@@ -357,21 +357,68 @@ impl ObserverCore {
     }
 
     fn publish_status(&self) {
-        let Some(tap) = &self.status_tap else { return };
-        let ready = self.window.is_some();
-        tap.publish_market(crate::status_tap::MarketSnapshot {
+        if let Some(tap) = &self.status_tap {
+            tap.publish_market(self.market_snapshot());
+        }
+    }
+
+    /// Status-tap copy of the counters: plain field copies, no allocation (event path).
+    pub(crate) fn market_snapshot(&self) -> crate::status_tap::MarketSnapshot {
+        crate::status_tap::MarketSnapshot {
             observing: self.observing,
-            stream_ready: ready,
-            gap_count: self.stats.gap_count,
-            reconnect_count: self.stats.reconnect_count,
-            liquidation_events: self.stats.liquidation_events,
-            last_observed_slot: self.stats.last_observed_slot,
-            live_verdict: market_verdict(
-                ready,
-                self.coverage_complete() && self.decode_complete(),
-                false,
-            ),
+            stream_ready: self.window.is_some(),
+            stats: self.stats.clone(),
+        }
+    }
+
+    /// Status-tap assessment. Allocates and sorts, so only at the capture's 2 s display cadence
+    /// and at the end. The verdict is the live, pre-verification one (never VALID in capture).
+    pub(crate) fn assessment_snapshot(&self) -> crate::status_tap::AssessmentSnapshot {
+        const TOP_RECEIVERS: usize = 10;
+        let mut edges = self.edges.clone();
+        edges.sort_by(f64::total_cmp);
+        let mut receivers: Vec<ReceiverRank> = self
+            .receivers
+            .iter()
+            .map(|(receiver, (events, gross))| ReceiverRank {
+                receiver: receiver.clone(),
+                liquidation_events: *events,
+                gross_edge_total_usd: *gross,
+            })
+            .collect();
+        receivers.sort_by(|a, b| {
+            b.liquidation_events
+                .cmp(&a.liquidation_events)
+                .then_with(|| b.gross_edge_total_usd.total_cmp(&a.gross_edge_total_usd))
+                .then_with(|| a.receiver.cmp(&b.receiver))
         });
+        receivers.truncate(TOP_RECEIVERS);
+        let coverage = self.coverage_complete();
+        let decode = self.decode_complete();
+        crate::status_tap::AssessmentSnapshot {
+            verdict: market_verdict(self.window.is_some(), coverage && decode, false),
+            coverage_complete: coverage,
+            decode_complete: decode,
+            enrichment_complete: self.enrichment_complete(),
+            incomplete_reasons: self.incomplete_reasons.iter().copied().collect(),
+            truncated_unqualified_reasons: self
+                .truncated_unqualified_reasons
+                .iter()
+                .map(|(code, n)| (*code, *n))
+                .collect(),
+            gap_records: self.gaps.len() as u64,
+            truncated_pending: self.truncated_pending.len() as u64,
+            deferred_liquidations: self.deferred.len() as u64,
+            distinct_targets: self.targets.len() as u64,
+            distinct_receivers: self.receivers.len() as u64,
+            gross_edge_total_usd: edges.iter().sum(),
+            gross_edge_p50_usd: quantile_nearest_rank(&edges, 0.5),
+            gross_edge_p90_usd: quantile_nearest_rank(&edges, 0.9),
+            gross_edge_p99_usd: quantile_nearest_rank(&edges, 0.99),
+            top_receivers: receivers,
+            deployment_error: self.deployment_error,
+            assessed_unix_ms: crate::status_tap::unix_ms_now(),
+        }
     }
 
     pub fn has_deferred(&self) -> bool {
@@ -769,6 +816,7 @@ impl ObserverCore {
             IngressEvent::Health(h) => {
                 if let Some(tap) = &self.status_tap {
                     tap.publish_transport(crate::status_tap::TransportSnapshot {
+                        application_frames: h.frames,
                         connected: h.connected,
                         last_frame_age_ns: h.last_frame_age_ns,
                         last_slot: h.last_slot,
@@ -804,6 +852,14 @@ impl ObserverCore {
                 }
                 if state == "INCOMPLETE_ABORT" {
                     self.mark_incomplete("WSS_RECOVERY_EXHAUSTED");
+                }
+                if let Some(tap) = &self.status_tap {
+                    tap.publish_transport_state(
+                        state.to_string(),
+                        code.to_string(),
+                        attempt,
+                        last_slot,
+                    );
                 }
                 self.coverage(
                     sink,

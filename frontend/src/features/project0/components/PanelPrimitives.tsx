@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 
-export function Section({ title, aside, children }: {
-  title?: string; aside?: ReactNode; children: ReactNode;
+export function Section({ title, aside, children, className = "" }: {
+  title?: string; aside?: ReactNode; children: ReactNode; className?: string;
 }) {
-  return <section className="p0-section">
+  return <section className={`p0-section ${className}`}>
     {title ? <div className="p0-row p0-section-title"><h2>{title}</h2>{aside}</div> : null}
     {children}
   </section>;

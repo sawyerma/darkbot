@@ -5,6 +5,10 @@ modules:
 lint:
   use:
     - STANDARD
+    - COMMENTS
+  ignore_only:
+    COMMENTS:
+      - schemas/darkbot/control
 breaking:
   use:
     - FILE

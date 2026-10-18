@@ -1,13 +1,25 @@
 syntax = "proto3";
+
 package darkbot.project0.v1;
+
+// First projection of project0.status. Superseded by SystemStatus (project0.status) and
+// CaptureState (project0.capture.state); kept unchanged for wire compatibility until package v2.
 message StatusProjection {
+  // Run id of the capture.
   string run_id = 1;
+  // Last slot of an admitted transaction.
   optional uint64 last_observed_slot = 2;
+  // Age of the last ingress application frame.
   optional uint64 last_frame_age_ns = 3;
+  // Transport gaps counted inside the observation window.
   optional uint64 gap_count = 4;
+  // Reconnects counted inside the observation window.
   optional uint64 reconnect_count = 5;
+  // Counted liquidation events.
   optional uint64 liquidation_events = 6;
+  // Writer queue bytes.
   optional uint64 queue_bytes = 7;
+  // Writer lag in frames.
   optional uint64 lag_frames = 8;
   // MARKET_OBSERVER_STREAM_NOT_READY | MARKET_DATA_INCOMPLETE |
   // MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED | MARKET_DATA_VALID

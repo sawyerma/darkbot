@@ -1,0 +1,20 @@
+/* Dynamic status fields can contain long account IDs, paths and counter names. */
+.p0-graphite .p0-heading { flex-wrap: wrap; }
+.p0-health .p0-line > span,
+.p0-live-section .p0-line > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.p0-health details > summary { cursor: pointer; }
+
+@media (max-width: 650px) {
+  .p0-health .p0-line,
+  .p0-live-section .p0-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding: 8px 0;
+  }
+  .p0-health .p0-right,
+  .p0-live-section .p0-right { text-align: left; }
+}

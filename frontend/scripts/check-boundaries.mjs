@@ -13,8 +13,8 @@ for(const name of targets(readFileSync(file,"utf8"))){const abs=name.startsWith(
 const target=rel(abs),toFeature=target.match(/^features\/([^/]+)\//)?.[1];
 if(origin.startsWith("core/")&&toFeature)errors.push(origin+": core imports "+name);
 if(feature&&toFeature&&feature!==toFeature)errors.push(origin+": cross-feature import "+name);
-if(origin.startsWith("features/overview/")&&toFeature)errors.push(origin+": overview imports "+name);
-if(target.startsWith("core/generated/")&&!origin.startsWith("core/realtime/")&&!adapter)errors.push(origin+": generated types outside adapter "+name);
+if(origin.startsWith("features/overview/")&&toFeature&&toFeature!=="overview")errors.push(origin+": overview imports "+name);
+if(target.startsWith("core/generated/")&&!origin.startsWith("core/realtime/")&&!origin.startsWith("core/generated/")&&!adapter)errors.push(origin+": generated types outside adapter "+name);
 }}
 if(errors.length){for(const e of errors)console.error(e);process.exitCode=1;}
 else console.log("Frontend import boundaries: PASS");

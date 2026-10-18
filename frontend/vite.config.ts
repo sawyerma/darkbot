@@ -15,6 +15,9 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: DEV_PORT,
+    fs: {
+      allow: [path.resolve(__dirname), path.resolve(__dirname, "../protocol")],
+    },
     proxy: {
       "/api/v1/session": { target: "http://127.0.0.1:8787", changeOrigin: true },
       "/ws/v1/gateway": { target: "ws://127.0.0.1:8787", ws: true, changeOrigin: true },

@@ -77,3 +77,29 @@ PASS nur nach realem Lauf mit Exit-Code; sonst NOT_RUN.
 
 Keine Secrets, keine RPC-URLs, keine Signer-Typen, keine Engine-internen Journalformate
 (`.p0j`, DBREC bleiben nativ). Keine Freigabe-Logik: ein Schema beweist keine Ausführbarkeit.
+
+## Project 0 status integration
+
+`project0.status` now carries `SystemStatus`; `project0.capture.state` carries
+`CaptureState`. The old `StatusProjection` message remains wire-compatible for
+historical decoding, but its topic binding is retired. Deploy the reporter,
+gateway and frontend together: an old topic descriptor is deliberately rejected.
+
+Generate all checked-in TypeScript, field documentation and the schema fingerprint:
+
+    protocol/scripts/check.sh --generate
+
+Verify them without modifying the working tree (including untracked outputs):
+
+    protocol/scripts/check.sh --check
+
+The gate requires a compatibility baseline (`main`, `origin/main`, or
+`PROTOCOL_BASE_REF=<ref>`), and works in linked worktrees. Both commands require
+access to the pinned Buf remote generators. Rust generation remains in each
+crate's build script. The full field catalogue is `docs/protocol/PROTOCOL.md`.
+
+The reporter coalesces capture states at 10 Hz by default.
+`P0_REPORT_MIN_INTERVAL_MS` accepts 100–1000 ms; heartbeat timing is independent
+of capture traffic. A final handoff waits at most two seconds for a connected
+reader's socket write. It does not acknowledge browser receipt or provide durable
+storage. With no reader, capture completion never waits on the GUI.

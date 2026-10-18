@@ -114,9 +114,6 @@ pub use core::{
     ReceiverRank, TruncationQualification,
 };
 
-#[path = "reporter_tap.rs"]
-pub mod reporter_tap;
-
 #[path = "summary.rs"]
 mod summary;
 pub use summary::{

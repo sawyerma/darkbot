@@ -1,94 +1,352 @@
-//! Latest-wins, read-only status channel. No I/O, protobuf or socket on producer path.
+//! Latest-wins, read-only status channel of the market capture. Producers copy values they
+//! already hold; no I/O, protobuf or socket on the producer path. Blocks that change rarely sit
+//! behind `Arc`, so a reader's clone under the lock stays a few pointer copies. Readers confirm
+//! delivered states, so the capture can hand its final state over before it returns.
+pub use crate::market::observer::{MarketStats, ReceiverRank};
 use crate::storage::writer::StorageStatus;
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use darkbot_solana::runtime_config;
+pub use darkbot_solana::runtime_config::{EffectiveConfig, Limits, Profile};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+pub fn unix_ms_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Run identity and configuration, once at capture start. Endpoints only as scheme://host.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunSnapshot {
+    pub run_id: String,
+    pub program_id: String,
+    pub source: &'static str,
+    pub commitment: &'static str,
+    pub ws_host: String,
+    pub rpc_host: Option<String>,
+    pub configured_duration_seconds: u64,
+    pub ready_timeout_seconds: u64,
+    pub drain_timeout_seconds: u64,
+    pub heartbeat_seconds: u64,
+    pub min_sample_liquidations: u64,
+    pub ingress_buffer_events: u64,
+    pub run_dir: String,
+    pub enrich_max_pending: u64,
+    pub enrich_max_attempts: u64,
+    pub enrich_retry_ms: u64,
+    pub enrich_timeout_ms: u64,
+    pub enrich_phase_max_seconds: u64,
+    pub source_coverage_verified: bool,
+    pub enrichment_available: bool,
+    pub recovery_budget_ms: Option<u64>,
+    pub recovery_attempts: u32,
+    pub idle_timeout_ms: u64,
+    pub healthy_reset_ms: u64,
+    pub readiness: String,
+    pub process_started_unix_s: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CapturePhase {
+    #[default]
+    WaitingForStream,
+    Capture,
+    Drain,
+    Finalize,
+    Ended,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct MarketSnapshot {
-    pub observing: bool,
-    pub stream_ready: bool,
-    pub gap_count: u64,
-    pub reconnect_count: u64,
-    pub liquidation_events: u64,
-    pub last_observed_slot: Option<u64>,
-    pub live_verdict: &'static str,
+pub struct PhaseSnapshot {
+    pub phase: CapturePhase,
+    pub changed_unix_ms: u64,
+    pub stream_ready_unix_s: Option<u64>,
+    pub stop_reason: &'static str,
+    pub drain_complete: Option<bool>,
+    pub write_error: Option<String>,
+    /// After `Ended`: `CAPTURE_COMPLETE` or exactly the error the capture returned.
+    pub end_result: String,
 }
+
+/// Ingress health report.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransportSnapshot {
     pub connected: bool,
     pub last_frame_age_ns: Option<u64>,
     pub last_slot: Option<u64>,
+    pub application_frames: u64,
 }
+
+/// Last transport state event (recovery, 429, abort); rare, so owned strings are fine.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct StorageSnapshot {
-    pub queue_bytes: u64,
-    pub lag_frames: u64,
+pub struct TransportStateSnapshot {
+    pub state: String,
+    pub code: String,
+    pub attempt: u32,
+    pub last_valid_slot: Option<u64>,
+    pub at_unix_ms: u64,
 }
-impl From<&StorageStatus> for StorageSnapshot {
-    fn from(s: &StorageStatus) -> Self {
-        Self {
-            queue_bytes: s.queue_bytes,
-            lag_frames: s.lag_frames,
-        }
+
+/// Counter copy for the event path: plain fields, no allocation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarketSnapshot {
+    pub observing: bool,
+    pub stream_ready: bool,
+    pub stats: MarketStats,
+}
+
+/// Completeness and distribution; built at the capture's 2 s display cadence and at the end.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AssessmentSnapshot {
+    pub verdict: &'static str,
+    pub coverage_complete: bool,
+    pub decode_complete: bool,
+    pub enrichment_complete: bool,
+    pub incomplete_reasons: Vec<&'static str>,
+    pub truncated_unqualified_reasons: Vec<(&'static str, u64)>,
+    pub gap_records: u64,
+    pub truncated_pending: u64,
+    pub deferred_liquidations: u64,
+    pub distinct_targets: u64,
+    pub distinct_receivers: u64,
+    pub gross_edge_total_usd: f64,
+    pub gross_edge_p50_usd: Option<f64>,
+    pub gross_edge_p90_usd: Option<f64>,
+    pub gross_edge_p99_usd: Option<f64>,
+    pub top_receivers: Vec<ReceiverRank>,
+    pub deployment_error: Option<&'static str>,
+    pub assessed_unix_ms: u64,
+}
+
+/// The writer's own sample, unchanged, plus the wall clock of its publication.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StorageSample {
+    pub at_unix_ms: u64,
+    pub status: StorageStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParameterValue {
+    pub field: &'static str,
+    pub unit: &'static str,
+    pub value: u64,
+    pub default: u64,
+    pub env: &'static str,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OperationalSnapshot {
+    pub parameters: Vec<ParameterValue>,
+    pub effective: Option<EffectiveConfig>,
+}
+
+/// Every entry of the engine's parameter registry with its value and source, plus the
+/// secret-free effective record. Endpoint URLs are never included.
+pub fn operational_snapshot_of(
+    limits: &Limits,
+    effective: Option<&EffectiveConfig>,
+) -> OperationalSnapshot {
+    let parameters = runtime_config::PARAMETERS
+        .iter()
+        .filter_map(|p| {
+            Some(ParameterValue {
+                field: p.field,
+                unit: p.unit,
+                value: limits.get(p.field)?,
+                default: p.default,
+                env: p.env,
+                source: effective
+                    .and_then(|e| e.sources.get(p.field).cloned())
+                    .unwrap_or_else(|| "builtin_default".into()),
+            })
+        })
+        .collect();
+    OperationalSnapshot {
+        parameters,
+        effective: effective.cloned(),
     }
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+
+/// The operational configuration of this process.
+pub fn operational_snapshot() -> OperationalSnapshot {
+    operational_snapshot_of(
+        &runtime_config::active().limits,
+        runtime_config::effective(),
+    )
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct StatusSnapshot {
     pub seq: u64,
-    pub market: Option<MarketSnapshot>,
+    /// Bumped by every change of the process-level block (`operational`).
+    pub system_version: u64,
+    /// Bumped by every change of a capture block.
+    pub capture_version: u64,
+    pub operational: Option<Arc<OperationalSnapshot>>,
+    pub run: Option<Arc<RunSnapshot>>,
+    pub phase: Option<PhaseSnapshot>,
     pub transport: Option<TransportSnapshot>,
-    pub storage: Option<StorageSnapshot>,
+    pub transport_state: Option<Arc<TransportStateSnapshot>>,
+    pub market: Option<MarketSnapshot>,
+    pub assessment: Option<Arc<AssessmentSnapshot>>,
+    pub storage: Option<StorageSample>,
 }
+
+#[derive(Default)]
+struct Delivery {
+    seq: u64,
+    readers: usize,
+}
+
 struct Inner {
     latest: Mutex<StatusSnapshot>,
     changed: Condvar,
+    delivery: Mutex<Delivery>,
+    delivered: Condvar,
 }
+
 #[derive(Clone)]
 pub struct StatusTap(Arc<Inner>);
+
 impl Default for StatusTap {
     fn default() -> Self {
         Self::new()
     }
 }
+
 impl StatusTap {
     pub fn new() -> Self {
         Self(Arc::new(Inner {
             latest: Mutex::new(StatusSnapshot::default()),
             changed: Condvar::new(),
+            delivery: Mutex::new(Delivery::default()),
+            delivered: Condvar::new(),
         }))
     }
-    fn publish(&self, f: impl FnOnce(&mut StatusSnapshot)) {
-        let mut s = self.0.latest.lock().unwrap_or_else(|e| e.into_inner());
+
+    fn publish(&self, system: bool, f: impl FnOnce(&mut StatusSnapshot)) {
+        let mut s = lock(&self.0.latest);
         f(&mut s);
         s.seq = s.seq.checked_add(1).expect("status-tap sequence overflow");
+        if system {
+            s.system_version += 1;
+        } else {
+            s.capture_version += 1;
+        }
         drop(s);
-        self.0.changed.notify_one();
+        self.0.changed.notify_all();
     }
-    pub fn publish_market(&self, s: MarketSnapshot) {
-        self.publish(|v| v.market = Some(s));
+
+    pub fn publish_operational(&self, s: OperationalSnapshot) {
+        let s = Arc::new(s);
+        self.publish(true, |v| v.operational = Some(s));
     }
+
+    pub fn publish_run(&self, run: RunSnapshot) {
+        let run = Arc::new(run);
+        self.publish(false, |v| v.run = Some(run));
+    }
+
+    /// Updates the phase in place (earlier fields are kept) and stamps the change time.
+    pub fn publish_phase(&self, f: impl FnOnce(&mut PhaseSnapshot)) {
+        let at = unix_ms_now();
+        self.publish(false, |v| {
+            let p = v.phase.get_or_insert_with(PhaseSnapshot::default);
+            f(p);
+            p.changed_unix_ms = at;
+        });
+    }
+
     pub fn publish_transport(&self, s: TransportSnapshot) {
-        self.publish(|v| v.transport = Some(s));
+        self.publish(false, |v| v.transport = Some(s));
     }
-    pub fn publish_storage(&self, s: StorageSnapshot) {
-        self.publish(|v| v.storage = Some(s));
+
+    pub fn publish_transport_state(
+        &self,
+        state: String,
+        code: String,
+        attempt: u32,
+        last_valid_slot: Option<u64>,
+    ) {
+        let s = Arc::new(TransportStateSnapshot {
+            state,
+            code,
+            attempt,
+            last_valid_slot,
+            at_unix_ms: unix_ms_now(),
+        });
+        self.publish(false, |v| v.transport_state = Some(s));
     }
+
+    pub fn publish_market(&self, s: MarketSnapshot) {
+        self.publish(false, |v| v.market = Some(s));
+    }
+
+    pub fn publish_assessment(&self, s: AssessmentSnapshot) {
+        let s = Arc::new(s);
+        self.publish(false, |v| v.assessment = Some(s));
+    }
+
+    /// Called at the capture's 2 s display cadence with the sample it already took.
+    pub fn publish_storage(&self, status: StorageStatus) {
+        let at_unix_ms = unix_ms_now();
+        self.publish(false, |v| {
+            v.storage = Some(StorageSample { at_unix_ms, status })
+        });
+    }
+
     pub fn reader(&self) -> Reader {
+        lock(&self.0.delivery).readers += 1;
         Reader {
             tap: self.clone(),
             last: 0,
         }
     }
+
+    /// Waits for a reader to confirm writing the latest state, at most `timeout`.
+    /// Returns false immediately without a reader. This confirms a socket write,
+    /// not a gateway/browser acknowledgement or durable delivery.
+    pub fn flush(&self, timeout: Duration) -> bool {
+        let target = lock(&self.0.latest).seq;
+        let deadline = Instant::now() + timeout;
+        let mut d = lock(&self.0.delivery);
+        loop {
+            if d.seq >= target {
+                return true;
+            }
+            if d.readers == 0 {
+                return false;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let (guard, _) = self
+                .0
+                .delivered
+                .wait_timeout(d, deadline - now)
+                .unwrap_or_else(|e| e.into_inner());
+            d = guard;
+        }
+    }
 }
+
 pub struct Reader {
     tap: StatusTap,
     last: u64,
 }
+
 impl Reader {
     pub fn wait_changed(&mut self, timeout: Duration) -> Option<StatusSnapshot> {
         let inner = &self.tap.0;
-        let mut s = inner.latest.lock().unwrap_or_else(|e| e.into_inner());
-        if s.seq == self.last {
+        let mut s = lock(&inner.latest);
+        if s.seq == self.last && !timeout.is_zero() {
             let (next, _) = inner
                 .changed
                 .wait_timeout(s, timeout)
@@ -101,34 +359,143 @@ impl Reader {
         self.last = s.seq;
         Some(s.clone())
     }
+
+    /// Confirms that the state with `seq` reached the consumer.
+    pub fn delivered(&self, seq: u64) {
+        let mut d = lock(&self.tap.0.delivery);
+        d.seq = d.seq.max(seq);
+        drop(d);
+        self.tap.0.delivered.notify_all();
+    }
 }
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        let mut d = lock(&self.tap.0.delivery);
+        d.readers = d.readers.saturating_sub(1);
+        drop(d);
+        self.tap.0.delivered.notify_all();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn latest_only() {
         let tap = StatusTap::new();
         let mut reader = tap.reader();
         for i in 1..=1000 {
-            tap.publish_market(MarketSnapshot {
-                gap_count: i,
-                ..Default::default()
-            });
+            let mut m = MarketSnapshot::default();
+            m.stats.gap_count = i;
+            tap.publish_market(m);
         }
         let value = reader.wait_changed(Duration::from_millis(5)).unwrap();
         assert_eq!(value.seq, 1000);
-        assert_eq!(value.market.unwrap().gap_count, 1000);
+        assert_eq!(value.market.unwrap().stats.gap_count, 1000);
         assert!(reader.wait_changed(Duration::from_millis(5)).is_none());
     }
+
     #[test]
-    fn optional_storage_is_not_invented() {
+    fn unreported_blocks_stay_unset() {
         let tap = StatusTap::new();
         let mut reader = tap.reader();
         tap.publish_market(MarketSnapshot::default());
-        assert!(reader
+        let s = reader.wait_changed(Duration::from_millis(5)).unwrap();
+        assert!(s.storage.is_none() && s.run.is_none() && s.phase.is_none());
+        assert!(s.operational.is_none() && s.assessment.is_none());
+    }
+
+    #[test]
+    fn storage_sample_is_kept_whole_and_stamped() {
+        let tap = StatusTap::new();
+        let mut reader = tap.reader();
+        let status = StorageStatus {
+            queue_bytes: 7,
+            disk_free_bytes: Some(42),
+            ..Default::default()
+        };
+        tap.publish_storage(status.clone());
+        let sample = reader
             .wait_changed(Duration::from_millis(5))
             .unwrap()
             .storage
-            .is_none());
+            .unwrap();
+        assert_eq!(sample.status, status);
+        assert!(sample.at_unix_ms > 1_600_000_000_000);
+    }
+
+    #[test]
+    fn phase_updates_keep_earlier_fields() {
+        let tap = StatusTap::new();
+        let mut reader = tap.reader();
+        tap.publish_phase(|p| {
+            p.phase = CapturePhase::Drain;
+            p.stop_reason = "TIMER";
+        });
+        tap.publish_phase(|p| {
+            p.phase = CapturePhase::Ended;
+            p.end_result = "CAPTURE_COMPLETE".into();
+        });
+        let p = reader
+            .wait_changed(Duration::from_millis(5))
+            .unwrap()
+            .phase
+            .unwrap();
+        assert_eq!((p.phase, p.stop_reason), (CapturePhase::Ended, "TIMER"));
+        assert_eq!(p.end_result, "CAPTURE_COMPLETE");
+        assert!(p.changed_unix_ms > 0);
+    }
+
+    #[test]
+    fn transport_health_and_state_are_independent() {
+        let tap = StatusTap::new();
+        let mut reader = tap.reader();
+        tap.publish_transport_state("RECOVERING".into(), "WSS_HTTP_429".into(), 2, Some(9));
+        tap.publish_transport(TransportSnapshot {
+            connected: true,
+            ..Default::default()
+        });
+        let s = reader.wait_changed(Duration::from_millis(5)).unwrap();
+        assert!(s.transport.unwrap().connected);
+        assert_eq!(s.transport_state.unwrap().code, "WSS_HTTP_429");
+    }
+
+    #[test]
+    fn system_and_capture_versions_are_separate() {
+        let tap = StatusTap::new();
+        let mut reader = tap.reader();
+        tap.publish_operational(operational_snapshot_of(&Limits::default(), None));
+        tap.publish_market(MarketSnapshot::default());
+        tap.publish_market(MarketSnapshot::default());
+        let s = reader.wait_changed(Duration::from_millis(5)).unwrap();
+        assert_eq!((s.system_version, s.capture_version), (1, 2));
+    }
+
+    #[test]
+    fn operational_snapshot_lists_every_registered_parameter() {
+        let o = operational_snapshot_of(&Limits::default(), None);
+        assert_eq!(o.parameters.len(), runtime_config::PARAMETERS.len());
+        assert!(o
+            .parameters
+            .iter()
+            .any(|p| p.field == "rpc_rps" && p.env == "P0_RPC_RPS"));
+        assert!(o.parameters.iter().all(|p| p.source == "builtin_default"));
+    }
+
+    #[test]
+    fn flush_waits_for_delivery_and_never_without_reader() {
+        let tap = StatusTap::new();
+        tap.publish_market(MarketSnapshot::default());
+        assert!(!tap.flush(Duration::from_millis(1)));
+        let mut reader = tap.reader();
+        assert!(!tap.flush(Duration::from_millis(20)));
+        let s = reader.wait_changed(Duration::from_millis(5)).unwrap();
+        reader.delivered(s.seq);
+        assert!(tap.flush(Duration::from_millis(1)));
+        drop(reader);
+        tap.publish_market(MarketSnapshot::default());
+        assert!(!tap.flush(Duration::from_millis(1)));
     }
 }

@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package darkbot.project0.v1;
+
+// Process-level status of Project_0: STATE topic project0.status. Sent when a reporter session
+// starts and whenever the operational configuration changes (restart only today).
+message SystemStatus {
+  // Operational parameters of the process (solana/src/runtime_config.rs).
+  OperationalConfig operational = 1;
+}
+
+// One numeric operational parameter of runtime_config::PARAMETERS.
+message OperationalParameter {
+  // Parameter field name (e.g. rpc_rps).
+  string field = 1;
+  // Unit as declared by the engine.
+  string unit = 2;
+  // Active value of this process.
+  uint64 value = 3;
+  // Built-in default.
+  uint64 default_value = 4;
+  // Environment variable that sets it.
+  string env = 5;
+  // Origin of the value: profile:<name> | environment | config_file | cli | builtin_default.
+  string source = 6;
+}
+
+// Secret-free effective operational record (runtime_config::EffectiveConfig).
+message EffectiveRecord {
+  // Record schema.
+  string schema = 1;
+  // Profile: smoke | standard | performance | custom.
+  string profile = 2;
+  // Configured RPC endpoints (URLs never leave the engine).
+  uint64 rpc_endpoint_count = 3;
+  // Configured WebSocket endpoints.
+  uint64 wss_endpoint_count = 4;
+  // Endpoint fallback enabled.
+  bool fallback = 5;
+  // Adaptive limits enabled.
+  bool adaptive = 6;
+  // Configured duration (e.g. 4h).
+  string duration = 7;
+  // Verification mode: off | index | strict | crosscheck.
+  string verification = 8;
+  // Diagnostics enabled.
+  bool diagnostics = 9;
+  // FE mode: smoke | full.
+  string fe_mode = 10;
+  // FE target accounts, base58.
+  repeated string fe_targets = 11;
+  // FE group account, base58.
+  string fe_group = 12;
+  // Origin of every configured value by field name.
+  map<string, string> sources = 13;
+  // Provider capacity qualified (fixed false today).
+  bool provider_capacity_qualified = 14;
+  // Free-plan-only operation (fixed true today).
+  bool free_only = 15;
+  // LIVE authorized (fixed false today).
+  bool live_authorized = 16;
+  // Transaction submission authorized (fixed false today).
+  bool submission_authorized = 17;
+}
+
+// Operational configuration of the process.
+message OperationalConfig {
+  // Every numeric operational parameter with its active value.
+  repeated OperationalParameter parameters = 1;
+  // Effective record; unset when the process runs on built-in defaults.
+  EffectiveRecord effective = 2;
+}

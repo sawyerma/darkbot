@@ -1,4 +1,4 @@
-import { create, fromBinary, toBinary, type MessageInit } from "@bufbuild/protobuf";
+import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   ClientMessageSchema,
   ServerMessageSchema,
@@ -15,7 +15,7 @@ export class DecodeError extends Error {
   }
 }
 
-export function encodeClient(init: MessageInit<ClientMessage>): Uint8Array {
+export function encodeClient(init: MessageInitShape<typeof ClientMessageSchema>): Uint8Array {
   return toBinary(ClientMessageSchema, create(ClientMessageSchema, init));
 }
 

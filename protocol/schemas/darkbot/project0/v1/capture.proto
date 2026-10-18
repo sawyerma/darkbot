@@ -1,0 +1,240 @@
+syntax = "proto3";
+
+package darkbot.project0.v1;
+
+// Live state of a Project_0 market capture: STATE topic project0.capture.state. The reporter
+// sends it when a block changed, at most once per P0_REPORT_MIN_INTERVAL_MS (newest wins).
+// Each block mirrors one engine structure and stays unset until the engine reported it.
+// Units are part of the field names.
+message CaptureState {
+  // Run identity and configuration (market/configuration.rs, market/rows.rs::CaptureStart); once at start.
+  RunInfo run = 1;
+  // Capture lifecycle (market/capture.rs); on every phase change.
+  PhaseStatus phase = 2;
+  // WebSocket ingress health and last transport event (market/core.rs); on ingress events.
+  TransportStatus transport = 3;
+  // Every capture counter (market/core.rs::MarketStats::counters); on coverage events and slots.
+  MarketCounters market = 4;
+  // Completeness, live verdict and edge distribution (market/core.rs::ObserverCore); every 2 s and at the end.
+  MarketAssessment assessment = 5;
+  // Writer lane of the market journal (storage/writer.rs::StorageStatus); every 2 s.
+  WriterLane writer = 6;
+}
+
+// Run identity and configuration. Endpoints only as scheme://host, never a key or query.
+message RunInfo {
+  // Run id: P0_MARKET_RUN_ID or market_<utc>.
+  string run_id = 1;
+  // Observed program, base58 (P0_PROGRAM_ID).
+  string program_id = 2;
+  // Market source: logs | transactions (P0_MARKET_SOURCE).
+  string source = 3;
+  // Commitment: finalized | confirmed (P0_MARKET_COMMITMENT).
+  string commitment = 4;
+  // WebSocket endpoint as scheme://host.
+  string ws_host = 5;
+  // RPC endpoint as scheme://host; unset without RPC endpoint.
+  optional string rpc_host = 6;
+  // Observation window after StreamReady (P0_MARKET_DURATION_SECS).
+  uint64 configured_duration_seconds = 7;
+  // Maximum wait for StreamReady (P0_MARKET_READY_TIMEOUT_SECS).
+  uint64 ready_timeout_seconds = 8;
+  // Maximum drain after the capture loop (P0_MARKET_DRAIN_TIMEOUT_SECS).
+  uint64 drain_timeout_seconds = 9;
+  // WebSocket heartbeat interval (P0_MARKET_HEARTBEAT_SECS).
+  uint64 heartbeat_seconds = 10;
+  // Liquidation events below which statistics are an insufficient sample (P0_MARKET_MIN_SAMPLE).
+  uint64 min_sample_liquidations = 11;
+  // Ingress channel capacity (P0_INGRESS_BUFFER).
+  uint64 ingress_buffer_events = 12;
+  // Output directory of the run.
+  string run_dir = 13;
+  // Post-capture enrichment: maximum pending fetches (P0_MARKET_ENRICH_MAX_PENDING).
+  uint64 enrich_max_pending = 14;
+  // Post-capture enrichment: attempts per transaction (P0_MARKET_ENRICH_MAX_ATTEMPTS).
+  uint64 enrich_max_attempts = 15;
+  // Post-capture enrichment: retry delay (P0_MARKET_ENRICH_RETRY_MS).
+  uint64 enrich_retry_ms = 16;
+  // Post-capture enrichment: request timeout (P0_MARKET_ENRICH_TIMEOUT_MS).
+  uint64 enrich_timeout_ms = 17;
+  // Post-capture enrichment: phase budget (P0_MARKET_ENRICH_PHASE_MAX_SECS).
+  uint64 enrich_phase_max_seconds = 18;
+  // Whether full delivery of program transactions is proven for the source (false today).
+  bool source_coverage_verified = 19;
+  // Whether post-capture enrichment can run (transactions source or RPC endpoint).
+  bool enrichment_available = 20;
+  // WebSocket outage budget; unset when only attempts bound the recovery.
+  optional uint64 recovery_budget_ms = 21;
+  // Maximum failed WebSocket attempts before the capture aborts.
+  uint32 recovery_attempts = 22;
+  // WebSocket idle timeout.
+  uint64 idle_timeout_ms = 23;
+  // Healthy period after which the WebSocket backoff resets.
+  uint64 healthy_reset_ms = 24;
+  // Readiness rule of the stream (ALL_ACKS_AND_NEW_SLOT_PROGRESS).
+  string readiness = 25;
+  // Process start, wall clock.
+  uint64 process_started_unix_s = 26;
+}
+
+// Capture lifecycle phase.
+enum CapturePhase {
+  // Not reported.
+  CAPTURE_PHASE_UNSPECIFIED = 0;
+  // Started; waiting for StreamReady.
+  CAPTURE_PHASE_WAITING_FOR_STREAM = 1;
+  // Observation window open.
+  CAPTURE_PHASE_CAPTURE = 2;
+  // Capture loop ended; ingress stopped, channel draining.
+  CAPTURE_PHASE_DRAIN = 3;
+  // Drain done; finalization, summary and report running.
+  CAPTURE_PHASE_FINALIZE = 4;
+  // Finished; see end_result.
+  CAPTURE_PHASE_ENDED = 5;
+}
+
+// Capture lifecycle state.
+message PhaseStatus {
+  // Current phase.
+  CapturePhase phase = 1;
+  // Wall clock of the last phase change.
+  uint64 changed_unix_ms = 2;
+  // StreamReady time; unset before the stream became ready.
+  optional uint64 stream_ready_unix_s = 3;
+  // Why the capture loop ended (TIMER | OPERATOR_STOP | C0_E1_ABORT | STREAM_NOT_READY | INGRESS_THREAD_ENDED | WRITE_ERROR); empty before.
+  string stop_reason = 4;
+  // Whether the drain reached the end of the channel; unset before finalization.
+  optional bool drain_complete = 5;
+  // Evidence write error, if any.
+  optional string write_error = 6;
+  // After ENDED: CAPTURE_COMPLETE, or exactly the error the capture returned; empty before.
+  string end_result = 7;
+}
+
+// WebSocket ingress state.
+message TransportStatus {
+  // Whether the ingress WebSocket is connected; unset before the first health report.
+  optional bool connected = 1;
+  // Age of the last application frame.
+  optional uint64 last_frame_age_ns = 2;
+  // Application frames received by the ingress.
+  optional uint64 application_frames = 3;
+  // Last slot seen by the ingress.
+  optional uint64 last_slot = 4;
+  // Last transport state event (RECOVERING | RECOVERED | INCOMPLETE_ABORT | ...); empty before the first one.
+  string last_state = 5;
+  // Code of the last transport state event (e.g. WSS_HTTP_429).
+  string last_code = 6;
+  // Attempt number of the last transport state event.
+  optional uint32 last_attempt = 7;
+  // Last valid slot reported with the last transport state event.
+  optional uint64 last_valid_slot = 8;
+  // Wall clock of the last transport state event.
+  optional uint64 last_state_unix_ms = 9;
+}
+
+// One named engine counter.
+message Counter {
+  // Engine counter name (MarketStats::counters); the unit follows the name suffix.
+  string name = 1;
+  // Counter value.
+  uint64 value = 2;
+}
+
+// Capture counters.
+message MarketCounters {
+  // Whether the observation window is open.
+  bool observing = 1;
+  // Whether the stream became ready.
+  bool stream_ready = 2;
+  // Every MarketStats counter in engine order; first/last_observed_slot appear once known.
+  repeated Counter counters = 3;
+}
+
+// Count per reason code.
+message ReasonCount {
+  // Bounded reason code.
+  string reason = 1;
+  // Occurrences.
+  uint64 count = 2;
+}
+
+// Aggregate of one liquidation receiver.
+message ReceiverTotal {
+  // Receiver account, base58.
+  string receiver = 1;
+  // Liquidation events of this receiver.
+  uint64 liquidation_events = 2;
+  // Summed gross edge of this receiver.
+  double gross_edge_total_usd = 3;
+}
+
+// Completeness and live verdict of the capture so far (pre-verification).
+message MarketAssessment {
+  // MARKET_OBSERVER_STREAM_NOT_READY | MARKET_DATA_INCOMPLETE | MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED (never VALID during capture).
+  string verdict = 1;
+  // No gap, overflow, fatal or gap-capacity loss so far.
+  bool coverage_complete = 2;
+  // No missing logs, decoder error or unqualified/mismatching truncation so far.
+  bool decode_complete = 3;
+  // Every requested enrichment succeeded.
+  bool enrichment_complete = 4;
+  // Reason codes that make the capture incomplete.
+  repeated string incomplete_reasons = 5;
+  // Reasons of unqualified truncated logs with counts.
+  repeated ReasonCount truncated_unqualified_reasons = 6;
+  // Recorded transport gap ranges.
+  uint64 gap_records = 7;
+  // Truncated-log transactions awaiting post-capture qualification.
+  uint64 truncated_pending = 8;
+  // Liquidations awaiting deferred processing.
+  uint64 deferred_liquidations = 9;
+  // Distinct liquidated target accounts.
+  uint64 distinct_targets = 10;
+  // Distinct liquidation receivers.
+  uint64 distinct_receivers = 11;
+  // Summed gross edge of all counted liquidation events.
+  double gross_edge_total_usd = 12;
+  // Median gross edge per event (nearest rank); unset without events.
+  optional double gross_edge_p50_usd = 13;
+  // 90th percentile gross edge per event (nearest rank).
+  optional double gross_edge_p90_usd = 14;
+  // 99th percentile gross edge per event (nearest rank).
+  optional double gross_edge_p99_usd = 15;
+  // Up to 10 receivers by liquidation events, then gross edge.
+  repeated ReceiverTotal top_receivers = 16;
+  // Program deployment check error, if the check failed.
+  optional string deployment_error = 17;
+  // Wall clock of this assessment.
+  uint64 assessed_unix_ms = 18;
+}
+
+// Writer lane of the market journal, sampled by the capture at its 2 s display cadence.
+message WriterLane {
+  // Engine wall clock when the capture published the sample.
+  uint64 sampled_unix_ms = 1;
+  // Bytes admitted but not yet written.
+  uint64 queue_bytes = 2;
+  // Highest queue so far.
+  uint64 queue_peak_bytes = 3;
+  // Current admission limit of the memory budget.
+  uint64 admission_limit_bytes = 4;
+  // Hard maximum of the memory budget.
+  uint64 max_bytes = 5;
+  // Budget left below the maximum.
+  uint64 free_budget_bytes = 6;
+  // Admitted bytes per second since the previous sample.
+  double ingress_bytes_per_s = 7;
+  // Written bytes per second since the previous sample.
+  double write_bytes_per_s = 8;
+  // Frames admitted but not yet written.
+  uint64 lag_frames = 9;
+  // Seconds until the budget is exhausted at current rates; unset when not draining slower than arriving.
+  optional double budget_exhaustion_s = 10;
+  // Free space on the journal filesystem; unset when the query failed.
+  optional uint64 disk_free_bytes = 11;
+  // Disk space that must remain free.
+  uint64 disk_reserve_bytes = 12;
+  // Seconds until the disk reserve is reached at the current write rate; unset without writes.
+  optional double disk_exhaustion_s = 13;
+}

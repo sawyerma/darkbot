@@ -49,7 +49,7 @@ const project0: ProjectRegistration<Project0Panel> = {
   navOrder: 1,
   page: lazy(() => import("@/features/project0/Project0Page")),
   topics: {
-    base: [TopicId.PROJECT0_STATUS],
+    base: [TopicId.PROJECT0_STATUS, TopicId.PROJECT0_CAPTURE_STATE],
     panels: {
       overview: [TopicId.PROJECT0_FINANCE_SUMMARY],
       liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE],

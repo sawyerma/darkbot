@@ -1,0 +1,48 @@
+name: Project 0 status contract
+on:
+  pull_request:
+    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', '.github/workflows/project0-status.yml']
+  push:
+    branches: [main]
+    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', '.github/workflows/project0-status.yml']
+  workflow_dispatch:
+jobs:
+  contract-and-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: bufbuild/buf-setup-action@v1
+      - run: protocol/scripts/check.sh --check
+        env:
+          PROTOCOL_BASE_REF: origin/main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test && npm run build && npm run lint:boundaries && npm run check:freeze && npm run lint:css
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:project0 && npm run test:code-split
+        working-directory: frontend
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            project_0/native
+            gateway
+      - run: cargo test -p darkbot-runner --features crate_health --lib market && cargo test -p darkbot-runner --features crate_health --lib status_tap && cargo test -p darkbot-p0-reporter
+        working-directory: project_0/native
+      - run: cargo build -p darkbot-p0-reporter --features test-fixture --bin p0-reporter-fixture
+        working-directory: project_0/native
+      - run: cargo test && DARKBOT_P0_REPORTER_FIXTURE="$GITHUB_WORKSPACE/project_0/native/target/debug/p0-reporter-fixture" cargo test --test p0_reporter_e2e -- --ignored
+        working-directory: gateway

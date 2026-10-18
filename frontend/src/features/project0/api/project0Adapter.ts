@@ -1,31 +1,74 @@
-import { fromBinary } from "@bufbuild/protobuf";
-import { StatusProjectionSchema, type StatusProjection } from "@/core/generated/darkbot/project0/v1/status_pb";
+import type { JsonObject } from "@bufbuild/protobuf";
 import { TopicId, topics, type StateMeta } from "@/core/realtime";
-import type { Project0StatusView } from "../model/status";
 import { useProject0Store } from "../store/project0Store";
+import {
+  captureJsonOf,
+  decodeCaptureState,
+  decodeSystemStatus,
+  systemJsonOf,
+  toCaptureView,
+  toSystemView,
+  type CaptureMessage,
+  type SystemMessage,
+} from "./project0ViewAdapter";
 
-export function toStatusView(p: StatusProjection): Project0StatusView {
-  return {
-    runId: p.runId,
-    lastObservedSlot: p.lastObservedSlot ?? null,
-    lastFrameAgeNs: p.lastFrameAgeNs ?? null,
-    gapCount: p.gapCount ?? null,
-    reconnectCount: p.reconnectCount ?? null,
-    liquidationEvents: p.liquidationEvents ?? null,
-    queueBytes: p.queueBytes ?? null,
-    lagFrames: p.lagFrames ?? null,
-    marketVerdict: p.marketVerdict,
+interface Update<T> {
+  value: T;
+  meta: StateMeta;
+  receivedAtMs: number;
+}
+
+/** At most one store update per rendered frame; the newest state wins. */
+function frameBatcher<T>(apply: (u: Update<T>) => void): (u: Update<T>) => void {
+  let pending: Update<T> | null = null;
+  let scheduled = false;
+  const flush = () => {
+    scheduled = false;
+    const next = pending;
+    pending = null;
+    if (next) apply(next);
+  };
+  return (u) => {
+    pending = u;
+    if (scheduled) return;
+    scheduled = true;
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
+    else setTimeout(flush, 0);
   };
 }
+
 let started = false;
+let lastSystem: SystemMessage | null = null;
+let lastCapture: CaptureMessage | null = null;
+
 export function ensureProject0Adapter(): void {
   if (started) return;
   started = true;
-  topics.onTopicStatus(TopicId.PROJECT0_STATUS, (status, reason) =>
-    useProject0Store.getState().setStatusTopic(status, reason),
-  );
-  topics.onState(TopicId.PROJECT0_STATUS, (bytes: Uint8Array, meta: StateMeta) => {
-    // Throwing on invalid protobuf prevents registry from acknowledging this state.
-    useProject0Store.getState().applyStatus(toStatusView(fromBinary(StatusProjectionSchema, bytes)), meta);
+  const store = useProject0Store.getState;
+  const applySystem = frameBatcher<SystemMessage>((u) => {
+    lastSystem = u.value;
+    store().applySystem(toSystemView(u.value), u.meta, u.receivedAtMs);
   });
+  const applyCapture = frameBatcher<CaptureMessage>((u) => {
+    lastCapture = u.value;
+    store().applyCapture(toCaptureView(u.value), u.meta, u.receivedAtMs);
+  });
+  topics.onTopicStatus(TopicId.PROJECT0_STATUS, (status, reason) => store().setSystemTopic(status, reason));
+  topics.onTopicStatus(TopicId.PROJECT0_CAPTURE_STATE, (status, reason) => store().setCaptureTopic(status, reason));
+  topics.onState(TopicId.PROJECT0_STATUS, (bytes: Uint8Array, meta: StateMeta) => {
+    const message = decodeSystemStatus(bytes);
+    applySystem({ value: message, meta, receivedAtMs: Date.now() });
+  });
+  topics.onState(TopicId.PROJECT0_CAPTURE_STATE, (bytes: Uint8Array, meta: StateMeta) => {
+    const message = decodeCaptureState(bytes);
+    applyCapture({ value: message, meta, receivedAtMs: Date.now() });
+  });
+}
+
+/** Every value of the latest received states, generated from the contract. */
+export function allValues(): { system: JsonObject | null; capture: JsonObject | null } {
+  return {
+    system: lastSystem ? systemJsonOf(lastSystem) : null,
+    capture: lastCapture ? captureJsonOf(lastCapture) : null,
+  };
 }

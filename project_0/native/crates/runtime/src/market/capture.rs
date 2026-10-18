@@ -1,7 +1,7 @@
 //! Read-only capture, drain and finalization lifecycle.
 use super::rows::{CaptureStart, MarketCoverage, WindowEvent};
 use super::*;
-use crate::status_tap::StatusTap;
+use crate::status_tap::{CapturePhase, StatusTap};
 use std::path::Path;
 
 // ------------------------------------------------------------------------------------------
@@ -38,6 +38,85 @@ pub(super) fn print_banner(cfg: &MarketConfig) {
         println!("rpc_host={}", redact_url(rpc));
     }
     println!("output={}", cfg.run_dir.display());
+}
+
+/// Longest wait for the reporter to deliver the final capture state.
+const STATUS_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Status-tap view of the run configuration; endpoints only as scheme://host.
+fn status_run_snapshot(
+    cfg: &MarketConfig,
+    start: &CaptureStart,
+    process_started_unix_s: u64,
+) -> crate::status_tap::RunSnapshot {
+    crate::status_tap::RunSnapshot {
+        run_id: cfg.run_id.clone(),
+        program_id: cfg.program.to_string(),
+        source: cfg.source.as_str(),
+        commitment: cfg.commitment,
+        ws_host: redact_url(&cfg.ws_url),
+        rpc_host: cfg.rpc_url.as_deref().map(redact_url),
+        configured_duration_seconds: cfg.duration_secs,
+        ready_timeout_seconds: cfg.ready_timeout_secs,
+        drain_timeout_seconds: cfg.drain_timeout_secs,
+        heartbeat_seconds: cfg.heartbeat_secs,
+        min_sample_liquidations: cfg.min_sample_liquidations,
+        ingress_buffer_events: cfg.ingress_buffer as u64,
+        run_dir: cfg.run_dir.display().to_string(),
+        enrich_max_pending: cfg.enrich.max_pending as u64,
+        enrich_max_attempts: u64::from(cfg.enrich.max_attempts),
+        enrich_retry_ms: cfg.enrich.retry_ms,
+        enrich_timeout_ms: cfg.enrich.timeout_ms,
+        enrich_phase_max_seconds: cfg.enrich.phase_max_secs,
+        source_coverage_verified: cfg.source.coverage_verified(),
+        enrichment_available: cfg.source == MarketSource::Transactions || cfg.rpc_url.is_some(),
+        recovery_budget_ms: start.recovery_budget_ms,
+        recovery_attempts: start.recovery_attempts,
+        idle_timeout_ms: start.idle_timeout_ms,
+        healthy_reset_ms: start.healthy_reset_ms,
+        readiness: start.readiness.clone(),
+        process_started_unix_s,
+    }
+}
+
+/// The one classification of a finished capture: what `run_embedded_with` returns and what the
+/// ENDED phase reports.
+fn capture_end(
+    cfg: &MarketConfig,
+    quiescent: &Result<(), String>,
+    stop_reason: &str,
+    stream_ready: bool,
+    write_error: Option<&str>,
+    ingress_end_error: Option<&str>,
+) -> Result<(), String> {
+    if let Err(e) = quiescent {
+        return Err(e.clone());
+    }
+    if stop_reason == "OPERATOR_STOP" {
+        // Requested stop (also before StreamReady): sealed INCOMPLETE, not a provider failure.
+        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
+    }
+    if !stream_ready {
+        let hint = if cfg.source == MarketSource::Transactions {
+            " MARKET_OBSERVER_UNSUPPORTED_TRANSACTION_SUBSCRIBE suspected: Helius transactionSubscribe needs a Developer/Business/Professional plan; on the Free plan use P0_MARKET_SOURCE=logs."
+        } else {
+            ""
+        };
+        return Err(format!(
+            "MARKET_OBSERVER_STREAM_NOT_READY: no StreamReady within {}s (see ingress errors above).{hint}",
+            cfg.ready_timeout_secs
+        ));
+    }
+    if let Some(e) = write_error {
+        return Err(format!("market evidence write failed: {e}"));
+    }
+    if stop_reason != "TIMER" {
+        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
+    }
+    if let Some(code) = ingress_end_error {
+        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {code}"));
+    }
+    Ok(())
 }
 
 /// Facts handed from the capture/drain phases to the shared finishing path.
@@ -240,6 +319,33 @@ pub fn run_embedded_with(
     econ: Option<crate::analytics::econ::Handle>,
     status_tap: Option<StatusTap>,
 ) -> Result<(), String> {
+    if let Some(tap) = &status_tap {
+        tap.publish_operational(crate::status_tap::operational_snapshot());
+        tap.publish_phase(|p| p.phase = CapturePhase::WaitingForStream);
+    }
+    // One terminal publication for every return path, including initialization and
+    // evidence-write failures before the capture loop begins.
+    let result = run_embedded_inner(cfg, clock, econ, status_tap.clone());
+    if let Some(tap) = &status_tap {
+        tap.publish_phase(|p| {
+            p.phase = CapturePhase::Ended;
+            p.end_result = result
+                .as_ref()
+                .err()
+                .cloned()
+                .unwrap_or_else(|| "CAPTURE_COMPLETE".into());
+        });
+        let _ = tap.flush(STATUS_FLUSH_TIMEOUT);
+    }
+    result
+}
+
+fn run_embedded_inner(
+    cfg: MarketConfig,
+    clock: Clock,
+    econ: Option<crate::analytics::econ::Handle>,
+    status_tap: Option<StatusTap>,
+) -> Result<(), String> {
     let process_started = unix_now_s();
     fs::create_dir_all(&cfg.run_dir)
         .map_err(|e| format!("create {}: {e}", cfg.run_dir.display()))?;
@@ -326,6 +432,9 @@ pub fn run_embedded_with(
     core.status_tap = status_tap.clone();
     core.gap_cfg = cfg.gap;
     core.reconcile_cfg = cfg.reconcile;
+    if let Some(tap) = &status_tap {
+        tap.publish_run(status_run_snapshot(&cfg, &start, process_started));
+    }
     // Provisional all-path counts come from the existing program-attributed
     // WebSocket decoder. Canonical RPC happens only after Shadow is quiescent.
     let mut last_live_display = Instant::now() - Duration::from_secs(5);
@@ -427,6 +536,12 @@ pub fn run_embedded_with(
                 window = Some((t_rx_ns, cutoff));
                 ready_unix_s = Some((clock.unix_ns(t_rx_ns) / 1_000_000_000) as u64);
                 core.start_observation(t_rx_ns, cutoff);
+                if let Some(tap) = &status_tap {
+                    tap.publish_phase(|p| {
+                        p.phase = CapturePhase::Capture;
+                        p.stream_ready_unix_s = ready_unix_s;
+                    });
+                }
                 if let Some(h) = &econ {
                     let evidence = h.cfg.plan.capture_window(clock, t_rx_ns)?;
                     crate::analytics::measurement::journal(
@@ -476,10 +591,13 @@ pub fn run_embedded_with(
             ));
             // SK-05: queue, rates, lag and exhaustion forecasts of the writer lane.
             if let Some(status) = sink.storage_status() {
-                if let Some(tap) = &status_tap {
-                    tap.publish_storage((&status).into());
-                }
                 crate::console::line(status.terminal());
+                if let Some(tap) = &status_tap {
+                    tap.publish_storage(status);
+                }
+            }
+            if let Some(tap) = &status_tap {
+                tap.publish_assessment(core.assessment_snapshot());
             }
         }
         let overflow = consumer.stats().overflow;
@@ -509,6 +627,12 @@ pub fn run_embedded_with(
         }
     }
     let capture_end_ns = clock.now_ns();
+    if let Some(tap) = &status_tap {
+        tap.publish_phase(|p| {
+            p.phase = CapturePhase::Drain;
+            p.stop_reason = stop_reason;
+        });
+    }
     if let Some(h) = &econ {
         crate::analytics::measurement::journal(
             &h.cfg.paths(),
@@ -611,6 +735,15 @@ pub fn run_embedded_with(
             },
         )?;
     }
+    if let Some(tap) = &status_tap {
+        let error = write_error.clone();
+        tap.publish_phase(|p| {
+            p.phase = CapturePhase::Finalize;
+            p.drain_complete = Some(drain_complete);
+            p.write_error = error;
+        });
+    }
+
     // ---- phase 3 + summary + report: one shared production path ----
     let outcome = CaptureOutcome {
         process_started_unix_s: process_started,
@@ -630,6 +763,19 @@ pub fn run_embedded_with(
         Some(thread) => quiesce(thread, Duration::from_secs(cfg.drain_timeout_secs)),
         None => Ok(()),
     };
+    let end = capture_end(
+        &cfg,
+        &quiescent,
+        stop_reason,
+        window.is_some(),
+        write_error.as_deref(),
+        ingress_end_error,
+    );
+    if let Some(tap) = &status_tap {
+        tap.publish_market(core.market_snapshot());
+        tap.publish_assessment(core.assessment_snapshot());
+        tap.publish_phase(|p| p.write_error = write_error.clone());
+    }
     if let Some(h) = &econ {
         h.emit(crate::analytics::econ::Evidence::MarketFinal(Box::new(
             summary,
@@ -637,32 +783,7 @@ pub fn run_embedded_with(
     } else {
         print!("{report}");
     }
-    quiescent?;
-    if stop_reason == "OPERATOR_STOP" {
-        // Requested stop (also before StreamReady): sealed INCOMPLETE, not a provider failure.
-        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
-    }
-    if window.is_none() {
-        let hint = if cfg.source == MarketSource::Transactions {
-            " MARKET_OBSERVER_UNSUPPORTED_TRANSACTION_SUBSCRIBE suspected: Helius transactionSubscribe needs a Developer/Business/Professional plan; on the Free plan use P0_MARKET_SOURCE=logs."
-        } else {
-            ""
-        };
-        return Err(format!(
-            "MARKET_OBSERVER_STREAM_NOT_READY: no StreamReady within {}s (see ingress errors above).{hint}",
-            cfg.ready_timeout_secs
-        ));
-    }
-    if let Some(e) = write_error {
-        return Err(format!("market evidence write failed: {e}"));
-    }
-    if stop_reason != "TIMER" {
-        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));
-    }
-    if let Some(code) = ingress_end_error {
-        return Err(format!("MARKET_CAPTURE_INCOMPLETE: {code}"));
-    }
-    Ok(())
+    end
 }
 
 /// A fixed, secret-free class of a market ingress error (R2/R6).
@@ -673,5 +794,80 @@ fn market_ingress_error_class(e: &darkbot_solana::ingress::IngressError) -> &'st
         E::Connect(_) => "INGRESS_CONNECT_ERROR",
         E::Protocol(_) => "INGRESS_PROTOCOL_ERROR",
         E::Config(_) => "INGRESS_CONFIG_ERROR",
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    fn config() -> MarketConfig {
+        MarketConfig::from_lookup(
+            &|key| match key {
+                "P0_PROGRAM_ID" => Some("11111111111111111111111111111111".into()),
+                "P0_WS_URL" => Some("wss://example.invalid/private/key?api-key=TEST_SECRET".into()),
+                "P0_MARKET_SOURCE" => Some("logs".into()),
+                _ => None,
+            },
+            1,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn initialization_failure_publishes_the_exact_terminal_result() {
+        let mut cfg = config();
+        let path = std::env::temp_dir().join(format!(
+            "p0-init-failure-{}-{}",
+            std::process::id(),
+            crate::status_tap::unix_ms_now()
+        ));
+        fs::write(&path, b"not a directory").unwrap();
+        cfg.run_dir = path.clone();
+        let tap = StatusTap::new();
+        let error = run_embedded_with(cfg, Clock::new(), None, Some(tap.clone())).unwrap_err();
+        let state = tap.reader().wait_changed(Duration::ZERO).unwrap();
+        let phase = state.phase.unwrap();
+        assert_eq!(phase.phase, CapturePhase::Ended);
+        assert_eq!(phase.end_result, error);
+        assert!(state.operational.is_some());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn terminal_classification_preserves_error_precedence() {
+        let cfg = config();
+        assert_eq!(
+            capture_end(
+                &cfg,
+                &Err("INGRESS_TIMEOUT".into()),
+                "OPERATOR_STOP",
+                false,
+                Some("WRITE"),
+                Some("END")
+            ),
+            Err("INGRESS_TIMEOUT".into())
+        );
+        assert_eq!(
+            capture_end(&cfg, &Ok(()), "OPERATOR_STOP", false, None, None),
+            Err("MARKET_CAPTURE_INCOMPLETE: OPERATOR_STOP".into())
+        );
+        assert!(
+            capture_end(&cfg, &Ok(()), "TIMER", false, Some("WRITE"), None)
+                .unwrap_err()
+                .starts_with("MARKET_OBSERVER_STREAM_NOT_READY:")
+        );
+        assert_eq!(
+            capture_end(&cfg, &Ok(()), "TIMER", true, Some("WRITE"), None),
+            Err("market evidence write failed: WRITE".into())
+        );
+        assert_eq!(
+            capture_end(&cfg, &Ok(()), "TIMER", true, None, Some("END")),
+            Err("MARKET_CAPTURE_INCOMPLETE: END".into())
+        );
+        assert_eq!(
+            capture_end(&cfg, &Ok(()), "TIMER", true, None, None),
+            Ok(())
+        );
     }
 }

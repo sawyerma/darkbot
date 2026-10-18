@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 8080",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run type-check && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "budget": "bundlesize",
     "smoke": "playwright test tests/smoke.spec.ts --reporter=line",
     "lint:boundaries": "node scripts/check-boundaries.mjs",
@@ -16,7 +16,10 @@
     "check:freeze": "node scripts/check-design-freeze.mjs",
     "lint:css": "node scripts/check-graphite-css.mjs",
     "visual": "playwright test -c playwright.visual.config.ts",
-    "visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots"
+    "visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots",
+    "test": "vitest run",
+    "test:project0": "playwright test -c playwright.project0.config.ts",
+    "test:project0-backend": "playwright test -c playwright.backend.config.ts"
   },
   "bundlesize": [
     {
@@ -95,6 +98,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.14",
     "typescript": "~5.6.2",
-    "vite": "^5.4.10"
+    "vite": "^5.4.10",
+    "vitest": "^2.1.9"
   }
 }

@@ -1,31 +1,42 @@
 #![cfg(unix)]
-use darkbot_p0_reporter::{generation, projection, schema_id};
-use darkbot_runner::status_tap::{MarketSnapshot, StatusSnapshot, StorageSnapshot};
+use darkbot_p0_reporter::{capture_state, generation, schema_id};
+use darkbot_runner::status_tap::{MarketSnapshot, MarketStats, StatusSnapshot, StorageSample};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn projected_fields_are_optional_and_not_fabricated() {
-    let empty = projection("TEST_ONLY", &StatusSnapshot::default());
-    assert_eq!(empty.queue_bytes, None);
-    assert_eq!(empty.last_observed_slot, None);
-    assert!(empty.market_verdict.is_empty());
+    let empty = capture_state(&StatusSnapshot::default());
+    assert!(empty.writer.is_none() && empty.market.is_none());
     let snapshot = StatusSnapshot {
         market: Some(MarketSnapshot {
-            gap_count: 7,
-            last_observed_slot: Some(123),
+            stats: MarketStats {
+                gap_count: 7,
+                last_observed_slot: Some(123),
+                ..Default::default()
+            },
             ..Default::default()
         }),
-        storage: Some(StorageSnapshot {
-            queue_bytes: 1024,
-            lag_frames: 2,
+        storage: Some(StorageSample {
+            at_unix_ms: 1000,
+            status: darkbot_runner::storage::writer::StorageStatus {
+                queue_bytes: 1024,
+                lag_frames: 2,
+                ..Default::default()
+            },
         }),
         ..Default::default()
     };
-    let p = projection("TEST_ONLY", &snapshot);
-    assert_eq!(p.gap_count, Some(7));
-    assert_eq!(p.last_observed_slot, Some(123));
-    assert_eq!(p.queue_bytes, Some(1024));
-    assert_eq!(p.lag_frames, Some(2));
+    let p = capture_state(&snapshot);
+    let counters = p.market.unwrap().counters;
+    assert!(counters
+        .iter()
+        .any(|c| c.name == "gap_count" && c.value == 7));
+    assert!(counters
+        .iter()
+        .any(|c| c.name == "last_observed_slot" && c.value == 123));
+    let writer = p.writer.unwrap();
+    assert_eq!(writer.queue_bytes, 1024);
+    assert_eq!(writer.lag_frames, 2);
     assert_eq!(schema_id().len(), 64);
 }
 #[test]
@@ -62,4 +73,20 @@ fn env_config_defaults_off_and_validates_enabled() {
     let cfg = config_from_env("r", &ok).unwrap().unwrap();
     assert_eq!(cfg.heartbeat, Duration::from_millis(1500));
     assert_eq!(cfg.run_id, "r");
+}
+
+#[test]
+fn configured_reporter_rate_is_bounded_and_leaves_final_handoff_time() {
+    for value in ["0", "20", "99", "1001", "10000"] {
+        let lookup = |key: &str| match key {
+            "P0_REPORT_SOCKET" => Some("/tmp/p0-test.sock".into()),
+            "P0_REPORT_GENERATION_FILE" => Some("/tmp/p0-test.gen".into()),
+            "P0_REPORT_MIN_INTERVAL_MS" => Some(value.into()),
+            _ => None,
+        };
+        assert!(
+            darkbot_p0_reporter::config_from_env("TEST_ONLY", &lookup).is_err(),
+            "{value}"
+        );
+    }
 }

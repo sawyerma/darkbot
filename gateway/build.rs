@@ -11,6 +11,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "darkbot/control/v1/overview.proto",
         "darkbot/control/v1/engine_feed.proto",
         "darkbot/project0/v1/status.proto",
+        "darkbot/project0/v1/capture.proto",
+        "darkbot/project0/v1/system.proto",
     ];
     for f in files {
         println!("cargo:rerun-if-changed={}", root.join(f).display());

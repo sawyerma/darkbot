@@ -1,20 +1,39 @@
 import { create } from "zustand";
 import type { StateMeta, TopicStatus } from "@/core/realtime";
-import type { Project0StatusView } from "../model/status";
-export interface StatusSlice {
-  projection: Project0StatusView | null;
+import type { CaptureView, SystemView } from "../model/status";
+
+export interface TopicSlice<T> {
+  value: T | null;
   meta: StateMeta | null;
   topicStatus: TopicStatus;
   reason: string;
+  /** Browser clock when the applied state arrived from the gateway. */
+  receivedAtMs: number | null;
 }
+
+function empty<T>(): TopicSlice<T> {
+  return { value: null, meta: null, topicStatus: "IDLE", reason: "", receivedAtMs: null };
+}
+
 interface Project0Store {
-  status: StatusSlice;
-  applyStatus: (projection: Project0StatusView, meta: StateMeta) => void;
-  setStatusTopic: (topicStatus: TopicStatus, reason: string) => void;
+  system: TopicSlice<SystemView>;
+  capture: TopicSlice<CaptureView>;
+  applySystem: (value: SystemView, meta: StateMeta, receivedAtMs: number) => void;
+  applyCapture: (value: CaptureView, meta: StateMeta, receivedAtMs: number) => void;
+  setSystemTopic: (topicStatus: TopicStatus, reason: string) => void;
+  setCaptureTopic: (topicStatus: TopicStatus, reason: string) => void;
 }
+
 export const useProject0Store = create<Project0Store>()((set) => ({
-  status: { projection: null, meta: null, topicStatus: "IDLE", reason: "" },
-  applyStatus: (projection, meta) => set((s) => ({ status: { ...s.status, projection, meta } })),
-  setStatusTopic: (topicStatus, reason) => set((s) => ({ status: { ...s.status, topicStatus, reason } })),
+  system: empty<SystemView>(),
+  capture: empty<CaptureView>(),
+  applySystem: (value, meta, receivedAtMs) =>
+    set((s) => ({ system: { ...s.system, value, meta, receivedAtMs } })),
+  applyCapture: (value, meta, receivedAtMs) =>
+    set((s) => ({ capture: { ...s.capture, value, meta, receivedAtMs } })),
+  setSystemTopic: (topicStatus, reason) => set((s) => ({ system: { ...s.system, topicStatus, reason } })),
+  setCaptureTopic: (topicStatus, reason) => set((s) => ({ capture: { ...s.capture, topicStatus, reason } })),
 }));
-export const selectStatus = (s: Project0Store) => s.status;
+
+export const selectSystem = (s: Project0Store) => s.system;
+export const selectCapture = (s: Project0Store) => s.capture;
