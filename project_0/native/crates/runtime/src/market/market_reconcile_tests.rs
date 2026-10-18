@@ -373,7 +373,12 @@ fn full_slot_lookup_table_requires_loaded_addresses() {
         );
         assert_eq!(c.stats.liquidation_events, u64::from(loaded));
         if !loaded {
-            assert_eq!(c.reconciliation.error, Some("LOADED_ADDRESSES_MISSING"));
+            // A4: counted as an invalid transaction (scan goes on), first code kept.
+            assert_eq!(c.reconciliation.error, Some("TRANSACTIONS_INVALID"));
+            assert_eq!(
+                c.reconciliation.first_invalid,
+                Some((10, 0, "LOADED_ADDRESSES_MISSING"))
+            );
         }
     }
 }
@@ -443,4 +448,49 @@ fn full_slot_related_instructions_are_recorded_but_never_liquidations() {
         ]
     );
     assert_eq!(s.rel[1].stack_height, Some(2));
+}
+
+/// A4: one foreign transaction that fails its validation no longer ends the scan: the rest of
+/// its block and the next block are scanned and their events counted; the reconciliation is
+/// incomplete with the count and the first failing transaction in the persisted error.
+#[test]
+fn full_slot_invalid_transaction_is_counted_and_the_scan_goes_on() {
+    let (mut c, mut s) = canonical_core(10, 11);
+    let mut bad = canonical_tx("bad", 10);
+    bad["version"] = json!(2);
+    c.reconcile_slots(
+        &mut |m, p, _| {
+            Ok(match m {
+                "getSlot" => json!(11),
+                "getBlocks" => json!([10, 11]),
+                "getBlock" => {
+                    let slot = p[0].as_u64().unwrap();
+                    let txs = if slot == 10 {
+                        vec![bad.clone(), canonical_tx("after", 10)]
+                    } else {
+                        vec![canonical_tx("next", 11)]
+                    };
+                    canonical_block(slot, slot - 1, txs)
+                }
+                _ => panic!("unexpected method"),
+            })
+        },
+        &mut s,
+    )
+    .unwrap();
+    let r = &c.reconciliation;
+    assert!(!r.complete);
+    assert_eq!(r.error, Some("TRANSACTIONS_INVALID"));
+    assert_eq!(
+        (r.transactions_scanned, r.transactions_invalid, r.slots_fetched),
+        (3, 1, 2)
+    );
+    let (slot, index, code) = r.first_invalid.unwrap();
+    assert_eq!((slot, index), (10, 0));
+    assert_eq!(c.stats.liquidation_events, 2, "events of the other transactions");
+    let row = super::rows::ReconciliationRow::from(r);
+    assert_eq!(
+        row.error,
+        Some(format!("TRANSACTIONS_INVALID n=1 first=slot 10 index 0 {code}"))
+    );
 }

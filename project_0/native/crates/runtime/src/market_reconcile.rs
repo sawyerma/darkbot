@@ -105,6 +105,27 @@ pub(super) struct Reconciliation {
     pub first_block_time: Option<i64>,
     pub last_block_time: Option<i64>,
     pub error: Option<&'static str>,
+    /// A4: transactions that failed their decode or validation; the scan went on, the
+    /// reconciliation is incomplete (`TRANSACTIONS_INVALID`). First one: slot, index, code.
+    pub transactions_invalid: u64,
+    pub first_invalid: Option<(u64, u64, &'static str)>,
+}
+impl Reconciliation {
+    /// The persisted error: with invalid transactions their count and the first one (the row
+    /// layout stays unchanged).
+    fn row_error(&self) -> Option<String> {
+        let invalid = self.first_invalid.map(|(slot, index, code)| {
+            format!(
+                "TRANSACTIONS_INVALID n={} first=slot {slot} index {index} {code}",
+                self.transactions_invalid
+            )
+        });
+        match (self.error, invalid) {
+            (Some("TRANSACTIONS_INVALID"), invalid) => invalid,
+            (Some(e), Some(invalid)) => Some(format!("{e}; {invalid}")),
+            (e, _) => e.map(Into::into),
+        }
+    }
 }
 impl From<&SlotBoundary> for SlotBoundaryRow {
     fn from(b: &SlotBoundary) -> Self {
@@ -133,7 +154,7 @@ impl From<&Reconciliation> for ReconciliationRow {
             marginfi_transactions: r.marginfi_transactions,
             first_block_time: r.first_block_time,
             last_block_time: r.last_block_time,
-            error: r.error.map(str::to_owned),
+            error: r.row_error(),
         }
     }
 }
@@ -429,9 +450,23 @@ impl ObserverCore {
                     return Ok(Err("RECONCILIATION_TRANSACTION_BUDGET"));
                 }
                 self.reconciliation.transactions_scanned += 1;
-                let tx = require!(entry.map_err(|e| e.0));
-                require!(validate_full_transaction(&tx));
-                let keys = require!(resolve_account_keys(&tx).map_err(|e| e.code()));
+                // A4: a transaction that fails its decode or validation makes the scan
+                // incomplete but never ends it; structural errors (parent chain, slot list,
+                // deadline, budget, duplicate) still end it at once.
+                let checked = entry.map_err(|e| e.0).and_then(|tx| {
+                    validate_full_transaction(&tx)?;
+                    let keys = resolve_account_keys(&tx).map_err(|e| e.code())?;
+                    Ok((tx, keys))
+                });
+                let (tx, keys) = match checked {
+                    Ok(checked) => checked,
+                    Err(code) => {
+                        let r = &mut self.reconciliation;
+                        r.transactions_invalid += 1;
+                        r.first_invalid.get_or_insert((slot, index as u64, code));
+                        continue;
+                    }
+                };
                 if keys.contains(&self.program) {
                     self.reconciliation.marginfi_transactions += 1;
                     let signature = tx.signatures[0].clone();
@@ -532,6 +567,9 @@ impl ObserverCore {
         }
         if next <= hi {
             return Ok(Err("TRAILING_SLOT_UNPROVEN"));
+        }
+        if self.reconciliation.transactions_invalid > 0 {
+            return Ok(Err("TRANSACTIONS_INVALID"));
         }
         Ok(Ok(()))
     }
