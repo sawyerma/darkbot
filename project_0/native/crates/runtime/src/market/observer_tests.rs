@@ -2044,6 +2044,52 @@ fn ingress_panic_after_last_event_never_seals_complete() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// R9: the capture's periodic sink check surfaces a sticky background writer failure while no
+/// further row is written (the tick used to call a no-op `JournalSink::flush`).
+#[test]
+fn journal_sink_flush_reports_a_failed_writer_without_a_new_row() {
+    use super::rows::MarketCoverage;
+    use std::time::{Duration, Instant};
+    let dir = std::env::temp_dir().join(format!(
+        "c0mo_r9_{}_{}",
+        std::process::id(),
+        utc_compact(unix_now_s())
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let cfg = crate::storage::writer::WriterConfig {
+        initial_bytes: 1 << 20,
+        max_bytes: 1 << 20,
+        system_reserve_bytes: 0,
+        batch_frames: 1,
+        flush_interval: Duration::from_millis(1),
+        sync_interval: Duration::from_millis(20),
+        stall_budget: Duration::from_millis(200),
+        disk_reserve_bytes: 0,
+        segment_bytes: 0,
+        fail_at_batch: Some(0),
+    };
+    let mut sink = JournalSink::create_with(&dir, cfg).unwrap();
+    assert!(sink.flush().is_ok(), "a healthy writer");
+    sink.coverage(&MarketCoverage::SlotFailed {
+        slot: 1,
+        error: "x".into(),
+    })
+    .unwrap();
+    // The first batch fails on the writer thread; no further row is written.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let reported = loop {
+        match sink.flush() {
+            Err(e) => break e.to_string(),
+            Ok(()) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            Ok(()) => panic!("a failed writer stays invisible to the periodic check"),
+        }
+    };
+    assert!(reported.contains("injected write failure"), "{reported}");
+    drop(sink);
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// D8: a stopped ingress thread is joined within the budget; one still running is reported,
 /// never declared quiescent.
 #[test]

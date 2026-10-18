@@ -317,6 +317,14 @@ impl MarketJournalWorker {
             .map(|e| io::Error::other(e.clone()))
     }
 
+    /// The sticky writer-thread failure, if any (R9: checked periodically, also without rows).
+    pub fn check(&self) -> io::Result<()> {
+        match self.failed() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
     /// Encodes `row` on the calling thread and admits it to the writer, waiting at most the
     /// stall budget for bytes and queue space. Never drops: a refusal is an error.
     pub fn submit<P: Payload>(&mut self, provenance: Provenance, row: &P) -> io::Result<()> {

@@ -187,8 +187,10 @@ impl MarketSink for JournalSink {
     }
     /// The writer lane flushes on its batch/interval bounds and syncs on its interval; durability
     /// of the whole journal is the sync at seal (OS-buffered frames are not crash-safe before).
+    /// R9: the capture's periodic call surfaces a sticky background writer failure even while no
+    /// row is written; it never flushes, seals or ends a batch.
     fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        self.writer.as_ref().map_or(Ok(()), |w| w.check())
     }
     fn finish(&mut self, complete: bool) -> std::io::Result<Option<MarketJournalBinding>> {
         self.seal(complete).map(Some)

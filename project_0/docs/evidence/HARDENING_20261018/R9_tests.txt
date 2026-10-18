@@ -1,0 +1,169 @@
+# R9 capture tick = writer status check; tested tree: 869de65 + R9 diff (CARGO_BUILD_JOBS=2)
+# RED (before the fix, same test): panicked 'a failed writer stays invisible to the periodic check' after 5 s (JournalSink::flush was Ok(()) unconditionally)
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 market:: storage:: market_verification
+
+running 144 tests
+test market::observer::markers::tests::discriminators_match_the_pinned_classifier_and_are_unique ... ok
+test market::observer::parity::tests::marker_discriminators_match_pinned_sources ... ok
+test market::observer::markers::tests::start_end_pairs_follow_the_pinned_rules ... ok
+test market::observer::paths::tests::instruction_namespace_is_unique_and_unknown_fails_closed ... ok
+test market::observer::paths::tests::upgrade_or_missing_proof_never_qualifies ... ok
+test market::observer::reconcile::pacing_tests::concurrent_reservations_are_spaced_and_deadline_is_hard ... ok
+test market::observer::reconcile::pacing_tests::transient_rpc_backoff_is_bounded ... ok
+test market::observer::related::tests::discriminators_are_pinned_and_disjoint_from_markers ... ok
+test market::observer::related::tests::positions_roles_status_and_fail_closed ... ok
+test market::observer::reporter_tap::tests::backpressure_and_disconnect_are_fail_open_for_observation ... ok
+test market::observer::reporter_tap::tests::snapshot_uses_existing_stats_without_resampling_storage ... ok
+test market::observer::parity::tests::real_v1_receivership_line ... ok
+test market::observer::strict_driver::tests::spec_identity_is_stable_and_bound_to_its_inputs ... ok
+test market::observer::tests::capture_operator_stop_seals_incomplete ... ok
+test market::observer::tests::complete_canonical_window_is_authority_despite_transport_gap_telemetry ... ok
+test market::observer::tests::cutoff_counts_queued_events_received_before_and_rejects_events_after ... ok
+test market::observer::tests::data_from_another_program_is_never_counted ... ok
+test market::observer::tests::decoder_error_in_successful_transaction_blocks_valid ... ok
+test market::observer::tests::decodes_valid_receiver_event ... ok
+test market::observer::tests::duplicate_signature_counts_once ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=5 signature=a event=0 target=1112GHZARW8F5sZ4QJqPnrxCRmLqAoDov7UQTWUpxCB receiver=1112HiBwB1EkFVbA7ckDZ9GQ9E4arVxLWvwgutPMbXp gross_usd=0.500000
+[MARKET/RECEIVERSHIP] provisional=true slot=6 signature=b event=0 target=1112KaTHEWJz6KchFyRVDF8Aa6jbdRtGLMCADPgfZVA receiver=1112P1thDTpcUjYbdMtjVSP2SZR7hRTzUSUHhYsAxur gross_usd=0.500000
+[MARKET/RECEIVERSHIP] provisional=true slot=7 signature=c event=0 target=1112SfG1kEpUmWTmhiu7tBdmjVaop95pMWjNZra4Jdo receiver=1112TLfzjhonQb8sqKvDdsA7hsVwLu2QBvRaKw6EHXp gross_usd=0.500000
+test market::observer::tests::enrichment_budget_identity_and_queue_limits_are_explicit ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=9 signature=x event=0 target=1112XuHstwDi83HHcCk5fbvSDVt96XvEPRXnKb9i5HV receiver=1112asNDgPFYK83nftnx26QiHiZsy4iojKihtGDf5JA gross_usd=2.000000
+test market::observer::tests::enrichment_init_failure_still_produces_summary_and_report ... ok
+test market::observer::tests::events_before_observation_are_not_counted ... ok
+test market::observer::tests::explicit_ws_url_overrides_helius_derived_url ... ok
+test market::observer::tests::failed_transaction_does_not_create_liquidation ... ok
+test market::observer::tests::failed_transaction_is_recorded_but_not_a_liquidation ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=9 signature=x event=0 target=1112yCqkcRCBHSgwoVrnKtNqQC8MDrJ8CLRyHKzs28x receiver=111311SmVQH3DbCrVJBRuAN8gyPoHwyuDPex5TUuXNj gross_usd=2.000000
+test market::observer::tests::finalize_writes_summary_report_and_unenriched_rows ... ok
+test market::observer::tests::full_slot_backfill_rows_and_failed_or_plain_transactions_create_no_event ... ok
+test market::observer::tests::full_slot_budget_and_large_range_are_bounded ... ok
+test market::observer::tests::full_slot_cannot_run_in_capture_or_without_boundaries ... ok
+test market::observer::tests::full_slot_every_produced_block_and_transaction_are_scanned ... ok
+test market::observer::tests::full_slot_live_duplicate_still_validates_instruction_event_parity ... ok
+test market::observer::tests::full_slot_lookup_table_requires_loaded_addresses ... ok
+test market::observer::tests::full_slot_missing_produced_block_cannot_masquerade_as_skipped ... ok
+test market::observer::tests::full_slot_related_instructions_are_recorded_but_never_liquidations ... ok
+test market::observer::tests::full_slot_repeat_and_live_duplicate_do_not_double_count ... ok
+test market::observer::tests::full_slot_skipped_slots_require_finalized_parent_proof_including_tail ... ok
+test market::observer::strict_driver::tests::driver_records_identities_and_refuses_changed_capture ... ok
+test market::observer::tests::full_slot_truncated_log_mismatch_fails_closed ... ok
+test market::observer::tests::full_slot_unproven_tail_rpc_failure_and_future_window_fail_closed ... ok
+test market::observer::tests::full_transaction_checks_loaded_address_counts_even_when_present ... ok
+test market::observer::tests::full_transaction_rejects_unsupported_version_and_bad_inner_index ... ok
+test market::observer::tests::gap_before_stream_ready_is_recorded_but_not_counted ... ok
+test market::observer::tests::gap_intervals_are_bounded_and_capacity_is_incomplete ... ok
+test market::observer::tests::gap_then_reconnect_then_slot_closes_range ... ok
+test market::observer::tests::ingress_is_joined_or_reported_not_quiescent ... ok
+test market::observer::tests::ingress_overflow_makes_data_incomplete ... ok
+test market::observer::tests::ingress_panic_after_last_event_never_seals_complete ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=9 signature=x event=0 target=1117hqFTWaP9ALxkBd2mquQcbK6Wv5cPhAzYcXncFxg receiver=1117jMXtYWtiTxHD6LwGqY9fJ8H73Z5NrAzWmtubMNN gross_usd=2.000000
+test market::observer::tests::journal_sink_finalize_binds_the_journal_and_early_exit_seals_incomplete ... ok
+test market::observer::tests::journal_sink_flush_reports_a_failed_writer_without_a_new_row ... ok
+test market::observer::tests::jsonl_sink_finish_seals_incomplete_when_asked ... ok
+test market::observer::tests::live_nonreceiver_corrupt_known_event_fails_closed ... ok
+test market::observer::tests::live_nonreceiver_events_ignore_foreign_emitter ... ok
+test market::observer::tests::live_nonreceiver_events_reuse_existing_canonical_decoder ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=451703584 signature=2cebUJBWZYNW9ZNRweyV4NygKshP6dcnR4M8z3rTUHjNA6yEfkWWLRpXdqRtBPpTF68BGph964ebYtuEcxdvHJEf event=0 target=3GqwCURBtJZfdQxMSyZ1VyWNSB5WXovg7Q8Q46HY7ihx receiver=D9i4VJA8XaY49Rzff71B1uAJmjnuNfUuuZ1BLrjsPqYn gross_usd=0.186822
+[MARKET/RECEIVERSHIP] provisional=true slot=7 signature=other event=0 target=111A5t6Bd9MBTaCpHybPfLsMA5UowimJcDeu2Zr1YCa receiver=111AALxaLnjdqthkiCVuUid29Q9DrjsjxSY3eT6DRXa gross_usd=0.500000
+test market::observer::tests::logs_capture_never_fetches_and_enrichment_runs_after_capture ... ok
+test market::observer::tests::logs_never_finish_a_batch_sink_per_transaction ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=9 signature=x event=0 target=111AFwWeFCvEvbvhgVapg9yqikrgxH5CRAXadWkKMFR receiver=111AGCUAxTxzMEcHb4ZvKSDkAD6gx5FeMp8gfN4KoCy gross_usd=2.000000
+test market::observer::tests::logs_without_rpc_url_still_reaches_finalize_and_report ... ok
+test market::observer::tests::market_config_needs_no_keypair_and_validates_source_and_commitment ... ok
+test market::observer::tests::market_mode_has_no_signing_simulation_or_submission_path ... ok
+[MARKET/RECEIVERSHIP] provisional=true slot=10 signature=live-a event=0 target=4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi receiver=8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR gross_usd=5.000000
+[MARKET/RECEIVERSHIP] provisional=true slot=11 signature=live-b event=0 target=CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8 receiver=8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR gross_usd=5.500000
+[MARKET/RECEIVERSHIP] provisional=true slot=11 signature=live-b event=1 target=GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq receiver=LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY gross_usd=2.000000
+[MARKET/RECEIVERSHIP] provisional=true slot=11 signature=truncated event=0 target=YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf receiver=cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN gross_usd=1.000000
+test market::observer::tests::market_summary_render_matches_golden ... ok
+test market::observer::tests::market_ws_config_enables_heartbeat_and_shadow_default_does_not ... ok
+test market::observer::tests::non_truncated_existing_behavior_unchanged ... ok
+test market::observer::tests::notification_without_status_or_decodable_payload_is_unknown_not_success ... ok
+test market::observer::tests::p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery ... ok
+test market::observer::tests::p2_abort_writes_incomplete_report_and_never_enters_verification_rpc ... ok
+test market::observer::tests::p2_failure_after_ack_invalidates_pending_restoration ... ok
+test market::observer::tests::p4_timer_finalizes_locally_without_verification_rpc ... ok
+test market::observer::tests::quantiles_are_nearest_rank ... ok
+test market::observer::tests::full_slot_transient_rate_limit_retries_without_skipping_block ... ok
+test market::observer::tests::report_e2e::report_arguments_follow_the_contract_and_refuse_json_and_index ... ok
+test market::observer::tests::short_non_finite_or_undecodable_marginfi_data_is_a_decoder_error ... ok
+test market::observer::tests::six_real_audit_liquidations_aggregate_into_market_summary ... ok
+test market::observer::tests::six_real_audit_liquidations_decode_enrich_and_verify_identity ... ok
+test market::observer::tests::slot_telemetry_frames_measure_stream_silence ... ok
+test market::observer::tests::strict_compat_export_failure_stays_failed_on_retry ... ok
+test market::observer::tests::strict_compat_sink_persists_binary_first_and_exports_at_batch_boundary ... ok
+test market::observer::tests::transactions_with_helius_key_uses_enhanced_mainnet_endpoint ... ok
+test market::observer::tests::transport_completeness_is_not_full_market_truth_under_master_contract ... ok
+test market::observer::tests::truncated_fetch_failure_or_wrong_transaction_fail_closed ... ok
+test market::observer::tests::truncated_logs_are_flagged ... ok
+test market::observer::tests::truncated_logs_missing_liquidation_event_fail_closed ... ok
+test market::observer::tests::truncated_logs_with_exact_instruction_event_parity_can_be_qualified ... ok
+test market::observer::tests::truncated_logs_with_no_end_liquidation_can_be_qualified ... ok
+test market::observer::tests::truncated_logs_wrong_target_or_receiver_fail_closed ... ok
+test market::observer::tests::truncated_missing_loaded_addresses_fail_closed ... ok
+test market::observer::tests::truncated_v0_loaded_addresses_are_resolved ... ok
+test market::observer::tests::truth_aggregate_all_types_preserves_known_and_unknown ... ok
+test market::observer::tests::truth_classic_decodes_native_amount_and_liability_deposit_cost ... ok
+test market::observer::tests::truth_classic_failed_normal_and_mismatched_events ... ok
+test market::observer::tests::truth_classic_loaded_program_and_cpi_are_resolved ... ok
+test market::observer::tests::truth_deleverage_and_bankruptcy_are_separate_from_permissionless_profit ... ok
+test market::observer::tests::truth_foreign_emitter_and_failed_cpi_never_produce_liquidation ... ok
+test market::observer::tests::truth_mixed_real_receiver_and_source_classic_preserves_event_order ... ok
+test market::observer::tests::truth_multiple_classic_events_in_one_transaction_are_not_collapsed ... ok
+test market::observer::tests::truth_priority_uses_requested_limit_not_consumed_units ... ok
+test market::observer::tests::truth_receivership_reuses_six_real_f8_fixtures ... ok
+test market::observer::tests::two_events_in_one_transaction_keep_distinct_indices ... ok
+test market::observer::tests::typed_market_frames_render_offline_to_their_legacy_rows ... ok
+test market::observer::tests::unexpected_receivership_in_additional_events_is_a_decoder_error ... ok
+test market::observer::tests::unverified_sources_never_yield_market_data_valid ... ok
+test market::observer::tests::utc_formatting ... ok
+test market::observer::tests::v0_loaded_addresses_resolve_receiver_and_lookups_without_loaded_are_unknown ... ok
+test market::observer::tests::verdicts_by_source_and_without_liquidations ... ok
+test market::observer::tests::wrong_discriminator_is_not_a_liquidation_event ... ok
+test market::observer::verification::tests::disk_budget_and_changed_scope_fail_closed ... ok
+test market::observer::verification::tests::interrupted_batches_resume_identically_with_parent_skip_proofs ... ok
+test market::observer::verification::tests::read_ahead_group_is_bounded_and_skips_known_slots ... ok
+test market::observer::tests::report_e2e::native_report_binds_sources_and_filters_only_the_view ... ok
+test market::winner::tests::f8_fail_closed_shapes ... ok
+test market::winner::tests::f8_failed_liquidation_is_not_a_winner ... ok
+test market::winner::tests::f8_legacy_successful_winner ... ok
+test market::winner::tests::f8_probe_sdk_encoded_transaction_decoding ... ignored
+test market::winner::tests::f8_same_slot_hits_are_ambiguous_never_guessed ... ok
+test market::winner::tests::f8_shared_instruction_truth_matches_six_audit_winners ... ok
+test market::winner::tests::f8_single_earliest_hit_is_unique_winner ... ok
+test market::winner::tests::f8_six_real_audit_winners_resolve_6_of_6 ... ok
+test market::winner::tests::f8_transaction_identity_is_fail_closed ... ok
+test market::winner::tests::f8_unrelated_successful_tx_is_not_a_winner ... ok
+test market::winner::tests::f8_v0_winner_with_receiver_from_lut ... ok
+test market::winner::tests::f8_v0_winner_without_relevant_lut_address ... ok
+test market::winner::tests::f8_winner_serializes_ambiguity_explicitly ... ok
+test market::winner::tests::outcomes ... ok
+test storage::budget::tests::acquire_samples_memory_at_most_once_per_interval ... ok
+test storage::budget::tests::byte_budget_is_hard_adaptive_and_releases ... ok
+test storage::budget::tests::headroom_decision_is_pure ... ok
+test storage::budget::tests::unrepresentable_wait_is_refused_without_panic ... ok
+test storage::preflight::tests::basis_and_write_probe_are_measured ... ok
+test storage::preflight::tests::verdicts_follow_measured_inputs_and_mode ... ok
+test storage::segments::tests::crash_missing_corrupt_and_orphan_segments_fail_closed ... ok
+test storage::segments::tests::segmented_replay_equals_single_journal ... ok
+test storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate ... ok
+test storage::segments::torn_tail_tests::capture_torn_tail_is_incomplete_but_wallet_and_resume_stay_strict ... ok
+test storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse ... ok
+test storage::segments::torn_tail_tests::interrupted_rotate_missing_final_successor_is_incomplete_and_orphan_holes_fail ... ok
+test storage::segments::torn_tail_tests::zero_bytes_inside_the_stream_stay_hard_errors ... ok
+test storage::writer::tests::adaptive_control_stays_within_reserved_bounds ... ok
+test storage::writer::tests::disk_reserve_fails_closed_and_status_reports_the_lane ... ok
+test market::observer::verification::tests::wrong_parent_and_corrupt_cached_response_never_pass ... ok
+test storage::writer::tests::overload_refuses_at_max_and_keeps_every_admitted_frame ... ok
+test storage::writer::tests::lane_rotates_segments_and_chain_replays_every_frame ... ok
+test storage::writer::tests::unrepresentable_stall_budget_is_an_error_not_a_panic ... ok
+test storage::writer::tests::worker_writes_ordered_batches_and_seals ... ok
+test storage::writer::tests::reservation_precedes_encoding_and_slots_are_budgeted ... ok
+test storage::writer::tests::writer_failure_is_sticky_and_keeps_the_written_prefix ... ok
+
+test result: ok. 143 passed; 0 failed; 1 ignored; 0 measured; 219 filtered out; finished in 9.30s
+
+exit=0
+$ cargo clippy -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0
