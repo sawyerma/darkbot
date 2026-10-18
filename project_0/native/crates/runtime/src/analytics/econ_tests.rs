@@ -771,6 +771,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
     let failed = FailedCostMatrix::default();
     let slots = darkbot_solana::ingress::SlotWatch::new();
     slots.observe(10);
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
     let mut p = Pipeline {
         mode: Mode::Shadow,
         clock: &clock,
@@ -799,6 +800,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         global_allowed: vec![],
         prereq_allowed: vec![],
         slot_watch: &slots,
+        network: &mut network,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -1451,4 +1453,193 @@ fn a2_rx_margins_only_for_a_confirmed_receipt() {
             1
         );
     }
+}
+
+/// Stub RPC for B6: every fee quote and simulation takes `delay` (a slow provider).
+struct SlowSubmitter {
+    delay: Duration,
+}
+impl SubmissionAdapter for SlowSubmitter {
+    fn path(&self) -> SubmissionPath {
+        SubmissionPath::Rpc
+    }
+    fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<MessageFeeQuote> {
+        std::thread::sleep(self.delay);
+        Some(MessageFeeQuote {
+            message_hash: tx.message.hash().to_string(),
+            context_slot: 1,
+            lamports: 200,
+        })
+    }
+    fn simulate(&self, _: &VersionedTransaction) -> SimResult {
+        std::thread::sleep(self.delay);
+        SimResult::Ok {
+            units_consumed: Some(100),
+        }
+    }
+    fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
+        panic!("must never broadcast")
+    }
+    fn submit_bundle(&self, _: &[VersionedTransaction], _: u64) -> Result<SubmitAck, SubmitError> {
+        panic!("must never broadcast bundle")
+    }
+}
+
+/// B6: the Shadow owner evaluates one candidate synchronously
+/// after at most 64 ingress events (`P0_INGRESS_BURST_BEFORE_DETECT`) while candidates are
+/// queued. The candidate's block grows with the provider latency (fee quote + simulation of the
+/// real pipeline); once rate × block > 64 the ingress queue grows by the difference per queued
+/// candidate until it overflows. Scaled offline: 100 ms per RPC, 1,000 events/s, a 1,024-event
+/// queue, 24 queued candidates; the real owner queue holds 65,536 events. With the B6 network
+/// budget the queue stays bounded and the deferred candidates are recorded.
+#[test]
+fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
+    use crate::execution::pipeline::{Mode, Pipeline};
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let adapter = ObserveOnly::new(SlowSubmitter {
+        delay: Duration::from_millis(100),
+    });
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let zero = Limits {
+        max_total_capital: 0,
+        max_outstanding_inventory: 0,
+        max_concurrent_positions: 0,
+        max_exposure_per_attempt: 0,
+        max_daily_loss: 0,
+        max_failed_attempts_per_day: 0,
+        max_tip: 0,
+        max_slippage_bps: 0,
+        max_outstanding_attempts: 0,
+    };
+    let mut safety = Safety::new(zero, Allow::default(), false);
+    let payer = solana_sdk::signature::Keypair::new();
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix::default();
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    slots.observe(10);
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let mut p = Pipeline {
+        mode: Mode::Shadow,
+        clock: &clock,
+        health: &TestHealth,
+        builder: &TestBuilder,
+        submitter: &adapter,
+        safety: &mut safety,
+        blockhash: &bh,
+        payer: &payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit: 0,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        tip_account: None,
+        global_allowed: vec![],
+        prereq_allowed: vec![],
+        slot_watch: &slots,
+        network: &mut network,
+    };
+    // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
+    // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
+    // the network budget (the owner's rule). Returns (overflow, max depth, losses, block max).
+    let run = |p: &mut Pipeline<'_, TestHealth, TestBuilder, ObserveOnly<SlowSubmitter>>,
+               guarded: bool| {
+        let (tx, rx) = darkbot_common::channel::bounded::<u64>("b6-ingress", 1024);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let producer_stop = stop.clone();
+        let producer = std::thread::spawn(move || {
+            let mut n = 0u64;
+            let started = std::time::Instant::now();
+            while !producer_stop.load(Ordering::Acquire) {
+                n += 1;
+                let _ = tx.try_push(n);
+                // 1,000 events/s on average.
+                if let Some(wait) = Duration::from_millis(n).checked_sub(started.elapsed()) {
+                    std::thread::sleep(wait);
+                }
+            }
+        });
+        let (mut block, mut max_depth, mut losses) = (Duration::ZERO, 0u64, Vec::new());
+        for _ in 0..24 {
+            for _ in 0..64 {
+                if rx.try_pop().is_none() {
+                    break;
+                }
+            }
+            let s = rx.stats();
+            if guarded && s.sent <= s.received {
+                p.network.drained();
+            }
+            let started = std::time::Instant::now();
+            let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+            block = block.max(started.elapsed());
+            losses.push(r.loss);
+            let s = rx.stats();
+            max_depth = max_depth.max(s.sent.saturating_sub(s.received));
+        }
+        stop.store(true, Ordering::Release);
+        producer.join().unwrap();
+        (rx.stats().overflow, max_depth, losses, block)
+    };
+    // Measurement (unbounded, the behaviour before B6): the queue overflows.
+    let (overflow, max_depth, losses, block) = run(&mut p, false);
+    println!(
+        "B6_OWNER_BLOCK rpc_ms=100 candidate_block_ms_max={} candidates=24 rate_per_s=1000 burst=64 queue=1024 max_depth={max_depth} overflow={overflow}",
+        block.as_millis()
+    );
+    // Fee quote and simulation of one candidate: at least two provider round trips.
+    assert!(block >= Duration::from_millis(200), "{block:?}");
+    assert!(losses.iter().all(Option::is_none));
+    // 1,000/s × ≥0.2 s − 64 drained ⇒ ≥136 events gained per queued candidate.
+    assert!(overflow > 0, "max_depth {max_depth}");
+
+    // B6 guard: one network candidate per drain window. The queue never overflows; the
+    // candidates of a window that is still behind are recorded as RpcBudget, not dropped.
+    *p.network = crate::execution::pipeline::NetworkBudget::new(1, u64::MAX);
+    let (overflow, max_depth, losses, _) = run(&mut p, true);
+    let deferred = losses
+        .iter()
+        .filter(|l| matches!(l, Some(LossReason::RpcBudget)))
+        .count();
+    println!(
+        "B6_OWNER_GUARD per_drain=1 max_depth={max_depth} overflow={overflow} deferred={deferred}"
+    );
+    assert_eq!(overflow, 0, "max_depth {max_depth}");
+    assert!(deferred > 0 && losses.iter().any(Option::is_none));
+
+    // B6 deadline: a candidate stops calling the provider once its deadline passed (here after
+    // the fee quote, before the simulation).
+    *p.network = crate::execution::pipeline::NetworkBudget::new(usize::MAX, 50_000_000);
+    let started = std::time::Instant::now();
+    let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+    assert!(
+        matches!(r.loss, Some(LossReason::RpcDeadline)),
+        "{:?}",
+        r.loss
+    );
+    assert_eq!(r.simulation_result, None);
+    assert!(started.elapsed() < Duration::from_millis(200));
 }

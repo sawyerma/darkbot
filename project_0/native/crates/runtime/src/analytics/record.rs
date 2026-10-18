@@ -41,6 +41,11 @@ pub enum LossReason {
     EconomicSkip,
     ThresholdTooHigh,
     Unknown,
+    /// B6: the owner's network budget for this drain window was used up; the candidate is
+    /// recorded without routes, fee quote or simulation (no drop, no HALT).
+    RpcBudget,
+    /// B6: the candidate's network deadline passed before its next provider call.
+    RpcDeadline,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

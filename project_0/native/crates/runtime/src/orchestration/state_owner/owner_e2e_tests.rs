@@ -106,6 +106,7 @@ fn fixture(tag: &str) -> Fixture {
         bank_input_revision: HashMap::new(),
         ingress_burst_before_detect: 64,
         ingress_since_detect: 0,
+        network: NetworkBudget::unbounded(),
         mt0_order_rx: VecDeque::new(),
         clock,
         econ: None,

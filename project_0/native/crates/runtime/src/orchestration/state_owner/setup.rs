@@ -742,6 +742,21 @@ pub(super) fn prepare(
     }
     #[cfg(feature = "crate_health")]
     let ingress_since_detect: usize = 0;
+    // B6: at most this many candidates use the network (routes, fee quote, simulation) until
+    // the ingress queue has been drained again; each stops calling the provider after the
+    // deadline (default about twice the measured Mainnet pipeline maximum of 2.654 s).
+    let rpc_candidates_per_drain: usize = config::parsed_or("P0_RPC_CANDIDATES_PER_DRAIN", 4)?;
+    let candidate_network_deadline_ms: u64 =
+        config::parsed_or("P0_CANDIDATE_NETWORK_DEADLINE_MS", 5_000)?;
+    if rpc_candidates_per_drain == 0 || candidate_network_deadline_ms == 0 {
+        return Err(
+            "P0_RPC_CANDIDATES_PER_DRAIN and P0_CANDIDATE_NETWORK_DEADLINE_MS must be > 0".into(),
+        );
+    }
+    let network = NetworkBudget::new(
+        rpc_candidates_per_drain,
+        candidate_network_deadline_ms.saturating_mul(1_000_000),
+    );
     // [MT0] Measurement only: owner-section timing, queue-age tracking and an off-owner
     // reporter thread (the only place that writes MT0 evidence to disk).
     let mt0_path = match config::parsed_or::<String>("P0_MT0_PATH", String::new())? {
@@ -858,6 +873,7 @@ pub(super) fn prepare(
         bank_input_revision,
         ingress_burst_before_detect,
         ingress_since_detect,
+        network,
         mt0_order_rx,
         clock,
         econ,

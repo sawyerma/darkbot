@@ -174,6 +174,35 @@ pub trait ReceivershipBuilder {
     ) -> Result<Vec<ReceivershipPlan>, String>;
 }
 
+/// B6: the Shadow owner's bound on synchronous network work (routes, fee quotes, simulation)
+/// while its ingress queue is behind. At most `per_drain` candidates use the network until the
+/// owner has drained its queue again (`drained`); each stops calling the provider once
+/// `deadline_ns` has passed since it reached the network stage. Other candidates are recorded
+/// with `RpcBudget`/`RpcDeadline`, never dropped silently and never a HALT.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NetworkBudget {
+    pub remaining: usize,
+    pub per_drain: usize,
+    pub deadline_ns: u64,
+}
+impl NetworkBudget {
+    pub fn new(per_drain: usize, deadline_ns: u64) -> Self {
+        Self {
+            remaining: per_drain,
+            per_drain,
+            deadline_ns,
+        }
+    }
+    /// No bound (tools and tests outside the owner).
+    pub fn unbounded() -> Self {
+        Self::new(usize::MAX, u64::MAX)
+    }
+    /// The owner's ingress queue is empty again: a new drain window.
+    pub fn drained(&mut self) {
+        self.remaining = self.per_drain;
+    }
+}
+
 pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> {
     pub mode: Mode,
     pub clock: &'a Clock,
@@ -199,6 +228,8 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub prereq_allowed: Vec<Pubkey>,
     /// [FIX-40] Zuletzt beobachteter Chain-Slot (vom Ingress aktualisiert).
     pub slot_watch: &'a darkbot_solana::ingress::SlotWatch,
+    /// B6: bound on the synchronous network work of the calling owner.
+    pub network: &'a mut NetworkBudget,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -299,6 +330,17 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("opportunity stale before planning".into());
             return rec.with_timeline(&tl);
         }
+        // B6: routes, fee quotes and simulation only within the owner's network budget.
+        if self.network.remaining == 0 {
+            rec.loss = Some(LossReason::RpcBudget);
+            rec.reason = Some(
+                "RPC_BUDGET: owner ingress queue behind; no network evaluation in this drain window"
+                    .into(),
+            );
+            return rec.with_timeline(&tl);
+        }
+        self.network.remaining -= 1;
+        let network_deadline = self.clock.now_ns().saturating_add(self.network.deadline_ns);
         let planning_started = Instant::now();
         let mt0_jupiter_before =
             darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter); // [MT0]
@@ -477,6 +519,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 && plan.prerequisite_txs.is_empty()
                 && plan.tip == 0
             {
+                if self.clock.now_ns() >= network_deadline {
+                    rec.loss = Some(LossReason::RpcDeadline);
+                    rec.reason = Some(
+                        "RPC_DEADLINE: candidate network deadline before the fee quote".into(),
+                    );
+                    return rec.with_timeline(&tl);
+                }
                 let fee_started = Instant::now();
                 let fee = self.submitter.fee_for_message(&built.tx);
                 // [MT0] H6: would a local fee model have matched the RPC fee? (measurement only)
@@ -727,6 +776,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             tl.mark(Stage::Sign, self.clock.now_ns());
             rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
             rec.path = Some(SubmissionPath::JitoBundle.as_str().into());
+        }
+        if self.clock.now_ns() >= network_deadline {
+            release_if(self.safety, reserved, plan.exposure);
+            rec.loss = Some(LossReason::RpcDeadline);
+            rec.reason =
+                Some("RPC_DEADLINE: candidate network deadline before the simulation".into());
+            return rec.with_timeline(&tl);
         }
         let simulation_started = Instant::now();
         let sim = if use_bundle {

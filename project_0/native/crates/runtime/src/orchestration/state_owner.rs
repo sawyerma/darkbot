@@ -3,7 +3,7 @@ use crate::analytics::shadow_ledger::ShadowLedger;
 #[cfg(feature = "crate_health")]
 use crate::execution::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
 use crate::execution::pending::PendingSubmission;
-use crate::execution::pipeline::{pipeline_timing_snapshot, Mode, Pipeline};
+use crate::execution::pipeline::{pipeline_timing_snapshot, Mode, NetworkBudget, Pipeline};
 #[cfg(feature = "crate_health")]
 use crate::execution::route::JupiterV2RouteProvider;
 use crate::market::winner::{race_outcome, RaceOutcome};
@@ -135,6 +135,8 @@ pub(super) struct ShadowOwner {
     bank_input_revision: HashMap<Pubkey, u64>,
     ingress_burst_before_detect: usize,
     ingress_since_detect: usize,
+    /// B6: bound on the synchronous network work of candidates while ingress is behind.
+    network: NetworkBudget,
     mt0_order_rx: VecDeque<u64>,
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,

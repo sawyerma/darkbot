@@ -359,6 +359,11 @@ impl ShadowOwner {
                     result: health_evidence,
                 }))?;
             self.evidence.check()?;
+            // B6: an empty ingress queue opens a new drain window of the network budget.
+            let queue = self.consumer.stats();
+            if queue.sent <= queue.received {
+                self.network.drained();
+            }
             // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
             let mut pipe = Pipeline {
                 mode: Mode::Shadow,
@@ -381,6 +386,7 @@ impl ShadowOwner {
                 global_allowed: self.global_allowed.clone(),
                 prereq_allowed: self.prereq_allowed.clone(),
                 slot_watch: &self.slot_watch,
+                network: &mut self.network,
             };
             #[cfg(feature = "crate_health")]
             let pipeline_started_ns = self.clock.now_ns();
