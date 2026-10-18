@@ -9,7 +9,7 @@
 #   darkbotctl status | open
 #   darkbotctl logs [gateway|capture]
 #   darkbotctl capture start [sekunden] | stop | status
-#   darkbotctl install-apps             DarkBot.app + DarkBot Stop.app, Verknüpfungen auf dem Schreibtisch
+#   darkbotctl install-apps             Eine DarkBot.app auf dem Schreibtisch
 #
 # Grundsatz: Das Fenster ist nur eine Ansicht. Schließen beendet keinen Prozess.
 
@@ -220,21 +220,106 @@ cmd_logs() {
   esac
 }
 
-cmd_install_apps() {
-  local apps="$HOME/Applications" ctl="$ROOT/ops/darkbotctl"
-  mkdir -p "$apps"
-  /usr/bin/osacompile -o "$apps/DarkBot.app" \
-    -e "do shell script \"'$ctl' up >> '$LOGDIR/app.log'\"" \
-    -e 'display notification "Cockpit geöffnet. Fenster schließen beendet nichts." with title "DarkBot"'
-  /usr/bin/osacompile -o "$apps/DarkBot Stop.app" \
-    -e "with timeout of 420 seconds" \
-    -e "do shell script \"'$ctl' down >> '$LOGDIR/app.log'\"" \
-    -e "end timeout" \
-    -e 'display notification "Capture-Stopp abgeschlossen; Gateway beendet." with title "DarkBot"'
-  ln -sfn "$apps/DarkBot.app" "$HOME/Desktop/DarkBot.app"
-  ln -sfn "$apps/DarkBot Stop.app" "$HOME/Desktop/DarkBot Stop.app"
-  say "Apps in $apps, Verknüpfungen auf dem Schreibtisch"
+cmd_is_up() { gateway_loaded; }
+
+cmd_status_short() {
+  local g c
+  if gateway_loaded; then g="Gateway läuft"; else g="Gateway gestoppt"; fi
+  if capture_running; then c="Capture läuft"; else c="keine Capture"; fi
+  printf '%s · %s\n' "$g" "$c"
 }
+
+make_icns() {
+  local png="$1" dest="$2" temp iconset n
+  temp="$(mktemp -d)"
+  iconset="$temp/DarkBot.iconset"
+  mkdir -p "$iconset"
+  for n in 16 32 128 256 512; do
+    /usr/bin/sips -s format png -z "$n" "$n" "$png" --out "$iconset/icon_${n}x${n}.png" >/dev/null
+    /usr/bin/sips -s format png -z "$((n*2))" "$((n*2))" "$png" --out "$iconset/icon_${n}x${n}@2x.png" >/dev/null
+  done
+  /usr/bin/iconutil -c icns "$iconset" -o "$dest"
+  rm -rf "$temp"
+}
+
+cmd_install_apps() {
+  local app="$HOME/Desktop/DarkBot.app" ctl="$ROOT/ops/darkbotctl"
+  local tmp src compiled backup
+  tmp="$(mktemp -d)"
+  src="$tmp/DarkBot.applescript"
+  compiled="$tmp/DarkBot.app"
+  backup="$HOME/Desktop/.DarkBot.previous.$$"
+  mkdir -p "$HOME/Desktop"
+
+  cat > "$src" <<EOF
+set ctl to quoted form of "$ctl"
+set logf to quoted form of "$LOGDIR/app.log"
+try
+  set isUp to true
+  try
+    do shell script ctl & " is-up"
+  on error
+    set isUp to false
+  end try
+  if isUp is false then
+    do shell script ctl & " up >> " & logf
+    display notification "Cockpit geöffnet." with title "DarkBot"
+  else
+    set info to do shell script ctl & " status-short"
+    set choice to button returned of (display dialog ("DarkBot läuft." & return & info) buttons {"Stoppen", "Abbrechen", "Cockpit öffnen"} default button "Cockpit öffnen" cancel button "Abbrechen" with title "DarkBot")
+    if choice is "Cockpit öffnen" then
+      do shell script ctl & " open"
+    else if choice is "Stoppen" then
+      if info contains "Capture läuft" then
+        display dialog "Capture läuft. Geordnet stoppen und Journal versiegeln?" buttons {"Abbrechen", "Stoppen"} default button "Abbrechen" cancel button "Abbrechen" with title "DarkBot" with icon caution
+      end if
+      with timeout of 420 seconds
+        do shell script ctl & " down >> " & logf
+      end timeout
+      display notification "DarkBot gestoppt." with title "DarkBot"
+    end if
+  end if
+on error number -128
+  return
+end try
+EOF
+
+  if ! /usr/bin/osacompile -o "$compiled" "$src"; then
+    rm -rf "$tmp"; die "AppleScript-Kompilierung fehlgeschlagen; alte App bleibt erhalten"
+  fi
+  if [ -f "$ROOT/ops/assets/DarkBot.png" ]; then
+    cp "$ROOT/ops/assets/DarkBot.png" "$tmp/DarkBot.png"
+  else
+    command -v swift >/dev/null 2>&1 || die "Swift fehlt"
+    if ! swift "$ROOT/ops/assets/make_icon.swift" "$tmp/DarkBot.png"; then
+      rm -rf "$tmp"; die "Icon-Generierung fehlgeschlagen"
+    fi
+  fi
+  if ! make_icns "$tmp/DarkBot.png" "$compiled/Contents/Resources/applet.icns"; then
+    rm -rf "$tmp"; die "Icon-Konvertierung fehlgeschlagen"
+  fi
+  rm -f "$compiled/Contents/Resources/Assets.car"
+  /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$compiled/Contents/Info.plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile applet" "$compiled/Contents/Info.plist" >/dev/null 2>&1 ||
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string applet" "$compiled/Contents/Info.plist"
+  if ! /usr/bin/codesign --force --sign - "$compiled"; then
+    rm -rf "$tmp"; die "Codesign fehlgeschlagen; alte App bleibt erhalten"
+  fi
+
+  if [ -e "$app" ] || [ -L "$app" ]; then mv "$app" "$backup"; fi
+  if mv "$compiled" "$app"; then
+    rm -rf "$backup"
+  else
+    if [ -e "$backup" ] || [ -L "$backup" ]; then mv "$backup" "$app"; fi
+    rm -rf "$tmp"; die "Installation fehlgeschlagen"
+  fi
+  rm -rf "$tmp"
+  rm -f "$HOME/Desktop/DarkBot Stop.app" "$HOME/Desktop/DarkBot Stop"
+  rm -rf "$HOME/Applications/DarkBot Stop.app" "$HOME/Applications/DarkBot.app"
+  touch "$app"
+  say "Ein Symbol: $app"
+}
+
 
 case "${1:-status}" in
   build) cmd_build ;;
@@ -253,6 +338,8 @@ case "${1:-status}" in
       status) cmd_capture_status ;;
       *) die "capture start [sekunden] | stop | status" ;;
     esac ;;
+  is-up) cmd_is_up ;;
+  status-short) cmd_status_short ;;
   install-apps) cmd_install_apps ;;
   *) die "unbekannt: $1 (build|deploy|up|down|restart-gateway|status|open|logs|capture|install-apps)" ;;
 esac
