@@ -100,6 +100,12 @@ pub const CLUSTER_READS: u64 = 5;
 pub fn required_reads(c: &RuntimeConfig) -> Result<u64, String> {
     Ok(CLUSTER_READS + fe::required_scope_reads(c)?)
 }
+/// R4: upper bound of the BOOT reads for the configured scope ([`CLUSTER_READS`] plus
+/// `fe::worst_case_scope_reads`). A `boot_calls` budget at or above it cannot run out on any
+/// dynamic dependency set; below it (but at least [`required_reads`]) the audit may block.
+pub fn worst_case_reads(c: &RuntimeConfig) -> Result<u64, String> {
+    Ok(CLUSTER_READS + fe::worst_case_scope_reads(c)?)
+}
 /// The audit's own call and time budget `(calls, seconds)` (N1): `boot_calls` capped by the
 /// global `max_requests`, and `boot_seconds`; independent of the FE-01 observation limits. A
 /// budget below [`required_reads`] is refused before any network access.
@@ -925,6 +931,141 @@ mod tests {
         server.join().unwrap();
         // `need` budgeted reads plus the one of the tight-deadline instance.
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), need + 1);
+    }
+    /// R4: a maximal dynamic scope — two targets, 16 distinct banks each, every bank with four
+    /// observation keys and three integration accounts (327 keys) — against the read bounds. A
+    /// coherent chain closes it in round 3 with fewer reads than the all-rounds minimum; a chain
+    /// that never becomes slot-coherent reads every round over the full scope: more than the
+    /// minimum, never more than `worst_case_reads`. With only the minimum budget the same audit
+    /// stops at the limit with BOOT_RPC_BUDGET after exactly `limit` reads (no retry).
+    #[test]
+    fn dynamic_boot_scope_is_bounded_and_blocks_at_the_budget() {
+        use bytemuck::Zeroable;
+        use marginfi_type_crate::types::{MarginfiAccount, OracleSetup};
+        use std::cell::Cell;
+        let (c, mut all) = fe::tests::fixture();
+        let program = Pubkey::from_str(protocol::PROGRAM_ID_MAINNET).unwrap();
+        let group = Pubkey::from_str(&c.fe_group).unwrap();
+        let wrapped = |disc: [u8; 8], payload: &[u8]| Account {
+            owner: program,
+            lamports: 1,
+            data: [disc.as_slice(), payload].concat(),
+            ..Account::default()
+        };
+        let plain = || Account {
+            owner: Pubkey::new_unique(),
+            lamports: 1,
+            data: vec![0; 82],
+            ..Account::default()
+        };
+        for target in &c.fe_targets {
+            let mut a = MarginfiAccount::zeroed();
+            a.group = group;
+            let mut banks: Vec<Pubkey> = (0..16).map(|_| Pubkey::new_unique()).collect();
+            banks.sort_by(|x, y| y.cmp(x));
+            for (i, bank_key) in banks.iter().enumerate() {
+                a.lending_account.balances[i].active = 1;
+                a.lending_account.balances[i].bank_pk = *bank_key;
+                let mut b = Bank::zeroed();
+                b.group = group;
+                b.mint = Pubkey::new_unique();
+                b.liquidity_vault = Pubkey::new_unique();
+                b.config.oracle_setup = OracleSetup::StakedWithPythPush;
+                for k in b.config.oracle_keys.iter_mut().take(4) {
+                    *k = Pubkey::new_unique();
+                }
+                b.integration_acc_1 = Pubkey::new_unique();
+                b.integration_acc_2 = Pubkey::new_unique();
+                b.integration_acc_3 = Pubkey::new_unique();
+                let deps = [
+                    b.mint,
+                    b.liquidity_vault,
+                    b.config.oracle_keys[0],
+                    b.config.oracle_keys[1],
+                    b.config.oracle_keys[2],
+                    b.config.oracle_keys[3],
+                    b.integration_acc_1,
+                    b.integration_acc_2,
+                    b.integration_acc_3,
+                ];
+                for k in deps {
+                    all.insert(k, plain());
+                }
+                all.insert(
+                    *bank_key,
+                    wrapped(protocol::DISC_BANK, bytemuck::bytes_of(&b)),
+                );
+            }
+            all.insert(
+                Pubkey::from_str(target).unwrap(),
+                wrapped(protocol::DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&a)),
+            );
+        }
+        let min = fe::required_scope_reads(&c).unwrap();
+        let worst = fe::worst_case_scope_reads(&c).unwrap();
+        assert_eq!(
+            (min + CLUSTER_READS, worst + CLUSTER_READS),
+            (required_reads(&c).unwrap(), worst_case_reads(&c).unwrap())
+        );
+        let serve = |keys: &[Pubkey], slot: u64| {
+            Ok((
+                slot,
+                fe::ObservedState(keys.iter().map(|k| (*k, all[k].clone())).collect()),
+            ))
+        };
+        // Coherent chain: the scope closes in round 3 (7, 39, then all 327 keys).
+        let reads = Cell::new(0u64);
+        let scope = fe::collect_scope(
+            &c,
+            |keys, _| {
+                reads.set(reads.get() + 1);
+                serve(keys, 100)
+            },
+            true,
+        )
+        .unwrap();
+        assert_eq!(scope.state.0.len(), 327);
+        let coherent_reads = reads.get();
+        assert!(coherent_reads <= worst, "{coherent_reads} > {worst}");
+        // Never slot-coherent: every round over the full scope, beyond the minimum, within the
+        // worst case; the audit ends unqualified, never passes.
+        let reads = Cell::new(0u64);
+        let incoherent = fe::collect_scope(
+            &c,
+            |keys, _| {
+                reads.set(reads.get() + 1);
+                serve(keys, 100 + reads.get())
+            },
+            true,
+        );
+        assert!(incoherent.is_err());
+        println!(
+            "R4_BOOT_SCOPE keys=327 coherent_rounds={} coherent_reads={coherent_reads} incoherent_reads={} minimum={min} worst_case={worst} (scope reads, plus {CLUSTER_READS} cluster reads)",
+            scope.round,
+            reads.get()
+        );
+        assert!(
+            reads.get() > min && reads.get() <= worst,
+            "min {min} < {} <= worst {worst}",
+            reads.get()
+        );
+        // Only the minimum budget: blocked at the limit, exactly `limit` reads, no retry.
+        let attempts = Cell::new(0u64);
+        let blocked = fe::collect_scope(
+            &c,
+            |keys, _| {
+                if attempts.get() >= min {
+                    return Err("BOOT_RPC_BUDGET".to_string());
+                }
+                attempts.set(attempts.get() + 1);
+                serve(keys, 100 + attempts.get())
+            },
+            true,
+        );
+        assert_eq!(blocked.err().as_deref(), Some("BOOT_RPC_BUDGET"));
+        assert_eq!(attempts.get(), min);
+        // Default profile: the configured BOOT budget covers this worst case.
+        assert!(c.limits.boot_calls >= worst_case_reads(&c).unwrap());
     }
     /// X2: responses are decoded into native values at the wire edge; malformed ones fail there.
     #[test]

@@ -1,0 +1,46 @@
+# R4 dynamic BOOT scope vs read budget; tested tree: 47b00b1 + R4 diff (CARGO_BUILD_JOBS=2); offline closures/fixtures only, no network
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=1 --nocapture dynamic_boot_scope boot_read_budget_is_reported
+
+running 2 tests
+test orchestration::boot_audit::tests::boot_read_budget_is_reported_against_the_worst_case ... ok
+test orchestration::boot_network::tests::dynamic_boot_scope_is_bounded_and_blocks_at_the_budget ... R4_BOOT_SCOPE keys=327 coherent_rounds=3 coherent_reads=8 incoherent_reads=28 minimum=10 worst_case=34 (scope reads, plus 5 cluster reads)
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 357 filtered out; finished in 0.11s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 boot_ fe_qualification
+
+running 25 tests
+test orchestration::boot_audit::tests::boot_read_budget_is_reported_against_the_worst_case ... ok
+test orchestration::boot_audit::tests::run_volume_resolves_like_the_launcher ... ok
+test orchestration::boot_audit::tests::offline_audit_blocks_and_binds_identity ... ok
+test orchestration::boot_audit::tests::seal_screening_is_bounded_and_structural_only ... ok
+test orchestration::boot_network::tests::boot_state_uses_pinned_decoders_dynamic_pda_and_oracle_gates ... ok
+test orchestration::boot_network::tests::cluster_pin_and_slot_contradictions_block_without_followup_reads ... ok
+test orchestration::boot_audit::tests::writer_probe_passes_and_fails_closed ... ok
+test orchestration::boot_network::tests::dynamic_boot_scope_is_bounded_and_blocks_at_the_budget ... ok
+test orchestration::boot_network::tests::network_fixture_never_promotes_unpinned_deployment_or_unknown_oracle ... ok
+test orchestration::boot_network::tests::native_network_record_and_start_token_reject_expiry_drift_and_tampering ... ok
+test orchestration::boot_network::tests::network_reads_decode_at_the_wire_edge ... ok
+test orchestration::boot_network::tests::network_reads_refuses_budget_below_minimum ... ok
+test orchestration::boot_network::tests::spec_rejects_genesis_that_differs_from_the_pin ... ok
+test orchestration::fe_qualification::tests::changed_deployment_and_missing_accounts_fail_closed ... ok
+test orchestration::fe_qualification::tests::exact_bank_layout_rejects_compatibility_padding ... ok
+test orchestration::fe_qualification::tests::integration_accounts_of_target_banks_are_observed_in_the_same_scope ... ok
+test orchestration::fe_qualification::tests::invalid_scope_and_callback_context_fail_closed_before_qualification ... ok
+test orchestration::fe_qualification::tests::mixed_contexts_and_round_budget_do_not_invent_coherent_state ... ok
+test orchestration::fe_qualification::tests::provider_evidence_requires_fresh_free_capacity_for_every_fallback ... ok
+test orchestration::boot_network::tests::network_reads_counts_only_boot_budget ... ok
+test orchestration::fe_qualification::tests::required_scope_reads_match_the_collector ... ok
+test orchestration::fe_qualification::tests::provider_evidence_round_trips_as_typed_journal ... ok
+test orchestration::fe_qualification::tests::scope_expands_beyond_three_calls_using_pinned_dependencies ... ok
+test orchestration::fe_qualification::tests::wire_decoder_preserves_bytes_and_rejects_regressed_or_missing_context ... ok
+test orchestration::fe_qualification::tests::saved_full_observation_replays_identically_but_stays_historical_and_incomplete ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 334 filtered out; finished in 0.55s
+
+exit=0
+$ cargo clippy -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0

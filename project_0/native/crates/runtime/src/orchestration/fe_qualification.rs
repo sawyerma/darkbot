@@ -326,6 +326,27 @@ pub fn required_scope_reads(config: &RuntimeConfig) -> Result<u64, String> {
     let initial = FIXED_SCOPE_KEYS + config.fe_targets.len() as u64;
     Ok(2 + config.limits.fe_snapshot_rounds * initial.div_ceil(batch))
 }
+/// R4: scope keys one bank can add at most — the bank, its liquidity vault, its mint, at most four
+/// observation keys (`bank_observation_keys`, StakedWithPythPush) and at most three integration
+/// accounts (`health::dependency_keys`); overlaps only lower the count.
+pub const MAX_SCOPE_KEYS_PER_BANK: u64 = 10;
+/// R4: upper bound of the scope collector's reads. The scope closes after at most two expansions
+/// (targets ⇒ their banks ⇒ each bank's dependencies; nothing deeper is followed), so a round
+/// never reads more than `FIXED + T·(1 + MAX_LENDING_ACCOUNT_BALANCES · MAX_SCOPE_KEYS_PER_BANK)`
+/// keys while the targets' bank sets stay unchanged during the audit (keys are only added across
+/// rounds; a target that changes its banks mid-audit can exceed it and then runs into the hard
+/// limit). [`required_scope_reads`] is the minimum (initial scope only); a budget between both may
+/// run out on chain and then blocks the audit (fail-closed), never passes it.
+pub fn worst_case_scope_reads(config: &RuntimeConfig) -> Result<u64, String> {
+    let batch = config.limits.fe_batch_size;
+    if batch == 0 || config.fe_targets.is_empty() {
+        return Err("FE_SCOPE_OR_BATCH_BUDGET_INVALID".into());
+    }
+    let per_target = 1 + marginfi_type_crate::types::MAX_LENDING_ACCOUNT_BALANCES as u64
+        * MAX_SCOPE_KEYS_PER_BANK;
+    let max_keys = FIXED_SCOPE_KEYS + config.fe_targets.len() as u64 * per_target;
+    Ok(2 + config.limits.fe_snapshot_rounds * max_keys.div_ceil(batch))
+}
 /// The same canonical scope collector, reusable by boot without constructing JSON reports.
 pub fn collect_scope<F>(
     config: &RuntimeConfig,

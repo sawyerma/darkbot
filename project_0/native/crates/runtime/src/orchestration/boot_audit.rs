@@ -582,6 +582,37 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             format!("run volume unresolved: {e}"),
         ),
     }
+    // R4: the BOOT read budget against the minimum and the worst case of the configured scope
+    // (config arithmetic only; the network audit itself stays NOT_RUN here).
+    let c = darkbot_solana::runtime_config::active();
+    let calls = c.limits.boot_calls.min(c.limits.max_requests);
+    match (
+        super::boot_network::required_reads(c),
+        super::boot_network::worst_case_reads(c),
+    ) {
+        (Ok(min), Ok(worst)) => add(
+            "BOOT-02",
+            "boot_read_budget",
+            false,
+            if calls >= worst { Pass } else { Warn },
+            "runtime config",
+            if calls < min {
+                format!("boot_calls={calls} < minimum {min}: the network audit is refused (BOOT_BUDGET_TOO_SMALL)")
+            } else if calls < worst {
+                format!("boot_calls={calls} covers the minimum {min} but not the worst case {worst}: dynamic dependencies may block the network audit (fail-closed)")
+            } else {
+                format!("boot_calls={calls} >= worst case {worst} (minimum {min})")
+            },
+        ),
+        (Err(e), _) | (_, Err(e)) => add(
+            "BOOT-02",
+            "boot_read_budget",
+            false,
+            Unknown,
+            "runtime config",
+            e,
+        ),
+    }
     let wall = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -958,6 +989,31 @@ mod tests {
         assert_eq!(b.verdict, AuditVerdict::Blocked);
         std::fs::remove_dir_all(&d).unwrap();
         std::fs::remove_dir_all(&elsewhere).unwrap();
+    }
+
+    /// R4: the doctor reports the BOOT read budget against the minimum and the worst case of the
+    /// configured scope (non-critical; PASS only at or above the worst case).
+    #[test]
+    fn boot_read_budget_is_reported_against_the_worst_case() {
+        let d = temp(line!());
+        let a = offline(&inputs(&d)).unwrap();
+        let c = a
+            .checks
+            .iter()
+            .find(|c| c.name == "boot_read_budget")
+            .unwrap();
+        assert!(!c.critical);
+        let cfg = darkbot_solana::runtime_config::active();
+        let worst = super::super::boot_network::worst_case_reads(cfg).unwrap();
+        let calls = cfg.limits.boot_calls.min(cfg.limits.max_requests);
+        let expected = if calls >= worst {
+            CheckState::Pass
+        } else {
+            CheckState::Warn
+        };
+        assert_eq!(c.state, expected, "{}", c.reason);
+        assert!(c.reason.contains(&worst.to_string()), "{}", c.reason);
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     /// E4: the write probe creates, writes, syncs, seals, reads back and removes a journal on the
