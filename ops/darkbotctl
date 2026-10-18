@@ -89,8 +89,8 @@ cmd_deploy() {
   cp "$GATEWAY_BUILD" "$rel/darkbot-gateway"
   cp -R "$DIST_BUILD" "$rel/dist"
   git -C "$ROOT" rev-parse HEAD > "$rel/COMMIT" 2>/dev/null || echo unknown > "$rel/COMMIT"
-  ln -s "$rel" "$APP_HOME/.current-$"
-  mv -fh "$APP_HOME/.current-$" "$APP_HOME/current"
+  ln -s "$rel" "$APP_HOME/.current-$$"
+  mv -fh "$APP_HOME/.current-$$" "$APP_HOME/current"
   # Retain previous immutable releases; never delete a running binary.
   say "deployed $(cat "$rel/COMMIT")"
   if gateway_loaded; then say "Gateway läuft noch mit altem Stand: darkbotctl restart-gateway"; fi
