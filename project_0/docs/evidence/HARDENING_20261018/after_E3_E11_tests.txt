@@ -1,0 +1,134 @@
+# E3/E11 regression; tested tree: 3847f28 + E3/E11 diff (CARGO_BUILD_JOBS=2); IDL source: marginfi 33c67987 idls/{kamino_lending,drift,juplend_earn}.json
+$ cargo test -p darkbot-project0 --features crate_health --lib -- --test-threads=2
+
+running 72 tests
+test census::tests::classes_follow_health_and_model_economics_and_errors_stay_visible ... ok
+test census::tests::census_totals_count_every_account_once_with_facts ... ok
+test census::tests::model_rejects_values_that_could_invent_profit ... ok
+test economics::tests::equal_net_prefers_capital_efficiency ... ok
+test economics::tests::exact_rpc_fee_qualifies_only_rpc_scenarios ... ok
+test economics::tests::funding_class_is_not_a_hardcoded_preference ... ok
+test economics::tests::invalid_fee_state_and_extreme_inputs_fail_closed_without_panic ... ok
+test economics::tests::premium_curve_matches_release_notes ... ok
+test economics::tests::seize_bound_from_source ... ok
+test economics::tests::ranking_by_net_then_capital_efficiency ... ok
+test economics::tests::t_profitable_solver ... ok
+test economics::tests::time_for_premium_inverts_curve ... ok
+test economics::tests::unknown_cost_is_not_zero ... ok
+test economics::tests::unknown_realizable_value_is_unknown ... ok
+test execution::tests::freshness_route_fee ... ok
+test execution::tests::gates ... ok
+test execution::tests::backoff_grows_and_drops ... ok
+test execution::tests::quarantine_expires ... ok
+test funding::tests::emits_all_feasible_candidates_instead_of_picking_one ... ok
+test funding::tests::inventory_classes_do_not_require_market_route ... ok
+test funding::tests::jit_is_only_shortfall_fallback ... ok
+test funding::tests::no_route_no_inventory_means_no_candidate ... ok
+test health::threshold_search_tests::first_true_boundary_expands_above_current ... ok
+test health::threshold_search_tests::first_true_boundary_finds_exact_integer_crossing ... ok
+test health::bank_layout_tests::resized_bank_fails_health_observation_closed ... ok
+test health::threshold_search_tests::first_true_boundary_propagates_fail_closed_error ... ok
+test index::tests::threshold_crossings_only_wake_newly_endangered_accounts ... ok
+test index::tests::reverse_index_fanout_and_replacement ... ok
+test index::tests::threshold_lookup_both_sides ... ok
+test integration::tests::pinned_refresh_discriminators_match_expected ... ok
+test integration::tests::refresh_builders_emit_the_pinned_idl_instructions ... ok
+test planner::tests::bundle_rules ... ok
+test planner::tests::end_must_be_last_without_exception ... ok
+test planner::tests::no_swap_plan_rejects_swap_and_requires_repay ... ok
+test planner::tests::non_allowlisted_swap_and_paid_route ... ok
+test planner::tests::valid_swap_plan ... ok
+test prepared::tests::exact_key_or_rebuild ... ok
+test projection::tests::delayed_evaluation_uses_exact_simulation_clock_for_both_venues ... ok
+test projection::tests::empty_and_zero_slot_projection_fail_closed ... ok
+test projection::tests::negative_simulation_timestamp_fails_closed ... ok
+test projection::tests::non_projected_account_falls_through_to_base ... ok
+test projection::tests::projected_account_overrides_base_without_mutating_it ... ok
+test integration::tests::marginfi_layouts_are_exact_on_every_decoder_path ... ok
+test projection::tests::writable_refresh_accounts_are_canonical_projection_targets ... ok
+test protocol::tests::classify_and_layouts ... ok
+test protocol::tests::dual_size_bank_decoder_fails_closed ... ok
+test protocol::tests::pdas_are_deterministic ... ok
+test protocol::tests::pinned_decoders_are_alignment_independent ... ok
+test protocol::tests::deployment_freeze_decodes_and_fails_closed ... ok
+test receivership::builders::repay_all_tests::classic_withdraw_does_not_append_mint ... ok
+test protocol::tests::source_pin_parity_with_type_crate ... ok
+test receivership::builders::repay_all_tests::partial_repay_does_not_append_health_observation ... ok
+test receivership::builders::repay_all_tests::repay_all_carries_observation_accounts ... ok
+test receivership::builders::repay_all_tests::token_2022_repay_includes_mint_before_repay_all_observation ... ok
+test safety::tests::limits_and_halts ... ok
+test receivership::builders::repay_all_tests::token_2022_withdraw_includes_mint_before_observation ... ok
+test safety::tests::live_disabled_and_day_roll ... ok
+test safety::tests::preview_does_not_reserve_capital ... ok
+test safety::tests::unknown_outcome_keeps_hold_until_complete_reconciliation ... ok
+test schedule::tests::premium_boundary_math ... ok
+test schedule::tests::scheduler_orders_and_invalidates ... ok
+test sizing::tests::closeout_threshold_matches_protocol_units ... ok
+test sizing::tests::drift_sizing_roundtrip_uses_scaled_balance_decimals ... ok
+test sizing::tests::headroom_is_below_boundary ... ok
+test sizing::tests::integer_conversions_are_conservative ... ok
+test sizing::tests::near_full_rounding_uses_source_backed_repay_all ... ok
+test sizing::tests::normal_and_closeout_bounds_are_distinct ... ok
+test sizing::tests::ordinary_partial_repay_semantics_are_unchanged ... ok
+test sizing::tests::r121_pair_heals_below_maximum_premium ... ok
+test sizing::tests::repay_all_matches_protocol_opposite_dust_boundary ... ok
+test sizing::tests::repay_all_never_clamps_a_target_above_full_transfer ... ok
+test sizing::tests::rounded_health_keeps_normal_boundary_and_closeout_exception ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 execution::
+
+running 47 tests
+test execution::builder::p0::fix100_tests::liquidation_record_link_controls_init ... ok
+test execution::builder::p0::fix100_tests::missing_floor_production_path_is_unknown_and_never_actionable ... ok
+test execution::builder::p0::fix100_tests::non_budget_errors_are_not_retried ... ok
+test execution::builder::p0::fix100_tests::p1c_quote_profitable_floor_unprofitable_is_not_actionable ... ok
+test execution::builder::p0::fix100_tests::p1c_zero_prefund_feasibility_uses_floor_not_quote ... ok
+test execution::builder::p0::fix100_tests::impossible_route_exhausts_bounded_budget_and_fails_closed ... ok
+test execution::builder::p0::fix100_tests::p5_unreadable_fee_state_blocks_instead_of_default_receiver ... ok
+test execution::builder::p0::fix100_tests::repay_all_removes_closed_bank_only_from_end_layout ... ok
+test execution::builder::p0::fix100_tests::route_requotes_until_actual_serialized_transaction_fits ... ok
+test execution::builder::p0::fix100_tests::route_budget_counts_payer_and_resource_accounts_too ... ok
+test execution::lookup_tables::tests::extension_slot_only_exposes_old_prefix ... ok
+test execution::lookup_tables::tests::invalid_and_deactivating_tables_are_excluded ... ok
+test execution::lookup_tables::tests::tables_reduce_compiled_size_and_merge_preserves_canonical_indices ... ok
+test execution::one_shot::receipts::tests::account_creation_close_and_loaded_keys_require_balance_evidence ... ok
+test execution::one_shot::receipts::tests::finalized_rpc_request_uses_shared_transport_with_no_submission ... ok
+test execution::one_shot::receipts::tests::finalized_success_and_revert_preserve_actual_fees_and_integer_deltas ... ok
+test execution::one_shot::receipts::tests::incomplete_token_metadata_preserves_fee_but_never_invents_zero ... ok
+test execution::one_shot::receipts::tests::missing_fee_or_metadata_signature_wallet_slot_and_key_mismatch_are_not_receipts ... ok
+test execution::one_shot::receipts::tests::multiple_wallet_accounts_aggregate_by_mint_without_other_owners ... ok
+test execution::one_shot::receipts::tests::finalized_partial_bundle_and_missing_tokens_persist_without_releasing_holds ... ok
+test execution::one_shot::sync_failure_tests::reservation_or_handoff_sync_failure_blocks_send_and_recovers_unknown ... ok
+test execution::one_shot::tests::all_finalized_members_fees_deltas_and_exit_required_even_on_revert ... ok
+test execution::one_shot::tests::bundle_partial_landing_does_not_release_single_flight_hold ... ok
+test execution::one_shot::tests::changed_signed_payload_order_path_and_signature_cannot_reach_adapter ... ok
+test execution::one_shot::tests::crash_before_and_after_handoff_retains_hold_and_cannot_rearm ... ok
+test execution::one_shot::tests::double_trigger_signed_bytes_and_all_budget_guards ... ok
+test execution::one_shot::tests::dropped_journal_releases_wallet_while_lock_descriptor_is_shared ... ok
+test execution::one_shot::tests::damaged_truncated_foreign_or_illegal_binary_journal_is_a_halt ... ok
+test execution::one_shot::tests::failed_open_releases_wallet_while_processes_are_spawned ... ok
+test execution::one_shot::tests::failed_unavailable_and_wrong_path_simulation_never_create_send_token ... ok
+test execution::one_shot::tests::journal_write_failure_blocks_send_and_keeps_the_hold ... ok
+test execution::one_shot::tests::legacy_journal_without_observations_reopens_with_hold ... ok
+test execution::one_shot::tests::next_owner_never_opens_a_journal_still_held_by_its_writer ... ok
+test execution::one_shot::tests::revalidate_stale_fork_upgrade_wallet_and_bundle_at_actual_boundary ... ok
+test execution::one_shot::tests::torn_or_corrupt_journal_is_a_halt_not_a_new_approval ... ok
+test execution::one_shot::tests::wallet_journal_with_zero_tail_is_a_halt ... ok
+test execution::pending::tests::absence_and_missing_metadata_never_invent_fee ... ok
+test execution::pending::tests::landed_success_and_revert_use_meta_fee ... ok
+test execution::one_shot::tests::exact_adapter_bytes_ack_timeout_and_rejection_never_rearm ... ok
+test execution::pending::tests::tip_requires_our_matching_landed_transfer_and_partial_bundle_is_unknown ... ok
+test execution::pipeline::mt0_tests::local_fee_estimate_reproduces_fix129_observations ... ok
+test execution::pipeline::plan_error_tests::p5_fee_state_unavailable_is_unknown_not_a_routing_loss ... ok
+test execution::pending::tests::recorded_mainnet_success_and_revert_fees_are_preserved ... ok
+test execution::route::tests::p1c_parses_quote_and_executable_floor_separately ... ok
+test execution::route::tests::parses_instruction_and_alt_without_rpc ... ok
+test execution::route::tests::strips_only_exact_verified_prewarmed_ata_setup ... ok
+test execution::route::tests::jupiter_error_keeps_only_status_or_allowlisted_code ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 300 filtered out; finished in 0.61s
+
+exit=0

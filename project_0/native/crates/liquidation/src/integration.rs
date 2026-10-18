@@ -9,7 +9,6 @@ use crate::health::AccountSource;
 use crate::protocol;
 use anchor_lang::AccountDeserialize;
 use solana_sdk::{
-    hash::hash,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
 };
@@ -198,8 +197,11 @@ fn static_pk(s: &str) -> Result<Pubkey, String> {
     Pubkey::from_str(s).map_err(|e| e.to_string())
 }
 
-fn ix_discriminator(name: &str) -> Vec<u8> {
-    hash(format!("global:{name}").as_bytes()).to_bytes()[..8].to_vec()
+/// E3/E11: refresh instruction discriminators come from the pinned IDLs (marginfi source
+/// 33c67987, `idls/{kamino_lending,drift,juplend_earn}.json` through `declare_program!` in the
+/// pinned mock crates) — exact source bytes, never a literal guess and never hashed per call.
+fn pinned_discriminator<D: anchor_lang::Discriminator>() -> Vec<u8> {
+    D::DISCRIMINATOR.to_vec()
 }
 
 fn raw<'a, S: AccountSource + ?Sized>(
@@ -299,7 +301,8 @@ fn kamino_refreshes<S: AccountSource + ?Sized>(
         Instruction {
             program_id: kamino_program,
             accounts: reserve_accounts,
-            data: ix_discriminator("refresh_reserve"),
+            data: pinned_discriminator::<kamino_mocks::kamino_lending::client::args::RefreshReserve>(
+            ),
         },
         Instruction {
             program_id: kamino_program,
@@ -308,7 +311,9 @@ fn kamino_refreshes<S: AccountSource + ?Sized>(
                 AccountMeta::new(obligation, false),
                 AccountMeta::new(reserve_key, false),
             ],
-            data: ix_discriminator("refresh_obligation"),
+            data: pinned_discriminator::<
+                kamino_mocks::kamino_lending::client::args::RefreshObligation,
+            >(),
         },
     ])
 }
@@ -373,7 +378,9 @@ fn drift_refresh<S: AccountSource + ?Sized>(
             AccountMeta::new_readonly(oracle, false),
             AccountMeta::new_readonly(vault, false),
         ],
-        data: vec![39, 166, 139, 243, 158, 165, 155, 225],
+        data: pinned_discriminator::<
+            drift_mocks::drift::client::args::UpdateSpotMarketCumulativeInterest,
+        >(),
     }])
 }
 
@@ -409,7 +416,7 @@ fn juplend_refresh<S: AccountSource + ?Sized>(
             AccountMeta::new_readonly(reserves, false),
             AccountMeta::new_readonly(rewards_rate_model, false),
         ],
-        data: vec![24, 225, 53, 189, 72, 212, 225, 178],
+        data: pinned_discriminator::<juplend_mocks::juplend_earn::client::args::UpdateRate>(),
     }])
 }
 
@@ -754,18 +761,125 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
 mod tests {
     use super::*;
 
+    /// E3: byte-exact refresh discriminators. The expected bytes are the `discriminator` arrays
+    /// of the pinned IDLs (marginfi 33c67987 `idls/`, also `idls-complete/`); the builders take
+    /// them from the IDL-generated mock crates, and all four equal the Anchor rule
+    /// sha256("global:<name>")[..8], so a single changed byte fails here.
     #[test]
     fn pinned_refresh_discriminators_match_expected() {
+        use kamino_mocks::kamino_lending::client::args as kamino;
+        let anchor = |name: &str| {
+            solana_sdk::hash::hash(format!("global:{name}").as_bytes()).to_bytes()[..8].to_vec()
+        };
+        for (built, idl, name) in [
+            (
+                pinned_discriminator::<kamino::RefreshReserve>(),
+                [2, 218, 138, 235, 79, 201, 25, 102],
+                "refresh_reserve",
+            ),
+            (
+                pinned_discriminator::<kamino::RefreshObligation>(),
+                [33, 132, 147, 228, 151, 192, 72, 89],
+                "refresh_obligation",
+            ),
+            (
+                pinned_discriminator::<
+                    drift_mocks::drift::client::args::UpdateSpotMarketCumulativeInterest,
+                >(),
+                [39, 166, 139, 243, 158, 165, 155, 225],
+                "update_spot_market_cumulative_interest",
+            ),
+            (
+                pinned_discriminator::<juplend_mocks::juplend_earn::client::args::UpdateRate>(),
+                [24, 225, 53, 189, 72, 212, 225, 178],
+                "update_rate",
+            ),
+        ] {
+            assert_eq!(built, idl.to_vec(), "{name}");
+            assert_eq!(anchor(name), idl.to_vec(), "{name}");
+            let mut mutated = idl;
+            mutated[7] ^= 1;
+            assert_ne!(built, mutated.to_vec(), "{name}");
+        }
+    }
+
+    /// E3: the live refresh builders emit exactly the pinned IDL instruction: program, data and
+    /// the account order/writable flags of `update_spot_market_cumulative_interest`
+    /// (state, spot_market W, oracle, spot_market_vault) and `update_rate` (lending W, mint,
+    /// f_token_mint, supply_token_reserves_liquidity, rewards_rate_model).
+    #[test]
+    fn refresh_builders_emit_the_pinned_idl_instructions() {
+        use bytemuck::Zeroable;
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, Vec<u8>>);
+        impl AccountSource for Source {
+            fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0
+                    .get(key)
+                    .map(|d| (Pubkey::default(), 1, d.as_slice()))
+            }
+        }
+        fn raw<T: bytemuck::Pod>(disc: [u8; 8], v: &T) -> Vec<u8> {
+            [disc.as_slice(), bytemuck::bytes_of(v)].concat()
+        }
+        let (market_key, lending_key) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let state = Source(HashMap::from([
+            (
+                market_key,
+                raw(
+                    drift_mocks::state::SPOT_MARKET_DISCRIMINATOR,
+                    &drift_mocks::state::MinimalSpotMarket::zeroed(),
+                ),
+            ),
+            (
+                lending_key,
+                raw(
+                    juplend_mocks::state::LENDING_DISCRIMINATOR,
+                    &juplend_mocks::state::Lending::zeroed(),
+                ),
+            ),
+        ]));
+        let flags = |ix: &Instruction| -> Vec<(bool, bool)> {
+            ix.accounts
+                .iter()
+                .map(|m| (m.is_writable, m.is_signer))
+                .collect()
+        };
+        let mut bank = Bank::zeroed();
+        bank.integration_acc_1 = market_key;
+        let drift = drift_refresh(&state, &bank).unwrap();
+        assert_eq!(drift.len(), 1);
+        assert_eq!(drift[0].program_id.to_string(), protocol::DRIFT_PROGRAM_ID);
+        assert_eq!(drift[0].data, vec![39, 166, 139, 243, 158, 165, 155, 225]);
         assert_eq!(
-            ix_discriminator("refresh_reserve"),
-            vec![2, 218, 138, 235, 79, 201, 25, 102]
+            flags(&drift[0]),
+            vec![
+                (false, false),
+                (true, false),
+                (false, false),
+                (false, false)
+            ]
         );
+        assert_eq!(drift[0].accounts[1].pubkey, market_key);
+        bank.integration_acc_1 = lending_key;
+        let juplend = juplend_refresh(&state, &bank).unwrap();
+        assert_eq!(juplend.len(), 1);
         assert_eq!(
-            ix_discriminator("refresh_obligation"),
-            vec![33, 132, 147, 228, 151, 192, 72, 89]
+            juplend[0].program_id.to_string(),
+            protocol::JUPLEND_PROGRAM_ID
         );
-        assert_eq!(vec![39, 166, 139, 243, 158, 165, 155, 225].len(), 8);
-        assert_eq!(vec![24, 225, 53, 189, 72, 212, 225, 178].len(), 8);
+        assert_eq!(juplend[0].data, vec![24, 225, 53, 189, 72, 212, 225, 178]);
+        assert_eq!(
+            flags(&juplend[0]),
+            vec![
+                (true, false),
+                (false, false),
+                (false, false),
+                (false, false),
+                (false, false)
+            ]
+        );
+        assert_eq!(juplend[0].accounts[0].pubkey, lending_key);
     }
 
     /// B2/E1: every Marginfi decoder on the integration, health and sizing paths accepts only the
