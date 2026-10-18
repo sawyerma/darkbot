@@ -66,9 +66,19 @@ impl MarketSink for JsonlSink {
     fn coverage(&mut self, row: &MarketCoverage) -> std::io::Result<()> {
         self.inner.coverage(row)
     }
+    /// The verifier batch boundary: the batch is complete.
     fn flush(&mut self) -> std::io::Result<()> {
+        self.seal_and_export(true)
+    }
+    /// D1: `finalize` passes the capture completeness; never sealed COMPLETE on its own.
+    fn finish(&mut self, complete: bool) -> std::io::Result<Option<MarketJournalBinding>> {
+        self.seal_and_export(complete).map(|_| None)
+    }
+}
+impl JsonlSink {
+    fn seal_and_export(&mut self, complete: bool) -> std::io::Result<()> {
         if !self.exported {
-            self.inner.seal(true)?;
+            self.inner.seal(complete)?;
             let views: Vec<(Option<u16>, PathBuf)> = MARKET_VIEWS
                 .iter()
                 .map(|(kind, name)| (Some(*kind), self.inner.run_dir.join(name)))

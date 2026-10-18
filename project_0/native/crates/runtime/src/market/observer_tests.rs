@@ -1965,6 +1965,24 @@ fn ingress_is_joined_or_reported_not_quiescent() {
     drop(release);
 }
 
+/// D1 (review rest): the compatibility batch sink honours the completeness of `finish` too.
+#[test]
+fn jsonl_sink_finish_seals_incomplete_when_asked() {
+    use super::rows::MarketCoverage;
+    for complete in [false, true] {
+        let dir = journal_test_dir(if complete { "d1_jsonl_c" } else { "d1_jsonl_i" });
+        let mut sink = JsonlSink::create(&dir).unwrap();
+        sink.coverage(&MarketCoverage::ShadowWarmupFailed { error: "X".into() })
+            .unwrap();
+        sink.finish(complete).unwrap();
+        let mut reader =
+            crate::analytics::journal::Reader::open(&dir.join(MARKET_JOURNAL)).unwrap();
+        while reader.next_frame().unwrap().is_some() {}
+        assert_eq!((reader.sealed, reader.complete), (true, complete));
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 /// D4: logs admission never flushes per transaction, so a batch sink is not finished early and
 /// every row reaches the journal before the explicit batch end.
 #[test]
