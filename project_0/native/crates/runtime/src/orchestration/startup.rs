@@ -98,9 +98,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         return crate::market_observer::run_from_env().map_err(|e| e.into());
     }
     // X1: a start by `p0ctl run start` (or with a record) is bound to its approved network
-    // audit before any thread starts or anything is read from the network; a missing, expired,
-    // foreign or drifted record refuses the start. The owner binds the audited accounts to its
-    // own bootstrap state at the first Ready, before admission.
+    // audit before any owner thread starts or anything is read from the network; a missing,
+    // expired, foreign or drifted record refuses the start (econ4h: after its local manifest, so
+    // the refused run stays diagnosable). The owner binds the audited accounts to its own
+    // bootstrap state at the first Ready, before admission.
     let admission = super::boot_audit::admission_record(
         &|k| std::env::var(k).ok(),
         std::env::var_os("P0_CTL_LAUNCH_RUN_ID").is_some(),
@@ -118,14 +119,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| {
         eprintln!("BOOT admission refused: {e}");
-        Box::new(super::state_owner::OwnerTerminal(
-            super::boot_audit::admission_code(&e),
-        ))
-    })?;
+        super::boot_audit::admission_code(&e)
+    });
+    let refused = |code| Box::new(super::state_owner::OwnerTerminal(code));
     if mode == "econ4h" {
-        return run_econ4h(admission).map_err(|e| e.into());
+        let code = admission.as_ref().err().copied();
+        return run_econ4h(admission).map_err(|e| match code {
+            Some(code) => refused(code) as Box<dyn std::error::Error>,
+            None => e.into(),
+        });
     }
-    run_shadow(Clock::new(), None, admission)
+    run_shadow(Clock::new(), None, admission.map_err(refused)?)
 }
 
 /// The Shadow owner of an econ run has ended. An owner error (e.g. an `OwnerTerminal` such as
@@ -175,7 +179,9 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
     }
 }
 
-fn run_econ4h(admission: Option<super::boot_audit::NetworkAudit>) -> Result<(), String> {
+fn run_econ4h(
+    admission: Result<Option<super::boot_audit::NetworkAudit>, &'static str>,
+) -> Result<(), String> {
     darkbot_solana::provider::enable_measurement_budget();
     use crate::analytics::econ;
     use crate::market::observer as market_observer;
@@ -197,12 +203,52 @@ fn run_econ4h(admission: Option<super::boot_audit::NetworkAudit>) -> Result<(), 
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
     let paths = handle.cfg.paths();
     // Every exit after BOOTSTRAP seals the phase journal and renders its JSONL view.
-    let result = supervise(handle, analytics, market, clock, timeout, admission);
+    let result = match admission {
+        Ok(admission) => supervise(handle, analytics, market, clock, timeout, admission),
+        Err(code) => refuse_before_owners(handle, analytics, clock, code),
+    };
     let rendered = crate::analytics::measurement::finalize_phases(&paths, result.is_ok());
     if let Err(e) = &rendered {
         eprintln!("C0_E1_PHASE_JOURNAL_INCOMPLETE {e}");
     }
     result.and(rendered)
+}
+
+/// X1: a refused admission ends the econ run before either owner starts (no owner thread, no
+/// network contact): both owners count as failed, the run is aborted and the analytics worker
+/// ends in order, so the local run evidence records the refusal.
+fn refuse_before_owners(
+    handle: crate::analytics::econ::Handle,
+    analytics: std::thread::JoinHandle<Result<(), String>>,
+    clock: Clock,
+    code: &'static str,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    eprintln!("C0_E1_ADMISSION_REFUSED {code}: no owner started; live=false submission=false");
+    let shared = &handle.shared;
+    for flag in [
+        &shared.abort,
+        &shared.shadow_failed,
+        &shared.market_failed,
+        &shared.shadow_done,
+        &shared.market_done,
+        &shared.finish,
+    ] {
+        flag.store(true, Ordering::Release);
+    }
+    crate::analytics::measurement::journal(
+        &handle.cfg.paths(),
+        clock,
+        crate::analytics::measurement::Phase::OwnersFinished {
+            aborted: true,
+            shadow_failed: true,
+            market_failed: true,
+        },
+    )?;
+    analytics
+        .join()
+        .map_err(|_| "C0-E1 analytics panic".to_string())??;
+    Err(code.into())
 }
 
 fn supervise(

@@ -209,7 +209,9 @@ class Launchers(unittest.TestCase):
             for store,run_id,root,layout in (({'P0_RUN_STORE':'legacy'},'old_run','data/econ4h','v1'),({},'new_run','data/runs','v2')):
                 with self.subTest(layout=layout):
                     p=launch({**store,'P0_ECON_RUN_ID':run_id})
-                    self.assertEqual(p.returncode,2,p.stderr[-2000:])  # no network: the real binary fails closed at startup
+                    # X1: a launcher child without the approved network audit record is refused after its local
+                    # manifest, before either owner starts (no network contact).
+                    self.assertEqual(p.returncode,2,p.stderr[-2000:])
                     run=project/root/run_id
                     # JFI-03/PERSIST-04: the productive run wrote no JSON/JSONL. The pinned readers below (V2 detection
                     # via manifest.json included) read the views of the explicit offline export.
@@ -232,10 +234,10 @@ class Launchers(unittest.TestCase):
                     self.assertTrue(evaluations.is_file())
                     for name in ('shadow_evaluations','shadow_offsets'):self.assertFalse(s.artifact(run,name).exists(),name)
                     tool=REPO/'project_0/native/target/release/p0-journal'
-                    # No evaluation was lost (stream COMPLETE); the run failed (phases INCOMPLETE); the
-                    # market capture ended early (INCOMPLETE). Every journal verifies end to end.
-                    for journal,status in ((evaluations,'COMPLETE'),(s.artifact(run,'phases').with_suffix('.p0j'),'INCOMPLETE'),
-                                           (s.artifact(run,'market')/'market.p0j','INCOMPLETE')):
+                    # No evaluation was lost (stream COMPLETE); the run failed (phases INCOMPLETE); the market
+                    # capture never started (X1 refusal). Every journal verifies end to end.
+                    self.assertFalse((s.artifact(run,'market')/'market.p0j').exists())
+                    for journal,status in ((evaluations,'COMPLETE'),(s.artifact(run,'phases').with_suffix('.p0j'),'INCOMPLETE')):
                         p=subprocess.run([str(tool),'verify',str(journal)],capture_output=True,text=True,timeout=60)
                         self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['status'],status,journal)
                     # The capture writes no JSONL: views are MISSING until rendered explicitly, then they must be
@@ -248,7 +250,8 @@ class Launchers(unittest.TestCase):
                     self.assertTrue(all(v['status'] in ('CREATED','MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
                     p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
                     self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
-                    self.assertIn('C0_E1_WARMUP_FAILED',s.artifact(run,'runtime_log').read_text())
+                    log=s.artifact(run,'runtime_log').read_text()
+                    self.assertIn('C0_E1_ADMISSION_REFUSED BOOT_NETWORK_AUDIT_MISSING',log);self.assertNotIn('C0_E1_WARMUP_FAILED',log)
                     self.assertEqual(c.capture_identity(run)['capture_run_id'],run_id)
                     p=subprocess.run(['bash',str(project/'scripts/verify.sh'),'--run',run_id,'--offline','--mode','off'],
                                      env={**clean_env(),'P0_ENV_FILE':str(tmp/'absent.env')},capture_output=True,text=True,timeout=120,cwd=tmp)

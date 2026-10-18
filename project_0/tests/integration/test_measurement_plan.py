@@ -117,7 +117,9 @@ class MeasurementCli(unittest.TestCase):
                                    env={**env, 'P0_ECON_RUN_ID': run_id, 'P0_CTL_LAUNCH_RUN_ID': run_id}, capture_output=True, text=True, timeout=600)
                 self.assertNotIn('No such file or directory', p.stderr)
                 self.assertNotIn('Traceback', p.stderr)
-                self.assertEqual(p.returncode, 2, p.stderr[-2000:])  # no network: the real capture fails closed at startup
+                # X1: without the approved network audit record the launched runtime is refused after its local
+                # manifest, before either owner starts (no network contact).
+                self.assertEqual(p.returncode, 2, p.stderr[-2000:])
                 # Started as p0ctl's launcher child (P0_CTL_LAUNCH_RUN_ID); run start itself requires the
                 # network boot audit since e42162e, asserted above (BOOT_NETWORK_AUDIT_REQUIRED).
                 self.assertIn(f'Capture: {seconds}s', p.stdout)
@@ -137,7 +139,9 @@ class MeasurementCli(unittest.TestCase):
                 self.assertEqual((manifest['live_enabled'], manifest['submission_enabled']), (False, False))
                 self.assertEqual(plan['duration_seconds'], seconds)
                 self.assertEqual(json.loads((run / 'storage_preflight.json').read_text())['duration_seconds'], seconds)
-                self.assertIn('C0_E1_WARMUP_FAILED', (run / 'runtime.log').read_text())
+                log = (run / 'runtime.log').read_text()
+                self.assertIn('C0_E1_ADMISSION_REFUSED BOOT_NETWORK_AUDIT_MISSING', log)
+                self.assertNotIn('C0_E1_WARMUP_FAILED', log)
                 self.assertFalse((run / 'quick_timebox_report.json').exists())
             rejected = subprocess.run([str(SCRIPTS / 'test.sh'), '--duration', '10m', *approved], cwd=tmp,
                                       env={**env, 'P0_ECON_RUN_MODE': 'quick', 'P0_ECON_RUN_ID': 'quick'}, capture_output=True, timeout=60)
