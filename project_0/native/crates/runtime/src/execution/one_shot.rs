@@ -975,6 +975,27 @@ mod tests {
         );
         fs::remove_dir_all(dir).unwrap();
     }
+    /// N3: the financial journal never treats a zero-filled tail as a torn capture: HALT, and
+    /// the file is neither truncated nor repaired.
+    #[test]
+    fn wallet_journal_with_zero_tail_is_a_halt() {
+        let (dir, a, i, c) = setup();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        let file = path_of(&j);
+        drop(j);
+        let good = fs::read(&file).unwrap();
+        for zeros in [4usize, 64, 70_000] {
+            fs::write(&file, [good.clone(), vec![0; zeros]].concat()).unwrap();
+            assert_eq!(
+                Journal::open(&dir, &a.wallet).err().as_deref(),
+                Some("JOURNAL_CORRUPT"),
+                "{zeros}"
+            );
+            assert_eq!(fs::read(&file).unwrap().len(), good.len() + zeros);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn damaged_truncated_foreign_or_illegal_binary_journal_is_a_halt() {
         let (dir, a, i, c) = setup();

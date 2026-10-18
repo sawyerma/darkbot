@@ -497,6 +497,35 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
+    /// N3: a zero-filled tail (power loss on ext4/XFS) of the crashed last segment is INCOMPLETE;
+    /// zeros after the manifest of a sealed, linked intermediate segment fail closed.
+    #[test]
+    fn zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate() {
+        use std::io::Write;
+        let zeros = |p: &Path| {
+            let mut f = std::fs::OpenOptions::new().append(true).open(p).unwrap();
+            f.write_all(&[0; 4096]).unwrap();
+        };
+        let d = dir("zero_tail");
+        let r = rows(40);
+        let crashed = d.join("c/market.p0j");
+        std::fs::create_dir_all(crashed.parent().unwrap()).unwrap();
+        let n = write(&crashed, 4096, &r, false);
+        assert!(n >= 3, "{n} segments");
+        zeros(&segment_path(&crashed, n));
+        let s = verify_chain(&crashed).unwrap();
+        assert_eq!(
+            (s.segments, s.events, s.sealed, s.complete),
+            (n, 40, false, false)
+        );
+        let sealed = d.join("s/market.p0j");
+        std::fs::create_dir_all(sealed.parent().unwrap()).unwrap();
+        write(&sealed, 4096, &r, true);
+        zeros(&segment_path(&sealed, 1));
+        assert!(verify_chain(&sealed).unwrap_err().starts_with("segment 1"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
     /// Crash in the last segment is INCOMPLETE; a missing, corrupt or swapped intermediate
     /// segment and an orphan beyond the chain end fail closed with their reason.
     #[test]
@@ -560,8 +589,14 @@ mod torn_tail_tests {
     use super::*;
     use crate::market::observer::rows::MarketCoverage;
     fn temp() -> PathBuf {
+        // `Pubkey::new_unique` restarts in every process: bind the name to this process and time
+        // so that directories left by an aborted run never collide.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
         let d = std::env::temp_dir().join(format!(
-            "p0_torn_{}",
+            "p0_torn_{}_{nanos}_{}",
+            std::process::id(),
             solana_sdk::pubkey::Pubkey::new_unique()
         ));
         std::fs::create_dir(&d).unwrap();
@@ -608,6 +643,89 @@ mod torn_tail_tests {
         corrupt[prefix as usize + 10] ^= 1;
         std::fs::write(&p, corrupt).unwrap();
         assert!(verify_chain(&p).unwrap_err().contains("FRAME_CRC"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+    /// Two frames, synced, unsealed: `(path, journal bytes, offset of the second frame)`.
+    fn two_frames(d: &Path) -> (PathBuf, Vec<u8>, usize) {
+        let p = d.join("market.p0j");
+        let mut w = Writer::create(&p).unwrap();
+        for slot in [1, 2] {
+            if slot == 2 {
+                let prefix = w.position() as usize;
+                w.append_typed(
+                    Provenance::default(),
+                    &MarketCoverage::SlotFailed {
+                        slot,
+                        error: "y".into(),
+                    },
+                )
+                .unwrap();
+                w.sync().unwrap();
+                drop(w);
+                return (p.clone(), std::fs::read(&p).unwrap(), prefix);
+            }
+            w.append_typed(
+                Provenance::default(),
+                &MarketCoverage::SlotFailed {
+                    slot,
+                    error: "x".into(),
+                },
+            )
+            .unwrap();
+        }
+        unreachable!()
+    }
+    /// N3: after power loss the file may be extended with zeros instead of truncated. Only a
+    /// tail of zeros up to EOF at a frame boundary of an unsealed capture is INCOMPLETE; the
+    /// strict readers (wallet journal, `Writer::resume`) refuse it and no byte is changed.
+    #[test]
+    fn capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse() {
+        let d = temp();
+        let (p, full, _) = two_frames(&d);
+        for zeros in [1usize, 3, 4, 5, 4096, 70_000] {
+            std::fs::write(&p, [full.clone(), vec![0; zeros]].concat()).unwrap();
+            let before = std::fs::read(&p).unwrap();
+            let s = verify_chain(&p).unwrap_or_else(|e| panic!("{zeros} zeros: {e}"));
+            assert_eq!(
+                (s.events, s.sealed, s.complete),
+                (2, false, false),
+                "{zeros}"
+            );
+            let mut strict = journal::Reader::open(&p).unwrap();
+            assert!(strict.next_frame().unwrap().is_some());
+            assert!(strict.next_frame().unwrap().is_some());
+            assert!(strict.next_frame().is_err(), "{zeros} zeros");
+            assert!(Writer::resume(&p).is_err());
+            assert_eq!(before, std::fs::read(&p).unwrap());
+        }
+        // A foreign byte after the zeros is not a torn tail.
+        std::fs::write(&p, [full.clone(), vec![0; 4096], vec![1]].concat()).unwrap();
+        assert!(verify_chain(&p).unwrap_err().contains("FRAME_LENGTH"));
+        // Zeros after the manifest of a sealed journal stay an error, not INCOMPLETE.
+        std::fs::write(&p, &full).unwrap();
+        Writer::resume(&p).unwrap().seal(true).unwrap();
+        let sealed = std::fs::read(&p).unwrap();
+        std::fs::write(&p, [sealed, vec![0; 4096]].concat()).unwrap();
+        assert!(verify_chain(&p).is_err());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn zero_bytes_inside_the_stream_stay_hard_errors() {
+        let d = temp();
+        let (p, full, prefix) = two_frames(&d);
+        // 16 bytes inside the second frame's SHA-256 trailer (not already zero).
+        let region = full.len() - 26..full.len() - 10;
+        assert!(full[region.clone()].iter().any(|b| *b != 0));
+        let mut inside = full.clone();
+        inside[region].fill(0);
+        std::fs::write(&p, &inside).unwrap();
+        let e = verify_chain(&p).unwrap_err();
+        assert!(e.contains("FRAME_CRC") || e.contains("FRAME_SHA256"), "{e}");
+        // A zeroed length in front of a written frame body is no zero-filled tail.
+        let mut length = full.clone();
+        length[prefix..prefix + 4].fill(0);
+        std::fs::write(&p, &length).unwrap();
+        assert!(verify_chain(&p).unwrap_err().contains("FRAME_LENGTH"));
         std::fs::remove_dir_all(d).unwrap();
     }
     #[test]

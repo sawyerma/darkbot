@@ -1,0 +1,64 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.42s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 56 tests
+test analytics::econ::canonical::regression::journal_replay_preserves_earliest_signed_record_and_hourly_final_reconcile ... ok
+test analytics::econ::tests::semantic_overflow_and_corrupt_journal_fail_closed ... ok
+test analytics::evidence::tests::owner_diagnostics_are_journaled_before_they_are_printed ... ok
+test analytics::journal::tests::explicit_export_matches_legacy_jsonl_and_never_overwrites ... ok
+test analytics::journal::tests::export_of_a_damaged_journal_leaves_no_partial_file ... ok
+test analytics::journal::tests::fsync_error_never_returns_durable_ack_and_poisoning_is_sticky ... ok
+test analytics::journal::tests::header_identities_are_fresh_per_writer_and_shared_per_run_and_boot ... ok
+test analytics::journal::tests::historical_schema_one_frames_of_migrated_kinds_stay_readable ... ok
+test analytics::journal::tests::lossless_integer_decimal_and_nested_value_roundtrip ... ok
+test analytics::journal::tests::malformed_length_payload_tags_and_depth_are_rejected ... ok
+test analytics::journal::tests::multi_view_export_is_all_or_nothing_and_never_overwrites ... ok
+test analytics::journal::tests::ordered_frames_preserve_provenance_manifest_and_durable_boundary ... ok
+test analytics::journal::tests::persist05_local_writer_benchmark ... ignored
+test analytics::journal::tests::restart_never_truncates_or_accepts_partial_tail ... ok
+test analytics::journal::tests::typed_frames_fail_closed_on_unknown_kind_version_or_truncation ... ok
+test analytics::journal::tests::unsupported_version_corruption_checksum_and_every_truncation_fail_closed ... ok
+test analytics::journal::tests::write_admission_forbids_legacy_rollback_and_unregistered_kinds ... ok
+test analytics::measurement::persistence_tests::manifest_is_exclusive_and_phase_journal_preserves_exact_window ... ok
+test analytics::measurement::tests::typed_plan_journal_is_the_runtime_input ... ok
+test analytics::mt0_journal::tests::existing_journal_is_never_overwritten ... ok
+test analytics::mt0_journal::tests::lost_snapshot_seals_incomplete_and_is_reported ... ok
+test analytics::mt0_journal::tests::reporter_writes_final_snapshot_and_seals_complete ... ok
+test execution::one_shot::receipts::tests::account_creation_close_and_loaded_keys_require_balance_evidence ... ok
+test execution::one_shot::receipts::tests::finalized_partial_bundle_and_missing_tokens_persist_without_releasing_holds ... ok
+test execution::one_shot::receipts::tests::finalized_rpc_request_uses_shared_transport_with_no_submission ... ok
+test execution::one_shot::receipts::tests::finalized_success_and_revert_preserve_actual_fees_and_integer_deltas ... ok
+test execution::one_shot::receipts::tests::incomplete_token_metadata_preserves_fee_but_never_invents_zero ... ok
+test execution::one_shot::receipts::tests::missing_fee_or_metadata_signature_wallet_slot_and_key_mismatch_are_not_receipts ... ok
+test execution::one_shot::receipts::tests::multiple_wallet_accounts_aggregate_by_mint_without_other_owners ... ok
+test execution::one_shot::sync_failure_tests::reservation_or_handoff_sync_failure_blocks_send_and_recovers_unknown ... ok
+test execution::one_shot::tests::all_finalized_members_fees_deltas_and_exit_required_even_on_revert ... ok
+test execution::one_shot::tests::bundle_partial_landing_does_not_release_single_flight_hold ... ok
+test execution::one_shot::tests::changed_signed_payload_order_path_and_signature_cannot_reach_adapter ... ok
+test execution::one_shot::tests::crash_before_and_after_handoff_retains_hold_and_cannot_rearm ... ok
+test execution::one_shot::tests::damaged_truncated_foreign_or_illegal_binary_journal_is_a_halt ... ok
+test execution::one_shot::tests::double_trigger_signed_bytes_and_all_budget_guards ... ok
+test execution::one_shot::tests::dropped_journal_releases_wallet_while_lock_descriptor_is_shared ... ok
+test execution::one_shot::tests::exact_adapter_bytes_ack_timeout_and_rejection_never_rearm ... ok
+test execution::one_shot::tests::failed_open_releases_wallet_while_processes_are_spawned ... ok
+test execution::one_shot::tests::failed_unavailable_and_wrong_path_simulation_never_create_send_token ... ok
+test execution::one_shot::tests::journal_write_failure_blocks_send_and_keeps_the_hold ... ok
+test execution::one_shot::tests::legacy_journal_without_observations_reopens_with_hold ... ok
+test execution::one_shot::tests::revalidate_stale_fork_upgrade_wallet_and_bundle_at_actual_boundary ... ok
+test execution::one_shot::tests::torn_or_corrupt_journal_is_a_halt_not_a_new_approval ... ok
+test execution::one_shot::tests::wallet_journal_with_zero_tail_is_a_halt ... ok
+test market::observer::tests::journal_sink_finalize_binds_the_journal_and_early_exit_seals_incomplete ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test storage::segments::tests::crash_missing_corrupt_and_orphan_segments_fail_closed ... ok
+test storage::segments::tests::segmented_replay_equals_single_journal ... ok
+test storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate ... ok
+test storage::segments::torn_tail_tests::capture_torn_tail_is_incomplete_but_wallet_and_resume_stay_strict ... ok
+test storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse ... ok
+test storage::segments::torn_tail_tests::interrupted_rotate_missing_final_successor_is_incomplete_and_orphan_holes_fail ... ok
+test storage::segments::torn_tail_tests::zero_bytes_inside_the_stream_stay_hard_errors ... ok
+test storage::writer::tests::lane_rotates_segments_and_chain_replays_every_frame ... ok
+test analytics::econ::tests::legacy_views_are_checked_and_missing_ones_rendered_from_the_journals ... ok
+
+test result: ok. 55 passed; 0 failed; 1 ignored; 0 measured; 263 filtered out; finished in 4.75s
+

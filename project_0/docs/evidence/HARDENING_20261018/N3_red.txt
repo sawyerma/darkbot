@@ -1,0 +1,31 @@
+   Compiling darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.71s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_runner-dd12e19c670d97b3)
+
+running 4 tests
+test execution::one_shot::tests::wallet_journal_with_zero_tail_is_a_halt ... ok
+test storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse ... FAILED
+test storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate ... FAILED
+test storage::segments::torn_tail_tests::zero_bytes_inside_the_stream_stay_hard_errors ... ok
+
+failures:
+
+---- storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse stdout ----
+
+thread 'storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse' (30119685) panicked at crates/runtime/src/storage/segments.rs:688:57:
+4 zeros: segment 1: FRAME_LENGTH
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate stdout ----
+
+thread 'storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate' (30119683) panicked at crates/runtime/src/storage/segments.rs:516:40:
+called `Result::unwrap()` on an `Err` value: "segment 4: FRAME_LENGTH"
+
+
+failures:
+    storage::segments::tests::zero_filled_tail_of_the_last_segment_is_incomplete_but_not_of_an_intermediate
+    storage::segments::torn_tail_tests::capture_zero_filled_tail_is_incomplete_but_strict_readers_refuse
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 315 filtered out; finished in 0.13s
+
+error: test failed, to rerun pass `-p darkbot-runner --lib`

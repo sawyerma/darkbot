@@ -850,6 +850,25 @@ impl Reader {
         Ok(Some(f))
     }
 }
+/// N3: after power loss ext4/XFS may extend a file with zeros instead of truncating it. A zero
+/// frame length is a torn tail (`UnexpectedEof`, which only an unsealed capture tolerates) only
+/// if every byte up to EOF is zero, checked in bounded 64 KiB blocks; any other byte keeps the
+/// hard `FRAME_LENGTH` error. Strict readers propagate either error.
+fn zero_filled_tail(file: &mut File) -> io::Result<Option<(Frame, [u8; 32])>> {
+    let mut block = vec![0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut block)?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "TAIL_ZERO_FILLED",
+            ));
+        }
+        if block[..n].iter().any(|b| *b != 0) {
+            return Err(bad("FRAME_LENGTH"));
+        }
+    }
+}
 fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32])>> {
     let mut length = [0; 4];
     match file.read(&mut length[..1])? {
@@ -862,6 +881,9 @@ fn read_frame(file: &mut File, offset: u64) -> io::Result<Option<(Frame, [u8; 32
             }
         })?,
     };
+    if length == [0; 4] {
+        return zero_filled_tail(file);
+    }
     let length = u32::from_le_bytes(length) as usize;
     if !(FIXED + 36..=MAX_FRAME).contains(&length) {
         return Err(bad("FRAME_LENGTH"));
