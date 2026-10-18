@@ -33,3 +33,21 @@ fn generation_advances_and_rejects_corruption() {
     assert!(generation::next(&path).is_err());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn env_config_defaults_off_and_validates_enabled() {
+    use darkbot_p0_reporter::config_from_env;
+    use std::time::Duration;
+    assert!(config_from_env("r", &|_| None).unwrap().is_none());
+    let missing_generation = |key: &str| (key == "P0_REPORT_SOCKET").then(|| "/tmp/p0.sock".to_string());
+    assert!(config_from_env("r", &missing_generation).is_err());
+    let ok = |key: &str| match key {
+        "P0_REPORT_SOCKET" => Some("/tmp/p0.sock".to_owned()),
+        "P0_REPORT_GENERATION_FILE" => Some("/tmp/p0.gen".to_owned()),
+        "P0_REPORT_HEARTBEAT_MS" => Some("1500".to_owned()),
+        _ => None,
+    };
+    let cfg = config_from_env("r", &ok).unwrap().unwrap();
+    assert_eq!(cfg.heartbeat, Duration::from_millis(1500));
+    assert_eq!(cfg.run_id, "r");
+}

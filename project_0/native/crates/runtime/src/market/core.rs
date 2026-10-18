@@ -232,6 +232,7 @@ pub struct ReceiverRank {
 
 pub struct ObserverCore {
     pub(super) econ: Option<crate::analytics::econ::Handle>,
+    pub status_tap: Option<crate::status_tap::StatusTap>,
     pub(super) program: Pubkey,
     pub(super) source: MarketSource,
     pub(super) enrich_cfg: EnrichConfig,
@@ -310,6 +311,7 @@ impl ObserverCore {
     pub fn new(program: Pubkey, source: MarketSource, enrich_cfg: EnrichConfig) -> Self {
         Self {
             econ: None,
+            status_tap: None,
             program,
             source,
             enrich_cfg,
@@ -352,6 +354,22 @@ impl ObserverCore {
 
     pub fn is_observing(&self) -> bool {
         self.observing
+    }
+
+    fn publish_status(&self) {
+        let Some(tap) = &self.status_tap else { return };
+        let ready = self.window.is_some();
+        tap.publish_market(crate::status_tap::MarketSnapshot {
+            observing: self.observing,
+            stream_ready: ready,
+            gap_count: self.stats.gap_count,
+            reconnect_count: self.stats.reconnect_count,
+            liquidation_events: self.stats.liquidation_events,
+            last_observed_slot: self.stats.last_observed_slot,
+            live_verdict: market_verdict(
+                ready, self.coverage_complete() && self.decode_complete(), false,
+            ),
+        });
     }
 
     pub fn has_deferred(&self) -> bool {
@@ -511,6 +529,7 @@ impl ObserverCore {
                 _ => {}
             }
         }
+        self.publish_status();
         sink.coverage(&MarketCoverage::Window {
             observed_unix_s: now_unix_s,
             t_rx_ns,
@@ -531,6 +550,7 @@ impl ObserverCore {
             self.stats.max_stream_silence_ms = self.stats.max_stream_silence_ms.max(gap_ms);
         }
         self.last_slot_frame_ns = Some(t_rx_ns);
+        self.publish_status();
     }
 
     /// Dedupe + window + counters. `false` = not part of the measurement.
@@ -725,17 +745,24 @@ impl ObserverCore {
         let before = self.econ.as_ref().map(|_| self.stats.clone());
         let at = ev.t_rx_ns();
         let result = match ev {
-            IngressEvent::Health(h) => self.coverage(
-                sink,
-                now_unix_s,
-                Some(h.t_rx_ns),
-                WindowEvent::TransportHealth {
-                    connected: h.connected,
-                    last_application_frame_age_ns: h.last_frame_age_ns,
-                    application_frames: h.frames,
-                    last_slot: h.last_slot,
-                },
-            ),
+            IngressEvent::Health(h) => {
+                if let Some(tap) = &self.status_tap {
+                    tap.publish_transport(crate::status_tap::TransportSnapshot {
+                        connected: h.connected,
+                        last_frame_age_ns: h.last_frame_age_ns,
+                        last_slot: h.last_slot,
+                    });
+                }
+                self.coverage(
+                    sink, now_unix_s, Some(h.t_rx_ns),
+                    WindowEvent::TransportHealth {
+                        connected: h.connected,
+                        last_application_frame_age_ns: h.last_frame_age_ns,
+                        application_frames: h.frames,
+                        last_slot: h.last_slot,
+                    },
+                )
+            },
             IngressEvent::Transport {
                 state,
                 code,

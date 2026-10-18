@@ -12,3 +12,7 @@ bytes = "1"
 [build-dependencies]
 prost-build = "0.13"
 protox = "0.7"
+
+[[bin]]
+name = "p0-market-capture-reported"
+path = "src/bin/p0_market_capture_reported.rs"

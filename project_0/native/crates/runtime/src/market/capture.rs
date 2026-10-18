@@ -1,6 +1,8 @@
 //! Read-only capture, drain and finalization lifecycle.
 use super::rows::{CaptureStart, MarketCoverage, WindowEvent};
 use super::*;
+use crate::status_tap::StatusTap;
+use std::path::Path;
 
 // ------------------------------------------------------------------------------------------
 // Production run
@@ -115,12 +117,19 @@ pub fn finish_capture(
 }
 
 pub fn run_from_env() -> Result<(), String> {
+    run_from_env_with(None, |_, _| Ok(()))
+}
+pub fn run_from_env_with(
+    status_tap: Option<StatusTap>,
+    before_start: impl FnOnce(&str, &Path) -> Result<(), String>,
+) -> Result<(), String> {
     let cfg = MarketConfig::from_lookup(&|k| std::env::var(k).ok(), unix_now_s())?;
-    run(cfg)
+    before_start(&cfg.run_id, &cfg.run_dir)?;
+    run_embedded_with(cfg, Clock::new(), None, status_tap)
 }
 
 pub fn run(cfg: MarketConfig) -> Result<(), String> {
-    run_embedded(cfg, Clock::new(), None)
+    run_embedded_with(cfg, Clock::new(), None, None)
 }
 
 /// Existing C0-MO capture/drain/enrichment with an optional typed evidence tap.
@@ -128,6 +137,14 @@ pub fn run_embedded(
     cfg: MarketConfig,
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
+) -> Result<(), String> {
+    run_embedded_with(cfg, clock, econ, None)
+}
+pub fn run_embedded_with(
+    cfg: MarketConfig,
+    clock: Clock,
+    econ: Option<crate::analytics::econ::Handle>,
+    status_tap: Option<StatusTap>,
 ) -> Result<(), String> {
     let process_started = unix_now_s();
     fs::create_dir_all(&cfg.run_dir)
@@ -207,6 +224,7 @@ pub fn run_embedded(
         Err(e) => core.deployment_error = Some(e),
     }
     core.econ = econ.clone();
+    core.status_tap = status_tap.clone();
     core.gap_cfg = cfg.gap;
     core.reconcile_cfg = cfg.reconcile;
     // Provisional all-path counts come from the existing program-attributed
@@ -359,6 +377,9 @@ pub fn run_embedded(
             );
             // SK-05: queue, rates, lag and exhaustion forecasts of the writer lane.
             if let Some(status) = sink.storage_status() {
+                if let Some(tap) = &status_tap {
+                    tap.publish_storage((&status).into());
+                }
                 eprintln!("{}", status.terminal());
             }
         }

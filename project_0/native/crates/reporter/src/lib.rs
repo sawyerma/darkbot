@@ -41,6 +41,7 @@ pub struct ReporterHandle {
     pub counters: Arc<Counters>,
 }
 impl ReporterHandle {
+    pub fn socket_path(&self) -> &std::path::Path { &self.socket_path }
     pub fn stop(mut self) { self.shutdown(); }
     fn shutdown(&mut self) {
         self.stop.store(true, Ordering::Release);
@@ -162,4 +163,25 @@ fn session(mut stream: UnixStream, cfg: &ReporterConfig, tap: &StatusTap, source
         }
     }
     Ok(())
+}
+
+pub fn config_from_env(
+    run_id: &str,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<ReporterConfig>, String> {
+    let Some(socket) = lookup("P0_REPORT_SOCKET").filter(|s| !s.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let generation_file = lookup("P0_REPORT_GENERATION_FILE")
+        .filter(|s| !s.trim().is_empty())
+        .ok_or("P0_REPORT_GENERATION_FILE required with P0_REPORT_SOCKET")?;
+    let ms = lookup("P0_REPORT_HEARTBEAT_MS")
+        .map(|v| v.trim().parse::<u64>().map_err(|e| format!("P0_REPORT_HEARTBEAT_MS: {e}")))
+        .transpose()?.unwrap_or(5000);
+    if !(500..=60_000).contains(&ms) {
+        return Err(format!("P0_REPORT_HEARTBEAT_MS out of range: {ms}"));
+    }
+    let mut config = ReporterConfig::new(socket.trim().into(), generation_file.trim().into(), run_id.to_owned());
+    config.heartbeat = Duration::from_millis(ms);
+    Ok(Some(config))
 }

@@ -129,7 +129,7 @@ mod fetch;
 use fetch::RpcFetcher;
 #[path = "capture.rs"]
 mod capture;
-pub use capture::{finish_capture, run, run_embedded, run_from_env, CaptureOutcome};
+pub use capture::{finish_capture, run, run_embedded, run_embedded_with, run_from_env, run_from_env_with, CaptureOutcome};
 
 #[cfg(test)]
 #[path = "observer_tests.rs"]
