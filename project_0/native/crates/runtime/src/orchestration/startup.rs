@@ -103,6 +103,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     run_shadow(Clock::new(), None)
 }
 
+/// The Shadow owner of an econ run has ended. An owner error (e.g. an `OwnerTerminal` such as
+/// STATE_RECOVERY_EXHAUSTED) or an end before admission closed marks the run failed and aborts
+/// it, so the market capture seals INCOMPLETE (C1/C7, D1 case "abort").
+pub(crate) fn record_shadow_end(
+    shared: &crate::analytics::econ::Shared,
+    failed: bool,
+    admission_closed: bool,
+) {
+    use std::sync::atomic::Ordering;
+    if failed || !admission_closed {
+        shared.shadow_failed.store(true, Ordering::Release);
+        shared.abort.store(true, Ordering::Release);
+    }
+    shared.shadow_done.store(true, Ordering::Release);
+}
+
 // Keep the first Shadow failure diagnosable without exposing provider URLs,
 // response payloads or wallet paths from library Display implementations.
 pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'static str {
@@ -182,17 +198,11 @@ fn supervise(
                 eprintln!("C0_E1_SHADOW_FAILED category={report}");
                 report
             });
-            if result.is_err() || !shadow_handle.admission_closed() {
-                shadow_handle
-                    .shared
-                    .shadow_failed
-                    .store(true, Ordering::Release);
-                shadow_handle.shared.abort.store(true, Ordering::Release);
-            }
-            shadow_handle
-                .shared
-                .shadow_done
-                .store(true, Ordering::Release);
+            record_shadow_end(
+                &shadow_handle.shared,
+                result.is_err(),
+                shadow_handle.admission_closed(),
+            );
             result
         })
         .map_err(|e| e.to_string())?;

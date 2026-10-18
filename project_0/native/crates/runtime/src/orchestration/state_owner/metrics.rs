@@ -1,4 +1,5 @@
 //! Existing counters, owned and updated by the same state-owner thread.
+#[derive(Default)]
 pub(super) struct OwnerMetrics {
     pub(super) oracle_dependency_updates: u64,
     pub(super) oracle_candidate_hits: u64,

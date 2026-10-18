@@ -258,3 +258,6 @@ use super::startup::shadow_failure_code;
 #[cfg(test)]
 #[path = "state_owner/tests.rs"]
 mod integration_probe_tests;
+#[cfg(all(test, feature = "crate_health"))]
+#[path = "state_owner/owner_e2e_tests.rs"]
+mod owner_e2e_tests;

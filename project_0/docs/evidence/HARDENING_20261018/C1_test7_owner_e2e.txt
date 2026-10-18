@@ -1,0 +1,113 @@
+# C1 test 7 owner end to end (offline: inert local parts, mock fetch, real RecoveryDriver, fake ingress queue); tested tree: 415f881 + diff (CARGO_BUILD_JOBS=2)
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=1 owner_e2e_tests::
+
+running 3 tests
+test orchestration::state_owner::owner_e2e_tests::owner_end_to_end_ends_terminally_and_never_fakes_ready ... [recovery] attempt=1/3 snapshot=A start
+[recovery] attempt=1/3 snapshot=A ok slot=10 accounts=1 missing_required=1
+[recovery] attempt=2/3 snapshot=A start
+[recovery] attempt=2/3 snapshot=A ok slot=10 accounts=1 missing_required=1
+[recovery] attempt=3/3 snapshot=A start
+[recovery] attempt=3/3 snapshot=A ok slot=10 accounts=1 missing_required=1
+recovery: Exhausted { attempts: 3 }, run_state=Halted(FeedGap)
+STATE_RECOVERY_EXHAUSTED: ending the run INCOMPLETE (no detection, no submission)
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+[recovery] attempt=1/3 snapshot=A start
+[recovery] attempt=1/3 snapshot=A ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 snapshot=B start
+[recovery] attempt=1/3 snapshot=B ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 reconcile=clean snapshot_slot=10
+recovery: Ready, run_state=Ready
+PROGRAM_UPGRADE HALT active program_data=111MqiH3tDg8KtkQYkCteems4APA9GgUsEFQavs8Vb — no automatic resume
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+recovery: Fatal { code: "WSS_RECOVERY_EXHAUSTED" }, run_state=Halted(FeedGap)
+WSS_RECOVERY_EXHAUSTED: ending the run INCOMPLETE (no detection, no submission)
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+ok
+test orchestration::state_owner::owner_e2e_tests::owner_end_to_end_recovers_only_with_a_valid_snapshot ... [recovery] attempt=1/3 snapshot=A start
+[recovery] attempt=1/3 snapshot=A ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 snapshot=B start
+[recovery] attempt=1/3 snapshot=B ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 reconcile=clean snapshot_slot=10
+recovery: Ready, run_state=Ready
+reverse_index_ready: banks=0 accounts=0 unsupported_bank_oracle_layouts=0 threshold_bootstrap=0 threshold_trigger=false
+r127_health_sweep_ready: reverse_accounts=0 startup_banks=0 threshold_trigger=false
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+ok
+test orchestration::state_owner::owner_e2e_tests::owner_error_aborts_the_econ_run ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 354 filtered out; finished in 4.10s
+
+exit=0
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 state_owner:: startup
+
+running 34 tests
+test orchestration::state_owner::census::tests::c0_census_worker_cost_at_historical_population ... ignored
+test orchestration::state_owner::census::tests::census_membership_counts_debtors_and_undecodable_members_only ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test orchestration::state_owner::census::tests::chain_clock_rejects_foreign_short_zero_and_future_clocks ... ok
+test orchestration::state_owner::integration_probe_tests::blockhash_freshness_is_one_policy ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test analytics::econ::tests::startup_barrier_never_starts_clock_on_timeout_or_failed_shadow ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test orchestration::state_owner::integration_probe_tests::evidence_failures_remain_explicit_static_categories ... ok
+test orchestration::state_owner::integration_probe_tests::failure_report_shows_classified_details_only ... ok
+test orchestration::state_owner::integration_probe_tests::ingress_end_and_evidence_drop_never_write_stderr_directly ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::no_duplicate_generation_or_old_session_readiness ... ok
+test orchestration::state_owner::integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test orchestration::state_owner::integration_probe_tests::owner_terminal_codes_are_reported_verbatim ... ok
+test orchestration::state_owner::integration_probe_tests::recovery_ready_rebuild_and_full_sweep_is_measured ... ignored
+test orchestration::state_owner::integration_probe_tests::ingress_session_stop_and_join_is_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::retired_generation_controls_are_classified_by_provenance ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+ingress ended: WSS_RECOVERY_EXHAUSTED
+test orchestration::state_owner::integration_probe_tests::requested_ingress_stop_never_aborts_the_measurement ... ok
+test orchestration::state_owner::integration_probe_tests::sweep_fanout_owner_block_is_measured ... ignored
+test orchestration::state_owner::integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+[recovery] attempt=1/3 snapshot=A start
+[recovery] attempt=1/3 snapshot=A ok slot=10 accounts=1 missing_required=1
+[recovery] attempt=2/3 snapshot=A start
+[recovery] attempt=2/3 snapshot=A ok slot=10 accounts=1 missing_required=1
+[recovery] attempt=3/3 snapshot=A start
+[recovery] attempt=3/3 snapshot=A ok slot=10 accounts=1 missing_required=1
+recovery: Exhausted { attempts: 3 }, run_state=Halted(FeedGap)
+STATE_RECOVERY_EXHAUSTED: ending the run INCOMPLETE (no detection, no submission)
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+[recovery] attempt=1/3 snapshot=A start
+[recovery] attempt=1/3 snapshot=A ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 snapshot=B start
+[recovery] attempt=1/3 snapshot=B ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 reconcile=clean snapshot_slot=10
+recovery: Ready, run_state=Ready
+PROGRAM_UPGRADE HALT active program_data=1112P1thDTpcUjYbdMtjVSP2SZR7hRTzUSUHhYsAxur — no automatic resume
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+recovery: Fatal { code: "WSS_RECOVERY_EXHAUSTED" }, run_state=Halted(FeedGap)
+WSS_RECOVERY_EXHAUSTED: ending the run INCOMPLETE (no detection, no submission)
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test orchestration::state_owner::owner_e2e_tests::owner_end_to_end_ends_terminally_and_never_fakes_ready ... ok
+[recovery] attempt=1/3 snapshot=A start
+[recovery] attempt=1/3 snapshot=A ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 snapshot=B start
+[recovery] attempt=1/3 snapshot=B ok slot=10 accounts=1 missing_required=0
+[recovery] attempt=1/3 reconcile=clean snapshot_slot=10
+recovery: Ready, run_state=Ready
+reverse_index_ready: banks=0 accounts=0 unsupported_bank_oracle_layouts=0 threshold_bootstrap=0 threshold_trigger=false
+r127_health_sweep_ready: reverse_accounts=0 startup_banks=0 threshold_trigger=false
+[owner-evidence] periodic_syncs=0 max_sync_ms=0 console_dropped=0
+test orchestration::state_owner::integration_probe_tests::shadow_session_stop_and_join_is_far_below_the_shutdown_budget ... ok
+test orchestration::state_owner::owner_e2e_tests::owner_error_aborts_the_econ_run ... ok
+test orchestration::state_owner::owner_e2e_tests::owner_end_to_end_recovers_only_with_a_valid_snapshot ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... ok
+test orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin ... ok
+test orchestration::state_owner::setup::cluster_tests::zero_prefund_flags_parse_strictly_and_never_enable_implicitly ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... ok
+
+test result: ok. 31 passed; 0 failed; 3 ignored; 0 measured; 323 filtered out; finished in 6.47s
+
+exit=0
+$ cargo clippy -p darkbot-runner --all-targets --all-features -- -D warnings
+exit=0
