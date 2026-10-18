@@ -1076,3 +1076,161 @@ fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
         "both handshake rounds reached the listener"
     );
 }
+
+/// R3: the composite owner block of one recovery Ready in sweep mode — reverse-index rebuild
+/// over the whole state, every group bank dirty, then the full debtor sweep (dedupe → exact
+/// health → sort) — repeated like back-to-back reconnects, on 1 and 2 rayon workers, while a
+/// producer fills the production-size ingress queue (65,536) at a fixed rate. Synthetic,
+/// fixed-price banks; release build: `cargo test --release -p darkbot-runner --features
+/// crate_health --lib -- --ignored recovery_ready_rebuild_and_full_sweep_is_measured --nocapture`.
+#[cfg(feature = "crate_health")]
+#[test]
+#[ignore]
+fn recovery_ready_rebuild_and_full_sweep_is_measured() {
+    use bytemuck::Zeroable;
+    use darkbot_project0::health::HealthEngine;
+    use darkbot_solana::ingress::AccountUpdate;
+    use marginfi_type_crate::types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup, WrappedI80F48,
+    };
+    const DEBTORS: usize = 100_000;
+    const CYCLES: usize = 6;
+    const QUEUE: usize = 65_536;
+    const RATE_PER_S: u64 = 50_000;
+    let one = |x: i128| WrappedI80F48 {
+        value: (x << 48).to_le_bytes(),
+    };
+    let program = Pubkey::from_str(protocol::PROGRAM_ID_MAINNET).unwrap();
+    let group = Pubkey::new_unique();
+    let (asset_bank, liability_bank) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let update = |pubkey: Pubkey, disc: [u8; 8], payload: &[u8]| AccountUpdate {
+        pubkey,
+        owner: program,
+        lamports: 1,
+        data: [disc.as_slice(), payload].concat(),
+        slot: 10,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    };
+    let mut accounts = vec![update(
+        group,
+        protocol::DISC_MARGINFI_GROUP,
+        bytemuck::bytes_of(&MarginfiGroup::zeroed()),
+    )];
+    for bank_key in [asset_bank, liability_bank] {
+        let mut bank = Bank::zeroed();
+        bank.group = group;
+        bank.mint_decimals = 6;
+        bank.asset_share_value = one(1);
+        bank.liability_share_value = one(1);
+        bank.config.asset_weight_init = one(1);
+        bank.config.asset_weight_maint = one(1);
+        bank.config.liability_weight_init = one(1);
+        bank.config.liability_weight_maint = one(1);
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_setup = OracleSetup::Fixed;
+        bank.config.fixed_price = one(1);
+        accounts.push(update(
+            bank_key,
+            protocol::DISC_BANK,
+            bytemuck::bytes_of(&bank),
+        ));
+    }
+    let (asset, liability) = if asset_bank > liability_bank {
+        (0, 1)
+    } else {
+        (1, 0)
+    };
+    for i in 0..DEBTORS {
+        let mut a = MarginfiAccount::zeroed();
+        a.group = group;
+        let b = &mut a.lending_account.balances;
+        b[asset].active = 1;
+        b[asset].bank_pk = asset_bank;
+        b[asset].asset_shares = one(1_000);
+        b[liability].active = 1;
+        b[liability].bank_pk = liability_bank;
+        b[liability].liability_shares = one(if i % 2 == 0 { 500 } else { 1_500 });
+        accounts.push(update(
+            Pubkey::new_unique(),
+            protocol::DISC_MARGINFI_ACCOUNT,
+            bytemuck::bytes_of(&a),
+        ));
+    }
+    let mut st = StateCore::new(16);
+    st.install_snapshot(10, accounts);
+    for workers in [1usize, 2] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .unwrap();
+        let mut blocks = Vec::new();
+        for _ in 0..CYCLES {
+            // Ingress keeps arriving while the owner is blocked.
+            let (tx, rx) = bounded::<u64>("r3-ingress", QUEUE);
+            let filling = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let fill = filling.clone();
+            let producer = std::thread::spawn(move || {
+                let started = std::time::Instant::now();
+                let mut sent = 0u64;
+                while fill.load(std::sync::atomic::Ordering::Acquire) {
+                    let due = (started.elapsed().as_micros() as u64) * RATE_PER_S / 1_000_000;
+                    while sent < due {
+                        let _ = tx.try_push(sent);
+                        sent += 1;
+                    }
+                    std::thread::sleep(Duration::from_micros(200));
+                }
+                tx.stats()
+            });
+            let started = std::time::Instant::now();
+            let (index, banks, indexed, _) = rebuild_reverse_index(&st, &program, &group, None);
+            assert_eq!((banks, indexed), (2, DEBTORS));
+            let view = StateView(&st);
+            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                state: &view,
+                group,
+            };
+            let mut work: HashMap<Pubkey, (u64, u64, u64)> = HashMap::new();
+            for bank in [asset_bank, liability_bank] {
+                for account in index.accounts_for_bank(&bank) {
+                    work.entry(*account).or_insert((1, 10, 0));
+                }
+            }
+            let mut evaluated: Vec<(Pubkey, bool)> = pool.install(|| {
+                work.into_par_iter()
+                    .map(|(account, _)| {
+                        (
+                            account,
+                            engine.health(&account, 1_000, 10).unwrap().liquidatable,
+                        )
+                    })
+                    .collect()
+            });
+            evaluated.sort_unstable_by_key(|(account, liquidatable)| (!*liquidatable, *account));
+            let block = started.elapsed();
+            filling.store(false, std::sync::atomic::Ordering::Release);
+            let stats = producer.join().unwrap();
+            drop(rx);
+            assert_eq!(evaluated.len(), DEBTORS);
+            println!(
+                "R3_CYCLE workers={workers} owner_block_ms={:.1} queued={} overflow={}",
+                block.as_secs_f64() * 1e3,
+                stats.sent,
+                stats.overflow
+            );
+            assert_eq!(stats.overflow, 0, "queue overflow during the owner block");
+            blocks.push((block, stats.sent));
+        }
+        let mut ms: Vec<f64> = blocks.iter().map(|(b, _)| b.as_secs_f64() * 1e3).collect();
+        ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let max = ms[ms.len() - 1];
+        println!(
+            "R3_RECOVERY_SWEEP workers={workers} debtors={DEBTORS} cycles={CYCLES} owner_block_ms_min={:.1} max={max:.1} queued_max={} overflow=0 break_even_events_per_s={:.0}",
+            ms[0],
+            blocks.iter().map(|(_, s)| *s).max().unwrap(),
+            QUEUE as f64 / (max / 1e3)
+        );
+    }
+}

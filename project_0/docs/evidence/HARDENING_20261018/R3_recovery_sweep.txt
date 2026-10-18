@@ -1,0 +1,27 @@
+# R3 composite recovery Ready -> reverse-index rebuild -> full debtor sweep (release), tested tree: 1661f48 + R3 test; host: Darwin arm64, Apple M4 Max; CARGO_BUILD_JOBS=2
+# fixture: 100k debtors on 2 fixed-price banks in a StateCore snapshot; 6 back-to-back cycles per worker count; producer fills a 65,536 queue at 50,000 events/s during each owner block
+$ cargo test --release -p darkbot-runner --features crate_health --lib -- --test-threads=1 --ignored --nocapture recovery_ready_rebuild_and_full_sweep
+
+running 1 test
+test orchestration::state_owner::integration_probe_tests::recovery_ready_rebuild_and_full_sweep_is_measured ... R3_CYCLE workers=1 owner_block_ms=231.2 queued=11550 overflow=0
+R3_CYCLE workers=1 owner_block_ms=228.0 queued=11389 overflow=0
+R3_CYCLE workers=1 owner_block_ms=230.8 queued=11526 overflow=0
+R3_CYCLE workers=1 owner_block_ms=234.4 queued=11708 overflow=0
+R3_CYCLE workers=1 owner_block_ms=227.9 queued=11388 overflow=0
+R3_CYCLE workers=1 owner_block_ms=226.6 queued=11324 overflow=0
+R3_RECOVERY_SWEEP workers=1 debtors=100000 cycles=6 owner_block_ms_min=226.6 max=234.4 queued_max=11708 overflow=0 break_even_events_per_s=279595
+R3_CYCLE workers=2 owner_block_ms=146.7 queued=7328 overflow=0
+R3_CYCLE workers=2 owner_block_ms=145.4 queued=7260 overflow=0
+R3_CYCLE workers=2 owner_block_ms=142.6 queued=7123 overflow=0
+R3_CYCLE workers=2 owner_block_ms=144.5 queued=7218 overflow=0
+R3_CYCLE workers=2 owner_block_ms=144.5 queued=7221 overflow=0
+R3_CYCLE workers=2 owner_block_ms=143.5 queued=7164 overflow=0
+R3_RECOVERY_SWEEP workers=2 debtors=100000 cycles=6 owner_block_ms_min=142.6 max=146.7 queued_max=7328 overflow=0 break_even_events_per_s=446717
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 353 filtered out; finished in 2.37s
+
+exit=0
+$ cargo clippy -p darkbot-runner --all-targets --all-features -- -D warnings
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+exit=0
