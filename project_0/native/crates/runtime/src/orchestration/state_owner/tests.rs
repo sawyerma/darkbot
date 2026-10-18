@@ -8,6 +8,8 @@ fn owner_terminal_codes_are_reported_verbatim() {
         "STATE_RECOVERY_EXHAUSTED",
         "WSS_RECOVERY_EXHAUSTED",
         "INGRESS_FATAL",
+        "INGRESS_SESSION_NOT_QUIESCENT",
+        "INGRESS_NOT_QUIESCENT",
     ] {
         assert_eq!(shadow_failure_code(&super::OwnerTerminal(code)), code);
     }
@@ -455,4 +457,145 @@ fn evidence_failures_remain_explicit_static_categories() {
     ] {
         assert_eq!(shadow_failure_code(&EvidenceFailure(code)), code);
     }
+}
+
+/// C6/D10: a session is stopped and joined within its budget; one that does not end in time is
+/// reported as still running instead of being detached.
+#[test]
+fn ingress_session_stop_and_join_is_bounded() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let stop = Shutdown::new();
+    let sd = stop.clone();
+    let thread = std::thread::spawn(move || {
+        while !sd.is_requested() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+    let mut session = IngressSession::new(stop, thread, 1);
+    assert!(session.stop_and_join(Duration::from_secs(5)));
+    assert!(session.stop_and_join(Duration::ZERO), "already joined");
+
+    let release = Arc::new(AtomicBool::new(false));
+    let r = release.clone();
+    let stuck = std::thread::spawn(move || {
+        while !r.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+    let mut session = IngressSession::new(Shutdown::new(), stuck, 2);
+    let started = std::time::Instant::now();
+    assert!(!session.stop_and_join(Duration::from_millis(50)));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    release.store(true, Ordering::Release);
+    assert!(session.stop_and_join(Duration::from_secs(5)));
+}
+
+/// C1 test 6 / C6 / D10: events a replaced session queued before it was joined can never lift
+/// the state to Ready; only the StreamReady of the new generation starts the recovery.
+#[test]
+fn no_duplicate_generation_or_old_session_readiness() {
+    use darkbot_solana::ingress::AccountUpdate;
+    use std::cell::{Cell, RefCell};
+    let pk = Pubkey::new_unique();
+    let upd = |slot: u64| AccountUpdate {
+        pubkey: pk,
+        owner: Pubkey::new_from_array([0xA5; 32]),
+        lamports: 1,
+        data: vec![1],
+        slot,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    };
+    let reconnected = || IngressEvent::Reconnected {
+        source: SourceKind::WsRpcControl,
+        attempt: 1,
+        t_rx_ns: 0,
+    };
+    let fetches = Cell::new(0u32);
+    let mut fetch = || {
+        fetches.set(fetches.get() + 1);
+        Ok(SnapshotData {
+            slot: 10,
+            accounts: vec![upd(10)],
+            missing_required: vec![],
+        })
+    };
+    // Generation 1 is ready; then the dependency set changes and the owner retires it (as in
+    // `events`): HALT, join, retire the queued events, open the gap.
+    let ready_then_retired = |fetch: &mut dyn FnMut() -> Result<SnapshotData, String>| {
+        let mut st = StateCore::new(10);
+        let mut drv = RecoveryDriver::new(3);
+        let out = drv.on_event(&mut st, reconnected(), fetch, &mut |_| {});
+        assert_eq!(
+            out,
+            Some(darkbot_solana::state::recovery::RecoveryOutcome::Ready)
+        );
+        st.halt(darkbot_common::error::HaltReason::StateGap);
+        (st, drv)
+    };
+    // Still queued from generation 1 after its join: a late StreamReady and an account write.
+    let old_generation = || vec![IngressEvent::Account(upd(11)), reconnected()];
+
+    // Before C6 the old StreamReady reached the recovery driver and made the state Ready although
+    // the new generation had not confirmed a single subscription.
+    let (mut st, mut drv) = ready_then_retired(&mut fetch);
+    let before = fetches.get();
+    for ev in old_generation() {
+        drv.on_event(&mut st, ev, &mut fetch, &mut |_| {});
+    }
+    assert!(
+        st.run_state().is_tradable(),
+        "control: the hazard the fix removes"
+    );
+    assert!(fetches.get() > before);
+
+    // With C6: the retired StreamReady is dropped, the data is applied, no recovery runs.
+    let (mut st, mut drv) = ready_then_retired(&mut fetch);
+    let queue = RefCell::new(std::collections::VecDeque::from(old_generation()));
+    let mut retired = RetiredEvents::default();
+    retired.retire(queue.borrow().len() as u64);
+    st.on_event(IngressEvent::Gap {
+        source: SourceKind::WsRpcControl,
+        from_slot: None,
+        to_slot: None,
+        t_rx_ns: 0,
+    });
+    let before = fetches.get();
+    let mut owner_turn =
+        |st: &mut StateCore, drv: &mut RecoveryDriver, retired: &mut RetiredEvents| {
+            let ev = queue.borrow_mut().pop_front()?;
+            let ev = retired.admit(ev)?;
+            drv.on_event(st, ev, &mut fetch, &mut |s: &mut StateCore| {
+                while let Some(ev) = queue.borrow_mut().pop_front() {
+                    s.on_event(ev);
+                }
+            })
+        };
+    while !queue.borrow().is_empty() {
+        assert_eq!(owner_turn(&mut st, &mut drv, &mut retired), None);
+    }
+    assert_eq!(retired.stream_ready_dropped, 1);
+    assert_eq!(
+        fetches.get(),
+        before,
+        "no recovery read for a retired generation"
+    );
+    assert!(!st.run_state().is_tradable());
+    assert_eq!(
+        st.get(&pk).map(|r| r.slot),
+        Some(11),
+        "retired data is still applied"
+    );
+    assert!(st.gap_open(), "no StreamReady of the new generation yet");
+
+    // The new generation's StreamReady (after all its ACKs) starts the recovery and recovers.
+    queue.borrow_mut().push_back(reconnected());
+    assert_eq!(
+        owner_turn(&mut st, &mut drv, &mut retired),
+        Some(darkbot_solana::state::recovery::RecoveryOutcome::Ready)
+    );
+    assert!(st.run_state().is_tradable());
+    assert_eq!(retired.stream_ready_dropped, 1);
 }

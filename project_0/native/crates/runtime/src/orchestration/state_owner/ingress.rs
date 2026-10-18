@@ -8,13 +8,91 @@ pub(super) struct IngressSessions {
     pub(super) econ: Option<crate::analytics::econ::Handle>,
 }
 
+/// One running WSS session (C6/D10): its stop request, its thread and its generation. A
+/// replaced session is stopped and joined before the next one starts, so two generations never
+/// write into the shared ingress queue at the same time.
+pub(super) struct IngressSession {
+    shutdown: Shutdown,
+    thread: Option<std::thread::JoinHandle<()>>,
+    pub(super) generation: u64,
+}
+
+impl IngressSession {
+    pub(super) fn new(
+        shutdown: Shutdown,
+        thread: std::thread::JoinHandle<()>,
+        generation: u64,
+    ) -> Self {
+        IngressSession {
+            shutdown,
+            thread: Some(thread),
+            generation,
+        }
+    }
+
+    pub(super) fn request(&self) {
+        self.shutdown.request();
+    }
+
+    /// Requests the stop and waits up to `budget` for the thread to end, then joins it. `join`
+    /// itself cannot time out, so the thread is polled first; `false` = still running.
+    pub(super) fn stop_and_join(&mut self, budget: Duration) -> bool {
+        self.shutdown.request();
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            match &self.thread {
+                None => return true,
+                Some(t) if t.is_finished() => {
+                    // A panicked session has ended as well; its events are already queued.
+                    let _ = self.thread.take().map(|t| t.join());
+                    return true;
+                }
+                Some(_) if std::time::Instant::now() >= deadline => return false,
+                Some(_) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+    }
+}
+
+/// Events still queued from retired session generations (C6/D10). After the old session is
+/// joined, every queued event precedes the first event of the new session (FIFO), so the next
+/// `remaining` pops belong to retired generations. Their account/slot/root data is chain data and
+/// is applied normally; their StreamReady (`Reconnected`) is no readiness of the new session and
+/// never starts a recovery.
+#[derive(Debug, Default)]
+pub(super) struct RetiredEvents {
+    remaining: u64,
+    pub(super) stream_ready_dropped: u64,
+}
+
+impl RetiredEvents {
+    /// The session was joined with `queued` events in the queue; all of them are retired.
+    pub(super) fn retire(&mut self, queued: u64) {
+        self.remaining = queued;
+    }
+
+    /// `None` = a retired generation's StreamReady, dropped and counted.
+    pub(super) fn admit(&mut self, ev: IngressEvent) -> Option<IngressEvent> {
+        if self.remaining == 0 {
+            return Some(ev);
+        }
+        self.remaining -= 1;
+        if matches!(ev, IngressEvent::Reconnected { .. }) {
+            self.stream_ready_dropped = self.stream_ready_dropped.saturating_add(1);
+            return None;
+        }
+        Some(ev)
+    }
+}
+
 impl IngressSessions {
     pub(super) fn spawn(
         &self,
         sub: Subscription,
         producer: darkbot_common::channel::Producer<IngressEvent>,
         halt: IngressHalt,
-    ) -> std::io::Result<Shutdown> {
+        generation: u64,
+    ) -> std::io::Result<IngressSession> {
         let session = Shutdown::new();
         let mut ws_config = WsRpcConfig::new(self.ws_url.clone(), sub);
         if self.econ.is_some() {
@@ -28,7 +106,7 @@ impl IngressSessions {
         let failure_handle = self.econ.clone();
         let sd = session.clone();
         let sw = self.slot_watch.clone();
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("ingress-ws".into())
             .spawn(move || {
                 if let Err(e) = src.run(producer, sd, halt, sw) {
@@ -43,6 +121,6 @@ impl IngressSessions {
                     }
                 }
             })?;
-        Ok(session)
+        Ok(IngressSession::new(session, thread, generation))
     }
 }

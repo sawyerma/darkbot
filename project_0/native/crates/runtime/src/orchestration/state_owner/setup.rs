@@ -204,7 +204,7 @@ pub(super) fn prepare(
     let subscribed: HashSet<Pubkey> = subscription_keys.iter().copied().collect();
     let required_set: HashSet<Pubkey> = required_dependency_keys.iter().copied().collect();
     let optional_set: HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
-    let ingress_session = ingress.spawn(sub.clone(), producer.clone(), halt.clone())?;
+    let ingress_session = ingress.spawn(sub.clone(), producer.clone(), halt.clone(), 1)?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
     // Large, filtered Marginfi getProgramAccounts payloads regularly approach the
@@ -869,6 +869,7 @@ pub(super) fn prepare(
         program_data_baseline_hash,
         sol_bank,
         ingress_session,
+        retired_events: Default::default(),
         st,
         drv,
         dep_shared,

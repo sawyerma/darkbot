@@ -25,6 +25,20 @@ impl ShadowOwner {
         } else {
             self.consumer.pop_timeout(Duration::from_millis(250))
         };
+        // C6/D10: the StreamReady of a replaced session is no readiness of the current one and
+        // never starts a recovery; its data events are applied as usual.
+        let maybe_ev = match maybe_ev.map(|ev| self.retired_events.admit(ev)) {
+            Some(None) => {
+                owner_log!(
+                    self,
+                    "ingress: StreamReady of a replaced session dropped (total={})",
+                    self.retired_events.stream_ready_dropped
+                );
+                return Ok(OwnerStep::Continue);
+            }
+            Some(Some(ev)) => Some(ev),
+            None => None,
+        };
 
         self.mt0_owner
             .enter(darkbot_common::mt0::OwnerCat::IngressApply);
@@ -685,7 +699,36 @@ impl ShadowOwner {
                     new_optional.len()
                 );
                     self.st.halt(darkbot_common::error::HaltReason::StateGap);
-                    self.ingress_session.request();
+                    // C6/D10: the old session ends and is joined before the new one starts; one
+                    // that does not stop within the shutdown budget ends the run INCOMPLETE.
+                    let budget = Duration::from_secs(
+                        darkbot_solana::runtime_config::active()
+                            .limits
+                            .shutdown_seconds,
+                    );
+                    if !self.ingress_session.stop_and_join(budget) {
+                        owner_log!(
+                            self,
+                            "INGRESS_SESSION_NOT_QUIESCENT: generation={} still running after {} s",
+                            self.ingress_session.generation,
+                            budget.as_secs()
+                        );
+                        return Err(Box::new(OwnerTerminal("INGRESS_SESSION_NOT_QUIESCENT")));
+                    }
+                    let queued = {
+                        let s = self.consumer.stats();
+                        s.sent.saturating_sub(s.received)
+                    };
+                    self.retired_events.retire(queued);
+                    // The new generation has no StreamReady yet: StateCore keeps the gap open until
+                    // its `Reconnected`, so no recovery can become Ready before it.
+                    self.halt.raise();
+                    self.st.on_event(IngressEvent::Gap {
+                        source: SourceKind::WsRpcControl,
+                        from_slot: None,
+                        to_slot: None,
+                        t_rx_ns: self.clock.now_ns(),
+                    });
                     self.required_set.extend(new_required.iter().copied());
                     self.optional_set.extend(new_optional.iter().copied());
                     self.required_dependency_keys = self.required_set.iter().copied().collect();
@@ -719,8 +762,20 @@ impl ShadowOwner {
                         transactions_mentioning: vec![],
                         logs_mentioning: vec![],
                     };
-                    self.ingress_session =
-                        ingress.spawn(sub2, self.producer.clone(), self.halt.clone())?;
+                    let generation = self.ingress_session.generation.saturating_add(1);
+                    owner_log!(
+                        self,
+                        "ingress: session generation={} joined, {} queued events retired; starting generation={}",
+                        self.ingress_session.generation,
+                        queued,
+                        generation
+                    );
+                    self.ingress_session = ingress.spawn(
+                        sub2,
+                        self.producer.clone(),
+                        self.halt.clone(),
+                        generation,
+                    )?;
                 }
             }
             #[cfg(feature = "crate_health")]

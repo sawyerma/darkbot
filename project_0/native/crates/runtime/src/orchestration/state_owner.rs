@@ -80,7 +80,7 @@ mod ingress;
 mod lifecycle;
 mod remote_apply;
 mod setup;
-use ingress::IngressSessions;
+use ingress::{IngressSession, IngressSessions, RetiredEvents};
 mod shutdown;
 mod sweep;
 mod telemetry;
@@ -153,7 +153,9 @@ pub(super) struct ShadowOwner {
     program_data: Pubkey,
     program_data_baseline_hash: Hash,
     sol_bank: Pubkey,
-    ingress_session: Shutdown,
+    ingress_session: IngressSession,
+    /// C6/D10: queued events of replaced (joined) session generations.
+    retired_events: RetiredEvents,
     st: StateCore,
     drv: RecoveryDriver,
     dep_shared: std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>,

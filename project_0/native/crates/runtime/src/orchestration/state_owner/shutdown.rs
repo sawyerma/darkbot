@@ -46,15 +46,20 @@ impl ShadowOwner {
         // without econ and after a HALT). The join is bounded by its 250 ms wait steps and the
         // 30 s RPC timeout of a refresh in flight.
         self.shutdown.request();
+        // C6/D10: the WSS session ends with its only consumer in every mode and is joined within
+        // the shutdown budget; one still running is never reported as quiescent.
+        self.ingress_session.request();
         if let Some(h) = self.blockhash_thread.take() {
             let _ = h.join();
         }
+        let shutdown_budget = Duration::from_secs(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .shutdown_seconds,
+        );
+        let ingress_quiescent = self.ingress_session.stop_and_join(shutdown_budget);
         if self.econ.is_some() || self.operational_window.is_some() {
-            self.remote.wait_stopped(Duration::from_secs(
-                darkbot_solana::runtime_config::active()
-                    .limits
-                    .shutdown_seconds,
-            ))?;
+            self.remote.wait_stopped(shutdown_budget)?;
         }
         // Final MT0 snapshot, seal and join; a lost snapshot makes the run's evidence INCOMPLETE.
         // It is reported last, so it never hides an evidence or operational failure.
@@ -62,6 +67,9 @@ impl ShadowOwner {
         evidence_result?;
         if let Some(reason) = self.operational_failure.take() {
             return Err(reason.into());
+        }
+        if !ingress_quiescent {
+            return Err(Box::new(OwnerTerminal("INGRESS_NOT_QUIESCENT")));
         }
         if !mt0_complete {
             return Err("MT0_EVIDENCE_INCOMPLETE".into());

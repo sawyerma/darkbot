@@ -1,0 +1,66 @@
+# C6/D10 + C1 test 6 regression; tested tree: 851d53a + C6/D10 diff (CARGO_BUILD_JOBS=2)
+$ cargo test -p darkbot-runner --features crate_health --lib -- --test-threads=2 state_owner::
+
+running 23 tests
+test orchestration::state_owner::census::tests::c0_census_worker_cost_at_historical_population ... ignored
+test orchestration::state_owner::census::tests::census_membership_counts_debtors_and_undecodable_members_only ... ok
+test orchestration::state_owner::census::tests::chain_clock_rejects_foreign_short_zero_and_future_clocks ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_cache_forwards_transition_force_revision_and_bounded_periodic_recheck ... ok
+test orchestration::state_owner::census::tests::census_proves_identity_coverage_and_journals_typed_rows ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_repeat_admission_remains_bounded ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token ... ok
+test orchestration::state_owner::integration_probe_tests::evidence_failures_remain_explicit_static_categories ... ok
+test orchestration::state_owner::integration_probe_tests::failure_report_shows_classified_details_only ... ok
+test orchestration::state_owner::integration_probe_tests::candidate_fairness_services_all_above_soft_cap_without_starvation ... ok
+test orchestration::state_owner::integration_probe_tests::no_duplicate_generation_or_old_session_readiness ... ok
+test orchestration::state_owner::integration_probe_tests::only_one_target_is_dispatched_per_idle_turn ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_returns_latest_coalesced_work_once ... ok
+test orchestration::state_owner::integration_probe_tests::oracle_detect_skips_stale_order_entries ... ok
+test orchestration::state_owner::integration_probe_tests::owner_terminal_codes_are_reported_verbatim ... ok
+test orchestration::state_owner::integration_probe_tests::shadow_error_category_never_formats_secret_payload ... ok
+test orchestration::state_owner::integration_probe_tests::target_waits_unsigned_until_worker_is_idle ... ok
+test orchestration::state_owner::integration_probe_tests::ingress_session_stop_and_join_is_bounded ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_admission_closed ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_in_flight_finishes_then_stops ... ok
+test orchestration::state_owner::setup::cluster_tests::cluster_check_accepts_only_the_mainnet_genesis_pin ... ok
+test orchestration::state_owner::setup::cluster_tests::zero_prefund_flags_parse_strictly_and_never_enable_implicitly ... ok
+test orchestration::state_owner::setup::blockhash_tests::blockhash_refresh_stops_on_shutdown_without_econ ... ok
+
+test result: ok. 22 passed; 0 failed; 1 ignored; 0 measured; 320 filtered out; finished in 0.37s
+
+exit=0
+$ cargo test -p darkbot-solana --lib -- --test-threads=2 state::
+
+running 28 tests
+test state::blockhash::tests::staleness ... ok
+test state::fork::tests::root_backwards_is_ignored ... ok
+test state::fork::tests::detects_orphaned_branch ... ok
+test state::recovery::tests::adaptive_root_progress_extends_soft_budget_but_stalls_and_hard_caps ... ok
+test state::recovery::tests::cancellation_after_snapshot_a_does_not_fetch_b ... ok
+test state::recovery::tests::adaptive_recovery_requires_real_root_before_ready ... ok
+test state::recovery::tests::dirty_reconcile_stays_halted ... ok
+test state::recovery::tests::fatal_during_snapshot_or_root_drain_is_terminal ... ok
+test state::recovery::tests::gap_after_reconnected_invalidates_ready ... ok
+test state::recovery::tests::gap_then_reconnected_can_recover ... ok
+test state::recovery::tests::gap_to_ready_full_loop ... ok
+test state::recovery::tests::legacy_fixed_budget_and_adaptive_soft_boundary_are_fail_closed ... ok
+test state::recovery::tests::missing_required_dependency_blocks_ready ... ok
+test state::recovery::tests::reconnected_in_third_drain_retries_without_external_event ... ok
+test state::recovery::tests::recovery_exhausted_without_fresh_trigger_aborts ... ok
+test state::recovery::tests::repeated_reconnected_cannot_extend_budget ... ok
+test state::recovery::tests::snapshot_b_missing_required_blocks_ready ... ok
+test state::snapshot::compressed_snapshot_tests::compressed_gpa_preserves_all_bytes_owner_lamports_and_context ... ok
+test state::snapshot::compressed_snapshot_tests::corrupt_compressed_account_cannot_produce_partial_snapshot ... ok
+test state::tests::bootstrap_buffers_then_applies_only_newer_than_snapshot ... ok
+test state::tests::gap_halts_and_reconcile_recovers ... ok
+test state::tests::ordering_rules ... ok
+test state::tests::reconcile_mismatch_halts ... ok
+test state::tests::reconcile_mixed_slot_batches_detects_stale_local ... ok
+test state::tests::reconcile_owner_mismatch_halts ... ok
+test state::tests::root_policy_rejects_below_root ... ok
+test state::tests::slot_events_track_highest ... ok
+test state::recovery::tests::cancellation_during_root_catchup_never_confirms_ready_or_retries ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.01s
+
+exit=0
