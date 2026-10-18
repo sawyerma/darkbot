@@ -109,6 +109,18 @@ impl JitoAdapter {
                 txs.len()
             )));
         }
+        // L2/9e: every transaction must carry its (non-default) fee-payer signature before any
+        // network handoff; the sentinel is taken from this complete list, never by blind index.
+        let sigs: Vec<Signature> = txs
+            .iter()
+            .filter_map(|t| t.signatures.first().copied())
+            .filter(|s| *s != Signature::default())
+            .collect();
+        if sigs.len() != txs.len() {
+            return Err(SubmitError::Rejected("BUNDLE_SIGNATURE_MISSING".into()));
+        }
+        // [FIX-18] Sentinel = Receivership-TX (vorletzte, wenn Tip zuletzt), alle Signaturen mitführen.
+        let sentinel = sigs[sigs.len().saturating_sub(2)];
         let encoded: Result<Vec<String>, _> = txs.iter().map(super::encode_base64).collect();
         let encoded = encoded?;
         let total_len: usize = txs
@@ -122,16 +134,6 @@ impl JitoAdapter {
             json!([encoded, {"encoding":"base64"}]),
         )?;
         let bundle_id = res.as_str().map(|s| s.to_string());
-        // [FIX-18] Sentinel = Receivership-TX (vorletzte, wenn Tip zuletzt), alle Signaturen mitführen.
-        let sigs: Vec<Signature> = txs
-            .iter()
-            .filter_map(|t| t.signatures.first().copied())
-            .collect();
-        let sentinel = if txs.len() >= 2 {
-            sigs[sigs.len() - 2]
-        } else {
-            sigs[0]
-        };
         Ok(SubmitAck {
             path: SubmissionPath::JitoBundle,
             signature: sentinel,
@@ -151,12 +153,13 @@ impl JitoAdapter {
         )?;
         let entry = res.pointer("/value/0").cloned().unwrap_or(Value::Null);
         Ok(match entry.get("status").and_then(|s| s.as_str()) {
-            Some("Landed") => BundleStatus::Landed {
-                slot: entry
-                    .get("landed_slot")
-                    .and_then(|s| s.as_u64())
-                    .unwrap_or(0),
-                confirmation: None,
+            // 9e: a landing without its slot is not yet a landing (never slot 0).
+            Some("Landed") => match entry.get("landed_slot").and_then(|s| s.as_u64()) {
+                Some(slot) => BundleStatus::Landed {
+                    slot,
+                    confirmation: None,
+                },
+                None => BundleStatus::Pending,
             },
             Some("Failed") => BundleStatus::Failed {
                 slot: None,
@@ -309,6 +312,32 @@ impl SubmissionAdapter for JitoAdapter {
 #[cfg(test)]
 mod secret_tests {
     use super::*;
+    /// L2/9e: an unsigned or signature-less transaction is refused before any HTTP request.
+    #[test]
+    fn unsigned_bundle_is_rejected_without_network() {
+        use solana_sdk::message::{Message, VersionedMessage};
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let a = JitoAdapter::new(url.clone(), Some(url), Duration::from_millis(500)).unwrap();
+        let tx = |signatures: Vec<Signature>| VersionedTransaction {
+            signatures,
+            message: VersionedMessage::Legacy(Message::default()),
+        };
+        let signed = tx(vec![Signature::from([7u8; 64])]);
+        for bundle in [
+            vec![tx(vec![Signature::default()])],
+            vec![signed.clone(), tx(vec![])],
+            vec![tx(vec![]), signed.clone()],
+        ] {
+            let error = a.submit_bundle(&bundle, 0).unwrap_err();
+            assert!(
+                matches!(&error, SubmitError::Rejected(c) if c == "BUNDLE_SIGNATURE_MISSING"),
+                "{error:?}"
+            );
+        }
+        assert!(socket.accept().is_err(), "no request may reach the network");
+    }
     #[test]
     fn jito_transport_and_simulation_do_not_expose_endpoint() {
         let url = "http://127.0.0.1:0/private?api-key=SECRET";
