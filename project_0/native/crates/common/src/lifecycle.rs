@@ -58,7 +58,10 @@ impl RunState {
     /// damit ein laufender Snapshot-Austausch nie auf einem tradable State passiert.
     pub fn begin_reconcile(self) -> RunState {
         match self {
-            RunState::Halted(_) | RunState::Bootstrapping | RunState::Ready | RunState::Reconciling => RunState::Reconciling,
+            RunState::Halted(_)
+            | RunState::Bootstrapping
+            | RunState::Ready
+            | RunState::Reconciling => RunState::Reconciling,
         }
     }
 
@@ -104,6 +107,9 @@ mod tests {
     #[test]
     fn bootstrapping_is_not_tradable() {
         assert!(!RunState::Bootstrapping.is_tradable());
-        assert_eq!(RunState::Bootstrapping.reconcile_ok(), RunState::Bootstrapping);
+        assert_eq!(
+            RunState::Bootstrapping.reconcile_ok(),
+            RunState::Bootstrapping
+        );
     }
 }

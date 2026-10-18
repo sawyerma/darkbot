@@ -15,21 +15,30 @@ fn main() -> ExitCode {
         let result = run_from_env_with(Some(tap), |run_id, _| {
             let cfg = config_from_env(run_id, &env)?.ok_or("reporter configuration missing")?;
             let h = start(cfg, tap_reporter)?;
-            eprintln!("[P0/REPORTER] socket={} generation={}", h.socket_path().display(), h.generation);
+            eprintln!(
+                "[P0/REPORTER] socket={} generation={}",
+                h.socket_path().display(),
+                h.generation
+            );
             handle = Some(h);
             Ok(())
         });
         if let Some(h) = handle {
-            eprintln!("[P0/REPORTER] connections={} frames_sent={} write_errors={}",
+            eprintln!(
+                "[P0/REPORTER] connections={} frames_sent={} write_errors={}",
                 h.counters.connections.load(Ordering::Relaxed),
                 h.counters.frames_sent.load(Ordering::Relaxed),
-                h.counters.write_errors.load(Ordering::Relaxed));
+                h.counters.write_errors.load(Ordering::Relaxed)
+            );
             h.stop();
         }
         result
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => { eprintln!("{e}"); ExitCode::FAILURE }
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
     }
 }

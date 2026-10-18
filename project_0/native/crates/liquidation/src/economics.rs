@@ -96,7 +96,9 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
     if repay_value == 0 || realizable_bps == 0 {
         return None;
     }
-    let num = (min_profit + fixed_costs as i128 + repay_value as i128) as u128 * (BPS as u128) * (BPS as u128);
+    let num = (min_profit + fixed_costs as i128 + repay_value as i128) as u128
+        * (BPS as u128)
+        * (BPS as u128);
     let den = repay_value as u128 * realizable_bps as u128;
     let p_needed = (num + den) / den; // ceil + 1 für striktes ">"
     if p_needed <= BPS as u128 {
@@ -110,9 +112,14 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
     match tagged_at {
         None => {
             let base = fee_state_max_bps.max(PREMIUM_BASE_BPS);
-            if needed_bps <= base { Some(now_unix_s) } else { None } // nicht getaggt: nur Basis verfügbar
+            if needed_bps <= base {
+                Some(now_unix_s)
+            } else {
+                None
+            } // nicht getaggt: nur Basis verfügbar
         }
-        Some(t0) => time_for_premium(t0, fee_state_max_bps, needed_bps, growth_blocked).map(|t| t.max(now_unix_s)),
+        Some(t0) => time_for_premium(t0, fee_state_max_bps, needed_bps, growth_blocked)
+            .map(|t| t.max(now_unix_s)),
     }
 }
 
@@ -170,7 +177,11 @@ impl FailedCostMatrix {
 /// Jito lifecycle/tip cells are deliberately untouched. Amounts are USD-micro.
 pub fn rpc_message_failure_costs(message_fee_usd_micro: Option<u64>) -> FailedCostMatrix {
     match message_fee_usd_micro {
-        Some(fee) => FailedCostMatrix { rpc_not_landed:Some(0), rpc_landed_revert:Some(fee), ..Default::default() },
+        Some(fee) => FailedCostMatrix {
+            rpc_not_landed: Some(0),
+            rpc_landed_revert: Some(fee),
+            ..Default::default()
+        },
         None => FailedCostMatrix::default(),
     }
 }
@@ -200,7 +211,10 @@ pub struct CandidateInput {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Evaluation {
     /// Netto-Profit deterministisch bekannt (kann negativ sein).
-    Known { net: i128, profit_per_capital_bps: i128 },
+    Known {
+        net: i128,
+        profit_per_capital_bps: i128,
+    },
     /// Eine Kostenzelle ist ungemessen → nicht handelbar.
     Unknown,
 }
@@ -209,8 +223,14 @@ pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
     let Some(gross_seized_realizable_usd_micro) = c.gross_seized_realizable_usd_micro else {
         return Evaluation::Unknown;
     };
-    let Some(failed_cost) = failed.conservative(c.path) else { return Evaluation::Unknown };
-    let (Some(transaction_fee), Some(rent_and_token)) = (c.transaction_fee_usd_micro, c.rent_and_token_usd_micro) else { return Evaluation::Unknown };
+    let Some(failed_cost) = failed.conservative(c.path) else {
+        return Evaluation::Unknown;
+    };
+    let (Some(transaction_fee), Some(rent_and_token)) =
+        (c.transaction_fee_usd_micro, c.rent_and_token_usd_micro)
+    else {
+        return Evaluation::Unknown;
+    };
     let costs: u128 = c.repay_usd_micro as u128
         + c.protocol_fees_usd_micro as u128
         + c.flat_sol_fee_usd_micro as u128
@@ -220,8 +240,15 @@ pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
         + rent_and_token as u128
         + failed_cost as u128;
     let net = gross_seized_realizable_usd_micro as i128 - costs as i128;
-    let ppc = if c.required_capital_usd_micro == 0 { i128::MAX } else { net * BPS as i128 / c.required_capital_usd_micro as i128 };
-    Evaluation::Known { net, profit_per_capital_bps: ppc }
+    let ppc = if c.required_capital_usd_micro == 0 {
+        i128::MAX
+    } else {
+        net * BPS as i128 / c.required_capital_usd_micro as i128
+    };
+    Evaluation::Known {
+        net,
+        profit_per_capital_bps: ppc,
+    }
 }
 
 /// Vergleich zweier bekannter Economics-Ergebnisse. Höherer deterministischer Netto-Profit
@@ -230,8 +257,14 @@ pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
 pub fn compare_evaluations(a: Evaluation, b: Evaluation) -> std::cmp::Ordering {
     match (a, b) {
         (
-            Evaluation::Known { net: na, profit_per_capital_bps: pa },
-            Evaluation::Known { net: nb, profit_per_capital_bps: pb },
+            Evaluation::Known {
+                net: na,
+                profit_per_capital_bps: pa,
+            },
+            Evaluation::Known {
+                net: nb,
+                profit_per_capital_bps: pb,
+            },
         ) => na.cmp(&nb).then(pa.cmp(&pb)),
         (Evaluation::Known { .. }, Evaluation::Unknown) => std::cmp::Ordering::Greater,
         (Evaluation::Unknown, Evaluation::Known { .. }) => std::cmp::Ordering::Less,
@@ -261,15 +294,25 @@ pub fn choose_best_candidate(
 }
 
 /// Handlungsregel V1: net > min_profit ∧ Ausführung/State/Safety gültig (Flags vom Aufrufer).
-pub fn actionable(e: Evaluation, min_profit: i128, execution_valid: bool, state_valid: bool, safety_valid: bool) -> bool {
+pub fn actionable(
+    e: Evaluation,
+    min_profit: i128,
+    execution_valid: bool,
+    state_valid: bool,
+    safety_valid: bool,
+) -> bool {
     match e {
-        Evaluation::Known { net, .. } => net > min_profit && execution_valid && state_valid && safety_valid,
+        Evaluation::Known { net, .. } => {
+            net > min_profit && execution_valid && state_valid && safety_valid
+        }
         Evaluation::Unknown => false,
     }
 }
 
 /// Ranking: zuerst höchster Netto, bei Gleichstand höchster Profit/Kapital. Unknown wird ausgelassen.
-pub fn rank(mut items: Vec<(solana_sdk::pubkey::Pubkey, Evaluation)>) -> Vec<(solana_sdk::pubkey::Pubkey, i128)> {
+pub fn rank(
+    mut items: Vec<(solana_sdk::pubkey::Pubkey, Evaluation)>,
+) -> Vec<(solana_sdk::pubkey::Pubkey, i128)> {
     items.retain(|(_, e)| matches!(e, Evaluation::Known { .. }));
     items.sort_by(|(_, a), (_, b)| compare_evaluations(*b, *a));
     items
@@ -288,23 +331,52 @@ mod tests {
 
     #[test]
     fn exact_rpc_fee_qualifies_only_rpc_scenarios() {
-        assert_eq!(rpc_message_failure_costs(Some(73)).conservative(Path::Rpc), Some(73));
-        assert_eq!(rpc_message_failure_costs(None).conservative(Path::Rpc), None);
-        assert_eq!(rpc_message_failure_costs(Some(73)).conservative(Path::JitoBundle), None);
+        assert_eq!(
+            rpc_message_failure_costs(Some(73)).conservative(Path::Rpc),
+            Some(73)
+        );
+        assert_eq!(
+            rpc_message_failure_costs(None).conservative(Path::Rpc),
+            None
+        );
+        assert_eq!(
+            rpc_message_failure_costs(Some(73)).conservative(Path::JitoBundle),
+            None
+        );
     }
 
     #[test]
     fn premium_curve_matches_release_notes() {
         let t0 = 1_000_000;
         assert_eq!(premium_bps(t0, Some(t0), 0, false), 500, "Basis 5 %");
-        assert_eq!(premium_bps(t0, Some(t0), 800, false), 800, "FeeState-Max gewinnt");
-        assert_eq!(premium_bps(t0 + 3_599, Some(t0), 0, false), 500, "Grace-Stunde");
+        assert_eq!(
+            premium_bps(t0, Some(t0), 800, false),
+            800,
+            "FeeState-Max gewinnt"
+        );
+        assert_eq!(
+            premium_bps(t0 + 3_599, Some(t0), 0, false),
+            500,
+            "Grace-Stunde"
+        );
         let half = t0 + PREMIUM_GRACE_S + PREMIUM_RAMP_S / 2;
         let p = premium_bps(half, Some(t0), 0, false);
-        assert!((5_249..=5_251).contains(&p), "Mitte der Rampe ≈ 52,5 %: {}", p);
-        assert_eq!(premium_bps(t0 + 7 * 24 * 3_600, Some(t0), 0, false), 10_000, "100 % genau 7 d nach Tagging");
+        assert!(
+            (5_249..=5_251).contains(&p),
+            "Mitte der Rampe ≈ 52,5 %: {}",
+            p
+        );
+        assert_eq!(
+            premium_bps(t0 + 7 * 24 * 3_600, Some(t0), 0, false),
+            10_000,
+            "100 % genau 7 d nach Tagging"
+        );
         assert!(premium_bps(t0 + 7 * 24 * 3_600 - 1, Some(t0), 0, false) < 10_000);
-        assert_eq!(premium_bps(t0 + 10 * PREMIUM_RAMP_S, Some(t0), 0, true), 500, "Bad Debt/EMODE: kein Wachstum");
+        assert_eq!(
+            premium_bps(t0 + 10 * PREMIUM_RAMP_S, Some(t0), 0, true),
+            500,
+            "Bad Debt/EMODE: kein Wachstum"
+        );
         assert_eq!(premium_bps(t0, None, 0, false), 500, "nicht getaggt");
     }
 
@@ -315,18 +387,42 @@ mod tests {
         let p = premium_bps(t, Some(t0), 0, false);
         assert!((2_000..2_010).contains(&p), "{}", p);
         assert!(premium_bps(t - 1, Some(t0), 0, false) < 2_000);
-        assert_eq!(time_for_premium(t0, 0, 400, false), Some(t0), "unter Basis sofort");
+        assert_eq!(
+            time_for_premium(t0, 0, 400, false),
+            Some(t0),
+            "unter Basis sofort"
+        );
         assert_eq!(time_for_premium(t0, 0, 3_000, true), None, "blockiert: nie");
     }
 
     #[test]
     fn seize_bound_from_source() {
-        assert_eq!(max_seizable_for_repay(10_000, 0, false), 10_500, "Minimum 5 %");
-        assert_eq!(max_seizable_for_repay(10_000, 800, false), 10_800, "FeeState 8 % gewinnt");
-        assert_eq!(max_seizable_for_repay(10_000, 0, true), u128::MAX, "Closeout < 5 USD");
+        assert_eq!(
+            max_seizable_for_repay(10_000, 0, false),
+            10_500,
+            "Minimum 5 %"
+        );
+        assert_eq!(
+            max_seizable_for_repay(10_000, 800, false),
+            10_800,
+            "FeeState 8 % gewinnt"
+        );
+        assert_eq!(
+            max_seizable_for_repay(10_000, 0, true),
+            u128::MAX,
+            "Closeout < 5 USD"
+        );
     }
 
-    fn inputs(fee: u64, blocked: bool, cap: u64, repay: u64, real: u64, costs: u64, min: i128) -> ProfitInputs {
+    fn inputs(
+        fee: u64,
+        blocked: bool,
+        cap: u64,
+        repay: u64,
+        real: u64,
+        costs: u64,
+        min: i128,
+    ) -> ProfitInputs {
         ProfitInputs {
             fee_state_max_bps: fee,
             growth_blocked: blocked,
@@ -347,11 +443,20 @@ mod tests {
         assert!((516..=530).contains(&p), "p={}", p);
         assert!(t > t0 + PREMIUM_GRACE_S, "liegt nach der Grace-Stunde");
         // Kappe durch Receivership-Regel unter Bedarf → None
-        assert_eq!(t_profitable(t0, Some(t0), &inputs(0, false, 500, 1_000, 9_700, 20, 0)), None);
+        assert_eq!(
+            t_profitable(t0, Some(t0), &inputs(0, false, 500, 1_000, 9_700, 20, 0)),
+            None
+        );
         // nicht getaggt, Basis reicht nicht → None
-        assert_eq!(t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 9_700, 20, 0)), None);
+        assert_eq!(
+            t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 9_700, 20, 0)),
+            None
+        );
         // sofort profitabel
-        assert_eq!(t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 10_000, 0, 0)), Some(t0));
+        assert_eq!(
+            t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 10_000, 0, 0)),
+            Some(t0)
+        );
     }
 
     #[test]
@@ -392,19 +497,58 @@ mod tests {
             path: Path::JitoBundle,
             funding: crate::funding::FundingClass::NoSwapInventory,
         };
-        assert_eq!(evaluate(&c, &FailedCostMatrix::default()), Evaluation::Unknown);
-        let m = FailedCostMatrix { jito_bundle_not_landed: Some(0), jito_bundle_failed: Some(0), ..Default::default() };
+        assert_eq!(
+            evaluate(&c, &FailedCostMatrix::default()),
+            Evaluation::Unknown
+        );
+        let m = FailedCostMatrix {
+            jito_bundle_not_landed: Some(0),
+            jito_bundle_failed: Some(0),
+            ..Default::default()
+        };
         match evaluate(&c, &m) {
-            Evaluation::Known { net, profit_per_capital_bps } => {
+            Evaluation::Known {
+                net,
+                profit_per_capital_bps,
+            } => {
                 assert_eq!(net, 100);
                 assert_eq!(profit_per_capital_bps, 100 * 10_000 / 900);
             }
             _ => panic!(),
         }
-        assert_eq!(evaluate(&CandidateInput { transaction_fee_usd_micro:None, ..c }, &m), Evaluation::Unknown);
-        assert_eq!(evaluate(&CandidateInput { rent_and_token_usd_micro:None, ..c }, &m), Evaluation::Unknown);
-        assert_eq!(evaluate(&CandidateInput { transaction_fee_usd_micro:Some(23), ..c }, &m),
-            Evaluation::Known {net:77, profit_per_capital_bps:77 * 10_000 / 900});
+        assert_eq!(
+            evaluate(
+                &CandidateInput {
+                    transaction_fee_usd_micro: None,
+                    ..c
+                },
+                &m
+            ),
+            Evaluation::Unknown
+        );
+        assert_eq!(
+            evaluate(
+                &CandidateInput {
+                    rent_and_token_usd_micro: None,
+                    ..c
+                },
+                &m
+            ),
+            Evaluation::Unknown
+        );
+        assert_eq!(
+            evaluate(
+                &CandidateInput {
+                    transaction_fee_usd_micro: Some(23),
+                    ..c
+                },
+                &m
+            ),
+            Evaluation::Known {
+                net: 77,
+                profit_per_capital_bps: 77 * 10_000 / 900
+            }
+        );
         assert!(actionable(evaluate(&c, &m), 0, true, true, true));
         assert!(!actionable(evaluate(&c, &m), 100, true, true, true));
         assert!(!actionable(evaluate(&c, &m), 0, true, false, true));
@@ -425,30 +569,59 @@ mod tests {
             path: Path::Rpc,
             funding: crate::funding::FundingClass::ZeroPrefundSameTx,
         };
-        let zero = CandidateInput { swap_fees_and_impact_usd_micro: 60, ..base }; // net 40
+        let zero = CandidateInput {
+            swap_fees_and_impact_usd_micro: 60,
+            ..base
+        }; // net 40
         let no_swap = CandidateInput {
             funding: crate::funding::FundingClass::NoSwapInventory,
             required_capital_usd_micro: 1_000,
             swap_fees_and_impact_usd_micro: 0,
             ..base
         }; // net 100
-        let failed = FailedCostMatrix { rpc_not_landed: Some(0), rpc_landed_revert: Some(0), ..Default::default() };
+        let failed = FailedCostMatrix {
+            rpc_not_landed: Some(0),
+            rpc_landed_revert: Some(0),
+            ..Default::default()
+        };
         let (chosen, eval) = choose_best_candidate(&[zero, no_swap], &failed, 0).unwrap();
-        assert_eq!(chosen.funding, crate::funding::FundingClass::NoSwapInventory);
+        assert_eq!(
+            chosen.funding,
+            crate::funding::FundingClass::NoSwapInventory
+        );
         assert!(matches!(eval, Evaluation::Known { net: 100, .. }));
     }
 
     #[test]
     fn equal_net_prefers_capital_efficiency() {
         let zero = CandidateInput {
-            gross_seized_realizable_usd_micro: Some(1_100), repay_usd_micro: 1_000, protocol_fees_usd_micro: 0, flat_sol_fee_usd_micro: 0,
-            swap_fees_and_impact_usd_micro: 0, transaction_fee_usd_micro: Some(0), jito_tip_usd_micro: 0, rent_and_token_usd_micro: Some(0),
-            required_capital_usd_micro: 0, path: Path::Rpc, funding: crate::funding::FundingClass::ZeroPrefundSameTx,
+            gross_seized_realizable_usd_micro: Some(1_100),
+            repay_usd_micro: 1_000,
+            protocol_fees_usd_micro: 0,
+            flat_sol_fee_usd_micro: 0,
+            swap_fees_and_impact_usd_micro: 0,
+            transaction_fee_usd_micro: Some(0),
+            jito_tip_usd_micro: 0,
+            rent_and_token_usd_micro: Some(0),
+            required_capital_usd_micro: 0,
+            path: Path::Rpc,
+            funding: crate::funding::FundingClass::ZeroPrefundSameTx,
         };
-        let preheld = CandidateInput { required_capital_usd_micro: 1_000, funding: crate::funding::FundingClass::PreheldInventory, ..zero };
-        let failed = FailedCostMatrix { rpc_not_landed: Some(0), rpc_landed_revert: Some(0), ..Default::default() };
+        let preheld = CandidateInput {
+            required_capital_usd_micro: 1_000,
+            funding: crate::funding::FundingClass::PreheldInventory,
+            ..zero
+        };
+        let failed = FailedCostMatrix {
+            rpc_not_landed: Some(0),
+            rpc_landed_revert: Some(0),
+            ..Default::default()
+        };
         let (chosen, _) = choose_best_candidate(&[preheld, zero], &failed, 0).unwrap();
-        assert_eq!(chosen.funding, crate::funding::FundingClass::ZeroPrefundSameTx);
+        assert_eq!(
+            chosen.funding,
+            crate::funding::FundingClass::ZeroPrefundSameTx
+        );
     }
 
     #[test]
@@ -457,9 +630,21 @@ mod tests {
         let b = Pubkey::new_unique();
         let u = Pubkey::new_unique();
         let r = rank(vec![
-            (a, Evaluation::Known { net: 50, profit_per_capital_bps: 10 }),
+            (
+                a,
+                Evaluation::Known {
+                    net: 50,
+                    profit_per_capital_bps: 10,
+                },
+            ),
             (u, Evaluation::Unknown),
-            (b, Evaluation::Known { net: 50, profit_per_capital_bps: 20 }),
+            (
+                b,
+                Evaluation::Known {
+                    net: 50,
+                    profit_per_capital_bps: 20,
+                },
+            ),
         ]);
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].0, b);

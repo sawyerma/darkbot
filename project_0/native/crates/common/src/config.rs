@@ -33,15 +33,19 @@ pub fn require(key: &str) -> Result<String, ConfigError> {
 /// Pflichtwert, geparst.
 pub fn require_parsed<T: FromStr>(key: &str) -> Result<T, ConfigError> {
     let v = require(key)?;
-    v.parse::<T>().map_err(|_| ConfigError::Invalid { key: key.to_string(), value: v })
+    v.parse::<T>().map_err(|_| ConfigError::Invalid {
+        key: key.to_string(),
+        value: v,
+    })
 }
 
 /// Optionaler Wert mit **explizitem** Default (Default steht beim Aufrufer, sichtbar).
 pub fn parsed_or<T: FromStr>(key: &str, default: T) -> Result<T, ConfigError> {
     match env::var(key) {
-        Ok(v) if !v.trim().is_empty() => {
-            v.parse::<T>().map_err(|_| ConfigError::Invalid { key: key.to_string(), value: v })
-        }
+        Ok(v) if !v.trim().is_empty() => v.parse::<T>().map_err(|_| ConfigError::Invalid {
+            key: key.to_string(),
+            value: v,
+        }),
         _ => Ok(default),
     }
 }
@@ -64,7 +68,10 @@ mod tests {
         env::remove_var("DARKBOT_TEST_CAP");
         assert_eq!(parsed_or::<usize>("DARKBOT_TEST_CAP", 64), Ok(64));
         env::set_var("DARKBOT_TEST_CAP", "abc");
-        assert!(matches!(parsed_or::<usize>("DARKBOT_TEST_CAP", 64), Err(ConfigError::Invalid { .. })));
+        assert!(matches!(
+            parsed_or::<usize>("DARKBOT_TEST_CAP", 64),
+            Err(ConfigError::Invalid { .. })
+        ));
         env::set_var("DARKBOT_TEST_CAP", "128");
         assert_eq!(parsed_or::<usize>("DARKBOT_TEST_CAP", 64), Ok(128));
         env::remove_var("DARKBOT_TEST_CAP");

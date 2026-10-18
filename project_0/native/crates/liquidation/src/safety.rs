@@ -64,7 +64,17 @@ pub struct Safety {
 
 impl Safety {
     pub fn new(limits: Limits, allow: Allow, live_enabled: bool) -> Self {
-        Safety { limits, allow, live_enabled, halted: None, outstanding: 0, open_positions: 0, capital_in_use: 0, inventory_outstanding: 0, day: DayStats::default() }
+        Safety {
+            limits,
+            allow,
+            live_enabled,
+            halted: None,
+            outstanding: 0,
+            open_positions: 0,
+            capital_in_use: 0,
+            inventory_outstanding: 0,
+            day: DayStats::default(),
+        }
     }
 
     pub fn halt(&mut self, reason: HaltReason) {
@@ -80,11 +90,21 @@ impl Safety {
     fn roll_day(&mut self, now_unix_s: u64) {
         let idx = now_unix_s / 86_400;
         if idx != self.day.day_index {
-            self.day = DayStats { day_index: idx, ..Default::default() };
+            self.day = DayStats {
+                day_index: idx,
+                ..Default::default()
+            };
         }
     }
 
-    fn validate_limits(&self, exposure: u64, tip: u64, slippage_bps: u64, assets: &[solana_sdk::pubkey::Pubkey], execution_class: &'static str) -> Result<(), Deny> {
+    fn validate_limits(
+        &self,
+        exposure: u64,
+        tip: u64,
+        slippage_bps: u64,
+        assets: &[solana_sdk::pubkey::Pubkey],
+        execution_class: &'static str,
+    ) -> Result<(), Deny> {
         if let Some(r) = self.halted {
             return Err(Deny::Halted(r));
         }
@@ -130,12 +150,28 @@ impl Safety {
     /// Nicht-reservierende Prüfung für Candidate-Auswahl. Rollt nur die Tagesstatistik;
     /// Kapital/Outstanding bleiben unverändert. So kann P4A bei Safety-Verstoß auf eine
     /// kapitalärmere Funding-Klasse zurückfallen, statt die gesamte Opportunity zu verwerfen.
-    pub fn preview(&mut self, now_unix_s: u64, exposure: u64, tip: u64, slippage_bps: u64, assets: &[solana_sdk::pubkey::Pubkey], execution_class: &'static str) -> Result<(), Deny> {
+    pub fn preview(
+        &mut self,
+        now_unix_s: u64,
+        exposure: u64,
+        tip: u64,
+        slippage_bps: u64,
+        assets: &[solana_sdk::pubkey::Pubkey],
+        execution_class: &'static str,
+    ) -> Result<(), Deny> {
         self.roll_day(now_unix_s);
         self.validate_limits(exposure, tip, slippage_bps, assets, execution_class)
     }
 
-    pub fn check(&mut self, now_unix_s: u64, exposure: u64, tip: u64, slippage_bps: u64, assets: &[solana_sdk::pubkey::Pubkey], execution_class: &'static str) -> Result<(), Deny> {
+    pub fn check(
+        &mut self,
+        now_unix_s: u64,
+        exposure: u64,
+        tip: u64,
+        slippage_bps: u64,
+        assets: &[solana_sdk::pubkey::Pubkey],
+        execution_class: &'static str,
+    ) -> Result<(), Deny> {
         self.roll_day(now_unix_s);
         self.validate_limits(exposure, tip, slippage_bps, assets, execution_class)?;
         self.outstanding += 1;
@@ -150,7 +186,14 @@ impl Safety {
     /// `exposure_released`: freigegebenes Kapital; `inventory_delta`: gehaltenes Collateral (NO_SWAP) ±.
     /// [FIX-24] `realized_pnl: None` = UNKNOWN → Buchhaltung bleibt offen und HALT(UnknownEconomics):
     /// ein unbekannter Ausgang hält Reservierungen und darf das Tagesbudget nicht besser aussehen lassen.
-    pub fn record_outcome(&mut self, now_unix_s: u64, landed_success: bool, realized_pnl: Option<i128>, exposure_released: u64, inventory_delta: i128) {
+    pub fn record_outcome(
+        &mut self,
+        now_unix_s: u64,
+        landed_success: bool,
+        realized_pnl: Option<i128>,
+        exposure_released: u64,
+        inventory_delta: i128,
+    ) {
         self.roll_day(now_unix_s);
         // UNKNOWN cannot release capital/inventory or reduce outstanding count.
         // A later complete reconciliation may close it, but never clears HALT.
@@ -161,7 +204,8 @@ impl Safety {
         self.outstanding = self.outstanding.saturating_sub(1);
         self.open_positions = self.open_positions.saturating_sub(1);
         self.capital_in_use = self.capital_in_use.saturating_sub(exposure_released);
-        self.inventory_outstanding = (self.inventory_outstanding as i128 + inventory_delta).max(0) as u64;
+        self.inventory_outstanding =
+            (self.inventory_outstanding as i128 + inventory_delta).max(0) as u64;
         match realized_pnl {
             Some(p) => self.day.realized_pnl += p,
             None => self.halt(HaltReason::UnknownEconomics),
@@ -199,7 +243,17 @@ mod tests {
     use super::*;
 
     fn lim() -> Limits {
-        Limits { max_total_capital: 1_000, max_outstanding_inventory: 1_000, max_concurrent_positions: 5, max_exposure_per_attempt: 100, max_daily_loss: 50, max_failed_attempts_per_day: 2, max_tip: 10, max_slippage_bps: 100, max_outstanding_attempts: 1 }
+        Limits {
+            max_total_capital: 1_000,
+            max_outstanding_inventory: 1_000,
+            max_concurrent_positions: 5,
+            max_exposure_per_attempt: 100,
+            max_daily_loss: 50,
+            max_failed_attempts_per_day: 2,
+            max_tip: 10,
+            max_slippage_bps: 100,
+            max_outstanding_attempts: 1,
+        }
     }
     fn allow() -> Allow {
         let mut a = Allow::default();
@@ -213,17 +267,36 @@ mod tests {
         assert_eq!(s.check(0, 200, 1, 1, &[], "longtail"), Err(Deny::Exposure));
         assert_eq!(s.check(0, 50, 11, 1, &[], "longtail"), Err(Deny::Tip));
         assert_eq!(s.check(0, 50, 1, 101, &[], "longtail"), Err(Deny::Slippage));
-        assert_eq!(s.check(0, 50, 1, 1, &[], "race"), Err(Deny::ExecutionClassNotAllowed));
-        assert_eq!(s.check(0, 50, 1, 1, &[solana_sdk::pubkey::Pubkey::new_unique()], "longtail"), Err(Deny::AssetNotAllowed));
+        assert_eq!(
+            s.check(0, 50, 1, 1, &[], "race"),
+            Err(Deny::ExecutionClassNotAllowed)
+        );
+        assert_eq!(
+            s.check(
+                0,
+                50,
+                1,
+                1,
+                &[solana_sdk::pubkey::Pubkey::new_unique()],
+                "longtail"
+            ),
+            Err(Deny::AssetNotAllowed)
+        );
         assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Ok(()));
-        assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Err(Deny::Outstanding));
+        assert_eq!(
+            s.check(0, 50, 1, 1, &[], "longtail"),
+            Err(Deny::Outstanding)
+        );
         s.record_outcome(0, false, Some(-30), 50, 0);
         assert_eq!(s.check(0, 50, 1, 1, &[], "longtail"), Ok(()));
         s.release_without_outcome(50);
         assert_eq!(s.capital_in_use(), 0);
         s.check(0, 50, 1, 1, &[], "longtail").unwrap();
         s.record_outcome(0, false, Some(-30), 50, 0); // Tagesverlust 60 ≥ 50 → HALT
-        assert!(matches!(s.check(0, 50, 1, 1, &[], "longtail"), Err(Deny::Halted(_))));
+        assert!(matches!(
+            s.check(0, 50, 1, 1, &[], "longtail"),
+            Err(Deny::Halted(_))
+        ));
     }
 
     #[test]
@@ -253,7 +326,10 @@ mod tests {
     #[test]
     fn live_disabled_and_day_roll() {
         let mut s = Safety::new(lim(), allow(), false);
-        assert_eq!(s.check(0, 1, 1, 1, &[], "longtail"), Err(Deny::LiveDisabled));
+        assert_eq!(
+            s.check(0, 1, 1, 1, &[], "longtail"),
+            Err(Deny::LiveDisabled)
+        );
         let mut s = Safety::new(lim(), allow(), true);
         s.check(0, 1, 1, 1, &[], "longtail").unwrap();
         s.record_outcome(0, false, Some(-10), 1, 0);

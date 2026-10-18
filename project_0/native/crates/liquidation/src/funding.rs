@@ -89,7 +89,10 @@ pub fn is_feasible(c: FundingClass, ctx: &FundingContext) -> bool {
         FundingClass::JitShortfall => {
             ctx.funding_bank.is_some()
                 && ctx.liability_inventory < ctx.liability_needed
-                && ctx.funding_available_value >= ctx.liability_needed_value.saturating_sub(ctx.liability_inventory_value)
+                && ctx.funding_available_value
+                    >= ctx
+                        .liability_needed_value
+                        .saturating_sub(ctx.liability_inventory_value)
         }
         FundingClass::PreheldInventory => ctx.liability_inventory >= ctx.liability_needed,
     }
@@ -109,8 +112,12 @@ pub fn feasible_classes(ctx: &FundingContext) -> Vec<FundingClass> {
 pub fn capital_required(c: FundingClass, ctx: &FundingContext) -> u64 {
     match c {
         FundingClass::ZeroPrefundSameTx | FundingClass::FlashFunded => 0,
-        FundingClass::NoSwapInventory | FundingClass::PreheldInventory => ctx.liability_needed_value,
-        FundingClass::JitShortfall => ctx.liability_needed_value.saturating_sub(ctx.liability_inventory_value),
+        FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
+            ctx.liability_needed_value
+        }
+        FundingClass::JitShortfall => ctx
+            .liability_needed_value
+            .saturating_sub(ctx.liability_inventory_value),
     }
 }
 
@@ -130,7 +137,11 @@ mod tests {
             liability_inventory: inv,
             liability_needed_value: need,
             liability_inventory_value: inv,
-            funding_bank: if route { Some(Pubkey::new_unique()) } else { None },
+            funding_bank: if route {
+                Some(Pubkey::new_unique())
+            } else {
+                None
+            },
             funding_available_value: 1_000_000,
             zero_prefund_qualified: zp,
             route_available: route,
@@ -150,7 +161,10 @@ mod tests {
     fn jit_is_only_shortfall_fallback() {
         let c = feasible_classes(&ctx(30, 100, false, true));
         assert_eq!(c, vec![FundingClass::JitShortfall]);
-        assert_eq!(capital_required(FundingClass::JitShortfall, &ctx(30, 100, false, true)), 70);
+        assert_eq!(
+            capital_required(FundingClass::JitShortfall, &ctx(30, 100, false, true)),
+            70
+        );
     }
 
     #[test]
@@ -165,7 +179,10 @@ mod tests {
     fn no_route_no_inventory_means_no_candidate() {
         assert!(feasible_classes(&ctx(0, 100, false, false)).is_empty());
         assert!(!FundingClass::FlashFunded.valid_for_project0());
-        assert_eq!(capital_required(FundingClass::ZeroPrefundSameTx, &ctx(0, 100, true, true)), 0);
+        assert_eq!(
+            capital_required(FundingClass::ZeroPrefundSameTx, &ctx(0, 100, true, true)),
+            0
+        );
         assert_eq!(FundingClass::JitShortfall.tx_count(), 2);
     }
 }

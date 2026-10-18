@@ -11,8 +11,8 @@
 //!
 //! Status: UNTESTED / VERIFY (solana-sdk API-Namen).
 
-use solana_message::AddressLookupTableAccount; // [FIX-13]
 use solana_compute_budget_interface::ComputeBudgetInstruction; // [FIX-13]
+use solana_message::AddressLookupTableAccount; // [FIX-13]
 use solana_sdk::hash::Hash;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::message::{v0, VersionedMessage};
@@ -32,7 +32,11 @@ pub struct TxLimits {
 
 impl Default for TxLimits {
     fn default() -> Self {
-        TxLimits { max_locked_accounts: 64, max_bytes_v0: 1232, max_bytes_v1: 4096 }
+        TxLimits {
+            max_locked_accounts: 64,
+            max_bytes_v0: 1232,
+            max_bytes_v1: 4096,
+        }
     }
 }
 
@@ -56,7 +60,8 @@ pub struct Resources {
 impl Resources {
     /// v1-Priority-Fee ist ein Gesamtbetrag: rate × CU-Limit / 1e6 (Solana Foundation).
     pub fn priority_total_lamports(&self) -> u64 {
-        (self.priority_micro_lamports_per_cu as u128 * self.compute_unit_limit as u128).div_ceil(1_000_000) as u64
+        (self.priority_micro_lamports_per_cu as u128 * self.compute_unit_limit as u128)
+            .div_ceil(1_000_000) as u64
     }
 }
 
@@ -143,7 +148,10 @@ pub fn build(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<BuiltT
     let final_ixs = effective_instructions(plan);
     let locked = locked_account_count(&plan.payer, &final_ixs);
     if locked > limits.max_locked_accounts {
-        return Err(BuildError::TooManyAccounts { count: locked, max: limits.max_locked_accounts });
+        return Err(BuildError::TooManyAccounts {
+            count: locked,
+            max: limits.max_locked_accounts,
+        });
     }
     match plan.version {
         BuildVersion::Legacy => build_legacy(plan, blockhash, limits, locked),
@@ -154,9 +162,13 @@ pub fn build(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<BuiltT
 
 fn resource_ixs(r: &Resources) -> Vec<Instruction> {
     let mut ixs = Vec::with_capacity(3);
-    ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(r.compute_unit_limit));
+    ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(
+        r.compute_unit_limit,
+    ));
     if r.priority_micro_lamports_per_cu > 0 {
-        ixs.push(ComputeBudgetInstruction::set_compute_unit_price(r.priority_micro_lamports_per_cu));
+        ixs.push(ComputeBudgetInstruction::set_compute_unit_price(
+            r.priority_micro_lamports_per_cu,
+        ));
     }
     if let Some(sz) = r.loaded_accounts_data_size {
         ixs.push(ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(sz));
@@ -165,7 +177,12 @@ fn resource_ixs(r: &Resources) -> Vec<Instruction> {
 }
 
 /// Legacy: keine LUTs, 1232 Bytes. Für kleine TXs (Tagging, Tip, Cleanup).
-fn build_legacy(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, locked: usize) -> Result<BuiltTx, BuildError> {
+fn build_legacy(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+    locked: usize,
+) -> Result<BuiltTx, BuildError> {
     let mut ixs = resource_ixs(&plan.resources);
     ixs.extend(plan.instructions.iter().cloned());
     let msg = solana_sdk::message::Message::new_with_blockhash(&ixs, Some(&plan.payer), &blockhash);
@@ -175,12 +192,26 @@ fn build_legacy(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, locked: usize
     };
     let bytes = bincode_len(&tx)?;
     if bytes > limits.max_bytes_v0 {
-        return Err(BuildError::TooLarge { bytes, max: limits.max_bytes_v0 });
+        return Err(BuildError::TooLarge {
+            bytes,
+            max: limits.max_bytes_v0,
+        });
     }
-    Ok(BuiltTx { version: BuildVersion::Legacy, tx, serialized_len: bytes, locked_accounts: locked, blockhash })
+    Ok(BuiltTx {
+        version: BuildVersion::Legacy,
+        tx,
+        serialized_len: bytes,
+        locked_accounts: locked,
+        blockhash,
+    })
 }
 
-fn build_v0(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, locked: usize) -> Result<BuiltTx, BuildError> {
+fn build_v0(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+    locked: usize,
+) -> Result<BuiltTx, BuildError> {
     let mut ixs = resource_ixs(&plan.resources);
     ixs.extend(plan.instructions.iter().cloned());
 
@@ -192,9 +223,18 @@ fn build_v0(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, locked: usize) ->
     };
     let bytes = bincode_len(&tx)?;
     if bytes > limits.max_bytes_v0 {
-        return Err(BuildError::TooLarge { bytes, max: limits.max_bytes_v0 });
+        return Err(BuildError::TooLarge {
+            bytes,
+            max: limits.max_bytes_v0,
+        });
     }
-    Ok(BuiltTx { version: BuildVersion::V0, tx, serialized_len: bytes, locked_accounts: locked, blockhash })
+    Ok(BuiltTx {
+        version: BuildVersion::V0,
+        tx,
+        serialized_len: bytes,
+        locked_accounts: locked,
+        blockhash,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,37 +247,61 @@ pub struct V1Measure {
 }
 
 #[cfg(not(feature = "txv1"))]
-pub fn measure_v1(_plan: &TxPlan, _blockhash: Hash, _limits: &TxLimits) -> Result<V1Measure, BuildError> {
+pub fn measure_v1(
+    _plan: &TxPlan,
+    _blockhash: Hash,
+    _limits: &TxLimits,
+) -> Result<V1Measure, BuildError> {
     Err(BuildError::V1Unavailable)
 }
 
 #[cfg(feature = "txv1")]
-fn compile_v1_message(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<solana_message_v1::v1::Message, BuildError> {
+fn compile_v1_message(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+) -> Result<solana_message_v1::v1::Message, BuildError> {
     use solana_instruction_v1::{AccountMeta as V1AccountMeta, Instruction as V1Instruction};
     use solana_message_v1::v1;
     use solana_pubkey_v1::Pubkey as V1Pubkey;
 
     let locked = locked_account_count(&plan.payer, &plan.instructions);
     if locked > limits.max_locked_accounts {
-        return Err(BuildError::TooManyAccounts { count: locked, max: limits.max_locked_accounts });
+        return Err(BuildError::TooManyAccounts {
+            count: locked,
+            max: limits.max_locked_accounts,
+        });
     }
     if plan.instructions.len() > 64 {
-        return Err(BuildError::Compile(format!("too many v1 instructions: {} > 64", plan.instructions.len())));
+        return Err(BuildError::Compile(format!(
+            "too many v1 instructions: {} > 64",
+            plan.instructions.len()
+        )));
     }
     let loaded = plan.resources.loaded_accounts_data_size.ok_or_else(|| {
-        BuildError::Compile("v1 requires explicit loaded_accounts_data_size; implicit 0 is unsafe".into())
+        BuildError::Compile(
+            "v1 requires explicit loaded_accounts_data_size; implicit 0 is unsafe".into(),
+        )
     })?;
 
     let payer = V1Pubkey::new_from_array(plan.payer.to_bytes());
-    let ixs: Vec<V1Instruction> = plan.instructions.iter().map(|ix| V1Instruction {
-        program_id: V1Pubkey::new_from_array(ix.program_id.to_bytes()),
-        accounts: ix.accounts.iter().map(|m| V1AccountMeta {
-            pubkey: V1Pubkey::new_from_array(m.pubkey.to_bytes()),
-            is_signer: m.is_signer,
-            is_writable: m.is_writable,
-        }).collect(),
-        data: ix.data.clone(),
-    }).collect();
+    let ixs: Vec<V1Instruction> = plan
+        .instructions
+        .iter()
+        .map(|ix| V1Instruction {
+            program_id: V1Pubkey::new_from_array(ix.program_id.to_bytes()),
+            accounts: ix
+                .accounts
+                .iter()
+                .map(|m| V1AccountMeta {
+                    pubkey: V1Pubkey::new_from_array(m.pubkey.to_bytes()),
+                    is_signer: m.is_signer,
+                    is_writable: m.is_writable,
+                })
+                .collect(),
+            data: ix.data.clone(),
+        })
+        .collect();
     let hash = solana_hash_v1::Hash::new_from_array(blockhash.to_bytes());
     let cfg = v1::TransactionConfig::empty()
         .with_compute_unit_limit(plan.resources.compute_unit_limit)
@@ -248,13 +312,20 @@ fn compile_v1_message(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Resu
     // Official serialize includes the 0x81 prefix; Message::size() alone does not.
     let bytes = msg.serialize().len() + usize::from(msg.header.num_required_signatures) * 64;
     if bytes > limits.max_bytes_v1 {
-        return Err(BuildError::TooLarge { bytes, max: limits.max_bytes_v1 });
+        return Err(BuildError::TooLarge {
+            bytes,
+            max: limits.max_bytes_v1,
+        });
     }
     Ok(msg)
 }
 
 #[cfg(feature = "txv1")]
-pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V1Measure, BuildError> {
+pub fn measure_v1(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+) -> Result<V1Measure, BuildError> {
     let msg = compile_v1_message(plan, blockhash, limits)?;
     let message_bytes = msg.serialize().len();
     let signatures = usize::from(msg.header.num_required_signatures);
@@ -272,16 +343,27 @@ pub fn measure_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits) -> Result<V
 /// Canonical SIMD-0385 wire, currently used only by the explicit no-send probe.
 /// Signatures follow the version-prefixed message, with no count prefix.
 #[cfg(feature = "txv1")]
-pub fn signed_v1_wire(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, signers: &[&Keypair]) -> Result<Vec<u8>, BuildError> {
+pub fn signed_v1_wire(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+    signers: &[&Keypair],
+) -> Result<Vec<u8>, BuildError> {
     let msg = compile_v1_message(plan, blockhash, limits)?;
     let required = usize::from(msg.header.num_required_signatures);
     if signers.len() != required {
-        return Err(BuildError::Sign(format!("v1 expects {} signers, got {}", required, signers.len())));
+        return Err(BuildError::Sign(format!(
+            "v1 expects {} signers, got {}",
+            required,
+            signers.len()
+        )));
     }
     let message = msg.serialize();
     let mut wire = message.clone();
     for key in msg.account_keys.iter().take(required) {
-        let signer = signers.iter().find(|s| s.pubkey().to_bytes() == key.to_bytes())
+        let signer = signers
+            .iter()
+            .find(|s| s.pubkey().to_bytes() == key.to_bytes())
             .ok_or_else(|| BuildError::Sign(format!("missing v1 signer {key}")))?;
         let signature = signer.sign_message(&message);
         wire.extend_from_slice(signature.as_ref());
@@ -290,12 +372,22 @@ pub fn signed_v1_wire(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, signers
 }
 
 #[cfg(not(feature = "txv1"))]
-fn build_v1(_plan: &TxPlan, _blockhash: Hash, _limits: &TxLimits, _locked: usize) -> Result<BuiltTx, BuildError> {
+fn build_v1(
+    _plan: &TxPlan,
+    _blockhash: Hash,
+    _limits: &TxLimits,
+    _locked: usize,
+) -> Result<BuiltTx, BuildError> {
     Err(BuildError::V1Unavailable)
 }
 
 #[cfg(feature = "txv1")]
-fn build_v1(plan: &TxPlan, blockhash: Hash, limits: &TxLimits, _locked: usize) -> Result<BuiltTx, BuildError> {
+fn build_v1(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+    _locked: usize,
+) -> Result<BuiltTx, BuildError> {
     // Capability/size is compiled with the official modular v1 message crates above.
     // The current `BuiltTx` carries SDK-3.x `VersionedTransaction`, so signing/submission
     // is intentionally not faked through incompatible types. A thin wire adapter can be
@@ -315,15 +407,18 @@ fn bincode_len(tx: &VersionedTransaction) -> Result<usize, BuildError> {
 /// Signiert in-place. Signer-Reihenfolge = Reihenfolge der Static-Keys.
 pub fn sign(built: &mut BuiltTx, signers: &[&Keypair]) -> Result<(), BuildError> {
     let msg = built.tx.message.clone();
-    let tx = VersionedTransaction::try_new(msg, signers).map_err(|e| BuildError::Sign(e.to_string()))?;
+    let tx =
+        VersionedTransaction::try_new(msg, signers).map_err(|e| BuildError::Sign(e.to_string()))?;
     built.tx = tx;
     Ok(())
 }
 
 /// Keypair aus Solana-CLI-JSON (Array von 64 Bytes) laden. Kein Key im Code, keine Env-Defaults.
 pub fn load_keypair_json(path: &str) -> Result<Keypair, BuildError> {
-    let raw = std::fs::read_to_string(path).map_err(|e| BuildError::Sign(format!("read {}: {}", path, e)))?;
-    let bytes: Vec<u8> = serde_json::from_str(&raw).map_err(|e| BuildError::Sign(format!("parse {}: {}", path, e)))?;
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| BuildError::Sign(format!("read {}: {}", path, e)))?;
+    let bytes: Vec<u8> = serde_json::from_str(&raw)
+        .map_err(|e| BuildError::Sign(format!("parse {}: {}", path, e)))?;
     // [FIX-13] SDK 3.x: `Keypair::try_from(&[u8])` (from_bytes entfernt).
     Keypair::try_from(&bytes[..]).map_err(|e| BuildError::Sign(e.to_string()))
 }
@@ -341,10 +436,21 @@ mod tests {
     #[test]
     fn v1_wire_signature_and_exact_size_boundary() {
         let payer = Keypair::new();
-        let plan = TxPlan { version: BuildVersion::V1, payer: payer.pubkey(),
-            instructions: vec![solana_system_interface::instruction::transfer(&payer.pubkey(), &payer.pubkey(), 0)],
-            lookup_tables: vec![], resources: Resources { compute_unit_limit: 200_000,
-                priority_micro_lamports_per_cu: 0, loaded_accounts_data_size: Some(64 * 1024) } };
+        let plan = TxPlan {
+            version: BuildVersion::V1,
+            payer: payer.pubkey(),
+            instructions: vec![solana_system_interface::instruction::transfer(
+                &payer.pubkey(),
+                &payer.pubkey(),
+                0,
+            )],
+            lookup_tables: vec![],
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: Some(64 * 1024),
+            },
+        };
         let hash = Hash::new_unique();
         let wire = signed_v1_wire(&plan, hash, &TxLimits::default(), &[&payer]).unwrap();
         assert_eq!(wire[0], 0x81);
@@ -353,12 +459,19 @@ mod tests {
         assert_eq!(wire.len(), measurement.message_bytes + 64);
         let signature = Signature::try_from(&wire[measurement.message_bytes..]).unwrap();
         assert!(signature.verify(payer.pubkey().as_ref(), &wire[..measurement.message_bytes]));
-        let mut tampered = wire[..measurement.message_bytes].to_vec(); tampered[0] = 0x80;
+        let mut tampered = wire[..measurement.message_bytes].to_vec();
+        tampered[0] = 0x80;
         assert!(!signature.verify(payer.pubkey().as_ref(), &tampered));
-        let mut limits = TxLimits { max_bytes_v1: wire.len(), ..Default::default() };
+        let mut limits = TxLimits {
+            max_bytes_v1: wire.len(),
+            ..Default::default()
+        };
         assert!(signed_v1_wire(&plan, hash, &limits, &[&payer]).is_ok());
         limits.max_bytes_v1 -= 1;
-        assert!(matches!(signed_v1_wire(&plan, hash, &limits, &[&payer]), Err(BuildError::TooLarge { .. })));
+        assert!(matches!(
+            signed_v1_wire(&plan, hash, &limits, &[&payer]),
+            Err(BuildError::TooLarge { .. })
+        ));
         assert!(signed_v1_wire(&plan, hash, &TxLimits::default(), &[&Keypair::new()]).is_err());
     }
 
@@ -368,7 +481,11 @@ mod tests {
         let prog = Pubkey::new_unique();
         let a = Pubkey::new_unique();
         let ixs = vec![
-            Instruction::new_with_bytes(prog, &[], vec![AccountMeta::new(a, false), AccountMeta::new(payer, true)]),
+            Instruction::new_with_bytes(
+                prog,
+                &[],
+                vec![AccountMeta::new(a, false), AccountMeta::new(payer, true)],
+            ),
             Instruction::new_with_bytes(prog, &[], vec![AccountMeta::new_readonly(a, false)]),
         ];
         assert_eq!(locked_account_count(&payer, &ixs), 3);
@@ -376,22 +493,36 @@ mod tests {
 
     #[test]
     fn priority_fee_uses_requested_limit_not_simulated_consumption() {
-        let resources = Resources { compute_unit_limit:1_400_000,
-            priority_micro_lamports_per_cu:2_000, loaded_accounts_data_size:None };
+        let resources = Resources {
+            compute_unit_limit: 1_400_000,
+            priority_micro_lamports_per_cu: 2_000,
+            loaded_accounts_data_size: None,
+        };
         assert_eq!(resources.priority_total_lamports(), 2_800);
         let simulated_consumption = 600u64;
-        assert_ne!(resources.priority_total_lamports(), simulated_consumption * 2_000 / 1_000_000);
+        assert_ne!(
+            resources.priority_total_lamports(),
+            simulated_consumption * 2_000 / 1_000_000
+        );
     }
 
     #[test]
     fn v1_priority_fee_is_total_lamports() {
-        let r = Resources { compute_unit_limit: 200_000, priority_micro_lamports_per_cu: 5_000, loaded_accounts_data_size: None };
+        let r = Resources {
+            compute_unit_limit: 200_000,
+            priority_micro_lamports_per_cu: 5_000,
+            loaded_accounts_data_size: None,
+        };
         assert_eq!(r.priority_total_lamports(), 1_000);
     }
 
     #[test]
     fn v1_priority_fee_rounds_up_to_total_lamports() {
-        let r = Resources { compute_unit_limit: 1, priority_micro_lamports_per_cu: 1, loaded_accounts_data_size: Some(32 * 1024) };
+        let r = Resources {
+            compute_unit_limit: 1,
+            priority_micro_lamports_per_cu: 1,
+            loaded_accounts_data_size: Some(32 * 1024),
+        };
         assert_eq!(r.priority_total_lamports(), 1);
     }
 
@@ -400,9 +531,17 @@ mod tests {
         let plan = TxPlan {
             version: BuildVersion::V1,
             payer: Pubkey::new_unique(),
-            instructions: vec![Instruction::new_with_bytes(Pubkey::new_unique(), &[], vec![])],
+            instructions: vec![Instruction::new_with_bytes(
+                Pubkey::new_unique(),
+                &[],
+                vec![],
+            )],
             lookup_tables: vec![],
-            resources: Resources { compute_unit_limit: 200_000, priority_micro_lamports_per_cu: 5_000, loaded_accounts_data_size: Some(32 * 1024) },
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 5_000,
+                loaded_accounts_data_size: Some(32 * 1024),
+            },
         };
         assert_eq!(effective_instruction_count(&plan), 1);
     }
@@ -411,20 +550,29 @@ mod tests {
     fn too_many_accounts_is_rejected_before_compile() {
         let payer = Pubkey::new_unique();
         let prog = Pubkey::new_unique();
-        let metas: Vec<AccountMeta> = (0..70).map(|_| AccountMeta::new(Pubkey::new_unique(), false)).collect();
+        let metas: Vec<AccountMeta> = (0..70)
+            .map(|_| AccountMeta::new(Pubkey::new_unique(), false))
+            .collect();
         let plan = TxPlan {
             version: BuildVersion::V0,
             payer,
             instructions: vec![Instruction::new_with_bytes(prog, &[], metas)],
             lookup_tables: vec![],
-            resources: Resources { compute_unit_limit: 1, priority_micro_lamports_per_cu: 0, loaded_accounts_data_size: None },
+            resources: Resources {
+                compute_unit_limit: 1,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: None,
+            },
         };
         match build(&plan, Hash::default(), &TxLimits::default()) {
             Err(BuildError::TooManyAccounts { count, max }) => {
                 assert_eq!(max, 64);
                 assert!(count > 64);
             }
-            other => panic!("expected TooManyAccounts, got {:?}", other.map(|b| b.serialized_len)),
+            other => panic!(
+                "expected TooManyAccounts, got {:?}",
+                other.map(|b| b.serialized_len)
+            ),
         }
     }
 
@@ -437,9 +585,16 @@ mod tests {
                 payer: Pubkey::new_unique(),
                 instructions: vec![],
                 lookup_tables: vec![],
-                resources: Resources { compute_unit_limit: 1, priority_micro_lamports_per_cu: 0, loaded_accounts_data_size: Some(0) },
+                resources: Resources {
+                    compute_unit_limit: 1,
+                    priority_micro_lamports_per_cu: 0,
+                    loaded_accounts_data_size: Some(0),
+                },
             };
-            assert!(matches!(build(&plan, Hash::default(), &TxLimits::default()), Err(BuildError::V1Unavailable)));
+            assert!(matches!(
+                build(&plan, Hash::default(), &TxLimits::default()),
+                Err(BuildError::V1Unavailable)
+            ));
         }
     }
 

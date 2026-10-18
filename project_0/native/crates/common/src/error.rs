@@ -52,7 +52,10 @@ pub struct FailClosed {
 
 impl FailClosed {
     pub fn new(reason: HaltReason, detail: impl Into<String>) -> Self {
-        FailClosed { reason, detail: detail.into() }
+        FailClosed {
+            reason,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -71,6 +74,9 @@ mod tests {
     #[test]
     fn display_carries_reason_and_detail() {
         let e = FailClosed::new(HaltReason::UnknownLayout, "bank size 3904 not in manifest");
-        assert_eq!(e.to_string(), "HALT[UNKNOWN_LAYOUT]: bank size 3904 not in manifest");
+        assert_eq!(
+            e.to_string(),
+            "HALT[UNKNOWN_LAYOUT]: bank size 3904 not in manifest"
+        );
     }
 }

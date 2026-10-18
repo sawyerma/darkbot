@@ -85,7 +85,10 @@ mod tests {
         };
         let s = CaptureSnapshot::from_existing_sample("test-only", true, &stats, Some(storage));
         assert_eq!(s.last_observed_slot, Some(321));
-        assert_eq!((s.gap_count, s.reconnect_count, s.liquidation_events), (2, 3, 4));
+        assert_eq!(
+            (s.gap_count, s.reconnect_count, s.liquidation_events),
+            (2, 3, 4)
+        );
         assert_eq!(s.storage.unwrap().lag_frames, 7);
     }
 
@@ -93,7 +96,9 @@ mod tests {
     fn backpressure_and_disconnect_are_fail_open_for_observation() {
         let (tx, rx) = sync_channel(1);
         let tap = ReporterTap::new(tx);
-        let make = || CaptureSnapshot::from_existing_sample("test-only", false, &MarketStats::default(), None);
+        let make = || {
+            CaptureSnapshot::from_existing_sample("test-only", false, &MarketStats::default(), None)
+        };
         assert_eq!(tap.offer(make()), OfferResult::Accepted);
         assert_eq!(tap.offer(make()), OfferResult::DroppedBackpressure);
         drop(rx);

@@ -102,13 +102,18 @@ pub struct TargetBackoff {
 
 impl TargetBackoff {
     pub fn allowed(&self, account: &Pubkey, now: u64) -> bool {
-        self.targets.get(account).is_none_or(|t| now >= t.next_allowed)
+        self.targets
+            .get(account)
+            .is_none_or(|t| now >= t.next_allowed)
     }
     /// Fehlschlag: 2^n × base, gedeckelt. Rückgabe `false`, wenn das Ziel nach `max_failures` fallengelassen wird.
     pub fn record_failure(&mut self, account: Pubkey, now: u64, policy: &ExecPolicy) -> bool {
         let t = self.targets.entry(account).or_default();
         t.failures += 1;
-        let delay = policy.backoff_base_s.saturating_mul(1u64 << (t.failures.min(16) - 1)).min(policy.backoff_max_s);
+        let delay = policy
+            .backoff_base_s
+            .saturating_mul(1u64 << (t.failures.min(16) - 1))
+            .min(policy.backoff_max_s);
         t.next_allowed = now + delay;
         t.failures < policy.max_failures_before_drop
     }
@@ -159,7 +164,13 @@ mod tests {
     use super::*;
 
     fn pol() -> ExecPolicy {
-        ExecPolicy { quarantine_s: 600, backoff_base_s: 5, backoff_max_s: 300, max_failures_before_drop: 4, allow_sequential_fallback_single_tx_only: true }
+        ExecPolicy {
+            quarantine_s: 600,
+            backoff_base_s: 5,
+            backoff_max_s: 300,
+            max_failures_before_drop: 4,
+            allow_sequential_fallback_single_tx_only: true,
+        }
     }
 
     #[test]
@@ -176,12 +187,12 @@ mod tests {
         let mut b = TargetBackoff::default();
         let a = Pubkey::new_unique();
         assert!(b.allowed(&a, 0));
-        assert!(b.record_failure(a, 0, &pol()));  // 5 s
+        assert!(b.record_failure(a, 0, &pol())); // 5 s
         assert!(!b.allowed(&a, 4));
         assert!(b.allowed(&a, 5));
-        assert!(b.record_failure(a, 5, &pol()));  // 10 s
+        assert!(b.record_failure(a, 5, &pol())); // 10 s
         assert!(!b.allowed(&a, 14));
-        assert!(b.record_failure(a, 20, &pol()));  // 20 s
+        assert!(b.record_failure(a, 20, &pol())); // 20 s
         assert!(!b.record_failure(a, 40, &pol()), "4. Fehler → fallenlassen");
         b.record_success(&a);
         assert!(b.allowed(&a, 0));
@@ -189,12 +200,33 @@ mod tests {
 
     #[test]
     fn freshness_route_fee() {
-        let f = Freshness { max_opportunity_age_ns: 1_000_000_000, execution_deadline_ns: 1_000_000_000 };
+        let f = Freshness {
+            max_opportunity_age_ns: 1_000_000_000,
+            execution_deadline_ns: 1_000_000_000,
+        };
         assert!(!f.is_stale(0, 500_000_000));
         assert!(f.is_stale(0, 1_500_000_000));
-        let q = [RouteQuote { provider: "jup", out_amount: 1000, route_cost: 50, extra_accounts: 20, extra_bytes: 400 },
-                 RouteQuote { provider: "titan", out_amount: 990, route_cost: 10, extra_accounts: 12, extra_bytes: 300 }];
-        assert_eq!(select_route(&q, 900).unwrap().provider, "titan", "Netto nach Kosten entscheidet");
+        let q = [
+            RouteQuote {
+                provider: "jup",
+                out_amount: 1000,
+                route_cost: 50,
+                extra_accounts: 20,
+                extra_bytes: 400,
+            },
+            RouteQuote {
+                provider: "titan",
+                out_amount: 990,
+                route_cost: 10,
+                extra_accounts: 12,
+                extra_bytes: 300,
+            },
+        ];
+        assert_eq!(
+            select_route(&q, 900).unwrap().provider,
+            "titan",
+            "Netto nach Kosten entscheidet"
+        );
         assert!(select_route(&q, 2000).is_none());
         let mut s = vec![5, 1, 9, 3, 7];
         assert_eq!(priority_fee_percentile(&mut s, 0.5, 100), Some(5));
@@ -204,7 +236,9 @@ mod tests {
 
     #[test]
     fn gates() {
-        assert!(simulate_gate(SimOutcome::Ok { units_consumed: Some(1) }));
+        assert!(simulate_gate(SimOutcome::Ok {
+            units_consumed: Some(1)
+        }));
         assert!(!simulate_gate(SimOutcome::Unavailable));
         assert!(needs_chain_confirmation(BundleView::Unknown, 3, 3));
         assert!(!needs_chain_confirmation(BundleView::Landed, 0, 3));

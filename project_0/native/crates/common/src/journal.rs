@@ -68,7 +68,10 @@ impl MemJournal {
     }
 
     pub fn replay(&self) -> MemReplay<'_> {
-        MemReplay { records: &self.records, pos: 0 }
+        MemReplay {
+            records: &self.records,
+            pos: 0,
+        }
     }
 }
 
@@ -76,7 +79,10 @@ impl Journal for MemJournal {
     fn append(&mut self, record: Record) -> Result<(), JournalError> {
         let expected = self.next_seq();
         if record.seq != expected {
-            return Err(JournalError::SeqGap { expected, got: record.seq });
+            return Err(JournalError::SeqGap {
+                expected,
+                got: record.seq,
+            });
         }
         self.records.push(record);
         Ok(())
@@ -107,7 +113,13 @@ mod tests {
     use super::*;
 
     fn rec(seq: u64) -> Record {
-        Record { seq, t_rx_ns: seq * 10, source: 1, kind: 1, payload: vec![seq as u8] }
+        Record {
+            seq,
+            t_rx_ns: seq * 10,
+            source: 1,
+            kind: 1,
+            payload: vec![seq as u8],
+        }
     }
 
     #[test]
@@ -127,7 +139,10 @@ mod tests {
         j.append(rec(0)).unwrap();
         assert_eq!(
             j.append(rec(2)),
-            Err(JournalError::SeqGap { expected: 1, got: 2 })
+            Err(JournalError::SeqGap {
+                expected: 1,
+                got: 2
+            })
         );
         assert_eq!(j.len(), 1, "fehlerhafter Append darf nichts schreiben");
     }

@@ -51,7 +51,9 @@ pub enum RecoveryOutcome {
     /// Owner stopped or measurement aborted; never promotes a partial recovery.
     Cancelled,
     /// Nach allen Versuchen nicht sauber; State bleibt HALTED.
-    Exhausted { attempts: u32 },
+    Exhausted {
+        attempts: u32,
+    },
 }
 
 // A root-only progress watchdog. Time values are elapsed from a single Instant,
@@ -70,7 +72,10 @@ struct RootProgressWatchdog {
 
 impl RootProgressWatchdog {
     fn new(initial_root: Option<u64>) -> Self {
-        Self { last_root: initial_root, last_progress_elapsed: Duration::ZERO }
+        Self {
+            last_root: initial_root,
+            last_progress_elapsed: Duration::ZERO,
+        }
     }
 
     fn observe_root(&mut self, root: Option<u64>, elapsed: Duration) {
@@ -90,8 +95,12 @@ impl RootProgressWatchdog {
     ) -> Option<&'static str> {
         match adaptive {
             Some(limits) if elapsed >= limits.hard => Some("hard"),
-            Some(limits) if elapsed >= soft
-                && elapsed.saturating_sub(self.last_progress_elapsed) >= limits.stall => Some("stall"),
+            Some(limits)
+                if elapsed >= soft
+                    && elapsed.saturating_sub(self.last_progress_elapsed) >= limits.stall =>
+            {
+                Some("stall")
+            }
             Some(_) => None,
             None if elapsed >= soft => Some("fixed"),
             None => None,
@@ -163,36 +172,65 @@ impl RecoveryDriver {
 
     /// Verarbeitet ein Ingress-Event und startet bei Gap/Reconnect/Fatal die Recovery.
     /// Gibt `Some(outcome)` zurück, wenn eine Recovery gelaufen ist.
-    pub fn on_event(&mut self, st: &mut StateCore, ev: IngressEvent, fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>) -> Option<RecoveryOutcome> {
+    pub fn on_event(
+        &mut self,
+        st: &mut StateCore,
+        ev: IngressEvent,
+        fetch: &mut SnapshotFn<'_>,
+        drain: &mut DrainFn<'_>,
+    ) -> Option<RecoveryOutcome> {
         self.on_event_cancellable(st, ev, fetch, drain, &|| false)
     }
 
-    pub fn on_event_cancellable(&mut self, st: &mut StateCore, ev: IngressEvent,
-        fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>, cancelled: &dyn Fn() -> bool,
+    pub fn on_event_cancellable(
+        &mut self,
+        st: &mut StateCore,
+        ev: IngressEvent,
+        fetch: &mut SnapshotFn<'_>,
+        drain: &mut DrainFn<'_>,
+        cancelled: &dyn Fn() -> bool,
     ) -> Option<RecoveryOutcome> {
         let trigger = matches!(ev, IngressEvent::Reconnected { .. });
         st.on_event(ev);
-        if trigger { Some(self.recover_cancellable(st, fetch, drain, cancelled)) } else { None }
+        if trigger {
+            Some(self.recover_cancellable(st, fetch, drain, cancelled))
+        } else {
+            None
+        }
     }
 
     /// Bootstrap und Recovery sind derselbe Pfad.
-    pub fn recover(&mut self, st: &mut StateCore, fetch: &mut SnapshotFn<'_>, drain: &mut DrainFn<'_>) -> RecoveryOutcome {
+    pub fn recover(
+        &mut self,
+        st: &mut StateCore,
+        fetch: &mut SnapshotFn<'_>,
+        drain: &mut DrainFn<'_>,
+    ) -> RecoveryOutcome {
         self.recover_cancellable(st, fetch, drain, &|| false)
     }
 
-    pub fn recover_cancellable(&mut self, st: &mut StateCore, fetch: &mut SnapshotFn<'_>,
-        drain: &mut DrainFn<'_>, cancelled: &dyn Fn() -> bool,
+    pub fn recover_cancellable(
+        &mut self,
+        st: &mut StateCore,
+        fetch: &mut SnapshotFn<'_>,
+        drain: &mut DrainFn<'_>,
+        cancelled: &dyn Fn() -> bool,
     ) -> RecoveryOutcome {
         macro_rules! check_cancelled {
-            () => { if cancelled() {
-                st.halt(HaltReason::FeedGap);
-                return RecoveryOutcome::Cancelled;
-            } };
+            () => {
+                if cancelled() {
+                    st.halt(HaltReason::FeedGap);
+                    return RecoveryOutcome::Cancelled;
+                }
+            };
         }
         'attempts: for attempt in 1..=self.max_attempts {
             check_cancelled!();
             self.attempts_total += 1;
-            self.note(format!("[recovery] attempt={}/{} snapshot=A start", attempt, self.max_attempts));
+            self.note(format!(
+                "[recovery] attempt={}/{} snapshot=A start",
+                attempt, self.max_attempts
+            ));
             let a = match fetch() {
                 Ok(s) => s,
                 Err(e) => {
@@ -222,7 +260,10 @@ impl RecoveryDriver {
             check_cancelled!();
             st.install_snapshot(a.slot, a.accounts);
             drain(st); // Deltas, die während Fetch A ankamen
-            self.note(format!("[recovery] attempt={}/{} snapshot=B start", attempt, self.max_attempts));
+            self.note(format!(
+                "[recovery] attempt={}/{} snapshot=B start",
+                attempt, self.max_attempts
+            ));
             let b = match fetch() {
                 Ok(s) => s,
                 Err(e) => {
@@ -274,7 +315,8 @@ impl RecoveryDriver {
                     let elapsed = started.elapsed();
                     let root = st.root();
                     progress.observe_root(root, elapsed);
-                    let reason = progress.timeout_reason(elapsed, timeout, self.root_progress_limits);
+                    let reason =
+                        progress.timeout_reason(elapsed, timeout, self.root_progress_limits);
                     // The hard limit takes precedence even if a blocked drain returned
                     // with a new root. Never promote an expired recovery attempt.
                     if reason == Some("hard") {
@@ -308,7 +350,10 @@ impl RecoveryDriver {
                         self.reconcile_failures += 1;
                         continue 'attempts;
                     }
-                    if self.root_progress_limits.is_some() && elapsed >= timeout && !extension_logged {
+                    if self.root_progress_limits.is_some()
+                        && elapsed >= timeout
+                        && !extension_logged
+                    {
                         extension_logged = true;
                         self.note(format!(
                             "[recovery] attempt={}/{} root_catchup extending target={} current={:?} elapsed_ms={}",
@@ -324,9 +369,7 @@ impl RecoveryDriver {
             if rep.is_clean() {
                 self.note(format!(
                     "[recovery] attempt={}/{} reconcile=clean snapshot_slot={}",
-                    attempt,
-                    self.max_attempts,
-                    b.slot
+                    attempt, self.max_attempts, b.slot
                 ));
                 if st.confirm_ready().is_tradable() {
                     return RecoveryOutcome::Ready;
@@ -334,9 +377,7 @@ impl RecoveryDriver {
             } else {
                 self.note(format!(
                     "[recovery] attempt={}/{} reconcile=dirty report={:?}",
-                    attempt,
-                    self.max_attempts,
-                    rep
+                    attempt, self.max_attempts, rep
                 ));
                 self.reconcile_failures += 1;
             }
@@ -345,7 +386,9 @@ impl RecoveryDriver {
             let _ = attempt;
         }
         debug_assert!(!st.run_state().is_tradable());
-        RecoveryOutcome::Exhausted { attempts: self.max_attempts }
+        RecoveryOutcome::Exhausted {
+            attempts: self.max_attempts,
+        }
     }
 }
 
@@ -360,7 +403,16 @@ mod tests {
     use solana_sdk::pubkey::Pubkey;
 
     fn upd(pk: Pubkey, slot: u64, data: u8) -> AccountUpdate {
-        AccountUpdate { pubkey: pk, owner: Pubkey::new_from_array([0xA5; 32]), lamports: 1, data: vec![data], slot, write_version: None, source: SourceKind::Snapshot, t_rx_ns: 0 } // [FIX-57] stable owner across A/B
+        AccountUpdate {
+            pubkey: pk,
+            owner: Pubkey::new_from_array([0xA5; 32]),
+            lamports: 1,
+            data: vec![data],
+            slot,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        } // [FIX-57] stable owner across A/B
     }
 
     #[test]
@@ -371,19 +423,47 @@ mod tests {
         let mut calls = 0;
         let mut fetch = move || {
             calls += 1;
-            Ok(SnapshotData { slot: 100 + calls, accounts: vec![upd(pk, 100 + calls, 7)], missing_required: vec![] })
+            Ok(SnapshotData {
+                slot: 100 + calls,
+                accounts: vec![upd(pk, 100 + calls, 7)],
+                missing_required: vec![],
+            })
         };
         let mut drained = 0;
-        let mut drain = |_st: &mut StateCore| { drained += 1; };
+        let mut drain = |_st: &mut StateCore| {
+            drained += 1;
+        };
         // Bootstrap
-        assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Ready);
+        assert_eq!(
+            drv.recover(&mut st, &mut fetch, &mut drain),
+            RecoveryOutcome::Ready
+        );
         assert!(st.run_state().is_tradable());
         // Gap hält nur an — keine Recovery (Stream ist unten)
-        let out = drv.on_event(&mut st, IngressEvent::Gap { source: SourceKind::WsRpcControl, from_slot: Some(101), to_slot: None, t_rx_ns: 0 }, &mut fetch, &mut drain);
+        let out = drv.on_event(
+            &mut st,
+            IngressEvent::Gap {
+                source: SourceKind::WsRpcControl,
+                from_slot: Some(101),
+                to_slot: None,
+                t_rx_ns: 0,
+            },
+            &mut fetch,
+            &mut drain,
+        );
         assert_eq!(out, None);
         assert!(!st.run_state().is_tradable());
         // Reconnected → genau eine Recovery
-        let out = drv.on_event(&mut st, IngressEvent::Reconnected { source: SourceKind::WsRpcControl, attempt: 1, t_rx_ns: 0 }, &mut fetch, &mut drain);
+        let out = drv.on_event(
+            &mut st,
+            IngressEvent::Reconnected {
+                source: SourceKind::WsRpcControl,
+                attempt: 1,
+                t_rx_ns: 0,
+            },
+            &mut fetch,
+            &mut drain,
+        );
         assert_eq!(out, Some(RecoveryOutcome::Ready));
         assert!(st.run_state().is_tradable());
         assert_eq!(drv.attempts_total, 2);
@@ -396,9 +476,18 @@ mod tests {
         let pk = Pubkey::new_unique();
         let mut st = StateCore::new(10);
         let mut drv = RecoveryDriver::new(1);
-        let mut fetch = move || Ok(SnapshotData { slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: vec![(Pubkey::new_unique(), 10)] });
+        let mut fetch = move || {
+            Ok(SnapshotData {
+                slot: 10,
+                accounts: vec![upd(pk, 10, 1)],
+                missing_required: vec![(Pubkey::new_unique(), 10)],
+            })
+        };
         let mut drain = |_st: &mut StateCore| {};
-        assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Exhausted { attempts: 1 });
+        assert_eq!(
+            drv.recover(&mut st, &mut fetch, &mut drain),
+            RecoveryOutcome::Exhausted { attempts: 1 }
+        );
         assert!(!st.run_state().is_tradable());
     }
 
@@ -411,11 +500,22 @@ mod tests {
         let mut n = 0u8;
         let mut fetch = move || {
             n += 1;
-            let missing = if n.is_multiple_of(2) { vec![(Pubkey::new_unique(), 10)] } else { vec![] };
-            Ok(SnapshotData { slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: missing })
+            let missing = if n.is_multiple_of(2) {
+                vec![(Pubkey::new_unique(), 10)]
+            } else {
+                vec![]
+            };
+            Ok(SnapshotData {
+                slot: 10,
+                accounts: vec![upd(pk, 10, 1)],
+                missing_required: missing,
+            })
         };
         let mut drain = |_st: &mut StateCore| {};
-        assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Exhausted { attempts: 2 });
+        assert_eq!(
+            drv.recover(&mut st, &mut fetch, &mut drain),
+            RecoveryOutcome::Exhausted { attempts: 2 }
+        );
         assert!(!st.run_state().is_tradable());
         assert_eq!(drv.reconcile_failures, 2);
     }
@@ -428,10 +528,17 @@ mod tests {
         let mut n = 0u8;
         let mut fetch = move || {
             n += 1;
-            Ok(SnapshotData { slot: 50, accounts: vec![upd(pk, 50, n)], missing_required: vec![] }) // jedes Mal andere Daten → nie sauber
+            Ok(SnapshotData {
+                slot: 50,
+                accounts: vec![upd(pk, 50, n)],
+                missing_required: vec![],
+            }) // jedes Mal andere Daten → nie sauber
         };
         let mut drain = |_st: &mut StateCore| {};
-        assert_eq!(drv.recover(&mut st, &mut fetch, &mut drain), RecoveryOutcome::Exhausted { attempts: 2 });
+        assert_eq!(
+            drv.recover(&mut st, &mut fetch, &mut drain),
+            RecoveryOutcome::Exhausted { attempts: 2 }
+        );
         assert!(is_halted(&st));
         assert_eq!(drv.reconcile_failures, 2);
     }
@@ -439,18 +546,34 @@ mod tests {
     fn adaptive_root_progress_extends_soft_budget_but_stalls_and_hard_caps() {
         let soft = Duration::from_secs(120);
         let limits = Some(RootProgressLimits {
-            stall: Duration::from_secs(60), hard: Duration::from_secs(300),
+            stall: Duration::from_secs(60),
+            hard: Duration::from_secs(300),
         });
         let mut w = RootProgressWatchdog::new(Some(455385463));
         w.observe_root(Some(455385799), Duration::from_secs(119));
         w.observe_root(Some(455385799), Duration::from_secs(151));
         assert_eq!(w.last_progress_elapsed, Duration::from_secs(119));
-        assert_eq!(w.timeout_reason(Duration::from_secs(120), soft, limits), None);
-        assert_eq!(w.timeout_reason(Duration::from_secs(178), soft, limits), None);
-        assert_eq!(w.timeout_reason(Duration::from_secs(179), soft, limits), Some("stall"));
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(120), soft, limits),
+            None
+        );
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(178), soft, limits),
+            None
+        );
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(179), soft, limits),
+            Some("stall")
+        );
         w.observe_root(Some(455385800), Duration::from_secs(178));
-        assert_eq!(w.timeout_reason(Duration::from_secs(179), soft, limits), None);
-        assert_eq!(w.timeout_reason(Duration::from_secs(300), soft, limits), Some("hard"));
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(179), soft, limits),
+            None
+        );
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(300), soft, limits),
+            Some("hard")
+        );
     }
 
     #[test]
@@ -458,12 +581,22 @@ mod tests {
         let soft = Duration::from_secs(120);
         let w = RootProgressWatchdog::new(None);
         assert_eq!(w.timeout_reason(Duration::from_secs(119), soft, None), None);
-        assert_eq!(w.timeout_reason(Duration::from_secs(120), soft, None), Some("fixed"));
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(120), soft, None),
+            Some("fixed")
+        );
         let limits = Some(RootProgressLimits {
-            stall: Duration::from_secs(60), hard: Duration::from_secs(300),
+            stall: Duration::from_secs(60),
+            hard: Duration::from_secs(300),
         });
-        assert_eq!(w.timeout_reason(Duration::from_secs(119), soft, limits), None);
-        assert_eq!(w.timeout_reason(Duration::from_secs(120), soft, limits), Some("stall"));
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(119), soft, limits),
+            None
+        );
+        assert_eq!(
+            w.timeout_reason(Duration::from_secs(120), soft, limits),
+            Some("stall")
+        );
     }
 
     #[test]
@@ -473,47 +606,82 @@ mod tests {
         let mut driver = RecoveryDriver::new(1)
             .with_root_catchup(Duration::from_secs(1))
             .with_root_progress_limits(Duration::from_secs(1), Duration::from_secs(2));
-        let mut fetch = || Ok(SnapshotData {
-            slot: 10, accounts: vec![upd(pk, 10, 1)], missing_required: vec![],
-        });
+        let mut fetch = || {
+            Ok(SnapshotData {
+                slot: 10,
+                accounts: vec![upd(pk, 10, 1)],
+                missing_required: vec![],
+            })
+        };
         let mut drain = |st: &mut StateCore| {
             st.on_event(IngressEvent::Root {
-                slot: 10, source: SourceKind::WsRpcControl, t_rx_ns: 0,
+                slot: 10,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 0,
             });
         };
-        assert_eq!(driver.recover(&mut state, &mut fetch, &mut drain), RecoveryOutcome::Ready);
+        assert_eq!(
+            driver.recover(&mut state, &mut fetch, &mut drain),
+            RecoveryOutcome::Ready
+        );
         assert!(state.run_state().is_tradable());
     }
 
     #[test]
     fn cancellation_during_root_catchup_never_confirms_ready_or_retries() {
         use std::cell::Cell;
-        let stop=Cell::new(false);
-        let pk=Pubkey::new_unique();
-        let mut state=StateCore::new(10);
-        let mut driver=RecoveryDriver::new(3).with_root_catchup(Duration::from_secs(30))
+        let stop = Cell::new(false);
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3)
+            .with_root_catchup(Duration::from_secs(30))
             .with_root_progress_limits(Duration::from_secs(60), Duration::from_secs(300));
-        let calls=Cell::new(0);
-        let mut fetch=|| {calls.set(calls.get()+1); Ok(SnapshotData{slot:10,accounts:vec![upd(pk,10,1)],missing_required:vec![]})};
-        let mut drains=0;
-        let mut drain=|_: &mut StateCore| {drains+=1;if drains==3 {stop.set(true);} };
-        assert_eq!(driver.recover_cancellable(&mut state,&mut fetch,&mut drain,&||stop.get()),RecoveryOutcome::Cancelled);
-        assert_eq!(calls.get(),2);
+        let calls = Cell::new(0);
+        let mut fetch = || {
+            calls.set(calls.get() + 1);
+            Ok(SnapshotData {
+                slot: 10,
+                accounts: vec![upd(pk, 10, 1)],
+                missing_required: vec![],
+            })
+        };
+        let mut drains = 0;
+        let mut drain = |_: &mut StateCore| {
+            drains += 1;
+            if drains == 3 {
+                stop.set(true);
+            }
+        };
+        assert_eq!(
+            driver.recover_cancellable(&mut state, &mut fetch, &mut drain, &|| stop.get()),
+            RecoveryOutcome::Cancelled
+        );
+        assert_eq!(calls.get(), 2);
         assert!(!state.run_state().is_tradable());
-        assert_eq!(driver.attempts_total,1);
+        assert_eq!(driver.attempts_total, 1);
     }
 
     #[test]
     fn cancellation_after_snapshot_a_does_not_fetch_b() {
         use std::cell::Cell;
-        let stop=Cell::new(false);
-        let mut state=StateCore::new(10);
-        let mut driver=RecoveryDriver::new(3);
-        let calls=Cell::new(0);
-        let mut fetch=|| {calls.set(calls.get()+1);stop.set(true);Ok(SnapshotData{slot:10,accounts:vec![],missing_required:vec![]})};
-        assert_eq!(driver.recover_cancellable(&mut state,&mut fetch,&mut |_|{},&||stop.get()),RecoveryOutcome::Cancelled);
-        assert_eq!(calls.get(),1);
+        let stop = Cell::new(false);
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = || {
+            calls.set(calls.get() + 1);
+            stop.set(true);
+            Ok(SnapshotData {
+                slot: 10,
+                accounts: vec![],
+                missing_required: vec![],
+            })
+        };
+        assert_eq!(
+            driver.recover_cancellable(&mut state, &mut fetch, &mut |_| {}, &|| stop.get()),
+            RecoveryOutcome::Cancelled
+        );
+        assert_eq!(calls.get(), 1);
         assert!(!state.run_state().is_tradable());
     }
-
 }

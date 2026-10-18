@@ -159,7 +159,8 @@ pub struct Summary {
 impl std::fmt::Display for Summary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn o(v: Option<u64>) -> String {
-            v.map(|x| x.to_string()).unwrap_or_else(|| "N/A".to_string())
+            v.map(|x| x.to_string())
+                .unwrap_or_else(|| "N/A".to_string())
         }
         write!(
             f,
@@ -179,12 +180,37 @@ mod tests {
 
     #[test]
     fn index_and_upper_are_consistent() {
-        for v in [0u64, 1, 7, 8, 9, 15, 16, 17, 31, 32, 100, 1_000, 65_535, 1 << 40, u64::MAX] {
+        for v in [
+            0u64,
+            1,
+            7,
+            8,
+            9,
+            15,
+            16,
+            17,
+            31,
+            32,
+            100,
+            1_000,
+            65_535,
+            1 << 40,
+            u64::MAX,
+        ] {
             let i = Histogram::index(v);
             assert!(i < BUCKETS, "index {} out of range for {}", i, v);
-            assert!(Histogram::upper(i) >= v, "upper({})={} < {}", i, Histogram::upper(i), v);
+            assert!(
+                Histogram::upper(i) >= v,
+                "upper({})={} < {}",
+                i,
+                Histogram::upper(i),
+                v
+            );
             if i > 0 {
-                assert!(Histogram::upper(i - 1) < v, "prev bucket upper must be < value");
+                assert!(
+                    Histogram::upper(i - 1) < v,
+                    "prev bucket upper must be < value"
+                );
             }
         }
         assert_eq!(Histogram::index(u64::MAX), BUCKETS - 1);
@@ -197,7 +223,10 @@ mod tests {
         assert_eq!(h.max(), None);
         assert_eq!(h.percentile(0.5), None);
         assert_eq!(h.summary().p99, None);
-        assert_eq!(h.summary().to_string(), "count=0 p50=N/A p95=N/A p99=N/A max=N/A");
+        assert_eq!(
+            h.summary().to_string(),
+            "count=0 p50=N/A p95=N/A p99=N/A max=N/A"
+        );
     }
 
     #[test]
@@ -209,7 +238,11 @@ mod tests {
         assert_eq!(h.count(), 1000);
         assert_eq!(h.max(), Some(1000));
         let p50 = h.percentile(0.5).unwrap();
-        assert!((500..=575).contains(&p50), "p50={} (Bucket-Fehler ≤ 12,5 %)", p50);
+        assert!(
+            (500..=575).contains(&p50),
+            "p50={} (Bucket-Fehler ≤ 12,5 %)",
+            p50
+        );
         let p99 = h.percentile(0.99).unwrap();
         assert!((990..=1000).contains(&p99), "p99={}", p99);
         assert_eq!(h.percentile(1.0), Some(1000));

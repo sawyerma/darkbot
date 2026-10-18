@@ -22,13 +22,13 @@ pub mod health;
 pub mod index;
 #[cfg(feature = "crate_health")]
 pub mod integration;
-#[cfg(feature = "crate_health")]
-pub mod projection;
 pub mod planner;
 pub mod prepared;
+#[cfg(feature = "crate_health")]
+pub mod projection;
 pub mod protocol;
 pub mod receivership;
 pub mod safety;
+pub mod schedule;
 #[cfg(feature = "crate_health")]
 pub mod sizing; // [FIX-59] exact protocol sizing; market realizability remains in RouteProvider/P4A
-pub mod schedule;

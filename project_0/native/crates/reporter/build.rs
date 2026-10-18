@@ -7,7 +7,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "darkbot/control/v1/engine_feed.proto",
         "darkbot/project0/v1/status.proto",
     ];
-    for file in files { println!("cargo:rerun-if-changed={}", root.join(file).display()); }
+    for file in files {
+        println!("cargo:rerun-if-changed={}", root.join(file).display());
+    }
     let descriptors = protox::compile(files.iter().map(|p| root.join(p)), [root.as_path()])?;
     let mut build = prost_build::Config::new();
     build.bytes(["."]);

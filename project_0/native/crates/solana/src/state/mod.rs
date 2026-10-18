@@ -157,7 +157,10 @@ impl StateCore {
     }
 
     /// Alle Accounts eines Owners (für Reverse-Index-Aufbau in P2).
-    pub fn iter_owned_by<'a>(&'a self, owner: &'a Pubkey) -> impl Iterator<Item = (&'a Pubkey, &'a AccountRecord)> + 'a {
+    pub fn iter_owned_by<'a>(
+        &'a self,
+        owner: &'a Pubkey,
+    ) -> impl Iterator<Item = (&'a Pubkey, &'a AccountRecord)> + 'a {
         self.accounts.iter().filter(move |(_, r)| &r.owner == owner)
     }
 
@@ -269,7 +272,11 @@ impl StateCore {
     /// Account-Snapshot-Slot) — nicht gegen einen zusammengezogenen Slot.
     /// Übergang: Bootstrapping/Halted → Reconciling. Freigabe erst nach sauberem
     /// `reconcile()` und `confirm_ready()`.
-    pub fn install_snapshot(&mut self, snapshot_lower_bound_slot: u64, accounts: Vec<AccountUpdate>) {
+    pub fn install_snapshot(
+        &mut self,
+        snapshot_lower_bound_slot: u64,
+        accounts: Vec<AccountUpdate>,
+    ) {
         self.run_state = self.run_state.begin_reconcile();
         self.reconciled_clean = false;
         self.accounts.clear();
@@ -309,7 +316,10 @@ impl StateCore {
     /// Lokale Accounts mit Slot > snapshot_slot werden nicht als Mismatch gewertet
     /// (sie sind neuer). Ergebnis entscheidet über `confirm_ready`.
     pub fn reconcile(&mut self, snapshot_slot: u64, remote: &[AccountUpdate]) -> ReconcileReport {
-        let mut rep = ReconcileReport { snapshot_slot, ..Default::default() };
+        let mut rep = ReconcileReport {
+            snapshot_slot,
+            ..Default::default()
+        };
         let mut seen: HashMap<Pubkey, ()> = HashMap::with_capacity(remote.len());
         for r in remote {
             seen.insert(r.pubkey, ());
@@ -322,7 +332,10 @@ impl StateCore {
                     if local.slot > r.slot {
                         continue;
                     }
-                    if local.data != r.data || local.lamports != r.lamports || local.owner != r.owner {
+                    if local.data != r.data
+                        || local.lamports != r.lamports
+                        || local.owner != r.owner
+                    {
                         rep.mismatch.push(r.pubkey);
                     }
                 }
@@ -382,13 +395,25 @@ mod tests {
         let mut st = StateCore::new(100);
         let pk = Pubkey::new_unique();
         assert!(!st.run_state().is_tradable());
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 10, None, 1))), Some(ApplyOutcome::Buffered));
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 12, None, 2))), Some(ApplyOutcome::Buffered));
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 10, None, 1))),
+            Some(ApplyOutcome::Buffered)
+        );
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 12, None, 2))),
+            Some(ApplyOutcome::Buffered)
+        );
         st.install_snapshot(11, vec![upd(pk, 11, None, 9)]);
         assert_eq!(st.get(&pk).unwrap().data, vec![2], "Update > S angewendet");
         assert_eq!(st.counters().buffer_dropped_le_snapshot, 1);
-        assert!(!st.run_state().is_tradable(), "erst reconcile + confirm_ready");
-        assert!(!st.confirm_ready().is_tradable(), "ohne reconcile keine Freigabe");
+        assert!(
+            !st.run_state().is_tradable(),
+            "erst reconcile + confirm_ready"
+        );
+        assert!(
+            !st.confirm_ready().is_tradable(),
+            "ohne reconcile keine Freigabe"
+        );
         // Reconcile gegen zweiten Snapshot bei Slot 12: lokaler Stand ist data=[2] @12
         let rep = st.reconcile(12, &[upd(pk, 12, None, 2)]);
         assert!(rep.is_clean());
@@ -402,13 +427,28 @@ mod tests {
         st.install_snapshot(5, vec![]);
         st.reconcile(5, &[]);
         st.confirm_ready();
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 10, Some(5), 1))), Some(ApplyOutcome::Applied));
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 9, Some(9), 2))), Some(ApplyOutcome::StaleSlot));
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 10, Some(4), 3))), Some(ApplyOutcome::StaleWriteVersion));
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 10, Some(6), 4))), Some(ApplyOutcome::Applied));
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 10, Some(5), 1))),
+            Some(ApplyOutcome::Applied)
+        );
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 9, Some(9), 2))),
+            Some(ApplyOutcome::StaleSlot)
+        );
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 10, Some(4), 3))),
+            Some(ApplyOutcome::StaleWriteVersion)
+        );
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 10, Some(6), 4))),
+            Some(ApplyOutcome::Applied)
+        );
         assert_eq!(st.get(&pk).unwrap().data, vec![4]);
         // ohne write_version im selben Slot: angewendet, aber gezählt
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 10, None, 5))), Some(ApplyOutcome::Applied));
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 10, None, 5))),
+            Some(ApplyOutcome::Applied)
+        );
         assert_eq!(st.counters().same_slot_no_wv, 1);
     }
 
@@ -418,10 +458,20 @@ mod tests {
         st.install_snapshot(5, vec![]);
         st.reconcile(5, &[]);
         st.confirm_ready();
-        st.on_event(IngressEvent::Root { slot: 100, source: SourceKind::WsRpcControl, t_rx_ns: 0 });
+        st.on_event(IngressEvent::Root {
+            slot: 100,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        });
         let pk = Pubkey::new_unique();
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 99, None, 1))), Some(ApplyOutcome::BelowRoot));
-        assert_eq!(st.on_event(IngressEvent::Account(upd(pk, 100, None, 1))), Some(ApplyOutcome::Applied));
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 99, None, 1))),
+            Some(ApplyOutcome::BelowRoot)
+        );
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(pk, 100, None, 1))),
+            Some(ApplyOutcome::Applied)
+        );
     }
 
     #[test]
@@ -431,7 +481,12 @@ mod tests {
         st.install_snapshot(5, vec![upd(pk, 5, None, 1)]);
         st.reconcile(5, &[upd(pk, 5, None, 1)]);
         st.confirm_ready();
-        st.on_event(IngressEvent::Gap { source: SourceKind::WsRpcControl, from_slot: Some(5), to_slot: None, t_rx_ns: 0 });
+        st.on_event(IngressEvent::Gap {
+            source: SourceKind::WsRpcControl,
+            from_slot: Some(5),
+            to_slot: None,
+            t_rx_ns: 0,
+        });
         assert_eq!(st.run_state(), RunState::Halted(HaltReason::FeedGap));
         // Recovery: neuer Snapshot, Reconcile sauber, Freigabe
         st.install_snapshot(8, vec![upd(pk, 8, None, 1)]);
@@ -447,11 +502,18 @@ mod tests {
         let pk = Pubkey::new_unique();
         st.install_snapshot(100, vec![upd(pk, 105, None, 1)]);
         let rep = st.reconcile(100, &[upd(pk, 110, None, 2)]);
-        assert_eq!(rep.mismatch, vec![pk], "lokal 105 < remote 110 muss verglichen werden");
+        assert_eq!(
+            rep.mismatch,
+            vec![pk],
+            "lokal 105 < remote 110 muss verglichen werden"
+        );
         let mut st = StateCore::new(10);
         st.install_snapshot(100, vec![upd(pk, 120, None, 1)]);
         let rep = st.reconcile(100, &[upd(pk, 110, None, 2)]);
-        assert!(rep.is_clean(), "lokal 120 > remote 110 → lokal neuer, kein Mismatch");
+        assert!(
+            rep.is_clean(),
+            "lokal 120 > remote 110 → lokal neuer, kein Mismatch"
+        );
     }
 
     #[test]
@@ -462,7 +524,10 @@ mod tests {
         let rep = st.reconcile(8, &[upd(pk, 8, None, 2)]);
         assert_eq!(rep.mismatch, vec![pk]);
         assert!(!st.confirm_ready().is_tradable());
-        assert_eq!(st.run_state(), RunState::Halted(HaltReason::ReconcileFailure));
+        assert_eq!(
+            st.run_state(),
+            RunState::Halted(HaltReason::ReconcileFailure)
+        );
     }
 
     #[test]
@@ -473,14 +538,27 @@ mod tests {
         let mut remote = upd(pk, 8, None, 1);
         remote.owner = Pubkey::new_from_array([0x5A; 32]);
         let rep = st.reconcile(8, &[remote]);
-        assert_eq!(rep.mismatch, vec![pk], "owner is part of canonical account state");
-        assert_eq!(st.run_state(), RunState::Halted(HaltReason::ReconcileFailure));
+        assert_eq!(
+            rep.mismatch,
+            vec![pk],
+            "owner is part of canonical account state"
+        );
+        assert_eq!(
+            st.run_state(),
+            RunState::Halted(HaltReason::ReconcileFailure)
+        );
     }
 
     #[test]
     fn slot_events_track_highest() {
         let mut st = StateCore::new(10);
-        st.on_event(IngressEvent::Slot(SlotUpdate { slot: 77, parent: Some(76), status: SlotStatus::Processed, source: SourceKind::WsRpcControl, t_rx_ns: 0 }));
+        st.on_event(IngressEvent::Slot(SlotUpdate {
+            slot: 77,
+            parent: Some(76),
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
         assert_eq!(st.highest_slot(), 77);
     }
 }

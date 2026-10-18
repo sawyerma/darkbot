@@ -367,7 +367,9 @@ impl ObserverCore {
             liquidation_events: self.stats.liquidation_events,
             last_observed_slot: self.stats.last_observed_slot,
             live_verdict: market_verdict(
-                ready, self.coverage_complete() && self.decode_complete(), false,
+                ready,
+                self.coverage_complete() && self.decode_complete(),
+                false,
             ),
         });
     }
@@ -754,7 +756,9 @@ impl ObserverCore {
                     });
                 }
                 self.coverage(
-                    sink, now_unix_s, Some(h.t_rx_ns),
+                    sink,
+                    now_unix_s,
+                    Some(h.t_rx_ns),
                     WindowEvent::TransportHealth {
                         connected: h.connected,
                         last_application_frame_age_ns: h.last_frame_age_ns,
@@ -762,7 +766,7 @@ impl ObserverCore {
                         last_slot: h.last_slot,
                     },
                 )
-            },
+            }
             IngressEvent::Transport {
                 state,
                 code,

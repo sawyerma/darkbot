@@ -39,7 +39,11 @@ impl BlockhashCache {
         let (hash, last_valid_block_height) = rpc
             .get_latest_blockhash_with_commitment(CommitmentConfig::confirmed())
             .map_err(|e| e.to_string())?;
-        let v = CachedBlockhash { hash, last_valid_block_height, refreshed_ns: now_ns };
+        let v = CachedBlockhash {
+            hash,
+            last_valid_block_height,
+            refreshed_ns: now_ns,
+        };
         self.set(v);
         Ok(v)
     }
@@ -64,7 +68,11 @@ mod tests {
     fn staleness() {
         let c = BlockhashCache::new();
         assert!(c.fresh(0, 1).is_none());
-        c.set(CachedBlockhash { hash: Hash::default(), last_valid_block_height: 5, refreshed_ns: 100 });
+        c.set(CachedBlockhash {
+            hash: Hash::default(),
+            last_valid_block_height: 5,
+            refreshed_ns: 100,
+        });
         assert!(c.fresh(150, 100).is_some());
         assert!(c.fresh(300, 100).is_none());
     }

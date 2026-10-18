@@ -10,8 +10,15 @@ fn projected_fields_are_optional_and_not_fabricated() {
     assert_eq!(empty.last_observed_slot, None);
     assert!(empty.market_verdict.is_empty());
     let snapshot = StatusSnapshot {
-        market: Some(MarketSnapshot { gap_count: 7, last_observed_slot: Some(123), ..Default::default() }),
-        storage: Some(StorageSnapshot { queue_bytes: 1024, lag_frames: 2 }),
+        market: Some(MarketSnapshot {
+            gap_count: 7,
+            last_observed_slot: Some(123),
+            ..Default::default()
+        }),
+        storage: Some(StorageSnapshot {
+            queue_bytes: 1024,
+            lag_frames: 2,
+        }),
         ..Default::default()
     };
     let p = projection("TEST_ONLY", &snapshot);
@@ -23,8 +30,12 @@ fn projected_fields_are_optional_and_not_fabricated() {
 }
 #[test]
 fn generation_advances_and_rejects_corruption() {
-    let id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("darkbot-p0-generation-{}-{id}", std::process::id()));
+    let id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("darkbot-p0-generation-{}-{id}", std::process::id()));
     std::fs::create_dir(&dir).unwrap();
     let path = dir.join("generation");
     assert_eq!(generation::next(&path).unwrap(), 1);
@@ -39,7 +50,8 @@ fn env_config_defaults_off_and_validates_enabled() {
     use darkbot_p0_reporter::config_from_env;
     use std::time::Duration;
     assert!(config_from_env("r", &|_| None).unwrap().is_none());
-    let missing_generation = |key: &str| (key == "P0_REPORT_SOCKET").then(|| "/tmp/p0.sock".to_string());
+    let missing_generation =
+        |key: &str| (key == "P0_REPORT_SOCKET").then(|| "/tmp/p0.sock".to_string());
     assert!(config_from_env("r", &missing_generation).is_err());
     let ok = |key: &str| match key {
         "P0_REPORT_SOCKET" => Some("/tmp/p0.sock".to_owned()),

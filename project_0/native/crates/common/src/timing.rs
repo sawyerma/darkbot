@@ -131,9 +131,15 @@ impl Timeline {
     pub fn standard_intervals(&self) -> [(&'static str, Option<u64>); 5] {
         [
             ("T_rx→T_detect", self.interval(Stage::Rx, Stage::Detect)),
-            ("T_detect→T_ready", self.interval(Stage::Detect, Stage::Ready)),
+            (
+                "T_detect→T_ready",
+                self.interval(Stage::Detect, Stage::Ready),
+            ),
             ("T_ready→T_sign", self.interval(Stage::Ready, Stage::Sign)),
-            ("T_sign→T_handoff", self.interval(Stage::Sign, Stage::Handoff)),
+            (
+                "T_sign→T_handoff",
+                self.interval(Stage::Sign, Stage::Handoff),
+            ),
             ("T_rx→T_handoff", self.interval(Stage::Rx, Stage::Handoff)),
         ]
     }
@@ -157,10 +163,17 @@ mod tests {
         let mut t = Timeline::new();
         assert!(t.mark(Stage::Rx, 100));
         assert!(t.mark(Stage::Detect, 250));
-        assert!(!t.mark(Stage::Rx, 999), "erster Mark darf nicht überschrieben werden");
+        assert!(
+            !t.mark(Stage::Rx, 999),
+            "erster Mark darf nicht überschrieben werden"
+        );
         assert_eq!(t.get(Stage::Rx), Some(100));
         assert_eq!(t.interval(Stage::Rx, Stage::Detect), Some(150));
-        assert_eq!(t.interval(Stage::Rx, Stage::Ready), None, "fehlender Punkt → None, nie 0");
+        assert_eq!(
+            t.interval(Stage::Rx, Stage::Ready),
+            None,
+            "fehlender Punkt → None, nie 0"
+        );
     }
 
     #[test]

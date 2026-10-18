@@ -48,10 +48,17 @@ pub mod builders {
     }
 
     fn obs(observation: &[Pubkey]) -> Vec<AccountMeta> {
-        observation.iter().map(|k| AccountMeta::new_readonly(*k, false)).collect()
+        observation
+            .iter()
+            .map(|k| AccountMeta::new_readonly(*k, false))
+            .collect()
     }
 
-    pub fn init_liquidation_record(program: &Pubkey, marginfi_account: &Pubkey, fee_payer: &Pubkey) -> Instruction {
+    pub fn init_liquidation_record(
+        program: &Pubkey,
+        marginfi_account: &Pubkey,
+        fee_payer: &Pubkey,
+    ) -> Instruction {
         Instruction {
             program_id: *program,
             accounts: marginfi::accounts::InitLiquidationRecord {
@@ -65,7 +72,13 @@ pub mod builders {
         }
     }
 
-    pub fn start_liquidation(program: &Pubkey, marginfi_account: &Pubkey, group: &Pubkey, receiver: &Pubkey, observation: &[AccountMeta]) -> Instruction {
+    pub fn start_liquidation(
+        program: &Pubkey,
+        marginfi_account: &Pubkey,
+        group: &Pubkey,
+        receiver: &Pubkey,
+        observation: &[AccountMeta],
+    ) -> Instruction {
         let mut accounts = marginfi::accounts::StartLiquidation {
             marginfi_account: *marginfi_account,
             liquidation_record: protocol::liquidation_record_pda(program, marginfi_account),
@@ -75,7 +88,11 @@ pub mod builders {
         }
         .to_account_metas(Some(true));
         accounts.extend_from_slice(observation);
-        Instruction { program_id: *program, accounts, data: marginfi::instruction::StartLiquidation.data() }
+        Instruction {
+            program_id: *program,
+            accounts,
+            data: marginfi::instruction::StartLiquidation.data(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -116,7 +133,11 @@ pub mod builders {
         Instruction {
             program_id: *program,
             accounts,
-            data: marginfi::instruction::LendingAccountWithdraw { amount, withdraw_all }.data(),
+            data: marginfi::instruction::LendingAccountWithdraw {
+                amount,
+                withdraw_all,
+            }
+            .data(),
         }
     }
 
@@ -357,8 +378,14 @@ pub mod builders {
         }
     }
 
-    pub fn end_liquidation(program: &Pubkey, marginfi_account: &Pubkey, group: &Pubkey, receiver: &Pubkey,
-                           global_fee_wallet: &Pubkey, banks_only: &[Pubkey]) -> Instruction {
+    pub fn end_liquidation(
+        program: &Pubkey,
+        marginfi_account: &Pubkey,
+        group: &Pubkey,
+        receiver: &Pubkey,
+        global_fee_wallet: &Pubkey,
+        banks_only: &[Pubkey],
+    ) -> Instruction {
         let mut accounts = marginfi::accounts::EndLiquidation {
             marginfi_account: *marginfi_account,
             liquidation_record: protocol::liquidation_record_pda(program, marginfi_account),
@@ -371,27 +398,52 @@ pub mod builders {
         }
         .to_account_metas(Some(true));
         accounts.extend(banks_only.iter().map(|k| AccountMeta::new(*k, false)));
-        Instruction { program_id: *program, accounts, data: marginfi::instruction::EndLiquidation.data() }
+        Instruction {
+            program_id: *program,
+            accounts,
+            data: marginfi::instruction::EndLiquidation.data(),
+        }
     }
 
     pub fn build_receivership(p: ReceivershipParams<'_>) -> Vec<Instruction> {
-        let mut v = Vec::with_capacity(4 + p.pre_refreshes.len() + p.withdraws.len() + p.swaps.len() + p.repays.len());
+        let mut v = Vec::with_capacity(
+            4 + p.pre_refreshes.len() + p.withdraws.len() + p.swaps.len() + p.repays.len(),
+        );
         v.extend(p.pre_refreshes);
         if p.init_record {
-            v.push(init_liquidation_record(p.program, p.marginfi_account, p.liquidator));
+            v.push(init_liquidation_record(
+                p.program,
+                p.marginfi_account,
+                p.liquidator,
+            ));
         }
-        v.push(start_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, &p.start_observation));
+        v.push(start_liquidation(
+            p.program,
+            p.marginfi_account,
+            p.group,
+            p.liquidator,
+            &p.start_observation,
+        ));
         v.extend(p.withdraws);
         v.extend(p.swaps);
         v.extend(p.repays);
-        v.push(end_liquidation(p.program, p.marginfi_account, p.group, p.liquidator, p.global_fee_wallet, &p.end_banks));
+        v.push(end_liquidation(
+            p.program,
+            p.marginfi_account,
+            p.group,
+            p.liquidator,
+            p.global_fee_wallet,
+            &p.end_banks,
+        ));
         v
     }
 
     #[cfg(test)]
     mod repay_all_tests {
         use super::*;
-        fn p() -> Pubkey { Pubkey::new_unique() }
+        fn p() -> Pubkey {
+            Pubkey::new_unique()
+        }
 
         #[test]
         fn token_2022_withdraw_includes_mint_before_observation() {
@@ -400,11 +452,25 @@ pub mod builders {
             let observation = p();
             let token_program = pk(protocol::TOKEN_2022_PROGRAM_ID);
             let ix = withdraw(
-                &program, &p(), &p(), &p(), &p(), &mint, &p(), &p(), &token_program,
-                13, None, &[observation],
+                &program,
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &mint,
+                &p(),
+                &p(),
+                &token_program,
+                13,
+                None,
+                &[observation],
             );
             let mint_index = ix.accounts.iter().position(|m| m.pubkey == mint).unwrap();
-            let obs_index = ix.accounts.iter().position(|m| m.pubkey == observation).unwrap();
+            let obs_index = ix
+                .accounts
+                .iter()
+                .position(|m| m.pubkey == observation)
+                .unwrap();
             assert!(mint_index < obs_index);
             assert!(!ix.accounts[mint_index].is_writable);
             assert!(!ix.accounts[mint_index].is_signer);
@@ -417,8 +483,18 @@ pub mod builders {
             let observation = p();
             let token_program = pk(protocol::TOKEN_PROGRAM_ID);
             let ix = withdraw(
-                &program, &p(), &p(), &p(), &p(), &mint, &p(), &p(), &token_program,
-                13, None, &[observation],
+                &program,
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &mint,
+                &p(),
+                &p(),
+                &token_program,
+                13,
+                None,
+                &[observation],
             );
             assert!(!ix.accounts.iter().any(|m| m.pubkey == mint));
             assert!(ix.accounts.iter().any(|m| m.pubkey == observation));
@@ -438,15 +514,29 @@ pub mod builders {
             let obs_keys = vec![p(), p(), p()];
 
             let ix = repay(
-                &program, &group, &account, &authority, &bank, &mint,
-                &token_account, &vault, &token_program, 11, Some(true), &obs_keys,
+                &program,
+                &group,
+                &account,
+                &authority,
+                &bank,
+                &mint,
+                &token_account,
+                &vault,
+                &token_program,
+                11,
+                Some(true),
+                &obs_keys,
             );
 
             assert_eq!(ix.program_id, program);
-            assert!(obs_keys.iter().all(|key|
-                ix.accounts.iter().any(|m| m.pubkey == *key && !m.is_writable && !m.is_signer)
-            ));
-            assert!(ix.data.len() >= 8, "anchor instruction discriminator missing");
+            assert!(obs_keys.iter().all(|key| ix
+                .accounts
+                .iter()
+                .any(|m| m.pubkey == *key && !m.is_writable && !m.is_signer)));
+            assert!(
+                ix.data.len() >= 8,
+                "anchor instruction discriminator missing"
+            );
         }
 
         #[test]
@@ -455,8 +545,18 @@ pub mod builders {
             let token_program = pk(protocol::TOKEN_PROGRAM_ID);
             let obs_key = p();
             let ix = repay(
-                &program, &p(), &p(), &p(), &p(), &p(), &p(), &p(), &token_program,
-                7, None, &[obs_key],
+                &program,
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &token_program,
+                7,
+                None,
+                &[obs_key],
             );
             assert!(!ix.accounts.iter().any(|m| m.pubkey == obs_key));
         }
@@ -468,11 +568,25 @@ pub mod builders {
             let observation = p();
             let token_program = pk(protocol::TOKEN_2022_PROGRAM_ID);
             let ix = repay(
-                &program, &p(), &p(), &p(), &p(), &mint, &p(), &p(), &token_program,
-                9, Some(true), &[observation],
+                &program,
+                &p(),
+                &p(),
+                &p(),
+                &p(),
+                &mint,
+                &p(),
+                &p(),
+                &token_program,
+                9,
+                Some(true),
+                &[observation],
             );
             let mint_index = ix.accounts.iter().position(|m| m.pubkey == mint).unwrap();
-            let obs_index = ix.accounts.iter().position(|m| m.pubkey == observation).unwrap();
+            let obs_index = ix
+                .accounts
+                .iter()
+                .position(|m| m.pubkey == observation)
+                .unwrap();
             assert!(mint_index < obs_index);
             assert!(!ix.accounts[mint_index].is_writable);
         }

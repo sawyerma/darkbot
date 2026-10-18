@@ -4,7 +4,10 @@
 //! does not claim oracle value is realizable market value. P4A-01 must value the resulting seized
 //! amount through an executable route.
 
-use crate::health::{crate_impl::{bank_observation_keys, CrateHealth}, AccountSource, HealthEngine, HealthError};
+use crate::health::{
+    crate_impl::{bank_observation_keys, CrateHealth},
+    AccountSource, HealthEngine, HealthError,
+};
 use crate::protocol;
 use fixed::types::I80F48;
 use marginfi::state::{
@@ -13,7 +16,7 @@ use marginfi::state::{
     price::{OraclePriceFeedAdapter, PriceAdapter},
 };
 use marginfi_type_crate::constants::{
-    ASSET_TAG_DEFAULT, ASSET_TAG_SOL, ASSET_TAG_KAMINO, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND,
+    ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
     ZERO_AMOUNT_THRESHOLD,
 };
 use marginfi_type_crate::types::{
@@ -93,22 +96,48 @@ struct Position {
 fn load<T: bytemuck::Pod>(data: &[u8]) -> Result<&T, String> {
     let payload = data.get(8..).ok_or_else(|| "short account".to_string())?;
     let n = std::mem::size_of::<T>();
-    let slice = payload.get(..n).ok_or_else(|| format!("payload {} < {}", payload.len(), n))?;
+    let slice = payload
+        .get(..n)
+        .ok_or_else(|| format!("payload {} < {}", payload.len(), n))?;
     bytemuck::try_from_bytes::<T>(slice).map_err(|e| format!("pod cast: {e:?}"))
 }
 
 /// EndLiquidation caps premium; it does not require taking the maximum. If the
 /// maximum would worsen health, retain headroom below the health-neutral ratio.
-fn healing_fee_factor(cap: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, headroom: I80F48) -> Option<I80F48> {
-    if cap < I80F48::ONE || asset_per_usd < I80F48::ZERO || liab_per_usd <= I80F48::ZERO { return None; }
-    if liab_per_usd.checked_div(cap)? > asset_per_usd { return Some(cap); }
-    if asset_per_usd == I80F48::ZERO { return None; }
-    let reduced = liab_per_usd.checked_div(asset_per_usd)?.checked_mul(headroom)?.min(cap);
-    (reduced >= I80F48::ONE && liab_per_usd.checked_div(reduced)? > asset_per_usd).then_some(reduced)
+fn healing_fee_factor(
+    cap: I80F48,
+    asset_per_usd: I80F48,
+    liab_per_usd: I80F48,
+    headroom: I80F48,
+) -> Option<I80F48> {
+    if cap < I80F48::ONE || asset_per_usd < I80F48::ZERO || liab_per_usd <= I80F48::ZERO {
+        return None;
+    }
+    if liab_per_usd.checked_div(cap)? > asset_per_usd {
+        return Some(cap);
+    }
+    if asset_per_usd == I80F48::ZERO {
+        return None;
+    }
+    let reduced = liab_per_usd
+        .checked_div(asset_per_usd)?
+        .checked_mul(headroom)?
+        .min(cap);
+    (reduced >= I80F48::ONE && liab_per_usd.checked_div(reduced)? > asset_per_usd)
+        .then_some(reduced)
 }
 
-fn rounded_health_valid(pre: I80F48, seized: I80F48, repaid: I80F48, asset_per_usd: I80F48, liab_per_usd: I80F48, closeout: bool) -> Option<bool> {
-    let delta = repaid.checked_mul(liab_per_usd)?.checked_sub(seized.checked_mul(asset_per_usd)?)?;
+fn rounded_health_valid(
+    pre: I80F48,
+    seized: I80F48,
+    repaid: I80F48,
+    asset_per_usd: I80F48,
+    liab_per_usd: I80F48,
+    closeout: bool,
+) -> Option<bool> {
+    let delta = repaid
+        .checked_mul(liab_per_usd)?
+        .checked_sub(seized.checked_mul(asset_per_usd)?)?;
     Some(delta >= I80F48::ZERO && (closeout || pre.checked_add(delta)? <= I80F48::ZERO))
 }
 
@@ -160,7 +189,8 @@ fn choose_repay(
 }
 
 fn amount_from_equity(value: I80F48, price: I80F48, bank: &Bank) -> Result<I80F48, String> {
-    calc_amount(value, price, bank.get_balance_decimals()).map_err(|e| format!("native balance amount: {e}"))
+    calc_amount(value, price, bank.get_balance_decimals())
+        .map_err(|e| format!("native balance amount: {e}"))
 }
 
 fn floor_u64(v: I80F48) -> Result<u64, String> {
@@ -228,7 +258,9 @@ type Positions = (Vec<Position>, Vec<Position>, Vec<EmodeConfig>);
 
 impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
     fn raw(&self, key: &Pubkey) -> Result<(Pubkey, u64, &'a [u8]), String> {
-        self.state.account(key).ok_or_else(|| format!("missing state account {key}"))
+        self.state
+            .account(key)
+            .ok_or_else(|| format!("missing state account {key}"))
     }
 
     fn bank(&self, key: &Pubkey) -> Result<Bank, String> {
@@ -236,7 +268,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         if owner != self.program {
             return Err(format!("UNKNOWN_LAYOUT: bank {key} owner {owner}"));
         }
-        protocol::decode_bank(data).copied().map_err(|e| format!("{e}: {key}"))
+        protocol::decode_bank(data)
+            .copied()
+            .map_err(|e| format!("{e}: {key}"))
     }
 
     fn fee_snapshot_and_rate(&self) -> Result<(FeeSnapshot, I80F48), String> {
@@ -247,11 +281,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         }
         let fee = load::<FeeState>(data)?;
         let f: I80F48 = fee.liquidation_max_fee.into();
-        Ok((FeeSnapshot {
-            global_fee_wallet: fee.global_fee_wallet,
-            liquidation_max_bps: fee_bps(f)?,
-            liquidation_flat_sol_fee_lamports: fee.liquidation_flat_sol_fee as u64,
-        }, f))
+        Ok((
+            FeeSnapshot {
+                global_fee_wallet: fee.global_fee_wallet,
+                liquidation_max_bps: fee_bps(f)?,
+                liquidation_flat_sol_fee_lamports: fee.liquidation_flat_sol_fee as u64,
+            },
+            f,
+        ))
     }
 
     pub fn fee_snapshot(&self) -> Result<FeeSnapshot, String> {
@@ -309,8 +346,15 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let mut integration_assets = 0usize;
         let mut integration_liabs = 0usize;
 
-        for balance in account.lending_account.balances.iter().filter(|b| b.is_active()) {
-            let Some(side) = balance.get_side() else { continue };
+        for balance in account
+            .lending_account
+            .balances
+            .iter()
+            .filter(|b| b.is_active())
+        {
+            let Some(side) = balance.get_side() else {
+                continue;
+            };
             let bank = self.bank(&balance.bank_pk)?;
             let integration = matches!(
                 bank.config.asset_tag,
@@ -319,13 +363,21 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             match side {
                 BalanceSide::Assets => {
                     assets += 1;
-                    if supported_asset_bank(&bank) { supported_assets += 1; }
-                    if integration { integration_assets += 1; }
+                    if supported_asset_bank(&bank) {
+                        supported_assets += 1;
+                    }
+                    if integration {
+                        integration_assets += 1;
+                    }
                 }
                 BalanceSide::Liabilities => {
                     liabs += 1;
-                    if supported_liability_bank(&bank) { supported_liabs += 1; }
-                    if integration { integration_liabs += 1; }
+                    if supported_liability_bank(&bank) {
+                        supported_liabs += 1;
+                    }
+                    if integration {
+                        integration_liabs += 1;
+                    }
                 }
             }
         }
@@ -371,7 +423,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             unix_timestamp: now_unix_s,
         };
         let price = self.prices(&bank, &clock)?.equity;
-        if price <= I80F48::ZERO { return Err("nonpositive cost conversion price".into()); }
+        if price <= I80F48::ZERO {
+            return Err("nonpositive cost conversion price".into());
+        }
         let value = calc_value(
             I80F48::from_num(native_amount),
             price,
@@ -379,9 +433,12 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             None,
         )
         .map_err(|e| format!("native amount value: {e}"))?;
-        ceil_u64(value.checked_mul(I80F48::from_num(USD_MICRO)).ok_or("cost conversion overflow")?)
+        ceil_u64(
+            value
+                .checked_mul(I80F48::from_num(USD_MICRO))
+                .ok_or("cost conversion overflow")?,
+        )
     }
-
 
     fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, String> {
         let keys = bank_observation_keys(bank).map_err(|e| e.to_string())?;
@@ -406,7 +463,11 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
             .map_err(|e| format!("oracle adapter: {e}"))?;
         let equity = feed
-            .get_price_of_type(OraclePriceType::TimeWeighted, None, bank.config.oracle_max_confidence)
+            .get_price_of_type(
+                OraclePriceType::TimeWeighted,
+                None,
+                bank.config.oracle_max_confidence,
+            )
             .map_err(|e| format!("equity price: {e}"))?;
         let maint_asset = feed
             .get_price_of_type(
@@ -422,14 +483,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 bank.config.oracle_max_confidence,
             )
             .map_err(|e| format!("maintenance liability price: {e}"))?;
-        Ok(Prices { equity, maint_asset, maint_liab })
+        Ok(Prices {
+            equity,
+            maint_asset,
+            maint_liab,
+        })
     }
 
-    fn positions(
-        &self,
-        account: &MarginfiAccount,
-        clock: &Clock,
-    ) -> Result<Positions, String> {
+    fn positions(&self, account: &MarginfiAccount, clock: &Clock) -> Result<Positions, String> {
         let mut assets = Vec::new();
         let mut liabs = Vec::new();
         let mut liability_emodes = Vec::new();
@@ -437,7 +498,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             if !balance.is_active() {
                 continue;
             }
-            let Some(side) = balance.get_side() else { continue };
+            let Some(side) = balance.get_side() else {
+                continue;
+            };
             let bank = self.bank(&balance.bank_pk)?;
             // [FIX-112][R6] Integration banks are eligible only as collateral assets.
             // Liability sizing remains restricted to generic banks because the pinned integration
@@ -497,7 +560,12 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
     /// Returns every protocol-valid generic Asset×Liability sizing candidate. The caller must
     /// separately establish executable routing and realizable market value.
-    pub fn sizes(&self, account_key: &Pubkey, now_unix_s: i64, slot: u64) -> Result<Vec<ProtocolSizing>, String> {
+    pub fn sizes(
+        &self,
+        account_key: &Pubkey,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<Vec<ProtocolSizing>, String> {
         if self.headroom_bps == 0 || self.headroom_bps > BPS {
             return Err(format!("headroom_bps must be 1..={BPS}"));
         }
@@ -506,9 +574,12 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             return Err("not a MarginfiAccount".into());
         }
         let account = load::<MarginfiAccount>(data)?;
-        let health = CrateHealth { state: self.state, group: self.group }
-            .health(account_key, now_unix_s, slot)
-            .map_err(|e: HealthError| e.to_string())?;
+        let health = CrateHealth {
+            state: self.state,
+            group: self.group,
+        }
+        .health(account_key, now_unix_s, slot)
+        .map_err(|e: HealthError| e.to_string())?;
         if !health.liquidatable || health.maintenance_health >= 0 {
             return Ok(Vec::new());
         }
@@ -518,7 +589,11 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             let minimum = I80F48::from_num(protocol::LIQUIDATION_BONUS_FEE_MINIMUM_BPS)
                 .checked_div(I80F48::from_num(BPS))
                 .ok_or_else(|| "minimum fee division".to_string())?;
-            if onchain_fee_rate > minimum { onchain_fee_rate } else { minimum }
+            if onchain_fee_rate > minimum {
+                onchain_fee_rate
+            } else {
+                minimum
+            }
         };
         let max_fee_factor = I80F48::ONE
             .checked_add(fee_rate)
@@ -561,7 +636,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     rej_liab_equity_nonpositive += 1;
                     continue;
                 }
-                let asset_weight = asset.bank.get_asset_weight(RequirementType::Maintenance, &reconciled);
+                let asset_weight = asset
+                    .bank
+                    .get_asset_weight(RequirementType::Maintenance, &reconciled);
                 let liab_weight: I80F48 = liab.bank.config.liability_weight_maint.into();
                 let asset_ratio = asset
                     .maintenance_unweighted_value
@@ -571,19 +648,33 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .maintenance_unweighted_value
                     .checked_div(liab.equity_value)
                     .ok_or_else(|| "liability maintenance/equity ratio".to_string())?;
-                let asset_per_usd = asset_ratio.checked_mul(asset_weight).ok_or("asset health value overflow")?;
-                let liab_per_usd = liab_ratio.checked_mul(liab_weight).ok_or("liability health value overflow")?;
-                let Some(fee_factor) = healing_fee_factor(max_fee_factor, asset_per_usd, liab_per_usd, headroom) else {
+                let asset_per_usd = asset_ratio
+                    .checked_mul(asset_weight)
+                    .ok_or("asset health value overflow")?;
+                let liab_per_usd = liab_ratio
+                    .checked_mul(liab_weight)
+                    .ok_or("liability health value overflow")?;
+                let Some(fee_factor) =
+                    healing_fee_factor(max_fee_factor, asset_per_usd, liab_per_usd, headroom)
+                else {
                     rej_coeff_nonpositive += 1;
-                    if pair_details.len() < 8 { pair_details.push(format!("{}→{}:no_nonnegative_premium_healing_pair", asset.bank_pk, liab.bank_pk)); }
+                    if pair_details.len() < 8 {
+                        pair_details.push(format!(
+                            "{}→{}:no_nonnegative_premium_healing_pair",
+                            asset.bank_pk, liab.bank_pk
+                        ));
+                    }
                     continue;
                 };
-                let coeff = liab_per_usd.checked_div(fee_factor)
-                    .and_then(|x| x.checked_sub(asset_per_usd)).ok_or("health coefficient overflow")?;
+                let coeff = liab_per_usd
+                    .checked_div(fee_factor)
+                    .and_then(|x| x.checked_sub(asset_per_usd))
+                    .ok_or("health coefficient overflow")?;
                 let health_cap = (-pre_health)
                     .checked_div(coeff)
                     .ok_or_else(|| "health cap division".to_string())?;
-                let liab_cap = liab.equity_value
+                let liab_cap = liab
+                    .equity_value
                     .checked_mul(fee_factor)
                     .ok_or_else(|| "liability cap overflow".to_string())?;
                 // [FIX-93] Marginfi closeout parity:
@@ -608,11 +699,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
                 let asset_prices = self.prices(&asset.bank, &clock)?;
                 let liab_prices = self.prices(&liab.bank, &clock)?;
-                let withdraw_exact = amount_from_equity(seize_value, asset_prices.equity, &asset.bank)?;
+                let withdraw_exact =
+                    amount_from_equity(seize_value, asset_prices.equity, &asset.bank)?;
                 let withdraw_amount = floor_u64(withdraw_exact)?;
                 if withdraw_amount == 0 {
                     rej_withdraw_zero += 1;
-                    if pair_details.len() < 8 { pair_details.push(format!("{}→{}:withdraw_zero(exact_bits={},seize_bits={},asset_equity_bits={},liab_equity_bits={},price_bits={},decimals={})", asset.bank_pk, liab.bank_pk, withdraw_exact.to_bits(), seize_value.to_bits(), asset.equity_value.to_bits(), liab.equity_value.to_bits(), asset_prices.equity.to_bits(), asset.bank.get_balance_decimals())); }
+                    if pair_details.len() < 8 {
+                        pair_details.push(format!("{}→{}:withdraw_zero(exact_bits={},seize_bits={},asset_equity_bits={},liab_equity_bits={},price_bits={},decimals={})", asset.bank_pk, liab.bank_pk, withdraw_exact.to_bits(), seize_value.to_bits(), asset.equity_value.to_bits(), liab.equity_value.to_bits(), asset_prices.equity.to_bits(), asset.bank.get_balance_decimals()));
+                    }
                     continue;
                 }
                 let seized_actual = calc_value(
@@ -626,11 +720,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .checked_div(fee_factor)
                     .ok_or_else(|| "repay target division".to_string())?;
                 let repay_exact = amount_from_equity(repay_target, liab_prices.equity, &liab.bank)?;
-                let Some(repay_choice) = choose_repay(
-                    repay_exact,
-                    liab.amount,
-                    liab.opposite_amount,
-                )? else {
+                let Some(repay_choice) =
+                    choose_repay(repay_exact, liab.amount, liab.opposite_amount)?
+                else {
                     if ceil_u64(repay_exact)? == 0 {
                         rej_repay_zero += 1;
                     } else {
@@ -675,32 +767,31 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 // repay_all also removes sub-threshold asset dust from the liability balance and
                 // credits it to insurance. EndLiquidation observes that as additional seized
                 // equity/maintenance loss even though the liquidator never receives the dust.
-                let (repay_all_dust_equity, repay_all_dust_health) = if repay_choice.repay_all
-                    && liab.opposite_amount > I80F48::ZERO
-                {
-                    let dust_equity = calc_value(
-                        liab.opposite_amount,
-                        liab_prices.equity,
-                        liab.bank.get_balance_decimals(),
-                        None,
-                    )
-                    .map_err(|e| format!("repay_all dust equity value: {e}"))?;
-                    let dust_maint = calc_value(
-                        liab.opposite_amount,
-                        liab_prices.maint_asset,
-                        liab.bank.get_balance_decimals(),
-                        None,
-                    )
-                    .map_err(|e| format!("repay_all dust maintenance value: {e}"))?
-                    .checked_mul(liab.bank.get_asset_weight(
-                        RequirementType::Maintenance,
-                        &reconciled,
-                    ))
-                    .ok_or("repay_all dust weighted health overflow")?;
-                    (dust_equity, dust_maint)
-                } else {
-                    (I80F48::ZERO, I80F48::ZERO)
-                };
+                let (repay_all_dust_equity, repay_all_dust_health) =
+                    if repay_choice.repay_all && liab.opposite_amount > I80F48::ZERO {
+                        let dust_equity = calc_value(
+                            liab.opposite_amount,
+                            liab_prices.equity,
+                            liab.bank.get_balance_decimals(),
+                            None,
+                        )
+                        .map_err(|e| format!("repay_all dust equity value: {e}"))?;
+                        let dust_maint = calc_value(
+                            liab.opposite_amount,
+                            liab_prices.maint_asset,
+                            liab.bank.get_balance_decimals(),
+                            None,
+                        )
+                        .map_err(|e| format!("repay_all dust maintenance value: {e}"))?
+                        .checked_mul(
+                            liab.bank
+                                .get_asset_weight(RequirementType::Maintenance, &reconciled),
+                        )
+                        .ok_or("repay_all dust weighted health overflow")?;
+                        (dust_equity, dust_maint)
+                    } else {
+                        (I80F48::ZERO, I80F48::ZERO)
+                    };
                 // Re-evaluate after floor(withdraw)/ceil(repay). Headroom alone cannot
                 // guarantee a near-zero normal account stays nonpositive after rounding.
                 let base_health_valid = rounded_health_valid(
@@ -720,7 +811,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                         .ok_or("repay_all dust health overflow")?;
                     delta >= I80F48::ZERO
                         && (health.closeout_allowed
-                            || pre_health.checked_add(delta).ok_or("repay_all post health overflow")?
+                            || pre_health
+                                .checked_add(delta)
+                                .ok_or("repay_all post health overflow")?
                                 <= I80F48::ZERO)
                 } else {
                     base_health_valid
@@ -807,27 +900,21 @@ mod tests {
     #[test]
     fn repay_all_never_clamps_a_target_above_full_transfer() {
         let debt = I80F48::from_num(9.2);
-        assert!(choose_repay(
-            I80F48::from_num(10.1),
-            debt,
-            I80F48::ZERO,
-        )
-        .unwrap()
-        .is_none());
+        assert!(choose_repay(I80F48::from_num(10.1), debt, I80F48::ZERO,)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn repay_all_matches_protocol_opposite_dust_boundary() {
         let debt = I80F48::from_num(9.2);
         let target = I80F48::from_num(9.8);
-        assert!(choose_repay(
-            target,
-            debt,
-            ZERO_AMOUNT_THRESHOLD - I80F48::DELTA,
-        )
-        .unwrap()
-        .unwrap()
-        .repay_all);
+        assert!(
+            choose_repay(target, debt, ZERO_AMOUNT_THRESHOLD - I80F48::DELTA,)
+                .unwrap()
+                .unwrap()
+                .repay_all
+        );
         assert!(choose_repay(target, debt, ZERO_AMOUNT_THRESHOLD)
             .unwrap()
             .is_none());
@@ -835,13 +922,9 @@ mod tests {
 
     #[test]
     fn ordinary_partial_repay_semantics_are_unchanged() {
-        let c = choose_repay(
-            I80F48::from_num(4.1),
-            I80F48::from_num(9.2),
-            I80F48::ZERO,
-        )
-        .unwrap()
-        .unwrap();
+        let c = choose_repay(I80F48::from_num(4.1), I80F48::from_num(9.2), I80F48::ZERO)
+            .unwrap()
+            .unwrap();
         assert_eq!(c.transfer_amount, 5);
         assert_eq!(c.protocol_amount, I80F48::from_num(5));
         assert!(!c.repay_all);
@@ -853,11 +936,26 @@ mod tests {
         let liab = I80F48::from_bits(281293154858195) * I80F48::from_bits(309622474381722);
         let cap = I80F48::from_num(1.1);
         assert!(liab / cap - asset < I80F48::ZERO);
-        let selected = healing_fee_factor(cap, asset, liab, I80F48::from_num(9990) / I80F48::from_num(10000)).unwrap();
+        let selected = healing_fee_factor(
+            cap,
+            asset,
+            liab,
+            I80F48::from_num(9990) / I80F48::from_num(10000),
+        )
+        .unwrap();
         assert!(selected >= I80F48::ONE && selected < cap);
         assert!(liab / selected - asset > I80F48::ZERO);
-        assert_eq!(healing_fee_factor(cap, I80F48::from_num(0.8), liab, I80F48::from_num(0.999)), Some(cap));
-        assert!(healing_fee_factor(cap, I80F48::from_num(1.2), I80F48::ONE, I80F48::from_num(0.999)).is_none());
+        assert_eq!(
+            healing_fee_factor(cap, I80F48::from_num(0.8), liab, I80F48::from_num(0.999)),
+            Some(cap)
+        );
+        assert!(healing_fee_factor(
+            cap,
+            I80F48::from_num(1.2),
+            I80F48::ONE,
+            I80F48::from_num(0.999)
+        )
+        .is_none());
     }
 
     #[test]
@@ -865,9 +963,18 @@ mod tests {
         let pre = I80F48::from_num(-0.01);
         let one = I80F48::ONE;
         let liab = I80F48::from_num(1.1);
-        assert_eq!(rounded_health_valid(pre, one, one, one, liab, false), Some(false));
-        assert_eq!(rounded_health_valid(pre, one, one, one, liab, true), Some(true));
-        assert_eq!(rounded_health_valid(pre, one, one, liab, one, true), Some(false));
+        assert_eq!(
+            rounded_health_valid(pre, one, one, one, liab, false),
+            Some(false)
+        );
+        assert_eq!(
+            rounded_health_valid(pre, one, one, one, liab, true),
+            Some(true)
+        );
+        assert_eq!(
+            rounded_health_valid(pre, one, one, liab, one, true),
+            Some(false)
+        );
     }
 
     #[test]
@@ -881,7 +988,10 @@ mod tests {
         let equity = calc_value(amount, price, bank.get_balance_decimals(), None).unwrap();
         assert_eq!(amount_from_equity(equity, price, &bank).unwrap(), amount);
         // The previous mint-decimal inverse returned 1/1000 of the bank balance units.
-        assert_ne!(calc_amount(equity, price, bank.mint_decimals).unwrap(), amount);
+        assert_ne!(
+            calc_amount(equity, price, bank.mint_decimals).unwrap(),
+            amount
+        );
         bank.config.asset_tag = ASSET_TAG_JUPLEND;
         let equity = calc_value(amount, price, bank.get_balance_decimals(), None).unwrap();
         assert_eq!(amount_from_equity(equity, price, &bank).unwrap(), amount);
@@ -889,9 +999,18 @@ mod tests {
 
     #[test]
     fn integer_conversions_are_conservative() {
-        assert_eq!(floor_u64(I80F48::from_num(12) + I80F48::from_num(1) / I80F48::from_num(2)).unwrap(), 12);
-        assert_eq!(ceil_u64(I80F48::from_num(12) + I80F48::from_num(1) / I80F48::from_num(2)).unwrap(), 13);
-        assert_eq!(usd_micro(I80F48::from_num(3) / I80F48::from_num(2)).unwrap(), 1_500_000);
+        assert_eq!(
+            floor_u64(I80F48::from_num(12) + I80F48::from_num(1) / I80F48::from_num(2)).unwrap(),
+            12
+        );
+        assert_eq!(
+            ceil_u64(I80F48::from_num(12) + I80F48::from_num(1) / I80F48::from_num(2)).unwrap(),
+            13
+        );
+        assert_eq!(
+            usd_micro(I80F48::from_num(3) / I80F48::from_num(2)).unwrap(),
+            1_500_000
+        );
     }
 
     #[test]
@@ -902,8 +1021,7 @@ mod tests {
 
     #[test]
     fn closeout_threshold_matches_protocol_units() {
-        let threshold_bits =
-            (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
+        let threshold_bits = (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
         assert_eq!(
             threshold_bits,
             I80F48::from_num(protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD).to_bits()

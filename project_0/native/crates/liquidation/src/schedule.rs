@@ -50,7 +50,14 @@ impl TimeScheduler {
             let seq = self.next_seq;
             self.next_seq += 1;
             self.heap.push(Reverse((at, seq)));
-            self.by_seq.insert(seq, Due { account, trigger, at_unix_s: at });
+            self.by_seq.insert(
+                seq,
+                Due {
+                    account,
+                    trigger,
+                    at_unix_s: at,
+                },
+            );
             self.current.insert((account, trigger), seq);
         }
     }

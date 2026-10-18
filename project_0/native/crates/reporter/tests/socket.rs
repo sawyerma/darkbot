@@ -1,24 +1,37 @@
 #![cfg(unix)]
-use darkbot_p0_reporter::{start, ReporterConfig};
 use darkbot_p0_reporter::proto::control::{engine_frame, EngineFrame, ProjectId, TopicId};
 use darkbot_p0_reporter::proto::project0::StatusProjection;
+use darkbot_p0_reporter::{start, ReporterConfig};
 use darkbot_runner::status_tap::{MarketSnapshot, StatusTap};
 use prost::Message;
 use std::io::Read;
 use std::os::unix::{fs::PermissionsExt, net::UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, SystemTime, UNIX_EPOCH, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn directory(name: &str) -> PathBuf {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let path = std::env::temp_dir().join(format!("darkbot-reporter-{}-{name}-{stamp}", std::process::id()));
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "darkbot-reporter-{}-{name}-{stamp}",
+        std::process::id()
+    ));
     std::fs::create_dir(&path).unwrap();
     path
 }
 fn sock(tag: &str) -> PathBuf {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    PathBuf::from(format!("/tmp/p0r-{}-{tag}-{:x}.sock", std::process::id(), stamp & 0xffff_ffff))
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    PathBuf::from(format!(
+        "/tmp/p0r-{}-{tag}-{:x}.sock",
+        std::process::id(),
+        stamp & 0xffff_ffff
+    ))
 }
 fn next(stream: &mut UnixStream) -> EngineFrame {
     let mut prefix = [0; 4];
@@ -31,7 +44,9 @@ fn next(stream: &mut UnixStream) -> EngineFrame {
 }
 fn connect(cfg: &ReporterConfig) -> UnixStream {
     let stream = UnixStream::connect(&cfg.socket_path).unwrap();
-    stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
     stream
 }
 fn expect_state(stream: &mut UnixStream) -> darkbot_p0_reporter::proto::control::StateFull {
@@ -47,7 +62,14 @@ fn handshake_state_heartbeat_permissions_and_reconnect_seq() {
     let mut cfg = ReporterConfig::new(sock("wire"), dir.join("generation"), "run-TEST_ONLY".into());
     cfg.heartbeat = Duration::from_millis(150);
     let handle = start(cfg.clone(), tap.clone()).unwrap();
-    assert_eq!(std::fs::metadata(&cfg.socket_path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(&cfg.socket_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
     let mut first = connect(&cfg);
     let hello = match next(&mut first).msg.unwrap() {
         engine_frame::Msg::Hello(h) => h,
@@ -58,7 +80,9 @@ fn handshake_state_heartbeat_permissions_and_reconnect_seq() {
     assert_eq!(hello.generation, handle.generation);
     assert_eq!(hello.schema_id, darkbot_p0_reporter::schema_id());
     tap.publish_market(MarketSnapshot {
-        gap_count: 11, last_observed_slot: Some(123), live_verdict: "MARKET_DATA_INCOMPLETE",
+        gap_count: 11,
+        last_observed_slot: Some(123),
+        live_verdict: "MARKET_DATA_INCOMPLETE",
         ..Default::default()
     });
     let one = expect_state(&mut first);
@@ -98,13 +122,22 @@ fn slow_and_disconnected_client_do_not_block_capture_publisher() {
     let slow = connect(&cfg);
     let started = Instant::now();
     for n in 0..20_000 {
-        tap.publish_market(MarketSnapshot { gap_count: n, ..Default::default() });
+        tap.publish_market(MarketSnapshot {
+            gap_count: n,
+            ..Default::default()
+        });
     }
-    assert!(started.elapsed() < Duration::from_secs(3), "capture publisher stalled by slow socket client");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "capture publisher stalled by slow socket client"
+    );
     drop(slow);
     // No publisher needs to wait for the socket worker to observe disconnection.
     for n in 0..1000 {
-        tap.publish_market(MarketSnapshot { gap_count: n, ..Default::default() });
+        tap.publish_market(MarketSnapshot {
+            gap_count: n,
+            ..Default::default()
+        });
     }
     // connect() completes before the nonblocking server thread necessarily accepts.
     // Give the accept loop a bounded chance to report the connection.
@@ -112,7 +145,10 @@ fn slow_and_disconnected_client_do_not_block_capture_publisher() {
     while handle.counters.connections.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(handle.counters.connections.load(Ordering::Relaxed) >= 1, "reporter did not accept the connection");
+    assert!(
+        handle.counters.connections.load(Ordering::Relaxed) >= 1,
+        "reporter did not accept the connection"
+    );
     handle.stop();
     std::fs::remove_dir_all(dir).unwrap();
 }

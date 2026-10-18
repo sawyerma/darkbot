@@ -144,13 +144,8 @@ mod tests {
         let base = Base {
             accounts: HashMap::from([(key, account(owner, 5, &[4]))]),
         };
-        let projected = ProjectedState::new(
-            &base,
-            7,
-            1_000,
-            [(other, account(owner, 9, &[8]))],
-        )
-        .expect("projection");
+        let projected = ProjectedState::new(&base, 7, 1_000, [(other, account(owner, 9, &[8]))])
+            .expect("projection");
 
         let (_, lamports, data) = projected.account(&key).expect("base fallback");
         assert_eq!(lamports, 5);
@@ -193,21 +188,26 @@ mod tests {
         let base = Base {
             accounts: HashMap::new(),
         };
-        assert!(ProjectedState::new(&base, 0, 1_000, [(Pubkey::new_unique(), Account::default())])
-            .is_err());
         assert!(ProjectedState::new(
             &base,
-            1,
+            0,
             1_000,
-            std::iter::empty::<(Pubkey, Account)>(),
+            [(Pubkey::new_unique(), Account::default())]
         )
         .is_err());
+        assert!(
+            ProjectedState::new(&base, 1, 1_000, std::iter::empty::<(Pubkey, Account)>(),).is_err()
+        );
     }
     #[test]
     fn negative_simulation_timestamp_fails_closed() {
-        let base = Base { accounts: HashMap::new() };
-        assert!(ProjectedState::new(&base, 42, -1,
-            [(Pubkey::new_unique(), Account::default())]).is_err());
+        let base = Base {
+            accounts: HashMap::new(),
+        };
+        assert!(
+            ProjectedState::new(&base, 42, -1, [(Pubkey::new_unique(), Account::default())])
+                .is_err()
+        );
     }
 
     #[cfg(feature = "crate_health")]
@@ -220,9 +220,16 @@ mod tests {
         lending.last_update_timestamp = 1_000;
         let mut reserve = kamino_mocks::state::MinimalReserve::zeroed();
         reserve.slot = 42;
-        let base = Base { accounts: HashMap::new() };
-        let projected = ProjectedState::new(&base, 42, 1_000,
-            [(Pubkey::new_unique(), Account::default())]).unwrap();
+        let base = Base {
+            accounts: HashMap::new(),
+        };
+        let projected = ProjectedState::new(
+            &base,
+            42,
+            1_000,
+            [(Pubkey::new_unique(), Account::default())],
+        )
+        .unwrap();
         let (unix_s, slot) = projected.evaluation_time();
         assert_eq!((unix_s, slot), (1_000, 42));
         assert!(!lending.is_stale(unix_s as i64));
@@ -231,5 +238,4 @@ mod tests {
         assert!(reserve.is_stale(43));
         assert_eq!(projected.evaluation_time(), (1_000, 42));
     }
-
 }

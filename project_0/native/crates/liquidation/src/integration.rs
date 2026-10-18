@@ -18,9 +18,9 @@ use std::str::FromStr;
 use marginfi_type_crate::{
     constants::{ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO},
     pdas::{
-        derive_drift_signer, derive_drift_spot_market, derive_drift_spot_market_vault, derive_drift_state,
-        derive_juplend_claim_account, derive_juplend_lending_admin, derive_juplend_liquidity,
-        derive_juplend_liquidity_vault, derive_juplend_rate_model,
+        derive_drift_signer, derive_drift_spot_market, derive_drift_spot_market_vault,
+        derive_drift_state, derive_juplend_claim_account, derive_juplend_lending_admin,
+        derive_juplend_liquidity, derive_juplend_liquidity_vault, derive_juplend_rate_model,
         derive_juplend_rewards_rate_model, JUPLEND_LIQUIDITY_PROGRAM_ID,
     },
     types::{Bank, MarginfiAccount},
@@ -68,14 +68,12 @@ pub fn pricing_kind(bank: &Bank) -> Option<IntegrationKind> {
     }
 }
 
-
 /// Venue whose state must be refreshed before evaluating this bank.
 /// Pricing/oracle integration is authoritative for freshness. Asset-tag integration is used as a
 /// conservative fallback for layouts that encode the venue only in the bank tag.
 fn refresh_kind(bank: &Bank) -> Option<IntegrationKind> {
     pricing_kind(bank).or_else(|| kind(bank))
 }
-
 
 /// [FIX-112][R6] Exact separation between Marginfi bank units and the underlying tokens
 /// that the external venue sends to the liquidator.
@@ -173,12 +171,11 @@ pub fn execution_amount_for_asset<S: AccountSource + ?Sized>(
             if underlying == 0 {
                 return Err("JUPLEND_UNDERLYING_ZERO".into());
             }
-            let shares_to_burn =
-                juplend_mocks::state::expected_shares_for_withdraw_from_rate(
-                    underlying,
-                    token_exchange_price,
-                )
-                .ok_or_else(|| "JUPLEND_UNDERLYING_TO_SHARES".to_string())?;
+            let shares_to_burn = juplend_mocks::state::expected_shares_for_withdraw_from_rate(
+                underlying,
+                token_exchange_price,
+            )
+            .ok_or_else(|| "JUPLEND_UNDERLYING_TO_SHARES".to_string())?;
             if shares_to_burn == 0 || shares_to_burn > bank_units {
                 return Err(format!(
                     "JUPLEND_BURN_EXCEEDS_SIZED_SHARES:{}>{}",
@@ -319,8 +316,7 @@ pub fn drift_reward_market_keys<S: AccountSource + ?Sized>(
 ) -> Result<Vec<Pubkey>, String> {
     let market: &drift_mocks::state::MinimalSpotMarket =
         pod_after_disc(state, &bank.integration_acc_1)?;
-    let user: &drift_mocks::state::MinimalUser =
-        pod_after_disc(state, &bank.integration_acc_2)?;
+    let user: &drift_mocks::state::MinimalUser = pod_after_disc(state, &bank.integration_acc_2)?;
 
     let mut indexes: Vec<u16> = user
         .spot_positions
@@ -336,10 +332,7 @@ pub fn drift_reward_market_keys<S: AccountSource + ?Sized>(
     indexes.dedup();
 
     if indexes.len() > 2 {
-        return Err(format!(
-            "DRIFT_TOO_MANY_REWARD_MARKETS:{}",
-            indexes.len()
-        ));
+        return Err(format!("DRIFT_TOO_MANY_REWARD_MARKETS:{}", indexes.len()));
     }
 
     Ok(indexes
@@ -430,7 +423,11 @@ pub fn kinds_for_account<S: AccountSource + ?Sized>(
     }
     let need = 8 + std::mem::size_of::<MarginfiAccount>();
     if data.len() < need {
-        return Err(format!("INTEGRATION_KIND_ACCOUNT_SHORT:{}<{}", data.len(), need));
+        return Err(format!(
+            "INTEGRATION_KIND_ACCOUNT_SHORT:{}<{}",
+            data.len(),
+            need
+        ));
     }
     let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
         .map_err(|e| format!("INTEGRATION_KIND_ACCOUNT_CAST:{e:?}"))?;
@@ -438,7 +435,12 @@ pub fn kinds_for_account<S: AccountSource + ?Sized>(
     let mut kamino = false;
     let mut drift = false;
     let mut juplend = false;
-    for bal in account.lending_account.balances.iter().filter(|b| b.is_active()) {
+    for bal in account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
         let (bank_owner, _, bank_data) = raw(state, &bal.bank_pk)?;
         if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
             return Err(format!("INTEGRATION_KIND_INVALID_BANK:{}", bal.bank_pk));
@@ -453,9 +455,15 @@ pub fn kinds_for_account<S: AccountSource + ?Sized>(
     }
 
     let mut out = Vec::with_capacity(3);
-    if kamino { out.push(IntegrationKind::Kamino); }
-    if drift { out.push(IntegrationKind::Drift); }
-    if juplend { out.push(IntegrationKind::JupLend); }
+    if kamino {
+        out.push(IntegrationKind::Kamino);
+    }
+    if drift {
+        out.push(IntegrationKind::Drift);
+    }
+    if juplend {
+        out.push(IntegrationKind::JupLend);
+    }
     Ok(out)
 }
 
@@ -466,7 +474,6 @@ pub fn kind_name(kind: IntegrationKind) -> &'static str {
         IntegrationKind::JupLend => "JupLend",
     }
 }
-
 
 pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
     state: &S,
@@ -479,7 +486,11 @@ pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
     }
     let need = 8 + std::mem::size_of::<MarginfiAccount>();
     if data.len() < need {
-        return Err(format!("PRICING_KIND_ACCOUNT_SHORT:{}<{}", data.len(), need));
+        return Err(format!(
+            "PRICING_KIND_ACCOUNT_SHORT:{}<{}",
+            data.len(),
+            need
+        ));
     }
     let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
         .map_err(|e| format!("PRICING_KIND_ACCOUNT_CAST:{e:?}"))?;
@@ -487,7 +498,12 @@ pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
     let mut kamino = false;
     let mut drift = false;
     let mut juplend = false;
-    for bal in account.lending_account.balances.iter().filter(|b| b.is_active()) {
+    for bal in account
+        .lending_account
+        .balances
+        .iter()
+        .filter(|b| b.is_active())
+    {
         let (bank_owner, _, bank_data) = raw(state, &bal.bank_pk)?;
         if bank_owner != *program || protocol::classify(bank_data) != protocol::AccountType::Bank {
             return Err(format!("PRICING_KIND_INVALID_BANK:{}", bal.bank_pk));
@@ -502,9 +518,15 @@ pub fn pricing_kinds_for_account<S: AccountSource + ?Sized>(
     }
 
     let mut out = Vec::with_capacity(3);
-    if kamino { out.push(IntegrationKind::Kamino); }
-    if drift { out.push(IntegrationKind::Drift); }
-    if juplend { out.push(IntegrationKind::JupLend); }
+    if kamino {
+        out.push(IntegrationKind::Kamino);
+    }
+    if drift {
+        out.push(IntegrationKind::Drift);
+    }
+    if juplend {
+        out.push(IntegrationKind::JupLend);
+    }
     Ok(out)
 }
 
@@ -523,7 +545,11 @@ pub fn refresh_plan_for_account<S: AccountSource + ?Sized>(
     }
     let need = 8 + std::mem::size_of::<MarginfiAccount>();
     if data.len() < need {
-        return Err(format!("INTEGRATION_MARGINFI_ACCOUNT_SHORT:{}<{}", data.len(), need));
+        return Err(format!(
+            "INTEGRATION_MARGINFI_ACCOUNT_SHORT:{}<{}",
+            data.len(),
+            need
+        ));
     }
     let account: &MarginfiAccount = bytemuck::try_from_bytes(&data[8..need])
         .map_err(|e| format!("INTEGRATION_MARGINFI_ACCOUNT_CAST:{e:?}"))?;
@@ -554,11 +580,15 @@ pub fn refresh_plan_for_account<S: AccountSource + ?Sized>(
             if existing.program_id == ix.program_id
                 && existing.data == ix.data
                 && existing.accounts.len() == ix.accounts.len()
-                && existing.accounts.iter().zip(ix.accounts.iter()).all(|(a, b)| {
-                    a.pubkey == b.pubkey
-                        && a.is_signer == b.is_signer
-                        && a.is_writable == b.is_writable
-                })
+                && existing
+                    .accounts
+                    .iter()
+                    .zip(ix.accounts.iter())
+                    .all(|(a, b)| {
+                        a.pubkey == b.pubkey
+                            && a.is_signer == b.is_signer
+                            && a.is_writable == b.is_writable
+                    })
             {
                 continue 'outer;
             }
@@ -594,7 +624,11 @@ pub fn projection_targets_for_account<S: AccountSource + ?Sized>(
     }
     let need = 8 + std::mem::size_of::<MarginfiAccount>();
     if data.len() < need {
-        return Err(format!("PROJECTION_MARGINFI_ACCOUNT_SHORT:{}<{}", data.len(), need));
+        return Err(format!(
+            "PROJECTION_MARGINFI_ACCOUNT_SHORT:{}<{}",
+            data.len(),
+            need
+        ));
     }
     bytemuck::try_from_bytes::<MarginfiAccount>(&data[8..need])
         .map_err(|e| format!("PROJECTION_MARGINFI_ACCOUNT_CAST:{e:?}"))?;
@@ -738,8 +772,14 @@ mod tests {
 
     #[test]
     fn pinned_refresh_discriminators_match_expected() {
-        assert_eq!(ix_discriminator("refresh_reserve"), vec![2, 218, 138, 235, 79, 201, 25, 102]);
-        assert_eq!(ix_discriminator("refresh_obligation"), vec![33, 132, 147, 228, 151, 192, 72, 89]);
+        assert_eq!(
+            ix_discriminator("refresh_reserve"),
+            vec![2, 218, 138, 235, 79, 201, 25, 102]
+        );
+        assert_eq!(
+            ix_discriminator("refresh_obligation"),
+            vec![33, 132, 147, 228, 151, 192, 72, 89]
+        );
         assert_eq!(vec![39, 166, 139, 243, 158, 165, 155, 225].len(), 8);
         assert_eq!(vec![24, 225, 53, 189, 72, 212, 225, 178].len(), 8);
     }

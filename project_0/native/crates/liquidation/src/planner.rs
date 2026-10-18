@@ -14,16 +14,16 @@ use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
-    Refresh(Pubkey),        // Programm, das refreshed wird (Kamino, Drift, JupLend, LiqRecord-Init)
-    PriceUpdate(Pubkey),    // Oracle-Programm (falls Pull-Oracle, P0-03)
+    Refresh(Pubkey), // Programm, das refreshed wird (Kamino, Drift, JupLend, LiqRecord-Init)
+    PriceUpdate(Pubkey), // Oracle-Programm (falls Pull-Oracle, P0-03)
     StartLiquidation,
     Withdraw,
     IntegrationWithdraw(Pubkey),
-    Swap(Pubkey),           // Swap-Programm
+    Swap(Pubkey), // Swap-Programm
     RepayFromInventory,
     Repay,
     EndLiquidation,
-    Other(Pubkey),          // alles andere (ATA-Close, Transfer, …)
+    Other(Pubkey), // alles andere (ATA-Close, Transfer, …)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -56,9 +56,20 @@ pub enum PlanError {
 }
 
 /// Validiert eine Receivership-TX (eine Transaktion). Indizes im Fehler = Position im Plan.
-pub fn validate_receivership(steps: &[Step], allow: &Allowlist, route: RouteKind, p7_passed: bool) -> Result<(), PlanError> {
-    let start = steps.iter().position(|s| *s == Step::StartLiquidation).ok_or(PlanError::NoStart)?;
-    let end = steps.iter().position(|s| *s == Step::EndLiquidation).ok_or(PlanError::NoEnd)?;
+pub fn validate_receivership(
+    steps: &[Step],
+    allow: &Allowlist,
+    route: RouteKind,
+    p7_passed: bool,
+) -> Result<(), PlanError> {
+    let start = steps
+        .iter()
+        .position(|s| *s == Step::StartLiquidation)
+        .ok_or(PlanError::NoStart)?;
+    let end = steps
+        .iter()
+        .position(|s| *s == Step::EndLiquidation)
+        .ok_or(PlanError::NoEnd)?;
     if end != steps.len() - 1 {
         return Err(PlanError::EndNotLast);
     }
@@ -101,7 +112,9 @@ pub fn validate_receivership(steps: &[Step], allow: &Allowlist, route: RouteKind
             Step::Refresh(p) if allow.refresh_programs.contains(p) => {}
             Step::PriceUpdate(p) if allow.oracle_programs.contains(p) => {}
             Step::Other(p) if allow.other_programs.contains(p) => {}
-            Step::Other(_) | Step::Refresh(_) | Step::PriceUpdate(_) => return Err(PlanError::ProgramNotAllowlisted(i)),
+            Step::Other(_) | Step::Refresh(_) | Step::PriceUpdate(_) => {
+                return Err(PlanError::ProgramNotAllowlisted(i))
+            }
             Step::EndLiquidation => unreachable!(),
         }
     }
@@ -139,7 +152,11 @@ mod tests {
     use super::*;
 
     fn allow() -> (Allowlist, Pubkey, Pubkey, Pubkey) {
-        let (kamino, jup, other) = (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+        let (kamino, jup, other) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
         let mut a = Allowlist::default();
         a.refresh_programs.insert(kamino);
         a.integration_programs.insert(kamino);
@@ -151,40 +168,96 @@ mod tests {
     #[test]
     fn valid_swap_plan() {
         let (a, kamino, jup, _) = allow();
-        let plan = vec![Step::Refresh(kamino), Step::StartLiquidation, Step::Withdraw, Step::Swap(jup), Step::Repay, Step::EndLiquidation];
-        assert_eq!(validate_receivership(&plan, &a, RouteKind::FreePublicAllowed, false), Ok(()));
+        let plan = vec![
+            Step::Refresh(kamino),
+            Step::StartLiquidation,
+            Step::Withdraw,
+            Step::Swap(jup),
+            Step::Repay,
+            Step::EndLiquidation,
+        ];
+        assert_eq!(
+            validate_receivership(&plan, &a, RouteKind::FreePublicAllowed, false),
+            Ok(())
+        );
     }
 
     #[test]
     fn end_must_be_last_without_exception() {
         let (a, _, _, other) = allow();
-        let plan = vec![Step::StartLiquidation, Step::Withdraw, Step::Repay, Step::EndLiquidation, Step::Other(other)];
-        assert_eq!(validate_receivership(&plan, &a, RouteKind::NoSwap, false), Err(PlanError::EndNotLast));
+        let plan = vec![
+            Step::StartLiquidation,
+            Step::Withdraw,
+            Step::Repay,
+            Step::EndLiquidation,
+            Step::Other(other),
+        ];
+        assert_eq!(
+            validate_receivership(&plan, &a, RouteKind::NoSwap, false),
+            Err(PlanError::EndNotLast)
+        );
     }
 
     #[test]
     fn non_allowlisted_swap_and_paid_route() {
         let (a, _, _, other) = allow();
-        let plan = vec![Step::StartLiquidation, Step::Withdraw, Step::Swap(other), Step::Repay, Step::EndLiquidation];
-        assert_eq!(validate_receivership(&plan, &a, RouteKind::FreePublicAllowed, false), Err(PlanError::ProgramNotAllowlisted(2)));
-        let plan = vec![Step::StartLiquidation, Step::Withdraw, Step::Repay, Step::EndLiquidation];
-        assert_eq!(validate_receivership(&plan, &a, RouteKind::PaidAllowed, false), Err(PlanError::PaidRouteBeforeP7));
-        assert_eq!(validate_receivership(&plan, &a, RouteKind::NoSwap, false), Ok(()));
+        let plan = vec![
+            Step::StartLiquidation,
+            Step::Withdraw,
+            Step::Swap(other),
+            Step::Repay,
+            Step::EndLiquidation,
+        ];
+        assert_eq!(
+            validate_receivership(&plan, &a, RouteKind::FreePublicAllowed, false),
+            Err(PlanError::ProgramNotAllowlisted(2))
+        );
+        let plan = vec![
+            Step::StartLiquidation,
+            Step::Withdraw,
+            Step::Repay,
+            Step::EndLiquidation,
+        ];
+        assert_eq!(
+            validate_receivership(&plan, &a, RouteKind::PaidAllowed, false),
+            Err(PlanError::PaidRouteBeforeP7)
+        );
+        assert_eq!(
+            validate_receivership(&plan, &a, RouteKind::NoSwap, false),
+            Ok(())
+        );
     }
 
     #[test]
     fn no_swap_plan_rejects_swap_and_requires_repay() {
         let (a, _, jup, _) = allow();
-        let plan = vec![Step::StartLiquidation, Step::Withdraw, Step::Swap(jup), Step::Repay, Step::EndLiquidation];
-        assert!(matches!(validate_receivership(&plan, &a, RouteKind::NoSwap, false), Err(PlanError::OrderViolation(2, _))));
+        let plan = vec![
+            Step::StartLiquidation,
+            Step::Withdraw,
+            Step::Swap(jup),
+            Step::Repay,
+            Step::EndLiquidation,
+        ];
+        assert!(matches!(
+            validate_receivership(&plan, &a, RouteKind::NoSwap, false),
+            Err(PlanError::OrderViolation(2, _))
+        ));
         let plan = vec![Step::StartLiquidation, Step::Withdraw, Step::EndLiquidation];
-        assert_eq!(validate_receivership(&plan, &a, RouteKind::NoSwap, false), Err(PlanError::RepayMissing));
+        assert_eq!(
+            validate_receivership(&plan, &a, RouteKind::NoSwap, false),
+            Err(PlanError::RepayMissing)
+        );
     }
 
     #[test]
     fn bundle_rules() {
         let pre = vec![Step::Other(Pubkey::new_unique())];
-        let recv = vec![Step::StartLiquidation, Step::Withdraw, Step::Repay, Step::EndLiquidation];
+        let recv = vec![
+            Step::StartLiquidation,
+            Step::Withdraw,
+            Step::Repay,
+            Step::EndLiquidation,
+        ];
         assert_eq!(validate_bundle(&[pre.clone(), recv.clone()]), Ok(1));
         let split_a = vec![Step::StartLiquidation, Step::Withdraw];
         let split_b = vec![Step::Repay, Step::EndLiquidation];

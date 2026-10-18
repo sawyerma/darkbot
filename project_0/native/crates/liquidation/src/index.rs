@@ -96,19 +96,31 @@ impl ReverseIndex {
     }
 
     pub fn banks_for_oracle(&self, oracle: &Pubkey) -> impl Iterator<Item = &Pubkey> {
-        self.oracle_to_banks.get(oracle).into_iter().flat_map(|s| s.iter())
+        self.oracle_to_banks
+            .get(oracle)
+            .into_iter()
+            .flat_map(|s| s.iter())
     }
 
     pub fn accounts_for_bank(&self, bank: &Pubkey) -> impl Iterator<Item = &Pubkey> {
-        self.bank_to_accounts.get(bank).into_iter().flat_map(|s| s.iter())
+        self.bank_to_accounts
+            .get(bank)
+            .into_iter()
+            .flat_map(|s| s.iter())
     }
 
     pub fn banks_for_account(&self, account: &Pubkey) -> impl Iterator<Item = &Pubkey> {
-        self.account_to_banks.get(account).into_iter().flat_map(|s| s.iter())
+        self.account_to_banks
+            .get(account)
+            .into_iter()
+            .flat_map(|s| s.iter())
     }
 
     pub fn banks_for_integration(&self, integration: &Pubkey) -> impl Iterator<Item = &Pubkey> {
-        self.integration_to_banks.get(integration).into_iter().flat_map(|s| s.iter())
+        self.integration_to_banks
+            .get(integration)
+            .into_iter()
+            .flat_map(|s| s.iter())
     }
 
     /// Oracle-Update → alle potenziell betroffenen Accounts (ohne Schwellen-Filter; Messgröße
@@ -261,7 +273,13 @@ mod tests {
     #[test]
     fn reverse_index_fanout_and_replacement() {
         let mut ix = ReverseIndex::new();
-        let (o, b1, b2, a1, a2) = (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+        let (o, b1, b2, a1, a2) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
         ix.set_bank_oracles(b1, &[o]);
         ix.set_bank_oracles(b2, &[o]);
         ix.set_account_banks(a1, &[b1]);
@@ -287,7 +305,11 @@ mod tests {
     fn threshold_lookup_both_sides() {
         let mut t = ThresholdIndex::new();
         let bank = Pubkey::new_unique();
-        let (a_asset, a_liab, far) = (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+        let (a_asset, a_liab, far) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
         // Asset-Halter wird liquidierbar, wenn Preis <= 100
         t.set_account(a_asset, &[(bank, Side::Asset, 100)]);
         // Schuldner wird liquidierbar, wenn Preis >= 200
