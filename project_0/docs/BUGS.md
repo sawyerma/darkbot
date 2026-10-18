@@ -611,28 +611,28 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** signierbarer Refresh ist durch Source/Fixture begründet, nicht durch eine 8-Byte-Länge. **Commit/Evidence:** —.
 
 ### E4 — BOOT-02 hat keinen aktiven Journal-Writer-Probe
-- [ ] **HIGH / LOCAL ADMISSION · CODE_CONFIRMED · G-A/G-B · BOOT-02/PERSIST/SK; Cross-Ref X3/M2.**
+- [x] **HIGH · LOCAL_PASS · G-A/G-B · BOOT-02/PERSIST/SK; Cross-Ref X3/M2.** ~~BOOT-02 prüft nur freie Bytes, schreibt nichts.~~
 - **Pfad:** `runtime/src/orchestration/boot_audit.rs::offline`.
 - **Ist:** BOOT-02 kontrolliert Runtime-Owner, unsealed Vorjournale, RAM und freie Diskkapazität, führt aber **keinen** isolierten Create→Frame-Write→Sync→Readback→Seal→Verify-Test des *tatsächlichen Run-Dateisystems* aus. Eine freie Diskzahl beweist weder aktuelle Schreibbarkeit noch Flush-/Sync-/Journal-Parität.
 - **Soll-Fix:** Nur nach sauberer BOOT-Owner-/Pfadprüfung in einer **einmaligen eindeutigen Probe-Datei** auf dem tatsächlich konfigurierten Ziel-Volume eine native `.p0j`-Framekette erstellen, fsync/sync_data plus Verzeichnismetadaten und CRC/Hash/Längen-/Manifest-Readback/Seal entsprechend bestehendem Journalvertrag überprüfen; Probe-Datei nach Erfolg geordnet entfernen, bei Fehler Ursache und Artefakt für Diagnose sicher behandeln, niemals fremde/historische Journale verändern. Kosten/Sync-Semantik explizit messen und eine lokal belastbare Schreibfähigkeit statt globaler Garantie behaupten. Keine Mainnet-Reads, keine Keys.
 - **Tests:** temp-volume writable/read-only/full/quota/permission, injected fsync/short-write/readback/manifest-failure, concurrent Owner und stale probe; BOOT bleibt `BLOCKED/UNKNOWN` bei unsicherem I/O.
-- **Abnahme:** aktive Writer-Probe auf **richtigem Zielpfad** PASS; sonst BOOT-02 nicht PASS. **Commit/Evidence:** —.
+- **Abnahme:** aktive Writer-Probe auf **richtigem Zielpfad** PASS; sonst BOOT-02 nicht PASS. **Commit/Evidence:** `af8050b`: `journal_writer_probe` (kritisch) erzeugt auf dem Volume des tatsächlichen Run-Roots (E6) eine eindeutige `.p0-boot-probe-<pid>-<ns>.p0j`, schreibt zwei typisierte Frames, `sync`, `seal(true)`, liest mit dem strikten `Reader` zurück (sealed+complete+Payload-Gleichheit), entfernt die Datei und synct das Verzeichnis; jeder Fehlschritt (CREATE/WRITE/SYNC/SEAL/READBACK/REMOVE) ⇒ BLOCKED, Probe-Datei auch nach Fehler entfernt (sonst Pfad im Grund). Dauer wird im Grund ausgewiesen. Test `writer_probe_passes_and_fails_closed` (beschreibbar ⇒ PASS ohne Rest, injizierter Sync-Fehler ⇒ `WRITER_PROBE_SYNC`, Read-only-Volume ⇒ `WRITER_PROBE_CREATE` und Audit BLOCKED) Exit 0 (`evidence/HARDENING_20261018/after_E4_E5_E6_tests.txt`). **NOT_RUN:** volle Platte/Quota, Short-Write, konkurrierender Owner während der Probe; die Probe belegt Schreib-/Sync-Fähigkeit *jetzt*, keine Kapazität für den ganzen Lauf (SK-06-Preflight).
 
 ### E5 — BOOT-Doctor scannt große alte p0j-Journale vollständig
-- [ ] **MEDIUM / OPERABILITY · CODE_CONFIRMED · G-A/G-B · BOOT-02.**
+- [x] **MEDIUM · LOCAL_PASS · G-A/G-B · BOOT-02.** ~~`unsealed_journals` liest jedes Journal bis zum Ende.~~
 - **Pfad:** `runtime/src/orchestration/boot_audit.rs::unsealed_journals`.
 - **Ist:** Für jedes `.p0j` der drei neuesten Runs pro Root wird `Reader::open` ausgeführt und in `while let Ok(Some(_)) = r.next_frame() {}` **bis zum Ende** gelesen. Ein langes Marktjournal kann Doctor/Admission deutlich verzögern; konkrete Minutenangabe ist erst mit realen Bytes nachzuweisen. Zudem klassifiziert die Schleife Lesefehler nicht getrennt, sondern beendet den Scan.
 - **Soll-Fix:** Bounded *strukturelles* Seal-/Tail-/Manifest-Screening mit expliziter Max-Arbeits-/Zeitgrenze und Erkennung von beschädigtem/undecodierbarem Tail; **nicht** einen unverifizierten Header/Footer als vollständige Chain-Verifikation verkaufen. Volle CRC/Hash-/Frame-Parität gehört weiterhin zum separaten strikten Verifier oder zu gefordertem tieferen BOOT-Gate. Bei unklarem Ergebnis `UNKNOWN/WARN/BLOCKED`, keine unbesehene Annahme `SEALED`. Kein Löschen älterer Runs.
 - **Tests:** 0-Byte/TornTail/corrupt sealed/unsealed, zig große Segmente, max drei Runroots, Budgetablauf und falscher Footer, vollständiger Checker findet absichtlich manipuliertes Middle-Frame. p50/p99-Doctor-Dauer und read bytes.
-- **Abnahme:** begrenzte Doctor-Laufzeit **ohne** Falsch-PASS der Journal-Integrität. **Commit/Evidence:** —.
+- **Abnahme:** begrenzte Doctor-Laufzeit **ohne** Falsch-PASS der Journal-Integrität. **Commit/Evidence:** `af8050b`: `journal::screen_seal` liest Header + höchstens 64 KiB Tail; „sealed“ nur, wenn der letzte Frame ein CRC/SHA-gültiges Manifest ist, dessen Frame-Zahl und Root zu eigener Sequenz und Vorgänger-Hash passen; sonst `Unsealed` bzw. `Undecodable(<Klasse>)` (OPEN, HEADER_TRUNCATED, JOURNAL_VERSION_OR_MAGIC, TAIL_READ, TAIL_UNDECODABLE, MANIFEST_MISMATCH). Bericht ausdrücklich „structural seal screening (no chain verification)“; Cap 4096 Journale pro Audit, Erreichen ⇒ WARN mit Hinweis. Test `seal_screening_is_bounded_and_structural_only` (sealed complete/incomplete, offen, leer, 64×60 KiB groß, letzter Frame > Fenster ⇒ nie sealed, Torn-Manifest, Null-Tail, Fremddatei, zu kurz; manipuliertes Middle-Frame: Screening „sealed“, voller `Reader` ⇒ Fehler) Exit 0. **NOT_RUN:** reale Doctor-Dauer p50/p99 auf Mainnet-Run-Daten.
 
 ### E6 — BOOT-Diskreserve misst Projekt-data statt tatsächlichen Run-Pfad
-- [ ] **MEDIUM / CAPACITY-CORRECTNESS · CODE_CONFIRMED · G-A/G-B/G-C · BOOT-02/SK.**
+- [x] **MEDIUM · LOCAL_PASS · G-A/G-B/G-C · BOOT-02/SK.** ~~Speicherprüfung auf `project/data` statt auf dem Run-Root.~~
 - **Pfad:** `runtime/src/orchestration/boot_audit.rs::offline` (`let data=project.join("data")` und `free_disk_bytes(data|project)`); `OfflineInputs::for_project`.
 - **Ist:** Speicherprüfung bezieht sich auf `project/data` (oder Projektwurzel), ohne jeden konfigurierten Output-Runroot auf getrennte Mounts/Symlinks/Volumes aufzulösen. Bei abweichendem `P0_DATA_DIR`/Runpfad können Reserve und späterer Capture-Writer ein anderes Dateisystem nutzen.
 - **Soll-Fix:** Zielverzeichnis des tatsächlich gewählten Capture-/Journal-/Market-Output-Runroots gegen Config/CanonicalPath/Persist-Owner auflösen; Volume-ID und freie Bytes + Reserve/Quota am korrekten Ziel; optional alle getrennten Write-Volumes prüfen. Noch nicht vorhandenen Run-Unterordner über nächste existierende Elternstruktur desselben Volumes behandeln, keine symlink-/path-TOCTOU-Umgehung. Zusammen mit E4 Writer-Probe und Storage-/Capacity-Preflight.
 - **Tests:** Projekt und Run auf verschiedenen Mounts/Mock-filesystem IDs, Symlink/RelativePath, fehlendes Verzeichnis, FreeSpace knapp, Writer-Fehler trotz viel freien Bytes; P0_FREE_ONLY unverändert.
-- **Abnahme:** BOOT-Prüfung qualifiziert das Volume, auf das tatsächlich geschrieben wird. **Commit/Evidence:** —.
+- **Abnahme:** BOOT-Prüfung qualifiziert das Volume, auf das tatsächlich geschrieben wird. **Commit/Evidence:** `af8050b`: `econ_run_root` löst den Run-Root wie der gepinnte Launcher-`run_store.resolve_store` auf (`P0_ECON_OUT_DIR` mit `~/`, sonst `data/econ4h` bei `P0_RUN_STORE=legacy`, sonst `data/runs`; ungültiger Store ⇒ Fehler); `disk_reserve` misst per `statvfs` am kanonisierten nächsten existierenden Vorfahren (Symlink aufgelöst) und nennt das Volume; unauflösbarer Root ⇒ `disk_reserve`/`journal_writer_probe` UNKNOWN ⇒ Audit BLOCKED. Test `run_volume_resolves_like_the_launcher` Exit 0. `run_store.py` unverändert (gepinnt). **Grenze:** Market-Runs (`P0_MARKET_OUT_DIR`) laufen nicht über `p0ctl run start` und sind nicht Teil dieser Prüfung; getrennte Mounts nur über Symlink-Fixture getestet, keine echte zweite Partition.
 
 ### E7 — owner_state nimmt beim reinen Statuslesen kurz den exklusiven Runtime-Lock
 - [ ] **LOW / REVIEW_REQUIRED: RACE-BEHAVIOR · G-A/G-B · BOOT-02/Control.**
@@ -749,7 +749,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Ist:** Offline-Identitäts-/Ownerprüfungen teilweise vorhanden, aber vollständige Version-/Schema-/Writer-Probe-/Crash-Recovery- und Betriebsbereitschaft sind nicht nachgewiesen.
 - **Soll:** gemäß `STARTUP_BACKTEST_OPTIMIZATION.md` alle kritischen lokalen Binary-/Decoder-/Journal-/Owner-/Lock-/Clock-/RAM-/Disk-/Writer-Checks mit dokumentiertem Scope, `PASS/WARN/BLOCKED/NOT_RUN`; externe BOOT-Schritte offline zwingend NOT_RUN. Keine implizite READINESS durch Einzelpass.
 - **Tests:** korrupte Journalversion/Writer-Probe, Doppel-Owner, fehlende Binärdatei, Disk-/RAM-Untergrenze, Config-Drift; keine echte Netzwerkaktivität.
-- **Dedupe:** M1–M3/N1–N3/PERSIST/SK. **Commit/Evidence:** —.
+- **Dedupe:** M1–M3/N1–N3/PERSIST/SK. **Commit/Evidence:** Teil `af8050b` (E4 Writer-Probe, E5 Seal-Screening, E6 Run-Volume in BOOT-02). Offen: Crash-Recovery-/Version-/Binary-Vollständigkeit als dokumentierte BOOT-01/02-Matrix.
 
 ## 12. Reihenfolge und Abhängigkeiten (kein Roadmap-Rewrite)
 
@@ -788,7 +788,7 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 ## 14. Aktuelle Abnahmeentscheidung
 
 - **G-A:** **OPEN**. C1/C7, D1/D8/D9, **E1/E2/E3/E4/E5/E6/E9** sind zusätzlich als Recovery-/Capture-/Decoder-/Plan-/BOOT-Evidence-Gates erfasst; D3-Lastqualifikation fehlt. H1–H3 und M4/M7 sind lokal reviewt; N1/N3/B5/B13/X1/X2 und andere offene Punkte verhindern einen globalen Härtungs-PASS.
-- **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; **E4/E5/E6 (lokaler Writer/Doctor/Disk-Scope)** und BOOT-12/JFI offen.
+- **G-B (Netzwerk-Audit):** **NOT_RUN / NICHT FREIGEGEBEN**. Das vorhandene BOOT-03–08-Modul ist Code, kein Network-READY; E4/E5/E6 lokal geschlossen (`af8050b`, LOCAL_PASS, keine reale Laufzeit), BOOT-12-Rest (X1) und X3 offen.
 - **G-C (600s-Kalibrierung):** **NOT_RUN / NICHT FREIGEGEBEN**.
 - **G-D (4h):** **NOT_QUALIFIED / NICHT FREIGEGEBEN**. C1-Recovery-/D1-Manifest-Fix und D3-Owner-Fanout-Stresstest fehlen. D4/D5/D13/E8 sind **keine** ohne neuen Beweis geltenden 4h-Blocker. Historische 4h-/5h-Versuche bleiben INCOMPLETE.
 - **G-E (FE-01–05):** **PARTIAL/OPEN**, bisheriger FE-00-Befund `NO_ECONOMIC_GO`.
