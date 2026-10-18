@@ -44,7 +44,13 @@ struct Shared {
     max: u64,
     reserve: u64,
     physical: Option<u64>,
+    /// OS memory samples taken by `acquire` (test probe of M1).
+    #[cfg(test)]
+    samples: std::sync::atomic::AtomicU64,
 }
+
+/// Minimum time between two OS memory samples of one waiting `acquire` (M1).
+const HEADROOM_SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
 pub struct MemoryBudget(Arc<Shared>);
@@ -100,6 +106,8 @@ impl MemoryBudget {
             max,
             reserve,
             physical,
+            #[cfg(test)]
+            samples: std::sync::atomic::AtomicU64::new(0),
         })))
     }
 
@@ -114,12 +122,27 @@ impl MemoryBudget {
         let started = Instant::now();
         let deadline = started + wait;
         let mut waited = false;
+        let mut sample: Option<(Instant, MemorySample)> = None;
         loop {
             if s.used + bytes > s.limit && s.used + bytes <= b.max {
-                let wanted = s.limit.saturating_mul(2).max(s.used + bytes).min(b.max);
-                if self.headroom_allows(wanted - s.limit) {
-                    s.limit = wanted;
-                    s.growths += 1;
+                // M1: the OS is sampled without the state lock (at most once per interval of
+                // this wait); the invariants are re-checked under the lock before any growth.
+                if sample.is_none_or(|(at, _)| at.elapsed() >= HEADROOM_SAMPLE_INTERVAL) {
+                    drop(s);
+                    sample = Some((Instant::now(), MemorySample::now()));
+                    #[cfg(test)]
+                    b.samples.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    s = b.state.lock().map_err(|_| "STORAGE_BUDGET_POISONED")?;
+                }
+                if s.used + bytes > s.limit && s.used + bytes <= b.max {
+                    let wanted = s.limit.saturating_mul(2).max(s.used + bytes).min(b.max);
+                    let measured = sample.as_ref().map(|(_, m)| m);
+                    if measured.is_some_and(|m| {
+                        headroom_allows(m, b.physical, b.reserve, wanted - s.limit)
+                    }) {
+                        s.limit = wanted;
+                        s.growths += 1;
+                    }
                 }
             }
             if s.used + bytes <= s.limit {
@@ -151,21 +174,6 @@ impl MemoryBudget {
         }
     }
 
-    /// Growth only while RSS + growth stays below physical memory minus the reserve and the OS
-    /// reports no memory pressure. Unknown physical memory or RSS permits no growth.
-    fn headroom_allows(&self, growth: u64) -> bool {
-        let m = MemorySample::now();
-        if m.pressure_level.is_some_and(|l| l >= PRESSURE_WARN) {
-            return false;
-        }
-        match (self.0.physical, m.rss_bytes.or(m.peak_rss_bytes)) {
-            (Some(physical), Some(rss)) => {
-                rss.saturating_add(growth) <= physical.saturating_sub(self.0.reserve)
-            }
-            _ => false,
-        }
-    }
-
     pub fn snapshot(&self) -> BudgetSnapshot {
         let b = &self.0;
         let s = b.state.lock().unwrap_or_else(|p| p.into_inner());
@@ -182,6 +190,21 @@ impl MemoryBudget {
             wait_ns_max: s.wait_ns_max,
             refused: s.refused,
         }
+    }
+}
+
+/// Growth only while RSS + growth stays below physical memory minus the reserve and the OS
+/// reports no memory pressure. Unknown physical memory or RSS permits no growth. Pure (M1): the
+/// sample is taken by the caller outside any lock.
+fn headroom_allows(m: &MemorySample, physical: Option<u64>, reserve: u64, growth: u64) -> bool {
+    if m.pressure_level.is_some_and(|l| l >= PRESSURE_WARN) {
+        return false;
+    }
+    match (physical, m.rss_bytes.or(m.peak_rss_bytes)) {
+        (Some(physical), Some(rss)) => {
+            rss.saturating_add(growth) <= physical.saturating_sub(reserve)
+        }
+        _ => false,
     }
 }
 
@@ -336,6 +359,59 @@ mod tests {
 
     /// Admission never exceeds `max`; growth happens only within the headroom; a request that
     /// cannot be admitted in time is refused (never dropped silently); release restores capacity.
+    /// M1: the headroom decision is a pure function of one sample.
+    #[test]
+    fn headroom_decision_is_pure() {
+        let ok = MemorySample {
+            rss_bytes: Some(100),
+            pressure_level: Some(1),
+            ..Default::default()
+        };
+        assert!(headroom_allows(&ok, Some(1_000), 100, 800));
+        assert!(!headroom_allows(&ok, Some(1_000), 100, 801));
+        let pressure = MemorySample {
+            pressure_level: Some(PRESSURE_WARN),
+            ..ok
+        };
+        assert!(!headroom_allows(&pressure, Some(1 << 40), 0, 1));
+        assert!(!headroom_allows(&ok, None, 0, 1));
+        let unknown = MemorySample::default();
+        assert!(!headroom_allows(&unknown, Some(1 << 40), 0, 1));
+        let peak_only = MemorySample {
+            peak_rss_bytes: Some(10),
+            ..Default::default()
+        };
+        assert!(headroom_allows(&peak_only, Some(100), 0, 90));
+    }
+    /// M1: a waiting acquire that needs growth samples the OS at most once per interval, however
+    /// often releases wake it.
+    #[test]
+    fn acquire_samples_memory_at_most_once_per_interval() {
+        let budget = MemoryBudget::with_physical(100, 1_000, 0, None).unwrap();
+        let held = budget.acquire(100, Duration::ZERO).unwrap();
+        let churn = {
+            let b = budget.clone();
+            std::thread::spawn(move || {
+                let end = Instant::now() + Duration::from_millis(60);
+                while Instant::now() < end {
+                    // Unknown physical memory: no growth; a free byte makes every release wake
+                    // the waiter.
+                    drop(b.acquire(0, Duration::ZERO));
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+        assert_eq!(
+            budget.acquire(50, Duration::from_millis(50)).err(),
+            Some("CAPTURE_MEMORY_BUDGET_EXHAUSTED")
+        );
+        churn.join().unwrap();
+        assert_eq!(
+            budget.0.samples.load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        drop(held);
+    }
     #[test]
     fn byte_budget_is_hard_adaptive_and_releases() {
         assert!(MemoryBudget::with_physical(0, 10, 0, None).is_err());
