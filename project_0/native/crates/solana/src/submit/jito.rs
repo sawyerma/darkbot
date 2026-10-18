@@ -152,22 +152,7 @@ impl JitoAdapter {
             json!([[bundle_id]]),
         )?;
         let entry = res.pointer("/value/0").cloned().unwrap_or(Value::Null);
-        Ok(match entry.get("status").and_then(|s| s.as_str()) {
-            // 9e: a landing without its slot is not yet a landing (never slot 0).
-            Some("Landed") => match entry.get("landed_slot").and_then(|s| s.as_u64()) {
-                Some(slot) => BundleStatus::Landed {
-                    slot,
-                    confirmation: None,
-                },
-                None => BundleStatus::Pending,
-            },
-            Some("Failed") => BundleStatus::Failed {
-                slot: None,
-                error: "inflight: Failed".into(),
-            },
-            Some("Pending") => BundleStatus::Pending,
-            _ => BundleStatus::NotFound,
-        })
+        Ok(inflight_entry_status(&entry))
     }
 
     /// Bundle-Status normalisiert. VERIFY Antwortformat: result.value[0] = {bundle_id, transactions, slot, confirmation_status, err}.
@@ -309,9 +294,63 @@ impl SubmissionAdapter for JitoAdapter {
     }
 }
 
+/// One `getInflightBundleStatuses` entry. 9e/F3: a landing without a real slot (missing, null,
+/// not a number or 0 — slot 0 is genesis, never a bundle landing) is not yet a landing.
+fn inflight_entry_status(entry: &Value) -> BundleStatus {
+    match entry.get("status").and_then(|s| s.as_str()) {
+        Some("Landed") => match entry.get("landed_slot").and_then(|s| s.as_u64()) {
+            Some(slot) if slot > 0 => BundleStatus::Landed {
+                slot,
+                confirmation: None,
+            },
+            _ => BundleStatus::Pending,
+        },
+        Some("Failed") => BundleStatus::Failed {
+            slot: None,
+            error: "inflight: Failed".into(),
+        },
+        Some("Pending") => BundleStatus::Pending,
+        _ => BundleStatus::NotFound,
+    }
+}
+
 #[cfg(test)]
 mod secret_tests {
     use super::*;
+
+    /// F3: an inflight Landed status without a real slot stays Pending; only a positive slot
+    /// is a landing (finalized ledger proof stays required elsewhere).
+    #[test]
+    fn inflight_landed_needs_a_real_slot() {
+        let landed = |slot: Value| json!({"status": "Landed", "landed_slot": slot});
+        for missing in [
+            json!({"status": "Landed"}),
+            landed(Value::Null),
+            landed(json!(0)),
+            landed(json!("123")),
+            landed(json!(-5)),
+        ] {
+            assert!(
+                matches!(inflight_entry_status(&missing), BundleStatus::Pending),
+                "{missing}"
+            );
+        }
+        assert!(matches!(
+            inflight_entry_status(&landed(json!(321))),
+            BundleStatus::Landed {
+                slot: 321,
+                confirmation: None
+            }
+        ));
+        assert!(matches!(
+            inflight_entry_status(&json!({"status": "Failed"})),
+            BundleStatus::Failed { slot: None, .. }
+        ));
+        assert!(matches!(
+            inflight_entry_status(&Value::Null),
+            BundleStatus::NotFound
+        ));
+    }
     /// L2/9e: an unsigned or signature-less transaction is refused before any HTTP request.
     #[test]
     fn unsigned_bundle_is_rejected_without_network() {
