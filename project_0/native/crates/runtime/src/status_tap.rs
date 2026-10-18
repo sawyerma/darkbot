@@ -16,7 +16,7 @@ pub struct MarketSnapshot {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransportSnapshot {
     pub connected: bool,
-    pub last_frame_age_ns: u64,
+    pub last_frame_age_ns: Option<u64>,
     pub last_slot: Option<u64>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -58,7 +58,7 @@ pub fn projection(run_id: &str, snapshot: &StatusSnapshot) -> StatusProjection {
     StatusProjection {
         run_id: run_id.to_owned(),
         last_observed_slot: snapshot.market.as_ref().and_then(|m| m.last_observed_slot),
-        last_frame_age_ns: snapshot.transport.as_ref().map(|m| m.last_frame_age_ns),
+        last_frame_age_ns: snapshot.transport.as_ref().and_then(|m| m.last_frame_age_ns),
         gap_count: snapshot.market.as_ref().map(|m| m.gap_count),
         reconnect_count: snapshot.market.as_ref().map(|m| m.reconnect_count),
         liquidation_events: snapshot.market.as_ref().map(|m| m.liquidation_events),
