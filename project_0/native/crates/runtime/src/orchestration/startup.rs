@@ -337,6 +337,21 @@ fn supervise(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    // A5: after an abort (analytics ended, deadline) the owners stop on the abort flag; the
+    // process ends only after they did (the market capture seals INCOMPLETE), bounded by the
+    // shutdown grace. One still running then is reported, never awaited without bound.
+    let grace = Duration::from_secs(handle.cfg.plan.budgets.shutdown_grace_seconds);
+    let quiescent = await_owners(&shadow, &observer, grace);
+    if !quiescent {
+        handle.shared.shadow_failed.store(true, Ordering::Release);
+        handle.shared.market_failed.store(true, Ordering::Release);
+        eprintln!(
+            "C0_E1_OWNERS_NOT_QUIESCENT shadow_finished={} market_finished={} grace_s={}; live=false submission=false",
+            shadow.is_finished(),
+            observer.is_finished(),
+            grace.as_secs()
+        );
+    }
     if shadow.is_finished() && !matches!(shadow.join(), Ok(Ok(()))) {
         handle.shared.shadow_failed.store(true, Ordering::Release);
     }
@@ -353,7 +368,87 @@ fn supervise(
             market_failed: handle.shared.market_failed.load(Ordering::Acquire),
         },
     )?;
-    analytics
+    let result = analytics
         .join()
-        .map_err(|_| "C0-E1 analytics panic".to_string())?
+        .map_err(|_| "C0-E1 analytics panic".to_string())?;
+    if !quiescent {
+        return result.and(Err("C0_E1_OWNERS_NOT_QUIESCENT".into()));
+    }
+    result
+}
+
+/// A5: waits until both owner threads have ended, at most `grace`; `false` if one still runs.
+pub(crate) fn await_owners<A, B>(
+    shadow: &std::thread::JoinHandle<A>,
+    observer: &std::thread::JoinHandle<B>,
+    grace: Duration,
+) -> bool {
+    let end = std::time::Instant::now() + grace;
+    while !(shadow.is_finished() && observer.is_finished()) {
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50).min(left));
+    }
+    true
+}
+
+#[cfg(test)]
+mod supervise_tests {
+    use super::*;
+    use crate::market_observer::rows::MarketCoverage;
+    use crate::market_observer::{JournalSink, MarketSink, MARKET_JOURNAL};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// A5: after the supervisor's abort (analytics ended) the process waits for the owners: the
+    /// market owner drains and seals its journal INCOMPLETE before the wait returns (without the
+    /// wait the journal is still unsealed at that point); a stuck owner is reported within the
+    /// grace instead of being awaited without bound.
+    #[test]
+    fn analytics_abort_waits_for_the_owners_until_the_market_journal_is_sealed() {
+        let dir = std::env::temp_dir().join(format!("p0_a5_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let abort = Arc::new(AtomicBool::new(false));
+        let (market_abort, shadow_abort) = (abort.clone(), abort.clone());
+        let market_dir = dir.clone();
+        let observer = std::thread::spawn(move || {
+            let mut sink = JournalSink::create(&market_dir).unwrap();
+            sink.coverage(&MarketCoverage::ShadowWarmupWait { observed_unix_s: 0 })
+                .unwrap();
+            while !market_abort.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // Drain, then seal INCOMPLETE (the capture's abort path).
+            std::thread::sleep(Duration::from_millis(300));
+            sink.finish(false).unwrap();
+        });
+        let shadow = std::thread::spawn(move || {
+            while !shadow_abort.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        abort.store(true, Ordering::Release);
+        let journal = dir.join(MARKET_JOURNAL);
+        assert!(
+            crate::storage::segments::verify_chain(&journal).map_or(true, |c| !c.sealed),
+            "right after the abort the journal is not sealed yet"
+        );
+        let started = std::time::Instant::now();
+        assert!(await_owners(&shadow, &observer, Duration::from_secs(10)));
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        let chain = crate::storage::segments::verify_chain(&journal).unwrap();
+        assert_eq!((chain.sealed, chain.complete), (true, false));
+
+        let done = std::thread::spawn(|| {});
+        let stuck = std::thread::spawn(|| std::thread::sleep(Duration::from_secs(1)));
+        let started = std::time::Instant::now();
+        assert!(!await_owners(&done, &stuck, Duration::from_millis(200)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        stuck.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
