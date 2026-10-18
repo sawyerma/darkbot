@@ -1,6 +1,6 @@
 {
   "schema": "F0_VAR_STATIC_CENSUS_V1",
-  "source_head": "ed8ae23848de051732e2c21d13f3e5dbd5664a7d",
+  "source_head": "988ae47a796f9b03f7936a863c448469f8380a46",
   "file_count": 244,
   "frontend_files": 37,
   "p0_rust_files": 162,

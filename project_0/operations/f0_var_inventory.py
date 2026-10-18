@@ -57,7 +57,7 @@ def table(filename: str, header: list[str], rows: list[list[object]]) -> None:
     with (OUT / filename).open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f, delimiter="\t", lineterminator="\n")
         w.writerow(header)
-        w.writerows(rows)
+        w.writerows([["-" if value == "" else value for value in row] for row in rows])
 
 def analyze_type(lines: list[str], path: str, out: list[list[object]]) -> None:
     """Lexer deliberately records unparsed declarations; check complex fields manually."""
