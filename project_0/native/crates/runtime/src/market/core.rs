@@ -632,6 +632,25 @@ impl ObserverCore {
         true
     }
 
+    /// One provisional non-receivership event of a successful transaction. D5: a Receivership in
+    /// this decoder output contradicts the decoder contract (the receiver decoder owns that type);
+    /// it is a decoder error that makes the capture INCOMPLETE, never a panic or a silent skip.
+    pub(super) fn count_provisional(&mut self, kind: truth::LiquidationType) {
+        match kind {
+            truth::LiquidationType::Classic => self.stats.provisional_classic_events += 1,
+            truth::LiquidationType::ForcedDeleverage => {
+                self.stats.provisional_deleverage_events += 1
+            }
+            truth::LiquidationType::BankruptcySettlement => {
+                self.stats.provisional_bankruptcy_events += 1
+            }
+            truth::LiquidationType::Receivership => {
+                self.stats.decoder_error_count += 1;
+                self.stats.decoder_errors_successful_tx += 1;
+                self.mark_incomplete("DECODER_ERROR");
+            }
+        }
+    }
     pub(super) fn absorb_decode(&mut self, d: &LogDecode, success: bool) {
         self.stats.decoder_error_count += d.decoder_errors;
         self.stats.foreign_program_events += d.foreign_program_events;
@@ -967,11 +986,9 @@ impl ObserverCore {
                 logs: l.logs,
             },
         };
+        // D4: no per-transaction flush; the writer lane flushes and syncs on its own bounds, and a
+        // batch sink is finished only at its batch boundary.
         sink.transaction(&row)?;
-        // A timeboxed diagnostic can be terminated before graceful finalization.
-        // Make each admitted live signature visible on disk immediately rather
-        // than letting the final BufWriter batch disappear on SIGTERM.
-        sink.flush()?;
         let Some(success) = success else {
             // Status UNKNOWN (reason recorded): its logged events are never counted.
             return Ok(());
@@ -993,18 +1010,7 @@ impl ObserverCore {
         self.absorb_decode(&decoded, success);
         if success {
             for ev in &decoded.additional_events {
-                match ev.kind {
-                    truth::LiquidationType::Classic => self.stats.provisional_classic_events += 1,
-                    truth::LiquidationType::ForcedDeleverage => {
-                        self.stats.provisional_deleverage_events += 1
-                    }
-                    truth::LiquidationType::BankruptcySettlement => {
-                        self.stats.provisional_bankruptcy_events += 1
-                    }
-                    truth::LiquidationType::Receivership => {
-                        unreachable!("original receiver decoder handles this type")
-                    }
-                }
+                self.count_provisional(ev.kind);
                 eprintln!(
                     "[MARKET/LIQUIDATION] provisional=true type={} slot={} signature={} target={} actor={} gross_usd={}",
                     ev.kind.as_str(), slot, signature, ev.target, ev.actor,

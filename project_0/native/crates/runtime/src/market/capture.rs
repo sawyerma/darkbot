@@ -57,6 +57,24 @@ pub struct CaptureOutcome {
 /// report. A missing `P0_RPC_URL` or a failing enrichment client is recorded
 /// (`ENRICHMENT_INIT_FAILED`, `enrichment_init_error`) and never prevents summary/report.
 /// Returns `(summary, report, write_error)`.
+/// Waits up to `budget` for a stopped ingress thread and joins it (D8). `join` itself cannot
+/// time out, so the thread is polled first; one still running is `INGRESS_NOT_QUIESCENT`.
+pub(super) fn quiesce(
+    ingress: std::thread::JoinHandle<()>,
+    budget: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + budget;
+    while !ingress.is_finished() {
+        if Instant::now() >= deadline {
+            return Err("INGRESS_NOT_QUIESCENT".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    ingress
+        .join()
+        .map_err(|_| "INGRESS_THREAD_PANIC".to_string())
+}
+
 pub fn finish_capture(
     cfg: &MarketConfig,
     core: &mut ObserverCore,
@@ -548,9 +566,10 @@ pub fn run_embedded_with(
         write_error,
     };
     let (summary, report, write_error) = finish_capture(&cfg, &mut core, &mut sink, outcome)?;
-    if ingress.is_finished() {
-        let _ = ingress.join();
-    }
+    // D8: the session was asked to stop; its thread is joined within the drain budget. One still
+    // alive afterwards is reported, never declared quiescent (the journal is INCOMPLETE then,
+    // since its drain did not complete).
+    let quiescent = quiesce(ingress, Duration::from_secs(cfg.drain_timeout_secs));
     if let Some(h) = &econ {
         h.emit(crate::analytics::econ::Evidence::MarketFinal(Box::new(
             summary,
@@ -558,6 +577,7 @@ pub fn run_embedded_with(
     } else {
         print!("{report}");
     }
+    quiescent?;
     if stop_reason == "OPERATOR_STOP" {
         // Requested stop (also before StreamReady): sealed INCOMPLETE, not a provider failure.
         return Err(format!("MARKET_CAPTURE_INCOMPLETE: {stop_reason}"));

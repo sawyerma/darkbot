@@ -1942,6 +1942,67 @@ fn capture_operator_stop_seals_incomplete() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// D8: a stopped ingress thread is joined within the budget; one still running is reported,
+/// never declared quiescent.
+#[test]
+fn ingress_is_joined_or_reported_not_quiescent() {
+    use std::time::{Duration, Instant};
+    let quick = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(100)));
+    assert_eq!(
+        super::capture::quiesce(quick, Duration::from_secs(2)),
+        Ok(())
+    );
+    let (release, rx) = std::sync::mpsc::channel::<()>();
+    let stuck = std::thread::spawn(move || {
+        let _ = rx.recv_timeout(Duration::from_secs(5));
+    });
+    let t0 = Instant::now();
+    assert_eq!(
+        super::capture::quiesce(stuck, Duration::from_millis(200)).unwrap_err(),
+        "INGRESS_NOT_QUIESCENT"
+    );
+    assert!(t0.elapsed() < Duration::from_secs(2));
+    drop(release);
+}
+
+/// D4: logs admission never flushes per transaction, so a batch sink is not finished early and
+/// every row reaches the journal before the explicit batch end.
+#[test]
+fn logs_never_finish_a_batch_sink_per_transaction() {
+    let dir = journal_test_dir("d4_batch");
+    let p = program();
+    let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+    let mut sink = JsonlSink::create(&dir).unwrap();
+    for (sig, slot) in [("d4-a", 9), ("d4-b", 10), ("d4-c", 11)] {
+        core.on_logs(
+            logs_event(sig, slot, logs_with(&p, &[]), None, 1),
+            0,
+            &mut sink,
+        )
+        .unwrap();
+    }
+    sink.flush().unwrap();
+    let mut reader = crate::analytics::journal::Reader::open(&dir.join(MARKET_JOURNAL)).unwrap();
+    let mut transactions = 0;
+    while let Some(f) = reader.next_frame().unwrap() {
+        transactions += u64::from(f.kind == crate::analytics::journal::kind::MARKET_TRANSACTION);
+    }
+    assert_eq!(transactions, 3);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// D5: an unexpected Receivership in the non-receiver decoder output is a decoder error
+/// (INCOMPLETE), never a panic and never counted as a provisional liquidation.
+#[test]
+fn unexpected_receivership_in_additional_events_is_a_decoder_error() {
+    let mut core = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
+    core.count_provisional(truth::LiquidationType::Classic);
+    core.count_provisional(truth::LiquidationType::Receivership);
+    assert_eq!(core.stats.provisional_classic_events, 1);
+    assert_eq!(core.stats.decoder_error_count, 1);
+    assert!(core.incomplete_reasons.contains("DECODER_ERROR"));
+}
+
 #[test]
 fn journal_sink_finalize_binds_the_journal_and_early_exit_seals_incomplete() {
     use super::rows::*;
