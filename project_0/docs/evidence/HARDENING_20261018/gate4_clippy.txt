@@ -1,0 +1,13 @@
+command: cargo clippy --all-targets --all-features -- -D warnings
+environment: CARGO_BUILD_JOBS=2 (machine load limit); cwd project_0/native (virtual workspace: common, solana, liquidation, runtime, reporter)
+tested_head: c8d2e3306558be09d44c5e1ac54cbc4b46e97d32
+worktree: dirty_entries_under_native=0
+toolchain: rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew); cargo 1.93.1 (Homebrew)
+started_utc: 2026-10-18T16:37:55Z
+----- output -----
+    Checking darkbot-runner v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/runtime)
+    Checking darkbot-p0-reporter v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/native/crates/reporter)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.30s
+----- end -----
+finished_utc: 2026-10-18T16:38:00Z
+exit_code: 0

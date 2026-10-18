@@ -1,0 +1,93 @@
+command: python3 -m unittest discover -s project_0/tests -t project_0
+tested_head: c8d2e3306558be09d44c5e1ac54cbc4b46e97d32
+----- output -----
+........................E.................EEE............................................................./opt/homebrew/Caskroom/miniconda/base/lib/python3.13/json/decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101f9e980>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/json/decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101f9dc60>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/json/decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101f9cd60>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/json/decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101f9e200>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/json/decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x101f9dd50>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/json/decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x102296200>
+  obj, end = self.scan_once(s, idx)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.s..
+======================================================================
+ERROR: test_launcher_uses_persisted_plan_and_no_total_capture_timebox (tests.integration.test_measurement_plan.MeasurementCli.test_launcher_uses_persisted_plan_and_no_total_capture_timebox)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/tests/integration/test_measurement_plan.py", line 131, in test_launcher_uses_persisted_plan_and_no_total_capture_timebox
+    plan = json.loads((run / 'measurement_plan.json').read_text())
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_local.py", line 546, in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_abc.py", line 632, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_local.py", line 537, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/p0-p1-launcher-azf00w10/runs/10m/measurement_plan.json'
+
+======================================================================
+ERROR: test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2 (tests.integration.test_run_store.Launchers.test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2) (layout='v1')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/tests/integration/test_run_store.py", line 221, in test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2
+    manifest=json.loads(s.artifact(run,'manifest').read_text())  # written by the real Rust runtime
+                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_local.py", line 546, in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_abc.py", line 632, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_local.py", line 537, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmp0e34nxzs/repo/project_0/data/econ4h/old_run/measurement_manifest.json'
+
+======================================================================
+ERROR: test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2 (tests.integration.test_run_store.Launchers.test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2) (layout='v2')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/tests/integration/test_run_store.py", line 220, in test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2
+    self.assertEqual(s.detect_layout(run),layout);self.assertEqual(a.find_run(str(run)),run.resolve())
+                     ~~~~~~~~~~~~~~~^^^^^
+  File "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/operations/capture/run_store.py", line 136, in detect_layout
+    if any(os.path.lexists(run/name) for name in V2_ONLY):raise RunStoreError('RUN_LAYOUT_INVALID')
+                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+operations.capture.run_store.RunStoreError: RUN_LAYOUT_INVALID
+
+======================================================================
+ERROR: test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2 (tests.integration.test_run_store.Launchers.test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot-project0/project_0/tests/integration/test_run_store.py", line 258, in test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2
+    self.assertEqual(json.loads((new/'config.json').read_text())['schema'],s.RUN_CONFIG_SCHEMA)
+                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_local.py", line 546, in read_text
+    return PathBase.read_text(self, encoding, errors, newline)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_abc.py", line 632, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Caskroom/miniconda/base/lib/python3.13/pathlib/_local.py", line 537, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmp0e34nxzs/repo/project_0/data/runs/new_run/config.json'
+
+----------------------------------------------------------------------
+Ran 108 tests in 14.994s
+
+FAILED (errors=4, skipped=1)
+exit_code: 1
