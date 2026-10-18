@@ -104,12 +104,12 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 ## 3. M — mittlere Ausgangsbefunde
 
 ### M1 — Betriebssystem-Sampling unter RAM-Budget-Mutex
-- [ ] **OPEN · G-A/G-D · PERSIST-02/SK-03.**
+- [x] **LOCAL_PASS · G-A/G-D · PERSIST-02/SK-03.**
 - **Pfad:** `runtime/src/storage/budget.rs`: `MemoryBudget::acquire` → `headroom_allows` → `MemorySample::now`.
 - **Ist:** Während `state.lock()` gehalten wird, können `sysctl`/`task_info`/`getrusage`/`/proc`-Abfragen erfolgen; Condvar-Wakeups können das wiederholen.
 - **Soll-Fix:** Entscheidungswerte ohne Mutex sampeln; Guard abgeben, Sample holen, Guard erneut nehmen, aktuelle `used/limit/max`-Invarianten erneut prüfen; monotones, begrenztes Samplingintervall; `UNKNOWN`-Headroom erlaubt kein Wachstum. Keine race-bedingte Überreservierung.
 - **Tests:** unabhängige Headroom-Tabelle (Memory-Pressure, unbekannte Werte, Grenzwerte), künstliche Concurrent-Acquires mit getriggertem Limitwechsel, Lock-/Deadlock-Probe, Bounded-Wait und Byte-Grenze. Messung: Sampling-/Lockdauer vor/nach.
-- **Abnahme:** keine langsamen Syscalls unter `state`-Lock; deterministische Limits unverändert. **Commit/Evidence:** —.
+- **Abnahme:** keine langsamen Syscalls unter `state`-Lock; deterministische Limits unverändert. **Commit/Evidence:** `325fa21` (OS-Sample ohne `state`-Lock, max. 1× pro 100 ms je Wartevorgang, Invarianten danach erneut geprüft; `headroom_allows` rein); Tests `headroom_decision_is_pure`, `acquire_samples_memory_at_most_once_per_interval` Exit 0.
 
 ### M2 — Owner-Evidence-Durability und blockierendes stderr
 - [x] **LOCAL_PASS · G-A/G-D · PERSIST-02/05/SK-04.**
@@ -180,28 +180,28 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Nachprüfung 18.10.2026:** Claude hat bereits `c5e6543` und dokumentierte RED/GREEN-Testausgaben eingecheckt; das Ticket ist inzwischen von Claude als `LOCAL_PASS` abgehakt. Green: 55 Tests bestanden, 1 ignoriert. Das ist **keine** vollständige Workspace-/4h-Abnahme; vorhandenen Haken und Claudes Evidence nicht überschreiben.
 
 ### N4 — Drift fälschlich als Mutex-Poison gemeldet
-- [ ] **MEDIUM · OPEN · G-A.**
+- [x] **MEDIUM · LOCAL_PASS · G-A.**
 - **Pfad:** `solana/src/provider.rs::check_configuration/acquire`.
 - **Ist:** `failed=true` nach Config-Drift, Fehlercode `PROVIDER_BUDGET_POISONED` suggeriert Unwind.
 - **Soll-Fix:** getrennte, sticky Diagnose `PROVIDER_BUDGET_CONFIG_DRIFT`; Endpunkte nur redigiert/als sichere Feldbezeichner, niemals vollständige URL; Poison-Fehler unverändert fail-closed.
 - **Tests:** Drift vs Poison differenziert, einmalige protokollierte Feldklasse, keine Secrets, keine Reinitialisierung.
-- **Abnahme:** eindeutiger Code ohne Abschwächung des Budget-HALTs. **Commit/Evidence:** —.
+- **Abnahme:** eindeutiger Code ohne Abschwächung des Budget-HALTs. **Commit/Evidence:** `e322869` (eigener sticky Zustand `PROVIDER_BUDGET_CONFIG_DRIFT`, einmalige Feldmeldung, Endpunkte nur als Anzahl, Poison unverändert); Test `early_default_budget_cannot_authorize_a_later_profile` Exit 0.
 
 ### N5 — lokale Runtime-Fehler durch globale Redaction unbrauchbar
-- [ ] **MEDIUM · OPEN · G-A.**
+- [x] **MEDIUM · LOCAL_PASS · G-A.**
 - **Pfad:** `runtime/src/orchestration/startup.rs::shadow_failure_code`; `runtime/src/main.rs`; sichere Config-/Walletfehler.
 - **Ist:** Unklassifizierte Fehler werden pauschal `SHADOW_RUNTIME_ERROR`, dadurch fehlen diagnostische Hinweise.
 - **Soll-Fix:** ausschließlich explizit allowgelistete eigene, secret-freie Fehlercodes und begrenzte strukturierte Detailfelder. **Kein beliebiges `Display` von unbekannten Error-Typen**; keine Provider-URL, API-Keys, Keypair-Pfade, HTTP-Body oder rohe Logs.
 - **Tests:** Missing Env/Mode identifizierbar; ClientError mit geheimem URL-Parameter redigiert; Wrapped/Custom-Fehler mit Secret zeigt nur Kategorie.
-- **Abnahme:** nützliche, secret-freie Betriebsdiagnose. **Commit/Evidence:** —.
+- **Abnahme:** nützliche, secret-freie Betriebsdiagnose. **Commit/Evidence:** `c83bd46` (`failure_report`: nur klassifizierte Details — Config-Schlüssel ohne Wert, `OperationalConfigError`, Owner-/Evidence-Codes; sonst Kategorie); Test `failure_report_shows_classified_details_only` Exit 0.
 
 ### N6 — neuer RPC-Client für jeden BOOT-Read
-- [ ] **MEDIUM · OPEN · G-B.**
+- [x] **MEDIUM · LOCAL_PASS · G-B.**
 - **Pfad:** `runtime/src/orchestration/boot_network.rs::NetworkReads::rpc`.
 - **Ist:** `provider::rpc_client(...)` pro Request; vermeidbare neue Clients/Transport-Runtimes. Die genaue SDK-Runtime-Zahl ist ohne Laufzeitmessung **nicht bewiesen**.
 - **Soll-Fix:** Einmaliger Client im `NetworkReads`-Owner, gleiche Provider-Awareness; vor jedem Call absolute Gesamtdeadline prüfen. Kein Client-Caching über veränderte Config-/Clusteridentitäten.
 - **Tests:** lokal instrumentierter Client-Factory-Zähler, Budget-/Timeout-Tests, keine erneute Konstruktion bei Wiederholung.
-- **Abnahme:** ein Client pro Audit-Instanz, globale Zeitgrenze bleibt hart. **Commit/Evidence:** —.
+- **Abnahme:** ein Client pro Audit-Instanz, globale Zeitgrenze bleibt hart. **Commit/Evidence:** `e322869` (ein RPC-Client je Audit; Per-Call-Timeout min(rpc_timeout, Budget/4, ≥ 1 s), Call nur bei ausreichender Restzeit → harte Deadline); Test `network_reads_counts_only_boot_budget` Exit 0.
 
 ### N7 — 60-Sekunden-Boot-Audit-TTL operativ knapp
 - [ ] **MEDIUM · OPEN / DESIGN_DECISION · G-B.**
@@ -213,26 +213,26 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `DESIGN/USABILITY`, kein fehlerhafter TTL-Safety-Check. Keine TTL-Aufweitung als vermeintlichen Bugfix autorisieren; kombinierte Doctor-Start-Bedienung nur separat testen.
 
 ### N8 — WSS-ACK-Deadline ignoriert Subscription-Anzahl
-- [ ] **MEDIUM · OPEN · G-C/G-D.**
+- [x] **MEDIUM · LOCAL_PASS · G-C/G-D.**
 - **Pfad:** `solana/src/ingress/ws_rpc.rs`: `ack_deadline = now + idle_timeout`.
 - **Ist:** ACK-Timeout meldet seit M4 korrekt `WSS_ACK_TIMEOUT`, Budget bleibt unabhängig von tatsächlichen Send-/ACK-Zahlen.
 - **Soll-Fix:** ACK-Dauer/-Zahl/-Lag instrumentieren; dynamische aber **harte, konfigurierte** obere Budgetgrenze nach tatsächlichem Subscriptionbedarf prüfen. Keine automatische unbeschränkte Verlängerung, keine Umgehung von Recoverybudget/WSS-Rate.
 - **Tests:** kleine/große Subscriptionmenge, einzelne fehlende ACK, 429/Timeout, Shutdown während ACK; reale Profile erst nach Erlaubnis.
-- **Abnahme:** falsche Reconnects reduziert, ausbleibende ACK führt weiterhin bounded HALT. **Commit/Evidence:** —.
+- **Abnahme:** falsche Reconnects reduziert, ausbleibende ACK führt weiterhin bounded HALT. **Commit/Evidence:** `4dc5de2` (ACK-Fenster = idle_timeout + Subscriptions × `wss_ack_ms_per_subscription`, gekappt an der Recovery-Deadline; Messzeile bei StreamReady; `LIMITS_REVISION` 4); Test `ack_window_scales_with_subscriptions_within_recovery_budget` Exit 0. Reale Profile NOT_RUN.
 
 ## 5. L — kleine Restbefunde aus dem ersten Review
 
 ### L1 — Drop-Reihenfolge Finanzjournal und File-Lock
-- [ ] **MEDIUM vor FE-04 · OPEN.**
+- [x] **MEDIUM vor FE-04 · LOCAL_PASS.**
 - **Pfad:** `runtime/src/execution/one_shot.rs::Journal`.
 - **Soll:** Ownership/Drop-Reihenfolge explizit so beweisen, dass Journal/Writer vollständig geschlossen und durable ist, bevor die zugehörige Lock-Freigabe andere Owner zulässt. Keine Lösung allein über Kommentar.
-- **Tests:** konkurrierender Open während Drop/Finish, Crash-/Sync-Fehler, Lock bleibt bis korrekt abgeschlossen. **Commit/Evidence:** —.
+- **Tests:** konkurrierender Open während Drop/Finish, Crash-/Sync-Fehler, Lock bleibt bis korrekt abgeschlossen. **Commit/Evidence:** `5887129` (Lock letztes Feld: Writer schließt vor Lock-Freigabe); Test `next_owner_never_opens_a_journal_still_held_by_its_writer` Exit 0.
 
 ### L2 — unsicherer `sigs[sigs.len()-2]`-Index im Jito-Bundle
-- [ ] **HIGH vor FE-06 · OPEN.**
+- [x] **HIGH vor FE-06 · LOCAL_PASS.**
 - **Pfad:** `solana/src/submit/jito.rs::submit_bundle`.
 - **Soll:** Signature-/Bundle-Vollständigkeit und erwartete Reihenfolge **vor jedem Netzwerk-Handoff** prüfen, keine Annahme von mindestens zwei Signaturen; leere/unvollständige Bundles lokal ablehnen.
-- **Tests:** 0/1/2/mehrere TX, fehlende Signature, nicht signierte TX; kein HTTP-Aufruf bei Ablehnung; UNKNOWN nach unklarer Annahme. **Commit/Evidence:** —.
+- **Tests:** 0/1/2/mehrere TX, fehlende Signature, nicht signierte TX; kein HTTP-Aufruf bei Ablehnung; UNKNOWN nach unklarer Annahme. **Commit/Evidence:** `47ebbc6` (alle Fee-Payer-Signaturen vor dem HTTP-Aufruf geprüft, `BUNDLE_SIGNATURE_MISSING`; inflight Landed ohne Slot → Pending); Test `unsigned_bundle_is_rejected_without_network` Exit 0.
 
 ### L3 — Writer-/Channel-/Submission-Metriken
 - [ ] **LOW / METRICS · CODE_CONFIRMED für Writer/Channel; Polling separat belegen.**
@@ -241,10 +241,10 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 
 
 ### L4 — falsch konfigurierte Zero-Prefund-Flags fallen auf `false` zurück
-- [ ] **MEDIUM · OPEN · FE-01/P5.**
+- [x] **MEDIUM · OPEN · FE-01/P5.**
 - **Pfad:** `runtime/src/orchestration/state_owner/setup.rs`: `P0_ZERO_PREFUND_QUALIFIED`, `P0_ZERO_PREFUND_SHADOW_PROBE`.
 - **Soll:** Parsefehler explizit als Config-Fehler blockieren, statt `unwrap_or(false)`; korrektes Defaultverhalten nur bei **fehlendem**, nicht malformed Wert.
-- **Tests:** missing/true/false/ungültig, kein implizites Einschalten von LIVE. **Commit/Evidence:** —.
+- **Tests:** missing/true/false/ungültig, kein implizites Einschalten von LIVE. **Commit/Evidence:** `c83bd46` (Slippage aus `limits.max_slippage_bps`, Zero-Prefund-Flags strikt vorab geparst, Probe nur im Shadow-Modus); Test `zero_prefund_flags_parse_strictly_and_never_enable_implicitly` Exit 0.
 
 ## 6. B — finanziell relevante zweite Reviewrunde
 
