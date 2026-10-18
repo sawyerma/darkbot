@@ -111,7 +111,15 @@ impl JupiterV2RouteProvider {
                     mt0_start.elapsed(),
                     outcome,
                 );
-                return Err(format!("jupiter /build transport: {e}"));
+                // B13: the transport error is classified; its text may carry the URL.
+                let class = if e.is_timeout() {
+                    "TIMEOUT"
+                } else if e.is_connect() {
+                    "CONNECT"
+                } else {
+                    "REQUEST"
+                };
+                return Err(format!("jupiter /build transport: {class}"));
             }
         };
         let mt0_status = response.status().as_u16();
@@ -131,15 +139,12 @@ impl JupiterV2RouteProvider {
         }
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().unwrap_or_default();
-            if body.contains("NO_ROUTES_FOUND")
-                || body.contains("COULD_NOT_FIND_ANY_ROUTE")
-                || body.contains("TOKEN_NOT_TRADABLE")
-            {
-                let short: String = body.chars().take(240).collect();
-                return Err(format!("jupiter /build: no executable route: {}", short));
-            }
-            return Err(format!("jupiter /build HTTP {status}: {body}"));
+            let mut body = Vec::new();
+            let _ = std::io::Read::read_to_end(
+                &mut std::io::Read::take(response, ERROR_BODY_LIMIT),
+                &mut body,
+            );
+            return Err(jupiter_error(status, &body));
         }
         let build: BuildResponse = response
             .json()
@@ -425,9 +430,46 @@ fn transform_alts(
     Ok(out)
 }
 
+/// Bytes of a Jupiter error body that are inspected (B13): never read unbounded.
+const ERROR_BODY_LIMIT: u64 = 4096;
+/// B13: only the HTTP status or an allowlisted no-route code reaches the error; body free text,
+/// URLs and keys never do.
+fn jupiter_error(status: reqwest::StatusCode, body: &[u8]) -> String {
+    const NO_ROUTE: [&str; 3] = [
+        "NO_ROUTES_FOUND",
+        "COULD_NOT_FIND_ANY_ROUTE",
+        "TOKEN_NOT_TRADABLE",
+    ];
+    let text = String::from_utf8_lossy(body);
+    match NO_ROUTE.iter().find(|code| text.contains(*code)) {
+        Some(code) => format!("jupiter /build: no executable route: {code}"),
+        None => format!("jupiter /build HTTP {}", status.as_u16()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn jupiter_error_keeps_only_status_or_allowlisted_code() {
+        let leak = "SECRET https://user:key@jup.invalid/swap?api-key=SECRET";
+        let big = format!("{}{leak}", "x".repeat(1 << 20));
+        let status = reqwest::StatusCode::INTERNAL_SERVER_ERROR;
+        assert_eq!(
+            jupiter_error(status, big.as_bytes()),
+            "jupiter /build HTTP 500"
+        );
+        assert_eq!(
+            jupiter_error(status, leak.as_bytes()),
+            "jupiter /build HTTP 500"
+        );
+        let no_route = format!("{{\"errorCode\":\"NO_ROUTES_FOUND\",\"message\":\"{leak}\"}}");
+        assert_eq!(
+            jupiter_error(reqwest::StatusCode::BAD_REQUEST, no_route.as_bytes()),
+            "jupiter /build: no executable route: NO_ROUTES_FOUND"
+        );
+        assert!(ERROR_BODY_LIMIT <= 4096);
+    }
 
     #[test]
     fn strips_only_exact_verified_prewarmed_ata_setup() {
