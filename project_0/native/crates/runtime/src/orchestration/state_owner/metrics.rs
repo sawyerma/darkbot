@@ -45,4 +45,9 @@ pub(super) struct OwnerMetrics {
     pub(super) detect_pipeline_calls: u64,
     pub(super) detect_pipeline_ns_total: u64,
     pub(super) detect_pipeline_ns_max: u64,
+    /// D3: owner time per sweep batch (ingress is not served meanwhile): total, maximum and the
+    /// unique accounts of the slowest batch.
+    pub(super) sweep_batch_ns_total: u64,
+    pub(super) sweep_batch_ns_max: u64,
+    pub(super) sweep_batch_ns_max_accounts: usize,
 }

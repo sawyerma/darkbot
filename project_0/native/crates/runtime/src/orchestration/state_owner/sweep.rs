@@ -21,6 +21,7 @@ impl ShadowOwner {
                 || batch_age_ns >= self.sweep_batch_max_age_ns
             {
                 let dirty = std::mem::take(&mut self.sweep_dirty_banks);
+                let owner_block_started = std::time::Instant::now();
                 self.sweep_batch_events = 0;
                 self.sweep_batch_started_ns = None;
                 self.metrics.sweep_batches = self.metrics.sweep_batches.saturating_add(1);
@@ -526,6 +527,15 @@ impl ShadowOwner {
                             }
                         }
                     }
+                }
+                // D3: the whole batch blocks the owner's ingress; measured, never estimated.
+                let blocked_ns =
+                    u64::try_from(owner_block_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                self.metrics.sweep_batch_ns_total =
+                    self.metrics.sweep_batch_ns_total.saturating_add(blocked_ns);
+                if blocked_ns > self.metrics.sweep_batch_ns_max {
+                    self.metrics.sweep_batch_ns_max = blocked_ns;
+                    self.metrics.sweep_batch_ns_max_accounts = unique;
                 }
             }
         }

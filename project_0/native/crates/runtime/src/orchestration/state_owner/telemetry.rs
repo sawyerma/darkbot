@@ -105,6 +105,18 @@ impl ShadowOwner {
                 self.candidate_error_recheck_slots,
                 self.candidate_repeat_soft_cap
             );
+            // D3: separate line, so the pinned R126/R127 parsers of the line above are unchanged.
+            #[cfg(feature = "crate_health")]
+            owner_log!(
+                self,
+                "sweep_timing: batches={} owner_block_ns_total={} owner_block_ns_max={} max_block_accounts={} max_unique_batch={} ingress_capacity={}",
+                self.metrics.sweep_batches,
+                self.metrics.sweep_batch_ns_total,
+                self.metrics.sweep_batch_ns_max,
+                self.metrics.sweep_batch_ns_max_accounts,
+                self.metrics.sweep_max_unique_batch,
+                self.consumer.stats().capacity
+            );
         }
     }
 }

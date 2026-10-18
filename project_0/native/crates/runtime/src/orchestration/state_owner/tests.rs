@@ -599,3 +599,137 @@ fn no_duplicate_generation_or_old_session_readiness() {
     assert!(st.run_state().is_tradable());
     assert_eq!(retired.stream_ready_dropped, 1);
 }
+
+/// D3: owner block time of one sweep batch, synthetic and deterministic: one dirty bank with N
+/// dependent accounts (each with a deposit on a second bank), fixed-price banks, the same
+/// dedupe → `par_iter` exact health → fairness sort as `sweep`, on 1 and 2 rayon workers. Real
+/// oracles (Pyth/Switchboard decode) cost more; the Mainnet detect path measured ~3.4 µs/call.
+/// Run: `cargo test --release -p darkbot-runner --features crate_health --lib -- --ignored
+/// sweep_fanout_owner_block_is_measured --nocapture`.
+#[cfg(feature = "crate_health")]
+#[test]
+#[ignore]
+fn sweep_fanout_owner_block_is_measured() {
+    use bytemuck::Zeroable;
+    use darkbot_project0::health::{AccountSource, HealthEngine};
+    use marginfi_type_crate::types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup, WrappedI80F48,
+    };
+    struct Source(HashMap<Pubkey, Account>);
+    impl AccountSource for Source {
+        fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            self.0
+                .get(key)
+                .map(|a| (a.owner, a.lamports, a.data.as_slice()))
+        }
+    }
+    let one = |x: i128| WrappedI80F48 {
+        value: (x << 48).to_le_bytes(),
+    };
+    let wrapped = |data: &[u8], disc: [u8; 8], owner: Pubkey| Account {
+        owner,
+        lamports: 1,
+        data: [disc.as_slice(), data].concat(),
+        ..Account::default()
+    };
+    let program = Pubkey::from_str(protocol::PROGRAM_ID_MAINNET).unwrap();
+    let group = Pubkey::new_unique();
+    let (asset_bank, liability_bank) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let mut state = HashMap::new();
+    state.insert(
+        group,
+        wrapped(
+            bytemuck::bytes_of(&MarginfiGroup::zeroed()),
+            protocol::DISC_MARGINFI_GROUP,
+            program,
+        ),
+    );
+    for bank_key in [asset_bank, liability_bank] {
+        let mut bank = Bank::zeroed();
+        bank.group = group;
+        bank.mint_decimals = 6;
+        bank.asset_share_value = one(1);
+        bank.liability_share_value = one(1);
+        bank.config.asset_weight_init = one(1);
+        bank.config.asset_weight_maint = one(1);
+        bank.config.liability_weight_init = one(1);
+        bank.config.liability_weight_maint = one(1);
+        bank.config.operational_state = BankOperationalState::Operational;
+        bank.config.oracle_setup = OracleSetup::Fixed;
+        bank.config.fixed_price = one(1);
+        state.insert(
+            bank_key,
+            wrapped(bytemuck::bytes_of(&bank), protocol::DISC_BANK, program),
+        );
+    }
+    let mut accounts = Vec::new();
+    for i in 0..100_000usize {
+        let key = Pubkey::new_unique();
+        let mut a = MarginfiAccount::zeroed();
+        a.group = group;
+        // Active balances sorted by bank key, descending (the on-chain order).
+        let (asset, liability) = if asset_bank > liability_bank {
+            (0, 1)
+        } else {
+            (1, 0)
+        };
+        let b = &mut a.lending_account.balances;
+        b[asset].active = 1;
+        b[asset].bank_pk = asset_bank;
+        b[asset].asset_shares = one(1_000);
+        b[liability].active = 1;
+        b[liability].bank_pk = liability_bank;
+        // Every second account is under water.
+        b[liability].liability_shares = one(if i % 2 == 0 { 500 } else { 1_500 });
+        state.insert(
+            key,
+            wrapped(
+                bytemuck::bytes_of(&a),
+                protocol::DISC_MARGINFI_ACCOUNT,
+                program,
+            ),
+        );
+        accounts.push(key);
+    }
+    let source = Source(state);
+    let engine = darkbot_project0::health::crate_impl::CrateHealth {
+        state: &source,
+        group,
+    };
+    let probe = engine.health(&accounts[1], 1_000, 100).unwrap();
+    assert!(probe.liquidatable, "the fixture evaluates the real path");
+    for n in [100usize, 10_000, 100_000] {
+        // The bank's fan-out is exactly n accounts (index construction is not owner time here).
+        let mut index = ReverseIndex::new();
+        for key in &accounts[..n] {
+            index.set_account_banks(*key, &[asset_bank, liability_bank]);
+        }
+        for threads in [1usize, 2] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let started = std::time::Instant::now();
+            let mut work: HashMap<Pubkey, (u64, u64, u64)> = HashMap::new();
+            for account in index.accounts_for_bank(&liability_bank) {
+                work.entry(*account).or_insert((1, 100, 0));
+            }
+            let mut evaluated: Vec<(Pubkey, bool)> = pool.install(|| {
+                work.into_par_iter()
+                    .map(|(account, _)| {
+                        let h = engine.health(&account, 1_000, 100).unwrap();
+                        (account, h.liquidatable)
+                    })
+                    .collect()
+            });
+            evaluated.sort_unstable_by_key(|(account, liquidatable)| (!*liquidatable, *account));
+            let ms = started.elapsed().as_secs_f64() * 1e3;
+            assert_eq!(evaluated.len(), n);
+            assert_eq!(evaluated.iter().filter(|e| e.1).count(), n / 2);
+            println!(
+                "D3_SWEEP_FANOUT accounts={n} workers={threads} owner_block_ms={ms:.1} us_per_account={:.2}",
+                ms * 1e3 / n as f64
+            );
+        }
+    }
+}
