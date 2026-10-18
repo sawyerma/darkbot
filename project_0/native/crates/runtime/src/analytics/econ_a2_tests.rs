@@ -85,6 +85,7 @@ fn a2_slot_margin_is_identical_live_and_offline_and_rx_only_when_confirmed() {
                 market_commitment: commitment,
                 slot_first_seen: Some(&inputs.slot_first_seen),
                 capture: None,
+                capital: &w.h.cfg.capital,
             },
         )
         .unwrap();
@@ -177,12 +178,18 @@ fn a2_earlier_schema_frames_stay_readable() {
     joined.our = Some(r);
     joined.identity_status = "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT";
     joined.winner_slot_first_seen_ns = Some(60);
+    joined.capital = vec![300, 700];
+    // Schema 2 (before A2) and 3 (A2, before A6) of the canonical row.
     let back: Joined = decode(
         Joined::KIND,
         TYPED,
         &earlier(
             &joined,
-            &(&joined.market_commitment, joined.winner_slot_first_seen_ns),
+            &(
+                &joined.market_commitment,
+                joined.winner_slot_first_seen_ns,
+                &joined.capital,
+            ),
         ),
     )
     .unwrap();
@@ -191,7 +198,14 @@ fn a2_earlier_schema_frames_stay_readable() {
         (back.market_commitment.as_str(), back.winner_slot_first_seen_ns),
         ("UNKNOWN", None)
     );
+    assert_eq!(back.capital, CAPITAL_USD.to_vec(), "the list its view used");
     assert_eq!(joined_facts(&back).local_observed_race_margin_ns, None);
+    let back: Joined = decode(Joined::KIND, 3, &earlier(&joined, &joined.capital)).unwrap();
+    assert_eq!(
+        (back.market_commitment.as_str(), back.winner_slot_first_seen_ns),
+        ("confirmed", Some(60))
+    );
+    assert_eq!(back.capital, CAPITAL_USD.to_vec());
 
     let w = worker();
     let report = w.report(1, false);

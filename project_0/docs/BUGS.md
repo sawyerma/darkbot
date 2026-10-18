@@ -954,12 +954,14 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 - **Abnahme:** vollständige Replay-Parität mit festgeschriebener Fensterregel. **Code-Commit/Evidence:** —.
 
 ### R16 — E-C: kanonischer Kapitalreport ignoriert konfiguriertes Kapitalraster
-- [ ] **LOW / REPORT-CONFIG PARITÄT · CODE_CONFIRMED · Cross-Ref FE-00/P6/C0-E1.**
+- [x] A6 · Fix: dieser Commit `fix(project0): A6 …` (SHA im nächsten Ticket-Commit) · Test `a6_canonical_capital_uses_the_configured_list_live_and_offline` — `summarize()`, `joined_value()` und Replay nutzen `cfg.capital` (Replay: optionales 8. Argument `CAPITAL_USD`, sonst Standardliste; `parse_capital` gemeinsam mit `P0_ECON_CAPITAL_USD`); kanonische Zeile trägt die Liste (ECON_CANONICAL Schema 4, Schema 2/3 lesbar mit der damals genutzten Standardliste); live == Replay für fundable/blocked/unknown.
+- [x] **LOW / REPORT-CONFIG PARITÄT · CODE_CONFIRMED · Cross-Ref FE-00/P6/C0-E1.**
 - **Ist:** `econ.rs::Config` liest `P0_ECON_CAPITAL_USD`, während `econ_canonical.rs::summarize` aktuell direkt `CAPITAL_USD` = [200,500,1000,2500,5000,10000] verwendet; Legacy-Pfad nutzt `cfg.capital`. Bei benutzerdefiniertem Raster weichen beide Reports ab.
 - **Soll:** kanonische Zusammenfassung erhält das validierte Konfigurationsraster ausdrücklich, Schema/Provenienz eindeutig; keine still geänderten Funding-Simulationen.
 - **Tests:** Default/Custom/invalid Capital, Live-/Offline-Paarvergleich, fundable/blocked/unknown identisch. **Commit/Evidence:** —.
 
 ### R17 — E-D: `first_observed_slot` in späteren Stundenfenstern kann globalen ersten Slot wiederholen
+- E-D laut Auftrag 18.10.2026 nur eingetragen, nicht gefixt.
 - [ ] **LOW / HOURLY-METRICS · CODE_CONFIRMED · Cross-Ref C0-E1/FE-00.**
 - **Ist:** `analytics/econ.rs` übernimmt bei `Evidence::MarketCounters` den `first_observed_slot` per `or_insert(n)`, während `MarketStats` einen globalen Minimumslot ausgibt. Stunde 2–4 können deshalb Slot 1 des ganzen Runs melden statt des stündlichen Minimums.
 - **Soll:** pro Fenster ein tatsächliches Slot-Minimum aus im Fenster beobachteten Slot-Ereignissen oder einer eindeutig deklarierten neuen Stundenmetrik führen; aus bloßem Counterdelta ohne Slot-Identität ist ein Minimum **nicht** sicher rekonstruierbar. Keine Schätzung aus `last_observed_slot`.
@@ -1014,7 +1016,7 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 - **Abnahme:** ausdrücklich geklärter RAM-Vertrag je Modus, keine Überlaufverschleierung. **Commit/Evidence:** —.
 
 ### R25 — Analytics-Supervisor: ungeordneter Abort verliert letzten Journalabschluss
-- [x] A5 · Fix: dieser Commit `fix(project0): A5 …` (SHA im nächsten Ticket-Commit) · Test `analytics_abort_waits_for_the_owners_until_the_market_journal_is_sealed` — `supervise()` wartet nach Abbruch (Analytics-Ende/Deadline) begrenzt durch `shutdown_grace_seconds` (Default 180 s, `P0_SHUTDOWN_SECS`) auf Shadow- und Market-Thread und joint sie; läuft einer danach noch: `C0_E1_OWNERS_NOT_QUIESCENT`, beide Owner als failed, kein Hängen. Hinweis: die Market-Shadow-Barriere selbst wartet bis `shadow_drain + quiescence_grace` (330 s) und kann die 180-s-Grace überschreiten ⇒ dann fail-closed gemeldet.
+- [x] A5 · Fix `a8bf405` · Test `analytics_abort_waits_for_the_owners_until_the_market_journal_is_sealed` — `supervise()` wartet nach Abbruch (Analytics-Ende/Deadline) begrenzt durch `shutdown_grace_seconds` (Default 180 s, `P0_SHUTDOWN_SECS`) auf Shadow- und Market-Thread und joint sie; läuft einer danach noch: `C0_E1_OWNERS_NOT_QUIESCENT`, beide Owner als failed, kein Hängen. Hinweis: die Market-Shadow-Barriere selbst wartet bis `shadow_drain + quiescence_grace` (330 s) und kann die 180-s-Grace überschreiten ⇒ dann fail-closed gemeldet.
 - [x] **LOW / FAILURE-EVIDENCE CONTRACT · BEHAVIOR_TO_VERIFY · Cross-Ref H1/D1/R2/R22/PERSIST.**
 - **Ist:** Reviewer sieht `startup.rs::supervise` mit hartem Prozessende bei Analytics-Panic/Deadline und potentiell noch laufenden Market-/Shadow-Threads. Ein unvollständiger Journal-Tail wird durch H1 fail-closed erkannt; die Evidence ist dann ggf. unvollständig, aber kein falscher PASS. Ob dieselbe Gefahr auf dem aktuellen Launchpfad noch besteht, beim Implementieren erneut lesen.
 - **Soll:** begrenztes koordiniertes Stop-/Quiescence-/Incomplete-Abschlussprotokoll **nur sofern** der Abortpfad dafür beweisbar Zeit und Owner-Kontrolle besitzt; bei harter Deadline niemals eine falsche COMPLETE-Versiegelung oder Endloswarten einführen. Bereits persistierte Frames nicht löschen.

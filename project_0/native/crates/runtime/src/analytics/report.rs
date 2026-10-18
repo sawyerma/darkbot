@@ -1491,6 +1491,8 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
                         start_ns: capture.monotonic_window.0,
                         cutoff_ns: capture.monotonic_window.1,
                     }),
+                    // The native report renders no budget buckets of the joined rows.
+                    capital: &crate::analytics::econ::CAPITAL_USD,
                 },
             );
             match joined {

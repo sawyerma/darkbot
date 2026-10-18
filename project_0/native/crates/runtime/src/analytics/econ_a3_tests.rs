@@ -28,6 +28,7 @@ fn a3_offline_join_admits_only_the_live_window() {
                     market_commitment: &w.commitment,
                     slot_first_seen: None,
                     capture,
+                    capital: &CAPITAL_USD,
                 },
             )
             .unwrap()
@@ -41,8 +42,8 @@ fn a3_offline_join_admits_only_the_live_window() {
         }));
         assert_eq!(joined_facts(&live), joined_facts(&filtered), "t_rx {t_rx}");
         assert_eq!(
-            summarize(&[&live], 4., 0, true).matching,
-            summarize(&[&filtered], 4., 0, true).matching
+            summarize(&[&live], 4., 0, true, &CAPITAL_USD).matching,
+            summarize(&[&filtered], 4., 0, true, &CAPITAL_USD).matching
         );
         assert_eq!((live.target_seen, live.our.is_some()), (inside, inside));
         if !inside {

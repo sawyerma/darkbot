@@ -24,11 +24,32 @@ mod docs;
 pub use canonical::{
     canonical_legacy_view, join as canonical_join, joined_facts, race_margins, record_digest,
     CanonicalSummary, CaptureFilter, JoinContext, JoinOutcome, Joined as CanonicalJoin,
-    JoinedFacts, RaceMargins,
+    JoinedFacts, RaceMargins, ReplayScope,
 };
 pub use docs::*;
 
 pub const CAPITAL_USD: [u64; 6] = [200, 500, 1000, 2500, 5000, 10000];
+
+/// The capital scenarios (USD) of a run: `P0_ECON_CAPITAL_USD` and the replay's argument.
+pub fn parse_capital(v: &str) -> Result<Vec<u64>, String> {
+    let capital = v
+        .split(',')
+        .map(|s| {
+            s.trim()
+                .parse::<u64>()
+                .map_err(|_| "invalid capital bucket".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if capital.is_empty()
+        || capital.len() > 32
+        || capital
+            .iter()
+            .any(|x| *x == 0 || x.checked_mul(1_000_000).is_none())
+    {
+        return Err("invalid capital list".into());
+    }
+    Ok(capital)
+}
 pub const SPEEDUP_MS: [u64; 9] = [1, 5, 10, 25, 50, 100, 200, 500, 1000];
 pub const NON_CLAIMS: [&str; 8] = [
     "Shadow evidence is not realized PnL or LIVE qualification",
@@ -81,24 +102,9 @@ impl EconConfig {
             return Err("invalid econ bounded capacity/drain".into());
         }
         let capital = match get("P0_ECON_CAPITAL_USD") {
-            Some(v) => v
-                .split(',')
-                .map(|s| {
-                    s.trim()
-                        .parse::<u64>()
-                        .map_err(|_| "invalid capital bucket".to_string())
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+            Some(v) => parse_capital(&v)?,
             None => CAPITAL_USD.to_vec(),
         };
-        if capital.is_empty()
-            || capital.len() > 32
-            || capital
-                .iter()
-                .any(|x| *x == 0 || x.checked_mul(1_000_000).is_none())
-        {
-            return Err("invalid capital list".into());
-        }
         let run_id =
             get("P0_ECON_RUN_ID").unwrap_or_else(|| format!("econ4h_{}", utc_compact(unix_s)));
         if !run_id
@@ -2222,15 +2228,7 @@ pub fn replay_canonical(
     plan: &MeasurementPlan,
     start_ns: u64,
     max_seconds: u64,
-    capture_start_ns: Option<u64>,
+    scope: &ReplayScope,
 ) -> Result<(), String> {
-    canonical::replay(
-        market,
-        shadow,
-        out,
-        plan,
-        start_ns,
-        max_seconds,
-        capture_start_ns,
-    )
+    canonical::replay(market, shadow, out, plan, start_ns, max_seconds, scope)
 }

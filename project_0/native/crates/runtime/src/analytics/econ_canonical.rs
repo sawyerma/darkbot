@@ -22,14 +22,17 @@ pub struct Joined {
     pub market_commitment: String,
     /// A2: first in-window local receipt of the winner slot (the capture's `SlotBoundary` row).
     pub winner_slot_first_seen_ns: Option<u64>,
+    /// A6: capital scenarios of the run (USD), as on the opportunity rows.
+    pub capital: Vec<u64>,
 }
 impl crate::analytics::payload::Payload for Joined {
     const KIND: u16 = journal::kind::ECON_CANONICAL;
-    const SCHEMA: u16 = 3;
+    const SCHEMA: u16 = 4;
+    /// Schema 2 (before A2) and 3 (before A6); their views used the default capital list.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == crate::analytics::payload::TYPED).then(|| {
-            let v: JoinedWireV2 = crate::analytics::payload::decode_wire(bytes)?;
-            JoinedWire {
+        use crate::analytics::payload::decode_wire;
+        let wire = match schema {
+            2 => decode_wire::<JoinedWireV2>(bytes).map(|v| JoinedWireV3 {
                 market: v.market,
                 target_seen: v.target_seen,
                 target_seen_without_slot: v.target_seen_without_slot,
@@ -42,10 +45,29 @@ impl crate::analytics::payload::Payload for Joined {
                 diagnostic: v.diagnostic,
                 market_commitment: "UNKNOWN".into(),
                 winner_slot_first_seen_ns: None,
+            }),
+            3 => decode_wire::<JoinedWireV3>(bytes),
+            _ => return None,
+        };
+        Some(wire.and_then(|v| {
+            JoinedWire {
+                market: v.market,
+                target_seen: v.target_seen,
+                target_seen_without_slot: v.target_seen_without_slot,
+                health_liquidatable: v.health_liquidatable,
+                candidates_created: v.candidates_created,
+                plan_validated: v.plan_validated,
+                built: v.built,
+                identity_status: v.identity_status,
+                our: v.our,
+                diagnostic: v.diagnostic,
+                market_commitment: v.market_commitment,
+                winner_slot_first_seen_ns: v.winner_slot_first_seen_ns,
+                capital: CAPITAL_USD.to_vec(),
             }
             .into_joined()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        })
+        }))
     }
 }
 /// The closed set of join identity outcomes; anything else fails to decode.
@@ -60,6 +82,23 @@ const IDENTITY_STATUS: [&str; 6] = [
 /// Wire form of `Joined` (owned status string, mapped back onto the closed set).
 #[derive(Deserialize)]
 struct JoinedWire {
+    market: TruthEvent,
+    target_seen: bool,
+    target_seen_without_slot: bool,
+    health_liquidatable: Option<bool>,
+    candidates_created: Option<bool>,
+    plan_validated: Option<bool>,
+    built: Option<bool>,
+    identity_status: String,
+    our: Option<OpportunityRecord>,
+    diagnostic: Option<OpportunityRecord>,
+    market_commitment: String,
+    winner_slot_first_seen_ns: Option<u64>,
+    capital: Vec<u64>,
+}
+/// Layout of schema 3 (A2, before A6): no capital list.
+#[derive(Deserialize)]
+struct JoinedWireV3 {
     market: TruthEvent,
     target_seen: bool,
     target_seen_without_slot: bool,
@@ -106,6 +145,7 @@ impl JoinedWire {
             diagnostic: self.diagnostic,
             market_commitment: self.market_commitment,
             winner_slot_first_seen_ns: self.winner_slot_first_seen_ns,
+            capital: self.capital,
         })
     }
 }
@@ -334,6 +374,7 @@ impl Worker {
                     our: None,
                     diagnostic: None,
                     market_commitment: self.commitment.clone(),
+                    capital: self.h.cfg.capital.clone(),
                 })
                 .collect();
             let mut cursor = self.shadow_heads.get(&target).copied();
@@ -394,7 +435,13 @@ impl Worker {
     pub(super) fn canonical_metrics(&self, from: usize, through: usize) -> CanonicalSummary {
         let (rows, unassigned) = self.canonical_rows(from, through);
         let seconds = self.h.cfg.plan.span_seconds(from, through);
-        summarize(&rows, seconds, unassigned, self.canonical_finalized)
+        summarize(
+            &rows,
+            seconds,
+            unassigned,
+            self.canonical_finalized,
+            &self.h.cfg.capital,
+        )
     }
     /// A2: race figures of the same canonical rows (live slot receipts of this run).
     pub(super) fn race_margin_metrics(&self, from: usize, through: usize) -> RaceMargins {
@@ -642,6 +689,7 @@ fn summarize(
     seconds: f64,
     unassigned: usize,
     finalized: bool,
+    capital: &[u64],
 ) -> CanonicalSummary {
     let mut market = BTreeMap::new();
     let mut fees = BTreeMap::new();
@@ -685,7 +733,7 @@ fn summarize(
         .copied()
         .filter(|r| r.market.permissionless_profit_opportunity)
         .collect();
-    let capital:Vec<_>=CAPITAL_USD.iter().map(|budget| {
+    let capital:Vec<_>=capital.iter().map(|budget| {
         let mut detected=0;let mut exec=0;let mut funded=0;let mut unknown=0;let mut blocked=0;
         let mut nets=Vec::new();let mut lost=Vec::new();
         for row in &tradable {
@@ -908,7 +956,7 @@ mod tests {
     use super::*;
     #[test]
     fn missing_values_have_no_zero_total() {
-        let s = view(&summarize(&[], 3600., 0, true));
+        let s = view(&summarize(&[], 3600., 0, true, &CAPITAL_USD));
         assert!(s["network_fees"]["known_total_lamports"].is_null());
         assert_eq!(s["capital"].as_array().unwrap().len(), 6);
     }
@@ -922,6 +970,7 @@ mod regression {
     use crate::market_observer::truth::LiquidationType;
     include!("econ_a2_tests.rs");
     include!("econ_a3_tests.rs");
+    include!("econ_a6_tests.rs");
     /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
     /// identical historical JSONL row; an identity status outside the closed set is refused.
     #[test]
@@ -983,6 +1032,7 @@ mod regression {
             diagnostic: None,
             market_commitment: "confirmed".into(),
             winner_slot_first_seen_ns: None,
+            capital: CAPITAL_USD.to_vec(),
         }
     }
     fn identified() -> OpportunityRecord {
@@ -1020,7 +1070,10 @@ mod regression {
             &plan,
             100_000_000_000,
             30,
-            None,
+            &ReplayScope {
+                capture_start_ns: None,
+                capital: &CAPITAL_USD,
+            },
         )
         .unwrap();
         let got: Value = serde_json::from_str(
@@ -1055,7 +1108,10 @@ mod regression {
             &plan,
             100_000_000_000,
             30,
-            None
+            &ReplayScope {
+                capture_start_ns: None,
+                capital: &CAPITAL_USD,
+            },
         )
         .is_err());
         // Runs before PERSIST-01 keep their JSONL stream: same replay, byte-identical renders.
@@ -1071,7 +1127,10 @@ mod regression {
             &plan,
             100_000_000_000,
             30,
-            None,
+            &ReplayScope {
+                capture_start_ns: None,
+                capital: &CAPITAL_USD,
+            },
         )
         .unwrap();
         for name in ["canonical_market_shadow.jsonl", "economics_final.json"] {
@@ -1095,7 +1154,10 @@ mod regression {
                 &plan,
                 100_000_000_000,
                 30,
-                None
+                &ReplayScope {
+                    capture_start_ns: None,
+                    capital: &CAPITAL_USD,
+                },
             )
             .err()
             .as_deref(),
@@ -1140,7 +1202,7 @@ mod regression {
         let r = rec();
         let mut rows = vec![row(&r, 10, 0)];
         assign_record(&mut rows, &r);
-        let s = view(&summarize(&[&rows[0]], 3600., 0, true));
+        let s = view(&summarize(&[&rows[0]], 3600., 0, true, &CAPITAL_USD));
         assert_eq!(s["matching"]["exact_plan_match"], 0);
         assert_eq!(s["capital"][0]["unknown_economics"], 1);
         assert!(s["capital"][0]["known_net_edge_usd"]["total"].is_null());
@@ -1163,14 +1225,14 @@ mod regression {
         r.selected_costs = Some(costs(200_000_000));
         let mut rows = vec![row(&r, 10, 0)];
         assign_record(&mut rows, &r);
-        let s = view(&summarize(&[&rows[0]], 3600., 0, true));
+        let s = view(&summarize(&[&rows[0]], 3600., 0, true, &CAPITAL_USD));
         assert_eq!(s["capital"][0]["fundable"], 0); // fee reserve makes exactly $200 insufficient
         assert_eq!(s["capital"][0]["lost_only_because_capital"], 1);
         assert_eq!(s["capital"][1]["fundable"], 1);
         assert_eq!(s["capital"][1]["known_profitable"], 1);
         rows[0].market.permissionless_profit_opportunity = false;
         rows[0].market.liquidation_type = LiquidationType::ForcedDeleverage;
-        let s = view(&summarize(&[&rows[0]], 3600., 0, true));
+        let s = view(&summarize(&[&rows[0]], 3600., 0, true, &CAPITAL_USD));
         assert_eq!(s["market"]["ALL"]["events"], 1);
         assert_eq!(s["capital"][0]["market_opportunities"], 0);
     }
@@ -1180,7 +1242,7 @@ mod regression {
         let a = row(&r, 10, 0);
         let mut b = row(&r, 10, 1);
         b.market.gross_edge_usd = None;
-        let s = view(&summarize(&[&a, &b], 3600., 0, true));
+        let s = view(&summarize(&[&a, &b], 3600., 0, true, &CAPITAL_USD));
         assert_eq!(s["network_fees"]["transactions"], 1);
         assert_eq!(s["network_fees"]["known_total_lamports"], 7000);
         assert_eq!(s["loss_attribution"]["NOT_DETECTED"]["count"], 2);
@@ -1488,7 +1550,7 @@ fn joined_value(row: &Joined) -> Value {
                     "signed":row.our.as_ref().map(|r|r.timing.t_sign_ns.is_some()),
                     "simulation_result":row.our.as_ref().and_then(|r|r.simulation_result.as_deref()),
                     "economic_net_usd":net(row.our.as_ref()),"economics_known":row.our.as_ref().map(|r|r.economics_known),
-                    "fundable_by_budget":CAPITAL_USD.iter().map(|budget|json!({"budget_usd":budget,"fundable":row.our.as_ref().and_then(|r|r.selected_costs.as_ref()).and_then(CandidateCostRecord::total_budget).map(|n|n<=budget*1_000_000)})).collect::<Vec<_>>(),
+                    "fundable_by_budget":row.capital.iter().map(|budget|json!({"budget_usd":budget,"fundable":row.our.as_ref().and_then(|r|r.selected_costs.as_ref()).and_then(CandidateCostRecord::total_budget).map(|n|n<=budget*1_000_000)})).collect::<Vec<_>>(),
                     "loss_provenance":if row.our.is_some(){"EXACT_PLAN_MATCH"}else if row.diagnostic.is_some(){"TARGET_EPISODE_DIAGNOSTIC; executable identity unproven"}else{"NO_TARGET_EPISODE_RECORD"}})
 }
 
@@ -1529,6 +1591,8 @@ pub struct JoinContext<'a> {
     pub market_commitment: &'a str,
     pub slot_first_seen: Option<&'a BTreeMap<u64, u64>>,
     pub capture: Option<CaptureFilter<'a>>,
+    /// A6: capital scenarios of the run (USD).
+    pub capital: &'a [u64],
 }
 
 pub fn join(
@@ -1566,6 +1630,7 @@ pub fn join(
                 our: None,
                 diagnostic: None,
                 market_commitment: ctx.market_commitment.into(),
+                capital: ctx.capital.to_vec(),
             });
     }
     for rows in grouped.values_mut() {
@@ -1664,6 +1729,13 @@ pub fn join(
     })
 }
 
+/// Run inputs of the offline replay beyond its event and evaluation files: A3 the monotone
+/// capture start (`None`: no evaluation window), A6 the run's capital scenarios.
+pub struct ReplayScope<'a> {
+    pub capture_start_ns: Option<u64>,
+    pub capital: &'a [u64],
+}
+
 /// Offline replay uses the identical production episode/plan selector and
 /// economics/attribution functions. It cannot call a provider or submit a TX.
 pub(super) fn replay(
@@ -1673,11 +1745,13 @@ pub(super) fn replay(
     plan: &MeasurementPlan,
     start_ns: u64,
     max_seconds: u64,
-    capture_start_ns: Option<u64>,
+    scope: &ReplayScope,
 ) -> Result<(), String> {
     use std::io::BufRead;
     plan.validate()?;
-    let capture = capture_start_ns
+    let capital = scope.capital;
+    let capture = scope
+        .capture_start_ns
         .map(|start| {
             plan.cutoff(start).map(|cutoff_ns| CaptureFilter {
                 plan,
@@ -1727,6 +1801,7 @@ pub(super) fn replay(
             market_commitment: "UNKNOWN",
             slot_first_seen: None,
             capture,
+            capital,
         },
     )?;
     fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
@@ -1755,8 +1830,9 @@ pub(super) fn replay(
         let unassigned = rows.iter().filter(|r| bucket(r).is_none()).count();
         let value = json!({"schema":"C0-E1/OfflineCanonicalEconomics/1","scope":"EXPLICIT_FINALIZED_EVENT_INPUT; verification coverage is separate",
             "start_unix_ns":start_ns,"cutoff_unix_ns":start_ns+plan.offset_ns(i),"plan":plan,
-            "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true),
-            "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true),
+            "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true,capital),
+            "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true,capital),
+            "capital_usd":capital,
             "race_margins":race_margins(&cumulative,"UNKNOWN",false),
             "evaluation_window":if capture.is_some() {"CAPTURE_WINDOW_MONOTONIC: only evaluations the live chain admits"} else {"NOT_APPLIED: no monotone capture start given; every evaluation frame joins"},
             "raw_shadow_available":available,"live_enabled":false,"master_pass":false});
