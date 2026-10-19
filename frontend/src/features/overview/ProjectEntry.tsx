@@ -1,12 +1,16 @@
-import { useNavigate } from "react-router-dom";
+import { useId } from "react";
+import { Link } from "react-router-dom";
 import type { ProjectRegistration } from "@/app/projectRegistry";
 import { StatusBadge, type NoticeState } from "@/shared/ui/graphite/Notice";
 import { DASH } from "@/shared/ui/graphite/Rows";
-import { selectProject, useOverviewStore } from "./overviewStore";
+import { selectProject, selectStatus, useOverviewStore } from "./overviewStore";
 import { formatCount, formatLatency, formatUsdMicroSigned } from "./model/format";
+import { processIndicator, projectControls } from "./model/lifecycle";
+import { DisabledAction, ProcessLine } from "./OverviewControls";
 
-// Eine Projektkarte aus der Registry. Daten ausschließlich aus overview.aggregates;
-// ohne Daten bleibt alles "—". Klick öffnet die Projektroute.
+// One project card from the registry. Metrics come only from overview.aggregates; without data
+// everything stays "—". Navigation is a link in the title; lifecycle controls are sibling buttons,
+// never nested in the link and never triggered by navigating.
 
 function sourceNotice(s: string | undefined): NoticeState {
   switch (s) {
@@ -19,24 +23,24 @@ function sourceNotice(s: string | undefined): NoticeState {
 }
 
 export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
-  const navigate = useNavigate();
-  const quality = useOverviewStore(s => s.status);
+  const quality = useOverviewStore(selectStatus);
   const cached = useOverviewStore(selectProject(reg.projectId));
   const summary = quality === "LIVE" ? cached : null;
+  const titleId = useId();
+  // No supervisor-owned lifecycle source exists yet (F7-OVR-B); the feed is never used as evidence.
+  const process = processIndicator(null);
+  const controls = projectControls(reg.key);
 
   return (
-    <button
-      type="button"
-      className="ov-card"
-      onClick={() => navigate(reg.route)}
-      aria-label={`Open ${reg.label}`}
-      data-testid={`project-card-${reg.key}`}
-    >
-      <div className="g-row">
-        <h3>{reg.label}</h3>
+    <article className="ov-card" aria-labelledby={titleId} data-testid={`project-card-${reg.key}`}>
+      <div className="ov-card-head">
+        <h3 id={titleId}>
+          <Link to={reg.route} title={`Open ${reg.label}`} data-testid={`project-link-${reg.key}`}>{reg.label}</Link>
+        </h3>
         <StatusBadge state={sourceNotice(summary?.source)} detail={summary?.sourceId} />
       </div>
-      <p>{summary?.domain ?? DASH}</p>
+      <p className="ov-domain">{summary?.domain ?? DASH}</p>
+      <ProcessLine indicator={process} testId={`project-process-${reg.key}`} />
       <dl className="ov-facts">
         <dt>Readiness</dt>
         <dd>{summary?.readiness ?? DASH}</dd>
@@ -52,6 +56,10 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
       {summary && summary.warnings.length > 0 ? (
         <p className="ov-warn">{summary.warnings.slice(0, 2).join(" · ")}</p>
       ) : null}
-    </button>
+      <div className="ov-actions" role="group" aria-label={`${reg.label} controls`}>
+        <DisabledAction label="Start / Stop" control={controls.startStop} testId={`project-startstop-${reg.key}`} />
+        <DisabledAction label="Logs" control={controls.logs} testId={`project-logs-${reg.key}`} />
+      </div>
+    </article>
   );
 }

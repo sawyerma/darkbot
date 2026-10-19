@@ -1,43 +1,13 @@
+/* F7-OVR overview (frontend/design/reference/darkbot_overview_control_v2.html).
+   Tokens only: new hex values are forbidden here (shared/ui/graphite/tokens.css). */
+
 .ov-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--g-gap-md);
 }
 
-.ov-card {
-  display: block;
-  width: 100%;
-  text-align: left;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  border: 1px solid var(--g-line);
-  border-radius: var(--g-r-health);
-  padding: 14px;
-  background: var(--g-health);
-}
-.ov-card:hover { background: var(--g-row-selected); }
-.ov-card h3 { margin: 0; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); }
-.ov-card > p { margin: 4px 0 10px; font-size: var(--g-fs-small); color: var(--g-muted); }
-
-.ov-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: var(--g-fs-small); }
-.ov-facts dt { color: var(--g-dim); }
-.ov-facts dd { margin: 0; text-align: right; color: var(--g-text); }
-
-.ov-warn { margin: 10px 0 0; font-size: var(--g-fs-tiny); color: var(--g-muted); }
-
-@media (max-width: 650px) {
-  .ov-cards { grid-template-columns: 1fr; }
-}
-
-/* Two matched Graphite cards below the existing project row. */
-.ov-tiles {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  gap: var(--g-gap-md);
-  margin-top: var(--g-gap-md);
-}
+.ov-card,
 .ov-tile {
   min-width: 0;
   border: 1px solid var(--g-line);
@@ -45,10 +15,91 @@
   padding: 14px;
   background: var(--g-health);
 }
-.ov-tile h3 { margin: 0 0 10px; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); }
-.ov-tile .ov-facts dd { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.ov-note { display: block; font-size: var(--g-fs-tiny); color: var(--g-muted); overflow-wrap: anywhere; }
+
+.ov-card { display: flex; flex-direction: column; position: relative; }
+.ov-card:hover { background: var(--g-row-selected); }
+.ov-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 7px; }
+.ov-card h3,
+.ov-tile h3 { margin: 0; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); }
+.ov-card h3 a { color: inherit; text-decoration: none; border-radius: var(--g-r-row); }
+.ov-card h3 a::after { content: ""; position: absolute; inset: 0; }
+.ov-card h3 a:hover { text-decoration: underline; }
+.ov-card h3 a:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.ov-domain { margin: 4px 0 12px; font-size: var(--g-fs-tiny); color: var(--g-muted); }
+
+.ov-process {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: var(--g-fs-tiny);
+  color: var(--g-muted);
+}
+/* Neutral gray only: without a supervisor-owned lifecycle source every project is UNKNOWN.
+   RUNNING/FAILED/STARTING/STOPPING colors need approved tokens first (F7-OVR-B). */
+.ov-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--g-dim); }
+
+.ov-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 9px;
+  row-gap: 5px;
+  margin: 0;
+  font-size: var(--g-fs-tiny);
+}
+.ov-facts dt { color: var(--g-dim); }
+.ov-facts dd { margin: 0; text-align: right; color: var(--g-text); font-variant-numeric: tabular-nums; }
+.ov-note { display: block; font-size: var(--g-fs-micro); color: var(--g-muted); overflow-wrap: anywhere; }
+.ov-warn { margin: 10px 0 0; font-size: var(--g-fs-tiny); color: var(--g-muted); }
+
+.ov-actions,
+.ov-tile-actions {
+  display: flex;
+  margin-top: auto;
+  border-top: 1px solid var(--g-line);
+}
+.ov-actions { justify-content: space-between; gap: 8px; padding-top: 12px; position: relative; z-index: 1; }
+.ov-tile-actions { gap: var(--g-gap-sm); padding-top: 13px; }
+
+.ov-btn {
+  border: 1px solid var(--g-line-secondary);
+  border-radius: var(--g-r-button);
+  background: transparent;
+  color: var(--g-accent);
+  padding: 6px 12px;
+  font: var(--g-fw-semibold) var(--g-fs-small)/1.4 var(--g-font);
+}
+.ov-btn:disabled { opacity: 0.43; cursor: not-allowed; }
+.ov-disabled-action { display: inline-flex; align-items: center; }
+
+.ov-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--g-gap-md);
+  margin-top: var(--g-gap-md);
+}
+.ov-tile { min-height: 254px; display: flex; flex-direction: column; }
+.ov-tile h3 { margin-bottom: var(--g-gap-lg); }
+.ov-tile .ov-facts { font-size: var(--g-fs-small); row-gap: var(--g-gap-sm); }
+.ov-tile-note { margin: 12px 0 0; font-size: var(--g-fs-micro); color: var(--g-dim); }
+
+.ov-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 @media (max-width: 850px) {
+  .ov-cards,
   .ov-tiles { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 470px) {
+  .ov-tile-actions { flex-wrap: wrap; }
 }

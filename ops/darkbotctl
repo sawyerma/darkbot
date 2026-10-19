@@ -36,6 +36,8 @@ LOCKFILE="$RUNDIR/lifecycle.lock"
 RESULT_FILE="$RUNDIR/capture.result"
 LAUNCH_FILE="$RUNDIR/capture.launch"
 STOPPING_FILE="$RUNDIR/capture.stopping"
+# Explicit user intent: a stopped capture must not auto-restart on the next desktop click.
+USER_STOP_FILE="$RUNDIR/capture.user_stopped"
 # Longest orderly capture stop (drain + seal) this tool waits for; also launchd's ExitTimeOut.
 STOP_BUDGET_S=330
 STOP_SENT=0
@@ -62,6 +64,7 @@ if [ -n "${DARKBOT_TEST_DIR:-}" ]; then
   CAPTURE_BIN="$APP_HOME/current/p0-market-capture-reported"
   LOCKFILE="$RUNDIR/lifecycle.lock"; RESULT_FILE="$RUNDIR/capture.result"
   LAUNCH_FILE="$RUNDIR/capture.launch"; STOPPING_FILE="$RUNDIR/capture.stopping"; DOWN_FILE="$RUNDIR/lifecycle.down"
+  USER_STOP_FILE="$RUNDIR/capture.user_stopped"
   export DARKBOT_NO_OPEN=1
 fi
 GEN_NEXT="${GEN_FILE%.*}.next"
@@ -366,6 +369,28 @@ _capture_start() {
   say "Capture gestartet pid=$p dauer=$secs launch=$launch"
 }
 
+
+# A deliberate Stop is sticky even if the capture is already absent.
+# Call only while holding lifecycle.lock. Publish atomically (umask 077).
+_suspend_autostart() {
+  local tmp="$USER_STOP_FILE.$"
+  printf 'launch=%s stopped_unix_s=%s\n' "$(launch_id)" "$(date +%s)" > "$tmp"
+  mv -f "$tmp" "$USER_STOP_FILE"
+}
+
+# Never clear user intent on a no-op (already running or sealing) or failed start.
+# The new launch ID is insufficient alone: _capture_start must have returned successfully,
+# and launchd must still report the new, non-stopping capture.
+_capture_start_explicit() {
+  local before after
+  before="$(launch_id)"
+  _capture_start "$@"
+  after="$(launch_id)"
+  if [ -n "$after" ] && [ "$after" != "$before" ] && capture_running && ! capture_stopping; then
+    rm -f "$USER_STOP_FILE"
+  fi
+}
+
 # Under the lock only the signal is sent; draining is awaited without holding it.
 _capture_stop_signal() {
   local p; p="$(capture_pid)"
@@ -391,8 +416,12 @@ capture_wait_stopped() {
 _clear_stopping() {
   if [ "$(cat "$STOPPING_FILE" 2>/dev/null || true)" = "$STOP_LAUNCH" ]; then rm -f "$STOPPING_FILE"; fi
 }
+_capture_stop_request() {
+  _suspend_autostart
+  _capture_stop_signal
+}
 cmd_capture_stop() {
-  locked _capture_stop_signal
+  locked _capture_stop_request
   if [ "$STOP_SENT" -eq 1 ]; then capture_wait_stopped; fi
   return 0
 }
@@ -422,6 +451,8 @@ app_inner() {
     secs="$(app_conf P0_APP_CAPTURE_SECS)"
     if [ "$auto" != 1 ] || [ -z "$secs" ]; then
       say "AUTOSTART_OFF: keine automatische Beobachtung konfiguriert (P0_APP_AUTOSTART_CAPTURE=1 und P0_APP_CAPTURE_SECS in $APP_CONF)"
+    elif [ -f "$USER_STOP_FILE" ]; then
+      say "AUTOSTART_SUSPENDED: Manueller Capture-Stopp aktiv; Neustart nur mit darkbotctl capture start <dauer>"
     elif recent_provider_failure; then
       say "PROVIDER_COOLDOWN: letzter Lauf endete ohne Marktstream – kein automatischer Neustart vor Ablauf der Sperre"
     else
@@ -439,7 +470,8 @@ _down_begin() {
   if [ -n "$owner" ] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
     die "Gesamtstopp läuft bereits (PID $owner)"
   fi
-  printf '%s\n' "$$" > "$DOWN_FILE"
+  printf '%s\n' "$" > "$DOWN_FILE"
+  _suspend_autostart
   _capture_stop_signal
 }
 _down_finish() {
@@ -480,6 +512,7 @@ cmd_status_short() {
   local g c
   if cmd_is_healthy; then g="Gateway läuft"; elif gateway_loaded; then g="Gateway antwortet nicht"; else g="Gateway gestoppt"; fi
   if capture_stopping; then c="Capture beendet sich"; elif capture_running; then c="Capture läuft"; else c="keine Capture"; fi
+  if [ -f "$USER_STOP_FILE" ] && ! capture_running; then c="$c (Autostart pausiert: manueller Stopp)"; fi
   printf '%s · %s · Aufnahme: %s\n' "$g" "$c" "$(app_conf P0_APP_CAPTURE_SECS nicht-konfiguriert)"
 }
 
@@ -596,7 +629,7 @@ case "${1:-status}" in
   capture)
     shift
     case "${1:-status}" in
-      start) shift; locked _capture_start "${1:-}" ;;
+      start) shift; locked _capture_start_explicit "${1:-}" ;;
       stop) cmd_capture_stop ;;
       status) cmd_capture_status ;;
       *) die "capture start <sekunden> | stop | status" ;;

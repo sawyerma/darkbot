@@ -15,7 +15,7 @@ test("overview retains project navigation and renders two honest, responsive til
   await expect(system).toBeVisible();
   await expect(finance).toBeVisible();
   await expect(system.getByRole("heading", { name: "System & Control Plane" })).toBeVisible();
-  await expect(finance.getByRole("heading", { name: "Global Finance" })).toBeVisible();
+  await expect(finance.getByRole("heading", { name: "Global Finance Aggregate" })).toBeVisible();
   await expect(system.locator("dt")).toHaveText([
     "Gateway", "Overview Feed", "Connected Projects", "Gateway RTT", "RPC Latency P95", "Last Overview Update",
   ]);
@@ -24,7 +24,12 @@ test("overview retains project navigation and renders two honest, responsive til
   ]);
   await expect(finance.locator("dd").first()).toHaveText("— USD");
   await expect(finance.locator("dd").nth(2)).toHaveText("— USD");
-  expect(await page.getByRole("button", { name: /start|buy|send|sweep/i }).count()).toBe(0);
+  for (const key of ["project0", "bsc", "solana"]) {
+    await expect(page.getByTestId(`project-startstop-${key}`)).toBeDisabled();
+    await expect(page.getByTestId(`project-logs-${key}`)).toBeDisabled();
+  }
+  await expect(page.getByTestId("overview-stop-all")).toBeDisabled();
+  await expect(page.getByTestId("overview-show-all-logs")).toBeDisabled();
   await expect(page.getByText("Execution authorization").first()).toBeVisible();
 
   await page.setViewportSize({ width: 580, height: 800 });
@@ -33,7 +38,7 @@ test("overview retains project navigation and renders two honest, responsive til
   const b = await finance.boundingBox();
   expect(a && b && b.y >= a.y + a.height).toBeTruthy();
 
-  await page.getByTestId("project-card-project0").click();
+  await page.getByTestId("project-link-project0").click();
   await expect(page).toHaveURL(/\/project-0$/);
   await expect(page.locator(".p0-graphite")).toBeVisible();
 });

@@ -109,7 +109,15 @@ try:
     assert (WORK/'app/data/market'/('app-'+firstlaunch)/'market_completion.p0j').exists()
     assert result()['launch_id']==launch()
     assert (WORK/'run/capture.result').stat().st_mode&0o777==0o600
-    run('app');crashlaunch=launch();crashgen=gen();wait(pid)
+    # B0: after user stop app must not start; only an explicit start can lift it.
+    marker=WORK/'run/capture.user_stopped'
+    assert marker.is_file(), 'manual stop marker required'
+    stopped_launch=launch()
+    run('app')
+    assert pid() is None and launch()==stopped_launch and marker.is_file()
+    run('capture','start','until-stopped')
+    assert pid() and launch()!=stopped_launch and not marker.exists()
+    crashlaunch=launch();crashgen=gen();wait(pid)
     subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
     wait(lambda:pid() is None)
     assert result()['launch_id']!=crashlaunch # Never attribute previous result to crashed run.
@@ -118,11 +126,21 @@ try:
     wait(lambda:(WORK/'run/lifecycle.down').exists())
     rejected=run('capture','start','until-stopped',ok=False);assert rejected.returncode!=0
     print(down.communicate(timeout=35)[0]);assert down.returncode==0 and pid() is None and pid('gateway') is None
+    assert marker.is_file(), 'down must suspend autostart'
+    down_launch=launch()
+    run('app');assert pid() is None and launch()==down_launch and marker.is_file()
+    # Fresh explicit start removes the marker, even when Gateway was stopped.
+    run('capture','start','until-stopped')
+    assert pid() and not marker.exists() and launch()!=down_launch
+    subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
+    wait(lambda:pid() is None)
     RATE_LIMIT.set();run('app');limitedlaunch=launch();browser('429');wait(lambda:pid() is None,35)
     assert result()['launch_id']==limitedlaunch
     assert result()['code']=='MARKET_OBSERVER_STREAM_NOT_READY'
     run('app');assert launch()==limitedlaunch and pid() is None
-    print('PASS: concurrent start, real browser stream, gateway crash, orderly stop, launch identity, capture crash recovery, down/start exclusion, 429 and cooldown',flush=True)
+    run('capture','stop');assert marker.is_file() # no-op stop also suspends next app
+    run('app');assert pid() is None and launch()==limitedlaunch and marker.is_file()
+    print('PASS: concurrent start, gateway crash, manual-stop autostart suppression, fresh explicit start, down/start exclusion, 429 and cooldown',flush=True)
     (WORK/'PASS').write_text('all lifecycle checks passed\n')
 finally:
     run('down',ok=False)

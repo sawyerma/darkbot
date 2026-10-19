@@ -1,4 +1,4 @@
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 import { PROJECT_REGISTRY } from "@/app/projectRegistry";
 import { useRealtimeStatus } from "@/core/realtime/useRealtimeStatus";
 import { useGatewayReason } from "@/core/realtime/hooks";
@@ -7,12 +7,15 @@ import { Section } from "@/shared/ui/graphite/Rows";
 import { StatusBadge, type NoticeState } from "@/shared/ui/graphite/Notice";
 import { ensureOverviewAdapter } from "./api/overviewAdapter";
 import { ProjectEntry } from "./ProjectEntry";
+import { DisabledAction } from "./OverviewControls";
 import { selectReason, selectStatus, selectView, useOverviewStore } from "./overviewStore";
 import { financeRows, systemRows, type OverviewRow } from "./model/overviewRows";
+import { GLOBAL_CONTROLS } from "./model/lifecycle";
 import { useNowMs } from "./useNowMs";
 import "./overview.css";
 
-// Overview subscribes only to overview.aggregates. No wallet/order streams or global trading controls.
+// Overview subscribes only to overview.aggregates. No wallet/order streams, no trading controls.
+// Layout per FRONTEND_PHASENPLAN §10 (F7-OVR): three project cards, two equal tiles below.
 const CARDS = PROJECT_REGISTRY.filter((project) => project.key !== "overview");
 
 function gatewayNotice(status: string): NoticeState {
@@ -26,7 +29,9 @@ function gatewayNotice(status: string): NoticeState {
   }
 }
 
-function OverviewTile({ title, rows, testId }: { title: string; rows: readonly OverviewRow[]; testId: string }) {
+function OverviewTile({ title, rows, testId, note, actions }: {
+  title: string; rows: readonly OverviewRow[]; testId: string; note?: string; actions?: ReactNode;
+}) {
   return (
     <section className="ov-tile" aria-label={title} data-testid={testId}>
       <h3>{title}</h3>
@@ -38,6 +43,8 @@ function OverviewTile({ title, rows, testId }: { title: string; rows: readonly O
           </Fragment>
         ))}
       </dl>
+      {note ? <p className="ov-tile-note">{note}</p> : null}
+      {actions ? <div className="ov-tile-actions" role="group" aria-label={`${title} actions`}>{actions}</div> : null}
     </section>
   );
 }
@@ -49,22 +56,29 @@ function SystemTile() {
   const topicReason = useOverviewStore(selectReason);
   const view = useOverviewStore(selectView);
   const nowMs = useNowMs();
-  return <OverviewTile title="System & Control Plane" testId="overview-system"
-    rows={systemRows({ gatewayStatus, gatewayReason, topicStatus, topicReason,
-      view, projectCount: CARDS.length, nowMs })} />;
+  return (
+    <OverviewTile title="System & Control Plane" testId="overview-system"
+      rows={systemRows({ gatewayStatus, gatewayReason, topicStatus, topicReason, view, projectCount: CARDS.length, nowMs })}
+      actions={<>
+        <DisabledAction label="Stop All" control={GLOBAL_CONTROLS.stopAll} testId="overview-stop-all" />
+        <DisabledAction label="Show All Logs" control={GLOBAL_CONTROLS.showAllLogs} testId="overview-show-all-logs" />
+      </>} />
+  );
 }
 
 function FinanceTile() {
   const topicStatus = useOverviewStore(selectStatus);
   const view = useOverviewStore(selectView);
-  return <OverviewTile title="Global Finance" testId="overview-finance"
-    rows={financeRows({ topicStatus, view, projectCount: CARDS.length })} />;
+  return (
+    <OverviewTile title="Global Finance Aggregate" testId="overview-finance"
+      rows={financeRows({ topicStatus, view, projectCount: CARDS.length })}
+      note="Only qualified, non-duplicated finance data is eligible." />
+  );
 }
 
 export default function OverviewPage() {
   const gatewayStatus = useRealtimeStatus();
   const gatewayReason = useGatewayReason();
-
   useEffect(() => { ensureOverviewAdapter(); }, []);
 
   return (
