@@ -29,6 +29,7 @@ export const useOverviewStore = create<OverviewStore>()((set) => ({
 
 export const selectStatus = (s: OverviewStore) => s.status;
 export const selectReason = (s: OverviewStore) => s.reason;
+export const selectView = (s: OverviewStore) => s.view;
 export const selectGlobal = (s: OverviewStore) => s.view?.global ?? null;
 export const selectConnected = (s: OverviewStore) => s.view?.projectsConnected ?? null;
 export const selectComputedAt = (s: OverviewStore) => s.view?.computedAtUnixNs ?? null;

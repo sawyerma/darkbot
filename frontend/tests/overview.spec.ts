@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("overview renders registry cards, no trading controls, unknown as dash", async ({ page }) => {
+test("overview retains project navigation and renders two honest, responsive tiles", async ({ page }) => {
   await page.goto("/", { waitUntil: "networkidle" });
 
   await expect(page.getByTestId("project-card-project0")).toBeVisible();
@@ -10,13 +10,28 @@ test("overview renders registry cards, no trading controls, unknown as dash", as
   const order = await page.locator(".ov-card h3").allTextContents();
   expect(order).toEqual(["Project 0", "BSC", "Solana"]);
 
+  const system = page.getByTestId("overview-system");
+  const finance = page.getByTestId("overview-finance");
+  await expect(system).toBeVisible();
+  await expect(finance).toBeVisible();
+  await expect(system.getByRole("heading", { name: "System & Control Plane" })).toBeVisible();
+  await expect(finance.getByRole("heading", { name: "Global Finance" })).toBeVisible();
+  await expect(system.locator("dt")).toHaveText([
+    "Gateway", "Overview Feed", "Connected Projects", "Gateway RTT", "RPC Latency P95", "Last Overview Update",
+  ]);
+  await expect(finance.locator("dt")).toHaveText([
+    "Realized Net PnL", "Unrealized PnL", "Total Equity", "Daily Net PnL", "PnL Coverage", "Reporting Currency",
+  ]);
+  await expect(finance.locator("dd").first()).toHaveText("— USD");
+  await expect(finance.locator("dd").nth(2)).toHaveText("— USD");
   expect(await page.getByRole("button", { name: /start|buy|send|sweep/i }).count()).toBe(0);
-
-  await expect(page.getByText("Aggregate unavailable")).toBeVisible();
   await expect(page.getByText("Execution authorization").first()).toBeVisible();
-  for (const v of await page.locator(".ov-facts dd").allTextContents()) {
-    expect(v.trim()).not.toMatch(/^0(\.00)?( USD)?$/);
-  }
+
+  await page.setViewportSize({ width: 580, height: 800 });
+  await expect.poll(async () => system.boundingBox()).not.toBeNull();
+  const a = await system.boundingBox();
+  const b = await finance.boundingBox();
+  expect(a && b && b.y >= a.y + a.height).toBeTruthy();
 
   await page.getByTestId("project-card-project0").click();
   await expect(page).toHaveURL(/\/project-0$/);

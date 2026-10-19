@@ -1,23 +1,22 @@
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 import { PROJECT_REGISTRY } from "@/app/projectRegistry";
 import { useRealtimeStatus } from "@/core/realtime/useRealtimeStatus";
 import { useGatewayReason } from "@/core/realtime/hooks";
 import { GraphiteShell } from "@/shared/ui/graphite/GraphiteShell";
-import { Line, Section, DASH } from "@/shared/ui/graphite/Rows";
-import { Notice, StatusBadge, type NoticeState } from "@/shared/ui/graphite/Notice";
+import { Section } from "@/shared/ui/graphite/Rows";
+import { StatusBadge, type NoticeState } from "@/shared/ui/graphite/Notice";
 import { ensureOverviewAdapter } from "./api/overviewAdapter";
 import { ProjectEntry } from "./ProjectEntry";
-import { selectComputedAt, selectConnected, selectGlobal, selectReason, selectStatus, useOverviewStore } from "./overviewStore";
-import { formatAge, formatUsdMicro, formatUsdMicroSigned } from "./model/format";
+import { selectReason, selectStatus, selectView, useOverviewStore } from "./overviewStore";
+import { financeRows, systemRows, type OverviewRow } from "./model/overviewRows";
+import { useNowMs } from "./useNowMs";
 import "./overview.css";
 
-// Globale Overview: abonniert ausschließlich overview.aggregates (über die Route gebunden).
-// Keine Wallet-, Bot- oder Orderstreams. Keine globalen Start/BUY/Send-Funktionen.
+// Overview subscribes only to overview.aggregates. No wallet/order streams or global trading controls.
+const CARDS = PROJECT_REGISTRY.filter((project) => project.key !== "overview");
 
-const CARDS = PROJECT_REGISTRY.filter((p) => p.key !== "overview");
-
-function gatewayNotice(s: string): NoticeState {
-  switch (s) {
+function gatewayNotice(status: string): NoticeState {
+  switch (status) {
     case "OPEN": return "READY";
     case "STALE": return "STALE";
     case "BLOCKED": return "BLOCKED";
@@ -27,19 +26,46 @@ function gatewayNotice(s: string): NoticeState {
   }
 }
 
-export default function OverviewPage() {
+function OverviewTile({ title, rows, testId }: { title: string; rows: readonly OverviewRow[]; testId: string }) {
+  return (
+    <section className="ov-tile" aria-label={title} data-testid={testId}>
+      <h3>{title}</h3>
+      <dl className="ov-facts">
+        {rows.map((row) => (
+          <Fragment key={row.label}>
+            <dt>{row.label}</dt>
+            <dd>{row.value}{row.note ? <small className="ov-note">{row.note}</small> : null}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function SystemTile() {
   const gatewayStatus = useRealtimeStatus();
   const gatewayReason = useGatewayReason();
   const topicStatus = useOverviewStore(selectStatus);
   const topicReason = useOverviewStore(selectReason);
-  const fresh = topicStatus === "LIVE";
-  const global = useOverviewStore(selectGlobal);
-  const connected = useOverviewStore(selectConnected);
-  const computedAt = useOverviewStore(selectComputedAt);
+  const view = useOverviewStore(selectView);
+  const nowMs = useNowMs();
+  return <OverviewTile title="System & Control Plane" testId="overview-system"
+    rows={systemRows({ gatewayStatus, gatewayReason, topicStatus, topicReason,
+      view, projectCount: CARDS.length, nowMs })} />;
+}
 
-  useEffect(() => {
-    ensureOverviewAdapter();
-  }, []);
+function FinanceTile() {
+  const topicStatus = useOverviewStore(selectStatus);
+  const view = useOverviewStore(selectView);
+  return <OverviewTile title="Global Finance" testId="overview-finance"
+    rows={financeRows({ topicStatus, view, projectCount: CARDS.length })} />;
+}
+
+export default function OverviewPage() {
+  const gatewayStatus = useRealtimeStatus();
+  const gatewayReason = useGatewayReason();
+
+  useEffect(() => { ensureOverviewAdapter(); }, []);
 
   return (
     <GraphiteShell
@@ -50,36 +76,13 @@ export default function OverviewPage() {
     >
       <Section title="Projects">
         <div className="ov-cards">
-          {CARDS.map((reg) => (
-            <ProjectEntry key={reg.key} reg={reg} />
-          ))}
+          {CARDS.map((project) => <ProjectEntry key={project.key} reg={project} />)}
         </div>
       </Section>
-
-      <div className="g-columns">
-      <Section title="Global finance">
-        {fresh && global?.available ? (
-          <>
-            <Line label="Net PnL (all projects)" value={formatUsdMicroSigned(global.netPnlUsdMicro)} />
-            <Line label="Total capital" value={formatUsdMicro(global.totalCapitalUsdMicro)} />
-          </>
-        ) : (
-          <Line label="Aggregate" value="Aggregate unavailable" hint={fresh ? (global?.reason || "no compatible finalized valuation across projects") : "topic not current"} />
-        )}
-      </Section>
-
-      <Section title="Control plane">
-        <Line label="Gateway" value={gatewayStatus} hint={gatewayReason || undefined} />
-        <Line label="overview.aggregates" value={topicStatus} hint={topicReason || undefined} />
-        <Line label="Projects connected" value={!fresh || connected === null ? DASH : String(connected)} />
-        <Line label="Computed" value={fresh ? formatAge(Date.now(), computedAt) : DASH} />
-      </Section>
-
+      <div className="ov-tiles">
+        <SystemTile />
+        <FinanceTile />
       </div>
-
-      <Notice>
-        Values appear only from qualified backend sources. Unknown is shown as {DASH}, never as zero. Readiness is not a LIVE authorization.
-      </Notice>
     </GraphiteShell>
   );
 }

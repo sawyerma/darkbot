@@ -20,7 +20,7 @@
 .ov-card h3 { margin: 0; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); }
 .ov-card > p { margin: 4px 0 10px; font-size: var(--g-fs-small); color: var(--g-muted); }
 
-.ov-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; font-size: var(--g-fs-small); }
+.ov-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: var(--g-fs-small); }
 .ov-facts dt { color: var(--g-dim); }
 .ov-facts dd { margin: 0; text-align: right; color: var(--g-text); }
 
@@ -28,4 +28,27 @@
 
 @media (max-width: 650px) {
   .ov-cards { grid-template-columns: 1fr; }
+}
+
+/* Two matched Graphite cards below the existing project row. */
+.ov-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: var(--g-gap-md);
+  margin-top: var(--g-gap-md);
+}
+.ov-tile {
+  min-width: 0;
+  border: 1px solid var(--g-line);
+  border-radius: var(--g-r-health);
+  padding: 14px;
+  background: var(--g-health);
+}
+.ov-tile h3 { margin: 0 0 10px; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); }
+.ov-tile .ov-facts dd { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ov-note { display: block; font-size: var(--g-fs-tiny); color: var(--g-muted); overflow-wrap: anywhere; }
+
+@media (max-width: 850px) {
+  .ov-tiles { grid-template-columns: 1fr; }
 }
