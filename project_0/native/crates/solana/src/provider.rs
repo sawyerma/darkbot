@@ -34,13 +34,18 @@ pub enum Workload {
     Deployment,
     History,
     Websocket,
-    /// C5: financial reconciliation — its own pacing slot and the highest admission priority,
-    /// always inside the same global RPS/burst/call/byte budget (no extra request budget).
+    /// C5: financial reconciliation — the highest admission priority, paced in the analytics
+    /// slot it shares with `Winner` (their combined rate stays `analytics_rps`) and always inside
+    /// the same global RPS/burst/call/byte budget: no additional request budget.
     Reconcile,
 }
 impl Workload {
+    /// Pacing slot. `Reconcile` shares `Winner`'s, so it gains precedence, never extra rate.
     fn index(self) -> usize {
-        self as usize
+        match self {
+            Workload::Reconcile => Workload::Winner as usize,
+            w => w as usize,
+        }
     }
 }
 struct State {
@@ -57,7 +62,7 @@ struct State {
     effective_rps: f64,
     bytes: u64,
     successes: u32,
-    next_workload: [Instant; 8],
+    next_workload: [Instant; 7],
     cooldown: Instant,
     rate_limits: u32,
     requests: u64,
@@ -168,7 +173,7 @@ impl Budget {
                 effective_rps: config.limits.rpc_rps as f64,
                 bytes: 0,
                 successes: 0,
-                next_workload: [now; 8],
+                next_workload: [now; 7],
                 cooldown: now,
                 rate_limits: 0,
                 requests: 0,
@@ -287,13 +292,16 @@ impl Budget {
                 self.changed.notify_all();
                 return Err("RPC_CALL_BUDGET");
             }
-            // Reserve every eighth admission for the oldest waiter; otherwise prioritize
-            // reconciliation (C5), then health/state/simulation, before analytics.
+            // Only a waiter whose own workload pacing is ready can be selected, so a paced
+            // workload never holds the queue (C5). Every eighth admission goes to the oldest
+            // such waiter; otherwise reconciliation, then health/state/simulation, then the rest.
+            let paced = |w: &Workload| s.next_workload[w.index()] <= now;
             let selected = if s.requests % 8 == 7 {
-                s.queue.front().map(|(t, _)| *t)
+                s.queue.iter().find(|(_, w)| paced(w)).map(|(t, _)| *t)
             } else {
                 s.queue
                     .iter()
+                    .filter(|(_, w)| paced(w))
                     .min_by_key(|(t, w)| {
                         (
                             match w {
@@ -842,6 +850,40 @@ mod tests {
         }
         assert_eq!(b.snapshot().requests, 0);
         assert_eq!(b.snapshot().queued, 0);
+    }
+    /// C5: a paced reconciliation never holds back hot-path reads: while its (shared
+    /// analytics) pacing slot is not ready, a queued LiveRead is admitted at once.
+    #[test]
+    fn c5_paced_reconcile_never_blocks_live_reads() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_rps = 1_000;
+        c.limits.rpc_burst = 1_000;
+        c.limits.rpc_concurrency = 4;
+        c.limits.analytics_rps = 1;
+        let b = Arc::new(Budget::configured(&c));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        drop(b.acquire(Workload::Winner, deadline).unwrap()); // analytics slot paced ~1 s
+        let budget = b.clone();
+        let reconcile = std::thread::spawn(move || {
+            let started = Instant::now();
+            drop(budget.acquire(Workload::Reconcile, deadline).unwrap());
+            started.elapsed()
+        });
+        while b.snapshot().queued < 1 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let started = Instant::now();
+        drop(b.acquire(Workload::LiveRead, deadline).unwrap());
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "{:?}",
+            started.elapsed()
+        );
+        let waited = reconcile.join().unwrap();
+        assert!(
+            waited >= Duration::from_millis(500),
+            "shared pacing slot kept: {waited:?}"
+        );
     }
     /// C5: a reconciliation waiting behind many analytics jobs is admitted first, inside the
     /// same concurrency and call budget.

@@ -28,7 +28,7 @@ struct Counters {
     received: AtomicU64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ChannelStats {
     pub name: &'static str,
     pub capacity: usize,
@@ -75,6 +75,22 @@ pub fn bounded<T>(name: &'static str, capacity: usize) -> (Producer<T>, Consumer
             capacity,
         },
     )
+}
+
+/// The `Debug` text is a parsed diagnostic format (`channel=ChannelStats { name: …, capacity: …,
+/// sent: …, overflow: …, received: … }` in the owner `updates:` line, read by the R126/R127
+/// qualification scripts): it stays exactly the derived layout of these five fields. `dropped`
+/// is reported separately (`channel_dropped=`).
+impl std::fmt::Debug for ChannelStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelStats")
+            .field("name", &self.name)
+            .field("capacity", &self.capacity)
+            .field("sent", &self.sent)
+            .field("overflow", &self.overflow)
+            .field("received", &self.received)
+            .finish()
+    }
 }
 
 impl<T> Producer<T> {
@@ -181,6 +197,11 @@ mod tests {
         tx.give_up();
         let s = rx.stats();
         assert_eq!((s.sent, s.overflow, s.dropped, s.received), (2, 4, 1, 1));
+        // The parsed diagnostic layout is unchanged (R126/R127 qualification regex).
+        assert_eq!(
+            format!("{s:?}"),
+            "ChannelStats { name: \"l3\", capacity: 1, sent: 2, overflow: 4, received: 1 }"
+        );
     }
 
     use super::*;

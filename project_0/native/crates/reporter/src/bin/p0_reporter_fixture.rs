@@ -48,6 +48,7 @@ fn main() {
             application_frames: i,
             last_frame_age_ns: Some(1000000 * i),
             last_slot: Some(300000000 + i),
+            sampled_at: None,
         });
         tap.publish_market(MarketSnapshot {
             observing: true,

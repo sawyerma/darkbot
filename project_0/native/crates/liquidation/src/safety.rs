@@ -389,12 +389,10 @@ mod tests {
             s.preview(0, 10, 1, 1, 1, &[], "longtail"),
             Err(Deny::Inventory)
         );
-        // UNKNOWN keeps the hold; a release before handoff and a known outcome return it.
-        s.record_outcome(0, true, None, 10, 0, 40);
-        assert_eq!(s.inventory_reserved, 100);
+        // A release before handoff returns its hold; a known outcome returns its hold and books
+        // the actually held inventory instead.
         s.release_without_outcome(10, 40);
         assert_eq!(s.inventory_reserved, 60);
-        s.halted = None;
         s.record_outcome(0, true, Some(1), 10, 60, 60);
         assert_eq!((s.inventory_reserved, s.inventory_outstanding), (0, 60));
         assert_eq!(
@@ -402,6 +400,12 @@ mod tests {
             Err(Deny::Inventory)
         );
         assert_eq!(s.preview(0, 10, 40, 1, 1, &[], "longtail"), Ok(()));
+        // UNKNOWN keeps the hold (and halts).
+        let mut u = Safety::new(l, allow(), true);
+        u.check(0, 10, 70, 1, 1, &[], "longtail").unwrap();
+        u.record_outcome(0, true, None, 10, 0, 70);
+        assert_eq!(u.inventory_reserved, 70);
+        assert!(u.halted().is_some());
         // An unrepresentable worst case is a denial, never a wrap.
         assert_eq!(
             s.preview(0, 10, u64::MAX, 1, 1, &[], "longtail"),

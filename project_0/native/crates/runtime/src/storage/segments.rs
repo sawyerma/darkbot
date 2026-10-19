@@ -21,7 +21,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 fn bad(code: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, code)
+    crate::analytics::journal::coded(code)
 }
 
 /// The sealed predecessor as its successor binds it.

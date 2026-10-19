@@ -178,8 +178,26 @@ pub mod source {
     /// Native C0-E1 report (B7).
     pub const REPORT: u32 = 12;
 }
+/// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
+/// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never
+/// by message text. `Display` is the code itself, as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Code(pub &'static str);
+impl std::fmt::Display for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for Code {}
+/// The journal code of an error raised by the journal, segment or payload layer.
+pub fn code_of(e: &io::Error) -> Option<&'static str> {
+    e.get_ref()?.downcast_ref::<Code>().map(|c| c.0)
+}
+pub(crate) fn coded(code: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, Code(code))
+}
 fn bad(code: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, code)
+    coded(code)
 }
 /// Directory to fsync after creating `path`; a bare file name lives in the working directory.
 fn parent(path: &Path) -> &Path {
@@ -867,9 +885,10 @@ fn zero_filled_tail<R: Read>(file: &mut R) -> io::Result<Option<(Frame, [u8; 32]
     loop {
         let n = file.read(&mut block)?;
         if n == 0 {
+            // M6: typed code; the kind stays UnexpectedEof (torn-tail tolerance, H1/N3).
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
-                "TAIL_ZERO_FILLED",
+                Code("TAIL_ZERO_FILLED"),
             ));
         }
         if block[..n].iter().any(|b| *b != 0) {
@@ -883,7 +902,7 @@ fn read_frame<R: Read>(file: &mut R, offset: u64) -> io::Result<Option<(Frame, [
         0 => return Ok(None),
         _ => file.read_exact(&mut length[1..]).map_err(|e| {
             if e.kind() == io::ErrorKind::UnexpectedEof {
-                io::Error::new(io::ErrorKind::UnexpectedEof, "FRAME_TRUNCATED")
+                io::Error::new(io::ErrorKind::UnexpectedEof, Code("FRAME_TRUNCATED"))
             } else {
                 e
             }
@@ -899,7 +918,7 @@ fn read_frame<R: Read>(file: &mut R, offset: u64) -> io::Result<Option<(Frame, [
     let mut b = vec![0; length];
     file.read_exact(&mut b).map_err(|e| {
         if e.kind() == io::ErrorKind::UnexpectedEof {
-            io::Error::new(io::ErrorKind::UnexpectedEof, "FRAME_TRUNCATED")
+            io::Error::new(io::ErrorKind::UnexpectedEof, Code("FRAME_TRUNCATED"))
         } else {
             e
         }

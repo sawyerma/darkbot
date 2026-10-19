@@ -28,6 +28,20 @@ pub mod p0 {
     use spl_associated_token_account::get_associated_token_address_with_program_id;
     use std::str::FromStr;
 
+    /// B15: collateral a plan leaves in the wallet, valued like the seized amount itself
+    /// (`Sizing::seized_equity_value`: protocol equity price of the exact `withdraw_amount`).
+    /// Inventory classes keep the whole withdrawal; ZERO_PREFUND swaps exactly the execution
+    /// amount ExactIn inside the same transaction (`route.amount_in` is checked against it) and
+    /// a flash-funded plan repays in-TX, so neither leaves collateral behind.
+    pub(crate) fn inventory_hold_usd_micro(class: FundingClass, sz: &Sizing) -> u64 {
+        match class {
+            FundingClass::NoSwapInventory
+            | FundingClass::PreheldInventory
+            | FundingClass::JitShortfall => sz.seized_equity_value,
+            FundingClass::ZeroPrefundSameTx | FundingClass::FlashFunded => 0,
+        }
+    }
+
     /// Protocol-Sizing für ein Asset×Liability-Paar. Markt-Realisierbarkeit gehört nicht hierher.
     #[derive(Clone, Debug)]
     pub struct Sizing {
@@ -421,6 +435,9 @@ pub mod p0 {
         /// Execution amount for Jito tip transaction.
         pub jito_tip_lamports: u64,
         pub zero_prefund_qualified: bool,
+        /// B9: offer V1 candidates only when the transaction layer builds and signs V1
+        /// (`tx::v1_build_capability`) and the submission adapter supports V1.
+        pub v1_plans: bool,
         pub path: Path,
         pub resources: Resources,
         pub limits: TxLimits,
@@ -1008,6 +1025,7 @@ pub mod p0 {
                                 input: self.input(&sz, class, None, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
+                                inventory_hold_usd_micro: inventory_hold_usd_micro(class, &sz),
                                 tip: self.jito_tip_lamports,
                                 slippage_bps: 0,
                                 assets: vec![asset_mint, liab_mint],
@@ -1051,6 +1069,7 @@ pub mod p0 {
                                 input: self.input(&sz, class, None, capital),
                                 premium_bps: sz.premium_bps,
                                 exposure: capital,
+                                inventory_hold_usd_micro: inventory_hold_usd_micro(class, &sz),
                                 tip: self.jito_tip_lamports,
                                 slippage_bps: sz.slippage_bps,
                                 assets: vec![asset_mint, liab_mint],
@@ -1154,7 +1173,7 @@ pub mod p0 {
                                     .push(format!("exact-in {}→{}: {}", asset_mint, liab_mint, e)),
                                 Ok(zp_input) => {
                                     // B9: a V1 candidate only with a buildable V1 transaction.
-                                    if darkbot_solana::tx::V1_BUILDABLE {
+                                    if self.v1_plans {
                                         out.push(ReceivershipPlan {
                                             market_identity: Some(
                                                 crate::analytics::record::MarketPlanIdentity {
@@ -1169,6 +1188,10 @@ pub mod p0 {
                                             input: zp_input,
                                             premium_bps: sz.premium_bps,
                                             exposure: capital,
+                                            inventory_hold_usd_micro: inventory_hold_usd_micro(
+                                                FundingClass::ZeroPrefundSameTx,
+                                                &sz,
+                                            ),
                                             tip: self.jito_tip_lamports,
                                             slippage_bps: sz.slippage_bps,
                                             assets: vec![asset_mint, liab_mint],
@@ -1191,6 +1214,10 @@ pub mod p0 {
                                         input: zp_input,
                                         premium_bps: sz.premium_bps,
                                         exposure: capital,
+                                        inventory_hold_usd_micro: inventory_hold_usd_micro(
+                                            FundingClass::ZeroPrefundSameTx,
+                                            &sz,
+                                        ),
                                         tip: self.jito_tip_lamports,
                                         slippage_bps: sz.slippage_bps,
                                         assets: vec![asset_mint, liab_mint],
@@ -1274,6 +1301,24 @@ pub mod p0 {
                 rent_and_token: 0,
                 premium_bps: 0,
                 slippage_bps: 50,
+            }
+        }
+
+        /// B15: the inventory hold of a plan is the seized collateral of its own sizing for
+        /// every class that keeps it, and nothing for the in-TX swap/flash classes.
+        #[test]
+        fn b15_inventory_hold_is_the_sized_seized_collateral() {
+            let mut sz = sizing(950, 950);
+            sz.seized_equity_value = 1_234_567;
+            for class in [
+                FundingClass::NoSwapInventory,
+                FundingClass::PreheldInventory,
+                FundingClass::JitShortfall,
+            ] {
+                assert_eq!(inventory_hold_usd_micro(class, &sz), 1_234_567, "{class:?}");
+            }
+            for class in [FundingClass::ZeroPrefundSameTx, FundingClass::FlashFunded] {
+                assert_eq!(inventory_hold_usd_micro(class, &sz), 0, "{class:?}");
             }
         }
 

@@ -77,9 +77,24 @@ pub struct PhaseSnapshot {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TransportSnapshot {
     pub connected: bool,
+    /// Age of the last application frame when this snapshot was published (`sampled_at`).
     pub last_frame_age_ns: Option<u64>,
     pub last_slot: Option<u64>,
     pub application_frames: u64,
+    /// R19: monotonic publication time of `last_frame_age_ns`, so a reader reports the age at
+    /// its own send time instead of re-sending a stale relative age as fresh.
+    pub sampled_at: Option<std::time::Instant>,
+}
+impl TransportSnapshot {
+    /// R19: the frame age now: the published age plus the time since publication. `None`
+    /// stays unknown; a snapshot without publication time keeps its published age.
+    pub fn last_frame_age_ns_now(&self) -> Option<u64> {
+        let age = self.last_frame_age_ns?;
+        let since = self.sampled_at.map_or(0, |t| {
+            u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        });
+        Some(age.saturating_add(since))
+    }
 }
 
 /// Last transport state event (recovery, 429, abort); rare, so owned strings are fine.
@@ -264,6 +279,10 @@ impl StatusTap {
     }
 
     pub fn publish_transport(&self, s: TransportSnapshot) {
+        let s = TransportSnapshot {
+            sampled_at: Some(std::time::Instant::now()),
+            ..s
+        };
         self.publish(false, |v| v.transport = Some(s));
     }
 

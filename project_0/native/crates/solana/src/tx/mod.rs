@@ -108,10 +108,34 @@ impl fmt::Display for BuildError {
 
 impl std::error::Error for BuildError {}
 
-/// B9: whether `build` produces a signed, submittable V1 transaction. `build_v1` has no signing/
-/// submission adapter yet (`V1Unavailable` in every feature set), so no planner offers a V1 plan
-/// and no adapter claims V1. Flip only together with a qualified build/sign/simulate/submit path.
-pub const V1_BUILDABLE: bool = false;
+/// B9: whether this build of the transaction layer produces a signed V1 transaction, found by
+/// running the implementation itself once (`build` + `sign` of a minimal V1 self-transfer with
+/// an ephemeral key; no network, no persisted key). A planner offers V1 only when this holds and
+/// the submission adapter's own `supports_tx_version(V1)` holds as well.
+pub fn v1_build_capability() -> bool {
+    static CAPABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CAPABLE.get_or_init(|| {
+        let payer = Keypair::new();
+        let plan = TxPlan {
+            version: BuildVersion::V1,
+            payer: payer.pubkey(),
+            instructions: vec![solana_system_interface::instruction::transfer(
+                &payer.pubkey(),
+                &payer.pubkey(),
+                0,
+            )],
+            lookup_tables: vec![],
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: Some(64 * 1024),
+            },
+        };
+        build(&plan, Hash::default(), &TxLimits::default())
+            .and_then(|mut built| sign(&mut built, &[&payer]).map(|()| built))
+            .is_ok_and(|built| built.version == BuildVersion::V1)
+    })
+}
 
 /// Zählt die eindeutigen Accounts, die die Runtime sperren würde (Payer +
 /// alle Ix-Accounts + Programme). Unabhängig von LUTs (Runtime-Limit).
@@ -420,14 +444,26 @@ pub fn sign(built: &mut BuiltTx, signers: &[&Keypair]) -> Result<(), BuildError>
 
 /// Keypair aus Solana-CLI-JSON (Array von 64 Bytes) laden. Kein Key im Code, keine Env-Defaults.
 /// B10: errors are fixed codes (no wallet path, no parser text that could quote a secret byte);
-/// the file text and the parsed bytes live in zeroized buffers (the bytes in one fixed array, no
-/// growing copies). Copies inside the OS, the allocator or the SDK are outside this guarantee.
+/// the file bytes are read into one buffer sized up front (no reallocation copies) and, like the
+/// parsed key bytes (one fixed array), zeroized on drop. Copies inside the OS, the allocator or
+/// the SDK are outside this guarantee.
 pub fn load_keypair_json(path: &str) -> Result<Keypair, BuildError> {
-    let raw = zeroize::Zeroizing::new(
-        std::fs::read_to_string(path)
-            .map_err(|e| BuildError::Sign(format!("KEYPAIR_READ: {:?}", e.kind())))?,
-    );
-    let bytes = keypair_bytes(&raw).ok_or_else(|| BuildError::Sign("KEYPAIR_FORMAT".into()))?;
+    use std::io::Read;
+    /// A Solana CLI keypair file is a few hundred bytes; anything larger is not a keypair.
+    const MAX_KEYPAIR_FILE: u64 = 4096;
+    let read_err = |e: std::io::Error| BuildError::Sign(format!("KEYPAIR_READ: {:?}", e.kind()));
+    let mut file = std::fs::File::open(path).map_err(read_err)?;
+    let len = file.metadata().map_err(read_err)?.len();
+    if len > MAX_KEYPAIR_FILE {
+        return Err(BuildError::Sign("KEYPAIR_FORMAT".into()));
+    }
+    let mut raw = zeroize::Zeroizing::new(Vec::with_capacity(MAX_KEYPAIR_FILE as usize + 1));
+    file.by_ref()
+        .take(MAX_KEYPAIR_FILE + 1)
+        .read_to_end(&mut raw)
+        .map_err(read_err)?;
+    let text = std::str::from_utf8(&raw).map_err(|_| BuildError::Sign("KEYPAIR_FORMAT".into()))?;
+    let bytes = keypair_bytes(text).ok_or_else(|| BuildError::Sign("KEYPAIR_FORMAT".into()))?;
     // [FIX-13] SDK 3.x: `Keypair::try_from(&[u8])` (from_bytes entfernt).
     Keypair::try_from(&bytes[..]).map_err(|_| BuildError::Sign("KEYPAIR_INVALID".into()))
 }
@@ -438,7 +474,12 @@ fn keypair_bytes(raw: &str) -> Option<zeroize::Zeroizing<[u8; 64]>> {
     let mut out = zeroize::Zeroizing::new([0u8; 64]);
     let mut n = 0;
     for part in inner.split(',') {
-        *out.get_mut(n)? = part.trim().parse().ok()?;
+        let digits = part.trim();
+        // JSON integers only: no sign, no exponent, no empty element.
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        *out.get_mut(n)? = digits.parse().ok()?;
         n += 1;
     }
     (n == 64).then_some(out)
@@ -453,7 +494,8 @@ mod tests {
     use super::*;
     use solana_sdk::instruction::AccountMeta;
 
-    /// B9: the V1 capability flag matches what `build` actually does.
+    /// B9: the V1 capability is what `build`/`sign` actually do, and the RPC adapter (SDK
+    /// `VersionedTransaction` wire only) does not claim V1.
     #[test]
     fn b9_v1_capability_flag_matches_the_builder() {
         let payer = Keypair::new();
@@ -473,8 +515,17 @@ mod tests {
             },
         };
         let built = build(&plan, Hash::new_unique(), &TxLimits::default());
-        assert_eq!(built.is_ok(), V1_BUILDABLE);
-        assert!(matches!(built, Err(BuildError::V1Unavailable)));
+        // The capability is exactly what the build path does; an unavailable V1 build is
+        // reported as such, never as another error.
+        assert_eq!(built.is_ok(), v1_build_capability());
+        if !v1_build_capability() {
+            assert!(matches!(built, Err(BuildError::V1Unavailable)));
+        }
+        // Never contacted: constructing the adapter opens no connection.
+        let rpc = crate::submit::rpc::RpcSubmitter::new("http://127.0.0.1:9".into(), false);
+        use crate::submit::SubmissionAdapter;
+        assert!(!rpc.supports_tx_version(BuildVersion::V1));
+        assert!(rpc.supports_tx_version(BuildVersion::V0));
     }
 
     /// B10: wrong path, malformed JSON, a byte out of range, a wrong length and a key whose
@@ -498,6 +549,8 @@ mod tests {
         wrong_pub[63] ^= 1;
         let mut out_of_range = json(&kp.to_bytes());
         out_of_range.replace_range(1..1, "300,");
+        let mut signed = json(&kp.to_bytes()[..63]);
+        signed.replace_range(1..1, "+1,");
         let cases = [
             ("missing", None, "KEYPAIR_READ: NotFound"),
             ("not_json", Some("{\"k\":1}".to_string()), "KEYPAIR_FORMAT"),
@@ -509,6 +562,8 @@ mod tests {
                 "KEYPAIR_FORMAT",
             ),
             ("mismatch", Some(json(&wrong_pub)), "KEYPAIR_INVALID"),
+            ("signed", Some(signed), "KEYPAIR_FORMAT"),
+            ("huge", Some(" ".repeat(5000)), "KEYPAIR_FORMAT"),
         ];
         let secret_byte = kp.to_bytes()[5].to_string();
         for (name, body, code) in cases {

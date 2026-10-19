@@ -135,33 +135,70 @@ enum Transition {
     Observe,
     Finalize,
 }
+/// Historical schema-1 frame (JSON value tree) of a transition: written in tests only, to
+/// replay journals from before F2.
+#[cfg(test)]
 #[derive(Serialize)]
 struct VersionRef<'a> {
     transition: Transition,
     state: &'a Saved,
 }
-#[derive(Deserialize)]
+/// F2: one durable transition of the wallet automaton as a typed binary frame
+/// (`FE04_TRANSITION`, schema 2). Schema-1 JSON frames of older journals stay readable.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Version {
+pub(crate) struct Version {
     transition: Transition,
     state: Saved,
 }
-#[derive(Serialize)]
-struct LegacyImportRef<'a> {
-    legacy_sha256: &'a str,
-    state: &'a Saved,
+impl crate::analytics::payload::Payload for Version {
+    const KIND: u16 = journal::kind::FE04_TRANSITION;
 }
-#[derive(Deserialize)]
+/// F2: the import of a pre-binary JSON wallet journal as a typed frame (`FE04_LEGACY_IMPORT`,
+/// schema 2); the JSON file itself stays unchanged and is only read.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LegacyImport {
+pub(crate) struct LegacyImport {
     legacy_sha256: String,
     state: Saved,
+}
+impl crate::analytics::payload::Payload for LegacyImport {
+    const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
 }
 /// A wallet journal holds a handful of state versions; anything larger is not ours.
 const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024;
 const LEGACY_MAX_BYTES: u64 = 256 * 1024;
 fn err(s: &str) -> String {
     s.into()
+}
+/// M6: `<code>:<class>` — the bounded, secret-free cause of a journal I/O or decode failure: the
+/// typed journal code of damaged data (`journal::Code`: FRAME_CRC, MANIFEST_MISMATCH, …), else
+/// the OS error class. Never a path, payload or provider text; every such failure still halts
+/// and keeps the holds.
+pub(crate) fn cause(code: &str, e: &std::io::Error) -> String {
+    use std::io::ErrorKind as K;
+    let class = match (journal::code_of(e), e.kind()) {
+        (Some(journal_code), _) => journal_code,
+        (None, K::InvalidData) => "INVALID_DATA",
+        (None, K::UnexpectedEof) => "TRUNCATED",
+        (None, K::PermissionDenied | K::ReadOnlyFilesystem) => "PERMISSION",
+        (None, K::NotFound) => "NOT_FOUND",
+        (None, K::StorageFull | K::QuotaExceeded) => "NO_SPACE",
+        _ if e.raw_os_error() == Some(libc::ENOSPC) => "NO_SPACE",
+        _ => "IO_OTHER",
+    };
+    format!("{code}:{class}")
+}
+/// M6: the class of a JSON decode/encode failure (no serde text, which may quote values).
+fn json_cause(code: &str, e: &serde_json::Error) -> String {
+    use serde_json::error::Category as C;
+    let class = match e.classify() {
+        C::Io => "IO",
+        C::Syntax => "JSON_SYNTAX",
+        C::Data => "JSON_DATA",
+        C::Eof => "JSON_EOF",
+    };
+    format!("{code}:{class}")
 }
 fn digest(v: &[u8]) -> String {
     solana_sdk::hash::hash(v).to_string()
@@ -174,18 +211,23 @@ fn key(s: &str) -> bool {
 }
 /// Pre-binary wallet journal (`<wallet>.json`, digest-wrapped). Read only, never rewritten.
 fn read_legacy(path: &Path, wallet: &str) -> Result<(String, Saved), String> {
-    if fs::metadata(path).map_err(|_| err("JOURNAL_READ"))?.len() > LEGACY_MAX_BYTES {
+    if fs::metadata(path)
+        .map_err(|e| cause("JOURNAL_READ", &e))?
+        .len()
+        > LEGACY_MAX_BYTES
+    {
         return Err(err("JOURNAL_SIZE_LIMIT"));
     }
-    let bytes = fs::read(path).map_err(|_| err("JOURNAL_READ"))?;
+    let bytes = fs::read(path).map_err(|e| cause("JOURNAL_READ", &e))?;
     let wrapper: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|_| err("JOURNAL_CORRUPT"))?;
-    let data = serde_json::to_vec(&wrapper["record"]).map_err(|_| err("JOURNAL_CORRUPT"))?;
+        serde_json::from_slice(&bytes).map_err(|e| json_cause("JOURNAL_CORRUPT", &e))?;
+    let data =
+        serde_json::to_vec(&wrapper["record"]).map_err(|e| json_cause("JOURNAL_CORRUPT", &e))?;
     if wrapper["digest"] != digest(&data) {
-        return Err(err("JOURNAL_CORRUPT"));
+        return Err(err("JOURNAL_CORRUPT:DIGEST"));
     }
-    let s: Saved =
-        serde_json::from_value(wrapper["record"].clone()).map_err(|_| err("JOURNAL_CORRUPT"))?;
+    let s: Saved = serde_json::from_value(wrapper["record"].clone())
+        .map_err(|e| json_cause("JOURNAL_CORRUPT", &e))?;
     if s.approval.wallet != wallet || s.intent.wallet != wallet {
         return Err(err("JOURNAL_WALLET_MISMATCH"));
     }
@@ -223,35 +265,61 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
         _ => false,
     }
 }
+/// F2: a typed frame (schema 2) is decoded natively; a schema-1 frame is a journal written
+/// before F2 and is read through the historical value reader only (never written again).
+fn decode_frame<P: crate::analytics::payload::Payload>(
+    frame: &journal::Frame,
+) -> Result<P, String> {
+    if frame.schema == 1 {
+        let value = frame
+            .legacy_value()
+            .map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
+        return serde_json::from_value(value).map_err(|e| json_cause("JOURNAL_CORRUPT", &e));
+    }
+    frame.typed().map_err(|e| cause("JOURNAL_CORRUPT", &e))
+}
 /// Replays the wallet journal. Any damaged, truncated, foreign or illegal frame is a halt.
 fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), String> {
-    let mut reader = journal::Reader::open(path).map_err(|_| err("JOURNAL_CORRUPT"))?;
+    let mut reader = journal::Reader::open(path).map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
     let (mut saved, mut imported) = (None::<Saved>, None);
-    while let Some(frame) = reader.next_frame().map_err(|_| err("JOURNAL_CORRUPT"))? {
+    let mut typed_seen = false;
+    while let Some(frame) = reader
+        .next_frame()
+        .map_err(|e| cause("JOURNAL_CORRUPT", &e))?
+    {
+        // F2: historical schema-1 FE-04 frames exist only as the prefix written before F2; once
+        // a typed frame was written, a schema-1 version is foreign.
+        let in_order = |typed_seen: bool| {
+            if frame.schema == 1 && typed_seen {
+                Err(err("JOURNAL_CORRUPT:SCHEMA_ORDER"))
+            } else {
+                Ok(())
+            }
+        };
         let next = match frame.kind {
             journal::kind::FE04_LEGACY_IMPORT if frame.journal_seq == 0 => {
-                let v: LegacyImport = serde_json::from_value(
-                    frame.legacy_value().map_err(|_| err("JOURNAL_CORRUPT"))?,
-                )
-                .map_err(|_| err("JOURNAL_CORRUPT"))?;
+                in_order(typed_seen)?;
+                let v: LegacyImport = decode_frame(&frame)?;
                 imported = Some(v.legacy_sha256);
                 v.state
             }
             journal::kind::FE04_TRANSITION => {
-                let v: Version = serde_json::from_value(
-                    frame.legacy_value().map_err(|_| err("JOURNAL_CORRUPT"))?,
-                )
-                .map_err(|_| err("JOURNAL_CORRUPT"))?;
+                in_order(typed_seen)?;
+                let v: Version = decode_frame(&frame)?;
                 if !legal(saved.as_ref(), v.transition, &v.state) {
                     return Err(err("JOURNAL_TRANSITION_INVALID"));
                 }
                 v.state
             }
-            _ => return Err(err("JOURNAL_CORRUPT")),
+            journal::kind::FE04_LEGACY_IMPORT => {
+                return Err(err("JOURNAL_CORRUPT:IMPORT_POSITION"))
+            }
+            _ => return Err(err("JOURNAL_CORRUPT:KIND")),
         };
         if next.approval.wallet != wallet || next.intent.wallet != wallet {
             return Err(err("JOURNAL_WALLET_MISMATCH"));
         }
+        typed_seen |= frame.schema != 1;
         saved = Some(next);
     }
     Ok((saved, imported))
@@ -262,14 +330,14 @@ impl Journal {
         if !key(wallet) {
             return Err(err("WALLET_INVALID"));
         }
-        fs::create_dir_all(directory).map_err(|_| err("JOURNAL_IO"))?;
+        fs::create_dir_all(directory).map_err(|e| cause("JOURNAL_IO", &e))?;
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
             .open(directory.join(format!("{wallet}.lock")))
-            .map_err(|_| err("JOURNAL_LOCK_IO"))?;
+            .map_err(|e| cause("JOURNAL_LOCK_IO", &e))?;
         lock.try_lock().map_err(|_| err("WALLET_ALREADY_LOCKED"))?;
         let lock = WalletLock(lock);
         let legacy = directory.join(format!("{wallet}.json"));
@@ -284,7 +352,11 @@ impl Journal {
         };
         let path = directory.join(format!("{wallet}.p0j"));
         let (saved, writer) = if path.exists() {
-            if fs::metadata(&path).map_err(|_| err("JOURNAL_READ"))?.len() > MAX_JOURNAL_BYTES {
+            if fs::metadata(&path)
+                .map_err(|e| cause("JOURNAL_READ", &e))?
+                .len()
+                > MAX_JOURNAL_BYTES
+            {
                 return Err(err("JOURNAL_SIZE_LIMIT"));
             }
             let (saved, imported) = replay(&path, wallet)?;
@@ -294,12 +366,13 @@ impl Journal {
                 (None, None, _) | (Some(_), None, None) => {}
                 _ => return Err(err("JOURNAL_LEGACY_MISMATCH")),
             }
-            let writer = journal::Writer::resume(&path).map_err(|_| err("JOURNAL_CORRUPT"))?;
+            let writer =
+                journal::Writer::resume(&path).map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
             (saved, writer)
         } else {
             (
                 None,
-                journal::Writer::create(&path).map_err(|_| err("JOURNAL_IO"))?,
+                journal::Writer::create(&path).map_err(|e| cause("JOURNAL_IO", &e))?,
             )
         };
         let mut this = Self {
@@ -310,12 +383,10 @@ impl Journal {
         };
         if this.saved.is_none() {
             if let Some((legacy_sha256, state)) = legacy {
-                let value = serde_json::to_value(LegacyImportRef {
-                    legacy_sha256: &legacy_sha256,
-                    state: &state,
-                })
-                .map_err(|_| err("JOURNAL_ENCODE"))?;
-                this.append(journal::kind::FE04_LEGACY_IMPORT, &value)?;
+                this.append(&LegacyImport {
+                    legacy_sha256,
+                    state: state.clone(),
+                })?;
                 this.saved = Some(state);
             }
         }
@@ -327,8 +398,8 @@ impl Journal {
         }
         Ok(this)
     }
-    /// Appends one frame and returns only after fsync confirmed exactly that frame.
-    fn append(&mut self, kind: u16, value: &serde_json::Value) -> Result<(), String> {
+    /// Appends one typed frame and returns only after fsync confirmed exactly that frame.
+    fn append<P: crate::analytics::payload::Payload>(&mut self, value: &P) -> Result<(), String> {
         let provenance = journal::Provenance {
             source: journal::source::FE04,
             source_seq: self.writer.next_seq(),
@@ -336,9 +407,9 @@ impl Journal {
         };
         let frame = self
             .writer
-            .append_legacy(kind, provenance, value)
-            .map_err(|_| err("JOURNAL_WRITE"))?;
-        let durable = self.writer.sync().map_err(|_| err("JOURNAL_FSYNC"))?;
+            .append_typed(provenance, value)
+            .map_err(|e| cause("JOURNAL_WRITE", &e))?;
+        let durable = self.writer.sync().map_err(|e| cause("JOURNAL_FSYNC", &e))?;
         if durable.journal_seq != frame.journal_seq || durable.hash != frame.hash {
             return Err(err("JOURNAL_DURABILITY_UNCONFIRMED"));
         }
@@ -347,13 +418,12 @@ impl Journal {
     /// The in-memory state advances only after the new version is durable. A failed write
     /// poisons the writer, so every later transition (and thus every send) is refused.
     fn persist(&mut self, saved: Saved, transition: Transition) -> Result<(), String> {
-        let value = serde_json::to_value(VersionRef {
+        let version = Version {
             transition,
-            state: &saved,
-        })
-        .map_err(|_| err("JOURNAL_ENCODE"))?;
-        self.append(journal::kind::FE04_TRANSITION, &value)?;
-        self.saved = Some(saved);
+            state: saved,
+        };
+        self.append(&version)?;
+        self.saved = Some(version.state);
         Ok(())
     }
     fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
@@ -532,6 +602,252 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// F2: the bincode layout of a wallet-journal transition is pinned. A change to `Version`,
+    /// `Saved` or anything inside must bump the FE04 schema with a reader for the old one;
+    /// otherwise existing wallet journals would halt on replay.
+    #[test]
+    fn f2_wallet_transition_layout_is_pinned() {
+        let key = |n: u8| solana_sdk::pubkey::Pubkey::new_from_array([n; 32]).to_string();
+        let approval = Approval {
+            schema: 1,
+            authorized: true,
+            approval_id: "approval-1".into(),
+            code_sha: "a".repeat(40),
+            binary_sha256: "b".repeat(64),
+            wallet: key(1),
+            program: key(2),
+            program_data_hash: "pd".into(),
+            funding_class: "NO_SWAP_INVENTORY".into(),
+            allowed_targets: [key(3)].into_iter().collect(),
+            expires_unix_s: 1_800_000_000,
+            max_state_age_ms: 2_000,
+            max_capital_usd_micro: 10_000_000,
+            max_total_sol_debit_lamports: 50_000,
+            max_tip_lamports: 1_000,
+            max_rent_lamports: 3_000_000,
+            max_loss_usd_micro: 1_000_000,
+            min_net_usd_micro: 100,
+            max_slippage_bps: 50,
+        };
+        let intent = Intent {
+            code_sha: "a".repeat(40),
+            binary_sha256: "b".repeat(64),
+            wallet: key(1),
+            program: key(2),
+            program_data_hash: "pd".into(),
+            funding_class: "NO_SWAP_INVENTORY".into(),
+            target: key(3),
+            signatures: vec!["sig-1".into()],
+            signed_wire_sha256: "c".repeat(64),
+            state_generation: 7,
+            state_slot: 300,
+            valid_until_slot: 450,
+            evaluated_unix_ms: 1_760_000_000_000,
+            capital_usd_micro: 5_000_000,
+            transaction_fee_lamports: 5_000,
+            tip_lamports: 0,
+            rent_lamports: 0,
+            max_loss_usd_micro: 500_000,
+            conservative_net_usd_micro: -12,
+            slippage_bps: 30,
+            holds: [("SOL".to_string(), 5_000u64)].into_iter().collect(),
+            expected_wallet_assets: ["SOL".to_string()].into_iter().collect(),
+        };
+        let state = Saved {
+            approval,
+            intent,
+            phase: Phase::HaltFinalized,
+            finalized: Some(vec![Receipt {
+                signature: "sig-1".into(),
+                finalized: true,
+                success: true,
+                fee_lamports: Some(5_000),
+                wallet_deltas: Some([("SOL".to_string(), -5_000i128)].into_iter().collect()),
+                exit_complete: true,
+            }]),
+            observations: [(
+                "sig-1".to_string(),
+                receipts::FinalizedObservation {
+                    signature: "sig-1".into(),
+                    slot: 301,
+                    success: true,
+                    fee_lamports: 5_000,
+                    wallet_sol_delta_lamports: -5_000,
+                    wallet_token_deltas: None,
+                    unknown_reasons: vec![],
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let version = Version {
+            transition: Transition::Finalize,
+            state: state.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version = crate::analytics::payload::decode(
+            journal::kind::FE04_TRANSITION,
+            crate::analytics::payload::TYPED,
+            &bytes,
+        )
+        .unwrap();
+        assert_eq!((back.transition, back.state), (Transition::Finalize, state));
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                1108,
+                "HwhygqtWc6VthHdUKxendZqFqfWF593a6mo8EFvxmWtn".to_string()
+            ),
+            "FE04_TRANSITION schema-2 layout changed"
+        );
+    }
+
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 2, no JSON value
+    /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
+    /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
+    #[test]
+    fn f2_wallet_journal_writes_typed_frames_and_reads_historical_json() {
+        let frames_of = |file: &Path| {
+            let mut r = journal::Reader::open(file).unwrap();
+            std::iter::from_fn(|| r.next_frame().unwrap()).collect::<Vec<_>>()
+        };
+        let (dir, a, i, c) = setup();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        let file = path_of(&j);
+        drop(j);
+        let frames = frames_of(&file);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(
+            (frames[0].kind, frames[0].schema),
+            (
+                journal::kind::FE04_TRANSITION,
+                crate::analytics::payload::TYPED
+            )
+        );
+        assert!(frames[0].legacy_value().is_err());
+        let v: Version = frames[0].typed().unwrap();
+        assert_eq!(
+            (v.transition, v.state.phase),
+            (Transition::Reserve, Phase::Reserved)
+        );
+        // A pre-F2 journal: the same reservation as a historical schema-1 frame.
+        fs::remove_file(&file).unwrap();
+        let mut w = journal::Writer::create(&file).unwrap();
+        let state = reserved(&a, &i);
+        let historical = serde_json::to_value(VersionRef {
+            transition: Transition::Reserve,
+            state: &state,
+        })
+        .unwrap();
+        assert!(w
+            .append_legacy(
+                journal::kind::FE04_TRANSITION,
+                Default::default(),
+                &historical
+            )
+            .is_err());
+        w.test_append_historical(journal::kind::FE04_TRANSITION, &historical)
+            .unwrap();
+        w.sync().unwrap();
+        drop(w);
+        let reopened = Journal::open(&dir, &a.wallet).unwrap();
+        assert_eq!(reopened.holds(), i.holds);
+        assert_eq!(
+            reopened.saved.as_ref().unwrap().phase,
+            Phase::HandoffUnknown
+        );
+        drop(reopened);
+        let frames = frames_of(&file);
+        assert_eq!(
+            frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
+            [1, crate::analytics::payload::TYPED],
+            "historical frame kept, the reopen transition is typed"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// M6: journal failures carry a bounded, secret-free class — the journal's static code for
+    /// damaged data, the OS class for I/O — and never the path; every one stays a halt.
+    #[test]
+    fn m6_journal_failures_carry_typed_secret_free_causes() {
+        let (dir, a, i, c) = setup();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        let file = path_of(&j);
+        drop(j);
+        let good = fs::read(&file).unwrap();
+        let n = good.len();
+        let mut payload = good.clone();
+        payload[n - 60] ^= 1;
+        let mut header = good.clone();
+        header[3] ^= 1;
+        for (bytes, expected) in [
+            (good[..30].to_vec(), "JOURNAL_CORRUPT:HEADER_TRUNCATED"),
+            (header, "JOURNAL_CORRUPT:JOURNAL_VERSION_OR_MAGIC"),
+        ] {
+            fs::write(&file, &bytes).unwrap();
+            assert_eq!(
+                Journal::open(&dir, &a.wallet).err().as_deref(),
+                Some(expected)
+            );
+        }
+        fs::write(&file, &payload).unwrap();
+        let damaged = Journal::open(&dir, &a.wallet).err().unwrap();
+        assert_eq!(damaged, "JOURNAL_CORRUPT:FRAME_CRC");
+        // A message shaped like a journal code is no code: only the typed source counts.
+        assert_eq!(
+            cause(
+                "JOURNAL_CORRUPT",
+                &std::io::Error::new(std::io::ErrorKind::InvalidData, "FRAME_CRC")
+            ),
+            "JOURNAL_CORRUPT:INVALID_DATA"
+        );
+        for e in [
+            Journal::open(&dir, &a.wallet).err().unwrap(),
+            cause(
+                "JOURNAL_IO",
+                &std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            ),
+            cause(
+                "JOURNAL_FSYNC",
+                &std::io::Error::from_raw_os_error(libc::ENOSPC),
+            ),
+            cause(
+                "JOURNAL_READ",
+                &std::io::Error::other(dir.display().to_string()),
+            ),
+        ] {
+            assert!(
+                !e.contains(&*dir.to_string_lossy()) && !e.contains('/'),
+                "{e}"
+            );
+        }
+        assert_eq!(
+            cause(
+                "JOURNAL_IO",
+                &std::io::Error::from(std::io::ErrorKind::PermissionDenied)
+            ),
+            "JOURNAL_IO:PERMISSION"
+        );
+        assert_eq!(
+            cause(
+                "JOURNAL_FSYNC",
+                &std::io::Error::from_raw_os_error(libc::ENOSPC)
+            ),
+            "JOURNAL_FSYNC:NO_SPACE"
+        );
+        assert_eq!(
+            cause(
+                "JOURNAL_READ",
+                &std::io::Error::other("https://x/?api-key=SECRET")
+            ),
+            "JOURNAL_READ:IO_OTHER"
+        );
+        fs::write(&file, &good).unwrap();
+        assert_eq!(Journal::open(&dir, &a.wallet).unwrap().holds(), i.holds);
+        fs::remove_dir_all(dir).unwrap();
+    }
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     pub(super) fn setup() -> (PathBuf, Approval, Intent, Current) {
@@ -1016,7 +1332,7 @@ mod tests {
             fs::write(&file, [good.clone(), vec![0; zeros]].concat()).unwrap();
             assert_eq!(
                 Journal::open(&dir, &a.wallet).err().as_deref(),
-                Some("JOURNAL_CORRUPT"),
+                Some("JOURNAL_CORRUPT:TAIL_ZERO_FILLED"),
                 "{zeros}"
             );
             assert_eq!(fs::read(&file).unwrap().len(), good.len() + zeros);
@@ -1036,18 +1352,21 @@ mod tests {
         flipped[n - 60] ^= 1;
         let mut header = good.clone();
         header[3] ^= 1;
-        for bytes in [
-            good[..n - 1].to_vec(),
-            good[..n - 40].to_vec(),
-            good[..30].to_vec(),
-            [good.clone(), vec![0x55]].concat(),
-            flipped,
-            header,
+        for (bytes, expected) in [
+            (good[..n - 1].to_vec(), "JOURNAL_CORRUPT:FRAME_TRUNCATED"),
+            (good[..n - 40].to_vec(), "JOURNAL_CORRUPT:FRAME_TRUNCATED"),
+            (good[..30].to_vec(), "JOURNAL_CORRUPT:HEADER_TRUNCATED"),
+            (
+                [good.clone(), vec![0x55]].concat(),
+                "JOURNAL_CORRUPT:FRAME_TRUNCATED",
+            ),
+            (flipped, "JOURNAL_CORRUPT:FRAME_CRC"),
+            (header, "JOURNAL_CORRUPT:JOURNAL_VERSION_OR_MAGIC"),
         ] {
             fs::write(&file, &bytes).unwrap();
             assert_eq!(
                 Journal::open(&dir, &a.wallet).err().as_deref(),
-                Some("JOURNAL_CORRUPT")
+                Some(expected)
             );
         }
         // Frames the automaton never writes: a second reservation, a foreign kind, a seal.
@@ -1057,37 +1376,58 @@ mod tests {
             state: &state,
         })
         .unwrap();
+        // The same illegal second reservation as a typed frame: the automaton refuses it.
+        fs::write(&file, &good).unwrap();
+        let mut w = journal::Writer::resume(&file).unwrap();
+        w.append_typed(
+            Default::default(),
+            &Version {
+                transition: Transition::Reserve,
+                state: state.clone(),
+            },
+        )
+        .unwrap();
+        w.sync().unwrap();
+        drop(w);
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_TRANSITION_INVALID")
+        );
         let illegal: [(u16, serde_json::Value, &str); 3] = [
             (
+                // F2: a historical schema-1 version after typed frames is foreign.
                 journal::kind::FE04_TRANSITION,
                 again,
-                "JOURNAL_TRANSITION_INVALID",
+                "JOURNAL_CORRUPT:SCHEMA_ORDER",
             ),
             (
                 journal::kind::OWNER_RECORD,
                 serde_json::json!({}),
-                "JOURNAL_CORRUPT",
+                "JOURNAL_CORRUPT:KIND",
             ),
             (
                 journal::kind::FE04_LEGACY_IMPORT,
                 serde_json::json!({}),
-                "JOURNAL_CORRUPT",
+                "JOURNAL_CORRUPT:IMPORT_POSITION",
             ),
         ];
-        for (kind, value, code) in illegal {
+        for (kind, value, code_expected) in illegal {
             fs::write(&file, &good).unwrap();
             let mut w = journal::Writer::resume(&file).unwrap();
             // A foreign or illegal frame as found on disk; the writer itself refuses foreign kinds.
             w.test_append_historical(kind, &value).unwrap();
             w.sync().unwrap();
             drop(w);
-            assert_eq!(Journal::open(&dir, &a.wallet).err().as_deref(), Some(code));
+            assert_eq!(
+                Journal::open(&dir, &a.wallet).err().as_deref(),
+                Some(code_expected)
+            );
         }
         fs::write(&file, &good).unwrap();
         journal::Writer::resume(&file).unwrap().seal(true).unwrap();
         assert_eq!(
             Journal::open(&dir, &a.wallet).err().as_deref(),
-            Some("JOURNAL_CORRUPT")
+            Some("JOURNAL_CORRUPT:KIND")
         );
         // Undamaged bytes still reopen into UNKNOWN with the hold.
         fs::write(&file, &good).unwrap();
@@ -1335,7 +1675,12 @@ mod sync_failure_tests {
                 } else {
                     j.reserve(a.clone(), i.clone(), &c)
                 };
-                assert_eq!(result.unwrap_err(), "JOURNAL_FSYNC");
+                let expected = if error == std::io::ErrorKind::StorageFull {
+                    "JOURNAL_FSYNC:NO_SPACE"
+                } else {
+                    "JOURNAL_FSYNC:IO_OTHER"
+                };
+                assert_eq!(result.unwrap_err(), expected);
                 assert_eq!(sends.get(), 0);
                 assert!(j
                     .handoff(&i.signed_wire_sha256, &c, || {

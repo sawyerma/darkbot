@@ -1474,6 +1474,7 @@ mod regression {
                 max_stream_silence_ms: 70,
                 ..Default::default()
             }),
+            observed_slots: Some((10, 12)),
         })
         .unwrap();
         w.accept(Evidence::ShadowStats(ShadowStats {

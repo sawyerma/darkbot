@@ -255,9 +255,10 @@ impl SubmissionAdapter for RpcSubmitter {
     }
 
     /// [FIX-38] RPC akzeptiert v1 (Solana Foundation, base64 >1232 B) — VERIFY per Capability-Gate S3-02.
-    /// B9: V1 only once the builder can produce it.
+    /// B9: `submit`/`simulate` send SDK `VersionedTransaction`s (legacy/v0 wire); there is no
+    /// V1 wire on this adapter, so it does not claim V1 (the former `true` was a false claim).
     fn supports_tx_version(&self, v: crate::tx::BuildVersion) -> bool {
-        !matches!(v, crate::tx::BuildVersion::V1) || crate::tx::V1_BUILDABLE
+        !matches!(v, crate::tx::BuildVersion::V1)
     }
 
     /// [FIX-6] Simulation derselben signierten TX; kein Rebuild zwischen Simulation und Send.
@@ -386,14 +387,14 @@ pub fn reconcile(
     let meta = if finalized {
         transaction_with_meta(rpc, sig, CommitmentConfig::finalized())
             .ok()
-            .map(|t| {
-                let meta = t.transaction.meta;
-                (
-                    t.slot,
-                    meta.as_ref().map(|m| m.fee),
-                    meta.as_ref()
-                        .and_then(|m| Option::<u64>::from(m.compute_units_consumed.clone())),
-                )
+            .and_then(|t| {
+                let meta = t.transaction.meta?;
+                Some(FinalizedReceipt {
+                    slot: t.slot,
+                    fee: meta.fee,
+                    compute_units: Option::<u64>::from(meta.compute_units_consumed.clone()),
+                    failed: meta.err.is_some(),
+                })
             })
     } else {
         None
@@ -413,10 +414,19 @@ pub fn reconcile(
     ))
 }
 
+/// The finalized receipt's settlement facts (`getTransaction` at finalized commitment).
+struct FinalizedReceipt {
+    slot: u64,
+    fee: u64,
+    compute_units: Option<u64>,
+    failed: bool,
+}
+
 /// C4: landing evidence from a signature status and, for a finalized status, the finalized
-/// receipt (`meta` = slot, fee, CU). A status below finalized is `LandedUnfinalized` without fee
-/// or outcome; a finalized status whose receipt is missing or belongs to another slot keeps the
-/// fee unknown (the attempt stays unresolved, never settled).
+/// receipt. A status below finalized is `LandedUnfinalized` without fee or outcome. A finalized
+/// status yields a fee only with a receipt of the same slot whose own success/failure (`meta.err`)
+/// agrees with the status; a missing, foreign-slot or contradicting receipt keeps the fee unknown
+/// (the attempt stays unresolved, never settled). The outcome is the receipt's.
 #[allow(clippy::too_many_arguments)]
 fn landing_evidence(
     path: SubmissionPath,
@@ -425,19 +435,19 @@ fn landing_evidence(
     confirmation: Option<String>,
     finalized: bool,
     err: Option<String>,
-    meta: Option<(u64, Option<u64>, Option<u64>)>,
+    receipt: Option<FinalizedReceipt>,
     now_ns: u64,
 ) -> LandingEvidence {
-    let (fee, cu) = match meta {
-        Some((slot, fee, cu)) if finalized && slot == status_slot => (fee, cu),
-        _ => (None, None),
-    };
+    let receipt = receipt.filter(|r| finalized && r.slot == status_slot);
+    let consistent = receipt.as_ref().filter(|r| r.failed == err.is_some());
+    let (fee, cu) = consistent.map_or((None, None), |r| (Some(r.fee), r.compute_units));
+    let failed = receipt.as_ref().map_or(err.is_some(), |r| r.failed);
     LandingEvidence {
         path,
         signature: *sig,
         outcome: if !finalized {
             LandingOutcome::LandedUnfinalized
-        } else if err.is_some() {
+        } else if failed {
             LandingOutcome::LandedFailed
         } else {
             LandingOutcome::LandedSuccess
@@ -455,50 +465,81 @@ fn landing_evidence(
 #[cfg(test)]
 mod landing_tests {
     use super::*;
+    use solana_client::rpc_request::RpcRequest;
 
-    /// C4: only a finalized status with a finalized receipt of the same slot yields a fee and an
-    /// outcome; confirmed is telemetry, a missing or foreign-slot receipt keeps the fee unknown.
+    /// C4 through `reconcile()`: only a finalized status with a finalized receipt of the same
+    /// slot and the same success/failure yields a fee; the outcome is the receipt's. Confirmed,
+    /// a foreign-slot receipt and a receipt contradicting the status stay unresolved (no fee).
     #[test]
-    fn c4_settlement_evidence_requires_finalized_status_and_receipt() {
+    fn c4_reconcile_settles_only_on_a_consistent_finalized_receipt() {
         let sig = Signature::new_unique();
-        let ev = |finalized, err: Option<&str>, meta| {
-            landing_evidence(
-                SubmissionPath::Rpc,
-                &sig,
-                50,
-                Some(if finalized { "Finalized" } else { "Confirmed" }.into()),
-                finalized,
-                err.map(Into::into),
-                meta,
-                7,
-            )
+        // The client's own default receipt (slot 2, err null), as the RPC wire carries it.
+        let receipt = serde_json::to_value(
+            RpcClient::new_mock("succeeds")
+                .get_transaction(&sig, UiTransactionEncoding::Json)
+                .unwrap(),
+        )
+        .unwrap();
+        let status = |slot: u64, level: &str, failed: bool| {
+            let err = if failed {
+                serde_json::json!({"InstructionError": [0, {"Custom": 1}]})
+            } else {
+                serde_json::Value::Null
+            };
+            let result = if failed {
+                serde_json::json!({"Err": err.clone()})
+            } else {
+                serde_json::json!({"Ok": null})
+            };
+            serde_json::json!({"context": {"slot": 9}, "value": [{
+                "slot": slot, "confirmations": null, "err": err, "status": result,
+                "confirmationStatus": level}]})
         };
-        let confirmed = ev(false, None, Some((50, Some(5_000), Some(9))));
-        assert_eq!(confirmed.outcome, LandingOutcome::LandedUnfinalized);
-        assert_eq!(confirmed.fee_lamports, None, "confirmed meta is no fee");
-        let confirmed_failed = ev(false, Some("InstructionError"), None);
-        assert_eq!(confirmed_failed.outcome, LandingOutcome::LandedUnfinalized);
-        let done = ev(true, None, Some((50, Some(5_000), Some(9))));
+        let with = |slot: u64, fee: u64, failed: bool| {
+            let mut r = receipt.clone();
+            r["slot"] = slot.into();
+            r["meta"]["fee"] = fee.into();
+            if failed {
+                r["meta"]["err"] = serde_json::json!({"InstructionError": [0, {"Custom": 1}]});
+                r["meta"]["status"] = serde_json::json!({"Err": r["meta"]["err"].clone()});
+            }
+            r
+        };
+        let run = |st: serde_json::Value, tx: serde_json::Value| {
+            let rpc = RpcClient::new_mock_with_mocks(
+                "succeeds",
+                [
+                    (RpcRequest::GetSignatureStatuses, st),
+                    (RpcRequest::GetTransaction, tx),
+                ]
+                .into_iter()
+                .collect(),
+            );
+            reconcile(&rpc, SubmissionPath::Rpc, &sig, 7).unwrap()
+        };
+        let ok = run(status(2, "finalized", false), with(2, 5_000, false));
         assert_eq!(
-            (done.outcome, done.fee_lamports, done.compute_units_consumed),
-            (LandingOutcome::LandedSuccess, Some(5_000), Some(9))
+            (ok.outcome, ok.fee_lamports),
+            (LandingOutcome::LandedSuccess, Some(5_000))
         );
-        let reverted = ev(
-            true,
-            Some("InstructionError"),
-            Some((50, Some(5_000), None)),
-        );
+        let reverted = run(status(2, "finalized", true), with(2, 5_000, true));
         assert_eq!(
             (reverted.outcome, reverted.fee_lamports),
             (LandingOutcome::LandedFailed, Some(5_000))
         );
-        for meta in [
-            None,
-            Some((51, Some(5_000), Some(9))),
-            Some((50, None, None)),
-        ] {
-            assert_eq!(ev(true, None, meta).fee_lamports, None, "{meta:?}");
-        }
+        let confirmed = run(status(2, "confirmed", false), with(2, 5_000, false));
+        assert_eq!(
+            (confirmed.outcome, confirmed.fee_lamports),
+            (LandingOutcome::LandedUnfinalized, None)
+        );
+        let foreign_slot = run(status(2, "finalized", false), with(3, 5_000, false));
+        assert_eq!(foreign_slot.fee_lamports, None);
+        // Status success, finalized receipt failure: the receipt decides, nothing is settled.
+        let contradiction = run(status(2, "finalized", false), with(2, 5_000, true));
+        assert_eq!(
+            (contradiction.outcome, contradiction.fee_lamports),
+            (LandingOutcome::LandedFailed, None)
+        );
     }
 }
 

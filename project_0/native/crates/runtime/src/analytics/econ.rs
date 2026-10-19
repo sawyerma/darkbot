@@ -171,6 +171,9 @@ pub enum Evidence {
         at_ns: u64,
         before: Box<crate::market_observer::MarketStats>,
         after: Box<crate::market_observer::MarketStats>,
+        /// R17: (min, max) slot of the transactions this event admitted; the per-hour
+        /// first/last observed slot comes from these, never from the run-global stats.
+        observed_slots: Option<(u64, u64)>,
     },
     ShadowStats(ShadowStats),
 }
@@ -968,13 +971,21 @@ impl Worker {
                 at_ns,
                 before,
                 after,
+                observed_slots,
             } => {
                 if let Some(hour) = self.hour(at_ns) {
                     let b: BTreeMap<&str, u64> = before.counters().into_iter().collect();
+                    let counts = &mut self.market_counters[hour];
+                    if let Some((first, last)) = observed_slots {
+                        let f = counts.entry("first_observed_slot".into()).or_insert(first);
+                        *f = (*f).min(first);
+                        let l = counts.entry("last_observed_slot".into()).or_insert(last);
+                        *l = (*l).max(last);
+                    }
                     for (key, n) in after.counters() {
-                        if key == "first_observed_slot" {
-                            self.market_counters[hour].entry(key.into()).or_insert(n);
-                        } else if key == "last_observed_slot" || key == "max_stream_silence_ms" {
+                        if key == "first_observed_slot" || key == "last_observed_slot" {
+                            // R17: from this event's admitted transactions (above).
+                        } else if key == "max_stream_silence_ms" {
                             let old = self.market_counters[hour].entry(key.into()).or_default();
                             *old = (*old).max(n);
                         } else {

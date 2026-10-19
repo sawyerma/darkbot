@@ -135,19 +135,6 @@ pub(crate) fn plan_economic_gate(
 /// B1: reason code of a LIVE candidate that reached the send boundary of this pipeline.
 pub const LIVE_SEND_REQUIRES_FE04: &str = "LIVE_SEND_REQUIRES_FE04_ONE_SHOT";
 
-/// B15: worst-case inventory an attempt can leave behind. A no-swap route holds the seized
-/// collateral (capital plus the liquidation premium, rounded up); a same-TX swap route reverts
-/// atomically or returns it. An unrepresentable value is `u64::MAX` (denied by the limit).
-pub(crate) fn worst_case_inventory(plan: &ReceivershipPlan) -> u64 {
-    match plan.route {
-        RouteKind::NoSwap => u64::try_from(
-            (u128::from(plan.exposure) * (10_000 + u128::from(plan.premium_bps))).div_ceil(10_000),
-        )
-        .unwrap_or(u64::MAX),
-        _ => 0,
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Shadow,
@@ -168,6 +155,9 @@ pub struct ReceivershipPlan {
     pub slippage_bps: u64,
     /// Beteiligte Asset-Mints (Safety-Allowlist).
     pub assets: Vec<Pubkey>,
+    /// B15: collateral this plan leaves in the wallet (USD micro at the protocol valuation of
+    /// the exact seized amount, from the plan's sizing); the Safety inventory hold.
+    pub inventory_hold_usd_micro: u64,
     /// TX-Klasse ist Bestandteil des Execution-Candidates; v0 kann Route-LUTs nutzen.
     pub tx_version: BuildVersion,
     pub lookup_tables: Vec<AddressLookupTableAccount>,
@@ -477,7 +467,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 Mode::Live => match self.safety.preview(
                     now_unix_s,
                     plan.exposure,
-                    worst_case_inventory(&plan),
+                    plan.inventory_hold_usd_micro,
                     plan.tip,
                     plan.slippage_bps,
                     &plan.assets,
@@ -698,11 +688,17 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(e.to_string());
             return rec.with_timeline(&tl);
         }
-        if plan.prerequisite_txs.is_empty() && plan.tip == 0 {
+        // [FIX-4/FIX-15] Bundle = [prerequisite TXs…, receivership TX, tip TX], only on a bundle
+        // path; otherwise this single signed TX is the payload.
+        let use_bundle =
+            self.submitter.supports_bundle() && (!plan.prerequisite_txs.is_empty() || plan.tip > 0);
+        // B18: T_sign and its slot exactly once, when the payload is completely signed — here for
+        // the single TX (also with a tip but no bundle path), after the bundle otherwise.
+        // [FIX-40] the slot is read at T_sign, lock-free.
+        if !use_bundle {
             tl.mark(Stage::Sign, self.clock.now_ns());
+            rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
         }
-        // [FIX-40] read at T_sign, lock-free (B18: the only assignment of the single-TX path).
-        rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
 
         // Drift-Muster: stale Opportunity / Deadline → nicht senden (Record bleibt für P6).
         let t_detect = tl.get(Stage::Detect).unwrap_or(t_rx_ns);
@@ -720,8 +716,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // Kapital deterministisch freigeben (kein Fehlversuch im Tagesstatus, es wurde nichts gesendet).
         // [FIX-15] Bundle-Kandidaten werden als Bundle simuliert, Einzel-TX als Einzel-TX — nie gemischt.
         // [FIX-4] Bundle = [prerequisite TXs…, receivership TX, tip TX]; Tip nie in der Receivership-TX.
-        let use_bundle =
-            self.submitter.supports_bundle() && (!plan.prerequisite_txs.is_empty() || plan.tip > 0);
         let mut bundle_txs: Vec<solana_sdk::transaction::VersionedTransaction> = Vec::new();
         if use_bundle {
             let Some(tip_account) = self.tip_account else {
@@ -836,7 +830,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if let Err(d) = self.safety.preview(
             now_unix_s,
             plan.exposure,
-            worst_case_inventory(&plan),
+            plan.inventory_hold_usd_micro,
             plan.tip,
             plan.slippage_bps,
             &plan.assets,
@@ -846,7 +840,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(format!("{:?}", d));
             return rec.with_timeline(&tl);
         }
-        rec.decision = Decision::DeniedBySafety;
+        // Not a Safety denial: the send capability is unavailable on this path.
+        rec.decision = Decision::Unavailable;
         rec.loss = Some(LossReason::Submission);
         rec.reason = Some(format!(
             "{LIVE_SEND_REQUIRES_FE04}: simulated {} candidate is handed off only by the FE-04 one-shot owner",

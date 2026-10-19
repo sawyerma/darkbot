@@ -261,6 +261,9 @@ pub struct ObserverCore {
     pub(super) gaps: Vec<gap::MarketGap>,
     pub(super) gap_stats: gap::GapStats,
     pub stats: MarketStats,
+    /// R17: (min, max) slot of the transactions admitted while routing the current ingress
+    /// event; handed to the analytics worker with that event's counters.
+    pub(super) event_slots: Option<(u64, u64)>,
 }
 
 /// `Some(true)` success, `Some(false)` failed, `None` no reliable status.
@@ -339,6 +342,7 @@ impl ObserverCore {
             gaps: Vec::new(),
             gap_stats: gap::GapStats::default(),
             stats: MarketStats::default(),
+            event_slots: None,
         }
     }
 
@@ -674,6 +678,10 @@ impl ObserverCore {
         }
         self.stats.first_observed_slot =
             Some(self.stats.first_observed_slot.map_or(slot, |s| s.min(slot)));
+        self.event_slots = Some(
+            self.event_slots
+                .map_or((slot, slot), |(a, b)| (a.min(slot), b.max(slot))),
+        );
         self.stats.last_observed_slot =
             Some(self.stats.last_observed_slot.map_or(slot, |s| s.max(slot)));
         true
@@ -811,6 +819,7 @@ impl ObserverCore {
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<()> {
         let before = self.econ.as_ref().map(|_| self.stats.clone());
+        self.event_slots = None;
         let at = ev.t_rx_ns();
         let result = match ev {
             IngressEvent::Health(h) => {
@@ -820,6 +829,7 @@ impl ObserverCore {
                         connected: h.connected,
                         last_frame_age_ns: h.last_frame_age_ns,
                         last_slot: h.last_slot,
+                        sampled_at: None, // stamped on publication
                     });
                 }
                 self.coverage(
@@ -933,6 +943,7 @@ impl ObserverCore {
                 at_ns: at,
                 before: Box::new(before),
                 after: Box::new(self.stats.clone()),
+                observed_slots: self.event_slots.take(),
             });
         }
         result

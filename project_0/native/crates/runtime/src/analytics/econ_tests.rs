@@ -610,6 +610,7 @@ fn counters_use_event_receive_hour_even_if_processed_after_boundary() {
         at_ns: 100,
         before: Box::new(a),
         after: Box::new(b),
+        observed_slots: None,
     })
     .unwrap();
     assert_eq!(
@@ -620,6 +621,65 @@ fn counters_use_event_receive_hour_even_if_processed_after_boundary() {
         view(&w.metrics(1, 2))["market"]["capture_counters"]["unique_transactions"],
         0
     );
+}
+
+/// R17: each hour reports the first/last slot of the transactions observed in that hour, not
+/// the run-global first slot (hour 2 used to repeat hour 1's first slot).
+#[test]
+fn r17_hourly_observed_slots_are_per_hour() {
+    let mut w = worker();
+    let mut stats = crate::market_observer::MarketStats::default();
+    for (at_ns, slots) in [
+        (100, (110, 120)),
+        (200, (105, 130)),
+        (1_500_000_000, (300, 310)),
+        (1_600_000_000, (305, 320)),
+    ] {
+        let before = stats.clone();
+        stats.unique_transactions += 1;
+        stats.first_observed_slot = Some(
+            stats
+                .first_observed_slot
+                .map_or(slots.0, |s| s.min(slots.0)),
+        );
+        stats.last_observed_slot =
+            Some(stats.last_observed_slot.map_or(slots.1, |s| s.max(slots.1)));
+        w.accept(Evidence::MarketCounters {
+            at_ns,
+            before: Box::new(before),
+            after: Box::new(stats.clone()),
+            observed_slots: Some(slots),
+        })
+        .unwrap();
+    }
+    // An event without admitted transactions changes no slot bound.
+    w.accept(Evidence::MarketCounters {
+        at_ns: 1_700_000_000,
+        before: Box::new(stats.clone()),
+        after: Box::new(stats.clone()),
+        observed_slots: None,
+    })
+    .unwrap();
+    let hour = |from, to| view(&w.metrics(from, to))["market"]["capture_counters"].clone();
+    assert_eq!(
+        (
+            hour(0, 1)["first_observed_slot"].clone(),
+            hour(0, 1)["last_observed_slot"].clone()
+        ),
+        (json!(105), json!(130))
+    );
+    assert_eq!(
+        (
+            hour(1, 2)["first_observed_slot"].clone(),
+            hour(1, 2)["last_observed_slot"].clone()
+        ),
+        (json!(300), json!(320))
+    );
+    assert_eq!(hour(0, 2)["first_observed_slot"], json!(105));
+    assert_eq!(hour(0, 2)["last_observed_slot"], json!(320));
+    assert!(hour(2, 3)
+        .get("first_observed_slot")
+        .is_none_or(|v| v.is_null()));
 }
 
 struct CountingSubmitter {
@@ -717,6 +777,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             input: input(0),
             premium_bps: 500,
             exposure: 0,
+            inventory_hold_usd_micro: 0,
             tip: 0,
             slippage_bps: 0,
             assets: vec![],
@@ -910,7 +971,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         simulation_failure: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
-    assert_eq!(r.decision, Decision::DeniedBySafety);
+    assert_eq!(r.decision, Decision::Unavailable);
     assert!(r
         .reason
         .as_deref()
@@ -923,6 +984,99 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
     assert_eq!(sims.load(Ordering::Relaxed), 1);
     assert_eq!(calls.load(Ordering::Relaxed), 0, "no submit call");
     assert_eq!(safety.capital_in_use(), 0, "no reservation left");
+}
+/// B18: a plan with a tip on a submitter without bundle path is signed as one transaction:
+/// T_sign and its slot are recorded once, at that signature (before: no T_sign at all).
+#[test]
+fn b18_single_tx_with_tip_marks_t_sign_once() {
+    use crate::execution::pipeline::{Mode, Pipeline, ReceivershipBuilder, ReceivershipPlan};
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    struct TipBuilder;
+    impl ReceivershipBuilder for TipBuilder {
+        fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+            Some(n)
+        }
+        fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut plans = TestBuilder.plans(a, now, slot)?;
+            plans[0].tip = 7;
+            Ok(plans)
+        }
+    }
+    let calls = Arc::new(AtomicU64::new(0));
+    let sims = Arc::new(AtomicU64::new(0));
+    let submitter = CountingSubmitter {
+        calls: calls.clone(),
+        sims: sims.clone(),
+    };
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let zero = Limits {
+        max_total_capital: 0,
+        max_outstanding_inventory: 0,
+        max_concurrent_positions: 0,
+        max_exposure_per_attempt: 0,
+        max_daily_loss: 0,
+        max_failed_attempts_per_day: 0,
+        max_tip: 0,
+        max_slippage_bps: 0,
+        max_outstanding_attempts: 0,
+    };
+    let mut safety = Safety::new(zero, Allow::default(), false);
+    let payer = solana_sdk::signature::Keypair::new();
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix::default();
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    slots.observe(10);
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let mut p = Pipeline {
+        mode: Mode::Shadow,
+        clock: &clock,
+        health: &TestHealth,
+        builder: &TipBuilder,
+        submitter: &submitter,
+        safety: &mut safety,
+        blockhash: &bh,
+        payer: &payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit: 0,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        tip_account: None,
+        global_allowed: vec![],
+        prereq_allowed: vec![],
+        slot_watch: &slots,
+        network: &mut network,
+        simulation_failure: None,
+    };
+    let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+    assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
+    assert!(r.timing.t_sign_ns.is_some(), "{:?}", r.timing);
+    assert_eq!(r.sign_slot, Some(10));
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }
 #[test]
 fn runtime_worker_writes_four_snapshots_then_identical_final() {

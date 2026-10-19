@@ -129,8 +129,16 @@ pub(super) fn prepare(
         .collect();
     #[cfg(feature = "crate_health")]
     let mut required_dependency_keys = {
-        let mut v =
-            darkbot_project0::health::dependency_keys(&StateView(&pre_state), &program, &bank_keys);
+        // B16: banks without a complete dependency set are reported, never silently skipped.
+        let scan =
+            darkbot_project0::health::dependency_scan(&StateView(&pre_state), &program, &bank_keys);
+        for (bank, gap) in &scan.gaps {
+            eprintln!(
+                "dependency_gap: bank={bank} code={} detail={gap:?}",
+                gap.code()
+            );
+        }
+        let mut v = scan.keys;
         v.push(group);
         v.push(protocol::fee_state_pda(&program));
         v.sort_unstable_by_key(|k| k.to_bytes());

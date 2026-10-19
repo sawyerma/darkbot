@@ -307,6 +307,11 @@ impl ShadowOwner {
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
                 zero_prefund_qualified: self.zero_prefund_enabled,
+                v1_plans: darkbot_solana::tx::v1_build_capability()
+                    && darkbot_solana::submit::SubmissionAdapter::supports_tx_version(
+                        &self.submitter,
+                        darkbot_solana::tx::BuildVersion::V1,
+                    ),
                 path: Path::Rpc,
                 resources: self.resources,
                 limits: TxLimits::default(),

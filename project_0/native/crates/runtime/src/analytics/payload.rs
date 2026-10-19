@@ -37,7 +37,7 @@ fn options() -> impl Options {
 }
 
 fn bad(code: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, code)
+    crate::analytics::journal::coded(code)
 }
 
 pub fn encode<P: Payload>(payload: &P) -> io::Result<Vec<u8>> {
@@ -177,6 +177,10 @@ macro_rules! typed_kinds {
             k::ECON_OPPORTUNITY => $f::<super::econ::OpportunityRow>($kind, $schema, $bytes),
             k::ECON_SNAPSHOT => $f::<super::econ::SnapshotFrame>($kind, $schema, $bytes),
             k::ECON_FINAL => $f::<super::econ::SnapshotReport>($kind, $schema, $bytes),
+            k::FE04_TRANSITION => $f::<crate::execution::one_shot::Version>($kind, $schema, $bytes),
+            k::FE04_LEGACY_IMPORT => {
+                $f::<crate::execution::one_shot::LegacyImport>($kind, $schema, $bytes)
+            }
             k::OWNER_RECONCILE => {
                 $f::<crate::execution::pending::ReconcileRecord>($kind, $schema, $bytes)
             }
@@ -231,9 +235,6 @@ pub fn registered_schema(kind: u16) -> Option<u16> {
 pub const LEGACY_WRITABLE: &[u16] = {
     use journal::kind as k;
     &[
-        // JFI-FIX-06 (FE-04 financial journal)
-        k::FE04_TRANSITION,
-        k::FE04_LEGACY_IMPORT,
         // remaining journal kinds (measurement, MT0, FE-01, C0 census import)
         k::MT0_SNAPSHOT,
         k::FE01_CONFIG,

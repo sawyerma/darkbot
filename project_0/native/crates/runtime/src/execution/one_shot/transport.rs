@@ -2,7 +2,7 @@
 //! This module neither loads a signer nor enables the normal LIVE entrypoint.
 use super::{err, Approval, Current, Intent, Journal};
 use darkbot_solana::submit::{
-    serialize_tx, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck,
+    serialize_tx, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError,
 };
 use solana_sdk::{pubkey::Pubkey, transaction::VersionedTransaction};
 use std::collections::BTreeSet;
@@ -163,7 +163,15 @@ impl Journal {
             } else {
                 simulated.adapter.submit(&p.txs[0], t_handoff_ns)
             };
-            result.map_err(|_| err("SUBMISSION_RESULT_UNKNOWN"))
+            // M6: the adapter's typed class; whatever it is, the attempt stays UNKNOWN.
+            result.map_err(|e| {
+                err(match e {
+                    // Local or remote definitive refusal; the hold is kept all the same.
+                    SubmitError::Rejected(_) => "SUBMISSION_RESULT_UNKNOWN:REJECTED",
+                    SubmitError::Transport(_) => "SUBMISSION_RESULT_UNKNOWN:TRANSPORT_AMBIGUOUS",
+                    SubmitError::Serialize(_) => "SUBMISSION_RESULT_UNKNOWN:SERIALIZE",
+                })
+            })
         })?;
         let returned: Vec<_> = ack.signatures.iter().map(ToString::to_string).collect();
         if ack.path != p.path

@@ -995,6 +995,53 @@ mod bank_layout_tests {
         }
         assert!(super::dependency_keys(&state, &program, &[bank]).is_empty());
     }
+
+    /// B16: every bank that cannot contribute a complete dependency set is reported with its
+    /// cause (missing, foreign owner, not a bank, unknown layout); a valid bank has no gap and
+    /// the same keys as `dependency_keys`.
+    #[test]
+    fn b16_dependency_gaps_are_reported_not_skipped() {
+        use super::DependencyGap as G;
+        use marginfi_type_crate::types::Bank;
+        let program = Pubkey::new_unique();
+        let [valid, missing, foreign, other, resized] = [(); 5].map(|_| Pubkey::new_unique());
+        let mut bank: Bank = bytemuck::Zeroable::zeroed();
+        bank.mint = Pubkey::new_unique();
+        let mut good = protocol::DISC_BANK.to_vec();
+        good.extend_from_slice(bytemuck::bytes_of(&bank));
+        let mut big = protocol::DISC_BANK.to_vec();
+        big.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_12, 0);
+        let mut not_bank = protocol::DISC_MARGINFI_ACCOUNT.to_vec();
+        not_bank.resize(64, 0);
+        let entry = |owner: Pubkey, bytes: &[u8]| {
+            let (w, n) = aligned(bytes);
+            (owner, w, n)
+        };
+        let state = Source(HashMap::from([
+            (valid, entry(program, &good)),
+            (foreign, entry(Pubkey::new_unique(), &good)),
+            (other, entry(program, &not_bank)),
+            (resized, entry(program, &big)),
+        ]));
+        let scan =
+            super::dependency_scan(&state, &program, &[valid, missing, foreign, other, resized]);
+        assert_eq!(scan.keys, vec![bank.mint]);
+        assert_eq!(
+            scan.keys,
+            super::dependency_keys(&state, &program, &[valid])
+        );
+        let codes: Vec<_> = scan.gaps.iter().map(|(k, g)| (*k, g.code())).collect();
+        assert_eq!(
+            codes,
+            [
+                (missing, G::Missing.code()),
+                (foreign, G::ForeignOwner.code()),
+                (other, G::NotABank.code()),
+                (resized, "DEPENDENCY_BANK_UNKNOWN_LAYOUT"),
+            ]
+        );
+        assert!(matches!(&scan.gaps[3].1, G::UnknownLayout(e) if e.contains("0.1.12")));
+    }
 }
 
 #[cfg(all(test, feature = "crate_health"))]
@@ -1042,29 +1089,85 @@ mod threshold_search_tests {
 /// [FIX-26] Externe Abhängigkeiten aller Banks im State (Oracle-PDAs/-Keys, Integrations-Accounts,
 /// Mints, Extra-Keys) — damit Ingress/Snapshot sie **vor** der ersten Health-Berechnung halten.
 /// Kein RPC hier; nur Ableitung aus dem RAM-State.
+/// B16: why a bank contributes no, or no complete, dependency set. Reported by
+/// `dependency_scan` instead of skipped silently; Health for such a bank fails closed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DependencyGap {
+    /// No account under this key in the state.
+    Missing,
+    /// The account is not owned by the configured program (source identity).
+    ForeignOwner,
+    /// Program-owned, but not a Marginfi bank.
+    NotABank,
+    /// A bank layout the pinned decoder does not qualify (e.g. 0.1.12 resized).
+    UnknownLayout(String),
+    /// The oracle setup has no qualified observation keys; mint/integration keys stay listed,
+    /// the bank is never priced.
+    UnsupportedOracle(String),
+}
+impl DependencyGap {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Missing => "DEPENDENCY_BANK_MISSING",
+            Self::ForeignOwner => "DEPENDENCY_BANK_FOREIGN_OWNER",
+            Self::NotABank => "DEPENDENCY_NOT_A_BANK",
+            Self::UnknownLayout(_) => "DEPENDENCY_BANK_UNKNOWN_LAYOUT",
+            Self::UnsupportedOracle(_) => "DEPENDENCY_ORACLE_UNSUPPORTED",
+        }
+    }
+}
+
+/// Dependency keys of a bank set plus every bank that could not contribute a complete set.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DependencyScan {
+    pub keys: Vec<Pubkey>,
+    pub gaps: Vec<(Pubkey, DependencyGap)>,
+}
+
 #[cfg(feature = "crate_health")]
 pub fn dependency_keys<S: AccountSource + ?Sized>(
     state: &S,
     program: &Pubkey,
     banks: &[Pubkey],
 ) -> Vec<Pubkey> {
+    dependency_scan(state, program, banks).keys
+}
+
+#[cfg(feature = "crate_health")]
+pub fn dependency_scan<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    banks: &[Pubkey],
+) -> DependencyScan {
     use crate::protocol;
     let mut out: Vec<Pubkey> = Vec::new();
+    let mut gaps = Vec::new();
     for bk in banks {
         let Some((owner, _, data)) = state.account(bk) else {
+            gaps.push((*bk, DependencyGap::Missing));
             continue;
         };
-        if &owner != program || protocol::classify(data) != protocol::AccountType::Bank {
+        if &owner != program {
+            gaps.push((*bk, DependencyGap::ForeignOwner));
+            continue;
+        }
+        if protocol::classify(data) != protocol::AccountType::Bank {
+            gaps.push((*bk, DependencyGap::NotABank));
             continue;
         }
         // [P1B-02] Resized/unknown layouts get no dependencies; Health then fails closed.
-        let Ok(bank) = protocol::decode_bank(data) else {
-            continue;
+        let bank = match protocol::decode_bank(data) {
+            Ok(bank) => bank,
+            Err(e) => {
+                gaps.push((*bk, DependencyGap::UnknownLayout(e.to_string())));
+                continue;
+            }
         };
         out.push(bank.mint);
         // [FIX-27] dieselbe Quelle wie die Health-Observation (p0-cli-Semantik).
-        if let Ok(keys) = crate_impl::bank_observation_keys(&bank) {
-            out.extend(keys);
+        match crate_impl::bank_observation_keys(&bank) {
+            Ok(keys) => out.extend(keys),
+            Err(e) => gaps.push((*bk, DependencyGap::UnsupportedOracle(e.to_string()))),
         }
 
         // [FIX-109][R6] Integration state is part of canonical planning state, not an RPC
@@ -1082,7 +1185,7 @@ pub fn dependency_keys<S: AccountSource + ?Sized>(
     }
     out.sort_unstable_by_key(|k| k.to_bytes());
     out.dedup();
-    out
+    DependencyScan { keys: out, gaps }
 }
 
 #[cfg(all(test, feature = "crate_health"))]

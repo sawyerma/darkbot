@@ -704,8 +704,18 @@ impl ShadowOwner {
             #[cfg(feature = "crate_health")]
             if let Some(bk) = updated_bank {
                 let view = StateView(&self.st);
-                let required_now =
-                    darkbot_project0::health::dependency_keys(&view, &self.program, &[bk]);
+                // B16: an updated bank without a complete dependency set is reported.
+                let scan = darkbot_project0::health::dependency_scan(&view, &self.program, &[bk]);
+                for (bank, gap) in &scan.gaps {
+                    owner_log!(
+                        self,
+                        "dependency_gap: bank={} code={} detail={:?}",
+                        bank,
+                        gap.code(),
+                        gap
+                    );
+                }
+                let required_now = scan.keys;
                 let optional_now =
                     ata_candidates_for_bank(&view, &self.program, &bk, &self.liquidator);
                 let new_required: Vec<Pubkey> = required_now

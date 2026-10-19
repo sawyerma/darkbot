@@ -59,7 +59,7 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
 fn unsupported_version_corruption_checksum_and_every_truncation_fail_closed() {
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE04_TRANSITION, &serde_json::json!({"a":123}))
+    w.append_value(kind::FE01_READ, &serde_json::json!({"a":123}))
         .unwrap();
     w.seal(true).unwrap();
     drop(w);
@@ -92,20 +92,14 @@ fn unsupported_version_corruption_checksum_and_every_truncation_fail_closed() {
 fn restart_never_truncates_or_accepts_partial_tail() {
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(
-        kind::FE04_TRANSITION,
-        &serde_json::json!({"intent":"RESERVED"}),
-    )
-    .unwrap();
+    w.append_value(kind::FE01_READ, &serde_json::json!({"intent":"RESERVED"}))
+        .unwrap();
     w.sync().unwrap();
     drop(w);
     let mut w = Writer::resume(&path).unwrap();
     assert_eq!(w.next_seq(), 1);
-    w.append_value(
-        kind::FE04_TRANSITION,
-        &serde_json::json!({"intent":"UNKNOWN"}),
-    )
-    .unwrap();
+    w.append_value(kind::FE01_READ, &serde_json::json!({"intent":"UNKNOWN"}))
+        .unwrap();
     w.sync().unwrap();
     drop(w);
     OpenOptions::new()
@@ -131,7 +125,7 @@ fn malformed_length_payload_tags_and_depth_are_rejected() {
     assert!(encode(&v).is_err());
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE04_TRANSITION, &Value::Null).unwrap();
+    w.append_value(kind::FE01_READ, &Value::Null).unwrap();
     drop(w);
     let mut f = OpenOptions::new().write(true).open(&path).unwrap();
     f.seek(SeekFrom::Start(HEADER_LEN)).unwrap();
@@ -322,16 +316,14 @@ fn fsync_error_never_returns_durable_ack_and_poisoning_is_sticky() {
         let mut writer = Writer::create(&path).unwrap();
         writer
             .append_value(
-                kind::FE04_TRANSITION,
+                kind::FE01_READ,
                 &serde_json::json!({"reservation":"RESERVED"}),
             )
             .unwrap();
         writer.test_fail_next_sync(kind);
         assert_eq!(writer.sync().unwrap_err().kind(), kind);
         assert!(writer.sync().is_err());
-        assert!(writer
-            .append_value(kind::FE04_TRANSITION, &Value::Null)
-            .is_err());
+        assert!(writer.append_value(kind::FE01_READ, &Value::Null).is_err());
         assert!(writer.seal(true).is_err());
         let mut reader = Reader::open(&path).unwrap();
         assert!(reader.next_frame().unwrap().is_some());

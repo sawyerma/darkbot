@@ -76,7 +76,10 @@ pub struct ReporterHandle {
     thread: Option<JoinHandle<()>>,
     socket_path: PathBuf,
     lock_path: PathBuf,
-    _lock: fs::File,
+    socket_lock_path: PathBuf,
+    /// R22: owner locks of the generation and of the socket path; `None` once released, so a
+    /// second shutdown (`stop` and then `Drop`) never touches a successor's files.
+    locks: Option<(fs::File, fs::File)>,
     pub generation: u64,
     pub counters: Arc<Counters>,
 }
@@ -95,8 +98,13 @@ impl ReporterHandle {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        let _ = fs::remove_file(&self.socket_path);
-        let _ = fs::remove_file(&self.lock_path);
+        // R22: remove our paths only while we still hold their locks, exactly once.
+        if let Some(locks) = self.locks.take() {
+            let _ = fs::remove_file(&self.socket_path);
+            let _ = fs::remove_file(&self.socket_lock_path);
+            let _ = fs::remove_file(&self.lock_path);
+            drop(locks);
+        }
     }
 }
 
@@ -193,7 +201,8 @@ fn transport_status(
     }
     Some(TransportStatus {
         connected: health.map(|h| h.connected),
-        last_frame_age_ns: health.and_then(|h| h.last_frame_age_ns),
+        // R19: the age at this frame's send time, never a stale relative age.
+        last_frame_age_ns: health.and_then(TransportSnapshot::last_frame_age_ns_now),
         application_frames: health.map(|h| h.application_frames),
         last_slot: health.and_then(|h| h.last_slot),
         last_state: state.map(|s| s.state.clone()).unwrap_or_default(),
@@ -436,16 +445,35 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
         ));
     }
     let lock_path = cfg.generation_file.with_extension("generation.lock");
-    let lock = acquire_owner_lock(&lock_path)?;
-    if let Err(e) = remove_stale_socket(&cfg.socket_path) {
+    let lock = acquire_owner_lock(&lock_path, "generation")?;
+    // R22: the socket path has an owner lock of its own, so two reporters with different
+    // generation files serialize probe, stale removal and bind of the same socket.
+    let mut socket_lock_name = cfg.socket_path.as_os_str().to_owned();
+    socket_lock_name.push(".lock");
+    let socket_lock_path = PathBuf::from(socket_lock_name);
+    let socket_lock = match acquire_owner_lock(&socket_lock_path, "socket") {
+        Ok(l) => l,
+        Err(e) => {
+            let _ = fs::remove_file(&lock_path);
+            return Err(e);
+        }
+    };
+    let release = |socket: bool| {
+        if socket {
+            let _ = fs::remove_file(&cfg.socket_path);
+        }
+        let _ = fs::remove_file(&socket_lock_path);
         let _ = fs::remove_file(&lock_path);
+    };
+    if let Err(e) = remove_stale_socket(&cfg.socket_path) {
+        release(false);
         return Err(e);
     }
     // Refuse replacing someone else's UNIX socket, including a live server.
     let listener = match UnixListener::bind(&cfg.socket_path) {
         Ok(listener) => listener,
         Err(e) => {
-            let _ = fs::remove_file(&lock_path);
+            release(false);
             return Err(format!("reporter bind: {e}"));
         }
     };
@@ -458,8 +486,7 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
     let generation = match ready {
         Ok(n) => n,
         Err(e) => {
-            let _ = fs::remove_file(&cfg.socket_path);
-            let _ = fs::remove_file(&lock_path);
+            release(true);
             return Err(e);
         }
     };
@@ -484,8 +511,7 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
     let thread = match join {
         Ok(thread) => thread,
         Err(e) => {
-            let _ = fs::remove_file(&cfg.socket_path);
-            let _ = fs::remove_file(&lock_path);
+            release(true);
             return Err(e);
         }
     };
@@ -494,7 +520,8 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
         thread: Some(thread),
         socket_path: cfg.socket_path,
         lock_path,
-        _lock: lock,
+        socket_lock_path,
+        locks: Some((lock, socket_lock)),
         generation,
         counters,
     })
@@ -504,26 +531,27 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
 /// leftover lock file never blocks a restart, while a live owner keeps every second start out.
 /// The locked inode must still be the path's file (an owner removing it on shutdown races
 /// with a starter that opened it before).
-fn acquire_owner_lock(lock_path: &std::path::Path) -> Result<fs::File, String> {
-    use std::os::unix::fs::MetadataExt;
+fn acquire_owner_lock(lock_path: &std::path::Path, what: &str) -> Result<fs::File, String> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(lock_path)
-        .map_err(|e| format!("reporter generation lock inaccessible: {e}"))?;
+        .map_err(|e| format!("reporter {what} lock inaccessible: {e}"))?;
     match lock.try_lock() {
         Ok(()) => {}
         Err(fs::TryLockError::WouldBlock) => {
-            return Err("reporter generation already owned by a live process".into())
+            return Err(format!("reporter {what} already owned by a live process"))
         }
-        Err(fs::TryLockError::Error(e)) => return Err(format!("reporter generation lock: {e}")),
+        Err(fs::TryLockError::Error(e)) => return Err(format!("reporter {what} lock: {e}")),
     }
     let held = lock.metadata().map_err(|e| e.to_string())?;
     match fs::symlink_metadata(lock_path) {
         Ok(path) if path.dev() == held.dev() && path.ino() == held.ino() => Ok(lock),
-        _ => Err("reporter generation lock replaced concurrently; retry".into()),
+        _ => Err(format!("reporter {what} lock replaced concurrently; retry")),
     }
 }
 
@@ -740,6 +768,7 @@ mod contract_tests {
                 last_frame_age_ns: Some(1_500_000),
                 last_slot: Some(400_000_123),
                 application_frames: 42,
+                sampled_at: None,
             }),
             transport_state: Some(Arc::new(TransportStateSnapshot {
                 state: "RECOVERED".into(),
@@ -930,5 +959,75 @@ mod schema_id_guard {
             "schema_id.txt must hold exactly the id, no newline"
         );
         assert!(super::SCHEMA_ID.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    /// R22: shutdown releases our paths exactly once. A second shutdown of the same handle
+    /// (`stop` followed by `Drop`) after a successor started leaves the successor's socket and
+    /// locks in place.
+    #[test]
+    fn r22_second_shutdown_never_removes_a_successors_files() {
+        let dir = std::env::temp_dir().join(format!("p0r-own-{}-{}", std::process::id(), now_ns()));
+        fs::create_dir(&dir).unwrap();
+        let socket = PathBuf::from(format!(
+            "/tmp/p0r-own-{}-{:x}.sock",
+            std::process::id(),
+            now_ns() & 0xffff_ffff
+        ));
+        let cfg = ReporterConfig::new(socket.clone(), dir.join("generation"), "TEST_ONLY".into());
+        let mut first = start(cfg.clone(), StatusTap::new()).unwrap();
+        first.shutdown();
+        let second = start(cfg.clone(), StatusTap::new()).unwrap();
+        first.shutdown();
+        drop(first);
+        assert!(socket.exists(), "successor socket kept");
+        assert!(dir.join("generation.generation.lock").exists());
+        assert!(UnixStream::connect(&socket).is_ok());
+        second.stop();
+        assert!(!socket.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod transport_age_tests {
+    use super::*;
+
+    /// R19: a capture state sent later (e.g. after another block changed) carries the frame age
+    /// at its send time; a frozen transport therefore ages instead of looking fresh.
+    #[test]
+    fn r19_frame_age_is_advanced_to_the_send_time() {
+        let tap = StatusTap::new();
+        tap.publish_transport(TransportSnapshot {
+            connected: true,
+            last_frame_age_ns: Some(1_000_000),
+            ..Default::default()
+        });
+        let mut reader = tap.reader();
+        let first = reader.wait_changed(Duration::from_millis(5)).unwrap();
+        let sent_now = capture_state(&first)
+            .transport
+            .unwrap()
+            .last_frame_age_ns
+            .unwrap();
+        assert!(sent_now >= 1_000_000);
+        std::thread::sleep(Duration::from_millis(300));
+        let later = capture_state(&first)
+            .transport
+            .unwrap()
+            .last_frame_age_ns
+            .unwrap();
+        assert!(later >= 301_000_000, "{later}");
+        // No published age stays unknown, never 0.
+        tap.publish_transport(TransportSnapshot::default());
+        let unknown = reader.wait_changed(Duration::from_millis(5)).unwrap();
+        assert_eq!(
+            capture_state(&unknown).transport.unwrap().last_frame_age_ns,
+            None
+        );
     }
 }

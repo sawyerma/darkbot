@@ -75,6 +75,25 @@ fn try_lock(file: &File) -> std::io::Result<bool> {
     }
 }
 
+/// E7: serializes status probes and owner acquisition. Both hold this blocking lock only for a
+/// few syscalls (acquisition: test + record write; probe: record read + test), so a probe's
+/// momentary exclusive test of the owner lock never overlaps a starting owner's attempt, and a
+/// probe never reads a record while it is rewritten. The owner lock itself stays the only
+/// mutual exclusion of runtimes; this guard never admits a second owner.
+fn probe_guard(path: &Path) -> std::io::Result<File> {
+    let guard = open(&path.with_extension("lock-probe"))?;
+    loop {
+        // SAFETY: flock on an owned, open file descriptor.
+        if unsafe { libc::flock(guard.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Ok(guard);
+        }
+        let e = std::io::Error::last_os_error();
+        if e.kind() != std::io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
 fn open(path: &Path) -> std::io::Result<File> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -89,6 +108,8 @@ fn open(path: &Path) -> std::io::Result<File> {
 
 /// Acquires the runtime-owner lock or refuses with the current holder.
 pub fn acquire_owner(path: &Path, run_id: &str, mode: &str) -> Result<OwnerLock, String> {
+    let _probe =
+        probe_guard(path).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO {}: {e}", path.display()))?;
     let mut file =
         open(path).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO {}: {e}", path.display()))?;
     match try_lock(&file) {
@@ -151,6 +172,7 @@ pub fn owner_state(path: &Path) -> Result<OwnerState, String> {
     if !path.exists() {
         return Ok(OwnerState::NotRunning { last: None });
     }
+    let _probe = probe_guard(path).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))?;
     let mut file = open(path).map_err(|e| format!("RUNTIME_OWNER_LOCK_IO: {e}"))?;
     let mut held = String::new();
     file.read_to_string(&mut held)
@@ -177,6 +199,42 @@ pub fn owner_state(path: &Path) -> Result<OwnerState, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E7: 1000 owner hand-overs while another thread probes the state continuously: a start is
+    /// never refused by a probe, a probe never reads a half-written record, and while an owner
+    /// holds the lock a second owner is still refused.
+    #[test]
+    fn e7_status_probes_never_fail_a_concurrent_start() {
+        let d = std::env::temp_dir().join(format!("p0_ctl_e7_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let path = d.join("data/.p0-runtime.lock");
+        drop(acquire_owner(&path, "seed", "shadow").unwrap());
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (probe_path, probe_stop) = (path.clone(), stop.clone());
+        let prober = std::thread::spawn(move || {
+            let mut probes = 0u64;
+            while !probe_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                owner_state(&probe_path).expect("probe never fails");
+                probes += 1;
+            }
+            probes
+        });
+        for i in 0..1000 {
+            let owner = acquire_owner(&path, &format!("run{i}"), "shadow")
+                .unwrap_or_else(|e| panic!("start {i} refused by a probe: {e}"));
+            assert!(acquire_owner(&path, "second", "shadow")
+                .unwrap_err()
+                .starts_with("RUNTIME_OWNER_LOCKED"));
+            assert!(matches!(
+                owner_state(&path).unwrap(),
+                OwnerState::Running { .. }
+            ));
+            drop(owner);
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(prober.join().unwrap() > 0);
+        std::fs::remove_dir_all(d).unwrap();
+    }
 
     /// A second owner is refused while the first holds the lock, the state is readable from
     /// outside, and the lock is free again once the holder is gone.

@@ -452,12 +452,15 @@ impl WsRpcControlSource {
                     failures = failures.saturating_add(1);
                     halt.raise();
                     let t = self.clock.now_ns();
-                    let _ = sink.try_push(IngressEvent::Gap {
+                    // L3: a control/health event lost to a full queue is counted as dropped.
+                    if let Err(ChannelError::Full(_)) = sink.try_push(IngressEvent::Gap {
                         source: SourceKind::WsRpcControl,
                         from_slot: last_slot,
                         to_slot: None,
                         t_rx_ns: t,
-                    });
+                    }) {
+                        sink.give_up();
+                    }
                     let code = if !recovery.retry_after.is_zero() {
                         "WSS_HTTP_429"
                     } else {
@@ -496,11 +499,14 @@ impl WsRpcControlSource {
                             attempt,
                             last_slot,
                         );
-                        let _ = sink.try_push(IngressEvent::Fatal {
+                        // L3: a control/health event lost to a full queue is counted as dropped.
+                        if let Err(ChannelError::Full(_)) = sink.try_push(IngressEvent::Fatal {
                             source: SourceKind::WsRpcControl,
                             detail: "WSS_RECOVERY_EXHAUSTED".into(),
                             t_rx_ns: self.clock.now_ns(),
-                        });
+                        }) {
+                            sink.give_up();
+                        }
                         return Err(IngressError::Connect("WSS_RECOVERY_EXHAUSTED".into()));
                     }
                     let _ = e; // no secret-bearing Display
@@ -540,13 +546,16 @@ impl WsRpcControlSource {
         attempt: u32,
         last_slot: Option<u64>,
     ) {
-        let _ = sink.try_push(IngressEvent::Transport {
+        // L3: a control/health event lost to a full queue is counted as dropped.
+        if let Err(ChannelError::Full(_)) = sink.try_push(IngressEvent::Transport {
             state,
             code,
             attempt,
             last_slot,
             t_rx_ns: self.clock.now_ns(),
-        });
+        }) {
+            sink.give_up();
+        }
     }
 
     async fn session(
@@ -741,15 +750,20 @@ impl WsRpcControlSource {
                                                // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt.
             if t_rx_ns.saturating_sub(last_health_ns) >= 5_000_000_000 {
                 last_health_ns = t_rx_ns;
-                let _ = sink.try_push(IngressEvent::Health(super::SourceHealth {
-                    source: SourceKind::WsRpcControl,
-                    connected: true,
-                    last_frame_age_ns: last_frame_ns.map(|l| t_rx_ns.saturating_sub(l)),
-                    frames,
-                    reconnects: 0,
-                    last_slot: *last_slot,
-                    t_rx_ns,
-                }));
+                // L3: a control/health event lost to a full queue is counted as dropped.
+                if let Err(ChannelError::Full(_)) =
+                    sink.try_push(IngressEvent::Health(super::SourceHealth {
+                        source: SourceKind::WsRpcControl,
+                        connected: true,
+                        last_frame_age_ns: last_frame_ns.map(|l| t_rx_ns.saturating_sub(l)),
+                        frames,
+                        reconnects: 0,
+                        last_slot: *last_slot,
+                        t_rx_ns,
+                    }))
+                {
+                    sink.give_up();
+                }
             }
             let frame = match frame {
                 Err(_) => return Err(IngressError::Connect("idle timeout".into())),
