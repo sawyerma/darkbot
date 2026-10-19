@@ -250,7 +250,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 ## 6. B — finanziell relevante zweite Reviewrunde
 
 ### B1 — LIVE-Pipeline umgeht FE-04-Durable-Admission
-- [ ] **CRITICAL · FE-06/P8 BLOCKER · G-E/G-F.**
+- [x] **CRITICAL · FE-06/P8 BLOCKER · G-E/G-F.** · Fix `e08d3a7` · Test `b1_live_pipeline_never_sends_and_reserves_nothing` — `Pipeline` hat keinen `submit`/`submit_bundle`-Aufruf mehr; LIVE endet nach Build/Sign/Sim mit `LIVE_SEND_REQUIRES_FE04_ONE_SHOT`, ohne Reservierung. Senden nur im FE-04-One-Shot-Owner. Rest: FE-06-Freigabe/Mainnet NOT_RUN.
 - **Pfad:** `runtime/src/execution/pipeline.rs::evaluate`, `execution/one_shot.rs`, `execution/pending.rs` und StateOwner.
 - **Ist:** `Mode::Live` verwendet `safety.check` (RAM) und `submitter.submit/submit_bundle` direkt. `one_shot::Journal`, `Approval` und `SignedPayload` sind nicht an diesen Handoff gebunden. Derzeit über Runtime-/ObserveOnly-Sperren unerreichbar – das ist **keine** finanzielle FE-04-Qualifikation.
 - **Soll-Fix:** Direktes finanzielles Senden typisiert unerreichbar machen, sofern keine gültige *persistierte und fsync-bestätigte* Single-Flight-Approval/Intent/Reservation/Signatur-/TX-Payload-/Budget-Bindung vorliegt. Ausschließlich ein bestehender FE-04-One-Shot-Owner führt den tatsächlichen Send aus. Bundles, Tips, Prerequisites, Cost-Floor, Blockhash-Lifetime und UNKNOWN nach Transportfehler vollständig einschließen. Kein zweiter Execution-Core.
@@ -347,7 +347,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - [ ] **LOW / PROFILE_REQUIRED · P5/P6.** `builder.rs::receivership`: `Pubkey::from_str(JUP_SWAP_PROGRAM_ID).expect("static")` und `protocol_luts.clone()` je Plan. Nur nach messbarem Effekt und Parität optimieren, keine statischen gültigen Programmpins still umstellen. **Commit/Evidence:** —.
 
 ### B15 — Inventarprüfung berücksichtigt neuen Versuch nicht
-- [ ] **HIGH vor P8-INV · G-E/G-F.** `liquidation/src/safety.rs::validate_limits`: bereits ausstehendes Inventar gegen **worst-case neues** Collateral/Exposure und globale Holds prüfen, nicht nur aktuellen RAM-Bestand. Tests: Limit genau erreicht, Mehr-Asset, Unknown Exit, gleichzeitige Versuche; niemals Doppelreservierung. **Commit/Evidence:** —.
+- [x] **HIGH vor P8-INV · G-E/G-F.** · Fix `e08d3a7` · Test `b15_inventory_limit_counts_worst_case_new_and_in_flight_holds` — Limit = gehalten + In-flight-Holds + Worst-Case des neuen Versuchs (NoSwap: Kapital × (1+Premium), checked); Hold genau einmal freigegeben, UNKNOWN hält ihn. `liquidation/src/safety.rs::validate_limits`: bereits ausstehendes Inventar gegen **worst-case neues** Collateral/Exposure und globale Holds prüfen, nicht nur aktuellen RAM-Bestand. Tests: Limit genau erreicht, Mehr-Asset, Unknown Exit, gleichzeitige Versuche; niemals Doppelreservierung. **Commit/Evidence:** —.
 
 ### B16 — unbekanntes OracleSetup ohne aussagekräftige Dependency-Diagnose
 - [ ] **LOW · P1B/S2.** `health.rs::dependency_keys`: fehlende/unsupported Bank-/Oracle-Beziehung in gekapselte UNKNOWN-/Quarantine-Diagnose aufnehmen, aber nicht trotzdem subscribed/qualified vortäuschen. Tests: unknown oracle, missing bank, source identity. **Commit/Evidence:** —.
@@ -356,7 +356,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - [ ] **REVIEW_REQUIRED · S1/S2.** `solana/src/state/mod.rs::on_event(Account)` setzt `SlotStatus::Confirmed`. Tatsächlichen Subscription-Commitment-/Root-Vertrag untersuchen; Status darf nicht höher sein als belegte Source-Finality. Tests: processed/confirmed/finalized mit Root-Reconciliation. **Commit/Evidence:** —.
 
 ### B18 — doppelte Sign-Slot-Zuweisung / toter Pfadcode
-- [ ] **LOW · Code-Hygiene.** `runtime/src/execution/pipeline.rs`: `rec.sign_slot` doppelt, `let _ = Path::Rpc`/`SubmissionPath::Rpc`. Aufräumen nur, wenn T_sign-/Timeline-/Telemetry-Parität bleibt; keine Nebenänderung in FE-/Safety-Entscheidungen. Tests: Timeline-Sign-Slot. **Commit/Evidence:** —.
+- [x] **LOW · Code-Hygiene.** · Fix `e08d3a7` · Test `actual_shadow_pipeline_builds_signs_simulates_and_never_submits` (Sign-Slot) — eine Zuweisung bei T_sign, tote `let _ = Path::Rpc`-Zeilen entfernt. `runtime/src/execution/pipeline.rs`: `rec.sign_slot` doppelt, `let _ = Path::Rpc`/`SubmissionPath::Rpc`. Aufräumen nur, wenn T_sign-/Timeline-/Telemetry-Parität bleibt; keine Nebenänderung in FE-/Safety-Entscheidungen. Tests: Timeline-Sign-Slot. **Commit/Evidence:** —.
 
 
 ## 7. C — dritter Reviewdurchgang: Recovery, Reconciliation, Owner und Ingress
@@ -401,7 +401,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `DESIGN_GATE P8`. `realized_pnl=None` hält Safety korrekt fail-closed; aktuell kein freigegebener LIVE-Pfad. Nicht als jetzige Kapitalfreigabe oder LIVE-Fehlbuchung behaupten.
 
 ### C4 — P8-Landing-Reconcile benutzt confirmed statt finalized
-- [ ] **CRITICAL vor werttragender Reconciliation · CODE_CONFIRMED · G-E/G-F · P8/FE-04 · Cross-Ref C3.**
+- [x] **CRITICAL vor werttragender Reconciliation · CODE_CONFIRMED · G-E/G-F · P8/FE-04 · Cross-Ref C3.** · Fix `e08d3a7` · Test `c4_settlement_evidence_requires_finalized_status_and_receipt` — Fee/Outcome nur bei finalisiertem Status + finalisiertem Receipt desselben Slots; confirmed ⇒ `LandedUnfinalized` (Telemetrie, ungelöst), fehlender/fremder Receipt ⇒ Fee unbekannt.
 - **Pfad:** `solana/src/submit/rpc.rs::reconcile` ruft `transaction_with_meta(..., CommitmentConfig::confirmed())` und nutzt Signaturstatus ohne zwingende finalized-Barriere; `pending.rs::try_reconcile` klassifiziert daraus `LANDED_SUCCESS/FAILED`.
 - **Risiko korrekt eingeordnet:** **Heute** führt C3 bei `realized_pnl=None` trotzdem zu HALT und hält Kapital zurück. **Sobald C3 geschlossen wird**, könnte der jetzige confirmed-Landing-Pfad vor finalisiertem Chainbeleg Holdings lösen oder Outcome/PnL buchen. FE-04 hat bereits den strengeren `finalized_transaction`-Einstieg; keine Abschwächung dieses Vertrags.
 - **Fixvertrag:** Kritische Finance-Settlement-Funktion verwendet ausschließlich finalisierte Receipt-/Meta-/Signature-/Token-/Rent-Nachweise mit Slot-/Fork-/Source-Konsistenz; `confirmed` darf als **vorläufige Telemetrie** ohne `capital_released`/PnL verwendet werden. Finalization-Reorg/Gap/Proof-unavailable ⇒ UNKNOWN/HALT. Keine bloße Ersetzung einer einzigen Konstante, wenn Status und Metadaten unterschiedliche Commitments/Slots besitzen.
@@ -409,7 +409,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `DESIGN_GATE P8`. `confirmed` ist im alten Pending-Reconcile vorhanden; solange C3 Unknown liefert, kommt es zu **keiner** Kapitalfreigabe. Fatal würde die Kombination erst bei P8-PnL-Implementierung ohne Finality-Gate.
 
 ### C5 — finanzielle Reconciliation konkurriert im Winner-Workload-Budget
-- [ ] **MEDIUM vor P8-LIVE · CODE_CONFIRMED · G-E/G-F · P8/Provider.**
+- [x] **MEDIUM vor P8-LIVE · CODE_CONFIRMED · G-E/G-F · P8/Provider.** · Fix `e08d3a7` · Test `c5_reconcile_is_admitted_before_queued_winner_jobs_within_the_budget` — eigener `Workload::Reconcile` (höchste Priorität, eigener Pacing-Slot mit `analytics_rps`), gleiche globale RPS/Burst/Call/Byte-Grenzen; kein neues Budget.
 - **Pfad:** `runtime/src/orchestration/remote_workers.rs::start` und `solana/src/provider.rs`.
 - **Ist:** `winner-rpc` und `reconcile-rpc` konstruieren beide Clients mit `Workload::Winner`; Providerlimiter mappt diese Klasse auf `analytics_rps` (Default 2/s) und gemeinsamen maximalen Provider-RPS-/FREE_ONLY-Vertrag.
 - **Soll-Fix:** Separater, klar priorisierter Reconcile-Workload **innerhalb** derselben globalen echten Providergrenze, mit Admission-/Deadline-/Burst-Fairness, ohne neues ungeprüftes Requestbudget oder unbegrenzte Retry-Pfade. Darf C3/C4 nicht vortäuschen. Bei Quota-Mangel: UNKNOWN und konservativer HALT; Winner-Analytics darf blockiert werden, Finance-Evidence nicht still degradiert.
@@ -456,7 +456,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** zwei konkurrierende Kandidaten, andere Bot-Owner, Crash/Restart, UNKNOWN, NO_SWAP-Collateral, intra-slot Deltas, Idempotency; Inventory nie doppelt ausgegeben. **Commit/Evidence:** —.
 
 ### C12 — Reconcile-Timeout von 90 s ohne qualifizierte Chain-Abwesenheitsprüfung
-- [ ] **MEDIUM als Konfiguration; HIGH für Safety-Settlement · Cross-Ref C3/C4.**
+- [x] **MEDIUM als Konfiguration; HIGH für Safety-Settlement · Cross-Ref C3/C4.** · Fix `e08d3a7` · Test `c12_timeout_is_unknown_and_releases_nothing` — `RECONCILE_UNRESOLVED_AFTER_S` (90 s) ist Berichtsfrist, kein Abwesenheitsbeweis: UNRESOLVED/UNKNOWN, `exposure_released=0`, Holds bleiben. Rest: finalisierter Nonlanding-/lastValidBlockHeight-Beweis (C3).
 - **Pfad:** `state_owner/remote_workers.rs`: `try_reconcile(..., 90)`.
 - **Soll:** Explizite versionierte Deadline-/Provider-/Blockhash-Validity-Policy; bloßer Wallclock-Timeout ist niemals Beweis für `NotLanded`. Timeout führt UNKNOWN, bis finalized Nonlanding/lastValidBlockHeight mit ausreichend vollständiger History nachgewiesen wird.
 - **Tests:** 89/90/91 s und langsamer finalized Slot, RPC-429/GAP, nicht bestätigte Bundle-Signaturen, realer lastValidBlockHeight-Cutoff als synthetisches Fixture, kein falsches `EXPOSURE_RELEASED`. **Commit/Evidence:** —.
