@@ -252,4 +252,3 @@ export enum TopicId {
  */
 export const TopicIdSchema: GenEnum<TopicId> = /*@__PURE__*/
   enumDesc(file_darkbot_control_v1_topics, 2);
-

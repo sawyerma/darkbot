@@ -53,6 +53,22 @@ const HANDSHAKE_TIMEOUT_MS = 5_000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
 const RECONNECT_JITTER_MS = 500;
+// Marker of the one reload after a gateway rejected this bundle's schema or major version.
+const SKEW_RELOAD_KEY = "darkbot.gateway.skewReloadFor";
+
+/** One reload per server schema; a second rejection for the same server schema stays BLOCKED. */
+export function shouldReloadForSkew(status: WelcomeStatus, serverSchemaId: string, marker: string | null): boolean {
+  const skew = status === WelcomeStatus.REJECTED_SCHEMA || status === WelcomeStatus.REJECTED_MAJOR;
+  return skew && marker !== (serverSchemaId || "unknown");
+}
+
+function clearSkewMarker(): void {
+  try {
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(SKEW_RELOAD_KEY);
+  } catch {
+    // storage unavailable: nothing to clear
+  }
+}
 
 // Nur ein Pfad, nie ein fremder Host: same-origin ist Vertrag (Wire V1.3 §1/§7).
 function resolveSameOriginUrl(path: string): string {
@@ -272,6 +288,10 @@ export class GatewayConnection {
 
     if (w.status !== WelcomeStatus.ACCEPTED) {
       const why = WelcomeStatus[w.status] ?? String(w.status);
+      if (this.reloadForVersionSkew(w)) {
+        this.block(`${why}: reloading the frontend that matches the gateway`);
+        return;
+      }
       this.block(`${why}${w.rejectReason ? `: ${w.rejectReason}` : ""}`);
       return;
     }
@@ -297,10 +317,25 @@ export class GatewayConnection {
       return;
     }
     this.reconnectAttempt = 0;
+    clearSkewMarker();
     this.info = { ...this.info, connectionId: w.connectionId, limits };
     this.setStatus("OPEN");
     this.startLivenessWatch();
     for (const fn of this.welcomeListeners) fn(w);
+  }
+
+  // Version skew (gateway deployed after this page loaded) is not an attack: the page reloads once
+  // from the same origin and receives the matching bundle. A real incompatibility stays BLOCKED.
+  private reloadForVersionSkew(w: Welcome): boolean {
+    if (typeof window === "undefined" || typeof sessionStorage === "undefined") return false;
+    try {
+      if (!shouldReloadForSkew(w.status, w.schemaId, sessionStorage.getItem(SKEW_RELOAD_KEY))) return false;
+      sessionStorage.setItem(SKEW_RELOAD_KEY, w.schemaId || "unknown");
+    } catch {
+      return false;
+    }
+    window.location.reload();
+    return true;
   }
 
   // ---------------------------------------------------------------- heartbeat / liveness

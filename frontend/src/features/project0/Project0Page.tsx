@@ -5,6 +5,7 @@ import { useFleetDrafts } from "./hooks/useFleetDrafts";
 import { TabStrip } from "./components/PanelPrimitives";
 import { HealthSection } from "./components/HealthSection";
 import { ensureProject0Adapter } from "./api/project0Adapter";
+import { useNowMs } from "./hooks/useStatusClock";
 import { healthLabel } from "./model/statusSelectors";
 import { selectCapture, useProject0Store } from "./store/project0Store";
 import { OverviewPanel } from "./pages/OverviewPanel";
@@ -30,6 +31,15 @@ const TABS: ReadonlyArray<{ value: Project0Tab; label: string }> = [
   { value: "wallets", label: "Wallets" },
 ];
 
+function HealthBadge({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const capture = useProject0Store(selectCapture);
+  const progress = useProject0Store(s => s.streamProgress);
+  const nowMs = useNowMs();
+  const label = healthLabel(capture.topicStatus, capture.value, { nowMs, ...progress });
+  return <button type="button" className="p0-badge" aria-expanded={open}
+    onClick={onToggle}>● &nbsp; Health · {label} &nbsp;›</button>;
+}
+
 export default function Project0Page() {
   const [tab, setTab] = useState<Project0Tab>("overview");
   const [healthOpen, setHealthOpen] = useState(false);
@@ -39,8 +49,7 @@ export default function Project0Page() {
   return <div className="p0-graphite"><div className="p0-panel">
     <div className="p0-heading">
       <div><h1>Project 0 Control</h1><p>DarkBot · Marginfi Liquidator</p></div>
-      <button type="button" className="p0-badge" aria-expanded={healthOpen}
-        onClick={() => setHealthOpen(v => !v)}>● &nbsp; Health · {healthLabel(capture.topicStatus, capture.value)} &nbsp;›</button>
+      <HealthBadge open={healthOpen} onToggle={() => setHealthOpen(v => !v)}/>
     </div>
     <TabStrip label="Project 0 areas" options={TABS} value={tab} onChange={setTab}/>
     {healthOpen ? <HealthSection/> : null}

@@ -10,7 +10,7 @@ use axum::{
     extract::{Request, State},
     http::{
         header::{
-            CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY, SET_COOKIE,
+            CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY, SET_COOKIE,
             X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
         },
         HeaderMap, HeaderValue, StatusCode,
@@ -106,16 +106,73 @@ async fn spa(State(app): State<Arc<AppState>>, headers: HeaderMap, req: Request)
     let Some(dir) = app.cfg.static_dir.clone() else {
         return (StatusCode::NOT_FOUND, "static dir not configured").into_response();
     };
+    let path = req.uri().path().to_owned();
     // Do not serve index.html for nonexistent asset paths.
     let svc = ServeDir::new(&dir).not_found_service(ServeFile::new(dir.join("index.html")));
     let mut res = match svc.oneshot(req).await {
         Ok(r) => r.map(Body::new),
         Err(e) => match e {},
     };
+    let policy = cache_policy(&path, &res);
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static(policy));
     if !session::has_valid_session(&headers, &app.cfg, &app.sessions) {
         let t = app.sessions.issue();
         res.headers_mut()
             .append(SET_COOKIE, session::set_cookie(&app.cfg.session_cookie, &t));
     }
     res
+}
+
+/// Content-hashed Vite assets never change and may be cached forever. Everything else, above all
+/// index.html (it names the bundle and with it the schema id), is revalidated on every load.
+fn cache_policy(path: &str, res: &Response) -> &'static str {
+    let html = res
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("text/html"));
+    if path.starts_with("/assets/") && res.status() == StatusCode::OK && !html {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    fn res(status: StatusCode, ct: &str) -> Response {
+        let mut r = Response::new(Body::empty());
+        *r.status_mut() = status;
+        r.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_str(ct).unwrap());
+        r
+    }
+    #[test]
+    fn index_is_revalidated_and_hashed_assets_are_immutable() {
+        assert_eq!(
+            cache_policy("/", &res(StatusCode::OK, "text/html")),
+            "no-cache"
+        );
+        assert_eq!(
+            cache_policy(
+                "/project-0",
+                &res(StatusCode::OK, "text/html; charset=utf-8")
+            ),
+            "no-cache"
+        );
+        assert_eq!(
+            cache_policy(
+                "/assets/index-abc.js",
+                &res(StatusCode::OK, "text/javascript")
+            ),
+            "public, max-age=31536000, immutable"
+        );
+        // A vanished old asset falls back to index.html: never cache that under the asset URL.
+        assert_eq!(
+            cache_policy("/assets/old.js", &res(StatusCode::OK, "text/html")),
+            "no-cache"
+        );
+    }
 }

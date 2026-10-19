@@ -449,7 +449,11 @@ fn run_embedded_inner(
 
     let started = Instant::now();
     let ready_timeout = Duration::from_secs(cfg.ready_timeout_secs);
-    let duration_ns = cfg.duration_secs.saturating_mul(1_000_000_000);
+    let duration_ns = if cfg.duration_secs == 0 {
+        u64::MAX
+    } else {
+        cfg.duration_secs.saturating_mul(1_000_000_000)
+    };
     let mut ready_unix_s: Option<u64> = None;
     let mut window: Option<(u64, u64)> = None;
     let mut last_overflow = 0u64;
@@ -627,6 +631,13 @@ fn run_embedded_inner(
         }
     }
     let capture_end_ns = clock.now_ns();
+    // Freeze an open-ended window at the operator stop before draining queued ingress.
+    if cfg.duration_secs == 0 {
+        if let Some((start, _)) = window {
+            window = Some((start, capture_end_ns));
+            core.start_observation(start, capture_end_ns);
+        }
+    }
     if let Some(tap) = &status_tap {
         tap.publish_phase(|p| {
             p.phase = CapturePhase::Drain;

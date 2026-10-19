@@ -52,7 +52,7 @@ test("real reporter process reaches browser Health through the real gateway", as
     await page.screenshot({ path: info.outputPath("real-backend-health.png"), fullPage: true });
     reporter.stdin!.end();
     await exit(reporter);
-    await expect(health).toContainText("Completed · Source detached");
+    await expect(health).toContainText("Completed · no capture running");
     await expect(row(page, "Phase")).toContainText("CAPTURE_COMPLETE");
     reporter = startReporter();
     await expect(health).toContainText("Health · Live");

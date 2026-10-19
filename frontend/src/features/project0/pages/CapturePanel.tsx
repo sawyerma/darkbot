@@ -18,7 +18,7 @@ function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null;
     {run ? <>
       <DetailRow title="Status feed" value={`${topicStatus} · last reported values`}/>
       <DetailRow title="Run" value={`${run.runId} · ${run.source}/${run.commitment}`}/>
-      <DetailRow title="Configured duration" value={`${run.configuredDurationSeconds} s`}/>
+      <DetailRow title="Configured duration" value={run.configuredDurationSeconds === 0n ? "Until stopped" : `${run.configuredDurationSeconds} s`}/>
       <DetailRow title="Stream" value={t ? `${t.connected == null ? "unknown" : t.connected ? "connected" : "disconnected"} · frame age ${fmtAgeNs(t.lastFrameAgeNs)}${t.lastCode ? ` · last ${t.lastCode}` : ""}` : DASH}/>
       <DetailRow title="Transactions / liquidation events" value={`${orDash(counterOf(capture, "unique_transactions"))} / ${orDash(counterOf(capture, "liquidation_events"))}`}/>
       <DetailRow title="Verdict (live)" value={a?.verdict ?? DASH}/>
@@ -39,7 +39,7 @@ export function CapturePanel({ capture, topicStatus }: { capture: CaptureView | 
   <Section title="Raw data capture"><DetailRow title="Duration" value="Presets are optional"/>
     <div className="p0-pills">
       {PRESETS.map(d => <button key={d} className={preset === d ? "p0-selected" : ""} onClick={() => setPreset(d)}>{d === "custom" ? "Custom" : d}</button>)}
-      <button disabled title="The engine accepts fixed durations only (s/m/h/d).">Until stopped · not supported</button>
+      <button disabled title="Desktop capture runs until explicitly stopped; GUI control commands are not wired.">Until stopped · desktop control</button>
     </div>
     {preset === "custom" ? <div className="p0-formgrid"><label>Duration<input type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)}/></label>
       <label>Unit<select value={unit} onChange={e => setUnit(e.target.value)}><option value="s">Seconds</option><option value="m">Minutes</option><option value="h">Hours</option><option value="d">Days</option></select></label></div> : null}

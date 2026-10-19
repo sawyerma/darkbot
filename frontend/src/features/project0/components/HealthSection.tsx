@@ -17,7 +17,7 @@ export function HealthSection() {
   const a = c?.assessment ?? null;
   const w = c?.writer ?? null;
   const n = (name: CounterName) => orDash(counterOf(c, name));
-  const mode = capture.topicStatus === "LIVE" ? "Live via gateway"
+  const mode = capture.topicStatus === "LIVE" ? "Reporter connected via gateway"
     : capture.topicStatus === "DETACHED" ? "Source detached · last known values"
     : capture.topicStatus === "STALE" ? "Stale · last known values"
     : "Backend not connected";
@@ -32,11 +32,11 @@ export function HealthSection() {
 
   return <section className="p0-health" aria-label="System Health">
     <h2>System Health <span className="p0-quiet">· {mode}</span></h2>
-    <DetailRow title="Run" value={run ? `${run.runId} · ${run.source}/${run.commitment} · ${run.configuredDurationSeconds} s` : "Not reported"}/>
+    <DetailRow title="Run" value={run ? `${run.runId} · ${run.source}/${run.commitment} · ${run.configuredDurationSeconds === 0n ? "Until stopped" : `${run.configuredDurationSeconds} s`}` : "Not reported"}/>
     <DetailRow title="Phase" value={phase ? `${phaseLabel(c)} since ${fmtClockMs(phase.changedUnixMs)}${phase.stopReason ? ` · stop ${phase.stopReason}` : ""}${phase.endResult ? ` · ${phase.endResult}` : ""}` : DASH}/>
     <DetailRow title="Operational profile" value={s ? `${s.activated ? s.profile : "built-in defaults"} · ${s.parameterCount} parameters` : "Not reported"}/>
     <DetailRow title="Software & program identity" value={run ? `program ${run.programId}${a?.deploymentError ? ` · ${a.deploymentError}` : ""}` : "Not checked"}/>
-    <DetailRow title="RPC / WebSocket / slot progression" value={run || t ? `${run?.wsHost ?? DASH} · ${connection} · last slot ${orDash(counterOf(c, "last_observed_slot") ?? t?.lastSlot ?? null)} · frame age ${fmtAgeNs(t?.lastFrameAgeNs)}` : "Not checked"}/>
+    <DetailRow title="RPC / WebSocket / slot progression (last reported)" value={run || t ? `${run?.wsHost ?? DASH} · ${connection} · last slot ${orDash(counterOf(c, "last_observed_slot") ?? t?.lastSlot ?? null)} · frame age ${fmtAgeNs(t?.lastFrameAgeNs)}` : "Not checked"}/>
     <DetailRow title="Transport events" value={t || c?.market ? `${t?.lastState || "none"}${t?.lastCode ? ` ${t.lastCode}` : ""} · HTTP 429 ${n("transport_http_429")} · reconnect attempts ${n("transport_reconnect_attempts")} · recovered ${n("transport_recovered")}` : DASH}/>
     <DetailRow title="Wallet / provider / capacity" value="Not collected"/>
     <DetailRow title="RPC latency · p50 / p95 / p99" value="Not collected"/>

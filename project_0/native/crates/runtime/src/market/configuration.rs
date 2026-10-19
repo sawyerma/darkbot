@@ -157,14 +157,20 @@ impl MarketConfig {
             _ => None,
         };
         let min_sample_liquidations = num("P0_MARKET_MIN_SAMPLE", DEFAULT_MIN_SAMPLE_LIQUIDATIONS)?;
-        let duration_secs = num("P0_MARKET_DURATION_SECS", DEFAULT_DURATION_SECS)?;
+        let until_stopped = opt("P0_MARKET_DURATION_SECS").as_deref() == Some("until-stopped");
+        // Zero is the status/record sentinel for an explicitly unbounded observation.
+        let duration_secs = if until_stopped {
+            0
+        } else {
+            num("P0_MARKET_DURATION_SECS", DEFAULT_DURATION_SECS)?
+        };
         let ready_timeout_secs = num("P0_MARKET_READY_TIMEOUT_SECS", DEFAULT_READY_TIMEOUT_SECS)?;
         let drain_timeout_secs = num("P0_MARKET_DRAIN_TIMEOUT_SECS", DEFAULT_DRAIN_TIMEOUT_SECS)?;
         let heartbeat_secs = num("P0_MARKET_HEARTBEAT_SECS", DEFAULT_HEARTBEAT_SECS)?;
         let ingress_buffer =
             usize::try_from(num("P0_INGRESS_BUFFER", DEFAULT_INGRESS_BUFFER as u64)?)
                 .map_err(|_| "invalid P0_INGRESS_BUFFER".to_string())?;
-        if duration_secs == 0
+        if (duration_secs == 0 && !until_stopped)
             || ready_timeout_secs == 0
             || drain_timeout_secs == 0
             || heartbeat_secs == 0

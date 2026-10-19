@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type { StateMeta, TopicStatus } from "@/core/realtime";
 import type { CaptureView, SystemView } from "../model/status";
 
+import { NO_STREAM_PROGRESS, nextStreamProgress, type StreamProgressState } from "../model/streamFreshness";
+
 export interface TopicSlice<T> {
   value: T | null;
   meta: StateMeta | null;
@@ -16,6 +18,7 @@ function empty<T>(): TopicSlice<T> {
 }
 
 interface Project0Store {
+  streamProgress: StreamProgressState;
   system: TopicSlice<SystemView>;
   capture: TopicSlice<CaptureView>;
   applySystem: (value: SystemView, meta: StateMeta, receivedAtMs: number) => void;
@@ -25,12 +28,16 @@ interface Project0Store {
 }
 
 export const useProject0Store = create<Project0Store>()((set) => ({
+  streamProgress: NO_STREAM_PROGRESS,
   system: empty<SystemView>(),
   capture: empty<CaptureView>(),
   applySystem: (value, meta, receivedAtMs) =>
     set((s) => ({ system: { ...s.system, value, meta, receivedAtMs } })),
   applyCapture: (value, meta, receivedAtMs) =>
-    set((s) => ({ capture: { ...s.capture, value, meta, receivedAtMs } })),
+    set((s) => ({ capture: { ...s.capture, value, meta, receivedAtMs },
+      streamProgress: nextStreamProgress(s.streamProgress, value.transport?.applicationFrames ?? null,
+        receivedAtMs, JSON.stringify([value.run?.runId ?? "", meta.sourceId, String(meta.generation)])),
+    })),
   setSystemTopic: (topicStatus, reason) => set((s) => ({ system: { ...s.system, topicStatus, reason } })),
   setCaptureTopic: (topicStatus, reason) => set((s) => ({ capture: { ...s.capture, topicStatus, reason } })),
 }));

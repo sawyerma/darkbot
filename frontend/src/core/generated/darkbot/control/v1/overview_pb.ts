@@ -350,4 +350,3 @@ export enum FinanceQuality {
  */
 export const FinanceQualitySchema: GenEnum<FinanceQuality> = /*@__PURE__*/
   enumDesc(file_darkbot_control_v1_overview, 2);
-

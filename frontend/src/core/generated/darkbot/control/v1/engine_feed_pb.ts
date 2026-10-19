@@ -90,4 +90,3 @@ export type EngineFrame = Message<"darkbot.control.v1.EngineFrame"> & {
  */
 export const EngineFrameSchema: GenMessage<EngineFrame> = /*@__PURE__*/
   messageDesc(file_darkbot_control_v1_engine_feed, 1);
-

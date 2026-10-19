@@ -931,6 +931,16 @@ fn market_config_needs_no_keypair_and_validates_source_and_commitment() {
     ];
     let c = MarketConfig::from_lookup(&env(&logs), 0).unwrap();
     assert_eq!((c.source, c.duration_secs), (MarketSource::Logs, 600));
+    let continuous = MarketConfig::from_lookup(
+        &env(&[
+            base[0],
+            base[1],
+            ("P0_MARKET_DURATION_SECS", "until-stopped"),
+        ]),
+        0,
+    )
+    .unwrap();
+    assert_eq!(continuous.duration_secs, 0);
     assert!(MarketConfig::from_lookup(
         &env(&[base[0], base[1], ("P0_MARKET_SOURCE", "blocks")]),
         0

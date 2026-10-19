@@ -55,8 +55,10 @@ test("real binary contracts drive all panels and lifecycle states", async ({ pag
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const { c, capture } = await feed(page);
-  await expect(badge(page)).toContainText("Waiting for stream");
+  await expect(badge(page)).toContainText("Provider rate limit · HTTP 429 ×7");
   c.phase!.phase = CapturePhase.CAPTURE;
+  c.transport!.applicationFrames += 1n;
+  c.transport!.lastState = "CAPTURING";
   capture();
   await expect(badge(page)).toContainText("Degraded");
   await expect(page.getByText("12 / 3", { exact: true })).toBeVisible();
@@ -76,24 +78,24 @@ test("real binary contracts drive all panels and lifecycle states", async ({ pag
   capture(StateQuality.STALE);
   await expect(badge(page)).toContainText("Stale");
   capture(StateQuality.SOURCE_DETACHED);
-  await expect(badge(page)).toContainText("Source detached");
+  await expect(badge(page)).toContainText("Capture process gone");
   c.phase!.phase = CapturePhase.DRAIN;
   capture();
   await expect(badge(page)).toContainText("Finishing");
   c.phase!.phase = CapturePhase.ENDED;
   c.phase!.endResult = "CAPTURE_COMPLETE";
   capture(StateQuality.SOURCE_DETACHED);
-  await expect(badge(page)).toContainText("Completed · Source detached");
+  await expect(badge(page)).toContainText("Completed · no capture running");
   await tab(page, "Capture");
   await expect(page.getByText("CAPTURE_COMPLETE", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Until stopped · not supported" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Until stopped · desktop control" })).toBeDisabled();
   for (const name of ["Liquidator", "Analytics", "Wallets", "Overview"]) await tab(page, name);
   expect(errors).toEqual([]);
 });
 
 test("missing and malformed data never become healthy or fabricated values", async ({ page }) => {
   const { capture } = await feed(page, false);
-  await expect(badge(page)).toContainText("Unknown");
+  await expect(badge(page)).toContainText("No capture data");
   await tab(page, "Capture");
   await expect(page.getByText("No capture reported by Project 0.")).toBeVisible();
   capture(StateQuality.OK, new Uint8Array([0xff]));
@@ -112,4 +114,52 @@ test("mobile health and all-values view fit the viewport", async ({ page }, info
   await page.getByText("rpc_rps", { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath("values-mobile.png") });
   expect(overflow).toBe(false);
+});
+
+
+test("stream ages without new frames and resets on run and generation changes", async ({ page }) => {
+  await page.clock.install();
+  const { c, capture } = await feed(page);
+  c.phase!.phase = CapturePhase.CAPTURE;
+  c.transport!.lastState = "CAPTURING";
+  c.transport!.applicationFrames += 1n;
+  capture();
+  await expect(badge(page)).toContainText("Degraded");
+  await page.clock.fastForward(12_000);
+  await expect(badge(page)).toContainText("Solana stream stale");
+  c.run!.runId = "another-run";
+  c.transport!.applicationFrames += 100n;
+  capture();
+  await expect(badge(page)).toContainText("Checking stream");
+  c.transport!.applicationFrames += 1n;
+  capture();
+  await expect(badge(page)).toContainText("Degraded");
+  c.transport!.applicationFrames += 100n;
+  capture(StateQuality.OK, toBinary(CaptureStateSchema, c), 2n, 1n);
+  await expect(badge(page)).toContainText("Checking stream");
+});
+
+test("schema rejection reloads once and stays blocked without subscribing", async ({ page }) => {
+  let hellos = 0;
+  let subscriptions = 0;
+  await page.route("**/api/v1/session", route => route.fulfill({ status: 204 }));
+  await page.routeWebSocket("**/ws/v1/gateway", ws => {
+    ws.onMessage(data => {
+      const msg = fromBinary(ClientMessageSchema, typeof data === "string" ? Buffer.from(data) : data).msg;
+      if (msg.case === "subscribe") subscriptions++;
+      if (msg.case === "hello") {
+        hellos++;
+        ws.send(Buffer.from(toBinary(ServerMessageSchema, create(ServerMessageSchema, { msg: {
+          case: "welcome", value: { status: WelcomeStatus.REJECTED_SCHEMA, protocolMajor: 1,
+            schemaId: "incompatible-test-server", rejectReason: "schema mismatch" },
+        } }))));
+      }
+    });
+  });
+  await page.goto("/");
+  await expect(page.getByText(/^BLOCKED/)).toBeVisible();
+  await expect.poll(() => hellos).toBe(2);
+  await page.waitForTimeout(500);
+  expect(hellos).toBe(2);
+  expect(subscriptions).toBe(0);
 });

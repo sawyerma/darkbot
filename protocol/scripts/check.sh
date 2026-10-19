@@ -29,6 +29,7 @@ buf breaking --against "$p0_tmp/base/protocol"
 if [[ "$mode" == --generate ]]; then
   buf generate
   buf generate --template buf.gen.docs.yaml
+  python3 scripts/normalize-generated.py
   bash scripts/schema-id.sh
 else
   mkdir -p "$p0_tmp/protocol"
@@ -37,6 +38,7 @@ else
     cd "$p0_tmp/protocol"
     buf generate
     buf generate --template buf.gen.docs.yaml
+    python3 scripts/normalize-generated.py
     bash scripts/schema-id.sh
   )
   diff -ru "$p0_tmp/frontend/src/core/generated" ../frontend/src/core/generated

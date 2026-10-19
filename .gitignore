@@ -81,3 +81,8 @@ node_modules/
 
 # Local pinned bsc-geth source checkout for C1; provenance is versioned separately.
 /bsc/vendor/
+
+# Frontend build and browser test artifacts
+/frontend/dist/
+/frontend/test-results/
+/frontend/playwright-report/

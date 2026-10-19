@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # darkbotctl – lokale Steuerung von DarkBot auf macOS.
 #
-#   darkbotctl build                    Frontend, Gateway, Capture bauen (nur explizit)
-#   darkbotctl deploy                   gebaute Artefakte nach ~/Library/Application Support/DarkBot kopieren
-#   darkbotctl up                       Gateway als launchd-Dienst starten, Cockpit öffnen
-#   darkbotctl down                     Capture geordnet stoppen, dann Gateway stoppen
-#   darkbotctl restart-gateway          nur Gateway neu (Capture läuft weiter, Reporter verbindet neu)
-#   darkbotctl status | open
-#   darkbotctl logs [gateway|capture]
-#   darkbotctl capture start [sekunden] | stop | status
-#   darkbotctl install-apps             Eine DarkBot.app auf dem Schreibtisch
+# darkbotctl build | deploy             bauen (nur explizit) | Release nach ~/Library/Application Support/DarkBot
+# darkbotctl app                        ein Klick: Gateway sicherstellen, ggf. konfigurierte Capture, Cockpit öffnen
+# darkbotctl up [--no-open] | down      Gateway starten | Capture geordnet stoppen, dann Gateway stoppen
+# darkbotctl restart-gateway            nur Gateway neu (Capture läuft weiter, Reporter verbindet neu)
+# darkbotctl status | open | logs [gateway|capture]
+# darkbotctl capture start <sekunden> | stop | status
+# darkbotctl install-apps               DarkBot.app auf dem Schreibtisch (nach jeder Änderung dieser Datei)
 #
-# Grundsatz: Das Fenster ist nur eine Ansicht. Schließen beendet keinen Prozess.
-
+# Grundsätze: Das Fenster ist nur eine Ansicht; Schließen beendet keinen Prozess. Prozesse gehören
+# launchd: das Gateway (KeepAlive) und je Lauf genau eine Capture (kein Neustart, kein Login-Start).
+# Jede Lebenszyklus-Änderung läuft unter einem kurzen Lock; während eines Capture-Drains wird keiner gehalten.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,32 +20,158 @@ LOGDIR="$HOME/Library/Logs/DarkBot"
 RUNDIR="$HOME/.darkbot/run"
 LABEL="com.darkbot.gateway"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+CAPTURE_LABEL="com.darkbot.capture"
+# Deliberately outside LaunchAgents: a capture never starts by itself at login.
+CAPTURE_PLIST="$RUNDIR/$CAPTURE_LABEL.plist"
 DOMAIN="gui/$(id -u)"
 URL="http://127.0.0.1:8787/"
 SOCK="/tmp/darkbot/project0.sock"
+GEN_LOCK="$HOME/.darkbot/p0.generation.lock"
 GATEWAY_BUILD="$ROOT/gateway/target/release/darkbot-gateway"
 DIST_BUILD="$ROOT/frontend/dist"
-CAPTURE_BIN="$ROOT/project_0/native/target/release/p0-market-capture-reported"
-CAPTURE_PID="$RUNDIR/capture.pid"
+CAPTURE_BUILD="$ROOT/project_0/native/target/release/p0-market-capture-reported"
+CAPTURE_BIN="$APP_HOME/current/p0-market-capture-reported"
+APP_CONF="${DARKBOT_APP_CONF:-$HOME/.darkbot/app.conf}"
+LOCKFILE="$RUNDIR/lifecycle.lock"
+RESULT_FILE="$RUNDIR/capture.result"
+LAUNCH_FILE="$RUNDIR/capture.launch"
+STOPPING_FILE="$RUNDIR/capture.stopping"
+# Longest orderly capture stop (drain + seal) this tool waits for; also launchd's ExitTimeOut.
+STOP_BUDGET_S=330
+STOP_SENT=0
+STOP_LAUNCH=""
+STOP_PID=""
+PORT=8787
+GEN_FILE="$HOME/.darkbot/p0.generation"
+ENV_FILES="$ROOT/project_0/config/market.public.env:$ROOT/project_0/.env"
+DOWN_FILE="$RUNDIR/lifecycle.down"
+# Tests must explicitly opt into a private namespace. No production label/path may leak into it.
+if [ -n "${DARKBOT_TEST_DIR:-}" ]; then
+  case "$DARKBOT_TEST_DIR" in /private/tmp/darkbot-test.*) ;; *) die_test=1; echo "invalid isolated test directory" >&2; exit 2;; esac
+  [ -f "$DARKBOT_TEST_DIR/.isolated" ] || exit 2
+  APP_HOME="$DARKBOT_TEST_DIR/app"; LOGDIR="$DARKBOT_TEST_DIR/logs"; RUNDIR="$DARKBOT_TEST_DIR/run"
+  LABEL="com.darkbot.test.${DARKBOT_TEST_DIR##*.}.gateway"
+  CAPTURE_LABEL="com.darkbot.test.${DARKBOT_TEST_DIR##*.}.capture"
+  PLIST="$RUNDIR/gateway.plist"; CAPTURE_PLIST="$RUNDIR/capture.plist"
+  PORT="${DARKBOT_TEST_PORT:?isolated port required}"
+  case "$PORT" in ''|*[!0-9]*) exit 2;; esac
+  [ "$PORT" -gt 1024 ] && [ "$PORT" -lt 65536 ] && [ "$PORT" != 8787 ] || exit 2
+  URL="http://127.0.0.1:$PORT/"
+  SOCK="$DARKBOT_TEST_DIR/p.sock"; GEN_FILE="$RUNDIR/p0.generation"; GEN_LOCK="$RUNDIR/p0.generation.lock"
+  APP_CONF="$DARKBOT_TEST_DIR/app.conf"; ENV_FILES="$DARKBOT_TEST_DIR/capture.env"
+  CAPTURE_BIN="$APP_HOME/current/p0-market-capture-reported"
+  LOCKFILE="$RUNDIR/lifecycle.lock"; RESULT_FILE="$RUNDIR/capture.result"
+  LAUNCH_FILE="$RUNDIR/capture.launch"; STOPPING_FILE="$RUNDIR/capture.stopping"; DOWN_FILE="$RUNDIR/lifecycle.down"
+  export DARKBOT_NO_OPEN=1
+fi
+GEN_NEXT="${GEN_FILE%.*}.next"
+umask 077
 
-mkdir -p "$APP_HOME/releases" "$LOGDIR" "$RUNDIR" /tmp/darkbot "$HOME/.darkbot"
+mkdir -p "$APP_HOME/releases" "$LOGDIR" "$RUNDIR" "$(dirname "$SOCK")" "$(dirname "$PLIST")"
+chmod 700 "$HOME/.darkbot" "$RUNDIR"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'darkbotctl: %s\n' "$*" >&2; exit 1; }
 
 gateway_loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
-port_pid() { /usr/sbin/lsof -nP -tiTCP:8787 -sTCP:LISTEN 2>/dev/null | head -n1 || true; }
+port_pid() { /usr/sbin/lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -n1 || true; }
 healthy() { /usr/bin/curl -fsS --max-time 2 "${URL}healthz" >/dev/null 2>&1; }
-capture_pid() { if [ -f "$CAPTURE_PID" ]; then cat "$CAPTURE_PID"; fi; }
-capture_running() {
-  local p comm
-  p="$(capture_pid)"
-  case "$p" in ''|*[!0-9]*) return 1;; esac
-  kill -0 "$p" 2>/dev/null || return 1
-  comm="$(ps -p "$p" -o comm= 2>/dev/null || true)"
-  [ "${comm##*/}" = "p0-market-capture-reported" ]
+
+# Numeric setting from $APP_CONF (read, never sourced); second argument is the default.
+app_conf() {
+  local v=""
+  if [ -f "$APP_CONF" ]; then v="$(sed -n "s/^$1=\([A-Za-z0-9_-][A-Za-z0-9_-]*\)$/\1/p" "$APP_CONF" | tail -n1)"; fi
+  printf '%s' "${v:-${2:-}}"
 }
 
+# ---------------------------------------------------------------- lifecycle lock
+# shlock(1) writes our PID and itself takes over a lock whose owner is dead. A live owner that
+# is not darkbotctl (PID reuse) is reported and never stolen. Release only by the owner.
+lock_holder() { cat "$LOCKFILE" 2>/dev/null || true; }
+release_lock() { if [ "$(lock_holder)" = "$$" ]; then rm -f "$LOCKFILE"; fi; return 0; }
+locked() {
+  local i=0 holder cmd
+  until /usr/bin/shlock -f "$LOCKFILE" -p $$; do
+    holder="$(lock_holder)"
+    cmd="$(ps -p "$holder" -o command= 2>/dev/null || true)"
+    case "$cmd" in
+      ''|*darkbotctl*) ;;
+      *) die "Lock $LOCKFILE gehört PID $holder ($cmd), kein darkbotctl – nichts übernommen" ;;
+    esac
+    i=$((i+1))
+    [ "$i" -lt 300 ] || die "eine andere DarkBot-Steuerung (PID $holder) hält den Lock seit über 30 s"
+    [ $((i % 50)) -ne 0 ] || say "warte auf laufende DarkBot-Steuerung (PID $holder) …"
+    sleep 0.1
+  done
+  trap release_lock EXIT
+  "$@"
+  release_lock
+  trap - EXIT
+}
+
+# ---------------------------------------------------------------- capture identity (launchd)
+capture_loaded() { launchctl list "$CAPTURE_LABEL" >/dev/null 2>&1; }
+capture_pid() {
+  launchctl list "$CAPTURE_LABEL" 2>/dev/null | sed -n 's/^[[:space:]]*"PID" = \([0-9][0-9]*\);$/\1/p' || true
+}
+capture_last_exit() {
+  launchctl list "$CAPTURE_LABEL" 2>/dev/null \
+    | sed -n 's/^[[:space:]]*"LastExitStatus" = \(-\{0,1\}[0-9][0-9]*\);$/\1/p' || true
+}
+capture_running() { [ -n "$(capture_pid)" ]; }
+launch_id() { cat "$LAUNCH_FILE" 2>/dev/null || true; }
+capture_stopping() { [ -n "$(capture_pid)" ] && [ "$(cat "$STOPPING_FILE" 2>/dev/null || true)" = "$(launch_id)" ]; }
+assert_not_down() {
+  [ -f "$DOWN_FILE" ] || return 0
+  local owner; owner="$(cat "$DOWN_FILE")"
+  if kill -0 "$owner" 2>/dev/null || capture_running; then
+    die "Geordneter Gesamtstopp läuft – kein Start; ggf. down erneut ausführen"
+  fi
+  rm -f "$DOWN_FILE"
+}
+# A capture binary not owned by our launchd job (e.g. started by hand). Only ever used to refuse.
+foreign_capture() {
+  [ -z "${DARKBOT_TEST_DIR:-}" ] || return 0
+  local p own; own="$(capture_pid)"
+  for p in $(/usr/bin/pgrep -f 'p0-market-capture-reported$' 2>/dev/null || true); do
+    if [ "$p" != "$own" ]; then echo "$p"; return 0; fi
+  done
+}
+
+# After a crash only: remove reporter socket and generation lock that no live process holds.
+clean_stale_reporter() {
+  local f holders
+  for f in "$SOCK" "$GEN_LOCK" "$GEN_NEXT"; do
+    [ -e "$f" ] || continue
+    holders="$(/usr/sbin/lsof -t -- "$f" 2>/dev/null | tr '\n' ' ' || true)"
+    [ -z "$holders" ] || die "$f wird noch gehalten (PID $holders) – nichts entfernt"
+    say "entferne verwaiste Datei nach Absturz: $f"
+    rm -f -- "$f"
+  done
+}
+
+# ---------------------------------------------------------------- run result
+result_field() {
+  [ -f "$RESULT_FILE" ] || return 0
+  sed -n "s/^$1=\([A-Za-z0-9_.-]*\)$/\1/p" "$RESULT_FILE" | tail -n1
+}
+last_result_line() {
+  if [ -f "$RESULT_FILE" ] && [ "$(result_field launch_id)" = "$(launch_id)" ]; then printf 'run=%s code=%s' "$(result_field run_id)" "$(result_field code)"
+  else printf 'kein Ergebnis'; fi
+}
+# Cooldown only if the run THIS tool launched last ended without a market stream.
+recent_provider_failure() {
+  local ended cooldown
+  [ -f "$RESULT_FILE" ] && [ -f "$LAUNCH_FILE" ] || return 1
+  [ "$(result_field launch_id)" = "$(cat "$LAUNCH_FILE")" ] || return 1
+  [ "$(result_field code)" = "MARKET_OBSERVER_STREAM_NOT_READY" ] || return 1
+  ended="$(result_field ended_unix_s)"
+  [ -n "$ended" ] || return 1
+  cooldown=600
+  [ $(( $(date +%s) - ended )) -lt "$cooldown" ]
+}
+
+# ---------------------------------------------------------------- launchd definitions
 write_plist() {
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -54,24 +179,69 @@ write_plist() {
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array><string>$APP_HOME/current/darkbot-gateway</string></array>
-  <key>WorkingDirectory</key><string>$APP_HOME/current</string>
+  <key>ProgramArguments</key><array><string>$(printf '%s' "$APP_HOME/current/darkbot-gateway" | xml_escape)</string></array>
+  <key>WorkingDirectory</key><string>$(printf '%s' "$APP_HOME/current" | xml_escape)</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>DARKBOT_GATEWAY_STATIC_DIR</key><string>$APP_HOME/current/dist</string>
-    <key>DARKBOT_GATEWAY_FEEDS</key><string>project0=$SOCK</string>
+    $(plist_env DARKBOT_GATEWAY_STATIC_DIR "$APP_HOME/current/dist")
+$(plist_env DARKBOT_GATEWAY_BIND "127.0.0.1:$PORT")
+$(plist_env DARKBOT_GATEWAY_GENERATION_FILE "$RUNDIR/gateway.generation")
+    $(plist_env DARKBOT_GATEWAY_FEEDS "project0=$SOCK")
     <key>RUST_LOG</key><string>info</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>5</integer>
-  <key>StandardOutPath</key><string>$LOGDIR/gateway.log</string>
-  <key>StandardErrorPath</key><string>$LOGDIR/gateway.log</string>
+  <key>StandardOutPath</key><string>$(printf '%s' "$LOGDIR/gateway.log" | xml_escape)</string>
+  <key>StandardErrorPath</key><string>$(printf '%s' "$LOGDIR/gateway.log" | xml_escape)</string>
 </dict>
 </plist>
 EOF
 }
 
+xml_escape() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+plist_env() { printf '    <key>%s</key><string>%s</string>\n' "$1" "$(printf '%s' "$2" | xml_escape)"; }
+
+# One definition per run: duration, log, result and launch id; never KeepAlive, never at login.
+write_capture_plist() {
+  local secs="$1" log="$2" launch="$3" k extra=""
+  # A launchd job does not inherit this shell: forward the few per-run overrides explicitly.
+  for k in P0_WS_URL P0_MARKET_READY_TIMEOUT_SECS P0_REPORT_MIN_INTERVAL_MS; do
+    if [ -n "${!k:-}" ]; then extra="$extra$(plist_env "$k" "${!k}")"$'\n'; fi
+  done
+  ( umask 077; cat > "$CAPTURE_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$CAPTURE_LABEL</string>
+  <key>ProgramArguments</key><array><string>$(printf '%s' "$CAPTURE_BIN" | xml_escape)</string></array>
+  <key>WorkingDirectory</key><string>$(printf '%s' "$APP_HOME/current" | xml_escape)</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+$(plist_env P0_CAPTURE_BIN "$CAPTURE_BIN")
+$(plist_env P0_ENV_FILE "$ENV_FILES")
+$(plist_env P0_MARKET_OUT_DIR "$APP_HOME/data/market")
+$(plist_env P0_REPORT_SOCKET "$SOCK")
+$(plist_env P0_REPORT_GENERATION_FILE "$GEN_FILE")
+$(plist_env P0_MARKET_RUN_ID "app-$launch")
+$(plist_env P0_MARKET_DURATION_SECS "$secs")
+$(plist_env P0_RESULT_FILE "$RESULT_FILE")
+$(plist_env P0_LAUNCH_ID "$launch")
+$extra  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>ExitTimeOut</key><integer>$STOP_BUDGET_S</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>$(printf '%s' "$log" | xml_escape)</string>
+  <key>StandardErrorPath</key><string>$(printf '%s' "$log" | xml_escape)</string>
+</dict>
+</plist>
+EOF
+  )
+}
+
+# ---------------------------------------------------------------- build / deploy / window
 cmd_build() {
   command -v npm >/dev/null || die "npm nicht im PATH – im Terminal ausführen"
   command -v cargo >/dev/null || die "cargo nicht im PATH – im Terminal ausführen"
@@ -84,19 +254,23 @@ cmd_build() {
 cmd_deploy() {
   [ -x "$GATEWAY_BUILD" ] || die "Gateway nicht gebaut: darkbotctl build"
   [ -f "$DIST_BUILD/index.html" ] || die "Frontend nicht gebaut: darkbotctl build"
+  [ -x "$CAPTURE_BUILD" ] || die "Capture nicht gebaut: darkbotctl build"
   local rel; rel="$APP_HOME/releases/$(date +%Y%m%dT%H%M%S)"
   mkdir -p "$rel"
   cp "$GATEWAY_BUILD" "$rel/darkbot-gateway"
+  cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
   cp -R "$DIST_BUILD" "$rel/dist"
   git -C "$ROOT" rev-parse HEAD > "$rel/COMMIT" 2>/dev/null || echo unknown > "$rel/COMMIT"
   ln -s "$rel" "$APP_HOME/.current-$$"
   mv -fh "$APP_HOME/.current-$$" "$APP_HOME/current"
-  # Retain previous immutable releases; never delete a running binary.
+  # Previous releases stay; a running capture keeps executing the binary it was started from.
   say "deployed $(cat "$rel/COMMIT")"
   if gateway_loaded; then say "Gateway läuft noch mit altem Stand: darkbotctl restart-gateway"; fi
+  if capture_running; then say "laufende Capture nutzt bis zu ihrem Ende den vorherigen Release"; fi
 }
 
 cmd_open() {
+  if [ -n "${DARKBOT_NO_OPEN:-}" ]; then say "Fenster nicht geöffnet (DARKBOT_NO_OPEN)"; return 0; fi
   if [ -d "/Applications/Google Chrome.app" ]; then
     # Eigenes Fenster ohne Tabs/Adressleiste, eigenes Profil (kollidiert nicht mit deinem Chrome)
     open -na "Google Chrome" --args --app="$URL" --user-data-dir="$HOME/.darkbot/chrome-profile" --no-first-run
@@ -105,15 +279,13 @@ cmd_open() {
   fi
 }
 
-cmd_up() {
+# ---------------------------------------------------------------- gateway
+cmd_up_inner() {
+  assert_not_down
   [ -x "$APP_HOME/current/darkbot-gateway" ] || die "nicht deployed: darkbotctl build && darkbotctl deploy"
   local p; p="$(port_pid)"
   if [ -n "$p" ] && ! gateway_loaded; then
-    local name; name="$(basename "$(ps -p "$p" -o comm=)")"
-    [ "$name" = "darkbot-gateway" ] || die "Port 8787 belegt von '$name' (pid $p) – nicht von DarkBot, nichts beendet"
-    say "beende manuell gestarteten Gateway (pid $p)"
-    kill -INT "$p"
-    local i=0; while kill -0 "$p" 2>/dev/null && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+    die "Port $PORT gehört keinem verwalteten Gateway (PID $p); kein fremder Prozess wird beendet"
   fi
   if ! gateway_loaded; then
     write_plist
@@ -124,75 +296,16 @@ cmd_up() {
   say "gateway: $(/usr/bin/curl -fsS "${URL}healthz")"
   if [ "${1:-}" != "--no-open" ]; then cmd_open; fi
 }
+cmd_up() { locked cmd_up_inner "${1:-}"; }
 
-cmd_restart_gateway() {
+_restart_gateway() {
+  assert_not_down
   gateway_loaded || die "Gateway läuft nicht: darkbotctl up"
   launchctl kickstart -k "$DOMAIN/$LABEL"
   say "Gateway neu gestartet (Capture unberührt, Reporter verbindet neu)"
 }
 
-cmd_capture_start() {
-  local secs="${1:-300}"
-  case "$secs" in ''|*[!0-9]*) die "Dauer in Sekunden angeben, z. B. 300";; esac
-  if capture_running; then die "Capture läuft bereits (pid $(capture_pid))"; fi
-  local old; old="$(capture_pid)"
-  if [ -n "$old" ]; then
-    if kill -0 "$old" 2>/dev/null; then
-      die "PID-Datei verweist auf fremden oder unbekannten Prozess $old; kein Überschreiben"
-    fi
-    rm -f "$CAPTURE_PID"
-  fi
-  [ -x "$CAPTURE_BIN" ] || die "Capture nicht gebaut: darkbotctl build"
-  [ -f "$ROOT/project_0/.env" ] || die "project_0/.env fehlt"
-  local log; log="$LOGDIR/capture-$(date +%Y%m%dT%H%M%S).log"
-  (
-    cd "$ROOT" || exit 1
-    P0_MARKET_DURATION_SECS="$secs" nohup /bin/bash project_0/operations/p0-capture-reported.sh >"$log" 2>&1 </dev/null &
-    echo "$!" > "$CAPTURE_PID"
-  )
-  local i=0
-  until capture_running || [ "$i" -ge 30 ]; do
-    kill -0 "$(capture_pid)" 2>/dev/null || break
-    sleep 0.1; i=$((i+1))
-  done
-  capture_running || die "Capture nicht gestartet. Log: $log"
-  local p; p="$(capture_pid)"
-  nohup /usr/bin/caffeinate -i -w "$p" >/dev/null 2>&1 &
-  ln -sfn "$log" "$LOGDIR/capture-latest.log"
-  say "Capture gestartet pid=$p dauer=${secs}s"
-  say "Log: darkbotctl logs capture   ·   Terminal und Fenster dürfen geschlossen werden"
-}
-
-cmd_capture_stop() {
-  local p; p="$(capture_pid)"
-  if ! capture_running; then
-    if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
-      die "PID-Datei gehört keinem identifizierten Capture-Prozess: $p; nicht anfassen"
-    fi
-    say "keine Capture aktiv"; rm -f "$CAPTURE_PID"; return 0
-  fi
-  say "Capture pid $p: geordneter Stopp (SIGINT wie Ctrl-C) – Journal wird versiegelt, bis zu ~3 min"
-  kill -TERM "$p"  # The reporter entrypoint installs the operator-stop handler.
-  local i=0
-  while kill -0 "$p" 2>/dev/null; do
-    sleep 1; i=$((i+1))
-    if [ $((i % 15)) -eq 0 ]; then say "  Drain/Finalisierung läuft … ${i}s"; fi
-    if [ $i -ge 300 ]; then
-      die "Capture nach 300 s nicht beendet – wird NICHT automatisch gekillt (Journal). Prüfen: darkbotctl logs capture"
-    fi
-  done
-  rm -f "$CAPTURE_PID"
-  say "Capture beendet"
-}
-
-cmd_capture_status() {
-  if capture_running; then say "capture: läuft (pid $(capture_pid))"
-  else say "capture: läuft nicht"; rm -f "$CAPTURE_PID"; fi
-  if [ -e "$LOGDIR/capture-latest.log" ]; then tail -n 3 "$LOGDIR/capture-latest.log"; fi
-}
-
-cmd_down() {
-  cmd_capture_stop
+_gateway_down() {
   if gateway_loaded; then
     launchctl bootout "$DOMAIN/$LABEL" || true
     rm -f "$PLIST"
@@ -202,6 +315,146 @@ cmd_down() {
   fi
 }
 
+# ---------------------------------------------------------------- capture
+_capture_start() {
+  assert_not_down
+  local secs="${1:-}" log launch p foreign i=0 previous_generation
+  previous_generation="$(cat "$GEN_FILE" 2>/dev/null || echo 0)"
+  case "$secs" in until-stopped) ;; ''|*[!0-9]*) die "Dauer in Sekunden angeben, z. B. darkbotctl capture start 600 (keine Standarddauer)";; esac
+  if [ "$secs" != until-stopped ]; then
+    [ "$secs" -ge 60 ] && [ "$secs" -le 86400 ] || die "Dauer: until-stopped oder 60..86400 Sekunden"
+  fi
+  if capture_running; then
+    if capture_stopping; then say "Capture beendet sich gerade (pid $(capture_pid)) – kein neuer Start"
+    else say "Capture läuft bereits (pid $(capture_pid))"; fi
+    return 0
+  fi
+  foreign="$(foreign_capture)"
+  [ -z "$foreign" ] || die "Capture-Prozess $foreign läuft außerhalb von launchd – kein zweiter Start (Stopp: kill -TERM $foreign)"
+  [ -x "$CAPTURE_BIN" ] || die "Capture nicht deployed: darkbotctl build && darkbotctl deploy"
+  if [ -z "${DARKBOT_TEST_DIR:-}" ]; then [ -f "$ROOT/project_0/.env" ] || die "project_0/.env fehlt"; fi
+  # launchd cannot read a Desktop checkout under macOS privacy controls. Stage private config
+  # with the user-invoked controller; execute only immutable deployed binaries outside Desktop.
+  if [ -z "${DARKBOT_TEST_DIR:-}" ]; then
+    cp "$ROOT/project_0/config/market.public.env" "$RUNDIR/capture.public.env"
+    cp "$ROOT/project_0/.env" "$RUNDIR/capture.private.env"
+    chmod 600 "$RUNDIR/capture.public.env" "$RUNDIR/capture.private.env"
+    ENV_FILES="$RUNDIR/capture.public.env:$RUNDIR/capture.private.env"
+  fi
+  mkdir -p "$APP_HOME/data/market"
+  clean_stale_reporter
+  # Not running (checked above, under the lock): unloading the finished job cannot hit a live run.
+  if capture_loaded; then launchctl bootout "$DOMAIN/$CAPTURE_LABEL" 2>/dev/null || true; fi
+  log="$LOGDIR/capture-$(date +%Y%m%dT%H%M%S)-$$.log"
+  launch="$(/usr/bin/uuidgen | tr '[:upper:]' '[:lower:]')"
+  write_capture_plist "$secs" "$log" "$launch"
+  rm -f "$STOPPING_FILE" "$RUNDIR/capture.pid"
+  printf '%s\n' "$launch" > "$LAUNCH_FILE"
+  launchctl bootstrap "$DOMAIN" "$CAPTURE_PLIST" || die "launchd hat die Capture nicht angenommen. Log: $log"
+  # A launchd PID alone may still be starting or already failing. Require the new reporter epoch.
+  until [ -S "$SOCK" ] && [ "$(cat "$GEN_FILE" 2>/dev/null || echo 0)" != "$previous_generation" ] && capture_running; do
+    i=$((i+1))
+    [ "$i" -lt 100 ] || die "Reporter nicht bereit (Exit $(capture_last_exit)). Log: $log"
+    if [ -f "$RESULT_FILE" ] && [ "$(result_field launch_id)" = "$launch" ]; then
+      die "Capture beim Start beendet: $(result_field code). Log: $log"
+    fi
+    sleep 0.1
+  done
+  p="$(capture_pid)"
+  nohup /usr/bin/caffeinate -i -w "$p" >/dev/null 2>&1 &
+  ln -sfn "$log" "$LOGDIR/capture-latest.log"
+  say "Capture gestartet pid=$p dauer=$secs launch=$launch"
+}
+
+# Under the lock only the signal is sent; draining is awaited without holding it.
+_capture_stop_signal() {
+  local p; p="$(capture_pid)"
+  if [ -z "$p" ]; then say "keine Capture aktiv"; return 0; fi
+  STOP_LAUNCH="$(launch_id)"; STOP_PID="$p"
+  printf '%s\n' "$STOP_LAUNCH" > "$STOPPING_FILE"
+  say "Capture pid $p: geordneter Stopp (SIGTERM) – Drain und Versiegelung, bis zu ${STOP_BUDGET_S}s"
+  launchctl kill SIGTERM "$DOMAIN/$CAPTURE_LABEL" || { [ "$(capture_pid)" != "$STOP_PID" ] || die "Capture konnte nicht signalisiert werden"; }
+  STOP_SENT=1
+}
+capture_wait_stopped() {
+  local i=0
+  while [ "$(launch_id)" = "$STOP_LAUNCH" ] && [ "$(capture_pid)" = "$STOP_PID" ]; do
+    sleep 1; i=$((i+1))
+    if [ $((i % 15)) -eq 0 ]; then say "  Drain/Finalisierung läuft … ${i}s"; fi
+    if [ "$i" -ge "$STOP_BUDGET_S" ]; then
+      die "Capture nach ${STOP_BUDGET_S}s nicht beendet – wird NICHT gekillt (Journal). Prüfen: darkbotctl logs capture"
+    fi
+  done
+  locked _clear_stopping
+  say "Capture beendet (Exit $(capture_last_exit)) · $(last_result_line)"
+}
+_clear_stopping() {
+  if [ "$(cat "$STOPPING_FILE" 2>/dev/null || true)" = "$STOP_LAUNCH" ]; then rm -f "$STOPPING_FILE"; fi
+}
+cmd_capture_stop() {
+  locked _capture_stop_signal
+  if [ "$STOP_SENT" -eq 1 ]; then capture_wait_stopped; fi
+  return 0
+}
+
+cmd_capture_status() {
+  local p f; p="$(capture_pid)"; f="$(foreign_capture)"
+  if [ -n "$p" ]; then
+    if capture_stopping; then say "capture: beendet sich (pid $p)"; else say "capture: läuft (pid $p, launchd)"; fi
+  else
+    say "capture: läuft nicht · letzter Lauf: $(last_result_line)"
+  fi
+  [ -z "$f" ] || say "WARNUNG: Capture-Prozess $f läuft außerhalb von launchd; Stopp: kill -TERM $f"
+  if [ -e "$LOGDIR/capture-latest.log" ]; then tail -n 3 "$LOGDIR/capture-latest.log"; fi
+}
+
+# ---------------------------------------------------------------- one click
+app_inner() {
+  local auto secs
+  say "[1/3] Gateway"
+  cmd_up_inner --no-open
+  say "[2/3] Project_0 Read-only-Capture"
+  if capture_running; then
+    if capture_stopping; then say "Capture beendet sich gerade – kein neuer Start"
+    else say "Capture läuft (pid $(capture_pid))"; fi
+  else
+    auto="$(app_conf P0_APP_AUTOSTART_CAPTURE 0)"
+    secs="$(app_conf P0_APP_CAPTURE_SECS)"
+    if [ "$auto" != 1 ] || [ -z "$secs" ]; then
+      say "AUTOSTART_OFF: keine automatische Beobachtung konfiguriert (P0_APP_AUTOSTART_CAPTURE=1 und P0_APP_CAPTURE_SECS in $APP_CONF)"
+    elif recent_provider_failure; then
+      say "PROVIDER_COOLDOWN: letzter Lauf endete ohne Marktstream – kein automatischer Neustart vor Ablauf der Sperre"
+    else
+      ( trap - EXIT; _capture_start "$secs" ) || say "CAPTURE_START_FAILED – Cockpit öffnet trotzdem (darkbotctl logs capture)"
+    fi
+  fi
+  say "[3/3] Cockpit"
+  cmd_open
+}
+cmd_app() { locked app_inner; }
+
+_down_begin() {
+  local owner
+  owner="$(cat "$DOWN_FILE" 2>/dev/null || true)"
+  if [ -n "$owner" ] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
+    die "Gesamtstopp läuft bereits (PID $owner)"
+  fi
+  printf '%s\n' "$$" > "$DOWN_FILE"
+  _capture_stop_signal
+}
+_down_finish() {
+  [ "$(cat "$DOWN_FILE" 2>/dev/null || true)" = "$$" ] || die "Stopp-Zuordnung geändert"
+  capture_running && die "Capture noch aktiv; Gateway bleibt an"
+  _gateway_down
+  rm -f "$DOWN_FILE"
+}
+cmd_down() {
+  locked _down_begin
+  if [ "$STOP_SENT" -eq 1 ]; then capture_wait_stopped; fi
+  locked _down_finish
+}
+
+# ---------------------------------------------------------------- status
 cmd_status() {
   if gateway_loaded; then say "gateway: läuft (launchd)"; else say "gateway: gestoppt"; fi
   local p; p="$(port_pid)"
@@ -221,14 +474,16 @@ cmd_logs() {
 }
 
 cmd_is_up() { gateway_loaded; }
+cmd_is_healthy() { gateway_loaded && healthy; }
 
 cmd_status_short() {
   local g c
-  if gateway_loaded; then g="Gateway läuft"; else g="Gateway gestoppt"; fi
-  if capture_running; then c="Capture läuft"; else c="keine Capture"; fi
-  printf '%s · %s\n' "$g" "$c"
+  if cmd_is_healthy; then g="Gateway läuft"; elif gateway_loaded; then g="Gateway antwortet nicht"; else g="Gateway gestoppt"; fi
+  if capture_stopping; then c="Capture beendet sich"; elif capture_running; then c="Capture läuft"; else c="keine Capture"; fi
+  printf '%s · %s · Aufnahme: %s\n' "$g" "$c" "$(app_conf P0_APP_CAPTURE_SECS nicht-konfiguriert)"
 }
 
+# ---------------------------------------------------------------- desktop app
 make_icns() {
   local png="$1" dest="$2" temp iconset n
   temp="$(mktemp -d)"
@@ -250,40 +505,51 @@ cmd_install_apps() {
   compiled="$tmp/DarkBot.app"
   backup="$HOME/Desktop/.DarkBot.previous.$$"
   mkdir -p "$HOME/Desktop"
-
   cat > "$src" <<EOF
 set ctl to quoted form of "$ctl"
 set logf to quoted form of "$LOGDIR/app.log"
+set runApp to ctl & " app >> " & logf & " 2>&1 || { tail -n 5 " & logf & " >&2; exit 1; }"
 try
-  set isUp to true
-  try
-    do shell script ctl & " is-up"
-  on error
-    set isUp to false
-  end try
-  if isUp is false then
-    do shell script ctl & " up >> " & logf
-    display notification "Cockpit geöffnet." with title "DarkBot"
-  else
-    set info to do shell script ctl & " status-short"
-    set choice to button returned of (display dialog ("DarkBot läuft." & return & info) buttons {"Stoppen", "Abbrechen", "Cockpit öffnen"} default button "Cockpit öffnen" cancel button "Abbrechen" with title "DarkBot")
-    if choice is "Cockpit öffnen" then
-      do shell script ctl & " open"
-    else if choice is "Stoppen" then
-      if info contains "Capture läuft" then
-        display dialog "Capture läuft. Geordnet stoppen und Journal versiegeln?" buttons {"Abbrechen", "Stoppen"} default button "Abbrechen" cancel button "Abbrechen" with title "DarkBot" with icon caution
-      end if
-      with timeout of 420 seconds
-        do shell script ctl & " down >> " & logf
-      end timeout
-      display notification "DarkBot gestoppt." with title "DarkBot"
-    end if
-  end if
-on error number -128
-  return
+	set isUp to true
+	try
+		do shell script ctl & " is-capturing"
+	on error
+		set isUp to false
+	end try
+	if isUp is false then
+		set progress total steps to 3
+		set progress description to "DarkBot startet"
+		set progress additional description to "Gateway · Project_0 · Cockpit"
+		set progress completed steps to 1
+		with timeout of 120 seconds
+			do shell script runApp
+		end timeout
+		set progress completed steps to 3
+		display notification (do shell script ctl & " status-short") with title "DarkBot"
+	else
+		set info to do shell script ctl & " status-short"
+		set choice to button returned of (display dialog ("DarkBot läuft." & return & info) buttons {"Stoppen", "Abbrechen", "Cockpit öffnen"} default button "Cockpit öffnen" cancel button "Abbrechen" with title "DarkBot" giving up after 15)
+		if choice is "Stoppen" then
+			if info contains "Capture läuft" then
+				display dialog "Capture läuft. Geordnet stoppen und Journal versiegeln?" buttons {"Abbrechen", "Stoppen"} default button "Abbrechen" cancel button "Abbrechen" with title "DarkBot" with icon caution
+			end if
+			set progress description to "DarkBot stoppt"
+			set progress additional description to "Drain und Versiegelung, bis zu 5 Minuten"
+			with timeout of 420 seconds
+				do shell script ctl & " down >> " & logf & " 2>&1 || { tail -n 5 " & logf & " >&2; exit 1; }"
+			end timeout
+			display notification "DarkBot gestoppt." with title "DarkBot"
+		else
+			with timeout of 120 seconds
+				do shell script runApp
+			end timeout
+		end if
+	end if
+on error errMsg number errNum
+	if errNum is -128 then return
+	display dialog ("DarkBot:" & return & errMsg & return & return & "Details: ~/Library/Logs/DarkBot/app.log") buttons {"OK"} default button "OK" with title "DarkBot" with icon stop
 end try
 EOF
-
   if ! /usr/bin/osacompile -o "$compiled" "$src"; then
     rm -rf "$tmp"; die "AppleScript-Kompilierung fehlgeschlagen; alte App bleibt erhalten"
   fi
@@ -305,7 +571,6 @@ EOF
   if ! /usr/bin/codesign --force --sign - "$compiled"; then
     rm -rf "$tmp"; die "Codesign fehlgeschlagen; alte App bleibt erhalten"
   fi
-
   if [ -e "$app" ] || [ -L "$app" ]; then mv "$app" "$backup"; fi
   if mv "$compiled" "$app"; then
     rm -rf "$backup"
@@ -314,32 +579,32 @@ EOF
     rm -rf "$tmp"; die "Installation fehlgeschlagen"
   fi
   rm -rf "$tmp"
-  rm -f "$HOME/Desktop/DarkBot Stop.app" "$HOME/Desktop/DarkBot Stop"
-  rm -rf "$HOME/Applications/DarkBot Stop.app" "$HOME/Applications/DarkBot.app"
   touch "$app"
   say "Ein Symbol: $app"
 }
 
-
 case "${1:-status}" in
   build) cmd_build ;;
   deploy) cmd_deploy ;;
+  app) cmd_app ;;
   up) shift; cmd_up "${1:-}" ;;
   down) cmd_down ;;
-  restart-gateway) cmd_restart_gateway ;;
+  restart-gateway) locked _restart_gateway ;;
   status) cmd_status ;;
   open) cmd_open ;;
   logs) shift; cmd_logs "${1:-gateway}" ;;
   capture)
     shift
     case "${1:-status}" in
-      start) shift; cmd_capture_start "${1:-300}" ;;
+      start) shift; locked _capture_start "${1:-}" ;;
       stop) cmd_capture_stop ;;
       status) cmd_capture_status ;;
-      *) die "capture start [sekunden] | stop | status" ;;
+      *) die "capture start <sekunden> | stop | status" ;;
     esac ;;
+  is-capturing) capture_running ;;
   is-up) cmd_is_up ;;
+  is-healthy) cmd_is_healthy ;;
   status-short) cmd_status_short ;;
   install-apps) cmd_install_apps ;;
-  *) die "unbekannt: $1 (build|deploy|up|down|restart-gateway|status|open|logs|capture|install-apps)" ;;
+  *) die "unbekannt: $1 (build|deploy|app|up|down|restart-gateway|status|open|logs|capture|install-apps)" ;;
 esac

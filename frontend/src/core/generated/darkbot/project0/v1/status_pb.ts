@@ -90,4 +90,3 @@ export type StatusProjection = Message<"darkbot.project0.v1.StatusProjection"> &
  */
 export const StatusProjectionSchema: GenMessage<StatusProjection> = /*@__PURE__*/
   messageDesc(file_darkbot_project0_v1_status, 0);
-
