@@ -5,7 +5,9 @@
 //! amount through an executable route.
 
 use crate::health::{
-    crate_impl::{bank_observation_keys, crate_error_text, CrateHealth},
+    crate_impl::{
+        bank_observation_keys, crate_error_text, maintenance_emode_config_of, CrateHealth,
+    },
     AccountSource, HealthEngine, HealthError,
 };
 use crate::protocol;
@@ -20,8 +22,8 @@ use marginfi_type_crate::constants::{
     ZERO_AMOUNT_THRESHOLD,
 };
 use marginfi_type_crate::types::{
-    reconcile_emode_configs, BalanceSide, Bank, BankOperationalState, EmodeConfig, MarginfiAccount,
-    OraclePriceType, PriceBias, RequirementType,
+    BalanceSide, Bank, BankOperationalState, MarginfiAccount, OraclePriceType, PriceBias,
+    RequirementType,
 };
 use solana_sdk::account::Account;
 use solana_sdk::account_info::IntoAccountInfo;
@@ -249,8 +251,8 @@ fn supported_liability_bank(bank: &Bank) -> bool {
     supported_generic_bank(bank)
 }
 
-/// Asset positions, liability positions and the liabilities' emode configs of one account.
-type Positions = (Vec<Position>, Vec<Position>, Vec<EmodeConfig>);
+/// Asset and liability positions of one account.
+type Positions = (Vec<Position>, Vec<Position>);
 
 impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
     fn raw(&self, key: &Pubkey) -> Result<(Pubkey, u64, &'a [u8]), String> {
@@ -267,6 +269,31 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         protocol::decode_bank(data)
             .map(std::borrow::Cow::into_owned)
             .map_err(|e| format!("{e}: {key}"))
+    }
+
+    /// B12: the maintenance EMODE configuration exactly as Health computes it — every active
+    /// liability balance (also those this sizer cannot size) and the group's same-asset EMODE.
+    fn maintenance_emode(
+        &self,
+        account: &MarginfiAccount,
+    ) -> Result<marginfi_type_crate::types::ReconciledEmodeConfig, String> {
+        let (owner, _, gdata) = self.raw(&self.group)?;
+        if owner != self.program {
+            return Err(format!(
+                "UNKNOWN_LAYOUT: group {} owner {owner}",
+                self.group
+            ));
+        }
+        let group = protocol::decode_group(gdata).map_err(|e| format!("{e}: group"))?;
+        let banks = account
+            .lending_account
+            .balances
+            .iter()
+            .filter(|b| b.is_active() && !b.is_empty(BalanceSide::Liabilities))
+            .map(|b| self.bank(&b.bank_pk))
+            .collect::<Result<Vec<_>, _>>()?;
+        let refs: Vec<&Bank> = banks.iter().collect();
+        Ok(maintenance_emode_config_of(&refs, &group))
     }
 
     fn fee_snapshot_and_rate(&self) -> Result<(FeeSnapshot, I80F48), String> {
@@ -490,7 +517,6 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
     fn positions(&self, account: &MarginfiAccount, clock: &Clock) -> Result<Positions, String> {
         let mut assets = Vec::new();
         let mut liabs = Vec::new();
-        let mut liability_emodes = Vec::new();
         for balance in &account.lending_account.balances {
             if !balance.is_active() {
                 continue;
@@ -548,11 +574,10 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             if is_asset {
                 assets.push(p);
             } else {
-                liability_emodes.push(bank.emode.emode_config);
                 liabs.push(p);
             }
         }
-        Ok((assets, liabs, liability_emodes))
+        Ok((assets, liabs))
     }
 
     /// Returns every protocol-valid generic Asset×Liability sizing candidate. The caller must
@@ -603,8 +628,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             leader_schedule_epoch: 0,
             unix_timestamp: now_unix_s,
         };
-        let (assets, liabs, emodes) = self.positions(account, &clock)?;
-        let reconciled = reconcile_emode_configs(emodes, RequirementType::Maintenance);
+        let (assets, liabs) = self.positions(account, &clock)?;
+        let reconciled = self.maintenance_emode(account)?;
         let headroom = I80F48::from_num(self.headroom_bps)
             .checked_div(I80F48::from_num(BPS))
             .ok_or_else(|| "headroom division".to_string())?;
@@ -637,7 +662,11 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 let asset_weight = asset
                     .bank
                     .get_asset_weight(RequirementType::Maintenance, &reconciled);
-                let liab_weight: I80F48 = liab.bank.config.liability_weight_maint.into();
+                // B12: the same API Health uses (pinned: exactly `liability_weight_maint`).
+                let liab_weight: I80F48 = liab
+                    .bank
+                    .config
+                    .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
                 let asset_ratio = asset
                     .maintenance_unweighted_value
                     .checked_div(asset.equity_value)
@@ -882,6 +911,98 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B12: sizing uses the maintenance EMODE configuration Health computes — including the
+    /// group's same-asset EMODE weight, which the former `reconcile_emode_configs` of the sized
+    /// liabilities alone did not contain — and the same liability weight API.
+    #[test]
+    fn b12_sizing_emode_and_liability_weight_equal_health() {
+        use marginfi_type_crate::constants::BANK_SAME_ASSET_EMODE_ELIGIBLE;
+        use marginfi_type_crate::types::{
+            reconcile_emode_configs, MarginfiGroup, OracleSetup, WrappedI80F48,
+        };
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for Source {
+            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        let (program, group_key, mint, oracle) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let bank = |weight: f64| {
+            let mut b: Bank = bytemuck::Zeroable::zeroed();
+            b.mint = mint;
+            b.config.oracle_setup = OracleSetup::PythPushOracle;
+            b.config.oracle_keys[0] = oracle;
+            b.flags = BANK_SAME_ASSET_EMODE_ELIGIBLE;
+            b.config.liability_weight_maint = WrappedI80F48::from(I80F48::from_num(weight));
+            b
+        };
+        let (bank_a, bank_b) = (bank(1.25), bank(1.1));
+        let mut group: marginfi_type_crate::types::MarginfiGroup = bytemuck::Zeroable::zeroed();
+        group.same_asset_emode_maint_leverage = u32::MAX / 10;
+        let (ka, kb) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let mut acc: MarginfiAccount = bytemuck::Zeroable::zeroed();
+        for (i, k) in [ka, kb].into_iter().enumerate() {
+            let b = &mut acc.lending_account.balances[i];
+            b.active = 1;
+            b.bank_pk = k;
+            b.liability_shares = WrappedI80F48::from(I80F48::from_num(1_000));
+        }
+        let data = |disc: [u8; 8], bytes: &[u8]| [disc.as_slice(), bytes].concat();
+        let state = Source(HashMap::from([
+            (
+                ka,
+                (
+                    program,
+                    data(protocol::DISC_BANK, bytemuck::bytes_of(&bank_a)),
+                ),
+            ),
+            (
+                kb,
+                (
+                    program,
+                    data(protocol::DISC_BANK, bytemuck::bytes_of(&bank_b)),
+                ),
+            ),
+            (
+                group_key,
+                (
+                    program,
+                    data(protocol::DISC_MARGINFI_GROUP, bytemuck::bytes_of(&group)),
+                ),
+            ),
+        ]));
+        let sizer = ProtocolSizer {
+            state: &state,
+            program,
+            group: group_key,
+            headroom_bps: 0,
+        };
+        let sized = sizer.maintenance_emode(&acc).unwrap();
+        let health = maintenance_emode_config_of(&[&bank_a, &bank_b], &group);
+        assert_eq!(sized, health);
+        assert_eq!(health.same_asset.mint, mint, "same-asset EMODE active");
+        let liabilities_only = reconcile_emode_configs(
+            [bank_a.emode.emode_config, bank_b.emode.emode_config],
+            RequirementType::Maintenance,
+        );
+        assert_ne!(sized, liabilities_only, "the former sizing path lacked it");
+        let _: &MarginfiGroup = &group;
+        for w in [0.0, 1.0, 1.1, 1.25, 3.5] {
+            let b = bank(w);
+            assert_eq!(
+                b.config
+                    .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities),
+                I80F48::from(b.config.liability_weight_maint)
+            );
+        }
+    }
 
     #[test]
     fn near_full_rounding_uses_source_backed_repay_all() {

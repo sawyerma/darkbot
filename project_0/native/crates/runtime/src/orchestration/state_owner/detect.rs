@@ -56,9 +56,28 @@ impl ShadowOwner {
                     let base_account_hash = hash(&base_record.data);
 
                     let cached = if trigger == "integration_projection" {
-                        self.projection_cache.remove(&acct).filter(|c| {
-                            c.base_account_hash == base_account_hash && base_record.slot == slot
-                        })
+                        match self.projection_cache.remove(&acct) {
+                            Some(c)
+                                if c.base_account_hash == base_account_hash
+                                    && base_record.slot == slot =>
+                            {
+                                // E9: a projection is reused only while every dependency it
+                                // was requested with is still at the same canonical revision.
+                                if dependency_fingerprint(&self.st, &c.dependencies)
+                                    == c.dependency_fingerprint
+                                {
+                                    Some(c)
+                                } else {
+                                    owner_log!(
+                                        self,
+                                        "projection_dependencies_changed: account={} at=consume",
+                                        acct
+                                    );
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
                     } else {
                         self.projection_cache.remove(&acct);
                         None
@@ -127,6 +146,16 @@ impl ShadowOwner {
                                 return Ok(false);
                             };
 
+                            // E9: the dependency set of this projection and its revisions now.
+                            let observation = darkbot_project0::health::crate_impl::CrateHealth {
+                                state: &view,
+                                group: self.group,
+                            }
+                            .observation_accounts(&acct)
+                            .unwrap_or_default();
+                            let dependencies =
+                                projection_dependencies(&acct, &refreshes, &observation);
+                            let fingerprint = dependency_fingerprint(&self.st, &dependencies);
                             let projection_plan = tx::TxPlan {
                                 version: tx::BuildVersion::V0,
                                 payer: self.liquidator,
@@ -164,6 +193,8 @@ impl ShadowOwner {
                                 t_rx_ns: t_rx,
                                 tx: built.tx,
                                 targets,
+                                dependencies,
+                                dependency_fingerprint: fingerprint,
                             };
                             match self.remote.projection_jobs.try_push(work) {
                                 Ok(()) => {
@@ -307,6 +338,7 @@ impl ShadowOwner {
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
                 zero_prefund_qualified: self.zero_prefund_enabled,
+                instructions: &self.instruction_table,
                 v1_plans: darkbot_solana::tx::v1_build_capability()
                     && darkbot_solana::submit::SubmissionAdapter::supports_tx_version(
                         &self.submitter,

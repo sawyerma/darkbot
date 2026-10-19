@@ -95,7 +95,7 @@ impl WsRpcConfig {
         let mut config = WsRpcConfig {
             ws_url,
             subscription,
-            commitment: "confirmed",
+            commitment: crate::state::STATE_COMMITMENT,
             reconnect_initial: Duration::from_millis(500),
             reconnect_max: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(60),

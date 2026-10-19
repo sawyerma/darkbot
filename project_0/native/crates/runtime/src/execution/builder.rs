@@ -17,7 +17,7 @@ pub mod p0 {
     use darkbot_project0::funding::{self, FundingClass, FundingContext};
     use darkbot_project0::health::crate_impl::CrateHealth;
     use darkbot_project0::health::{AccountSource, HealthEngine};
-    use darkbot_project0::planner::{RouteKind, Step};
+    use darkbot_project0::planner::{InstructionTable, RouteKind};
     use darkbot_project0::receivership::{builders, ReceivershipParams};
     use darkbot_solana::tx::{self, BuildError, BuildVersion, Resources, TxLimits, TxPlan};
     use marginfi_type_crate::types::Bank;
@@ -26,7 +26,6 @@ pub mod p0 {
     use solana_sdk::instruction::{AccountMeta, Instruction};
     use solana_sdk::pubkey::Pubkey;
     use spl_associated_token_account::get_associated_token_address_with_program_id;
-    use std::str::FromStr;
 
     /// B15: collateral a plan leaves in the wallet, valued like the seized amount itself
     /// (`Sizing::seized_equity_value`: protocol equity price of the exact `withdraw_amount`).
@@ -435,6 +434,8 @@ pub mod p0 {
         /// Execution amount for Jito tip transaction.
         pub jito_tip_lamports: u64,
         pub zero_prefund_qualified: bool,
+        /// E2: pinned instruction table of the receivership TX (built once at setup).
+        pub instructions: &'a InstructionTable,
         /// B9: offer V1 candidates only when the transaction layer builds and signs V1
         /// (`tx::v1_build_capability`) and the submission adapter supports V1.
         pub v1_plans: bool,
@@ -766,8 +767,7 @@ pub mod p0 {
             obs: &[Pubkey],
             sz: &Sizing,
             swaps: Vec<Instruction>,
-            repay_from_inventory: bool,
-        ) -> Result<(Vec<Instruction>, Vec<Step>), String> {
+        ) -> Result<Vec<Instruction>, String> {
             let (_asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
 
@@ -823,20 +823,6 @@ pub mod p0 {
                 sz.repay_all.then_some(true),
                 obs,
             );
-            let route_steps: Vec<Step> = swaps
-                .iter()
-                .map(|i| {
-                    if i.program_id
-                        == Pubkey::from_str(darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID)
-                            .expect("static")
-                    {
-                        Step::Swap(i.program_id)
-                    } else {
-                        Step::Other(i.program_id)
-                    }
-                })
-                .collect();
-
             let active_banks_before = self.active_bank_keys(account)?;
             let start_observation: Vec<AccountMeta> = obs
                 .iter()
@@ -875,16 +861,8 @@ pub mod p0 {
                 swaps,
                 repays: vec![repay],
             });
-            let mut steps = vec![Step::StartLiquidation];
-            steps.push(Step::Withdraw);
-            steps.extend(route_steps);
-            steps.push(if repay_from_inventory {
-                Step::RepayFromInventory
-            } else {
-                Step::Repay
-            });
-            steps.push(Step::EndLiquidation);
-            Ok((ixs, steps))
+            // E2: the planner gate derives its steps from exactly these instructions.
+            Ok(ixs)
         }
 
         fn input(
@@ -910,6 +888,10 @@ pub mod p0 {
     {
         fn native_cost_usd_micro(&self, lamports: u64) -> Option<u64> {
             (self.lamports_to_usd_micro)(lamports)
+        }
+
+        fn instruction_table(&self) -> &InstructionTable {
+            self.instructions
         }
 
         fn plans(
@@ -1009,8 +991,7 @@ pub mod p0 {
                         // separately below after its own ExactIn quote.
                         FundingClass::ZeroPrefundSameTx => continue,
                         FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
-                            let (ixs, steps) =
-                                self.receivership(account, &obs, &sz, vec![], true)?;
+                            let ixs = self.receivership(account, &obs, &sz, vec![])?;
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1019,7 +1000,6 @@ pub mod p0 {
                                         liability_bank: sz.liab_bank.to_string(),
                                     },
                                 ),
-                                steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
                                 input: self.input(&sz, class, None, capital),
@@ -1053,8 +1033,7 @@ pub mod p0 {
                                     continue;
                                 }
                             };
-                            let (ixs, steps) =
-                                self.receivership(account, &obs, &sz, vec![], true)?;
+                            let ixs = self.receivership(account, &obs, &sz, vec![])?;
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1063,7 +1042,6 @@ pub mod p0 {
                                         liability_bank: sz.liab_bank.to_string(),
                                     },
                                 ),
-                                steps,
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
                                 input: self.input(&sz, class, None, capital),
@@ -1124,8 +1102,8 @@ pub mod p0 {
                             Ok(route)
                         },
                         |route| {
-                            let (ixs, steps) = self
-                                .receivership(account, &obs, &sz, route.instructions.clone(), false)
+                            let ixs = self
+                                .receivership(account, &obs, &sz, route.instructions.clone())
                                 .map_err(BuildError::Compile)?;
                             // Same payer/resources/LUTs/signature placeholders as final build.
                             // Hash bytes have fixed width; no RPC or signing needed for sizing.
@@ -1143,7 +1121,7 @@ pub mod p0 {
                                 Hash::default(),
                                 &self.limits,
                             )?;
-                            Ok((ixs, steps))
+                            Ok(ixs)
                         },
                     );
                     let fitted = match fitted {
@@ -1154,7 +1132,7 @@ pub mod p0 {
                             None
                         }
                     };
-                    if let Some((mark, (ixs, steps))) = fitted {
+                    if let Some((mark, ixs)) = fitted {
                         let mut zp_ctx = base_ctx.clone();
                         zp_ctx.route_available = true;
                         if funding::is_feasible(FundingClass::ZeroPrefundSameTx, &zp_ctx) {
@@ -1182,7 +1160,6 @@ pub mod p0 {
                                                     liability_bank: sz.liab_bank.to_string(),
                                                 },
                                             ),
-                                            steps: steps.clone(),
                                             instructions: ixs.clone(),
                                             route: RouteKind::FreePublicAllowed,
                                             input: zp_input,
@@ -1208,7 +1185,6 @@ pub mod p0 {
                                                 liability_bank: sz.liab_bank.to_string(),
                                             },
                                         ),
-                                        steps,
                                         instructions: ixs,
                                         route: RouteKind::FreePublicAllowed,
                                         input: zp_input,

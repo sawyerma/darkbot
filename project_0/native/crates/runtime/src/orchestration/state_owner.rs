@@ -172,6 +172,9 @@ pub(super) struct ShadowOwner {
     blockhash_thread: Option<std::thread::JoinHandle<()>>,
     safety: Safety,
     allowlist: Allowlist,
+    /// E2: pinned instruction table the planner gate classifies built instructions with.
+    #[cfg(feature = "crate_health")]
+    instruction_table: darkbot_project0::planner::InstructionTable,
     global_allowed: Vec<Pubkey>,
     submitter: crate::execution::observe_only::ObserveOnly<RpcSubmitter>,
     failed_costs: FailedCostMatrix,

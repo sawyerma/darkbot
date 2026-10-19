@@ -21,6 +21,48 @@ pub(crate) struct CachedProjection {
     pub(crate) projection_slot: u64,
     pub(crate) projection_unix_s: i64,
     pub(crate) accounts: Vec<(Pubkey, Account)>,
+    /// E9: every account the projection and its later evaluation depend on besides the
+    /// candidate (refresh instruction accounts, health observation accounts) …
+    pub(crate) dependencies: Vec<Pubkey>,
+    /// … and their canonical revisions when the projection was requested.
+    pub(crate) dependency_fingerprint: Hash,
+}
+
+/// E9: one fingerprint over the canonical revision (presence, slot, data hash) of every
+/// dependency key; any change of any of them changes it, unrelated accounts never do.
+pub(crate) fn dependency_fingerprint(st: &StateCore, keys: &[Pubkey]) -> Hash {
+    let mut parts: Vec<Vec<u8>> = Vec::with_capacity(keys.len());
+    for k in keys {
+        let mut part = k.to_bytes().to_vec();
+        match st.get(k) {
+            Some(r) => {
+                part.push(1);
+                part.extend_from_slice(&r.slot.to_le_bytes());
+                part.extend_from_slice(&hash(&r.data).to_bytes());
+            }
+            None => part.push(0),
+        }
+        parts.push(part);
+    }
+    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    solana_sdk::hash::hashv(&refs)
+}
+
+/// E9: the sorted, deduplicated dependency set of a candidate's projection.
+pub(crate) fn projection_dependencies(
+    candidate: &Pubkey,
+    refreshes: &[solana_sdk::instruction::Instruction],
+    observation: &[Pubkey],
+) -> Vec<Pubkey> {
+    let mut keys: Vec<Pubkey> = refreshes
+        .iter()
+        .flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey))
+        .chain(observation.iter().copied())
+        .filter(|k| k != candidate)
+        .collect();
+    keys.sort_unstable_by_key(|k| k.to_bytes());
+    keys.dedup();
+    keys
 }
 
 #[cfg(feature = "crate_health")]
@@ -193,4 +235,77 @@ pub(crate) fn enqueue_oracle_accounts(
     }
     *max_pending = (*max_pending).max(pending.len());
     count
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod e9_tests {
+    use super::*;
+
+    /// E9: the projection fingerprint follows every dependency revision (slot, data, presence)
+    /// and ignores the candidate itself and unrelated accounts.
+    #[test]
+    fn e9_dependency_fingerprint_tracks_every_dependency_revision() {
+        let (candidate, bank, oracle, unrelated) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let account = |slot: u64, byte: u8| (slot, vec![byte; 8]);
+        let refresh = solana_sdk::instruction::Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(oracle, false),
+                solana_sdk::instruction::AccountMeta::new_readonly(candidate, false),
+            ],
+            data: vec![],
+        };
+        let deps = projection_dependencies(&candidate, &[refresh], &[bank, oracle]);
+        assert_eq!(deps.len(), 2);
+        assert!(!deps.contains(&candidate));
+        let install = |entries: &[(Pubkey, (u64, Vec<u8>))]| {
+            let mut st = StateCore::new(1);
+            st.install_snapshot(
+                10,
+                entries
+                    .iter()
+                    .map(|(k, (slot, data))| darkbot_solana::ingress::AccountUpdate {
+                        pubkey: *k,
+                        owner: Pubkey::new_from_array([3; 32]),
+                        lamports: 1,
+                        data: data.clone(),
+                        slot: *slot,
+                        write_version: None,
+                        source: darkbot_solana::ingress::SourceKind::Snapshot,
+                        t_rx_ns: 0,
+                    })
+                    .collect(),
+            );
+            st
+        };
+        let base = [
+            (candidate, account(10, 1)),
+            (bank, account(10, 2)),
+            (oracle, account(10, 3)),
+            (unrelated, account(10, 4)),
+        ];
+        let fp = dependency_fingerprint(&install(&base), &deps);
+        let mut changed_candidate = base.clone();
+        changed_candidate[0].1 = account(11, 9);
+        changed_candidate[3].1 = account(12, 9);
+        assert_eq!(
+            dependency_fingerprint(&install(&changed_candidate), &deps),
+            fp
+        );
+        for (i, replacement) in [(1, account(10, 7)), (2, account(11, 3))] {
+            let mut changed = base.clone();
+            changed[i].1 = replacement;
+            assert_ne!(dependency_fingerprint(&install(&changed), &deps), fp, "{i}");
+        }
+        assert_ne!(
+            dependency_fingerprint(&install(&base[..2]), &deps),
+            fp,
+            "missing oracle"
+        );
+    }
 }

@@ -240,6 +240,23 @@ pub struct Handle {
     pub clock: Clock,
     pub cfg: EconConfig,
 }
+/// Test fixture: a handle without a worker thread (evidence goes to the returned consumer).
+#[cfg(test)]
+pub(crate) fn test_handle(
+    retention: usize,
+) -> (Handle, darkbot_common::channel::Consumer<Evidence>) {
+    let mut cfg = EconConfig::from_lookup(&|_| None, 0).expect("default config");
+    cfg.retention = retention;
+    let (tx, rx) = darkbot_common::channel::bounded("test-econ", 1024);
+    let handle = Handle {
+        tx,
+        shared: Arc::new(Shared::default()),
+        clock: Clock::new(),
+        cfg,
+    };
+    (handle, rx)
+}
+
 impl Handle {
     pub fn emit(&self, ev: Evidence) {
         if self.tx.try_push(ev).is_err() {

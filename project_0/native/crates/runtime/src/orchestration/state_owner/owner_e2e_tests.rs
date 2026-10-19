@@ -137,6 +137,9 @@ fn fixture(tag: &str) -> Fixture {
         blockhash_thread: None,
         safety: Safety::new(limits, Allow::default(), false),
         allowlist: Allowlist::default(),
+        #[cfg(feature = "crate_health")]
+        instruction_table: darkbot_project0::receivership::builders::instruction_table(&program)
+            .unwrap(),
         global_allowed: vec![],
         submitter: crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::new(
             unused_rpc.clone(),

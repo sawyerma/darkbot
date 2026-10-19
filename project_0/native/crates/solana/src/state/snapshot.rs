@@ -33,6 +33,17 @@ pub struct Snapshot {
     pub missing: Vec<(Pubkey, u64)>,
 }
 
+/// B17: snapshots read at the state commitment (see `state::STATE_COMMITMENT`).
+pub(crate) const STATE_SNAPSHOT_COMMITMENT: &str = super::STATE_COMMITMENT;
+pub(crate) fn state_commitment_config() -> CommitmentConfig {
+    use crate::ingress::SlotStatus as S;
+    match super::STATE_SLOT_STATUS {
+        S::Processed => CommitmentConfig::processed(),
+        S::Confirmed => CommitmentConfig::confirmed(),
+        S::Finalized => CommitmentConfig::finalized(),
+    }
+}
+
 fn decode_program_accounts(
     rpc: &RpcClient,
     program: &Pubkey,
@@ -41,7 +52,7 @@ fn decode_program_accounts(
 ) -> Result<Snapshot, SnapshotError> {
     let mut cfg = serde_json::json!({
         "encoding": "base64+zstd",
-        "commitment": "confirmed",
+        "commitment": STATE_SNAPSHOT_COMMITMENT,
         "withContext": true
     });
     if let Some(filters) = filters {
@@ -120,7 +131,7 @@ pub fn multiple_accounts(
     let mut slot_min = u64::MAX;
     for chunk in keys.chunks(100) {
         let resp = rpc
-            .get_multiple_accounts_with_commitment(chunk, CommitmentConfig::confirmed())
+            .get_multiple_accounts_with_commitment(chunk, state_commitment_config())
             .map_err(|e| SnapshotError(e.to_string()))?;
         slot_min = slot_min.min(resp.context.slot);
         let t = clock.now_ns();

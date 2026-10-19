@@ -17,6 +17,21 @@ pub mod recovery;
 pub mod snapshot;
 
 use crate::ingress::{AccountUpdate, IngressEvent, SlotStatus, SourceKind};
+
+/// B17: the one commitment both state sources read at — the WSS subscriptions of the state
+/// owner (`WsRpcConfig::new`) and the RPC snapshots (`snapshot`). Every account record carries
+/// the status this commitment proves (`STATE_SLOT_STATUS`), never a higher one.
+pub const STATE_COMMITMENT: &str = "confirmed";
+pub const STATE_SLOT_STATUS: SlotStatus = SlotStatus::Confirmed;
+/// The slot status a commitment level proves.
+pub fn status_of_commitment(commitment: &str) -> Option<SlotStatus> {
+    match commitment {
+        "processed" => Some(SlotStatus::Processed),
+        "confirmed" => Some(SlotStatus::Confirmed),
+        "finalized" => Some(SlotStatus::Finalized),
+        _ => None,
+    }
+}
 use darkbot_common::error::HaltReason;
 use darkbot_common::lifecycle::RunState;
 use solana_sdk::pubkey::Pubkey;
@@ -195,7 +210,7 @@ impl StateCore {
     /// Ingress-Event verarbeiten. Gibt für Account-Updates das Ergebnis zurück.
     pub fn on_event(&mut self, ev: IngressEvent) -> Option<ApplyOutcome> {
         match ev {
-            IngressEvent::Account(a) => Some(self.on_account(a, SlotStatus::Confirmed)),
+            IngressEvent::Account(a) => Some(self.on_account(a, STATE_SLOT_STATUS)),
             IngressEvent::Slot(s) => {
                 self.highest_slot = self.highest_slot.max(s.slot);
                 self.forks.on_slot(s.slot, s.parent);
@@ -321,7 +336,7 @@ impl StateCore {
                 data: a.data,
                 slot: a.slot,
                 write_version: None,
-                status: SlotStatus::Confirmed,
+                status: STATE_SLOT_STATUS,
                 source: SourceKind::Snapshot,
                 t_rx_ns: a.t_rx_ns,
             };
@@ -335,7 +350,7 @@ impl StateCore {
                 None => a.slot > min_slot,
             };
             if newer {
-                self.apply(a, SlotStatus::Confirmed);
+                self.apply(a, STATE_SLOT_STATUS);
             } else {
                 self.counters.buffer_dropped_le_snapshot += 1;
             }
@@ -400,6 +415,45 @@ impl StateCore {
 
     pub fn is_reconciled(&self) -> bool {
         self.reconciled_clean
+    }
+}
+
+#[cfg(test)]
+mod commitment_tests {
+    use super::*;
+
+    /// B17: the recorded account status is exactly what the state sources' commitment proves:
+    /// the owner's WSS default and the snapshot reads use `STATE_COMMITMENT`.
+    #[test]
+    fn b17_account_status_is_the_subscription_commitment() {
+        assert_eq!(
+            status_of_commitment(STATE_COMMITMENT),
+            Some(STATE_SLOT_STATUS)
+        );
+        let ws = crate::ingress::ws_rpc::WsRpcConfig::new(
+            "wss://unused.invalid".into(),
+            Default::default(),
+        );
+        assert_eq!(ws.commitment, STATE_COMMITMENT);
+        assert_eq!(snapshot::STATE_SNAPSHOT_COMMITMENT, STATE_COMMITMENT);
+        assert_eq!(
+            snapshot::state_commitment_config().commitment.to_string(),
+            STATE_COMMITMENT
+        );
+        let mut st = StateCore::new(4);
+        st.install_snapshot(1, vec![]);
+        let key = Pubkey::new_unique();
+        st.on_event(IngressEvent::Account(AccountUpdate {
+            pubkey: key,
+            owner: Pubkey::new_unique(),
+            lamports: 1,
+            data: vec![1],
+            slot: 5,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
+        assert_eq!(st.get(&key).unwrap().status, STATE_SLOT_STATUS);
     }
 }
 

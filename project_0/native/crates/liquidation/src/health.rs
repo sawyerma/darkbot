@@ -205,6 +205,116 @@ pub mod crate_impl {
         Ok(out)
     }
 
+    /// B12: the maintenance EMODE configuration of an account's liability banks exactly as the
+    /// pinned program reconciles it, including the group's same-asset EMODE. Health and sizing
+    /// both use this one function, so their asset/liability weights cannot diverge.
+    pub fn maintenance_emode_config_of(
+        liability_banks: &[&Bank],
+        group: &MarginfiGroup,
+    ) -> ReconciledEmodeConfig {
+        let mut configs = Vec::new();
+        let leverage = u32_to_basis(group.same_asset_emode_maint_leverage);
+        let same_asset_enabled = leverage > I80F48::ONE;
+
+        let mut shared_mint = None;
+        let mut shared_oracle_key = None;
+        let mut shared_feed_family = None;
+        let mut shared_fixed_price: Option<I80F48> = None;
+        let mut lowest_liab_weight: Option<I80F48> = None;
+        let mut same_asset_valid = true;
+
+        for bank in liability_banks.iter().copied() {
+            configs.push(bank.emode.emode_config);
+
+            if !same_asset_enabled || !same_asset_valid {
+                continue;
+            }
+
+            if !matches!(
+                bank.config.oracle_setup,
+                OracleSetup::PythPushOracle
+                    | OracleSetup::SwitchboardPull
+                    | OracleSetup::StakedWithPythPush
+                    | OracleSetup::PythMSOL
+                    | OracleSetup::PythLST
+                    | OracleSetup::PTPyth
+            ) {
+                same_asset_valid = false;
+                lowest_liab_weight = None;
+                continue;
+            }
+
+            let Some(feed_family) = bank.config.oracle_setup.feed_family() else {
+                same_asset_valid = false;
+                lowest_liab_weight = None;
+                continue;
+            };
+            if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
+                || bank.config.oracle_keys[0] == Pubkey::default()
+            {
+                same_asset_valid = false;
+                lowest_liab_weight = None;
+                continue;
+            }
+
+            let mint = bank.mint;
+            let oracle_key = bank.config.oracle_keys[0];
+            let fixed_price: I80F48 = bank.config.fixed_price.into();
+            let liab_weight = bank
+                .config
+                .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
+
+            match shared_mint {
+                Some(existing)
+                    if existing != mint
+                        || shared_oracle_key != Some(oracle_key)
+                        || shared_feed_family != Some(feed_family)
+                        || shared_fixed_price != Some(fixed_price) =>
+                {
+                    same_asset_valid = false;
+                    lowest_liab_weight = None;
+                }
+                Some(_) => {
+                    if lowest_liab_weight.is_none_or(|w| liab_weight < w) {
+                        lowest_liab_weight = Some(liab_weight);
+                    }
+                }
+                None => {
+                    shared_mint = Some(mint);
+                    shared_oracle_key = Some(oracle_key);
+                    shared_feed_family = Some(feed_family);
+                    shared_fixed_price = Some(fixed_price);
+                    lowest_liab_weight = Some(liab_weight);
+                }
+            }
+        }
+
+        let mut reconciled = reconcile_emode_configs(configs, RequirementType::Maintenance);
+        if same_asset_enabled && same_asset_valid {
+            if let (
+                Some(mint),
+                Some(oracle_key),
+                Some(feed_family),
+                Some(fixed_price),
+                Some(liab_weight),
+            ) = (
+                shared_mint,
+                shared_oracle_key,
+                shared_feed_family,
+                shared_fixed_price,
+                lowest_liab_weight,
+            ) {
+                reconciled.same_asset.mint = mint;
+                reconciled.same_asset.oracle_key = oracle_key;
+                reconciled.same_asset.feed_family = Some(feed_family);
+                reconciled.same_asset.fixed_price = fixed_price;
+                reconciled.same_asset.asset_weight =
+                    compute_same_asset_emode_weight(leverage, liab_weight);
+            }
+        }
+        reconciled
+    }
+
     pub struct CrateHealth<'s, S: AccountSource + ?Sized> {
         // [FIX-53] supports &dyn AccountSource
         pub state: &'s S,
@@ -303,17 +413,7 @@ pub mod crate_impl {
             acc: &MarginfiAccount,
             group: &MarginfiGroup,
         ) -> Result<ReconciledEmodeConfig, HealthError> {
-            let mut configs = Vec::new();
-            let leverage = u32_to_basis(group.same_asset_emode_maint_leverage);
-            let same_asset_enabled = leverage > I80F48::ONE;
-
-            let mut shared_mint = None;
-            let mut shared_oracle_key = None;
-            let mut shared_feed_family = None;
-            let mut shared_fixed_price: Option<I80F48> = None;
-            let mut lowest_liab_weight: Option<I80F48> = None;
-            let mut same_asset_valid = true;
-
+            let mut banks = Vec::new();
             for balance in acc
                 .lending_account
                 .balances
@@ -324,97 +424,10 @@ pub mod crate_impl {
                     continue;
                 }
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
-                let bank = load_bank(bdata)?;
-                let bank: &Bank = &bank;
-                configs.push(bank.emode.emode_config);
-
-                if !same_asset_enabled || !same_asset_valid {
-                    continue;
-                }
-
-                if !matches!(
-                    bank.config.oracle_setup,
-                    OracleSetup::PythPushOracle
-                        | OracleSetup::SwitchboardPull
-                        | OracleSetup::StakedWithPythPush
-                        | OracleSetup::PythMSOL
-                        | OracleSetup::PythLST
-                        | OracleSetup::PTPyth
-                ) {
-                    same_asset_valid = false;
-                    lowest_liab_weight = None;
-                    continue;
-                }
-
-                let Some(feed_family) = bank.config.oracle_setup.feed_family() else {
-                    same_asset_valid = false;
-                    lowest_liab_weight = None;
-                    continue;
-                };
-                if !bank.get_flag(BANK_SAME_ASSET_EMODE_ELIGIBLE)
-                    || bank.config.oracle_keys[0] == Pubkey::default()
-                {
-                    same_asset_valid = false;
-                    lowest_liab_weight = None;
-                    continue;
-                }
-
-                let mint = bank.mint;
-                let oracle_key = bank.config.oracle_keys[0];
-                let fixed_price: I80F48 = bank.config.fixed_price.into();
-                let liab_weight = bank
-                    .config
-                    .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
-
-                match shared_mint {
-                    Some(existing)
-                        if existing != mint
-                            || shared_oracle_key != Some(oracle_key)
-                            || shared_feed_family != Some(feed_family)
-                            || shared_fixed_price != Some(fixed_price) =>
-                    {
-                        same_asset_valid = false;
-                        lowest_liab_weight = None;
-                    }
-                    Some(_) => {
-                        if lowest_liab_weight.is_none_or(|w| liab_weight < w) {
-                            lowest_liab_weight = Some(liab_weight);
-                        }
-                    }
-                    None => {
-                        shared_mint = Some(mint);
-                        shared_oracle_key = Some(oracle_key);
-                        shared_feed_family = Some(feed_family);
-                        shared_fixed_price = Some(fixed_price);
-                        lowest_liab_weight = Some(liab_weight);
-                    }
-                }
+                banks.push(load_bank(bdata)?);
             }
-
-            let mut reconciled = reconcile_emode_configs(configs, RequirementType::Maintenance);
-            if same_asset_enabled && same_asset_valid {
-                if let (
-                    Some(mint),
-                    Some(oracle_key),
-                    Some(feed_family),
-                    Some(fixed_price),
-                    Some(liab_weight),
-                ) = (
-                    shared_mint,
-                    shared_oracle_key,
-                    shared_feed_family,
-                    shared_fixed_price,
-                    lowest_liab_weight,
-                ) {
-                    reconciled.same_asset.mint = mint;
-                    reconciled.same_asset.oracle_key = oracle_key;
-                    reconciled.same_asset.feed_family = Some(feed_family);
-                    reconciled.same_asset.fixed_price = fixed_price;
-                    reconciled.same_asset.asset_weight =
-                        compute_same_asset_emode_weight(leverage, liab_weight);
-                }
-            }
-            Ok(reconciled)
+            let refs: Vec<&Bank> = banks.iter().map(|b| &**b).collect();
+            Ok(maintenance_emode_config_of(&refs, group))
         }
 
         fn bank_maintenance_prices(

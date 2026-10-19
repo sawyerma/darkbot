@@ -62,6 +62,9 @@ pub struct ProjectionWork {
     pub t_rx_ns: u64,
     pub tx: VersionedTransaction,
     pub targets: Vec<Pubkey>,
+    /// E9: dependency set and its canonical revisions at request time (passed back unchanged).
+    pub dependencies: Vec<Pubkey>,
+    pub dependency_fingerprint: Hash,
 }
 
 pub struct ProjectionResultMessage {
@@ -69,6 +72,8 @@ pub struct ProjectionResultMessage {
     pub base_slot: u64,
     pub base_account_hash: Hash,
     pub t_rx_ns: u64,
+    pub dependencies: Vec<Pubkey>,
+    pub dependency_fingerprint: Hash,
     pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
 }
 
@@ -258,6 +263,8 @@ impl RemoteWorkers {
                         let base_slot = work.base_slot;
                         let base_account_hash = work.base_account_hash;
                         let t_rx_ns = work.t_rx_ns;
+                        let dependencies = work.dependencies.clone();
+                        let dependency_fingerprint = work.dependency_fingerprint;
                         let mt0_start = std::time::Instant::now(); // [MT0]
                         let result = submitter
                             .simulate_with_post_accounts(&work.tx, &work.targets)
@@ -278,6 +285,8 @@ impl RemoteWorkers {
                                 base_slot,
                                 base_account_hash,
                                 t_rx_ns,
+                                dependencies,
+                                dependency_fingerprint,
                                 result,
                             },
                             &projection_shutdown,

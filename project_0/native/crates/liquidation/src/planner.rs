@@ -9,8 +9,9 @@
 //! Der eigentliche Instruction-Bau (marginfi-Ixs, Kamino/JupLend-Refresh, Jupiter/Titan-Swap)
 //! kommt aus dem Crate bzw. den gepinnten IDLs (VERIFY, P5-05). Dieses Modul validiert Pläne.
 
+use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
@@ -53,6 +54,66 @@ pub enum PlanError {
     OrderViolation(usize, &'static str),
     RepayMissing,
     PaidRouteBeforeP7,
+    /// E2: an instruction of the receivership program or of a pinned integration program whose
+    /// discriminator is not one this plan may contain.
+    UnknownInstruction(usize),
+}
+
+/// E2: how built instructions are recognized — the receivership program with its pinned
+/// instruction discriminators and every pinned integration program with its refresh
+/// discriminators (both from the pinned crates/IDLs, see `receivership::builders`).
+#[derive(Clone, Debug, Default)]
+pub struct InstructionTable {
+    pub program: Pubkey,
+    pub start: [u8; 8],
+    pub end: [u8; 8],
+    /// Plain and integration withdraws of the receivership program.
+    pub withdraw: Vec<[u8; 8]>,
+    pub repay: [u8; 8],
+    pub init_record: [u8; 8],
+    /// Integration program → its pinned refresh discriminators.
+    pub refreshes: HashMap<Pubkey, Vec<[u8; 8]>>,
+    pub swap_programs: HashSet<Pubkey>,
+}
+
+/// E2: the steps of an actually built transaction, from each instruction's program and 8-byte
+/// discriminator. The receivership program and the pinned integration programs only appear
+/// with a discriminator of the table (anything else is `UnknownInstruction`); a swap program
+/// is a `Swap`; every other program is `Other`, left to the allowlist. The steps are a pure
+/// function of the bytes, never an independently written list.
+pub fn steps_of(ixs: &[Instruction], t: &InstructionTable) -> Result<Vec<Step>, PlanError> {
+    ixs.iter()
+        .enumerate()
+        .map(|(i, ix)| {
+            let disc: Option<[u8; 8]> = ix.data.get(..8).and_then(|d| d.try_into().ok());
+            if ix.program_id == t.program {
+                let d = disc.ok_or(PlanError::UnknownInstruction(i))?;
+                return if d == t.start {
+                    Ok(Step::StartLiquidation)
+                } else if d == t.end {
+                    Ok(Step::EndLiquidation)
+                } else if t.withdraw.contains(&d) {
+                    Ok(Step::Withdraw)
+                } else if d == t.repay {
+                    Ok(Step::Repay)
+                } else if d == t.init_record {
+                    Ok(Step::Refresh(t.program))
+                } else {
+                    Err(PlanError::UnknownInstruction(i))
+                };
+            }
+            if let Some(refreshes) = t.refreshes.get(&ix.program_id) {
+                return match disc {
+                    Some(d) if refreshes.contains(&d) => Ok(Step::Refresh(ix.program_id)),
+                    _ => Err(PlanError::UnknownInstruction(i)),
+                };
+            }
+            if t.swap_programs.contains(&ix.program_id) {
+                return Ok(Step::Swap(ix.program_id));
+            }
+            Ok(Step::Other(ix.program_id))
+        })
+        .collect()
 }
 
 /// Validiert eine Receivership-TX (eine Transaktion). Indizes im Fehler = Position im Plan.
@@ -150,6 +211,100 @@ pub fn validate_bundle(txs: &[Vec<Step>]) -> Result<usize, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn table() -> InstructionTable {
+        let kamino = Pubkey::new_unique();
+        InstructionTable {
+            program: Pubkey::new_unique(),
+            start: [1; 8],
+            end: [2; 8],
+            withdraw: vec![[3; 8], [4; 8]],
+            repay: [5; 8],
+            init_record: [6; 8],
+            refreshes: HashMap::from([(kamino, vec![[7; 8]])]),
+            swap_programs: HashSet::from([Pubkey::new_unique()]),
+        }
+    }
+    fn ix(program: Pubkey, disc: [u8; 8]) -> Instruction {
+        let mut data = disc.to_vec();
+        data.extend_from_slice(&[9, 9]);
+        Instruction {
+            program_id: program,
+            accounts: vec![],
+            data,
+        }
+    }
+
+    /// E2: steps come from program + discriminator of the built instructions: order, End last,
+    /// duplicate Start, foreign program with a Start discriminator, unknown discriminators.
+    #[test]
+    fn e2_steps_are_derived_from_built_instructions() {
+        let t = table();
+        let kamino = *t.refreshes.keys().next().unwrap();
+        let swap = *t.swap_programs.iter().next().unwrap();
+        let p = t.program;
+        let built = [
+            ix(kamino, [7; 8]),
+            ix(p, [6; 8]),
+            ix(p, [1; 8]),
+            ix(p, [4; 8]),
+            ix(swap, [42; 8]),
+            ix(p, [5; 8]),
+            ix(p, [2; 8]),
+        ];
+        assert_eq!(
+            steps_of(&built, &t).unwrap(),
+            [
+                Step::Refresh(kamino),
+                Step::Refresh(p),
+                Step::StartLiquidation,
+                Step::Withdraw,
+                Step::Swap(swap),
+                Step::Repay,
+                Step::EndLiquidation,
+            ]
+        );
+        let mut a = Allowlist::default();
+        a.refresh_programs.extend([kamino, p]);
+        a.swap_programs.insert(swap);
+        let check = |ixs: &[Instruction]| {
+            validate_receivership(&steps_of(ixs, &t)?, &a, RouteKind::FreePublicAllowed, false)
+        };
+        assert_eq!(check(&built), Ok(()));
+        // End not last: anything after the real End instruction.
+        let mut after = built.to_vec();
+        after.push(ix(Pubkey::new_unique(), [0; 8]));
+        assert_eq!(check(&after), Err(PlanError::EndNotLast));
+        // Second Start.
+        let mut twice = built.to_vec();
+        twice.insert(3, ix(p, [1; 8]));
+        assert_eq!(
+            check(&twice),
+            Err(PlanError::OrderViolation(3, "duplicate start"))
+        );
+        // A foreign program carrying the Start discriminator is no Start.
+        let mut foreign = built.to_vec();
+        foreign[2] = ix(Pubkey::new_unique(), [1; 8]);
+        assert_eq!(check(&foreign), Err(PlanError::NoStart));
+        // Unknown discriminator on the receivership program or on a pinned integration program.
+        let mut unknown = built.to_vec();
+        unknown[3] = ix(p, [8; 8]);
+        assert_eq!(check(&unknown), Err(PlanError::UnknownInstruction(3)));
+        let mut refresh = built.to_vec();
+        refresh[0] = ix(kamino, [8; 8]);
+        assert_eq!(check(&refresh), Err(PlanError::UnknownInstruction(0)));
+        let short = [Instruction {
+            program_id: p,
+            accounts: vec![],
+            data: vec![1, 1],
+        }];
+        assert_eq!(steps_of(&short, &t), Err(PlanError::UnknownInstruction(0)));
+        // A prerequisite containing Start/End is not a prerequisite.
+        let pre = steps_of(&[ix(swap, [42; 8])], &t).unwrap();
+        let recv = steps_of(&built, &t).unwrap();
+        assert_eq!(validate_bundle(&[pre.clone(), recv.clone()]), Ok(1));
+        assert!(validate_bundle(&[recv.clone(), recv]).is_err());
+    }
 
     fn allow() -> (Allowlist, Pubkey, Pubkey, Pubkey) {
         let (kamino, jup, other) = (

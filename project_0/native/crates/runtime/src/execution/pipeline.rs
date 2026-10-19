@@ -5,7 +5,7 @@ use darkbot_common::timing::{Clock, Stage, Timeline};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
 use darkbot_project0::health::{HealthEngine, HealthError};
-use darkbot_project0::planner::{self, Allowlist, RouteKind, Step};
+use darkbot_project0::planner::{self, Allowlist, InstructionTable, RouteKind};
 use darkbot_project0::safety::Safety;
 use darkbot_solana::state::blockhash::BlockhashCache;
 use darkbot_solana::submit::{self as submit, SimResult, SubmissionAdapter, SubmissionPath};
@@ -145,7 +145,8 @@ pub enum Mode {
 /// marginfi-Crate/IDL; hier nur der Contract.
 pub struct ReceivershipPlan {
     pub market_identity: Option<crate::analytics::record::MarketPlanIdentity>,
-    pub steps: Vec<Step>,
+    /// The receivership TX. E2: its planner steps are derived from these bytes
+    /// (`planner::steps_of`), never supplied separately.
     pub instructions: Vec<Instruction>,
     pub route: RouteKind,
     pub input: CandidateInput,
@@ -172,6 +173,8 @@ pub trait ReceivershipBuilder {
     fn native_cost_usd_micro(&self, _lamports: u64) -> Option<u64> {
         None
     }
+    /// E2: the pinned instruction table the plans' instructions are classified with.
+    fn instruction_table(&self) -> &InstructionTable;
     fn plans(
         &self,
         account: &Pubkey,
@@ -415,14 +418,31 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let mut threshold_hits: u32 = 0;
         let mut rejected = Vec::new();
         for mut plan in plans {
-            if let Err(e) = planner::validate_receivership(
-                &plan.steps,
-                self.allowlist,
-                plan.route,
-                self.p7_passed,
-            ) {
+            // E2: the gate decides on the steps of the actually built instructions (receivership
+            // TX and every prerequisite TX), immediately before they are signed.
+            let table = self.builder.instruction_table();
+            let checked = planner::steps_of(&plan.instructions, table).and_then(|steps| {
+                planner::validate_receivership(&steps, self.allowlist, plan.route, self.p7_passed)?;
+                Ok(steps)
+            });
+            let checked = checked.map_err(|e| format!("{e:?}")).and_then(|steps| {
+                if plan.prerequisite_txs.is_empty() {
+                    return Ok(());
+                }
+                let mut txs = plan
+                    .prerequisite_txs
+                    .iter()
+                    .map(|pre| planner::steps_of(pre, table))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("prerequisite {e:?}"))?;
+                txs.push(steps);
+                planner::validate_bundle(&txs)
+                    .map(drop)
+                    .map_err(str::to_owned)
+            });
+            if let Err(e) = checked {
                 rejected.push(format!(
-                    "{}: plan invalid: {:?}",
+                    "{}: plan invalid: {}",
                     plan.input.funding.as_str(),
                     e
                 ));

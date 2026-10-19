@@ -401,6 +401,8 @@ pub(super) fn prepare(
         allowlist.refresh_programs.insert(p); // Pre-Start-Refreshes nur dieser Programme (liquidate_start.rs)
     }
     allowlist.refresh_programs.insert(program); // init_liquidation_record vor Start
+    #[cfg(feature = "crate_health")]
+    let instruction_table = darkbot_project0::receivership::builders::instruction_table(&program)?;
     let global_allowed = protocol::receivership_allowed_programs();
     // [FIX-30] Prerequisite-TXs (JIT-Buy): Swap-Programme + System/Token/Token-2022/ATA/ComputeBudget.
     let prereq_allowed: Vec<Pubkey> = [
@@ -912,6 +914,8 @@ pub(super) fn prepare(
         blockhash_thread: Some(blockhash_thread),
         safety,
         allowlist,
+        #[cfg(feature = "crate_health")]
+        instruction_table,
         global_allowed,
         submitter,
         failed_costs,

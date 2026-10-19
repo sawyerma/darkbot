@@ -204,6 +204,39 @@ fn pinned_discriminator<D: anchor_lang::Discriminator>() -> Vec<u8> {
     D::DISCRIMINATOR.to_vec()
 }
 
+fn disc8<D: anchor_lang::Discriminator>() -> [u8; 8] {
+    D::DISCRIMINATOR
+        .try_into()
+        .expect("anchor discriminators are 8 bytes")
+}
+
+/// E2: every pinned integration program with the refresh discriminators this module builds
+/// (the same IDL constants as `kamino_refreshes`/`drift_refresh`/`juplend_refresh`).
+/// An integration program and its pinned refresh discriminators.
+pub type PinnedRefreshes = (Pubkey, Vec<[u8; 8]>);
+
+pub fn pinned_refresh_discriminators() -> Result<Vec<PinnedRefreshes>, String> {
+    Ok(vec![
+        (
+            static_pk(protocol::KAMINO_PROGRAM_ID)?,
+            vec![
+                disc8::<kamino_mocks::kamino_lending::client::args::RefreshReserve>(),
+                disc8::<kamino_mocks::kamino_lending::client::args::RefreshObligation>(),
+            ],
+        ),
+        (
+            static_pk(protocol::DRIFT_PROGRAM_ID)?,
+            vec![disc8::<
+                drift_mocks::drift::client::args::UpdateSpotMarketCumulativeInterest,
+            >()],
+        ),
+        (
+            static_pk(protocol::JUPLEND_PROGRAM_ID)?,
+            vec![disc8::<juplend_mocks::juplend_earn::client::args::UpdateRate>()],
+        ),
+    ])
+}
+
 fn raw<'a, S: AccountSource + ?Sized>(
     state: &'a S,
     key: &Pubkey,

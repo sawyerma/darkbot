@@ -47,6 +47,42 @@ pub mod builders {
         Pubkey::from_str(s).expect("static")
     }
 
+    fn disc8<D: anchor_lang::Discriminator>() -> [u8; 8] {
+        D::DISCRIMINATOR
+            .try_into()
+            .expect("anchor discriminators are 8 bytes")
+    }
+
+    /// E2: the instruction table of the receivership TX these builders produce: the pinned
+    /// marginfi instruction discriminators (crate IDL) of exactly the instructions built here,
+    /// the pinned integration refreshes and the swap programs of the receivership allowlist.
+    pub fn instruction_table(program: &Pubkey) -> Result<crate::planner::InstructionTable, String> {
+        use marginfi::instruction as mi;
+        Ok(crate::planner::InstructionTable {
+            program: *program,
+            start: disc8::<mi::StartLiquidation>(),
+            end: disc8::<mi::EndLiquidation>(),
+            withdraw: vec![
+                disc8::<mi::LendingAccountWithdraw>(),
+                disc8::<mi::KaminoWithdraw>(),
+                disc8::<mi::DriftWithdraw>(),
+                disc8::<mi::JuplendWithdraw>(),
+            ],
+            repay: disc8::<mi::LendingAccountRepay>(),
+            init_record: disc8::<mi::MarginfiAccountInitLiqRecord>(),
+            refreshes: crate::integration::pinned_refresh_discriminators()?
+                .into_iter()
+                .collect(),
+            swap_programs: [
+                protocol::JUP_SWAP_PROGRAM_ID,
+                protocol::TITAN_SWAP_PROGRAM_ID,
+            ]
+            .into_iter()
+            .map(pk)
+            .collect(),
+        })
+    }
+
     fn obs(observation: &[Pubkey]) -> Vec<AccountMeta> {
         observation
             .iter()
@@ -443,6 +479,81 @@ pub mod builders {
         use super::*;
         fn p() -> Pubkey {
             Pubkey::new_unique()
+        }
+
+        /// E2: the steps of a TX built by these builders, derived through the pinned
+        /// instruction table: integration refresh, init record, Start, Withdraw, Swap, Repay,
+        /// End — exactly the built order, End last.
+        #[test]
+        fn e2_built_receivership_derives_its_true_steps() {
+            use crate::planner::{steps_of, Step};
+            let (program, account, liquidator, bank, mint) = (p(), p(), p(), p(), p());
+            let table = instruction_table(&program).unwrap();
+            let kamino = pk(protocol::KAMINO_PROGRAM_ID);
+            let jup = pk(protocol::JUP_SWAP_PROGRAM_ID);
+            let refresh = Instruction {
+                program_id: kamino,
+                accounts: vec![],
+                data: table.refreshes[&kamino][0].to_vec(),
+            };
+            let swap = Instruction {
+                program_id: jup,
+                accounts: vec![],
+                data: vec![0xe5; 16],
+            };
+            let token = pk(protocol::TOKEN_PROGRAM_ID);
+            let ixs = build_receivership(ReceivershipParams {
+                program: &program,
+                group: &p(),
+                marginfi_account: &account,
+                liquidator: &liquidator,
+                global_fee_wallet: &p(),
+                start_observation: vec![],
+                end_banks: vec![bank],
+                init_record: true,
+                pre_refreshes: vec![refresh],
+                withdraws: vec![withdraw(
+                    &program,
+                    &p(),
+                    &account,
+                    &liquidator,
+                    &bank,
+                    &mint,
+                    &p(),
+                    &p(),
+                    &token,
+                    13,
+                    None,
+                    &[],
+                )],
+                swaps: vec![swap],
+                repays: vec![repay(
+                    &program,
+                    &p(),
+                    &account,
+                    &liquidator,
+                    &bank,
+                    &mint,
+                    &p(),
+                    &p(),
+                    &token,
+                    7,
+                    None,
+                    &[],
+                )],
+            });
+            assert_eq!(
+                steps_of(&ixs, &table).unwrap(),
+                [
+                    Step::Refresh(kamino),
+                    Step::Refresh(program),
+                    Step::StartLiquidation,
+                    Step::Withdraw,
+                    Step::Swap(jup),
+                    Step::Repay,
+                    Step::EndLiquidation,
+                ]
+            );
         }
 
         #[test]

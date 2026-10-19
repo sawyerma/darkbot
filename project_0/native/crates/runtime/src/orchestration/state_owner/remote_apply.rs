@@ -268,11 +268,22 @@ impl ShadowOwner {
             match done.result {
                 Ok((projection_slot, projection_unix_s, accounts, units)) => {
                     let canonical = self.st.get(&done.account);
-                    let canonical_matches = canonical
+                    let base_matches = canonical
                         .map(|r| {
                             r.slot == done.base_slot && hash(&r.data) == done.base_account_hash
                         })
                         .unwrap_or(false);
+                    // E9: a dependency revised while the worker projected makes it stale too.
+                    let dependencies_match = dependency_fingerprint(&self.st, &done.dependencies)
+                        == done.dependency_fingerprint;
+                    if base_matches && !dependencies_match {
+                        owner_log!(
+                            self,
+                            "projection_dependencies_changed: account={} at=result",
+                            done.account
+                        );
+                    }
+                    let canonical_matches = base_matches && dependencies_match;
 
                     // [FIX-116b] The candidate MarginfiAccount is readonly during the external
                     // refresh prefix and is therefore intentionally not requested as a post-account.
@@ -288,6 +299,8 @@ impl ShadowOwner {
                                 projection_slot,
                                 projection_unix_s,
                                 accounts,
+                                dependencies: done.dependencies,
+                                dependency_fingerprint: done.dependency_fingerprint,
                             },
                         );
                         self.detect_queue.push_front((

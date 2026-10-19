@@ -452,3 +452,41 @@ mod supervise_tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[cfg(test)]
+mod d13_tests {
+    /// D13: the configured worker count sizes the global Rayon pool. `run` applies the
+    /// operational environment (`RAYON_NUM_THREADS` = `limits.workers`) on the single startup
+    /// thread before anything uses Rayon (only the state owner's sweep does); each count is
+    /// checked in a fresh process, where no earlier pool can exist.
+    #[test]
+    fn d13_configured_workers_size_the_global_rayon_pool() {
+        if let Ok(n) = std::env::var("P0_D13_CHILD") {
+            let workers: u64 = n.parse().unwrap();
+            let mut c = darkbot_solana::runtime_config::RuntimeConfig::default();
+            c.limits.workers = workers;
+            for (k, v) in c.environment() {
+                std::env::set_var(k, v);
+            }
+            assert_eq!(rayon::current_num_threads() as u64, workers);
+            return;
+        }
+        for workers in [1u64, 2, 4] {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "orchestration::startup::d13_tests::d13_configured_workers_size_the_global_rayon_pool",
+                    "--test-threads=1",
+                ])
+                .env("P0_D13_CHILD", workers.to_string())
+                .env_remove("RAYON_NUM_THREADS")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+                "workers={workers}: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+    }
+}

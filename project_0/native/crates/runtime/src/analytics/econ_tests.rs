@@ -757,10 +757,35 @@ impl darkbot_project0::health::HealthEngine for TestHealth {
         Ok(0)
     }
 }
+/// E2 fixture: an instruction table of a test program and its Start/Repay/End instructions,
+/// so the pipeline gate classifies real instruction bytes in these tests too.
+fn test_table() -> &'static darkbot_project0::planner::InstructionTable {
+    static TABLE: std::sync::OnceLock<darkbot_project0::planner::InstructionTable> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| darkbot_project0::planner::InstructionTable {
+        program: Pubkey::new_from_array([7; 32]),
+        start: [1; 8],
+        end: [2; 8],
+        withdraw: vec![[3; 8]],
+        repay: [5; 8],
+        init_record: [6; 8],
+        ..Default::default()
+    })
+}
+fn test_ix(disc: [u8; 8]) -> solana_sdk::instruction::Instruction {
+    solana_sdk::instruction::Instruction {
+        program_id: test_table().program,
+        accounts: vec![],
+        data: disc.to_vec(),
+    }
+}
 struct TestBuilder;
 impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
     fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
         Some(n)
+    }
+    fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+        test_table()
     }
     fn plans(
         &self,
@@ -768,11 +793,11 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
         _: u64,
         _: u64,
     ) -> Result<Vec<crate::execution::pipeline::ReceivershipPlan>, String> {
-        use darkbot_project0::planner::{RouteKind, Step};
+        use darkbot_project0::planner::RouteKind;
+        let t = test_table();
         Ok(vec![crate::execution::pipeline::ReceivershipPlan {
             market_identity: None,
-            steps: vec![Step::StartLiquidation, Step::Repay, Step::EndLiquidation],
-            instructions: vec![],
+            instructions: vec![test_ix(t.start), test_ix(t.repay), test_ix(t.end)],
             route: RouteKind::NoSwap,
             input: input(0),
             premium_bps: 500,
@@ -858,7 +883,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![],
+        global_allowed: vec![test_table().program],
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,
@@ -964,7 +989,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![],
+        global_allowed: vec![test_table().program],
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,
@@ -1003,6 +1028,9 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
     impl ReceivershipBuilder for TipBuilder {
         fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
             Some(n)
+        }
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
         }
         fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
             let mut plans = TestBuilder.plans(a, now, slot)?;
@@ -1066,7 +1094,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![],
+        global_allowed: vec![test_table().program],
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,
@@ -1077,6 +1105,126 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
     assert!(r.timing.t_sign_ns.is_some(), "{:?}", r.timing);
     assert_eq!(r.sign_slot, Some(10));
     assert_eq!(calls.load(Ordering::Relaxed), 0);
+}
+/// E2: the pipeline gate classifies the built instructions themselves: an instruction after the
+/// real End, or an unknown discriminator of the receivership program, rejects the plan before
+/// any build, signature or simulation.
+#[test]
+fn e2_pipeline_rejects_plans_by_their_built_instructions() {
+    use crate::execution::pipeline::{
+        Mode, NetworkBudget, Pipeline, ReceivershipBuilder, ReceivershipPlan,
+    };
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    struct Rewritten(fn(&mut Vec<solana_sdk::instruction::Instruction>));
+
+    impl ReceivershipBuilder for Rewritten {
+        fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+            Some(n)
+        }
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
+        }
+        fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut plans = TestBuilder.plans(a, now, slot)?;
+            (self.0)(&mut plans[0].instructions);
+            Ok(plans)
+        }
+    }
+    type Rewrite = fn(&mut Vec<solana_sdk::instruction::Instruction>);
+    let cases: [(Rewrite, &str); 3] = [
+        (|ixs| ixs.push(test_ix([9; 8])), "UnknownInstruction(3)"),
+        (
+            |ixs| ixs.insert(1, test_ix([9; 8])),
+            "UnknownInstruction(1)",
+        ),
+        (
+            |ixs| {
+                ixs.swap(1, 2);
+            },
+            "EndNotLast",
+        ),
+    ];
+    for (rewrite, expected) in cases {
+        let calls = Arc::new(AtomicU64::new(0));
+        let sims = Arc::new(AtomicU64::new(0));
+        let submitter = CountingSubmitter {
+            calls: calls.clone(),
+            sims: sims.clone(),
+        };
+        let clock = Clock::new();
+        let bh = BlockhashCache::new();
+        bh.set(CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 100,
+            refreshed_ns: clock.now_ns(),
+        });
+        let zero = Limits {
+            max_total_capital: 0,
+            max_outstanding_inventory: 0,
+            max_concurrent_positions: 0,
+            max_exposure_per_attempt: 0,
+            max_daily_loss: 0,
+            max_failed_attempts_per_day: 0,
+            max_tip: 0,
+            max_slippage_bps: 0,
+            max_outstanding_attempts: 0,
+        };
+        let mut safety = Safety::new(zero, Allow::default(), false);
+        let payer = solana_sdk::signature::Keypair::new();
+        let allow = Allowlist::default();
+        let failed = FailedCostMatrix::default();
+        let slots = darkbot_solana::ingress::SlotWatch::new();
+        let mut network = NetworkBudget::unbounded();
+        let builder = Rewritten(rewrite);
+        let mut p = Pipeline {
+            mode: Mode::Shadow,
+            clock: &clock,
+            health: &TestHealth,
+            builder: &builder,
+            submitter: &submitter,
+            safety: &mut safety,
+            blockhash: &bh,
+            payer: &payer,
+            allowlist: &allow,
+            failed_costs: &failed,
+            limits: TxLimits::default(),
+            resources: Resources {
+                compute_unit_limit: 100_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: None,
+            },
+            min_profit: 0,
+            blockhash_max_age_ns: u64::MAX,
+            p7_passed: false,
+            freshness: Freshness {
+                max_opportunity_age_ns: u64::MAX,
+                execution_deadline_ns: u64::MAX,
+            },
+            tip_account: None,
+            global_allowed: vec![test_table().program],
+            prereq_allowed: vec![],
+            slot_watch: &slots,
+            network: &mut network,
+            simulation_failure: None,
+        };
+        let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+        let reason = r.reason.clone().unwrap_or_default();
+        assert!(
+            reason.contains(&format!("plan invalid: {expected}")),
+            "{reason}"
+        );
+        assert_eq!(r.progress.transaction_built, None);
+        assert_eq!(sims.load(Ordering::Relaxed), 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
 }
 #[test]
 fn runtime_worker_writes_four_snapshots_then_identical_final() {
@@ -1809,7 +1957,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![],
+        global_allowed: vec![test_table().program],
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,

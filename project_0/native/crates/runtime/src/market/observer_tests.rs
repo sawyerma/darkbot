@@ -2320,3 +2320,44 @@ fn strict_compat_export_failure_stays_failed_on_retry() {
     drop(sink);
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// R12: the live capture retention cap is exact and fail-closed: `cap` distinct transactions
+/// (successful or failed relevant ones) are admitted, a duplicate at the cap is a duplicate
+/// (no overflow), the next distinct transaction marks INCOMPLETE and is counted — never a
+/// silent eviction. Applied with the default cap 262,144 at 262,144 / 262,145.
+#[test]
+fn r12_live_retention_cap_is_exact_and_fail_closed() {
+    for cap in [4usize, 262_144] {
+        let (h, _rx) = crate::analytics::econ::test_handle(cap);
+        let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+        core.econ = Some(h.clone());
+        for i in 0..cap {
+            assert!(
+                core.admit_identity(&format!("sig{i}"), 10, Some(i % 3 != 0)),
+                "{i}"
+            );
+        }
+        assert_eq!(core.stats.unique_transactions as usize, cap);
+        assert!(core.stats.failed_transactions > 0);
+        assert!(!core.admit("sig0", 10, Some(true), 1), "duplicate");
+        assert_eq!(core.stats.duplicate_transactions, 1);
+        let overflow = || {
+            h.shared
+                .retention_overflow
+                .load(std::sync::atomic::Ordering::Relaxed)
+        };
+        assert_eq!(overflow(), 0);
+        assert!(!core
+            .incomplete_reasons
+            .contains("C0_E1_MARKET_RETENTION_OVERFLOW"));
+        assert!(!core.admit_identity("one-more", 11, Some(true)));
+        assert_eq!(overflow(), 1);
+        assert!(core
+            .incomplete_reasons
+            .contains("C0_E1_MARKET_RETENTION_OVERFLOW"));
+        assert_eq!(
+            core.stats.unique_transactions as usize, cap,
+            "nothing evicted"
+        );
+    }
+}
