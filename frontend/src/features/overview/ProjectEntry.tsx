@@ -34,12 +34,12 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
   const controls = projectControls(reg.key, process);
 
   return (
-    <article className="ov-card" aria-labelledby={titleId} data-testid={`project-card-${reg.key}`}>
+    <article className="ov-card" aria-labelledby={titleId} data-testid={`project-card-${reg.key}`} data-project={reg.key} data-capture-state={process.state}>
       <div className="ov-card-head">
         <h3 id={titleId}>
           <Link to={reg.route} title={`Open ${reg.label}`} data-testid={`project-link-${reg.key}`}>{reg.label}</Link>
         </h3>
-        <StatusBadge state={sourceNotice(summary?.source)} detail={summary?.sourceId} />
+        <StatusBadge state={reg.key === "project0" && process.state === "FAILED" ? "FAILED" : sourceNotice(summary?.source)} detail={reg.key === "project0" && process.state === "FAILED" ? process.reason : summary?.sourceId} />
       </div>
       <p className="ov-domain">{summary?.domain ?? DASH}</p>
       <ProcessLine indicator={process} testId={`project-process-${reg.key}`} />

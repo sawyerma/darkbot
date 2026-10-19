@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 // Health = READY ist keine Execution-/LIVE-Freigabe.
 export type NoticeState =
   | "UNKNOWN" | "NOT_CONNECTED" | "STALE" | "DETACHED" | "INCOMPLETE"
-  | "BLOCKED" | "READY" | "LIVE" | "OFFLINE_REPLAY";
+  | "FAILED" | "BLOCKED" | "READY" | "LIVE" | "OFFLINE_REPLAY";
 
 const LABEL: Record<NoticeState, string> = {
   UNKNOWN: "Unknown",
@@ -11,6 +11,7 @@ const LABEL: Record<NoticeState, string> = {
   STALE: "Stale",
   DETACHED: "Source detached",
   INCOMPLETE: "Incomplete",
+  FAILED: "Failed",
   BLOCKED: "Blocked",
   READY: "Ready",
   LIVE: "Live",

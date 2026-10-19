@@ -110,3 +110,15 @@
 .ov-log-view h2 { margin: 0; font-size: var(--g-fs-h2); }
 .ov-log-view p { color: var(--g-muted); }
 .ov-log-view pre { white-space: pre-wrap; overflow-wrap: anywhere; font: var(--g-fs-small)/var(--g-lh-base) var(--g-font-mono); }
+
+/* Project 0 only: process truth gates the Ready fill; connection labels stay neutral otherwise. */
+.ov-card[data-project="project0"][data-capture-state="RUNNING"] .g-badge[data-state="READY"] {
+  background: var(--g-status-running);
+  border-color: var(--g-status-running);
+  color: var(--g-text-strong);
+}
+.ov-card[data-project="project0"] .g-badge[data-state="FAILED"] {
+  background: var(--g-status-failed);
+  border-color: var(--g-status-failed);
+  color: var(--g-text-strong);
+}
