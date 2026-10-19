@@ -170,6 +170,7 @@ impl ShadowOwner {
                                     self.projection_pending.insert(acct);
                                 }
                                 Err(ChannelError::Full(_)) => {
+                                    self.remote.projection_jobs.give_up();
                                     self.evidence.emit(OwnerEvidence::Record(
                                         RecordEvent::IntegrationSkip {
                                             account: acct,
@@ -387,6 +388,7 @@ impl ShadowOwner {
                 prereq_allowed: self.prereq_allowed.clone(),
                 slot_watch: &self.slot_watch,
                 network: &mut self.network,
+                simulation_failure: None,
             };
             #[cfg(feature = "crate_health")]
             let pipeline_started_ns = self.clock.now_ns();
@@ -399,6 +401,7 @@ impl ShadowOwner {
                 protocol_slot,
                 self.st.run_state().is_tradable(),
             );
+            let simulation_failure = pipe.simulation_failure.take();
             rec.rx_slot = Some(slot); // trigger provenance differs from projected evaluation slot
             #[cfg(feature = "crate_health")]
             {
@@ -439,6 +442,16 @@ impl ShadowOwner {
                 h.emit(crate::analytics::econ::Evidence::Shadow(Box::new(
                     rec.clone(),
                 )));
+            }
+            if let Some(failure) = simulation_failure {
+                self.evidence
+                    .emit(OwnerEvidence::SimulationFailure(Box::new(
+                        crate::analytics::record::SimulationFailureRecord {
+                            account: rec.account.clone(),
+                            rx_slot: rec.rx_slot,
+                            failure,
+                        },
+                    )))?;
             }
             self.evidence
                 .emit(OwnerEvidence::Opportunity(Box::new(rec.clone())))?;

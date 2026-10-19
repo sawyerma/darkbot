@@ -255,8 +255,9 @@ impl SubmissionAdapter for RpcSubmitter {
     }
 
     /// [FIX-38] RPC akzeptiert v1 (Solana Foundation, base64 >1232 B) — VERIFY per Capability-Gate S3-02.
-    fn supports_tx_version(&self, _v: crate::tx::BuildVersion) -> bool {
-        true
+    /// B9: V1 only once the builder can produce it.
+    fn supports_tx_version(&self, v: crate::tx::BuildVersion) -> bool {
+        !matches!(v, crate::tx::BuildVersion::V1) || crate::tx::V1_BUILDABLE
     }
 
     /// [FIX-6] Simulation derselben signierten TX; kein Rebuild zwischen Simulation und Send.
@@ -286,7 +287,18 @@ impl SubmissionAdapter for RpcSubmitter {
                 None => SimResult::Ok {
                     units_consumed: r.value.units_consumed,
                 },
-                Some(e) => SimResult::Failed(format!("RPC_SIMULATION_FAILED {e:?}")),
+                Some(e) => {
+                    // F1: bounded, redacted logs for the native journal only.
+                    let (logs, log_lines, logs_truncated) =
+                        super::bounded_simulation_logs(r.value.logs.as_deref());
+                    SimResult::Failed(super::SimulationFailure {
+                        code: format!("RPC_SIMULATION_FAILED {e:?}"),
+                        units_consumed: r.value.units_consumed,
+                        logs,
+                        log_lines,
+                        logs_truncated,
+                    })
+                }
             },
             Err(e) => SimResult::Unavailable(safe_rpc_error(&e)),
         }

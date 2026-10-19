@@ -159,6 +159,9 @@ macro_rules! typed_kinds {
             k::OWNER_DIAGNOSTIC => $f::<OwnerDiagnostic>($kind, $schema, $bytes),
             k::OWNER_RECORD => $f::<super::evidence::OwnerRecord>($kind, $schema, $bytes),
             k::OWNER_OPPORTUNITY => $f::<super::record::OpportunityRecord>($kind, $schema, $bytes),
+            k::OWNER_SIMULATION_FAILURE => {
+                $f::<super::record::SimulationFailureRecord>($kind, $schema, $bytes)
+            }
             k::ECON_SHADOW_EVALUATION => {
                 $f::<super::econ::ShadowEvaluation>($kind, $schema, $bytes)
             }

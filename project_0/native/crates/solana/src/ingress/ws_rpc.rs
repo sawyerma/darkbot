@@ -904,12 +904,15 @@ fn deliver(
         Err(ChannelError::Full(_)) => {
             // Kein stiller Drop: Out-of-Band-Halt (garantiert sichtbar) + Gap-Versuch.
             halt.raise();
-            let _ = sink.try_push(IngressEvent::Gap {
+            sink.give_up();
+            if let Err(ChannelError::Full(_)) = sink.try_push(IngressEvent::Gap {
                 source: SourceKind::WsRpcControl,
                 from_slot: *last_slot,
                 to_slot: None,
                 t_rx_ns,
-            });
+            }) {
+                sink.give_up();
+            }
             Err(IngressError::Protocol("sink overflow".into()))
         }
         Err(ChannelError::Disconnected(_)) => Ok(false),

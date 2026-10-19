@@ -436,11 +436,11 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
         ));
     }
     let lock_path = cfg.generation_file.with_extension("generation.lock");
-    let lock = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-        .map_err(|e| format!("reporter generation already owned or inaccessible: {e}"))?;
+    let lock = acquire_owner_lock(&lock_path)?;
+    if let Err(e) = remove_stale_socket(&cfg.socket_path) {
+        let _ = fs::remove_file(&lock_path);
+        return Err(e);
+    }
     // Refuse replacing someone else's UNIX socket, including a live server.
     let listener = match UnixListener::bind(&cfg.socket_path) {
         Ok(listener) => listener,
@@ -500,6 +500,60 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
     })
 }
 
+/// R22: process-bound ownership. The advisory lock dies with its process, so a crashed owner's
+/// leftover lock file never blocks a restart, while a live owner keeps every second start out.
+/// The locked inode must still be the path's file (an owner removing it on shutdown races
+/// with a starter that opened it before).
+fn acquire_owner_lock(lock_path: &std::path::Path) -> Result<fs::File, String> {
+    use std::os::unix::fs::MetadataExt;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(|e| format!("reporter generation lock inaccessible: {e}"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => {
+            return Err("reporter generation already owned by a live process".into())
+        }
+        Err(fs::TryLockError::Error(e)) => return Err(format!("reporter generation lock: {e}")),
+    }
+    let held = lock.metadata().map_err(|e| e.to_string())?;
+    match fs::symlink_metadata(lock_path) {
+        Ok(path) if path.dev() == held.dev() && path.ino() == held.ino() => Ok(lock),
+        _ => Err("reporter generation lock replaced concurrently; retry".into()),
+    }
+}
+
+/// R22: a socket file left by a crashed owner (we hold the owner lock) is removed only if it is
+/// a socket of our own user that nobody serves; a live server, a foreign user's socket, a
+/// symlink or any other file stays untouched and refuses the start.
+fn remove_stale_socket(socket_path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let meta = match fs::symlink_metadata(socket_path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("reporter socket path: {e}")),
+    };
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    if !meta.file_type().is_socket() || meta.uid() != uid {
+        return Err("reporter socket path occupied by a foreign file".into());
+    }
+    match UnixStream::connect(socket_path) {
+        Ok(_) => Err("reporter socket served by a live process".into()),
+        Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
+            fs::remove_file(socket_path).map_err(|e| format!("reporter stale socket removal: {e}"))
+        }
+        Err(e) => Err(format!("reporter socket probe: {e}")),
+    }
+}
+
+/// Longest wait between checks of the stop flag.
+const STOP_POLL: Duration = Duration::from_millis(500);
+
 fn serve(
     listener: UnixListener,
     cfg: ReporterConfig,
@@ -554,28 +608,28 @@ fn session(
     let mut last_heartbeat_at = Instant::now();
     let mut last_capture_at: Option<Instant> = None;
     while !stop.load(Ordering::Acquire) {
-        match reader.wait_changed(cfg.heartbeat.min(Duration::from_millis(500))) {
-            Some(mut snapshot) => {
-                // At most one capture state per min_interval; whatever arrived meanwhile wins.
-                if snapshot.capture_version != sent.capture {
-                    if let Some(at) = last_capture_at {
-                        let since = at.elapsed();
-                        if since < cfg.min_interval {
-                            thread::sleep(cfg.min_interval - since);
-                            if let Some(newer) = reader.wait_changed(Duration::ZERO) {
-                                snapshot = newer;
-                            }
+        // R21: wake for the next heartbeat deadline (configured period), at the latest after
+        // STOP_POLL to observe a stop request; state changes wake earlier.
+        let until_heartbeat = cfg.heartbeat.saturating_sub(last_heartbeat_at.elapsed());
+        if let Some(mut snapshot) = reader.wait_changed(until_heartbeat.min(STOP_POLL)) {
+            // At most one capture state per min_interval; whatever arrived meanwhile wins.
+            if snapshot.capture_version != sent.capture {
+                if let Some(at) = last_capture_at {
+                    let since = at.elapsed();
+                    if since < cfg.min_interval {
+                        thread::sleep(cfg.min_interval - since);
+                        if let Some(newer) = reader.wait_changed(Duration::ZERO) {
+                            snapshot = newer;
                         }
                     }
                 }
-                if send_changes(
-                    &snapshot, &mut sent, source_id, generation, counters, &mut send,
-                )? {
-                    last_capture_at = Some(Instant::now());
-                }
-                reader.delivered(snapshot.seq);
             }
-            None => {}
+            if send_changes(
+                &snapshot, &mut sent, source_id, generation, counters, &mut send,
+            )? {
+                last_capture_at = Some(Instant::now());
+            }
+            reader.delivered(snapshot.seq);
         }
         // Heartbeats follow their own clock, including during continuous state traffic.
         if last_heartbeat_at.elapsed() >= cfg.heartbeat {
@@ -811,7 +865,6 @@ mod contract_tests {
         s.capture_version += 1;
         assert!(send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
         assert!(!send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
-        drop(count);
         assert_eq!(frames, 3, "system once, capture twice");
     }
 

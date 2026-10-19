@@ -217,6 +217,17 @@ impl super::payload::Payload for OpportunityRecord {
     const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
 }
 
+/// F1: the simulation evidence of one failed candidate (journal only, never stderr/Display).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimulationFailureRecord {
+    pub account: String,
+    pub rx_slot: Option<u64>,
+    pub failure: darkbot_solana::submit::SimulationFailure,
+}
+impl super::payload::Payload for SimulationFailureRecord {
+    const KIND: u16 = super::journal::kind::OWNER_SIMULATION_FAILURE;
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

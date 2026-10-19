@@ -15,6 +15,13 @@ pub fn next(path: &Path) -> Result<u64, String> {
     };
     let generation = current.checked_add(1).ok_or("GENERATION_OVERFLOW")?;
     let temp = path.with_extension("next");
+    // R22: the caller holds the exclusive owner lock, so a leftover temp file is the debris of a
+    // crashed earlier owner, never a concurrent writer's.
+    match fs::remove_file(&temp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("generation temp: {e}")),
+    }
     let result = (|| -> Result<(), String> {
         let mut out = OpenOptions::new()
             .write(true)

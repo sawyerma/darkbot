@@ -139,6 +139,26 @@ impl StorageStatus {
     }
 }
 
+/// L3: `deferred_syncs` counts each sync deadline backlog postponed once, not every loop pass
+/// spent inside the same postponement.
+#[derive(Default)]
+struct Deferral {
+    open: bool,
+}
+impl Deferral {
+    /// True exactly when an overdue sync is newly deferred.
+    fn observe(&mut self, overdue: bool, sync_due: bool) -> bool {
+        let newly = overdue && !sync_due && !self.open;
+        if newly {
+            self.open = true;
+        }
+        newly
+    }
+    fn synced(&mut self) {
+        self.open = false;
+    }
+}
+
 /// Measured writer and budget behaviour of one journal (reported with the seal).
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StorageMetrics {
@@ -447,6 +467,7 @@ fn write_loop(
     let mut batch: Vec<Pending> = Vec::with_capacity(cfg.batch_frames * ADAPTIVE_BATCH);
     let mut first_pending: Option<Instant> = None;
     let mut last_sync = Instant::now();
+    let mut deferral = Deferral::default();
     let mut seal = None;
     loop {
         let wait = first_pending
@@ -518,10 +539,12 @@ fn write_loop(
             if writer.rotate_if_due()? {
                 m.syncs += 2;
                 last_sync = Instant::now();
+                deferral.synced();
             }
             m.segments = writer.segments();
         }
-        if seal.is_none() && last_sync.elapsed() >= cfg.sync_interval && !sync_due && m.frames > 0 {
+        let overdue = last_sync.elapsed() >= cfg.sync_interval;
+        if seal.is_none() && m.frames > 0 && deferral.observe(overdue, sync_due) {
             m.deferred_syncs += 1;
         }
         if seal.is_none() && sync_due && m.frames > 0 {
@@ -530,6 +553,7 @@ fn write_loop(
             m.syncs += 1;
             m.max_sync_ns = m.max_sync_ns.max(started.elapsed().as_nanos() as u64);
             last_sync = Instant::now();
+            deferral.synced();
         }
         if let Some(complete) = seal {
             m.segments = writer.segments();
@@ -756,6 +780,18 @@ mod tests {
         assert!(w.seal(true).is_err());
         assert_eq!(frames_in(&path), (2, false, false));
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// L3: one deferred sync per postponed deadline, however many loop passes it spans.
+    #[test]
+    fn l3_deferred_syncs_count_postponed_deadlines_not_loop_passes() {
+        let mut d = Deferral::default();
+        let passes: u32 = (0..50).map(|_| u32::from(d.observe(true, false))).sum();
+        assert_eq!(passes, 1);
+        assert!(!d.observe(false, false) && !d.observe(true, true));
+        d.synced();
+        assert!(!d.observe(false, false));
+        assert!(d.observe(true, false));
     }
 
     /// SK-05: larger batches and a deferred sync only under backlog, bounded by the reserved

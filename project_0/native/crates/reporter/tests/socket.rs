@@ -274,3 +274,94 @@ fn idle_heartbeat_obeys_its_configured_interval() {
     handle.stop();
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// R21: the heartbeat follows its configured period, not the 500-ms stop poll (700 ms used to
+/// arrive every ~1000 ms).
+#[test]
+fn r21_heartbeat_period_is_the_configured_interval() {
+    let dir = directory("r21");
+    let mut cfg = ReporterConfig::new(sock("r21"), dir.join("generation"), "TEST_ONLY".into());
+    cfg.heartbeat = Duration::from_millis(700);
+    let handle = start(cfg.clone(), StatusTap::new()).unwrap();
+    let mut client = connect(&cfg);
+    assert!(matches!(
+        next(&mut client).msg,
+        Some(engine_frame::Msg::Hello(_))
+    ));
+    let mut last = Instant::now();
+    for _ in 0..3 {
+        assert!(matches!(
+            next(&mut client).msg,
+            Some(engine_frame::Msg::Heartbeat(_))
+        ));
+        let gap = last.elapsed();
+        last = Instant::now();
+        assert!(
+            gap >= Duration::from_millis(650) && gap < Duration::from_millis(900),
+            "heartbeat gap {gap:?}"
+        );
+    }
+    handle.stop();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// R22: leftovers of a crashed owner (lock file, generation temp file, unserved socket) never
+/// block a restart; a live owner, a live foreign server, a foreign file and a symlink refuse
+/// the start and stay untouched.
+#[test]
+fn r22_crash_leftovers_restart_but_live_owners_and_foreign_files_refuse() {
+    let dir = directory("r22");
+    let cfg = ReporterConfig::new(sock("r22"), dir.join("generation"), "TEST_ONLY".into());
+    std::fs::write(dir.join("generation.generation.lock"), b"").unwrap();
+    std::fs::write(dir.join("generation.next"), b"7\n").unwrap();
+    drop(std::os::unix::net::UnixListener::bind(&cfg.socket_path).unwrap());
+    assert!(cfg.socket_path.exists(), "stale socket file left behind");
+    let handle = start(cfg.clone(), StatusTap::new()).expect("restart after crash");
+    assert_eq!(handle.generation, 1);
+    let mut client = connect(&cfg);
+    assert!(matches!(
+        next(&mut client).msg,
+        Some(engine_frame::Msg::Hello(_))
+    ));
+    // Same owner lock while alive.
+    let second = start(cfg.clone(), StatusTap::new()).err().unwrap();
+    assert!(second.contains("already owned"), "{second}");
+    // Another generation file but the live socket.
+    let other = ReporterConfig::new(
+        cfg.socket_path.clone(),
+        dir.join("other"),
+        "TEST_ONLY".into(),
+    );
+    let live = start(other, StatusTap::new()).err().unwrap();
+    assert!(live.contains("live process"), "{live}");
+    assert!(cfg.socket_path.exists());
+    // A regular file and a symlink at the socket path are never removed.
+    let file = sock("r22f");
+    std::fs::write(&file, b"keep").unwrap();
+    let foreign = start(
+        ReporterConfig::new(file.clone(), dir.join("f"), "TEST_ONLY".into()),
+        StatusTap::new(),
+    )
+    .err()
+    .unwrap();
+    assert!(foreign.contains("foreign file"), "{foreign}");
+    assert_eq!(std::fs::read(&file).unwrap(), b"keep");
+    let link = sock("r22l");
+    std::os::unix::fs::symlink(&file, &link).unwrap();
+    let linked = start(
+        ReporterConfig::new(link.clone(), dir.join("l"), "TEST_ONLY".into()),
+        StatusTap::new(),
+    )
+    .err()
+    .unwrap();
+    assert!(linked.contains("foreign file"), "{linked}");
+    assert!(std::fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    std::fs::remove_file(&link).unwrap();
+    std::fs::remove_file(&file).unwrap();
+    handle.stop();
+    assert!(!cfg.socket_path.exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}

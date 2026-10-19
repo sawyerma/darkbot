@@ -1153,27 +1153,30 @@ pub mod p0 {
                                 Err(e) => route_errors
                                     .push(format!("exact-in {}→{}: {}", asset_mint, liab_mint, e)),
                                 Ok(zp_input) => {
-                                    out.push(ReceivershipPlan {
-                                        market_identity: Some(
-                                            crate::analytics::record::MarketPlanIdentity {
-                                                liquidation_type: "RECEIVERSHIP".into(),
-                                                asset_bank: sz.asset_bank.to_string(),
-                                                liability_bank: sz.liab_bank.to_string(),
-                                            },
-                                        ),
-                                        steps: steps.clone(),
-                                        instructions: ixs.clone(),
-                                        route: RouteKind::FreePublicAllowed,
-                                        input: zp_input,
-                                        premium_bps: sz.premium_bps,
-                                        exposure: capital,
-                                        tip: self.jito_tip_lamports,
-                                        slippage_bps: sz.slippage_bps,
-                                        assets: vec![asset_mint, liab_mint],
-                                        tx_version: BuildVersion::V1,
-                                        lookup_tables: vec![],
-                                        prerequisite_txs: vec![],
-                                    });
+                                    // B9: a V1 candidate only with a buildable V1 transaction.
+                                    if darkbot_solana::tx::V1_BUILDABLE {
+                                        out.push(ReceivershipPlan {
+                                            market_identity: Some(
+                                                crate::analytics::record::MarketPlanIdentity {
+                                                    liquidation_type: "RECEIVERSHIP".into(),
+                                                    asset_bank: sz.asset_bank.to_string(),
+                                                    liability_bank: sz.liab_bank.to_string(),
+                                                },
+                                            ),
+                                            steps: steps.clone(),
+                                            instructions: ixs.clone(),
+                                            route: RouteKind::FreePublicAllowed,
+                                            input: zp_input,
+                                            premium_bps: sz.premium_bps,
+                                            exposure: capital,
+                                            tip: self.jito_tip_lamports,
+                                            slippage_bps: sz.slippage_bps,
+                                            assets: vec![asset_mint, liab_mint],
+                                            tx_version: BuildVersion::V1,
+                                            lookup_tables: vec![],
+                                            prerequisite_txs: vec![],
+                                        });
+                                    }
                                     out.push(ReceivershipPlan {
                                         market_identity: Some(
                                             crate::analytics::record::MarketPlanIdentity {

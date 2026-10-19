@@ -180,6 +180,8 @@ pub enum OwnerEvidence {
     Summary(DaySummary),
     /// A formatted owner diagnostic. The owner never writes stderr itself (PERSIST-02).
     Diagnostic(String),
+    /// F1: bounded simulation logs of a failed candidate.
+    SimulationFailure(Box<super::record::SimulationFailureRecord>),
 }
 /// One encoded owner event: kind, payload version, bytes and frame provenance.
 struct Encoded {
@@ -214,6 +216,7 @@ impl OwnerEvidence {
             Self::Diagnostic(line) => {
                 Encoded::of(&OwnerDiagnostic { line: line.clone() }, None, None)
             }
+            Self::SimulationFailure(v) => Encoded::of(v.as_ref(), v.rx_slot, None),
         }
     }
 }

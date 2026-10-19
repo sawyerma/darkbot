@@ -108,6 +108,11 @@ impl fmt::Display for BuildError {
 
 impl std::error::Error for BuildError {}
 
+/// B9: whether `build` produces a signed, submittable V1 transaction. `build_v1` has no signing/
+/// submission adapter yet (`V1Unavailable` in every feature set), so no planner offers a V1 plan
+/// and no adapter claims V1. Flip only together with a qualified build/sign/simulate/submit path.
+pub const V1_BUILDABLE: bool = false;
+
 /// Zählt die eindeutigen Accounts, die die Runtime sperren würde (Payer +
 /// alle Ix-Accounts + Programme). Unabhängig von LUTs (Runtime-Limit).
 pub fn locked_account_count(payer: &Pubkey, ixs: &[Instruction]) -> usize {
@@ -414,13 +419,29 @@ pub fn sign(built: &mut BuiltTx, signers: &[&Keypair]) -> Result<(), BuildError>
 }
 
 /// Keypair aus Solana-CLI-JSON (Array von 64 Bytes) laden. Kein Key im Code, keine Env-Defaults.
+/// B10: errors are fixed codes (no wallet path, no parser text that could quote a secret byte);
+/// the file text and the parsed bytes live in zeroized buffers (the bytes in one fixed array, no
+/// growing copies). Copies inside the OS, the allocator or the SDK are outside this guarantee.
 pub fn load_keypair_json(path: &str) -> Result<Keypair, BuildError> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| BuildError::Sign(format!("read {}: {}", path, e)))?;
-    let bytes: Vec<u8> = serde_json::from_str(&raw)
-        .map_err(|e| BuildError::Sign(format!("parse {}: {}", path, e)))?;
+    let raw = zeroize::Zeroizing::new(
+        std::fs::read_to_string(path)
+            .map_err(|e| BuildError::Sign(format!("KEYPAIR_READ: {:?}", e.kind())))?,
+    );
+    let bytes = keypair_bytes(&raw).ok_or_else(|| BuildError::Sign("KEYPAIR_FORMAT".into()))?;
     // [FIX-13] SDK 3.x: `Keypair::try_from(&[u8])` (from_bytes entfernt).
-    Keypair::try_from(&bytes[..]).map_err(|e| BuildError::Sign(e.to_string()))
+    Keypair::try_from(&bytes[..]).map_err(|_| BuildError::Sign("KEYPAIR_INVALID".into()))
+}
+
+/// The Solana CLI keypair format: a JSON array of exactly 64 integers 0..=255.
+fn keypair_bytes(raw: &str) -> Option<zeroize::Zeroizing<[u8; 64]>> {
+    let inner = raw.trim().strip_prefix('[')?.strip_suffix(']')?;
+    let mut out = zeroize::Zeroizing::new([0u8; 64]);
+    let mut n = 0;
+    for part in inner.split(',') {
+        *out.get_mut(n)? = part.trim().parse().ok()?;
+        n += 1;
+    }
+    (n == 64).then_some(out)
 }
 
 pub fn payer_of(kp: &Keypair) -> Pubkey {
@@ -431,6 +452,83 @@ pub fn payer_of(kp: &Keypair) -> Pubkey {
 mod tests {
     use super::*;
     use solana_sdk::instruction::AccountMeta;
+
+    /// B9: the V1 capability flag matches what `build` actually does.
+    #[test]
+    fn b9_v1_capability_flag_matches_the_builder() {
+        let payer = Keypair::new();
+        let plan = TxPlan {
+            version: BuildVersion::V1,
+            payer: payer.pubkey(),
+            instructions: vec![solana_system_interface::instruction::transfer(
+                &payer.pubkey(),
+                &payer.pubkey(),
+                0,
+            )],
+            lookup_tables: vec![],
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: Some(64 * 1024),
+            },
+        };
+        let built = build(&plan, Hash::new_unique(), &TxLimits::default());
+        assert_eq!(built.is_ok(), V1_BUILDABLE);
+        assert!(matches!(built, Err(BuildError::V1Unavailable)));
+    }
+
+    /// B10: wrong path, malformed JSON, a byte out of range, a wrong length and a key whose
+    /// public half does not match fail with fixed codes that name neither the path nor a value.
+    #[test]
+    fn b10_keypair_errors_never_carry_path_or_secret_bytes() {
+        let dir = std::env::temp_dir().join(format!("b10-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let kp = Keypair::new();
+        let good = dir.join("SECRET_WALLET_PATH.json");
+        let json = |b: &[u8]| {
+            format!(
+                "[{}]\n",
+                b.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
+            )
+        };
+        std::fs::write(&good, json(&kp.to_bytes())).unwrap();
+        let loaded = load_keypair_json(good.to_str().unwrap()).unwrap();
+        assert_eq!(loaded.pubkey(), kp.pubkey());
+        let mut wrong_pub = kp.to_bytes();
+        wrong_pub[63] ^= 1;
+        let mut out_of_range = json(&kp.to_bytes());
+        out_of_range.replace_range(1..1, "300,");
+        let cases = [
+            ("missing", None, "KEYPAIR_READ: NotFound"),
+            ("not_json", Some("{\"k\":1}".to_string()), "KEYPAIR_FORMAT"),
+            ("range", Some(out_of_range), "KEYPAIR_FORMAT"),
+            ("short", Some(json(&kp.to_bytes()[..63])), "KEYPAIR_FORMAT"),
+            (
+                "long",
+                Some(json(&[kp.to_bytes().as_slice(), &[1]].concat())),
+                "KEYPAIR_FORMAT",
+            ),
+            ("mismatch", Some(json(&wrong_pub)), "KEYPAIR_INVALID"),
+        ];
+        let secret_byte = kp.to_bytes()[5].to_string();
+        for (name, body, code) in cases {
+            let path = dir.join(format!("SECRET_WALLET_PATH_{name}.json"));
+            if let Some(b) = body {
+                std::fs::write(&path, b).unwrap();
+            }
+            let e = load_keypair_json(path.to_str().unwrap())
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(e.ends_with(code), "{name}: {e}");
+            assert!(
+                !e.contains("SECRET_WALLET_PATH") && !e.contains("300"),
+                "{name}: {e}"
+            );
+            assert!(!e.contains(&format!(" {secret_byte}")), "{name}: {e}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[cfg(feature = "txv1")]
     #[test]

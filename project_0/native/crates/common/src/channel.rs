@@ -24,6 +24,7 @@ pub enum ChannelError<T> {
 struct Counters {
     sent: AtomicU64,
     overflow: AtomicU64,
+    dropped: AtomicU64,
     received: AtomicU64,
 }
 
@@ -32,7 +33,10 @@ pub struct ChannelStats {
     pub name: &'static str,
     pub capacity: usize,
     pub sent: u64,
+    /// Failed push attempts (`Full`); an element retried n times counts n times.
     pub overflow: u64,
+    /// L3: elements the producer finally gave up after `Full` (`give_up`), each once.
+    pub dropped: u64,
     pub received: u64,
 }
 
@@ -90,6 +94,11 @@ impl<T> Producer<T> {
         }
     }
 
+    /// L3: the element rejected by the last `try_push` is abandoned, not retried.
+    pub fn give_up(&self) {
+        self.counters.dropped.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn stats(&self) -> ChannelStats {
         stats(self.name, self.capacity, &self.counters)
     }
@@ -145,12 +154,35 @@ fn stats(name: &'static str, capacity: usize, c: &Counters) -> ChannelStats {
         capacity,
         sent: c.sent.load(Ordering::Relaxed),
         overflow: c.overflow.load(Ordering::Relaxed),
+        dropped: c.dropped.load(Ordering::Relaxed),
         received: c.received.load(Ordering::Relaxed),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    /// L3: retried pushes are failed attempts, not lost elements; only `give_up` counts a drop.
+    #[test]
+    fn l3_failed_attempts_and_dropped_elements_are_separate() {
+        let (tx, rx) = bounded::<u32>("l3", 1);
+        tx.try_push(1).unwrap();
+        let mut v = 2;
+        for _ in 0..3 {
+            match tx.try_push(v) {
+                Err(ChannelError::Full(back)) => v = back,
+                _ => panic!("expected Full"),
+            }
+        }
+        let s = tx.stats();
+        assert_eq!((s.sent, s.overflow, s.dropped), (1, 3, 0));
+        assert_eq!(rx.try_pop(), Some(1));
+        tx.try_push(v).unwrap();
+        assert!(matches!(tx.try_push(3), Err(ChannelError::Full(3))));
+        tx.give_up();
+        let s = rx.stats();
+        assert_eq!((s.sent, s.overflow, s.dropped, s.received), (2, 4, 1, 1));
+    }
+
     use super::*;
 
     #[test]

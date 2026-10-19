@@ -70,8 +70,91 @@ impl std::error::Error for SubmitError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SimResult {
     Ok { units_consumed: Option<u64> },
-    Failed(String),
+    Failed(SimulationFailure),
     Unavailable(String),
+}
+
+/// F1: a failed simulation. `code` is the categorized, secret-free cause; the program logs are
+/// bounded and redacted (`bounded_simulation_logs`) and belong only in the native journal:
+/// `Debug` shows the code alone (exactly the former `Failed("<code>")` text), never a log line.
+#[derive(Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SimulationFailure {
+    pub code: String,
+    pub units_consumed: Option<u64>,
+    pub logs: Vec<String>,
+    /// Lines the provider reported (`None`: no log field in the response).
+    pub log_lines: Option<u32>,
+    pub logs_truncated: bool,
+}
+impl std::fmt::Debug for SimulationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.code, f)
+    }
+}
+impl From<&str> for SimulationFailure {
+    fn from(code: &str) -> Self {
+        Self {
+            code: code.to_owned(),
+            ..Self::default()
+        }
+    }
+}
+impl From<String> for SimulationFailure {
+    fn from(code: String) -> Self {
+        Self {
+            code,
+            ..Self::default()
+        }
+    }
+}
+
+/// F1 bounds: at most 64 lines of at most 256 bytes, at most 16 KiB in total.
+pub const SIM_LOG_MAX_LINES: usize = 64;
+pub const SIM_LOG_MAX_LINE_BYTES: usize = 256;
+pub const SIM_LOG_MAX_BYTES: usize = 16 * 1024;
+
+/// F1: bounded, redacted program logs of a failed simulation. A line that names an endpoint or
+/// a credential is replaced; cut lines end on a char boundary. Returns (logs, reported lines,
+/// truncated).
+pub fn bounded_simulation_logs(logs: Option<&[String]>) -> (Vec<String>, Option<u32>, bool) {
+    let Some(logs) = logs else {
+        return (Vec::new(), None, false);
+    };
+    let mut out = Vec::new();
+    let (mut bytes, mut truncated) = (0usize, false);
+    for line in logs {
+        if out.len() == SIM_LOG_MAX_LINES {
+            truncated = true;
+            break;
+        }
+        let lower = line.to_ascii_lowercase();
+        let secret = [
+            "http://", "https://", "ws://", "wss://", "api-key", "api_key", "apikey", "token=",
+        ]
+        .iter()
+        .any(|m| lower.contains(m));
+        let mut line = if secret {
+            "[REDACTED]".to_owned()
+        } else {
+            line.clone()
+        };
+        if line.len() > SIM_LOG_MAX_LINE_BYTES {
+            let mut cut = SIM_LOG_MAX_LINE_BYTES;
+            while !line.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            line.truncate(cut);
+            truncated = true;
+        }
+        if bytes + line.len() > SIM_LOG_MAX_BYTES {
+            truncated = true;
+            break;
+        }
+        bytes += line.len();
+        out.push(line);
+    }
+    let reported = u32::try_from(logs.len()).unwrap_or(u32::MAX);
+    (out, Some(reported), truncated)
 }
 
 /// RPC quote for the exact serialized message, not an observed landed fee.
@@ -185,5 +268,50 @@ mod tests {
     fn path_names_match_ledger() {
         assert_eq!(SubmissionPath::Rpc.as_str(), "RPC");
         assert_eq!(SubmissionPath::JitoBundle.as_str(), "JITO_BUNDLE");
+    }
+}
+
+#[cfg(test)]
+mod simulation_log_tests {
+    use super::*;
+
+    /// F1: 0/65/1000 lines, oversized lines and a secret sentinel stay within the bounds; the
+    /// Debug text of a failure is its code only.
+    #[test]
+    fn f1_simulation_logs_are_bounded_redacted_and_never_in_debug() {
+        assert_eq!(bounded_simulation_logs(None), (vec![], None, false));
+        assert_eq!(bounded_simulation_logs(Some(&[])), (vec![], Some(0), false));
+        let lines = |n: usize, len: usize| -> Vec<String> {
+            (0..n)
+                .map(|i| format!("{i:04}{}", "x".repeat(len)))
+                .collect()
+        };
+        let (out, n, cut) = bounded_simulation_logs(Some(&lines(65, 10)));
+        assert_eq!((out.len(), n, cut), (SIM_LOG_MAX_LINES, Some(65), true));
+        let (out, n, cut) = bounded_simulation_logs(Some(&lines(1000, 300)));
+        assert!(cut && n == Some(1000));
+        assert!(out.iter().all(|l| l.len() <= SIM_LOG_MAX_LINE_BYTES));
+        assert!(out.iter().map(String::len).sum::<usize>() <= SIM_LOG_MAX_BYTES);
+        let multibyte = vec!["é".repeat(200)];
+        let (out, _, cut) = bounded_simulation_logs(Some(&multibyte));
+        assert!(cut && out[0].len() <= SIM_LOG_MAX_LINE_BYTES);
+        let secret = vec![
+            "Program log: ok".to_owned(),
+            "fetch https://rpc.invalid/?api-key=SECRET failed".to_owned(),
+            "Api_Key=SECRET".to_owned(),
+        ];
+        let (out, _, _) = bounded_simulation_logs(Some(&secret));
+        assert_eq!(out, ["Program log: ok", "[REDACTED]", "[REDACTED]"]);
+        let failure = SimResult::Failed(SimulationFailure {
+            code: "RPC_SIMULATION_FAILED X".into(),
+            units_consumed: Some(7),
+            logs: vec!["Program log: SENTINEL".into()],
+            log_lines: Some(1),
+            logs_truncated: false,
+        });
+        assert_eq!(
+            format!("{failure:?}"),
+            "Failed(\"RPC_SIMULATION_FAILED X\")"
+        );
     }
 }

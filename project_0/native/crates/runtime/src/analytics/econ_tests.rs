@@ -801,6 +801,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,
+        simulation_failure: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -906,6 +907,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,
+        simulation_failure: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::DeniedBySafety);
@@ -1657,6 +1659,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         prereq_allowed: vec![],
         slot_watch: &slots,
         network: &mut network,
+        simulation_failure: None,
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of

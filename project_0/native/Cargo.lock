@@ -1039,6 +1039,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "darkbot-runner",
+ "libc",
  "prost",
  "prost-build",
  "protox",
@@ -1121,6 +1122,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "zeroize",
 ]
 
 [[package]]

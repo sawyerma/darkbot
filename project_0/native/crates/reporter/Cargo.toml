@@ -8,6 +8,7 @@ publish = false
 darkbot-runner = { path = "../runtime", features = ["crate_health"] }
 prost = "0.13"
 bytes = "1"
+libc = "0.2"
 
 [build-dependencies]
 prost-build = "0.13"

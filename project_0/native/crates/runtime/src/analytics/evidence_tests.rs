@@ -530,6 +530,43 @@ fn ordinary_writer_preserves_opportunity_reconcile_and_summary_bytes() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// F1: the bounded simulation logs of a failed candidate are a typed owner frame of their own
+/// kind (slot provenance from the record), decoded back exactly.
+#[test]
+fn f1_simulation_failure_is_a_typed_owner_frame() {
+    let failure = crate::analytics::record::SimulationFailureRecord {
+        account: Pubkey::new_unique().to_string(),
+        rx_slot: Some(42),
+        failure: darkbot_solana::submit::SimulationFailure {
+            code: "RPC_SIMULATION_FAILED InstructionError(2, Custom(6009))".into(),
+            units_consumed: Some(31_337),
+            logs: vec!["Program log: Error: Insufficient funds".into()],
+            log_lines: Some(9),
+            logs_truncated: false,
+        },
+    };
+    let dir = directory();
+    let path = dir.join("events.p0j");
+    let mut writer = OwnerEvidenceWriter::start(
+        path.clone(),
+        dir.join("recovery.p0j"),
+        4,
+        std::time::Duration::from_secs(60),
+    )
+    .unwrap();
+    writer
+        .emit(OwnerEvidence::SimulationFailure(Box::new(failure.clone())))
+        .unwrap();
+    writer.finish(None).unwrap();
+    let mut reader = journal::Reader::open(&path).unwrap();
+    let frame = reader.next_frame().unwrap().unwrap();
+    assert_eq!(frame.kind, journal::kind::OWNER_SIMULATION_FAILURE);
+    assert_eq!(frame.provenance.slot, Some(42));
+    let back: crate::analytics::record::SimulationFailureRecord = frame.typed().unwrap();
+    assert_eq!(back, failure);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// JFI-02 local measurement (`--ignored`): writer-thread cost per owner opportunity frame, the
 /// former JSON value path against the typed payload path. Synthetic, not a Mainnet measurement.
 #[test]

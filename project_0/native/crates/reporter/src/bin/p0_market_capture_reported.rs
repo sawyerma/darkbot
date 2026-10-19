@@ -135,7 +135,7 @@ fn write_result<E: std::fmt::Display>(
         generation.map_or_else(|| "none".to_owned(), |g| g.to_string()),
         result_code(result),
     );
-    if let Err(_) = persist_result(&path, &body) {
+    if persist_result(&path, &body).is_err() {
         eprintln!("[P0/RESULT] could not write the result file");
     }
 }

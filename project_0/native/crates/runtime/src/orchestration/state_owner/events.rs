@@ -1027,6 +1027,9 @@ impl ShadowOwner {
                                             );
                                                 }
                                                 Err(ChannelError::Full(_)) => {
+                                                    self.remote
+                                                        .oracle_price_projection_jobs
+                                                        .give_up();
                                                     self.metrics.oracle_price_fallbacks = self
                                                         .metrics
                                                         .oracle_price_fallbacks

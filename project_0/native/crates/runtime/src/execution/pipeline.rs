@@ -246,6 +246,8 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub slot_watch: &'a darkbot_solana::ingress::SlotWatch,
     /// B6: bound on the synchronous network work of the calling owner.
     pub network: &'a mut NetworkBudget,
+    /// F1: logs of the last failed simulation, taken by the owner for its journal.
+    pub simulation_failure: Option<darkbot_solana::submit::SimulationFailure>,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -802,6 +804,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             other => {
                 rec.simulation_result = Some(format!("{:?}", other));
+                if let SimResult::Failed(f) = &other {
+                    self.simulation_failure = Some(f.clone());
+                }
                 rec.loss = Some(LossReason::Build);
                 rec.reason = Some(format!("simulation not ok: {:?}", other));
                 rec.decision = if self.mode == Mode::Shadow {
