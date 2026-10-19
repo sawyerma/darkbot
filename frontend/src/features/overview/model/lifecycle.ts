@@ -1,54 +1,27 @@
 import type { ProjectKey } from "@/app/projectRegistry";
-
-// F7-OVR §10.2/§10.3. Process lifecycle is NOT feed connection, readiness or LIVE permission.
-
-export type ProcessState = "RUNNING" | "STOPPED" | "STARTING" | "STOPPING" | "FAILED" | "UNKNOWN";
-
-/** Future input from a supervisor-owned, authenticated, timestamped lifecycle source (F7-OVR-B).
- *  The wire contract has no such source yet, so every caller passes null today. */
-export interface ProcessStatusSource {
-  state: ProcessState;
-  runId: string;
-}
-
-export interface ProcessIndicator {
-  state: ProcessState;
-  label: string;
-  reason: string;
-}
-
-/** Missing, stale or untrusted status is UNKNOWN and never inferred as stopped or running.
- *  Deliberately takes no feed/readiness input: a connected feed is not process evidence. */
+import type { CaptureProcess, CaptureAction, ProcessState } from "@/core/realtime/captureControl";
+export type { ProcessState };
+export interface ProcessStatusSource { state: ProcessState; runId: string }
+export interface ProcessIndicator { state: ProcessState; label: string; reason: string }
 export function processIndicator(source: ProcessStatusSource | null, sourceTopicStatus = "IDLE"): ProcessIndicator {
-  if (!source) {
-    return { state: "UNKNOWN", label: "Process · UNKNOWN", reason: "No supervisor-owned lifecycle source is exposed (F7-OVR-B)" };
-  }
-  if (sourceTopicStatus !== "LIVE" || !source.runId) {
-    return { state: "UNKNOWN", label: "Process · UNKNOWN", reason: "Lifecycle source not live or unidentified" };
-  }
+  if (!source || sourceTopicStatus !== "LIVE" || !source.runId) return { state: "UNKNOWN", label: "Process · UNKNOWN", reason: "No fresh supervisor observation" };
   return { state: source.state, label: `Process · ${source.state}`, reason: `Run ${source.runId}` };
 }
-
-/** Only disabled controls exist until the F6 command channel and a qualified owner do. The literal
- *  `false` turns an enabled control into a type error instead of a decorative clickable button. */
-export interface DisabledControl {
-  readonly enabled: false;
-  readonly reason: string;
+export function captureIndicator(p: CaptureProcess | null): ProcessIndicator {
+  return p ? { state: p.state, label: `Process · ${p.state}`, reason: p.reason } : processIndicator(null);
 }
-
-const P0_CONTROLLER = "Lifecycle controller not yet qualified (requires F6 commands, F7-OVR-C)";
-const NO_OWNER = "No qualified process owner exposes a controller (F7-OVR-B)";
-const LOG_VIEWER = "Authorized, bounded log viewer not yet qualified (F7-OVR-D)";
-
-export function projectControls(key: ProjectKey): { startStop: DisabledControl; logs: DisabledControl } {
-  return {
-    startStop: { enabled: false, reason: key === "project0" ? P0_CONTROLLER : NO_OWNER },
-    logs: { enabled: false, reason: LOG_VIEWER },
-  };
+export interface DisabledControl { readonly enabled: false; readonly reason: string }
+export interface EnabledControl { readonly enabled: true; readonly label: string; readonly action: CaptureAction; readonly confirm?: string }
+export type Control = DisabledControl | EnabledControl;
+const NO_OWNER = "No qualified process controller for this project";
+const STOP_CONFIRM = "Stop the Project 0 read-only capture? Its journal will be drained and sealed. The gateway remains running.";
+export function projectControls(key: ProjectKey, process: ProcessIndicator = processIndicator(null)): { startStop: Control; logs: { enabled: boolean; reason: string } } {
+  const logs = { enabled: key === "project0", reason: NO_OWNER };
+  if (key !== "project0") return { startStop: { enabled: false, reason: NO_OWNER }, logs };
+  if (process.state === "RUNNING") return { startStop: { enabled: true, label: "Stop", action: "project0.capture.stop", confirm: STOP_CONFIRM }, logs };
+  if (process.state === "STOPPED" || process.state === "FAILED") return { startStop: { enabled: true, label: "Start", action: "project0.capture.start" }, logs };
+  return { startStop: { enabled: false, reason: process.state === "STOPPING" ? "Journal drain and seal in progress" : "Process state unknown" }, logs };
 }
-
-/** Exactly two global actions. There is no "Start Selected". */
-export const GLOBAL_CONTROLS = {
-  stopAll: { enabled: false, reason: "Qualified global stop contract pending (F7-OVR-D)" },
-  showAllLogs: { enabled: false, reason: "Qualified log viewer pending (F7-OVR-D)" },
-} as const satisfies Record<string, DisabledControl>;
+export function stopAllControl(process: ProcessIndicator): Control {
+  return process.state === "RUNNING" ? { enabled: true, label: "Stop All", action: "project0.capture.stop", confirm: STOP_CONFIRM + " Only Project 0 has a managed controller." } : { enabled: false, reason: "No managed capture running" };
+}

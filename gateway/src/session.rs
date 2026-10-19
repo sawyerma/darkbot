@@ -15,6 +15,7 @@ use std::{
 struct Session {
     created: Instant,
     seen: Instant,
+    csrf: String,
 }
 pub struct SessionStore {
     inner: RwLock<HashMap<String, Session>>,
@@ -48,6 +49,7 @@ impl SessionStore {
             Session {
                 created: now,
                 seen: now,
+                csrf: random_token(32),
             },
         );
         token
@@ -66,6 +68,13 @@ impl SessionStore {
             }
             None => false,
         }
+    }
+    pub fn csrf_of(&self, token: &str) -> Option<String> {
+        self.inner
+            .read()
+            .get(token)
+            .filter(|s| s.seen.elapsed() < self.ttl)
+            .map(|s| s.csrf.clone())
     }
     pub fn len(&self) -> usize {
         self.inner.read().len()

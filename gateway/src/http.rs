@@ -7,7 +7,7 @@ use crate::{
 };
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{
         header::{
             CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY, SET_COOKIE,
@@ -35,6 +35,7 @@ use tower_http::{
 };
 pub struct AppState {
     pub cfg: GatewayConfig,
+    pub control: crate::control::Control,
     pub hub: Arc<StateHub>,
     pub registry: Arc<SourceRegistry>,
     pub sessions: SessionStore,
@@ -45,6 +46,7 @@ impl AppState {
     pub fn new(cfg: GatewayConfig, hub: Arc<StateHub>, registry: Arc<SourceRegistry>) -> Arc<Self> {
         Arc::new(Self {
             cfg,
+            control: crate::control::Control::from_env(),
             hub,
             registry,
             sessions: SessionStore::new(64, Duration::from_secs(12 * 3600)),
@@ -54,7 +56,10 @@ impl AppState {
     }
 }
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new().route("/ws/v1/gateway",get(ws::upgrade)).route("/api/v1/session",get(session_bootstrap)).route("/healthz",get(healthz)).fallback(spa)
+    Router::new().route("/ws/v1/gateway",get(ws::upgrade)).route("/api/v1/session",get(session_bootstrap)).route("/api/v1/command",get(crate::control::lookup).post(crate::control::command).layer(DefaultBodyLimit::max(4096)))
+ .route("/api/v1/project0/process",get(crate::control::process))
+ .route("/api/v1/logs",get(crate::control::logs))
+ .route("/healthz",get(healthz)).fallback(spa)
  .layer(middleware::from_fn_with_state(state.clone(),enforce_host))
  .layer(SetResponseHeaderLayer::if_not_present(CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")))
  .layer(SetResponseHeaderLayer::if_not_present(X_CONTENT_TYPE_OPTIONS,HeaderValue::from_static("nosniff")))
@@ -95,10 +100,20 @@ async fn session_bootstrap(State(app): State<Arc<AppState>>, headers: HeaderMap)
     let mut r = StatusCode::NO_CONTENT.into_response();
     r.headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    if !session::has_valid_session(&headers, &app.cfg, &app.sessions) {
+    let existing = session::cookie_value(&headers, &app.cfg.session_cookie)
+        .filter(|t| app.sessions.validate(t));
+    let token = existing.unwrap_or_else(|| {
         let t = app.sessions.issue();
         r.headers_mut()
             .append(SET_COOKIE, session::set_cookie(&app.cfg.session_cookie, &t));
+        t
+    });
+    if let Some(csrf) = app
+        .sessions
+        .csrf_of(&token)
+        .and_then(|s| HeaderValue::from_str(&s).ok())
+    {
+        r.headers_mut().insert("x-csrf-token", csrf);
     }
     r
 }

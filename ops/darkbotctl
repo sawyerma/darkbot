@@ -190,6 +190,12 @@ write_plist() {
 $(plist_env DARKBOT_GATEWAY_BIND "127.0.0.1:$PORT")
 $(plist_env DARKBOT_GATEWAY_GENERATION_FILE "$RUNDIR/gateway.generation")
     $(plist_env DARKBOT_GATEWAY_FEEDS "project0=$SOCK")
+$(plist_env DARKBOT_CTL "$APP_HOME/current/darkbotctl")
+$(plist_env DARKBOT_RUNDIR "$RUNDIR")
+$(plist_env DARKBOT_LOGDIR "$LOGDIR")
+$(plist_env DARKBOT_CAPTURE_LABEL "$CAPTURE_LABEL")
+$(plist_env DARKBOT_APP_CONF "$APP_CONF")
+$(if [ -n "${DARKBOT_TEST_DIR:-}" ]; then plist_env DARKBOT_TEST_DIR "$DARKBOT_TEST_DIR"; plist_env DARKBOT_TEST_PORT "$PORT"; fi)
     <key>RUST_LOG</key><string>info</string>
   </dict>
   <key>RunAtLoad</key><true/>
@@ -245,6 +251,14 @@ EOF
 }
 
 # ---------------------------------------------------------------- build / deploy / window
+stage_capture_env() {
+  [ -z "${DARKBOT_TEST_DIR:-}" ] || return 0
+  [ -f "$ROOT/project_0/.env" ] || die "project_0/.env fehlt"
+  cp "$ROOT/project_0/config/market.public.env" "$RUNDIR/capture.public.env"
+  cp "$ROOT/project_0/.env" "$RUNDIR/capture.private.env"
+  chmod 600 "$RUNDIR/capture.public.env" "$RUNDIR/capture.private.env"
+}
+
 cmd_build() {
   command -v npm >/dev/null || die "npm nicht im PATH – im Terminal ausführen"
   command -v cargo >/dev/null || die "cargo nicht im PATH – im Terminal ausführen"
@@ -262,6 +276,9 @@ cmd_deploy() {
   mkdir -p "$rel"
   cp "$GATEWAY_BUILD" "$rel/darkbot-gateway"
   cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
+  cp "$ROOT/ops/darkbotctl" "$rel/darkbotctl"
+  chmod 755 "$rel/darkbotctl"
+  stage_capture_env
   cp -R "$DIST_BUILD" "$rel/dist"
   git -C "$ROOT" rev-parse HEAD > "$rel/COMMIT" 2>/dev/null || echo unknown > "$rel/COMMIT"
   ln -s "$rel" "$APP_HOME/.current-$$"
@@ -335,13 +352,10 @@ _capture_start() {
   foreign="$(foreign_capture)"
   [ -z "$foreign" ] || die "Capture-Prozess $foreign läuft außerhalb von launchd – kein zweiter Start (Stopp: kill -TERM $foreign)"
   [ -x "$CAPTURE_BIN" ] || die "Capture nicht deployed: darkbotctl build && darkbotctl deploy"
-  if [ -z "${DARKBOT_TEST_DIR:-}" ]; then [ -f "$ROOT/project_0/.env" ] || die "project_0/.env fehlt"; fi
-  # launchd cannot read a Desktop checkout under macOS privacy controls. Stage private config
-  # with the user-invoked controller; execute only immutable deployed binaries outside Desktop.
   if [ -z "${DARKBOT_TEST_DIR:-}" ]; then
-    cp "$ROOT/project_0/config/market.public.env" "$RUNDIR/capture.public.env"
-    cp "$ROOT/project_0/.env" "$RUNDIR/capture.private.env"
-    chmod 600 "$RUNDIR/capture.public.env" "$RUNDIR/capture.private.env"
+    # The deployed controller never needs access to the privacy-protected Desktop checkout.
+    if [ "${DARKBOT_STAGED:-}" != 1 ]; then stage_capture_env; fi
+    [ -f "$RUNDIR/capture.public.env" ] && [ -f "$RUNDIR/capture.private.env" ] || die "Capture-Konfiguration nicht bereitgestellt: darkbotctl deploy"
     ENV_FILES="$RUNDIR/capture.public.env:$RUNDIR/capture.private.env"
   fi
   mkdir -p "$APP_HOME/data/market"
@@ -373,7 +387,7 @@ _capture_start() {
 # A deliberate Stop is sticky even if the capture is already absent.
 # Call only while holding lifecycle.lock. Publish atomically (umask 077).
 _suspend_autostart() {
-  local tmp="$USER_STOP_FILE.$"
+  local tmp="$USER_STOP_FILE.$$"
   printf 'launch=%s stopped_unix_s=%s\n' "$(launch_id)" "$(date +%s)" > "$tmp"
   mv -f "$tmp" "$USER_STOP_FILE"
 }
@@ -389,6 +403,12 @@ _capture_start_explicit() {
   if [ -n "$after" ] && [ "$after" != "$before" ] && capture_running && ! capture_stopping; then
     rm -f "$USER_STOP_FILE"
   fi
+}
+
+_capture_start_configured() {
+  local secs; secs="$(app_conf P0_APP_CAPTURE_SECS)"
+  [ -n "$secs" ] || die "P0_APP_CAPTURE_SECS nicht konfiguriert"
+  _capture_start_explicit "$secs"
 }
 
 # Under the lock only the signal is sent; draining is awaited without holding it.
@@ -470,7 +490,7 @@ _down_begin() {
   if [ -n "$owner" ] && [ "$owner" != "$$" ] && kill -0 "$owner" 2>/dev/null; then
     die "Gesamtstopp läuft bereits (PID $owner)"
   fi
-  printf '%s\n' "$" > "$DOWN_FILE"
+  printf '%s\n' "$$" > "$DOWN_FILE"
   _suspend_autostart
   _capture_stop_signal
 }
@@ -503,6 +523,14 @@ cmd_logs() {
     capture) tail -n 200 -f "$LOGDIR/capture-latest.log" ;;
     *) die "logs gateway|capture" ;;
   esac
+}
+
+_reload_gateway() {
+  assert_not_down
+  if gateway_loaded; then launchctl bootout "$DOMAIN/$LABEL"; fi
+  write_plist
+  launchctl bootstrap "$DOMAIN" "$PLIST"
+  cmd_up_inner --no-open
 }
 
 cmd_is_up() { gateway_loaded; }
@@ -623,6 +651,7 @@ case "${1:-status}" in
   up) shift; cmd_up "${1:-}" ;;
   down) cmd_down ;;
   restart-gateway) locked _restart_gateway ;;
+  reload-gateway) locked _reload_gateway ;;
   status) cmd_status ;;
   open) cmd_open ;;
   logs) shift; cmd_logs "${1:-gateway}" ;;
@@ -630,7 +659,8 @@ case "${1:-status}" in
     shift
     case "${1:-status}" in
       start) shift; locked _capture_start_explicit "${1:-}" ;;
-      stop) cmd_capture_stop ;;
+      start-configured) locked _capture_start_configured ;;
+      stop) shift; if [ "${1:-}" = "--signal-only" ]; then locked _capture_stop_request; else cmd_capture_stop; fi ;;
       status) cmd_capture_status ;;
       *) die "capture start <sekunden> | stop | status" ;;
     esac ;;

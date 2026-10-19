@@ -1,3 +1,4 @@
+import { useCaptureControl } from "@/core/realtime/captureControl";
 import { useId } from "react";
 import { Link } from "react-router-dom";
 import type { ProjectRegistration } from "@/app/projectRegistry";
@@ -5,8 +6,8 @@ import { StatusBadge, type NoticeState } from "@/shared/ui/graphite/Notice";
 import { DASH } from "@/shared/ui/graphite/Rows";
 import { selectProject, selectStatus, useOverviewStore } from "./overviewStore";
 import { formatCount, formatLatency, formatUsdMicroSigned } from "./model/format";
-import { processIndicator, projectControls } from "./model/lifecycle";
-import { DisabledAction, ProcessLine } from "./OverviewControls";
+import { captureIndicator, processIndicator, projectControls } from "./model/lifecycle";
+import { CommandAction, DisabledAction, LogsAction, ProcessLine } from "./OverviewControls";
 
 // One project card from the registry. Metrics come only from overview.aggregates; without data
 // everything stays "—". Navigation is a link in the title; lifecycle controls are sibling buttons,
@@ -27,9 +28,10 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
   const cached = useOverviewStore(selectProject(reg.projectId));
   const summary = quality === "LIVE" ? cached : null;
   const titleId = useId();
-  // No supervisor-owned lifecycle source exists yet (F7-OVR-B); the feed is never used as evidence.
-  const process = processIndicator(null);
-  const controls = projectControls(reg.key);
+  // Capture lifecycle comes from launchd, independently of the reporter feed.
+  const capture = useCaptureControl(s => s.process);
+  const process = reg.key === "project0" ? captureIndicator(capture) : processIndicator(null);
+  const controls = projectControls(reg.key, process);
 
   return (
     <article className="ov-card" aria-labelledby={titleId} data-testid={`project-card-${reg.key}`}>
@@ -47,7 +49,7 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
         <dt>Execution authorization</dt>
         <dd>{summary?.liveAuthorized == null ? DASH : summary.liveAuthorized ? "Engine authorized" : "Not authorized"}</dd>
         <dt>Bots / jobs / captures</dt>
-        <dd>{`${formatCount(summary?.activeBots ?? null)} / ${formatCount(summary?.activeJobs ?? null)} / ${formatCount(summary?.activeCaptures ?? null)}`}</dd>
+        <dd>{`${formatCount(summary?.activeBots ?? null)} / ${formatCount(summary?.activeJobs ?? null)} / ${formatCount(reg.key === "project0" ? (["RUNNING", "STOPPING"].includes(process.state) ? 1 : ["STOPPED", "FAILED"].includes(process.state) ? 0 : null) : summary?.activeCaptures ?? null)}`}</dd>
         <dt>RPC p95</dt>
         <dd>{formatLatency(summary?.rpcLatency ?? null)}</dd>
         <dt>Realized net PnL</dt>
@@ -57,8 +59,10 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
         <p className="ov-warn">{summary.warnings.slice(0, 2).join(" · ")}</p>
       ) : null}
       <div className="ov-actions" role="group" aria-label={`${reg.label} controls`}>
-        <DisabledAction label="Start / Stop" control={controls.startStop} testId={`project-startstop-${reg.key}`} />
-        <DisabledAction label="Logs" control={controls.logs} testId={`project-logs-${reg.key}`} />
+        {controls.startStop.enabled && capture?.controller_available
+          ? <CommandAction control={controls.startStop} testId={`project-startstop-${reg.key}`} />
+          : <DisabledAction label="Start / Stop" control={{ enabled: false, reason: "No available controller or capture is stopping" }} testId={`project-startstop-${reg.key}`} />}
+        {controls.logs.enabled ? <LogsAction label="Logs" source="project0" testId={`project-logs-${reg.key}`} /> : <DisabledAction label="Logs" control={{ enabled: false, reason: controls.logs.reason }} testId={`project-logs-${reg.key}`} />}
       </div>
     </article>
   );

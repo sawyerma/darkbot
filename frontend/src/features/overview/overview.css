@@ -103,3 +103,10 @@
 @media (max-width: 470px) {
   .ov-tile-actions { flex-wrap: wrap; }
 }
+
+/* Portalled modal: outside project-card stacking contexts; keyboard focus stays inside. */
+.ov-log-overlay { position: fixed; inset: 0; z-index: 100; background: color-mix(in srgb, var(--g-bg) 78%, transparent); }
+.ov-log-view { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 101; box-sizing: border-box; background: var(--g-well-deep); color: var(--g-text); border: 1px solid var(--g-line-secondary); border-radius: var(--g-r-health); padding: 20px; width: min(1000px, calc(100% - 40px)); max-height: 85vh; overflow: auto; font: var(--g-fs-body)/var(--g-lh-base) var(--g-font); }
+.ov-log-view h2 { margin: 0; font-size: var(--g-fs-h2); }
+.ov-log-view p { color: var(--g-muted); }
+.ov-log-view pre { white-space: pre-wrap; overflow-wrap: anywhere; font: var(--g-fs-small)/var(--g-lh-base) var(--g-font-mono); }

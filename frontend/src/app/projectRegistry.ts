@@ -25,8 +25,8 @@ export interface ProjectRegistration<P extends string = string> {
   };
   readonly capabilities: {
     readonly readStatus: boolean;
-    // Commands sind in V1 nirgends freigegeben; der Wert wird erst in F6 je Projekt gesetzt.
-    readonly commands: false;
+    // Project 0 supports read-only capture lifecycle commands only.
+    readonly commands: boolean;
   };
 }
 
@@ -60,7 +60,7 @@ const project0: ProjectRegistration<Project0Panel> = {
       // useTopic(..., { startPolicy }) – nie automatisch über die Route.
     },
   },
-  capabilities: { readStatus: true, commands: false },
+  capabilities: { readStatus: true, commands: true },
 };
 
 const bsc: ProjectRegistration<BscPanel> = {

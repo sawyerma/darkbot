@@ -83,68 +83,69 @@ def browser(mode):
     p=subprocess.run(['node',str(ROOT/'ops/tests/lifecycle_browser.mjs'),str(port),str(WORK),mode],text=True,capture_output=True,timeout=40)
     print(p.stdout+p.stderr,flush=True);assert p.returncode==0
 
-try:
-    release=WORK/'app/releases/test';release.mkdir(parents=True)
-    for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('p0-market-capture-reported','project_0/native/target/debug/p0-market-capture-reported')]:shutil.copy2(ROOT/source,release/name)
-    shutil.copytree(ROOT/'frontend/dist',release/'dist')
-    (WORK/'app/current').symlink_to(release,target_is_directory=True)
-    (WORK/'app.conf').write_text('P0_APP_AUTOSTART_CAPTURE=1\nP0_APP_CAPTURE_SECS=until-stopped\n')
-    (WORK/'capture.env').write_text(f'P0_WS_URL=ws://127.0.0.1:{server.server_address[1]}\nP0_PROGRAM_ID=11111111111111111111111111111111\nP0_MARKET_SOURCE=logs\nP0_MARKET_OUT_DIR={WORK}/data\nP0_MARKET_READY_TIMEOUT_SECS=4\nP0_MARKET_DRAIN_TIMEOUT_SECS=3\nP0_MARKET_HEARTBEAT_SECS=1\n')
-    run('app');first=wait(pid);firstlaunch=launch();firstgen=wait(lambda:gen())
-    with ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(lambda _:run('capture','start','until-stopped'),range(4)))
-    assert pid()==first and launch()==firstlaunch and gen()==firstgen
-    plist=plistlib.loads((WORK/'run/capture.plist').read_bytes());assert plist['KeepAlive'] is False
-    assert (WORK/'run/capture.plist').stat().st_mode&0o777==0o600
-    browser('live')
-    # Gateway crash/restart cannot change the capture run/generation.
-    subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.gateway'],check=True)
-    run('up','--no-open');assert pid()==first and gen()==firstgen
-    browser('live')
-    stop=subprocess.Popen([str(ROOT/'ops/darkbotctl'),'capture','stop'],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-    wait(lambda:(WORK/'run/capture.stopping').exists() or stop.poll() is not None)
-    run('capture','start','until-stopped')
-    print(stop.communicate(timeout=35)[0]);assert stop.returncode==0
-    if launch()!=firstlaunch: # If first run already ended, old waiter must not wait on this new run.
-        assert pid();run('capture','stop')
-    assert (WORK/'app/data/market'/('app-'+firstlaunch)/'market_completion.p0j').exists()
-    assert result()['launch_id']==launch()
-    assert (WORK/'run/capture.result').stat().st_mode&0o777==0o600
-    # B0: after user stop app must not start; only an explicit start can lift it.
-    marker=WORK/'run/capture.user_stopped'
-    assert marker.is_file(), 'manual stop marker required'
-    stopped_launch=launch()
-    run('app')
-    assert pid() is None and launch()==stopped_launch and marker.is_file()
-    run('capture','start','until-stopped')
-    assert pid() and launch()!=stopped_launch and not marker.exists()
-    crashlaunch=launch();crashgen=gen();wait(pid)
-    subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
-    wait(lambda:pid() is None)
-    assert result()['launch_id']!=crashlaunch # Never attribute previous result to crashed run.
-    run('app');wait(lambda:gen()>crashgen);assert launch()!=crashlaunch
-    down=subprocess.Popen([str(ROOT/'ops/darkbotctl'),'down'],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-    wait(lambda:(WORK/'run/lifecycle.down').exists())
-    rejected=run('capture','start','until-stopped',ok=False);assert rejected.returncode!=0
-    print(down.communicate(timeout=35)[0]);assert down.returncode==0 and pid() is None and pid('gateway') is None
-    assert marker.is_file(), 'down must suspend autostart'
-    down_launch=launch()
-    run('app');assert pid() is None and launch()==down_launch and marker.is_file()
-    # Fresh explicit start removes the marker, even when Gateway was stopped.
-    run('capture','start','until-stopped')
-    assert pid() and not marker.exists() and launch()!=down_launch
-    subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
-    wait(lambda:pid() is None)
-    RATE_LIMIT.set();run('app');limitedlaunch=launch();browser('429');wait(lambda:pid() is None,35)
-    assert result()['launch_id']==limitedlaunch
-    assert result()['code']=='MARKET_OBSERVER_STREAM_NOT_READY'
-    run('app');assert launch()==limitedlaunch and pid() is None
-    run('capture','stop');assert marker.is_file() # no-op stop also suspends next app
-    run('app');assert pid() is None and launch()==limitedlaunch and marker.is_file()
-    print('PASS: concurrent start, gateway crash, manual-stop autostart suppression, fresh explicit start, down/start exclusion, 429 and cooldown',flush=True)
-    (WORK/'PASS').write_text('all lifecycle checks passed\n')
-finally:
-    run('down',ok=False)
-    for kind in ('capture','gateway'):
-        subprocess.run(['launchctl','bootout',domain+'/'+label+'.'+kind],capture_output=True)
-    server.shutdown()
-    print('Isolated evidence:',WORK,flush=True)
+if __name__ == "__main__":
+    try:
+        release=WORK/'app/releases/test';release.mkdir(parents=True)
+        for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('p0-market-capture-reported','project_0/native/target/debug/p0-market-capture-reported')]:shutil.copy2(ROOT/source,release/name)
+        shutil.copytree(ROOT/'frontend/dist',release/'dist')
+        (WORK/'app/current').symlink_to(release,target_is_directory=True)
+        (WORK/'app.conf').write_text('P0_APP_AUTOSTART_CAPTURE=1\nP0_APP_CAPTURE_SECS=until-stopped\n')
+        (WORK/'capture.env').write_text(f'P0_WS_URL=ws://127.0.0.1:{server.server_address[1]}\nP0_PROGRAM_ID=11111111111111111111111111111111\nP0_MARKET_SOURCE=logs\nP0_MARKET_OUT_DIR={WORK}/data\nP0_MARKET_READY_TIMEOUT_SECS=4\nP0_MARKET_DRAIN_TIMEOUT_SECS=3\nP0_MARKET_HEARTBEAT_SECS=1\n')
+        run('app');first=wait(pid);firstlaunch=launch();firstgen=wait(lambda:gen())
+        with ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(lambda _:run('capture','start','until-stopped'),range(4)))
+        assert pid()==first and launch()==firstlaunch and gen()==firstgen
+        plist=plistlib.loads((WORK/'run/capture.plist').read_bytes());assert plist['KeepAlive'] is False
+        assert (WORK/'run/capture.plist').stat().st_mode&0o777==0o600
+        browser('live')
+        # Gateway crash/restart cannot change the capture run/generation.
+        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.gateway'],check=True)
+        run('up','--no-open');assert pid()==first and gen()==firstgen
+        browser('live')
+        stop=subprocess.Popen([str(ROOT/'ops/darkbotctl'),'capture','stop'],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+        wait(lambda:(WORK/'run/capture.stopping').exists() or stop.poll() is not None)
+        run('capture','start','until-stopped')
+        print(stop.communicate(timeout=35)[0]);assert stop.returncode==0
+        if launch()!=firstlaunch: # If first run already ended, old waiter must not wait on this new run.
+            assert pid();run('capture','stop')
+        assert (WORK/'app/data/market'/('app-'+firstlaunch)/'market_completion.p0j').exists()
+        assert result()['launch_id']==launch()
+        assert (WORK/'run/capture.result').stat().st_mode&0o777==0o600
+        # B0: after user stop app must not start; only an explicit start can lift it.
+        marker=WORK/'run/capture.user_stopped'
+        assert marker.is_file(), 'manual stop marker required'
+        stopped_launch=launch()
+        run('app')
+        assert pid() is None and launch()==stopped_launch and marker.is_file()
+        run('capture','start','until-stopped')
+        assert pid() and launch()!=stopped_launch and not marker.exists()
+        crashlaunch=launch();crashgen=gen();wait(pid)
+        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
+        wait(lambda:pid() is None)
+        assert result()['launch_id']!=crashlaunch # Never attribute previous result to crashed run.
+        run('app');wait(lambda:gen()>crashgen);assert launch()!=crashlaunch
+        down=subprocess.Popen([str(ROOT/'ops/darkbotctl'),'down'],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+        wait(lambda:(WORK/'run/lifecycle.down').exists())
+        rejected=run('capture','start','until-stopped',ok=False);assert rejected.returncode!=0
+        print(down.communicate(timeout=35)[0]);assert down.returncode==0 and pid() is None and pid('gateway') is None
+        assert marker.is_file(), 'down must suspend autostart'
+        down_launch=launch()
+        run('app');assert pid() is None and launch()==down_launch and marker.is_file()
+        # Fresh explicit start removes the marker, even when Gateway was stopped.
+        run('capture','start','until-stopped')
+        assert pid() and not marker.exists() and launch()!=down_launch
+        subprocess.run(['launchctl','kill','SIGKILL',domain+'/'+label+'.capture'],check=True)
+        wait(lambda:pid() is None)
+        RATE_LIMIT.set();run('app');limitedlaunch=launch();browser('429');wait(lambda:pid() is None,35)
+        assert result()['launch_id']==limitedlaunch
+        assert result()['code']=='MARKET_OBSERVER_STREAM_NOT_READY'
+        run('app');assert launch()==limitedlaunch and pid() is None
+        run('capture','stop');assert marker.is_file() # no-op stop also suspends next app
+        run('app');assert pid() is None and launch()==limitedlaunch and marker.is_file()
+        print('PASS: concurrent start, gateway crash, manual-stop autostart suppression, fresh explicit start, down/start exclusion, 429 and cooldown',flush=True)
+        (WORK/'PASS').write_text('all lifecycle checks passed\n')
+    finally:
+        run('down',ok=False)
+        for kind in ('capture','gateway'):
+            subprocess.run(['launchctl','bootout',domain+'/'+label+'.'+kind],capture_output=True)
+        server.shutdown()
+        print('Isolated evidence:',WORK,flush=True)
