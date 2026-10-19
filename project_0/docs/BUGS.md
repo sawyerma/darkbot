@@ -236,7 +236,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** 0/1/2/mehrere TX, fehlende Signature, nicht signierte TX; kein HTTP-Aufruf bei Ablehnung; UNKNOWN nach unklarer Annahme. **Commit/Evidence:** `47ebbc6` (alle Fee-Payer-Signaturen vor dem HTTP-Aufruf geprüft, `BUNDLE_SIGNATURE_MISSING`; inflight Landed ohne Slot → Pending); Test `unsigned_bundle_is_rejected_without_network` Exit 0.
 
 ### L3 — Writer-/Channel-/Submission-Metriken
-- [ ] **LOW / METRICS · CODE_CONFIRMED für Writer/Channel; Polling separat belegen.**
+- [x] **LOW / METRICS · CODE_CONFIRMED für Writer/Channel; Polling separat belegen.** · Fix `9fad87d` · Tests `l3_failed_attempts_and_dropped_elements_are_separate`, `l3_deferred_syncs_count_postponed_deadlines_not_loop_passes` — Channel `overflow` = Fehlversuche (unverändert), neu `dropped` via `give_up` (Ingress, Projection-, Oracle-Queue); Writer `deferred_syncs` zählt je verschobene Sync-Deadline einmal (wie dokumentiert). 1-ms-Submission-Polling: kein Aufrufpfad (B1: Pipeline sendet nicht).
 - **Ist:** `storage/writer.rs::deferred_syncs` wird während eines Deferrals in Worker-Schleifen erhöht; `common/channel.rs::Producer::try_push` zählt Full bei jedem Retry, nicht unterschiedliche verlorene Events. 1-ms-Submissionpolling aus Review noch am tatsächlichen Aufrufpfad nachzuweisen.
 - **Soll/Tests:** `failed_push_attempts`, tatsächliche `unique_dropped`, `deferred_intervals` voneinander trennen, vorhandene Zähler nicht heimlich semantisch ändern. Deterministische Retry-/Backpressure-/Shutdown-Tests, Polling nur bei reproduzierter Last anpassen. **Commit/Evidence:** —.
 
@@ -321,7 +321,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `TELEMETRY_ONLY / NO AUTOMATIC BELOW-ROOT APPLY`. Kein belegter praktischer Provider-Reordering-Fall mit falscher finalisierter Entscheidung. Bis Repro/Root-Audit keine StateCore-Barriere ändern; nicht als 4h-Blocker zählen.
 
 ### B9 — nicht ausführbare V1-Pläne werden generiert
-- [ ] **MEDIUM · P5/FE-02 · G-E.**
+- [x] **MEDIUM · P5/FE-02 · G-E.** · Fix `9fad87d` · Test `b9_v1_capability_flag_matches_the_builder` — `tx::V1_BUILDABLE` (false, solange `build_v1` nicht signier-/sendbar ist); Builder erzeugt V1-Plan und `RpcSubmitter` meldet V1 nur bei `true`.
 - **Pfad:** `runtime/src/execution/builder.rs::plans`; `solana/src/tx/mod.rs::build_v1`.
 - **Ist:** Builder fügt `BuildVersion::V1`-Plan hinzu; `build_v1` endet aktuell in `V1Unavailable`; vermeidbare Fehlrecords/Build-Arbeit.
 - **Soll:** V1-Plan nur bei **tatsächlich qualifizierter** Build-/Sign-/Simulate-/Submit-Capability generieren, nicht allein aufgrund aktivierter Featureflag oder eines erfolgreichen Wire-Probes. V0 nicht als unqualifizierten Ersatz promoten.
@@ -330,7 +330,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `CODE_CONFIRMED NOISE`: V1-Plan ohne V1-Buildfähigkeit kostet Arbeit/erzeugt Ablehnungsrecords, impliziert **keinen** ungeprüften V1-Submit; fixen bei P5/FE-02, nicht als 4h-Blocking einstufen.
 
 ### B10 — Keypair-Fehlerpfad und Secret-Zeroization
-- [ ] **MEDIUM · G-A vor FE-06.** `solana/src/tx/mod.rs::load_keypair_json`: keine Wallet-Pfade/Secret-Bytes in `Display/Debug`, sensible Zwischenpuffer soweit Rust-/SDK-seitig praktisch möglich sicher droppen/zeroizen; keine unbegründete Garantie über sämtliche Speicher-Kopien. Tests: falscher Pfad, defekter JSON-Inhalt, Secret-Sentinel, Lock-/Test-Fixtures. **Commit/Evidence:** —.
+- [x] **MEDIUM · G-A vor FE-06.** · Fix `9fad87d` · Test `b10_keypair_errors_never_carry_path_or_secret_bytes` — feste Codes `KEYPAIR_READ/FORMAT/INVALID` ohne Pfad/Parsertext; Dateitext und Bytes in `Zeroizing`, fester 64-Byte-Parse ohne wachsende Kopien. Kopien in OS/Allocator/SDK außerhalb der Garantie. `solana/src/tx/mod.rs::load_keypair_json`: keine Wallet-Pfade/Secret-Bytes in `Display/Debug`, sensible Zwischenpuffer soweit Rust-/SDK-seitig praktisch möglich sicher droppen/zeroizen; keine unbegründete Garantie über sämtliche Speicher-Kopien. Tests: falscher Pfad, defekter JSON-Inhalt, Secret-Sentinel, Lock-/Test-Fixtures. **Commit/Evidence:** —.
 
 ### B11 — Alignment-abhängige bytemuck-POD-Decoder
 - [x] **MEDIUM · LOCAL_PASS · G-E zusammen mit B2.** Geschlossen mit B2/D11 in `40a368f`: alle gepinnten Marginfi-Decoder liefern `Cow` (ausgerichtet geliehen, sonst Kopie), Test `pinned_decoders_are_alignment_independent` (Offsets 0..8) Exit 0. Rest: externe Integrations-Layouts (`pod_after_disc`, Kamino/Drift/JupLend) bleiben `try_from_bytes`. `health.rs`/`sizing.rs` nutzen `bytemuck::try_from_bytes`, `fe_qualification` anderswo unaligned Read. Nur nach Prüfung, ob Referenztypen/Kopien nötig sind, konsistente, formatgerechte Decoder; Alignment darf nicht zufällig vom `Vec<u8>` abhängen. Tests: gezielt unaligned Slice, echte Pinned Fixtures. **Commit/Evidence:** —.
@@ -700,7 +700,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 ## 10. F — weitere bestätigte oder prüfpflichtige Vertragslücken
 
 ### F1 — fehlende begrenzte Simulationslogs
-- [ ] **MEDIUM / FE-02-DIAGNOSTIK · CODE_CONFIRMED.**
+- [x] **MEDIUM / FE-02-DIAGNOSTIK · CODE_CONFIRMED.** · Fix `9fad87d` · Tests `f1_simulation_logs_are_bounded_redacted_and_never_in_debug`, `f1_simulation_failure_is_a_typed_owner_frame` — `SimResult::Failed(SimulationFailure)` mit Code, CU, ≤ 64 Zeilen à 256 B / 16 KiB, Redaction, Truncation; eigener Journal-Kind `OWNER_SIMULATION_FAILURE` (105); `Debug`/Record-Text nur der Code. Jito-Bundle-Simulation weiterhin nur Code.
 - **Ist:** `submit/rpc.rs::simulate` speichert bei Fehler nur `SimResult::Failed("RPC_SIMULATION_FAILED ...")`, nicht `r.value.logs`.
 - **Soll:** Typisierte `SimulationFailureEvidence` mit kategorisiertem Fehler, optionalen CU, redigierten Logs (z. B. höchstens 64 Zeilen à 256 Bytes, maximal 16 KiB) samt Truncation, nur im nativen Journal, nie im ungeschützten Display/stderr. Failed/Unavailable bleiben no-send.
 - **Tests:** 0/65/1000 Zeilen, oversized, Secret-/URL-Sentinel, fehlende Logs, Backward Reader, keine unqualifizierte Send-Freigabe. **Commit/Evidence:** —.
@@ -991,13 +991,13 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 - **Abnahme:** belegte Wire-Parität je vereinbartem Topic; offene Scope-Themen bleiben eigene Frontend-Gates. **Commit/Evidence:** —.
 
 ### R21 — F-D: Reporter-Heartbeat ignoriert konfigurierte Periode
-- [ ] **LOW / CONFIG-EFFECTIVENESS · CODE_CONFIRMED · Cross-Ref R20/F3-Gateway.**
+- [x] **LOW / CONFIG-EFFECTIVENESS · CODE_CONFIRMED · Cross-Ref R20/F3-Gateway.** · Fix `9fad87d` · Test `r21_heartbeat_period_is_the_configured_interval` — Wait bis zur nächsten Heartbeat-Deadline (≤ 500-ms-Stop-Poll); 700 ms kam vorher alle ~1000 ms.
 - **Ist:** `reporter/lib.rs::run_session` wartet mit `reader.wait_changed(cfg.heartbeat.min(Duration::from_millis(500)))`, also effektiv maximal 500 ms statt des aus `P0_REPORT_HEARTBEAT_MS` geparsten Intervalls. Ob jede Wait-Iteration tatsächlich einen Wire-Heartbeat sendet, im Test qualifizieren; die Konfiguration verliert jedenfalls ihre beabsichtigte Taktwirkung.
 - **Soll:** Heartbeat-Deadline und LatestValue-State-Änderungen getrennt behandeln, konfigurierten Intervall innerhalb Wire-/Gateway-Liveness-Budgets einhalten, keine busy loop und keine Rückstau-/Sleep-Schleife bei fehlendem Client.
 - **Tests:** Fake-Clock 500/5.000/15.000 ms, bursts vs idle, Backpressure und Disconnection; Anzahl gesendeter Heartbeats und Zeitabstände prüfen. **Commit/Evidence:** —.
 
 ### R22 — F-E: stale Reporter-Socket/Lock nach Crash verhindert Neustart
-- [ ] **MEDIUM / RESTARTABILITY · CODE_CONFIRMED, CRASH_REPRO_NOT_RUN · Cross-Ref R18/FEUI.**
+- [x] **MEDIUM / RESTARTABILITY · CODE_CONFIRMED, CRASH_REPRO_NOT_RUN · Cross-Ref R18/FEUI.** · Fix `9fad87d` · Test `r22_crash_leftovers_restart_but_live_owners_and_foreign_files_refuse` — prozessgebundener `flock` (Inode-Prüfung) statt `create_new`; verwaister eigener, unbedienter Socket und Generation-Temp-Datei werden entfernt; lebender Owner/Server, Fremddatei, Symlink ⇒ Start verweigert, nichts gelöscht.
 - **Ist:** `reporter/lib.rs::bind` erzeugt einen Lock mit `create_new(true)` und bindet UNIX-Socket ohne Recovery vorhandener verwaister Socket-/Lock-Artefakte; `Drop` entfernt sie nur bei geordnetem Ende. Nach Crash/kill -9 können verwaiste Pfade einen Neustart blockieren.
 - **Soll:** exklusive, prozessgebundene Ownership (z. B. Advisory `flock`), sichere Live-Server-Probe vor Entfernen nur **eigener** stale Socket-Datei, generation-gebundene Umstellung; niemals fremdes lebendes Socket löschen oder zweiter Writer werden. Permission- und symlink-sichere Pfadidentität. Kein Force-Unlink ohne belegte Inaktivität.
 - **Tests:** Crash/restart, aktiver fremder Owner, races zwischen 2 Starts, stale lock+socket, symlink attack, falsche Permission, Gateways während Rebind, idempotentes geordnetes Stop.
