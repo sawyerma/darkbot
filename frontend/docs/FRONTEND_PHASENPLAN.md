@@ -1,6 +1,6 @@
 # DarkBot Frontend – Master-Phasenplan V1.3
 
-**Status:** Verbindlicher SOLL-Architektur- und Implementierungsplan, Stand 2026-10-17. **Keine Aussage, dass Gateway, Commands, Protobuf und BSC-GUI bereits implementiert sind.** Fachliche Projektpläne bleiben unabhängig maßgebend. Dieser Master ersetzt die alten, sich überlappenden Frontend-Gesamtpläne.
+**Status:** Verbindlicher SOLL-Architektur- und Implementierungsplan, Stand 2026-10-19 (F7-OVR specification appended; historical IST sections remain evidence snapshots). **Keine Aussage, dass Gateway, Commands, Protobuf und BSC-GUI bereits implementiert sind.** Fachliche Projektpläne bleiben unabhängig maßgebend. Dieser Master ersetzt die alten, sich überlappenden Frontend-Gesamtpläne.
 
 ## 0. Eine Dokumentationsautorität
 
@@ -210,3 +210,51 @@ Die erste **belegte** Extraktion steht in [SOURCE_VARIABLE_MATRIX.md](SOURCE_VAR
 10. Performance: STATE-Frame zunächst <=256 KiB, ~15s heartbeat, ~2s grace, max 3 Retry als **Messhypothese**. Publisher-p95/Engine-Channel-Füllstand bei Slow Client messen, Abnahme-SLO **vor** Implementierungs-PASS festschreiben.
 
 **Umsetzungshygiene:** F-Arbeitspaket erst erledigt, wenn Implementierung + Tests + Source-/Protocol-Identity + offene Risiken dokumentiert. Kein neuer paralleler 'FINAL_PLAN.md'. Jede echte Designänderung zuerst hier bzw. im ausschließlich zuständigen Wire-/Governance-Vertrag, dann Migration.
+
+## 10. Binding F7-OVR amendment – independent project lifecycle and Overview control (2026-10-19)
+
+**Normative status:** this section is part of the **single master** and supersedes older Overview UI wording where inconsistent. **Design target approved for Fable review; operating commands are NOT_IMPLEMENTED / NOT_AUTHORIZED.** Evidence baseline `db238cfdb44991387bb5bd706c838befdbbd2661`. Previous sections describing an earlier IST state are historical snapshots and not proof of present capabilities.
+
+**Visual reference (global Overview only):** [standalone Graphite HTML](../design/reference/darkbot_overview_control_v2.html) · [SVG reference](../design/reference/darkbot_overview_control_v2.svg). Colors, spacing, radii and typography come from the real `src/shared/ui/graphite/{tokens.css,graphite.css}` and `src/features/overview/{overview.css,ProjectEntry.tsx}`. The accepted Project_0 [V7 fleet HTML](../design/reference/project0_graphite_v7_fleet.html), five tabs and wallet freeze remain byte-untouched. **The HTML/SVG are static specimens, not proof of runtime state or working controls.**
+
+![Binding Overview structure: three project cards above two equal Graphite panels](../design/reference/darkbot_overview_control_v2.svg)
+
+### 10.1 Fixed information architecture
+
+- **Top row:** exactly **Project 0**, **BSC**, **Solana** project cards, in registry order. Each preserves its current title/domain, independent source-connection pill and ALL five read-only metrics, in order: `Readiness`, `Execution authorization`, `Bots / jobs / captures`, `RPC p95`, `Realized net PnL`. None is dropped, renamed or replaced by the new controls.
+- Each project card adds a **distinct process-status dot with label** plus its own qualified **Start OR Stop** and **Logs** controls. The current entire-card `<button>` must be restructured into valid accessible navigation + **sibling** controls; nested buttons or command-by-card-navigation are forbidden. Retain keyboard navigation and stable project-card test IDs.
+- **Bottom row:** exactly **two equal-width, equal-height Graphite panels** (stacked on narrow screens): LEFT **System & Control Plane** with `Gateway`, `Overview Feed`, `Connected Projects`, `Gateway RTT`, `RPC Latency P95`, `Last Overview Update` and actions **Stop All**, **Show All Logs**; RIGHT **Global Finance Aggregate** with `Realized Net PnL`, `Unrealized PnL`, `Total Equity`, `Daily Net PnL`, `PnL Coverage`, `Reporting Currency`. **No Start Selected.** Do not add `Data Age` or `Valuation` rows.
+- Global Overview remains read-only as to finance/trading. Project-specific numbers stay at the top; global qualified sums at bottom right. English UI labels throughout, existing restrained monochrome Graphite tokens; no new blue/navy UI or parallel design system.
+
+### 10.2 Source truth and indicator semantics
+
+**Connection state ≠ process lifecycle ≠ engine readiness ≠ LIVE permission.** A currently displayed `Ready` source pill means a validated feed connection, never proof of a RUNNING process. `Gateway OPEN` and `Overview Feed LIVE` are infrastructure states only; `Connected Projects` counts attached sources and **must not** be renamed `Running Projects`.
+
+Project process state requires its OWN supervisor-owned, authenticated, timestamped source with launch/run identity and liveness. `RUNNING` → **green** only with positive healthy process evidence; `STOPPED` → gray only when supervisor positively confirms stopped; `STARTING`/`STOPPING` → amber with witnessed operation; `FAILED` → red with evidenced failure; `UNKNOWN` → neutral gray on missing/stale/untrusted status. Unknown must not be inferred as stopped. P0 read-only Capture running is NOT P0 trading being authorized/running. BSC and Solana retain independent process owners and native safety gates.
+
+### 10.3 Start/Stop/Logs control contract (must pass F6 before enablement)
+
+- One project can run while the others are stopped; lifecycle scopes are **independent**. User-facing Start/Stop targets an explicitly qualified project **process group** (for P0 distinguish Capture/Reporter from trading). No generic Start means `BUY`, submit transaction or enable LIVE.
+- Real commands only through authenticated same-origin action channel and native/supervisor authority, with CSRF/Origin/Host checks, replay protection, idempotency, CAS/expected version, durable intent/receipt and separate acknowledged-versus-executed status. Duplicate clicks must never spawn duplicate processes. Never display optimistic `RUNNING`.
+- Stop means graceful drain and durable finalization (P0 journal seal), then **verified** stopped state. No ordinary SIGKILL. Timeout/ambiguous Ack/failed seal shows failure/unknown, not success. Closing the browser window does **not** stop capture; reopening reconstructs authoritative status without creating a duplicate.
+- **Stop All** explicitly confirms scope and returns **per-project** success/failure/unknown; partial stop must not masquerade as global completion. **Gateway remains running** to keep the GUI and logs available. No `Start Selected`.
+- **Show All Logs** and per-project `Logs` use bounded, read-only, authenticated, redacted source logs with project/severity/time filters and archive pagination. No unbounded frontend buffer, raw HTML injection or credentials.
+- Existing local `P0_APP_AUTOSTART_CAPTURE=1` and `P0_APP_CAPTURE_SECS=until-stopped` are not to be silently changed. Before binding controls, Fable must give an explicit proposal resolving **manual Stop vs next Desktop-app open/autostart**; a previous explicit user Stop must not be deceptively reversed when merely reopening a window.
+- **Missing backend interface => disabled action with honest reason**, not a decorative clickable control. Especially BSC/Solana actions remain gated until their process owner exposes a qualified controller. No LIVE/BUY/Wallet-gate changes.
+
+### 10.4 Finance and measurements remain evidence-based
+
+`Gateway RTT` remains `—` until actually measured. An arithmetic mean of per-project RPC p95 values is NOT global p95; disclose source/worst-of-sources or show unknown. `Last Overview Update` is gateway overview calculation age, not chain-event age. `GlobalFinance.net_pnl` is not automatically validated **Realized Net PnL**, and `total_capital` is not automatically **Total Equity**: do not silently relabel them. Partial sums across a qualified subset of projects are allowed **only** if the backend identifies contributors, comparable price/time/finality, no double counting, and marked partial scope. Until supported, monetary rows are `— USD`, never invented zero. `PnL Coverage` counts finalized verified realized-PnL contributors, not project connections.
+
+### 10.5 Delivery gates nested in F3/F6/F7 (NOT a competing phase sequence)
+
+| Work item | Mandatory evidence and acceptance |
+|---|---|
+| **F7-OVR-A: visual/reference** | 3 original metric-rich cards + 2 equal tiles + exact names, non-nested controls, keyboard/A11y, 1152px and narrow-width screenshots, Graphite CSS/freeze checks. **SPECIFIED; UI commands not wired.** |
+| **F7-OVR-B: read-only process truth** | Exact per-project supervisor/IPC owner, lifecycle source identity/run generation, detach/stale/start/restart tests, no false green. **OPEN** |
+| **F7-OVR-C: per-project commands** | P0 read-only Capture first; explicit target; auth/CSRF/Idempotency/CAS, sealed journal, double click, crash/reopen, missing BSC/Solana interfaces disabled. **OPEN, gated by F6** |
+| **F7-OVR-D: global control/logs** | Stop All confirmation, verified per-project outcomes and partial-failure evidence, keep Gateway up; bounded redacted Show All Logs + project filters. **OPEN** |
+| **F7-OVR-E: acceptance** | `npm run type-check`, `lint`, `test`, `build`, `lint:boundaries`, `lint:css`, `check:freeze`, Playwright desktop/mobile, native integration/negative tests, screenshot/sha + rollback. No `PASS` without real execution. **NOT_RUN for new controls** |
+
+**Implementation order:** visual/accessibility proposal → real read-only process status → P0 capture-only lifecycle → BSC/Solana adapters after owner proof → Stop All / logs and full negative-suite. Fable returns exact source-proven patches and tests for review, **no autonomous Git writes**. Current backend architecture and single Project_0 native execution/trading gates remain authoritative; F8 multi-bot is deferred. Only `main`, never branches/worktrees/force push.
+
