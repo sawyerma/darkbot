@@ -152,6 +152,9 @@ pub(super) fn prepare(
     // [C0-FIX-03] The Clock sysvar is canonical state: every protocol evaluation uses its
     // slot/unix timestamp from the same state generation instead of local wall time.
     required_dependency_keys.push(solana_sdk::sysvar::clock::id());
+    // B4: the Rent sysvar is canonical state too: the rent of a LiquidationRecord a plan creates
+    // comes from it, never from a constant.
+    required_dependency_keys.push(solana_sdk::sysvar::rent::id());
     required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
     required_dependency_keys.dedup();
 
@@ -400,7 +403,7 @@ pub(super) fn prepare(
         allowlist.integration_programs.insert(p);
         allowlist.refresh_programs.insert(p); // Pre-Start-Refreshes nur dieser Programme (liquidate_start.rs)
     }
-    allowlist.refresh_programs.insert(program); // init_liquidation_record vor Start
+    // E2: init_liquidation_record is its own planner step (only before Start), not a refresh.
     #[cfg(feature = "crate_health")]
     let instruction_table = darkbot_project0::receivership::builders::instruction_table(&program)?;
     let global_allowed = protocol::receivership_allowed_programs();

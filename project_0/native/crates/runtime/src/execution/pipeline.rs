@@ -132,6 +132,35 @@ pub(crate) fn plan_economic_gate(
     (eval, actionable, technical_probe)
 }
 
+/// E2: the message to be signed carries exactly the validated instructions — program id and data,
+/// in order — preceded at most by the ComputeBudget instructions the transaction layer adds.
+pub(crate) fn compiled_matches(
+    message: &solana_sdk::message::VersionedMessage,
+    validated: &[Instruction],
+) -> bool {
+    static COMPUTE_BUDGET: std::sync::OnceLock<Option<Pubkey>> = std::sync::OnceLock::new();
+    let Some(compute_budget) =
+        *COMPUTE_BUDGET.get_or_init(|| COMPUTE_BUDGET_PROGRAM_ID.parse().ok())
+    else {
+        return false;
+    };
+    let keys = message.static_account_keys();
+    let mut compiled = message.instructions().iter().map(|ix| {
+        keys.get(usize::from(ix.program_id_index))
+            .map(|program| (*program, ix.data.as_slice()))
+    });
+    let mut first = compiled.next();
+    while matches!(first, Some(Some((p, _))) if p == compute_budget) {
+        first = compiled.next();
+    }
+    let compiled: Vec<_> = first.into_iter().chain(compiled).collect();
+    compiled.len() == validated.len()
+        && compiled
+            .iter()
+            .zip(validated)
+            .all(|(c, v)| *c == Some((v.program_id, v.data.as_slice())))
+}
+
 /// B1: reason code of a LIVE candidate that reached the send boundary of this pipeline.
 pub const LIVE_SEND_REQUIRES_FE04: &str = "LIVE_SEND_REQUIRES_FE04_ONE_SHOT";
 
@@ -232,9 +261,10 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     /// [FIX-4] Tip-Account (aus `JitoAdapter::tip_accounts()`, rotierend) — nur für Bundle-Pfad.
     pub tip_account: Option<Pubkey>,
     /// [FIX-22] Globale P0-Top-Level-Allowlist (protocol::receivership_allowed_programs).
-    pub global_allowed: Vec<Pubkey>,
+    /// C8: borrowed from the owner (immutable during the evaluation), never copied per candidate.
+    pub global_allowed: &'a [Pubkey],
     /// [FIX-30] Allowlist für Prerequisite-TXs (Swap-Programme, System, Token, Token-2022, ATA, ComputeBudget).
-    pub prereq_allowed: Vec<Pubkey>,
+    pub prereq_allowed: &'a [Pubkey],
     /// [FIX-40] Zuletzt beobachteter Chain-Slot (vom Ingress aktualisiert).
     pub slot_watch: &'a darkbot_solana::ingress::SlotWatch,
     /// B6: bound on the synchronous network work of the calling owner.
@@ -417,6 +447,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         )> = None;
         let mut threshold_hits: u32 = 0;
         let mut rejected = Vec::new();
+        // D2: fee quotes of this evaluation (one blockhash, one slot) keyed by the message hash
+        // of the built bytes: funding classes with byte-identical transactions (NoSwap and
+        // Preheld inventory) share one quote; nothing is reused across evaluations.
+        let mut fee_quotes: Vec<(solana_sdk::hash::Hash, Option<submit::MessageFeeQuote>)> =
+            Vec::new();
         for mut plan in plans {
             // E2: the gate decides on the steps of the actually built instructions (receivership
             // TX and every prerequisite TX), immediately before they are signed.
@@ -547,6 +582,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
             };
 
+            if !compiled_matches(&built.tx.message, &plan.instructions) {
+                rejected.push(format!(
+                    "{}: compiled message differs from the validated instructions",
+                    plan.input.funding.as_str()
+                ));
+                continue;
+            }
             rec.progress.transaction_built = Some(true);
             let fee_quote = if plan.input.path == Path::Rpc
                 && self.submitter.path() == SubmissionPath::Rpc
@@ -560,25 +602,38 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     );
                     return rec.with_timeline(&tl);
                 }
-                let fee_started = Instant::now();
-                let fee = self.submitter.fee_for_message(&built.tx);
-                // [MT0] H6: would a local fee model have matched the RPC fee? (measurement only)
-                if let Some(q) = &fee {
-                    match local_fee_estimate_lamports(&built.tx) {
-                        Some(local) if local == q.lamports => darkbot_common::mt0::MT0
-                            .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
-                        Some(_) => darkbot_common::mt0::MT0
-                            .add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
-                        None => darkbot_common::mt0::MT0
-                            .add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
+                let message_hash = built.tx.message.hash();
+                let cached = fee_quotes
+                    .iter()
+                    .find(|(h, _)| *h == message_hash)
+                    .map(|(_, q)| q.clone());
+                let fee = match cached {
+                    Some(quote) => quote,
+                    None => {
+                        let fee_started = Instant::now();
+                        let quote = self.submitter.fee_for_message(&built.tx);
+                        // [MT0] H6: would a local fee model have matched the RPC fee?
+                        // (measurement only, once per RPC quote)
+                        if let Some(q) = &quote {
+                            match local_fee_estimate_lamports(&built.tx) {
+                                Some(local) if local == q.lamports => darkbot_common::mt0::MT0
+                                    .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
+                                Some(_) => darkbot_common::mt0::MT0
+                                    .add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
+                                None => darkbot_common::mt0::MT0
+                                    .add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
+                            }
+                        }
+                        record_timing(
+                            &FEE_CALLS,
+                            &FEE_NS_TOTAL,
+                            &FEE_NS_MAX,
+                            fee_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+                        );
+                        fee_quotes.push((message_hash, quote.clone()));
+                        quote
                     }
-                }
-                record_timing(
-                    &FEE_CALLS,
-                    &FEE_NS_TOTAL,
-                    &FEE_NS_MAX,
-                    fee_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
-                );
+                };
                 fee.filter(|q| q.message_hash == built.tx.message.hash().to_string())
             } else {
                 None
@@ -759,6 +814,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                         return rec.with_timeline(&tl);
                     }
                 };
+                if !compiled_matches(&b.tx.message, pre) {
+                    rec.loss = Some(LossReason::Build);
+                    rec.reason =
+                        Some("prerequisite compiled message differs from the validated one".into());
+                    return rec.with_timeline(&tl);
+                }
                 if let Err(e) = tx::sign(&mut b, &[self.payer]) {
                     rec.loss = Some(LossReason::Build);
                     rec.reason = Some(e.to_string());
@@ -922,6 +983,48 @@ fn classify_plan_error(e: &str) -> (Decision, LossReason) {
 #[cfg(test)]
 mod plan_error_tests {
     use super::*;
+
+    /// E2: the compiled message must carry exactly the validated instructions (ComputeBudget
+    /// prefix allowed); any other instruction, order or data byte is a mismatch.
+    #[test]
+    fn e2_compiled_message_is_checked_against_the_validated_instructions() {
+        let payer = solana_sdk::signature::Keypair::new();
+        let ix = |program: Pubkey, data: Vec<u8>| Instruction {
+            program_id: program,
+            accounts: vec![],
+            data,
+        };
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let validated = vec![ix(a, vec![1; 8]), ix(b, vec![2; 8])];
+        let plan = TxPlan {
+            version: BuildVersion::V0,
+            payer: tx::payer_of(&payer),
+            instructions: validated.clone(),
+            lookup_tables: vec![],
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 1,
+                loaded_accounts_data_size: None,
+            },
+        };
+        let built = tx::build(
+            &plan,
+            solana_sdk::hash::Hash::new_unique(),
+            &TxLimits::default(),
+        )
+        .unwrap();
+        assert!(
+            built.tx.message.instructions().len() > validated.len(),
+            "CU prefix added"
+        );
+        assert!(compiled_matches(&built.tx.message, &validated));
+        let mut other_data = validated.clone();
+        other_data[1].data[0] = 3;
+        assert!(!compiled_matches(&built.tx.message, &other_data));
+        let reordered = vec![validated[1].clone(), validated[0].clone()];
+        assert!(!compiled_matches(&built.tx.message, &reordered));
+        assert!(!compiled_matches(&built.tx.message, &validated[..1]));
+    }
 
     /// C10: a stale integration reserve is recognized only by the marker the typed error-code
     /// check sets, whatever the wording behind it; a foreign text naming "ReserveStale" is no

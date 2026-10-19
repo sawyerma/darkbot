@@ -200,6 +200,82 @@ pub fn owner_state(path: &Path) -> Result<OwnerState, String> {
 mod tests {
     use super::*;
 
+    /// E8: the stop handler (no SA_RESTART) is safe for the blocking I/O of the runtime: with
+    /// it installed, SIGTERMs delivered to a thread blocked in `read_exact` on a pipe and to a
+    /// thread appending+fsyncing journal frames interrupt neither (std retries EINTR there); the
+    /// stop flag is set. Runs in a child process so the signal disposition stays local.
+    #[test]
+    fn e8_stop_signals_never_break_blocking_reads_or_journal_writes() {
+        use std::io::{Read, Write};
+        use std::os::unix::thread::JoinHandleExt;
+        if std::env::var_os("P0_E8_CHILD").is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "orchestration::control::tests::e8_stop_signals_never_break_blocking_reads_or_journal_writes",
+                    "--test-threads=1",
+                ])
+                .env("P0_E8_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        install_stop_handler().unwrap();
+        let (mut tx, mut rx) = std::os::unix::net::UnixStream::pair().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut buf = [0u8; 64];
+            rx.read_exact(&mut buf).map(|()| buf)
+        });
+        let dir = std::env::temp_dir().join(format!("p0_e8_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("e8.p0j");
+        let signalled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = signalled.clone();
+        // Appends + fsyncs until every signal was sent, so the signals hit an active writer.
+        let writer = std::thread::spawn(move || -> std::io::Result<u64> {
+            let mut w = crate::analytics::journal::Writer::create(&path)?;
+            let mut frames = 0u64;
+            while !done.load(std::sync::atomic::Ordering::Acquire) || frames < 10 {
+                w.append_typed(
+                    Default::default(),
+                    &crate::analytics::payload::OwnerDiagnostic {
+                        line: format!("e8 {frames}"),
+                    },
+                )?;
+                w.sync()?;
+                frames += 1;
+            }
+            w.seal(true)?;
+            Ok(frames)
+        });
+        let targets = [reader.as_pthread_t(), writer.as_pthread_t()];
+        for _ in 0..50 {
+            for t in targets {
+                // SAFETY: neither thread can exit before its signal phase ends (the reader waits
+                // for the data sent below, the writer for `signalled`), and the handles stay
+                // unjoined until then; SIGTERM only stores a flag.
+                unsafe { libc::pthread_kill(t, libc::SIGTERM) };
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        signalled.store(true, std::sync::atomic::Ordering::Release);
+        tx.write_all(&[7u8; 64]).unwrap();
+        assert_eq!(reader.join().unwrap().unwrap(), [7u8; 64]);
+        let frames = writer.join().unwrap().unwrap();
+        assert!(frames >= 10, "{frames}");
+        let chain = crate::storage::segments::verify_chain(&dir.join("e8.p0j")).unwrap();
+        assert!(chain.sealed && chain.complete);
+        assert!(stop_requested());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// E7: 1000 owner hand-overs while another thread probes the state continuously: a start is
     /// never refused by a probe, a probe never reads a half-written record, and while an owner
     /// holds the lock a second owner is still refused.

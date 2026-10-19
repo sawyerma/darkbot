@@ -372,6 +372,20 @@ pub mod crate_impl {
             req: RequirementType,
             clock: &Clock,
         ) -> Result<(i128, i128), HealthError> {
+            let [c] = self.components_of(acc, group, obs, [req], clock)?;
+            Ok(c)
+        }
+
+        /// The health components of every requested requirement type over one copy of the
+        /// observation accounts (the pinned crate reads them through `AccountInfo`).
+        fn components_of<const N: usize>(
+            &self,
+            acc: &MarginfiAccount,
+            group: &MarginfiGroup,
+            obs: &[Pubkey],
+            reqs: [RequirementType; N],
+            clock: &Clock,
+        ) -> Result<[(i128, i128); N], HealthError> {
             let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(obs.len());
             for k in obs {
                 let (owner, lamports, data) = self.raw(k)?;
@@ -390,22 +404,26 @@ pub mod crate_impl {
                 .iter_mut()
                 .map(|(k, a)| (&*k, a).into_account_info())
                 .collect();
-            let (assets, liabs) = get_health_components(
-                acc,
-                group,
-                &ais,
-                req,
-                &mut None,
-                HealthPriceMode::Client(clock.clone()),
-            )
-            .map_err(|e| {
-                if integration_stale(&e) {
-                    HealthError::IntegrationStale(e.to_string())
-                } else {
-                    HealthError::Crate(e.to_string())
-                }
-            })?;
-            Ok((assets.to_bits(), liabs.to_bits()))
+            let mut out = [(0i128, 0i128); N];
+            for (slot, req) in out.iter_mut().zip(reqs) {
+                let (assets, liabs) = get_health_components(
+                    acc,
+                    group,
+                    &ais,
+                    req,
+                    &mut None,
+                    HealthPriceMode::Client(clock.clone()),
+                )
+                .map_err(|e| {
+                    if integration_stale(&e) {
+                        HealthError::IntegrationStale(e.to_string())
+                    } else {
+                        HealthError::Crate(e.to_string())
+                    }
+                })?;
+                *slot = (assets.to_bits(), liabs.to_bits());
+            }
+            Ok(out)
         }
 
         fn maintenance_emode_config(
@@ -906,9 +924,14 @@ pub mod crate_impl {
                 leader_schedule_epoch: 0,
                 unix_timestamp: now_unix_s,
             };
-            let (ma, ml) =
-                self.components(acc, group, &obs, RequirementType::Maintenance, &clock)?;
-            let (ea, el) = self.components(acc, group, &obs, RequirementType::Equity, &clock)?;
+            // B7: one copy of the observation accounts for both requirement types.
+            let [(ma, ml), (ea, el)] = self.components_of(
+                acc,
+                group,
+                &obs,
+                [RequirementType::Maintenance, RequirementType::Equity],
+                &clock,
+            )?;
             let five_usd_bits: i128 =
                 (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
             Ok(HealthView {

@@ -424,6 +424,7 @@ fn run_embedded_inner(
     let mut ingress = Some(ingress);
 
     let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+    core.retention = cfg.retention;
     match deployment_before {
         Ok(v) => core.deployment_before = Some(v),
         Err(e) => core.deployment_error = Some(e),

@@ -797,7 +797,12 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
         let t = test_table();
         Ok(vec![crate::execution::pipeline::ReceivershipPlan {
             market_identity: None,
-            instructions: vec![test_ix(t.start), test_ix(t.repay), test_ix(t.end)],
+            instructions: vec![
+                test_ix(t.start),
+                test_ix(t.withdraw[0]),
+                test_ix(t.repay),
+                test_ix(t.end),
+            ],
             route: RouteKind::NoSwap,
             input: input(0),
             premium_bps: 500,
@@ -883,8 +888,8 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![test_table().program],
-        prereq_allowed: vec![],
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &[],
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
@@ -989,8 +994,8 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![test_table().program],
-        prereq_allowed: vec![],
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &[],
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
@@ -1094,8 +1099,8 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![test_table().program],
-        prereq_allowed: vec![],
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &[],
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
@@ -1140,14 +1145,14 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
     }
     type Rewrite = fn(&mut Vec<solana_sdk::instruction::Instruction>);
     let cases: [(Rewrite, &str); 3] = [
-        (|ixs| ixs.push(test_ix([9; 8])), "UnknownInstruction(3)"),
+        (|ixs| ixs.push(test_ix([9; 8])), "UnknownInstruction(4)"),
         (
             |ixs| ixs.insert(1, test_ix([9; 8])),
             "UnknownInstruction(1)",
         ),
         (
             |ixs| {
-                ixs.swap(1, 2);
+                ixs.swap(2, 3);
             },
             "EndNotLast",
         ),
@@ -1209,8 +1214,8 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
                 execution_deadline_ns: u64::MAX,
             },
             tip_account: None,
-            global_allowed: vec![test_table().program],
-            prereq_allowed: vec![],
+            global_allowed: std::slice::from_ref(&test_table().program),
+            prereq_allowed: &[],
             slot_watch: &slots,
             network: &mut network,
             simulation_failure: None,
@@ -1224,6 +1229,149 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
         assert_eq!(r.progress.transaction_built, None);
         assert_eq!(sims.load(Ordering::Relaxed), 0);
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+}
+/// D2: NoSwap and Preheld inventory plans with byte-identical transactions share one fee
+/// quote within the evaluation; both funding classes keep their own cost record with it.
+#[test]
+fn d2_identical_funding_plans_share_one_fee_quote() {
+    use crate::execution::pipeline::{
+        Mode, NetworkBudget, Pipeline, ReceivershipBuilder, ReceivershipPlan,
+    };
+    use darkbot_project0::{
+        execution::Freshness,
+        funding::FundingClass,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    struct FeeCounting(Arc<AtomicU64>);
+    impl SubmissionAdapter for FeeCounting {
+        fn path(&self) -> SubmissionPath {
+            SubmissionPath::Rpc
+        }
+        fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<MessageFeeQuote> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Some(MessageFeeQuote {
+                message_hash: tx.message.hash().to_string(),
+                context_slot: 1,
+                lamports: 5_000,
+            })
+        }
+        fn simulate(&self, _: &VersionedTransaction) -> SimResult {
+            SimResult::Ok {
+                units_consumed: Some(100),
+            }
+        }
+        fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
+            panic!("must never broadcast")
+        }
+        fn submit_bundle(
+            &self,
+            _: &[VersionedTransaction],
+            _: u64,
+        ) -> Result<SubmitAck, SubmitError> {
+            panic!("must never broadcast bundle")
+        }
+    }
+    struct TwoClasses(bool);
+    impl ReceivershipBuilder for TwoClasses {
+        fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+            Some(n)
+        }
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
+        }
+        fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut first = TestBuilder.plans(a, now, slot)?.remove(0);
+            first.input.funding = FundingClass::NoSwapInventory;
+            let mut second = TestBuilder.plans(a, now, slot)?.remove(0);
+            second.input.funding = FundingClass::PreheldInventory;
+            if self.0 {
+                // A different transaction (one more byte of data): its own quote.
+                second.instructions[1].data.push(0);
+            }
+            Ok(vec![first, second])
+        }
+    }
+    for (different, expected_calls) in [(false, 1u64), (true, 2)] {
+        let fees = Arc::new(AtomicU64::new(0));
+        let submitter = FeeCounting(fees.clone());
+        let clock = Clock::new();
+        let bh = BlockhashCache::new();
+        bh.set(CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 100,
+            refreshed_ns: clock.now_ns(),
+        });
+        let zero = Limits {
+            max_total_capital: 0,
+            max_outstanding_inventory: 0,
+            max_concurrent_positions: 0,
+            max_exposure_per_attempt: 0,
+            max_daily_loss: 0,
+            max_failed_attempts_per_day: 0,
+            max_tip: 0,
+            max_slippage_bps: 0,
+            max_outstanding_attempts: 0,
+        };
+        let mut safety = Safety::new(zero, Allow::default(), false);
+        let payer = solana_sdk::signature::Keypair::new();
+        let allow = Allowlist::default();
+        let failed = FailedCostMatrix::default();
+        let slots = darkbot_solana::ingress::SlotWatch::new();
+        let mut network = NetworkBudget::unbounded();
+        let builder = TwoClasses(different);
+        let mut p = Pipeline {
+            mode: Mode::Shadow,
+            clock: &clock,
+            health: &TestHealth,
+            builder: &builder,
+            submitter: &submitter,
+            safety: &mut safety,
+            blockhash: &bh,
+            payer: &payer,
+            allowlist: &allow,
+            failed_costs: &failed,
+            limits: TxLimits::default(),
+            resources: Resources {
+                compute_unit_limit: 100_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: None,
+            },
+            min_profit: 0,
+            blockhash_max_age_ns: u64::MAX,
+            p7_passed: false,
+            freshness: Freshness {
+                max_opportunity_age_ns: u64::MAX,
+                execution_deadline_ns: u64::MAX,
+            },
+            tip_account: None,
+            global_allowed: std::slice::from_ref(&test_table().program),
+            prereq_allowed: &[],
+            slot_watch: &slots,
+            network: &mut network,
+            simulation_failure: None,
+        };
+        let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+        assert_eq!(
+            fees.load(Ordering::Relaxed),
+            expected_calls,
+            "different={different}"
+        );
+        let labels: Vec<_> = r
+            .candidate_costs
+            .iter()
+            .map(|c| c.funding.clone())
+            .collect();
+        assert_eq!(labels.len(), 2, "{labels:?}");
+        assert!(r
+            .candidate_costs
+            .iter()
+            .all(|c| c.message_fee_quote.is_some()));
     }
 }
 #[test]
@@ -1957,8 +2105,8 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: vec![test_table().program],
-        prereq_allowed: vec![],
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &[],
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,

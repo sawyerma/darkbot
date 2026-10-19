@@ -110,6 +110,22 @@ pub(crate) fn candidate_should_forward(
     forced || transition || revision_changed || (periodic_due && repeat_capacity)
 }
 
+/// Fairness/scheduling key of one sweep candidate (`candidate_fairness_key`).
+#[cfg(feature = "crate_health")]
+pub(crate) type FairnessKey = (u8, std::cmp::Reverse<u64>, [u8; 32]);
+
+/// D12: orders sweep work by its fairness key, computing each key exactly once; returns whether
+/// any candidate is an ordinary due repeat (class 1, a fairness rotation). The keys are unique
+/// (pubkey tie-breaker), so the order equals sorting with the key recomputed per comparison.
+#[cfg(feature = "crate_health")]
+pub(crate) fn order_by_fairness<T>(items: &mut Vec<T>, key: impl Fn(&T) -> FairnessKey) -> bool {
+    let mut keyed: Vec<(FairnessKey, T)> = items.drain(..).map(|t| (key(&t), t)).collect();
+    let rotation = keyed.iter().any(|(k, _)| k.0 == 1);
+    keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    items.extend(keyed.into_iter().map(|(_, t)| t));
+    rotation
+}
+
 #[cfg(feature = "crate_health")]
 pub(crate) fn candidate_fairness_key(
     account: Pubkey,
@@ -235,6 +251,40 @@ pub(crate) fn enqueue_oracle_accounts(
     }
     *max_pending = (*max_pending).max(pending.len());
     count
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod d12_tests {
+    use super::*;
+
+    /// D12: each key is computed once, the order is exactly the per-comparison sort's, and the
+    /// rotation flag matches a class-1 key; empty work stays empty.
+    #[test]
+    fn d12_fairness_keys_are_computed_once_with_identical_order() {
+        let keys: Vec<FairnessKey> = (0..500u64)
+            .map(|i| {
+                let class = (i % 3) as u8;
+                let mut account = [0u8; 32];
+                account[..8].copy_from_slice(&i.wrapping_mul(0x9E37_79B9_7F4A_7C15).to_le_bytes());
+                (class, std::cmp::Reverse(i % 17), account)
+            })
+            .collect();
+        let mut expected = keys.clone();
+        expected.sort_unstable();
+        let calls = std::cell::Cell::new(0usize);
+        let mut items = keys.clone();
+        let rotation = order_by_fairness(&mut items, |k| {
+            calls.set(calls.get() + 1);
+            *k
+        });
+        assert_eq!(calls.get(), keys.len());
+        assert_eq!(items, expected);
+        assert!(rotation);
+        let mut no_repeat: Vec<FairnessKey> = keys.into_iter().filter(|k| k.0 != 1).collect();
+        assert!(!order_by_fairness(&mut no_repeat, |k| *k));
+        let mut empty: Vec<FairnessKey> = vec![];
+        assert!(!order_by_fairness(&mut empty, |k| *k) && empty.is_empty());
+    }
 }
 
 #[cfg(all(test, feature = "crate_health"))]

@@ -27,6 +27,42 @@ pub mod p0 {
     use solana_sdk::pubkey::Pubkey;
     use spl_associated_token_account::get_associated_token_address_with_program_id;
 
+    /// B4: account size the pinned program allocates for a LiquidationRecord
+    /// (`init_liquid_record.rs`: `space = 8 + size_of::<LiquidationRecord>()`).
+    pub(crate) const LIQUIDATION_RECORD_SPACE: usize =
+        8 + std::mem::size_of::<marginfi_type_crate::types::LiquidationRecord>();
+
+    /// B4: rent-exempt minimum of a new LiquidationRecord from the canonical Rent sysvar.
+    pub(crate) fn liquidation_record_rent_lamports<S: AccountSource + ?Sized>(
+        state: &S,
+    ) -> Result<u64, &'static str> {
+        let (owner, _, data) = state
+            .account(&solana_sdk::sysvar::rent::id())
+            .ok_or("RENT_SYSVAR_MISSING")?;
+        if owner != solana_sdk::sysvar::id() {
+            return Err("RENT_SYSVAR_OWNER");
+        }
+        let rent: solana_sdk::rent::Rent =
+            bincode::deserialize(data).map_err(|_| "RENT_SYSVAR_DECODE")?;
+        Ok(rent.minimum_balance(LIQUIDATION_RECORD_SPACE))
+    }
+
+    /// B4: USD-micro cost of the new record's rent: canonical Rent sysvar, conservative SOL price.
+    pub(crate) fn record_rent_usd_micro<S: AccountSource + ?Sized>(
+        state: &S,
+        lamports_to_usd_micro: &dyn Fn(u64) -> Option<u64>,
+    ) -> Option<u64> {
+        liquidation_record_rent_lamports(state)
+            .ok()
+            .and_then(lamports_to_usd_micro)
+    }
+
+    /// B4: a plan that creates the record carries its rent on top of its other rent/token
+    /// costs; an unknown part or an overflow keeps the whole cost UNKNOWN.
+    pub(crate) fn plus_record_rent(base: Option<u64>, rent: Option<u64>) -> Option<u64> {
+        base?.checked_add(rent?)
+    }
+
     /// B15: collateral a plan leaves in the wallet, valued like the seized amount itself
     /// (`Sizing::seized_equity_value`: protocol equity price of the exact `withdraw_amount`).
     /// Inventory classes keep the whole withdrawal; ZERO_PREFUND swaps exactly the execution
@@ -430,6 +466,8 @@ pub mod p0 {
         pub ata: &'a dyn Fn(&Pubkey) -> Option<Pubkey>,
         /// Economics cost after explicit conversion, never raw lamports. [FIX-61]
         pub lamports_to_usd_micro: &'a dyn Fn(u64) -> Option<u64>,
+        /// B4: conservative (high-biased) conversion for the rent of a created account.
+        pub rent_lamports_to_usd_micro: &'a dyn Fn(u64) -> Option<u64>,
         pub jito_tip_usd_micro: u64,
         /// Execution amount for Jito tip transaction.
         pub jito_tip_lamports: u64,
@@ -1229,10 +1267,14 @@ pub mod p0 {
                 return Err(format!("ROUTING:{}", route_errors.join(" | ")));
             }
             if self.should_init_liquidation_record(account)? {
-                // ATA prewarm rent is sunk; new protocol-account rent is a separate,
-                // presently unmeasured debit. Do not qualify it as zero.
+                // B4: the record this plan creates costs its rent-exempt minimum. The pinned
+                // program can return it (`close_liquid_record`, to the record payer), but no plan
+                // contains that instruction, so no recovery is credited. Known only with the
+                // canonical Rent sysvar and a conservative SOL price; otherwise UNKNOWN.
+                let rent = record_rent_usd_micro(self.state, self.rent_lamports_to_usd_micro);
                 for plan in &mut out {
-                    plan.input.rent_and_token_usd_micro = None;
+                    plan.input.rent_and_token_usd_micro =
+                        plus_record_rent(plan.input.rent_and_token_usd_micro, rent);
                 }
             }
             Ok(out)
@@ -1278,6 +1320,283 @@ pub mod p0 {
                 premium_bps: 0,
                 slippage_bps: 50,
             }
+        }
+
+        /// B4: the record rent is the canonical Rent sysvar's exempt minimum for the pinned
+        /// record size; a missing, foreign or undecodable sysvar is no rent (UNKNOWN).
+        #[test]
+        fn b4_liquidation_record_rent_comes_from_the_rent_sysvar() {
+            use std::collections::HashMap;
+            struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+            impl AccountSource for Source {
+                fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                    self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+                }
+            }
+            assert_eq!(LIQUIDATION_RECORD_SPACE, 520);
+            let rent_key = solana_sdk::sysvar::rent::id();
+            let with =
+                |owner: Pubkey, data: Vec<u8>| Source(HashMap::from([(rent_key, (owner, data))]));
+            let mainnet = solana_sdk::rent::Rent::default();
+            let ok = with(
+                solana_sdk::sysvar::id(),
+                bincode::serialize(&mainnet).unwrap(),
+            );
+            // (128 overhead + 520) bytes × 3480 lamports/byte-year × 2 years exemption.
+            assert_eq!(liquidation_record_rent_lamports(&ok), Ok(4_510_080));
+            // The sysvar data as the chain carries it: first field lamports per byte-year.
+            let mut doubled = bincode::serialize(&mainnet).unwrap();
+            doubled[..8].copy_from_slice(&6960u64.to_le_bytes());
+            let changed = with(solana_sdk::sysvar::id(), doubled);
+            assert_eq!(liquidation_record_rent_lamports(&changed), Ok(9_020_160));
+            assert_eq!(
+                liquidation_record_rent_lamports(&Source(HashMap::new())),
+                Err("RENT_SYSVAR_MISSING")
+            );
+            let foreign = with(Pubkey::new_unique(), bincode::serialize(&mainnet).unwrap());
+            assert_eq!(
+                liquidation_record_rent_lamports(&foreign),
+                Err("RENT_SYSVAR_OWNER")
+            );
+            let short = with(solana_sdk::sysvar::id(), vec![1, 2, 3]);
+            assert_eq!(
+                liquidation_record_rent_lamports(&short),
+                Err("RENT_SYSVAR_DECODE")
+            );
+        }
+
+        /// B4: a plan that creates the record carries the sysvar rent at the conservative SOL
+        /// price on top of its other costs; unknown price, missing sysvar, unknown base cost or
+        /// overflow keep the plan's rent/token cost UNKNOWN (never zero, never base alone).
+        #[test]
+        fn b4_record_creating_plans_carry_the_rent_or_stay_unknown() {
+            use std::collections::HashMap;
+            struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+            impl AccountSource for Source {
+                fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                    self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+                }
+            }
+            let sysvar = Source(HashMap::from([(
+                solana_sdk::sysvar::rent::id(),
+                (
+                    solana_sdk::sysvar::id(),
+                    bincode::serialize(&solana_sdk::rent::Rent::default()).unwrap(),
+                ),
+            )]));
+            // 150 USD/SOL, rounded up: 4_510_080 lamports ⇒ 676_512 micro.
+            let price = |lamports: u64| Some((u128::from(lamports) * 150).div_ceil(1_000) as u64);
+            let unknown_price = |_: u64| None;
+            let rent = record_rent_usd_micro(&sysvar, &price);
+            assert_eq!(rent, Some(676_512));
+            assert_eq!(plus_record_rent(Some(1_000), rent), Some(677_512));
+            assert_eq!(record_rent_usd_micro(&sysvar, &unknown_price), None);
+            assert_eq!(record_rent_usd_micro(&Source(HashMap::new()), &price), None);
+            assert_eq!(plus_record_rent(Some(1_000), None), None);
+            assert_eq!(plus_record_rent(None, rent), None);
+            assert_eq!(plus_record_rent(Some(u64::MAX), Some(1)), None);
+        }
+
+        /// B4 through the production `plans()` path: every plan of an account whose record is
+        /// still unlinked carries the record rent (Rent sysvar × conservative SOL price) on top
+        /// of its sizing's rent/token cost; a linked record adds nothing; an unknown price or a
+        /// missing Rent sysvar keeps every plan's rent/token cost UNKNOWN.
+        #[test]
+        fn b4_plans_add_the_record_rent_only_when_the_record_is_created() {
+            use darkbot_project0::protocol;
+            use marginfi_type_crate::types::{
+                BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup, WrappedI80F48,
+            };
+            use std::collections::HashMap;
+            struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+            impl AccountSource for Source {
+                fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                    self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+                }
+            }
+            struct OneSizing(Sizing);
+            impl SizingProvider for OneSizing {
+                fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, String> {
+                    Ok(vec![self.0.clone()])
+                }
+            }
+            struct NoRoutes;
+            impl RouteProvider for NoRoutes {
+                fn quote_exact_in(
+                    &self,
+                    _: &Pubkey,
+                    _: &Pubkey,
+                    _: u64,
+                    _: &[PrewarmedAta],
+                ) -> Result<Option<Route>, String> {
+                    Ok(None)
+                }
+                fn quote_exact_out(
+                    &self,
+                    _: &Pubkey,
+                    _: &Pubkey,
+                    _: u64,
+                ) -> Result<Option<Route>, String> {
+                    Ok(None)
+                }
+            }
+            let program: Pubkey = protocol::PROGRAM_ID_MAINNET.parse().unwrap();
+            // I80F48 has 48 fractional bits: `v` as its raw fixed-point value.
+            let one = |v: i128| WrappedI80F48 {
+                value: (v << 48).to_le_bytes(),
+            };
+            let token_program: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().unwrap();
+            let (group, liquidator, account) = (
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+            );
+            let mut banks = [Pubkey::new_unique(), Pubkey::new_unique()];
+            banks.sort_unstable_by(|a, b| b.cmp(a));
+            let (asset_bank, liab_bank) = (banks[0], banks[1]);
+            let (asset_mint, liab_mint) = (Pubkey::new_unique(), Pubkey::new_unique());
+            let wrap = |disc: [u8; 8], bytes: &[u8]| [disc.as_slice(), bytes].concat();
+            let state = |record: Pubkey, rent_sysvar: bool| {
+                let mut m: HashMap<Pubkey, (Pubkey, Vec<u8>)> = HashMap::new();
+                m.insert(
+                    group,
+                    (
+                        program,
+                        wrap(
+                            protocol::DISC_MARGINFI_GROUP,
+                            bytemuck::bytes_of(&<MarginfiGroup as bytemuck::Zeroable>::zeroed()),
+                        ),
+                    ),
+                );
+                for (bank_key, mint) in [(asset_bank, asset_mint), (liab_bank, liab_mint)] {
+                    let mut b: Bank = bytemuck::Zeroable::zeroed();
+                    b.group = group;
+                    b.mint = mint;
+                    b.mint_decimals = 6;
+                    b.asset_share_value = one(1);
+                    b.liability_share_value = one(1);
+                    b.config.asset_weight_init = one(1);
+                    b.config.asset_weight_maint = one(1);
+                    b.config.liability_weight_init = one(1);
+                    b.config.liability_weight_maint = one(1);
+                    b.config.operational_state = BankOperationalState::Operational;
+                    b.config.oracle_setup = OracleSetup::Fixed;
+                    b.config.fixed_price = one(1);
+                    m.insert(
+                        bank_key,
+                        (program, wrap(protocol::DISC_BANK, bytemuck::bytes_of(&b))),
+                    );
+                    m.insert(mint, (token_program, vec![0; 82]));
+                }
+                let mut a: MarginfiAccount = bytemuck::Zeroable::zeroed();
+                a.group = group;
+                a.liquidation_record = record;
+                let bal = &mut a.lending_account.balances;
+                bal[0].active = 1;
+                bal[0].bank_pk = asset_bank;
+                bal[0].asset_shares = one(1_000);
+                bal[1].active = 1;
+                bal[1].bank_pk = liab_bank;
+                bal[1].liability_shares = one(1_500);
+                m.insert(
+                    account,
+                    (
+                        program,
+                        wrap(protocol::DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&a)),
+                    ),
+                );
+                if rent_sysvar {
+                    m.insert(
+                        solana_sdk::sysvar::rent::id(),
+                        (
+                            solana_sdk::sysvar::id(),
+                            bincode::serialize(&solana_sdk::rent::Rent::default()).unwrap(),
+                        ),
+                    );
+                }
+                Source(m)
+            };
+            let sizing = OneSizing(Sizing {
+                asset_bank,
+                liab_bank,
+                withdraw_amount: 1_000,
+                repay_amount: 500,
+                repay_all: false,
+                seized_equity_value: 1_050,
+                repay_value: 500,
+                liability_needed_value: 500,
+                liability_inventory_value: 10_000,
+                funding_bank: None,
+                funding_available_value: 0,
+                protocol_fees: 0,
+                flat_sol_fee: 0,
+                rent_and_token: 7,
+                premium_bps: 500,
+                slippage_bps: 0,
+            });
+            let table =
+                darkbot_project0::receivership::builders::instruction_table(&program).unwrap();
+            let inventory = |_: &Pubkey| 10_000u64;
+            let ata = |mint: &Pubkey| {
+                Some(get_associated_token_address_with_program_id(
+                    &liquidator,
+                    mint,
+                    &token_program,
+                ))
+            };
+            let lamports = |l: u64| Some(l);
+            // 150 USD/SOL, rounded up: the record rent 4_510_080 lamports ⇒ 676_512 micro.
+            let price = |l: u64| Some((u128::from(l) * 150).div_ceil(1_000) as u64);
+            let unknown_price = |_: u64| None;
+            let rent_of = |src: &Source, rent: &dyn Fn(u64) -> Option<u64>| {
+                P0ReceivershipBuilder {
+                    state: src,
+                    program,
+                    group,
+                    liquidator,
+                    global_fee_wallet: Ok(Pubkey::new_unique()),
+                    sizing: &sizing,
+                    routes: &NoRoutes,
+                    inventory: &inventory,
+                    ata: &ata,
+                    lamports_to_usd_micro: &lamports,
+                    rent_lamports_to_usd_micro: rent,
+                    jito_tip_usd_micro: 0,
+                    jito_tip_lamports: 0,
+                    zero_prefund_qualified: false,
+                    instructions: &table,
+                    v1_plans: false,
+                    path: Path::Rpc,
+                    resources: Resources {
+                        compute_unit_limit: 400_000,
+                        priority_micro_lamports_per_cu: 0,
+                        loaded_accounts_data_size: None,
+                    },
+                    limits: TxLimits::default(),
+                }
+                .plans(&account, 1_000, 10)
+                .unwrap()
+                .iter()
+                .map(|p| (p.input.funding, p.input.rent_and_token_usd_micro))
+                .collect::<Vec<_>>()
+            };
+            let unlinked = state(Pubkey::default(), true);
+            let created = rent_of(&unlinked, &price);
+            assert_eq!(
+                created,
+                [
+                    (FundingClass::NoSwapInventory, Some(7 + 676_512)),
+                    (FundingClass::PreheldInventory, Some(7 + 676_512)),
+                ]
+            );
+            let linked = state(protocol::liquidation_record_pda(&program, &account), true);
+            assert!(rent_of(&linked, &price).iter().all(|(_, c)| *c == Some(7)));
+            assert!(rent_of(&unlinked, &unknown_price)
+                .iter()
+                .all(|(_, c)| c.is_none()));
+            assert!(rent_of(&state(Pubkey::default(), false), &price)
+                .iter()
+                .all(|(_, c)| c.is_none()));
         }
 
         /// B15: the inventory hold of a plan is the seized collateral of its own sizing for

@@ -74,6 +74,9 @@ pub struct MarketConfig {
     /// Below this many liquidation events the result is `INSUFFICIENT_SAMPLE`.
     pub min_sample_liquidations: u64,
     pub ingress_buffer: usize,
+    /// R24: distinct transactions/events a market-only capture retains (`P0_MARKET_RETENTION`);
+    /// beyond it the capture is INCOMPLETE. An econ run uses its `P0_ECON_RETENTION` instead.
+    pub retention: usize,
     pub run_id: String,
     pub run_dir: PathBuf,
     pub enrich: EnrichConfig,
@@ -170,6 +173,17 @@ impl MarketConfig {
         let ingress_buffer =
             usize::try_from(num("P0_INGRESS_BUFFER", DEFAULT_INGRESS_BUFFER as u64)?)
                 .map_err(|_| "invalid P0_INGRESS_BUFFER".to_string())?;
+        let retention = usize::try_from(num(
+            "P0_MARKET_RETENTION",
+            crate::analytics::econ::DEFAULT_RETENTION as u64,
+        )?)
+        .map_err(|_| "invalid P0_MARKET_RETENTION".to_string())?;
+        if retention == 0 || retention > crate::analytics::econ::MAX_RETENTION {
+            return Err(format!(
+                "P0_MARKET_RETENTION must be 1..={}",
+                crate::analytics::econ::MAX_RETENTION
+            ));
+        }
         if (duration_secs == 0 && !until_stopped)
             || ready_timeout_secs == 0
             || drain_timeout_secs == 0
@@ -223,6 +237,7 @@ impl MarketConfig {
             heartbeat_secs,
             min_sample_liquidations,
             ingress_buffer,
+            retention,
             run_id,
             run_dir,
             enrich,

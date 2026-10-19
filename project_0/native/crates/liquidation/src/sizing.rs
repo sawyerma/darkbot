@@ -75,7 +75,7 @@ pub struct ProtocolSizer<'a, S: AccountSource + ?Sized> {
     pub headroom_bps: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Prices {
     /// RequirementType::Equity uses TimeWeighted (TWAP/EMA) in pinned marginfi source. [FIX-62]
     equity: I80F48,
@@ -93,6 +93,8 @@ struct Position {
     opposite_amount: I80F48,
     equity_value: I80F48,
     maintenance_unweighted_value: I80F48,
+    /// B7: the bank's prices at this sizing's clock, computed once in `positions`.
+    prices: Prices,
 }
 
 /// B2: strict pinned MarginfiAccount (discriminator, exact length), never a prefix decode.
@@ -427,6 +429,44 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         Ok("NO_VALID_PROTOCOL_PAIR".into())
     }
 
+    /// B4: conservative cost conversion — the bank's upper price bound (`conservative_cost_price`),
+    /// rounded up; for debits whose value must not be understated (rent of a created account).
+    pub fn native_amount_conservative_cost_usd_micro(
+        &self,
+        bank_key: &Pubkey,
+        native_amount: u64,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<u64, String> {
+        if native_amount == 0 {
+            return Ok(0);
+        }
+        let bank = self.bank(bank_key)?;
+        let clock = Clock {
+            slot,
+            epoch_start_timestamp: 0,
+            epoch: 0,
+            leader_schedule_epoch: 0,
+            unix_timestamp: now_unix_s,
+        };
+        let price = self.conservative_cost_price(&bank, &clock)?;
+        if price <= I80F48::ZERO {
+            return Err("nonpositive cost conversion price".into());
+        }
+        let value = calc_value(
+            I80F48::from_num(native_amount),
+            price,
+            bank.get_balance_decimals(),
+            None,
+        )
+        .map_err(|e| format!("native amount value: {e}"))?;
+        ceil_u64(
+            value
+                .checked_mul(I80F48::from_num(USD_MICRO))
+                .ok_or("cost conversion overflow")?,
+        )
+    }
+
     /// Cost conversion rounds up; executable proceeds use the value method.
     pub fn native_amount_cost_usd_micro(
         &self,
@@ -464,7 +504,64 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         )
     }
 
+    /// B4: upper bound of the bank's price under the pinned oracle adapter — the higher of the
+    /// high-biased (`PriceBias::High`, price plus its confidence interval) time-weighted and
+    /// real-time prices.
+    fn conservative_cost_price(&self, bank: &Bank, clock: &Clock) -> Result<I80F48, String> {
+        self.with_feed(bank, clock, |feed| {
+            let high = |price_type, what| {
+                feed.get_price_of_type(
+                    price_type,
+                    Some(PriceBias::High),
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| crate_error_text(what, &e))
+            };
+            Ok(
+                high(OraclePriceType::TimeWeighted, "time-weighted high price")?
+                    .max(high(OraclePriceType::RealTime, "real-time high price")?),
+            )
+        })
+    }
+
     fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, String> {
+        self.with_feed(bank, clock, |feed| {
+            let equity = feed
+                .get_price_of_type(
+                    OraclePriceType::TimeWeighted,
+                    None,
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| crate_error_text("equity price", &e))?;
+            let maint_asset = feed
+                .get_price_of_type(
+                    OraclePriceType::RealTime,
+                    Some(PriceBias::Low),
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| crate_error_text("maintenance asset price", &e))?;
+            let maint_liab = feed
+                .get_price_of_type(
+                    OraclePriceType::RealTime,
+                    Some(PriceBias::High),
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| crate_error_text("maintenance liability price", &e))?;
+            Ok(Prices {
+                equity,
+                maint_asset,
+                maint_liab,
+            })
+        })
+    }
+
+    /// The pinned oracle adapter of `bank` over its observation accounts at `clock`.
+    fn with_feed<T>(
+        &self,
+        bank: &Bank,
+        clock: &Clock,
+        f: impl FnOnce(&OraclePriceFeedAdapter) -> Result<T, String>,
+    ) -> Result<T, String> {
         let keys = bank_observation_keys(bank).map_err(|e| e.to_string())?;
         let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(keys.len());
         for key in keys {
@@ -486,32 +583,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .collect();
         let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
             .map_err(|e| crate_error_text("oracle adapter", &e))?;
-        let equity = feed
-            .get_price_of_type(
-                OraclePriceType::TimeWeighted,
-                None,
-                bank.config.oracle_max_confidence,
-            )
-            .map_err(|e| crate_error_text("equity price", &e))?;
-        let maint_asset = feed
-            .get_price_of_type(
-                OraclePriceType::RealTime,
-                Some(PriceBias::Low),
-                bank.config.oracle_max_confidence,
-            )
-            .map_err(|e| crate_error_text("maintenance asset price", &e))?;
-        let maint_liab = feed
-            .get_price_of_type(
-                OraclePriceType::RealTime,
-                Some(PriceBias::High),
-                bank.config.oracle_max_confidence,
-            )
-            .map_err(|e| crate_error_text("maintenance liability price", &e))?;
-        Ok(Prices {
-            equity,
-            maint_asset,
-            maint_liab,
-        })
+        f(&feed)
     }
 
     fn positions(&self, account: &MarginfiAccount, clock: &Clock) -> Result<Positions, String> {
@@ -570,6 +642,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 opposite_amount,
                 equity_value,
                 maintenance_unweighted_value,
+                prices,
             };
             if is_asset {
                 assets.push(p);
@@ -724,8 +797,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     continue;
                 }
 
-                let asset_prices = self.prices(&asset.bank, &clock)?;
-                let liab_prices = self.prices(&liab.bank, &clock)?;
+                // B7: the prices `positions` computed for exactly these banks and this clock.
+                let (asset_prices, liab_prices) = (asset.prices, liab.prices);
                 let withdraw_exact =
                     amount_from_equity(seize_value, asset_prices.equity, &asset.bank)?;
                 let withdraw_amount = floor_u64(withdraw_exact)?;
@@ -911,6 +984,138 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// B4: the conservative cost conversion takes the bank's upper price bound under the pinned
+    /// adapter — max(time-weighted + confidence, real-time + confidence) — converts the exact
+    /// native amount and rounds up; zero is free, a zero price or a missing bank/oracle is no
+    /// cost (error), never 0. The Pyth case is a PriceUpdateV2 account decoded by the pinned
+    /// adapter, with an EMA above spot: the bound exceeds both the EMA and the high spot price.
+    #[test]
+    fn b4_conservative_cost_uses_the_upper_price_bound_and_rounds_up() {
+        use marginfi_type_crate::types::{BankOperationalState, OracleSetup, WrappedI80F48};
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for Source {
+            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        let (program, group, sol, oracle) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let now = 1_700_000_000i64;
+        let bank_of = |setup: OracleSetup, price: I80F48| {
+            let mut b: Bank = bytemuck::Zeroable::zeroed();
+            b.group = group;
+            b.mint_decimals = 9;
+            b.config.operational_state = BankOperationalState::Operational;
+            b.config.oracle_setup = setup;
+            b.config.fixed_price = WrappedI80F48::from(price);
+            b.config.oracle_keys[0] = oracle;
+            [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&b)].concat()
+        };
+        // PriceUpdateV2 (pyth-solana-receiver-sdk): Anchor discriminator, write authority,
+        // VerificationLevel::Full, PriceFeedMessage, posted slot — little-endian Borsh.
+        let price_update = |price: i64, conf: u64, ema: i64, ema_conf: u64| {
+            let mut d = solana_sdk::hash::hash(b"account:PriceUpdateV2").to_bytes()[..8].to_vec();
+            d.extend_from_slice(&[7u8; 32]);
+            d.push(1);
+            d.extend_from_slice(&[9u8; 32]);
+            d.extend_from_slice(&price.to_le_bytes());
+            d.extend_from_slice(&conf.to_le_bytes());
+            d.extend_from_slice(&(-8i32).to_le_bytes());
+            d.extend_from_slice(&now.to_le_bytes());
+            d.extend_from_slice(&now.to_le_bytes());
+            d.extend_from_slice(&ema.to_le_bytes());
+            d.extend_from_slice(&ema_conf.to_le_bytes());
+            d.extend_from_slice(&10u64.to_le_bytes());
+            d
+        };
+        let state = |bank: Vec<u8>, oracle_data: Option<Vec<u8>>| {
+            let mut m = HashMap::from([(sol, (program, bank))]);
+            if let Some(d) = oracle_data {
+                m.insert(oracle, (Pubkey::new_unique(), d));
+            }
+            Source(m)
+        };
+        fn sizer(s: &Source, program: Pubkey, group: Pubkey) -> ProtocolSizer<'_, Source> {
+            ProtocolSizer {
+                state: s,
+                program,
+                group,
+                headroom_bps: 0,
+            }
+        }
+        let clock = Clock {
+            slot: 10,
+            epoch_start_timestamp: 0,
+            epoch: 0,
+            leader_schedule_epoch: 0,
+            unix_timestamp: now,
+        };
+        // Spot 149 ± 0.5, EMA 150 ± 1 (×2.12 confidence multiple of the pinned adapter).
+        let pyth = state(
+            bank_of(OracleSetup::PythPushOracle, I80F48::ZERO),
+            Some(price_update(
+                149_0000_0000,
+                5000_0000,
+                150_0000_0000,
+                1_0000_0000,
+            )),
+        );
+        let s = sizer(&pyth, program, group);
+        let bank = s.bank(&sol).unwrap();
+        let prices = s.prices(&bank, &clock).unwrap();
+        let bound = s.conservative_cost_price(&bank, &clock).unwrap();
+        assert!(
+            bound > prices.equity && bound > prices.maint_liab,
+            "{bound} {prices:?}"
+        );
+        assert!(
+            (bound - I80F48::from_num(152.12)).abs() < I80F48::from_num(1e-6),
+            "{bound}"
+        );
+        // Spot above the EMA: the real-time bound (155 + 1.06) is the upper one.
+        let spot_high = state(
+            bank_of(OracleSetup::PythPushOracle, I80F48::ZERO),
+            Some(price_update(
+                155_0000_0000,
+                5000_0000,
+                150_0000_0000,
+                1_0000_0000,
+            )),
+        );
+        let s2 = sizer(&spot_high, program, group);
+        let bound2 = s2
+            .conservative_cost_price(&s2.bank(&sol).unwrap(), &clock)
+            .unwrap();
+        assert!(
+            (bound2 - I80F48::from_num(156.06)).abs() < I80F48::from_num(1e-6),
+            "{bound2}"
+        );
+        let cost = |src: &Source, lamports: u64| {
+            sizer(src, program, group)
+                .native_amount_conservative_cost_usd_micro(&sol, lamports, now, 10)
+        };
+        // 4_510_080 lamports (record rent) × 152.12 USD/SOL = 0.68607336... USD, rounded up.
+        let expected = (I80F48::from_num(4_510_080u64) * bound / I80F48::from_num(1_000u64))
+            .ceil()
+            .to_num::<u64>();
+        assert_eq!(cost(&pyth, 4_510_080), Ok(expected));
+        assert_eq!(expected, 686_074);
+        // Fixed feed (no confidence): exactly price × amount, rounded up.
+        let fixed = |p: f64| state(bank_of(OracleSetup::Fixed, I80F48::from_num(p)), None);
+        assert_eq!(cost(&fixed(150.0), 4_510_080), Ok(676_512));
+        assert_eq!(cost(&fixed(150.5), 4_510_080), Ok(678_768));
+        assert_eq!(cost(&fixed(150.0), 0), Ok(0));
+        assert!(cost(&fixed(0.0), 4_510_080).is_err());
+        assert!(cost(&Source(HashMap::new()), 4_510_080).is_err());
+        let no_oracle = state(bank_of(OracleSetup::PythPushOracle, I80F48::ZERO), None);
+        assert!(cost(&no_oracle, 4_510_080).is_err());
+    }
 
     /// B12: sizing uses the maintenance EMODE configuration Health computes — including the
     /// group's same-asset EMODE weight, which the former `reconcile_emode_configs` of the sized

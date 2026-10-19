@@ -149,50 +149,31 @@ impl ShadowOwner {
                 // [FIX-135] Preserve bounded repeat work but remove deterministic starvation:
                 // correctness work first; ordinary repeats oldest last-forwarded slot first;
                 // pubkey is only the deterministic tie-breaker.
+                // D12: every candidate's key exactly once (two map lookups each), not once for
+                // the rotation check plus O(n log n) times inside the sort.
                 let fairness_round =
-                    evaluated
-                        .iter()
-                        .any(|(account, _, _, input_revision, status)| {
-                            let previous = self.candidate_cache.get(account).copied();
-                            let forced = self.candidate_force_rearm.contains(account);
-                            let recheck_slots = match status {
-                                CandidateHealthState::Liquidatable => self.candidate_recheck_slots,
-                                CandidateHealthState::Error => self.candidate_error_recheck_slots,
-                                CandidateHealthState::Healthy => u64::MAX,
-                            };
-                            candidate_fairness_key(
-                                *account,
-                                previous,
-                                *status,
-                                evaluation_slot,
-                                *input_revision,
-                                forced,
-                                recheck_slots,
-                            )
-                            .0 == 1
-                        });
+                    order_by_fairness(&mut evaluated, |(account, _, _, input_revision, status)| {
+                        let previous = self.candidate_cache.get(account).copied();
+                        let forced = self.candidate_force_rearm.contains(account);
+                        let recheck_slots = match status {
+                            CandidateHealthState::Liquidatable => self.candidate_recheck_slots,
+                            CandidateHealthState::Error => self.candidate_error_recheck_slots,
+                            CandidateHealthState::Healthy => u64::MAX,
+                        };
+                        candidate_fairness_key(
+                            *account,
+                            previous,
+                            *status,
+                            evaluation_slot,
+                            *input_revision,
+                            forced,
+                            recheck_slots,
+                        )
+                    });
                 if fairness_round {
                     self.metrics.candidate_fairness_rotations =
                         self.metrics.candidate_fairness_rotations.saturating_add(1);
                 }
-                evaluated.sort_unstable_by_key(|(account, _, _, input_revision, status)| {
-                    let previous = self.candidate_cache.get(account).copied();
-                    let forced = self.candidate_force_rearm.contains(account);
-                    let recheck_slots = match status {
-                        CandidateHealthState::Liquidatable => self.candidate_recheck_slots,
-                        CandidateHealthState::Error => self.candidate_error_recheck_slots,
-                        CandidateHealthState::Healthy => u64::MAX,
-                    };
-                    candidate_fairness_key(
-                        *account,
-                        previous,
-                        *status,
-                        evaluation_slot,
-                        *input_revision,
-                        forced,
-                        recheck_slots,
-                    )
-                });
 
                 for (account, t_rx_ns, event_slot, input_revision, status) in evaluated {
                     let previous = self.candidate_cache.get(&account).copied();

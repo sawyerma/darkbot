@@ -32,6 +32,16 @@ pub fn failure_report(error: &(dyn std::error::Error + 'static)) -> String {
     shadow_failure_code(error).to_string()
 }
 
+/// The operational configuration as process environment (incl. `RAYON_NUM_THREADS` =
+/// `limits.workers`). D13: applied on the single startup thread before anything uses Rayon.
+pub(crate) fn apply_operational_environment(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+) {
+    for (k, v) in config.environment() {
+        std::env::set_var(k, v);
+    }
+}
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|s| s == "--help" || s == "-h") {
@@ -64,9 +74,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Single-threaded startup only. Existing constructors keep their typed
         // gates while obtaining operational values from the shared contract.
-        for (k, v) in resolved.config.environment() {
-            std::env::set_var(k, v);
-        }
+        apply_operational_environment(&resolved.config);
         resolved.activate()?;
         darkbot_solana::provider::enable_measurement_budget();
     }
@@ -459,15 +467,55 @@ mod d13_tests {
     /// operational environment (`RAYON_NUM_THREADS` = `limits.workers`) on the single startup
     /// thread before anything uses Rayon (only the state owner's sweep does); each count is
     /// checked in a fresh process, where no earlier pool can exist.
+    /// D13: only the state owner (constructed after `apply_operational_environment` in `run`)
+    /// uses Rayon; no other runtime source can initialize the global pool earlier.
+    #[test]
+    fn d13_rayon_is_used_only_by_the_state_owner() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        let users: Vec<_> = files
+            .iter()
+            .filter(|p| {
+                let text = std::fs::read_to_string(p).unwrap();
+                text.contains("rayon::") || text.contains("par_iter")
+            })
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        let allowed = [
+            "orchestration/state_owner.rs",
+            "orchestration/state_owner/sweep.rs",
+            "orchestration/state_owner/tests.rs",
+            "orchestration/startup.rs",
+        ];
+        assert!(
+            users.iter().all(|u| allowed.contains(&u.as_str())),
+            "{users:?}"
+        );
+    }
+
     #[test]
     fn d13_configured_workers_size_the_global_rayon_pool() {
         if let Ok(n) = std::env::var("P0_D13_CHILD") {
             let workers: u64 = n.parse().unwrap();
             let mut c = darkbot_solana::runtime_config::RuntimeConfig::default();
             c.limits.workers = workers;
-            for (k, v) in c.environment() {
-                std::env::set_var(k, v);
-            }
+            super::apply_operational_environment(&c);
             assert_eq!(rayon::current_num_threads() as u64, workers);
             return;
         }

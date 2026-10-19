@@ -2054,6 +2054,124 @@ fn ingress_panic_after_last_event_never_seals_complete() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// R1 (rest): at the stop the consumer queue is full, half full, or still filling while the
+/// ingress ends: every queued and late frame is processed before the capture seals, the drain
+/// is complete, ends far inside the deadline and the journal seals COMPLETE (TIMER). Like the
+/// real WSS producer, the fake never retries: a frame refused by a full queue is lost, and that
+/// capture seals INCOMPLETE (`lost`).
+#[test]
+fn r1_full_and_half_full_queue_drain_completely_before_the_seal() {
+    use std::time::{Duration, Instant};
+    const CAP: usize = 64;
+    let root = std::env::temp_dir().join(format!(
+        "c0mo_r1_{}_{}",
+        std::process::id(),
+        utc_compact(unix_now_s())
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let root_s = root.to_string_lossy().to_string();
+    for (run, queued, late, lost) in [
+        ("full", CAP, 0usize, false),
+        ("half", CAP / 2, 0, false),
+        ("late", CAP / 2, 40, false),
+        ("lost", CAP, 0, true),
+    ] {
+        let cfg = MarketConfig::from_lookup(
+            &env_of(&[
+                ("P0_WS_URL", "wss://h"),
+                (
+                    "P0_PROGRAM_ID",
+                    darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+                ),
+                ("P0_MARKET_SOURCE", "logs"),
+                ("P0_MARKET_OUT_DIR", root_s.as_str()),
+                ("P0_MARKET_RUN_ID", run),
+            ]),
+            0,
+        )
+        .unwrap();
+        fs::create_dir_all(&cfg.run_dir).unwrap();
+        let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
+        let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+        core.start_observation(0, 600_000_000_000);
+        let (tx, rx) = darkbot_common::channel::bounded::<IngressEvent>("r1", CAP);
+        let slot = |n: usize| {
+            IngressEvent::Slot(SlotUpdate {
+                slot: 100 + n as u64,
+                parent: Some(99 + n as u64),
+                status: SlotStatus::Processed,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 1,
+            })
+        };
+        for n in 0..queued {
+            tx.try_push(slot(n)).unwrap();
+        }
+        if lost {
+            assert!(
+                tx.try_push(slot(queued)).is_err(),
+                "queue full: the frame is lost"
+            );
+        }
+        // The ingress delivers its last frames while the drain runs, then ends cleanly.
+        let thread: super::capture::IngressThread = std::thread::spawn(move || {
+            for n in queued..queued + late {
+                std::thread::sleep(Duration::from_millis(1));
+                tx.try_push(slot(n))
+                    .expect("the draining consumer keeps up");
+            }
+            Ok(())
+        });
+        let mut ingress = Some(thread);
+        let mut last_overflow = 0;
+        let started = Instant::now();
+        let (drain, write_error, end_error) = super::capture::drain_after_stop(
+            &rx,
+            &mut ingress,
+            &mut core,
+            &mut sink,
+            darkbot_common::timing::Clock::new(),
+            Instant::now() + Duration::from_secs(120),
+            &mut last_overflow,
+        );
+        assert!(started.elapsed() < Duration::from_secs(10), "{run}");
+        assert_eq!((drain, write_error, end_error), (true, None, None), "{run}");
+        assert!(ingress.is_none(), "{run}");
+        assert_eq!(
+            rx.stats().received as usize,
+            queued + late,
+            "{run}: every frame"
+        );
+        assert_eq!(
+            core.stats.slot_notifications as usize,
+            queued + late,
+            "{run}"
+        );
+        core.stop_observation();
+        let outcome = CaptureOutcome {
+            process_started_unix_s: 0,
+            ready_unix_s: Some(0),
+            window: Some((0, 600_000_000_000)),
+            capture_end_ns: 600_000_000_000,
+            observation_end_unix_s: 600,
+            stop_reason: "TIMER",
+            drain_complete: drain,
+            write_error: None,
+        };
+        let (summary, _, _) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+        let status = if lost { "INCOMPLETE" } else { "COMPLETE" };
+        assert_eq!(
+            view(&summary)["evidence_journal"]["status"],
+            status,
+            "{run}"
+        );
+        let chain =
+            crate::storage::segments::verify_chain(&cfg.run_dir.join(MARKET_JOURNAL)).unwrap();
+        assert_eq!((chain.sealed, chain.complete), (true, !lost), "{run}");
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// R9: the capture's periodic sink check surfaces a sticky background writer failure while no
 /// further row is written (the tick used to call a no-op `JournalSink::flush`).
 #[test]
@@ -2360,4 +2478,48 @@ fn r12_live_retention_cap_is_exact_and_fail_closed() {
             "nothing evicted"
         );
     }
+}
+
+/// R24: a market-only capture (no econ handle) is bounded by its configured retention
+/// (`P0_MARKET_RETENTION`, default the shared 262,144): at the cap a new transaction marks the
+/// capture INCOMPLETE and nothing retained is evicted; the setting is validated.
+#[test]
+fn r24_market_only_retention_is_configured_bounded_and_fail_closed() {
+    let base = |extra: &[(&'static str, &'static str)]| {
+        let mut v = vec![
+            ("P0_WS_URL", "wss://h"),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+            ),
+        ];
+        v.extend_from_slice(extra);
+        MarketConfig::from_lookup(&env_of(&v), 0)
+    };
+    assert_eq!(
+        base(&[]).unwrap().retention,
+        crate::analytics::econ::DEFAULT_RETENTION
+    );
+    assert_eq!(base(&[("P0_MARKET_RETENTION", "3")]).unwrap().retention, 3);
+    assert!(base(&[("P0_MARKET_RETENTION", "0")]).is_err());
+    assert!(base(&[("P0_MARKET_RETENTION", "2000001")]).is_err());
+    let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+    core.retention = 3;
+    for i in 0..3 {
+        assert!(core.admit(&format!("sig{i}"), 10, Some(true), 1));
+    }
+    assert!(
+        !core.admit("sig0", 10, Some(true), 1),
+        "duplicate, no overflow"
+    );
+    assert!(!core
+        .incomplete_reasons
+        .contains("MARKET_RETENTION_OVERFLOW"));
+    assert!(!core.admit("sig3", 10, Some(true), 1));
+    assert!(core
+        .incomplete_reasons
+        .contains("MARKET_RETENTION_OVERFLOW"));
+    assert!(core.truth.retention_error);
+    assert_eq!(core.stats.unique_transactions, 3, "nothing evicted");
+    assert!(core.seen.len() <= 3, "bounded");
 }

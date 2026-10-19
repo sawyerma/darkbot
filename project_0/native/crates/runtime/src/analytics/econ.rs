@@ -92,12 +92,12 @@ impl EconConfig {
         let layout = crate::run_layout::RunLayout::from_lookup(get)?;
         let queue_capacity = usize::try_from(num("P0_ECON_QUEUE_CAPACITY", 8192)?)
             .map_err(|_| "queue capacity overflow")?;
-        let retention =
-            usize::try_from(num("P0_ECON_RETENTION", 262144)?).map_err(|_| "retention overflow")?;
+        let retention = usize::try_from(num("P0_ECON_RETENTION", DEFAULT_RETENTION as u64)?)
+            .map_err(|_| "retention overflow")?;
         if queue_capacity == 0
             || retention == 0
             || queue_capacity > 1_000_000
-            || retention > 2_000_000
+            || retention > MAX_RETENTION
         {
             return Err("invalid econ bounded capacity/drain".into());
         }
@@ -240,6 +240,11 @@ pub struct Handle {
     pub clock: Clock,
     pub cfg: EconConfig,
 }
+/// Retained distinct capture transactions/events per run (R12: max. 1,682 per 4h observed, far
+/// below); overflow is INCOMPLETE, never an eviction. Shared by econ and market-only runs (R24).
+pub const DEFAULT_RETENTION: usize = 262_144;
+pub const MAX_RETENTION: usize = 2_000_000;
+
 /// Test fixture: a handle without a worker thread (evidence goes to the returned consumer).
 #[cfg(test)]
 pub(crate) fn test_handle(

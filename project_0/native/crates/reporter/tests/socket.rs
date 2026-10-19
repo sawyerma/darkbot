@@ -365,3 +365,40 @@ fn r22_crash_leftovers_restart_but_live_owners_and_foreign_files_refuse() {
     assert!(!cfg.socket_path.exists());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// R23: a heartbeat names, per topic sent in the session, the generation and the highest seq
+/// of the state frames already delivered.
+#[test]
+fn r23_heartbeat_watermarks_follow_the_sent_state_frames() {
+    let dir = directory("r23");
+    let mut cfg = ReporterConfig::new(sock("r23"), dir.join("generation"), "TEST_ONLY".into());
+    cfg.heartbeat = Duration::from_millis(600);
+    let tap = StatusTap::new();
+    tap.publish_market(MarketSnapshot::default());
+    let handle = start(cfg.clone(), tap.clone()).unwrap();
+    let mut client = connect(&cfg);
+    let mut last_capture_seq = 0;
+    let generation = loop {
+        match next(&mut client).msg.unwrap() {
+            engine_frame::Msg::Hello(h) => assert_eq!(h.generation, handle.generation),
+            engine_frame::Msg::State(s) => {
+                assert_eq!(s.topic, TopicId::Project0CaptureState as i32);
+                last_capture_seq = s.seq;
+                tap.publish_market(MarketSnapshot::default());
+            }
+            engine_frame::Msg::Heartbeat(hb) => {
+                assert!(last_capture_seq > 0);
+                let w = hb
+                    .state_watermarks
+                    .iter()
+                    .find(|w| w.topic == TopicId::Project0CaptureState as i32)
+                    .expect("capture watermark");
+                assert!(w.highest_seq_sent >= last_capture_seq, "{w:?}");
+                break w.generation;
+            }
+        }
+    };
+    assert_eq!(generation, handle.generation);
+    handle.stop();
+    std::fs::remove_dir_all(dir).unwrap();
+}

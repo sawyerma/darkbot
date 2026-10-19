@@ -546,7 +546,7 @@ pub mod builders {
                 steps_of(&ixs, &table).unwrap(),
                 [
                     Step::Refresh(kamino),
-                    Step::Refresh(program),
+                    Step::InitLiquidationRecord,
                     Step::StartLiquidation,
                     Step::Withdraw,
                     Step::Swap(jup),

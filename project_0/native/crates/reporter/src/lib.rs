@@ -10,7 +10,8 @@ use darkbot_runner::status_tap::{
 };
 use prost::Message;
 use proto::control::{
-    engine_frame, EngineFrame, EngineHello, Heartbeat, ProjectId, StateFull, StateQuality, TopicId,
+    engine_frame, EngineFrame, EngineHello, Heartbeat, ProjectId, StateFull, StateQuality,
+    StateWatermark, TopicId,
 };
 use proto::project0::{
     CapturePhase as WirePhase, CaptureState, Counter, EffectiveRecord, MarketAssessment,
@@ -372,11 +373,20 @@ pub fn state_frame<M: Message>(
     }))
 }
 
-pub fn heartbeat_frame(id: u64) -> Vec<u8> {
+/// R23: the heartbeat carries, per topic sent in this session, the generation and the highest
+/// `seq` sent (the `StateWatermark` contract of `stream.proto`).
+pub fn heartbeat_frame(id: u64, generation: u64, watermarks: &[(TopicId, u64)]) -> Vec<u8> {
     frame(engine_frame::Msg::Heartbeat(Heartbeat {
         heartbeat_id: id,
         server_time_unix_ns: now_ns(),
-        state_watermarks: vec![],
+        state_watermarks: watermarks
+            .iter()
+            .map(|(topic, seq)| StateWatermark {
+                topic: *topic as i32,
+                generation,
+                highest_seq_sent: *seq,
+            })
+            .collect(),
     }))
 }
 
@@ -388,11 +398,24 @@ fn next_seq(counters: &Counters) -> Result<u64, String> {
         .ok_or_else(|| "reporter sequence overflow".to_string())
 }
 
-/// Versions already sent in this session.
+/// Versions already sent in this session, and the highest `seq` sent per topic.
 #[derive(Default)]
 struct Sent {
     system: u64,
     capture: u64,
+    system_seq: u64,
+    capture_seq: u64,
+}
+impl Sent {
+    fn watermarks(&self) -> Vec<(TopicId, u64)> {
+        [
+            (TopicId::Project0Status, self.system_seq),
+            (TopicId::Project0CaptureState, self.capture_seq),
+        ]
+        .into_iter()
+        .filter(|(_, seq)| *seq > 0)
+        .collect()
+    }
 }
 
 /// Sends each topic whose blocks changed since the last send. Returns whether a capture-state
@@ -415,6 +438,7 @@ fn send_changes(
                 seq,
                 &value,
             ))?;
+            sent.system_seq = seq;
         }
         sent.system = snapshot.system_version;
     }
@@ -430,6 +454,7 @@ fn send_changes(
         &capture_state(snapshot),
     ))?;
     sent.capture = snapshot.capture_version;
+    sent.capture_seq = seq;
     Ok(true)
 }
 
@@ -598,14 +623,16 @@ fn serve(
                 if let Err(e) = session(stream, &cfg, &tap, &source_id, generation, &stop, &counts)
                 {
                     counts.write_errors.fetch_add(1, Ordering::Relaxed);
-                    eprintln!("[P0/REPORTER] session error: {e}");
+                    // R23: bounded, non-blocking diagnostics; a blocked stderr never holds the
+                    // reporter thread that shutdown joins.
+                    darkbot_runner::console::line(format!("[P0/REPORTER] session error: {e}"));
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50))
             }
             Err(e) => {
-                eprintln!("[P0/REPORTER] accept error: {e}");
+                darkbot_runner::console::line(format!("[P0/REPORTER] accept error: {e}"));
                 thread::sleep(Duration::from_millis(100));
             }
         }
@@ -662,7 +689,11 @@ fn session(
         // Heartbeats follow their own clock, including during continuous state traffic.
         if last_heartbeat_at.elapsed() >= cfg.heartbeat {
             heartbeat_id = heartbeat_id.saturating_add(1);
-            send(&heartbeat_frame(heartbeat_id))?;
+            send(&heartbeat_frame(
+                heartbeat_id,
+                generation,
+                &sent.watermarks(),
+            ))?;
             last_heartbeat_at = Instant::now();
         }
     }

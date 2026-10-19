@@ -261,6 +261,8 @@ pub struct ObserverCore {
     pub(super) gaps: Vec<gap::MarketGap>,
     pub(super) gap_stats: gap::GapStats,
     pub stats: MarketStats,
+    /// R24: retention of a market-only capture (an econ run uses its handle's capacity).
+    pub(super) retention: usize,
     /// R17: (min, max) slot of the transactions admitted while routing the current ingress
     /// event; handed to the analytics worker with that event's counters.
     pub(super) event_slots: Option<(u64, u64)>,
@@ -342,6 +344,7 @@ impl ObserverCore {
             gaps: Vec::new(),
             gap_stats: gap::GapStats::default(),
             stats: MarketStats::default(),
+            retention: crate::analytics::econ::DEFAULT_RETENTION,
             event_slots: None,
         }
     }
@@ -629,7 +632,7 @@ impl ObserverCore {
                 return false;
             }
         }
-        let cap = self.econ.as_ref().map(|h| h.capacity()).unwrap_or(100_000);
+        let cap = self.retention_cap();
         if self.truth.live_receipts.len() < cap || self.truth.live_receipts.contains_key(signature)
         {
             self.truth
@@ -642,24 +645,28 @@ impl ObserverCore {
         self.admit_identity(signature, slot, success)
     }
 
+    /// R12/R24: distinct transactions/events this capture may retain.
+    pub(super) fn retention_cap(&self) -> usize {
+        self.econ.as_ref().map_or(self.retention, |h| h.capacity())
+    }
+
     pub(super) fn admit_identity(
         &mut self,
         signature: &str,
         slot: u64,
         success: Option<bool>,
     ) -> bool {
-        if self
-            .econ
-            .as_ref()
-            .is_some_and(|h| self.seen.len() >= h.capacity() && !self.seen.contains(signature))
-        {
-            self.mark_incomplete("C0_E1_MARKET_RETENTION_OVERFLOW");
-            self.econ
-                .as_ref()
-                .unwrap()
-                .shared
-                .retention_overflow
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if self.seen.len() >= self.retention_cap() && !self.seen.contains(signature) {
+            match self.econ.as_ref().map(|h| h.shared.clone()) {
+                Some(shared) => {
+                    self.mark_incomplete("C0_E1_MARKET_RETENTION_OVERFLOW");
+                    shared
+                        .retention_overflow
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                // R24: a market-only capture is bounded too; beyond it INCOMPLETE, no eviction.
+                None => self.mark_incomplete("MARKET_RETENTION_OVERFLOW"),
+            }
             return false;
         }
         self.stats.transactions_received += 1;
@@ -748,18 +755,17 @@ impl ObserverCore {
                     },
                 ));
             }
-            if self
-                .econ
-                .as_ref()
-                .is_some_and(|h| self.edges.len() >= h.capacity())
-            {
-                self.mark_incomplete("C0_E1_EVENT_RETENTION_OVERFLOW");
-                self.econ
-                    .as_ref()
-                    .unwrap()
-                    .shared
-                    .retention_overflow
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.edges.len() >= self.retention_cap() {
+                match self.econ.as_ref().map(|h| h.shared.clone()) {
+                    Some(shared) => {
+                        self.mark_incomplete("C0_E1_EVENT_RETENTION_OVERFLOW");
+                        shared
+                            .retention_overflow
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    // R24: market-only event retention is bounded the same way.
+                    None => self.mark_incomplete("MARKET_EVENT_RETENTION_OVERFLOW"),
+                }
                 continue;
             }
             let edge = ev.gross_edge_usd();

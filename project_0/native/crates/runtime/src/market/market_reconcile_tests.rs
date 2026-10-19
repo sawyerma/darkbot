@@ -494,3 +494,22 @@ fn full_slot_invalid_transaction_is_counted_and_the_scan_goes_on() {
         Some(format!("TRANSACTIONS_INVALID n=1 first=slot 10 index 0 {code}"))
     );
 }
+
+/// R12/R24: the strict scan retains at most the run's configured number of canonical
+/// transactions; beyond it the reconciliation fails closed (`CANONICAL_MARKET_RETENTION`),
+/// within it the same block reconciles completely.
+#[test]
+fn r12_strict_scan_retention_is_the_configured_cap() {
+    for (cap, complete) in [(3usize, true), (2, false)] {
+        let (mut c, mut s) = canonical_core(10, 10);
+        c.retention = cap;
+        let txs = ["a", "b", "c"]
+            .iter()
+            .map(|sig| canonical_tx(sig, 10))
+            .collect();
+        reconcile_one_block(&mut c, &mut s, 10, txs);
+        assert_eq!(c.truth.retention_error, !complete, "cap={cap}");
+        assert_eq!(c.reconciliation.complete, complete, "cap={cap}");
+        assert!(c.truth.signatures.len() <= cap);
+    }
+}

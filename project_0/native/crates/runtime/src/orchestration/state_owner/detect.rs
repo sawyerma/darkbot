@@ -324,6 +324,17 @@ impl ShadowOwner {
                     .ok()
             };
             #[cfg(feature = "crate_health")]
+            let rent_lamports_to_usd_micro = |lamports| {
+                sizer_for_cost
+                    .native_amount_conservative_cost_usd_micro(
+                        &self.sol_bank,
+                        lamports,
+                        protocol_now as i64,
+                        protocol_slot,
+                    )
+                    .ok()
+            };
+            #[cfg(feature = "crate_health")]
             let builder = P0ReceivershipBuilder {
                 state: eval_state,
                 program: self.program,
@@ -335,6 +346,7 @@ impl ShadowOwner {
                 inventory: &inventory,
                 ata: &ata,
                 lamports_to_usd_micro: &lamports_to_usd_micro,
+                rent_lamports_to_usd_micro: &rent_lamports_to_usd_micro,
                 jito_tip_usd_micro: 0,
                 jito_tip_lamports: 0,
                 zero_prefund_qualified: self.zero_prefund_enabled,
@@ -421,8 +433,8 @@ impl ShadowOwner {
                 p7_passed: false,
                 freshness: self.freshness,
                 tip_account: None,
-                global_allowed: self.global_allowed.clone(),
-                prereq_allowed: self.prereq_allowed.clone(),
+                global_allowed: &self.global_allowed,
+                prereq_allowed: &self.prereq_allowed,
                 slot_watch: &self.slot_watch,
                 network: &mut self.network,
                 simulation_failure: None,

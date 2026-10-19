@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
-    Refresh(Pubkey), // Programm, das refreshed wird (Kamino, Drift, JupLend, LiqRecord-Init)
+    Refresh(Pubkey), // Programm, das refreshed wird (Kamino, Drift, JupLend)
+    /// E2: the receivership program's LiquidationRecord initialization (only before Start).
+    InitLiquidationRecord,
     PriceUpdate(Pubkey), // Oracle-Programm (falls Pull-Oracle, P0-03)
     StartLiquidation,
     Withdraw,
@@ -97,7 +99,7 @@ pub fn steps_of(ixs: &[Instruction], t: &InstructionTable) -> Result<Vec<Step>, 
                 } else if d == t.repay {
                     Ok(Step::Repay)
                 } else if d == t.init_record {
-                    Ok(Step::Refresh(t.program))
+                    Ok(Step::InitLiquidationRecord)
                 } else {
                     Err(PlanError::UnknownInstruction(i))
                 };
@@ -142,6 +144,7 @@ pub fn validate_receivership(
         match s {
             Step::Refresh(p) if allow.refresh_programs.contains(p) => {}
             Step::PriceUpdate(p) if allow.oracle_programs.contains(p) => {}
+            Step::InitLiquidationRecord => {}
             _ => return Err(PlanError::StepBeforeStartNotAllowed(i)),
         }
     }
@@ -168,7 +171,16 @@ pub fn validate_receivership(
                     return Err(PlanError::OrderViolation(i, "swap before withdraw"));
                 }
             }
-            Step::RepayFromInventory | Step::Repay => seen_repay = true,
+            // E2: a repay settles what a withdraw seized, never before it.
+            Step::RepayFromInventory | Step::Repay => {
+                if !seen_withdraw {
+                    return Err(PlanError::OrderViolation(i, "repay before withdraw"));
+                }
+                seen_repay = true
+            }
+            Step::InitLiquidationRecord => {
+                return Err(PlanError::OrderViolation(i, "init record after start"))
+            }
             Step::StartLiquidation => return Err(PlanError::OrderViolation(i, "duplicate start")),
             Step::Refresh(p) if allow.refresh_programs.contains(p) => {}
             Step::PriceUpdate(p) if allow.oracle_programs.contains(p) => {}
@@ -256,7 +268,7 @@ mod tests {
             steps_of(&built, &t).unwrap(),
             [
                 Step::Refresh(kamino),
-                Step::Refresh(p),
+                Step::InitLiquidationRecord,
                 Step::StartLiquidation,
                 Step::Withdraw,
                 Step::Swap(swap),
@@ -265,7 +277,7 @@ mod tests {
             ]
         );
         let mut a = Allowlist::default();
-        a.refresh_programs.extend([kamino, p]);
+        a.refresh_programs.insert(kamino);
         a.swap_programs.insert(swap);
         let check = |ixs: &[Instruction]| {
             validate_receivership(&steps_of(ixs, &t)?, &a, RouteKind::FreePublicAllowed, false)
@@ -299,6 +311,19 @@ mod tests {
             data: vec![1, 1],
         }];
         assert_eq!(steps_of(&short, &t), Err(PlanError::UnknownInstruction(0)));
+        // Init record only before Start; repay only after a withdraw.
+        let mut late_init = built.to_vec();
+        late_init.swap(1, 2);
+        assert_eq!(
+            check(&late_init),
+            Err(PlanError::OrderViolation(2, "init record after start"))
+        );
+        let mut early_repay = built.to_vec();
+        early_repay.swap(3, 5);
+        assert_eq!(
+            check(&early_repay),
+            Err(PlanError::OrderViolation(3, "repay before withdraw"))
+        );
         // A prerequisite containing Start/End is not a prerequisite.
         let pre = steps_of(&[ix(swap, [42; 8])], &t).unwrap();
         let recv = steps_of(&built, &t).unwrap();

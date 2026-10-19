@@ -505,7 +505,8 @@ impl ObserverCore {
                         self.truth.duplicate_transactions += 1;
                         return Ok(Err("DUPLICATE_CANONICAL_TRANSACTION"));
                     }
-                    let capacity = self.econ.as_ref().map(|h| h.capacity()).unwrap_or(100_000);
+                    // R12/R24: the run's configured retention (econ or market-only), no literal.
+                    let capacity = self.retention_cap();
                     if self.truth.signatures.len() >= capacity
                         || self.truth.events.len().saturating_add(events.len()) > capacity
                     {
