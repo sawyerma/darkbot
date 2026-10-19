@@ -132,6 +132,22 @@ pub(crate) fn plan_economic_gate(
     (eval, actionable, technical_probe)
 }
 
+/// B1: reason code of a LIVE candidate that reached the send boundary of this pipeline.
+pub const LIVE_SEND_REQUIRES_FE04: &str = "LIVE_SEND_REQUIRES_FE04_ONE_SHOT";
+
+/// B15: worst-case inventory an attempt can leave behind. A no-swap route holds the seized
+/// collateral (capital plus the liquidation premium, rounded up); a same-TX swap route reverts
+/// atomically or returns it. An unrepresentable value is `u64::MAX` (denied by the limit).
+pub(crate) fn worst_case_inventory(plan: &ReceivershipPlan) -> u64 {
+    match plan.route {
+        RouteKind::NoSwap => u64::try_from(
+            (u128::from(plan.exposure) * (10_000 + u128::from(plan.premium_bps))).div_ceil(10_000),
+        )
+        .unwrap_or(u64::MAX),
+        _ => 0,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Shadow,
@@ -459,6 +475,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 Mode::Live => match self.safety.preview(
                     now_unix_s,
                     plan.exposure,
+                    worst_case_inventory(&plan),
                     plan.tip,
                     plan.slippage_bps,
                     &plan.assets,
@@ -682,6 +699,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if plan.prerequisite_txs.is_empty() && plan.tip == 0 {
             tl.mark(Stage::Sign, self.clock.now_ns());
         }
+        // [FIX-40] read at T_sign, lock-free (B18: the only assignment of the single-TX path).
         rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
 
         // Drift-Muster: stale Opportunity / Deadline → nicht senden (Record bleibt für P6).
@@ -694,30 +712,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("execution deadline passed".into());
             return rec.with_timeline(&tl);
         }
-        rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0); // [FIX-40] exakt bei T_sign gelesen, lockfrei
-                                                                        // [M1] Shadow baut und simuliert identisch zu LIVE; nur Reservierung und Senden entfallen.
-        let reserved = if self.mode == Mode::Live {
-            if let Err(d) = self.safety.check(
-                now_unix_s,
-                plan.exposure,
-                plan.tip,
-                plan.slippage_bps,
-                &plan.assets,
-                "longtail",
-            ) {
-                rec.decision = Decision::DeniedBySafety;
-                rec.reason = Some(format!("{:?}", d));
-                return rec.with_timeline(&tl);
-            }
-            true
-        } else {
-            false
-        };
-        fn release_if(s: &mut Safety, reserved: bool, exposure: u64) {
-            if reserved {
-                s.release_without_outcome(exposure);
-            }
-        }
+        // [M1] Shadow baut und simuliert identisch zu LIVE. B1: this pipeline never reserves and
+        // never sends; a value-bearing handoff exists only in the FE-04 one-shot owner.
         // [FIX-6] Simulate-first auf genau dieser signierten TX. Nur Ok sendet; Fehler/Unavailable → SKIP,
         // Kapital deterministisch freigeben (kein Fehlversuch im Tagesstatus, es wurde nichts gesendet).
         // [FIX-15] Bundle-Kandidaten werden als Bundle simuliert, Einzel-TX als Einzel-TX — nie gemischt.
@@ -727,7 +723,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let mut bundle_txs: Vec<solana_sdk::transaction::VersionedTransaction> = Vec::new();
         if use_bundle {
             let Some(tip_account) = self.tip_account else {
-                release_if(self.safety, reserved, plan.exposure);
                 rec.loss = Some(LossReason::Submission);
                 rec.reason = Some("bundle path without tip account".into());
                 return rec.with_timeline(&tl);
@@ -743,14 +738,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 let mut b = match tx::build(&pre_plan, bh.hash, &self.limits) {
                     Ok(b) => b,
                     Err(e) => {
-                        release_if(self.safety, reserved, plan.exposure);
                         rec.loss = Some(LossReason::Build);
                         rec.reason = Some(format!("prerequisite build: {}", e));
                         return rec.with_timeline(&tl);
                     }
                 };
                 if let Err(e) = tx::sign(&mut b, &[self.payer]) {
-                    release_if(self.safety, reserved, plan.exposure);
                     rec.loss = Some(LossReason::Build);
                     rec.reason = Some(e.to_string());
                     return rec.with_timeline(&tl);
@@ -770,7 +763,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     bundle_txs.push(t);
                 }
                 Err(e) => {
-                    release_if(self.safety, reserved, plan.exposure);
                     rec.loss = Some(LossReason::Build);
                     rec.reason = Some(format!("tip tx: {}", e));
                     return rec.with_timeline(&tl);
@@ -783,7 +775,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.path = Some(SubmissionPath::JitoBundle.as_str().into());
         }
         if self.clock.now_ns() >= network_deadline {
-            release_if(self.safety, reserved, plan.exposure);
             rec.loss = Some(LossReason::RpcDeadline);
             rec.reason =
                 Some("RPC_DEADLINE: candidate network deadline before the simulation".into());
@@ -811,7 +802,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             other => {
                 rec.simulation_result = Some(format!("{:?}", other));
-                release_if(self.safety, reserved, plan.exposure);
                 rec.loss = Some(LossReason::Build);
                 rec.reason = Some(format!("simulation not ok: {:?}", other));
                 rec.decision = if self.mode == Mode::Shadow {
@@ -835,69 +825,28 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             };
             return rec.with_timeline(&tl);
         }
-        rec.path = Some(
-            if use_bundle {
-                SubmissionPath::JitoBundle
-            } else {
-                self.submitter.path()
-            }
-            .as_str()
-            .into(),
-        );
-        let t_handoff = self.clock.now_ns();
-        let result = if use_bundle {
-            self.submitter.submit_bundle(&bundle_txs, t_handoff)
-        } else {
-            self.submitter.submit(&built.tx, t_handoff)
-        };
-        match result {
-            Ok(ack) => {
-                tl.mark(Stage::Handoff, t_handoff);
-                rec.decision = Decision::Submitted;
-                rec.path = Some(ack.path.as_str().to_string());
-                rec.signature = Some(ack.signature.to_string());
-                rec.all_signatures = ack.signatures.iter().map(|s| s.to_string()).collect();
-                rec.bundle_id = ack.submission_id.clone();
-                rec.exposure = Some(plan.exposure);
-            }
-            Err(submit::SubmitError::Rejected(e)) | Err(submit::SubmitError::Serialize(e)) => {
-                // [FIX-7] Eindeutig nicht angenommen: Kapital frei, kein Fehlversuch im Tagesstatus.
-                self.safety.release_without_outcome(plan.exposure);
-                rec.loss = Some(LossReason::Submission);
-                rec.reason = Some(e);
-            }
-            Err(submit::SubmitError::Transport(e)) => {
-                // [FIX-23] Transportfehler nach Request-Send: Annahme unbekannt → KEIN Release; Reconciliation
-                // über die lokal bekannten Signaturen (wir haben signiert). Kein Doppelversand.
-                let sigs: Vec<String> = if use_bundle {
-                    bundle_txs
-                        .iter()
-                        .filter_map(|t| t.signatures.first())
-                        .map(|s| s.to_string())
-                        .collect()
-                } else {
-                    built
-                        .tx
-                        .signatures
-                        .first()
-                        .map(|s| vec![s.to_string()])
-                        .unwrap_or_default()
-                };
-                rec.decision = Decision::AmbiguousSubmission;
-                rec.signature = sigs
-                    .get(if use_bundle && sigs.len() >= 2 {
-                        sigs.len() - 2
-                    } else {
-                        0
-                    })
-                    .cloned();
-                rec.all_signatures = sigs;
-                rec.exposure = Some(plan.exposure);
-                rec.reason = Some(format!("transport after handoff: {}", e));
-            }
+        // B1: LIVE ends at the same boundary. A send needs a persisted, fsync-confirmed FE-04
+        // approval/intent/reservation bound to these signed bytes, and only the one-shot owner
+        // (`execution::one_shot`) holds one; this pipeline has no submit call at all.
+        if let Err(d) = self.safety.preview(
+            now_unix_s,
+            plan.exposure,
+            worst_case_inventory(&plan),
+            plan.tip,
+            plan.slippage_bps,
+            &plan.assets,
+            "longtail",
+        ) {
+            rec.decision = Decision::DeniedBySafety;
+            rec.reason = Some(format!("{:?}", d));
+            return rec.with_timeline(&tl);
         }
-        let _ = Path::Rpc;
-        let _ = SubmissionPath::Rpc;
+        rec.decision = Decision::DeniedBySafety;
+        rec.loss = Some(LossReason::Submission);
+        rec.reason = Some(format!(
+            "{LIVE_SEND_REQUIRES_FE04}: simulated {} candidate is handed off only by the FE-04 one-shot owner",
+            if use_bundle { "bundle" } else { "single-TX" }
+        ));
         rec.with_timeline(&tl)
     }
 
@@ -917,6 +866,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             realized_pnl,
             exposure_released,
             inventory_delta,
+            0,
         );
     }
 }

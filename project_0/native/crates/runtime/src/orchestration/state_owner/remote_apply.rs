@@ -65,7 +65,9 @@ impl ShadowOwner {
                         worker_now_s,
                         r.landed_success,
                         r.realized_pnl,
-                        work.submission.exposure,
+                        r.record.exposure_released,
+                        0,
+                        // B15: the shadow pipeline reserves no inventory hold (B1: no send).
                         0,
                     );
                     self.evidence.emit(OwnerEvidence::Reconcile(r.record))?;

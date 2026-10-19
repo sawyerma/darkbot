@@ -826,6 +826,102 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert_eq!(adapter.attempts.load(Ordering::Relaxed), 2);
 }
+/// B1: a LIVE pipeline with every limit open and an enabled Safety stops at the send boundary
+/// after build/sign/simulation; it never calls `submit`/`submit_bundle` (the submitter panics)
+/// and leaves no reservation. Sending exists only in the FE-04 one-shot owner.
+#[test]
+fn b1_live_pipeline_never_sends_and_reserves_nothing() {
+    use crate::execution::pipeline::{Mode, Pipeline, LIVE_SEND_REQUIRES_FE04};
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let calls = Arc::new(AtomicU64::new(0));
+    let sims = Arc::new(AtomicU64::new(0));
+    let submitter = CountingSubmitter {
+        calls: calls.clone(),
+        sims: sims.clone(),
+    };
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let mut allow_live = Allow::default();
+    allow_live.execution_classes.insert("longtail");
+    let mut safety = Safety::new(
+        Limits {
+            max_total_capital: u64::MAX,
+            max_outstanding_inventory: u64::MAX,
+            max_concurrent_positions: u32::MAX,
+            max_exposure_per_attempt: u64::MAX,
+            max_daily_loss: u64::MAX,
+            max_failed_attempts_per_day: u32::MAX,
+            max_tip: u64::MAX,
+            max_slippage_bps: u64::MAX,
+            max_outstanding_attempts: u32::MAX,
+        },
+        allow_live,
+        true,
+    );
+    let payer = solana_sdk::signature::Keypair::new();
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix::default();
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    slots.observe(10);
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let mut p = Pipeline {
+        mode: Mode::Live,
+        clock: &clock,
+        health: &TestHealth,
+        builder: &TestBuilder,
+        submitter: &submitter,
+        safety: &mut safety,
+        blockhash: &bh,
+        payer: &payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit: 0,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        tip_account: None,
+        global_allowed: vec![],
+        prereq_allowed: vec![],
+        slot_watch: &slots,
+        network: &mut network,
+    };
+    let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
+    assert_eq!(r.decision, Decision::DeniedBySafety);
+    assert!(r
+        .reason
+        .as_deref()
+        .is_some_and(|x| x.starts_with(LIVE_SEND_REQUIRES_FE04)));
+    assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
+    assert_eq!(
+        (r.signature, r.exposure, r.timing.t_handoff_ns),
+        (None, None, None)
+    );
+    assert_eq!(sims.load(Ordering::Relaxed), 1);
+    assert_eq!(calls.load(Ordering::Relaxed), 0, "no submit call");
+    assert_eq!(safety.capital_in_use(), 0, "no reservation left");
+}
 #[test]
 fn runtime_worker_writes_four_snapshots_then_identical_final() {
     four_snapshots_then_identical_final(crate::run_layout::RunLayout::V1);

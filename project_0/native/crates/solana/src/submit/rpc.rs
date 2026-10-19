@@ -366,38 +366,128 @@ pub fn reconcile(
         }
         Some(s) => s,
     };
-    let fetched = transaction_with_meta(rpc, sig, CommitmentConfig::confirmed());
-    let (fee, cu) = match fetched {
-        Ok(t) => {
-            let meta = t.transaction.meta;
-            // VERIFY: Feldnamen `fee` und `compute_units_consumed` (OptionSerializer) in solana-transaction-status 3.x
-            let fee = meta.as_ref().map(|m| m.fee);
-            let cu = meta
-                .as_ref()
-                .and_then(|m| Option::<u64>::from(m.compute_units_consumed.clone()));
-            (fee, cu)
-        }
-        Err(_) => (None, None),
+    // C4: settlement facts only from a finalized status and finalized metadata of that slot.
+    let finalized = matches!(
+        status.confirmation_status,
+        Some(solana_transaction_status::TransactionConfirmationStatus::Finalized)
+    );
+    let meta = if finalized {
+        transaction_with_meta(rpc, sig, CommitmentConfig::finalized())
+            .ok()
+            .map(|t| {
+                let meta = t.transaction.meta;
+                (
+                    t.slot,
+                    meta.as_ref().map(|m| m.fee),
+                    meta.as_ref()
+                        .and_then(|m| Option::<u64>::from(m.compute_units_consumed.clone())),
+                )
+            })
+    } else {
+        None
     };
-    Ok(LandingEvidence {
+    Ok(landing_evidence(
+        path,
+        sig,
+        status.slot,
+        status
+            .confirmation_status
+            .as_ref()
+            .map(|c| format!("{:?}", c)),
+        finalized,
+        status.err.as_ref().map(|e| format!("{:?}", e)),
+        meta,
+        now_ns,
+    ))
+}
+
+/// C4: landing evidence from a signature status and, for a finalized status, the finalized
+/// receipt (`meta` = slot, fee, CU). A status below finalized is `LandedUnfinalized` without fee
+/// or outcome; a finalized status whose receipt is missing or belongs to another slot keeps the
+/// fee unknown (the attempt stays unresolved, never settled).
+#[allow(clippy::too_many_arguments)]
+fn landing_evidence(
+    path: SubmissionPath,
+    sig: &Signature,
+    status_slot: u64,
+    confirmation: Option<String>,
+    finalized: bool,
+    err: Option<String>,
+    meta: Option<(u64, Option<u64>, Option<u64>)>,
+    now_ns: u64,
+) -> LandingEvidence {
+    let (fee, cu) = match meta {
+        Some((slot, fee, cu)) if finalized && slot == status_slot => (fee, cu),
+        _ => (None, None),
+    };
+    LandingEvidence {
         path,
         signature: *sig,
-        outcome: if status.err.is_some() {
+        outcome: if !finalized {
+            LandingOutcome::LandedUnfinalized
+        } else if err.is_some() {
             LandingOutcome::LandedFailed
         } else {
             LandingOutcome::LandedSuccess
         },
-        landed_slot: Some(status.slot),
+        landed_slot: Some(status_slot),
         tx_index_in_slot: None,
-        confirmation: status
-            .confirmation_status
-            .as_ref()
-            .map(|c| format!("{:?}", c)),
+        confirmation,
         fee_lamports: fee,
         compute_units_consumed: cu,
-        error: status.err.as_ref().map(|e| format!("{:?}", e)),
+        error: err,
         t_observed_landed_ns: Some(now_ns),
-    })
+    }
+}
+
+#[cfg(test)]
+mod landing_tests {
+    use super::*;
+
+    /// C4: only a finalized status with a finalized receipt of the same slot yields a fee and an
+    /// outcome; confirmed is telemetry, a missing or foreign-slot receipt keeps the fee unknown.
+    #[test]
+    fn c4_settlement_evidence_requires_finalized_status_and_receipt() {
+        let sig = Signature::new_unique();
+        let ev = |finalized, err: Option<&str>, meta| {
+            landing_evidence(
+                SubmissionPath::Rpc,
+                &sig,
+                50,
+                Some(if finalized { "Finalized" } else { "Confirmed" }.into()),
+                finalized,
+                err.map(Into::into),
+                meta,
+                7,
+            )
+        };
+        let confirmed = ev(false, None, Some((50, Some(5_000), Some(9))));
+        assert_eq!(confirmed.outcome, LandingOutcome::LandedUnfinalized);
+        assert_eq!(confirmed.fee_lamports, None, "confirmed meta is no fee");
+        let confirmed_failed = ev(false, Some("InstructionError"), None);
+        assert_eq!(confirmed_failed.outcome, LandingOutcome::LandedUnfinalized);
+        let done = ev(true, None, Some((50, Some(5_000), Some(9))));
+        assert_eq!(
+            (done.outcome, done.fee_lamports, done.compute_units_consumed),
+            (LandingOutcome::LandedSuccess, Some(5_000), Some(9))
+        );
+        let reverted = ev(
+            true,
+            Some("InstructionError"),
+            Some((50, Some(5_000), None)),
+        );
+        assert_eq!(
+            (reverted.outcome, reverted.fee_lamports),
+            (LandingOutcome::LandedFailed, Some(5_000))
+        );
+        for meta in [
+            None,
+            Some((51, Some(5_000), Some(9))),
+            Some((50, None, None)),
+        ] {
+            assert_eq!(ev(true, None, meta).fee_lamports, None, "{meta:?}");
+        }
+    }
 }
 
 #[cfg(test)]

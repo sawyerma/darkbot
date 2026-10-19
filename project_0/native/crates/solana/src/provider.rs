@@ -34,6 +34,9 @@ pub enum Workload {
     Deployment,
     History,
     Websocket,
+    /// C5: financial reconciliation — its own pacing slot and the highest admission priority,
+    /// always inside the same global RPS/burst/call/byte budget (no extra request budget).
+    Reconcile,
 }
 impl Workload {
     fn index(self) -> usize {
@@ -54,7 +57,7 @@ struct State {
     effective_rps: f64,
     bytes: u64,
     successes: u32,
-    next_workload: [Instant; 7],
+    next_workload: [Instant; 8],
     cooldown: Instant,
     rate_limits: u32,
     requests: u64,
@@ -165,7 +168,7 @@ impl Budget {
                 effective_rps: config.limits.rpc_rps as f64,
                 bytes: 0,
                 successes: 0,
-                next_workload: [now; 7],
+                next_workload: [now; 8],
                 cooldown: now,
                 rate_limits: 0,
                 requests: 0,
@@ -284,8 +287,8 @@ impl Budget {
                 self.changed.notify_all();
                 return Err("RPC_CALL_BUDGET");
             }
-            // Reserve every eighth admission for the oldest waiter; otherwise
-            // prioritize health/state/simulation without starving reconciliation.
+            // Reserve every eighth admission for the oldest waiter; otherwise prioritize
+            // reconciliation (C5), then health/state/simulation, before analytics.
             let selected = if s.requests % 8 == 7 {
                 s.queue.front().map(|(t, _)| *t)
             } else {
@@ -294,9 +297,10 @@ impl Budget {
                     .min_by_key(|(t, w)| {
                         (
                             match w {
-                                Workload::LiveRead | Workload::Simulation => 0,
-                                Workload::Bootstrap | Workload::Websocket => 1,
-                                _ => 2,
+                                Workload::Reconcile => 0,
+                                Workload::LiveRead | Workload::Simulation => 1,
+                                Workload::Bootstrap | Workload::Websocket => 2,
+                                _ => 3,
                             },
                             *t,
                         )
@@ -316,7 +320,8 @@ impl Budget {
                     Workload::LiveRead | Workload::Deployment => self.limits.hotpath_rps,
                     Workload::Simulation => self.limits.simulation_rps,
                     Workload::History => self.limits.history_rps,
-                    Workload::Winner => self.limits.analytics_rps,
+                    // C5: the configured analytics rate, but a pacing slot of its own.
+                    Workload::Winner | Workload::Reconcile => self.limits.analytics_rps,
                     Workload::Websocket => self.limits.wss_rps,
                 };
                 s.next_workload[work.index()] = now + Duration::from_secs_f64(1.0 / rate as f64);
@@ -837,6 +842,47 @@ mod tests {
         }
         assert_eq!(b.snapshot().requests, 0);
         assert_eq!(b.snapshot().queued, 0);
+    }
+    /// C5: a reconciliation waiting behind many analytics jobs is admitted first, inside the
+    /// same concurrency and call budget.
+    #[test]
+    fn c5_reconcile_is_admitted_before_queued_winner_jobs_within_the_budget() {
+        let mut c = crate::runtime_config::RuntimeConfig::default();
+        c.limits.rpc_rps = 1_000;
+        c.limits.rpc_burst = 1_000;
+        c.limits.rpc_concurrency = 1;
+        c.limits.max_requests = 100;
+        let b = Arc::new(Budget::configured(&c));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let held = b.acquire(Workload::LiveRead, deadline).unwrap();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut threads = Vec::new();
+        for (i, w) in std::iter::repeat_n(Workload::Winner, 6)
+            .chain([Workload::Reconcile])
+            .enumerate()
+        {
+            let (budget, order) = (b.clone(), order.clone());
+            threads.push(std::thread::spawn(move || {
+                let p = budget.acquire(w, deadline);
+                order
+                    .lock()
+                    .unwrap()
+                    .push((i, matches!(w, Workload::Reconcile)));
+                drop(p);
+            }));
+            while b.snapshot().queued < (i + 1) as u64 {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        drop(held);
+        for t in threads {
+            t.join().unwrap();
+        }
+        let order = order.lock().unwrap();
+        assert_eq!(order.len(), 7);
+        assert!(order[0].1, "reconcile first: {order:?}");
+        let s = b.snapshot();
+        assert!(s.requests <= c.limits.max_requests && s.in_flight == 0 && s.queued == 0);
     }
     #[test]
     fn aggregate_concurrency_is_bounded_and_cancelled_tickets_do_not_block() {

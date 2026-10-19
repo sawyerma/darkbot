@@ -145,6 +145,9 @@ pub enum LandingOutcome {
     NotLanded,
     LandedSuccess,
     LandedFailed,
+    /// C4: observed in a processed/confirmed status only — telemetry, never settlement evidence
+    /// (no fee, outcome or capital release until a finalized status and receipt exist).
+    LandedUnfinalized,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -69,7 +69,10 @@ pub fn measured_attempt_costs(
         let e = evidence
             .iter()
             .find(|e| e.signature == *sig && e.path == p.path)?;
-        if e.outcome == LandingOutcome::NotLanded {
+        if matches!(
+            e.outcome,
+            LandingOutcome::NotLanded | LandingOutcome::LandedUnfinalized
+        ) {
             return None;
         }
         total.checked_add(e.fee_lamports?)
@@ -96,6 +99,12 @@ pub fn measured_attempt_costs(
     (fee, tip)
 }
 
+/// C12: wall-clock age after which an attempt whose status/receipt evidence is still incomplete is
+/// recorded `UNRESOLVED`. This is a reporting deadline, never absence proof: the outcome stays
+/// UNKNOWN (no `NotLanded`, no release), Safety halts and keeps every hold until a finalized
+/// non-landing/lastValidBlockHeight proof or a complete finalized receipt exists.
+pub const RECONCILE_UNRESOLVED_AFTER_S: u64 = 90;
+
 /// None = retry. Timeout yields unresolved UNKNOWN, never a fictitious zero PnL.
 pub fn try_reconcile(
     rpc: &RpcClient,
@@ -117,9 +126,12 @@ pub fn try_reconcile(
         .collect::<Result<_, _>>()
         .ok()?;
     let ev = evidence.iter().find(|e| e.signature == p.signature)?;
-    let unresolved = evidence
-        .iter()
-        .any(|e| e.outcome == LandingOutcome::NotLanded || e.fee_lamports.is_none());
+    let unresolved = evidence.iter().any(|e| {
+        matches!(
+            e.outcome,
+            LandingOutcome::NotLanded | LandingOutcome::LandedUnfinalized
+        ) || e.fee_lamports.is_none()
+    });
     if unresolved && now_unix_s.saturating_sub(p.submitted_unix_s) < timeout_s {
         return None;
     }
@@ -135,6 +147,8 @@ pub fn try_reconcile(
         "LANDED_FAILED"
     };
     let (fee, tip) = measured_attempt_costs(p, &evidence);
+    // Complete execution PnL additionally requires token/protocol/rent deltas.
+    let realized_pnl: Option<i128> = None;
     Some(ReconcileResult {
         record: ReconcileRecord {
             signature: p.signature.to_string(),
@@ -150,12 +164,16 @@ pub fn try_reconcile(
             } else {
                 ev.error.clone()
             },
-            exposure_released: p.exposure,
+            // C12/C3: only capital Safety actually releases (a known PnL); UNKNOWN holds it.
+            exposure_released: if realized_pnl.is_some() {
+                p.exposure
+            } else {
+                0
+            },
             pnl_complete: false,
         },
         landed_success,
-        // Complete execution PnL additionally requires token/protocol/rent deltas.
-        realized_pnl: None,
+        realized_pnl,
     })
 }
 
@@ -216,6 +234,35 @@ mod tests {
             };
             let (p, e) = sample(SubmissionPath::Rpc, outcome, Some(fee));
             assert_eq!(measured_attempt_costs(&p, &[e]).0, Some(fee));
+        }
+    }
+
+    /// C12: before the deadline an incomplete attempt is retried; at/after it the record is
+    /// UNRESOLVED (UNKNOWN), never NotLanded, and claims no released exposure. A finalized status
+    /// whose receipt is of another slot (mock: status slot 1, receipt slot 2) is incomplete too (C4).
+    #[test]
+    fn c12_timeout_is_unknown_and_releases_nothing() {
+        let sig = Signature::new_unique();
+        let p = PendingSubmission {
+            signature: sig,
+            signatures: vec![sig],
+            bundle_id: None,
+            path: SubmissionPath::Rpc,
+            exposure: 77,
+            submitted_unix_s: 1_000,
+            tip: None,
+        };
+        for url in ["sig_not_found", "succeeds"] {
+            let rpc = RpcClient::new_mock(url);
+            let t = RECONCILE_UNRESOLVED_AFTER_S;
+            assert!(try_reconcile(&rpc, None, &p, 1_000 + t - 1, 0, t).is_none());
+            for now in [1_000 + t, 1_000 + t + 1] {
+                let r = try_reconcile(&rpc, None, &p, now, 0, t).unwrap();
+                assert_eq!(r.record.outcome, "UNRESOLVED", "{url}");
+                assert_eq!(r.record.exposure_released, 0);
+                assert_eq!(r.record.fee_lamports, None);
+                assert!(r.realized_pnl.is_none() && !r.landed_success);
+            }
         }
     }
 

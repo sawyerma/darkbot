@@ -208,7 +208,8 @@ impl RemoteWorkers {
                         reconcile_rpc_url,
                         Duration::from_secs(30),
                         Default::default(),
-                        darkbot_solana::provider::Workload::Winner,
+                        // C5: own prioritized workload inside the same global provider budget.
+                        darkbot_solana::provider::Workload::Reconcile,
                     );
                     let clock = Clock::new();
                     while !reconcile_shutdown.is_requested() {
@@ -221,7 +222,14 @@ impl RemoteWorkers {
                             .map(|d| d.as_secs())
                             .map_err(|_| "WALL_CLOCK_BEFORE_UNIX_EPOCH");
                         let result = reconcile_at(now_s, |now_s| {
-                            try_reconcile(&rpc, None, &work.submission, now_s, clock.now_ns(), 90)
+                            try_reconcile(
+                                &rpc,
+                                None,
+                                &work.submission,
+                                now_s,
+                                clock.now_ns(),
+                                crate::execution::pending::RECONCILE_UNRESOLVED_AFTER_S,
+                            )
                         });
                         if !push_result(
                             &reconcile_done_tx,
