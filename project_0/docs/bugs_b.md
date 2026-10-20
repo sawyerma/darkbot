@@ -1857,3 +1857,22 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | C2 | Weiterhin offen | Health in Detection, Pipeline und Sizing mehrfach; Messung / Cacheparität ausstehend |
 
 **Vollständigkeit und Ungewissheit:** Neue Original-BUGS.md-Tickets werden durch dieses Dokument nicht abgehakt. Alle neu berichteten Compiler-/Laufzeit-/Performance-Effekte ohne eigenständige Test-Evidence behalten ihren begrenzten Nachweisstatus. Ein Codepfad kann als bestätigt gelten, ohne dass seine Auslösung bei realer Mainnetlast bewiesen ist.
+
+## F. Umsetzungsstand (Claude, 20.10.2026) — Abbildung auf BUGS.md §18 (V-Serie)
+
+Die in diesem Dokument Z1–Z8 genannten Befunde sind dieselben wie die Nutzerprüfung „N1–N8“, in `BUGS.md` §18 als **V1–V8** geführt (IDs N1–N8 dort belegt; Q1–Q14 dieses Dokuments bleiben eigene IDs). Nachweis je Eintrag in BUGS.md: Regressionstest, der per Mutation gegen das alte Verhalten fehlschlägt; Gate fmt/Clippy (all/default)/Tests (all/default)/Release/Python grün. Nur offline, keine Mainnet-Läufe.
+
+| bugs_b | BUGS.md | Stand | Commit |
+|---|---|---|---|
+| Z1 (= Q4) | V1 | `[x]` exhaustive Loss-Buckets, Attributionsmodell, Golden geprüft (nur vorbelegte Nullen/neue Felder) | `423c024` |
+| Z2 | V2 (Ergänzung B6) | `[x]` eine Kandidaten-Deadline bis in `BudgetedSender`, Jupiter, Route-Fit, Fee, Simulation; 12 Tests (10 Pipeline-/Adapter-Akzeptanztests mit echtem Adapter gegen Loopback-HTTP, 2 Transporttests) | `78d79c3` |
+| Z3 | V3 | `[x]` Observation-Fehler ⇒ keine Projektion, Record + Zähler; Group/FeeState im Fingerprint | `423c024` |
+| Z4 | V4 | `[x]` bilanzierende ProjectionStats, periodisch + Shutdown | `423c024` |
+| Z5 | V5 | `[x]` `_all` unverändert + `_technical`; ECON Schema 4 mit expliziten V2/V3-Layouts, Golden aus Altjournalen | `423c024` |
+| Z6 | V6 | `[x]` dependency_gap nur neu/geändert/aufgehoben | `423c024` |
+| Z7 | V7 | **PARTIAL / KONFLIKT:** auf ausdrückliche Nutzeranweisung (Stufe 1) halten ZeroPrefund/FlashFunded vorläufig den vollen `seized_equity_value`. Abschnitt E dieses Dokuments bewertet den Voll-Hold als nicht belegt (der Swap verbraucht die volle Ausführungsmenge; Rest = Liability-Überschuss und Rundungsstaub). Wirkung nur im LIVE-Pfad (gesperrt), Shadow unverändert. **Nutzerentscheidung offen**, Stufe 2 (Token-Flüsse) vor FE-06. | `423c024` |
+| Z8 | V8 | `[x]` Struktur: gemeinsamer EMODE-Filter (Semantik unverändert, wie Abschnitt E) | `423c024` |
+| — | V9 | offen: technische Plan-Ablehnungen als ECONOMIC_SKIP attribuiert (verwandt mit Q5 `PlanError`) | — |
+
+Weiter offen aus diesem Dokument (Reihenfolge laut Nutzerauftrag): Q2 (Safety-Ledger), Z18 (Integrationsidentität), Z12 (Fehlerisolation), Z14 (Ingress-Race), dann übrige bestätigte Z/Q.
+

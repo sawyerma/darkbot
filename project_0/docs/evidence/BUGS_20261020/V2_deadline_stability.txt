@@ -1,0 +1,79 @@
+# V2 deadline stability — tested SHA e50865aa3dc2239f0e9e38fe5a3b302d558fa4c7 (2026-10-20T07:58Z), clean project_0/native
+# Deadline 300 ms, acceptance bound 400 ms (deadline + 100 ms); loopback HTTP endpoints only, no Mainnet.
+## run 1: cargo test -p darkbot-runner --all-features --lib -- --test-threads=4 n2_
+test execution::builder::p0::fix100_tests::n2_expired_deadline_starts_no_request ... ok
+test execution::builder::p0::fix100_tests::n2_adapter_without_candidate_transport_never_calls_the_network ... ok
+test execution::builder::p0::fix100_tests::n2_blocked_provider_permit_ends_at_the_deadline_without_a_request ... ok
+test execution::builder::p0::fix100_tests::n2_a_deadline_cut_does_not_degrade_the_provider ... ok
+test execution::builder::p0::fix100_tests::n2_provider_backoff_past_the_deadline_is_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_real_adapter_quotes_and_simulates_within_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_jupiter_ends_planning_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_route_fit_requotes_stop_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_jito_bundle_simulation_ends_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_retried_and_slow_rpc_calls_end_at_the_deadline ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 417 filtered out; finished in 1.27s
+## run 2: cargo test -p darkbot-runner --all-features --lib -- --test-threads=4 n2_
+test execution::builder::p0::fix100_tests::n2_expired_deadline_starts_no_request ... ok
+test execution::builder::p0::fix100_tests::n2_adapter_without_candidate_transport_never_calls_the_network ... ok
+test execution::builder::p0::fix100_tests::n2_blocked_provider_permit_ends_at_the_deadline_without_a_request ... ok
+test execution::builder::p0::fix100_tests::n2_a_deadline_cut_does_not_degrade_the_provider ... ok
+test execution::builder::p0::fix100_tests::n2_provider_backoff_past_the_deadline_is_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_jupiter_ends_planning_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_real_adapter_quotes_and_simulates_within_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_jito_bundle_simulation_ends_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_route_fit_requotes_stop_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_retried_and_slow_rpc_calls_end_at_the_deadline ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 417 filtered out; finished in 1.27s
+## run 3: cargo test -p darkbot-runner --all-features --lib -- --test-threads=4 n2_
+test execution::builder::p0::fix100_tests::n2_adapter_without_candidate_transport_never_calls_the_network ... ok
+test execution::builder::p0::fix100_tests::n2_expired_deadline_starts_no_request ... ok
+test execution::builder::p0::fix100_tests::n2_a_deadline_cut_does_not_degrade_the_provider ... ok
+test execution::builder::p0::fix100_tests::n2_blocked_provider_permit_ends_at_the_deadline_without_a_request ... ok
+test execution::builder::p0::fix100_tests::n2_provider_backoff_past_the_deadline_is_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_real_adapter_quotes_and_simulates_within_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_jupiter_ends_planning_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_route_fit_requotes_stop_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_jito_bundle_simulation_ends_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_retried_and_slow_rpc_calls_end_at_the_deadline ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 417 filtered out; finished in 1.27s
+## run 4: cargo test -p darkbot-runner --all-features --lib -- --test-threads=4 n2_
+test execution::builder::p0::fix100_tests::n2_adapter_without_candidate_transport_never_calls_the_network ... ok
+test execution::builder::p0::fix100_tests::n2_expired_deadline_starts_no_request ... ok
+test execution::builder::p0::fix100_tests::n2_a_deadline_cut_does_not_degrade_the_provider ... ok
+test execution::builder::p0::fix100_tests::n2_blocked_provider_permit_ends_at_the_deadline_without_a_request ... ok
+test execution::builder::p0::fix100_tests::n2_provider_backoff_past_the_deadline_is_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_real_adapter_quotes_and_simulates_within_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_jupiter_ends_planning_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_route_fit_requotes_stop_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_jito_bundle_simulation_ends_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_retried_and_slow_rpc_calls_end_at_the_deadline ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 417 filtered out; finished in 1.26s
+## run 5: cargo test -p darkbot-runner --all-features --lib -- --test-threads=4 n2_
+test execution::builder::p0::fix100_tests::n2_expired_deadline_starts_no_request ... ok
+test execution::builder::p0::fix100_tests::n2_adapter_without_candidate_transport_never_calls_the_network ... ok
+test execution::builder::p0::fix100_tests::n2_a_deadline_cut_does_not_degrade_the_provider ... ok
+test execution::builder::p0::fix100_tests::n2_blocked_provider_permit_ends_at_the_deadline_without_a_request ... ok
+test execution::builder::p0::fix100_tests::n2_provider_backoff_past_the_deadline_is_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_real_adapter_quotes_and_simulates_within_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_jupiter_ends_planning_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_route_fit_requotes_stop_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_jito_bundle_simulation_ends_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_retried_and_slow_rpc_calls_end_at_the_deadline ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 417 filtered out; finished in 1.27s
+## transport: cargo test -p darkbot-solana --lib -- n2_
+test provider::http_tests::n2_unbudgeted_candidate_transport_needs_no_permit_and_keeps_the_deadline ... ok
+test provider::http_tests::n2_legacy_send_still_degrades_a_hanging_provider ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 100 filtered out; finished in 2.02s
+## under load: full darkbot-runner lib suite, --test-threads=4
+test execution::builder::p0::fix100_tests::n2_adapter_without_candidate_transport_never_calls_the_network ... ok
+test execution::builder::p0::fix100_tests::n2_a_deadline_cut_does_not_degrade_the_provider ... ok
+test execution::builder::p0::fix100_tests::n2_expired_deadline_starts_no_request ... ok
+test execution::builder::p0::fix100_tests::n2_blocked_provider_permit_ends_at_the_deadline_without_a_request ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_jupiter_ends_planning_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_jito_bundle_simulation_ends_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_provider_backoff_past_the_deadline_is_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_real_adapter_quotes_and_simulates_within_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_route_fit_requotes_stop_at_the_deadline ... ok
+test execution::builder::p0::fix100_tests::n2_hanging_retried_and_slow_rpc_calls_end_at_the_deadline ... ok
+test result: ok. 421 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 47.53s
+# Rebased onto origin/main without project_0 changes: committed as 78d79c3; project_0/native tree identical to the tested e50865a (git diff empty).
