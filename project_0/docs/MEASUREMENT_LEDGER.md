@@ -5734,3 +5734,14 @@ Base `2ffcc20`; commits `119da22` (package 5), `423c024` (review 9: V1/V3–V8 =
 - ECON schema 4 (V1/V5): golden test over sealed, chain-verified ECON journals written by the schema-2 (2026-10-17) and schema-3 (2026-10-18) writers in synthetic test runs (provenance and sha256 in BUGS.md V5); existing figures unchanged, new fields `NOT_RECORDED`/`PRE_N1` for old frames.
 - NOT_RUN / not claimed: no Mainnet read, provider measurement, capture, calibration or LIVE; the real-load candidate rate under the 5 s default deadline and the share of `RpcDeadline` losses are NOT_MEASURED.
 
+## 2026-10-20 — bugs_b Q2/Z18/Z12/Z14 = BUGS V10–V13 (LOCAL_PASS per ticket, offline only)
+
+Commit `3f901d3` (rebased onto foreign `45ca27e`, `project_0/native` tree identical to the gated state). Each ticket was reproduced RED on the old code before the fix and is guarded by fail-before mutations; independent read-only review before the push (two review findings fixed before the commit: V13 probes first sat in `detect_queue` ahead of oracle work).
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 665/0/6, default 663/0/6, release, Python 108 (1 skipped) exit 0.
+- V10 (Q2): checked safety ledger transitions, HALT `LEDGER_INVARIANT` without applying anything; owner reconcile path unreachable since B1 (no `PendingSubmission`), proven at `Safety` level.
+- V11 (Z18): integration accounts only with the pinned owner (`declare_id!` of the pinned mock crates) and discriminator; Kamino reserve owner checked before decoding.
+- V12 (Z12): pair errors isolated; account-wide errors fatal; no-plan classification unchanged.
+- V13 (Z14): race reproduced offline with the real owner (after a recovery with 1,100 was-liquidatable accounts only 63 of 1,024 ingress slots were free); probes now in a dedicated owner queue after oracle work.
+- NOT_RUN: no Mainnet read, capture or LIVE; B3/C3 (durable multi-attempt safety ledger, settlement) open.
+

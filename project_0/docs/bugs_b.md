@@ -1873,6 +1873,10 @@ Die in diesem Dokument Z1–Z8 genannten Befunde sind dieselben wie die Nutzerpr
 | Z7 | V7 | **PARTIAL / KONFLIKT:** auf ausdrückliche Nutzeranweisung (Stufe 1) halten ZeroPrefund/FlashFunded vorläufig den vollen `seized_equity_value`. Abschnitt E dieses Dokuments bewertet den Voll-Hold als nicht belegt (der Swap verbraucht die volle Ausführungsmenge; Rest = Liability-Überschuss und Rundungsstaub). Wirkung nur im LIVE-Pfad (gesperrt), Shadow unverändert. **Nutzerentscheidung offen**, Stufe 2 (Token-Flüsse) vor FE-06. | `423c024` |
 | Z8 | V8 | `[x]` Struktur: gemeinsamer EMODE-Filter (Semantik unverändert, wie Abschnitt E) | `423c024` |
 | — | V9 | offen: technische Plan-Ablehnungen als ECONOMIC_SKIP attribuiert (verwandt mit Q5 `PlanError`) | — |
+| Q2 | V10 | `[x]` geprüfte Ledger-Transitionen, HALT `LEDGER_INVARIANT` ohne Anwendung; B3/C3 (dauerhafter Ledger, Settlement) bleiben offen | `3f901d3` |
+| Z18 | V11 | `[x]` Owner + Discriminator aus den gepinnten Typen (`AccountLoader`-Identität), ein gemeinsamer Decoder | `3f901d3` |
+| Z12 | V12 | `[x]` Paarfehler isoliert, kontoweite Fehler fatal, Klassifikation ohne Plan unverändert | `3f901d3` |
+| Z14 | V13 | `[x]` Race reproduziert (63/1.024 frei), Probes als Owner-Detektionsarbeit | `3f901d3` |
 
-Weiter offen aus diesem Dokument (Reihenfolge laut Nutzerauftrag): Q2 (Safety-Ledger), Z18 (Integrationsidentität), Z12 (Fehlerisolation), Z14 (Ingress-Race), dann übrige bestätigte Z/Q.
+Weiter offen aus diesem Dokument (Reihenfolge laut Nutzerauftrag): B1/B3/B15, C3/C11/C12 (FE-04/P8-Ledger), dann übrige bestätigte Z/Q.
 
