@@ -132,6 +132,13 @@ pub(crate) fn plan_economic_gate(
     (eval, actionable, technical_probe)
 }
 
+/// N2: `now` plus the candidate's network time; an unrepresentable bound (an unbounded budget of
+/// tools and tests) is one year.
+pub(crate) fn deadline_after(now: Instant, deadline_ns: u64) -> Instant {
+    now.checked_add(std::time::Duration::from_nanos(deadline_ns))
+        .unwrap_or_else(|| now + std::time::Duration::from_secs(365 * 24 * 3600))
+}
+
 /// E2: the message to be signed carries exactly the validated instructions — program id and data,
 /// in order — preceded at most by the ComputeBudget instructions the transaction layer adds.
 pub(crate) fn compiled_matches(
@@ -204,11 +211,13 @@ pub trait ReceivershipBuilder {
     }
     /// E2: the pinned instruction table the plans' instructions are classified with.
     fn instruction_table(&self) -> &InstructionTable;
+    /// N2: all external work of planning (route quotes, route-fit re-quotes) ends by `deadline`.
     fn plans(
         &self,
         account: &Pubkey,
         now_unix_s: u64,
         slot: u64,
+        deadline: Instant,
     ) -> Result<Vec<ReceivershipPlan>, String>;
 }
 
@@ -386,11 +395,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         }
         self.network.remaining -= 1;
-        let network_deadline = self.clock.now_ns().saturating_add(self.network.deadline_ns);
+        // N2: one monotonic deadline for all external work of this candidate — route quotes and
+        // route-fit re-quotes, fee quote, simulation (provider permit, request, response read).
+        let deadline = deadline_after(Instant::now(), self.network.deadline_ns);
         let planning_started = Instant::now();
         let mt0_jupiter_before =
             darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter); // [MT0]
-        let planning_result = self.builder.plans(&account, now_unix_s, slot);
+        let planning_result = self.builder.plans(&account, now_unix_s, slot, deadline);
         let mt0_jupiter = darkbot_common::mt0::MT0
             .remote_requests(darkbot_common::mt0::RemoteClass::Jupiter)
             .saturating_sub(mt0_jupiter_before);
@@ -408,6 +419,19 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             planning_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
         );
         rec.progress.candidates_created = planning_result.as_ref().ok().map(|p| !p.is_empty());
+        // N2: planning that reached the deadline leaves no time for fee quote and simulation;
+        // a planning error at the deadline is the deadline, not a routing verdict.
+        if Instant::now() >= deadline {
+            rec.loss = Some(LossReason::RpcDeadline);
+            rec.reason = Some(format!(
+                "RPC_DEADLINE: candidate network deadline during planning ({})",
+                match &planning_result {
+                    Ok(p) => format!("{} plan(s)", p.len()),
+                    Err(e) => e.clone(),
+                }
+            ));
+            return rec.with_timeline(&tl);
+        }
         let plans = match planning_result {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => {
@@ -450,8 +474,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // D2: fee quotes of this evaluation (one blockhash, one slot) keyed by the message hash
         // of the built bytes: funding classes with byte-identical transactions (NoSwap and
         // Preheld inventory) share one quote; nothing is reused across evaluations.
-        let mut fee_quotes: Vec<(solana_sdk::hash::Hash, Option<submit::MessageFeeQuote>)> =
-            Vec::new();
+        let mut fee_quotes: Vec<(
+            solana_sdk::hash::Hash,
+            Result<submit::MessageFeeQuote, submit::FeeQuoteError>,
+        )> = Vec::new();
         for mut plan in plans {
             // E2: the gate decides on the steps of the actually built instructions (receivership
             // TX and every prerequisite TX), immediately before they are signed.
@@ -595,7 +621,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 && plan.prerequisite_txs.is_empty()
                 && plan.tip == 0
             {
-                if self.clock.now_ns() >= network_deadline {
+                if Instant::now() >= deadline {
                     rec.loss = Some(LossReason::RpcDeadline);
                     rec.reason = Some(
                         "RPC_DEADLINE: candidate network deadline before the fee quote".into(),
@@ -611,10 +637,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     Some(quote) => quote,
                     None => {
                         let fee_started = Instant::now();
-                        let quote = self.submitter.fee_for_message(&built.tx);
+                        let quote = self.submitter.fee_for_message(&built.tx, deadline);
                         // [MT0] H6: would a local fee model have matched the RPC fee?
                         // (measurement only, once per RPC quote)
-                        if let Some(q) = &quote {
+                        if let Ok(q) = &quote {
                             match local_fee_estimate_lamports(&built.tx) {
                                 Some(local) if local == q.lamports => darkbot_common::mt0::MT0
                                     .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
@@ -634,7 +660,26 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                         quote
                     }
                 };
-                fee.filter(|q| q.message_hash == built.tx.message.hash().to_string())
+                // N2: a deadline or a refused call ends the evaluation with its own cause; an
+                // unavailable quote or a transport failure leaves the fee UNKNOWN (never 0).
+                match fee {
+                    Err(submit::FeeQuoteError::Deadline) => {
+                        rec.loss = Some(LossReason::RpcDeadline);
+                        rec.reason = Some(
+                            "RPC_DEADLINE: candidate network deadline in the fee quote".into(),
+                        );
+                        return rec.with_timeline(&tl);
+                    }
+                    Err(submit::FeeQuoteError::BudgetRejected(code)) => {
+                        rec.loss = Some(LossReason::RpcBudget);
+                        rec.reason = Some(format!("RPC_BUDGET: fee quote refused ({code})"));
+                        return rec.with_timeline(&tl);
+                    }
+                    Err(_) => None,
+                    Ok(q) => {
+                        Some(q).filter(|q| q.message_hash == built.tx.message.hash().to_string())
+                    }
+                }
             } else {
                 None
             };
@@ -851,7 +896,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.sign_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
             rec.path = Some(SubmissionPath::JitoBundle.as_str().into());
         }
-        if self.clock.now_ns() >= network_deadline {
+        if Instant::now() >= deadline {
             rec.loss = Some(LossReason::RpcDeadline);
             rec.reason =
                 Some("RPC_DEADLINE: candidate network deadline before the simulation".into());
@@ -859,9 +904,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         }
         let simulation_started = Instant::now();
         let sim = if use_bundle {
-            self.submitter.simulate_bundle(&bundle_txs)
+            self.submitter.simulate_bundle(&bundle_txs, deadline)
         } else {
-            self.submitter.simulate(&built.tx)
+            self.submitter.simulate(&built.tx, deadline)
         };
         record_timing(
             &SIMULATION_CALLS,
@@ -876,6 +921,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             SimResult::Ok { units_consumed } => {
                 rec.simulation_result = Some("PASS".into());
                 rec.simulated_cu = units_consumed;
+            }
+            // N2: no simulation result exists; the cause is our own network bound.
+            SimResult::Deadline => {
+                rec.loss = Some(LossReason::RpcDeadline);
+                rec.reason =
+                    Some("RPC_DEADLINE: candidate network deadline in the simulation".into());
+                return rec.with_timeline(&tl);
+            }
+            SimResult::BudgetRejected(code) => {
+                rec.loss = Some(LossReason::RpcBudget);
+                rec.reason = Some(format!("RPC_BUDGET: simulation refused ({code})"));
+                return rec.with_timeline(&tl);
             }
             other => {
                 rec.simulation_result = Some(format!("{:?}", other));

@@ -690,14 +690,18 @@ impl SubmissionAdapter for CountingSubmitter {
     fn path(&self) -> SubmissionPath {
         SubmissionPath::Rpc
     }
-    fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<MessageFeeQuote> {
-        Some(MessageFeeQuote {
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        _: std::time::Instant,
+    ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
+        Ok(MessageFeeQuote {
             message_hash: tx.message.hash().to_string(),
             context_slot: 1,
             lamports: 200,
         })
     }
-    fn simulate(&self, tx: &VersionedTransaction) -> SimResult {
+    fn simulate(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
         assert!(
             tx.verify_and_hash_message().is_ok(),
             "simulate exactly signed bytes"
@@ -706,6 +710,9 @@ impl SubmissionAdapter for CountingSubmitter {
         SimResult::Ok {
             units_consumed: Some(100),
         }
+    }
+    fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
+        SimResult::Unavailable("test adapter: no bundle simulation".into())
     }
     fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
         self.calls.fetch_add(1, Ordering::Relaxed);
@@ -792,6 +799,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
         _: &Pubkey,
         _: u64,
         _: u64,
+        _: std::time::Instant,
     ) -> Result<Vec<crate::execution::pipeline::ReceivershipPlan>, String> {
         use darkbot_project0::planner::RouteKind;
         let t = test_table();
@@ -1037,8 +1045,14 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
             test_table()
         }
-        fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
-            let mut plans = TestBuilder.plans(a, now, slot)?;
+        fn plans(
+            &self,
+            a: &Pubkey,
+            now: u64,
+            slot: u64,
+            deadline: std::time::Instant,
+        ) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut plans = TestBuilder.plans(a, now, slot, deadline)?;
             plans[0].tip = 7;
             Ok(plans)
         }
@@ -1137,8 +1151,14 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
         fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
             test_table()
         }
-        fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
-            let mut plans = TestBuilder.plans(a, now, slot)?;
+        fn plans(
+            &self,
+            a: &Pubkey,
+            now: u64,
+            slot: u64,
+            deadline: std::time::Instant,
+        ) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut plans = TestBuilder.plans(a, now, slot, deadline)?;
             (self.0)(&mut plans[0].instructions);
             Ok(plans)
         }
@@ -1253,18 +1273,25 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
         fn path(&self) -> SubmissionPath {
             SubmissionPath::Rpc
         }
-        fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<MessageFeeQuote> {
+        fn fee_for_message(
+            &self,
+            tx: &VersionedTransaction,
+            _: std::time::Instant,
+        ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
             self.0.fetch_add(1, Ordering::Relaxed);
-            Some(MessageFeeQuote {
+            Ok(MessageFeeQuote {
                 message_hash: tx.message.hash().to_string(),
                 context_slot: 1,
                 lamports: 5_000,
             })
         }
-        fn simulate(&self, _: &VersionedTransaction) -> SimResult {
+        fn simulate(&self, _: &VersionedTransaction, _: std::time::Instant) -> SimResult {
             SimResult::Ok {
                 units_consumed: Some(100),
             }
+        }
+        fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
+            SimResult::Unavailable("test adapter: no bundle simulation".into())
         }
         fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
             panic!("must never broadcast")
@@ -1285,10 +1312,16 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
         fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
             test_table()
         }
-        fn plans(&self, a: &Pubkey, now: u64, slot: u64) -> Result<Vec<ReceivershipPlan>, String> {
-            let mut first = TestBuilder.plans(a, now, slot)?.remove(0);
+        fn plans(
+            &self,
+            a: &Pubkey,
+            now: u64,
+            slot: u64,
+            deadline: std::time::Instant,
+        ) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut first = TestBuilder.plans(a, now, slot, deadline)?.remove(0);
             first.input.funding = FundingClass::NoSwapInventory;
-            let mut second = TestBuilder.plans(a, now, slot)?.remove(0);
+            let mut second = TestBuilder.plans(a, now, slot, deadline)?.remove(0);
             second.input.funding = FundingClass::PreheldInventory;
             if self.0 {
                 // A different transaction (one more byte of data): its own quote.
@@ -2011,19 +2044,26 @@ impl SubmissionAdapter for SlowSubmitter {
     fn path(&self) -> SubmissionPath {
         SubmissionPath::Rpc
     }
-    fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<MessageFeeQuote> {
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        _: std::time::Instant,
+    ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
         std::thread::sleep(self.delay);
-        Some(MessageFeeQuote {
+        Ok(MessageFeeQuote {
             message_hash: tx.message.hash().to_string(),
             context_slot: 1,
             lamports: 200,
         })
     }
-    fn simulate(&self, _: &VersionedTransaction) -> SimResult {
+    fn simulate(&self, _: &VersionedTransaction, _: std::time::Instant) -> SimResult {
         std::thread::sleep(self.delay);
         SimResult::Ok {
             units_consumed: Some(100),
         }
+    }
+    fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
+        SimResult::Unavailable("test adapter: no bundle simulation".into())
     }
     fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
         panic!("must never broadcast")

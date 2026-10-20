@@ -16,6 +16,10 @@ use spl_associated_token_account::{
 };
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::time::{Duration, Instant};
+
+/// Upper bound of one Jupiter request (also when the candidate deadline is further away).
+const REQUEST_TIMEOUT: Duration = Duration::from_millis(1500);
 
 const DEFAULT_BASE: &str = "https://api.jup.ag/swap/v2";
 const JUP_PROGRAM: &str = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
@@ -46,7 +50,7 @@ impl JupiterV2RouteProvider {
         }
         Ok(Self {
             client: reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_millis(1500))
+                .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(|e| format!("jupiter client: {e}"))?,
             base_url: DEFAULT_BASE.into(),
@@ -59,6 +63,13 @@ impl JupiterV2RouteProvider {
         })
     }
 
+    /// Tests point the provider at a loopback endpoint.
+    #[cfg(test)]
+    pub(crate) fn with_base_url(mut self, base_url: String) -> Self {
+        self.base_url = base_url;
+        self
+    }
+
     fn exact_in(
         &self,
         from_mint: &Pubkey,
@@ -66,7 +77,13 @@ impl JupiterV2RouteProvider {
         amount: u64,
         prewarmed_atas: &[PrewarmedAta],
         max_accounts: u8,
+        deadline: Instant,
     ) -> Result<Option<Route>, String> {
+        // N2: no request after the candidate deadline; one in flight ends at it.
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("jupiter /build: DEADLINE (not started)".into());
+        }
         if amount == 0 {
             return Err("jupiter exact-in rejected locally: amount=0".into());
         }
@@ -77,19 +94,23 @@ impl JupiterV2RouteProvider {
             ));
         }
         let url = format!("{}/build", self.base_url.trim_end_matches('/'));
-        let mut req = self.client.get(url).query(&[
-            ("inputMint", from_mint.to_string()),
-            ("outputMint", to_mint.to_string()),
-            ("amount", amount.to_string()),
-            ("taker", self.taker.to_string()),
-            ("slippageBps", self.slippage_bps.to_string()),
-            (
-                "maxAccounts",
-                max_accounts.min(self.max_accounts).max(1).to_string(),
-            ),
-            ("wrapAndUnwrapSol", "false".to_string()),
-            ("forJitoBundle", self.for_jito_bundle.to_string()),
-        ]);
+        let mut req = self
+            .client
+            .get(url)
+            .timeout(remaining.min(REQUEST_TIMEOUT))
+            .query(&[
+                ("inputMint", from_mint.to_string()),
+                ("outputMint", to_mint.to_string()),
+                ("amount", amount.to_string()),
+                ("taker", self.taker.to_string()),
+                ("slippageBps", self.slippage_bps.to_string()),
+                (
+                    "maxAccounts",
+                    max_accounts.min(self.max_accounts).max(1).to_string(),
+                ),
+                ("wrapAndUnwrapSol", "false".to_string()),
+                ("forJitoBundle", self.for_jito_bundle.to_string()),
+            ]);
         if self.fast {
             req = req.query(&[("mode", "fast")]);
         }
@@ -112,7 +133,9 @@ impl JupiterV2RouteProvider {
                     outcome,
                 );
                 // B13: the transport error is classified; its text may carry the URL.
-                let class = if e.is_timeout() {
+                let class = if Instant::now() >= deadline {
+                    "DEADLINE"
+                } else if e.is_timeout() {
                     "TIMEOUT"
                 } else if e.is_connect() {
                     "CONNECT"
@@ -209,6 +232,7 @@ impl RouteProvider for JupiterV2RouteProvider {
         to_mint: &Pubkey,
         amount_in: u64,
         prewarmed_atas: &[PrewarmedAta],
+        deadline: Instant,
     ) -> Result<Option<Route>, String> {
         self.exact_in(
             from_mint,
@@ -216,6 +240,7 @@ impl RouteProvider for JupiterV2RouteProvider {
             amount_in,
             prewarmed_atas,
             self.max_accounts,
+            deadline,
         )
     }
 
@@ -230,8 +255,16 @@ impl RouteProvider for JupiterV2RouteProvider {
         amount_in: u64,
         prewarmed_atas: &[PrewarmedAta],
         max_accounts: u8,
+        deadline: Instant,
     ) -> Result<Option<Route>, String> {
-        self.exact_in(from_mint, to_mint, amount_in, prewarmed_atas, max_accounts)
+        self.exact_in(
+            from_mint,
+            to_mint,
+            amount_in,
+            prewarmed_atas,
+            max_accounts,
+            deadline,
+        )
     }
 
     fn quote_exact_out(
@@ -239,6 +272,7 @@ impl RouteProvider for JupiterV2RouteProvider {
         _from_mint: &Pubkey,
         _to_mint: &Pubkey,
         _amount_out: u64,
+        _deadline: Instant,
     ) -> Result<Option<Route>, String> {
         // Swap V2 /build docs currently specify amount as input amount and do not document an
         // ExactOut request parameter. JIT remains fail-closed until an exact-output route is proven.

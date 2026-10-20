@@ -918,6 +918,10 @@ mod tests {
         };
         (path, a, i, c)
     }
+    /// A deadline no test simulation reaches.
+    fn test_deadline() -> std::time::Instant {
+        std::time::Instant::now() + std::time::Duration::from_secs(60)
+    }
     struct RecordingAdapter {
         path: darkbot_solana::submit::SubmissionPath,
         simulation: darkbot_solana::submit::SimResult,
@@ -932,15 +936,27 @@ mod tests {
         fn supports_bundle(&self) -> bool {
             self.path != darkbot_solana::submit::SubmissionPath::Rpc
         }
+        fn fee_for_message(
+            &self,
+            _: &solana_sdk::transaction::VersionedTransaction,
+            _: std::time::Instant,
+        ) -> Result<darkbot_solana::submit::MessageFeeQuote, darkbot_solana::submit::FeeQuoteError>
+        {
+            Err(darkbot_solana::submit::FeeQuoteError::Unavailable(
+                "recording adapter: no fee quote",
+            ))
+        }
         fn simulate(
             &self,
             tx: &solana_sdk::transaction::VersionedTransaction,
+            deadline: std::time::Instant,
         ) -> darkbot_solana::submit::SimResult {
-            self.simulate_bundle(std::slice::from_ref(tx))
+            self.simulate_bundle(std::slice::from_ref(tx), deadline)
         }
         fn simulate_bundle(
             &self,
             txs: &[solana_sdk::transaction::VersionedTransaction],
+            _: std::time::Instant,
         ) -> darkbot_solana::submit::SimResult {
             *self.simulated.borrow_mut() = txs
                 .iter()
@@ -1044,7 +1060,7 @@ mod tests {
                 i.signed_wire_sha256 = payload.wire_sha256().into();
                 c.bundle_simulated = path_kind == SubmissionPath::JitoBundle;
                 let adapter = adapter(path_kind, failure);
-                let simulated = payload.simulate(&adapter).unwrap();
+                let simulated = payload.simulate(&adapter, test_deadline()).unwrap();
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
                 j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
                     .unwrap();
@@ -1208,8 +1224,8 @@ mod tests {
         i.signatures = original.signatures().to_vec();
         i.signed_wire_sha256 = original.wire_sha256().into();
         let adapter = adapter(SubmissionPath::JitoBundle, 0);
-        let original = original.simulate(&adapter).unwrap();
-        let reversed = reversed.simulate(&adapter).unwrap();
+        let original = original.simulate(&adapter, test_deadline()).unwrap();
+        let reversed = reversed.simulate(&adapter, test_deadline()).unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         assert!(j
             .reserve_payload(a.clone(), i.clone(), &c, &reversed)
@@ -1237,7 +1253,7 @@ mod tests {
                 payer.pubkey(),
             )
             .unwrap();
-            assert!(p.simulate(&a).is_err());
+            assert!(p.simulate(&a, test_deadline()).is_err());
             assert_eq!(a.calls.get(), 0);
         }
         let a = adapter(SubmissionPath::Rpc, 0);
@@ -1247,7 +1263,7 @@ mod tests {
             payer.pubkey(),
         )
         .unwrap();
-        assert!(p.simulate(&a).is_err());
+        assert!(p.simulate(&a, test_deadline()).is_err());
         assert!(a.simulated.borrow().is_empty());
     }
     /// A pre-binary `<wallet>.json` journal exactly as the former JSON writer stored it.

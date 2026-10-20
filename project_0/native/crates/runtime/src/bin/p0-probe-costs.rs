@@ -13,7 +13,7 @@ use solana_sdk::{
 };
 use std::{env, error::Error, str::FromStr};
 fn main() -> Result<(), Box<dyn Error>> {
-    let adapter = RpcSubmitter::new(env::var("P0_RPC_URL")?, false);
+    let adapter = RpcSubmitter::for_candidates(env::var("P0_RPC_URL")?, false)?;
     let payer = tx::load_keypair_json(&env::var("P0_KEYPAIR_PATH")?)?;
     if payer.pubkey() != Pubkey::from_str(&env::var("P0_EXPECTED_PUBKEY")?)? {
         return Err("signer identity mismatch".into());
@@ -51,7 +51,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
         let mut built = tx::build(&plan, hash, &TxLimits::default())?;
         tx::sign(&mut built, &[&payer])?;
-        let quote = adapter.fee_for_message(&built.tx);
+        // N2: one probe call, bounded like the provider's own per-call limit.
+        let quote = adapter.fee_for_message(
+            &built.tx,
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+        );
         let sim = adapter
             .client()
             .simulate_transaction_with_config(
@@ -63,7 +67,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 },
             )
             .map_err(|_| "simulation RPC failed")?;
-        scenarios.push(json!({"case":name,"fee_quote":quote,"requested_cu_limit":plan.resources.compute_unit_limit,
+        scenarios.push(json!({"case":name,"fee_quote":quote.as_ref().ok(),
+            "fee_quote_error":quote.as_ref().err().map(|e| format!("{e:?}")),"requested_cu_limit":plan.resources.compute_unit_limit,
             "cu_price_micro_lamports":price,"priority_lamports_from_requested_limit":plan.resources.priority_total_lamports(),
             "simulation":sim}));
     }

@@ -69,9 +69,28 @@ impl std::error::Error for SubmitError {}
 /// Simulationsergebnis (Simulate-first). `Unavailable` ist **kein** Freifahrtschein.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SimResult {
-    Ok { units_consumed: Option<u64> },
+    Ok {
+        units_consumed: Option<u64>,
+    },
     Failed(SimulationFailure),
     Unavailable(String),
+    /// N2: the caller's deadline passed before or during the simulation (nothing simulated).
+    Deadline,
+    /// N2: the provider budget refused the simulation call.
+    BudgetRejected(&'static str),
+}
+
+/// N2: why there is no fee quote — a timeout or a refused call never looks like "no quote".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FeeQuoteError {
+    /// The adapter has no fee quote for this path, or the node returned none for the message.
+    Unavailable(&'static str),
+    /// The provider budget refused the call.
+    BudgetRejected(&'static str),
+    /// The caller's deadline passed before or during the call.
+    Deadline,
+    /// Transport, HTTP, decode or remote failure before the deadline.
+    Transport(&'static str),
 }
 
 /// F1: a failed simulation. `code` is the categorized, secret-free cause; the program logs are
@@ -165,11 +184,16 @@ pub struct MessageFeeQuote {
     pub lamports: u64,
 }
 
+/// N2: the network operations a candidate evaluation performs (`fee_for_message`, `simulate`,
+/// `simulate_bundle`) take the candidate's monotonic deadline and have no default: every adapter
+/// states how it honours it (nothing starts after the deadline; a call in flight ends at it).
 pub trait SubmissionAdapter {
     fn path(&self) -> SubmissionPath;
-    fn fee_for_message(&self, _tx: &VersionedTransaction) -> Option<MessageFeeQuote> {
-        None
-    }
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> Result<MessageFeeQuote, FeeQuoteError>;
     /// [FIX-14] Fähigkeit, nicht Pfad: nur Adapter mit `true` dürfen Prerequisite-/Tip-Bundles senden.
     fn supports_bundle(&self) -> bool {
         false
@@ -179,10 +203,12 @@ pub trait SubmissionAdapter {
     fn supports_tx_version(&self, v: crate::tx::BuildVersion) -> bool {
         !matches!(v, crate::tx::BuildVersion::V1)
     }
-    /// [FIX-15] Bundle-Simulation (sequenziell, atomar). Default: Unavailable → fail closed.
-    fn simulate_bundle(&self, _txs: &[VersionedTransaction]) -> SimResult {
-        SimResult::Unavailable("no bundle simulation on this adapter".into())
-    }
+    /// [FIX-15] Bundle-Simulation (sequenziell, atomar); without a bundle simulator: Unavailable.
+    fn simulate_bundle(
+        &self,
+        txs: &[VersionedTransaction],
+        deadline: std::time::Instant,
+    ) -> SimResult;
     fn submit(
         &self,
         tx: &VersionedTransaction,
@@ -200,10 +226,8 @@ pub trait SubmissionAdapter {
             self.path().as_str()
         )))
     }
-    /// [FIX-6] Simulate-first auf **genau** der TX, die gesendet wird. Default: Unavailable.
-    fn simulate(&self, _tx: &VersionedTransaction) -> SimResult {
-        SimResult::Unavailable("no simulation on this adapter".into())
-    }
+    /// [FIX-6] Simulate-first auf **genau** der TX, die gesendet wird.
+    fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult;
 }
 
 /// [FIX-4] Jito-Tip als eigene legacy-TX: ein System-Transfer an einen Tip-Account.

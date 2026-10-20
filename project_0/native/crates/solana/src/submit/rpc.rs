@@ -71,6 +71,10 @@ fn submission_error(e: &solana_client::client_error::ClientError) -> SubmitError
 
 pub struct RpcSubmitter {
     rpc: RpcClient,
+    /// N2: the deadline-bound transport of candidate fee quotes and simulations; only adapters of
+    /// the candidate path have one (`for_candidates`), others answer those calls `Unavailable`
+    /// without a network call.
+    candidate: Option<crate::provider::DeadlineRpc>,
     /// Preflight kostet Zeit; für Long-Tail kann es an bleiben (Revert-Kosten sparen).
     pub skip_preflight: bool,
     pub max_retries: Option<usize>,
@@ -80,7 +84,39 @@ pub struct RpcSubmitter {
 pub type PostAccountsSimulation = (u64, i64, Vec<(Pubkey, Account)>, Option<u64>);
 
 impl RpcSubmitter {
+    /// An adapter without a candidate transport (projection workers, tools that only submit or
+    /// reconcile): `fee_for_message`/`simulate` answer `Unavailable` without a network call.
     pub fn new(url: String, skip_preflight: bool) -> Self {
+        Self::with_candidate(url, skip_preflight, None)
+    }
+
+    /// N2: the adapter of the candidate path: fee quotes and simulations through the
+    /// deadline-bound transport against the process provider budget (`shared()`).
+    pub fn for_candidates(url: String, skip_preflight: bool) -> Result<Self, String> {
+        let candidate =
+            crate::provider::DeadlineRpc::new(url.clone(), crate::provider::Workload::Simulation)?;
+        Ok(Self::with_candidate(url, skip_preflight, Some(candidate)))
+    }
+
+    /// N2: the candidate adapter against an explicit provider budget.
+    pub fn with_budget(
+        url: String,
+        skip_preflight: bool,
+        budget: std::sync::Arc<crate::provider::Budget>,
+    ) -> Result<Self, String> {
+        let candidate = crate::provider::DeadlineRpc::with_budget(
+            url.clone(),
+            crate::provider::Workload::Simulation,
+            budget,
+        )?;
+        Ok(Self::with_candidate(url, skip_preflight, Some(candidate)))
+    }
+
+    fn with_candidate(
+        url: String,
+        skip_preflight: bool,
+        candidate: Option<crate::provider::DeadlineRpc>,
+    ) -> Self {
         RpcSubmitter {
             rpc: crate::provider::rpc_client(
                 url,
@@ -88,9 +124,17 @@ impl RpcSubmitter {
                 CommitmentConfig::confirmed(),
                 crate::provider::Workload::Simulation,
             ),
+            candidate,
             skip_preflight,
             max_retries: Some(0),
         }
+    }
+
+    /// N2: requests the candidate transport has sent (fee quotes and simulations).
+    pub fn candidate_requests(&self) -> usize {
+        self.candidate
+            .as_ref()
+            .map_or(0, crate::provider::DeadlineRpc::request_count)
     }
 
     pub fn client(&self) -> &RpcClient {
@@ -194,28 +238,38 @@ impl RpcSubmitter {
 }
 
 impl SubmissionAdapter for RpcSubmitter {
-    fn fee_for_message(&self, tx: &VersionedTransaction) -> Option<super::MessageFeeQuote> {
+    /// N2: bounded by `deadline` (permit, attempts, request, response read); every failure is
+    /// typed, a timeout is never "no quote".
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> Result<super::MessageFeeQuote, super::FeeQuoteError> {
         use base64::Engine;
+        let Some(candidate) = &self.candidate else {
+            return Err(super::FeeQuoteError::Unavailable("NO_CANDIDATE_TRANSPORT"));
+        };
         let mt0_start = std::time::Instant::now(); // [MT0]
-        let sent = self.rpc.send::<solana_client::rpc_response::Response<Option<u64>>>(
+        let sent = candidate.call(
             solana_client::rpc_request::RpcRequest::GetFeeForMessage,
             serde_json::json!([base64::engine::general_purpose::STANDARD.encode(tx.message.serialize()),
                 {"commitment":"confirmed"}]),
+            deadline,
         );
-        let mt0_outcome = match &sent {
-            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
-        };
         darkbot_common::mt0::MT0.record_remote(
             darkbot_common::mt0::RemoteClass::FeeRpc,
             mt0_start.elapsed(),
-            mt0_outcome,
+            remote_outcome(&sent),
         );
-        let response = sent.ok()?;
-        Some(super::MessageFeeQuote {
+        let response: solana_client::rpc_response::Response<Option<u64>> =
+            serde_json::from_value(sent.map_err(fee_error)?)
+                .map_err(|_| super::FeeQuoteError::Transport("RPC_FEE_DECODE"))?;
+        Ok(super::MessageFeeQuote {
             message_hash: tx.message.hash().to_string(),
             context_slot: response.context.slot,
-            lamports: response.value?,
+            lamports: response
+                .value
+                .ok_or(super::FeeQuoteError::Unavailable("FEE_FOR_MESSAGE_NULL"))?,
         })
     }
 
@@ -262,7 +316,8 @@ impl SubmissionAdapter for RpcSubmitter {
     }
 
     /// [FIX-6] Simulation derselben signierten TX; kein Rebuild zwischen Simulation und Send.
-    fn simulate(&self, tx: &VersionedTransaction) -> SimResult {
+    /// N2: bounded by `deadline` like the fee quote.
+    fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
         let cfg = RpcSimulateTransactionConfig {
             sig_verify: true,
             replace_recent_blockhash: false,
@@ -272,37 +327,91 @@ impl SubmissionAdapter for RpcSubmitter {
             min_context_slot: None,
             inner_instructions: false,
         };
-        let mt0_start = std::time::Instant::now(); // [MT0]
-        let simulated = self.rpc.simulate_transaction_with_config(tx, cfg);
-        let mt0_outcome = match &simulated {
-            Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.to_string()),
+        let Some(candidate) = &self.candidate else {
+            return SimResult::Unavailable("NO_CANDIDATE_TRANSPORT".into());
         };
+        let Ok(encoded) = super::encode_base64(tx) else {
+            return SimResult::Unavailable("SIMULATION_ENCODE".into());
+        };
+        let mt0_start = std::time::Instant::now(); // [MT0]
+        let simulated = candidate.call(
+            solana_client::rpc_request::RpcRequest::SimulateTransaction,
+            serde_json::json!([encoded, cfg]),
+            deadline,
+        );
         darkbot_common::mt0::MT0.record_remote(
             darkbot_common::mt0::RemoteClass::Simulation,
             mt0_start.elapsed(),
-            mt0_outcome,
+            remote_outcome(&simulated),
         );
-        match simulated {
-            Ok(r) => match r.value.err {
-                None => SimResult::Ok {
-                    units_consumed: r.value.units_consumed,
-                },
-                Some(e) => {
-                    // F1: bounded, redacted logs for the native journal only.
-                    let (logs, log_lines, logs_truncated) =
-                        super::bounded_simulation_logs(r.value.logs.as_deref());
-                    SimResult::Failed(super::SimulationFailure {
-                        code: format!("RPC_SIMULATION_FAILED {e:?}"),
-                        units_consumed: r.value.units_consumed,
-                        logs,
-                        log_lines,
-                        logs_truncated,
-                    })
-                }
+        let value = match simulated {
+            Ok(v) => v,
+            Err(crate::provider::CallError::Deadline(_)) => return SimResult::Deadline,
+            Err(crate::provider::CallError::Budget(code)) => {
+                return SimResult::BudgetRejected(code)
+            }
+            Err(crate::provider::CallError::Transport(code)) => {
+                return SimResult::Unavailable(code.into())
+            }
+            Err(crate::provider::CallError::Remote(e)) => {
+                return SimResult::Unavailable(safe_rpc_error(&e))
+            }
+        };
+        let Ok(r) = serde_json::from_value::<
+            solana_client::rpc_response::Response<
+                solana_client::rpc_response::RpcSimulateTransactionResult,
+            >,
+        >(value) else {
+            return SimResult::Unavailable("RPC_SIMULATION_DECODE".into());
+        };
+        match r.value.err {
+            None => SimResult::Ok {
+                units_consumed: r.value.units_consumed,
             },
-            Err(e) => SimResult::Unavailable(safe_rpc_error(&e)),
+            Some(e) => {
+                // F1: bounded, redacted logs for the native journal only.
+                let (logs, log_lines, logs_truncated) =
+                    super::bounded_simulation_logs(r.value.logs.as_deref());
+                SimResult::Failed(super::SimulationFailure {
+                    code: format!("RPC_SIMULATION_FAILED {e:?}"),
+                    units_consumed: r.value.units_consumed,
+                    logs,
+                    log_lines,
+                    logs_truncated,
+                })
+            }
         }
+    }
+
+    /// The RPC path has no bundle simulation (no network call).
+    fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
+        SimResult::Unavailable("no bundle simulation on the RPC path".into())
+    }
+}
+
+/// N2: the fee-quote error of a failed candidate call.
+fn fee_error(e: crate::provider::CallError) -> super::FeeQuoteError {
+    use crate::provider::CallError as C;
+    match e {
+        C::Deadline(_) => super::FeeQuoteError::Deadline,
+        C::Budget(code) => super::FeeQuoteError::BudgetRejected(code),
+        C::Transport(code) => super::FeeQuoteError::Transport(code),
+        C::Remote(_) => super::FeeQuoteError::Transport("RPC_REMOTE_ERROR"),
+    }
+}
+
+/// [MT0] outcome class of a candidate call (measurement only).
+fn remote_outcome(
+    r: &Result<serde_json::Value, crate::provider::CallError>,
+) -> darkbot_common::mt0::RemoteOutcome {
+    use crate::provider::CallError as C;
+    use darkbot_common::mt0::RemoteOutcome as O;
+    match r {
+        Ok(_) => O::Ok,
+        Err(C::Deadline(_)) => O::Timeout,
+        Err(C::Budget("RPC_RATE_LIMIT")) => O::RateLimited,
+        Err(C::Remote(e)) => O::classify_text(&e.to_string()),
+        Err(_) => O::Error,
     }
 }
 

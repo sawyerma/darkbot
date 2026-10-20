@@ -212,9 +212,28 @@ impl SubmissionAdapter for JitoAdapter {
         JitoAdapter::submit_bundle(self, txs, t_handoff_ns)
     }
 
+    /// The block-engine path quotes no message fee (no network call).
+    fn fee_for_message(
+        &self,
+        _: &VersionedTransaction,
+        _: std::time::Instant,
+    ) -> Result<super::MessageFeeQuote, super::FeeQuoteError> {
+        Err(super::FeeQuoteError::Unavailable("JITO_PATH_NO_FEE_QUOTE"))
+    }
+
+    /// A single transaction is simulated only as part of its bundle (no network call).
+    fn simulate(&self, _: &VersionedTransaction, _: std::time::Instant) -> super::SimResult {
+        super::SimResult::Unavailable("no single-transaction simulation on the Jito path".into())
+    }
+
     /// [FIX-15] `simulateBundle` (Jito-RPC-Methode; VERIFY Endpunkt/Antwortformat). Qualifiziert die
     /// sequenzielle Ausführung aller TXs; jeder Fehler → Failed; nicht erreichbar → Unavailable.
-    fn simulate_bundle(&self, txs: &[VersionedTransaction]) -> super::SimResult {
+    /// N2: bounded by `deadline` (request and response read); nothing starts after it.
+    fn simulate_bundle(
+        &self,
+        txs: &[VersionedTransaction],
+        deadline: std::time::Instant,
+    ) -> super::SimResult {
         let encoded: Result<Vec<String>, _> = txs.iter().map(super::encode_base64).collect();
         let Ok(encoded) = encoded else {
             return super::SimResult::Unavailable("encode".into());
@@ -224,10 +243,15 @@ impl SubmissionAdapter for JitoAdapter {
                 "no bundle simulator configured (P0_BUNDLE_SIM_RPC_URL)".into(),
             );
         };
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return super::SimResult::Deadline;
+        }
         let body = json!({"jsonrpc":"2.0","id":1,"method":"simulateBundle","params":[{"encodedTransactions": encoded}]});
         let call: Result<Value, String> = self
             .http
             .post(sim)
+            .timeout(remaining)
             .json(&body)
             .send()
             .map_err(|e| super::rpc::safe_http_error(&e).to_string())
@@ -265,6 +289,7 @@ impl SubmissionAdapter for JitoAdapter {
                     super::SimResult::Failed("BUNDLE_SIMULATION_FAILED".into())
                 }
             }
+            Err(_) if std::time::Instant::now() >= deadline => super::SimResult::Deadline,
             Err(e) => super::SimResult::Unavailable(e.to_string()),
         }
     }
@@ -387,7 +412,7 @@ mod secret_tests {
         let a = JitoAdapter::new(url.into(), Some(url.into()), Duration::from_millis(100)).unwrap();
         let error = a.tip_accounts().unwrap_err().to_string();
         assert!(!error.contains("SECRET") && !error.contains("127.0.0.1"));
-        let result = a.simulate_bundle(&[]);
+        let result = a.simulate_bundle(&[], std::time::Instant::now() + Duration::from_secs(5));
         assert!(matches!(result, super::super::SimResult::Unavailable(_)));
         assert!(!format!("{result:?}").contains("SECRET"));
         let remote =

@@ -424,10 +424,11 @@ pub(super) fn prepare(
     .iter()
     .map(|s| Pubkey::from_str(s))
     .collect::<Result<_, _>>()?;
-    let submitter = crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::new(
+    // N2: the owner's candidate path quotes and simulates through the deadline-bound transport.
+    let submitter = crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::for_candidates(
         config::require("P0_RPC_URL")?,
         true,
-    ));
+    )?);
     let failed_costs = FailedCostMatrix::default(); // alle None → Unknown → nicht handelbar, bis gemessen
     #[cfg(feature = "crate_health")]
     let routes = JupiterV2RouteProvider::new(

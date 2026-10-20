@@ -26,6 +26,7 @@ pub mod p0 {
     use solana_sdk::instruction::{AccountMeta, Instruction};
     use solana_sdk::pubkey::Pubkey;
     use spl_associated_token_account::get_associated_token_address_with_program_id;
+    use std::time::Instant;
 
     /// B4: account size the pinned program allocates for a LiquidationRecord
     /// (`init_liquid_record.rs`: `space = 8 + size_of::<LiquidationRecord>()`).
@@ -340,6 +341,8 @@ pub mod p0 {
         pub token_program: Pubkey,
     }
 
+    /// N2: every quote takes the candidate's monotonic deadline; a provider starts no request
+    /// after it and ends one in flight at it.
     pub trait RouteProvider {
         /// ExactIn: ZERO_PREFUND (seized asset → liability) mit `withdraw_amount` als Input.
         fn quote_exact_in(
@@ -348,10 +351,13 @@ pub mod p0 {
             to_mint: &Pubkey,
             amount_in: u64,
             prewarmed_atas: &[PrewarmedAta],
+            deadline: Instant,
         ) -> Result<Option<Route>, String>;
         fn max_accounts(&self) -> u8 {
             64
         }
+        /// ExactIn with an account cap; a provider without caps answers the uncapped quote under
+        /// the same deadline.
         fn quote_exact_in_with_budget(
             &self,
             from_mint: &Pubkey,
@@ -359,8 +365,9 @@ pub mod p0 {
             amount_in: u64,
             prewarmed_atas: &[PrewarmedAta],
             _max_accounts: u8,
+            deadline: Instant,
         ) -> Result<Option<Route>, String> {
-            self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas)
+            self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
         }
         /// ExactOut bleibt Provider-Capability. Ein Provider ohne belegten ExactOut-Pfad liefert None.
         fn quote_exact_out(
@@ -368,6 +375,7 @@ pub mod p0 {
             from_mint: &Pubkey,
             to_mint: &Pubkey,
             amount_out: u64,
+            deadline: Instant,
         ) -> Result<Option<Route>, String>;
     }
 
@@ -398,6 +406,7 @@ pub mod p0 {
     /// Bound remote work to six requests. Every changed quote is revalidated and repriced.
     fn quote_fitting_route<T>(
         initial_cap: u8,
+        deadline: Instant,
         mut quote: impl FnMut(u8) -> Result<Option<Route>, String>,
         mut compile: impl FnMut(&Route) -> Result<T, BuildError>,
     ) -> Result<Option<(Route, T)>, String> {
@@ -405,6 +414,10 @@ pub mod p0 {
         let mut rejected = Vec::new();
         darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RouteFitCalls, 1); // [MT0]
         for attempt in 0..6 {
+            // N2: no re-quote after the candidate deadline.
+            if Instant::now() >= deadline {
+                return Err(format!("ROUTE_FIT_DEADLINE after {attempt} attempt(s)"));
+            }
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RouteFitAttempts, 1); // [MT0]
             let Some(route) = quote(cap)? else {
                 return Ok(None);
@@ -940,6 +953,7 @@ pub mod p0 {
             account: &Pubkey,
             now_unix_s: u64,
             slot: u64,
+            deadline: Instant,
         ) -> Result<Vec<ReceivershipPlan>, String> {
             required_fee_wallet(&self.global_fee_wallet)?;
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
@@ -1063,6 +1077,7 @@ pub mod p0 {
                                 &funding_mint,
                                 &liab_mint,
                                 shortfall,
+                                deadline,
                             ) {
                                 Ok(Some(route)) => route,
                                 Ok(None) => continue,
@@ -1120,6 +1135,7 @@ pub mod p0 {
                         .unwrap_or(sz.withdraw_amount);
                     let fitted = quote_fitting_route(
                         self.routes.max_accounts(),
+                        deadline,
                         |cap| {
                             let route = self.routes.quote_exact_in_with_budget(
                                 &asset_mint,
@@ -1127,6 +1143,7 @@ pub mod p0 {
                                 route_input_amount,
                                 &prewarmed_atas,
                                 cap,
+                                deadline,
                             )?;
                             if let Some(ref route) = route {
                                 if route.amount_in != route_input_amount {
@@ -1434,6 +1451,7 @@ pub mod p0 {
                 _: &Pubkey,
                 _: u64,
                 _: &[PrewarmedAta],
+                _: Instant,
             ) -> Result<Option<Route>, String> {
                 Ok(self.0.clone())
             }
@@ -1442,6 +1460,7 @@ pub mod p0 {
                 _: &Pubkey,
                 _: &Pubkey,
                 _: u64,
+                _: Instant,
             ) -> Result<Option<Route>, String> {
                 Ok(None)
             }
@@ -1601,7 +1620,12 @@ pub mod p0 {
                     },
                     limits: TxLimits::default(),
                 }
-                .plans(&self.account, 1_000, 10)
+                .plans(
+                    &self.account,
+                    1_000,
+                    10,
+                    Instant::now() + std::time::Duration::from_secs(60),
+                )
                 .unwrap()
             }
         }
@@ -1680,6 +1704,8 @@ pub mod p0 {
                 ]
             );
         }
+
+        include!("builder_n2_tests.rs");
 
         /// B15: the inventory hold of a plan is the seized collateral of its own sizing for
         /// every class that keeps it, and nothing for the in-TX swap/flash classes.
@@ -1872,6 +1898,7 @@ pub mod p0 {
             };
             let (route, built) = quote_fitting_route(
                 64,
+                Instant::now() + std::time::Duration::from_secs(60),
                 |cap| {
                     caps.push(cap);
                     Ok(Some(route_for_budget(cap, cap as usize * 20, 0)))
@@ -1897,6 +1924,7 @@ pub mod p0 {
             };
             let (_, built) = quote_fitting_route(
                 64,
+                Instant::now() + std::time::Duration::from_secs(60),
                 |cap| {
                     calls += 1;
                     Ok(Some(route_for_budget(cap, 0, cap as usize)))
@@ -1914,6 +1942,7 @@ pub mod p0 {
             let mut calls = 0;
             let result = quote_fitting_route(
                 64,
+                Instant::now() + std::time::Duration::from_secs(60),
                 |cap| {
                     calls += 1;
                     Ok(Some(route_for_budget(cap, 2_000, 0)))
@@ -1929,6 +1958,7 @@ pub mod p0 {
             let mut calls = 0;
             let result = quote_fitting_route(
                 64,
+                Instant::now() + std::time::Duration::from_secs(60),
                 |cap| {
                     calls += 1;
                     Ok(Some(route_for_budget(cap, 0, 0)))

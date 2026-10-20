@@ -87,7 +87,12 @@ impl SignedPayload {
 
     /// Reuse the production adapter's full single-TX or sequential bundle
     /// simulation. Unavailable/failed simulation never yields a sendable token.
-    pub fn simulate(self, adapter: &dyn SubmissionAdapter) -> Result<SimulatedPayload<'_>, String> {
+    /// N2: the simulation ends by `deadline`; a deadline or a refused call is no PASS.
+    pub fn simulate(
+        self,
+        adapter: &dyn SubmissionAdapter,
+        deadline: std::time::Instant,
+    ) -> Result<SimulatedPayload<'_>, String> {
         let compatible = match self.path {
             SubmissionPath::JitoBundle => {
                 adapter.supports_bundle()
@@ -102,9 +107,9 @@ impl SignedPayload {
             return Err(err("SUBMISSION_PATH_MISMATCH"));
         }
         let result = if self.path == SubmissionPath::JitoBundle {
-            adapter.simulate_bundle(&self.txs)
+            adapter.simulate_bundle(&self.txs, deadline)
         } else {
-            adapter.simulate(&self.txs[0])
+            adapter.simulate(&self.txs[0], deadline)
         };
         if !matches!(result, SimResult::Ok { .. }) {
             return Err(err("EXACT_PAYLOAD_SIMULATION_NOT_PASSED"));

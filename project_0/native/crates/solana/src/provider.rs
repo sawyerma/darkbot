@@ -193,6 +193,14 @@ fn halted(s: &State) -> Option<&'static str> {
         None
     }
 }
+/// N2: a refused admission: the code `acquire` reports and whether only the deadline made it
+/// impossible (the permit would be granted later).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Refusal {
+    pub(crate) code: &'static str,
+    pub(crate) deadline_bound: bool,
+}
+
 pub fn shared() -> Arc<Budget> {
     static B: OnceLock<Arc<Budget>> = OnceLock::new();
     let b = B.get_or_init(|| Arc::new(Budget::default())).clone();
@@ -239,15 +247,30 @@ impl Budget {
         deadline: Instant,
         shutdown: Option<&darkbot_common::lifecycle::Shutdown>,
     ) -> Result<Permit, &'static str> {
+        self.admit(work, deadline, shutdown).map_err(|r| r.code)
+    }
+    /// N2: the admission with a typed refusal — `deadline_bound` when the permit cannot be
+    /// granted before `deadline` (pacing, cooldown, concurrency), as opposed to a refusal by the
+    /// budget itself. The codes are exactly those `acquire_cancellable` reports.
+    pub(crate) fn admit(
+        self: &Arc<Self>,
+        work: Workload,
+        deadline: Instant,
+        shutdown: Option<&darkbot_common::lifecycle::Shutdown>,
+    ) -> Result<Permit, Refusal> {
+        let refused = |code: &'static str| Refusal {
+            code,
+            deadline_bound: false,
+        };
         let mut s = self.lock_state();
         if let Some(code) = halted(&s) {
-            return Err(code);
+            return Err(refused(code));
         }
         if s.retry_after_overflow {
-            return Err("RPC_RATE_LIMIT");
+            return Err(refused("RPC_RATE_LIMIT"));
         }
         if s.queue.len() as u64 >= self.limits.rpc_queue {
-            return Err("RPC_ADMISSION_QUEUE_FULL");
+            return Err(refused("RPC_ADMISSION_QUEUE_FULL"));
         }
         let ticket = s.next_ticket;
         s.next_ticket += 1;
@@ -256,7 +279,7 @@ impl Budget {
             if let Some(code) = halted(&s) {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
-                return Err(code);
+                return Err(refused(code));
             }
             let now = Instant::now();
             let elapsed = now.saturating_duration_since(s.refill_at).as_secs_f64();
@@ -274,23 +297,26 @@ impl Budget {
             if s.retry_after_overflow || cancelled || now >= deadline || ready >= deadline {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
-                return Err(if cancelled {
-                    "RPC_ADMISSION_CANCELLED"
-                } else if s.retry_after_overflow || s.cooldown > now {
-                    "RPC_RATE_LIMIT"
-                } else {
-                    "RPC_ADMISSION_BUDGET"
+                return Err(Refusal {
+                    code: if cancelled {
+                        "RPC_ADMISSION_CANCELLED"
+                    } else if s.retry_after_overflow || s.cooldown > now {
+                        "RPC_RATE_LIMIT"
+                    } else {
+                        "RPC_ADMISSION_BUDGET"
+                    },
+                    deadline_bound: !cancelled && !s.retry_after_overflow,
                 });
             }
             if s.bytes >= self.limits.max_total_mib * 1024 * 1024 {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
-                return Err("RPC_BYTE_BUDGET");
+                return Err(refused("RPC_BYTE_BUDGET"));
             }
             if s.requests >= self.limits.max_requests {
                 s.queue.retain(|(t, _)| *t != ticket);
                 self.changed.notify_all();
-                return Err("RPC_CALL_BUDGET");
+                return Err(refused("RPC_CALL_BUDGET"));
             }
             // Only a waiter whose own workload pacing is ready can be selected, so a paced
             // workload never holds the queue (C5). Every eighth admission goes to the oldest
@@ -537,6 +563,7 @@ pub fn rpc_client(
                 .build()
                 .expect("HTTP client configuration"),
             budget: shared(),
+            admission: true,
             stats: Mutex::new(RpcTransportStats::default()),
         },
         RpcClientConfig::with_commitment(commitment),
@@ -548,6 +575,10 @@ struct BudgetedSender {
     work: Workload,
     http: reqwest::Client,
     budget: Arc<Budget>,
+    /// N2: `false` — the provider budget is not enabled for this process: no permit, no byte
+    /// accounting, no provider degradation/backoff, no fallback endpoint and a single attempt,
+    /// exactly as the unbudgeted client; the deadline-bound request path is the same.
+    admission: bool,
     stats: Mutex<RpcTransportStats>,
 }
 struct CallTimer<'a> {
@@ -563,23 +594,59 @@ impl Drop for CallTimer<'_> {
 fn rpc_error(code: &'static str) -> solana_client::client_error::ClientError {
     RpcError::RpcRequestError(code.into()).into()
 }
-#[async_trait::async_trait]
-impl RpcSender for BudgetedSender {
-    async fn send(
+/// N2: why a deadline-bound call failed — every case distinguishable. The code is the
+/// transport's own failure code, the same text `RpcSender::send` reports for it.
+#[derive(Debug)]
+pub enum CallError {
+    /// The deadline passed before or during the call (a permit not obtainable before it
+    /// included); nothing is started after the deadline.
+    Deadline(&'static str),
+    /// The provider budget refused the call (queue, call/byte budget, rate limit, halt).
+    Budget(&'static str),
+    /// Transport, HTTP status, body or decode failure before the deadline.
+    Transport(&'static str),
+    /// The node answered with a JSON-RPC error.
+    Remote(solana_client::client_error::ClientError),
+}
+impl CallError {
+    fn into_client_error(self) -> solana_client::client_error::ClientError {
+        match self {
+            Self::Deadline(code) | Self::Budget(code) | Self::Transport(code) => rpc_error(code),
+            Self::Remote(e) => e,
+        }
+    }
+}
+impl BudgetedSender {
+    /// N2: one JSON-RPC call bounded by `deadline` (capped by the configured per-call timeout):
+    /// the permit wait, every attempt, the HTTP request and the response read. A failure at or
+    /// after the deadline is `Deadline`; no attempt starts after it (the permit is refused).
+    /// `caller_deadline`: the deadline is a caller's (a candidate's) bound — a call it cuts before
+    /// the transport's own limit is no provider failure (no degradation, no backoff for other
+    /// workloads). Ordinary calls (`RpcSender::send`) pass `false` and keep their behaviour.
+    async fn send_until(
         &self,
         request: RpcRequest,
         params: Value,
-    ) -> solana_client::client_error::Result<Value> {
+        deadline: Instant,
+        caller_deadline: bool,
+    ) -> Result<Value, CallError> {
+        let now = Instant::now();
         let _timer = CallTimer {
             stats: &self.stats,
-            started: Instant::now(),
+            started: now,
         };
-        let deadline = Instant::now()
-            + self
-                .timeout
-                .min(Duration::from_millis(self.budget.limits.rpc_timeout_ms));
+        let own_limit = now + Duration::from_millis(self.budget.limits.rpc_timeout_ms);
+        let caller_bound = caller_deadline && deadline < own_limit;
+        let deadline = deadline.min(own_limit);
+        let late = |code: &'static str| {
+            if Instant::now() >= deadline {
+                CallError::Deadline(code)
+            } else {
+                CallError::Transport(code)
+            }
+        };
         // Repeating submission can spend funds. This transport never retries sendTransaction.
-        let attempts = if request == RpcRequest::SendTransaction {
+        let attempts = if request == RpcRequest::SendTransaction || !self.admission {
             1
         } else {
             self.budget.limits.rpc_attempts
@@ -587,28 +654,42 @@ impl RpcSender for BudgetedSender {
         for attempt in 0..attempts {
             let work = self.work;
             let budget = self.budget.clone();
-            let permit = tokio::task::spawn_blocking(move || budget.acquire(work, deadline))
-                .await
-                .map_err(|_| rpc_error("RPC_ADMISSION_JOIN"))?
-                .map_err(rpc_error)?;
+            let permit = if self.admission {
+                Some(
+                    tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
+                        .await
+                        .map_err(|_| CallError::Transport("RPC_ADMISSION_JOIN"))?
+                        .map_err(|r| {
+                            if r.deadline_bound || Instant::now() >= deadline {
+                                CallError::Deadline(r.code)
+                            } else {
+                                CallError::Budget(r.code)
+                            }
+                        })?,
+                )
+            } else {
+                None
+            };
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                return Err(rpc_error("RPC_REQUEST_BUDGET"));
+                return Err(CallError::Deadline("RPC_REQUEST_BUDGET"));
             }
             self.stats
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .request_count += 1;
             let body = request.build_request_json(1, params.clone());
-            self.budget
-                .account_bytes(
-                    serde_json::to_vec(&body)
-                        .map_err(|_| rpc_error("RPC_ENCODE"))?
-                        .len(),
-                )
-                .map_err(rpc_error)?;
+            let request_bytes = serde_json::to_vec(&body)
+                .map_err(|_| CallError::Transport("RPC_ENCODE"))?
+                .len();
+            if self.admission {
+                self.budget
+                    .account_bytes(request_bytes)
+                    .map_err(CallError::Budget)?;
+            }
             let config = &self.budget;
-            let endpoint = if config.fallback
+            let endpoint = if self.admission
+                && config.fallback
                 && request != RpcRequest::SendTransaction
                 && config.rpc_endpoints.first() == Some(&self.url)
             {
@@ -629,15 +710,21 @@ impl RpcSender for BudgetedSender {
             let mut response = match response {
                 Ok(r) => r,
                 Err(_) => {
-                    self.budget.degraded();
+                    if caller_bound && Instant::now() >= deadline {
+                        return Err(CallError::Deadline("RPC_TRANSPORT"));
+                    }
+                    if self.admission {
+                        self.budget.degraded();
+                    }
                     drop(permit);
                     if attempt + 1 == attempts {
-                        return Err(rpc_error("RPC_TRANSPORT"));
+                        return Err(late("RPC_TRANSPORT"));
                     }
                     continue;
                 }
             };
-            if !response.status().is_success() {
+            // Unbudgeted (as the plain client it replaces) writes no stderr of its own.
+            if self.admission && !response.status().is_success() {
                 eprintln!(
                     "[PROVIDER/RPC] method={request} status={} workload={:?} attempt={}",
                     response.status().as_u16(),
@@ -646,49 +733,58 @@ impl RpcSender for BudgetedSender {
                 );
             }
             if response.status().as_u16() == 429 {
-                self.budget.rate_limited(retry_after(
-                    response
-                        .headers()
-                        .get("retry-after")
-                        .and_then(|h| h.to_str().ok()),
-                    SystemTime::now(),
-                ));
+                if self.admission {
+                    self.budget.rate_limited(retry_after(
+                        response
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|h| h.to_str().ok()),
+                        SystemTime::now(),
+                    ));
+                }
                 drop(permit);
                 if attempt + 1 == attempts {
-                    return Err(rpc_error("RPC_RATE_LIMIT"));
+                    // Without a local budget the provider's own 429 is a transport answer.
+                    return Err(if self.admission {
+                        CallError::Budget("RPC_RATE_LIMIT")
+                    } else {
+                        CallError::Transport("RPC_RATE_LIMIT")
+                    });
                 }
                 continue;
             }
             if !response.status().is_success() {
                 if response.status().is_server_error() {
-                    self.budget.degraded();
+                    if self.admission {
+                        self.budget.degraded();
+                    }
                     drop(permit);
                     if attempt + 1 < attempts {
                         continue;
                     }
                 }
-                return Err(rpc_error("RPC_HTTP_ERROR"));
+                return Err(late("RPC_HTTP_ERROR"));
             }
             let mut bytes = Vec::new();
-            while let Some(chunk) = response
-                .chunk()
-                .await
-                .map_err(|_| rpc_error("RPC_BODY_READ"))?
-            {
-                self.budget.account_bytes(chunk.len()).map_err(rpc_error)?;
+            while let Some(chunk) = response.chunk().await.map_err(|_| late("RPC_BODY_READ"))? {
+                if self.admission {
+                    self.budget
+                        .account_bytes(chunk.len())
+                        .map_err(CallError::Budget)?;
+                }
                 if bytes.len().saturating_add(chunk.len())
                     > (self.budget.limits.max_response_mib * 1024 * 1024) as usize
                 {
-                    return Err(rpc_error("RPC_BODY_LIMIT"));
+                    return Err(CallError::Transport("RPC_BODY_LIMIT"));
                 }
                 bytes.extend_from_slice(&chunk);
             }
             let mut value: Value =
-                serde_json::from_slice(&bytes).map_err(|_| rpc_error("RPC_JSON"))?;
+                serde_json::from_slice(&bytes).map_err(|_| CallError::Transport("RPC_JSON"))?;
             if value["error"].is_object() {
                 let code = value["error"]["code"]
                     .as_i64()
-                    .ok_or_else(|| rpc_error("RPC_ERROR_CODE"))?;
+                    .ok_or(CallError::Transport("RPC_ERROR_CODE"))?;
                 let data = match code {
                     -32002 => serde_json::from_value(value["error"]["data"].clone())
                         .map(RpcResponseErrorData::SendTransactionPreflightFailure)
@@ -698,26 +794,118 @@ impl RpcSender for BudgetedSender {
                     },
                     _ => RpcResponseErrorData::Empty,
                 };
-                return Err(RpcError::RpcResponseError {
-                    code,
-                    message: "RPC_REMOTE_ERROR".into(),
-                    data,
-                }
-                .into());
+                return Err(CallError::Remote(
+                    RpcError::RpcResponseError {
+                        code,
+                        message: "RPC_REMOTE_ERROR".into(),
+                        data,
+                    }
+                    .into(),
+                ));
             }
-            self.budget.succeeded();
+            if self.admission {
+                self.budget.succeeded();
+            }
             return value
                 .get_mut("result")
                 .map(Value::take)
-                .ok_or_else(|| rpc_error("RPC_MISSING_RESULT"));
+                .ok_or(CallError::Transport("RPC_MISSING_RESULT"));
         }
-        Err(rpc_error("RPC_RETRY_EXHAUSTED"))
+        Err(late("RPC_RETRY_EXHAUSTED"))
+    }
+}
+#[async_trait::async_trait]
+impl RpcSender for BudgetedSender {
+    async fn send(
+        &self,
+        request: RpcRequest,
+        params: Value,
+    ) -> solana_client::client_error::Result<Value> {
+        let deadline = Instant::now()
+            + self
+                .timeout
+                .min(Duration::from_millis(self.budget.limits.rpc_timeout_ms));
+        self.send_until(request, params, deadline, false)
+            .await
+            .map_err(CallError::into_client_error)
     }
     fn get_transport_stats(&self) -> RpcTransportStats {
         self.stats.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
     fn url(&self) -> String {
         self.url.clone()
+    }
+}
+
+/// N2: blocking JSON-RPC calls bounded by a caller deadline through the budgeted transport —
+/// the same permits, attempts, HTTP client settings and accounting as `rpc_client`, no second
+/// RPC stack. Built once per adapter (its runtime and connection pool are reused).
+pub struct DeadlineRpc {
+    sender: BudgetedSender,
+    runtime: tokio::runtime::Runtime,
+}
+impl DeadlineRpc {
+    /// Like `rpc_client`: against the process-wide provider budget when it is enabled
+    /// (`enable_measurement_budget`), otherwise unbudgeted — the deadline binds in both.
+    pub fn new(url: String, work: Workload) -> Result<Self, String> {
+        Self::build(url, work, shared(), enabled())
+    }
+    /// Against an explicit budget (an isolated profile; tests that hold its permits).
+    pub fn with_budget(url: String, work: Workload, budget: Arc<Budget>) -> Result<Self, String> {
+        Self::build(url, work, budget, true)
+    }
+    /// Unbudgeted (the provider budget not enabled), with `budget` only for its limits.
+    #[cfg(test)]
+    fn unbudgeted(url: String, work: Workload, budget: Arc<Budget>) -> Result<Self, String> {
+        Self::build(url, work, budget, false)
+    }
+    fn build(
+        url: String,
+        work: Workload,
+        budget: Arc<Budget>,
+        admission: bool,
+    ) -> Result<Self, String> {
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(
+                crate::runtime_config::active()
+                    .limits
+                    .rpc_connect_timeout_ms,
+            ))
+            .build()
+            .map_err(|_| "DEADLINE_RPC_HTTP_CLIENT".to_string())?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "DEADLINE_RPC_RUNTIME".to_string())?;
+        Ok(Self {
+            sender: BudgetedSender {
+                url,
+                timeout: Duration::from_millis(budget.limits.rpc_timeout_ms),
+                work,
+                http,
+                budget,
+                admission,
+                stats: Mutex::new(RpcTransportStats::default()),
+            },
+            runtime,
+        })
+    }
+    /// One call; an expired deadline starts nothing.
+    pub fn call(
+        &self,
+        request: RpcRequest,
+        params: Value,
+        deadline: Instant,
+    ) -> Result<Value, CallError> {
+        if Instant::now() >= deadline {
+            return Err(CallError::Deadline("RPC_DEADLINE"));
+        }
+        self.runtime
+            .block_on(self.sender.send_until(request, params, deadline, true))
+    }
+    /// Requests this transport sent so far.
+    pub fn request_count(&self) -> usize {
+        self.sender.get_transport_stats().request_count
     }
 }
 
@@ -990,8 +1178,90 @@ mod http_tests {
             work: Workload::Simulation,
             http: reqwest::Client::new(),
             budget: Arc::new(Budget::default()),
+            admission: true,
             stats: Mutex::new(RpcTransportStats::default()),
         }
+    }
+    /// N2: without an enabled provider budget the candidate transport behaves like the
+    /// unbudgeted client — no permit (a fully held budget does not block it), no degradation —
+    /// and the candidate deadline still ends a hanging request.
+    #[test]
+    fn n2_unbudgeted_candidate_transport_needs_no_permit_and_keeps_the_deadline() {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let hold = std::thread::spawn(move || {
+            let (c, _) = socket.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(1));
+            drop(c);
+        });
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        config.limits.rpc_concurrency = 1;
+        config.limits.rpc_backoff_ms = 5_000;
+        let budget = Arc::new(Budget::configured(&config));
+        let held = budget
+            .acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        let rpc = DeadlineRpc::unbudgeted(url, Workload::Simulation, budget.clone()).unwrap();
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(300);
+        let result = rpc.call(RpcRequest::GetSlot, serde_json::json!([]), deadline);
+        assert!(matches!(result, Err(CallError::Deadline(_))), "{result:?}");
+        assert!(
+            started.elapsed() <= Duration::from_millis(400),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(rpc.request_count(), 1, "sent without a permit");
+        drop(held);
+        assert!(
+            budget
+                .acquire(
+                    Workload::LiveRead,
+                    Instant::now() + Duration::from_millis(100)
+                )
+                .is_ok(),
+            "no degradation without the budget"
+        );
+        hold.join().unwrap();
+    }
+    /// N2 legacy contract: an ordinary call (`RpcSender::send`) that hangs until its own limit is
+    /// a provider failure as before — the provider is degraded (backoff for every workload) and
+    /// the retry the backoff refuses reports the old code `RPC_RATE_LIMIT`. Only a candidate
+    /// deadline (`DeadlineRpc`) cuts without degrading.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn n2_legacy_send_still_degrades_a_hanging_provider() {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let hold = std::thread::spawn(move || {
+            let (c, _) = socket.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(2));
+            drop(c);
+        });
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        config.limits.rpc_rps = 100;
+        config.limits.simulation_rps = 100;
+        config.limits.rpc_backoff_ms = 5_000;
+        config.limits.rpc_attempts = 3;
+        let mut s = sender(url);
+        s.timeout = Duration::from_millis(300);
+        s.budget = Arc::new(Budget::configured(&config));
+        let error = s
+            .send(RpcRequest::GetSlot, serde_json::json!([]))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("RPC_RATE_LIMIT"), "{error}");
+        assert!(
+            matches!(
+                s.budget.acquire(
+                    Workload::LiveRead,
+                    Instant::now() + Duration::from_millis(200)
+                ),
+                Err("RPC_RATE_LIMIT")
+            ),
+            "degraded: every workload backs off"
+        );
+        hold.join().unwrap();
     }
     #[tokio::test]
     async fn explicit_read_fallback_shares_budget_and_send_is_never_retried() {
