@@ -5785,3 +5785,12 @@ Commit `02ac861`.
 - `tx::message_matches_plan` decompiles every message before signing (receivership and prerequisites) and requires exactly the plan's compute-budget and validated instructions with the same account keys (lookup tables resolved), the union privileges, the payer first and no other key; 11 tampering cases refused with their own code, 8 fail-before mutations.
 - E2 stays PARTIAL: swap and prerequisite `Other` instructions are bound by program only (no pinned Jupiter IDL); Jupiter lookup-table contents are the API's claim, not checked on chain; the bundle tip transaction is constructed, not checked; instruction amounts are not checked against the sizing.
 - NOT_RUN: no Mainnet read, capture or LIVE.
+
+## 2026-10-20 — BUGS V19 typed unknown layout (LOCAL_PASS, offline only)
+
+Commit `d06393e`.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 674/0/6, default 672/0/6, release, Python 108 (1 skipped) exit 0.
+- The strict decoders return `HealthError::UnknownLayout`; the census class and the shadow-ledger fail-closed count follow the variant, never the text; displayed texts unchanged. Layout refusals inside the pinned crate stay `Crate`; builder layout errors stay untyped (V17).
+- B4 rest made precise: payer SOL coverage is already checked at the FE-04 admission; open is filling `Intent.rent_lamports` from the plan (B1).
+- NOT_RUN: no Mainnet read, capture or LIVE.
