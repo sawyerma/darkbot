@@ -5812,3 +5812,12 @@ Commit `9602562`.
 - Projection simulations carry `minContextSlot` = newest canonical slot of the candidate request and its dependencies; an older context or JSON-RPC −32016 is a typed `ContextBehind`. ProgramData is a projection dependency. Stale results and lagging nodes requeue at most twice per external trigger, FIFO; other failures wait for the next trigger.
 - Offline proof through the real projection worker and owner result handling against a scripted loopback RPC; no Mainnet read.
 - PARTIAL: no upper bound on the projection context at consume (mixed-state risk), no requeue backoff, trigger kinds by string. NOT_MEASURED: provider support of `minContextSlot`, discard/requeue rates under real oracle cadence.
+
+## 2026-10-21 — BUGS E9 part 2: projection context upper bound at consume, E9 closed (LOCAL_PASS, offline only)
+
+Commit `479c67a`.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 683/0/6, default 681/0/6, release, Python 108 (1 skipped) exit 0.
+- A cached projection is consumed only once the owner processed every confirmed account notification up to its simulation slot (newest account notification − 1, snapshot lower bound or root; tradable state only); otherwise the work is parked and released in slot order. A ContextBehind requeue waits for one more processed slot. E9 closed on all code criteria of the 21.10 order.
+- Assumption (not checked against agave source or the provider): one confirmed-bank notification pass over all subscriptions, in slot order, per WSS connection.
+- NOT_MEASURED: that ordering at the real WSS provider, real oracle cadence, provider `minContextSlot` behaviour, drop rate of parked projections (`deferred` vs `dropped` on the first real run).
