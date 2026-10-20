@@ -1882,6 +1882,7 @@ Die in diesem Dokument Z1–Z8 genannten Befunde sind dieselben wie die Nutzerpr
 | Z17 | V16 | `[x]` echter `sizes()`-Grenztest beiderseits der 5-USD-Schwelle, 4 Mutationen rot | `c7ccce0` |
 | Q3 | V18 | **PARTIAL:** explizite persistierte Namen/Texte für `LossReason`, `Path`, `BuildVersion`, `SimResult`, Census-`Unsupported`, Confirmation-Status — byte-identisch, gepinnt, historische Werte lesbar; offen: SDK-`TransactionError`-Debug im Simulations-Fehlercode/Landing-`err` | `b30e0ea` |
 | — | V19 | offen (Fund bei Q3): Census `Unsupported::of` klassifiziert `UNKNOWN_LAYOUT` über Fehlertext | — |
+| (E2) | E2 | Original-Ticket, **PARTIAL:** signierte Message = Plan vollständig geprüft (Metas, Privilegien, LUT, ComputeBudget-Daten, Payer, keine fremden Schlüssel); offen: Swap-/Prerequisite-`Other` nur programmgebunden | `02ac861` |
 | Q5 | V17 | **PARTIAL:** typisierter `PlanError`/`SizingError` vom Entstehungsort bis `Pipeline::evaluate`, Klassifikation nur über die Art, Texte byte-identisch; offen: Art nicht persistiert (`Other`/Routing ununterscheidbar, braucht `LossReason`-Erweiterung mit Q3) | `0dbdc35` |
 
 Weiter offen aus diesem Dokument (Reihenfolge laut Nutzerauftrag): B1/B3/B15, C3/C11/C12 (FE-04/P8-Ledger), dann übrige bestätigte Z/Q.

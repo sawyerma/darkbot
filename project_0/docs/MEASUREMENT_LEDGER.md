@@ -5776,3 +5776,12 @@ Commit `b30e0ea`.
 - Persisted and reported enum values (loss names, legacy bottleneck keys, shadow-ledger day losses, cost-record path, tx version, simulation result, census unsupported names, landing confirmation status) come from explicit names, byte-identical to the former Debug output (checked once against every variant), so journals, reports and Python readers are unchanged; no schema change.
 - PARTIAL: the simulation failure code and the landing `err` still embed the Debug of the pinned SDK `TransactionError`. New finding V19: census `UNKNOWN_LAYOUT` classified by text.
 - NOT_RUN: no Mainnet read, capture or LIVE.
+
+## 2026-10-20 — BUGS E2 rest: signed message equals its plan (LOCAL_PASS, E2 PARTIAL, offline only)
+
+Commit `02ac861`.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 672/0/6, default 670/0/6, release, Python 108 (1 skipped) exit 0.
+- `tx::message_matches_plan` decompiles every message before signing (receivership and prerequisites) and requires exactly the plan's compute-budget and validated instructions with the same account keys (lookup tables resolved), the union privileges, the payer first and no other key; 11 tampering cases refused with their own code, 8 fail-before mutations.
+- E2 stays PARTIAL: swap and prerequisite `Other` instructions are bound by program only (no pinned Jupiter IDL); Jupiter lookup-table contents are the API's claim, not checked on chain; the bundle tip transaction is constructed, not checked; instruction amounts are not checked against the sizing.
+- NOT_RUN: no Mainnet read, capture or LIVE.
