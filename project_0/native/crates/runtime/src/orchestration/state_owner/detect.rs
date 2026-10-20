@@ -496,8 +496,8 @@ impl ShadowOwner {
                     h.equity_assets,
                 );
             }
-            // C10: a stale integration reserve is classified at its source (pinned error code ⇒
-            // HealthError::IntegrationStale / INTEGRATION_STALE marker), never from text here.
+            // C10/Q5: a stale integration reserve is classified at its source (pinned error code ⇒
+            // HealthError::IntegrationStale / typed PlanErrorKind::IntegrationStale), never from text.
             if let Some(h) = &self.econ {
                 h.emit(crate::analytics::econ::Evidence::Shadow(Box::new(
                     rec.clone(),

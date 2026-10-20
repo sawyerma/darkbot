@@ -802,7 +802,10 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
         _: u64,
         _: u64,
         _: std::time::Instant,
-    ) -> Result<Vec<crate::execution::pipeline::ReceivershipPlan>, String> {
+    ) -> Result<
+        Vec<crate::execution::pipeline::ReceivershipPlan>,
+        crate::execution::pipeline::PlanError,
+    > {
         use darkbot_project0::planner::RouteKind;
         let t = test_table();
         Ok(vec![crate::execution::pipeline::ReceivershipPlan {
@@ -1053,7 +1056,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
             now: u64,
             slot: u64,
             deadline: std::time::Instant,
-        ) -> Result<Vec<ReceivershipPlan>, String> {
+        ) -> Result<Vec<ReceivershipPlan>, crate::execution::pipeline::PlanError> {
             let mut plans = TestBuilder.plans(a, now, slot, deadline)?;
             plans[0].tip = 7;
             Ok(plans)
@@ -1159,7 +1162,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             now: u64,
             slot: u64,
             deadline: std::time::Instant,
-        ) -> Result<Vec<ReceivershipPlan>, String> {
+        ) -> Result<Vec<ReceivershipPlan>, crate::execution::pipeline::PlanError> {
             let mut plans = TestBuilder.plans(a, now, slot, deadline)?;
             (self.0)(&mut plans[0].instructions);
             Ok(plans)
@@ -1320,7 +1323,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             now: u64,
             slot: u64,
             deadline: std::time::Instant,
-        ) -> Result<Vec<ReceivershipPlan>, String> {
+        ) -> Result<Vec<ReceivershipPlan>, crate::execution::pipeline::PlanError> {
             let mut first = TestBuilder.plans(a, now, slot, deadline)?.remove(0);
             first.input.funding = FundingClass::NoSwapInventory;
             let mut second = TestBuilder.plans(a, now, slot, deadline)?.remove(0);
@@ -2241,18 +2244,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
 /// that reached economics keeps the economic attribution (`ThresholdTooHigh`/`EconomicSkip`).
 #[test]
 fn v9_technical_plan_rejections_keep_their_own_cause() {
-    use crate::execution::pipeline::{
-        Mode, NetworkBudget, Pipeline, ReceivershipBuilder, ReceivershipPlan,
-    };
-    use darkbot_project0::{
-        execution::Freshness,
-        planner::Allowlist,
-        safety::{Allow, Limits, Safety},
-    };
-    use darkbot_solana::{
-        state::blockhash::{BlockhashCache, CachedBlockhash},
-        tx::{Resources, TxLimits},
-    };
+    use crate::execution::pipeline::{ReceivershipBuilder, ReceivershipPlan};
     /// The shape of one plan: an unknown instruction (fails the plan gate), a prerequisite
     /// transaction (needs the bundle path the RPC adapter lacks), valid, or valid but losing.
     #[derive(Clone, Copy)]
@@ -2276,7 +2268,7 @@ fn v9_technical_plan_rejections_keep_their_own_cause() {
             now: u64,
             slot: u64,
             deadline: std::time::Instant,
-        ) -> Result<Vec<ReceivershipPlan>, String> {
+        ) -> Result<Vec<ReceivershipPlan>, crate::execution::pipeline::PlanError> {
             let mut out = Vec::new();
             for shape in &self.0 {
                 let mut plan = TestBuilder.plans(a, now, slot, deadline)?.remove(0);
@@ -2299,69 +2291,7 @@ fn v9_technical_plan_rejections_keep_their_own_cause() {
             Ok(out)
         }
     }
-    let prereq_program = [Pubkey::new_from_array([8; 32])];
-    let evaluate = |builder: &Shaped, min_profit: i128| {
-        let submitter = CountingSubmitter {
-            calls: Arc::new(AtomicU64::new(0)),
-            sims: Arc::new(AtomicU64::new(0)),
-        };
-        let clock = Clock::new();
-        let bh = BlockhashCache::new();
-        bh.set(CachedBlockhash {
-            hash: solana_sdk::hash::Hash::new_unique(),
-            last_valid_block_height: 100,
-            refreshed_ns: clock.now_ns(),
-        });
-        let zero = Limits {
-            max_total_capital: 0,
-            max_outstanding_inventory: 0,
-            max_concurrent_positions: 0,
-            max_exposure_per_attempt: 0,
-            max_daily_loss: 0,
-            max_failed_attempts_per_day: 0,
-            max_tip: 0,
-            max_slippage_bps: 0,
-            max_outstanding_attempts: 0,
-        };
-        let mut safety = Safety::new(zero, Allow::default(), false);
-        let payer = solana_sdk::signature::Keypair::new();
-        let allow = Allowlist::default();
-        let failed = FailedCostMatrix::default();
-        let slots = darkbot_solana::ingress::SlotWatch::new();
-        let mut network = NetworkBudget::unbounded();
-        let mut p = Pipeline {
-            mode: Mode::Shadow,
-            clock: &clock,
-            health: &TestHealth,
-            builder,
-            submitter: &submitter,
-            safety: &mut safety,
-            blockhash: &bh,
-            payer: &payer,
-            allowlist: &allow,
-            failed_costs: &failed,
-            limits: TxLimits::default(),
-            resources: Resources {
-                compute_unit_limit: 100_000,
-                priority_micro_lamports_per_cu: 0,
-                loaded_accounts_data_size: None,
-            },
-            min_profit,
-            blockhash_max_age_ns: u64::MAX,
-            p7_passed: false,
-            freshness: Freshness {
-                max_opportunity_age_ns: u64::MAX,
-                execution_deadline_ns: u64::MAX,
-            },
-            tip_account: None,
-            global_allowed: std::slice::from_ref(&test_table().program),
-            prereq_allowed: &prereq_program,
-            slot_watch: &slots,
-            network: &mut network,
-            simulation_failure: None,
-        };
-        p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
-    };
+    let evaluate = |builder: &Shaped, min_profit: i128| evaluate_once(builder, min_profit);
     use Shape::*;
     let loss = |shapes: &[Shape], min_profit: i128| {
         let r = evaluate(&Shaped(shapes.to_vec()), min_profit);
@@ -2387,4 +2317,137 @@ fn v9_technical_plan_rejections_keep_their_own_cause() {
     );
     // Control: a valid plan is selected, no loss.
     assert_eq!(loss(&[Broken, Valid], 0), None);
+}
+
+/// One Shadow `Pipeline::evaluate` of `builder` with the counting RPC adapter, zero safety
+/// limits and a fresh blockhash (V9/Q5); prerequisites may use program `[8; 32]`.
+fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
+    builder: &B,
+    min_profit: i128,
+) -> OpportunityRecord {
+    use crate::execution::pipeline::{Mode, NetworkBudget, Pipeline};
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let prereq_program = [Pubkey::new_from_array([8; 32])];
+    let submitter = CountingSubmitter {
+        calls: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+    };
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let zero = Limits {
+        max_total_capital: 0,
+        max_outstanding_inventory: 0,
+        max_concurrent_positions: 0,
+        max_exposure_per_attempt: 0,
+        max_daily_loss: 0,
+        max_failed_attempts_per_day: 0,
+        max_tip: 0,
+        max_slippage_bps: 0,
+        max_outstanding_attempts: 0,
+    };
+    let mut safety = Safety::new(zero, Allow::default(), false);
+    let payer = solana_sdk::signature::Keypair::new();
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix::default();
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    let mut network = NetworkBudget::unbounded();
+    let mut p = Pipeline {
+        mode: Mode::Shadow,
+        clock: &clock,
+        health: &TestHealth,
+        builder,
+        submitter: &submitter,
+        safety: &mut safety,
+        blockhash: &bh,
+        payer: &payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        tip_account: None,
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &prereq_program,
+        slot_watch: &slots,
+        network: &mut network,
+        simulation_failure: None,
+    };
+    p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
+}
+
+/// Q5 through `Pipeline::evaluate`: a planning failure is recorded with the decision and loss of
+/// its typed kind and its unchanged text as reason — a routing failure whose remote message says
+/// "unavailable" stays a judged routing skip (by text it was UNAVAILABLE).
+#[test]
+fn q5_evaluate_records_the_typed_plan_error() {
+    use crate::execution::pipeline::{PlanError, PlanErrorKind, ReceivershipBuilder};
+    struct Failing(PlanError);
+    impl ReceivershipBuilder for Failing {
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
+        }
+        fn plans(
+            &self,
+            _: &Pubkey,
+            _: u64,
+            _: u64,
+            _: std::time::Instant,
+        ) -> Result<Vec<crate::execution::pipeline::ReceivershipPlan>, PlanError> {
+            Err(self.0.clone())
+        }
+    }
+    for (kind, text, decision, loss) in [
+        (
+            PlanErrorKind::Routing,
+            "ROUTING:exact-in a→b: provider temporarily unavailable",
+            Decision::Skip,
+            LossReason::Routing,
+        ),
+        (
+            PlanErrorKind::FeeStateUnavailable,
+            "FEE_STATE_UNAVAILABLE:FeeState account missing",
+            Decision::Unavailable,
+            LossReason::Unknown,
+        ),
+        (
+            PlanErrorKind::IntegrationStale,
+            "INTEGRATION_STALE:equity price: AnchorError code 6504",
+            Decision::Skip,
+            LossReason::IntegrationRefresh,
+        ),
+        (
+            PlanErrorKind::UnsupportedIntegration,
+            "SIZING:UNSUPPORTED_INTEGRATION_ASSET",
+            Decision::Skip,
+            LossReason::UnsupportedIntegration,
+        ),
+    ] {
+        let r = evaluate_once(&Failing(PlanError::new(kind, text)), 0);
+        assert_eq!(r.decision, decision, "{text}");
+        assert_eq!(r.loss, Some(loss), "{text}");
+        assert_eq!(r.reason.as_deref(), Some(text));
+    }
 }

@@ -38,8 +38,9 @@ pub struct AccountThresholds {
     pub thresholds: Vec<(Pubkey, Side, u128)>,
 }
 
-/// C10: stable marker of a stale integration reserve in string errors (sizing/plans), set only
-/// by the typed check of the pinned error code (`crate_impl::integration_stale`).
+/// C10: marker of a stale integration reserve in the error text (the record's reason), set only
+/// by the typed check of the pinned error code (`crate_impl::integration_stale`). Q5: the text is
+/// for readers; classification uses `sizing::SizingErrorKind::IntegrationStale`.
 pub const INTEGRATION_STALE: &str = "INTEGRATION_STALE:";
 
 #[derive(Debug)]

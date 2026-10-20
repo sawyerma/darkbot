@@ -502,7 +502,7 @@ where
                 if h.liquidatable && row["receivership_eligibility"] == "PASS" {
                     match sizer.sizes(target,clock.unix_timestamp,clock.slot){
                             Ok(sizes)=>row["protocol_sizes"]=json!(sizes.into_iter().map(|s|json!({"asset_bank":s.asset_bank.to_string(),"liability_bank":s.liab_bank.to_string(),"withdraw_native":s.withdraw_amount,"repay_native":s.repay_amount,"repay_all":s.repay_all,"flat_sol_fee_lamports":s.flat_sol_fee_lamports,"executable_value":"UNKNOWN"})).collect::<Vec<_>>()),
-                            Err(e)=>row["sizing_error"]=json!(e),
+                            Err(e)=>row["sizing_error"]=json!(e.text),
                         }
                 }
             }

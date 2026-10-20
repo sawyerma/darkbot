@@ -12,13 +12,16 @@ pub const FEE_STATE_UNAVAILABLE: &str = "FEE_STATE_UNAVAILABLE";
 
 #[cfg(feature = "crate_health")]
 pub mod p0 {
-    use crate::execution::pipeline::{ReceivershipBuilder, ReceivershipPlan};
+    use crate::execution::pipeline::{
+        PlanError, PlanErrorKind, ReceivershipBuilder, ReceivershipPlan,
+    };
     use darkbot_project0::economics::{CandidateInput, Path};
     use darkbot_project0::funding::{self, FundingClass, FundingContext};
     use darkbot_project0::health::crate_impl::CrateHealth;
     use darkbot_project0::health::{AccountSource, HealthEngine};
     use darkbot_project0::planner::{InstructionTable, RouteKind};
     use darkbot_project0::receivership::{builders, ReceivershipParams};
+    use darkbot_project0::sizing::{NoSizeReason, SizingError, SizingErrorKind};
     use darkbot_solana::tx::{self, BuildError, BuildVersion, Resources, TxLimits, TxPlan};
     use marginfi_type_crate::types::Bank;
     use solana_message::AddressLookupTableAccount; /* [FIX-13] */
@@ -109,10 +112,33 @@ pub mod p0 {
             account: &Pubkey,
             now_unix_s: u64,
             slot: u64,
-        ) -> Result<Vec<Sizing>, String>;
-        fn no_size_reason(&self, _account: &Pubkey) -> Result<String, String> {
-            Ok("NO_VALID_PROTOCOL_PAIR".into())
+        ) -> Result<Vec<Sizing>, PlanError>;
+        fn no_size_reason(&self, _account: &Pubkey) -> Result<NoSizeReason, String> {
+            Ok(NoSizeReason::NoValidProtocolPair)
         }
+    }
+
+    /// Q5: a sizing failure keeps its typed kind into planning.
+    impl From<SizingError> for PlanError {
+        fn from(e: SizingError) -> Self {
+            let kind = match e.kind {
+                SizingErrorKind::NoValidPair => PlanErrorKind::Sizing,
+                SizingErrorKind::IntegrationStale => PlanErrorKind::IntegrationStale,
+                SizingErrorKind::HealthUnavailable => PlanErrorKind::HealthUnavailable,
+                SizingErrorKind::Other => PlanErrorKind::Other,
+            };
+            PlanError::new(kind, e.text)
+        }
+    }
+
+    /// Q5: no sizing candidate — `SIZING:<code>`, an unsupported integration typed as such.
+    fn no_size_error(reason: NoSizeReason) -> PlanError {
+        let kind = if reason.unsupported_integration() {
+            PlanErrorKind::UnsupportedIntegration
+        } else {
+            PlanErrorKind::Sizing
+        };
+        PlanError::new(kind, format!("SIZING:{}", reason.code()))
     }
 
     /// Concrete bridge from protocol-exact sizing into runner economics. It adds only facts that
@@ -127,7 +153,7 @@ pub mod p0 {
     }
 
     impl<'a, S: AccountSource + ?Sized> ProtocolSizingProvider<'a, S> {
-        pub fn no_size_reason(&self, account: &Pubkey) -> Result<String, String> {
+        pub fn no_size_reason(&self, account: &Pubkey) -> Result<NoSizeReason, String> {
             darkbot_project0::sizing::ProtocolSizer {
                 state: self.state,
                 program: self.program,
@@ -144,7 +170,7 @@ pub mod p0 {
             account: &Pubkey,
             now_unix_s: u64,
             slot: u64,
-        ) -> Result<Vec<Sizing>, String> {
+        ) -> Result<Vec<Sizing>, PlanError> {
             let sizer = darkbot_project0::sizing::ProtocolSizer {
                 state: self.state,
                 program: self.program,
@@ -195,7 +221,7 @@ pub mod p0 {
             Ok(out)
         }
 
-        fn no_size_reason(&self, account: &Pubkey) -> Result<String, String> {
+        fn no_size_reason(&self, account: &Pubkey) -> Result<NoSizeReason, String> {
             ProtocolSizingProvider::no_size_reason(self, account)
         }
     }
@@ -511,9 +537,13 @@ pub mod p0 {
 
     /// [P5] The EndLiquidation fee receiver comes only from a successfully read FeeState; a
     /// default key would build a transaction with an invalid fee recipient.
-    fn required_fee_wallet(fee: &Result<Pubkey, String>) -> Result<&Pubkey, String> {
-        fee.as_ref()
-            .map_err(|e| format!("{}:{e}", super::FEE_STATE_UNAVAILABLE))
+    fn required_fee_wallet(fee: &Result<Pubkey, String>) -> Result<&Pubkey, PlanError> {
+        fee.as_ref().map_err(|e| {
+            PlanError::new(
+                PlanErrorKind::FeeStateUnavailable,
+                format!("{}:{e}", super::FEE_STATE_UNAVAILABLE),
+            )
+        })
     }
 
     fn liquidation_record_init_decision(linked: Pubkey, expected: Pubkey) -> Result<bool, String> {
@@ -895,7 +925,9 @@ pub mod p0 {
                 group: &self.group,
                 marginfi_account: account,
                 liquidator: &self.liquidator,
-                global_fee_wallet: required_fee_wallet(&self.global_fee_wallet)?,
+                // `plans` checks the FeeState first (typed); here only its text can remain.
+                global_fee_wallet: required_fee_wallet(&self.global_fee_wallet)
+                    .map_err(|e| e.text)?,
                 start_observation,
                 end_banks,
                 init_record,
@@ -943,11 +975,11 @@ pub mod p0 {
             now_unix_s: u64,
             slot: u64,
             deadline: Instant,
-        ) -> Result<Vec<ReceivershipPlan>, String> {
+        ) -> Result<Vec<ReceivershipPlan>, PlanError> {
             required_fee_wallet(&self.global_fee_wallet)?;
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
             if sizings.is_empty() {
-                return Err(format!("SIZING:{}", self.sizing.no_size_reason(account)?));
+                return Err(no_size_error(self.sizing.no_size_reason(account)?));
             }
             let protocol_luts =
                 crate::execution::lookup_tables::from_state(self.state, &self.group, slot);
@@ -957,7 +989,7 @@ pub mod p0 {
             };
             let obs = health
                 .observation_accounts(account)
-                .map_err(|e| e.to_string())?;
+                .map_err(SizingError::from)?;
             let mut out = Vec::new();
 
             let mut route_errors = Vec::new();
@@ -965,13 +997,13 @@ pub mod p0 {
 
             // Z12: an error of one asset/liability pair skips that pair only; account-wide
             // checks (fee wallet, sizing, observation, record link) stay fatal above and below.
-            let mut pair_errors: Vec<String> = Vec::new();
+            let mut pair_errors: Vec<PlanError> = Vec::new();
             macro_rules! pair_try {
                 ($pair:lifetime, $e:expr) => {
                     match $e {
                         Ok(v) => v,
                         Err(e) => {
-                            pair_errors.push(e);
+                            pair_errors.push(PlanError::from(e));
                             continue $pair;
                         }
                     }
@@ -1292,14 +1324,20 @@ pub mod p0 {
                 } else {
                     format!("; other pairs ROUTING: {}", route_errors.join(" | "))
                 };
-                return Err(format!(
-                    "ATA:PREWARM_REQUIRED: {}{}",
-                    ata_errors.join(" | "),
-                    routing
+                return Err(PlanError::new(
+                    PlanErrorKind::MissingAta,
+                    format!(
+                        "ATA:PREWARM_REQUIRED: {}{}",
+                        ata_errors.join(" | "),
+                        routing
+                    ),
                 ));
             }
             if out.is_empty() && !route_errors.is_empty() {
-                return Err(format!("ROUTING:{}", route_errors.join(" | ")));
+                return Err(PlanError::new(
+                    PlanErrorKind::Routing,
+                    format!("ROUTING:{}", route_errors.join(" | ")),
+                ));
             }
             if self.should_init_liquidation_record(account)? {
                 // B4: the record this plan creates costs its rent-exempt minimum. The pinned
@@ -1322,7 +1360,8 @@ pub mod p0 {
         #[test]
         fn p5_unreadable_fee_state_blocks_instead_of_default_receiver() {
             let err = required_fee_wallet(&Err("FeeState account missing".into())).unwrap_err();
-            assert_eq!(err, "FEE_STATE_UNAVAILABLE:FeeState account missing");
+            assert_eq!(err.text, "FEE_STATE_UNAVAILABLE:FeeState account missing");
+            assert_eq!(err.kind, PlanErrorKind::FeeStateUnavailable);
             let wallet = Pubkey::new_unique();
             assert_eq!(required_fee_wallet(&Ok(wallet)), Ok(&wallet));
         }
@@ -1453,7 +1492,7 @@ pub mod p0 {
         }
         struct OneSizing(Sizing);
         impl SizingProvider for OneSizing {
-            fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, String> {
+            fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, PlanError> {
                 Ok(vec![self.0.clone()])
             }
         }
@@ -1687,7 +1726,7 @@ pub mod p0 {
         fn z12_one_invalid_pair_keeps_the_valid_pairs_plans() {
             struct TwoSizings(Vec<Sizing>);
             impl SizingProvider for TwoSizings {
-                fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, String> {
+                fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, PlanError> {
                     Ok(self.0.clone())
                 }
             }
@@ -1764,8 +1803,161 @@ pub mod p0 {
                     == valid.liab_bank.to_string()));
             // Only invalid pairs: the first pair error, unchanged.
             assert_eq!(
-                plans_with(vec![invalid.clone()]).err().as_deref(),
-                Some("mint not in state")
+                plans_with(vec![invalid.clone()]).err(),
+                Some(PlanError::new(PlanErrorKind::Other, "mint not in state"))
+            );
+        }
+
+        /// Q5 through the production `plans()` path: every planning failure carries its typed
+        /// kind from its source — FeeState, an empty sizing with its no-size code (unsupported
+        /// integration or not), a typed sizing error (stale integration reserve), a missing
+        /// prewarmed ATA — and its text is exactly the former message.
+        #[test]
+        fn q5_plans_carry_the_typed_cause_and_the_former_text() {
+            use darkbot_project0::sizing::{NoSizeReason as R, SizingError, SizingErrorKind};
+            struct Scripted(Result<Vec<Sizing>, PlanError>, NoSizeReason);
+            impl SizingProvider for Scripted {
+                fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, PlanError> {
+                    self.0.clone()
+                }
+                fn no_size_reason(&self, _: &Pubkey) -> Result<NoSizeReason, String> {
+                    Ok(self.1)
+                }
+            }
+            let f = PlansFixture::new();
+            let src = f.state(Pubkey::default(), true);
+            let run = |sizing: Scripted, fee: Result<Pubkey, String>, with_atas: bool| {
+                let inventory = |_: &Pubkey| 10_000u64;
+                let ata = |mint: &Pubkey| {
+                    with_atas.then(|| {
+                        get_associated_token_address_with_program_id(
+                            &f.liquidator,
+                            mint,
+                            &f.token_program,
+                        )
+                    })
+                };
+                let lamports = |l: u64| Some(l);
+                P0ReceivershipBuilder {
+                    state: &src,
+                    program: f.program,
+                    group: f.group,
+                    liquidator: f.liquidator,
+                    global_fee_wallet: fee,
+                    sizing: &sizing,
+                    routes: &TestRoutes(None),
+                    inventory: &inventory,
+                    ata: &ata,
+                    lamports_to_usd_micro: &lamports,
+                    rent_lamports_to_usd_micro: &lamports,
+                    jito_tip_usd_micro: 0,
+                    jito_tip_lamports: 0,
+                    zero_prefund_qualified: false,
+                    instructions: &f.table,
+                    v1_plans: false,
+                    path: Path::Rpc,
+                    resources: Resources {
+                        compute_unit_limit: 400_000,
+                        priority_micro_lamports_per_cu: 0,
+                        loaded_accounts_data_size: None,
+                    },
+                    limits: TxLimits::default(),
+                }
+                .plans(
+                    &f.account,
+                    1_000,
+                    10,
+                    Instant::now() + std::time::Duration::from_secs(60),
+                )
+                .err()
+                .expect("a planning failure")
+            };
+            let wallet = Ok(Pubkey::new_unique());
+            // Empty sizing: `SIZING:<code>`, an unsupported integration typed as such.
+            for (reason, code, kind) in [
+                (
+                    R::NotMarginfiAccount,
+                    "NOT_MARGINFI_ACCOUNT",
+                    PlanErrorKind::Sizing,
+                ),
+                (R::NoAsset, "NO_ASSET", PlanErrorKind::Sizing),
+                (R::NoLiability, "NO_LIABILITY", PlanErrorKind::Sizing),
+                (
+                    R::UnsupportedIntegrationAsset,
+                    "UNSUPPORTED_INTEGRATION_ASSET",
+                    PlanErrorKind::UnsupportedIntegration,
+                ),
+                (
+                    R::UnsupportedIntegrationLiability,
+                    "UNSUPPORTED_INTEGRATION_LIABILITY",
+                    PlanErrorKind::UnsupportedIntegration,
+                ),
+                (
+                    R::NoSupportedAssetBank,
+                    "NO_SUPPORTED_ASSET_BANK",
+                    PlanErrorKind::Sizing,
+                ),
+                (
+                    R::NoSupportedLiabilityBank,
+                    "NO_SUPPORTED_LIABILITY_BANK",
+                    PlanErrorKind::Sizing,
+                ),
+                (
+                    R::NoValidProtocolPair,
+                    "NO_VALID_PROTOCOL_PAIR",
+                    PlanErrorKind::Sizing,
+                ),
+            ] {
+                assert_eq!(
+                    run(Scripted(Ok(vec![]), reason), wallet.clone(), true),
+                    PlanError::new(kind, format!("SIZING:{code}"))
+                );
+            }
+            // A typed sizing error keeps its kind; its text (with the reader's marker) is as before.
+            let stale = SizingError {
+                kind: SizingErrorKind::IntegrationStale,
+                text: "INTEGRATION_STALE:equity price: AnchorError code 6504".into(),
+            };
+            let e = run(
+                Scripted(Err(stale.clone().into()), R::NoValidProtocolPair),
+                wallet.clone(),
+                true,
+            );
+            assert_eq!(e.kind, PlanErrorKind::IntegrationStale);
+            assert_eq!(e.text, stale.text);
+            let census = SizingError {
+                kind: SizingErrorKind::NoValidPair,
+                text: "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive=1".into(),
+            };
+            let e = run(
+                Scripted(Err(census.into()), R::NoValidProtocolPair),
+                wallet.clone(),
+                true,
+            );
+            assert_eq!(e.kind, PlanErrorKind::Sizing);
+            // FeeState unreadable: checked first, typed.
+            let e = run(
+                Scripted(Ok(vec![f.sizing.0.clone()]), R::NoValidProtocolPair),
+                Err("FeeState account missing".into()),
+                true,
+            );
+            assert_eq!(
+                e,
+                PlanError::new(
+                    PlanErrorKind::FeeStateUnavailable,
+                    "FEE_STATE_UNAVAILABLE:FeeState account missing"
+                )
+            );
+            // No prewarmed ATA for the only pair.
+            let e = run(
+                Scripted(Ok(vec![f.sizing.0.clone()]), R::NoValidProtocolPair),
+                wallet.clone(),
+                false,
+            );
+            assert_eq!(e.kind, PlanErrorKind::MissingAta);
+            assert!(
+                e.text.starts_with("ATA:PREWARM_REQUIRED: asset ATA="),
+                "{e}"
             );
         }
 

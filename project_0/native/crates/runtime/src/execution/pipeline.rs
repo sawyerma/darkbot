@@ -211,6 +211,92 @@ pub struct ReceivershipPlan {
     pub prerequisite_txs: Vec<Vec<Instruction>>,
 }
 
+/// Q5: why a builder produced no plan, typed where it arises. The text is the former message
+/// (the record's `reason`, unchanged); decision and loss follow from the kind alone, never from
+/// the text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanErrorKind {
+    /// The protocol FeeState is unreadable: economics UNKNOWN (P5).
+    FeeStateUnavailable,
+    /// Nothing protocol-valid to size (`SIZING:`).
+    Sizing,
+    /// Sizing stopped at an integration bank this build cannot size.
+    UnsupportedIntegration,
+    /// A prewarmed associated token account is missing (`ATA:`).
+    MissingAta,
+    /// C10: a stale integration reserve, from the pinned program's error code.
+    IntegrationStale,
+    /// No health engine built in.
+    HealthUnavailable,
+    /// No route for any pair (`ROUTING:`).
+    Routing,
+    /// Any other planning failure (state, layout, build), attributed to routing as before Q5.
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanError {
+    pub kind: PlanErrorKind,
+    pub text: String,
+}
+
+impl PlanError {
+    pub fn new(kind: PlanErrorKind, text: impl Into<String>) -> Self {
+        PlanError {
+            kind,
+            text: text.into(),
+        }
+    }
+
+    /// [P5] An unreadable FeeState (or no health engine) leaves the candidate unjudged
+    /// (UNAVAILABLE); every other planning failure is a judged skip.
+    pub fn decision(&self) -> Decision {
+        match self.kind {
+            PlanErrorKind::FeeStateUnavailable | PlanErrorKind::HealthUnavailable => {
+                Decision::Unavailable
+            }
+            PlanErrorKind::Sizing
+            | PlanErrorKind::UnsupportedIntegration
+            | PlanErrorKind::MissingAta
+            | PlanErrorKind::IntegrationStale
+            | PlanErrorKind::Routing
+            | PlanErrorKind::Other => Decision::Skip,
+        }
+    }
+
+    /// Loss attribution: [P5] an unreadable FeeState is UNKNOWN, never a routing loss.
+    pub fn loss(&self) -> LossReason {
+        match self.kind {
+            PlanErrorKind::FeeStateUnavailable => LossReason::Unknown,
+            PlanErrorKind::Sizing => LossReason::Sizing,
+            PlanErrorKind::UnsupportedIntegration => LossReason::UnsupportedIntegration,
+            PlanErrorKind::MissingAta => LossReason::MissingAta,
+            PlanErrorKind::IntegrationStale => LossReason::IntegrationRefresh,
+            PlanErrorKind::HealthUnavailable | PlanErrorKind::Routing | PlanErrorKind::Other => {
+                LossReason::Routing
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for PlanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+impl From<String> for PlanError {
+    fn from(text: String) -> Self {
+        PlanError::new(PlanErrorKind::Other, text)
+    }
+}
+
+impl From<&str> for PlanError {
+    fn from(text: &str) -> Self {
+        PlanError::new(PlanErrorKind::Other, text)
+    }
+}
+
 pub trait ReceivershipBuilder {
     /// Liefert **alle** technisch machbaren Funding-/Route-Candidates. Keine harte
     /// Funding-Präferenz im Builder; P4A + TX-Feasibility entscheiden danach.
@@ -226,7 +312,7 @@ pub trait ReceivershipBuilder {
         now_unix_s: u64,
         slot: u64,
         deadline: Instant,
-    ) -> Result<Vec<ReceivershipPlan>, String>;
+    ) -> Result<Vec<ReceivershipPlan>, PlanError>;
 }
 
 /// B6: the Shadow owner's bound on synchronous network work (routes, fee quotes, simulation)
@@ -435,7 +521,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 "RPC_DEADLINE: candidate network deadline during planning ({})",
                 match &planning_result {
                     Ok(p) => format!("{} plan(s)", p.len()),
-                    Err(e) => e.clone(),
+                    Err(e) => e.text.clone(),
                 }
             ));
             return rec.with_timeline(&tl);
@@ -448,10 +534,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             }
             Err(e) => {
-                let (decision, loss) = classify_plan_error(&e);
-                rec.decision = decision;
-                rec.loss = Some(loss);
-                rec.reason = Some(e);
+                rec.decision = e.decision();
+                rec.loss = Some(e.loss());
+                rec.reason = Some(e.text);
                 return rec.with_timeline(&tl);
             }
         };
@@ -1035,34 +1120,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
     }
 }
 
-/// Decision and loss attribution for a rejected plan. [P5] An unreadable FeeState is UNKNOWN
-/// (unavailable), never a routing loss or a skip that looks like a judged candidate.
-fn classify_plan_error(e: &str) -> (Decision, LossReason) {
-    let fee_state_unknown = e.starts_with(crate::execution::builder::FEE_STATE_UNAVAILABLE);
-    let decision = if e.contains("unavailable") || fee_state_unknown {
-        Decision::Unavailable
-    } else {
-        Decision::Skip
-    };
-    let loss = if fee_state_unknown {
-        LossReason::Unknown
-    } else if e.starts_with("SIZING:UNSUPPORTED_INTEGRATION") {
-        LossReason::UnsupportedIntegration
-    } else if e.starts_with("SIZING:") {
-        LossReason::Sizing
-    } else if e.starts_with("ATA:") {
-        LossReason::MissingAta
-    } else if e.starts_with("FUNDING:") {
-        LossReason::Funding
-    } else if e.starts_with(darkbot_project0::health::INTEGRATION_STALE) {
-        // C10: set only by the typed error-code check, never inferred from message text.
-        LossReason::IntegrationRefresh
-    } else {
-        LossReason::Routing
-    };
-    (decision, loss)
-}
-
 #[cfg(test)]
 mod plan_error_tests {
     use super::*;
@@ -1109,39 +1166,53 @@ mod plan_error_tests {
         assert!(!compiled_matches(&built.tx.message, &validated[..1]));
     }
 
-    /// C10: a stale integration reserve is recognized only by the marker the typed error-code
-    /// check sets, whatever the wording behind it; a foreign text naming "ReserveStale" is no
-    /// such classification.
+    /// Q5 (with C10/P5): decision and loss of a planning failure follow from its typed kind
+    /// alone. The text — the record's reason, unchanged — never decides: a routing failure whose
+    /// remote message says "unavailable" or names "INTEGRATION_STALE:"/"SIZING:"/"ATA:" stays a
+    /// routing skip, and a typed stale reserve is IntegrationRefresh whatever its wording.
     #[test]
-    fn c10_integration_stale_is_typed_not_text() {
-        for marked in [
+    fn q5_plan_errors_are_classified_by_kind_not_text() {
+        use PlanErrorKind as K;
+        let expected = |kind| match kind {
+            K::FeeStateUnavailable => (Decision::Unavailable, LossReason::Unknown),
+            K::Sizing => (Decision::Skip, LossReason::Sizing),
+            K::UnsupportedIntegration => (Decision::Skip, LossReason::UnsupportedIntegration),
+            K::MissingAta => (Decision::Skip, LossReason::MissingAta),
+            K::IntegrationStale => (Decision::Skip, LossReason::IntegrationRefresh),
+            K::HealthUnavailable => (Decision::Unavailable, LossReason::Routing),
+            K::Routing | K::Other => (Decision::Skip, LossReason::Routing),
+        };
+        let texts = [
+            "ROUTING:exact-in a→b: provider temporarily unavailable",
             "INTEGRATION_STALE:oracle adapter: Kamino reserve not refreshed in this slot",
-            "INTEGRATION_STALE:equity price: AnchorError code 6504",
-        ] {
-            assert!(matches!(
-                classify_plan_error(marked).1,
-                LossReason::IntegrationRefresh
-            ));
-        }
-        for foreign in [
+            "SIZING:NO_LIABILITY",
+            "ATA:PREWARM_REQUIRED: asset ATA=x",
+            "FEE_STATE_UNAVAILABLE:FeeState account missing",
             "route provider: ReserveStale upstream",
-            "SolendReserveStale mentioned by a quote API",
+        ];
+        for kind in [
+            K::FeeStateUnavailable,
+            K::Sizing,
+            K::UnsupportedIntegration,
+            K::MissingAta,
+            K::IntegrationStale,
+            K::HealthUnavailable,
+            K::Routing,
+            K::Other,
         ] {
-            assert!(matches!(
-                classify_plan_error(foreign).1,
-                LossReason::Routing
-            ));
+            for text in texts {
+                let e = PlanError::new(kind, text);
+                assert_eq!((e.decision(), e.loss()), expected(kind), "{kind:?} {text}");
+                assert_eq!(e.to_string(), text);
+            }
         }
-    }
-
-    #[test]
-    fn p5_fee_state_unavailable_is_unknown_not_a_routing_loss() {
-        let (d, l) = classify_plan_error("FEE_STATE_UNAVAILABLE:FeeState account missing");
-        assert!(matches!(d, Decision::Unavailable));
-        assert!(matches!(l, LossReason::Unknown));
-        let (d, l) = classify_plan_error("SIZING:NO_LIABILITY");
-        assert!(matches!(d, Decision::Skip));
-        assert!(matches!(l, LossReason::Sizing));
+        // An untyped string is an unclassified failure: a routing skip, as before Q5.
+        let e = PlanError::from("FEE_STATE_UNAVAILABLE:looks typed but is not");
+        assert_eq!(e.kind, K::Other);
+        assert_eq!(
+            (e.decision(), e.loss()),
+            (Decision::Skip, LossReason::Routing)
+        );
     }
 }
 

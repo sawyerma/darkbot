@@ -6,7 +6,7 @@
 
 use crate::health::{
     crate_impl::{
-        bank_observation_keys, crate_error_text, emode_liability_balances,
+        bank_observation_keys, crate_error_text, emode_liability_balances, integration_stale,
         maintenance_emode_config_of, CrateHealth,
     },
     AccountSource, HealthEngine, HealthError,
@@ -60,6 +60,127 @@ pub struct ProtocolSizing {
     /// On-chain FeeState cap used by the sizing calculation.
     pub fee_state_max_bps: u64,
     pub flat_sol_fee_lamports: u64,
+}
+
+/// Q5: the kind of a sizing failure, typed where it arises. The text is the former message, so
+/// reasons and journals read as before; classification never inspects it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SizingErrorKind {
+    /// No protocol-valid asset/liability pair (the `SIZING:NO_VALID_PROTOCOL_PAIR:` census).
+    NoValidPair,
+    /// C10: the pinned program reports a stale integration reserve (typed error code).
+    IntegrationStale,
+    /// `HealthError::Unavailable`: no health engine built in.
+    HealthUnavailable,
+    /// State, layout, oracle or arithmetic failure.
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SizingError {
+    pub kind: SizingErrorKind,
+    pub text: String,
+}
+
+impl SizingError {
+    /// A pinned-crate error in `context`; a stale integration reserve is typed by its error code
+    /// (the text keeps the `INTEGRATION_STALE:` marker for readers of the reason).
+    fn crate_error(context: &str, e: &anchor_lang::error::Error) -> Self {
+        SizingError {
+            kind: if integration_stale(e) {
+                SizingErrorKind::IntegrationStale
+            } else {
+                SizingErrorKind::Other
+            },
+            text: crate_error_text(context, e),
+        }
+    }
+}
+
+impl From<HealthError> for SizingError {
+    fn from(e: HealthError) -> Self {
+        let kind = match e {
+            HealthError::IntegrationStale(_) => SizingErrorKind::IntegrationStale,
+            HealthError::Unavailable => SizingErrorKind::HealthUnavailable,
+            HealthError::Unsupported(_)
+            | HealthError::Stale(_)
+            | HealthError::Crate(_)
+            | HealthError::MissingAccount(_) => SizingErrorKind::Other,
+        };
+        SizingError {
+            kind,
+            text: e.to_string(),
+        }
+    }
+}
+
+impl From<String> for SizingError {
+    fn from(text: String) -> Self {
+        SizingError {
+            kind: SizingErrorKind::Other,
+            text,
+        }
+    }
+}
+
+impl From<&str> for SizingError {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
+impl From<SizingError> for String {
+    fn from(e: SizingError) -> Self {
+        e.text
+    }
+}
+
+impl std::fmt::Display for SizingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+/// Q5: why sizing produced no candidate, as a fixed code ([FIX-89] diagnostics).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoSizeReason {
+    NotMarginfiAccount,
+    NoAsset,
+    NoLiability,
+    UnsupportedIntegrationAsset,
+    UnsupportedIntegrationLiability,
+    NoSupportedAssetBank,
+    NoSupportedLiabilityBank,
+    NoValidProtocolPair,
+}
+
+impl NoSizeReason {
+    pub fn code(self) -> &'static str {
+        match self {
+            NoSizeReason::NotMarginfiAccount => "NOT_MARGINFI_ACCOUNT",
+            NoSizeReason::NoAsset => "NO_ASSET",
+            NoSizeReason::NoLiability => "NO_LIABILITY",
+            NoSizeReason::UnsupportedIntegrationAsset => "UNSUPPORTED_INTEGRATION_ASSET",
+            NoSizeReason::UnsupportedIntegrationLiability => "UNSUPPORTED_INTEGRATION_LIABILITY",
+            NoSizeReason::NoSupportedAssetBank => "NO_SUPPORTED_ASSET_BANK",
+            NoSizeReason::NoSupportedLiabilityBank => "NO_SUPPORTED_LIABILITY_BANK",
+            NoSizeReason::NoValidProtocolPair => "NO_VALID_PROTOCOL_PAIR",
+        }
+    }
+
+    /// The account holds an integration bank this build cannot size.
+    pub fn unsupported_integration(self) -> bool {
+        match self {
+            NoSizeReason::UnsupportedIntegrationAsset
+            | NoSizeReason::UnsupportedIntegrationLiability => true,
+            NoSizeReason::NotMarginfiAccount
+            | NoSizeReason::NoAsset
+            | NoSizeReason::NoLiability
+            | NoSizeReason::NoSupportedAssetBank
+            | NoSizeReason::NoSupportedLiabilityBank
+            | NoSizeReason::NoValidProtocolPair => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -326,7 +447,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         native_amount: u64,
         now_unix_s: i64,
         slot: u64,
-    ) -> Result<u64, String> {
+    ) -> Result<u64, SizingError> {
         if native_amount == 0 {
             return Ok(0);
         }
@@ -346,7 +467,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             None,
         )
         .map_err(|e| format!("native amount value: {e}"))?;
-        usd_micro(value)
+        Ok(usd_micro(value)?)
     }
 
     pub fn bank_mint(&self, bank_key: &Pubkey) -> Result<Pubkey, String> {
@@ -355,10 +476,10 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
     /// [FIX-89] Deterministic explanation when protocol sizing produced zero candidates.
     /// This is diagnostics only; it does not relax any fail-closed sizing rule.
-    pub fn no_size_reason(&self, account_key: &Pubkey) -> Result<String, String> {
+    pub fn no_size_reason(&self, account_key: &Pubkey) -> Result<NoSizeReason, String> {
         let (_, _, data) = self.raw(account_key)?;
         if protocol::classify(data) != protocol::AccountType::MarginfiAccount {
-            return Ok("NOT_MARGINFI_ACCOUNT".into());
+            return Ok(NoSizeReason::NotMarginfiAccount);
         }
         let account = load_account(data)?;
         let account: &MarginfiAccount = &account;
@@ -406,24 +527,24 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         }
 
         if assets == 0 {
-            return Ok("NO_ASSET".into());
+            return Ok(NoSizeReason::NoAsset);
         }
         if liabs == 0 {
-            return Ok("NO_LIABILITY".into());
+            return Ok(NoSizeReason::NoLiability);
         }
         if supported_assets == 0 && integration_assets > 0 {
-            return Ok("UNSUPPORTED_INTEGRATION_ASSET".into());
+            return Ok(NoSizeReason::UnsupportedIntegrationAsset);
         }
         if supported_liabs == 0 && integration_liabs > 0 {
-            return Ok("UNSUPPORTED_INTEGRATION_LIABILITY".into());
+            return Ok(NoSizeReason::UnsupportedIntegrationLiability);
         }
         if supported_assets == 0 {
-            return Ok("NO_SUPPORTED_ASSET_BANK".into());
+            return Ok(NoSizeReason::NoSupportedAssetBank);
         }
         if supported_liabs == 0 {
-            return Ok("NO_SUPPORTED_LIABILITY_BANK".into());
+            return Ok(NoSizeReason::NoSupportedLiabilityBank);
         }
-        Ok("NO_VALID_PROTOCOL_PAIR".into())
+        Ok(NoSizeReason::NoValidProtocolPair)
     }
 
     /// B4: conservative cost conversion — the bank's upper price bound (`conservative_cost_price`),
@@ -504,7 +625,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
     /// B4: upper bound of the bank's price under the pinned oracle adapter — the higher of the
     /// high-biased (`PriceBias::High`, price plus its confidence interval) time-weighted and
     /// real-time prices.
-    fn conservative_cost_price(&self, bank: &Bank, clock: &Clock) -> Result<I80F48, String> {
+    fn conservative_cost_price(&self, bank: &Bank, clock: &Clock) -> Result<I80F48, SizingError> {
         self.with_feed(bank, clock, |feed| {
             let high = |price_type, what| {
                 feed.get_price_of_type(
@@ -512,7 +633,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     Some(PriceBias::High),
                     bank.config.oracle_max_confidence,
                 )
-                .map_err(|e| crate_error_text(what, &e))
+                .map_err(|e| SizingError::crate_error(what, &e))
             };
             Ok(
                 high(OraclePriceType::TimeWeighted, "time-weighted high price")?
@@ -521,7 +642,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         })
     }
 
-    fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, String> {
+    fn prices(&self, bank: &Bank, clock: &Clock) -> Result<Prices, SizingError> {
         self.with_feed(bank, clock, |feed| {
             let equity = feed
                 .get_price_of_type(
@@ -529,21 +650,21 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     None,
                     bank.config.oracle_max_confidence,
                 )
-                .map_err(|e| crate_error_text("equity price", &e))?;
+                .map_err(|e| SizingError::crate_error("equity price", &e))?;
             let maint_asset = feed
                 .get_price_of_type(
                     OraclePriceType::RealTime,
                     Some(PriceBias::Low),
                     bank.config.oracle_max_confidence,
                 )
-                .map_err(|e| crate_error_text("maintenance asset price", &e))?;
+                .map_err(|e| SizingError::crate_error("maintenance asset price", &e))?;
             let maint_liab = feed
                 .get_price_of_type(
                     OraclePriceType::RealTime,
                     Some(PriceBias::High),
                     bank.config.oracle_max_confidence,
                 )
-                .map_err(|e| crate_error_text("maintenance liability price", &e))?;
+                .map_err(|e| SizingError::crate_error("maintenance liability price", &e))?;
             Ok(Prices {
                 equity,
                 maint_asset,
@@ -557,8 +678,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         &self,
         bank: &Bank,
         clock: &Clock,
-        f: impl FnOnce(&OraclePriceFeedAdapter) -> Result<T, String>,
-    ) -> Result<T, String> {
+        f: impl FnOnce(&OraclePriceFeedAdapter) -> Result<T, SizingError>,
+    ) -> Result<T, SizingError> {
         let keys = bank_observation_keys(bank).map_err(|e| e.to_string())?;
         let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(keys.len());
         for key in keys {
@@ -579,11 +700,15 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .map(|(key, account)| (&*key, account).into_account_info())
             .collect();
         let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
-            .map_err(|e| crate_error_text("oracle adapter", &e))?;
+            .map_err(|e| SizingError::crate_error("oracle adapter", &e))?;
         f(&feed)
     }
 
-    fn positions(&self, account: &MarginfiAccount, clock: &Clock) -> Result<Positions, String> {
+    fn positions(
+        &self,
+        account: &MarginfiAccount,
+        clock: &Clock,
+    ) -> Result<Positions, SizingError> {
         let mut assets = Vec::new();
         let mut liabs = Vec::new();
         for balance in &account.lending_account.balances {
@@ -657,9 +782,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         account_key: &Pubkey,
         now_unix_s: i64,
         slot: u64,
-    ) -> Result<Vec<ProtocolSizing>, String> {
+    ) -> Result<Vec<ProtocolSizing>, SizingError> {
         if self.headroom_bps == 0 || self.headroom_bps > BPS {
-            return Err(format!("headroom_bps must be 1..={BPS}"));
+            return Err(format!("headroom_bps must be 1..={BPS}").into());
         }
         let (_, _, data) = self.raw(account_key)?;
         if protocol::classify(data) != protocol::AccountType::MarginfiAccount {
@@ -672,7 +797,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             group: self.group,
         }
         .health(account_key, now_unix_s, slot)
-        .map_err(|e: HealthError| e.to_string())?;
+        .map_err(SizingError::from)?;
         if !health.liquidatable || health.maintenance_health >= 0 {
             return Ok(Vec::new());
         }
@@ -959,7 +1084,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         }
 
         if out.is_empty() && !assets.is_empty() && !liabs.is_empty() {
-            return Err(format!(
+            return Err(SizingError {
+                kind: SizingErrorKind::NoValidPair,
+                text: format!(
                 "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={};rounded_health={};pair_details={}",
                 rej_asset_equity_nonpositive,
                 rej_liab_equity_nonpositive,
@@ -972,7 +1099,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 rej_premium_bound,
                 rej_rounded_health,
                 pair_details.join(" | "),
-            ));
+            ),
+            });
         }
         Ok(out)
     }
@@ -1422,25 +1550,49 @@ mod tests {
         assert!(51_500_000i128 < threshold_bits);
     }
 
-    /// Z17 (FIX-93) through the production `sizes()` path: one asset (maintenance weight 0.8)
-    /// and one liability (weight 1.0), both 1 USD (Fixed), FeeState cap 10 %, headroom 99.9 %.
-    /// At equity assets of 5 USD or more the sizing stays within the normal health bound
-    /// (post-liquidation maintenance health ≤ 0, seized value ≤ the health cap); below 5 USD
-    /// (pinned `LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD`, strict `<`) the closeout drops the
-    /// health cap: the seized value goes past it and the post-health becomes positive.
-    #[test]
-    fn normal_and_closeout_bounds_are_distinct() {
+    /// RAM state of one Marginfi account with one asset and one liability bank (pinned program
+    /// id, so Health loads it through its Anchor owner check).
+    struct TwoBank {
+        state: std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>,
+        program: Pubkey,
+        group: Pubkey,
+        account: Pubkey,
+    }
+
+    impl AccountSource for TwoBank {
+        fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            self.state.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+        }
+    }
+
+    impl TwoBank {
+        fn sizes(&self) -> Result<Vec<ProtocolSizing>, SizingError> {
+            ProtocolSizer {
+                state: self,
+                program: self.program,
+                group: self.group,
+                headroom_bps: 9_990,
+            }
+            .sizes(&self.account, 1_700_000_000, 10)
+        }
+
+        fn closeout(&self) -> bool {
+            CrateHealth {
+                state: self,
+                group: self.group,
+            }
+            .health(&self.account, 1_700_000_000, 10)
+            .unwrap()
+            .closeout_allowed
+        }
+    }
+
+    /// One asset (maintenance weight `asset_weight`) and one liability (weight 1.0), both 1 USD
+    /// (Fixed), FeeState cap 10 %; `asset`/`liab` are native amounts (6 decimals).
+    fn two_bank(asset_weight: f64, asset: u64, liab: u64) -> TwoBank {
         use marginfi_type_crate::types::{
             BankOperationalState, FeeState, MarginfiGroup, OracleSetup, WrappedI80F48,
         };
-        use std::collections::HashMap;
-        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
-        impl AccountSource for Source {
-            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
-                self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
-            }
-        }
-        // The pinned program id: Health loads the accounts through its Anchor owner check.
         let program: Pubkey = protocol::PROGRAM_ID_MAINNET.parse().unwrap();
         let (group, account, asset_bank, liab_bank) = (
             Pubkey::new_unique(),
@@ -1468,34 +1620,26 @@ mod tests {
         };
         let mut fee: FeeState = bytemuck::Zeroable::zeroed();
         fee.liquidation_max_fee = num(0.1);
-        // Native token amounts (6 decimals) of the asset and the liability.
-        let sized = |asset: u64, liab: u64| {
-            let mut a: MarginfiAccount = bytemuck::Zeroable::zeroed();
-            a.group = group;
-            // Pinned Marginfi keeps the balances sorted by bank key, descending.
-            let (i, j) = if asset_bank > liab_bank {
-                (0, 1)
-            } else {
-                (1, 0)
-            };
-            let bal = &mut a.lending_account.balances;
-            (bal[i].active, bal[i].bank_pk, bal[i].asset_shares) =
-                (1, asset_bank, num(asset as f64));
-            (bal[j].active, bal[j].bank_pk, bal[j].liability_shares) =
-                (1, liab_bank, num(liab as f64));
-            let state = Source(HashMap::from([
-                (asset_bank, (program, bank(0.8))),
+        let mut a: MarginfiAccount = bytemuck::Zeroable::zeroed();
+        a.group = group;
+        // Pinned Marginfi keeps the balances sorted by bank key, descending.
+        let (i, j) = if asset_bank > liab_bank {
+            (0, 1)
+        } else {
+            (1, 0)
+        };
+        let bal = &mut a.lending_account.balances;
+        (bal[i].active, bal[i].bank_pk, bal[i].asset_shares) = (1, asset_bank, num(asset as f64));
+        (bal[j].active, bal[j].bank_pk, bal[j].liability_shares) = (1, liab_bank, num(liab as f64));
+        let group_data = data(
+            protocol::DISC_MARGINFI_GROUP,
+            bytemuck::bytes_of(&<MarginfiGroup as bytemuck::Zeroable>::zeroed()),
+        );
+        TwoBank {
+            state: std::collections::HashMap::from([
+                (asset_bank, (program, bank(asset_weight))),
                 (liab_bank, (program, bank(1.0))),
-                (
-                    group,
-                    (
-                        program,
-                        data(
-                            protocol::DISC_MARGINFI_GROUP,
-                            bytemuck::bytes_of(&<MarginfiGroup as bytemuck::Zeroable>::zeroed()),
-                        ),
-                    ),
-                ),
+                (group, (program, group_data)),
                 (
                     protocol::fee_state_pda(&program),
                     (
@@ -1510,24 +1654,86 @@ mod tests {
                         data(protocol::DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&a)),
                     ),
                 ),
-            ]));
-            let closeout = CrateHealth {
-                state: &state,
-                group,
-            }
-            .health(&account, 1_700_000_000, 10)
-            .unwrap()
-            .closeout_allowed;
-            let mut out = ProtocolSizer {
-                state: &state,
-                program,
-                group,
-                headroom_bps: 9_990,
-            }
-            .sizes(&account, 1_700_000_000, 10)
-            .unwrap();
+            ]),
+            program,
+            group,
+            account,
+        }
+    }
+
+    /// Q5: sizing failures are typed where they arise — the pair census of a real `sizes()` run
+    /// without a valid pair is `NoValidPair` (text unchanged), a pinned-crate error is
+    /// `IntegrationStale` only for the pinned stale-reserve codes (text with the reader's marker,
+    /// as before), and every `HealthError` maps by its variant.
+    #[test]
+    fn q5_sizing_errors_are_typed_at_their_source() {
+        // Asset and liability both weigh 1.0: no fee factor ≥ 1 heals (coefficient ≤ 0).
+        let e = two_bank(1.0, 100_000_000, 110_000_000).sizes().unwrap_err();
+        assert_eq!(e.kind, SizingErrorKind::NoValidPair);
+        assert!(
+            e.text.starts_with(
+                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive=0;liab_eq_nonpositive=0;\
+                 coeff_nonpositive=1;"
+            ),
+            "{e}"
+        );
+        let crate_error = |code| {
+            SizingError::crate_error(
+                "oracle adapter",
+                &anchor_lang::error::Error::from(anchor_lang::prelude::ProgramError::Custom(code)),
+            )
+        };
+        let stale = crate_error(6206);
+        assert_eq!(stale.kind, SizingErrorKind::IntegrationStale);
+        assert!(
+            stale.text.starts_with("INTEGRATION_STALE:oracle adapter: "),
+            "{stale}"
+        );
+        let other = crate_error(6207);
+        assert_eq!(other.kind, SizingErrorKind::Other);
+        assert!(other.text.starts_with("oracle adapter: "), "{other}");
+        let health = |e: HealthError| {
+            let text = e.to_string();
+            let typed = SizingError::from(e);
+            assert_eq!(typed.text, text);
+            typed.kind
+        };
+        assert_eq!(
+            health(HealthError::IntegrationStale("kamino".into())),
+            SizingErrorKind::IntegrationStale
+        );
+        assert_eq!(
+            health(HealthError::Unavailable),
+            SizingErrorKind::HealthUnavailable
+        );
+        for e in [
+            HealthError::Unsupported("x".into()),
+            HealthError::Stale("x".into()),
+            HealthError::Crate("x".into()),
+            HealthError::MissingAccount(Pubkey::new_unique()),
+        ] {
+            assert_eq!(health(e), SizingErrorKind::Other);
+        }
+        // An untyped message stays unclassified, whatever it says.
+        assert_eq!(
+            SizingError::from("INTEGRATION_STALE:looks typed but is not").kind,
+            SizingErrorKind::Other
+        );
+    }
+
+    /// Z17 (FIX-93) through the production `sizes()` path: one asset (maintenance weight 0.8)
+    /// and one liability (weight 1.0), both 1 USD (Fixed), FeeState cap 10 %, headroom 99.9 %.
+    /// At equity assets of 5 USD or more the sizing stays within the normal health bound
+    /// (post-liquidation maintenance health ≤ 0, seized value ≤ the health cap); below 5 USD
+    /// (pinned `LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD`, strict `<`) the closeout drops the
+    /// health cap: the seized value goes past it and the post-health becomes positive.
+    #[test]
+    fn normal_and_closeout_bounds_are_distinct() {
+        let sized = |asset: u64, liab: u64| {
+            let f = two_bank(0.8, asset, liab);
+            let mut out = f.sizes().unwrap();
             assert_eq!(out.len(), 1);
-            (closeout, out.remove(0))
+            (f.closeout(), out.remove(0))
         };
         // USD micro: the normal health cap -pre / (1/1.1 - 0.8) and the post-liquidation
         // maintenance health pre + repaid - 0.8 × seized (prices 1 USD, micro = native).
