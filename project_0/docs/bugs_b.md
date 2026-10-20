@@ -1872,11 +1872,14 @@ Die in diesem Dokument Z1–Z8 genannten Befunde sind dieselben wie die Nutzerpr
 | Z6 | V6 | `[x]` dependency_gap nur neu/geändert/aufgehoben | `423c024` |
 | Z7 | V7 | **PARTIAL / KONFLIKT:** auf ausdrückliche Nutzeranweisung (Stufe 1) halten ZeroPrefund/FlashFunded vorläufig den vollen `seized_equity_value`. Abschnitt E dieses Dokuments bewertet den Voll-Hold als nicht belegt (der Swap verbraucht die volle Ausführungsmenge; Rest = Liability-Überschuss und Rundungsstaub). Wirkung nur im LIVE-Pfad (gesperrt), Shadow unverändert. **Nutzerentscheidung offen**, Stufe 2 (Token-Flüsse) vor FE-06. | `423c024` |
 | Z8 | V8 | `[x]` Struktur: gemeinsamer EMODE-Filter (Semantik unverändert, wie Abschnitt E) | `423c024` |
-| — | V9 | offen: technische Plan-Ablehnungen als ECONOMIC_SKIP attribuiert (verwandt mit Q5 `PlanError`) | — |
+| — | V9 | **PARTIAL:** Verlustgrund aus der am weitesten gelangten technischen Stufe (Build/Submission), Ökonomie vor Technik; offen LIVE-Safety-Ablehnung (braucht neue `LossReason`-Variante, LIVE gesperrt) | `c7ccce0` |
 | Q2 | V10 | `[x]` geprüfte Ledger-Transitionen, HALT `LEDGER_INVARIANT` ohne Anwendung; B3/C3 (dauerhafter Ledger, Settlement) bleiben offen | `3f901d3` |
 | Z18 | V11 | `[x]` Owner + Discriminator aus den gepinnten Typen (`AccountLoader`-Identität), ein gemeinsamer Decoder | `3f901d3` |
 | Z12 | V12 | `[x]` Paarfehler isoliert, kontoweite Fehler fatal, Klassifikation ohne Plan unverändert | `3f901d3` |
-| Z14 | V13 | `[x]` Race reproduziert (63/1.024 frei), Probes als Owner-Detektionsarbeit | `3f901d3` |
+| Z14 | V13 | `[x]` Race reproduziert (63/1.024 frei), Probes als Owner-Detektionsarbeit; Backlog-Telemetrie als eigene Zeile `bootstrap_probes:` | `3f901d3`, `c7ccce0` |
+| Z13 | V14 | `[x]` Bankrott ersetzt nur Folgegründe des fehlenden Plans, Herkunft im Grundtext; unabhängige Gründe und `loss=None` bleiben | `c7ccce0` |
+| Z19 | V15 | `[x]` Health-Snapshot auch in Stille (echte Session gegen Loopback-WSS), Intervall konfigurierbar, Produktion 5 s | `c7ccce0` |
+| Z17 | V16 | `[x]` echter `sizes()`-Grenztest beiderseits der 5-USD-Schwelle, 4 Mutationen rot | `c7ccce0` |
 
 Weiter offen aus diesem Dokument (Reihenfolge laut Nutzerauftrag): B1/B3/B15, C3/C11/C12 (FE-04/P8-Ledger), dann übrige bestätigte Z/Q.
 

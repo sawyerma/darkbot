@@ -5745,3 +5745,15 @@ Commit `3f901d3` (rebased onto foreign `45ca27e`, `project_0/native` tree identi
 - V13 (Z14): race reproduced offline with the real owner (after a recovery with 1,100 was-liquidatable accounts only 63 of 1,024 ingress slots were free); probes now in a dedicated owner queue after oracle work.
 - NOT_RUN: no Mainnet read, capture or LIVE; B3/C3 (durable multi-attempt safety ledger, settlement) open.
 
+## 2026-10-20 — bugs_b Z13/Z19/Z17 = BUGS V14–V16, V9, V13 telemetry (LOCAL_PASS per ticket, offline only)
+
+Commit `c7ccce0` (rebased onto foreign `63142e3`, `project_0` tree identical to the gated state). Each ticket is guarded by fail-before mutations (the old behaviour restored makes its test fail); independent read-only review before the push.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 668/0/6, default 666/0/6, release, Python 108 (1 skipped) exit 0.
+- V9: the loss of a candidate without a plan is the furthest technical stage (BUILD/SUBMISSION) unless a plan reached the economics; from `c7ccce0` such candidates no longer count as ECONOMIC_SKIP (older journals unchanged). PARTIAL: a LIVE safety-preview denial is still attributed economically (needs a new `LossReason` variant; LIVE locked).
+- V13: probe backlog on its own diagnostic line `bootstrap_probes:` (the R126/R127-parsed `oracle_trigger_stats` line unchanged).
+- V14 (Z13): bankruptcy replaces only no-plan follow-on causes and keeps their provenance.
+- V15 (Z19): WSS health snapshot also during silence, proven with the real session against a loopback WebSocket; production interval 5 s unchanged.
+- V16 (Z17): real `sizes()` test on both sides of the 5 USD closeout threshold.
+- Test hygiene (no production change): the first gate run of this package failed 6 econ tests with `AMBIGUOUS_SHADOW_SOURCE` — the test worker directory `c0_e1_<pid>_<seq>` in the system temp dir was reused by a recycled process id and still held a `shadow_evaluations.jsonl` of a 2026-10-15 run. The helper now clears its directory before use; the gate was repeated in full.
+- NOT_RUN: no Mainnet read, capture or LIVE; real probe waits and health cadence under Mainnet load NOT_MEASURED.
