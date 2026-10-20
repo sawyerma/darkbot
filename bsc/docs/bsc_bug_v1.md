@@ -633,7 +633,95 @@ Gezielte **neue** Tests fuer E5-2 (Unicode/InvalidHex/Panic-Freiheit), E5-3 (MAX
 **Etappe-5-Abnahme:** E5-1 als spaeteres LIVE-Blocking-Risk-Gate registriert, E5-2/3/4 als implementierbare Fixes spezifiziert, E5-5/6 als spaeter messpflichtige Architektur-Tradeoffs statt angebliche aktuelle Mainnet-Bugs klassifiziert; `ArmedFence`-Herkunft unveraendert. `STAGE_5_REVIEWED`, **FIXES OPEN**, G0.7 `UNARMED`, C1/C2 noch `PAUSED`.
 
 
-## 7. Nachfolgende Etappen
+## 7. Etappe 6 — geth_ipc Ingress/Outbound, HOT0 und SPSC-Wire-V2
+
+**Pruefstand:** 2026-10-20 · **Fable-Referenz:** `cac786e` · **unabhaengig gepruefter Git-`main`-HEAD:** `6e0e5876f86308f166b609deacc325842ad10eef`. Die in dieser Etappe bewerteten BSC-Codepfade wurden seit `cac786e` nicht im aktiven Review geaendert. **Kein Produktionscode editiert, kein Cargo-/Go-Test ausgefuehrt, keine Mainnet-Transaktion ausgelöst.**
+
+**Autoritative Phase:** `bsc/docs/PHASENPLAN.md` -> `BSC_DUAL_VENUE_ROADMAP.md`, `GATE0_TESTPLAN_SHORT.md`, `BSC_PRODUCTION_BUILD_MASTER_PLAN.md`, `BSC_C1_PARALLEL_FAST_LANE_PLAN.md` und der `BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md`. **C1/C2 erst nach G0.7→G0.8**; ein historischer lokaler C1.4/C1.5-Test-PASS ist keine gesamte Mainnet-Coverage, keine reale BUY-Inclusion und keine <1-ms-Produzentenmessung. Fast Lane darf keine zweite wirtschaftliche Admission-/Nonce-/Final-Binding-/Egress-Autoritaet etablieren. Die betroffene Produktionsschnittstelle ist in der spaeteren C1/C2/C3-Integration zu qualifizieren.
+
+**Eigene Code-Abdeckung:** `geth_ipc/src/{ingress,outbound,hot0}.rs`, `protocol_v2/{producer,consumer,guards,mapping,mod}.rs`, die gezielten `protocol_v2/{c15_tests,tests}.rs`-Tests und Dokumentationsstellen des C1-Plans/Runbooks; genauer Quell- und Testbestand erhoben. **Offen:** Vollpruefung von `host.rs`, `protocol_v1.rs`, `protocol_v2/{arena,lifecycle,peer_pool,role_lease,layout,lanes,error}.rs` und dem Rest der grossen HOT0-/V2-/Stress-Testfaelle; Go-Overlay-Offset-Pruefung ist Etappe 7. Etappe 6 ist daher ein **teilweiser, klar abgegrenzter Audit**, keine behauptete Komplettverifikation des gesamten Crates.
+
+### Etappe-6-Urteil
+
+| ID | Klassifikation | Quellcode-Urteil | Implementierung |
+| --- | --- | --- | --- |
+| E6-1 | **Produktrelevant/C1-C2 Coverage** | **BESTAETIGT:** Scope nur direkter Portal-v6-Selector; Audit verwendet denselben Scope und kann ausserhalb davon keine False Negatives feststellen | **C1/C2 Pflicht zur produktweiten Coverage-Definition und unabhaengiger Denominator-Evidence**, keine G0.7-Aenderung |
+| E6-2 | **Produktrelevant/C1-C2 Safety-Integration** | **BESTAETIGT:** `publish_buy` akzeptiert `hot0::IntentSlot::Sealed` ohne `trading::IntentLane::start_write`-Permit; Integrationsgrenze noch nicht zusammengefuehrt | **Vor jeder produktiven LocalGeth-Egress-Qualifikation zwingend vereinheitlichen** |
+| E6-3 | **C1.5/7 Protokoll-Haertung** | **TEILWEISE BESTAETIGT:** fehlende Barrieren bei freiwilliger Rewrite-Diagnostik; **die von Fable vorgeschlagenen zwei Fences sind nicht als korrekte/ausreichende Loesung bewiesen** | Go/Rust-Speichermodell-/Layout-/Race-Pruefung in Etappe 7, keine unqualifizierte Wire-Aenderung |
+| E6-POS | Vorhandene SPSC-Sicherheit | **QUELLCODE-KONSISTENT** im zugesicherten ein-Producer/ein-Consumer-/Guard-Lebenszeit-Vertrag; Testbelege vorhanden | Kein unnoetiger Rework |
+| E6-REST | Offene Dateien / Interop | **NICHT VOLL GEPRUEFT** | Gezielter Folgeaudit C1, kein umfassender PASS |
+
+### E6-1 — Getrennte Begriffe fuer engen Prefilter-Audit und echte Launch-Abdeckung
+
+**Beleg:** `bsc/engine/crates/geth_ipc/src/ingress.rs` ca. Z. 226–294 definiert `C14_FLAP_SCOPE` mit genau **Portal-Proxy** `0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0` und **`newTokenV6`**-Selector `0x8cb5772c`. `PrefilterScopeV2::matches` verlangt `tx.to=Portal` und passenden ersten Selector. `IngressAuditV2::judge_txpool_record` ca. Z. 602–673 dekodiert die Txpool-Huelle, fuehrt denselben `scope.matches`-Test aus und liefert fuer alles ausserhalb **`NotRelevant`**. Die in `IngressAuditStatsV2` ermittelten `relevant/false_negatives` beziehen sich daher auf **diesen** eingefrorenen direkten Caller/Selector-Scope. Die `txpool`-Bestaetigung kann nur einen Peer-Miss fuer eine als relevant klassifizierte TX finden. `C14_SCOPE_CANONICAL_HEX` und CRC32C-Fingerprint binden genau diesen Narrow-Scope an die Go-/Core-Schnittstelle.
+
+**Tragweite / keine ueberdehnte Behauptung:** Erzeugungen via Creator-/Router-/Multicall-/Proxy-Vertrag mit anderem `to` oder abweichende Methodenselektoren werden **von diesem Filter nicht als Launch erfasst**. Ob das gepinnte Portal v5.25.0 solche mittelbaren oder anderen Launch-Semantiken auf Mainnet tatsaechlich erlaubt und wie oft sie auftreten, ist hier **NICHT NACHGEWIESEN**; Beispielklassen sind potenzielle Coverage-Luecken, keine gemessenen Verluste. `C1.4 PASS` kann nur `C1.4-SCOPE_PASS` sein, **nicht** „alle Flap-Launches erfasst“. Dabei gilt der C1-Plan §7: Der Go-Prefilter ist lediglich ein konservatives **Superset der qualifizierten** Venue-Rollen und selbst keine wirtschaftliche Authority. Eine fachlich nicht unterstuetzte Launch-Art darf nicht automatisch als handelbar aktiviert werden.
+
+**C1/C2-Pflichtauftrag:**
+1. Formal zwei Grundgesamtheiten versionieren: **(A) qualifizierte direkte `newTokenV6`-TXs, die in der Txpool-/Peer-Beobachtung des verfuegbaren Netzs auftauchen**, und **(B) alle tatsaechlich im beobachteten kanonischen Mainnet-Blockfenster vom bezeugten Portal erzeugten Tokens/Launches**. Ein C1.4-Scoped-Txpool-Audit ist nur die A-Negativquote, nicht die B-Abdeckung.
+2. Fuer B eine **vom C1.4-Prefilter unabhaengige**, read-only Block-/Receipt-/Log-basierte Ground Truth aus dem bezeugten Portal-`TokenCreated`-Event aufbauen. Event-ABI, Adresse, Codegeneration, Receipt/Blockhash und kanonische Finalitaet aus gepinntem Flap-Code pruefen; `TokenCreated` nicht aus einem nicht verifizierten Event-Namen oder frei erfundenen Topic0 ableiten. Event -> tatsaechliche erzeugende Parent-TX, Ursprung-`to`, Selector und vermittelnde Contract-Calls aufloesen, dann gegen **fruehe** Peer-/TXPOOL-Beobachtung abgleichen.
+3. Explicit `scope_outside_count`, `direct_in_scope_count`, `event_backed_launches`, `early_observed_launches`, `missed_launches`, `unknown_parent` sowie Gaps/Clock-/Archiv-/Traces-Fehler mit nachpruefbarer Bezugsmenge, Fenster, Dekoderversion und Coverage-Denominator reporten. Keine pauschal zusammengeworfenen Prozente fuer alle Launches. Begrenzungen bei historischen Mempool-Daten und unvollstaendiger Peer-Anbindung gelten als UNKNOWN/INCOMPLETE.
+4. **Wichtige Grenze:** Ein `TokenCreated`-Event kann ausschliesslich **in inkludierten erfolgreichen Receipts** vorkommen. Es zaehlt weder private nie inkludierte Launches noch vorzeitig verworfene oder noch ausstehende TXs. Das Event ist deshalb eine kanonische **realisierte Launch-Ground-Truth**, aber **kein kompletter Nenner aller moeglichen Pending-Launches**. Keine falsche Aussage „nur so wird jeder Prefilter-Miss messbar“. Gleichzeitig ist eine erfolgreiche Event-Erkennung **kein** Nachweis, dass die eigene Fast Lane den Launch *vor* Konkurrenz gesehen hat.
+5. Nur bei durch reale Mainnet-Fixtures nachgewiesenem Fehl-Scope und nach eigener wirtschaftlicher Profilqualifikation alternative Caller-/Selector-Faelle gezielt dem Go/Rust-Filter hinzufuegen. `C14_SCOPE_CANONICAL_HEX`, CRC32C, Go-/Rust-/Core-Goldens, falsche Matches, C1.4a-Feasibility und Cross-Lane-Coverage erneut beurteilen. Keine neue `ROLE_LAUNCH`-Autoritaet ohne Code-/Profil-Evidence.
+
+**Abnahme:** Nicht nur „innerhalb des Filters 0 False Negatives“, sondern explizite Denominator-/Scope-Angaben und beweisbare Differenz zu den bezeugten tatsaechlichen Launches. Ohne Mainnet-Sample `COVERAGE_UNKNOWN`, nicht Marketing-PASS. Keine G0.7-Neuqualifikation fuer einen noch getrennten C1-Filter.
+
+### E6-2 — HOT0-Egress modelliert einen zweiten signierten-Bytes-Ausgang
+
+**Codebeleg:** `geth_ipc/src/outbound.rs::publish_buy` ca. Z. 120–142 hat den oeffentlichen Aufruf `(&mut ProducerV2, &IntentSlot, commit_ns)`, verlangt lediglich `slot.state()==IntentState::Sealed` und monotone Clock ungleich 0; schreibt `slot.buy_bytes()` mit dem vom Slot gelieferten `slot.buy_hash()` in `RecordKind::OutboundSignedTx`. `geth_ipc/src/hot0.rs::IntentSlot::seal` ca. Z. 239–267 akzeptiert ein `IntentBuy` mit separatem `intent_id/generation/policy_generation/nonce/adapter_permit_mask/buy_hash/signed_buy`, prueft an der Stelle aber nur State, Nichtleere und Kapazitaet, **nicht** ein verifiziert verbrauchtes Adapter-Permit und auch nicht eigenstaendig die Cryptographic-Hash-zu-RLP-Byte-Bindung. Dies ist eine vorallokierte C1.5-Egress-Speicherstruktur, kein Produktions-`trading::intent`-Owner.
+
+Demgegenueber verbietet `trading/src/intent/mod.rs` Invarianten 4–8 das Entnehmen signierter Bytes ausser ueber ein **einmaliges `IntentLane::start_write`** nach `begin_send`, mit einem Nonce/Intent, Snapshot und fail-closed UNKNOWN/HALT bei jedem Egress-Zweifel. `execution/src/submission/send.rs` konsumiert tatsaechlich ein Lane-Permit pro Adapter. `geth_ipc/Cargo.toml` hat derzeit nur `libc` als Abhaengigkeit und `hot0` ist bewusst eine vom Trading-Core getrennte C1-Infrastruktur. **Aktuelle externe Rust-API laesst einen anderen Egress-Vertrag zu, wenn man sie spaeter ohne Bridge im Runner verdrahtet.**
+
+**Urteil:** Produktrelevante **Architektur-/Integrationsluecke**, aber **kein belegter aktuell ausfuehrender Bypass**, denn `execution/src/startup.rs` laesst `LocalGeth` im bestehenden Release-Startup **nicht** als auswaehlbaren Adapter zu und der spaetere vereinte Runtime-Risk-/Nonce-/Egress-Owner ist noch nicht integriert. Ein lokaler P2P-Broadcast waere oeffentlich und darf nicht als privates G0.7-Bundle-Equivalent behandelt werden.
+
+**C1/C2/C3-Pflichtfix vor produktivem Egress:**
+1. **Ein** Source-of-Truth-Owner fuer Intent/Nonce/Exposure/Dedup/Signer-/BUY-Bytes. Entweder LocalGeth-Egress nur ueber eine **vom einmalig konsumierten `IntentLane::start_write` erteilte, unaustauschbare typisierte Permit-/Byte-Capability** aufrufen oder `hot0::IntentSlot` ausschliesslich als Speicher hinter demselben Lane-Permit-Owner einsetzen. Keine implizite Nonce-/Permit-Wahrheit aus `hot0::IntentBuy` uebernehmen. Unvermeidbare getrennte Datenstrukturen muessen eine **eindeutige** wirtschaftliche Identitaet und einen gemeinsamen Egress-Status besitzen.
+2. Vor erstem Wire-Publish finale RLP/EIP-155-/Sender-/Chain-/Portal-/Nonce-/Gas-/Value-/Token-/Minimum-/Snapshot-Bindung erhalten; BUY-Hash aus den **tatsaechlichen signierten Bytes** checken. Fuer jeden Adapter dieselben signierten Bytes und Nonce, getrennte Wire-Frames/Handoff-Evidence aber nur **ein** wirtschaftlicher BUY. Der adapterbezogene Permit wird exakt einmal verbraucht; ein zweiter `publish_buy` mit demselben Slot darf kein zweites Wire-Publish bewirken, ausser dieselbe bewusst erlaubte Fanout-Operation des einen Intents wurde einmalig authorisiert und deren Evidence gebunden.
+3. `publish_buy`-Fehlervariante `QueueFull`/nach Partial-/unbestimmtem Commit darf den wirtschaftlichen Intent **nicht** still freigeben: vor garantierter Disclosure nur qualifizierter SKIP, ab ungewisser moeglicher Offenlegung immer UNKNOWN/HALT. Auch geth-Evidence `DISPATCHED`/`HANDED_OFF` beweist nur lokalen P2P-Transport, nicht Netzempfang, Inclusion, Erwerb oder Zeitpunkt `T_buy`. Status-/Sequence-/Peer-Identity-Records versionieren.
+4. C1/C2- und Runner-Tests: `Sealed` ohne Permit STOP; zweite Publikation STOP; mismatched raw/hash STOP; falscher Nonce/Signer/Token/Codegen/Policygen STOP; alle Adapter bytegleich; partial-Wire-Write UNKNOWN; queue-full mit expliziter Disclosure-Grenze; Reorg, Late Execution, Quarantäne/Crash/Restart und kumulatives E5-1-Budget. Fake-Keys / Offline-Frames; **kein** echter geth-Broadcast.
+
+**Abnahme:** Einheitliche `IntentLane`-Invariante 5 auf **alle** lokalen und Builder-Egress-Adapter angewandt, ohne neues Nonce-/Retry-/Exposure-Loch und ohne das SPSC-Zero-Copy-Latenzziel aufzugeben. Die Typgrenze muss im Integrationscode nachgewiesen werden, nicht nur per Kommentar.
+
+### E6-3 — Memory Ordering: Two-Fence-Vorschlag ist keine bewiesene regelwidrige Rewrite-Sicherheit
+
+**Feste Beobachtung:** `protocol_v2/producer.rs` ca. Z. 51–79 setzt `SLOT_OFF_COMMITTED` bei Slot-Reuse mit `store(EMPTY_SEQUENCE, Ordering::Relaxed)`, schreibt Header und Payload danach als **nichtatomare Bytes in ein MAP_SHARED-mmap** und publiziert `committed_sequence` / `write_sequence` mit `Release`. `protocol_v2/consumer.rs` nimmt `write_sequence` / `committed_sequence` mit `Acquire` auf, prueft CRC/epoch/Bounds und laesst einen `RecordGuardV2` die referenzierten Bytes leihen. `protocol_v2/guards.rs::check_stable` liest `committed` spaeter mit `Acquire` erneut. **Der vorgeschlagene Code von Fable wuerde nur `fence(Ordering::Release)` hinter dem leeren Store und `fence(Ordering::Acquire)` unmittelbar vor der abschliessenden Commit-Lesepruefung einsetzen.**
+
+**Zwei unterschiedliche Garantien trennen:**
+- **Regulaeres SPSC-Protokoll:** Der Producer darf denselben Slot waehrend eines gehaltenen `RecordGuardV2` **nicht** aendern. Er muss vor Wiederverwendung den vom Consumer mit `Release` erhoehten `read_sequence` per `Acquire` beachten. Diese Eigentumsfolge bietet die beabsichtigte **gueltige** Synchronisierung fuer plain slot data. Bestehende Tests `protocol_v2/c15_tests.rs::a_held_slot_cannot_be_reused_and_a_released_slot_can` und doctests demonstrieren SPSC- und Borrow-Regeln; `a_corrupt_record_is_refused_and_never_released` prueft eine **vor** Consumer-Acquire manipulierte Payload.
+- **Regelwidriges gleichzeitiges Ueberschreiben:** Der bestehende Kommentar verspricht per `committed_sequence`-Recheck erkennbaren Rewrite, waehrend dabei **nichtatomare** Slotbytes moeglicherweise parallel gelesen/geschrieben werden. Eine solche Race-Situation liegt **ausserhalb des SPSC-Eigentumsvertrags** und ist durch nachtraegliches Checken der Commit-Word-Identitaet alleine **nicht sicher auszuschliessen**. `protocol_v2/c15_tests.rs` hat einen Test mit manuell gesetztem `EMPTY_SEQUENCE` nach dem Guard-Acquire; das testet **sichtbare Commit-Manipulation**, nicht das gleichzeitige, lockfreie Lesen/Schreiben einer Plain-Byte-Payload. CRC hilft bei finaler Integritaet, nicht gegen alle konkurrierenden Zwischenschreibungen oder eine unsound Rust-`&[u8]`-Aliasing-Situation. Nach Rust-Atomics-Dokumentation synchronisieren Fences nur unter definierten Atomic-Operationen/Happens-Before-Bedingungen. **Die zwei Fences allein beweisen keine Race-Freedom fuer den vertragsverletzenden Writer.**
+
+**Entscheidung:** E6-3 **nicht** mit einem ungeprueften „2 Zeilen, Kosten vernachlaessigbar“ als FIXED etikettieren. Der vorgeschlagene Patch kann eine **zusaetzliche** Ordnungsgrenze im gewuenschten Kontrollfluss markieren; ob genau `Release` hinter dem Clear bzw. `Acquire` vor dem Recheck und die Go-Entsprechungen hinreichende *gegenseitige* Read-/Write-Ordnungen liefern, bedarf einer eigenen Proof-/Toolchain-/ISA-Ueberpruefung (ARM64 Apple M4 und tatsaechlicher Linux-Produktionshost). **Zwingend** den Sonderfall „Writer ignoriert Full/read_sequence und schreibt parallel in geliehene nichtatomare mmap-Bytes“ entweder mit einer staerkeren Ownership-/No-Aliasing-Garantie **strukturell unmoeglich machen**, oder separate atomare/konsistente Snapshot-Strategie fuer die Ausnahme spezifizieren. Keine behauptete unbedingte Erkennung/Memory-Safety durch einen zweiten Commit-Load. Fable-Patch 1 **NICHT BLIND ANWENDEN** und Go-Seite bei Etappe 7 verpflichtend offsets/layout/atomics abgleichen.
+
+**C1-Folgeauftrag:** Dokumentierte Annahmen `SPSC-owner, one producer, guard lifetime, read_sequence Release, producer Acquire, no concurrent slot overwrite` explizit an Go/Rust-Grenze und Lifecycle-/Pool-Leases pinnen. Bei jeder geplanten Fence-Aenderung Rust/Go-Golden-/Backpressure-/Quarantäne- und ABI-Tests sowie einen kontrollierten Stress-/Concurrency-Test fuer ARM64 laufen lassen; falls „detect malicious concurrent rewrite“ als Produktgarantie erhalten bleibt, formalen Happens-Before-/Aliasing-Nachweis bzw. sicherer struktureller Ausschluss verlangt. Testlast und unveraenderte HOT0-P99-Allokations-/Latenzwerte dokumentieren. Keine Protokollfelder ohne gepinnte Migrations-/Kompatibilitaetsentscheidung aendern.
+
+**Relevante externe Sprachgrundlage (keine Mainnet-Evidence):** Rust `std::sync::atomic::fence` https://doc.rust-lang.org/std/sync/atomic/fn.fence.html : Atomics-Fences synchronisieren unter definierten Atomic-Bedingungen und ersetzen nicht den Beweis fuer den Schutz nichtatomarer Daten.
+
+### Positive Evidenz und verbleibender Scope
+
+- `ProducerV2::publish`: Read-Sequence `Acquire`, Write-Sequence `Release`, Capacity-/Payload-Bounds, Lane-State und Shutdown-Gates. `ConsumerV2::acquire_slot`: Write-/Committed-`Acquire`, Record-CRC, Epoch und Quarantaene bei Fehler; Borrow-Guard released Read-Sequence erst nach Lifecycle-Pruefung. **Im validen, gueltig implementierten SPSC-Protokoll konsistent**; die angesprochenen Kommentare/Rechecks sind keine Lizenz zum ueberlappenden Plain-Byte-Write.
+- `IngressAuditV2`: fruehester Peer-`T_ingress`, striktes Time-Domain-/Record-Contract-Checking, Peer nach Txpool-Accept zaehlt nicht als frueher Hit; `qualification` benoetigt geschlossene, geleerte und quellenkonforme Evidence. Diese Aussagen gelten **nur fuer Scope und bezeugtes Fenster**.
+- `Outbound`: Evidence wird nach Sender-/Worker-/Status-/Timing-Provenienz klassifiziert, `SendErrorUnknown` ist **nie** „nicht gesendet“. Ein `T_queue` oder lokaler geth-Peer-Handoff ist **keine** On-Chain-BUY-Ausfuehrung, und der Provider-Send-Handoff darf nicht als G0.7/G0.8- oder <1-ms-Beweis benutzt werden.
+- Vorliegende Offline-Tests und historische C1-REV2-Berichte duerfen als **existierende** Artefakte angegeben werden, nicht als in dieser Etappe neu ausgefuehrte PASS-Evidence. Der C1-Runbook verlangt nach betroffenen Source-Aenderungen Gate-Order und relevante Regressionsneuauswertung; keine umfassende C1-Freeze ohne die fehlenden C1.9-/Hook-/Coverage-Nachweise.
+
+### Etappe-6-Tests und Abnahmegrenze
+
+**Bestehende zielgerichtete Kommandos fuer spaetere C1-Implementierung (hier nicht ausgefuehrt):**
+
+~~~bash
+cd bsc/engine
+cargo test --locked --offline -p darkbot-bsc-geth-ipc
+cargo test --locked --offline -p darkbot-bsc-geth-ipc --test c15_hot0_alloc
+cargo test --locked --offline -p darkbot-bsc-geth-ipc --test c18_stress
+cargo test --locked --offline -p darkbot-bsc-geth-ipc --release
+cargo fmt --all -- --check
+~~~
+
+**Zusatz vor C1/C2-Inclusion:** echte Scope-/Ground-Truth-Fixtures mit Block-/Event-Gegenbeweis, intern nicht verfaelschbare typed-permit-to-egress-Testcases und Go/Rust-Speicherordnungs-/Aliasing-Review mit kontrollierter Laufzeit-/Stress-Evidence. Kein synthetischer Record ist ein Ersatz fuer echte Mainnet-Coverage; kein erfolgreicher local-geth-Handoff steht fuer ein vom Producer innerhalb <1 ms ausgefuehrtes Token-BUY.
+
+**Etappe-6-Status:** **REVIEWED (PARTIAL CODE SCOPE) / E6-1 & E6-2 FUTURE INTEGRATION GATES / E6-3 REQUIRES MEMORY-MODEL PROOF**, Produktions-Fixes offen, G0.7-Code-Ready davon **nicht** blockiert. G0.7 `UNARMED`, G0.8 `NOT_EXECUTED`, C1/C2 `PAUSED`. Etappen **7** (Go↔Rust Offset-/ABI-/Atomics-Paritaet) und **8** (Journal/Record/Legacy) noch offen.
+
+
+## 8. Nachfolgende Etappen
 
 Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** aufgenommen, aber erst nach unabhaengigem Code-/Phasenplanabgleich. Bereits behandelte Behauptungen nicht doppelt als Bug anlegen. Auch nach erfolgreicher Umsetzung bleibt eine Etappe „FIXED / TESTED“ erst mit konkretem Commit und Tests/Evidence belegbar; sonst `OPEN`.
 
@@ -644,6 +732,6 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | 3 | G0.6a DRY-/Requal-Werkzeuge | **REVIEWED / FIXES OPEN; SALT A/B UNDECIDED** |
 | 4 | Trading/Signer/RLP/Intent | **4a + 4b REVIEWED; E4-3/E4-4 OPEN; 4b future C2/C3 items parked** |
 | 5 | Execution/Submission/TLS | **REVIEWED / E5-2..E5-4 FIXES OPEN; E5-1 C2 GATE; E5-5/6 DEFERRED** |
-| 6 | geth_ipc Rust | AWAITING INPUT |
+| 6 | geth_ipc Rust | **PARTIAL REVIEWED / E6-1/E6-2 C1/C2 INTEGRATION OPEN; E6-3 MEMORY PROOF OPEN** |
 | 7 | Go-geth Overlay/Rust-Paritaet | AWAITING INPUT |
 | 8 | Journal/Records/Legacy | AWAITING INPUT |
