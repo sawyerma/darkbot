@@ -532,7 +532,108 @@ Fables positive Bewertung der Intent-Lane/Final-Binding/Submission-Plan-/Release
 **Etappe-4b-Abnahme:** 4b **REVIEWED / NO CURRENT-PHASE FIX**; E4b-1 spaeterer produktiver Deployment-/Profile-Nachzug, E4b-2 spaetere C2/C3-Latenzmessung ohne Safety-Bypass, E4b-3 zu E2-1 verlinkt, E4b-4 current Caller-Scope nachgewiesen und als API-Grenze offen. G0.7/G0.8 ohne LIVE, keine Veraenderung an signierten Bytes, keine Wiederaufnahme C1/C2 vor Gate 0.
 
 
-## 6. Nachfolgende Etappen
+## 6. Etappe 5 — Produktions-Execution: Startup, Budget, Dispatch, TLS, Builder-Probe
+
+**Review:** 2026-10-20 · **Fable-Referenz:** `cac786e` · **unabhaengig geprueft:** `main`, `84bd285877c2d189b87a87ebb80ebd49afa51bb4`; seit `cac786e` wurde fuer die hier bewerteten BSC-Codepfade keine Implementierungsaenderung festgestellt. **Kein Codepatch, kein Cargo-/Mainnet-Test und keine Netzwerk-Submission in diesem Review ausgefuehrt.** Die bereits dokumentierten Etappen 1–4b bleiben unangetastet.
+
+**Autorisierter Scope:** Nach `BSC_DUAL_VENUE_ROADMAP.md` und `G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md` (bindender Update 2026-10-20) hat die qualifizierte G0.7-G0.8-Kette Vorrang; produktive C2/Unit-6-Runtime, GUI, generische Architektur-Refaktoren und Latenzoptimierung sind **nicht** Bestandteil der aktuellen G0.7-Code-Ready-Abnahme. `FROZEN_APPROVED_V4_SHA256=UNARMED`; unveraendertes Transaktionshashpaar, ein wirtschaftlicher Versuch, kein LIVE, kein Retry, kein Nonce-Burn. `BSC_PRODUCTION_BUILD_MASTER_PLAN.md` §§7–8/13/Unit-6 und `BSC_C1_PARALLEL_FAST_LANE_PLAN.md` regeln die spaetere single-owner- und Runner-Integration.
+
+**Pruefumfang ueber den Fable-Text hinaus:** `execution/src/startup.rs`, `submission/send.rs`, `submission/tls/{owner,transport,connection,config}.rs`, die relevanten Stellen aus `intent/lane.rs`, `economics/policy.rs` und `submission_policy/plan.rs`; Dateiquelltext und Test-Inventar zu `execution/tests/{dispatch,tls,framing,hotpath_alloc,release,responses}.rs`, `submission/release_tests.rs` und `g07_builder_probe/plan.rs`. **Tests nur gelesen, nicht ausgefuehrt.** Die unabhaengige Originalbehauptung, der gesamte Submission-/Q5A-Pfad sei vollstaendig getestet, wird damit **nicht** aufgestellt. Der Rest von Q5A und jeder in Fable explizit als „nicht gelesen“ bezeichnete Pfad bleibt ausserhalb der behaupteten Vollstaendigkeitspruefung.
+
+### Etappe-5-Urteil
+
+| ID | Schwere / Phase | Evidenzbewertung | Behandlung |
+| --- | --- | --- | --- |
+| E5-1 | **Mittel–Hoch fuer spaeteres Produktions-LIVE**, Unit 6/C2 | **BESTAETIGTE FUNKTIONSLUECKE:** pro-Intent-Budget, kein kumulativ autorisiertes Session-Exposure | Pflichtgate **vor produktivem LIVE**, nicht G0.7 |
+| E5-2 | **Mittel, lokaler Secret-Schutz**, Startup | **BESTAETIGTER IMPLEMENTIERUNGSFEHLER:** str-Slicing kann auf nicht-ASCII-UTF-8 paniken und Key-Daten im Panic-Text zeigen | Enger sicherer Fix empfohlen, offline testen; nicht G0.7 |
+| E5-3 | **Mittel, Autorisierungsinvalidation**, Startup | **BESTAETIGTER GRENZFEHLER:** `saturating_add` bei `u64::MAX` macht Widerruf unwirksam | Enger Pflichtfix; Fables blosses `expect()` ist unter Nebenlaeufigkeit **nicht** automatisch fail-closed |
+| E5-4 | **Niedrig**, Startup | **BESTAETIGTER VALIDIERUNGSWIDERSPRUCH:** `10000` bps Startup PASS, `BuyPolicy::new` STOP | Einzeiliger Fix + Boundary-Test |
+| E5-5 | **Design/Verfuegbarkeit**, Runner C2 | **BESTAETIGTES BEWUSSTES VERHALTEN**, kein derzeitiger Sicherheitsbug | Kein automatischer Permit-/HALT-Refactor |
+| E5-6 | **Latenz-/Wartungs-Risiko**, Runner C2/C3 | **BESTAETIGTE BLOCKIERENDE CONNECT-SEMANTIK**, reale Disconnect-Rate und Millisekundenwert **UNVERIFIZIERT** | Runner-Wartung neben Hotpath und Messung |
+| E4b-4 | Fence-Herkunft | **ABGESCHLOSSENE QUELLCODE-CALLER-INVENTUR:** genau ein Produktionsaufruf in `ValidatedStartup::arm` nach durable Fence | Kein aktueller Bypass nachgewiesen, Gate nicht lockern |
+
+### E5-1 — Kumulatives wirtschaftliches Budget fuer eine Produktions-Session fehlt
+
+**Beweis:** `execution/src/startup.rs::StartupEconomics` ca. Z. 61–75 bietet `max_buy_input_wei`, `max_buy_gas_wei`, `max_provider_payment_wei` und `max_total_wei` fuer **eine** konfigurierte Submission. `validate_facts` Z. 595–612 verlangt `balance_wei >= max_total_wei` (Startfinanzierung einer einzelnen Maximalausgabe), `validate_economics` Z. 614–639 prueft `buy_amount + signed_max_gas + provider_bid <= max_total_wei`. `trading/submission_policy/plan.rs::SubmissionPlan::new` prueft wiederum das Budget des **einen** Intents. `IntentLane` fuehrt Dedup nach Token und noncegeordnete Intents; keinen kumulativen wirtschaftlichen Budget-Owner ueber mehrere Kauefe. Die vorallokierte Lane kann bis zu **65536** Plaetze zulassen. Keine sichtbare Einheit verhindert damit `N * einzelner_maximalbetrag` ueber die gesamte Laufzeit, soweit Nonces/Guthaben die Kauefe ermoeglichen.
+
+**Bewertung:** Ein grosser Produktions-LIVE-Risikofehler **bei spaeterer Mehrfachausfuehrung**, aber nicht Beweis fuer heutige Ueberschreitung und **nicht** auf G0.7 uebertragbar (dort bindende max. ein Attempt, konkretes Budget und Guard). Auch ist `max_total_wei` nach aktuellem Typ **kein** bereits vereinbartes Session-Budget; es darf nicht heimlich semantisch umgedeutet werden.
+
+**Pflichtauftrag vor Produktions-LIVE (Unit-6/C2, NICHT jetzt):**
+1. Gesonderte und ausdruecklich freigegebene **Session-/Tages-/Run-Exposure-Obergrenze** als validierte Betreiberpolicy einfuehren (keine erfundene Zahl). Zu einem zentralen, ausschliesslichen Economic-Risk-/Nonce-/Intent-Owner gehoert eine **atomare, overflow-sichere Reservierung vor wirtschaftlicher Admission bzw. vor erstem potenziellen Egress**. Jedes beabsichtigte identische Multi-Adapter-Fanout zaehlt **einmal** fuer den einen wirtschaftlichen Intent; eigenes Launch-Gas, BUY-Wert/Gas und reale vertraglich zulaessige Bid-/Tip-/Provider-Kosten separat aufnehmen. Neben dem Session-Cap bleiben alle einzelnen Budgetobergrenzen bindend.
+2. Ein disclosed Intent bleibt mit maximaler moeglicher Gesamtbelastung **reserviert**, solange Execution/Abrechnung ungewiss ist; weder Builder-`maxBlock`, HTTP-Reject, lokale Expiry noch Prozessneustart geben Geld oder Nonce frei. Nur nach typisiertem, quellengebundenem kanonischem Chain-/Reconciliation-Beleg Exposure-Abschluss verbuchen. Bei Reorg/replaced/late inclusion keine Doppelbuchung, keine Entlastung ohne sichere Ableitung; konservativ OVERRESERVE oder STOP.
+3. Runtime-Neustart/Crash muss Session-Budget-/disclosed-Intent-Zustand sicher wiederherstellen bzw. quarantinen. **Keinen blockierenden Datei-fsync im BUY-Hotpath** einfuehren; stattdessen vorab dauerhaft qualifizierte Risk-/Ledger-/Admission-Strategie und klar dokumentierte Crash-Boundary, die mit dem bereits bestehenden Single-Writer- und Restart-Fence verifiziert wird. Bei fehlendem Budgetnachweis kein neuer BUY.
+4. Tests: 1/2/3 Intents unter-/genau auf/ueber Cap; gleichzeitige Kandidaten; zwei Adapter dieselben Bytes; teilweiser Write/UNKNOWN; Reorg; Late BUY nach Providerablauf; Crash vor/nach Egress; u128/U256-Ueberlauf; fremder Token mit gleicher wirtschaftlicher Absicht; Nonce-Quarantaene. Negative Faelle sicher verweigern, kein zweiter Buy nach Budget-STOP.
+
+**Abnahme:** dokumentierte maximale kumulative Kapitalexposition einer gesamten Session, einschliesslich weiterhin ausfuehrbarer offener Rohtransaktionen und Reorg-/Recovery-Faelle; pro-Intent- und Gesamtrisiko bleiben beide Grenzen. Kein pauschaler „Wallet-Guthaben ist Session-Budget“-Ersatz.
+
+### E5-2 — Nicht-ASCII-Key-Datei verursacht Panic mit Secret-/String-Leak und umgeht Wipe
+
+**Code:** `execution/src/startup.rs::read_signer_secret` Z. 642–668. Fuer nicht genau 32 Rohbytes wird `bytes` als UTF-8 eingelesen, getrimmt, dann `hex.len()==64` (**Byteanzahl**) geprueft. Anschliessend schneidet `&hex[index*2..index*2+2]` einen UTF-8-String an den numerischen ASCII-Bytegrenzen. Eine 64 Byte lange Zeichenfolge wie `"a"*61 + "é" + "a"` besteht die Byte-Laengenpruefung, trifft spaeter aber eine Nicht-Char-Boundary und **panikt statt `InvalidSignerEncoding`**. Rusts Str-Slicing-Panic kann die betroffene Eingabe inkl. Hex-artigem Key-Praefix in stderr oder Crash-Logs ausgeben. Die geplante Bereinigung `bytes.fill(0)` steht **nach** dem Parse-Closure; auf einem Panic-Unwind wird sie nicht ausgefuehrt. Die vorhandenen `SecretSources::Debug`-/`ValidatedStartup::Debug`-Redaktionen schuetzen diesen Panic-Pfad nicht.
+
+**Pflichtfix:** Vor erstem `&str`-Index/Slicing: `hex.len()==64 && hex.as_bytes().iter().all(u8::is_ascii_hexdigit)` (bzw. die semantisch identische `hex.bytes().all(|b| b.is_ascii_hexdigit())`-Variante) pruefen und sonst **immer** `Err(StartupError::InvalidSignerEncoding)` ohne Secret-/Pfadinhalt zurueckgeben. Alternativ die Hex-Paare ausschliesslich als validierte ASCII-`&[u8]` parsen. Fables Patch 1 ist fuer das Grenzproblem tauglich, aber die Klasse **alle Fehler- und Panic-Pfade der Key-Kopien** sollte mit RAII-/`Zeroizing`-Schutz abgedeckt werden, soweit ohne neue Instabilitaet moeglich; die aktuelle `bytes.fill(0)` auf normalem `Err` beibehalten. Keine Text-/Debug-Ausgabe des gelesenen Secretwerts, keine `set -x`-Skripttests und kein echter Wallet-Key in der Fixture. Die legitime Dateiform **exakt 32 rohe Bytes** weiterhin erhalten. Nicht `StartupError::InvalidSignerEncoding` um geheime Eingaben erweitern.
+
+**Tests:** 64 ASCII-Hex-Bytes OK, 64 Bytes mit Nicht-ASCII an ungerader und gerader Byteposition -> definierter `Err`, keine Panic; ungueltiges Hex bei 64 ASCII-Bytes -> `Err`; raw 32 Bytes -> Erfolg wie vorher; 63/65 Bytes/ungültige UTF-8 -> `Err`; Hex-Praefix `0x`/Whitespace wie zuvor definiert; Test darf Secret-Werte nie in Ausgabe schreiben. Catch-unwind (ausschliesslich mit Dummy-Daten) darf bei allen fehlerhaften Texten keine Panic finden. Validation und Signeradresse desselben legitimen Eingangs muessen identisch bleiben.
+
+**Abnahme:** Kein schaedlicher UTF-8-Grenzen-Panic mehr; alle nicht wohldefinierten Keys fail-closed, keine Entschluesselungs-/Logging-Ausweitung; Single-startup-Build unveraendert; keine G0.7-Eingriffe.
+
+### E5-3 — `GenerationOwner::bump` kann bei MAX eine alte Freigabe gueltig lassen
+
+**Code:** `execution/src/startup.rs::bump` ca. Z. 173–185: `current.saturating_add(1)`, CAS. Bei `u64::MAX` ist `next == current`, `compare_exchange` kann trotzdem Erfolg melden. `GenerationOwner::revoke_authorization` liefert MAX, aber `StartupAuthorization::is_current` ca. Z. 196–204 vergleicht unveraendert denselben `GenerationSnapshot` und kann weiter `true` ergeben. `validate_config` ca. Z. 520–530 lehnt nur **Null**, nicht MAX ab. Das ist ein **wirklicher sicherheitsrelevanter Grenzfehler**, kein blosser Testfall fuer ein unrealistisches normales Laufzeitinkrement.
+
+**Pflichtfix:** Strikter Nicht-Saettigungs-Vertrag. Bereits bei `validate_config` alle vier Generationen mit eindeutig dokumentierter maximaler sicherer Spanne oder reserviertem Terminalbereich **vor Startup-Validierung/Arming** ablehnen, statt `MAX` als gueltige Startgeneration zu akzeptieren. Zusätzlicher harter Runtime-Schutz gegen dennoch erreichtes MAX (race-sicher mit `Ordering::Acquire/AcqRel`): **Die bisherige Autorisierung darf nach einem Revocation-Versuch niemals weiter `is_current==true` bleiben**, auch bei erschöpftem Zähler. Eine reine `checked_add(1).expect(...)`-Panic **genuegt nicht automatisch**: wenn sie nur einen Hintergrund-Thread beendet, kann ein anderer Thread weiterhin mit der unveraenderten Generation traden. Implementierer muss entweder einen vorab geprueften/unueberwindbaren Wertebereich plus processweiten, unvermeidbar fail-closed Abbruch beweisen oder einen **sticky terminal revoked/halted**-Status in jedem Admission-/Send-/Authorization-Check beruecksichtigen. Keine Saturation, kein Wrap auf 0, kein stiller Weiterbetrieb.
+
+**Zu Fables Patch 2:** Die zusaetzliche `GenerationOutOfRange`-Fehlervariante kann zweckmaessig sein, aber `u64::MAX/2` ist eine willkuerliche **gewaltige** Reserve; sie ist keine Sicherheitsbegruendung fuer den Umgang mit einer tatsaechlichen Ueberlauf-Kondition. Keine Aenderung der public `revoke_authorization() -> u64`-API ohne Caller-/Protokoll-Review; ggf. eigene getestete Fallible-Revoke-Semantik plus terminalen STOP. Das ist ein minimaler Safety-Fix, nicht ein neuer Runtime-Refactor.
+
+**Tests:** Startgeneration 0/MAX/MAX-1 und nahe reserviertem Limit; verschiedene Generationsarten; Revocation am Limit, mehrfach und nebenlaeufig; alter `StartupAuthorization` muss nach Revocation `!is_current` ergeben oder der **gesamte** Runtime-Release/Egress irreversibel fail-closed sein. Konkurrenz von invalidation und `ValidatedStartup::arm` darf keinen Fence aus veralteter Autorisierung minten; keine false PASS in einem Panic-Thread.
+
+### E5-4 — Startup und BuyPolicy widersprechen sich bei Slippage 10000 bps
+
+**Code:** `execution/src/startup.rs::validate_economics` Z. 614–622: `e.slippage_bps > 10000`. Dagegen `trading/src/economics/policy.rs::BuyPolicy::new` Z. 55–81 verweigert `slippage_bps >= BPS_DENOMINATOR (=10000)`. Es handelt sich um einen **fail-closed aber zu spaeten** Startup-Abbruch; bis zur spaeteren Policy-Bildung koennte scheinbar valide Konfiguration angelegt werden.
+
+**Fix:** Startup ebenfalls `e.slippage_bps >= 10000`; vorzugsweise gegen das exakt gleiche freigegebene `BPS_DENOMINATOR`-Wertmodell statt eine neue widerspruechliche Konstante. Keine Ausgabe null-Minimum, keine Aufweitung von zulaessigen Slippage-Profilen. Tests bei `9999` erlaubt soweit die restliche Policy stimmt, `10000` und `10001` STOP; `BuyPolicy::new` und `validate_startup` identische Grenzentscheidung. Nicht schon bei normalem Eintritt einer Fehlkonfiguration die Live-Armierung erlauben.
+
+### E5-5 — Ein fehlender Adapter nach Admission haelt die ganze Lane
+
+**Code:** `execution/src/submission/send.rs::run` ca. Z. 679–832. Nur **vor** der wirtschaftlichen Admission ist `!any_ready`/abgelaufene Initialdeadline ein vorbereiteter, nicht gehaltener SKIP. Sobald `lane.begin_send` Permits ausgegeben hat, bleibt nach der Fanout-Schleife mit `stopped || unstarted>0 || !started` ein `HaltReason::External` zurueck. Bei einem Teil-Fanout mit einem HandOff und einem Stale-/Deadline-SKIP werden die anderen Permits unterdrueckt, kein zweites wirtschaftliches Send und kein neuer BUY erlaubt. `execution/tests/dispatch.rs` hat **gezielte Regressionstests**: `a_late_pre_permit_check_after_another_adapter_was_sent_leaves_no_permit`, `a_connection_that_is_not_ready_is_skipped_and_leaves_no_permit`, `a_deadline_passing_after_the_admission_stops_the_lane_without_disclosure`. Das ist **vorhandenes beabsichtigtes Safety-Design**, keine versehentliche if-Klausel.
+
+**Entscheidung:** Jetzt **nicht** aus Verfuegbarkeitsgruenden aufweichen. Fables hypothetische Alternative, ungestartete Permits ohne Lane-HALT zu unterdruecken, darf spaeter in C2 nur nach Beweis aller wirtschaftlichen, Nonce-/Late-execution-/Dedupe-/Reorg- und restart-/journalbezogenen Invarianten erwaegt werden; insbesondere nach einem disclosed Teilversuch bleibt der gesendete BUY bis zur Chain-Reconciliation potentiell wirksam. Keine neuen Intents/NONCEs freigeben, nur weil ein zweiter Builder nicht Ready war. Wahrheitsgemaess als Tradeoff `AVAILABILITY_REDUCED_BY_SAFETY_GATE` dokumentieren. **Kein Patch in Gate 0.**
+
+### E5-6 — `maintain()` verbindet synchron; Wartung darf HOT0 niemals blockieren
+
+**Code:** `execution/src/submission/tls/transport.rs::state` ca. Z. 145–161 setzt `Stale` bei `last_activity.elapsed()>max_idle`, pending Ciphertext oder anderer Unfertigkeit. `execution/src/submission/tls/owner.rs::maintain` ca. Z. 119–139 ruft bei Stale/Disconnected/NotReady synchron `connect()`; `WarmTlsConnection::establish` (`tls/connection.rs`) kann synchron DNS/TCP/Handshake ausfuehren, begrenzt durch jeweilige Policy-Timeouts. `owner.rs::connect` dokumentiert: **„never call it while a dispatch could use the transport“**. `execution/tests/tls.rs::an_idle_connection_is_not_eligible` bestaetigt als Offline-Testfall den `Stale`-Zustand und `maintain`-Ersatz; andere Tests pruefen Reconnect nach fehlerhafter Antwort und Inflight/Close.
+
+**Bewertung:** Blockierender Maintenance-Pfad steht fest. **Nicht** nachgewiesen sind die im Fable-Text genannten „staendig neu“ aufgebauten Verbindungen, typische konkrete Provider-Idle-Timeouts oder **100–500 ms** pro Reconnect; das ist abhaengig von Provider/Netz/TLS-Resumption und wurde hier nicht gemessen. Aus diesem Modul folgt auch nicht, dass der **spaetere Runner** `maintain` faelschlich im Entscheidungsthread aufrufen wird – diese Integration ist noch ausstehend. Kein unqualifizierter Keepalive-HTTP-Request als vermeintlich kostenloses Heilmittel: er koennte Provider-Quoten, Auth, Reply-Correlations und den genau-eine-Anfrage-pro-Verbindung-Vertrag verletzen.
+
+**Verbindliche C2/C3-Anforderung:** TLS-Connect/DNS/Close-/Response-Wartung auf ausdruecklichen **nicht-HOT0-Owner** legen, exklusiven Transport-Handoff/Lebenszyklus beweisen und warmen Eligibility-Snapshot ohne Queue-/Lock-/Netzwerkwartezeit am Dispatch nutzen. Vor `T0` verbinden und vorwaermen, `Stale` ist reiner Fail-closed-Skip statt blockierender Reconnect **im** BUY. Reconnect-Haeufigkeit/-Dauer/Idle-P99, misslungene Reconnects, Prozent Dispatch mit `Ready`, blinde Intervalle und `T_signal -> T_send` auf Zielhardware messen. Auf Service-Realitaet abgestimmter Keepalive nur nach offiziellem API-/TLS- und Timing-Nachweis; kein nicht-adressierter Extra-Request auf in-flight Verbindung. **Kein Patch jetzt.**
+
+### E4b-4 — Fence-Aufrufer nochmals bestaetigt
+
+Aus dem bereits abgeschlossenen eigenstaendigen Scan aller 32 `execution/src/**/*.rs`-Quellen: **einziger** `ArmedFence::from_durable_startup`-Aufruf in `startup.rs::ValidatedStartup::arm` ca. Z. 281–293 und **nach** `durable_fence` mit `create_new`, Datei-/Directory-`sync_all`. Kein aktueller Konstruktor-Benutzer in G0.7-, Probe-/Readiness-Entrypoints. Featureweite API-Erreichbarkeit (`runner-startup` global) bleibt ein spaeter pruefbarer Modularisierungsaspekt, nicht neuer akuter Bypass. Kein Doppel-Ticket.
+
+### Umsetzungsscope, priorisierte Tests und Release-Grenzen
+
+**Innerhalb der bestehenden Phase und ohne Ausweitung des Gate-0-Codes:** E5-2 (ASCII-Hex-/Secret-Panic), E5-3 (monotone Invalidation mit garantiertem globalem fail-closed Verhalten), E5-4 (Slippage-Boundary) koennen vom Coding-Agent als **gezielte Startup-Codehaertung** in `startup.rs` mit minimalen Tests bearbeitet werden. Sie sind **keine** Blocker des unveraenderten G0.7-Binaries und duerfen nicht als Grund fuer ein neues R0-/DRY-Fenster ausgegeben werden. Wenn eine breitere Revision den eingefrorenen Source-/Probe-Scope unnoetig invalidieren wuerde, nachweislich qualifikationsneutral isolieren oder gesonderten Auftrag abwarten.
+
+**Vor einem spaeteren produktiven Mehrfach-BUY zwingend:** E5-1 kumulatives Risk-Budget; E5-5/6 Safety-/Availability-/latency-taugliches Runner-Eigentum. Die produktive Release-Kette ist heute wegen qualifikationsloser Capability-Records und alter v5.24.0-Deployment-Profile absichtlich BLOCKED (E4b-1); weder Fable-Review noch Startup-Fixes heben diese Sperre auf.
+
+**Kommandos fuer Coding-Agent (hier nicht gelaufen):**
+
+~~~bash
+cd bsc/engine
+cargo test --locked -p darkbot-bsc-execution --lib startup
+cargo test --locked -p darkbot-bsc-execution --test dispatch
+cargo test --locked -p darkbot-bsc-execution --test tls
+cargo test --locked -p darkbot-bsc-execution --test hotpath_alloc
+cargo test --locked -p darkbot-bsc-execution --test release
+cargo fmt --all -- --check
+~~~
+
+Gezielte **neue** Tests fuer E5-2 (Unicode/InvalidHex/Panic-Freiheit), E5-3 (MAX/nearMAX + Revocation/Thread) und E5-4 (9999/10000/10001) in `startup.rs` direkt anlegen. Berichte `PASS` nur bei tatsaechlich ausgefuehrten Tests samt Commit-/Toolchain-/Feature-Scope; vorhandene Testnamen liefern keine neue Verifikationsmessung. Keine G0.7-Arming-Aktion, keine Freigabe, kein Echtgeld und kein automatisches Runner-C2-Refactoring.
+
+**Etappe-5-Abnahme:** E5-1 als spaeteres LIVE-Blocking-Risk-Gate registriert, E5-2/3/4 als implementierbare Fixes spezifiziert, E5-5/6 als spaeter messpflichtige Architektur-Tradeoffs statt angebliche aktuelle Mainnet-Bugs klassifiziert; `ArmedFence`-Herkunft unveraendert. `STAGE_5_REVIEWED`, **FIXES OPEN**, G0.7 `UNARMED`, C1/C2 noch `PAUSED`.
+
+
+## 7. Nachfolgende Etappen
 
 Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** aufgenommen, aber erst nach unabhaengigem Code-/Phasenplanabgleich. Bereits behandelte Behauptungen nicht doppelt als Bug anlegen. Auch nach erfolgreicher Umsetzung bleibt eine Etappe „FIXED / TESTED“ erst mit konkretem Commit und Tests/Evidence belegbar; sonst `OPEN`.
 
@@ -542,7 +643,7 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | 2 | G0.8 Verifikation/Witness/Evidence | **REVIEWED / FIXES OPEN** |
 | 3 | G0.6a DRY-/Requal-Werkzeuge | **REVIEWED / FIXES OPEN; SALT A/B UNDECIDED** |
 | 4 | Trading/Signer/RLP/Intent | **4a + 4b REVIEWED; E4-3/E4-4 OPEN; 4b future C2/C3 items parked** |
-| 5 | Execution/Submission/TLS | AWAITING INPUT |
+| 5 | Execution/Submission/TLS | **REVIEWED / E5-2..E5-4 FIXES OPEN; E5-1 C2 GATE; E5-5/6 DEFERRED** |
 | 6 | geth_ipc Rust | AWAITING INPUT |
 | 7 | Go-geth Overlay/Rust-Paritaet | AWAITING INPUT |
 | 8 | Journal/Records/Legacy | AWAITING INPUT |
