@@ -112,8 +112,10 @@ pub(super) struct ShadowOwner {
     projection_pending: HashSet<Pubkey>,
     /// N4: projection outcomes (E9 discards).
     projection_stats: ProjectionStats,
-    /// E9: consecutive requeues per candidate since its last ready projection (bounded).
+    /// E9: consecutive requeues per candidate since its last external trigger (bounded).
     projection_requeues: HashMap<Pubkey, u8>,
+    /// E9: projection work waiting for processed account notifications up to a slot.
+    projection_parked: ParkedProjections,
     detect_queue: VecDeque<DetectWork>,
     /// Z14: bootstrap probes of the was-liquidatable accounts after a recovery — the owner's
     /// own detection work, served after the detect and oracle queues, never via the ingress

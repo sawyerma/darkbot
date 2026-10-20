@@ -1087,6 +1087,8 @@ impl ShadowOwner {
         } else {
             #[cfg(feature = "crate_health")]
             {
+                // E9: parked projection work whose slot is now processed.
+                self.release_parked_projections();
                 detect = self
                     .detect_queue
                     .pop_front()

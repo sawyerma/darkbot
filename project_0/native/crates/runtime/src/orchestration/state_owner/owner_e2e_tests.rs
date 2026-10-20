@@ -86,6 +86,7 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         pending: vec![],
         projection_cache: HashMap::new(),
         projection_requeues: HashMap::new(),
+        projection_parked: ParkedProjections::default(),
         projection_pending: HashSet::new(),
         projection_stats: ProjectionStats::default(),
         detect_queue: VecDeque::new(),
@@ -470,7 +471,7 @@ fn n4_projection_counters_are_journaled_at_shutdown() {
             "projection: requested=3 queue_full=0 observation_unknown=0 accepted=2 failed=1 \
              stale_result=0 discarded_result=0 in_flight=0 reused=1 invalid_at_use=0 \
              discarded_consume=1 stale_consume=0 dropped=0 cached=0 requeued=0 \
-             requeue_exhausted=0"
+             requeue_exhausted=0 deferred=0"
         ],
         "{lines:?}"
     );
@@ -608,7 +609,7 @@ fn e9_stale_projection_requeue_is_bounded_and_fair() {
     f.owner.detect_queue.push_back(waiting);
     let requeue = (candidate, 7, 12, "integration_projection_requeue");
     for n in 1..=PROJECTION_REQUEUE_MAX as u64 {
-        f.owner.requeue_projection(candidate, 7);
+        f.owner.requeue_projection(candidate, 7, None);
         assert_eq!(f.owner.projection_stats.requeued, n);
     }
     let queued: Vec<_> = f.owner.detect_queue.iter().copied().collect();
@@ -619,12 +620,12 @@ fn e9_stale_projection_requeue_is_bounded_and_fair() {
     ));
     assert_eq!(queued, expected, "behind the waiting work, FIFO");
     // The bound: no further request, counted, the sequence ends.
-    f.owner.requeue_projection(candidate, 7);
+    f.owner.requeue_projection(candidate, 7, None);
     assert_eq!(f.owner.detect_queue.len(), expected.len());
     assert_eq!(f.owner.projection_stats.requeue_exhausted, 1);
     assert!(!f.owner.projection_requeues.contains_key(&candidate));
     // A later stale result (after a new trigger) gets a fresh bounded sequence.
-    f.owner.requeue_projection(candidate, 9);
+    f.owner.requeue_projection(candidate, 9, None);
     assert_eq!(
         f.owner.detect_queue.back(),
         Some(&(candidate, 9, 12, "integration_projection_requeue"))
@@ -632,7 +633,7 @@ fn e9_stale_projection_requeue_is_bounded_and_fair() {
     // Not in state: nothing queued, nothing kept.
     let gone = Pubkey::new_unique();
     let before = f.owner.detect_queue.len();
-    f.owner.requeue_projection(gone, 7);
+    f.owner.requeue_projection(gone, 7, None);
     assert_eq!(f.owner.detect_queue.len(), before);
     assert!(!f.owner.projection_requeues.contains_key(&gone));
     let dir = f.dir.clone();
@@ -732,19 +733,19 @@ fn e9_projection_results_drive_the_bounded_requeue() {
     let mut f = fixture_rpc("e9_results", &rpc);
     let candidate = Pubkey::new_unique();
     let data = vec![1u8; 8];
-    f.owner.st.install_snapshot(
-        12,
-        vec![AccountUpdate {
-            pubkey: candidate,
-            owner: f.owner.program,
-            lamports: 1,
-            data: data.clone(),
-            slot: 12,
-            write_version: None,
-            source: SourceKind::Snapshot,
-            t_rx_ns: 0,
-        }],
-    );
+    let snapshot = vec![AccountUpdate {
+        pubkey: candidate,
+        owner: f.owner.program,
+        lamports: 1,
+        data: data.clone(),
+        slot: 12,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    }];
+    f.owner.st.install_snapshot(12, snapshot.clone());
+    f.owner.st.reconcile(12, &snapshot);
+    f.owner.st.confirm_ready();
     let payer = solana_sdk::signature::Keypair::new();
     let mut built = darkbot_solana::tx::build(
         &darkbot_solana::tx::TxPlan {
@@ -792,8 +793,32 @@ fn e9_projection_results_drive_the_bounded_requeue() {
     let real = solana_sdk::hash::hash(&data);
     run(&mut f, work(real));
     assert_eq!(f.owner.projection_stats.failed, 1, "node behind");
-    assert_eq!(f.owner.detect_queue.back(), Some(&requeue));
     assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&1));
+    // Backoff: parked until one more slot of account notifications is processed.
+    let queued = f.owner.detect_queue.len();
+    assert_eq!(f.owner.projection_parked.len(), 1);
+    f.owner.release_parked_projections();
+    assert_eq!(
+        f.owner.detect_queue.len(),
+        queued,
+        "not before the next slot"
+    );
+    // The backoff waits for the slot after the processed level; a notification of the slot
+    // after that proves it.
+    let after = processed_level(&f.owner.st) + 1;
+    f.owner.st.on_event(IngressEvent::Account(AccountUpdate {
+        pubkey: Pubkey::new_unique(),
+        owner: f.owner.program,
+        lamports: 1,
+        data: vec![2; 8],
+        slot: after + 1,
+        write_version: None,
+        source: SourceKind::WsRpcControl,
+        t_rx_ns: 0,
+    }));
+    f.owner.release_parked_projections();
+    assert_eq!(f.owner.detect_queue.back(), Some(&requeue));
+    assert_eq!(f.owner.projection_parked.len(), 0);
     run(&mut f, work(solana_sdk::hash::Hash::new_unique()));
     assert_eq!(f.owner.projection_stats.stale_at_result, 1);
     assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&2));
@@ -811,6 +836,93 @@ fn e9_projection_results_drive_the_bounded_requeue() {
     assert_eq!(f.owner.detect_queue.len(), queued);
     assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&2));
     assert_eq!(f.owner.projection_stats.requeued, 2);
+    let dir = f.dir.clone();
+    drop(f);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// E9 (consume gate on the owner's state): a cached projection newer than the processed account
+/// notifications is not consumed — parked, counted, its cache entry kept — until a newer
+/// notification proves its slot; then it is released into the detect queue and consumable. A new
+/// external trigger supersedes the wait; after a gap nothing is consumable until the state is
+/// reconciled again.
+#[test]
+fn e9_consume_gate_waits_for_the_projection_slot() {
+    let mut f = fixture("e9_gate");
+    let candidate = Pubkey::new_unique();
+    let snapshot = vec![AccountUpdate {
+        pubkey: candidate,
+        owner: f.owner.program,
+        lamports: 1,
+        data: vec![1; 8],
+        slot: 12,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    }];
+    f.owner.st.install_snapshot(12, snapshot.clone());
+    f.owner.st.reconcile(12, &snapshot);
+    f.owner.st.confirm_ready();
+    let cache = |slot: u64| CachedProjection {
+        base_account_hash: solana_sdk::hash::hash(&[1; 8]),
+        projection_slot: slot,
+        projection_unix_s: 1_700_000_000,
+        accounts: vec![],
+        dependencies: vec![],
+        dependency_fingerprint: solana_sdk::hash::Hash::default(),
+    };
+    f.owner.projection_cache.insert(candidate, cache(14));
+    let consume = (candidate, 7, 12, TRIGGER_INTEGRATION_PROJECTION);
+    let gate = |f: &mut Fixture, work: DetectWork| {
+        projection_consume_gate(
+            &f.owner.st,
+            &f.owner.projection_cache,
+            &mut f.owner.projection_parked,
+            &mut f.owner.projection_stats,
+            work,
+        )
+    };
+    let notify = |f: &mut Fixture, slot: u64| {
+        f.owner.st.on_event(IngressEvent::Account(AccountUpdate {
+            pubkey: Pubkey::new_unique(),
+            owner: f.owner.program,
+            lamports: 1,
+            data: vec![2; 8],
+            slot,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
+    };
+    // Simulated at 14, processed only to 12: parked, counted, the projection kept.
+    assert!(!gate(&mut f, consume));
+    assert_eq!(f.owner.projection_stats.deferred, 1);
+    assert_eq!(f.owner.projection_parked.len(), 1);
+    assert!(f.owner.projection_cache.contains_key(&candidate));
+    notify(&mut f, 14);
+    f.owner.release_parked_projections();
+    assert!(
+        f.owner.detect_queue.is_empty(),
+        "14 itself is not proven yet"
+    );
+    notify(&mut f, 15);
+    f.owner.release_parked_projections();
+    assert_eq!(f.owner.detect_queue.pop_back(), Some(consume));
+    assert!(gate(&mut f, consume), "processed through 14: consumable");
+    // A new external trigger supersedes a parked wait.
+    f.owner.projection_cache.insert(candidate, cache(30));
+    assert!(!gate(&mut f, consume));
+    assert!(gate(&mut f, (candidate, 8, 12, "account_update")));
+    assert_eq!(f.owner.projection_parked.len(), 0);
+    // After a gap nothing is consumable, whatever was processed before.
+    f.owner.projection_cache.insert(candidate, cache(13));
+    f.owner.st.on_event(IngressEvent::Gap {
+        source: SourceKind::WsRpcControl,
+        from_slot: Some(15),
+        to_slot: None,
+        t_rx_ns: 0,
+    });
+    assert!(!gate(&mut f, consume));
     let dir = f.dir.clone();
     drop(f);
     let _ = std::fs::remove_dir_all(dir);

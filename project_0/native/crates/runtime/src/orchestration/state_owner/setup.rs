@@ -867,6 +867,7 @@ pub(super) fn prepare(
         pending,
         projection_cache,
         projection_requeues: HashMap::new(),
+        projection_parked: ParkedProjections::default(),
         projection_pending,
         projection_stats: ProjectionStats::default(),
         detect_queue,

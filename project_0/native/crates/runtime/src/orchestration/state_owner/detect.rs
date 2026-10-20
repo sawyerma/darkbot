@@ -55,7 +55,18 @@ impl ShadowOwner {
                     };
                     let base_account_hash = hash(&base_record.data);
 
-                    let cached = if trigger == "integration_projection" {
+                    // E9: a cached projection newer than the processed account notifications
+                    // waits (parked); a new external trigger supersedes such a wait.
+                    if !projection_consume_gate(
+                        &self.st,
+                        &self.projection_cache,
+                        &mut self.projection_parked,
+                        &mut self.projection_stats,
+                        (acct, t_rx, slot, trigger),
+                    ) {
+                        return Ok(false);
+                    }
+                    let cached = if trigger == TRIGGER_INTEGRATION_PROJECTION {
                         self.projection_cache.remove(&acct).and_then(|c| {
                             let base_matches = c.base_account_hash == base_account_hash
                                 && base_record.slot == slot;

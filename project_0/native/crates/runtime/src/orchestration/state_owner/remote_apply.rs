@@ -309,7 +309,7 @@ impl ShadowOwner {
                             done.account,
                             done.t_rx_ns,
                             done.base_slot,
-                            "integration_projection",
+                            TRIGGER_INTEGRATION_PROJECTION,
                         ));
                         let (integration_kinds, pricing_integration_kinds) = {
                             let view = StateView(&self.st);
@@ -364,7 +364,7 @@ impl ShadowOwner {
                         self.evidence.emit(OwnerEvidence::Record(line))?;
                         // E9: the candidate or a dependency changed while the worker
                         // projected — request it again from the current state (bounded).
-                        self.requeue_projection(done.account, done.t_rx_ns);
+                        self.requeue_projection(done.account, done.t_rx_ns, None);
                     }
                 }
                 Err(failure) => {
@@ -380,10 +380,12 @@ impl ShadowOwner {
                         error: failure.error,
                     };
                     self.evidence.emit(OwnerEvidence::Record(line))?;
-                    // E9: a node behind the required context may have caught up (bounded);
-                    // any other failure waits for the candidate's next trigger.
+                    // E9: a node behind the required context may catch up — retried (bounded)
+                    // after at least one more processed slot; any other failure waits for the
+                    // candidate's next trigger.
                     if failure.context_behind {
-                        self.requeue_projection(done.account, done.t_rx_ns);
+                        let after = processed_level(&self.st).saturating_add(1);
+                        self.requeue_projection(done.account, done.t_rx_ns, Some(after));
                     }
                 }
             }
@@ -432,11 +434,16 @@ impl ShadowOwner {
 
 impl ShadowOwner {
     /// E9: requests a candidate's projection again after a stale result or a lagging node —
-    /// through the ordinary detect queue (behind waiting work, so neither it nor others starve)
-    /// and within the candidate's bound (`projection_retry_allowed`). A candidate no longer in
-    /// state is not requeued.
+    /// through the ordinary detect queue (behind waiting work, so neither it nor others starve),
+    /// or parked until `after_slot` is processed (backoff), and within the candidate's bound
+    /// (`projection_retry_allowed`). A candidate no longer in state is not requeued.
     #[cfg(feature = "crate_health")]
-    pub(super) fn requeue_projection(&mut self, account: Pubkey, t_rx_ns: u64) {
+    pub(super) fn requeue_projection(
+        &mut self,
+        account: Pubkey,
+        t_rx_ns: u64,
+        after_slot: Option<u64>,
+    ) {
         let Some(slot) = self.st.get(&account).map(|r| r.slot) else {
             self.projection_requeues.remove(&account);
             return;
@@ -446,8 +453,20 @@ impl ShadowOwner {
             &mut self.projection_stats,
             account,
         ) {
-            self.detect_queue
-                .push_back((account, t_rx_ns, slot, "integration_projection_requeue"));
+            let work = (account, t_rx_ns, slot, TRIGGER_PROJECTION_REQUEUE);
+            match after_slot {
+                None => self.detect_queue.push_back(work),
+                Some(after) => self.projection_parked.park(after, work),
+            }
+        }
+    }
+
+    /// E9: parked projection work whose slot the owner has processed joins the detect queue
+    /// (behind waiting work).
+    #[cfg(feature = "crate_health")]
+    pub(super) fn release_parked_projections(&mut self) {
+        for work in self.projection_parked.release(&self.st) {
+            self.detect_queue.push_back(work);
         }
     }
 }

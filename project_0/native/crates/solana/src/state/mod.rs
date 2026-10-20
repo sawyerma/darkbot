@@ -96,6 +96,13 @@ pub struct StateCore {
     snapshot_slot: Option<u64>,
     /// Höchster gesehener Slot (Provenienz).
     highest_slot: u64,
+    /// E9: newest slot of a received account notification (all at `STATE_COMMITMENT`). In-order
+    /// delivery on the one WSS connection: every notification of an earlier slot was received
+    /// (of its own slot only once a later slot's notification arrived).
+    highest_account_slot: u64,
+    /// E9: the lower bound of the last installed snapshot — the state covers every account
+    /// update up to it.
+    covered_slot: u64,
     /// Letzter Root (Finalisierung). Updates darunter sind ungültig.
     root: Option<u64>,
     /// Bootstrap-Puffer bis Snapshot installiert ist.
@@ -123,6 +130,8 @@ impl StateCore {
             run_state: RunState::Bootstrapping,
             snapshot_slot: None,
             highest_slot: 0,
+            highest_account_slot: 0,
+            covered_slot: 0,
             root: None,
             buffer: VecDeque::new(),
             buffer_cap,
@@ -190,6 +199,16 @@ impl StateCore {
         self.highest_slot
     }
 
+    /// E9: the newest slot of a received account notification (see the field).
+    pub fn highest_account_slot(&self) -> u64 {
+        self.highest_account_slot
+    }
+
+    /// E9: the lower bound of the last installed snapshot (see the field).
+    pub fn covered_slot(&self) -> u64 {
+        self.covered_slot
+    }
+
     pub fn root(&self) -> Option<u64> {
         self.root
     }
@@ -254,6 +273,7 @@ impl StateCore {
 
     fn on_account(&mut self, a: AccountUpdate, status: SlotStatus) -> ApplyOutcome {
         self.highest_slot = self.highest_slot.max(a.slot);
+        self.highest_account_slot = self.highest_account_slot.max(a.slot);
         if self.snapshot_slot.is_none() {
             // Bootstrap: puffern bis Snapshot installiert ist.
             if self.buffer.len() >= self.buffer_cap {
@@ -326,6 +346,8 @@ impl StateCore {
         self.run_state = self.run_state.begin_reconcile();
         self.reconciled_clean = false;
         self.accounts.clear();
+        // E9: the snapshot state covers every account update up to its lower bound.
+        self.covered_slot = self.covered_slot.max(snapshot_lower_bound_slot);
         let mut min_slot = snapshot_lower_bound_slot;
         for a in accounts {
             min_slot = min_slot.min(a.slot);
@@ -645,5 +667,40 @@ mod tests {
             t_rx_ns: 0,
         }));
         assert_eq!(st.highest_slot(), 77);
+    }
+
+    /// E9: the account-notification watermark follows received account notifications only — a
+    /// (processed) slot event does not move it, an older notification does not lower it.
+    #[test]
+    fn e9_account_watermark_follows_account_notifications_only() {
+        let mut st = StateCore::new(10);
+        let account = |slot: u64| {
+            IngressEvent::Account(AccountUpdate {
+                pubkey: Pubkey::new_unique(),
+                owner: Pubkey::new_unique(),
+                lamports: 1,
+                data: vec![1],
+                slot,
+                write_version: None,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            })
+        };
+        st.on_event(IngressEvent::Slot(SlotUpdate {
+            slot: 90,
+            parent: Some(89),
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
+        assert_eq!(st.highest_account_slot(), 0);
+        st.on_event(account(80));
+        assert_eq!(st.highest_account_slot(), 80);
+        st.on_event(account(70));
+        assert_eq!(st.highest_account_slot(), 80);
+        assert_eq!(st.highest_slot(), 90);
+        // A snapshot covers up to its lower bound; it is no notification.
+        st.install_snapshot(85, vec![]);
+        assert_eq!((st.covered_slot(), st.highest_account_slot()), (85, 80));
     }
 }

@@ -204,10 +204,118 @@ pub(crate) struct ProjectionStats {
     pub(crate) requeued: u64,
     /// … or the candidate's bound was reached and it waits for its next trigger.
     pub(crate) requeue_exhausted: u64,
+    /// E9: a cached projection newer than the processed account notifications waited (parked).
+    pub(crate) deferred: u64,
 }
 
 /// E9: consecutive projection requeues per candidate before it waits for its next trigger.
 pub(crate) const PROJECTION_REQUEUE_MAX: u8 = 2;
+
+/// E9: trigger of the consumption of a candidate's cached projection (the projection's own work).
+pub(crate) const TRIGGER_INTEGRATION_PROJECTION: &str = "integration_projection";
+/// E9: trigger of a bounded projection requeue (the projection's own work).
+pub(crate) const TRIGGER_PROJECTION_REQUEUE: &str = "integration_projection_requeue";
+
+/// E9: whether a trigger is the projection's own work (not a new external trigger).
+pub(crate) fn projection_own_trigger(trigger: &str) -> bool {
+    trigger == TRIGGER_INTEGRATION_PROJECTION || trigger == TRIGGER_PROJECTION_REQUEUE
+}
+
+/// E9: the newest slot up to which the owner has every confirmed account update: one slot below
+/// the newest account notification (assumption from the agave notification design, not measured
+/// against the provider: one confirmed bank per pass over all subscriptions, in slot order, on
+/// the one WSS connection — a notification of slot S then proves every slot before S complete,
+/// S itself only once a later slot arrives), the last snapshot's
+/// lower bound, or the root. (A root can precede late confirmed notifications the tracker sends
+/// while catching up; accepted, stated in BUGS E9.)
+pub(crate) fn processed_level(st: &StateCore) -> u64 {
+    st.highest_account_slot()
+        .saturating_sub(1)
+        .max(st.covered_slot())
+        .max(st.root().unwrap_or(0))
+}
+
+/// E9: a projection simulated at `slot` is not newer than the RAM inputs it is combined with —
+/// the owner has every account update up to `slot`, and only on a tradable state (a reconnect or
+/// recovery window has no complete stream until its snapshot is reconciled).
+pub(crate) fn processed_through(st: &StateCore, slot: u64) -> bool {
+    st.run_state().is_tradable() && processed_level(st) >= slot
+}
+
+/// E9: the detect gate before a candidate's projection path. A new external trigger supersedes
+/// the candidate's parked wait. The consumption of a cached projection proceeds only once the
+/// owner has processed every confirmed account notification up to the projection's simulation
+/// slot — never a newer overlay combined with older RAM inputs; until then the work is parked
+/// (counted `deferred`) and `false` is returned. Everything else proceeds.
+#[cfg(feature = "crate_health")]
+pub(crate) fn projection_consume_gate(
+    st: &StateCore,
+    cache: &HashMap<Pubkey, CachedProjection>,
+    parked: &mut ParkedProjections,
+    stats: &mut ProjectionStats,
+    work: DetectWork,
+) -> bool {
+    let (account, _, _, trigger) = work;
+    if !projection_own_trigger(trigger) {
+        parked.unpark(&account);
+        return true;
+    }
+    if trigger != TRIGGER_INTEGRATION_PROJECTION {
+        return true;
+    }
+    match cache.get(&account).map(|c| c.projection_slot) {
+        Some(projected) if !processed_through(st, projected) => {
+            parked.park(projected, work);
+            stats.deferred += 1;
+            false
+        }
+        _ => true,
+    }
+}
+
+/// E9: projection work waiting for the owner to process the account notifications up to a slot
+/// (a cached projection's simulation slot, or one slot of backoff after a lagging node) — at
+/// most one entry per candidate, released in slot order.
+#[cfg(feature = "crate_health")]
+#[derive(Default)]
+pub(crate) struct ParkedProjections {
+    by_slot: std::collections::BTreeMap<(u64, Pubkey), DetectWork>,
+    at: HashMap<Pubkey, u64>,
+}
+
+#[cfg(feature = "crate_health")]
+impl ParkedProjections {
+    /// Parks `work` until `until_slot`, replacing the candidate's earlier entry.
+    pub(crate) fn park(&mut self, until_slot: u64, work: DetectWork) {
+        self.unpark(&work.0);
+        self.at.insert(work.0, until_slot);
+        self.by_slot.insert((until_slot, work.0), work);
+    }
+    /// Drops the candidate's entry (a new external trigger supersedes it).
+    pub(crate) fn unpark(&mut self, account: &Pubkey) {
+        if let Some(slot) = self.at.remove(account) {
+            self.by_slot.remove(&(slot, *account));
+        }
+    }
+    /// The work whose slot the owner has processed, in slot order.
+    pub(crate) fn release(&mut self, st: &StateCore) -> Vec<DetectWork> {
+        let mut out = Vec::new();
+        while let Some((&(slot, account), _)) = self.by_slot.first_key_value() {
+            if !processed_through(st, slot) {
+                break;
+            }
+            self.at.remove(&account);
+            if let Some(work) = self.by_slot.remove(&(slot, account)) {
+                out.push(work);
+            }
+        }
+        out
+    }
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.at.len()
+    }
+}
 
 /// E9: one more projection request that no new trigger asked for (a stale result, a lagging
 /// node, a cached projection unusable at its consumption) — at most `PROJECTION_REQUEUE_MAX`
@@ -239,8 +347,8 @@ pub(crate) fn projection_request_allowed(
     trigger: &str,
 ) -> bool {
     match trigger {
-        "integration_projection" => projection_retry_allowed(requeues, stats, account),
-        "integration_projection_requeue" => true,
+        TRIGGER_INTEGRATION_PROJECTION => projection_retry_allowed(requeues, stats, account),
+        TRIGGER_PROJECTION_REQUEUE => true,
         _ => {
             requeues.remove(&account);
             true
@@ -292,7 +400,7 @@ impl ProjectionStats {
             "projection: requested={} queue_full={} observation_unknown={} accepted={} failed={} \
              stale_result={} discarded_result={} in_flight={in_flight} reused={} \
              invalid_at_use={} discarded_consume={} stale_consume={} dropped={} cached={cached} \
-             requeued={} requeue_exhausted={}",
+             requeued={} requeue_exhausted={} deferred={}",
             self.requested,
             self.queue_full,
             self.observation_unknown,
@@ -307,6 +415,7 @@ impl ProjectionStats {
             self.dropped,
             self.requeued,
             self.requeue_exhausted,
+            self.deferred,
         )
     }
 }
@@ -790,7 +899,7 @@ mod n3_n4_tests {
             "projection: requested=7 queue_full=2 observation_unknown=1 accepted=4 failed=0 \
              stale_result=1 discarded_result=1 in_flight=1 reused=1 invalid_at_use=0 \
              discarded_consume=1 stale_consume=1 dropped=1 cached=0 requeued=0 \
-             requeue_exhausted=0"
+             requeue_exhausted=0 deferred=0"
         );
     }
 
@@ -824,6 +933,102 @@ mod n3_n4_tests {
             "account_update"
         ));
         assert!(!requeues.contains_key(&a));
+    }
+
+    /// E9: a projection simulated at a slot is consumable only once the owner processed the
+    /// account notifications up to it (watermark or root); parked work is released in slot
+    /// order, at most one entry per candidate, superseded by a new park or an unpark.
+    #[test]
+    fn e9_parked_projection_work_waits_for_the_processed_slot() {
+        let account = |slot: u64| {
+            darkbot_solana::ingress::IngressEvent::Account(darkbot_solana::ingress::AccountUpdate {
+                pubkey: Pubkey::new_unique(),
+                owner: Pubkey::new_unique(),
+                lamports: 1,
+                data: vec![1],
+                slot,
+                write_version: None,
+                source: darkbot_solana::ingress::SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            })
+        };
+        let ready = |lower: u64| {
+            let mut st = StateCore::new(16);
+            st.install_snapshot(lower, vec![]);
+            st.reconcile(lower, &[]);
+            st.confirm_ready();
+            st
+        };
+        // Not tradable (snapshot not reconciled): nothing is processed.
+        let mut unready = StateCore::new(16);
+        unready.install_snapshot(10, vec![]);
+        assert!(!processed_through(&unready, 1));
+        let mut st = ready(10);
+        assert!(
+            processed_through(&st, 10),
+            "the snapshot covers its lower bound"
+        );
+        assert!(!processed_through(&st, 11));
+        // A notification of slot 12 proves 11 complete, not 12 (same-slot pass may continue).
+        st.on_event(account(12));
+        assert!(processed_through(&st, 11));
+        assert!(!processed_through(&st, 12));
+        // A (processed-level) slot event ahead of the confirmed notifications proves nothing.
+        st.on_event(darkbot_solana::ingress::IngressEvent::Slot(
+            darkbot_solana::ingress::SlotUpdate {
+                slot: 40,
+                parent: Some(39),
+                status: darkbot_solana::ingress::SlotStatus::Processed,
+                source: darkbot_solana::ingress::SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            },
+        ));
+        assert!(!processed_through(&st, 12));
+        let (a, b, c) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let mut parked = ParkedProjections::default();
+        parked.park(13, (a, 1, 13, TRIGGER_INTEGRATION_PROJECTION));
+        parked.park(12, (b, 2, 12, TRIGGER_PROJECTION_REQUEUE));
+        parked.park(14, (c, 3, 14, TRIGGER_INTEGRATION_PROJECTION));
+        // A new park replaces the candidate's entry; an unpark drops it.
+        parked.park(15, (a, 4, 15, TRIGGER_INTEGRATION_PROJECTION));
+        parked.unpark(&c);
+        assert_eq!(parked.len(), 2);
+        assert!(parked.release(&st).is_empty());
+        st.on_event(account(13));
+        assert_eq!(
+            parked.release(&st),
+            [(b, 2, 12, TRIGGER_PROJECTION_REQUEUE)]
+        );
+        st.on_event(account(20));
+        assert_eq!(
+            parked.release(&st),
+            [(a, 4, 15, TRIGGER_INTEGRATION_PROJECTION)]
+        );
+        assert_eq!(parked.len(), 0);
+        // A gap (reconnect) leaves the stream incomplete until the next reconciled snapshot.
+        st.on_event(darkbot_solana::ingress::IngressEvent::Gap {
+            source: darkbot_solana::ingress::SourceKind::WsRpcControl,
+            from_slot: Some(20),
+            to_slot: None,
+            t_rx_ns: 0,
+        });
+        assert!(!processed_through(&st, 11));
+        // The root reaching a slot proves it processed too.
+        let mut rooted = ready(10);
+        rooted.on_event(darkbot_solana::ingress::IngressEvent::Root {
+            slot: 30,
+            source: darkbot_solana::ingress::SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        });
+        assert!(processed_through(&rooted, 30));
+        assert!(!processed_through(&rooted, 31));
+        assert!(projection_own_trigger(TRIGGER_INTEGRATION_PROJECTION));
+        assert!(projection_own_trigger(TRIGGER_PROJECTION_REQUEUE));
+        assert!(!projection_own_trigger("oracle_price"));
     }
 
     /// V19: a refused layout counts as fail-closed unsupported like an unsupported state; the
