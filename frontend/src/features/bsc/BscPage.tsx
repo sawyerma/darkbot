@@ -15,7 +15,7 @@ import { WalletsPanel } from "./pages/WalletsPanel";
 
 /**
  * BSC Birth Entry – Feature-Komposition.
- * - Read-only. Keine Commands, kein BUY-Button, keine Signer.
+ * - Read-only projections and a separate readiness job; no BUY controller or signer.
  * - Die BSC-Engine (bsc/engine) ist alleinige Autorität für G0.7/G0.8, Guard und Wallets.
  * - bsc.status ist über die Route gebunden (projectRegistry); Panels binden ihre Topics selbst.
  */
@@ -64,7 +64,7 @@ export default function BscPage() {
           <span className="g-badge bsc-state" data-tone={statusTone(guard)} data-testid="bsc-guard">Guard · {guard}</span>
         </span>
       }
-      footer="Graphite V0 · BSC read-only shell · No BUY or transfers from this UI"
+      footer="BSC · Readiness control and evidence · BUY execution unavailable"
     >
       <Tabs items={TABS} value={tab} onChange={setTab} ariaLabel="BSC areas" />
       {tab === "overview" ? <OverviewPanel goto={setTab} /> : null}

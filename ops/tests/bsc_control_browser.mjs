@@ -37,6 +37,22 @@ try{
  await p.getByRole('tab',{name:'Wallets',exact:true}).click();
  await until(async()=> (await p.locator('body').innerText()).includes('Wallet snapshots'),'wallet snapshots');
  await p.screenshot({path:`${dir}/bsc-wallets.png`,fullPage:true});
+ await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await p.getByRole('heading',{name:'Controlled BUY test · G0.7 → G0.8',exact:true}).waitFor();
+ const checks=p.getByLabel('Filter readiness checks');
+ await checks.fill('no-such-native-field');
+ const checkSection=checks.locator('xpath=ancestor::section[1]');
+ assert((await checkSection.innerText()).includes('No matching fields.'));
+ await checkSection.getByRole('button',{name:'Clear filter',exact:true}).click();
+ assert.equal(await checks.inputValue(),'');
+ await until(async()=> (await checkSection.innerText()).includes('V4_CONTRACT'),'new readiness result reaches Launch panel');
+ await p.screenshot({path:`${dir}/bsc-launch.png`,fullPage:true});
+ await p.getByRole('tab',{name:'Analytics',exact:true}).click();
+ await p.getByLabel('Report',{exact:true}).selectOption('g08');
+ await until(async()=> (await p.locator('body').innerText()).includes('NOT_EXECUTED'),'G0.8 native missing evidence state');
+ assert((await p.locator('body').innerText()).includes('No native fields available.'));
+ await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
+
  // A bounded fixture child is used for explicit cancellation and crash tests only.
  const fixture=`#!/usr/bin/python3\nimport pathlib,signal,time,sys\nmode=pathlib.Path(${JSON.stringify(dir+'/mode')}).read_text().strip()\nif mode=='crash': sys.exit(19)\ndef stop(a,b):\n time.sleep(3);sys.exit(0)\nsignal.signal(signal.SIGTERM,stop)\nwhile True: time.sleep(.1)\n`;
  writeFileSync(`${dir}/app/releases/test/g07_pre_live_readiness`,fixture);chmodSync(`${dir}/app/releases/test/g07_pre_live_readiness`,0o755);writeFileSync(`${dir}/mode`,'hold');
