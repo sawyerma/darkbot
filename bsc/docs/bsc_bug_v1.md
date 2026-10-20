@@ -477,7 +477,62 @@ cargo fmt --all -- --check
 Falls Tests zusaetzlich `test-support` oder explizite Testtargets benoetigen, die tatsaechliche Feature-Matrix lesen und den Scope sauber dokumentieren. Alle Tests **ohne** Mainnet-Send, reale Wallet-Secrets, GUARD-Arming oder Erhoehung der Freigabegrenzen; keine langen R0/DRY-Neulaeufe ohne einen wirklich invalidierten Input. Vor einer produktiven Profiloeffnung muss erst der verbindliche G0.7/G0.8-Mainnet-Versuch spaeter **separat** vom Nutzer freigegeben und abgeschlossen werden.
 
 
-## 5. Nachfolgende Etappen
+## 5. Etappe 4b — Intent-Lane, Deployment, Final-Binding, Submission-Policy und Release
+
+**Review:** 2026-10-20 · **Fable-Pruefstand:** \`cac786e\` · **aktueller direkt gepruefter BSC-Code:** \`df888d71a5f922a91699de8638c4caacac719c2f\` (\`main\`). Keine BSC-Codeaenderungen zwischen diesen Quellstaenden festgestellt; HEAD zwischenzeitlich um Project_0-Dokumentation und Etappen-Reviews fortgeschrieben. **Alle Implementierungen bleiben unveraendert.** Etappe 4b dient der fachlichen Einordnung und spaeteren Produktionsqualifikation; sie beweist keinen neuen Bug in der aktuellen G0.7-Binary.
+
+**Gepruefte Quellen:** \`trading/venues/flap/deployment.rs\`, \`binding.rs\`, \`intent/mod.rs\`, \`intent/lane.rs\`, \`submission_policy/plan.rs\`, \`release.rs\`, \`capability.rs\` (betroffene Faehigkeits-/Release-Stellen), \`chain_state/canonical.rs\`, \`economics/policy.rs\`, \`execution/src/startup.rs\`, \`execution/Cargo.toml\`, \`G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md\`, \`G07_REQUALIFICATION_RESULT_20261020.md\`. Die grossen separaten Testdateien wurden fuer diesen Bericht nicht neu vollstaendig durch einen Rust-Testlauf qualifiziert. **Keine Cargo-/RPC-/Mainnet-Tests ausgefuehrt.**
+
+### Etappe-4b-Urteil
+
+| ID | Befund | Urteil | Jetzt umsetzen? |
+| --- | --- | --- | --- |
+| E4b-1 | Produktionsdeployment kennt nur v5.24.0, Mainnet ist laut neuer Requal v5.25.0 | **BESTAETIGT; FAIL-CLOSED / ZUKUENFTIGE PRODUKTIONS-QUALIFIKATION** | **Nein**, erst spaetere C2-/Produktionsphase nach Gate-0 |
+| E4b-2 | Signieren plus finaler Public-Key-Recovery kann lokale Latenz verbrauchen | **BESTAETIGTER POTENZIELLER KOSTENPFAD; GESCHAETZTE NS/MS NICHT GEMESSEN; NOTWENDIGKEIT NACH T0 NICHT ALLGEMEIN** | **Nein**, erst gemessene C2/C3-Instrumentierung |
+| E4b-3 | Legacy-BUY ohne Zeitlimit, Builder-Expiry entwertet disclosed Bytes nicht | **BESTAETIGT; BEREITS UNTER E2-1 BERUECKSICHTIGT** | Kein neuer Nonce-/Retry-/Burn-Patch |
+| E4b-4 | \`runner-startup\` immer auf dem \`execution\`-Abhaengigkeitspfad; Konstruktor oeffentlich | **BESTAETIGTE API-EXPOSITION, ABER KEIN FALSCHER AUFRUFER GEFUNDEN** | Nur weiter kontrollieren, kein ungepruefter Refactor |
+| E4b-AUDIT | Intent, Binding, Plan, Release und Canonical-Typen weitgehend fail-closed | **KEIN NEUER REPRODUZIERBARER IMPLEMENTIERUNGSFEHLER** | Keine unnötigen Aenderungen |
+
+### E4b-1 — Produktions-Deployment-Identitaet von Flap ist veraltet (nicht G0.7)
+
+**Source- und Evidence-Bindung:** \`bsc/engine/crates/trading/src/venues/flap/deployment.rs::bsc_mainnet_v5_24_0\` ca. Z. 182–221 ist die **einzige** in diesem Modul gelieferte gepinnte Mainnet-Deployment-Variante. Sie erwartet \`portal_version="v5.24.0"\`, Implementation \`0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20\` und deren alten SHA-256. \`FlapDeployment::validate\` ca. Z. 136–167 stoppt bereits bei abweichender \`portal_version\` mit \`DeploymentError::PortalVersion\`, danach bei Implementation-/Fingerprint-Drift. \`G07_REQUALIFICATION_RESULT_20261020.md\` und \`G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md\` dokumentieren Mainnet v5.25.0, Implementation \`0xe13227370996f892a56d2ff4a30f6026887b48fb\`, neuen Implementation-SHA-256 (Praefix \`42c91172\`), identische Token-TAX_V3-Implementation. Das ist **historische, quellgestuetzte** Feststellung, keine in diesem Review erfolgte aktuelle Mainnet-Abfrage.
+
+**Konsequenz:** Der heutige produktive Trading-Core kann einen Live-Deployment-Snapshot von v5.25.0 durch das alte \`ValidatedDeployment\` nicht freigeben; folglich keine \`classify_launch\`-/\`ExpectedBuy\`-Kette fuer diese Live-Version. **Absichtlich sichere Sperre**; G0.7 besitzt getrennt requalifizierte, eingefrorene Flap-v5.25.0-Preflights, Transaktionsbytes und Guard. Die G0.7-Requal reicht **nicht** zum Freischalten beliebiger Fremd-Launches im Produkt.
+
+**Spaeterer Auftrag (explizit nur nach Gate-0):** \`bsc_mainnet_v5_25_0()\` mit **vollstaendigen** tatsaechlich gepinnten Proxy-/Implementation-/Tax-Bytecode-Fingerprints, korrekter address/generation/token-derivation und Current-Chain-Beobachtung ergaenzen. Bestehende v5.24.0-Variante **als historische Identitaet erhalten**, keine stillen Werte ersetzen. Goldens fuer bekannte Versionen plus Drift-/Reorg-/Codehash-Negativtests. Erst dann gesonderte native-Tax-/Fee-/Quote-/Metadata-/Beneficiary-/Input-Amount-C2-Qualifikation (siehe E4-1); keinen Release aus dem blossen Hinzufuegen einer Versionskonstante ableiten. Kein neues Baseline-R0, keine DRY-Requal-Wiederholung, solange deren eigener Scope unveraendert bleibt.
+
+### E4b-2 — Signatur und Recovery: tatsaechliche Timinggrenzen statt Schaetzwerte
+
+**Quellstellen:** \`trading/src/signer/mod.rs::Signer::sign_legacy\` und \`trading/src/venues/flap/binding.rs::verify_final_buy\` (ca. Z. 241–281) mit \`recover_legacy_sender\`. Der Binding-Vertrag validiert zuletzt den zugehoerigen Snapshot, alle signierten Sender-/Nonce-/Gas-/Chain-/Portal-/Wert-/Token-/Minimum-Felder. Eine Public-Key-Recovery ist heute tatsaechlich im \`verify_final_buy\`-Pfad; \`sign_legacy\` fuehrt secp256k1-Signierung aus. **Die von Fable angegebenen ca. 0.1–0.3 ms wurden nicht gemessen** und duerfen nicht als belegte Latenz im Ledger stehen.
+
+**Wichtige Korrektur der Fable-Interpretation:** Der Satz „der Salt ist erst ab T0 bekannt und deshalb muss die BUY-Signatur immer danach erfolgen“ ist **generell falsch**. Nach \`BSC_BIRTH_ENTRY_ARCHITECTURE.md\` und \`GATE0_TESTPLAN_SHORT.md\` kann eine vollstaendige Launch-Transaktion bereits vor dem ersten tradable Execution-Zeitpunkt sichtbar sein, insbesondere beim kontrollierten Self-Launch. Dann sind Salt, Token-Ableitung und BUY-Felder moeglicherweise vor T0 qualifizierbar und die Signatur kann vorher erstellt werden. Die Binding-Doku sagt explizit: „for prepared payloads it runs before the trigger“. Das gilt **nicht** fuer unbekannte/private Launches ohne vorherige Daten; bei solchen Kandidaten muss der schnelle Reaktionspfad separat gemessen werden.
+
+**Spaetere C2/C3-Arbeitsanweisung:** auf dem Zielhost und realer, bezeugter Fixture \`T_pre -> sign_ready -> verify_final_buy -> permit -> T_send\` messen, pro signiertem finalem Feld und pro Payload-Size/Cache-Warm-/Cold-Zustand, P50/P95/P99/MAX, allocations, Monotonic-Clock, ohne RPC im Hotpath. Zwei Faelle streng trennen: (A) vorbereitete Bytes, Signierung/Recovery vor dem Trigger; (B) erst zum Trigger vollstaendig bekannte Felder. Erst **nach** reproduzierbarem Bottleneck-Nachweis zwischen sicherheitserhaltenden Alternativen entscheiden (z.B. andere Signatur-Bibliothek oder Provenienz-gebundener interner Signer-Trust). Eine bloess durch den Sender gesetzte Adresse ist **kein Ersatz** fuer \`recover_legacy_sender\`; ohne starke kryptographisch gebundene Erzeuger-/Byte-Provenienz die volle Final-Bindung unveraendert lassen. Jede Optimierung muss unveraenderte RLP-Bytes und Same-Intent-/Nonce-/Snapshot-/Fallthrough-Negativtests beweisen. **Kein Patch jetzt.**
+
+### E4b-3 — Disclaimer \`NoTimeBound\` und Disclosed-Bytes bestaetigt E2-1
+
+**Quellstellen:** \`trading/src/submission_policy/plan.rs::TransactionValidity\` ca. Z. 388–393: \`NoTimeBound\`; \`SubmissionPlan::buy_validity\` ca. Z. 844–847 liefert immer \`NoTimeBound\`. \`Disclosure::may_still_execute\` ca. Z. 1091–1102 meldet nach jeglicher moeglichen Byte-Offenlegung selbst bei \`Rejected\`, \`ExpiredAfterDisclosure\` und \`Unknown\` \`true\`. \`capability.rs\` trennt \`expiry_revokes_disclosed_bytes=false\` von der API-Expiry. Keine qualifizierte Cancel-Funktion.
+
+**Folgerung:** Builder-\`maxBlock\` und Transport-/Anfrage-Expiry sind **keine** On-Chain-TX-Zeitgueltigkeitsschranke. Ein bereits disclosed Legacy-TX kann grundsaetzlich solange spaeter ausgefuehrt werden, wie er durch Nonce/State/Fees/Chain weiter gueltig ist und irgendwo gehalten wird. Deshalb bestaetigt E4b-3 die Etappe-2-Korrektur gegen Fables pauschales \`UNRESOLVED -> ADAPT\` nach Head-/Nonce-Snapshot. Nonce-Gleichstand und temporär fehlende TX auf einem Knoten liefern allein keinen sicheren Negativbeweis; keine Wiederholung, keine zweite wirtschaftliche Transaktion, kein eigenmaechtiger \`Nonce-Burn\`. Erst nach quellgebundenem Reconciliation-/Exposure-Nachweis darf ein abgeschlossener Ausgang korrekt klassifiziert werden. **Keine neue E4b-3-Duplikat-Ticketnummer in der Reparaturliste; E2-1 bleibt der Owner.**
+
+### E4b-4 — \`runner-startup\` / \`ArmedFence::from_durable_startup\`: exakter Aufrufstand
+
+**Quellen:** \`bsc/engine/crates/execution/Cargo.toml\`: \`darkbot-bsc-trading = { path = "../trading", features = ["runner-startup"] }\` in normaler \`[dependencies]\` ohne Ausnahme fuer G0.7-Bins. \`trading/src/intent/mod.rs\` ca. Z. 417–451 exponiert \`#[cfg(feature="runner-startup")] pub fn ArmedFence::from_durable_startup(...)\`; die Annotation \`#[doc(hidden)]\` blendet nur Dokumentation aus und erzwingt **keine** Laufzeitautorisierung. Zugleich ist \`IntentLane::armed\` dadurch potentiell mit einem mintbaren Fence erreichbar.
+
+**Zusaetzlicher eigenstaendiger Quellscan, ueber Fable 4b hinaus:** Alle **32 Rust-Quelldateien** unter \`bsc/engine/crates/execution/src/**\` am angegebenen HEAD einzeln auf \`ArmedFence\`, \`from_durable_startup\` und \`IntentLane::armed\` durchsucht. **Genau ein echter Produktionsaufrufer gefunden:** \`execution/src/startup.rs::ValidatedStartup::arm\` ca. Z. 281–293. Dort wird zuerst \`durable_fence(root,...)\` erfolgreich durchgefuehrt und **erst danach** \`ArmedFence::from_durable_startup\` aufgerufen. \`durable_fence\` ca. Z. 677–723: \`create_new\`, write, file \`sync_all\`, parent-directory \`sync_all\`, Fehler => fail-closed bzw. Restart-Quarantaene. **Keine** Verwendung des Konstruktors in G0.7, \`g07_builder_probe\` oder \`g07_pre_live_readiness\` gefunden. Dies ist eine konkrete negative Caller-Inventur, kein blosses Vertrauen in den Kommentar.
+
+**Einordnung:** Kein gegenwaertiger Beweis fuer einen Bypass, der ohne durable Startup zulassige Transaktionen sendet. Aber weil der oeffentliche Konstruktor durch das global aktive Feature auch in nicht-Runner-Kontexten kompiliert, ist seine **API-Herkunftssicherung noch keine harte Typgrenze**. Falls die Produktionsarchitektur spaeter einen Ausbruch aus dem \`ValidatedStartup::arm\`-Pfad ermoeglicht, koennte ein fremder Codepfad denselben Fence direkt praegen. Das ist ein gezielt zu beobachtender **Defense-in-depth-/Modulgrenzenpunkt**, kein Anlass, G0.7-/Readiness-Module jetzt umzubauen oder wegen eines reinen hypothetischen Callers den kompletten Core zu refaktorieren.
+
+**Etappe-5-Folgepruefung:** Bei jeder weiteren Execution-Aenderung Quell-/Modul-Grenze und Call-Graph erneut pruefen; keine neue \`from_durable_startup\`-Callsite ohne reviewed und durable \`StartupAuthorization\`-/\`create_new\`-/fsync-Proof. In der spaeteren produktiven Integrationsphase Konstruktion soweit sinnvoll hinter einen eng begrenzten Owner-/Token-Zugang oder ein Production-Runner-Feature stellen. Keine Proxy-/Fake-Fence-Fixtures ausser in strikt getrennten Offline-Tests als Produktions-PASS deklarieren.
+
+### Ergebnis ohne neue Implementierungsbugs
+
+Fables positive Bewertung der Intent-Lane/Final-Binding/Submission-Plan-/Release-Policy ist mit den inspizierten Quellen **vereinbar**: \`IntentLane\` bindet wirtschaftliche Identitaet und noncegeordnete Permits, \`verify_final_buy\` validiert einen echten signierten BUY mit Snapshot-Identitaet, \`SubmissionPlan::bind_dispatch\` bindet Intent-Ticket, Buy-Hash und Adapter-Set, \`release_blocker\` verlangt qualifizierte Ordnung/Atomizitaet/Same-Block/No-Leak/\`T_send\`. Die \`capability.rs\`-Quellen bestaetigen, dass **heute kein Providerverhalten als release-qualified gilt**, also kein voreiliges Release. **Aus Code-Lesung folgt nicht der Beweis, dass alle 55k/86k grossen Testdateien ausgefuehrt wurden oder keine versteckten Implementierungsfehler existieren.** Keine neue Fixpflicht fuer diese Kernlogik ohne konkrete Gegenbeweise.
+
+**Etappe-4b-Abnahme:** 4b **REVIEWED / NO CURRENT-PHASE FIX**; E4b-1 spaeterer produktiver Deployment-/Profile-Nachzug, E4b-2 spaetere C2/C3-Latenzmessung ohne Safety-Bypass, E4b-3 zu E2-1 verlinkt, E4b-4 current Caller-Scope nachgewiesen und als API-Grenze offen. G0.7/G0.8 ohne LIVE, keine Veraenderung an signierten Bytes, keine Wiederaufnahme C1/C2 vor Gate 0.
+
+
+## 6. Nachfolgende Etappen
 
 Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** aufgenommen, aber erst nach unabhaengigem Code-/Phasenplanabgleich. Bereits behandelte Behauptungen nicht doppelt als Bug anlegen. Auch nach erfolgreicher Umsetzung bleibt eine Etappe „FIXED / TESTED“ erst mit konkretem Commit und Tests/Evidence belegbar; sonst `OPEN`.
 
@@ -486,7 +541,7 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | 1 | G0.7 Guard/Vertrag/Readiness/Requal | **REVIEWED / FIXES OPEN** |
 | 2 | G0.8 Verifikation/Witness/Evidence | **REVIEWED / FIXES OPEN** |
 | 3 | G0.6a DRY-/Requal-Werkzeuge | **REVIEWED / FIXES OPEN; SALT A/B UNDECIDED** |
-| 4 | Trading/Signer/RLP/Intent | **PARTIAL: 4a REVIEWED / E4-3 & E4-4 OPEN; 4b AWAITING INPUT** |
+| 4 | Trading/Signer/RLP/Intent | **4a + 4b REVIEWED; E4-3/E4-4 OPEN; 4b future C2/C3 items parked** |
 | 5 | Execution/Submission/TLS | AWAITING INPUT |
 | 6 | geth_ipc Rust | AWAITING INPUT |
 | 7 | Go-geth Overlay/Rust-Paritaet | AWAITING INPUT |
