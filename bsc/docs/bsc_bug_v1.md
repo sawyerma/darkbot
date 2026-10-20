@@ -387,7 +387,97 @@ Der neue Test `g06a_dry_no_network` existiert **noch nicht** und ist vom Impleme
 **Etappe-3-Abnahme:** Alle bestaetigten lokalen Korrekturauftraege geprueft implementiert, die Saltrisiko-Entscheidung sichtbar getrennt, geklaerte Sicherheitsgrenzen und reproduzierbare eng begrenzte Offline-Tests. G0.7 bleibt **CODE-READY-ZIEL / LIVE NOT AUTHORIZED**, G0.8 **NOT EXECUTED**, Phase C1/C2 weiter **PAUSED**.
 
 
-## 4. Nachfolgende Etappen
+## 4. Etappe 4a — Flap-Economics, Signer, RLP, Launch-Admission und G0.7-Key-Hygiene
+
+**Review:** 2026-10-20 · **Fable-Basis:** `cac786e` · **unabhaengig gepruefter `main`-HEAD:** `b11edda156423ce31a18221e1d0ffdabe4a11413`. Gegenueber `cac786e` ist in den hier geprueften BSC-Quellpfaden keine spaetere Implementierung festgestellt worden. Die auf `main` erschienenen neueren Changesets betreffen u.a. Project_0-Dokumentation; nicht auf einen veralteten Gesamt-HEAD zuruecksetzen. **Keine Rust-/Netzwerk-/Mainnet-Tests in diesem Review ausgefuehrt.**
+
+**Relevante Vertraege:** `BSC_DUAL_VENUE_ROADMAP.md` (Binding 2026-10-20: G0.7/G0.8 vor C1/C2, keine breite Optimierung), `BSC_PRODUCTION_BUILD_MASTER_PLAN.md` (ein Trading-/Signing-Owner in der spaeteren Runtime), `BSC_BIRTH_ENTRY_ARCHITECTURE.md` (realer erfolgreicher Kauf und sub-ms-Produzentenmessung), `GATE0_TESTPLAN_SHORT.md` sowie unveraenderter G0.7-v4-/Signed-Byte-/Unarmed-Guard-Vertrag. Ein produktiver Fremd-Launch ist **noch nicht qualifiziert**; diese Etappe macht keine neuen wirtschaftlichen Parameter frei.
+
+### Etappe-4a-Urteil
+
+| ID | Kategorie | Unabhaengiges Urteil | Auftrag / Scope |
+| --- | --- | --- | --- |
+| E4-1 | Produktqualifikation | **BESTAETIGT, KEIN IMPLEMENTIERUNGSBUG:** `classify_launch` und `admit_native_buy` sind bewusst auf den witnessed G0.6a-Crosscheck eingeschraenkt | Keine jetzige Profil-/Betragsaufweitung; **spatere C2-/Produktions-Qualifikation** |
+| E4-2 | Evidenz/Salt-Exposure | **BESTAETIGT, BEREITS E3-1:** `WITNESSED_SALT` und `WITNESSED_TOKEN` stehen wortwoertlich in versioniertem Testquelltext | E3-1 verstaerken, kein zweites Salt-Ticket |
+| E4-3 | Codeparitaet / qualifizierte Grenze | **BESTAETIGT, TESTLUECKE:** parallele RLP-/Signing-Implementierungen von Trading, G0.7 und DRY; kein expliziter bytegenauer G0.7-vs-Production-Quertest gefunden | Kleiner Offline-Regressionsbeweis, **kein Signer-Umbau** |
+| E4-4 | Credential-Hygiene | **BESTAETIGT, DEFENSE-IN-DEPTH:** `String` + `Vec<u8>` aus G0.7-`key_from_env` nicht bewusst ge-zerot, Key-ENV bleibt vorhanden | Enger Sicherheitsfix nur mit Source-/Plan-Hash-Review, ohne Signed-Byte- oder Egress-Aenderung |
+| E4-AUDIT | Keine neuen Fehler | In den betrachteten Kurven-/Fee-/Slippage-/RLP-/ABI-Teilen kein konkreter, quellcodegestuetzter Gegenbeweis zur bestehenden Testlogik gefunden | **Nicht** als „mathematisch formal bewiesen“ oder neu getestet ausgeben |
+
+### E4-1 — Klassifizierungs-/Buy-Admission-Profil laesst gegenwaertig keine fremden Standard-Launches durch
+
+**Fundstellen:** `bsc/engine/crates/trading/src/venues/flap/profile.rs` ca. Z. 1–41 und `classify_launch` Z. 220–303; `bsc/engine/crates/trading/src/economics/flap/native_curve20.rs` ca. Z. 174–275.
+
+**Gegenpruefung:**
+- Die qualifizierte native Launch-Klasse verlangt ausser allen festen relevanten Fee-/Tax-/DEX-/Quote-/Distribution-/Token-Version-Feldern auch exakt `name = "DarkBot G06A Economics"`, `symbol = "DBG06E"`, die Economics-Test-URI und den Test-`beneficiary = 0x...a11c`. Nur der `salt` ist in dieser Klasse variabel; dieser beeinflusst die abgeleitete Tokenadresse. Ein anderer Launch faellt u.a. an `UnsupportedLaunch::{BuyTax,Distribution,Beneficiary,Metadata,...}` durch.
+- `admit_native_buy` verlangt **exakt `QUALIFIED_MAINNET_INPUT_WEI = 1000000000000000 wei` (= 0.001 BNB)**. Der eingefrorene G0.7-Versuch ist dagegen `1000000000000 wei` (= 0.000001 BNB), also **Faktor 1000 kleiner**. Daraus entsteht **kein** Widerspruch im aktuellen G0.7-Code: `g07_mainnet_self_launch_buy` benutzt seine eigene fuer Gate 0 eingefrorene Launch-/BUY-/Signaturstrecke, **nicht** `classify_launch`/`admit_native_buy`.
+- Auch der vom G0.7-Harness erzeugte Launch hat andere Metadata (z.B. `DarkBot G06A Self Launch`) und den tatsaechlichen Launcher als Beneficiary. Die aktuelle Produktions-Admission wuerde ihn nicht als witnessed Economics-Profil klassifizieren. Dieses Verhalten ist **absichtlich fail-closed** und entspricht der aktuellen Gating-/Phasengrenze, kein Versehens-Reject im bereits freigegebenen Produktionsbot.
+
+**Verbindliche Entscheidung:** **Kein Patch in Etappe 4a**. Nicht `Metadata`/`Beneficiary`-Pruefungen entfernen, keine Buy-Amount-Schranke erweitern und keinen fremden Real-Launch als heute „unterstuetzt“ deklarieren. Nach dem Gate-0-G0.7→G0.8-Verdikt und erst im autorisierten Produktions-/C2-Abschnitt sind mindestens erforderlich: (a) Beweis aus gepinntem aktuellem Portal-Implementation-Code, ob Metadata/Beneficiary tatsaechlich kaufirrelevant sind oder eigene Profilklassen benoetigen; (b) unabhängige EVM-Validierung zusaetzlicher Steuer-/Creator-Purchase-/Quote-/Distribution-Profile mit negativen Boundaries; (c) qualifizierte Input-Ranges und Risiko-/Slippage-/Gas-/Profit-Grenzen samt exact-state Evidence; (d) ausreichende Replay/PAPER- und End-to-End-Aufnahmen. Nicht aus der Existenz dieser Funktionen auf bereits LIVE-funktionierende Fremd-Launch-Admission schliessen.
+
+**Abnahme dieser Etappe:** Testbares, dokumentiertes `UNQUALIFIED_LAUNCH`-/`UnqualifiedAmount`-Fail-closed-Verhalten bleibt erhalten; kein G0.7-Byte- oder Budget-Eingriff.
+
+### E4-2 — Der eingefrorene Salt steht auch im Trading-Testkit
+
+**Fundstelle:** `trading/src/venues/flap/profile.rs`, `#[cfg(test)] pub(crate) mod testkit`, ca. Z. 305–319: Konstanten `WITNESSED_SALT` und `WITNESSED_TOKEN`. Der Token entspricht der bereits im `G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md` beschriebenen DRY-Adresse; der Salt stimmt mit dem bekannten G0.6a-Crosscheck-Kandidaten ueberein. **`#[cfg(test)]` schliesst die Konstanten nur aus dem normalen Produktions-Build aus, versteckt sie aber nicht im oeffentlichen Git-Quelltext.** Die reproduzierbare feste Kandidatengenerierung und die versionierten Records standen bereits unter E3-1.
+
+**Fix:** Kein neues Issue und kein kosmetisches Entfernen des Testkit-Salts mit der Behauptung, der Salt sei wieder geheim: er ist aus Seed, RPC-Call-Daten, historischen Artefakten und Git-Historie weiterhin rekonstruierbar. Als zusaetzlichen Beleg zu **E3-1** dokumentieren. A/B-Entscheidung bleibt offen, vor der spaeteren gesonderten wirtschaftlichen Freigabe. Keine Aenderung am v4-Kandidaten ohne neue DRY-/Hash-/Freigabekette.
+
+### E4-3 — Fehlender expliziter G0.7-vs-Production Byte-Paritaetsnachweis
+
+**Fundstellen:** `trading/src/signer/mod.rs::Signer::sign_legacy` (ca. Z. 108–167), `trading/src/transactions/legacy.rs::LegacyTx` (ab Z. 56), `tx_encoding/src/rlp.rs`, `execution/src/bin/g07_mainnet_self_launch_buy/transactions.rs::sign_legacy` (ca. Z. 66–119), `qualification/src/bin/g06a_self_launch_bundle.rs::sign_legacy` (ca. Z. 180 ff.), `g06a_local_simulate.cjs` (ethers-Pfad). `trading::signer` und `trading::transactions::legacy` sind **tatsaechlich oeffentlich exportiert** (`trading/src/lib.rs` und `transactions/mod.rs`); die von Fable verwendeten Modulpfade sind richtig. `execution/Cargo.toml` haengt `darkbot-bsc-trading` bereits ab, daher ist kein neuer Produktiv-Signer zu implementieren.
+
+**Bewertung:** Die getrennten Signier-/RLP-Pfade stammen aus einem bewusst isolierten und eingefrorenen Gate-0-Harness. Das derzeitige Produktionsziel „ein Signer-Owner“ ist ein **Integrationsziel fuer die spaetere Runtime**, nicht die Erlaubnis, jetzt den eingefrorenen G0.7-Signierer auszutauschen. Es gibt bereits **Trading-Golden-Tests** (u.a. EIP-155 und unabhaengig berechnete Signaturen) und G0.7/DRY-Byte-Bindung, aber nicht denselben klaren Test beider Signierer **mit identischen Testinputs in einem Lauf**. Das ist eine Regressionsevidenzluecke, **kein nachgewiesener Signatur-/Encoding-Fehler**.
+
+**Minimaler Fix:** Einen **reinen Offline-Test** im bestehenden G0.7-Binary-`mod tests` oder einem passend gelinkten Testmodul ergaenzen, der mit ausschliesslich **synthetischem** `[0x22;32]`-Key `G0.7::sign_legacy` und `trading::signer::Signer::sign_legacy` auf **identischen** `LegacyTx`-Feldern aufruft und **raw RLP bytes und Keccak-TX-Hash** exakt vergleicht. Mindestens:
+1. BUY-`swapExactInput` kurzer/realistischer Payload, kurzer Integer-/Null-Wert-Fall;
+2. kompletter `newTokenV6`-Launch mit langem Calldata-Payload inkl. RLP-Long-Form und groesserem Gaslimit, gegebenenfalls gesonderte Feste-Nonce-/Gas-/Buy-Value-Fixtures;
+3. beide unterschiedlichen wirtschaftlichen Rollen/Signer, feste EIP-155-Chain `56`, Recovered-Sender/Low-s und reproduzierbare exakte Bytes, unter den wirklich identischen Feldern;
+4. eine **separate** Assertion gegen bereits vorhandene, unabhaengig gepinnte DRY-/Golden-`launch_tx_hash` und `buy_tx_hash`-Referenzen, **nur wenn** ein geeigneter Test mit diesen Hashes ohne reale Wallet-Secrets machbar ist; niemals private Schluessel aus `secrets.env` ziehen, keine simulierten Secrets als Beweis des realen eingefrorenen Hashpaares ausgeben.
+
+Fables Patch 1 (Test in `main.rs::tests`) ist vom Typ-/Importaufbau her plausibel: `Signer`, `LegacyTx`, `LegacyTx { chain_id, nonce, gas_price, gas_limit, to, value, input }`, `Signer::sign_legacy(&tx,&mut scratch,&mut raw) -> Result<B256,_>` sind tatsaechlich vorhanden. **In der Rohfassung sind Launch und BUY aber beide mit demselben `value=1e12` und `gas_limit=3000000` kodiert**. Das testet nur generische Gleichheit, **nicht** das korrekt eingefrorene Launcher-/BUY-Profil. Fuer einen nuetzlichen Regressionsbeweis getrennte realistische Fix-Fixtures mit Launch `value=0`, `gas_limit=6603270` und BUY `value=1e12`, `gas_limit=3000000` verwenden und die gleichen Daten strikt beiden Signierern zufuehren. Die synthetische Signier-ID bleibt synthetisch; kein LIVE-Versuch.
+
+**Tests:** alle Varianten raw + hash gleich; Test faellt bei einem geaenderten Signatur-`v`, RLP-Integer-/List-Encoding oder unerwartetem Byte abweichend rot; source-only `#[cfg(test)]`-Aenderung in G0.7 darf **nicht** die freigegebenen Live-Signed-Bytes veraendern. Enge `cargo test`-Probe und bestehenden No-Send-Guard beibehalten. Die Quertest-Gleichheit allein liefert keine unabhaengige Kryptographie-/Mainnet-Erfolgsbescheinigung; Golden-Vektoren behalten eigene Aussagekraft.
+
+### E4-4 — G0.7 behaelt kurzlebige Key-Rohkopien und geerbte Key-Environment
+
+**Fundstelle:** `execution/src/bin/g07_mainnet_self_launch_buy/inputs.rs::key_from_env` ca. Z. 28–35:
+`let raw = req_env(name);` -> `hex::decode(...)` liefert `Vec<u8>` -> `SigningKey::from_slice(&bytes)`. Danach verlassen `raw` und `bytes` ohne explizites Zeroize den Scope, auch auf manchen Fehlerpfaden. Die geerbten Env-Variablen `DARKBOT_G07_LAUNCHER_PRIVATE_KEY` und `DARKBOT_G07_BUYER_PRIVATE_KEY` bleiben im Prozess. Die `SigningKey`-Objekte muessen dagegen fuer den spaeteren signierenden Schritt **absichtlich** bis zur Nutzung verfuegbar sein.
+
+**Konkrete Risikoeinordnung:** Restliche Key-Kopien/ENV erhoehen den potentiellen Expositionsradius bei Process-Memory-/Debug-/Crash-/unbedachter Spawn-Inspektion. Dies ist **keine** bereits nachgewiesene Schluesseluebertragung an einen externen RPC: `g07.../chain_reads.rs::child_command` (ca. Z. 36–43) verwendet fuer seine `curl`-Unterprozesse **`env_clear()`** und uebergibt keine privaten Keys. Die Sicherheitsluecke ist damit ein **Hygiene-/Defense-in-depth-Befund**, nicht ein bewiesener Mainnet-Key-Diebstahl.
+
+**Minimale Härtung (Fables Patch 2 nur nach Anpassung):**
+1. Den aus ENV gelesenen `String` und dekodierte Key-Bytes **direkt mit RAII-gesichertem Zeroize auf allen Rueckgabe- und Fehlerrouten** halten, bevorzugt `zeroize::Zeroizing<String>` bzw. `Zeroizing<Vec<u8>>`, um ein `unwrap_or_else(panic!)` vor manuellem `zeroize()` nicht als Sicherheitsloch zu behalten. Eine explizite `zeroize`-Abhaengigkeit nur hinter `g07-mainnet`, Lockfile-/Feature-Flags geprueft, keine Produktions-Hot-Path-Allocation hinzufuegen.
+2. ENV-Schluessel **vor** jedem moeglichen Subprocess-/Thread-/TLS-Abschnitt entfernen oder anderweitig so scopen, dass sie nicht unnoetig vererbt werden. Da das Workspace `edition = "2024"` und `std::env::remove_var` in Rust 2024 **unsafe** ist, den Ein-Thread-Startup-/Concurrent-Library-Kontext und den Betriebssystem-/Prozessvertrag **explizit beweisen**, bevor Fables `unsafe { env::remove_var(name) }` kopiert wird. Bei unklarem Concurrent-Environment niemals ein ungeprueftes `unsafe` als Codehaertung implementieren; sichere vorgelagerte Startprozess-Sanitization und explizit gereinigte Child-Environments bevorzugen. Keine Kindprozesse, die Secrets erben.
+3. An beiden `key_from_env`-Aufrufen in `main.rs` ca. Z. 90–91 dieselbe Adresse, denselben Signer und die unveraenderten Launch-/BUY-RLP-Hashes verlangen; niemand darf einen falschen Key verschlucken oder bei fehlendem Key fail-open starten. Die bestehenden Guards/Latch-/Capture-/Egress-Order bleiben unveraendert.
+4. **G0.7-Source-/Probe-Hash-Scope bewerten:** Der bereits gepinnte Test-/Quellstand und die genauen Freigabe-Hashes muessen nach einer Aenderung von `inputs.rs` ueberprueft werden. G0.7 jetzt nicht aus kosmetischen Gruenden re-signieren oder die alten DRY-/TX-Hashes neu ableiten. Falls ein Sicherheitsfix am eingefrorenen Laufzeitcode vor der spaeteren wirtschaftlichen Freigabe wirklich erforderlich ist, **gezielt requalifizieren**, mit neuem Code-/Plan-Hash und expliziter Dokumentation der unveraenderten signed-byte-Identitaet. Alternativ streng kontrolliert bis nach dem wirtschaftlichen Gate vertagen, aber die erwartete Key-Hygiene als offenes Sicherheitsrisiko dokumentieren. Ein Testfix allein darf nicht still die Vertragsautoritaet wechseln.
+
+**Gezielte Offline-Tests:** gute/fehlende/falsche Hex-Key-Inputs und unterschiedliche Laengen ohne Secret-String in Fehlermeldungen; isolierte Startup-/Child-Environment-Pruefung mit *Dummy*-Keys; gleiche abgeleitete Signeradresse und exakt gleiche synthetische RLP-TX-Bytes; keine neuen Threads/IO im gemessenen Hot-Path, Guard `UNARMED`. Memory-Nullung nicht durch einen Test vortaeuschen, der ausschliesslich `raw.zeroize()` im happy path prueft; RAII-/Error-Exit-Pfade und ggf. eine kontrollierte Codeinspektion erforderlich.
+
+### Quellreview ohne neu bestaetigten Implementierungsfehler
+
+Die Fable-Etappe nennt Kurvenarithmetik (`supply = TOTAL + h - ceil(k*10^18/(r+reserve))`), Rundungen, Fee-Split, `floor`-Slippage, RLP-Long-Form/kanonische Integers, EIP-155-Signieren/Recover und kanonischen `newTokenV6`-ABI-Decoder. Bei der **gegengeprueften Implementierungsstruktur und vorhandenen Testcases** fand sich kein belastbarer neuer Defekt, der ein Ticket rechtfertigt. Die konkrete G0.7-Economics-Ausgabe `176693134169499757962` ist in der vorhandenen DRY-Requal-/Quote-Evidenz dokumentiert. **Nicht** aus Code-Lesen oder historisch berichteten GREEN-Tests ein neues staerkeres `VERIFIED` fuer beliebige Betragsprofile, veraenderte Tax-Konfigurationen oder ungepruefte externe Launches machen. Es wurde hier kein externer ERC20-/BNB-Geldkauf, kein EVM-Neulauf, keine neue mathematische Vollverifikation und kein kryptographisch unabhaengiger Signaturbeweis durchgefuehrt.
+
+### Etappe-4a-Ziel und Agent-Abnahme
+
+- **Jetzt im Scope:** E4-3 enger Test-/Evidenzfix, mit historischen Signed-Byte-Goldens und No-Send-Gates; E4-4 gesondert vor Freigabe pruefen/gezielt haerten, wenn Source-/Plan-Bindung kontrollierbar ist. Kein neuer Signer, kein RLP-Refactor, keine Codeaenderung an `transactions.rs::sign_legacy`.
+- **Explizit nicht jetzt:** E4-1 Admission/Betrags-/Tax-Freigabe (Produktionsphase nach G0.7/G0.8); E4-2 ist bereits E3-1; E4-4 nicht pauschal ohne sicheren Rust2024-/Concurrency-Plan einbauen.
+- **Vor jedem CODE-READY-Verdikt:** Nachweis der byteidentischen G0.7-/Production-Signer-Ausgaben mit synthetischen, identischen Inputs und der weiterhin eingefrorenen G0.7-TX-Hashes im Qualifikationspfad; keine Secrets in Testevidence; kein LIVE-Send; unveraenderte Limit-/Builder-/Wirtschaftsbindung. Der cross-test soll **nicht** als Ersatz des echten G0.7→G0.8 Erwerbs-/Producer-Witness-Gates bezeichnet werden.
+- **Status:** 4a **REVIEWED**, keine neuen Economics-/ABI-/RLP-Implementierungsbugs nachgewiesen, aber E4-3+E4-4 **OPEN**; 4b (Intent, Submission-Policy, Flap-Binding, Chain-State) folgt separat.
+
+**Zieltestkommandos fuer den Implementierer (in diesem Review nicht ausgefuehrt):**
+
+~~~bash
+cd bsc/engine
+cargo test --locked -p darkbot-bsc-execution --features g07-mainnet --bin g07_mainnet_self_launch_buy
+cargo test --locked -p darkbot-bsc-trading
+cargo test --locked -p darkbot-bsc-execution --features g07-mainnet --test g07_no_send
+cargo fmt --all -- --check
+~~~
+
+Falls Tests zusaetzlich `test-support` oder explizite Testtargets benoetigen, die tatsaechliche Feature-Matrix lesen und den Scope sauber dokumentieren. Alle Tests **ohne** Mainnet-Send, reale Wallet-Secrets, GUARD-Arming oder Erhoehung der Freigabegrenzen; keine langen R0/DRY-Neulaeufe ohne einen wirklich invalidierten Input. Vor einer produktiven Profiloeffnung muss erst der verbindliche G0.7/G0.8-Mainnet-Versuch spaeter **separat** vom Nutzer freigegeben und abgeschlossen werden.
+
+
+## 5. Nachfolgende Etappen
 
 Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** aufgenommen, aber erst nach unabhaengigem Code-/Phasenplanabgleich. Bereits behandelte Behauptungen nicht doppelt als Bug anlegen. Auch nach erfolgreicher Umsetzung bleibt eine Etappe „FIXED / TESTED“ erst mit konkretem Commit und Tests/Evidence belegbar; sonst `OPEN`.
 
@@ -396,7 +486,7 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | 1 | G0.7 Guard/Vertrag/Readiness/Requal | **REVIEWED / FIXES OPEN** |
 | 2 | G0.8 Verifikation/Witness/Evidence | **REVIEWED / FIXES OPEN** |
 | 3 | G0.6a DRY-/Requal-Werkzeuge | **REVIEWED / FIXES OPEN; SALT A/B UNDECIDED** |
-| 4 | Trading/Signer/RLP/Intent | AWAITING INPUT |
+| 4 | Trading/Signer/RLP/Intent | **PARTIAL: 4a REVIEWED / E4-3 & E4-4 OPEN; 4b AWAITING INPUT** |
 | 5 | Execution/Submission/TLS | AWAITING INPUT |
 | 6 | geth_ipc Rust | AWAITING INPUT |
 | 7 | Go-geth Overlay/Rust-Paritaet | AWAITING INPUT |
