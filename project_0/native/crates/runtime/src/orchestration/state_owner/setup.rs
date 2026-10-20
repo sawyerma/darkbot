@@ -868,6 +868,7 @@ pub(super) fn prepare(
         projection_pending,
         projection_stats: ProjectionStats::default(),
         detect_queue,
+        bootstrap_probe_queue: VecDeque::new(),
         oracle_detect_order,
         oracle_detect_pending,
         oracle_bank_projection_pending,

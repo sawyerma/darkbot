@@ -104,7 +104,7 @@ pub fn execution_amount_for_asset<S: AccountSource + ?Sized>(
     let out = match kind {
         IntegrationKind::Kamino => {
             let reserve: &kamino_mocks::state::MinimalReserve =
-                pod_after_disc(state, &bank.integration_acc_1)?;
+                integration_account(state, &bank.integration_acc_1)?;
             let underlying = reserve
                 .collateral_to_liquidity(bank_units)
                 .map_err(|e| format!("KAMINO_COLLATERAL_TO_LIQUIDITY:{e}"))?;
@@ -121,7 +121,7 @@ pub fn execution_amount_for_asset<S: AccountSource + ?Sized>(
         }
         IntegrationKind::Drift => {
             let market: &drift_mocks::state::MinimalSpotMarket =
-                pod_after_disc(state, &bank.integration_acc_1)?;
+                integration_account(state, &bank.integration_acc_1)?;
             // Marginfi balance units are Drift scaled-balance units. DriftWithdraw takes
             // underlying native token units, then rounds the scaled decrement up.
             let mut token_amount = market
@@ -158,7 +158,7 @@ pub fn execution_amount_for_asset<S: AccountSource + ?Sized>(
         }
         IntegrationKind::JupLend => {
             let lending: &juplend_mocks::state::Lending =
-                pod_after_disc(state, &bank.integration_acc_1)?;
+                integration_account(state, &bank.integration_acc_1)?;
             // Marginfi balance units are fToken shares. JuplendWithdraw takes underlying
             // assets and burns ceil(assets / exchange_rate) fTokens.
             let token_exchange_price = lending.token_exchange_price;
@@ -246,14 +246,32 @@ fn raw<'a, S: AccountSource + ?Sized>(
         .ok_or_else(|| format!("INTEGRATION_MISSING_ACCOUNT:{key}"))
 }
 
+/// Z18: an external integration account type of the pinned program: a POD layout with the
+/// owning program and discriminator the program's `AccountLoader` checks.
+pub trait IntegrationAccount:
+    bytemuck::Pod + anchor_lang::Owner + anchor_lang::Discriminator
+{
+}
+impl<T: bytemuck::Pod + anchor_lang::Owner + anchor_lang::Discriminator> IntegrationAccount for T {}
+
 /// External integration accounts (Kamino/Drift/JupLend mock layouts) only. E1: never for
 /// Marginfi `Bank`/`MarginfiAccount`/`MarginfiGroup`/`FeeState`; those use the strict pinned
 /// decoders of `protocol`.
-fn pod_after_disc<'a, T: bytemuck::Pod, S: AccountSource + ?Sized>(
-    state: &'a S,
-    key: &Pubkey,
-) -> Result<&'a T, String> {
-    let (_, _, data) = raw(state, key)?;
+/// Z18: accepted only with the identity the pinned program's `AccountLoader<T>` checks — owned
+/// by T's program (`Owner`, the mock crate's `declare_id!`) and starting with T's discriminator;
+/// a foreign owner or discriminator is rejected, never cast.
+pub fn integration_account<'a, T, S>(state: &'a S, key: &Pubkey) -> Result<&'a T, String>
+where
+    T: IntegrationAccount,
+    S: AccountSource + ?Sized,
+{
+    let (owner, _, data) = raw(state, key)?;
+    if owner != <T as anchor_lang::Owner>::owner() {
+        return Err(format!("INTEGRATION_OWNER_MISMATCH:{key}:{owner}"));
+    }
+    if !data.starts_with(<T as anchor_lang::Discriminator>::DISCRIMINATOR) {
+        return Err(format!("INTEGRATION_DISCRIMINATOR_MISMATCH:{key}"));
+    }
     let need = 8 + std::mem::size_of::<T>();
     if data.len() < need {
         return Err(format!(
@@ -271,7 +289,11 @@ fn kamino_reserve<S: AccountSource + ?Sized>(
     state: &S,
     reserve: &Pubkey,
 ) -> Result<kamino_mocks::kamino_lending_complete::accounts::Reserve, String> {
-    let (_, _, data) = raw(state, reserve)?;
+    let (owner, _, data) = raw(state, reserve)?;
+    // Z18: the Kamino lending program owns the reserve (the decoder checks the discriminator).
+    if owner != marginfi_type_crate::pdas::KAMINO_PROGRAM_ID {
+        return Err(format!("INTEGRATION_OWNER_MISMATCH:{reserve}:{owner}"));
+    }
     let mut slice = data;
     kamino_mocks::kamino_lending_complete::accounts::Reserve::try_deserialize(&mut slice)
         .map_err(|e| format!("KAMINO_RESERVE_DECODE:{}:{e}", reserve))
@@ -356,8 +378,9 @@ pub fn drift_reward_market_keys<S: AccountSource + ?Sized>(
     bank: &Bank,
 ) -> Result<Vec<Pubkey>, String> {
     let market: &drift_mocks::state::MinimalSpotMarket =
-        pod_after_disc(state, &bank.integration_acc_1)?;
-    let user: &drift_mocks::state::MinimalUser = pod_after_disc(state, &bank.integration_acc_2)?;
+        integration_account(state, &bank.integration_acc_1)?;
+    let user: &drift_mocks::state::MinimalUser =
+        integration_account(state, &bank.integration_acc_2)?;
 
     let mut indexes: Vec<u16> = user
         .spot_positions
@@ -390,7 +413,7 @@ fn drift_refresh<S: AccountSource + ?Sized>(
     if market_key == Pubkey::default() {
         return Err("DRIFT_SPOT_MARKET_DEFAULT".into());
     }
-    let market: &drift_mocks::state::MinimalSpotMarket = pod_after_disc(state, &market_key)?;
+    let market: &drift_mocks::state::MinimalSpotMarket = integration_account(state, &market_key)?;
     let state_key = derive_drift_state().0;
     let vault = if market.vault != Pubkey::default() {
         market.vault
@@ -425,7 +448,7 @@ fn juplend_refresh<S: AccountSource + ?Sized>(
     if lending_key == Pubkey::default() {
         return Err("JUPLEND_LENDING_DEFAULT".into());
     }
-    let lending: &juplend_mocks::state::Lending = pod_after_disc(state, &lending_key)?;
+    let lending: &juplend_mocks::state::Lending = integration_account(state, &lending_key)?;
 
     // Copy packed fields to aligned locals before formatting/building metas.
     let mint = lending.mint;
@@ -711,7 +734,7 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
                 out.push(key);
             }
             let minimal: &kamino_mocks::state::MinimalReserve =
-                pod_after_disc(state, &bank.integration_acc_1)?;
+                integration_account(state, &bank.integration_acc_1)?;
             for key in [
                 minimal.supply_vault,
                 minimal.collateral_mint_pubkey,
@@ -741,7 +764,7 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
         }
         Some(IntegrationKind::Drift) => {
             let market: &drift_mocks::state::MinimalSpotMarket =
-                pod_after_disc(state, &bank.integration_acc_1)?;
+                integration_account(state, &bank.integration_acc_1)?;
             out.push(derive_drift_state().0);
             out.push(derive_drift_signer().0);
             out.push(if market.vault != Pubkey::default() {
@@ -758,7 +781,7 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
         }
         Some(IntegrationKind::JupLend) => {
             let lending: &juplend_mocks::state::Lending =
-                pod_after_disc(state, &bank.integration_acc_1)?;
+                integration_account(state, &bank.integration_acc_1)?;
             let mint = lending.mint;
             let f_token_mint = lending.f_token_mint;
             let reserves = lending.token_reserves_liquidity;
@@ -793,6 +816,87 @@ pub fn dependency_keys_for_bank<S: AccountSource + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Z18: an integration account is accepted only with the identity the pinned program's
+    /// `AccountLoader<T>` requires — owned by T's program and carrying T's discriminator. A
+    /// foreign owner or a foreign discriminator is rejected, never cast.
+    #[test]
+    fn z18_integration_accounts_need_the_pinned_owner_and_discriminator() {
+        use anchor_lang::Owner;
+        use bytemuck::Zeroable;
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for Source {
+            fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(key).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        fn raw<T: bytemuck::Pod>(disc: [u8; 8], v: &T) -> Vec<u8> {
+            [disc.as_slice(), bytemuck::bytes_of(v)].concat()
+        }
+        let market = raw(
+            drift_mocks::state::SPOT_MARKET_DISCRIMINATOR,
+            &drift_mocks::state::MinimalSpotMarket::zeroed(),
+        );
+        let lending = raw(
+            juplend_mocks::state::LENDING_DISCRIMINATOR,
+            &juplend_mocks::state::Lending::zeroed(),
+        );
+        let drift_owner = drift_mocks::state::MinimalSpotMarket::owner();
+        let juplend_owner = juplend_mocks::state::Lending::owner();
+        let key = Pubkey::new_unique();
+        let mut bank = Bank::zeroed();
+        bank.integration_acc_1 = key;
+        let with = |owner: Pubkey, data: Vec<u8>| Source(HashMap::from([(key, (owner, data))]));
+        // The pinned identity is accepted.
+        assert!(drift_refresh(&with(drift_owner, market.clone()), &bank).is_ok());
+        assert!(juplend_refresh(&with(juplend_owner, lending.clone()), &bank).is_ok());
+        // Correct bytes under a foreign owner.
+        let foreign = Pubkey::new_unique();
+        assert!(drift_refresh(&with(foreign, market.clone()), &bank).is_err());
+        assert!(juplend_refresh(&with(foreign, lending.clone()), &bank).is_err());
+        // The right owner, but another account type's discriminator (same length or longer).
+        let mut user_as_market = market.clone();
+        user_as_market[..8].copy_from_slice(&drift_mocks::state::USER_DISCRIMINATOR);
+        assert!(drift_refresh(&with(drift_owner, user_as_market), &bank).is_err());
+        let mut wrong_lending = lending.clone();
+        wrong_lending[0] ^= 1;
+        assert!(juplend_refresh(&with(juplend_owner, wrong_lending), &bank).is_err());
+        // Kamino reserve (execution amount path): the identity is checked before any field.
+        let reserve = raw(
+            kamino_mocks::state::RESERVE_DISCRIMINATOR,
+            &kamino_mocks::state::MinimalReserve::zeroed(),
+        );
+        let kamino_owner = kamino_mocks::state::MinimalReserve::owner();
+        let mut kamino_bank = Bank::zeroed();
+        kamino_bank.integration_acc_1 = key;
+        kamino_bank.config.asset_tag = ASSET_TAG_KAMINO;
+        assert_eq!(kind(&kamino_bank), Some(IntegrationKind::Kamino));
+        let amount = |src: &Source| execution_amount_for_asset(src, &kamino_bank, 1_000);
+        let identity_error = |r: Result<Option<IntegrationExecutionAmount>, String>| {
+            r.err().is_some_and(|e| {
+                e.starts_with("INTEGRATION_OWNER_MISMATCH")
+                    || e.starts_with("INTEGRATION_DISCRIMINATOR_MISMATCH")
+            })
+        };
+        assert!(!identity_error(amount(&with(
+            kamino_owner,
+            reserve.clone()
+        ))));
+        assert!(identity_error(amount(&with(foreign, reserve.clone()))));
+        let mut obligation_as_reserve = reserve;
+        obligation_as_reserve[..8].copy_from_slice(&kamino_mocks::state::OBLIGATION_DISCRIMINATOR);
+        assert!(identity_error(amount(&with(
+            kamino_owner,
+            obligation_as_reserve
+        ))));
+        // The fully decoded Kamino reserve: the owner is checked before any decoding.
+        let garbage = vec![7u8; 64];
+        let full = |owner: Pubkey| kamino_reserve(&with(owner, garbage.clone()), &key).err();
+        assert!(full(foreign).is_some_and(|e| e.starts_with("INTEGRATION_OWNER_MISMATCH")));
+        assert!(full(marginfi_type_crate::pdas::KAMINO_PROGRAM_ID)
+            .is_some_and(|e| e.starts_with("KAMINO_RESERVE_DECODE")));
+    }
 
     /// E3: byte-exact refresh discriminators. The expected bytes are the `discriminator` arrays
     /// of the pinned IDLs (marginfi 33c67987 `idls/`, also `idls-complete/`); the builders take
@@ -842,14 +946,14 @@ mod tests {
     /// f_token_mint, supply_token_reserves_liquidity, rewards_rate_model).
     #[test]
     fn refresh_builders_emit_the_pinned_idl_instructions() {
+        use anchor_lang::Owner;
         use bytemuck::Zeroable;
         use std::collections::HashMap;
-        struct Source(HashMap<Pubkey, Vec<u8>>);
+        // Z18: each integration account under its pinned owning program.
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
         impl AccountSource for Source {
             fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
-                self.0
-                    .get(key)
-                    .map(|d| (Pubkey::default(), 1, d.as_slice()))
+                self.0.get(key).map(|(o, d)| (*o, 1, d.as_slice()))
             }
         }
         fn raw<T: bytemuck::Pod>(disc: [u8; 8], v: &T) -> Vec<u8> {
@@ -859,16 +963,22 @@ mod tests {
         let state = Source(HashMap::from([
             (
                 market_key,
-                raw(
-                    drift_mocks::state::SPOT_MARKET_DISCRIMINATOR,
-                    &drift_mocks::state::MinimalSpotMarket::zeroed(),
+                (
+                    drift_mocks::state::MinimalSpotMarket::owner(),
+                    raw(
+                        drift_mocks::state::SPOT_MARKET_DISCRIMINATOR,
+                        &drift_mocks::state::MinimalSpotMarket::zeroed(),
+                    ),
                 ),
             ),
             (
                 lending_key,
-                raw(
-                    juplend_mocks::state::LENDING_DISCRIMINATOR,
-                    &juplend_mocks::state::Lending::zeroed(),
+                (
+                    juplend_mocks::state::Lending::owner(),
+                    raw(
+                        juplend_mocks::state::LENDING_DISCRIMINATOR,
+                        &juplend_mocks::state::Lending::zeroed(),
+                    ),
                 ),
             ),
         ]));

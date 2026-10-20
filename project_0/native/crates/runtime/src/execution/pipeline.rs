@@ -990,6 +990,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
     /// Landing-Reconciliation (S3-06) → Safety. Muss für **jede** Submission genau einmal
     /// aufgerufen werden, sonst bleibt `outstanding` belegt.
+    /// Q2: a ledger violation halts the safety layer and is returned.
     pub fn reconcile_outcome(
         &mut self,
         now_unix_s: u64,
@@ -997,7 +998,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         realized_pnl: Option<i128>,
         exposure_released: u64,
         inventory_delta: i128,
-    ) {
+    ) -> Result<(), darkbot_project0::safety::LedgerViolation> {
         self.safety.record_outcome(
             now_unix_s,
             landed_success,
@@ -1005,7 +1006,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             exposure_released,
             inventory_delta,
             0,
-        );
+        )
     }
 }
 

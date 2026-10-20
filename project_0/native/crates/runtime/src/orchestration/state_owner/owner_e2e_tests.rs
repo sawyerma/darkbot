@@ -83,6 +83,7 @@ fn fixture(tag: &str) -> Fixture {
         projection_pending: HashSet::new(),
         projection_stats: ProjectionStats::default(),
         detect_queue: VecDeque::new(),
+        bootstrap_probe_queue: VecDeque::new(),
         oracle_detect_order: VecDeque::new(),
         oracle_detect_pending: HashMap::new(),
         oracle_bank_projection_pending: HashMap::new(),
@@ -466,5 +467,90 @@ fn n4_projection_counters_are_journaled_at_shutdown() {
         ],
         "{lines:?}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Z14: the bootstrap probes of the was-liquidatable accounts after a recovery never occupy the
+/// bounded ingress channel the WSS session writes to (a full channel ends that session as a sink
+/// overflow); they are the owner's own detection work behind live ingress.
+#[test]
+fn z14_bootstrap_probes_never_occupy_the_ingress_channel() {
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::MarginfiAccount;
+    let mut f = fixture("z14");
+    f.owner.halt.raise();
+    f.owner.bootstrap_probe_done = false;
+    // More probe candidates than the fixture's 1024-slot ingress channel holds.
+    let probes = 1_100usize;
+    let mut accounts = vec![f.program_data_account.clone()];
+    for _ in 0..probes {
+        let mut a = MarginfiAccount::zeroed();
+        a.group = f.owner.group;
+        a.indexer_flags.was_liquidatable = 1;
+        accounts.push(AccountUpdate {
+            pubkey: Pubkey::new_unique(),
+            owner: f.owner.program,
+            lamports: 1,
+            data: [
+                protocol::DISC_MARGINFI_ACCOUNT.as_slice(),
+                bytemuck::bytes_of(&a),
+            ]
+            .concat(),
+            slot: 10,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        });
+    }
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: 10,
+            accounts: accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert!(f.owner.st.run_state().is_tradable());
+    // Every probe is the owner's own detection work, in deterministic account order.
+    let scheduled: Vec<Pubkey> = f.owner.bootstrap_probe_queue.iter().map(|w| w.0).collect();
+    assert_eq!(scheduled.len(), probes);
+    assert!(scheduled
+        .windows(2)
+        .all(|w| w[0].to_bytes() < w[1].to_bytes()));
+    assert!(f
+        .owner
+        .bootstrap_probe_queue
+        .iter()
+        .all(|w| w.3 == "bootstrap_snapshot_probe"));
+    // An oracle-triggered candidate waiting meanwhile is served before the probes.
+    let oracle = Pubkey::new_unique();
+    f.owner.oracle_detect_order.push_back(oracle);
+    f.owner
+        .oracle_detect_pending
+        .insert(oracle, (oracle, 0, 10, "oracle_price"));
+    let next = |f: &mut Fixture| match f.owner.events(&mut || unreachable!(), &f.ingress) {
+        Ok(OwnerStep::Next(Some(w))) => w,
+        _ => panic!("detection work expected"),
+    };
+    assert_eq!(next(&mut f).0, oracle, "oracle work first");
+    assert_eq!(next(&mut f).0, scheduled[0], "then the probes in order");
+    assert_eq!(next(&mut f).0, scheduled[1]);
+    // The WSS producer still has the whole channel.
+    let free = (0..1_024)
+        .take_while(|_| {
+            f.producer
+                .try_push(IngressEvent::Gap {
+                    source: SourceKind::WsRpcControl,
+                    from_slot: Some(11),
+                    to_slot: None,
+                    t_rx_ns: 0,
+                })
+                .is_ok()
+        })
+        .count();
+    assert_eq!(free, 1_024, "probes occupy no ingress slot");
+    let dir = f.dir.clone();
+    drop(f);
     let _ = std::fs::remove_dir_all(dir);
 }

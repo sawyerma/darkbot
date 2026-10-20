@@ -17,6 +17,9 @@ pub enum HaltReason {
     /// [FIX-12] Safety-Limit verletzt (Daily Loss / Failed Attempts) — kein Protokollfehler.
     LimitBreached,
     Shutdown,
+    /// Q2: a safety ledger transition would break an invariant (double or excess release,
+    /// negative inventory, overflow); nothing was applied, every hold stays.
+    LedgerInvariant,
 }
 
 impl HaltReason {
@@ -33,6 +36,7 @@ impl HaltReason {
             HaltReason::UnknownVersion => "UNKNOWN_VERSION",
             HaltReason::LimitBreached => "LIMIT_BREACHED",
             HaltReason::Shutdown => "SHUTDOWN",
+            HaltReason::LedgerInvariant => "LEDGER_INVARIANT",
         }
     }
 }

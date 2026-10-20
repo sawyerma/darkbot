@@ -11,6 +11,7 @@ impl ShadowOwner {
         #[cfg(feature = "crate_health")]
         let queued_detection_available = !self.detect_queue.is_empty()
             || !self.oracle_detect_pending.is_empty()
+            || !self.bootstrap_probe_queue.is_empty()
             || (!self.integration_probe_queue.is_empty() && self.projection_pending.is_empty());
         #[cfg(feature = "crate_health")]
         let force_detection = queued_detection_available
@@ -335,30 +336,20 @@ impl ShadowOwner {
                     #[cfg(feature = "crate_health")]
                     if self.mode == "shadow" && !self.bootstrap_probe_done {
                         self.bootstrap_probe_done = true;
-                        let mut probes = Vec::new();
-                        for (pk, r) in self.st.iter_owned_by(&self.program) {
-                            if bootstrap_probe_candidate(&r.data, &self.group) {
-                                probes.push(darkbot_solana::ingress::AccountUpdate {
-                                    pubkey: *pk,
-                                    owner: r.owner,
-                                    lamports: r.lamports,
-                                    data: r.data.clone(),
-                                    slot: r.slot,
-                                    write_version: r.write_version,
-                                    source: SourceKind::Snapshot,
-                                    t_rx_ns: self.clock.now_ns(),
-                                });
-                            }
-                        }
-                        probes.sort_unstable_by_key(|a| a.pubkey.to_bytes());
-                        let mut queued = 0usize;
-                        for a in probes {
-                            if self.producer.try_push(IngressEvent::Account(a)).is_ok() {
-                                queued += 1;
-                            } else {
-                                break;
-                            }
-                        }
+                        // Z14: the probes are the owner's own detection work (served after the
+                        // detect and oracle queues), never events in the bounded ingress channel
+                        // the WSS session writes to — a channel they filled would end that session
+                        // as an overflow.
+                        let now_ns = self.clock.now_ns();
+                        let mut probes: Vec<DetectWork> = self
+                            .st
+                            .iter_owned_by(&self.program)
+                            .filter(|(_, r)| bootstrap_probe_candidate(&r.data, &self.group))
+                            .map(|(pk, r)| (*pk, now_ns, r.slot, "bootstrap_snapshot_probe"))
+                            .collect();
+                        probes.sort_unstable_by_key(|w| w.0.to_bytes());
+                        let queued = probes.len();
+                        self.bootstrap_probe_queue.extend(probes);
                         owner_log!(
                             self,
                             "bootstrap_probe: queued={} candidates from was_liquidatable",
@@ -1116,6 +1107,8 @@ impl ShadowOwner {
                         }
                         work
                     })
+                    // Z14: bootstrap probes after the oracle-triggered candidates.
+                    .or_else(|| self.bootstrap_probe_queue.pop_front())
                     .or_else(|| {
                         next_integration_probe(
                             &mut self.integration_probe_queue,

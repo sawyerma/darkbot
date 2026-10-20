@@ -113,6 +113,10 @@ pub(super) struct ShadowOwner {
     /// N4: projection outcomes (E9 discards).
     projection_stats: ProjectionStats,
     detect_queue: VecDeque<DetectWork>,
+    /// Z14: bootstrap probes of the was-liquidatable accounts after a recovery — the owner's
+    /// own detection work, served after the detect and oracle queues, never via the ingress
+    /// channel the WSS session writes to.
+    bootstrap_probe_queue: VecDeque<DetectWork>,
     oracle_detect_order: VecDeque<Pubkey>,
     oracle_detect_pending: HashMap<Pubkey, DetectWork>,
     oracle_bank_projection_pending: HashMap<Pubkey, (u64, u64)>,

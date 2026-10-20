@@ -553,23 +553,12 @@ pub mod p0 {
                 .map_err(|e| e.to_string())
         }
 
-        /// External integration accounts only (E1): never for Marginfi Bank/Account/Group/FeeState.
-        fn pod_after_disc<T: bytemuck::Pod>(&self, k: &Pubkey) -> Result<&T, String> {
-            let (_, _, data) = self
-                .state
-                .account(k)
-                .ok_or_else(|| format!("INTEGRATION_MISSING_ACCOUNT:{k}"))?;
-            let need = 8 + std::mem::size_of::<T>();
-            if data.len() < need {
-                return Err(format!(
-                    "INTEGRATION_LAYOUT_SHORT:{}:{}<{}",
-                    k,
-                    data.len(),
-                    need
-                ));
-            }
-            bytemuck::try_from_bytes::<T>(&data[8..need])
-                .map_err(|e| format!("INTEGRATION_LAYOUT_CAST:{}:{e:?}", k))
+        /// External integration accounts only (E1), with the pinned owner and discriminator (Z18).
+        fn pod_after_disc<T: darkbot_project0::integration::IntegrationAccount>(
+            &self,
+            k: &Pubkey,
+        ) -> Result<&T, String> {
+            darkbot_project0::integration::integration_account::<T, S>(self.state, k)
         }
 
         /// [FIX-100] MarginfiAccount itself is the authoritative source for whether its
@@ -974,9 +963,23 @@ pub mod p0 {
             let mut route_errors = Vec::new();
             let mut ata_errors = Vec::new();
 
-            for sz in sizings {
-                let (_, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
-                let (_, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
+            // Z12: an error of one asset/liability pair skips that pair only; account-wide
+            // checks (fee wallet, sizing, observation, record link) stay fatal above and below.
+            let mut pair_errors: Vec<String> = Vec::new();
+            macro_rules! pair_try {
+                ($pair:lifetime, $e:expr) => {
+                    match $e {
+                        Ok(v) => v,
+                        Err(e) => {
+                            pair_errors.push(e);
+                            continue $pair;
+                        }
+                    }
+                };
+            }
+            'pairs: for sz in sizings {
+                let (_, liab_mint, liab_tp) = pair_try!('pairs, self.bank(&sz.liab_bank));
+                let (_, asset_mint, asset_tp) = pair_try!('pairs, self.bank(&sz.asset_bank));
 
                 let asset_ata = (self.ata)(&asset_mint);
                 let liab_ata = (self.ata)(&liab_mint);
@@ -1046,7 +1049,8 @@ pub mod p0 {
                         // separately below after its own ExactIn quote.
                         FundingClass::ZeroPrefundSameTx => continue,
                         FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
-                            let ixs = self.receivership(account, &obs, &sz, vec![])?;
+                            let ixs =
+                                pair_try!('pairs, self.receivership(account, &obs, &sz, vec![]));
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1071,7 +1075,7 @@ pub mod p0 {
                         }
                         FundingClass::JitShortfall => {
                             let Some(fb) = sz.funding_bank else { continue };
-                            let (_, funding_mint, _) = self.bank(&fb)?;
+                            let (_, funding_mint, _) = pair_try!('pairs, self.bank(&fb));
                             let shortfall = funding::shortfall_token_amount(&base_ctx);
                             let buy = match self.routes.quote_exact_out(
                                 &funding_mint,
@@ -1089,7 +1093,8 @@ pub mod p0 {
                                     continue;
                                 }
                             };
-                            let ixs = self.receivership(account, &obs, &sz, vec![])?;
+                            let ixs =
+                                pair_try!('pairs, self.receivership(account, &obs, &sz, vec![]));
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1124,13 +1129,13 @@ pub mod p0 {
                 // so this class alone requires ExactIn market evidence. A provider error or
                 // missing route must not invalidate already-built inventory/JIT candidates.
                 if self.zero_prefund_qualified {
-                    let asset_bank = self.bank_full(&sz.asset_bank)?;
+                    let asset_bank = pair_try!('pairs, self.bank_full(&sz.asset_bank));
                     let route_input_amount =
-                        darkbot_project0::integration::execution_amount_for_asset(
+                        pair_try!('pairs, darkbot_project0::integration::execution_amount_for_asset(
                             self.state,
                             &asset_bank,
                             sz.withdraw_amount,
-                        )?
+                        ))
                         .map(|x| x.underlying_out)
                         .unwrap_or(sz.withdraw_amount);
                     let fitted = quote_fitting_route(
@@ -1269,6 +1274,16 @@ pub mod p0 {
                 }
             }
 
+            // Z12: without any plan, the first pair error ends planning exactly as it did before
+            // (same text, same classification); otherwise it stays a diagnostic.
+            if out.is_empty() {
+                if let Some(first) = pair_errors.first() {
+                    return Err(first.clone());
+                }
+            }
+            for error in &pair_errors {
+                route_diagnostic(format!("pair_skipped: {error}"));
+            }
             if out.is_empty() && !ata_errors.is_empty() {
                 ata_errors.sort();
                 ata_errors.dedup();
@@ -1663,6 +1678,95 @@ pub mod p0 {
             assert!(rent_of(&f.state(Pubkey::default(), false), &price)
                 .iter()
                 .all(|(_, c)| c.is_none()));
+        }
+
+        /// Z12: an error of one asset/liability pair (here: the liability bank's mint is not in
+        /// state) no longer discards the valid plans of the account's other pairs; when every pair
+        /// fails, the first pair error comes back unchanged (same classification as before).
+        #[test]
+        fn z12_one_invalid_pair_keeps_the_valid_pairs_plans() {
+            struct TwoSizings(Vec<Sizing>);
+            impl SizingProvider for TwoSizings {
+                fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, String> {
+                    Ok(self.0.clone())
+                }
+            }
+            let f = PlansFixture::new();
+            let mut src = f.state(Pubkey::default(), true);
+            // A third bank whose mint account is missing from state.
+            let broken_bank = Pubkey::new_unique();
+            let (_, liab_data) = src.0.get(&f.banks[1].0).unwrap().clone();
+            let mut broken: Bank = *bytemuck::from_bytes(&liab_data[8..]);
+            broken.mint = Pubkey::new_unique();
+            src.0.insert(
+                broken_bank,
+                (
+                    f.program,
+                    [
+                        darkbot_project0::protocol::DISC_BANK.as_slice(),
+                        bytemuck::bytes_of(&broken),
+                    ]
+                    .concat(),
+                ),
+            );
+            let valid = f.sizing.0.clone();
+            let mut invalid = valid.clone();
+            invalid.liab_bank = broken_bank;
+            let plans_with = |sizings: Vec<Sizing>| {
+                let sizing = TwoSizings(sizings);
+                let inventory = |_: &Pubkey| 10_000u64;
+                let ata = |mint: &Pubkey| {
+                    Some(get_associated_token_address_with_program_id(
+                        &f.liquidator,
+                        mint,
+                        &f.token_program,
+                    ))
+                };
+                let lamports = |l: u64| Some(l);
+                P0ReceivershipBuilder {
+                    state: &src,
+                    program: f.program,
+                    group: f.group,
+                    liquidator: f.liquidator,
+                    global_fee_wallet: Ok(Pubkey::new_unique()),
+                    sizing: &sizing,
+                    routes: &TestRoutes(None),
+                    inventory: &inventory,
+                    ata: &ata,
+                    lamports_to_usd_micro: &lamports,
+                    rent_lamports_to_usd_micro: &lamports,
+                    jito_tip_usd_micro: 0,
+                    jito_tip_lamports: 0,
+                    zero_prefund_qualified: false,
+                    instructions: &f.table,
+                    v1_plans: false,
+                    path: Path::Rpc,
+                    resources: Resources {
+                        compute_unit_limit: 400_000,
+                        priority_micro_lamports_per_cu: 0,
+                        loaded_accounts_data_size: None,
+                    },
+                    limits: TxLimits::default(),
+                }
+                .plans(
+                    &f.account,
+                    1_000,
+                    10,
+                    Instant::now() + std::time::Duration::from_secs(60),
+                )
+            };
+            // Invalid pair first, valid pair second: the valid pair's plans survive.
+            let plans = plans_with(vec![invalid.clone(), valid.clone()]).unwrap();
+            assert_eq!(plans.len(), 2, "NoSwap + Preheld of the valid pair");
+            assert!(plans
+                .iter()
+                .all(|p| p.market_identity.as_ref().unwrap().liability_bank
+                    == valid.liab_bank.to_string()));
+            // Only invalid pairs: the first pair error, unchanged.
+            assert_eq!(
+                plans_with(vec![invalid.clone()]).err().as_deref(),
+                Some("mint not in state")
+            );
         }
 
         /// N7 stage 1 through the production `plans()` path: the ZERO_PREFUND plan (in-TX ExactIn

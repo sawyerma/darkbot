@@ -36,6 +36,42 @@ pub enum Deny {
     LiveDisabled,
 }
 
+/// Q2: a safety ledger transition that would break an invariant. It halts the safety layer
+/// (`HaltReason::LedgerInvariant`) and changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerViolation {
+    OutstandingUnderflow,
+    OpenPositionsUnderflow,
+    CapitalReleaseExceedsReserved,
+    InventoryReleaseExceedsReserved,
+    InventoryNegative,
+    InventoryOverflow,
+    PnlOverflow,
+    CounterOverflow,
+}
+impl LedgerViolation {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::OutstandingUnderflow => "LEDGER_OUTSTANDING_UNDERFLOW",
+            Self::OpenPositionsUnderflow => "LEDGER_OPEN_POSITIONS_UNDERFLOW",
+            Self::CapitalReleaseExceedsReserved => "LEDGER_CAPITAL_RELEASE_EXCEEDS_RESERVED",
+            Self::InventoryReleaseExceedsReserved => "LEDGER_INVENTORY_RELEASE_EXCEEDS_RESERVED",
+            Self::InventoryNegative => "LEDGER_INVENTORY_NEGATIVE",
+            Self::InventoryOverflow => "LEDGER_INVENTORY_OVERFLOW",
+            Self::PnlOverflow => "LEDGER_PNL_OVERFLOW",
+            Self::CounterOverflow => "LEDGER_COUNTER_OVERFLOW",
+        }
+    }
+}
+
+/// The counters after releasing one attempt's reservation (computed before anything applies).
+struct Released {
+    outstanding: u32,
+    open_positions: u32,
+    capital_in_use: u64,
+    inventory_reserved: u64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DayStats {
     pub day_index: u64,
@@ -121,7 +157,11 @@ impl Safety {
         if assets.iter().any(|a| !self.allow.assets.contains(a)) {
             return Err(Deny::AssetNotAllowed);
         }
-        if self.capital_in_use.saturating_add(exposure) > self.limits.max_total_capital {
+        if self
+            .capital_in_use
+            .checked_add(exposure)
+            .is_none_or(|v| v > self.limits.max_total_capital)
+        {
             return Err(Deny::TotalCapital);
         }
         // B15: held inventory plus the worst case of every in-flight attempt plus this attempt.
@@ -203,11 +243,26 @@ impl Safety {
             assets,
             execution_class,
         )?;
-        self.outstanding += 1;
-        self.open_positions += 1;
-        self.capital_in_use = self.capital_in_use.saturating_add(exposure);
-        self.inventory_reserved = self.inventory_reserved.saturating_add(new_inventory);
-        self.day.attempts += 1;
+        // Q2: the limits above bound every sum; a sum that still does not fit is a ledger
+        // invariant violation (halt), never a saturated value.
+        let next = (|| {
+            Some((
+                self.outstanding.checked_add(1)?,
+                self.open_positions.checked_add(1)?,
+                self.capital_in_use.checked_add(exposure)?,
+                self.inventory_reserved.checked_add(new_inventory)?,
+                self.day.attempts.checked_add(1)?,
+            ))
+        })();
+        let Some((outstanding, open, capital, reserved, attempts)) = next else {
+            self.halt(HaltReason::LedgerInvariant);
+            return Err(Deny::Halted(HaltReason::LedgerInvariant));
+        };
+        self.outstanding = outstanding;
+        self.open_positions = open;
+        self.capital_in_use = capital;
+        self.inventory_reserved = reserved;
+        self.day.attempts = attempts;
         Ok(())
     }
 
@@ -217,6 +272,7 @@ impl Safety {
     /// `inventory_hold`: the worst-case hold `check()` reserved for this attempt (B15).
     /// [FIX-24] `realized_pnl: None` = UNKNOWN → Buchhaltung bleibt offen und HALT(UnknownEconomics):
     /// ein unbekannter Ausgang hält Reservierungen und darf das Tagesbudget nicht besser aussehen lassen.
+    #[must_use = "a ledger violation halts the safety layer; the caller must surface it"]
     pub fn record_outcome(
         &mut self,
         now_unix_s: u64,
@@ -225,33 +281,92 @@ impl Safety {
         exposure_released: u64,
         inventory_delta: i128,
         inventory_hold: u64,
-    ) {
+    ) -> Result<(), LedgerViolation> {
         self.roll_day(now_unix_s);
         // UNKNOWN cannot release capital/inventory or reduce outstanding count.
         // A later complete reconciliation may close it, but never clears HALT.
-        if realized_pnl.is_none() {
+        let Some(pnl) = realized_pnl else {
             self.halt(HaltReason::UnknownEconomics);
-            return;
-        }
-        self.outstanding = self.outstanding.saturating_sub(1);
-        self.open_positions = self.open_positions.saturating_sub(1);
-        self.capital_in_use = self.capital_in_use.saturating_sub(exposure_released);
-        self.inventory_reserved = self.inventory_reserved.saturating_sub(inventory_hold);
-        self.inventory_outstanding =
-            (self.inventory_outstanding as i128 + inventory_delta).max(0) as u64;
-        match realized_pnl {
-            Some(p) => self.day.realized_pnl += p,
-            None => self.halt(HaltReason::UnknownEconomics),
-        }
-        if !landed_success {
-            self.day.failed_attempts += 1;
-        }
+            return Ok(());
+        };
+        // Q2: one checked transaction — computed completely, applied only if every step holds.
+        let released = self.released(exposure_released, inventory_hold)?;
+        let inventory = i128::from(self.inventory_outstanding)
+            .checked_add(inventory_delta)
+            .ok_or(LedgerViolation::InventoryOverflow)
+            .and_then(|v| u64::try_from(v).map_err(|_| LedgerViolation::InventoryNegative));
+        let inventory = self.violation(inventory)?;
+        let pnl = self.violation(
+            self.day
+                .realized_pnl
+                .checked_add(pnl)
+                .ok_or(LedgerViolation::PnlOverflow),
+        )?;
+        let failed = if landed_success {
+            self.day.failed_attempts
+        } else {
+            self.violation(
+                self.day
+                    .failed_attempts
+                    .checked_add(1)
+                    .ok_or(LedgerViolation::CounterOverflow),
+            )?
+        };
+        self.apply_release(released);
+        self.inventory_outstanding = inventory;
+        self.day.realized_pnl = pnl;
+        self.day.failed_attempts = failed;
         if -self.day.realized_pnl >= self.limits.max_daily_loss as i128 {
             self.halt(HaltReason::LimitBreached); // [FIX-12]
         }
         if self.day.failed_attempts >= self.limits.max_failed_attempts_per_day {
             self.halt(HaltReason::LimitBreached); // [FIX-12]
         }
+        Ok(())
+    }
+
+    /// Q2: the counters after releasing one attempt's reservation, or the violation (halts).
+    fn released(
+        &mut self,
+        exposure: u64,
+        inventory_hold: u64,
+    ) -> Result<Released, LedgerViolation> {
+        let next = (|| {
+            Ok(Released {
+                outstanding: self
+                    .outstanding
+                    .checked_sub(1)
+                    .ok_or(LedgerViolation::OutstandingUnderflow)?,
+                open_positions: self
+                    .open_positions
+                    .checked_sub(1)
+                    .ok_or(LedgerViolation::OpenPositionsUnderflow)?,
+                capital_in_use: self
+                    .capital_in_use
+                    .checked_sub(exposure)
+                    .ok_or(LedgerViolation::CapitalReleaseExceedsReserved)?,
+                inventory_reserved: self
+                    .inventory_reserved
+                    .checked_sub(inventory_hold)
+                    .ok_or(LedgerViolation::InventoryReleaseExceedsReserved)?,
+            })
+        })();
+        self.violation(next)
+    }
+
+    fn apply_release(&mut self, r: Released) {
+        self.outstanding = r.outstanding;
+        self.open_positions = r.open_positions;
+        self.capital_in_use = r.capital_in_use;
+        self.inventory_reserved = r.inventory_reserved;
+    }
+
+    /// Q2: a violated step halts the safety layer (sticky) and is reported; nothing is applied.
+    fn violation<T>(&mut self, step: Result<T, LedgerViolation>) -> Result<T, LedgerViolation> {
+        if step.is_err() {
+            self.halt(HaltReason::LedgerInvariant);
+        }
+        step
     }
 
     pub fn day(&self) -> DayStats {
@@ -260,11 +375,16 @@ impl Safety {
 
     /// In-flight-Kapital: `check()` reserviert `exposure`; dieser Pfad gibt es bei einem Fehlschlag
     /// **vor** Submission (Build/Sim/Deadline) deterministisch frei, ohne Tagesstatistik zu verändern.
-    pub fn release_without_outcome(&mut self, exposure: u64, inventory_hold: u64) {
-        self.outstanding = self.outstanding.saturating_sub(1);
-        self.open_positions = self.open_positions.saturating_sub(1);
-        self.capital_in_use = self.capital_in_use.saturating_sub(exposure);
-        self.inventory_reserved = self.inventory_reserved.saturating_sub(inventory_hold);
+    /// Q2: checked like `record_outcome`; a violation halts and releases nothing.
+    #[must_use = "a ledger violation halts the safety layer; the caller must surface it"]
+    pub fn release_without_outcome(
+        &mut self,
+        exposure: u64,
+        inventory_hold: u64,
+    ) -> Result<(), LedgerViolation> {
+        let released = self.released(exposure, inventory_hold)?;
+        self.apply_release(released);
+        Ok(())
     }
 
     pub fn capital_in_use(&self) -> u64 {
@@ -328,16 +448,89 @@ mod tests {
             s.check(0, 50, 0, 1, 1, &[], "longtail"),
             Err(Deny::Outstanding)
         );
-        s.record_outcome(0, false, Some(-30), 50, 0, 0);
+        s.record_outcome(0, false, Some(-30), 50, 0, 0).unwrap();
         assert_eq!(s.check(0, 50, 0, 1, 1, &[], "longtail"), Ok(()));
-        s.release_without_outcome(50, 0);
+        s.release_without_outcome(50, 0).unwrap();
         assert_eq!(s.capital_in_use(), 0);
         s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
-        s.record_outcome(0, false, Some(-30), 50, 0, 0); // Tagesverlust 60 ≥ 50 → HALT
+        s.record_outcome(0, false, Some(-30), 50, 0, 0).unwrap(); // Tagesverlust 60 ≥ 50 → HALT
         assert!(matches!(
             s.check(0, 50, 0, 1, 1, &[], "longtail"),
             Err(Deny::Halted(_))
         ));
+    }
+
+    /// Q2 (bugs_b): every ledger transition is checked. A double release, a release above the
+    /// reservation, an inventory that would turn negative and a PnL overflow halt the safety
+    /// layer and change nothing (the holds stay) — never a silent clamp or wrap.
+    #[test]
+    fn q2_ledger_violations_halt_and_change_nothing() {
+        let halted = Some(HaltReason::LedgerInvariant);
+        // Double release of one attempt.
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(s.record_outcome(0, true, Some(0), 50, 0, 0), Ok(()));
+        assert!(s.halted().is_none() && s.capital_in_use() == 0);
+        assert_eq!(
+            s.record_outcome(0, true, Some(0), 50, 0, 0),
+            Err(LedgerViolation::OutstandingUnderflow)
+        );
+        assert_eq!(s.halted(), halted, "double release halts");
+        // Release above the reserved capital: halts, the reservation stays.
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(
+            s.release_without_outcome(80, 0),
+            Err(LedgerViolation::CapitalReleaseExceedsReserved)
+        );
+        assert_eq!(s.halted(), halted, "release above reservation halts");
+        assert_eq!(s.capital_in_use(), 50, "reservation unchanged");
+        // Inventory hold released above its reservation.
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 10, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(
+            s.release_without_outcome(50, 11),
+            Err(LedgerViolation::InventoryReleaseExceedsReserved)
+        );
+        assert_eq!(s.capital_in_use(), 50);
+        // Inventory delta below zero: halts instead of clamping to 0.
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(
+            s.record_outcome(0, true, Some(0), 50, -5, 0),
+            Err(LedgerViolation::InventoryNegative)
+        );
+        assert_eq!(s.halted(), halted, "negative inventory halts");
+        assert_eq!(s.capital_in_use(), 50, "nothing applied");
+        // Realized PnL overflow: halts instead of wrapping or panicking.
+        let mut s = Safety::new(
+            Limits {
+                max_daily_loss: u64::MAX,
+                max_outstanding_attempts: 2,
+                ..lim()
+            },
+            allow(),
+            true,
+        );
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(s.record_outcome(0, true, Some(i128::MAX), 50, 0, 0), Ok(()));
+        assert_eq!(
+            s.record_outcome(0, true, Some(1), 50, 0, 0),
+            Err(LedgerViolation::PnlOverflow)
+        );
+        assert_eq!(s.halted(), halted, "pnl overflow halts");
+        assert_eq!(s.capital_in_use(), 50, "the second release not applied");
+        assert!(matches!(
+            s.check(0, 1, 0, 1, 1, &[], "longtail"),
+            Err(Deny::Halted(HaltReason::LedgerInvariant))
+        ));
+        // A regular outcome after a valid reservation still balances to zero.
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 10, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(s.record_outcome(0, true, Some(3), 50, 4, 10), Ok(()));
+        assert_eq!(s.capital_in_use(), 0);
+        assert!(s.halted().is_none());
     }
 
     #[test]
@@ -353,12 +546,12 @@ mod tests {
     fn unknown_outcome_keeps_hold_until_complete_reconciliation() {
         let mut s = Safety::new(lim(), allow(), true);
         s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
-        s.record_outcome(0, true, None, 50, 0, 0);
+        s.record_outcome(0, true, None, 50, 0, 0).unwrap();
         assert_eq!(s.capital_in_use(), 50);
         assert_eq!(s.outstanding, 1);
         assert_eq!(s.open_positions, 1);
         assert_eq!(s.halted(), Some(HaltReason::UnknownEconomics));
-        s.record_outcome(0, true, Some(5), 50, 0, 0);
+        s.record_outcome(0, true, Some(5), 50, 0, 0).unwrap();
         assert_eq!(s.capital_in_use(), 0);
         assert_eq!(s.outstanding, 0);
         assert_eq!(s.halted(), Some(HaltReason::UnknownEconomics));
@@ -391,9 +584,9 @@ mod tests {
         );
         // A release before handoff returns its hold; a known outcome returns its hold and books
         // the actually held inventory instead.
-        s.release_without_outcome(10, 40);
+        s.release_without_outcome(10, 40).unwrap();
         assert_eq!(s.inventory_reserved, 60);
-        s.record_outcome(0, true, Some(1), 10, 60, 60);
+        s.record_outcome(0, true, Some(1), 10, 60, 60).unwrap();
         assert_eq!((s.inventory_reserved, s.inventory_outstanding), (0, 60));
         assert_eq!(
             s.preview(0, 10, 41, 1, 1, &[], "longtail"),
@@ -403,7 +596,7 @@ mod tests {
         // UNKNOWN keeps the hold (and halts).
         let mut u = Safety::new(l, allow(), true);
         u.check(0, 10, 70, 1, 1, &[], "longtail").unwrap();
-        u.record_outcome(0, true, None, 10, 0, 70);
+        u.record_outcome(0, true, None, 10, 0, 70).unwrap();
         assert_eq!(u.inventory_reserved, 70);
         assert!(u.halted().is_some());
         // An unrepresentable worst case is a denial, never a wrap.
@@ -422,7 +615,7 @@ mod tests {
         );
         let mut s = Safety::new(lim(), allow(), true);
         s.check(0, 1, 0, 1, 1, &[], "longtail").unwrap();
-        s.record_outcome(0, false, Some(-10), 1, 0, 0);
+        s.record_outcome(0, false, Some(-10), 1, 0, 0).unwrap();
         assert_eq!(s.day().failed_attempts, 1);
         s.check(86_400, 1, 0, 1, 1, &[], "longtail").unwrap();
         assert_eq!(s.day().failed_attempts, 0, "neuer Tag");
