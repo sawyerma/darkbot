@@ -24,12 +24,20 @@ hex = { workspace = true }
 # features, so that the production build's features stay as they are.
 ring = { version = "=0.17.14", default-features = false }
 
-prost = "=0.13.5"
+prost = { version = "=0.13.5", optional = true }
 
 [build-dependencies]
-prost-build = "=0.13.5"
-protox = "=0.7.2"
+prost-build = { version = "=0.13.5", optional = true }
+protox = { version = "=0.7.2", optional = true }
 
 [dev-dependencies]
 # A loopback TLS server for the offline end-to-end tests.
 rustls = { workspace = true }
+
+[features]
+default = []
+status-reporter = ["dep:prost", "dep:prost-build", "dep:protox"]
+
+[[bin]]
+name = "bsc-status-reporter"
+required-features = ["status-reporter"]

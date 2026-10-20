@@ -12,6 +12,14 @@
 - **E1-9 BLOCKED (unabhängige Artefaktverfügbarkeit):** Originale Requal-Records und bisheriger V4 bleiben unverändert lokal/untracked. Neuer inaktiver Review-Vorschlag: `bsc/config/g07_attempt1_acceptance_v4.e1-review.dbrec`, SHA `82f862c2046c656496378a288c03e14a17c1a58c19f81a98b8c932b637ddb278`. Mit vorhandener echter PASS-Evidence offline erzeugt; keine neuen R0-/DRY-Läufe. Approved-Variante ausschließlich berechnet: `6f877ae0f08bc1d795f4ec8370b033b83259cdbaf4e6296550d30d3c24cecce6`. Die alten `5da0068b…` / `4308f2cb…` sind **SUPERSEDED**, keine Freigabereferenz. Der bisherige Operator-Vorschlag wurde nicht ersetzt; vor Freigabe muss der neue geprüfte Vorschlag ausdrücklich übernommen werden. Keine sichere externe Artefaktablage eingerichtet, daher keine unabhängige Verifizierbarkeit behauptet.
 - G0.7 bleibt UNARMED / NOT_EXECUTED; signed-byte-Hashes und 481163500000000-wei-Limit unverändert. E1-OPTION bleibt DEFERRED.
 
+## Implementierungsstand — Paket E2
+
+- **FIXED / TESTED:** E2-2, E2-5, E2-6b/c, E2-7. Begrenzte read-only RPC-Recovery, Receipt-Fehleranzahl/letzte Ursache statt verschlucktem Fehler; terminale persistierte UNRESOLVED-Diagnosen; UTF-8-Bytegrenze und Providertext-Redaktion; Kostenfehler/Overflow fail-closed; Timing-Ausgabepfad verpflichtend, zusätzlicher gespeicherter Self-Launch-NON-CLAIM. Reporter samt Proto-Build hinter nicht-default `status-reporter`; bestehender Installer-Build explizit angepasst.
+- **Tests:** 13 G0.8-Verifier-, 5 Timing-, 5 Binary-Vertrags-, 2 G0.7-Evidence-Handoff- und 3 Reporter-Tests PASS. BSC-only `cargo check --locked --offline` ohne Root-`protocol/` PASS. Zwei veraltete Test-Erwartungen (redigierter Fehlertext, Anzahl NON-CLAIMs) korrigiert; keine Mainnet-Probe.
+- **E2-1 DEFERRED:** sichere bestehende UNRESOLVED-/No-Retry-Semantik erhalten; keine unbewiesene Expiry-/Non-Inclusion-Autorität ergänzt.
+- **E2-3/E2-4 BLOCKED:** kein qualifiziertes originales v5.25-Tax-Receipt verfügbar. Fehlende State-/Capture-/Competitor-Daten führen nun UNRESOLVED statt ADAPT; die fachliche harte Event-Mismatch-Regel bleibt bis realem ABI-/Tax-Nachweis ungeändert und nicht als FIXED deklariert.
+- E2-6a widerlegt, kein Patch; E2-8 und nicht beauftragte E2-9-Verschärfungen DEFERRED. G0.8 weiterhin NOT_EXECUTED, kein Timing-/Erwerbs-PASS behauptet.
+
 ## 0. Verbindliche Hierarchie und harte Arbeitsregeln
 
 1. `bsc/docs/PHASENPLAN.md` ist der Einstieg. Rangfolge: `BSC_DUAL_VENUE_ROADMAP.md` > `GATE0_TESTPLAN_SHORT.md` > `BSC_PRODUCTION_BUILD_MASTER_PLAN.md`; dazu die phasenspezifischen technischen Vertraege, `ACCEPTANCE_MAP.json` und das chronologische `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md`. Besonders bindend: Roadmap 2026-10-20 „G0.7 CODE READY“ / STOP-Regel, G0.7-Requalifikationsplan §2/§5, Masterplan §§7–8/13.

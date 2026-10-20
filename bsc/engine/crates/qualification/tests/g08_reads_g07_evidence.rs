@@ -98,8 +98,9 @@ fn g08_stderr(tag: &str, contents: &[u8]) -> String {
     assert!(!dir.join("chain.journal").exists(), "{tag}");
     fs::remove_dir_all(&dir).unwrap();
     assert!(!out.status.success());
-    assert!(out.stdout.is_empty());
-    String::from_utf8_lossy(&out.stderr).to_string()
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !stdout.is_empty() { assert!(stdout.contains("UNRESOLVED")); assert!(!stdout.contains("PASS")); }
+    format!("{}{}", String::from_utf8_lossy(&out.stderr), stdout)
 }
 
 #[test]

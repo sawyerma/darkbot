@@ -27,4 +27,5 @@ pub mod probe;
 pub mod stats;
 pub mod verdict;
 
+#[cfg(feature = "status-reporter")]
 pub mod status;

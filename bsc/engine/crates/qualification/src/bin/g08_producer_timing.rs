@@ -101,6 +101,8 @@ fn checked(draft: &Draft) -> (Vec<u8>, Record) {
 }
 
 fn main() {
+    let output_path = req_env("DARKBOT_G08_TIMING_EVIDENCE_PATH");
+    assert!(!output_path.trim().is_empty(), "timing evidence output path required");
     let g08_path = req_env("DARKBOT_G08_EVIDENCE");
     let witness_path = req_env("DARKBOT_G08_PRODUCER_WITNESS");
     let g08_bytes = load_bytes(&g08_path);
@@ -293,6 +295,7 @@ fn main() {
             "ORIGINAL_SUCCESSFUL_PRODUCER_EXECUTION_ATTEMPT",
         );
     for not_authority in [
+        "SELF_LAUNCH_BUNDLE_ONLY; DOES_NOT_MEASURE_FOREIGN_LAUNCH_REACTION_T_SIGNAL_TO_T_SEND",
         "receipt first-seen time",
         "block timestamp",
         "builder ACK time",
@@ -306,9 +309,7 @@ fn main() {
     let (bytes, record) = checked(&out);
     // Written before anything is printed: a verdict that could not be
     // written never appears on stdout.
-    if let Ok(path) = env::var("DARKBOT_G08_TIMING_EVIDENCE_PATH") {
-        write_atomic(&path, &bytes).unwrap_or_else(|e| panic!("write timing evidence {e}"));
-    }
+    write_atomic(&output_path, &bytes).unwrap_or_else(|e| panic!("write timing evidence {e}"));
     print!("{}", record.render());
     if verdict != "PASS" {
         std::process::exit(2);

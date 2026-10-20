@@ -22,7 +22,7 @@ use std::{
     io::Write,
     path::Path,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use wire::{Block, Receipt, Tx};
 
@@ -132,7 +132,7 @@ fn unresolved_draft(
     let mut d = Draft::new(&unresolved::SCHEMA);
     d.set(unresolved::GATE, "G0.8")
         .set(unresolved::VERDICT, "UNRESOLVED")
-        .set(unresolved::REASON, reason)
+        .set(unresolved::REASON, bounded_error(reason))
         .set(unresolved::ATTEMPT_ID, attempt)
         .set(unresolved::LAUNCH_TX, word(launch))
         .set(unresolved::BUY_TX, word(buy))
@@ -150,7 +150,6 @@ fn unresolved_draft(
 // into the typed values below before it leaves this module, and no JSON
 // type crosses its border (tests/g08_binary_records.rs checks the source).
 mod wire {
-    use super::req_env;
     use alloy_primitives::{Address, B256, U256};
     use serde_json::Value as Json;
     use std::{env, process::Command};
@@ -223,7 +222,7 @@ mod wire {
     /// One JSON-RPC call over curl. The child sees only PATH; it never hangs
     /// (connect 2 s, whole call 5 s) and reads no .curlrc (-q first).
     fn call(method: &str, params: &str) -> Result<Json, String> {
-        let url = req_env("BSC_MAINNET_RPC_HTTPS");
+        let url = env::var("BSC_MAINNET_RPC_HTTPS").map_err(|_| "BSC_MAINNET_RPC_HTTPS is required".to_string())?;
         let body = body(method, params);
         let mut curl = Command::new("curl");
         curl.env_clear();
@@ -248,8 +247,8 @@ mod wire {
             .map_err(|e| format!("execute curl: {e}"))?;
         if !out.status.success() {
             return Err(format!(
-                "curl {method}: {}",
-                String::from_utf8_lossy(&out.stderr)
+                "curl {method}: transport failure (exit {:?})",
+                out.status.code()
             ));
         }
         response(method, &out.stdout)
@@ -260,8 +259,7 @@ mod wire {
             .map_err(|e| format!("invalid JSON-RPC response for {method}: {e}"))?;
         if let Some(err) = v.get("error") {
             let code = err.get("code").and_then(Json::as_i64).unwrap_or(0);
-            let message = err.get("message").and_then(Json::as_str).unwrap_or("");
-            return Err(format!("JSON-RPC {method}: error {code}: {message}"));
+            return Err(format!("JSON-RPC {method}: error {code} (provider text redacted)"));
         }
         v.get("result")
             .cloned()
@@ -521,7 +519,7 @@ mod wire {
             );
             assert_eq!(
                 err.unwrap_err(),
-                "JSON-RPC eth_call: error -32000: execution reverted"
+                "JSON-RPC eth_call: error -32000 (provider text redacted)"
             );
             assert!(response("eth_chainId", b"not json").is_err());
             assert!(u64_of(&Json::from("38"), "q").is_err());
@@ -601,14 +599,54 @@ mod wire {
 }
 // ---- end of the JSON-RPC wire boundary ---------------------------------
 
-fn wait_receipt(hash: B256) -> Option<Receipt> {
-    for _ in 0..RECEIPT_TIMEOUT_POLLS {
-        match wire::receipt(hash) {
-            Ok(Some(receipt)) => return Some(receipt),
-            Ok(None) | Err(_) => thread::sleep(RECEIPT_POLL),
+fn bounded_error(text: &str) -> &str {
+    let mut end = text.len().min(4000);
+    while !text.is_char_boundary(end) { end -= 1; }
+    &text[..end]
+}
+
+fn permanent_read_error(error: &str) -> bool {
+    ["invalid", "decode", "missing result", "removed", "wrong chain", "required", "error -32600", "error -32601", "error -32602"].iter().any(|needle| error.contains(needle))
+}
+
+/// At most three attempts; each wire call has a 5s curl limit, plus 2*100ms.
+fn recover_read<T>(mut read: impl FnMut() -> Result<T, String>, mut pause: impl FnMut()) -> Result<T, String> {
+    for attempt in 1..=3 {
+        match read() {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt == 3 || permanent_read_error(&error) => return Err(format!("read_errors={attempt}; last={}", bounded_error(&error))),
+            Err(_) => pause(),
         }
     }
-    None
+    unreachable!()
+}
+fn read_rpc<T>(read: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    recover_read(read, || thread::sleep(Duration::from_millis(100)))
+}
+
+/// Includes call time in the 120s bound (reserve 5s for the last call).
+/// A missing receipt is distinct from unreadable evidence; neither permits retry/send.
+fn poll_receipt<T>(mut read: impl FnMut() -> Result<Option<T>, String>, mut pause: impl FnMut(), deadline: Instant, polls: usize) -> Result<Option<T>, String> {
+    let mut errors = 0;
+    let mut last = String::new();
+    for _ in 0..polls {
+        if Instant::now() >= deadline { break; }
+        match read() {
+            Ok(Some(receipt)) => return Ok(Some(receipt)),
+            Ok(None) => {},
+            Err(error) => {
+                errors += 1;
+                let permanent = permanent_read_error(&error);
+                last = bounded_error(&error).to_owned();
+                if permanent || errors >= 3 { return Err(format!("receipt_errors={errors}; last={last}")); }
+            }
+        }
+        pause();
+    }
+    if errors == 0 { Ok(None) } else { Err(format!("receipt_errors={errors}; unresolved after polling; last={last}")) }
+}
+fn wait_receipt(hash: B256) -> Result<Option<Receipt>, String> {
+    poll_receipt(|| wire::receipt(hash), || thread::sleep(RECEIPT_POLL), Instant::now() + Duration::from_secs(114), RECEIPT_TIMEOUT_POLLS)
 }
 
 fn balance_of_at(token: Address, owner: Address, block: u64) -> Result<U256, String> {
@@ -621,12 +659,12 @@ fn transaction_at_index(block: &Block, index: u64) -> Option<&Tx> {
     block.transactions.get(index as usize)
 }
 
-fn receipt_gas_cost(receipt: &Receipt, tx: &Tx) -> U256 {
+fn receipt_gas_cost(receipt: &Receipt, tx: &Tx) -> Result<U256, String> {
     let gas_price = receipt
         .effective_gas_price
         .or(tx.gas_price)
-        .expect("neither effectiveGasPrice nor gasPrice reported");
-    U256::from(receipt.gas_used) * gas_price
+        .ok_or("neither effectiveGasPrice nor gasPrice reported")?;
+    U256::from(receipt.gas_used).checked_mul(gas_price).ok_or_else(|| "receipt gas cost overflow".into())
 }
 
 #[derive(Debug)]
@@ -759,27 +797,26 @@ fn successful_competing_buys_between(
     buy_block: u64,
     buy_index: u64,
     token: Address,
-) -> Option<Vec<B256>> {
+) -> Result<Vec<B256>, String> {
     if buy_block < launch_block || buy_block.saturating_sub(launch_block) > 32 {
-        return None;
+        return Err("incomplete competitor chain window".into());
     }
     let mut hashes = Vec::new();
     let mut previous = None;
     for number in launch_block..=buy_block {
-        let block = wire::block(number).ok()??;
+        let block = read_rpc(|| wire::block(number))?.ok_or("competitor block unavailable")?;
         if previous.is_some_and(|hash| block.parent_hash != hash) {
-            return None;
+            return Err("incomplete competitor chain window".into());
         }
         previous = Some(block.hash);
-        let receipts = block_receipts(&block).ok()?;
+        let receipts = read_rpc(|| block_receipts(&block))?;
         for r in receipts {
             let after_launch = number > launch_block || r.transaction_index > launch_index;
             let before_buy = number < buy_block || r.transaction_index < buy_index;
             if after_launch
                 && before_buy
                 && r.status == 1
-                && portal_buys(&r)
-                    .ok()?
+                && portal_buys(&r)?
                     .iter()
                     .any(|b| b.token == token && b.amount > U256::ZERO)
             {
@@ -787,7 +824,7 @@ fn successful_competing_buys_between(
             }
         }
     }
-    Some(hashes)
+    Ok(hashes)
 }
 
 fn block_receipts(block: &Block) -> Result<Vec<Receipt>, String> {
@@ -911,7 +948,7 @@ fn capture_chain_window(
     let mut writer = JournalWriter::new(file);
     let mut sequence = 0u64;
 
-    let launch = wire::block(launch_block)?.ok_or("launch block unavailable for chain capture")?;
+    let launch = read_rpc(|| wire::block(launch_block))?.ok_or("launch block unavailable for chain capture")?;
     let launch_timestamp = launch.timestamp;
     // Whole-second headers cannot locate T0 within that second. Include
     // its upper edge plus 15 seconds, then one further boundary block.
@@ -950,10 +987,12 @@ fn capture_chain_window(
     let mut crossed_horizon = false;
     let mut captured = Vec::new();
     let last_block;
+    let capture_deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let mut waits = 0u16;
         let block = loop {
-            if let Some(block) = wire::block(number)? {
+            if Instant::now() >= capture_deadline { return Err("chain capture time budget exhausted; INCOMPLETE".into()); }
+            if let Some(block) = read_rpc(|| wire::block(number))? {
                 break block;
             }
             waits = waits.saturating_add(1);
@@ -997,7 +1036,7 @@ fn capture_chain_window(
             .map_err(|e| format!("transaction {} of block {number}: {e}", tx.hash))?;
         }
 
-        let receipts = block_receipts(&block)?;
+        let receipts = read_rpc(|| block_receipts(&block))?;
         for receipt in &receipts {
             append_record(
                 &mut writer,
@@ -1087,11 +1126,20 @@ fn main() {
     );
     persist_result(&evidence_path, &pending).expect("durable UNRESOLVED evidence before RPC");
 
-    let chain_id = wire::chain_id().expect("chain-id read failed");
-    assert_eq!(chain_id, CHAIN_ID, "wrong RPC chain");
+    let abort = |reason: &str| -> ! {
+        let pending = unresolved_draft(&attempt_id, launch_hash, buy_hash, false, false, bounded_error(reason));
+        match persist_result(&evidence_path, &pending) {
+            Ok(record) => print!("{}", record.render()),
+            Err(_) => eprintln!("UNRESOLVED terminal evidence write failed; prior pending evidence remains authoritative"),
+        }
+        std::process::exit(2)
+    };
+    macro_rules! resolved { ($value:expr) => { match $value { Ok(value) => value, Err(error) => abort(&error) } }; }
+    let chain_id = resolved!(read_rpc(wire::chain_id));
+    if chain_id != CHAIN_ID { abort("wrong RPC chain"); }
 
-    let launch_receipt = wait_receipt(launch_hash);
-    let buy_receipt = wait_receipt(buy_hash);
+    let launch_receipt = resolved!(wait_receipt(launch_hash));
+    let buy_receipt = resolved!(wait_receipt(buy_hash));
     if launch_receipt.is_none() || buy_receipt.is_none() {
         let pending = unresolved_draft(
             &attempt_id,
@@ -1118,11 +1166,8 @@ fn main() {
     let launch_block_hash = launch_receipt.block_hash;
     let buy_block_hash = buy_receipt.block_hash;
 
-    let launch_tx = wire::transaction(launch_hash).expect("launch transaction lookup failed");
-    let buy_tx = wire::transaction(buy_hash).expect("BUY transaction lookup failed");
-    assert!(launch_tx.is_some() && buy_tx.is_some());
-    let launch_tx = launch_tx.unwrap();
-    let buy_tx = buy_tx.unwrap();
+    let launch_tx = resolved!(read_rpc(|| wire::transaction(launch_hash))).unwrap_or_else(|| abort("launch transaction unavailable"));
+    let buy_tx = resolved!(read_rpc(|| wire::transaction(buy_hash))).unwrap_or_else(|| abort("BUY transaction unavailable"));
 
     let launch_scope_ok =
         launch_tx.from == launcher && launch_tx.to == Some(PORTAL) && launch_tx.value == U256::ZERO;
@@ -1130,7 +1175,7 @@ fn main() {
         buy_tx.from == buyer && buy_tx.to == Some(PORTAL) && buy_tx.value == expected_buy_value;
 
     let buy_call = swapExactInputCall::abi_decode_validate(&buy_tx.input)
-        .expect("BUY calldata is not the expected swapExactInput call");
+        .unwrap_or_else(|_| abort("BUY calldata decode invalid"));
     let buy_calldata_ok = buy_call.params.inputToken == Address::ZERO
         && buy_call.params.outputToken == token
         && buy_call.params.inputAmount == expected_buy_value
@@ -1140,15 +1185,11 @@ fn main() {
     let ordered = buy_block > launch_block || (same_block && buy_index > launch_index);
     let adjacent = same_block && buy_index == launch_index.saturating_add(1);
 
-    let launch_canonical_block = wire::block(launch_block)
-        .expect("canonical launch block lookup failed")
-        .expect("canonical launch block hash missing");
+    let launch_canonical_block = resolved!(read_rpc(|| wire::block(launch_block))).unwrap_or_else(|| abort("canonical launch block unavailable"));
     let buy_canonical_block = if same_block {
         launch_canonical_block.clone()
     } else {
-        wire::block(buy_block)
-            .expect("canonical BUY block lookup failed")
-            .expect("canonical BUY block hash missing")
+        resolved!(read_rpc(|| wire::block(buy_block))).unwrap_or_else(|| abort("canonical BUY block unavailable"))
     };
     let launch_canonical_hash = launch_canonical_block.hash;
     let buy_canonical_hash = buy_canonical_block.hash;
@@ -1160,14 +1201,12 @@ fn main() {
         .is_some_and(|tx| tx.hash == buy_hash && tx == &buy_tx);
 
     let prior_block = launch_block.saturating_sub(1);
-    let token_absent_before = wire::code(token, prior_block)
-        .ok()
+    let token_absent_before = Some(resolved!(read_rpc(|| wire::code(token, prior_block))))
         .map(|code| code.is_empty());
-    let token_exists_after = wire::code(token, buy_block)
-        .ok()
+    let token_exists_after = Some(resolved!(read_rpc(|| wire::code(token, buy_block))))
         .map(|code| !code.is_empty());
     let buyer_balance_after = match token_exists_after {
-        Some(true) => balance_of_at(token, buyer, buy_block).ok(),
+        Some(true) => Some(resolved!(read_rpc(|| balance_of_at(token, buyer, buy_block)))),
         Some(false) => Some(U256::ZERO),
         None => None,
     };
@@ -1189,13 +1228,13 @@ fn main() {
             .is_some_and(|balance| *balance > U256::ZERO);
 
     let competitor_hashes =
-        successful_competing_buys_between(launch_block, launch_index, buy_block, buy_index, token);
+        Some(resolved!(successful_competing_buys_between(launch_block, launch_index, buy_block, buy_index, token)));
     let competitor_count = competitor_hashes.as_ref().map(Vec::len);
 
-    let launch_gas_cost = receipt_gas_cost(&launch_receipt, &launch_tx);
-    let buy_gas_cost = receipt_gas_cost(&buy_receipt, &buy_tx);
-    let buyer_total_debit = buy_tx.value + buy_gas_cost;
-    let experiment_total_cost = launch_gas_cost + buyer_total_debit;
+    let launch_gas_cost = resolved!(receipt_gas_cost(&launch_receipt, &launch_tx));
+    let buy_gas_cost = resolved!(receipt_gas_cost(&buy_receipt, &buy_tx));
+    let buyer_total_debit = buy_tx.value.checked_add(buy_gas_cost).unwrap_or_else(|| abort("buyer cost overflow"));
+    let experiment_total_cost = launch_gas_cost.checked_add(buyer_total_debit).unwrap_or_else(|| abort("experiment cost overflow"));
 
     let chain_capture = capture_chain_window(
         &chain_capture_path,
@@ -1210,16 +1249,12 @@ fn main() {
 
     // Revalidate receipts and blocks after the entire observation window.
     canonical = canonical
-        && wire::block(launch_block)
-            .ok()
-            .flatten()
+        && resolved!(read_rpc(|| wire::block(launch_block)))
             .is_some_and(|b| b.hash == launch_block_hash)
-        && wire::block(buy_block)
-            .ok()
-            .flatten()
+        && resolved!(read_rpc(|| wire::block(buy_block)))
             .is_some_and(|b| b.hash == buy_block_hash)
-        && wire::receipt(launch_hash).ok().flatten().as_ref() == Some(&launch_receipt)
-        && wire::receipt(buy_hash).ok().flatten().as_ref() == Some(&buy_receipt);
+        && resolved!(read_rpc(|| wire::receipt(launch_hash))).as_ref() == Some(&launch_receipt)
+        && resolved!(read_rpc(|| wire::receipt(buy_hash))).as_ref() == Some(&buy_receipt);
     let receipt_identity = launch_receipt.transaction_hash == launch_hash
         && buy_receipt.transaction_hash == buy_hash
         && launch_tx.hash == launch_hash
@@ -1245,7 +1280,7 @@ fn main() {
         || competitor_count != Some(0)
         || !local_capture_complete
         || !chain_capture_complete;
-    let verdict = if !canonical {
+    let verdict = if !canonical || !acquisition_evidence_complete || !chain_capture_complete || !local_capture_complete || competitor_count.is_none() {
         "UNRESOLVED"
     } else if hard_stop {
         "STOP"
@@ -1255,7 +1290,7 @@ fn main() {
         "PASS"
     };
 
-    let head = wire::block_number().expect("head lookup failed");
+    let head = resolved!(read_rpc(wire::block_number));
     let mut r = Draft::new(&result::SCHEMA);
     r.set(result::GATE, "G0.8")
         .set(result::ATTEMPT_ID, attempt_id.as_str())
@@ -1365,7 +1400,7 @@ fn main() {
             r.set(result::CHAIN_JOURNAL, journal.into_nested());
         }
         Err(e) => {
-            r.set(result::CHAIN_JOURNAL_ERROR, e.as_str());
+            r.set(result::CHAIN_JOURNAL_ERROR, bounded_error(e));
         }
     }
 
@@ -1389,6 +1424,26 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_rpc_recovery_and_receipt_errors_are_distinct_from_null() {
+        let mut calls = 0;
+        assert_eq!(recover_read(|| { calls += 1; if calls == 1 { Err("transport failure".into()) } else { Ok(7) } }, || {}).unwrap(),7);
+        assert_eq!(calls,2);
+        calls=0;
+        let error = recover_read::<()>(|| { calls+=1; Err("timeout".into()) }, || {}).unwrap_err();
+        assert_eq!(calls,3); assert!(error.contains("read_errors=3"));
+        calls=0;
+        assert!(recover_read::<()>(|| { calls+=1; Err("invalid JSON".into()) }, || {}).is_err()); assert_eq!(calls,1);
+        let deadline = Instant::now()+Duration::from_secs(1);
+        assert_eq!(poll_receipt::<u8>(||Ok(None),||{},deadline,2).unwrap(),None);
+        assert_eq!(poll_receipt(||Ok(Some(1)),||{},deadline,2).unwrap(),Some(1));
+        assert!(poll_receipt::<u8>(||Err("timeout".into()),||{},deadline,3).unwrap_err().contains("receipt_errors=3"));
+        let reason="🦀".repeat(4097);
+        let record=unresolved_draft("offline-test", B256::ZERO,B256::ZERO,false,false,&reason);
+        assert!(record.encode().is_ok()); assert_eq!(bounded_error(&reason).len(),4000);
+        assert!(receipt_gas_cost(&receipt(2,None), &tx(1,None)).is_err());
+    }
+
 
     fn buy_log(token: Address, buyer: Address, amount: u64, value: u64, fee: u64) -> wire::Log {
         let mut data = Vec::new();
@@ -1604,25 +1659,19 @@ mod tests {
     fn invalid_ordering_window_is_unknown_without_rpc() {
         // BUY before launch, or a window wider than 32 blocks, yields no
         // verdict (None = UNKNOWN) before any network read.
-        assert_eq!(
-            successful_competing_buys_between(10, 0, 9, 0, Address::ZERO),
-            None
-        );
-        assert_eq!(
-            successful_competing_buys_between(0, 0, 33, 0, Address::ZERO),
-            None
-        );
+        assert!(successful_competing_buys_between(10, 0, 9, 0, Address::ZERO).is_err());
+        assert!(successful_competing_buys_between(0, 0, 33, 0, Address::ZERO).is_err());
     }
 
     #[test]
     fn receipt_gas_cost_uses_effective_price_then_signed_price() {
         let signed = tx(1, Some(3));
         assert_eq!(
-            receipt_gas_cost(&receipt(2, Some(5)), &signed),
+            receipt_gas_cost(&receipt(2, Some(5)), &signed).unwrap(),
             U256::from(10u64)
         );
         assert_eq!(
-            receipt_gas_cost(&receipt(2, None), &signed),
+            receipt_gas_cost(&receipt(2, None), &signed).unwrap(),
             U256::from(6u64)
         );
     }

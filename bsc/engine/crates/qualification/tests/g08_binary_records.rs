@@ -190,13 +190,14 @@ fn producer_timing_reads_and_writes_binary_records() {
     );
     let record = decode(&v::SCHEMA, &written.expect("timing verdict written")).unwrap();
     assert_eq!(record.text(v::VERDICT).unwrap(), "PASS");
+    assert!(record.render().contains("SELF_LAUNCH_BUNDLE_ONLY; DOES_NOT_MEASURE_FOREIGN_LAUNCH_REACTION_T_SIGNAL_TO_T_SEND"));
     assert_eq!(record.u64(v::BRACKET_UPPER_NS).unwrap(), 700);
     assert_eq!(record.b256(v::G08_SHA256).unwrap(), sha256(&g08));
     assert_eq!(
         record.b256(v::PRODUCER_WITNESS_SHA256).unwrap(),
         sha256(&witness_bytes)
     );
-    assert_eq!(record.texts(v::EXPLICITLY_NOT_AUTHORITY).unwrap().len(), 6);
+    assert_eq!(record.texts(v::EXPLICITLY_NOT_AUTHORITY).unwrap().len(), 7);
 }
 
 #[test]
@@ -247,4 +248,21 @@ fn producer_timing_refuses_foreign_or_legacy_inputs_without_output() {
         assert!(written.is_none(), "{tag}");
         assert!(stderr.contains(expected), "{tag}: {stderr}");
     }
+}
+
+#[test]
+fn timing_requires_writable_output_before_reporting_a_verdict() {
+    let output = Command::new(TIMING_BIN).env_clear().output().unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("DARKBOT_G08_TIMING_EVIDENCE_PATH"));
+    let dir = std::env::temp_dir().join(format!("g08-unwritable-{}",std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("g08"), g08_pass().encode().unwrap()).unwrap();
+    fs::write(dir.join("witness"), witness().encode().unwrap()).unwrap();
+    let out = Command::new(TIMING_BIN).env_clear().env("DARKBOT_G08_EVIDENCE",dir.join("g08"))
+        .env("DARKBOT_G08_PRODUCER_WITNESS",dir.join("witness"))
+        .env("DARKBOT_G08_TIMING_EVIDENCE_PATH",dir.join("missing/out")).output().unwrap();
+    assert!(!out.status.success()); assert!(out.stdout.is_empty());
+    fs::remove_dir_all(dir).unwrap();
 }
