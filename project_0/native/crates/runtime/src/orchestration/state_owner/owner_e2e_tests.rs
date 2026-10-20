@@ -81,6 +81,7 @@ fn fixture(tag: &str) -> Fixture {
         pending: vec![],
         projection_cache: HashMap::new(),
         projection_pending: HashSet::new(),
+        projection_stats: ProjectionStats::default(),
         detect_queue: VecDeque::new(),
         oracle_detect_order: VecDeque::new(),
         oracle_detect_pending: HashMap::new(),
@@ -140,6 +141,8 @@ fn fixture(tag: &str) -> Fixture {
         #[cfg(feature = "crate_health")]
         instruction_table: darkbot_project0::receivership::builders::instruction_table(&program)
             .unwrap(),
+        #[cfg(feature = "crate_health")]
+        dependency_gaps: HashMap::new(),
         global_allowed: vec![],
         submitter: crate::execution::observe_only::ObserveOnly::new(RpcSubmitter::new(
             unused_rpc.clone(),
@@ -426,4 +429,42 @@ fn owner_binds_the_approved_audit_before_admission() {
         f.owner.finish().unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// N4: the projection counters reach the owner journal once at shutdown, also when the update
+/// count never reached a periodic report.
+#[test]
+fn n4_projection_counters_are_journaled_at_shutdown() {
+    use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
+    let mut f = fixture("projection_stats");
+    // A balancing history: 3 requested = 2 accepted + 1 failed; 2 accepted = 1 reused +
+    // 1 discarded at use.
+    let s = &mut f.owner.projection_stats;
+    (s.requested, s.accepted, s.failed) = (3, 2, 1);
+    (s.reused, s.discarded_at_consume) = (1, 1);
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut lines = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == OwnerDiagnostic::KIND {
+            let d: OwnerDiagnostic = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            lines.push(d.line);
+        }
+    }
+    let projection: Vec<_> = lines
+        .iter()
+        .filter(|l| l.starts_with("projection: "))
+        .collect();
+    assert_eq!(
+        projection,
+        [
+            "projection: requested=3 queue_full=0 observation_unknown=0 accepted=2 failed=1 \
+             stale_result=0 discarded_result=0 in_flight=0 reused=1 invalid_at_use=0 \
+             discarded_consume=1 stale_consume=0 dropped=0 cached=0"
+        ],
+        "{lines:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

@@ -39,6 +39,11 @@ impl ShadowOwner {
             self.shutdown.request();
             self.ingress_session.request();
         }
+        // N4: the projection outcomes once at shutdown, whatever the update count reached.
+        let projection = self
+            .projection_stats
+            .line(self.projection_pending.len(), self.projection_cache.len());
+        owner_log!(self, "{projection}");
         // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
         let final_summary = self.ledger.finish();
         let evidence_result = self.evidence.finish(Some(final_summary));

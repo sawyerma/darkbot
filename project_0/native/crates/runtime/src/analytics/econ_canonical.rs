@@ -293,6 +293,76 @@ fn slot_margin(row: &Joined) -> Option<i128> {
             - i128::from(row.our.as_ref()?.timing.t_sign_ns?),
     )
 }
+/// N1: the loss-attribution model of a report: one bucket per `LossReason`, UNKNOWN only for an
+/// undetermined cause. Reports of ECON schema ≤ 3 carry `LOSS_ATTRIBUTION_PRE_N1`.
+pub const LOSS_ATTRIBUTION_MODEL: &str =
+    "EXHAUSTIVE_V1: one bucket per LossReason; UNKNOWN only for an undetermined cause";
+pub const LOSS_ATTRIBUTION_PRE_N1: &str = "PRE_N1 (ECON schema <= 3): UNKNOWN includes the \
+     LossReasons Ingress, State, CircuitBreaker, IntegrationRefresh, UnsupportedIntegration, \
+     Sizing, Submission, Tip, RpcBudget and RpcDeadline; ECONOMICS includes EconomicSkip, \
+     ThresholdTooHigh and technical matches with unknown economics";
+
+/// N1: every bucket the canonical loss attribution can report, pre-seeded with zero rows.
+/// (`ADMINISTRATIVE_SETTLEMENT` rows are not tradable and never attributed.)
+pub(crate) const LOSS_BUCKETS: [&str; 28] = [
+    "NOT_DETECTED",
+    "INGRESS",
+    "STATE",
+    "STATE_RACE",
+    "HEALTH_ERROR",
+    "CIRCUIT_BREAKER",
+    "BANKRUPTCY",
+    "INTEGRATION_REFRESH",
+    "UNSUPPORTED_INTEGRATION",
+    "SIZING",
+    "MISSING_ATA",
+    "ROUTING",
+    "FUNDING",
+    "CAPITAL",
+    "ECONOMICS",
+    "ECONOMIC_SKIP",
+    "THRESHOLD_TOO_HIGH",
+    "ECONOMICS_UNKNOWN",
+    "SIMULATION",
+    "BUILD",
+    "SIGNING",
+    "SUBMISSION",
+    "TIP",
+    "RPC_BUDGET",
+    "RPC_DEADLINE",
+    "WINNER_TOO_EARLY",
+    "NO_PROVEN_TECHNICAL_LOSS",
+    "UNKNOWN",
+];
+
+/// N1: exhaustive — a new `LossReason` is a compile error here, never a silent UNKNOWN.
+pub(crate) fn loss_bucket(reason: LossReason) -> &'static str {
+    match reason {
+        LossReason::Ingress => "INGRESS",
+        LossReason::State => "STATE",
+        LossReason::Health => "HEALTH_ERROR",
+        LossReason::CircuitBreaker => "CIRCUIT_BREAKER",
+        LossReason::Bankruptcy => "BANKRUPTCY",
+        LossReason::IntegrationRefresh => "INTEGRATION_REFRESH",
+        LossReason::Funding => "FUNDING",
+        LossReason::MissingAta => "MISSING_ATA",
+        LossReason::UnsupportedIntegration => "UNSUPPORTED_INTEGRATION",
+        LossReason::Sizing => "SIZING",
+        LossReason::Economics => "ECONOMICS",
+        LossReason::Routing => "ROUTING",
+        LossReason::Build => "BUILD",
+        LossReason::Submission => "SUBMISSION",
+        LossReason::Tip => "TIP",
+        LossReason::StateRace => "STATE_RACE",
+        LossReason::EconomicSkip => "ECONOMIC_SKIP",
+        LossReason::ThresholdTooHigh => "THRESHOLD_TOO_HIGH",
+        // The recording stage itself could not classify the cause.
+        LossReason::Unknown => "UNKNOWN",
+        LossReason::RpcBudget => "RPC_BUDGET",
+        LossReason::RpcDeadline => "RPC_DEADLINE",
+    }
+}
+
 fn loss(row: &Joined) -> &'static str {
     if !row.market.permissionless_profit_opportunity {
         return "ADMINISTRATIVE_SETTLEMENT";
@@ -313,23 +383,11 @@ fn loss(row: &Joined) -> &'static str {
             return "SIMULATION";
         }
         if let Some(reason) = rec.loss {
-            return match reason {
-                LossReason::Health => "HEALTH_ERROR",
-                LossReason::StateRace => "STATE_RACE",
-                LossReason::MissingAta => "MISSING_ATA",
-                LossReason::Routing => "ROUTING",
-                LossReason::Funding => "FUNDING",
-                LossReason::Bankruptcy => "BANKRUPTCY",
-                LossReason::Economics | LossReason::EconomicSkip | LossReason::ThresholdTooHigh => {
-                    "ECONOMICS"
-                }
-                LossReason::Build => "BUILD",
-                _ => "UNKNOWN",
-            };
+            return loss_bucket(reason);
         }
         if row.our.is_some() && technical(rec) {
             if !rec.economics_known {
-                return "ECONOMICS";
+                return "ECONOMICS_UNKNOWN";
             }
             if race_class(row) == "POST_WINNER_SLOT_PROVEN_LATE" {
                 return "WINNER_TOO_EARLY";
@@ -517,32 +575,99 @@ pub struct RaceMargins {
     pub market_commitment: String,
     pub winner_rx_margin_status: String,
     pub winner_slot_margin_status: String,
+    /// Population `_all`: every exact-plan match with a signing time, whatever its simulation.
     pub canonical_slot_margin_ms: Distribution,
     pub required_canonical_slot_speedup_ms: Distribution,
     pub canonical_slot_speedup_sensitivity: Vec<SpeedupBucket>,
+    /// N5: how the `_technical` figures below were obtained (or why they are absent).
+    pub technical_status: String,
+    /// N5: population `_technical` — exact-plan matches that were signed and simulated PASS
+    /// (`technical`); the main race figure. `None`: not recorded (report before N5).
+    pub canonical_slot_margin_ms_technical: Option<Distribution>,
+    pub required_canonical_slot_speedup_ms_technical: Option<Distribution>,
 }
+/// N5: status of the technical race figures.
+pub const TECHNICAL_COMPUTED: &str =
+    "COMPUTED: exact-plan matches signed and simulated PASS (ShadowReady/ShadowTechnicalReady)";
+pub const TECHNICAL_NOT_RECORDED: &str =
+    "NOT_RECORDED: report of ECON schema <= 3 (before N5); no technical figures exist";
 impl RaceMargins {
     /// A report written before A2 (no race figures recorded).
     pub fn earlier_schema() -> Self {
-        race_margins(&[], "UNKNOWN", false)
+        RaceMarginsV3::from_layout(race_margins(&[], "UNKNOWN", false)).into()
+    }
+}
+/// Layout of `RaceMargins` in ECON schema 3 (A2, before N5).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RaceMarginsV3 {
+    market_commitment: String,
+    winner_rx_margin_status: String,
+    winner_slot_margin_status: String,
+    canonical_slot_margin_ms: Distribution,
+    required_canonical_slot_speedup_ms: Distribution,
+    canonical_slot_speedup_sensitivity: Vec<SpeedupBucket>,
+}
+impl RaceMarginsV3 {
+    fn from_layout(m: RaceMargins) -> Self {
+        Self {
+            market_commitment: m.market_commitment,
+            winner_rx_margin_status: m.winner_rx_margin_status,
+            winner_slot_margin_status: m.winner_slot_margin_status,
+            canonical_slot_margin_ms: m.canonical_slot_margin_ms,
+            required_canonical_slot_speedup_ms: m.required_canonical_slot_speedup_ms,
+            canonical_slot_speedup_sensitivity: m.canonical_slot_speedup_sensitivity,
+        }
+    }
+}
+impl From<RaceMarginsV3> for RaceMargins {
+    /// The recorded figures unchanged; the technical figures did not exist.
+    fn from(v: RaceMarginsV3) -> Self {
+        Self {
+            market_commitment: v.market_commitment,
+            winner_rx_margin_status: v.winner_rx_margin_status,
+            winner_slot_margin_status: v.winner_slot_margin_status,
+            canonical_slot_margin_ms: v.canonical_slot_margin_ms,
+            required_canonical_slot_speedup_ms: v.required_canonical_slot_speedup_ms,
+            canonical_slot_speedup_sensitivity: v.canonical_slot_speedup_sensitivity,
+            technical_status: TECHNICAL_NOT_RECORDED.into(),
+            canonical_slot_margin_ms_technical: None,
+            required_canonical_slot_speedup_ms_technical: None,
+        }
     }
 }
 
-/// A2: the race figures over canonical rows (live and offline the same function).
-pub fn race_margins(rows: &[&Joined], market_commitment: &str, slot_receipts: bool) -> RaceMargins {
+/// N5: margin samples (ms) and the required speedups of the negative ones.
+fn margin_samples<'a>(
+    rows: impl Iterator<Item = &'a &'a Joined>,
+    margin: impl Fn(&Joined) -> Option<i128>,
+) -> (Vec<f64>, Vec<f64>) {
     let mut margins = Vec::new();
     let mut speed = Vec::new();
-    for row in rows
-        .iter()
-        .filter(|r| r.market.permissionless_profit_opportunity)
-    {
-        if let Some(n) = slot_margin(row) {
+    for row in rows {
+        if let Some(n) = margin(row) {
             margins.push(n as f64 / 1e6);
             if n < 0 {
                 speed.push((-n) as f64 / 1e6);
             }
         }
     }
+    (margins, speed)
+}
+
+/// N5: the technically executable rows: exact-plan matches signed and simulated PASS.
+fn technical_row(row: &Joined) -> bool {
+    row.our.as_ref().is_some_and(technical)
+}
+
+/// A2: the race figures over canonical rows (live and offline the same function).
+pub fn race_margins(rows: &[&Joined], market_commitment: &str, slot_receipts: bool) -> RaceMargins {
+    let tradable = || {
+        rows.iter()
+            .filter(|r| r.market.permissionless_profit_opportunity)
+    };
+    let (margins, speed) = margin_samples(tradable(), slot_margin);
+    let (technical_margins, technical_speed) =
+        margin_samples(tradable().filter(|r| technical_row(r)), slot_margin);
     RaceMargins {
         market_commitment: market_commitment.into(),
         winner_rx_margin_status: rx_margin_status(market_commitment),
@@ -563,6 +688,9 @@ pub fn race_margins(rows: &[&Joined], market_commitment: &str, slot_receipts: bo
                     .into(),
             })
             .collect(),
+        technical_status: TECHNICAL_COMPUTED.into(),
+        canonical_slot_margin_ms_technical: Some(distribution(technical_margins)),
+        required_canonical_slot_speedup_ms_technical: Some(distribution(technical_speed)),
     }
 }
 
@@ -667,12 +795,71 @@ pub struct CanonicalSummary {
     pub largest_measured_stage: BTreeMap<String, StageBucket>,
     pub race: BTreeMap<String, RaceBucket>,
     pub matched_stage_ms: BTreeMap<String, Distribution>,
+    /// Population `_all`: every exact-plan match with a signing time, whatever its simulation.
     pub local_margin_ms: Distribution,
     pub required_local_speedup_ms: Distribution,
     pub speedup_sensitivity: Vec<SpeedupBucket>,
     pub competition: CanonicalCompetition,
     pub true_competitor_submission_deadline: String,
     pub live_ready: bool,
+    /// N1: the model `loss_attribution` was attributed under.
+    pub loss_attribution_model: String,
+    /// N5: population `_technical` (signed, simulation PASS); `None`: not recorded (before N5).
+    pub local_margin_ms_technical: Option<Distribution>,
+    pub required_local_speedup_ms_technical: Option<Distribution>,
+}
+/// Layout of `CanonicalSummary` in ECON schema 2 and 3 (before N1/N5).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalSummaryV3 {
+    finalized: bool,
+    market: BTreeMap<String, CanonicalGroup>,
+    authoritative_scope: String,
+    market_window_hour_assignment: String,
+    hour_unassigned_events_full_window: u64,
+    unassigned_included_in_final_total: bool,
+    matching: CanonicalMatching,
+    network_fees: NetworkFees,
+    capital: Vec<CanonicalCapital>,
+    loss_attribution: BTreeMap<String, LossBucket>,
+    largest_measured_stage: BTreeMap<String, StageBucket>,
+    race: BTreeMap<String, RaceBucket>,
+    matched_stage_ms: BTreeMap<String, Distribution>,
+    local_margin_ms: Distribution,
+    required_local_speedup_ms: Distribution,
+    speedup_sensitivity: Vec<SpeedupBucket>,
+    competition: CanonicalCompetition,
+    true_competitor_submission_deadline: String,
+    live_ready: bool,
+}
+impl From<CanonicalSummaryV3> for CanonicalSummary {
+    /// The recorded figures unchanged, labelled with the attribution model they were made
+    /// under; the technical figures did not exist.
+    fn from(v: CanonicalSummaryV3) -> Self {
+        Self {
+            finalized: v.finalized,
+            market: v.market,
+            authoritative_scope: v.authoritative_scope,
+            market_window_hour_assignment: v.market_window_hour_assignment,
+            hour_unassigned_events_full_window: v.hour_unassigned_events_full_window,
+            unassigned_included_in_final_total: v.unassigned_included_in_final_total,
+            matching: v.matching,
+            network_fees: v.network_fees,
+            capital: v.capital,
+            loss_attribution: v.loss_attribution,
+            largest_measured_stage: v.largest_measured_stage,
+            race: v.race,
+            matched_stage_ms: v.matched_stage_ms,
+            local_margin_ms: v.local_margin_ms,
+            required_local_speedup_ms: v.required_local_speedup_ms,
+            speedup_sensitivity: v.speedup_sensitivity,
+            competition: v.competition,
+            true_competitor_submission_deadline: v.true_competitor_submission_deadline,
+            live_ready: v.live_ready,
+            loss_attribution_model: LOSS_ATTRIBUTION_PRE_N1.into(),
+            local_margin_ms_technical: None,
+            required_local_speedup_ms_technical: None,
+        }
+    }
 }
 
 fn values(rows: &[&Joined], f: impl Fn(&TruthEvent) -> Option<f64>) -> Values {
@@ -765,30 +952,11 @@ fn summarize(
             only_capital_semantics: "otherwise signed/simulated, positive known net, PRE winner slot; still not guaranteed capture".into(),
         }
     }).collect();
-    let mut reasons: BTreeMap<&str, Vec<&Joined>> = [
-        "NOT_DETECTED",
-        "HEALTH_ERROR",
-        "STATE_RACE",
-        "MISSING_ATA",
-        "ROUTING",
-        "FUNDING",
-        "CAPITAL",
-        "ECONOMICS",
-        "BANKRUPTCY",
-        "SIMULATION",
-        "BUILD",
-        "SIGNING",
-        "WINNER_TOO_EARLY",
-        "UNKNOWN",
-    ]
-    .into_iter()
-    .map(|k| (k, vec![]))
-    .collect();
+    let mut reasons: BTreeMap<&str, Vec<&Joined>> =
+        LOSS_BUCKETS.into_iter().map(|k| (k, vec![])).collect();
     let mut race: BTreeMap<&str, Vec<&Joined>> = BTreeMap::new();
     let mut stages: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     let mut bottlenecks: BTreeMap<&str, Vec<&Joined>> = BTreeMap::new();
-    let mut margins = Vec::new();
-    let mut speed = Vec::new();
     for row in &tradable {
         reasons.entry(loss(row)).or_default().push(row);
         race.entry(race_class(row)).or_default().push(row);
@@ -811,13 +979,10 @@ fn summarize(
                 }
             }
         }
-        if let Some(n) = margin(row) {
-            margins.push(n as f64 / 1e6);
-            if n < 0 {
-                speed.push((-n) as f64 / 1e6);
-            }
-        }
     }
+    let (margins, speed) = margin_samples(tradable.iter(), margin);
+    let (technical_margins, technical_speed) =
+        margin_samples(tradable.iter().filter(|r| technical_row(r)), margin);
     let loss_dollars: BTreeMap<_, _> = reasons
         .into_iter()
         .map(|(reason, group)| {
@@ -947,6 +1112,9 @@ fn summarize(
         },
         true_competitor_submission_deadline: "UNKNOWN".into(),
         live_ready: false,
+        loss_attribution_model: LOSS_ATTRIBUTION_MODEL.into(),
+        local_margin_ms_technical: Some(distribution(technical_margins)),
+        required_local_speedup_ms_technical: Some(distribution(technical_speed)),
     }
 }
 
@@ -1048,6 +1216,114 @@ mod regression {
         r.progress.transaction_built = Some(true);
         r
     }
+    /// N1: every `LossReason` has its own pre-seeded bucket (UNKNOWN only for `Unknown`), and a
+    /// detected target lost for a reason the former mapping dropped into UNKNOWN is reported
+    /// under that reason.
+    #[test]
+    fn n1_every_loss_reason_has_its_own_bucket() {
+        use LossReason as L;
+        let reasons = [
+            L::Ingress,
+            L::State,
+            L::Health,
+            L::CircuitBreaker,
+            L::Bankruptcy,
+            L::IntegrationRefresh,
+            L::Funding,
+            L::MissingAta,
+            L::UnsupportedIntegration,
+            L::Sizing,
+            L::Economics,
+            L::Routing,
+            L::Build,
+            L::Submission,
+            L::Tip,
+            L::StateRace,
+            L::EconomicSkip,
+            L::ThresholdTooHigh,
+            L::Unknown,
+            L::RpcBudget,
+            L::RpcDeadline,
+        ];
+        // Exhaustive like `loss_bucket`: a new variant must be added to `reasons` above.
+        for r in reasons {
+            match r {
+                L::Ingress | L::State | L::Health | L::CircuitBreaker | L::Bankruptcy => {}
+                L::IntegrationRefresh | L::Funding | L::MissingAta => {}
+                L::UnsupportedIntegration | L::Sizing | L::Economics | L::Routing => {}
+                L::Build | L::Submission | L::Tip | L::StateRace | L::EconomicSkip => {}
+                L::ThresholdTooHigh | L::Unknown | L::RpcBudget | L::RpcDeadline => {}
+            }
+        }
+        let mut buckets: Vec<_> = reasons.iter().map(|r| loss_bucket(*r)).collect();
+        for (r, b) in reasons.iter().zip(&buckets) {
+            assert!(LOSS_BUCKETS.contains(b), "{b} pre-seeded");
+            assert_eq!(*b == "UNKNOWN", *r == L::Unknown, "{r:?}");
+        }
+        buckets.sort_unstable();
+        buckets.dedup();
+        assert_eq!(buckets.len(), reasons.len(), "one bucket per reason");
+        for (reason, bucket) in [
+            (L::RpcBudget, "RPC_BUDGET"),
+            (L::RpcDeadline, "RPC_DEADLINE"),
+            (L::Tip, "TIP"),
+            (L::Submission, "SUBMISSION"),
+            (L::CircuitBreaker, "CIRCUIT_BREAKER"),
+            (L::IntegrationRefresh, "INTEGRATION_REFRESH"),
+            (L::UnsupportedIntegration, "UNSUPPORTED_INTEGRATION"),
+            (L::Ingress, "INGRESS"),
+            (L::State, "STATE"),
+            (L::Sizing, "SIZING"),
+            (L::EconomicSkip, "ECONOMIC_SKIP"),
+            (L::ThresholdTooHigh, "THRESHOLD_TOO_HIGH"),
+        ] {
+            let mut r = identified();
+            r.loss = Some(reason);
+            let mut rows = vec![row(&r, 10, 0)];
+            assign_record(&mut rows, &r);
+            let s = summarize(&[&rows[0]], 3600., 0, true, &CAPITAL_USD);
+            assert_eq!(s.loss_attribution[bucket].count, 1, "{reason:?}");
+            assert_eq!(s.loss_attribution["UNKNOWN"].count, 0, "{reason:?}");
+            assert_eq!(s.loss_attribution.len(), LOSS_BUCKETS.len(), "{reason:?}");
+            assert_eq!(s.loss_attribution_model, LOSS_ATTRIBUTION_MODEL);
+        }
+    }
+
+    /// N5: the `_technical` race figures count only exact-plan matches that were signed and
+    /// simulated PASS; the `_all` figures keep every exact-plan match with a signing time; no
+    /// technical sample is an empty distribution (UNKNOWN values), a report before N5 has none.
+    #[test]
+    fn n5_technical_race_figures_count_only_signed_simulated_matches() {
+        let pass = identified();
+        let mut failed = identified();
+        failed.simulation_result = Some("FAIL".into());
+        let mut rows = vec![row(&pass, 10, 0), row(&failed, 10, 1)];
+        assign_record(&mut rows[..1], &pass);
+        assign_record(&mut rows[1..], &failed);
+        for r in &mut rows {
+            assert!(r.our.is_some());
+            r.winner_slot_first_seen_ns = Some(100);
+        }
+        let both = [&rows[0], &rows[1]];
+        let m = race_margins(&both, "confirmed", true);
+        assert_eq!(m.canonical_slot_margin_ms.count_known, 2, "_all unchanged");
+        let tech = m.canonical_slot_margin_ms_technical.as_ref().unwrap();
+        assert_eq!(tech.count_known, 1);
+        assert_eq!(m.technical_status, TECHNICAL_COMPUTED);
+        let s = summarize(&both, 3600., 0, true, &CAPITAL_USD);
+        assert_eq!(s.local_margin_ms.count_known, 2, "_all unchanged");
+        assert_eq!(s.local_margin_ms_technical.as_ref().unwrap().count_known, 1);
+        let only_failed = race_margins(&[&rows[1]], "confirmed", true);
+        let none = only_failed.canonical_slot_margin_ms_technical.unwrap();
+        assert_eq!((none.count_known, none.median), (0, None));
+        let earlier = RaceMargins::earlier_schema();
+        assert!(earlier.canonical_slot_margin_ms_technical.is_none());
+        assert!(earlier
+            .required_canonical_slot_speedup_ms_technical
+            .is_none());
+        assert_eq!(earlier.technical_status, TECHNICAL_NOT_RECORDED);
+    }
+
     #[test]
     fn offline_replay_uses_same_selector_and_exact_odd_plan_boundaries() {
         let mut w = worker();

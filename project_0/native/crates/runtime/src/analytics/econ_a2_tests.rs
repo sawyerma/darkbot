@@ -207,32 +207,87 @@ fn a2_earlier_schema_frames_stay_readable() {
     );
     assert_eq!(back.capital, CAPITAL_USD.to_vec());
 
-    let w = worker();
-    let report = w.report(1, false);
-    let back: SnapshotReport = decode(
-        SnapshotReport::KIND,
-        TYPED,
-        &earlier(&report, &report.race_margins),
-    )
-    .unwrap();
-    assert_eq!(back.race_margins.cumulative, RaceMargins::earlier_schema());
-    assert_eq!(back.canonical, report.canonical);
+    // Snapshot/final reports of schema 2 and 3 are read from real historical frames:
+    // `n1_n5_historical_econ_frames_stay_readable`. Any other version stays refused.
     let frame = SnapshotFrame {
         index: 1,
         finalizing: false,
-        report,
+        report: worker().report(1, false),
     };
-    let back: SnapshotFrame = decode(
-        SnapshotFrame::KIND,
-        TYPED,
-        &earlier(&frame, &frame.report.race_margins),
-    )
-    .unwrap();
-    assert_eq!(back.index, 1);
-    assert_eq!(
-        back.report.race_margins.window_delta,
-        RaceMargins::earlier_schema()
-    );
-    // Any other version stays refused.
     assert!(decode::<SnapshotFrame>(SnapshotFrame::KIND, 9, &encode(&frame).unwrap()).is_err());
+}
+
+/// N1/N5: ECON journals written by the schema-2 (17.10.2026) and schema-3 (18.10.2026) writers
+/// (test runs of that time; sealed, chain-verified fixtures) stay readable through their explicit
+/// layouts. Every snapshot and final frame decodes; the recorded figures are unchanged — the
+/// schema-2 final equals the JSON its own writer rendered then, the schema-3 final equals the
+/// render of the schema-3 reader — and the fields added by N1/N5 say "not recorded" instead of
+/// presenting new values as historical measurements.
+#[test]
+fn n1_n5_historical_econ_frames_stay_readable() {
+    use crate::analytics::payload::{decode, Payload};
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/analytics/fixtures");
+    let not_recorded = |r: &SnapshotReport| {
+        for (c, m) in [
+            (&r.canonical.window_delta, &r.race_margins.window_delta),
+            (&r.canonical.cumulative, &r.race_margins.cumulative),
+        ] {
+            assert_eq!(c.loss_attribution_model, LOSS_ATTRIBUTION_PRE_N1);
+            assert!(c.local_margin_ms_technical.is_none());
+            assert!(c.required_local_speedup_ms_technical.is_none());
+            assert_eq!(m.technical_status, TECHNICAL_NOT_RECORDED);
+            assert!(m.canonical_slot_margin_ms_technical.is_none());
+            assert!(m.required_canonical_slot_speedup_ms_technical.is_none());
+        }
+    };
+    for (schema, journal_file, golden, golden_has_race_margins) in [
+        (2u16, "econ_reports_schema2.p0j", "econ_final_schema2_writer.json", false),
+        (3, "econ_reports_schema3.p0j", "econ_final_schema3_reader.json", true),
+    ] {
+        let path = dir.join(journal_file);
+        let chain = crate::storage::segments::verify_chain(&path).unwrap();
+        assert!(chain.sealed && chain.complete, "{journal_file}");
+        let mut reader = journal::Reader::open(&path).unwrap();
+        let (mut snapshots, mut last_final) = (0, None);
+        while let Some(f) = reader.next_frame().unwrap() {
+            if f.kind == SnapshotFrame::KIND {
+                assert_eq!(f.schema, schema);
+                let frame: SnapshotFrame = decode(f.kind, f.schema, &f.payload).unwrap();
+                not_recorded(&frame.report);
+                snapshots += 1;
+            } else if f.kind == SnapshotReport::KIND {
+                assert_eq!(f.schema, schema);
+                let report: SnapshotReport = decode(f.kind, f.schema, &f.payload).unwrap();
+                not_recorded(&report);
+                assert!(last_final.replace(report).is_none(), "one final");
+            }
+        }
+        assert_eq!(snapshots, 8, "{journal_file}");
+        let mut rendered = render(&last_final.unwrap()).unwrap();
+        for section in ["window_delta", "cumulative"] {
+            let c = rendered["canonical"][section].as_object_mut().unwrap();
+            for k in [
+                "loss_attribution_model",
+                "local_margin_ms_technical",
+                "required_local_speedup_ms_technical",
+            ] {
+                assert!(c.remove(k).is_some(), "{k}");
+            }
+            let m = rendered["race_margins"][section].as_object_mut().unwrap();
+            for k in [
+                "technical_status",
+                "canonical_slot_margin_ms_technical",
+                "required_canonical_slot_speedup_ms_technical",
+            ] {
+                assert!(m.remove(k).is_some(), "{k}");
+            }
+        }
+        if !golden_has_race_margins {
+            // Schema 2 predates A2: its writer had no race margins.
+            rendered.as_object_mut().unwrap().remove("race_margins");
+        }
+        let expected: Value =
+            serde_json::from_slice(&std::fs::read(dir.join(golden)).unwrap()).unwrap();
+        assert_eq!(rendered, expected, "{golden}");
+    }
 }

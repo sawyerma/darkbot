@@ -53,16 +53,153 @@ pub(crate) fn projection_dependencies(
     candidate: &Pubkey,
     refreshes: &[solana_sdk::instruction::Instruction],
     observation: &[Pubkey],
+    fixed: &[Pubkey],
 ) -> Vec<Pubkey> {
     let mut keys: Vec<Pubkey> = refreshes
         .iter()
         .flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey))
         .chain(observation.iter().copied())
+        .chain(fixed.iter().copied())
         .filter(|k| k != candidate)
         .collect();
     keys.sort_unstable_by_key(|k| k.to_bytes());
     keys.dedup();
     keys
+}
+
+/// E9/N3: the dependency set of a candidate's projection — the refresh instruction accounts, the
+/// candidate's health observation accounts, the group and the FeeState (sizing reads the group's
+/// EMODE and the FeeState). An undeterminable observation set is an error, never an empty set:
+/// without it the projection's staleness cannot be bound (fail-closed).
+#[cfg(feature = "crate_health")]
+pub(crate) fn projection_dependency_set<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    group: &Pubkey,
+    candidate: &Pubkey,
+    refreshes: &[solana_sdk::instruction::Instruction],
+) -> Result<Vec<Pubkey>, String> {
+    let observation = darkbot_project0::health::crate_impl::CrateHealth {
+        state,
+        group: *group,
+    }
+    .observation_accounts(candidate)
+    .map_err(|e| e.to_string())?;
+    Ok(projection_dependencies(
+        candidate,
+        refreshes,
+        &observation,
+        &[*group, protocol::fee_state_pda(program)],
+    ))
+}
+
+/// N6: whether a bank's dependency gap is reported — when it is new, when it changed, and once
+/// when it cleared; an unchanged gap stays silent. `seen` holds exactly the banks with a current
+/// gap, so it is bounded by the number of banks.
+#[cfg(feature = "crate_health")]
+pub(crate) fn note_gap(
+    seen: &mut HashMap<Pubkey, darkbot_project0::health::DependencyGap>,
+    bank: Pubkey,
+    gap: Option<&darkbot_project0::health::DependencyGap>,
+) -> bool {
+    match gap {
+        Some(g) => seen.insert(bank, g.clone()).as_ref() != Some(g),
+        None => seen.remove(&bank).is_some(),
+    }
+}
+
+/// N4: the outcomes of the integration projections (how often E9 discards one). Every requested
+/// projection ends in exactly one result counter or is still in flight, every accepted one in
+/// exactly one consume counter or is still cached, so the report balances:
+/// `requested = accepted + failed + stale_result + discarded_result + in_flight` and
+/// `accepted = reused + invalid_at_use + discarded_consume + stale_consume + dropped + cached`.
+/// Reported periodically with the owner telemetry and once at shutdown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ProjectionStats {
+    /// Handed to the projection worker.
+    pub(crate) requested: u64,
+    /// Not handed over: the worker queue was full (no request).
+    pub(crate) queue_full: u64,
+    /// Not requested: the candidate's observation set is unknown (N3, fail-closed).
+    pub(crate) observation_unknown: u64,
+    /// Results: cached for the candidate's next evaluation …
+    pub(crate) accepted: u64,
+    /// … the simulation failed …
+    pub(crate) failed: u64,
+    /// … the candidate itself changed while the worker projected …
+    pub(crate) stale_at_result: u64,
+    /// … or a dependency changed (E9).
+    pub(crate) discarded_at_result: u64,
+    /// Cached projections: used by the evaluation …
+    pub(crate) reused: u64,
+    /// … taken for the evaluation but its overlay was invalid (no evaluation on it) …
+    pub(crate) invalid_at_use: u64,
+    /// … discarded at use because a dependency changed (E9) …
+    pub(crate) discarded_at_consume: u64,
+    /// … discarded at use because the candidate changed …
+    pub(crate) stale_at_consume: u64,
+    /// … or replaced/removed before any use.
+    pub(crate) dropped: u64,
+}
+impl ProjectionStats {
+    /// A cached projection is taken for the candidate's evaluation; a usable one is counted by
+    /// `used` once its overlay is built.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn consume(&mut self, base_matches: bool, dependencies_unchanged: bool) -> bool {
+        match (base_matches, dependencies_unchanged) {
+            (false, _) => self.stale_at_consume += 1,
+            (true, false) => self.discarded_at_consume += 1,
+            (true, true) => {}
+        }
+        base_matches && dependencies_unchanged
+    }
+    /// The taken projection's overlay was built (`reused`) or was invalid (`invalid_at_use`).
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn used(&mut self, overlay_valid: bool) {
+        if overlay_valid {
+            self.reused += 1;
+        } else {
+            self.invalid_at_use += 1;
+        }
+    }
+    /// A successful worker result: accepted only with the candidate and every dependency
+    /// unchanged.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn result(&mut self, base_matches: bool, dependencies_unchanged: bool) -> bool {
+        match (base_matches, dependencies_unchanged) {
+            (false, _) => self.stale_at_result += 1,
+            (true, false) => self.discarded_at_result += 1,
+            (true, true) => self.accepted += 1,
+        }
+        base_matches && dependencies_unchanged
+    }
+    /// A cached projection left the cache without being used (replaced or removed).
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn dropped_if<T>(&mut self, removed: Option<T>) {
+        if removed.is_some() {
+            self.dropped += 1;
+        }
+    }
+    /// The report line with the two current gauges (`in_flight`, `cached`) that balance it.
+    pub(crate) fn line(&self, in_flight: usize, cached: usize) -> String {
+        format!(
+            "projection: requested={} queue_full={} observation_unknown={} accepted={} failed={} \
+             stale_result={} discarded_result={} in_flight={in_flight} reused={} \
+             invalid_at_use={} discarded_consume={} stale_consume={} dropped={} cached={cached}",
+            self.requested,
+            self.queue_full,
+            self.observation_unknown,
+            self.accepted,
+            self.failed,
+            self.stale_at_result,
+            self.discarded_at_result,
+            self.reused,
+            self.invalid_at_use,
+            self.discarded_at_consume,
+            self.stale_at_consume,
+            self.dropped,
+        )
+    }
 }
 
 #[cfg(feature = "crate_health")]
@@ -310,7 +447,7 @@ mod e9_tests {
             ],
             data: vec![],
         };
-        let deps = projection_dependencies(&candidate, &[refresh], &[bank, oracle]);
+        let deps = projection_dependencies(&candidate, &[refresh], &[bank, oracle], &[]);
         assert_eq!(deps.len(), 2);
         assert!(!deps.contains(&candidate));
         let install = |entries: &[(Pubkey, (u64, Vec<u8>))]| {
@@ -356,6 +493,177 @@ mod e9_tests {
             dependency_fingerprint(&install(&base[..2]), &deps),
             fp,
             "missing oracle"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod n3_n4_tests {
+    use super::*;
+    use marginfi_type_crate::types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup, WrappedI80F48,
+    };
+
+    struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+    impl AccountSource for Source {
+        fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+        }
+    }
+
+    /// N3: the projection dependency set contains the refresh accounts, the candidate's
+    /// observation accounts, the group and the FeeState; with a missing or an invalid bank the
+    /// observation set is unknown and the set is an error — never a smaller set.
+    #[test]
+    fn n3_unknown_observation_set_is_no_dependency_set() {
+        let program: Pubkey = protocol::PROGRAM_ID_MAINNET.parse().unwrap();
+        let (group, candidate, bank, reserve) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let one = |v: i128| WrappedI80F48 {
+            value: (v << 48).to_le_bytes(),
+        };
+        let wrap = |disc: [u8; 8], bytes: &[u8]| [disc.as_slice(), bytes].concat();
+        let mut b: Bank = bytemuck::Zeroable::zeroed();
+        b.group = group;
+        b.mint_decimals = 6;
+        b.asset_share_value = one(1);
+        b.config.operational_state = BankOperationalState::Operational;
+        b.config.oracle_setup = OracleSetup::Fixed;
+        b.config.fixed_price = one(1);
+        let mut a: MarginfiAccount = bytemuck::Zeroable::zeroed();
+        a.group = group;
+        a.lending_account.balances[0].active = 1;
+        a.lending_account.balances[0].bank_pk = bank;
+        a.lending_account.balances[0].asset_shares = one(10);
+        let refresh = solana_sdk::instruction::Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![solana_sdk::instruction::AccountMeta::new(reserve, false)],
+            data: vec![],
+        };
+        let state = |bank_data: Option<Vec<u8>>| {
+            let mut m = HashMap::from([
+                (
+                    candidate,
+                    (
+                        program,
+                        wrap(protocol::DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&a)),
+                    ),
+                ),
+                (
+                    group,
+                    (
+                        program,
+                        wrap(
+                            protocol::DISC_MARGINFI_GROUP,
+                            bytemuck::bytes_of(&<MarginfiGroup as bytemuck::Zeroable>::zeroed()),
+                        ),
+                    ),
+                ),
+            ]);
+            if let Some(d) = bank_data {
+                m.insert(bank, (program, d));
+            }
+            Source(m)
+        };
+        let set = |src: &Source| {
+            projection_dependency_set(
+                src,
+                &program,
+                &group,
+                &candidate,
+                std::slice::from_ref(&refresh),
+            )
+        };
+        let valid = set(&state(Some(wrap(
+            protocol::DISC_BANK,
+            bytemuck::bytes_of(&b),
+        ))))
+        .unwrap();
+        for k in [bank, reserve, group, protocol::fee_state_pda(&program)] {
+            assert!(valid.contains(&k), "{k}");
+        }
+        assert!(!valid.contains(&candidate));
+        assert!(set(&state(None)).is_err(), "missing bank");
+        assert!(set(&state(Some(vec![1; 64]))).is_err(), "invalid bank");
+    }
+
+    /// N6: repeated identical gaps are reported once, a changed gap (other code or detail) again,
+    /// a cleared gap once and then nothing; the state holds only banks with a current gap.
+    #[test]
+    fn n6_dependency_gaps_are_reported_on_change_only() {
+        use darkbot_project0::health::DependencyGap as G;
+        let mut seen = HashMap::new();
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let reported = (0..100)
+            .filter(|_| note_gap(&mut seen, a, Some(&G::Missing)))
+            .count();
+        assert_eq!(reported, 1);
+        assert!(note_gap(&mut seen, a, Some(&G::NotABank)), "other code");
+        assert!(!note_gap(&mut seen, a, Some(&G::NotABank)));
+        let x = G::UnsupportedOracle("X".into());
+        let y = G::UnsupportedOracle("Y".into());
+        assert!(note_gap(&mut seen, a, Some(&x)));
+        assert!(note_gap(&mut seen, a, Some(&y)), "same code, other detail");
+        assert!(note_gap(&mut seen, b, Some(&G::Missing)), "per bank");
+        assert_eq!(seen.len(), 2);
+        assert!(note_gap(&mut seen, a, None), "cleared once");
+        assert!(!note_gap(&mut seen, a, None));
+        assert!(
+            !note_gap(&mut seen, Pubkey::new_unique(), None),
+            "never had a gap"
+        );
+        assert_eq!(seen.len(), 1, "bounded by banks with a current gap");
+    }
+
+    /// N4: every projection outcome lands in exactly one counter, so the report balances:
+    /// requested = accepted + failed + stale_result + discarded_result + in_flight and
+    /// accepted = reused + discarded_consume + stale_consume + dropped + cached.
+    #[test]
+    fn n4_projection_outcomes_are_counted_once() {
+        let mut p = ProjectionStats {
+            requested: 7,
+            queue_full: 2,
+            observation_unknown: 1,
+            ..Default::default()
+        };
+        // Results of six requests (one still in flight).
+        for (base, deps) in [(true, true), (true, true), (true, true), (true, true)] {
+            assert!(p.result(base, deps));
+        }
+        assert!(!p.result(false, true), "candidate changed");
+        assert!(!p.result(true, false), "dependency changed");
+        // Uses of the four accepted ones: reused, E9-discarded, candidate changed, replaced;
+        // none remains cached; a taken one is reused only once its overlay is built.
+        assert!(p.consume(true, true));
+        assert_eq!(p.reused, 0, "not yet used");
+        p.used(true);
+        assert!(!p.consume(true, false));
+        assert!(!p.consume(false, false));
+        p.dropped_if(Some(()));
+        p.dropped_if(None::<()>);
+        let (in_flight, cached) = (1u64, 0u64);
+        assert_eq!(
+            p.requested,
+            p.accepted + p.failed + p.stale_at_result + p.discarded_at_result + in_flight
+        );
+        assert_eq!(
+            p.accepted,
+            p.reused
+                + p.invalid_at_use
+                + p.discarded_at_consume
+                + p.stale_at_consume
+                + p.dropped
+                + cached
+        );
+        assert_eq!(
+            p.line(1, 0),
+            "projection: requested=7 queue_full=2 observation_unknown=1 accepted=4 failed=0 \
+             stale_result=1 discarded_result=1 in_flight=1 reused=1 invalid_at_use=0 \
+             discarded_consume=1 stale_consume=1 dropped=1 cached=0"
         );
     }
 }

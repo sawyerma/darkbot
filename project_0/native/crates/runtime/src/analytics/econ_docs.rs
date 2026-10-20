@@ -492,6 +492,15 @@ pub struct Section<T> {
     pub window_delta: T,
     pub cumulative: T,
 }
+impl<T> Section<T> {
+    /// The same section in another (migrated) layout.
+    fn migrate<U: From<T>>(self) -> Section<U> {
+        Section {
+            window_delta: self.window_delta.into(),
+            cumulative: self.cumulative.into(),
+        }
+    }
+}
 
 /// Market window delta: the metrics plus the capture-counter delta between checkpoints.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -600,7 +609,7 @@ pub(super) struct SnapshotReportV2 {
     bottlenecks: Section<Bottlenecks>,
     unknowns: Section<Unknowns>,
     canonical_market_truth: Option<CanonicalTruthRef>,
-    canonical: Section<CanonicalSummary>,
+    canonical: Section<CanonicalSummaryV3>,
     authoritative_analytics: String,
 }
 impl From<SnapshotReportV2> for SnapshotReport {
@@ -627,7 +636,7 @@ impl From<SnapshotReportV2> for SnapshotReport {
             bottlenecks: v.bottlenecks,
             unknowns: v.unknowns,
             canonical_market_truth: v.canonical_market_truth,
-            canonical: v.canonical,
+            canonical: v.canonical.migrate(),
             authoritative_analytics: v.authoritative_analytics,
             race_margins: Section {
                 window_delta: RaceMargins::earlier_schema(),
@@ -636,13 +645,79 @@ impl From<SnapshotReportV2> for SnapshotReport {
         }
     }
 }
+/// Layout of schema 3 (A2, before N1/N5): canonical summary and race margins without the
+/// attribution model and the technical figures.
+#[derive(Deserialize)]
+pub(super) struct SnapshotReportV3 {
+    measurement_plan: MeasurementPlan,
+    capture_window: Option<CaptureWindow>,
+    identity: Identity,
+    window: Window,
+    technical_qualification: Technical,
+    non_claims: Vec<String>,
+    economic_sample_status: String,
+    market_edge_status: String,
+    executable_edge_status: String,
+    competition_evidence_status: String,
+    live_ready: bool,
+    market: MarketSection,
+    shadow: Section<ShadowMetrics>,
+    matching: Section<Matching>,
+    economics: Section<EconomicsMetrics>,
+    capital: Section<Vec<CapitalReport>>,
+    competition: Section<RacePool>,
+    race_timing: Section<RaceTiming>,
+    bottlenecks: Section<Bottlenecks>,
+    unknowns: Section<Unknowns>,
+    canonical_market_truth: Option<CanonicalTruthRef>,
+    canonical: Section<CanonicalSummaryV3>,
+    authoritative_analytics: String,
+    race_margins: Section<RaceMarginsV3>,
+}
+impl From<SnapshotReportV3> for SnapshotReport {
+    fn from(v: SnapshotReportV3) -> Self {
+        Self {
+            measurement_plan: v.measurement_plan,
+            capture_window: v.capture_window,
+            identity: v.identity,
+            window: v.window,
+            technical_qualification: v.technical_qualification,
+            non_claims: v.non_claims,
+            economic_sample_status: v.economic_sample_status,
+            market_edge_status: v.market_edge_status,
+            executable_edge_status: v.executable_edge_status,
+            competition_evidence_status: v.competition_evidence_status,
+            live_ready: v.live_ready,
+            market: v.market,
+            shadow: v.shadow,
+            matching: v.matching,
+            economics: v.economics,
+            capital: v.capital,
+            competition: v.competition,
+            race_timing: v.race_timing,
+            bottlenecks: v.bottlenecks,
+            unknowns: v.unknowns,
+            canonical_market_truth: v.canonical_market_truth,
+            canonical: v.canonical.migrate(),
+            authoritative_analytics: v.authoritative_analytics,
+            race_margins: v.race_margins.migrate(),
+        }
+    }
+}
+/// N1/N5: schema 4; schema 2 and 3 frames are read through their own explicit layouts.
+fn decode_report_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<SnapshotReport>> {
+    use crate::analytics::payload::{decode_wire, TYPED};
+    match schema {
+        TYPED => Some(decode_wire::<SnapshotReportV2>(bytes).map(Into::into)),
+        3 => Some(decode_wire::<SnapshotReportV3>(bytes).map(Into::into)),
+        _ => None,
+    }
+}
 impl crate::analytics::payload::Payload for SnapshotReport {
     const KIND: u16 = kind::ECON_FINAL;
-    const SCHEMA: u16 = 3;
+    const SCHEMA: u16 = 4;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == crate::analytics::payload::TYPED).then(|| {
-            crate::analytics::payload::decode_wire::<SnapshotReportV2>(bytes).map(Self::from)
-        })
+        decode_report_earlier(schema, bytes)
     }
 }
 
@@ -653,24 +728,38 @@ pub struct SnapshotFrame {
     pub finalizing: bool,
     pub report: SnapshotReport,
 }
-/// Layout of schema 2 (before A2).
+/// Layout of schema 2 (before A2) and 3 (before N1/N5): the frame around that report layout.
 #[derive(Deserialize)]
-struct SnapshotFrameV2 {
+struct SnapshotFrameEarlier<R> {
     index: u64,
     finalizing: bool,
-    report: SnapshotReportV2,
+    report: R,
+}
+impl<R: Into<SnapshotReport>> SnapshotFrameEarlier<R> {
+    fn migrate(self) -> SnapshotFrame {
+        SnapshotFrame {
+            index: self.index,
+            finalizing: self.finalizing,
+            report: self.report.into(),
+        }
+    }
 }
 impl crate::analytics::payload::Payload for SnapshotFrame {
     const KIND: u16 = kind::ECON_SNAPSHOT;
-    const SCHEMA: u16 = 3;
+    const SCHEMA: u16 = 4;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == crate::analytics::payload::TYPED).then(|| {
-            crate::analytics::payload::decode_wire::<SnapshotFrameV2>(bytes).map(|v| Self {
-                index: v.index,
-                finalizing: v.finalizing,
-                report: v.report.into(),
-            })
-        })
+        use crate::analytics::payload::{decode_wire, TYPED};
+        match schema {
+            TYPED => Some(
+                decode_wire::<SnapshotFrameEarlier<SnapshotReportV2>>(bytes)
+                    .map(SnapshotFrameEarlier::migrate),
+            ),
+            3 => Some(
+                decode_wire::<SnapshotFrameEarlier<SnapshotReportV3>>(bytes)
+                    .map(SnapshotFrameEarlier::migrate),
+            ),
+            _ => None,
+        }
     }
 }
 

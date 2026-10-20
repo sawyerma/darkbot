@@ -23,8 +23,8 @@ mod canonical;
 mod docs;
 pub use canonical::{
     canonical_legacy_view, join as canonical_join, joined_facts, race_margins, record_digest,
-    CanonicalSummary, CaptureFilter, JoinContext, JoinOutcome, Joined as CanonicalJoin,
-    JoinedFacts, RaceMargins, ReplayScope,
+    CanonicalSummary, CanonicalSummaryV3, CaptureFilter, JoinContext, JoinOutcome,
+    Joined as CanonicalJoin, JoinedFacts, RaceMargins, RaceMarginsV3, ReplayScope,
 };
 pub use docs::*;
 
@@ -1281,8 +1281,11 @@ impl Worker {
         let mut stage_late: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
         let mut stage_weighted: BTreeMap<&str, f64> = BTreeMap::new();
         let mut stage_sufficient: BTreeMap<&str, EdgeCount> = BTreeMap::new();
+        // N1: every LossReason (Debug name) is pre-seeded, so each appears, with 0 if unseen.
         let mut bottlenecks: BTreeMap<String, Bottleneck> = [
+            "Ingress",
             "State",
+            "StateRace",
             "Health",
             "CircuitBreaker",
             "Bankruptcy",
@@ -1294,6 +1297,10 @@ impl Worker {
             "Economics",
             "Routing",
             "Build",
+            "Submission",
+            "Tip",
+            "RpcBudget",
+            "RpcDeadline",
             "Simulation",
             "EconomicSkip",
             "ThresholdTooHigh",

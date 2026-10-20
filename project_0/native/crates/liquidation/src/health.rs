@@ -205,6 +205,19 @@ pub mod crate_impl {
         Ok(out)
     }
 
+    /// N8: the balances whose banks form the maintenance EMODE set — active and with a
+    /// non-empty liability side, the condition of the pinned program's balance walk
+    /// (`marginfi_account.rs`, `!balance.is_empty(BalanceSide::Liabilities)` over active
+    /// balances). Health and sizing select through this one filter.
+    pub fn emode_liability_balances(
+        acc: &MarginfiAccount,
+    ) -> impl Iterator<Item = &marginfi_type_crate::types::Balance> + '_ {
+        acc.lending_account
+            .balances
+            .iter()
+            .filter(|b| b.is_active() && !b.is_empty(BalanceSide::Liabilities))
+    }
+
     /// B12: the maintenance EMODE configuration of an account's liability banks exactly as the
     /// pinned program reconciles it, including the group's same-asset EMODE. Health and sizing
     /// both use this one function, so their asset/liability weights cannot diverge.
@@ -432,15 +445,7 @@ pub mod crate_impl {
             group: &MarginfiGroup,
         ) -> Result<ReconciledEmodeConfig, HealthError> {
             let mut banks = Vec::new();
-            for balance in acc
-                .lending_account
-                .balances
-                .iter()
-                .filter(|b| b.is_active())
-            {
-                if balance.is_empty(BalanceSide::Liabilities) {
-                    continue;
-                }
+            for balance in emode_liability_balances(acc) {
                 let (_, _, bdata) = self.raw(&balance.bank_pk)?;
                 banks.push(load_bank(bdata)?);
             }

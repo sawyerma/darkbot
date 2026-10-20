@@ -273,17 +273,13 @@ impl ShadowOwner {
                             r.slot == done.base_slot && hash(&r.data) == done.base_account_hash
                         })
                         .unwrap_or(false);
-                    // E9: a dependency revised while the worker projected makes it stale too.
+                    // E9: a dependency revised while the worker projected makes it stale too
+                    // (N4: counted, no line per discard).
                     let dependencies_match = dependency_fingerprint(&self.st, &done.dependencies)
                         == done.dependency_fingerprint;
-                    if base_matches && !dependencies_match {
-                        owner_log!(
-                            self,
-                            "projection_dependencies_changed: account={} at=result",
-                            done.account
-                        );
-                    }
-                    let canonical_matches = base_matches && dependencies_match;
+                    let canonical_matches = self
+                        .projection_stats
+                        .result(base_matches, dependencies_match);
 
                     // [FIX-116b] The candidate MarginfiAccount is readonly during the external
                     // refresh prefix and is therefore intentionally not requested as a post-account.
@@ -292,7 +288,7 @@ impl ShadowOwner {
                         if targeted_probe_result {
                             targeted_status = Some("ready");
                         }
-                        self.projection_cache.insert(
+                        let replaced = self.projection_cache.insert(
                             done.account,
                             CachedProjection {
                                 base_account_hash: done.base_account_hash,
@@ -303,6 +299,7 @@ impl ShadowOwner {
                                 dependency_fingerprint: done.dependency_fingerprint,
                             },
                         );
+                        self.projection_stats.dropped_if(replaced);
                         self.detect_queue.push_front((
                             done.account,
                             done.t_rx_ns,
@@ -351,7 +348,8 @@ impl ShadowOwner {
                         if targeted_probe_result {
                             targeted_status = Some("stale");
                         }
-                        self.projection_cache.remove(&done.account);
+                        let removed = self.projection_cache.remove(&done.account);
+                        self.projection_stats.dropped_if(removed);
                         let line = RecordEvent::ProjectionStale {
                             account: done.account,
                             base_slot: done.base_slot,
@@ -365,7 +363,9 @@ impl ShadowOwner {
                     if targeted_probe_result {
                         targeted_status = Some("failed");
                     }
-                    self.projection_cache.remove(&done.account);
+                    self.projection_stats.failed += 1;
+                    let removed = self.projection_cache.remove(&done.account);
+                    self.projection_stats.dropped_if(removed);
                     let line = RecordEvent::ProjectionFailed {
                         account: done.account,
                         base_slot: done.base_slot,

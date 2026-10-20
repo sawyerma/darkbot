@@ -60,6 +60,13 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "Ingress": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "IntegrationRefresh": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
@@ -102,6 +109,20 @@
             "opportunity_count": 1,
             "percentage_of_known_rejected_executable_edge": 20.0
           },
+          "RpcBudget": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "RpcDeadline": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "Simulation": {
             "known_candidate_net_edge_usd_micro": 199999500,
             "market_matched_count": 0,
@@ -123,7 +144,28 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "StateRace": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Submission": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "ThresholdTooHigh": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Tip": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
             "matched_market_gross_edge_usd": null,
@@ -161,12 +203,18 @@
           "Economics",
           "Funding",
           "Health",
+          "Ingress",
           "IntegrationRefresh",
           "MissingAta",
           "RaceLate",
+          "RpcBudget",
+          "RpcDeadline",
           "Sizing",
           "State",
+          "StateRace",
+          "Submission",
           "ThresholdTooHigh",
+          "Tip",
           "UnsupportedIntegration"
         ]
       },
@@ -228,6 +276,13 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "Ingress": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "IntegrationRefresh": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
@@ -270,6 +325,20 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "RpcBudget": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "RpcDeadline": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "Simulation": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
@@ -291,7 +360,28 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "StateRace": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Submission": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "ThresholdTooHigh": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Tip": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
             "matched_market_gross_edge_usd": null,
@@ -325,15 +415,21 @@
           "Economics",
           "Funding",
           "Health",
+          "Ingress",
           "IntegrationRefresh",
           "MissingAta",
           "RaceLate",
           "RaceSameSlotUnknown",
           "Routing",
+          "RpcBudget",
+          "RpcDeadline",
           "Simulation",
           "Sizing",
           "State",
+          "StateRace",
+          "Submission",
           "ThresholdTooHigh",
+          "Tip",
           "Unknown",
           "UnsupportedIntegration"
         ]
@@ -625,6 +721,18 @@
           "p99": null,
           "total": null
         },
+        "local_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "loss_attribution": {
           "BANKRUPTCY": {
             "count": 0,
@@ -725,7 +833,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "CIRCUIT_BREAKER": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ECONOMICS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMICS_UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMIC_SKIP": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -792,6 +999,72 @@
             "our_edge_unknown_count": 0
           },
           "HEALTH_ERROR": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "INGRESS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "INTEGRATION_REFRESH": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -956,6 +1229,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "RPC_BUDGET": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_DEADLINE": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "SIGNING": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -1022,6 +1361,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SIZING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "STATE": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "STATE_RACE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -1055,7 +1460,139 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SUBMISSION": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "THRESHOLD_TOO_HIGH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "TIP": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "UNSUPPORTED_INTEGRATION": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -1122,6 +1659,7 @@
             "our_edge_unknown_count": 0
           }
         },
+        "loss_attribution_model": "EXHAUSTIVE_V1: one bucket per LossReason; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 4,
@@ -1596,6 +2134,18 @@
           "p99": null,
           "total": null
         },
+        "required_local_speedup_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "speedup_sensitivity": [
           {
             "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS",
@@ -1893,6 +2443,18 @@
           "p99": null,
           "total": null
         },
+        "local_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "loss_attribution": {
           "BANKRUPTCY": {
             "count": 0,
@@ -1993,7 +2555,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "CIRCUIT_BREAKER": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ECONOMICS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMICS_UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMIC_SKIP": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -2092,6 +2753,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "INGRESS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "INTEGRATION_REFRESH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "MISSING_ATA": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -2158,7 +2885,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "NO_PROVEN_TECHNICAL_LOSS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ROUTING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_BUDGET": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_DEADLINE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -2257,6 +3083,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SIZING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "STATE": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "STATE_RACE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -2290,7 +3182,139 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SUBMISSION": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "THRESHOLD_TOO_HIGH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "TIP": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "UNSUPPORTED_INTEGRATION": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -2357,6 +3381,7 @@
             "our_edge_unknown_count": 0
           }
         },
+        "loss_attribution_model": "EXHAUSTIVE_V1: one bucket per LossReason; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 1,
@@ -2728,6 +3753,18 @@
         },
         "race": {},
         "required_local_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "required_local_speedup_ms_technical": {
           "average": null,
           "count_known": 0,
           "max": null,
@@ -4333,6 +5370,18 @@
           "p99": null,
           "total": null
         },
+        "canonical_slot_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "canonical_slot_speedup_sensitivity": [
           {
             "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
@@ -4393,6 +5442,19 @@
           "p99": null,
           "total": null
         },
+        "required_canonical_slot_speedup_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "technical_status": "COMPUTED: exact-plan matches signed and simulated PASS (ShadowReady/ShadowTechnicalReady)",
         "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
         "winner_slot_margin_status": "COMPUTED"
       },
@@ -4409,6 +5471,18 @@
           "p99": null,
           "total": null
         },
+        "canonical_slot_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "canonical_slot_speedup_sensitivity": [
           {
             "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
@@ -4469,6 +5543,19 @@
           "p99": null,
           "total": null
         },
+        "required_canonical_slot_speedup_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "technical_status": "COMPUTED: exact-plan matches signed and simulated PASS (ShadowReady/ShadowTechnicalReady)",
         "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
         "winner_slot_margin_status": "COMPUTED"
       }
@@ -5175,6 +6262,13 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "Ingress": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "IntegrationRefresh": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
@@ -5217,6 +6311,20 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "RpcBudget": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "RpcDeadline": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "Simulation": {
             "known_candidate_net_edge_usd_micro": 199999500,
             "market_matched_count": 0,
@@ -5238,7 +6346,28 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "StateRace": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Submission": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "ThresholdTooHigh": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Tip": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
             "matched_market_gross_edge_usd": null,
@@ -5273,14 +6402,20 @@
           "Economics",
           "Funding",
           "Health",
+          "Ingress",
           "IntegrationRefresh",
           "MissingAta",
           "RaceLate",
           "RaceUnresolved",
           "Routing",
+          "RpcBudget",
+          "RpcDeadline",
           "Sizing",
           "State",
+          "StateRace",
+          "Submission",
           "ThresholdTooHigh",
+          "Tip",
           "Unknown",
           "UnsupportedIntegration"
         ]
@@ -5343,6 +6478,13 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "Ingress": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "IntegrationRefresh": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
@@ -5385,6 +6527,20 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "RpcBudget": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "RpcDeadline": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "Simulation": {
             "known_candidate_net_edge_usd_micro": 199999500,
             "market_matched_count": 0,
@@ -5406,7 +6562,28 @@
             "opportunity_count": 0,
             "percentage_of_known_rejected_executable_edge": 0.0
           },
+          "StateRace": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Submission": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
           "ThresholdTooHigh": {
+            "known_candidate_net_edge_usd_micro": 0,
+            "market_matched_count": 0,
+            "matched_market_gross_edge_usd": null,
+            "opportunity_count": 0,
+            "percentage_of_known_rejected_executable_edge": 0.0
+          },
+          "Tip": {
             "known_candidate_net_edge_usd_micro": 0,
             "market_matched_count": 0,
             "matched_market_gross_edge_usd": null,
@@ -5441,14 +6618,20 @@
           "Economics",
           "Funding",
           "Health",
+          "Ingress",
           "IntegrationRefresh",
           "MissingAta",
           "RaceLate",
           "RaceUnresolved",
           "Routing",
+          "RpcBudget",
+          "RpcDeadline",
           "Sizing",
           "State",
+          "StateRace",
+          "Submission",
           "ThresholdTooHigh",
+          "Tip",
           "Unknown",
           "UnsupportedIntegration"
         ]
@@ -5702,6 +6885,18 @@
           "p99": null,
           "total": null
         },
+        "local_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "loss_attribution": {
           "BANKRUPTCY": {
             "count": 0,
@@ -5802,7 +6997,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "CIRCUIT_BREAKER": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ECONOMICS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMICS_UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMIC_SKIP": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -5901,6 +7195,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "INGRESS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "INTEGRATION_REFRESH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "MISSING_ATA": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -5967,7 +7327,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "NO_PROVEN_TECHNICAL_LOSS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ROUTING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_BUDGET": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_DEADLINE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -6066,6 +7525,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SIZING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "STATE": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "STATE_RACE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -6099,7 +7624,139 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SUBMISSION": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "THRESHOLD_TOO_HIGH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "TIP": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "UNSUPPORTED_INTEGRATION": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -6166,6 +7823,7 @@
             "our_edge_unknown_count": 0
           }
         },
+        "loss_attribution_model": "EXHAUSTIVE_V1: one bucket per LossReason; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 0,
@@ -6537,6 +8195,18 @@
         },
         "race": {},
         "required_local_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "required_local_speedup_ms_technical": {
           "average": null,
           "count_known": 0,
           "max": null,
@@ -6845,6 +8515,18 @@
           "p99": null,
           "total": null
         },
+        "local_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "loss_attribution": {
           "BANKRUPTCY": {
             "count": 0,
@@ -6945,7 +8627,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "CIRCUIT_BREAKER": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ECONOMICS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMICS_UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "ECONOMIC_SKIP": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -7044,6 +8825,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "INGRESS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "INTEGRATION_REFRESH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "MISSING_ATA": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -7110,7 +8957,106 @@
             },
             "our_edge_unknown_count": 0
           },
+          "NO_PROVEN_TECHNICAL_LOSS": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "ROUTING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_BUDGET": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "RPC_DEADLINE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -7209,6 +9155,72 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SIZING": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "STATE": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "STATE_RACE": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
@@ -7242,7 +9254,139 @@
             },
             "our_edge_unknown_count": 0
           },
+          "SUBMISSION": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "THRESHOLD_TOO_HIGH": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "TIP": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
           "UNKNOWN": {
+            "count": 0,
+            "interpretation": "opportunity attribution; not realized monetary loss",
+            "known_market_gross_edge_usd": {
+              "count_known": 0,
+              "count_unknown": 0,
+              "distribution": {
+                "average": null,
+                "count_known": 0,
+                "max": null,
+                "median": null,
+                "min": null,
+                "p10": null,
+                "p50": null,
+                "p90": null,
+                "p99": null,
+                "total": null
+              }
+            },
+            "known_our_executable_net_edge_usd": {
+              "average": null,
+              "count_known": 0,
+              "max": null,
+              "median": null,
+              "min": null,
+              "p10": null,
+              "p50": null,
+              "p90": null,
+              "p99": null,
+              "total": null
+            },
+            "our_edge_unknown_count": 0
+          },
+          "UNSUPPORTED_INTEGRATION": {
             "count": 0,
             "interpretation": "opportunity attribution; not realized monetary loss",
             "known_market_gross_edge_usd": {
@@ -7309,6 +9453,7 @@
             "our_edge_unknown_count": 0
           }
         },
+        "loss_attribution_model": "EXHAUSTIVE_V1: one bucket per LossReason; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 0,
@@ -7680,6 +9825,18 @@
         },
         "race": {},
         "required_local_speedup_ms": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "required_local_speedup_ms_technical": {
           "average": null,
           "count_known": 0,
           "max": null,
@@ -9260,6 +11417,18 @@
           "p99": null,
           "total": null
         },
+        "canonical_slot_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "canonical_slot_speedup_sensitivity": [
           {
             "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
@@ -9320,6 +11489,19 @@
           "p99": null,
           "total": null
         },
+        "required_canonical_slot_speedup_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "technical_status": "COMPUTED: exact-plan matches signed and simulated PASS (ShadowReady/ShadowTechnicalReady)",
         "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
         "winner_slot_margin_status": "COMPUTED"
       },
@@ -9336,6 +11518,18 @@
           "p99": null,
           "total": null
         },
+        "canonical_slot_margin_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
         "canonical_slot_speedup_sensitivity": [
           {
             "claim": "COUNTERFACTUAL LOCAL BOUNDARY ANALYSIS (first local winner-slot receipt)",
@@ -9396,6 +11590,19 @@
           "p99": null,
           "total": null
         },
+        "required_canonical_slot_speedup_ms_technical": {
+          "average": null,
+          "count_known": 0,
+          "max": null,
+          "median": null,
+          "min": null,
+          "p10": null,
+          "p50": null,
+          "p90": null,
+          "p99": null,
+          "total": null
+        },
+        "technical_status": "COMPUTED: exact-plan matches signed and simulated PASS (ShadowReady/ShadowTechnicalReady)",
         "winner_rx_margin_status": "NOT_COMPUTED: market commitment finalized; the winner's live receipt is its finalized notification, not a race observation; the winner-slot margin is the race figure",
         "winner_slot_margin_status": "COMPUTED"
       }

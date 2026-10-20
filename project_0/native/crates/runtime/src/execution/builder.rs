@@ -65,15 +65,18 @@ pub mod p0 {
 
     /// B15: collateral a plan leaves in the wallet, valued like the seized amount itself
     /// (`Sizing::seized_equity_value`: protocol equity price of the exact `withdraw_amount`).
-    /// Inventory classes keep the whole withdrawal; ZERO_PREFUND swaps exactly the execution
-    /// amount ExactIn inside the same transaction (`route.amount_in` is checked against it) and
-    /// a flash-funded plan repays in-TX, so neither leaves collateral behind.
+    /// Inventory classes keep the whole withdrawal.
+    /// N7 (stage 1): ZERO_PREFUND and flash-funded plans hold the full seized value too. That
+    /// their in-TX swap/repayment leaves nothing behind is not proven from the real token flows
+    /// (credited native amount and mint of the withdrawal incl. integration conversion, ExactIn
+    /// input, remainder, wallet deltas); until it is, the hold is never optimistically zero.
     pub(crate) fn inventory_hold_usd_micro(class: FundingClass, sz: &Sizing) -> u64 {
         match class {
             FundingClass::NoSwapInventory
             | FundingClass::PreheldInventory
-            | FundingClass::JitShortfall => sz.seized_equity_value,
-            FundingClass::ZeroPrefundSameTx | FundingClass::FlashFunded => 0,
+            | FundingClass::JitShortfall
+            | FundingClass::ZeroPrefundSameTx
+            | FundingClass::FlashFunded => sz.seized_equity_value,
         }
     }
 
@@ -1397,80 +1400,118 @@ pub mod p0 {
             assert_eq!(plus_record_rent(Some(u64::MAX), Some(1)), None);
         }
 
-        /// B4 through the production `plans()` path: every plan of an account whose record is
-        /// still unlinked carries the record rent (Rent sysvar × conservative SOL price) on top
-        /// of its sizing's rent/token cost; a linked record adds nothing; an unknown price or a
-        /// missing Rent sysvar keeps every plan's rent/token cost UNKNOWN.
-        #[test]
-        fn b4_plans_add_the_record_rent_only_when_the_record_is_created() {
-            use darkbot_project0::protocol;
-            use marginfi_type_crate::types::{
-                BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup, WrappedI80F48,
-            };
-            use std::collections::HashMap;
-            struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
-            impl AccountSource for Source {
-                fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
-                    self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+        /// A real `P0ReceivershipBuilder::plans()` setup: a MarginfiAccount with one asset and one
+        /// liability balance on two Fixed-oracle banks, their mints, the group and (optionally)
+        /// the Rent sysvar; sizing and routes are the inputs under test.
+        struct PlansFixture {
+            program: Pubkey,
+            group: Pubkey,
+            liquidator: Pubkey,
+            account: Pubkey,
+            banks: [(Pubkey, Pubkey); 2],
+            token_program: Pubkey,
+            table: darkbot_project0::planner::InstructionTable,
+            sizing: OneSizing,
+        }
+        struct FixtureSource(std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for FixtureSource {
+            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        struct OneSizing(Sizing);
+        impl SizingProvider for OneSizing {
+            fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, String> {
+                Ok(vec![self.0.clone()])
+            }
+        }
+        /// The ExactIn route a router would return (or none).
+        struct TestRoutes(Option<Route>);
+        impl RouteProvider for TestRoutes {
+            fn quote_exact_in(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                _: u64,
+                _: &[PrewarmedAta],
+            ) -> Result<Option<Route>, String> {
+                Ok(self.0.clone())
+            }
+            fn quote_exact_out(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                _: u64,
+            ) -> Result<Option<Route>, String> {
+                Ok(None)
+            }
+        }
+        impl PlansFixture {
+            fn new() -> Self {
+                let program: Pubkey = darkbot_project0::protocol::PROGRAM_ID_MAINNET
+                    .parse()
+                    .unwrap();
+                let mut banks = [Pubkey::new_unique(), Pubkey::new_unique()];
+                banks.sort_unstable_by(|a, b| b.cmp(a));
+                Self {
+                    program,
+                    group: Pubkey::new_unique(),
+                    liquidator: Pubkey::new_unique(),
+                    account: Pubkey::new_unique(),
+                    banks: [
+                        (banks[0], Pubkey::new_unique()),
+                        (banks[1], Pubkey::new_unique()),
+                    ],
+                    token_program: darkbot_project0::protocol::TOKEN_PROGRAM_ID
+                        .parse()
+                        .unwrap(),
+                    table: darkbot_project0::receivership::builders::instruction_table(&program)
+                        .unwrap(),
+                    sizing: OneSizing(Sizing {
+                        asset_bank: banks[0],
+                        liab_bank: banks[1],
+                        withdraw_amount: 1_000,
+                        repay_amount: 500,
+                        repay_all: false,
+                        seized_equity_value: 1_050,
+                        repay_value: 500,
+                        liability_needed_value: 500,
+                        liability_inventory_value: 10_000,
+                        funding_bank: None,
+                        funding_available_value: 0,
+                        protocol_fees: 0,
+                        flat_sol_fee: 0,
+                        rent_and_token: 7,
+                        premium_bps: 500,
+                        slippage_bps: 0,
+                    }),
                 }
             }
-            struct OneSizing(Sizing);
-            impl SizingProvider for OneSizing {
-                fn sizes(&self, _: &Pubkey, _: u64, _: u64) -> Result<Vec<Sizing>, String> {
-                    Ok(vec![self.0.clone()])
-                }
-            }
-            struct NoRoutes;
-            impl RouteProvider for NoRoutes {
-                fn quote_exact_in(
-                    &self,
-                    _: &Pubkey,
-                    _: &Pubkey,
-                    _: u64,
-                    _: &[PrewarmedAta],
-                ) -> Result<Option<Route>, String> {
-                    Ok(None)
-                }
-                fn quote_exact_out(
-                    &self,
-                    _: &Pubkey,
-                    _: &Pubkey,
-                    _: u64,
-                ) -> Result<Option<Route>, String> {
-                    Ok(None)
-                }
-            }
-            let program: Pubkey = protocol::PROGRAM_ID_MAINNET.parse().unwrap();
-            // I80F48 has 48 fractional bits: `v` as its raw fixed-point value.
-            let one = |v: i128| WrappedI80F48 {
-                value: (v << 48).to_le_bytes(),
-            };
-            let token_program: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().unwrap();
-            let (group, liquidator, account) = (
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-            );
-            let mut banks = [Pubkey::new_unique(), Pubkey::new_unique()];
-            banks.sort_unstable_by(|a, b| b.cmp(a));
-            let (asset_bank, liab_bank) = (banks[0], banks[1]);
-            let (asset_mint, liab_mint) = (Pubkey::new_unique(), Pubkey::new_unique());
-            let wrap = |disc: [u8; 8], bytes: &[u8]| [disc.as_slice(), bytes].concat();
-            let state = |record: Pubkey, rent_sysvar: bool| {
-                let mut m: HashMap<Pubkey, (Pubkey, Vec<u8>)> = HashMap::new();
+            fn state(&self, record: Pubkey, rent_sysvar: bool) -> FixtureSource {
+                use darkbot_project0::protocol;
+                use marginfi_type_crate::types::{
+                    BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup,
+                    WrappedI80F48,
+                };
+                // I80F48 has 48 fractional bits: `v` as its raw fixed-point value.
+                let one = |v: i128| WrappedI80F48 {
+                    value: (v << 48).to_le_bytes(),
+                };
+                let wrap = |disc: [u8; 8], bytes: &[u8]| [disc.as_slice(), bytes].concat();
+                let mut m = std::collections::HashMap::new();
                 m.insert(
-                    group,
+                    self.group,
                     (
-                        program,
+                        self.program,
                         wrap(
                             protocol::DISC_MARGINFI_GROUP,
                             bytemuck::bytes_of(&<MarginfiGroup as bytemuck::Zeroable>::zeroed()),
                         ),
                     ),
                 );
-                for (bank_key, mint) in [(asset_bank, asset_mint), (liab_bank, liab_mint)] {
+                for (bank_key, mint) in self.banks {
                     let mut b: Bank = bytemuck::Zeroable::zeroed();
-                    b.group = group;
+                    b.group = self.group;
                     b.mint = mint;
                     b.mint_decimals = 6;
                     b.asset_share_value = one(1);
@@ -1484,24 +1525,27 @@ pub mod p0 {
                     b.config.fixed_price = one(1);
                     m.insert(
                         bank_key,
-                        (program, wrap(protocol::DISC_BANK, bytemuck::bytes_of(&b))),
+                        (
+                            self.program,
+                            wrap(protocol::DISC_BANK, bytemuck::bytes_of(&b)),
+                        ),
                     );
-                    m.insert(mint, (token_program, vec![0; 82]));
+                    m.insert(mint, (self.token_program, vec![0; 82]));
                 }
                 let mut a: MarginfiAccount = bytemuck::Zeroable::zeroed();
-                a.group = group;
+                a.group = self.group;
                 a.liquidation_record = record;
                 let bal = &mut a.lending_account.balances;
                 bal[0].active = 1;
-                bal[0].bank_pk = asset_bank;
+                bal[0].bank_pk = self.banks[0].0;
                 bal[0].asset_shares = one(1_000);
                 bal[1].active = 1;
-                bal[1].bank_pk = liab_bank;
+                bal[1].bank_pk = self.banks[1].0;
                 bal[1].liability_shares = one(1_500);
                 m.insert(
-                    account,
+                    self.account,
                     (
-                        program,
+                        self.program,
                         wrap(protocol::DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&a)),
                     ),
                 );
@@ -1514,57 +1558,40 @@ pub mod p0 {
                         ),
                     );
                 }
-                Source(m)
-            };
-            let sizing = OneSizing(Sizing {
-                asset_bank,
-                liab_bank,
-                withdraw_amount: 1_000,
-                repay_amount: 500,
-                repay_all: false,
-                seized_equity_value: 1_050,
-                repay_value: 500,
-                liability_needed_value: 500,
-                liability_inventory_value: 10_000,
-                funding_bank: None,
-                funding_available_value: 0,
-                protocol_fees: 0,
-                flat_sol_fee: 0,
-                rent_and_token: 7,
-                premium_bps: 500,
-                slippage_bps: 0,
-            });
-            let table =
-                darkbot_project0::receivership::builders::instruction_table(&program).unwrap();
-            let inventory = |_: &Pubkey| 10_000u64;
-            let ata = |mint: &Pubkey| {
-                Some(get_associated_token_address_with_program_id(
-                    &liquidator,
-                    mint,
-                    &token_program,
-                ))
-            };
-            let lamports = |l: u64| Some(l);
-            // 150 USD/SOL, rounded up: the record rent 4_510_080 lamports ⇒ 676_512 micro.
-            let price = |l: u64| Some((u128::from(l) * 150).div_ceil(1_000) as u64);
-            let unknown_price = |_: u64| None;
-            let rent_of = |src: &Source, rent: &dyn Fn(u64) -> Option<u64>| {
+                FixtureSource(m)
+            }
+            fn plans(
+                &self,
+                src: &FixtureSource,
+                rent: &dyn Fn(u64) -> Option<u64>,
+                routes: &TestRoutes,
+                zero_prefund: bool,
+            ) -> Vec<ReceivershipPlan> {
+                let inventory = |_: &Pubkey| 10_000u64;
+                let ata = |mint: &Pubkey| {
+                    Some(get_associated_token_address_with_program_id(
+                        &self.liquidator,
+                        mint,
+                        &self.token_program,
+                    ))
+                };
+                let lamports = |l: u64| Some(l);
                 P0ReceivershipBuilder {
                     state: src,
-                    program,
-                    group,
-                    liquidator,
+                    program: self.program,
+                    group: self.group,
+                    liquidator: self.liquidator,
                     global_fee_wallet: Ok(Pubkey::new_unique()),
-                    sizing: &sizing,
-                    routes: &NoRoutes,
+                    sizing: &self.sizing,
+                    routes,
                     inventory: &inventory,
                     ata: &ata,
                     lamports_to_usd_micro: &lamports,
                     rent_lamports_to_usd_micro: rent,
                     jito_tip_usd_micro: 0,
                     jito_tip_lamports: 0,
-                    zero_prefund_qualified: false,
-                    instructions: &table,
+                    zero_prefund_qualified: zero_prefund,
+                    instructions: &self.table,
                     v1_plans: false,
                     path: Path::Rpc,
                     resources: Resources {
@@ -1574,29 +1601,84 @@ pub mod p0 {
                     },
                     limits: TxLimits::default(),
                 }
-                .plans(&account, 1_000, 10)
+                .plans(&self.account, 1_000, 10)
                 .unwrap()
-                .iter()
-                .map(|p| (p.input.funding, p.input.rent_and_token_usd_micro))
-                .collect::<Vec<_>>()
+            }
+        }
+
+        /// B4 through the production `plans()` path: every plan of an account whose record is
+        /// still unlinked carries the record rent (Rent sysvar × conservative SOL price) on top
+        /// of its sizing's rent/token cost; a linked record adds nothing; an unknown price or a
+        /// missing Rent sysvar keeps every plan's rent/token cost UNKNOWN.
+        #[test]
+        fn b4_plans_add_the_record_rent_only_when_the_record_is_created() {
+            let f = PlansFixture::new();
+            // 150 USD/SOL, rounded up: the record rent 4_510_080 lamports ⇒ 676_512 micro.
+            let price = |l: u64| Some((u128::from(l) * 150).div_ceil(1_000) as u64);
+            let unknown_price = |_: u64| None;
+            let rent_of = |src: &FixtureSource, rent: &dyn Fn(u64) -> Option<u64>| {
+                f.plans(src, rent, &TestRoutes(None), false)
+                    .iter()
+                    .map(|p| (p.input.funding, p.input.rent_and_token_usd_micro))
+                    .collect::<Vec<_>>()
             };
-            let unlinked = state(Pubkey::default(), true);
-            let created = rent_of(&unlinked, &price);
+            let unlinked = f.state(Pubkey::default(), true);
             assert_eq!(
-                created,
+                rent_of(&unlinked, &price),
                 [
                     (FundingClass::NoSwapInventory, Some(7 + 676_512)),
                     (FundingClass::PreheldInventory, Some(7 + 676_512)),
                 ]
             );
-            let linked = state(protocol::liquidation_record_pda(&program, &account), true);
+            let pda = darkbot_project0::protocol::liquidation_record_pda(&f.program, &f.account);
+            let linked = f.state(pda, true);
             assert!(rent_of(&linked, &price).iter().all(|(_, c)| *c == Some(7)));
             assert!(rent_of(&unlinked, &unknown_price)
                 .iter()
                 .all(|(_, c)| c.is_none()));
-            assert!(rent_of(&state(Pubkey::default(), false), &price)
+            assert!(rent_of(&f.state(Pubkey::default(), false), &price)
                 .iter()
                 .all(|(_, c)| c.is_none()));
+        }
+
+        /// N7 stage 1 through the production `plans()` path: the ZERO_PREFUND plan (in-TX ExactIn
+        /// swap of the whole withdrawal) holds the full seized value like the inventory classes;
+        /// its swap is not proven to leave nothing behind.
+        #[test]
+        fn n7_zero_prefund_plan_holds_the_full_seized_value() {
+            let f = PlansFixture::new();
+            let swap_program = Pubkey::new_unique();
+            let route = Route {
+                instructions: vec![Instruction {
+                    program_id: swap_program,
+                    accounts: vec![],
+                    data: vec![1],
+                }],
+                lookup_tables: vec![],
+                swap_program,
+                amount_in: 1_000,
+                quoted_out: 600,
+                minimum_executable_out: Some(550),
+            };
+            let price = |l: u64| Some(l);
+            let plans = f.plans(
+                &f.state(Pubkey::default(), true),
+                &price,
+                &TestRoutes(Some(route)),
+                true,
+            );
+            let holds: Vec<_> = plans
+                .iter()
+                .map(|p| (p.input.funding, p.inventory_hold_usd_micro))
+                .collect();
+            assert_eq!(
+                holds,
+                [
+                    (FundingClass::NoSwapInventory, 1_050),
+                    (FundingClass::PreheldInventory, 1_050),
+                    (FundingClass::ZeroPrefundSameTx, 1_050),
+                ]
+            );
         }
 
         /// B15: the inventory hold of a plan is the seized collateral of its own sizing for
@@ -1612,8 +1694,9 @@ pub mod p0 {
             ] {
                 assert_eq!(inventory_hold_usd_micro(class, &sz), 1_234_567, "{class:?}");
             }
+            // N7 stage 1: the in-TX classes are not proven to leave nothing behind: full hold.
             for class in [FundingClass::ZeroPrefundSameTx, FundingClass::FlashFunded] {
-                assert_eq!(inventory_hold_usd_micro(class, &sz), 0, "{class:?}");
+                assert_eq!(inventory_hold_usd_micro(class, &sz), 1_234_567, "{class:?}");
             }
         }
 

@@ -706,14 +706,19 @@ impl ShadowOwner {
                 let view = StateView(&self.st);
                 // B16: an updated bank without a complete dependency set is reported.
                 let scan = darkbot_project0::health::dependency_scan(&view, &self.program, &[bk]);
-                for (bank, gap) in &scan.gaps {
-                    owner_log!(
-                        self,
-                        "dependency_gap: bank={} code={} detail={:?}",
-                        bank,
-                        gap.code(),
-                        gap
-                    );
+                // N6: reported when new, changed or cleared — never once per bank update.
+                let gap = scan.gaps.iter().find(|(b, _)| *b == bk).map(|(_, g)| g);
+                if note_gap(&mut self.dependency_gaps, bk, gap) {
+                    match gap {
+                        Some(g) => owner_log!(
+                            self,
+                            "dependency_gap: bank={} code={} detail={:?}",
+                            bk,
+                            g.code(),
+                            g
+                        ),
+                        None => owner_log!(self, "dependency_gap_cleared: bank={}", bk),
+                    }
                 }
                 let required_now = scan.keys;
                 let optional_now =

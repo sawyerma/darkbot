@@ -6,7 +6,8 @@
 
 use crate::health::{
     crate_impl::{
-        bank_observation_keys, crate_error_text, maintenance_emode_config_of, CrateHealth,
+        bank_observation_keys, crate_error_text, emode_liability_balances,
+        maintenance_emode_config_of, CrateHealth,
     },
     AccountSource, HealthEngine, HealthError,
 };
@@ -287,11 +288,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             ));
         }
         let group = protocol::decode_group(gdata).map_err(|e| format!("{e}: group"))?;
-        let banks = account
-            .lending_account
-            .balances
-            .iter()
-            .filter(|b| b.is_active() && !b.is_empty(BalanceSide::Liabilities))
+        let banks = emode_liability_balances(account)
             .map(|b| self.bank(&b.bank_pk))
             .collect::<Result<Vec<_>, _>>()?;
         let refs: Vec<&Bank> = banks.iter().collect();
@@ -1120,6 +1117,77 @@ mod tests {
     /// B12: sizing uses the maintenance EMODE configuration Health computes — including the
     /// group's same-asset EMODE weight, which the former `reconcile_emode_configs` of the sized
     /// liabilities alone did not contain — and the same liability weight API.
+    /// N8 (structure): Health and sizing select the EMODE banks through one filter — active
+    /// balances with a non-empty liability side; an asset-only, an active-but-empty and an
+    /// inactive liability balance are not part of it, and the sizer's EMODE equals the one
+    /// reconciled from exactly the filtered banks.
+    #[test]
+    fn n8_health_and_sizing_share_one_emode_filter() {
+        use marginfi_type_crate::types::{OracleSetup, WrappedI80F48};
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for Source {
+            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        let (program, group_key) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let keys: Vec<Pubkey> = (0..4).map(|_| Pubkey::new_unique()).collect();
+        let shares = |v: u64| WrappedI80F48::from(I80F48::from_num(v));
+        let mut acc: MarginfiAccount = bytemuck::Zeroable::zeroed();
+        let b = &mut acc.lending_account.balances;
+        // 0: liability; 1: asset only; 2: active but empty; 3: inactive with liability shares.
+        (b[0].active, b[0].bank_pk, b[0].liability_shares) = (1, keys[0], shares(5));
+        (b[1].active, b[1].bank_pk, b[1].asset_shares) = (1, keys[1], shares(5));
+        (b[2].active, b[2].bank_pk) = (1, keys[2]);
+        (b[3].active, b[3].bank_pk, b[3].liability_shares) = (0, keys[3], shares(5));
+        let selected: Vec<Pubkey> = emode_liability_balances(&acc).map(|b| b.bank_pk).collect();
+        assert_eq!(selected, [keys[0]]);
+        let mut state = HashMap::new();
+        let mut banks = vec![];
+        for (i, k) in keys.iter().enumerate() {
+            let mut bank: Bank = bytemuck::Zeroable::zeroed();
+            bank.config.oracle_setup = OracleSetup::Fixed;
+            bank.emode.emode_config.entries[0].collateral_bank_emode_tag = i as u16 + 1;
+            banks.push(bank);
+            state.insert(
+                *k,
+                (
+                    program,
+                    [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&bank)].concat(),
+                ),
+            );
+        }
+        let group: marginfi_type_crate::types::MarginfiGroup = bytemuck::Zeroable::zeroed();
+        state.insert(
+            group_key,
+            (
+                program,
+                [
+                    protocol::DISC_MARGINFI_GROUP.as_slice(),
+                    bytemuck::bytes_of(&group),
+                ]
+                .concat(),
+            ),
+        );
+        let state = Source(state);
+        let sizer = ProtocolSizer {
+            state: &state,
+            program,
+            group: group_key,
+            headroom_bps: 0,
+        };
+        assert_eq!(
+            sizer.maintenance_emode(&acc).unwrap(),
+            maintenance_emode_config_of(&[&banks[0]], &group)
+        );
+        assert_ne!(
+            sizer.maintenance_emode(&acc).unwrap(),
+            maintenance_emode_config_of(&[&banks[0], &banks[1], &banks[2], &banks[3]], &group),
+            "the unfiltered balances would form another EMODE set"
+        );
+    }
+
     #[test]
     fn b12_sizing_emode_and_liability_weight_equal_health() {
         use marginfi_type_crate::constants::BANK_SAME_ASSET_EMODE_ELIGIBLE;

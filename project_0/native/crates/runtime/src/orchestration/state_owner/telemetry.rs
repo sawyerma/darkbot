@@ -25,6 +25,11 @@ impl ShadowOwner {
                 self.consumer.stats(),
                 self.consumer.stats().dropped
             );
+            // N4: projection outcomes (also once at shutdown).
+            let projection = self
+                .projection_stats
+                .line(self.projection_pending.len(), self.projection_cache.len());
+            owner_log!(self, "{projection}");
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,

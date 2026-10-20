@@ -128,15 +128,19 @@ pub(super) fn prepare(
         })
         .collect();
     #[cfg(feature = "crate_health")]
+    let mut dependency_gaps = HashMap::new();
+    #[cfg(feature = "crate_health")]
     let mut required_dependency_keys = {
         // B16: banks without a complete dependency set are reported, never silently skipped.
         let scan =
             darkbot_project0::health::dependency_scan(&StateView(&pre_state), &program, &bank_keys);
-        for (bank, gap) in &scan.gaps {
+        for (bank, gap) in scan.gaps {
             eprintln!(
                 "dependency_gap: bank={bank} code={} detail={gap:?}",
                 gap.code()
             );
+            // N6: the owner starts with these gaps known; it reports only their changes.
+            dependency_gaps.insert(bank, gap);
         }
         let mut v = scan.keys;
         v.push(group);
@@ -861,6 +865,7 @@ pub(super) fn prepare(
         pending,
         projection_cache,
         projection_pending,
+        projection_stats: ProjectionStats::default(),
         detect_queue,
         oracle_detect_order,
         oracle_detect_pending,
@@ -919,6 +924,8 @@ pub(super) fn prepare(
         allowlist,
         #[cfg(feature = "crate_health")]
         instruction_table,
+        #[cfg(feature = "crate_health")]
+        dependency_gaps,
         global_allowed,
         submitter,
         failed_costs,

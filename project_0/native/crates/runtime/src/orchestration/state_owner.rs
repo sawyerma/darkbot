@@ -110,6 +110,8 @@ pub(super) struct ShadowOwner {
     pending: Vec<ReconcileWork>,
     projection_cache: HashMap<Pubkey, CachedProjection>,
     projection_pending: HashSet<Pubkey>,
+    /// N4: projection outcomes (E9 discards).
+    projection_stats: ProjectionStats,
     detect_queue: VecDeque<DetectWork>,
     oracle_detect_order: VecDeque<Pubkey>,
     oracle_detect_pending: HashMap<Pubkey, DetectWork>,
@@ -175,6 +177,9 @@ pub(super) struct ShadowOwner {
     /// E2: pinned instruction table the planner gate classifies built instructions with.
     #[cfg(feature = "crate_health")]
     instruction_table: darkbot_project0::planner::InstructionTable,
+    /// N6: the current dependency gap of each bank that has one (reported on change only).
+    #[cfg(feature = "crate_health")]
+    dependency_gaps: HashMap<Pubkey, darkbot_project0::health::DependencyGap>,
     global_allowed: Vec<Pubkey>,
     submitter: crate::execution::observe_only::ObserveOnly<RpcSubmitter>,
     failed_costs: FailedCostMatrix,

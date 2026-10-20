@@ -56,30 +56,22 @@ impl ShadowOwner {
                     let base_account_hash = hash(&base_record.data);
 
                     let cached = if trigger == "integration_projection" {
-                        match self.projection_cache.remove(&acct) {
-                            Some(c)
-                                if c.base_account_hash == base_account_hash
-                                    && base_record.slot == slot =>
-                            {
-                                // E9: a projection is reused only while every dependency it
-                                // was requested with is still at the same canonical revision.
-                                if dependency_fingerprint(&self.st, &c.dependencies)
-                                    == c.dependency_fingerprint
-                                {
-                                    Some(c)
-                                } else {
-                                    owner_log!(
-                                        self,
-                                        "projection_dependencies_changed: account={} at=consume",
-                                        acct
-                                    );
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
+                        self.projection_cache.remove(&acct).and_then(|c| {
+                            let base_matches = c.base_account_hash == base_account_hash
+                                && base_record.slot == slot;
+                            // E9: a projection is reused only while every dependency it was
+                            // requested with is still at the same canonical revision
+                            // (N4: counted, no line per discard).
+                            let unchanged = base_matches
+                                && dependency_fingerprint(&self.st, &c.dependencies)
+                                    == c.dependency_fingerprint;
+                            self.projection_stats
+                                .consume(base_matches, unchanged)
+                                .then_some(c)
+                        })
                     } else {
-                        self.projection_cache.remove(&acct);
+                        let removed = self.projection_cache.remove(&acct);
+                        self.projection_stats.dropped_if(removed);
                         None
                     };
 
@@ -90,8 +82,12 @@ impl ShadowOwner {
                             cached.projection_unix_s,
                             cached.accounts,
                         ) {
-                            Ok(p) => Some(p),
+                            Ok(p) => {
+                                self.projection_stats.used(true);
+                                Some(p)
+                            }
                             Err(e) => {
+                                self.projection_stats.used(false);
                                 self.evidence.emit(OwnerEvidence::Record(
                                     RecordEvent::IntegrationSkip {
                                         account: acct,
@@ -147,14 +143,27 @@ impl ShadowOwner {
                             };
 
                             // E9: the dependency set of this projection and its revisions now.
-                            let observation = darkbot_project0::health::crate_impl::CrateHealth {
-                                state: &view,
-                                group: self.group,
-                            }
-                            .observation_accounts(&acct)
-                            .unwrap_or_default();
-                            let dependencies =
-                                projection_dependencies(&acct, &refreshes, &observation);
+                            // N3: an unknown observation set means no projection (fail-closed),
+                            // recorded and counted.
+                            let dependencies = match projection_dependency_set(
+                                &view,
+                                &self.program,
+                                &self.group,
+                                &acct,
+                                &refreshes,
+                            ) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    self.projection_stats.observation_unknown += 1;
+                                    self.evidence.emit(OwnerEvidence::Record(
+                                        RecordEvent::IntegrationSkip {
+                                            account: acct,
+                                            reason: format!("projection observation unknown: {e}"),
+                                        },
+                                    ))?;
+                                    return Ok(false);
+                                }
+                            };
                             let fingerprint = dependency_fingerprint(&self.st, &dependencies);
                             let projection_plan = tx::TxPlan {
                                 version: tx::BuildVersion::V0,
@@ -198,9 +207,11 @@ impl ShadowOwner {
                             };
                             match self.remote.projection_jobs.try_push(work) {
                                 Ok(()) => {
+                                    self.projection_stats.requested += 1;
                                     self.projection_pending.insert(acct);
                                 }
                                 Err(ChannelError::Full(_)) => {
+                                    self.projection_stats.queue_full += 1;
                                     self.remote.projection_jobs.give_up();
                                     self.evidence.emit(OwnerEvidence::Record(
                                         RecordEvent::IntegrationSkip {
