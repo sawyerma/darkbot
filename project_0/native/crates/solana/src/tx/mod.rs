@@ -174,6 +174,122 @@ pub fn effective_instructions(plan: &TxPlan) -> Vec<Instruction> {
     out
 }
 
+/// E2: the signed message is exactly its plan — the builder's compute-budget instructions and the
+/// validated instructions (`effective_instructions`), in order, with the same program, data and
+/// account keys (lookup-table addresses resolved from the plan's tables); every key carries
+/// exactly the privileges the instructions ask for (the payer: first key, signer, writable) and
+/// the message addresses no other key. `Err` is a stable code.
+pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result<(), &'static str> {
+    let (header, statics, compiled, lookups) = match message {
+        VersionedMessage::Legacy(m) => (m.header, &m.account_keys, &m.instructions, &[][..]),
+        VersionedMessage::V0(m) => (
+            m.header,
+            &m.account_keys,
+            &m.instructions,
+            m.address_table_lookups.as_slice(),
+        ),
+    };
+    let required = usize::from(header.num_required_signatures);
+    let readonly_signed = usize::from(header.num_readonly_signed_accounts);
+    let readonly_unsigned = usize::from(header.num_readonly_unsigned_accounts);
+    let static_len = statics.len();
+    if required > static_len
+        || readonly_signed > required
+        || readonly_unsigned > static_len - required
+    {
+        return Err("MESSAGE_HEADER");
+    }
+    if statics.first() != Some(&plan.payer) {
+        return Err("MESSAGE_PAYER");
+    }
+    // (key, signer, writable) in message order: static keys, then loaded writable, then loaded
+    // readonly addresses.
+    let mut keys: Vec<(Pubkey, bool, bool)> = statics
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            let writable = if i < required {
+                i < required - readonly_signed
+            } else {
+                i < static_len - readonly_unsigned
+            };
+            (*k, i < required, writable)
+        })
+        .collect();
+    let mut loaded_readonly = Vec::new();
+    for lookup in lookups {
+        let table = plan
+            .lookup_tables
+            .iter()
+            .find(|t| t.key == lookup.account_key)
+            .ok_or("MESSAGE_LOOKUP_TABLE_UNKNOWN")?;
+        let address = |i: &u8| {
+            table
+                .addresses
+                .get(usize::from(*i))
+                .copied()
+                .ok_or("MESSAGE_LOOKUP_INDEX")
+        };
+        for i in &lookup.writable_indexes {
+            keys.push((address(i)?, false, true));
+        }
+        for i in &lookup.readonly_indexes {
+            loaded_readonly.push((address(i)?, false, false));
+        }
+    }
+    keys.extend(loaded_readonly);
+    let expected = effective_instructions(plan);
+    if compiled.len() != expected.len() {
+        return Err("MESSAGE_INSTRUCTION_COUNT");
+    }
+    let key = |i: u8| {
+        keys.get(usize::from(i))
+            .map(|k| k.0)
+            .ok_or("MESSAGE_ACCOUNT_INDEX")
+    };
+    for (c, e) in compiled.iter().zip(&expected) {
+        if key(c.program_id_index)? != e.program_id {
+            return Err("MESSAGE_PROGRAM");
+        }
+        if c.data != e.data {
+            return Err("MESSAGE_DATA");
+        }
+        if c.accounts.len() != e.accounts.len() {
+            return Err("MESSAGE_ACCOUNTS");
+        }
+        for (i, meta) in c.accounts.iter().zip(&e.accounts) {
+            if key(*i)? != meta.pubkey {
+                return Err("MESSAGE_ACCOUNTS");
+            }
+        }
+    }
+    // Privileges: exactly the union the instructions ask for; the payer signs and pays.
+    let mut wanted: std::collections::BTreeMap<Pubkey, (bool, bool)> =
+        std::collections::BTreeMap::from([(plan.payer, (true, true))]);
+    for e in &expected {
+        wanted.entry(e.program_id).or_insert((false, false));
+        for meta in &e.accounts {
+            let w = wanted.entry(meta.pubkey).or_insert((false, false));
+            w.0 |= meta.is_signer;
+            w.1 |= meta.is_writable;
+        }
+    }
+    // Every wanted key is the payer or appears in a compared instruction; a duplicate or any
+    // other key is refused.
+    let distinct: HashSet<Pubkey> = keys.iter().map(|k| k.0).collect();
+    if distinct.len() != keys.len() {
+        return Err("MESSAGE_KEYS");
+    }
+    for (k, signer, writable) in &keys {
+        match wanted.get(k) {
+            Some(&(s, w)) if s == *signer && w == *writable => {}
+            Some(_) => return Err("MESSAGE_PRIVILEGES"),
+            None => return Err("MESSAGE_KEYS"),
+        }
+    }
+    Ok(())
+}
+
 pub fn effective_locked_account_count(plan: &TxPlan) -> usize {
     locked_account_count(&plan.payer, &effective_instructions(plan))
 }
@@ -505,6 +621,149 @@ pub fn payer_of(kp: &Keypair) -> Pubkey {
 mod tests {
     use super::*;
     use solana_sdk::instruction::AccountMeta;
+
+    /// E2: the signed message must be exactly its plan. Real Legacy and V0 builds (V0 with a
+    /// lookup-table address) match; each tampering — compute-budget data, a dropped compute-budget
+    /// instruction, an account swap, a raised privilege, a foreign or substituted lookup table, an
+    /// extra key, another fee payer — is refused with its own code.
+    #[test]
+    fn e2_signed_message_is_exactly_its_plan() {
+        let payer = Keypair::new();
+        let (p, q, a, b, c, d) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let instructions = vec![
+            Instruction {
+                program_id: p,
+                accounts: vec![
+                    AccountMeta::new(a, false),
+                    AccountMeta::new_readonly(b, false),
+                ],
+                data: vec![1, 2, 3],
+            },
+            Instruction {
+                program_id: q,
+                accounts: vec![
+                    AccountMeta::new(b, false),
+                    AccountMeta::new_readonly(c, false),
+                ],
+                data: vec![4],
+            },
+        ];
+        let table = AddressLookupTableAccount {
+            key: Pubkey::new_unique(),
+            addresses: vec![d, c],
+        };
+        let plan = |version, tables: Vec<AddressLookupTableAccount>| TxPlan {
+            version,
+            payer: payer.pubkey(),
+            instructions: instructions.clone(),
+            lookup_tables: tables,
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 5,
+                loaded_accounts_data_size: None,
+            },
+        };
+        let v0 = plan(BuildVersion::V0, vec![table.clone()]);
+        let built = build(&v0, Hash::new_unique(), &TxLimits::default()).unwrap();
+        let VersionedMessage::V0(m) = &built.tx.message else {
+            panic!("v0 message expected")
+        };
+        assert_eq!(
+            m.address_table_lookups.len(),
+            1,
+            "c is loaded from the table"
+        );
+        assert_eq!(message_matches_plan(&built.tx.message, &v0), Ok(()));
+        let legacy = plan(BuildVersion::Legacy, vec![]);
+        let built_legacy = build(&legacy, Hash::new_unique(), &TxLimits::default()).unwrap();
+        assert_eq!(
+            message_matches_plan(&built_legacy.tx.message, &legacy),
+            Ok(())
+        );
+        let tampered = |f: &dyn Fn(&mut v0::Message)| {
+            let mut m = m.clone();
+            f(&mut m);
+            message_matches_plan(&VersionedMessage::V0(m), &v0)
+        };
+        // Compute-unit limit changed / price instruction dropped.
+        assert_eq!(
+            tampered(&|m| m.instructions[0].data[1] ^= 1),
+            Err("MESSAGE_DATA")
+        );
+        assert_eq!(
+            tampered(&|m| {
+                m.instructions.remove(1);
+            }),
+            Err("MESSAGE_INSTRUCTION_COUNT")
+        );
+        // Two accounts of the first receivership instruction swapped.
+        assert_eq!(
+            tampered(&|m| m.instructions[2].accounts.swap(0, 1)),
+            Err("MESSAGE_ACCOUNTS")
+        );
+        // One readonly static key made writable.
+        assert_eq!(
+            tampered(&|m| m.header.num_readonly_unsigned_accounts -= 1),
+            Err("MESSAGE_PRIVILEGES")
+        );
+        // Another fee payer.
+        assert_eq!(
+            tampered(&|m| m.account_keys.swap(0, 1)),
+            Err("MESSAGE_PAYER")
+        );
+        // An extra, unused static key (Legacy: no loaded addresses behind it; in V0 it would
+        // shift the loaded indexes and fail as MESSAGE_ACCOUNTS first).
+        let VersionedMessage::Legacy(l) = &built_legacy.tx.message else {
+            panic!("legacy message expected")
+        };
+        let mut extra = l.clone();
+        extra.account_keys.push(Pubkey::new_unique());
+        extra.header.num_readonly_unsigned_accounts += 1;
+        assert_eq!(
+            message_matches_plan(&VersionedMessage::Legacy(extra), &legacy),
+            Err("MESSAGE_KEYS")
+        );
+        // A readonly key listed twice.
+        let mut twice = l.clone();
+        let last = *twice.account_keys.last().unwrap();
+        twice.account_keys.push(last);
+        twice.header.num_readonly_unsigned_accounts += 1;
+        assert_eq!(
+            message_matches_plan(&VersionedMessage::Legacy(twice), &legacy),
+            Err("MESSAGE_KEYS")
+        );
+        // The message resolves through a table the plan does not have.
+        assert_eq!(
+            tampered(&|m| m.address_table_lookups[0].account_key = Pubkey::new_unique()),
+            Err("MESSAGE_LOOKUP_TABLE_UNKNOWN")
+        );
+        // The plan's table at that index holds another address.
+        let substituted = plan(
+            BuildVersion::V0,
+            vec![AddressLookupTableAccount {
+                key: table.key,
+                addresses: vec![d, Pubkey::new_unique()],
+            }],
+        );
+        assert_eq!(
+            message_matches_plan(&built.tx.message, &substituted),
+            Err("MESSAGE_ACCOUNTS")
+        );
+        // Another compute-unit price in the plan than in the message.
+        let mut other_price = plan(BuildVersion::V0, vec![table.clone()]);
+        other_price.resources.priority_micro_lamports_per_cu = 6;
+        assert_eq!(
+            message_matches_plan(&built.tx.message, &other_price),
+            Err("MESSAGE_DATA")
+        );
+    }
 
     /// B9: the V1 capability is what `build`/`sign` actually do, and the RPC adapter (SDK
     /// `VersionedTransaction` wire only) does not claim V1.

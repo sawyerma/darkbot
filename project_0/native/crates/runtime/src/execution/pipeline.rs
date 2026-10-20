@@ -147,35 +147,6 @@ pub(crate) fn deadline_after(now: Instant, deadline_ns: u64) -> Instant {
         .unwrap_or_else(|| now + std::time::Duration::from_secs(365 * 24 * 3600))
 }
 
-/// E2: the message to be signed carries exactly the validated instructions — program id and data,
-/// in order — preceded at most by the ComputeBudget instructions the transaction layer adds.
-pub(crate) fn compiled_matches(
-    message: &solana_sdk::message::VersionedMessage,
-    validated: &[Instruction],
-) -> bool {
-    static COMPUTE_BUDGET: std::sync::OnceLock<Option<Pubkey>> = std::sync::OnceLock::new();
-    let Some(compute_budget) =
-        *COMPUTE_BUDGET.get_or_init(|| COMPUTE_BUDGET_PROGRAM_ID.parse().ok())
-    else {
-        return false;
-    };
-    let keys = message.static_account_keys();
-    let mut compiled = message.instructions().iter().map(|ix| {
-        keys.get(usize::from(ix.program_id_index))
-            .map(|program| (*program, ix.data.as_slice()))
-    });
-    let mut first = compiled.next();
-    while matches!(first, Some(Some((p, _))) if p == compute_budget) {
-        first = compiled.next();
-    }
-    let compiled: Vec<_> = first.into_iter().chain(compiled).collect();
-    compiled.len() == validated.len()
-        && compiled
-            .iter()
-            .zip(validated)
-            .all(|(c, v)| *c == Some((v.program_id, v.data.as_slice())))
-}
-
 /// B1: reason code of a LIVE candidate that reached the send boundary of this pipeline.
 pub const LIVE_SEND_REQUIRES_FE04: &str = "LIVE_SEND_REQUIRES_FE04_ONE_SHOT";
 
@@ -671,9 +642,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 // [FIX-38]
                 note_stage(&mut furthest_technical, 3, LossReason::Submission);
                 rejected.push(format!(
-                    "{}: tx version {:?} not supported on {}",
+                    "{}: tx version {} not supported on {}",
                     plan.input.funding.as_str(),
-                    plan.tx_version,
+                    plan.tx_version.record_name(),
                     self.submitter.path().as_str()
                 ));
                 continue;
@@ -711,10 +682,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
             };
 
-            if !compiled_matches(&built.tx.message, &plan.instructions) {
+            // E2: the signed message is exactly the validated plan (with its compute budget).
+            if let Err(code) = tx::message_matches_plan(&built.tx.message, &txplan) {
                 note_stage(&mut furthest_technical, 5, LossReason::Build);
                 rejected.push(format!(
-                    "{}: compiled message differs from the validated instructions",
+                    "{}: compiled message differs from the validated instructions ({code})",
                     plan.input.funding.as_str()
                 ));
                 continue;
@@ -969,10 +941,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                         return rec.with_timeline(&tl);
                     }
                 };
-                if !compiled_matches(&b.tx.message, pre) {
+                if let Err(code) = tx::message_matches_plan(&b.tx.message, &pre_plan) {
                     rec.loss = Some(LossReason::Build);
-                    rec.reason =
-                        Some("prerequisite compiled message differs from the validated one".into());
+                    rec.reason = Some(format!(
+                        "prerequisite compiled message differs from the validated one ({code})"
+                    ));
                     return rec.with_timeline(&tl);
                 }
                 if let Err(e) = tx::sign(&mut b, &[self.payer]) {
@@ -1157,13 +1130,19 @@ mod plan_error_tests {
             built.tx.message.instructions().len() > validated.len(),
             "CU prefix added"
         );
-        assert!(compiled_matches(&built.tx.message, &validated));
+        assert_eq!(tx::message_matches_plan(&built.tx.message, &plan), Ok(()));
+        let with = |instructions: Vec<Instruction>| TxPlan {
+            instructions,
+            ..plan.clone()
+        };
         let mut other_data = validated.clone();
         other_data[1].data[0] = 3;
-        assert!(!compiled_matches(&built.tx.message, &other_data));
+        assert!(tx::message_matches_plan(&built.tx.message, &with(other_data)).is_err());
         let reordered = vec![validated[1].clone(), validated[0].clone()];
-        assert!(!compiled_matches(&built.tx.message, &reordered));
-        assert!(!compiled_matches(&built.tx.message, &validated[..1]));
+        assert!(tx::message_matches_plan(&built.tx.message, &with(reordered)).is_err());
+        assert!(
+            tx::message_matches_plan(&built.tx.message, &with(validated[..1].to_vec())).is_err()
+        );
     }
 
     /// Q5 (with C10/P5): decision and loss of a planning failure follow from its typed kind
