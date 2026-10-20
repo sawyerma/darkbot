@@ -440,6 +440,7 @@ pub(crate) fn run_current_preflight(
         )
         .set(f::PORTAL_IMPLEMENTATION_CODE_SHA256, sha(&portal_impl_code))
         .set(
+            // Constant identity; independent live protection is the Portal implementation/codehash.
             f::TAX_V3_IMPL,
             V::Address(
                 Address::from_str(TAX_V3_IMPL_EXPECTED)

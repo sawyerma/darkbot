@@ -19,6 +19,85 @@ use darkbot_bsc_record::{
 };
 use std::path::Path;
 
+pub const ATTEMPT_ID: &str = "g07-mainnet-attempt-1-dry-20261015T222241Z";
+pub const LAUNCHER: &str = "0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd";
+pub const BUYER: &str = "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE";
+pub const FROZEN_DIR: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";
+pub const REQUAL_STATUS: &str = "requalification_status.dbrec";
+pub const REQUAL_CHECKS: &[&str] = &["R0_UPGRADE", "DRY0_PREFLIGHT", "DRY1_BYTES_AND_SIGNERS", "DRY2_SIMULATION", "DRY3_GAS_ECONOMICS_BUDGET", "DRY4_EXPIRY_NONCES_ZERO_EGRESS"];
+
+/// No aliases across the approval boundary: paths are repository-relative,
+/// normalized and every existing component must be non-symlinked.
+fn evidence_path(root: &Path, relative: &str) -> Result<(), String> {
+    use std::path::Component;
+    let path = Path::new(relative);
+    if relative.is_empty() || relative.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
+        return Err("non-canonical evidence path".into());
+    }
+    let mut current = root.to_path_buf();
+    for part in path.components() {
+        let Component::Normal(part) = part else { return Err("evidence path must be relative".into()); };
+        current.push(part);
+        let meta = std::fs::symlink_metadata(&current).map_err(|e| format!("evidence path: {e}"))?;
+        if meta.file_type().is_symlink() { return Err("symlinked evidence path".into()); }
+    }
+    Ok(())
+}
+
+fn requalification_pass(root: &Path, dir: &str, policy: &str) -> Result<(), String> {
+    use g06a::requalification as r;
+    use std::collections::{BTreeMap, BTreeSet};
+    let e = |x: darkbot_bsc_record::RecordError| x.0;
+    for path in [dir, FROZEN_DIR, policy] { evidence_path(root, path)?; }
+    let status = format!("{dir}/{REQUAL_STATUS}");
+    evidence_path(root, &status)?;
+    let bytes = std::fs::read(root.join(&status)).map_err(|e| e.to_string())?;
+    let record = decode(&r::SCHEMA, &bytes).map_err(e)?;
+    let canonical_root = root.canonicalize().map_err(|e| e.to_string())?;
+    // Verifier records produced by the shell use canonical absolute paths.
+    // Accept only that exact spelling or the normalized repository-relative one.
+    let same_path = |recorded: &str, relative: &str| recorded == relative || Path::new(recorded) == canonical_root.join(relative);
+    if record.text(r::VERDICT).map_err(e)? != "PASS"
+        || record.text(darkbot_bsc_record::schema::PROVENANCE_TOOL).map_err(e)? != "g06a_requal_check"
+        || !same_path(record.text(r::REQUAL_DIR).map_err(e)?, dir)
+        || !same_path(record.text(r::FROZEN_DIR).map_err(e)?, FROZEN_DIR) {
+        return Err("requalification verdict/provenance/directory mismatch".into());
+    }
+    let mut checks = BTreeSet::new();
+    for check in record.nested_all(r::CHECKS).map_err(e)? {
+        let name = check.text(r::check::NAME).map_err(e)?.to_owned();
+        if !REQUAL_CHECKS.contains(&name.as_str()) || !checks.insert(name) || check.text(r::check::STATUS).map_err(e)? != "PASS" {
+            return Err("requalification check missing, duplicated or not PASS".into());
+        }
+    }
+    if checks.len() != REQUAL_CHECKS.len() { return Err("incomplete requalification checks".into()); }
+    let mut records = BTreeMap::new();
+    for row in record.nested_all(r::RECORDS).map_err(e)? {
+        let raw_name = row.text(r::bound::NAME).map_err(e)?;
+        let name = if same_path(raw_name, policy) { policy } else { raw_name };
+        if records.insert(name.to_owned(), row.b256(r::bound::SHA256).map_err(e)?).is_some() {
+            return Err("duplicate requalification record".into());
+        }
+    }
+    for name in [REQUAL_PREFLIGHT, "native_quote.dbrec", REQUAL_ECONOMICS, REQUAL_LOCAL_SIMULATION, REQUAL_DRY, REQUAL_PORTAL_UPGRADE, policy] {
+        let path = if name == policy { name.to_owned() } else { format!("{dir}/{name}") };
+        evidence_path(root, &path)?;
+        let bytes = std::fs::read(root.join(path)).map_err(|e| e.to_string())?;
+        if records.remove(name) != Some(sha256(&bytes)) { return Err(format!("requalification record binding mismatch: {name}")); }
+    }
+    if !records.is_empty() { return Err("unexpected requalification records".into()); }
+    Ok(())
+}
+
+/// Checks every individual safety flag, not just the aggregate.
+pub fn require_dry_pass(dry: &Record) -> Result<(), String> {
+    use g06a::dry as d;
+    for tag in [d::DRY_1, d::DRY_2, d::DRY_3, d::DRY_4, d::DRY_ALL, d::ZERO_EGRESS_STRUCTURAL] {
+        if dry.bool(tag).map_err(|e| e.0)? != true { return Err(format!("DRY flag {tag} is not PASS")); }
+    }
+    Ok(())
+}
+
 /// The binary input records G0.7 attempt 1 reads (the offline legacy import).
 pub const DRY_RECORD: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016/dry_result.dbrec";
 pub const PREFLIGHT_RECORD: &str =
@@ -190,17 +269,17 @@ fn common(d: &mut Draft, approved: bool) -> Result<(), String> {
     );
     d.set(
         tag("authorization.launcher_address")?,
-        address("0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd")?,
+        address(LAUNCHER)?,
     );
     d.set(
         tag("authorization.buyer_address")?,
-        address("0x9c8a0Db41914beEE52Dd49790c4F087E252743DE")?,
+        address(BUYER)?,
     );
     d.set(tag("authorization.execution_authority")?, "Only this binary v3 contract may authorize the self-launch Mainnet send path; the JSON v1/v2 contracts and the JSON v2 draft are forbidden as runtime authority");
     d.set(tag("authorization.approval_scope")?, "Exactly one economic G0.7 attempt (attempt_number 1) of the exact DRY-qualified [launch_A, buy_B] bytes; no retry; no second attempt under this approval; a disarm commit (FROZEN back to UNARMED) is mandatory immediately after the release regardless of outcome");
     d.set(
         tag("authorization.attempt_id")?,
-        "g07-mainnet-attempt-1-dry-20261015T222241Z",
+        ATTEMPT_ID,
     );
     d.set(tag("scope.chain_id")?, 56u64);
     d.set(tag("scope.venue")?, "Flap");
@@ -224,11 +303,11 @@ fn common(d: &mut Draft, approved: bool) -> Result<(), String> {
     d.set(tag("scope.historical_g03_authority")?, "Historical DOGE/0.15-BNB G0.3 fixture is NOT authority for this native-quote self-launch; native mode requires its own dry semantic validation");
     d.set(
         tag("wallet_separation.launcher")?,
-        address("0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd")?,
+        address(LAUNCHER)?,
     );
     d.set(
         tag("wallet_separation.buyer")?,
-        address("0x9c8a0Db41914beEE52Dd49790c4F087E252743DE")?,
+        address(BUYER)?,
     );
     d.set(tag("wallet_separation.must_be_distinct_addresses")?, true);
     d.set(
@@ -563,19 +642,44 @@ pub fn attempt1_v4_evidence(
         builder_policy as b, dry as d, economics, local_simulation, portal_upgrade as up,
         preflight as p,
     };
+    requalification_pass(root, requal_dir, builder_policy)?;
     let at = |name: &str| format!("{}/{name}", requal_dir.trim_end_matches('/'));
     let e = |x: darkbot_bsc_record::RecordError| x.0;
     let (dry, dry_rec) = read_input(root, &at(REQUAL_DRY), &[&d::NATIVE])?;
-    if !dry_rec.bool(d::DRY_ALL).map_err(e)? {
-        return Err("requalification DRY did not pass DRY-1..DRY-4".into());
+    require_dry_pass(&dry_rec)?;
+    let frozen_bytes = std::fs::read(root.join(DRY_RECORD)).map_err(|e| e.to_string())?;
+    if hex(&sha256(&frozen_bytes)) != "c7153a7da4c6154a2a6af384c9836d7141d16fd643662d385d20d3d18ba99b98" {
+        return Err("frozen DRY identity hash mismatch".into());
+    }
+    let frozen = decode(&d::SCHEMA, &frozen_bytes).map_err(e)?;
+    for tag in [d::LAUNCHER, d::BUYER, d::DISTINCT, d::CHAIN_ID, d::PORTAL, d::GAS_PRICE_WEI, d::LAUNCH_GAS_LIMIT, d::BUY_GAS_LIMIT, d::LAUNCH_VALUE_WEI, d::BUY_VALUE_WEI, d::LAUNCH_TX_HASH, d::BUY_TX_HASH, d::TOKEN, d::LOCAL_EXPECTED_OUTPUT, d::MIN_OUTPUT] {
+        if dry_rec.get(tag) != frozen.get(tag) { return Err(format!("frozen DRY identity mismatch: {tag}")); }
+    }
+    if dry_rec.address(d::LAUNCHER).map_err(e)? != hex_literal::<20>(LAUNCHER)? || dry_rec.address(d::BUYER).map_err(e)? != hex_literal::<20>(BUYER)? {
+        return Err("DRY wallets differ from contract".into());
     }
     let (preflight, pre) = read_input(root, &at(REQUAL_PREFLIGHT), &[&p::SCHEMA])?;
     if preflight.legacy_sha256.is_some() {
         return Err("the requalification preflight must be a native record, not an import".into());
     }
+    if pre.u64(p::CHAIN_ID).map_err(e)? != 56 || pre.address(p::PORTAL).map_err(e)? != dry_rec.address(d::PORTAL).map_err(e)? { return Err("preflight chain/Portal mismatch".into()); }
     let (builder_policy, policy) = read_input(root, builder_policy, &[&b::NATIVE, &b::SCHEMA])?;
-    let (witness_source, _) =
+    let (witness_source, witness) =
         read_input(root, WITNESS_SOURCE_RECORD, &[&g07::witness_source::SCHEMA])?;
+    if witness.text(g07::witness_source::ATTEMPT_ID).map_err(e)? != ATTEMPT_ID {
+        return Err("witness attempt_id differs from contract".into());
+    }
+    for (tag, expected) in [(p::LAUNCHER_PENDING_NONCE, 0), (p::BUYER_PENDING_NONCE, 0), (p::PROFILE_GAS_PRICE_WEI, 50_000_000), (p::PROFILE_LAUNCH_GAS_LIMIT, 6_603_270), (p::PROFILE_BUY_GAS_LIMIT, 3_000_000)] {
+        // Gas price profile is a U256; nonce and gas-limit profiles are U64.
+        let matches = if tag == p::PROFILE_GAS_PRICE_WEI { pre.u256(tag).map_err(e)? == darkbot_bsc_record::u256_from_u128(expected as u128) } else { pre.u64(tag).map_err(e)? == expected };
+        if !matches { return Err(format!("preflight frozen profile mismatch: {tag}")); }
+    }
+    for (tag, expected) in [(p::PROFILE_LAUNCH_VALUE_WEI, 0), (p::PROFILE_BUY_VALUE_WEI, 1_000_000_000_000u128)] {
+        if pre.u256(tag).map_err(e)? != darkbot_bsc_record::u256_from_u128(expected) { return Err("preflight value mismatch".into()); }
+    }
+    if pre.address(p::LAUNCHER_ADDRESS).map_err(e)? != dry_rec.address(d::LAUNCHER).map_err(e)? || pre.address(p::BUYER_ADDRESS).map_err(e)? != dry_rec.address(d::BUYER).map_err(e)? || pre.opt_bool(p::FUNDING_PASS).map_err(e)? != Some(true) {
+        return Err("preflight wallets/funding mismatch".into());
+    }
     let (local_simulation, _) = read_input(
         root,
         &at(REQUAL_LOCAL_SIMULATION),
@@ -642,6 +746,9 @@ pub fn attempt1_v4(e: &V4Evidence, authorization: Authorization) -> Result<Vec<u
     let approved = authorization == Authorization::Approved;
     let mut d = Draft::new(&contract::V4);
     common(&mut d, approved)?;
+    d.set(tag("economics_validation.gas_floor.blockrazor_current_documented_reference")?, "Active policy: authorization.evidence_bindings.builder_policy_record_sha256; see the bound native policy for the documented floor, not proof of inclusion or price enforcement");
+    d.set(tag("economics_validation.gas_floor.bound_policy_superseded_fields")?, "The bound native builder policy supersedes the historical v3 addendum/refresh; inclusion, 48Club price enforcement and noMerge/positionFirst effects remain UNQUALIFIED");
+    d.set(tag("budget_wei.note")?, "Frozen worst-case reserve: (6603270 + 3000000) gas * 50000000 wei + 1000000000000 wei BUY = 481163500000000 wei. Gas limits are ceilings, not measured consumption. Current measurements and funding belong to the hash-bound native local_simulation, economics and preflight records");
     let implementation = format!("0x{}", hex(&e.portal_implementation));
     let dry_dir = e
         .dry

@@ -507,6 +507,12 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
     Ok(Evaluation { checks, bound, facts })
 }
 
+fn bounded_detail(text: &str) -> &str {
+    let mut end = text.len().min(4000);
+    while !text.is_char_boundary(end) { end -= 1; }
+    &text[..end]
+}
+
 fn status_record(dir: &Path, frozen: &Path, e: Evaluation) -> (bool, Vec<u8>) {
     let pass = e.checks.iter().all(|c| c.pass);
     let mut d = e.facts;
@@ -523,7 +529,7 @@ fn status_record(dir: &Path, frozen: &Path, e: Evaluation) -> (bool, Vec<u8>) {
         let mut row = Draft::new(&rq::check::SCHEMA);
         row.set(rq::check::NAME, c.name)
             .set(rq::check::STATUS, if c.pass { "PASS" } else { "STOP" })
-            .set(rq::check::DETAIL, c.detail.chars().take(4000).collect::<String>());
+            .set(rq::check::DETAIL, bounded_detail(&c.detail));
         d.push(rq::CHECKS, row.into_nested());
     }
     for (name, sha) in &e.bound {
@@ -572,6 +578,18 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf8_status_details_are_byte_bounded_and_preserve_stop() {
+        for detail in ["a".repeat(4000), "a".repeat(4001), "é".repeat(4000), "€".repeat(4000), "🦀".repeat(4000), format!("{}€🦀", "a".repeat(3999))] {
+            let evaluation = Evaluation { checks: vec![Check { name: "offline-test", pass: false, detail }], bound: vec![], facts: Draft::new(&rq::SCHEMA) };
+            let (pass, bytes) = status_record(Path::new("offline-test"), Path::new("offline-test"), evaluation);
+            let record = darkbot_bsc_record::decode(&rq::SCHEMA, &bytes).unwrap();
+            assert!(!pass);
+            assert_eq!(record.text(rq::VERDICT).unwrap(), "STOP");
+            assert!(record.nested_all(rq::CHECKS).unwrap()[0].text(rq::check::DETAIL).unwrap().len() <= 4000);
+        }
+    }
 
     /// The frozen import, relative to the repository root.
     const FROZEN: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";

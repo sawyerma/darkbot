@@ -6,6 +6,9 @@
 //! repository root without affecting other test binaries; all tests set the
 //! same directory.
 
+#[path = "support/requalification.rs"]
+mod requalification_fixture;
+
 use darkbot_bsc_execution::acceptance_contract::{
     Authorization, WITNESS_SOURCE_RECORD, attempt1_bindings, attempt1_v3, attempt1_v4,
     attempt1_v4_evidence,
@@ -41,6 +44,7 @@ fn at_repo_root() {
 fn matching_context() -> LiveGuardContext {
     let snap = inspect_v3(Path::new(V3_RELATIVE_PATH)).unwrap();
     LiveGuardContext {
+        attempt_id: snap.attempt_id.clone(),
         launcher_address: snap.launcher_address.clone(),
         buyer_address: snap.buyer_address.clone(),
         chain_id: snap.chain_id,
@@ -270,6 +274,7 @@ fn requal_root() -> (PathBuf, &'static str) {
         .set(up::FIRST_PARENT_HASH, Value::B256([1; 32]))
         .set(up::LAST_BLOCK_HASH, Value::B256([2; 32]));
     write("portal_upgrade.dbrec", scan.encode().unwrap());
+    requalification_fixture::fixture(&root, dir, &format!("{FROZEN}/builder_policy.dbrec"), Path::new("."));
     (root, dir)
 }
 
@@ -315,13 +320,96 @@ fn v4_binds_native_inputs_without_and_imports_with_legacy_hashes() {
             v3.max_attempts
         )
     );
+    // All CLI modes share this validation, before any hash/output/write.
+    use g06a::requalification as r;
+    let status_path = root.join(dir).join("requalification_status.dbrec");
+    let original = std::fs::read(&status_path).unwrap();
+    let original_record = decode(&r::SCHEMA, &original).unwrap();
+    let copy = |record: &darkbot_bsc_record::Record| {
+        let mut d = Draft::new(record.schema());
+        for (tag, value) in record.fields() { d.push(*tag, value.clone()); }
+        d
+    };
+    for case in 0..10 {
+        let mut status = copy(&original_record);
+        match case {
+            0 => { std::fs::remove_file(&status_path).unwrap(); },
+            1 => { status.set(r::VERDICT, "STOP"); },
+            2 => { let mut row = Draft::new(&r::check::SCHEMA); row.set(r::check::NAME, "R0_UPGRADE").set(r::check::STATUS, "STOP").set(r::check::DETAIL, "offline-test"); status.clear(r::CHECKS); status.push(r::CHECKS, row.into_nested()); },
+            3 => { status.clear(r::RECORDS); },
+            4 => { status.push(r::RECORDS, original_record.get(r::RECORDS).unwrap().clone()); },
+            5 => { status.set(r::REQUAL_DIR, "wrong/directory"); },
+            6 => { status.set(r::FROZEN_DIR, "wrong/frozen"); },
+            7 => { status.set(PROVENANCE_TOOL, "not-the-verifier"); },
+            8 | 9 => {
+                status.clear(r::RECORDS);
+                for record in original_record.nested_all(r::RECORDS).unwrap() {
+                    let mut row = copy(&record);
+                    if record.text(r::bound::NAME).unwrap() == "native_quote.dbrec" {
+                        if case == 8 { row.set(r::bound::NAME, "replacement.dbrec"); }
+                        else { row.set(r::bound::SHA256, Value::B256([0;32])); }
+                    }
+                    status.push(r::RECORDS, row.into_nested());
+                }
+            },
+            _ => unreachable!(),
+        }
+        if case != 0 { std::fs::write(&status_path, status.encode().unwrap()).unwrap(); }
+        assert!(attempt1_v4_evidence(&root, dir, &policy).is_err(), "case {case}");
+        for mode in ["--check", "--approved-sha"] {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_g07_acceptance_contract")).current_dir(&root).args([dir, policy.as_str(), mode]).env_clear().output().unwrap();
+            assert!(!output.status.success());
+            assert!(output.stdout.is_empty());
+        }
+        std::fs::write(&status_path, &original).unwrap();
+    }
+    assert!(attempt1_v4_evidence(&root, dir, &policy.replace("/builder_policy", "/./builder_policy")).is_err());
+    // Even a matching status binding cannot make altered signed identity valid.
+    let dry_path = root.join(dir).join("dry_result.dbrec");
+    let dry_bytes = std::fs::read(&dry_path).unwrap();
+    let dry = decode(&g06a::dry::NATIVE, &dry_bytes).unwrap();
+    for tag in [g06a::dry::CHAIN_ID, g06a::dry::GAS_PRICE_WEI, g06a::dry::BUY_GAS_LIMIT, g06a::dry::LAUNCH_GAS_LIMIT, g06a::dry::BUYER, g06a::dry::PORTAL, g06a::dry::LAUNCH_TX_HASH, g06a::dry::BUY_VALUE_WEI] {
+        let mut altered = copy(&dry);
+        altered.set(tag, match dry.get(tag).unwrap() { Value::U64(n) => Value::U64(n+1), Value::Address(_) => Value::Address([0;20]), Value::B256(_) => Value::B256([0;32]), Value::U256(_) => Value::U256([0;32]), _ => unreachable!() });
+        std::fs::write(&dry_path, altered.encode().unwrap()).unwrap();
+        requalification_fixture::refresh(&root, dir, &policy);
+        assert!(attempt1_v4_evidence(&root, dir, &policy).is_err(), "identity {tag}");
+    }
+    std::fs::write(&dry_path, &dry_bytes).unwrap();
+    requalification_fixture::refresh(&root, dir, &policy);
+    assert!(attempt1_v4_evidence(&root, dir, &policy).is_ok());
+    for authorization in [Authorization::Proposed, Authorization::Approved] {
+        let bytes = attempt1_v4(&evidence, authorization).unwrap();
+        let text = decode(&contract::V4, &bytes).unwrap().render();
+        for obsolete in ["authorization.evidence_paths.builder_requirements_refresh", "eth_estimateGas=5502725", "addendum stays bound"] { assert!(!text.contains(obsolete), "{obsolete}"); }
+    }
     // An import where a native record is required is refused.
     std::fs::copy(
         format!("{FROZEN}/preflight.dbrec"),
         root.join(dir).join("preflight.dbrec"),
     )
     .unwrap();
+    requalification_fixture::refresh(&root, dir, &policy);
     let e = attempt1_v4_evidence(&root, dir, &policy).unwrap_err();
     assert!(e.contains("must be a native record"), "{e}");
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn explicit_attempt_identity_and_individual_dry_flags_fail_closed() {
+    use darkbot_bsc_execution::acceptance_contract::{ATTEMPT_ID, require_dry_pass};
+    use darkbot_bsc_execution::acceptance_guard::verify_attempt_id;
+    use g06a::dry as d;
+    assert!(verify_attempt_id(ATTEMPT_ID, ATTEMPT_ID).is_ok());
+    for wrong in ["", "other", "g07-mainnet-attempt-1-dry-20261015T222241Z "] { assert!(verify_attempt_id(ATTEMPT_ID, wrong).is_err()); }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let bytes = std::fs::read(root.join(darkbot_bsc_execution::acceptance_contract::DRY_RECORD)).unwrap();
+    let good = decode(&d::SCHEMA, &bytes).unwrap();
+    assert!(require_dry_pass(&good).is_ok());
+    for flag in [d::DRY_1,d::DRY_2,d::DRY_3,d::DRY_4,d::DRY_ALL,d::ZERO_EGRESS_STRUCTURAL] {
+        let mut record = Draft::new(&d::SCHEMA);
+        for (tag, value) in good.fields() { record.push(*tag, value.clone()); }
+        record.set(flag, false);
+        assert!(require_dry_pass(&decode(&d::SCHEMA, &record.encode().unwrap()).unwrap()).is_err());
+    }
 }

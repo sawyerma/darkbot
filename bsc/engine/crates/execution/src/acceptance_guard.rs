@@ -27,6 +27,7 @@ pub struct InputHashes {
 
 #[derive(Debug, Clone)]
 pub struct LiveGuardContext {
+    pub attempt_id: String,
     pub launcher_address: String,
     pub buyer_address: String,
     pub chain_id: u64,
@@ -283,6 +284,7 @@ pub fn verify_live_authorization(
         return Err("producer-witness schema/source contract is not bound for this attempt; actual producer access may arrive asynchronously".into());
     }
 
+    verify_attempt_id(&snap.attempt_id, &ctx.attempt_id)?;
     verify_input("dry_evidence", &snap.dry_evidence, &ctx.dry_evidence)?;
     verify_input(
         "preflight_evidence",
@@ -418,4 +420,10 @@ mod tests {
                         .all(|b| b.is_ascii_hexdigit()))
         );
     }
+}
+
+/// Exact runtime identity binding; no normalization or empty identity.
+pub fn verify_attempt_id(expected: &str, actual: &str) -> Result<(), String> {
+    if expected.is_empty() || expected != actual { return Err("runtime attempt_id differs from frozen v4".into()); }
+    Ok(())
 }

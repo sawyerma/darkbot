@@ -106,25 +106,36 @@ pub(crate) fn validate_attempt_id(attempt_id: &str) -> Result<(), String> {
 /// The run must start at the root of the main checkout, where bsc/.local/ is
 /// git-ignored (the capture journal holds broadcastable signed bytes) and
 /// every run shares one latch directory (a linked worktree has its own).
-pub(crate) fn assert_repository_root() {
-    assert!(
-        Path::new(V4_RELATIVE_PATH).is_file(),
-        "run G0.7 from the repository root: {V4_RELATIVE_PATH} not found"
-    );
-    assert!(
-        fs::symlink_metadata(".git").is_ok_and(|m| m.file_type().is_dir()),
-        "run G0.7 from the main checkout: .git must be a directory, not a linked worktree"
-    );
-    let ignored = fs::read_to_string("bsc/.gitignore").is_ok_and(|rules| {
-        rules.lines().any(|rule| rule.trim() == "/.local/")
-            && !rules
-                .lines()
-                .any(|rule| rule.trim_start().starts_with('!') && rule.contains(".local"))
+pub(crate) fn repository_root_check(root: &Path) -> Result<(), String> {
+    if !root.join(V4_RELATIVE_PATH).is_file() { return Err("v4 missing from repository root".into()); }
+    if !fs::symlink_metadata(root.join(".git")).is_ok_and(|m| m.file_type().is_dir()) { return Err("main checkout .git directory required".into()); }
+    let ignored = fs::read_to_string(root.join("bsc/.gitignore")).is_ok_and(|rules| {
+        rules.lines().any(|rule| rule.trim() == "/.local/") && !rules.lines().any(|rule| rule.trim_start().starts_with('!') && rule.contains(".local"))
     });
-    assert!(
-        ignored,
-        "bsc/.gitignore must ignore /.local/ (without negation) before G0.7 writes its journal there"
-    );
+    if !ignored { return Err("bsc/.gitignore must ignore /.local/ without negation".into()); }
+    Ok(())
+}
+
+pub(crate) fn assert_repository_root() {
+    repository_root_check(Path::new(".")).expect("unsafe G0.7 repository root");
+}
+
+/// Read-only: reject unknown roots and symlinked/non-directory state ancestors.
+#[allow(dead_code)] // Shared with readiness; runner retains atomic latch creation.
+pub(crate) fn absent_attempt_latch(root: &Path, attempt: &str) -> Result<(), String> {
+    repository_root_check(root)?;
+    validate_attempt_id(attempt)?;
+    let mut path = root.to_path_buf();
+    for part in ["bsc", ".local", "g07", attempt] {
+        path.push(part);
+        match fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("attempt state inspection failed: {e}")),
+            Ok(m) if !m.file_type().is_dir() => return Err("attempt state is not a real directory".into()),
+            Ok(_) => {}
+        }
+    }
+    Err("existing attempt state requires reconciliation; no retry".into())
 }
 
 /// Syncs a directory, making its entries (a created, renamed or removed file)
@@ -793,5 +804,34 @@ mod tests {
             "{note}"
         );
         fs::remove_dir_all(&base).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod root_regression {
+    use super::*;
+    #[test]
+    fn latch_requires_safe_main_root_and_absent_real_state() {
+        let root = std::env::temp_dir().join(format!("g07-root-check-{}", std::process::id()));
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(root.join(V4_RELATIVE_PATH), b"offline-test").unwrap();
+        let id = "offline-test";
+        assert!(absent_attempt_latch(&root, id).is_err());
+        fs::write(root.join(".git"), "gitdir: other").unwrap();
+        fs::write(root.join("bsc/.gitignore"), "/.local/\n").unwrap();
+        assert!(absent_attempt_latch(&root,id).is_err());
+        fs::remove_file(root.join(".git")).unwrap();
+        fs::create_dir(root.join(".git")).unwrap();
+        assert!(absent_attempt_latch(&root,id).is_ok());
+        fs::write(root.join("bsc/.gitignore"), "/.local/\n!/.local/\n").unwrap();
+        assert!(absent_attempt_latch(&root,id).is_err());
+        fs::write(root.join("bsc/.gitignore"), "/.local/\n").unwrap();
+        fs::create_dir_all(root.join("bsc/.local/g07/offline-test")).unwrap();
+        assert!(absent_attempt_latch(&root,id).is_err());
+        fs::remove_dir(root.join("bsc/.local/g07/offline-test")).unwrap();
+        std::os::unix::fs::symlink("/nonexistent-g07-state",root.join("bsc/.local/g07/offline-test")).unwrap();
+        assert!(absent_attempt_latch(&root,id).is_err());
+        assert!(absent_attempt_latch(&root,"../escape").is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -85,7 +85,7 @@ fn main() {
     let (baseline, baseline_hashes) =
         load_record(&baseline_path, &[&schema::g06a::preflight::SCHEMA]);
     assert_eq!(field(dry.text(d::STATUS)), "G0.6A_SELF_LAUNCH_BUNDLE_DRY");
-    assert!(field(dry.bool(d::DRY_ALL)), "DRY-1..DRY-4 are not all PASS");
+    darkbot_bsc_execution::acceptance_contract::require_dry_pass(&dry).expect("individual DRY checks failed");
 
     let launcher_key = key_from_env("DARKBOT_G07_LAUNCHER_PRIVATE_KEY");
     let buyer_key = key_from_env("DARKBOT_G07_BUYER_PRIVATE_KEY");
@@ -262,6 +262,7 @@ fn main() {
     let contract = match verify_live_authorization(
         Path::new(V4_RELATIVE_PATH),
         &LiveGuardContext {
+            attempt_id: attempt_id.clone(),
             launcher_address: launcher.to_string(),
             buyer_address: buyer.to_string(),
             chain_id: CHAIN_ID,

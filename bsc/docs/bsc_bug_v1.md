@@ -4,6 +4,14 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Implementierungsstand — 2026-10-20, Paket E1
+
+- **FIXED / TESTED:** E1-1 bis E1-7. Requal-Verifier/PASS, sieben eindeutige Name/Hash-Bindungen (einschließlich Quote), sechs Einzelchecks und aliasfreie Lauf-/Frozen-/Policy-Pfade; eingefrorene DRY-/Wallet-/Nonce-/Funding-Identität; V4-Prosa; explizite Guard-Attempt-ID; Root-/Latch-Prüfung; einzelne DRY-Flags; UTF-8-Bytegrenze.
+- **FIXED:** E1-8 Provenienzkommentar; keine zusätzliche Live-Aussage des konstanten TAX-Felds.
+- **Tests:** 26 Readiness/shared Unit-Tests, 9 Guard/Vertrags- und 5 Readiness-CLI-Tests PASS; 1 gezielter Requal-UTF-8-Test PASS. Nach Pfadkompatibilitätskorrektur Vertrags-Mutationsregression erneut PASS. Ausschließlich offline, synthetische Fixtures ausdrücklich ohne Chain-Autorität.
+- **E1-9 BLOCKED (unabhängige Artefaktverfügbarkeit):** Originale Requal-Records und bisheriger V4 bleiben unverändert lokal/untracked. Neuer inaktiver Review-Vorschlag: `bsc/config/g07_attempt1_acceptance_v4.e1-review.dbrec`, SHA `82f862c2046c656496378a288c03e14a17c1a58c19f81a98b8c932b637ddb278`. Mit vorhandener echter PASS-Evidence offline erzeugt; keine neuen R0-/DRY-Läufe. Approved-Variante ausschließlich berechnet: `6f877ae0f08bc1d795f4ec8370b033b83259cdbaf4e6296550d30d3c24cecce6`. Die alten `5da0068b…` / `4308f2cb…` sind **SUPERSEDED**, keine Freigabereferenz. Der bisherige Operator-Vorschlag wurde nicht ersetzt; vor Freigabe muss der neue geprüfte Vorschlag ausdrücklich übernommen werden. Keine sichere externe Artefaktablage eingerichtet, daher keine unabhängige Verifizierbarkeit behauptet.
+- G0.7 bleibt UNARMED / NOT_EXECUTED; signed-byte-Hashes und 481163500000000-wei-Limit unverändert. E1-OPTION bleibt DEFERRED.
+
 ## 0. Verbindliche Hierarchie und harte Arbeitsregeln
 
 1. `bsc/docs/PHASENPLAN.md` ist der Einstieg. Rangfolge: `BSC_DUAL_VENUE_ROADMAP.md` > `GATE0_TESTPLAN_SHORT.md` > `BSC_PRODUCTION_BUILD_MASTER_PLAN.md`; dazu die phasenspezifischen technischen Vertraege, `ACCEPTANCE_MAP.json` und das chronologische `GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md`. Besonders bindend: Roadmap 2026-10-20 „G0.7 CODE READY“ / STOP-Regel, G0.7-Requalifikationsplan §2/§5, Masterplan §§7–8/13.

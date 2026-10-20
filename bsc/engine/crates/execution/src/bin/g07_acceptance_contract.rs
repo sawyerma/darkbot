@@ -4,6 +4,8 @@
 //!
 //! - `<requal_dir> <builder_policy>`: writes the v4 proposal
 //!   (`approved=false`) to a new file;
+//! - `<requal_dir> <builder_policy> --proposal-out=<new-path>`: exports a
+//!   new inactive review proposal, preserving the existing operator file;
 //! - `<requal_dir> <builder_policy> --check`: verifies the committed file is
 //!   exactly that proposal;
 //! - `<requal_dir> <builder_policy> --approved-sha`: prints the SHA-256 of
@@ -91,6 +93,17 @@ fn main() -> ExitCode {
             }
             Err(e) => stop(e),
         },
+        Some(mode) if mode.starts_with("--proposal-out=") => {
+            let out = &mode["--proposal-out=".len()..];
+            match contract(Authorization::Proposed) {
+                Ok(bytes) => match fs::OpenOptions::new().write(true).create_new(true).open(out)
+                    .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all())) {
+                    Ok(()) => { println!("PROPOSAL_SHA256={}\nGUARD=UNARMED", sha256_hex(&bytes)); ExitCode::SUCCESS },
+                    Err(e) => stop(e),
+                },
+                Err(e) => stop(e),
+            }
+        }
         Some("--check") => match (
             contract(Authorization::Proposed),
             fs::read(V4_RELATIVE_PATH),

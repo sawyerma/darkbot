@@ -300,27 +300,9 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         ),
     );
     validate_attempt_id(&snap.attempt_id)?;
-    let state = fs::symlink_metadata(Path::new(ATTEMPT_STATE_ROOT).join(&snap.attempt_id));
-    if state
-        .as_ref()
-        .is_err_and(|e| e.kind() != std::io::ErrorKind::NotFound)
-    {
-        return Err("attempt state cannot be inspected".into());
-    }
-    if state.is_ok() {
-        check(
-            report,
-            "ATTEMPT_LATCH",
-            "BLOCKED",
-            "Existing attempt state requires reconciliation; no reset/retry",
-        );
-    } else {
-        check(
-            report,
-            "ATTEMPT_LATCH",
-            "PASS",
-            "No attempt directory; no latch created; maximum one",
-        );
+    match absent_attempt_latch(Path::new("."), &snap.attempt_id) {
+        Ok(()) => check(report, "ATTEMPT_LATCH", "PASS", "Verified main checkout; no attempt directory; no latch created"),
+        Err(reason) => check(report, "ATTEMPT_LATCH", "BLOCKED", &reason),
     }
     let (ln, bn, _) = validate_current_preflight(&baseline, &baseline, launcher, buyer, gas);
     check(

@@ -1,3 +1,5 @@
+#[path = "support/requalification.rs"]
+mod requalification_fixture;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -141,6 +143,7 @@ fn v4_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
         .set(up::FIRST_PARENT_HASH, Value::B256([1; 32]))
         .set(up::LAST_BLOCK_HASH, Value::B256([2; 32]));
     write("portal_upgrade.dbrec", scan.encode().unwrap());
+    requalification_fixture::fixture(&root, REQUAL, &policy, &repo);
     let evidence = attempt1_v4_evidence(&root, REQUAL, &policy).unwrap();
     let proposal = attempt1_v4(&evidence, Authorization::Proposed).unwrap();
     let mut draft = Draft::new(&c::V4);
