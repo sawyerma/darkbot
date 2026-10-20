@@ -94,7 +94,7 @@ impl Unsupported {
 
     pub fn of(e: &HealthError) -> Self {
         match e {
-            HealthError::Unsupported(s) if s.contains("UNKNOWN_LAYOUT") => Self::UnknownLayout,
+            HealthError::UnknownLayout(_) => Self::UnknownLayout,
             HealthError::Unsupported(_) => Self::Unsupported,
             HealthError::Stale(_) | HealthError::IntegrationStale(_) => Self::Stale,
             HealthError::MissingAccount(_) => Self::MissingAccount,
@@ -584,7 +584,7 @@ mod tests {
             C0Class::Unsupported(Unsupported::Facts)
         );
         let r = CensusRow::new(
-            Err(HealthError::Unsupported(
+            Err(HealthError::UnknownLayout(
                 "UNKNOWN_LAYOUT: bank layout 0.1.12 is not the pinned crate layout".into(),
             )),
             Ok(0),
@@ -622,6 +622,27 @@ mod tests {
         assert!(CensusModel::new(500, 9_900, 1, 0).is_ok());
     }
 
+    /// V19: the census class of a health error follows its variant: a strict decoder's refusal
+    /// (`UnknownLayout`) is UNKNOWN_LAYOUT, an `Unsupported` error stays UNSUPPORTED even when its
+    /// text names "UNKNOWN_LAYOUT"; the error text reads exactly as before the variant existed.
+    #[test]
+    fn v19_census_layout_class_is_typed_not_text() {
+        assert_eq!(
+            Unsupported::of(&HealthError::UnknownLayout("bank raw length 1".into())),
+            Unsupported::UnknownLayout
+        );
+        assert_eq!(
+            Unsupported::of(&HealthError::Unsupported(
+                "CB_PRICE_GATE bank=x error=UNKNOWN_LAYOUT upstream".into()
+            )),
+            Unsupported::Unsupported
+        );
+        assert_eq!(
+            HealthError::UnknownLayout("UNKNOWN_LAYOUT: bank raw length 1".into()).to_string(),
+            "health unsupported (fail closed): UNKNOWN_LAYOUT: bank raw length 1"
+        );
+    }
+
     #[test]
     fn census_totals_count_every_account_once_with_facts() {
         let now = 1_000_000;
@@ -632,7 +653,7 @@ mod tests {
             row(200, 100, true),
             row(90, 100, true),
             CensusRow::new(
-                Err(HealthError::Unsupported("UNKNOWN_LAYOUT: x".into())),
+                Err(HealthError::UnknownLayout("UNKNOWN_LAYOUT: x".into())),
                 Ok(0),
                 Ok(facts()),
             ),

@@ -103,6 +103,7 @@ impl From<HealthError> for SizingError {
             HealthError::IntegrationStale(_) => SizingErrorKind::IntegrationStale,
             HealthError::Unavailable => SizingErrorKind::HealthUnavailable,
             HealthError::Unsupported(_)
+            | HealthError::UnknownLayout(_)
             | HealthError::Stale(_)
             | HealthError::Crate(_)
             | HealthError::MissingAccount(_) => SizingErrorKind::Other,
@@ -1708,6 +1709,7 @@ mod tests {
         );
         for e in [
             HealthError::Unsupported("x".into()),
+            HealthError::UnknownLayout("UNKNOWN_LAYOUT: x".into()),
             HealthError::Stale("x".into()),
             HealthError::Crate("x".into()),
             HealthError::MissingAccount(Pubkey::new_unique()),

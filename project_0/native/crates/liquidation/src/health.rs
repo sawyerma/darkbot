@@ -46,6 +46,9 @@ pub const INTEGRATION_STALE: &str = "INTEGRATION_STALE:";
 #[derive(Debug)]
 pub enum HealthError {
     Unsupported(String),
+    /// V19: a strict pinned decoder refused the account layout (discriminator, length or
+    /// version); fails closed like `Unsupported` and reads the same.
+    UnknownLayout(String),
     Stale(String),
     /// C10: the pinned program reports a stale integration reserve (refresh prerequisite).
     IntegrationStale(String),
@@ -57,7 +60,9 @@ pub enum HealthError {
 impl std::fmt::Display for HealthError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HealthError::Unsupported(s) => write!(f, "health unsupported (fail closed): {}", s),
+            HealthError::Unsupported(s) | HealthError::UnknownLayout(s) => {
+                write!(f, "health unsupported (fail closed): {}", s)
+            }
             HealthError::Stale(s) => write!(f, "health stale: {}", s),
             HealthError::IntegrationStale(s) => {
                 write!(f, "health integration reserve stale: {}", s)
@@ -339,15 +344,15 @@ pub mod crate_impl {
     /// unknown or resized layout is UNKNOWN_LAYOUT, never a prefix decode.
     fn load_account(data: &[u8]) -> Result<std::borrow::Cow<'_, MarginfiAccount>, HealthError> {
         crate::protocol::decode_marginfi_account(data)
-            .map_err(|e| HealthError::Unsupported(e.to_string()))
+            .map_err(|e| HealthError::UnknownLayout(e.to_string()))
     }
     fn load_group(data: &[u8]) -> Result<std::borrow::Cow<'_, MarginfiGroup>, HealthError> {
-        crate::protocol::decode_group(data).map_err(|e| HealthError::Unsupported(e.to_string()))
+        crate::protocol::decode_group(data).map_err(|e| HealthError::UnknownLayout(e.to_string()))
     }
 
     /// [P1B-02] Strict Bank layout: a 0.1.12-resized bank is UNKNOWN_LAYOUT, never a prefix decode.
     fn load_bank(data: &[u8]) -> Result<std::borrow::Cow<'_, Bank>, HealthError> {
-        crate::protocol::decode_bank(data).map_err(|e| HealthError::Unsupported(e.to_string()))
+        crate::protocol::decode_bank(data).map_err(|e| HealthError::UnknownLayout(e.to_string()))
     }
 
     impl<'s, S: AccountSource + ?Sized> CrateHealth<'s, S> {
@@ -1030,7 +1035,7 @@ mod bank_layout_tests {
             group: Pubkey::new_unique(),
         };
         match engine.observation_accounts(&account) {
-            Err(HealthError::Unsupported(e)) => {
+            Err(HealthError::UnknownLayout(e)) => {
                 assert!(e.starts_with("UNKNOWN_LAYOUT: bank layout 0.1.12"))
             }
             other => panic!("resized bank must fail closed, got {other:?}"),

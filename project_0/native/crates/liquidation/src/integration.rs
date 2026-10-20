@@ -1135,11 +1135,11 @@ mod tests {
         assert!(kinds_for_account(&foreign, &program, &account_key).is_err());
         assert!(crate::protocol::decode_marginfi_account(&foreign.0[&account_key].1).is_err());
 
-        // Health: account and group follow the same exact contract (UNKNOWN_LAYOUT = Unsupported).
+        // Health: account and group follow the same exact contract (V19: typed UnknownLayout).
         let health = |s: &Source| CrateHealth { state: s, group }.health(&account_key, 1, 1);
         assert!(!matches!(
             health(&state(0, exact_bank.clone(), 0, 0)),
-            Err(HealthError::Unsupported(_))
+            Err(HealthError::Unsupported(_) | HealthError::UnknownLayout(_))
         ));
         for s in [
             state(8, exact_bank.clone(), 0, 0),
@@ -1147,7 +1147,7 @@ mod tests {
             state(0, resized_bank.clone(), 0, 0),
         ] {
             assert!(
-                matches!(health(&s), Err(HealthError::Unsupported(ref e)) if e.contains("UNKNOWN_LAYOUT")),
+                matches!(health(&s), Err(HealthError::UnknownLayout(ref e)) if e.contains("UNKNOWN_LAYOUT")),
                 "{:?}",
                 health(&s)
             );

@@ -404,8 +404,7 @@ impl ShadowOwner {
                     HealthEvidence::Unavailable
                 }
                 Err(e) => {
-                    self.ledger
-                        .on_health(false, matches!(e, HealthError::Unsupported(_)));
+                    self.ledger.on_health(false, health_fails_closed(e));
                     HealthEvidence::Error(e.to_string())
                 }
             };

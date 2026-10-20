@@ -113,6 +113,20 @@ pub(crate) fn note_gap(
 /// (sizing, routing, funding, economics) and keeps that cause in the reason; an earlier,
 /// independent cause (own network budget, state, ingress, health, integration, build,
 /// submission …) and a candidate without any loss stay exactly as recorded.
+/// V19: a health error the shadow ledger counts as fail-closed unsupported — an unsupported
+/// protocol state or a layout the strict decoders refuse.
+pub(crate) fn health_fails_closed(e: &darkbot_project0::health::HealthError) -> bool {
+    use darkbot_project0::health::HealthError as H;
+    match e {
+        H::Unsupported(_) | H::UnknownLayout(_) => true,
+        H::Stale(_)
+        | H::IntegrationStale(_)
+        | H::Crate(_)
+        | H::MissingAccount(_)
+        | H::Unavailable => false,
+    }
+}
+
 pub(crate) fn bankruptcy_classification(
     loss: Option<crate::analytics::record::LossReason>,
     reason: Option<String>,
@@ -702,6 +716,28 @@ mod n3_n4_tests {
              stale_result=1 discarded_result=1 in_flight=1 reused=1 invalid_at_use=0 \
              discarded_consume=1 stale_consume=1 dropped=1 cached=0"
         );
+    }
+
+    /// V19: a refused layout counts as fail-closed unsupported like an unsupported state; the
+    /// other health errors do not.
+    #[test]
+    fn v19_unknown_layout_counts_as_fail_closed() {
+        use darkbot_project0::health::HealthError as H;
+        assert!(health_fails_closed(&H::UnknownLayout(
+            "UNKNOWN_LAYOUT: x".into()
+        )));
+        assert!(health_fails_closed(&H::Unsupported(
+            "CB_HALTED bank=x".into()
+        )));
+        for e in [
+            H::Stale("x".into()),
+            H::IntegrationStale("x".into()),
+            H::Crate("x".into()),
+            H::MissingAccount(solana_sdk::pubkey::Pubkey::new_unique()),
+            H::Unavailable,
+        ] {
+            assert!(!health_fails_closed(&e), "{e}");
+        }
     }
 
     /// Z13: the bankruptcy reclassification replaces only the "no plan" follow-on causes a
