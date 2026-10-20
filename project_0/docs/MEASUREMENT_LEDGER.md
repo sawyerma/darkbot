@@ -5803,3 +5803,12 @@ Commit `9a0ae35` (test-only).
 - Tight `econ_retention_mib` byte budget: the next distinct evidence is refused and counted, nothing evicted, verdict INCOMPLETE; `P0_ECON_RETENTION` bound exact (2,000,000 accepted, 2,000,001 refused).
 - Historical byte peak NOT_MEASURED: read-only check of all 22 runs in the local backup outside the repository (`Backup/DarkBot/project_0/data/econ4h`) — none carries `retention_bytes_peak` (pre SK-03). Historical counts as in A1 (max 1,682 transactions in 4h).
 - NOT_RUN: no Mainnet read, capture or LIVE; 600-s calibration needs separate approval.
+
+## 2026-10-21 — BUGS E9 part 1: projection context bound and bounded requeue (LOCAL_PASS, E9 PARTIAL, offline only)
+
+Commit `9602562`.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 680/0/6, default 678/0/6, release, Python 108 (1 skipped) exit 0.
+- Projection simulations carry `minContextSlot` = newest canonical slot of the candidate request and its dependencies; an older context or JSON-RPC −32016 is a typed `ContextBehind`. ProgramData is a projection dependency. Stale results and lagging nodes requeue at most twice per external trigger, FIFO; other failures wait for the next trigger.
+- Offline proof through the real projection worker and owner result handling against a scripted loopback RPC; no Mainnet read.
+- PARTIAL: no upper bound on the projection context at consume (mixed-state risk), no requeue backoff, trigger kinds by string. NOT_MEASURED: provider support of `minContextSlot`, discard/requeue rates under real oracle cadence.
