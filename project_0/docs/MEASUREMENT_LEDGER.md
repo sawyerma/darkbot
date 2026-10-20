@@ -5794,3 +5794,12 @@ Commit `d06393e`.
 - The strict decoders return `HealthError::UnknownLayout`; the census class and the shadow-ledger fail-closed count follow the variant, never the text; displayed texts unchanged. Layout refusals inside the pinned crate stay `Crate`; builder layout errors stay untyped (V17).
 - B4 rest made precise: payer SOL coverage is already checked at the FE-04 admission; open is filling `Intent.rent_lamports` from the plan (B1).
 - NOT_RUN: no Mainnet read, capture or LIVE.
+
+## 2026-10-20 — BUGS R12 rest: byte budget and retention bound tests (LOCAL_PASS, R12 PARTIAL, offline only)
+
+Commit `9a0ae35` (test-only).
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 676/0/6, default 674/0/6, release, Python 108 (1 skipped) exit 0.
+- Tight `econ_retention_mib` byte budget: the next distinct evidence is refused and counted, nothing evicted, verdict INCOMPLETE; `P0_ECON_RETENTION` bound exact (2,000,000 accepted, 2,000,001 refused).
+- Historical byte peak NOT_MEASURED: read-only check of all 22 runs in the local backup outside the repository (`Backup/DarkBot/project_0/data/econ4h`) — none carries `retention_bytes_peak` (pre SK-03). Historical counts as in A1 (max 1,682 transactions in 4h).
+- NOT_RUN: no Mainnet read, capture or LIVE; 600-s calibration needs separate approval.
