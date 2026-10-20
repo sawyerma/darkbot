@@ -475,6 +475,7 @@ fn n4_projection_counters_are_journaled_at_shutdown() {
 /// overflow); they are the owner's own detection work behind live ingress.
 #[test]
 fn z14_bootstrap_probes_never_occupy_the_ingress_channel() {
+    use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
     use bytemuck::Zeroable;
     use marginfi_type_crate::types::MarginfiAccount;
     let mut f = fixture("z14");
@@ -550,7 +551,26 @@ fn z14_bootstrap_probes_never_occupy_the_ingress_channel() {
         })
         .count();
     assert_eq!(free, 1_024, "probes occupy no ingress slot");
+    // V13: the backlog is journaled on its own line (here once at shutdown).
     let dir = f.dir.clone();
-    drop(f);
+    let _ = f.owner.finish();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut lines = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == OwnerDiagnostic::KIND {
+            let d: OwnerDiagnostic = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            lines.push(d.line);
+        }
+    }
+    let backlog: Vec<_> = lines
+        .iter()
+        .filter(|l| l.starts_with("bootstrap_probes: "))
+        .collect();
+    assert_eq!(
+        backlog,
+        ["bootstrap_probes: queued=1100 taken=2 pending=1098"],
+        "{lines:?}"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }

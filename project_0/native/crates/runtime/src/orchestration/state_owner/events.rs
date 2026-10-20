@@ -350,6 +350,7 @@ impl ShadowOwner {
                         probes.sort_unstable_by_key(|w| w.0.to_bytes());
                         let queued = probes.len();
                         self.bootstrap_probe_queue.extend(probes);
+                        self.metrics.bootstrap_probes_queued += queued;
                         owner_log!(
                             self,
                             "bootstrap_probe: queued={} candidates from was_liquidatable",

@@ -2,6 +2,19 @@
 use super::*;
 
 impl ShadowOwner {
+    /// V13: the Z14 bootstrap-probe backlog on its own line (the R126/R127 parsers of the
+    /// `oracle_trigger_stats` line stay unchanged); `None` while no probe was scheduled.
+    pub(super) fn bootstrap_probe_line(&self) -> Option<String> {
+        let queued = self.metrics.bootstrap_probes_queued;
+        let pending = self.bootstrap_probe_queue.len();
+        (queued > 0).then(|| {
+            format!(
+                "bootstrap_probes: queued={queued} taken={} pending={pending}",
+                queued.saturating_sub(pending)
+            )
+        })
+    }
+
     pub(super) fn telemetry(&mut self) {
         // [FIX-108][R4] Winner/Reconcile RPC is handled only by bounded workers above.
         // Detection/Pipeline (P2→P5) wird hier eingehängt, sobald HealthEngine (P3) verfügbar ist.
@@ -30,6 +43,10 @@ impl ShadowOwner {
                 .projection_stats
                 .line(self.projection_pending.len(), self.projection_cache.len());
             owner_log!(self, "{projection}");
+            // V13: the probe backlog (also once at shutdown).
+            if let Some(line) = self.bootstrap_probe_line() {
+                owner_log!(self, "{line}");
+            }
             // [F1] Winner-watch telemetry. RPC request / 429 counts need the MT1 sender: N/A, not 0.
             let ws = self.winner_tracker.stats();
             owner_log!(self,

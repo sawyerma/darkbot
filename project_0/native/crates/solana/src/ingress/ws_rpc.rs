@@ -54,6 +54,9 @@ pub struct WsRpcConfig {
     pub recovery_attempts: u32,
     /// N8: ACK allowance per subscription on top of the idle timeout.
     pub ack_per_subscription: Duration,
+    /// Z19: interval of the stream health snapshot (5 s, ledger "stream health"), emitted with or
+    /// without frames.
+    pub health_interval: Duration,
 }
 
 /// N8: how long all subscription ACKs may take: the idle timeout plus a configured allowance per
@@ -103,6 +106,7 @@ impl WsRpcConfig {
             recovery_budget: None,
             recovery_attempts: 8,
             ack_per_subscription: Duration::from_millis(5),
+            health_interval: Duration::from_secs(5),
         };
         if crate::runtime_config::configured() {
             let p = &crate::runtime_config::active().limits;
@@ -743,12 +747,13 @@ impl WsRpcControlSource {
             );
             let wait = wait.min(Duration::from_millis(250));
             let frame = tokio::time::timeout(wait, rx.next()).await;
-            if frame.is_err() && last_app_frame_at.elapsed() < self.cfg.idle_timeout {
-                continue; // woke up for the heartbeat, not because the stream went idle
-            }
             let t_rx_ns = self.clock.now_ns(); // T_rx: vor Parse
-                                               // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt.
-            if t_rx_ns.saturating_sub(last_health_ns) >= 5_000_000_000 {
+                                               // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt. Z19:
+                                               // also while the stream is silent (no frame before the wake-up), so the frame age
+                                               // keeps rising in the event stream until the idle timeout ends the session.
+            let health_interval_ns =
+                self.cfg.health_interval.as_nanos().min(u64::MAX as u128) as u64;
+            if t_rx_ns.saturating_sub(last_health_ns) >= health_interval_ns {
                 last_health_ns = t_rx_ns;
                 // L3: a control/health event lost to a full queue is counted as dropped.
                 if let Err(ChannelError::Full(_)) =
@@ -764,6 +769,9 @@ impl WsRpcControlSource {
                 {
                     sink.give_up();
                 }
+            }
+            if frame.is_err() && last_app_frame_at.elapsed() < self.cfg.idle_timeout {
+                continue; // woke up for the heartbeat, not because the stream went idle
             }
             let frame = match frame {
                 Err(_) => return Err(IngressError::Connect("idle timeout".into())),

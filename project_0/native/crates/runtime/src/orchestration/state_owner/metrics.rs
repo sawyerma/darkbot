@@ -51,4 +51,6 @@ pub(super) struct OwnerMetrics {
     pub(super) sweep_batch_ns_total: u64,
     pub(super) sweep_batch_ns_max: u64,
     pub(super) sweep_batch_ns_max_accounts: usize,
+    /// V13: bootstrap probes scheduled (Z14); taken for detection = scheduled − still queued.
+    pub(super) bootstrap_probes_queued: usize,
 }

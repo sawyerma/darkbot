@@ -489,12 +489,12 @@ impl ShadowOwner {
                     self.metrics.detect_pipeline_ns_max.max(elapsed);
             }
             if let Ok(h) = &health_result {
-                // [FIX-91] Bankruptcy/no-collateral is a protocol state, not a routing/sizing
-                // failure. Reclassify independently of the stage that first reported "no plan".
-                if h.is_bad_debt && h.equity_assets <= 0 {
-                    rec.loss = Some(crate::analytics::record::LossReason::Bankruptcy);
-                    rec.reason = Some("bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal receivership opportunity".into());
-                }
+                (rec.loss, rec.reason) = bankruptcy_classification(
+                    rec.loss,
+                    rec.reason.take(),
+                    h.is_bad_debt,
+                    h.equity_assets,
+                );
             }
             // C10: a stale integration reserve is classified at its source (pinned error code ⇒
             // HealthError::IntegrationStale / INTEGRATION_STALE marker), never from text here.

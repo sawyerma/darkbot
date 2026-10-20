@@ -132,6 +132,14 @@ pub(crate) fn plan_economic_gate(
     (eval, actionable, technical_probe)
 }
 
+/// V9: keeps the furthest technical stage a rejected plan reached: plan gate (1), allowlists (2),
+/// path capability (3), transaction build (4), compiled-message check (5).
+fn note_stage(furthest: &mut Option<(u8, LossReason)>, stage: u8, loss: LossReason) {
+    if furthest.is_none_or(|(reached, _)| stage > reached) {
+        *furthest = Some((stage, loss));
+    }
+}
+
 /// N2: `now` plus the candidate's network time; an unrepresentable bound (an unbounded budget of
 /// tools and tests) is one year.
 pub(crate) fn deadline_after(now: Instant, deadline_ns: u64) -> Instant {
@@ -471,6 +479,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         )> = None;
         let mut threshold_hits: u32 = 0;
         let mut rejected = Vec::new();
+        // V9: the furthest technical stage a rejected plan reached (and its loss cause), and
+        // whether any plan reached the economics; the loss of a candidate without a plan names it.
+        let mut furthest_technical: Option<(u8, LossReason)> = None;
+        let mut reached_economics = false;
         // D2: fee quotes of this evaluation (one blockhash, one slot) keyed by the message hash
         // of the built bytes: funding classes with byte-identical transactions (NoSwap and
         // Preheld inventory) share one quote; nothing is reused across evaluations.
@@ -502,6 +514,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     .map_err(str::to_owned)
             });
             if let Err(e) = checked {
+                note_stage(&mut furthest_technical, 1, LossReason::Build);
                 rejected.push(format!(
                     "{}: plan invalid: {}",
                     plan.input.funding.as_str(),
@@ -519,6 +532,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .iter()
                 .find(|ix| !self.global_allowed.contains(&ix.program_id))
             {
+                note_stage(&mut furthest_technical, 2, LossReason::Build);
                 rejected.push(format!(
                     "{}: receivership program not allowlisted: {}",
                     plan.input.funding.as_str(),
@@ -532,6 +546,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .flatten()
                 .find(|ix| !self.prereq_allowed.contains(&ix.program_id))
             {
+                note_stage(&mut furthest_technical, 2, LossReason::Build);
                 rejected.push(format!(
                     "{}: prerequisite program not allowed: {}",
                     plan.input.funding.as_str(),
@@ -569,6 +584,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             // [FIX-3] Prerequisite-TXs nur über Bundle-Pfad; sonst ist der Kandidat nicht ausführbar.
             if !self.submitter.supports_tx_version(plan.tx_version) {
                 // [FIX-38]
+                note_stage(&mut furthest_technical, 3, LossReason::Submission);
                 rejected.push(format!(
                     "{}: tx version {:?} not supported on {}",
                     plan.input.funding.as_str(),
@@ -579,6 +595,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
             if !plan.prerequisite_txs.is_empty() && !self.submitter.supports_bundle() {
                 // [FIX-14]
+                note_stage(&mut furthest_technical, 3, LossReason::Submission);
                 rejected.push(format!(
                     "{}: needs bundle path",
                     plan.input.funding.as_str()
@@ -599,6 +616,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             let built = match tx::build(&txplan, bh.hash, &self.limits) {
                 Ok(b) => b,
                 Err(e) => {
+                    note_stage(&mut furthest_technical, 4, LossReason::Build);
                     rejected.push(format!(
                         "{}: tx infeasible: {}",
                         plan.input.funding.as_str(),
@@ -609,6 +627,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             };
 
             if !compiled_matches(&built.tx.message, &plan.instructions) {
+                note_stage(&mut furthest_technical, 5, LossReason::Build);
                 rejected.push(format!(
                     "{}: compiled message differs from the validated instructions",
                     plan.input.funding.as_str()
@@ -732,6 +751,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                         rec.funding = Some(plan.input.funding.as_str().into());
                     }
                 }
+                reached_economics = true;
                 rejected.push(format!(
                     "{}: economics {:?}",
                     plan.input.funding.as_str(),
@@ -773,6 +793,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             // [FIX-43] ThresholdTooHigh nur, wenn mindestens ein Kandidat positiv, aber unter MIN_PROFIT lag.
             rec.loss = Some(if threshold_hits > 0 {
                 LossReason::ThresholdTooHigh
+            } else if reached_economics {
+                LossReason::EconomicSkip
+            } else if let Some((_, technical)) = furthest_technical {
+                // V9: no plan reached the economics; the furthest technical stage is the cause.
+                technical
             } else {
                 LossReason::EconomicSkip
             });

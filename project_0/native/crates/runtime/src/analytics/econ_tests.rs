@@ -120,6 +120,8 @@ fn worker_in(layout: crate::run_layout::RunLayout) -> Worker {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ));
+    // A reused process id must not find an earlier run's journals in the same directory.
+    let _ = std::fs::remove_dir_all(&cfg.run_dir);
     cfg.paths().create().unwrap();
     let (tx, rx) = bounded("test-econ", 64);
     let h = Handle {
@@ -2231,4 +2233,158 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
     );
     assert_eq!(r.simulation_result, None);
     assert!(started.elapsed() < Duration::from_millis(200));
+}
+
+/// V9: when every plan of a candidate fails a technical stage before economics, the loss is that
+/// stage's cause — `Build` for the plan gate, allowlists, transaction build and compiled-message
+/// check, `Submission` for a path capability the adapter lacks — never `EconomicSkip`. A plan
+/// that reached economics keeps the economic attribution (`ThresholdTooHigh`/`EconomicSkip`).
+#[test]
+fn v9_technical_plan_rejections_keep_their_own_cause() {
+    use crate::execution::pipeline::{
+        Mode, NetworkBudget, Pipeline, ReceivershipBuilder, ReceivershipPlan,
+    };
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    /// The shape of one plan: an unknown instruction (fails the plan gate), a prerequisite
+    /// transaction (needs the bundle path the RPC adapter lacks), valid, or valid but losing.
+    #[derive(Clone, Copy)]
+    enum Shape {
+        Broken,
+        Bundle,
+        Valid,
+        Losing,
+    }
+    struct Shaped(Vec<Shape>);
+    impl ReceivershipBuilder for Shaped {
+        fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+            Some(n)
+        }
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
+        }
+        fn plans(
+            &self,
+            a: &Pubkey,
+            now: u64,
+            slot: u64,
+            deadline: std::time::Instant,
+        ) -> Result<Vec<ReceivershipPlan>, String> {
+            let mut out = Vec::new();
+            for shape in &self.0 {
+                let mut plan = TestBuilder.plans(a, now, slot, deadline)?.remove(0);
+                match shape {
+                    Shape::Broken => plan.instructions.push(test_ix([9; 8])),
+                    // A prerequisite on its own allowlisted program (e.g. a swap).
+                    Shape::Bundle => {
+                        plan.prerequisite_txs = vec![vec![solana_sdk::instruction::Instruction {
+                            program_id: Pubkey::new_from_array([8; 32]),
+                            accounts: vec![],
+                            data: vec![1],
+                        }]]
+                    }
+                    Shape::Valid => {}
+                    // Seized value below the repayment: known, negative net.
+                    Shape::Losing => plan.input.gross_seized_realizable_usd_micro = Some(1),
+                }
+                out.push(plan);
+            }
+            Ok(out)
+        }
+    }
+    let prereq_program = [Pubkey::new_from_array([8; 32])];
+    let evaluate = |builder: &Shaped, min_profit: i128| {
+        let submitter = CountingSubmitter {
+            calls: Arc::new(AtomicU64::new(0)),
+            sims: Arc::new(AtomicU64::new(0)),
+        };
+        let clock = Clock::new();
+        let bh = BlockhashCache::new();
+        bh.set(CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 100,
+            refreshed_ns: clock.now_ns(),
+        });
+        let zero = Limits {
+            max_total_capital: 0,
+            max_outstanding_inventory: 0,
+            max_concurrent_positions: 0,
+            max_exposure_per_attempt: 0,
+            max_daily_loss: 0,
+            max_failed_attempts_per_day: 0,
+            max_tip: 0,
+            max_slippage_bps: 0,
+            max_outstanding_attempts: 0,
+        };
+        let mut safety = Safety::new(zero, Allow::default(), false);
+        let payer = solana_sdk::signature::Keypair::new();
+        let allow = Allowlist::default();
+        let failed = FailedCostMatrix::default();
+        let slots = darkbot_solana::ingress::SlotWatch::new();
+        let mut network = NetworkBudget::unbounded();
+        let mut p = Pipeline {
+            mode: Mode::Shadow,
+            clock: &clock,
+            health: &TestHealth,
+            builder,
+            submitter: &submitter,
+            safety: &mut safety,
+            blockhash: &bh,
+            payer: &payer,
+            allowlist: &allow,
+            failed_costs: &failed,
+            limits: TxLimits::default(),
+            resources: Resources {
+                compute_unit_limit: 100_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: None,
+            },
+            min_profit,
+            blockhash_max_age_ns: u64::MAX,
+            p7_passed: false,
+            freshness: Freshness {
+                max_opportunity_age_ns: u64::MAX,
+                execution_deadline_ns: u64::MAX,
+            },
+            tip_account: None,
+            global_allowed: std::slice::from_ref(&test_table().program),
+            prereq_allowed: &prereq_program,
+            slot_watch: &slots,
+            network: &mut network,
+            simulation_failure: None,
+        };
+        p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
+    };
+    use Shape::*;
+    let loss = |shapes: &[Shape], min_profit: i128| {
+        let r = evaluate(&Shaped(shapes.to_vec()), min_profit);
+        assert_eq!(r.loss.is_some(), r.reason.is_some(), "{:?}", r.reason);
+        r.loss
+    };
+    // Every plan fails the plan gate: Build.
+    assert_eq!(loss(&[Broken, Broken], 0), Some(LossReason::Build));
+    // Every plan needs a bundle the RPC adapter does not offer: Submission.
+    assert_eq!(loss(&[Bundle], 0), Some(LossReason::Submission));
+    // The furthest stage decides, in either order: capability (3) is past the gate (1).
+    assert_eq!(loss(&[Broken, Bundle], 0), Some(LossReason::Submission));
+    assert_eq!(loss(&[Bundle, Broken], 0), Some(LossReason::Submission));
+    // A plan that reached economics keeps the economic attribution over any technical stage:
+    // positive below the threshold, or a known loss.
+    assert_eq!(
+        loss(&[Broken, Valid, Bundle], i128::MAX),
+        Some(LossReason::ThresholdTooHigh)
+    );
+    assert_eq!(
+        loss(&[Bundle, Losing, Broken], 0),
+        Some(LossReason::EconomicSkip)
+    );
+    // Control: a valid plan is selected, no loss.
+    assert_eq!(loss(&[Broken, Valid], 0), None);
 }

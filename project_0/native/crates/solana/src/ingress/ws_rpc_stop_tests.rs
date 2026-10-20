@@ -318,3 +318,70 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
         assert!(*ended < Duration::from_secs(2), "{phase}: {ended:?}");
     }
 }
+
+/// Z19: a silent stream (no frame after the last application frame, idle timeout not reached)
+/// keeps emitting the periodic health snapshot: the frame age rises in the event stream while
+/// the frame count stays, and the silence ends neither the session nor emits Gap/Fatal.
+/// Loopback only, never Mainnet.
+#[test]
+fn z19_silent_stream_keeps_reporting_a_rising_frame_age() {
+    let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    std_listener.set_nonblocking(true).unwrap();
+    let url = format!("ws://{}", std_listener.local_addr().unwrap());
+    let release = Shutdown::new();
+    let hold = release.clone();
+    let server = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
+            let (s, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+            let request = ws.next().await.unwrap().unwrap();
+            let id = serde_json::from_str::<Value>(request.to_text().unwrap()).unwrap()["id"].clone();
+            ws.send(Message::Text(
+                json!({"jsonrpc": "2.0", "result": 7, "id": id}).to_string(),
+            ))
+            .await
+            .unwrap();
+            ws.send(Message::Text(
+                json!({"jsonrpc": "2.0", "method": "slotNotification", "params": {
+                    "subscription": 7, "result": {"slot": 100, "parent": 99, "root": 98}}})
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+            // Silence: the connection stays open without a frame until the test is done.
+            let until = tokio::time::Instant::now() + Duration::from_secs(20);
+            while !hold.is_requested() && tokio::time::Instant::now() < until {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+    });
+    let mut cfg = r10_cfg(url);
+    cfg.health_interval = Duration::from_millis(200);
+    let started = std::time::Instant::now();
+    let (r, _, ev) = r10_run_until(
+        cfg,
+        Some(&move || started.elapsed() >= Duration::from_millis(1500)),
+    );
+    release.request();
+    server.join().unwrap();
+    assert!(r.is_ok() && r10_fatals(&ev) == 0, "{r:?}");
+    assert!(!ev.iter().any(|e| matches!(e, IngressEvent::Gap { .. })));
+    assert!(ev.iter().any(|e| matches!(e, IngressEvent::Reconnected { .. })));
+    let snapshots: Vec<(u64, u64)> = ev
+        .iter()
+        .filter_map(|e| match e {
+            IngressEvent::Health(h) if h.connected => h.last_frame_age_ns.map(|a| (a, h.frames)),
+            _ => None,
+        })
+        .collect();
+    // ~1.4 s of silence after the one frame at a 200 ms interval (250 ms wake-ups).
+    assert!(snapshots.len() >= 3, "{snapshots:?}");
+    assert!(snapshots.iter().all(|&(_, frames)| frames == 1), "{snapshots:?}");
+    assert!(snapshots.windows(2).all(|w| w[1].0 > w[0].0), "{snapshots:?}");
+    assert!(snapshots.last().unwrap().0 >= 800_000_000, "{snapshots:?}");
+}

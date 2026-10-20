@@ -108,6 +108,43 @@ pub(crate) fn note_gap(
     }
 }
 
+/// [FIX-91] Bankruptcy/no-collateral is a protocol state, not a routing/sizing failure.
+/// Z13: it replaces only the "no plan" follow-on causes a zero-equity account produces
+/// (sizing, routing, funding, economics) and keeps that cause in the reason; an earlier,
+/// independent cause (own network budget, state, ingress, health, integration, build,
+/// submission …) and a candidate without any loss stay exactly as recorded.
+pub(crate) fn bankruptcy_classification(
+    loss: Option<crate::analytics::record::LossReason>,
+    reason: Option<String>,
+    bad_debt: bool,
+    equity_assets: i128,
+) -> (Option<crate::analytics::record::LossReason>, Option<String>) {
+    use crate::analytics::record::LossReason as L;
+    let follow_on = matches!(
+        loss,
+        Some(
+            L::Sizing
+                | L::Routing
+                | L::Funding
+                | L::Economics
+                | L::EconomicSkip
+                | L::ThresholdTooHigh
+        )
+    );
+    if !(bad_debt && equity_assets <= 0 && follow_on) {
+        return (loss, reason);
+    }
+    (
+        Some(L::Bankruptcy),
+        Some(format!(
+            "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal \
+             receivership opportunity (reported as {:?}: {})",
+            loss.expect("follow-on cause"),
+            reason.as_deref().unwrap_or("-")
+        )),
+    )
+}
+
 /// N4: the outcomes of the integration projections (how often E9 discards one). Every requested
 /// projection ends in exactly one result counter or is still in flight, every accepted one in
 /// exactly one consume counter or is still cached, so the report balances:
@@ -664,6 +701,65 @@ mod n3_n4_tests {
             "projection: requested=7 queue_full=2 observation_unknown=1 accepted=4 failed=0 \
              stale_result=1 discarded_result=1 in_flight=1 reused=1 invalid_at_use=0 \
              discarded_consume=1 stale_consume=1 dropped=1 cached=0"
+        );
+    }
+
+    /// Z13: the bankruptcy reclassification replaces only the "no plan" follow-on causes a
+    /// zero-equity account produces (sizing, routing, funding, economics) and keeps their cause
+    /// in the reason; an earlier, independent cause (own network budget, state, health,
+    /// integration, build …) or a candidate without any loss stays as recorded.
+    #[test]
+    fn z13_bankruptcy_keeps_independent_causes_and_their_provenance() {
+        use crate::analytics::record::LossReason as L;
+        let classify = |loss: Option<L>, reason: &str| {
+            bankruptcy_classification(loss, Some(reason.to_string()), true, 0)
+        };
+        for follow_on in [
+            L::Sizing,
+            L::Routing,
+            L::Funding,
+            L::Economics,
+            L::EconomicSkip,
+            L::ThresholdTooHigh,
+        ] {
+            let (loss, reason) = classify(Some(follow_on), "SIZING:NO_VALID_PROTOCOL_PAIR");
+            assert_eq!(loss, Some(L::Bankruptcy), "{follow_on:?}");
+            let reason = reason.unwrap();
+            assert!(reason.contains("NO_VALID_PROTOCOL_PAIR"), "{reason}");
+            assert!(reason.contains(&format!("{follow_on:?}")), "{reason}");
+        }
+        for independent in [
+            L::RpcBudget,
+            L::RpcDeadline,
+            L::State,
+            L::StateRace,
+            L::Ingress,
+            L::Health,
+            L::CircuitBreaker,
+            L::IntegrationRefresh,
+            L::UnsupportedIntegration,
+            L::MissingAta,
+            L::Build,
+            L::Submission,
+            L::Tip,
+            L::Unknown,
+            L::Bankruptcy,
+        ] {
+            assert_eq!(
+                classify(Some(independent), "original"),
+                (Some(independent), Some("original".to_string())),
+                "{independent:?}"
+            );
+        }
+        assert_eq!(classify(None, "ready"), (None, Some("ready".to_string())));
+        // Not bad debt, or equity left: never reclassified.
+        assert_eq!(
+            bankruptcy_classification(Some(L::Routing), None, true, 1),
+            (Some(L::Routing), None)
+        );
+        assert_eq!(
+            bankruptcy_classification(Some(L::Routing), None, false, 0),
+            (Some(L::Routing), None)
         );
     }
 }

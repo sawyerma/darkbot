@@ -1422,13 +1422,152 @@ mod tests {
         assert!(51_500_000i128 < threshold_bits);
     }
 
+    /// Z17 (FIX-93) through the production `sizes()` path: one asset (maintenance weight 0.8)
+    /// and one liability (weight 1.0), both 1 USD (Fixed), FeeState cap 10 %, headroom 99.9 %.
+    /// At equity assets of 5 USD or more the sizing stays within the normal health bound
+    /// (post-liquidation maintenance health ≤ 0, seized value ≤ the health cap); below 5 USD
+    /// (pinned `LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD`, strict `<`) the closeout drops the
+    /// health cap: the seized value goes past it and the post-health becomes positive.
     #[test]
     fn normal_and_closeout_bounds_are_distinct() {
-        // Regression guard for FIX-93: normal liquidations retain the health/premium
-        // constraints; closeout is selected exclusively by HealthView::closeout_allowed.
-        let normal = false;
-        let closeout = true;
-        assert!(!normal);
-        assert!(closeout);
+        use marginfi_type_crate::types::{
+            BankOperationalState, FeeState, MarginfiGroup, OracleSetup, WrappedI80F48,
+        };
+        use std::collections::HashMap;
+        struct Source(HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+        impl AccountSource for Source {
+            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.0.get(k).map(|(o, d)| (*o, 1, d.as_slice()))
+            }
+        }
+        // The pinned program id: Health loads the accounts through its Anchor owner check.
+        let program: Pubkey = protocol::PROGRAM_ID_MAINNET.parse().unwrap();
+        let (group, account, asset_bank, liab_bank) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let num = |v: f64| WrappedI80F48::from(I80F48::from_num(v));
+        let data = |disc: [u8; 8], bytes: &[u8]| [disc.as_slice(), bytes].concat();
+        let bank = |asset_weight: f64| {
+            let mut b: Bank = bytemuck::Zeroable::zeroed();
+            b.group = group;
+            b.mint = Pubkey::new_unique();
+            b.mint_decimals = 6;
+            b.asset_share_value = num(1.0);
+            b.liability_share_value = num(1.0);
+            b.config.asset_weight_init = num(asset_weight);
+            b.config.asset_weight_maint = num(asset_weight);
+            b.config.liability_weight_init = num(1.0);
+            b.config.liability_weight_maint = num(1.0);
+            b.config.operational_state = BankOperationalState::Operational;
+            b.config.oracle_setup = OracleSetup::Fixed;
+            b.config.fixed_price = num(1.0);
+            data(protocol::DISC_BANK, bytemuck::bytes_of(&b))
+        };
+        let mut fee: FeeState = bytemuck::Zeroable::zeroed();
+        fee.liquidation_max_fee = num(0.1);
+        // Native token amounts (6 decimals) of the asset and the liability.
+        let sized = |asset: u64, liab: u64| {
+            let mut a: MarginfiAccount = bytemuck::Zeroable::zeroed();
+            a.group = group;
+            // Pinned Marginfi keeps the balances sorted by bank key, descending.
+            let (i, j) = if asset_bank > liab_bank {
+                (0, 1)
+            } else {
+                (1, 0)
+            };
+            let bal = &mut a.lending_account.balances;
+            (bal[i].active, bal[i].bank_pk, bal[i].asset_shares) =
+                (1, asset_bank, num(asset as f64));
+            (bal[j].active, bal[j].bank_pk, bal[j].liability_shares) =
+                (1, liab_bank, num(liab as f64));
+            let state = Source(HashMap::from([
+                (asset_bank, (program, bank(0.8))),
+                (liab_bank, (program, bank(1.0))),
+                (
+                    group,
+                    (
+                        program,
+                        data(
+                            protocol::DISC_MARGINFI_GROUP,
+                            bytemuck::bytes_of(&<MarginfiGroup as bytemuck::Zeroable>::zeroed()),
+                        ),
+                    ),
+                ),
+                (
+                    protocol::fee_state_pda(&program),
+                    (
+                        program,
+                        data(protocol::DISC_FEE_STATE, bytemuck::bytes_of(&fee)),
+                    ),
+                ),
+                (
+                    account,
+                    (
+                        program,
+                        data(protocol::DISC_MARGINFI_ACCOUNT, bytemuck::bytes_of(&a)),
+                    ),
+                ),
+            ]));
+            let closeout = CrateHealth {
+                state: &state,
+                group,
+            }
+            .health(&account, 1_700_000_000, 10)
+            .unwrap()
+            .closeout_allowed;
+            let mut out = ProtocolSizer {
+                state: &state,
+                program,
+                group,
+                headroom_bps: 9_990,
+            }
+            .sizes(&account, 1_700_000_000, 10)
+            .unwrap();
+            assert_eq!(out.len(), 1);
+            (closeout, out.remove(0))
+        };
+        // USD micro: the normal health cap -pre / (1/1.1 - 0.8) and the post-liquidation
+        // maintenance health pre + repaid - 0.8 × seized (prices 1 USD, micro = native).
+        let health_cap = |asset: u64, liab: u64| (liab - asset * 8 / 10) as f64 / (1.0 / 1.1 - 0.8);
+        let post = |asset: u64, liab: u64, s: &ProtocolSizing| {
+            (asset * 8 / 10) as i128 - liab as i128 + s.repay_equity_value_micro as i128
+                - (s.seized_equity_value_micro * 8 / 10) as i128
+        };
+        // Normal: 100/90 USD and exactly at the threshold, 5/4.5 USD.
+        for (asset, liab) in [(100_000_000, 90_000_000), (5_000_000, 4_500_000)] {
+            let (closeout, s) = sized(asset, liab);
+            assert!(!closeout, "{asset}");
+            assert!(
+                s.seized_equity_value_micro as f64 <= health_cap(asset, liab),
+                "{s:?}"
+            );
+            assert!(
+                post(asset, liab, &s) <= 0,
+                "{asset}: {} {s:?}",
+                post(asset, liab, &s)
+            );
+            assert!(s.premium_bps <= 1_000, "{s:?}");
+        }
+        // Closeout: just below the threshold (4.999999/4.5 USD) and 4/3.6 USD.
+        for (asset, liab) in [(4_999_999, 4_500_000), (4_000_000, 3_600_000)] {
+            let (closeout, s) = sized(asset, liab);
+            assert!(closeout, "{asset}");
+            assert!(
+                s.seized_equity_value_micro as f64 > health_cap(asset, liab),
+                "{s:?}"
+            );
+            assert!(
+                post(asset, liab, &s) > 0,
+                "{asset}: {} {s:?}",
+                post(asset, liab, &s)
+            );
+            // Still bounded by the sizer's own conservative liability cap (liability × fee
+            // factor) — a strategy bound: under `ignore_healthy` the pinned `liquidate_end.rs`
+            // skips the premium check entirely.
+            assert!(s.seized_equity_value_micro <= liab * 11 / 10, "{s:?}");
+        }
     }
 }

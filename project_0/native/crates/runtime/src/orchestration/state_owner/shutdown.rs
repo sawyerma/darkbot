@@ -44,6 +44,9 @@ impl ShadowOwner {
             .projection_stats
             .line(self.projection_pending.len(), self.projection_cache.len());
         owner_log!(self, "{projection}");
+        if let Some(line) = self.bootstrap_probe_line() {
+            owner_log!(self, "{line}");
+        }
         // [FIX-46] Letzten (Teil-)Tag beim regulären Shutdown schreiben, damit das Ledger vollständig ist.
         let final_summary = self.ledger.finish();
         let evidence_result = self.evidence.finish(Some(final_summary));

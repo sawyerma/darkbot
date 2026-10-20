@@ -844,6 +844,7 @@ pub(super) fn prepare(
             sweep_batch_ns_total: 0,
             sweep_batch_ns_max: 0,
             sweep_batch_ns_max_accounts: 0,
+            bootstrap_probes_queued: 0,
         },
         eval_slippage_bps,
         zero_prefund_enabled: zero_prefund_enabled(&mode, &|k| std::env::var(k).ok())?,
