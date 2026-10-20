@@ -267,7 +267,127 @@ Ergaenzend **BSC-only-Archiv-/Buildprobe ohne Root-`protocol/`** und gezielte E2
 **Etappe-2-Abnahme:** auf `main` nur nachgepruefte minimal-invasive Fixes, klar unterschiedenes `UNRESOLVED`/STOP/ADAPT, kein Warten ohne endliche Obergrenze, keine falsche Timing-Definition, durable BIN-Evidence, G0.8 ohne GUI-Buildabhaengigkeit. Keine Freigabe, kein Mainnet-BUY, kein automatischer Nonce-Burn und keine Wiederaufnahme von C1/C2.
 
 
-## 3. Nachfolgende Etappen
+## 3. Etappe 3 — DRY-/Requal-Werkzeuge, Salt-Exposure und Prozessisolation
+
+**Pruefstand:** 2026-10-20, GitHub `main` Commit `c2de791a0833ff35be48f326c533c348093945de`; Fable-Report Etappe 3 bezieht sich auf `cac786e`. Fuer diese Codepfade lag bis zu dieser Revision keine neuere Implementierung vor. **Hier wurden die Codepfade, die vorhandenen gepinnten Evidenzen und die verbindlichen Plaene gelesen, aber weder aktuelle Mainnet-RPC-Tests noch Rust-/Shell-Tests ausgefuehrt.** Alle Fixes sind weiter `OPEN`. Die bisherige signed-byte-Identitaet, die historischen R0-/DRY-Records, Guard `UNARMED` und der eine wirtschaftliche Attempt duerfen nicht unbemerkt geaendert werden.
+
+**Phasen-/Vertragsbezug:** `BSC_DUAL_VENUE_ROADMAP.md` (Binding Update 2026-10-20), `G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md` §§1,2,5, `G07_REQUALIFICATION_RESULT_20261020.md`, `BSC_BIRTH_ENTRY_ARCHITECTURE.md` und `GATE0_TESTPLAN_SHORT.md`. Die historische Requal hat R0 + DRY0–DRY4 PASS mit dem eingefrorenen Salt/Token/Launch-/BUY-Hash dokumentiert; daraus folgt **weder** Geheimhaltung des Salts noch live BUY/ordering/timing PASS. Keine Wiederholung des langen R0/DRY allein zur Umsetzung kosmetischer Härtung.
+
+### Etappe-3-Urteil
+
+| ID | Schwere | Urteil | Umsetzungsstatus / Sicherheitsgrenze |
+| --- | --- | --- | --- |
+| E3-1 | Hoch, Angriffs-/Kandidatenrisiko | **BESTAETIGT:** Salt deterministisch, Repository-veroeffentlicht und RPC-seitig offengelegt; **tatsaechlicher fremder erfolgreichen Pre-Launch NICHT NACHGEWIESEN** | Anwenderentscheidung A/B erforderlich; kein stiller Re-Salt |
+| E3-2 | Hoch fuer Geheimnisisolation | **BESTAETIGT:** Keys durch `set -a`/globales `export` zu breit vererbt | Pflichtfix ohne Kandidaten-/DRY-Aenderung |
+| E3-3 | Niedrig bis Mittel | **BESTAETIGT:** DRY-3 prueft gegen veraltete v2-Maximum-Zahl | Pflichtfix fuer kuenftige erneute DRY-Laeufe; alte Records unveraendert |
+| E3-4 | Niedrig, Assurance | **BESTAETIGT:** `ZERO_EGRESS_STRUCTURAL=true` ist eine manuell behauptete Eigenschaft | Enger Quell-/Offline-Negativtest, keine neue Network-Faehigkeit |
+| E3-5 | Niedrig, Reproduzierbarkeit | **BESTAETIGT:** Readiness-Wrapper startet Cargo vom Repo-Root ohne den Workspace-Pin | Pflichtfix, gezielte Shell-/Toolchain-Probe |
+| E3-6 | Niedrig, irrefuehrender Fehlzustand | **BESTAETIGT:** zwei Legacy-Probes erwarten V2-Guard/JSON-Toolchain | Explizit ausser Betrieb nehmen; nicht in Gate-0-Hotfix portieren |
+| E3-7 | Info / moegliche Konsistenzhaertung | **BESTAETIGTE ARCHITEKTUR-EIGENSCHAFT:** RPC-State ohne Proof, `latest`-Reads nicht auf festen Block gepinnt; **konkreter falscher PASS nicht nachgewiesen** | Transparent dokumentieren, minimalen Snapshot-Fix nur bei nachgewiesenem G0.7-Sicherheitsbedarf |
+
+### E3-1 — Eingefrorener Launch-Salt ist vorhersagbar und oeffentlich
+
+**Harter Code-/Evidence-Nachweis:**
+
+- `bsc/tools/g06a_economics_evm_crosscheck.cjs::chooseSalt` ca. Z. 145–157 berechnet `keccak256(UTF8("darkbot-g06a-economics-v1:" + i))` fuer `i=0,1,...`, prueft den Vanity-Suffix `7777` und sucht die erste beim gesichteten Block noch nicht belegte CREATE2-Adresse. Es wird **keine** CSPRNG-Entropie fuer diesen Salt benutzt.
+- `bsc/tools/g06a_final_dry.sh` ca. Z. 143–153 uebernimmt `salt` aus `economics_crosscheck.dbrec`, verlangt Identitaet zum bereits eingefrorenen DRY und verwendet ihn spaeter fuer Signatur und Simulation.
+- Die versionierte Datei `bsc/native/evidence/g06a/g06a_final_dry_20261015T222241Z/economics_crosscheck.json` enthaelt nachweislich ein nichtleeres `salt`-Feld; auch `bsc/native/evidence/g06a/g07_binary_import_20261016/economics_crosscheck.dbrec` ist versioniert. Die Token-Adresse steht zusaetzlich im Requal-Plan. Der Salt ist also nicht vertraulich. Den geheimen Wert nicht erneut in Fehlermeldungen oder diesen Bugtext kopieren.
+- **Zusaetzlich verifiziert, bei Fable nicht ausreichend beschrieben:** `g06a_economics_evm_crosscheck.cjs` ca. Z. 267–303 sendet `launchCalldata(LAUNCHER, salt)` bereits bei `eth_estimateGas` und `eth_call` an den konfigurierten externen RPC; ca. Z. 450 wird `SALT=...` auf stdout geschrieben. Auch `bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/main.rs` ca. Z. 192–203 verwendet nach der Token-Code-Pruefung ein `rpc_estimate_gas(..., &launch_data)`, welches den aktuellen Launch-Salt an einen RPC weitergibt. **Read-only RPC verhindert wirtschaftliches Senden, bedeutet aber nicht Geheimhaltung von Call-Daten.**
+- Offizielle Flap-Referenz: `https://github.com/flap-sh/flap-skills/blob/main/launch-bnb-token-on-flap/references/salt-finding.md`. Der Token wird nach dem Protokoll ueber CREATE2 aus Portal (Deployer), Salt und Clone-Initcode mit TAX_V3-Implementation berechnet; der offizielle Salt-Finder nutzt einen frischen Zufalls-Seed. **Die Live-Autorisierungs-/Collision-Semantik der genauen Portal-v5.25.0-Implementation ist hier nicht durch einen fremden Test-Launch belegt.** Kein Mainnet-Launch darf zur Pruefung dieser Behauptung ausgefuehrt werden.
+
+**Risiko:** Ein Dritter kann Kandidat und Token-Adresse offline im Voraus kennen. Falls die aktuelle `newTokenV6`-Deployment-Semantik einen anderen Caller nicht an der Nutzung der bekannten CREATE2-Adresse hindert, kann ein fremder Vorab-Launch die gewaehlte Adresse belegen; G0.7 STOP vor dem Latch oder ein Race/Revert beim Release ist moeglich. Der tatsaechliche fruehere Fremd-Launch bzw. eine bereits belegte Adresse sind **nicht belegt**. Der vorhandene G0.7-Test `rpc_code(token)` mit `predicted token already exists` ca. Z. 185–191 findet eine **bereits belegte** Token-Adresse, garantiert aber **nicht** die Abwesenheit einer spaeteren Race-/Builder-Propagation. Fables „A: vor Latch Token frei pruefen“ ist insofern **schon weitgehend implementiert**; erfordert allenfalls nachgewiesene Verkuerzung/Aktualitaetspruefung, keinen neuen Preflight-Mechanismus.
+
+**Keine automatische Codeentscheidung:**
+
+- **A — eingefrorenen Salt behalten:** Exaktes Launch-/BUY-Hashpaar, Vertrags-/Requal-Bindung und wirtschaftliche Obergrenzen bleiben unveraendert. Bei spaeterer wirtschaftlicher Freigabe muss das dokumentierte Salt-/Adress-Collision-/Front-run-Risiko explizit akzeptiert werden. Vor dem Latch und moeglichst nahe am autorisierten Release weiterhin Code-/Head-/Nonce-/Chain-Gates ausfuehren. **Auch ein frisch leerer Account ist keine Garantie** gegen Fremdausfuehrung nach dem Check. Kein neuer unterschwelliger Salt-Wechsel.
+- **B — neuer kryptographisch zufaelliger Salt (mit Vanity-Suche):** nur nach neuer ausdruecklicher Entscheidung; neue Token-Adresse, neue Launch-Calldata, neues signiertes Launch-/BUY-Hashpaar, notwendige DRY-/EVM-/Economics-/Guard-/Contract-V4-(oder Folgevertrags-)Bindung und neue Approved-Variant-SHA-256. Die bisherigen PASS-Evidenzen bleiben historische Belege, autorisieren aber **nicht** den neuen Kandidaten. **Besonderer Pflichtpunkt:** blosse Ersetzung von `chooseSalt` beseitigt nicht das Leakage: alle externen `eth_estimateGas`-/`eth_call`-Pfade mit echten sensitive Launch-Daten und die G0.7-Laufzeitpruefung muessen fuer eine *Geheimhaltungs-Behauptung* ebenfalls entfernt/auf unverfaengliche Kontrollfaelle bzw. lokale EVM-Qualifikation umgestellt werden. Jeden Verifikationsverlust explizit bewerten; keine G0.7-Safety-Checks ersatzlos loeschen.
+- Kein `Option B` im laufenden Bugfix stillschweigend umsetzen. Zu A/B **keinen** neuen R0-Scan oder Echtgeldversuch veranlassen. Zuerst eine read-only ABI-/Contract-Analyse, ob andere Caller denselben Salt/Deployment-Adressbereich kollidieren lassen koennen. Danach Benutzerentscheidung mit konkretem Risiko.
+
+**Dokumentation:** Die Aussage `The DRY salt was not disclosed` in `G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md` §1 bezieht sich auf die historischen Read-only-Probes vom 2026-10-17 mit Random-Salt, ist aber **keine zulaessige Aussage ueber den spaeteren eingefrorenen DRY-Salt**. Kontextpraezise korrigieren/annotieren; historische Fakten nicht loeschen. Die alte Salt-Vertraulichkeit nicht mehr als Schutzmaessnahme ausweisen.
+
+**Abnahme:** Eine klare A/B-Risikoentscheidung, kein unbeabsichtigter Aenderungspfad und keine Behauptung, die bestehende G0.7-Token-Code-Pruefung sichere ein Race vollstaendig ab. `UNARMED` bleibt erhalten.
+
+### E3-2 — Private Schluessel aus `secrets.env` werden an unberechtigte Folgeprozesse weitergegeben
+
+**Code:** `bsc/tools/g06a_final_dry.sh` ca. Z. 59–75: `set -a; source "$SECRETS"; set +a` und danach `export DARKBOT_G06A_LAUNCHER_PRIVATE_KEY`, `export DARKBOT_G06A_BUYER_PRIVATE_KEY`. Jeder spaetere Kindprozess erbt den gesamten exportierten Variablensatz, auch `node g06a_economics_evm_crosscheck.cjs`, `g06a_builder_policy_record` (offizielle Netzabrufe), `g06a_preflight_record`, `dbrec_show`, `shasum` usw. Schluessel brauchen nur `g06a_local_simulate.cjs` und `g06a_self_launch_bundle`. Bereits als `export` in `secrets.env` markierte oder aus der aeusseren Umgebung geerbte Variablen bleiben auch **ohne `set -a`** exportiert. Fables Patch 1 entfernt das grobe `set -a`, garantiert aber **allein** keine vollstaendige Prozessisolation.
+
+**Pflichtfix vor dem naechsten DRY mit echten Schluesseln:**
+
+1. Konfigurationswerte aus `secrets.env` **nicht per `set -a` massenhaft exportieren**, fuer Secret-Datei und Shell-Variablen Berechtigungen/Ignore-Regeln erhalten; kein `set -x`, kein Secret in Stdout/Stderr/Journal. Falls Datei selbst `export` enthaelt, diese Attribute nach dem Laden gezielt entfernen oder Quelle fail-closed ablehnen; zuvor geerbte Export-Flags ebenfalls beruecksichtigen.
+2. **Jede Kindprozess-Grenze** mit klar erlaubter Umgebung ausfuehren, vorzugsweise `env -i` + minimaler Allowlist (`PATH`, ggf. `HOME`/Toolchain-/Node-Laufzeitvariablen soweit tatsaechlich notwendig, RPC-URL und jeweils erforderliche nichtgeheime DRY-Parameter). Insbesondere fuer alle RPC-/HTTPS-/Dokumentations-Schritte **keine** `BSC_*_PRIVATE_KEY`- oder `DARKBOT_G06A_*_PRIVATE_KEY`-Variablen; auch sonstige Tokens aus `secrets.env` nicht blind vererben. Die zwei erlaubten Signier-/lokalen EVM-Schritte erhalten beide Keys nur **fuer ihren direkten Prozess**.
+3. Den letzten Schritt, `g06a_self_launch_bundle`, und die lokale `g06a_local_simulate.cjs` mit identischen Parametern aufrufen; Binary-/ABI-/RLP-Konstruktion und Signatur nicht aendern. Sollten die Tools transitive Unterprozesse starten, deren Umgebung gesondert pruefen; eine Shell-Funktion `with_keys` allein isoliert keine Kindkette.
+4. Eine **gefaelschte Offline-Key-Fixture** bzw. instrumentierte Test-Commands nutzen, die ausschliesslich Prasenz/Abwesenheit von Variablennamen und einen SHA-256-Testdigest dokumentieren, **nicht** Secret-Werte oder `ps -E`-Ausgaben. Explizit negative Faelle: `secrets.env` mit `export`, bereits beim Scriptstart vererbter Key, unerwartete Environment-Variablen, abgebrochener Signierschritt.
+
+**Abnahme:** Kein nicht berechtigter Kindprozess sieht Key-Variablen; beide berechtigten Schritte koennen sie weiterhin verwenden; kein Netzprozess erhaelt Keys; Signatur-/Transaktions-Bytes bleiben fuer denselben eingefrorenen Input unveraendert. **Nicht** den kompletten historischen R0/DRY neu starten, nur um Umgebungs-Scopes zu pruefen.
+
+### E3-3 — DRY-3 verwendet weiterhin die historische v2-Budgetgrenze
+
+**Code:** `bsc/engine/crates/qualification/src/bin/g06a_self_launch_bundle.rs` ca. Z. 571–578 und Z. 649–655 akzeptiert `reserved` und `simulated_cost` jeweils bis **10603270000000000 wei** (0.01060327 BNB). Der jetzt bindende v3/v4-Maximumwert ist **481163500000000 wei** (0.0004811635 BNB). Andere Komponenten (`g06a_requal_check`, live Guard, Readiness) pruefen das strengere Limit; **kein bestehender Budgetdurchbruch wurde durch die alte DRY-3-Zeile nachgewiesen**, aber der G06A-Teilnachweis wird in diesem Punkt zu optimistisch.
+
+**Minimaler Fix:** Beide Grenzpruefungen gegen die exakt gebundene Kontrakt-Obergrenze **481163500000000 wei** aendern, bevorzugt ueber eine geprüfte gemeinsame numerische Konstante statt einer neu erfundenen Quelle. `budget.v2_proposal_per_attempt_ceiling_wei` im historisch kompatiblen Record **nicht** stillschweigend umbenennen oder umschreiben (Fables Vorschlag ist hier passend); unveraenderte DRY-Records/Hashes muessen historische Wahrheit behalten. Uebernehmen der **exakten** Signaturparameter unveraendert sicherstellen. Bei Abweichung STOP, niemals Cap automatisch erhoehen.
+
+**Tests:** beide Vergleichsstellen bei `MAX`, `MAX+1`, Ueberlauf und dem aktuellen signierten Versuch; historische v2-Feldbytes unveraendert; kein verdeckter v2-Fallback als aktuelle Scope-Autoritaet.
+
+### E3-4 — Zero-Egress-Flag ist eine statische Behauptung, keine Laufzeit-Observation
+
+**Code:** `g06a_self_launch_bundle.rs` ca. Z. 682–688: `let dry4_zero_egress = true;` und `dry::ZERO_EGRESS_STRUCTURAL` wird aus dieser Konstanten geschrieben. Aktuelle Quellpruefung zeigt fuer **dieses** DRY-Binary keine intendierte Transport-Send-Funktion; dennoch kann der boolesche Literalwert allein keine lueckenlose Negativaussage ueber jede kuenftige Abhaengigkeit oder den ganzen DRY-Prozess beweisen.
+
+**Fix:** Den Flag explizit **`STRUCTURAL_CODE_SCOPE_ONLY`** bzw. im bestehenden Typfeld mit klarer Record-Provenienz-/Qualification-Note versehen; den booleschen Inhalt des alten Felds nicht umwidmen. Engen Quelltest fuer direkten Netzwerk-/Child-Process-/Signed-RLP-Persistenzpfad dieses Binaries einfuehren, und wenn moeglich einen Offline-Durchlauf mit gesperrtem Netzzugriff/Fixture-Keys. **Fables reine Suche nach sieben verbotenen Strings ist ein guenstiger Regressionstest, aber keine formale Callgraph- oder transitive Netzwerkfreiheit.** Lokale DRY-2-EthereumJS-Simulation und Builder-Policy-Fetch nutzen weiterhin **Read-only RPC/HTTPS**, also kein globales „Netzwerk unmoeglich“ behaupten.
+
+**Abnahme:** Qualifizierter Scope des Flags ist dokumentiert und bei neuen Netzwerk-/Process-/Persistenzaufrufen im betroffenen Binary wird der Test rot. Keine Schlussfolgerung `G0.7 NEVER SEND` allein aus diesem Bool.
+
+### E3-5 — Readiness-Wrapper ignoriert Toolchain-Auswahl des Cargo-Workspace
+
+**Codebeweis:** `bsc/tools/g07_pre_live_readiness.sh` macht `cd "$ROOT"` und dort `cargo run --locked --offline --manifest-path bsc/engine/Cargo.toml ...`. Im Git-Tree gibt es `bsc/engine/rust-toolchain.toml` mit `channel="1.93.1"`, aber **keinen** Root-`rust-toolchain.toml`. Rustup waehlt das Toolchain-Override grundsaetzlich nach dem laufenden Arbeitsverzeichnis; der Manifestpfad allein pinnt es nicht. Kann bei abweichender Default-Version Kompilierung/Ergebnis invalidieren.
+
+**Fix:** Im Teilprozess `(cd "$ROOT/bsc/engine" && cargo build --locked --offline ... --bin g07_pre_live_readiness)` bauen, dann aus dem **Repo-Root** das gebaute `bsc/engine/target/debug/g07_pre_live_readiness` ausfuehren, damit die bestehenden relativen `bsc/config`-/Evidenzpfade unveraendert funktionieren. Alternativ ausdruecklich gepinnte Toolchain `cargo +1.93.1` ausfuehren, wenn Umgebung dies verlaesslich unterstuetzt. Exitcode, Args, offline-Zwang, stdout und kein Send unveraendert.
+
+**Tests:** `bash -n`, `rustup show active-toolchain` innerhalb Workspace, dokumentierte `rustc --version`, Wrapper von fremdem Arbeitsverzeichnis, invalides Argument, Guard UNARMED, keine Netz-/Send-Aktivierung.
+
+### E3-6 — Zwei alte Minimum-Probes sind inkompatibel und liefern eine falsche Guard-Diagnose
+
+**Code:** `bsc/tools/g07_find_min_executable_buy.sh` (ca. Z. 32) und `bsc/tools/g07_min_spend_probe.sh` (ca. Z. 28) suchen nach `FROZEN_APPROVED_V2_SHA256 = "UNARMED"`. In `bsc/engine/crates/execution/src/acceptance_guard.rs` existiert fuer den aktiven Kandidaten **nur V4**. `g07_min_spend_probe.sh` nennt diese fehlende Zeichenfolge faelschlich `live guard is armed`. Beide Skripte rechnen mit veralteten JSON-Preflights/Outputs bzw. frueheren Argumentlisten, waehrend aktuelle Rust-Qualifikationsprogramme DBREC und andere Pfade erwarten.
+
+**Fix:** **Nicht** beide alten Minimum-Searches fuer die eingefrorene G0.7-Phase zu einer zweiten qualifizierten Pipeline portieren: das waere Scope-Drift und koennte andere GAS/BUY-Kandidaten ohne passende Zustimmung hervorbringen. Stattdessen den beiden Einstiegspunkten einen sofortigen, klaren und sicheren Fehlerhinweis `SUPERSEDED_INCOMPATIBLE_WITH_V4_DBREC; NO_LIVE_AUTHORITY` geben, ohne vorher Keys oder RPC zu lesen; Verweis auf den bindenden frozen G0.7-Kandidaten und die aktive DRY-Requal-Toolchain. Optional nach Dokumentation/Archivierung in `prestudy` verschieben, aber keine neuen produktiven Entrypoints oder Branches erstellen. **Keinen** angeblich „armed“-Guard-Fehler behaupten.
+
+**Tests:** beide Entrypoints ohne Secrets und ohne Netz -> sofort erklaerbarer nichtnull Exit, keine Credentials geladen, keine signierten TXs, kein JSON; `bash -n`. Benutzer soll die in `README` genannte historische Toolzaehlung nicht mit aktueller Run-Qualifikation gleichsetzen.
+
+### E3-7 — State-/Block-Provenienz im read-only Qualifikationspfad
+
+**Code:** `g06a_economics_evm_crosscheck.cjs` und `g06a_local_simulate.cjs` verwenden denselben konfigurierten Archiv-RPC und lesen historische Balances/Nonce/Code/Storage ueber RPC (`eth_getStorageAt`, Account-Loader ohne `eth_getProof`), waehrend die lokale Quote einen **unabhaengigen Rechenalgorithmus**, aber keine zweite unabhaengige RPC-State-Quelle darstellt. Einige Plausibilitaets-/Headerchecks binden Parentblock/Hash. `execution/src/bin/g07_mainnet_self_launch_buy/chain_reads.rs::run_current_preflight` beginnt mit einem Head, verwendet bei vielen spaeteren Read-only-Aufrufen jedoch `"latest"`. Ein load-balanced RPC kann dabei unterschiedliche Head-States liefern.
+
+**Bewertung:** Kein konkreter Mix-State-Falsch-PASS oder RPC-Defekt in den vorhandenen Evidenzen nachgewiesen. Trotzdem `same-RPC-source` nicht als unabhaengige *State-Quelle* oder Merkle-verifizierte State-Trie-Aussage bezeichnen. Fuer die G0.7-Vorbereitungsqualitaet ist eine **gezielte Head-Konsistenzpruefung** im Preflight gerechtfertigt: kanonische Read-Only-State-Felder soweit moeglich auf denselben Blocktag/Hash beziehen oder den Head/Hash nach Abschluss validieren; **pending** Nonces separat frisch vor Release halten, nicht mit finalen Block-Nonces verwechseln. Jede damit verbundene Aenderung der bereits qualifizierten Baseline-/DRY-Semantik muss gegen den bestehenden Record-Vergleich reviewt und nur mit anlassbezogenen Tests belegt werden. Keine neue RPC-Providerpflicht, `eth_getProof`-Redesign oder pauschaler R0-Rescan als Reparatur der Beobachtbarkeit.
+
+**Tests bei einem beauftragten engen Fix:** simuliert wechselnder `latest`-Head, Block-Hash-Reorg, inkonsistenter RPC-Backend-State, ungeaenderter eingefrorener Parent-Snapshot; keine Hoherstufung zu PASS bei unvereinbaren Heads. Ohne Fix ist der Safety-Scope als **INFO/OPEN** auszuweisen, nicht falsch als schon kryptographisch nachgewiesen.
+
+### Etappe-3-Zielzustand und Agent-Regressionen
+
+1. E3-2 (Key-Isolation) vor allen weiteren DRY-Schritten mit echten Schluesseln priorisieren. Schon vorhandene Historien-Artefakte nicht mit anderen Secret-Umgebungen ueberschreiben; spaetere Tests mit Fake-Keys oder ueber reine Funktions-Mocks. Kein `ps -E` mit echten Keys.
+2. E3-5 Wrapper und E3-6 irrefuehrende Alt-Tools enger Scope, E3-3 DRY-3-Maximum, E3-4 direktes No-Egress-Assurance-Testing. Gezielt daran gebundene Tests; keine Voll-Requal ohne Invalidation.
+3. E3-1 Salt-Risiko offenlegen, On-chain-Autorisierungs-/Collision-Regeln **read-only** pruefen, und A/B zur ausdruecklichen Userentscheidung vor spaeterer wirtschaftlicher Freigabe vorbereiten. A ist derzeit kein Beweis gegen Race, B invalidiert die bisherige Signed-Byte-Freeze. Keine Option automatisch waehlen.
+4. E3-7 als Quelle/Head-Konsistenzlimit dokumentieren. Keine versteckte Neudefinition von Gate 0 oder Aenderung der Mainnet-/Release-Regeln.
+5. Crosscheck-Binary-Paritaet und zero-egress-Quell-Grenzen in kurzer Test-/Evidence-Matrix erweisen. Abschlussmeldung angeben: geaenderte Datei/Zeile, neue Testnamen, die real ausgefuehrten PASS/FAIL-Ergebnisse, geladene Umgebungs-**Namen** ohne Inhalte, unveraenderte TX-Hashes und **UNARMED**.
+
+**Gezielte Kommandos fuer die Agent-Implementierung (nur nach Fix, nicht hier ausgefuehrt):**
+
+~~~bash
+# Von repo root
+bash -n bsc/tools/g06a_final_dry.sh
+bash -n bsc/tools/g07_pre_live_readiness.sh
+bash -n bsc/tools/g07_find_min_executable_buy.sh
+bash -n bsc/tools/g07_min_spend_probe.sh
+# Vorerst ausschliesslich Mock-/Offline-Pruefung der isolierten Secret-Scopes.
+(cd bsc/engine && cargo test --locked -p darkbot-bsc-qualification --bin g06a_self_launch_bundle)
+(cd bsc/engine && cargo test --locked -p darkbot-bsc-qualification --test g06a_dry_no_network)
+(cd bsc/engine && cargo fmt --all -- --check)
+~~~
+
+Der neue Test `g06a_dry_no_network` existiert **noch nicht** und ist vom Implementierer nur fuer den konkret geaenderten Code anzulegen; der `cargo test --test`-Aufruf ist deshalb **kein** Beleg, dass er zum jetzigen Stand laeuft. Kein `g06a_final_dry.sh` ohne ausdrueckliche Anforderung starten, keinen Salt auf `main` austauschen, keine private Key-Datei committen und keinen G0.7-LIVE-Versuch ausloesen.
+
+**Etappe-3-Abnahme:** Alle bestaetigten lokalen Korrekturauftraege geprueft implementiert, die Saltrisiko-Entscheidung sichtbar getrennt, geklaerte Sicherheitsgrenzen und reproduzierbare eng begrenzte Offline-Tests. G0.7 bleibt **CODE-READY-ZIEL / LIVE NOT AUTHORIZED**, G0.8 **NOT EXECUTED**, Phase C1/C2 weiter **PAUSED**.
+
+
+## 4. Nachfolgende Etappen
 
 Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** aufgenommen, aber erst nach unabhaengigem Code-/Phasenplanabgleich. Bereits behandelte Behauptungen nicht doppelt als Bug anlegen. Auch nach erfolgreicher Umsetzung bleibt eine Etappe „FIXED / TESTED“ erst mit konkretem Commit und Tests/Evidence belegbar; sonst `OPEN`.
 
@@ -275,7 +395,7 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | --- | --- | --- |
 | 1 | G0.7 Guard/Vertrag/Readiness/Requal | **REVIEWED / FIXES OPEN** |
 | 2 | G0.8 Verifikation/Witness/Evidence | **REVIEWED / FIXES OPEN** |
-| 3 | G0.6a DRY-/Requal-Werkzeuge | AWAITING INPUT |
+| 3 | G0.6a DRY-/Requal-Werkzeuge | **REVIEWED / FIXES OPEN; SALT A/B UNDECIDED** |
 | 4 | Trading/Signer/RLP/Intent | AWAITING INPUT |
 | 5 | Execution/Submission/TLS | AWAITING INPUT |
 | 6 | geth_ipc Rust | AWAITING INPUT |
