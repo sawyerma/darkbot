@@ -492,10 +492,12 @@ pub(crate) fn validate_producer_witness_source(
 pub(crate) fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Record, InputHashes) {
     use schema::g06a::builder_policy as b;
     let (r, hashes) = load_record(path, &[&b::NATIVE, &b::SCHEMA]);
-    assert_eq!(
-        field(r.text(b::LEGACY_SCHEMA)),
+    let expected_name = if r.schema() == &b::NATIVE {
+        b::NATIVE.name
+    } else {
         "darkbot.g06a.builder-floor-evidence-addendum.v2"
-    );
+    };
+    assert_eq!(field(r.text(b::LEGACY_SCHEMA)), expected_name);
     assert!(field(r.bool(b::DRY3_READY)));
     assert!(field(r.bool(b::BLOCKRAZOR_VERIFIED)));
     assert!(field(r.bool(b::FORTYEIGHTCLUB_VERIFIED)));
@@ -516,6 +518,35 @@ pub(crate) fn validate_builder_policy(path: &str, signed_gas_price: u64) -> (Rec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_and_imported_builder_policy_keep_schema_and_gas_guards() {
+        use schema::g06a::builder_policy as b;
+        let imported_bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"),
+            "/../../../native/evidence/g06a/g07_binary_import_20261016/builder_policy.dbrec"));
+        let imported = schema::decode_any(imported_bytes).unwrap();
+        let dir = scratch("builder-schema");
+        let path = dir.join("policy.dbrec");
+        let file = path.to_str().unwrap();
+        fs::write(&path, imported_bytes).unwrap();
+        validate_builder_policy(file, 50_000_000);
+        let mut native = Draft::new(&b::NATIVE);
+        native.set(schema::PROVENANCE_TOOL, "offline-builder-schema-fixture")
+            .set(schema::PROVENANCE_OBSERVED_UNIX_MS, 1_u64);
+        for (tag, value) in imported.fields() {
+            if *tag >= 10 { native.push(*tag, value.clone()); }
+        }
+        native.set(b::LEGACY_SCHEMA, b::NATIVE.name);
+        fs::write(&path, native.encode().unwrap()).unwrap();
+        validate_builder_policy(file, 50_000_000);
+        for gas in [49_999_999, 50_000_001] {
+            assert!(std::panic::catch_unwind(|| validate_builder_policy(file, gas)).is_err());
+        }
+        native.set(b::LEGACY_SCHEMA, "darkbot.g06a.builder-floor-evidence-addendum.v2");
+        fs::write(&path, native.encode().unwrap()).unwrap();
+        assert!(std::panic::catch_unwind(|| validate_builder_policy(file, 50_000_000)).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     /// A fresh private directory under the canonical temp dir (on macOS the
     /// temp dir is reached through the /var -> /private/var symlink).
