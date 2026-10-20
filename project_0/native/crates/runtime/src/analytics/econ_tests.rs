@@ -2451,3 +2451,56 @@ fn q5_evaluate_records_the_typed_plan_error() {
         assert_eq!(r.reason.as_deref(), Some(text));
     }
 }
+
+/// R12: the retention byte budget is the configured `econ_retention_mib` and, when tight, refuses
+/// further evidence fail-closed: with room for exactly one more market event the next distinct
+/// one is refused and counted, nothing retained is evicted, the accounted bytes stay within the
+/// limit, and the technical verdict of an otherwise complete run turns INCOMPLETE.
+#[test]
+fn r12_tight_byte_budget_refuses_evidence_and_fails_the_run() {
+    let mut w = worker();
+    assert_eq!(
+        w.retention_byte_limit,
+        darkbot_solana::runtime_config::active()
+            .limits
+            .econ_retention_mib
+            * crate::storage::budget::MIB
+    );
+    complete(&mut w);
+    w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
+    assert_eq!(view(&w.technical(true))["verdict"], "PASS");
+    let (_, first) = pair(&rec(), 3, 40);
+    let mut second = first.clone();
+    second.signature = "second".into();
+    let retained = w.market.len();
+    // Room for exactly one more market event.
+    w.retention_byte_limit = w.retained_bytes + retained_size(&first);
+    w.accept(Evidence::Market(first)).unwrap();
+    assert_eq!(w.market.len(), retained + 1);
+    assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 0);
+    assert_eq!(w.retained_bytes, w.retention_byte_limit);
+    w.accept(Evidence::Market(second)).unwrap();
+    assert_eq!(w.market.len(), retained + 1, "refused, nothing evicted");
+    assert_eq!(w.h.shared.retention_overflow.load(Ordering::Relaxed), 1);
+    assert!(w.retained_bytes <= w.retention_byte_limit);
+    assert_eq!(w.retained_bytes, accounted(&w));
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
+}
+
+/// R12: `P0_ECON_RETENTION` accepts every count up to the hard bound 2,000,000 and refuses 0 and
+/// anything beyond; the default stays 262,144. The byte budget (`econ_retention_mib`) bounds the
+/// retained bytes independently and may bind first at a large count — fail-closed either way.
+#[test]
+fn r12_econ_retention_bound_is_exact() {
+    let with = |v: &'static str| {
+        EconConfig::from_lookup(&|k| (k == "P0_ECON_RETENTION").then(|| v.to_string()), 0)
+    };
+    assert_eq!(
+        EconConfig::from_lookup(&|_| None, 0).unwrap().retention,
+        crate::analytics::econ::DEFAULT_RETENTION
+    );
+    assert_eq!(with("1").unwrap().retention, 1);
+    assert_eq!(with("2000000").unwrap().retention, 2_000_000);
+    assert!(with("2000001").is_err());
+    assert!(with("0").is_err());
+}
