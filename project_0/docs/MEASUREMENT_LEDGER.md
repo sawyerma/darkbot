@@ -5757,3 +5757,13 @@ Commit `c7ccce0` (rebased onto foreign `63142e3`, `project_0` tree identical to 
 - V16 (Z17): real `sizes()` test on both sides of the 5 USD closeout threshold.
 - Test hygiene (no production change): the first gate run of this package failed 6 econ tests with `AMBIGUOUS_SHADOW_SOURCE` — the test worker directory `c0_e1_<pid>_<seq>` in the system temp dir was reused by a recycled process id and still held a `shadow_evaluations.jsonl` of a 2026-10-15 run. The helper now clears its directory before use; the gate was repeated in full.
 - NOT_RUN: no Mainnet read, capture or LIVE; real probe waits and health cadence under Mainnet load NOT_MEASURED.
+
+## 2026-10-20 — bugs_b Q5 = BUGS V17 typed planning errors (LOCAL_PASS, PARTIAL, offline only)
+
+Commit `0dbdc35`. Independent read-only review before the push.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 670/0/6, default 668/0/6, release, Python 108 (1 skipped) exit 0.
+- Planning failures carry a typed kind from their source (FeeState, sizing census, no-size code, stale integration reserve by pinned error code, health, ATA, routing); decision and loss follow from the kind only. Reason texts are byte-identical, so journals and renders are unchanged; no schema change.
+- Attribution changes: a non-FeeState planning failure whose text contains "unavailable" is now SKIP (was UNAVAILABLE); a typed stale integration reserve from sizing/observation is INTEGRATION_REFRESH (was ROUTING, practically unreachable).
+- PARTIAL: the kind itself is not persisted; OTHER/HEALTH_UNAVAILABLE/ROUTING remain one ROUTING loss (needs a `LossReason` extension with schema versioning, with Q3).
+- NOT_RUN: no Mainnet read, capture or LIVE.
