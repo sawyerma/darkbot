@@ -5767,3 +5767,12 @@ Commit `0dbdc35`. Independent read-only review before the push.
 - Attribution changes: a non-FeeState planning failure whose text contains "unavailable" is now SKIP (was UNAVAILABLE); a typed stale integration reserve from sizing/observation is INTEGRATION_REFRESH (was ROUTING, practically unreachable).
 - PARTIAL: the kind itself is not persisted; OTHER/HEALTH_UNAVAILABLE/ROUTING remain one ROUTING loss (needs a `LossReason` extension with schema versioning, with Q3).
 - NOT_RUN: no Mainnet read, capture or LIVE.
+
+## 2026-10-20 — bugs_b Q3 = BUGS V18 explicit persisted names (LOCAL_PASS, PARTIAL, offline only)
+
+Commit `b30e0ea`.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 671/0/6, default 669/0/6, release, Python 108 (1 skipped) exit 0.
+- Persisted and reported enum values (loss names, legacy bottleneck keys, shadow-ledger day losses, cost-record path, tx version, simulation result, census unsupported names, landing confirmation status) come from explicit names, byte-identical to the former Debug output (checked once against every variant), so journals, reports and Python readers are unchanged; no schema change.
+- PARTIAL: the simulation failure code and the landing `err` still embed the Debug of the pinned SDK `TransactionError`. New finding V19: census `UNKNOWN_LAYOUT` classified by text.
+- NOT_RUN: no Mainnet read, capture or LIVE.
