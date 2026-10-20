@@ -1,7 +1,21 @@
 # DarkBot Solana + BSC Roadmap — Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-16 (binary data-path invariant added; Gate-0 qualification freeze of 2026-10-13 preserved)
+Updated: 2026-10-20 (G0.7 code-readiness clarification; existing freezes preserved)
+
+## BINDING G0.7 CLARIFICATION — 2026-10-20: finish code before economic approval
+
+**Immediate development objective: complete the existing G0.7/G0.8 code up to the explicit authorization/send boundary. The actual Mainnet BUY is NOT part of this implementation task.** This dated clarification supersedes prior guidance only where it conflates pre-BUY technical readiness with results that require a real future trial. The signed-byte freeze, all safety constraints and the mandatory G0.7 -> G0.8 -> PASS/ADAPT/STOP order remain unchanged.
+
+- **Verified historical evidence:** 2026-10-20 R0 and DRY-0..DRY-4 passed against Flap Portal v5.25.0, with unchanged signed launch/BUY bytes and zero egress; see G07_REQUALIFICATION_RESULT_20261020.md. Do not rerun the long historical scan or an unchanged DRY without evidence of invalidation.
+- **Technical pre-LIVE readiness:** PASS_READ_ONLY with exit 0 must be reachable after the mandatory technical conditions actually pass (current chain/Portal, bound V4 draft and immutable evidence, exact signed bytes, nonce, wallet/funding, gas and total budget, head/clock/expiry, one-attempt safety and applicable submission preflight). Genuine failures remain BLOCKED/STOP with exit 2. PASS_READ_ONLY is never economic approval or authority to send. The hard-coded BLOCKED-only code identified on 2026-10-20 must be corrected; code-readiness is not yet verified.
+- **Builder outcome:** submission format, price-floor documentation and expiry acceptance have limited evidence. Builder inclusion, 48Club price enforcement and building-time effects of noMerge/positionFirst remain **UNQUALIFIED**, never PASS. These *future outcome risks* must not permanently prevent finishing the code. Where the exact V4 approval contract permits a bounded experiment, explicitly document the residual risks for informed user approval. Never bypass a genuinely mandatory pre-egress check or represent unknown inclusion as verified.
+- **Producer execution witness:** source_ready=false means actual T0 -> T_buy and the sub-1-ms timing acceptance remain **UNKNOWN**. The missing original producer timing witness does not by itself prevent preparation of a controlled token-acquisition trial. Binding and integrity of the witness **source contract** remain mandatory.
+- **Three separate states:** (1) technical PASS_READ_ONLY, (2) explicit exact-V4 user economic approval and live guard authorization, and (3) actual on-chain acquisition/ordering/timing evidence. No state implies the next. Preserve UNKNOWN/UNQUALIFIED as independent dimensions, not fabricated PASS.
+- **Scope until code-ready:** finish existing native G0.7 runner, V4-approval preparation, one-attempt journal/anti-replay and immediate G0.8 acquisition/order/cost reconciliation. Only targeted regression tests for changed logic. No GUI, C1/C2, new venue, refactoring campaign, repeat R0/DRY or synthetic test campaign.
+- **Economic boundary:** remain UNARMED, approved=false and execution_ready=false throughout this task. The max one-attempt reserve remains 481163500000000 wei = 0.0004811635 BNB. A separate explicit user approval of the exact **approved-variant V4 SHA-256**, bounded risk and one live attempt is required before any arming, signing for live submission or send. Keep exact hash/byte/chain/wallet/nonce/funding/gas/budget/freshness, evidence durability and anti-replay guards intact.
+
+**Development milestone: G0.7 CODE READY — AWAITING EXPLICIT ECONOMIC APPROVAL. This is NOT G0.7 or Gate-0 PASS.**
 
 ## **ABSOLUTE STOP RULE — REAL MAINNET BUY BEFORE ANY MORE C1/C2 WORK**
 

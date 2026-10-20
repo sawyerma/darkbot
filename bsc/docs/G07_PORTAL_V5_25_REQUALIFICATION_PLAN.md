@@ -1,6 +1,6 @@
 # G0.7 attempt 1: requalification against Flap Portal v5.25.0
 
-Status: 2026-10-17. **Read-only analysis complete; sections 3 and 4 implemented (option A) and tested offline; the requalification DRY run (DRY-1 signing) is pending with the user.**
+Historical status (2026-10-17): **Read-only analysis complete; sections 3 and 4 implemented (option A) and tested offline; the requalification DRY was then pending. See the binding 2026-10-20 update in section 5.**
 
 - Nothing was sent. No signature was made, no builder was contacted, and the guard stays `UNARMED`.
 - The DRY salt was not disclosed: every on-chain probe used a random salt and dummy strings of equal length.
@@ -100,6 +100,21 @@ Planned changes:
 - **Builder probe:** not part of the requalification. The builder interfaces did not change because of the Portal upgrade. The dry-plan hash is `8e24138b…`; there is no approval and none is requested.
 
 ## 5. Order and approval points
+
+### Binding 2026-10-20 implementation update — code-ready, not live authorization
+
+R0 and DRY-0..DRY-4 have now passed on Flap Portal v5.25.0; signed launch/BUY bytes are unchanged and zero egress was verified. Use G07_REQUALIFICATION_RESULT_20261020.md as the current evidence and preserve older records as historical. Do not repeat the R0 scan or unchanged DRY solely to prepare code.
+
+**This implementation task ends at G0.7 CODE READY — AWAITING EXPLICIT ECONOMIC APPROVAL; do NOT execute the Mainnet BUY.**
+
+Implement the readiness distinction in g07_pre_live_readiness.rs:
+1. Remove the unconditional BUILDER_SEMANTICS=BLOCKED *as a code-completion gate*. Keep actual inclusion, 48Club pricing and noMerge/positionFirst effectiveness UNQUALIFIED, never PASS. Present the economic risk for explicit acceptance in the final exact V4 authorization where the binding contract permits this; genuinely mandatory pre-send checks remain enforced.
+2. A missing original PRODUCER_WITNESS means actual T0 -> T_buy remains UNKNOWN, not a blanket prohibition on preparing G0.7 acquisition testing. The witness source contract and integrity checks remain bound and verified.
+3. Replace hard-coded PRE_LIVE_READINESS=BLOCKED/exit 2 with an aggregate of actually mandatory technical checks: PASS_READ_ONLY/exit 0 only when all mandatory preflight conditions pass; BLOCKED/STOP/exit 2 for real chain, contract, evidence, signing-byte, nonce, gas, budget, wallet, freshness or other safety failures. Unknown future outcomes remain separately visible. PASS_READ_ONLY cannot arm or send.
+
+Complete existing G0.7 and the immediate G0.8 acquisition/order/cost verification handoff using only targeted regressions. No GUI work, C1/C2, generic audit, refactor, requalification campaign or new tests without a specific changed-code need. Preserve the previously qualified exact bytes and all one-attempt, journal, budget and anti-replay protections.
+
+The separate **economic authorization** requires explicit user approval of the final V4 *approved variant* SHA-256, stated residual builder risk and the frozen maximum loss budget, followed by a distinct authorized arming step. Until then: approved=false, execution_ready=false, UNARMED, no Mainnet submission. Missing producer timing evidence continues to block a full sub-1-ms timing PASS, not the code-completion milestone.
 
 1. Decide the DRY-2 output (option A or B). This is the only architecture decision.
 2. Implement section 3 and section 4 with targeted tests (codec/schema, golden, guard v4, G0.7 no-send, readiness). No full regression until acceptance.
