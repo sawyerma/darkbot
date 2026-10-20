@@ -69,12 +69,13 @@ pub(crate) fn projection_dependencies(
 
 /// E9/N3: the dependency set of a candidate's projection — the refresh instruction accounts, the
 /// candidate's health observation accounts, the group and the FeeState (sizing reads the group's
-/// EMODE and the FeeState). An undeterminable observation set is an error, never an empty set:
+/// EMODE and the FeeState) and the program's ProgramData (a program upgrade invalidates it). An undeterminable observation set is an error, never an empty set:
 /// without it the projection's staleness cannot be bound (fail-closed).
 #[cfg(feature = "crate_health")]
 pub(crate) fn projection_dependency_set<S: AccountSource + ?Sized>(
     state: &S,
     program: &Pubkey,
+    program_data: &Pubkey,
     group: &Pubkey,
     candidate: &Pubkey,
     refreshes: &[solana_sdk::instruction::Instruction],
@@ -89,8 +90,16 @@ pub(crate) fn projection_dependency_set<S: AccountSource + ?Sized>(
         candidate,
         refreshes,
         &observation,
-        &[*group, protocol::fee_state_pda(program)],
+        &[*group, protocol::fee_state_pda(program), *program_data],
     ))
+}
+
+/// E9: the newest canonical slot among the candidate and its dependencies — the oldest
+/// simulation context a projection requested from them may come from.
+pub(crate) fn required_context_slot(st: &StateCore, base_slot: u64, keys: &[Pubkey]) -> u64 {
+    keys.iter()
+        .filter_map(|k| st.get(k).map(|r| r.slot))
+        .fold(base_slot, u64::max)
 }
 
 /// N6: whether a bank's dependency gap is reported — when it is new, when it changed, and once
@@ -191,6 +200,52 @@ pub(crate) struct ProjectionStats {
     pub(crate) stale_at_consume: u64,
     /// … or replaced/removed before any use.
     pub(crate) dropped: u64,
+    /// E9: a stale result or a lagging node led to a new request (bounded per candidate) …
+    pub(crate) requeued: u64,
+    /// … or the candidate's bound was reached and it waits for its next trigger.
+    pub(crate) requeue_exhausted: u64,
+}
+
+/// E9: consecutive projection requeues per candidate before it waits for its next trigger.
+pub(crate) const PROJECTION_REQUEUE_MAX: u8 = 2;
+
+/// E9: one more projection request that no new trigger asked for (a stale result, a lagging
+/// node, a cached projection unusable at its consumption) — at most `PROJECTION_REQUEUE_MAX`
+/// per external trigger; at the bound it is counted, the sequence ends and the candidate waits
+/// for its next trigger.
+pub(crate) fn projection_retry_allowed(
+    requeues: &mut HashMap<Pubkey, u8>,
+    stats: &mut ProjectionStats,
+    account: Pubkey,
+) -> bool {
+    let attempts = requeues.entry(account).or_insert(0);
+    if *attempts >= PROJECTION_REQUEUE_MAX {
+        requeues.remove(&account);
+        stats.requeue_exhausted += 1;
+        return false;
+    }
+    *attempts += 1;
+    stats.requeued += 1;
+    true
+}
+
+/// E9: whether detect may request a projection for `account` on `trigger`. An external trigger
+/// starts a fresh sequence; the consumption of an unusable cached projection re-requests only
+/// within the bound; a requeue was counted when it was queued.
+pub(crate) fn projection_request_allowed(
+    requeues: &mut HashMap<Pubkey, u8>,
+    stats: &mut ProjectionStats,
+    account: Pubkey,
+    trigger: &str,
+) -> bool {
+    match trigger {
+        "integration_projection" => projection_retry_allowed(requeues, stats, account),
+        "integration_projection_requeue" => true,
+        _ => {
+            requeues.remove(&account);
+            true
+        }
+    }
 }
 impl ProjectionStats {
     /// A cached projection is taken for the candidate's evaluation; a usable one is counted by
@@ -236,7 +291,8 @@ impl ProjectionStats {
         format!(
             "projection: requested={} queue_full={} observation_unknown={} accepted={} failed={} \
              stale_result={} discarded_result={} in_flight={in_flight} reused={} \
-             invalid_at_use={} discarded_consume={} stale_consume={} dropped={} cached={cached}",
+             invalid_at_use={} discarded_consume={} stale_consume={} dropped={} cached={cached} \
+             requeued={} requeue_exhausted={}",
             self.requested,
             self.queue_full,
             self.observation_unknown,
@@ -249,6 +305,8 @@ impl ProjectionStats {
             self.discarded_at_consume,
             self.stale_at_consume,
             self.dropped,
+            self.requeued,
+            self.requeue_exhausted,
         )
     }
 }
@@ -545,6 +603,14 @@ mod e9_tests {
             fp,
             "missing oracle"
         );
+        // E9: the oldest acceptable simulation context is the newest canonical slot of the
+        // candidate's request and its dependencies; unrelated and missing accounts do not count.
+        let mut newer = base.clone();
+        newer[2].1 = account(14, 3);
+        newer[3].1 = account(20, 4);
+        assert_eq!(required_context_slot(&install(&newer), 10, &deps), 14);
+        assert_eq!(required_context_slot(&install(&base), 12, &deps), 12);
+        assert_eq!(required_context_slot(&install(&base[..1]), 10, &deps), 10);
     }
 }
 
@@ -568,6 +634,7 @@ mod n3_n4_tests {
     #[test]
     fn n3_unknown_observation_set_is_no_dependency_set() {
         let program: Pubkey = protocol::PROGRAM_ID_MAINNET.parse().unwrap();
+        let program_data = Pubkey::new_unique();
         let (group, candidate, bank, reserve) = (
             Pubkey::new_unique(),
             Pubkey::new_unique(),
@@ -624,6 +691,7 @@ mod n3_n4_tests {
             projection_dependency_set(
                 src,
                 &program,
+                &program_data,
                 &group,
                 &candidate,
                 std::slice::from_ref(&refresh),
@@ -634,7 +702,14 @@ mod n3_n4_tests {
             bytemuck::bytes_of(&b),
         ))))
         .unwrap();
-        for k in [bank, reserve, group, protocol::fee_state_pda(&program)] {
+        // E9: the ProgramData is a dependency — a program upgrade makes the projection stale.
+        for k in [
+            bank,
+            reserve,
+            group,
+            protocol::fee_state_pda(&program),
+            program_data,
+        ] {
             assert!(valid.contains(&k), "{k}");
         }
         assert!(!valid.contains(&candidate));
@@ -714,8 +789,41 @@ mod n3_n4_tests {
             p.line(1, 0),
             "projection: requested=7 queue_full=2 observation_unknown=1 accepted=4 failed=0 \
              stale_result=1 discarded_result=1 in_flight=1 reused=1 invalid_at_use=0 \
-             discarded_consume=1 stale_consume=1 dropped=1 cached=0"
+             discarded_consume=1 stale_consume=1 dropped=1 cached=0 requeued=0 \
+             requeue_exhausted=0"
         );
+    }
+
+    /// E9: projection re-requests no new trigger asked for are bounded per external trigger: the
+    /// consumption of an unusable cached projection re-requests at most `PROJECTION_REQUEUE_MAX`
+    /// times (then counted and refused), a queued requeue (already counted) proceeds, and an
+    /// external trigger starts a fresh sequence.
+    #[test]
+    fn e9_projection_rerequests_are_bounded_per_external_trigger() {
+        let mut requeues = HashMap::new();
+        let mut stats = ProjectionStats::default();
+        let a = Pubkey::new_unique();
+        let mut allowed =
+            |trigger| projection_request_allowed(&mut requeues, &mut stats, a, trigger);
+        assert!(allowed("account_update"));
+        for _ in 0..PROJECTION_REQUEUE_MAX {
+            assert!(allowed("integration_projection"));
+        }
+        assert!(!allowed("integration_projection"), "bound reached");
+        assert!(allowed("integration_projection_requeue"));
+        // After the bound the sequence ended; a new external trigger starts a fresh one.
+        assert!(allowed("oracle_price"));
+        assert!(allowed("integration_projection"));
+        assert_eq!(stats.requeued, u64::from(PROJECTION_REQUEUE_MAX) + 1);
+        assert_eq!(stats.requeue_exhausted, 1);
+        // An external trigger resets an unfinished sequence too.
+        assert!(projection_request_allowed(
+            &mut requeues,
+            &mut stats,
+            a,
+            "account_update"
+        ));
+        assert!(!requeues.contains_key(&a));
     }
 
     /// V19: a refused layout counts as fail-closed unsupported like an unsupported state; the

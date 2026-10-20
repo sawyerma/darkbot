@@ -98,7 +98,15 @@ impl ShadowOwner {
                             }
                         }
                     } else {
-                        if !self.projection_pending.contains(&acct) {
+                        // E9: bounded re-requests (`projection_request_allowed`).
+                        if !self.projection_pending.contains(&acct)
+                            && projection_request_allowed(
+                                &mut self.projection_requeues,
+                                &mut self.projection_stats,
+                                acct,
+                                trigger,
+                            )
+                        {
                             let targets =
                                 match darkbot_project0::integration::projection_targets_for_account(
                                     &view,
@@ -148,6 +156,7 @@ impl ShadowOwner {
                             let dependencies = match projection_dependency_set(
                                 &view,
                                 &self.program,
+                                &self.program_data,
                                 &self.group,
                                 &acct,
                                 &refreshes,
@@ -165,6 +174,8 @@ impl ShadowOwner {
                                 }
                             };
                             let fingerprint = dependency_fingerprint(&self.st, &dependencies);
+                            let min_context_slot =
+                                required_context_slot(&self.st, base_record.slot, &dependencies);
                             let projection_plan = tx::TxPlan {
                                 version: tx::BuildVersion::V0,
                                 payer: self.liquidator,
@@ -204,6 +215,7 @@ impl ShadowOwner {
                                 targets,
                                 dependencies,
                                 dependency_fingerprint: fingerprint,
+                                min_context_slot,
                             };
                             match self.remote.projection_jobs.try_push(work) {
                                 Ok(()) => {

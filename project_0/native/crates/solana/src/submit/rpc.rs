@@ -83,6 +83,56 @@ pub struct RpcSubmitter {
 /// `(Clock slot, Clock unix timestamp, selected post accounts, units consumed)` of a projection simulation.
 pub type PostAccountsSimulation = (u64, i64, Vec<(Pubkey, Account)>, Option<u64>);
 
+/// E9: why a projection simulation produced no projection.
+#[derive(Debug)]
+pub enum ProjectionError {
+    /// The node is behind the slot the projection was requested from: it simulated at an older
+    /// `context` slot, or refused the request because it has not reached `minContextSlot`
+    /// (JSON-RPC -32016; the node's slot is then unknown).
+    ContextBehind { context: Option<u64>, required: u64 },
+    /// Transport, rejection or decode failure.
+    Submit(SubmitError),
+}
+
+/// E9: the node refused a request because it has not reached its `minContextSlot` — typed by
+/// the JSON-RPC error code, never by message text.
+fn min_context_slot_not_reached(e: &solana_client::client_error::ClientError) -> bool {
+    matches!(
+        e.kind(),
+        solana_client::client_error::ClientErrorKind::RpcError(
+            solana_client::rpc_request::RpcError::RpcResponseError { code, .. }
+        ) if *code == solana_client::rpc_custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
+    )
+}
+
+impl From<SubmitError> for ProjectionError {
+    fn from(e: SubmitError) -> Self {
+        ProjectionError::Submit(e)
+    }
+}
+
+impl std::fmt::Display for ProjectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProjectionError::ContextBehind {
+                context: Some(context),
+                required,
+            } => write!(
+                f,
+                "PROJECTION_CONTEXT_BEHIND: context slot {context} below the required {required}"
+            ),
+            ProjectionError::ContextBehind {
+                context: None,
+                required,
+            } => write!(
+                f,
+                "PROJECTION_CONTEXT_BEHIND: the node has not reached the required slot {required}"
+            ),
+            ProjectionError::Submit(e) => e.fmt(f),
+        }
+    }
+}
+
 impl RpcSubmitter {
     /// An adapter without a candidate transport (projection workers, tools that only submit or
     /// reconcile): `fee_for_message`/`simulate` answer `Unavailable` without a network call.
@@ -145,15 +195,19 @@ impl RpcSubmitter {
     /// accounts. This is the authoritative projection primitive for integration refreshes:
     /// callers can overlay the returned accounts onto reconciled RAM state without mutating the
     /// canonical state or faking Clock/freshness fields.
+    /// E9: `min_context_slot` is the newest canonical slot the projection was requested from; the
+    /// node must simulate at or after it (`minContextSlot`), and an older context is refused.
     pub fn simulate_with_post_accounts(
         &self,
         tx: &VersionedTransaction,
         addresses: &[Pubkey],
-    ) -> Result<PostAccountsSimulation, SubmitError> {
+        min_context_slot: u64,
+    ) -> Result<PostAccountsSimulation, ProjectionError> {
         if addresses.is_empty() {
             return Err(SubmitError::Rejected(
                 "projection simulation requested zero post accounts".into(),
-            ));
+            )
+            .into());
         }
 
         // [FIX-118a][R6] JupLend freshness is exact to the simulation Clock unix timestamp.
@@ -175,28 +229,43 @@ impl RpcSubmitter {
                 encoding: Some(UiAccountEncoding::Base64),
                 addresses: requested.iter().map(ToString::to_string).collect(),
             }),
-            min_context_slot: None,
+            min_context_slot: Some(min_context_slot),
             inner_instructions: false,
         };
         let response = self
             .rpc
             .simulate_transaction_with_config(tx, cfg)
-            .map_err(|e| SubmitError::Transport(safe_rpc_error(&e)))?;
+            .map_err(|e| {
+                if min_context_slot_not_reached(&e) {
+                    ProjectionError::ContextBehind {
+                        context: None,
+                        required: min_context_slot,
+                    }
+                } else {
+                    SubmitError::Transport(safe_rpc_error(&e)).into()
+                }
+            })?;
+        if response.context.slot < min_context_slot {
+            return Err(ProjectionError::ContextBehind {
+                context: Some(response.context.slot),
+                required: min_context_slot,
+            });
+        }
         if let Some(err) = response.value.err {
-            return Err(SubmitError::Rejected(format!(
+            return Err(ProjectionError::Submit(SubmitError::Rejected(format!(
                 "projection simulation failed: {:?}",
                 err
-            )));
+            ))));
         }
         let returned = response.value.accounts.ok_or_else(|| {
             SubmitError::Rejected("projection simulation returned no accounts".into())
         })?;
         if returned.len() != requested.len() {
-            return Err(SubmitError::Rejected(format!(
+            return Err(ProjectionError::Submit(SubmitError::Rejected(format!(
                 "projection account count mismatch: requested={} returned={}",
                 requested.len(),
                 returned.len()
-            )));
+            ))));
         }
 
         let mut out = Vec::with_capacity(addresses.len());
@@ -223,10 +292,10 @@ impl RpcSubmitter {
             SubmitError::Rejected("projection simulation returned no Clock sysvar".into())
         })?;
         if simulation_clock.slot != response.context.slot {
-            return Err(SubmitError::Rejected(format!(
+            return Err(ProjectionError::Submit(SubmitError::Rejected(format!(
                 "projection clock/context slot mismatch: clock={} context={}",
                 simulation_clock.slot, response.context.slot
-            )));
+            ))));
         }
         Ok((
             simulation_clock.slot,

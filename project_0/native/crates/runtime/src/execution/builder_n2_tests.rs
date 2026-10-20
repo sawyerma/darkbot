@@ -10,7 +10,10 @@
 /// started after a deadline.
 struct Endpoint {
     url: String,
-    arrivals: std::sync::Arc<std::sync::Mutex<Vec<(std::time::Instant, String)>>>,
+    /// (arrival, method or path, JSON request body or `null`)
+    arrivals: std::sync::Arc<
+        std::sync::Mutex<Vec<(std::time::Instant, String, serde_json::Value)>>,
+    >,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -18,6 +21,8 @@ struct Endpoint {
 enum Answer {
     /// `200` with this JSON-RPC `result`.
     Result(serde_json::Value),
+    /// `200` with this JSON-RPC `error` object.
+    Error(serde_json::Value),
     /// A status code with an empty body.
     Status(u16),
     /// Accept, read the request, never answer (until the test ends).
@@ -76,9 +81,11 @@ impl Endpoint {
                             return;
                         }
                         let path = request_line.split(' ').nth(1).unwrap_or("").to_string();
-                        let kind = serde_json::from_slice::<serde_json::Value>(&body)
-                            .ok()
-                            .and_then(|v| v["method"].as_str().map(str::to_string))
+                        let json = serde_json::from_slice::<serde_json::Value>(&body)
+                            .unwrap_or(serde_json::Value::Null);
+                        let kind = json["method"]
+                            .as_str()
+                            .map(str::to_string)
                             .unwrap_or_else(|| path.split('?').next().unwrap_or("").to_string());
                         let n = {
                             let mut c = counts.lock().unwrap();
@@ -86,10 +93,20 @@ impl Endpoint {
                             *e += 1;
                             *e - 1
                         };
-                        log.lock().unwrap().push((arrived, kind.clone()));
+                        log.lock().unwrap().push((arrived, kind.clone(), json));
                         match answer(&kind, n) {
                             Answer::Result(result) => {
                                 let body = serde_json::json!({"jsonrpc":"2.0","id":1,"result":result})
+                                    .to_string();
+                                let _ = write!(
+                                    stream,
+                                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                                    body.len(),
+                                    body
+                                );
+                            }
+                            Answer::Error(error) => {
+                                let body = serde_json::json!({"jsonrpc":"2.0","id":1,"error":error})
                                     .to_string();
                                 let _ = write!(
                                     stream,
@@ -140,8 +157,18 @@ impl Endpoint {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, k)| k == kind)
-            .map(|(t, _)| *t)
+            .filter(|(_, k, _)| k == kind)
+            .map(|(t, _, _)| *t)
+            .collect()
+    }
+    /// JSON request bodies of all requests of `kind`.
+    fn bodies_of(&self, kind: &str) -> Vec<serde_json::Value> {
+        self.arrivals
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, k, _)| k == kind)
+            .map(|(_, _, b)| b.clone())
             .collect()
     }
 }
@@ -321,7 +348,7 @@ fn assert_bounded(
         rec.reason
     );
     let deadline = started + N2_DEADLINE;
-    for (at, kind) in endpoint.arrivals.lock().unwrap().iter() {
+    for (at, kind, _) in endpoint.arrivals.lock().unwrap().iter() {
         assert!(*at < deadline, "{case}: {kind} started after the deadline");
     }
 }
@@ -452,7 +479,7 @@ fn n2_hanging_jupiter_ends_planning_at_the_deadline() {
     let outcome = n2_evaluate(&f, &payer, &routes, true, &submitter);
     assert_bounded("hanging jupiter", &outcome, &jupiter, started);
     assert!(!jupiter.arrivals.lock().unwrap().is_empty(), "the quote was requested");
-    for (at, kind) in rpc.arrivals.lock().unwrap().iter() {
+    for (at, kind, _) in rpc.arrivals.lock().unwrap().iter() {
         assert!(*at < started + N2_DEADLINE, "{kind} after the deadline");
     }
 }
@@ -580,4 +607,101 @@ fn n2_adapter_without_candidate_transport_never_calls_the_network() {
     assert_eq!(plain.candidate_requests(), 0);
     std::thread::sleep(std::time::Duration::from_millis(50));
     assert!(endpoint.arrivals.lock().unwrap().is_empty());
+}
+
+/// E9: a projection simulation asks the node for at least the newest canonical slot it was
+/// requested from (`minContextSlot`) and refuses an older context (a lagging node would project
+/// from older inputs than the canonical state); at the required slot it is accepted and its
+/// projected slot is the simulation Clock's.
+#[test]
+fn e9_projection_simulation_is_not_older_than_its_inputs() {
+    use base64::Engine;
+    use solana_sdk::signature::Signer;
+    let account = |data: Vec<u8>| {
+        serde_json::json!({"lamports": 1, "owner": Pubkey::default().to_string(),
+            "data": [base64::engine::general_purpose::STANDARD.encode(&data), "base64"],
+            "executable": false, "rentEpoch": 0, "space": data.len()})
+    };
+    let at = move |slot: u64| {
+        let clock = solana_sdk::clock::Clock {
+            slot,
+            unix_timestamp: 1_700_000_000,
+            ..Default::default()
+        };
+        Answer::Result(serde_json::json!({"context": {"slot": slot}, "value": {
+            "err": null, "logs": [], "unitsConsumed": 5, "returnData": null,
+            "innerInstructions": null, "replacementBlockhash": null,
+            "accounts": [account(vec![7; 8]), account(bincode::serialize(&clock).unwrap())]}}))
+    };
+    let endpoint = Endpoint::start(move |kind, n| match (kind, n) {
+        ("simulateTransaction", 0) => at(99),
+        ("simulateTransaction", 1) => Answer::Error(serde_json::json!({
+            "code": -32016, "message": "Minimum context slot has not been reached",
+            "data": {"contextSlot": 98}})),
+        _ => at(100),
+    });
+    let payer = solana_sdk::signature::Keypair::new();
+    let mut built = tx::build(
+        &TxPlan {
+            version: BuildVersion::V0,
+            payer: payer.pubkey(),
+            instructions: vec![Instruction {
+                program_id: Pubkey::new_unique(),
+                accounts: vec![],
+                data: vec![1],
+            }],
+            lookup_tables: vec![],
+            resources: Resources {
+                compute_unit_limit: 200_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: None,
+            },
+        },
+        solana_sdk::hash::Hash::new_unique(),
+        &TxLimits::default(),
+    )
+    .unwrap();
+    tx::sign(&mut built, &[&payer]).unwrap();
+    let submitter = darkbot_solana::submit::rpc::RpcSubmitter::new(endpoint.url.clone(), true);
+    let target = [Pubkey::new_unique()];
+    let behind = submitter
+        .simulate_with_post_accounts(&built.tx, &target, 100)
+        .unwrap_err();
+    assert!(
+        matches!(
+            behind,
+            darkbot_solana::submit::rpc::ProjectionError::ContextBehind {
+                context: Some(99),
+                required: 100
+            }
+        ),
+        "{behind}"
+    );
+    assert!(
+        behind.to_string().starts_with("PROJECTION_CONTEXT_BEHIND"),
+        "{behind}"
+    );
+    // A node that has not reached the slot refuses with -32016: the same typed cause.
+    let refused = submitter
+        .simulate_with_post_accounts(&built.tx, &target, 100)
+        .unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            darkbot_solana::submit::rpc::ProjectionError::ContextBehind {
+                context: None,
+                required: 100
+            }
+        ),
+        "{refused}"
+    );
+    let (slot, unix_s, accounts, _) = submitter
+        .simulate_with_post_accounts(&built.tx, &target, 100)
+        .unwrap();
+    assert_eq!((slot, unix_s, accounts.len()), (100, 1_700_000_000, 1));
+    let bodies = endpoint.bodies_of("simulateTransaction");
+    assert_eq!(bodies.len(), 3);
+    for body in bodies {
+        assert_eq!(body["params"][1]["minContextSlot"], 100, "{body}");
+    }
 }

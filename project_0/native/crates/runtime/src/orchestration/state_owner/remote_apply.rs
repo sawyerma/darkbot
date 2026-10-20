@@ -362,9 +362,12 @@ impl ShadowOwner {
                             canonical_matches,
                         };
                         self.evidence.emit(OwnerEvidence::Record(line))?;
+                        // E9: the candidate or a dependency changed while the worker
+                        // projected — request it again from the current state (bounded).
+                        self.requeue_projection(done.account, done.t_rx_ns);
                     }
                 }
-                Err(error) => {
+                Err(failure) => {
                     if targeted_probe_result {
                         targeted_status = Some("failed");
                     }
@@ -374,9 +377,14 @@ impl ShadowOwner {
                     let line = RecordEvent::ProjectionFailed {
                         account: done.account,
                         base_slot: done.base_slot,
-                        error,
+                        error: failure.error,
                     };
                     self.evidence.emit(OwnerEvidence::Record(line))?;
+                    // E9: a node behind the required context may have caught up (bounded);
+                    // any other failure waits for the candidate's next trigger.
+                    if failure.context_behind {
+                        self.requeue_projection(done.account, done.t_rx_ns);
+                    }
                 }
             }
 
@@ -419,5 +427,27 @@ impl ShadowOwner {
         )?;
 
         Ok(worker_now_s)
+    }
+}
+
+impl ShadowOwner {
+    /// E9: requests a candidate's projection again after a stale result or a lagging node —
+    /// through the ordinary detect queue (behind waiting work, so neither it nor others starve)
+    /// and within the candidate's bound (`projection_retry_allowed`). A candidate no longer in
+    /// state is not requeued.
+    #[cfg(feature = "crate_health")]
+    pub(super) fn requeue_projection(&mut self, account: Pubkey, t_rx_ns: u64) {
+        let Some(slot) = self.st.get(&account).map(|r| r.slot) else {
+            self.projection_requeues.remove(&account);
+            return;
+        };
+        if projection_retry_allowed(
+            &mut self.projection_requeues,
+            &mut self.projection_stats,
+            account,
+        ) {
+            self.detect_queue
+                .push_back((account, t_rx_ns, slot, "integration_projection_requeue"));
+        }
     }
 }

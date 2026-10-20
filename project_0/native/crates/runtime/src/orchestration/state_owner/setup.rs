@@ -866,6 +866,7 @@ pub(super) fn prepare(
         remote_worker_capacity,
         pending,
         projection_cache,
+        projection_requeues: HashMap::new(),
         projection_pending,
         projection_stats: ProjectionStats::default(),
         detect_queue,

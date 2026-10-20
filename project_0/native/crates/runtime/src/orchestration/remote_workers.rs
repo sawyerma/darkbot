@@ -65,6 +65,9 @@ pub struct ProjectionWork {
     /// E9: dependency set and its canonical revisions at request time (passed back unchanged).
     pub dependencies: Vec<Pubkey>,
     pub dependency_fingerprint: Hash,
+    /// E9: the newest canonical slot of the candidate and its dependencies; the simulation must
+    /// not be older.
+    pub min_context_slot: u64,
 }
 
 pub struct ProjectionResultMessage {
@@ -74,7 +77,15 @@ pub struct ProjectionResultMessage {
     pub t_rx_ns: u64,
     pub dependencies: Vec<Pubkey>,
     pub dependency_fingerprint: Hash,
-    pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
+    pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, ProjectionFailure>,
+}
+
+/// E9: a failed projection — typed whether the node was behind the required context (a retry
+/// can succeed once it caught up) — and its error text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectionFailure {
+    pub context_behind: bool,
+    pub error: String,
 }
 
 /// [R126] One integration-Bank refresh projection is enough to obtain a fresh pricing state
@@ -267,11 +278,21 @@ impl RemoteWorkers {
                         let dependency_fingerprint = work.dependency_fingerprint;
                         let mt0_start = std::time::Instant::now(); // [MT0]
                         let result = submitter
-                            .simulate_with_post_accounts(&work.tx, &work.targets)
-                            .map_err(|e| e.to_string());
+                            .simulate_with_post_accounts(
+                                &work.tx,
+                                &work.targets,
+                                work.min_context_slot,
+                            )
+                            .map_err(|e| ProjectionFailure {
+                                context_behind: matches!(
+                                    e,
+                                    darkbot_solana::submit::rpc::ProjectionError::ContextBehind { .. }
+                                ),
+                                error: e.to_string(),
+                            });
                         let mt0_outcome = match &result {
                             Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,
-                            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(e),
+                            Err(e) => darkbot_common::mt0::RemoteOutcome::classify_text(&e.error),
                         };
                         darkbot_common::mt0::MT0.record_remote(
                             darkbot_common::mt0::RemoteClass::IntegrationProjection,
@@ -314,8 +335,9 @@ impl RemoteWorkers {
                         let base_slot = work.base_slot;
                         let base_bank_hash = work.base_bank_hash;
                         let mt0_start = std::time::Instant::now(); // [MT0]
+                                                                   // E9: the bank's projection is not older than its canonical bank.
                         let result = submitter
-                            .simulate_with_post_accounts(&work.tx, &work.targets)
+                            .simulate_with_post_accounts(&work.tx, &work.targets, work.base_slot)
                             .map_err(|e| e.to_string());
                         let mt0_outcome = match &result {
                             Ok(_) => darkbot_common::mt0::RemoteOutcome::Ok,

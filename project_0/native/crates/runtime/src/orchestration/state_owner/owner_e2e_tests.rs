@@ -16,6 +16,11 @@ struct Fixture {
 }
 
 fn fixture(tag: &str) -> Fixture {
+    fixture_rpc(tag, "http://127.0.0.1:9")
+}
+
+/// The fixture with its remote workers against `rpc` (default: a closed port).
+fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("p0_owner_e2e_{}_{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -38,7 +43,7 @@ fn fixture(tag: &str) -> Fixture {
         t_rx_ns: 0,
     };
     let (producer, consumer) = bounded::<IngressEvent>("ingress", 1024);
-    let unused_rpc = "http://127.0.0.1:9".to_string();
+    let unused_rpc = rpc.to_string();
     let limits = Limits {
         max_total_capital: 0,
         max_outstanding_inventory: 0,
@@ -80,6 +85,7 @@ fn fixture(tag: &str) -> Fixture {
         remote_worker_capacity: 16,
         pending: vec![],
         projection_cache: HashMap::new(),
+        projection_requeues: HashMap::new(),
         projection_pending: HashSet::new(),
         projection_stats: ProjectionStats::default(),
         detect_queue: VecDeque::new(),
@@ -463,7 +469,8 @@ fn n4_projection_counters_are_journaled_at_shutdown() {
         [
             "projection: requested=3 queue_full=0 observation_unknown=0 accepted=2 failed=1 \
              stale_result=0 discarded_result=0 in_flight=0 reused=1 invalid_at_use=0 \
-             discarded_consume=1 stale_consume=0 dropped=0 cached=0"
+             discarded_consume=1 stale_consume=0 dropped=0 cached=0 requeued=0 \
+             requeue_exhausted=0"
         ],
         "{lines:?}"
     );
@@ -572,5 +579,239 @@ fn z14_bootstrap_probes_never_occupy_the_ingress_channel() {
         ["bootstrap_probes: queued=1100 taken=2 pending=1098"],
         "{lines:?}"
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// E9: a projection made unusable by a change during the worker's projection (or by a lagging
+/// node) is requested again through the ordinary detect queue — behind work already waiting, so
+/// neither starves — at most `PROJECTION_REQUEUE_MAX` times in a row; then it is counted and the
+/// candidate waits for its next trigger, and a later stale result starts a fresh bounded
+/// sequence. A candidate no longer in state is not requeued.
+#[test]
+fn e9_stale_projection_requeue_is_bounded_and_fair() {
+    let mut f = fixture("e9_requeue");
+    let candidate = Pubkey::new_unique();
+    f.owner.st.install_snapshot(
+        12,
+        vec![AccountUpdate {
+            pubkey: candidate,
+            owner: f.owner.program,
+            lamports: 1,
+            data: vec![1; 8],
+            slot: 12,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        }],
+    );
+    let waiting = (Pubkey::new_unique(), 1, 11, "account_update");
+    f.owner.detect_queue.push_back(waiting);
+    let requeue = (candidate, 7, 12, "integration_projection_requeue");
+    for n in 1..=PROJECTION_REQUEUE_MAX as u64 {
+        f.owner.requeue_projection(candidate, 7);
+        assert_eq!(f.owner.projection_stats.requeued, n);
+    }
+    let queued: Vec<_> = f.owner.detect_queue.iter().copied().collect();
+    let mut expected = vec![waiting];
+    expected.extend(std::iter::repeat_n(
+        requeue,
+        PROJECTION_REQUEUE_MAX as usize,
+    ));
+    assert_eq!(queued, expected, "behind the waiting work, FIFO");
+    // The bound: no further request, counted, the sequence ends.
+    f.owner.requeue_projection(candidate, 7);
+    assert_eq!(f.owner.detect_queue.len(), expected.len());
+    assert_eq!(f.owner.projection_stats.requeue_exhausted, 1);
+    assert!(!f.owner.projection_requeues.contains_key(&candidate));
+    // A later stale result (after a new trigger) gets a fresh bounded sequence.
+    f.owner.requeue_projection(candidate, 9);
+    assert_eq!(
+        f.owner.detect_queue.back(),
+        Some(&(candidate, 9, 12, "integration_projection_requeue"))
+    );
+    // Not in state: nothing queued, nothing kept.
+    let gone = Pubkey::new_unique();
+    let before = f.owner.detect_queue.len();
+    f.owner.requeue_projection(gone, 7);
+    assert_eq!(f.owner.detect_queue.len(), before);
+    assert!(!f.owner.projection_requeues.contains_key(&gone));
+    let dir = f.dir.clone();
+    drop(f);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A loopback JSON-RPC endpoint answering each request with the next scripted response members
+/// (`{"result": …}` or `{"error": …}`).
+fn scripted_rpc(results: Vec<serde_json::Value>) -> String {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let results = std::sync::Arc::new(std::sync::Mutex::new(
+        results.into_iter().collect::<VecDeque<_>>(),
+    ));
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { return };
+            let results = results.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut stream = stream;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    let mut length = 0usize;
+                    loop {
+                        let mut h = String::new();
+                        if reader.read_line(&mut h).unwrap_or(0) == 0 {
+                            return;
+                        }
+                        if h == "\r\n" {
+                            break;
+                        }
+                        if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+                            length = v.trim().parse().unwrap_or(0);
+                        }
+                    }
+                    let mut body = vec![0u8; length];
+                    if reader.read_exact(&mut body).is_err() {
+                        return;
+                    }
+                    let Some(mut answer) = results.lock().unwrap().pop_front() else {
+                        return;
+                    };
+                    answer["jsonrpc"] = "2.0".into();
+                    answer["id"] = 1.into();
+                    let body = answer.to_string();
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                }
+            });
+        }
+    });
+    url
+}
+
+/// E9 through the real projection worker and the owner's result handling: a node behind the
+/// required context and a stale result each requeue the candidate (typed, bounded); a ready
+/// projection is cached and ends the requeue sequence.
+#[test]
+fn e9_projection_results_drive_the_bounded_requeue() {
+    use base64::Engine;
+    use solana_sdk::signature::Signer;
+    let account = |data: Vec<u8>| {
+        serde_json::json!({"lamports": 1, "owner": Pubkey::default().to_string(),
+            "data": [base64::engine::general_purpose::STANDARD.encode(&data), "base64"],
+            "executable": false, "rentEpoch": 0, "space": data.len()})
+    };
+    let at = |slot: u64| {
+        let clock = solana_sdk::clock::Clock {
+            slot,
+            unix_timestamp: 1_700_000_000,
+            ..Default::default()
+        };
+        serde_json::json!({"result": {"context": {"slot": slot}, "value": {
+            "err": null, "logs": [], "unitsConsumed": 5, "returnData": null,
+            "innerInstructions": null, "replacementBlockhash": null,
+            "accounts": [account(vec![7; 8]), account(bincode::serialize(&clock).unwrap())]}}})
+    };
+    // The node has not reached slot 12 (-32016), two answers at the required slot, then a
+    // failed simulation.
+    let behind = serde_json::json!({"error": {"code": -32016,
+        "message": "Minimum context slot has not been reached", "data": {"contextSlot": 11}}});
+    let failed = serde_json::json!({"result": {"context": {"slot": 12}, "value": {
+        "err": {"InstructionError": [0, "InvalidArgument"]}, "logs": [], "unitsConsumed": 5,
+        "accounts": null, "returnData": null, "innerInstructions": null,
+        "replacementBlockhash": null}}});
+    let rpc = scripted_rpc(vec![behind, at(12), at(12), failed]);
+    let mut f = fixture_rpc("e9_results", &rpc);
+    let candidate = Pubkey::new_unique();
+    let data = vec![1u8; 8];
+    f.owner.st.install_snapshot(
+        12,
+        vec![AccountUpdate {
+            pubkey: candidate,
+            owner: f.owner.program,
+            lamports: 1,
+            data: data.clone(),
+            slot: 12,
+            write_version: None,
+            source: SourceKind::Snapshot,
+            t_rx_ns: 0,
+        }],
+    );
+    let payer = solana_sdk::signature::Keypair::new();
+    let mut built = darkbot_solana::tx::build(
+        &darkbot_solana::tx::TxPlan {
+            version: darkbot_solana::tx::BuildVersion::V0,
+            payer: payer.pubkey(),
+            instructions: vec![solana_sdk::instruction::Instruction {
+                program_id: Pubkey::new_unique(),
+                accounts: vec![],
+                data: vec![1],
+            }],
+            lookup_tables: vec![],
+            resources: f.owner.resources,
+        },
+        solana_sdk::hash::Hash::new_unique(),
+        &darkbot_solana::tx::TxLimits::default(),
+    )
+    .unwrap();
+    darkbot_solana::tx::sign(&mut built, &[&payer]).unwrap();
+    let empty_fingerprint = dependency_fingerprint(&f.owner.st, &[]);
+    let work = |base_account_hash: solana_sdk::hash::Hash| {
+        crate::orchestration::remote_workers::ProjectionWork {
+            account: candidate,
+            base_slot: 12,
+            base_account_hash,
+            t_rx_ns: 7,
+            tx: built.tx.clone(),
+            targets: vec![Pubkey::new_unique()],
+            dependencies: vec![],
+            dependency_fingerprint: empty_fingerprint,
+            min_context_slot: 12,
+        }
+    };
+    let run = |f: &mut Fixture, w| {
+        let before = f.owner.projection_stats;
+        f.owner.projection_pending.insert(candidate);
+        assert!(f.owner.remote.projection_jobs.try_push(w).is_ok());
+        let started = std::time::Instant::now();
+        while f.owner.projection_stats == before {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            f.owner.remote_apply().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    let requeue = (candidate, 7, 12, "integration_projection_requeue");
+    let real = solana_sdk::hash::hash(&data);
+    run(&mut f, work(real));
+    assert_eq!(f.owner.projection_stats.failed, 1, "node behind");
+    assert_eq!(f.owner.detect_queue.back(), Some(&requeue));
+    assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&1));
+    run(&mut f, work(solana_sdk::hash::Hash::new_unique()));
+    assert_eq!(f.owner.projection_stats.stale_at_result, 1);
+    assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&2));
+    assert_eq!(f.owner.projection_stats.requeued, 2);
+    run(&mut f, work(real));
+    assert_eq!(f.owner.projection_stats.accepted, 1);
+    assert!(f.owner.projection_cache.contains_key(&candidate));
+    // A ready projection does not end the sequence: only a new external trigger or the bound
+    // does (so a projection unusable again at its consumption cannot re-request without bound).
+    assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&2));
+    // Any other failure is not requeued: it waits for the candidate's next trigger.
+    let queued = f.owner.detect_queue.len();
+    run(&mut f, work(real));
+    assert_eq!(f.owner.projection_stats.failed, 2);
+    assert_eq!(f.owner.detect_queue.len(), queued);
+    assert_eq!(f.owner.projection_requeues.get(&candidate), Some(&2));
+    assert_eq!(f.owner.projection_stats.requeued, 2);
+    let dir = f.dir.clone();
+    drop(f);
     let _ = std::fs::remove_dir_all(dir);
 }
