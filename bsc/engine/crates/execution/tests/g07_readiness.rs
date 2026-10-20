@@ -133,7 +133,10 @@ fn v4_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
         .set(up::ARCHIVE_SOURCE, "offline-test")
         .set(up::HEADERS_VERIFIED, 2u64)
         .set(up::BLOOM_CANDIDATE_BLOCKS, 0u64)
-        .set(up::CURRENT_IMPLEMENTATION_CODE_SHA256, Value::B256([0x42; 32]))
+        .set(
+            up::CURRENT_IMPLEMENTATION_CODE_SHA256,
+            Value::B256([0x42; 32]),
+        )
         .set(up::CURRENT_IMPLEMENTATION_CODE_BYTES, 1u64)
         .set(up::FIRST_PARENT_HASH, Value::B256([1; 32]))
         .set(up::LAST_BLOCK_HASH, Value::B256([2; 32]));
@@ -151,7 +154,11 @@ fn v4_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
 
 #[test]
 fn without_a_v4_contract_readiness_is_blocked_and_never_invokes_rpc() {
-    let (code, text) = run(&repo_root(), &[]);
+    // Never depend on an operator's untracked V4 proposal in the real checkout.
+    let root = std::env::temp_dir().join(format!("darkbot-readiness-no-v4-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let (code, text) = run(&root, &[]);
+    std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(code, Some(2));
     for expected in [
         "OFFLINE_ZERO_EGRESS",

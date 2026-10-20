@@ -270,6 +270,12 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         field(contract.text(c::WITNESS_SOURCE_RECORD_PATH)),
         &snap.attempt_id,
     );
+    check(
+        report,
+        "WITNESS_SOURCE_BINDING",
+        "PASS",
+        "Witness source contract identity and integrity verified; not a producer timing measurement",
+    );
     let output = U256::from_be_bytes(field(dry.u256(d::LOCAL_EXPECTED_OUTPUT)));
     if output == U256::ZERO
         || output * U256::from(9900) / U256::from(10000)
@@ -357,18 +363,17 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     check(
         report,
         "BUILDER_SEMANTICS",
-        "BLOCKED",
-        "Existing probe proves submission checks only; inclusion/noMerge/positionFirst remain unqualified",
+        "UNQUALIFIED",
+        "Existing probe proves submission checks only; inclusion, 48Club pricing and building-time noMerge/positionFirst effects remain unqualified economic risks requiring separate explicit acceptance",
     );
     check(
         report,
         "PRODUCER_WITNESS",
-        if field(witness.bool(schema::g07::witness_source::SOURCE_READY)) {
-            "PASS"
-        } else {
-            "BLOCKED"
-        },
-        "Original producer execution witness is separately required for T0-to-BUY timing",
+        "UNKNOWN",
+        &format!(
+            "T0-to-BUY timing is not measured by readiness; bound source_ready={}; original producer execution witness required for the later timing verdict",
+            field(witness.bool(schema::g07::witness_source::SOURCE_READY))
+        ),
     );
     if current_rpc {
         let current = run_current_preflight(launcher, buyer, gas, lg, bg, lv, bv)?;
@@ -450,6 +455,67 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     Ok(())
 }
 
+// Completeness is mandatory: an early return, panic or missing check can never
+// become PASS. Future outcome evidence is kept separate from technical safety.
+const REQUIRED_TECHNICAL_CHECKS: &[&str] = &[
+    "V4_GUARD",
+    "V4_INPUT_BINDINGS",
+    "DRY1_DRY4",
+    "WITNESS_SOURCE_BINDING",
+    "BUDGET_GAS_SLIPPAGE",
+    "SIGNED_TX_HASHES",
+    "ATTEMPT_LATCH",
+    "FROZEN_PREFLIGHT",
+    "BUILDER_FRESHNESS",
+    "CURRENT_DEPLOYMENTS_NONCES_FUNDING_GAS",
+    "CLOCK_HEAD",
+    "CLOCK_CONFIG",
+    "SIGNED_EGRESS",
+];
+
+fn technical_ready(report: &Record) -> bool {
+    if report.text(r::MODE).ok() != Some("READ_ONLY_RPC") {
+        return false;
+    }
+    let Ok(checks) = report.nested_all(r::CHECKS) else {
+        return false;
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    for row in &checks {
+        let (Ok(name), Ok(status)) = (row.text(r::check::NAME), row.text(r::check::STATUS)) else {
+            return false;
+        };
+        if !seen.insert(name) {
+            return false;
+        }
+        let accepted = match name {
+            "BUILDER_SEMANTICS" => status == "UNQUALIFIED",
+            "PRODUCER_WITNESS" => status == "UNKNOWN",
+            _ => status == "PASS",
+        };
+        if !accepted {
+            return false;
+        }
+    }
+    REQUIRED_TECHNICAL_CHECKS
+        .iter()
+        .all(|name| seen.contains(name))
+        && seen.contains("BUILDER_SEMANTICS")
+        && seen.contains("PRODUCER_WITNESS")
+}
+
+fn finish_report(report: &mut Draft) -> (Vec<u8>, i32) {
+    let before = report.encode().expect("encode evaluated readiness");
+    let pass = technical_ready(&decode(&r::SCHEMA, &before).expect("decode evaluated readiness"));
+    report
+        .set(r::STATUS, if pass { "PASS_READ_ONLY" } else { "BLOCKED" })
+        .set(r::LIVE_AUTHORIZED, false);
+    (
+        report.encode().expect("encode readiness verdict"),
+        if pass { 0 } else { 2 },
+    )
+}
+
 fn main() {
     let args: Vec<_> = env::args().skip(1).collect();
     let current_rpc = args.iter().any(|a| a == "--current-rpc");
@@ -491,7 +557,7 @@ fn main() {
             )
         }
     }
-    let bytes = report.encode().expect("encode readiness");
+    let (bytes, exit_code) = finish_report(&mut report);
     let record = decode(&r::SCHEMA, &bytes).expect("decode readiness");
     if binary {
         std::io::stdout()
@@ -501,15 +567,116 @@ fn main() {
     } else {
         print!("{}", record.render());
         println!(
-            "PRE_LIVE_READINESS=BLOCKED\nLIVE_GUARD={FROZEN_APPROVED_V4_SHA256}\nLIVE=BLOCKED"
+            "PRE_LIVE_READINESS={}\nLIVE_GUARD={FROZEN_APPROVED_V4_SHA256}\nLIVE=BLOCKED",
+            field(record.text(r::STATUS))
         );
     }
-    std::process::exit(2);
+    std::process::exit(exit_code);
 }
 
 #[cfg(test)]
 mod readiness_tests {
     use super::*;
+
+    fn evaluated_report(omit: Option<&str>, failed: Option<(&str, &str)>) -> Draft {
+        let mut report = Draft::new(&r::SCHEMA);
+        report
+            .set(r::STATUS, "BLOCKED")
+            .set(r::MODE, "READ_ONLY_RPC")
+            .set(r::OBSERVED_UNIX_MS, 1_u64)
+            .set(r::LIVE_AUTHORIZED, false);
+        for name in REQUIRED_TECHNICAL_CHECKS {
+            if omit == Some(*name) {
+                continue;
+            }
+            let status = failed
+                .filter(|(target, _)| target == name)
+                .map_or("PASS", |(_, status)| status);
+            check(&mut report, name, status, "offline verdict fixture");
+        }
+        for (name, default_status) in [
+            ("BUILDER_SEMANTICS", "UNQUALIFIED"),
+            ("PRODUCER_WITNESS", "UNKNOWN"),
+        ] {
+            if omit == Some(name) {
+                continue;
+            }
+            let status = failed
+                .filter(|(target, _)| *target == name)
+                .map_or(default_status, |(_, status)| status);
+            check(
+                &mut report,
+                name,
+                status,
+                "later outcome evidence remains unqualified",
+            );
+        }
+        report
+    }
+
+    #[test]
+    fn pass_read_only_is_reachable_without_claiming_outcomes_or_live_authority() {
+        let mut report = evaluated_report(None, None);
+        let (bytes, code) = finish_report(&mut report);
+        let result = decode(&r::SCHEMA, &bytes).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(result.text(r::STATUS).unwrap(), "PASS_READ_ONLY");
+        assert!(!result.bool(r::LIVE_AUTHORIZED).unwrap());
+        assert_eq!(FROZEN_APPROVED_V4_SHA256, "UNARMED");
+        assert!(result.render().contains("UNQUALIFIED"));
+        assert!(result.render().contains("UNKNOWN"));
+    }
+
+    #[test]
+    fn missing_or_nonpassing_technical_checks_always_block() {
+        for name in REQUIRED_TECHNICAL_CHECKS {
+            assert_eq!(
+                finish_report(&mut evaluated_report(Some(name), None)).1,
+                2,
+                "missing {name}"
+            );
+            for status in ["BLOCKED", "STOP", "UNKNOWN", "UNQUALIFIED"] {
+                assert_eq!(
+                    finish_report(&mut evaluated_report(None, Some((name, status)))).1,
+                    2,
+                    "{name}: {status}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn offline_errors_duplicates_and_missing_risk_disclosures_cannot_pass() {
+        let mut offline = evaluated_report(None, None);
+        offline.set(r::MODE, "OFFLINE_ZERO_EGRESS");
+        assert_eq!(finish_report(&mut offline).1, 2);
+        for (name, status) in [
+            ("VALIDATION", "BLOCKED"),
+            ("CURRENT_DEPLOYMENT_DRIFT", "STOP"),
+            ("V4_GUARD", "PASS"),
+            ("BUILDER_SEMANTICS", "PASS"),
+            ("PRODUCER_WITNESS", "PASS"),
+        ] {
+            let mut report = evaluated_report(None, None);
+            check(
+                &mut report,
+                name,
+                status,
+                "must not turn an invalid result green",
+            );
+            assert_eq!(finish_report(&mut report).1, 2);
+        }
+        for name in ["BUILDER_SEMANTICS", "PRODUCER_WITNESS"] {
+            assert_eq!(finish_report(&mut evaluated_report(Some(name), None)).1, 2);
+            assert_eq!(
+                finish_report(&mut evaluated_report(None, Some((name, "PASS")))).1,
+                2
+            );
+        }
+        let mut incomplete = evaluated_report(None, None);
+        incomplete.clear(r::CHECKS);
+        assert_eq!(finish_report(&mut incomplete).1, 2);
+    }
 
     #[test]
     fn every_drifted_deployment_field_is_reported_with_both_values() {
