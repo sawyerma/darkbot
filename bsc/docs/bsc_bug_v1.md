@@ -721,7 +721,81 @@ cargo fmt --all -- --check
 **Etappe-6-Status:** **REVIEWED (PARTIAL CODE SCOPE) / E6-1 & E6-2 FUTURE INTEGRATION GATES / E6-3 REQUIRES MEMORY-MODEL PROOF**, Produktions-Fixes offen, G0.7-Code-Ready davon **nicht** blockiert. G0.7 `UNARMED`, G0.8 `NOT_EXECUTED`, C1/C2 `PAUSED`. Etappen **7** (Go↔Rust Offset-/ABI-/Atomics-Paritaet) und **8** (Journal/Record/Legacy) noch offen.
 
 
-## 8. Nachfolgende Etappen
+## 8. Etappe 7 — Go-Overlay gegen Rust, Teil 1: Txpool-Coverage, Chain-Hooks, Wire-Layout, Unsynced-Gate
+
+**Review:** 2026-10-20, **Fable-Basis:** `cac786e`, **unabhaengig gepruefter HEAD:** `main` `df52f8f423e42b48e7f348d0a56543bc90ea32ac`. Kein Quellcode editiert, keine Go-/Rust-/Mainnet-Tests ausgefuehrt. Beibehaltung der bindenden C1.1–C1.10-Gate-Reihenfolge und der G0.7→G0.8-Vorrangstellung; C1/C2 weiter pausiert. **Etappe 7 ist hier ausschliesslich Teil 1 / PARTIAL REVIEW**, kein abschliessender Go-/Rust-Parallelitaetsbeweis.
+
+**Neu aufgeklaerte Files, die Fable wegen Dateinamen-404 nicht lesen konnte:** Das vollstaendige Overlayverzeichnis `bsc/geth/overlay/darkbot/fastlane/` enthaelt die 15 Dateien
+`chain_v2.go`, `chain_v2_test.go`, `fastlane.go`, `fastlane_test.go`, `ingress.go`, `ingress_fixtures_test.go`, `ingress_test.go`, `outbound.go`, `outbound_test.go`, `qos.go`, `qos_darwin.go`, `qos_fallback.go`, `stress_test.go`, `v2.go` und `v2_test.go`. **`v2.go`** (1530 Zeilen) implementiert `arenaV2`, `laneV2`, `publishChecked`, `tryConsume`, Pool-/Lifecycle-/Role-Lease- und Wire-V2-Mapping-Funktionen; **`ingress.go`** (1013 Zeilen) implementiert `IngressV2` und die unsynchronisierte Txpool-Freigabe. Keine weitere Dateiliste oder Nutzer-Terminalhilfe fuer Teil 2 erforderlich.
+
+### Etappe-7-Teil-1-Urteil
+
+| ID | Status nach unabhaengiger Pruefung | Fix-/Gate-Konsequenz |
+| --- | --- | --- |
+| E7-1 | **BESTAETIGTE C1.4-QUALIFIKATIONSLUECKE:** Txpool schreibt full raw TX in 3840-Byte-Payload und zaehlt Oversize/Full auch ausserhalb C1.4-Launch-Scope; **„Mainnet kann praktisch nie PASS“ ist ohne Messung NICHT BELEGT** | Coverage-/Denominator-/Backpressure-Redesign erst C1, keinesfalls unbesehen Fehlzaehler ignorieren |
+| E7-2 | **TEILWEISE BESTAETIGT:** Overlay-Patch instrumentiert zwei Canonical- und einen Reorg-Hook; andere Head-Mutationen im vollstaendigen gepinnten geth-Build NICHT gegen den realen Source-Baum bewiesen | C2 Chain-Owner muss Gap-/Resync-Semantik qualifizieren; reine Parent-Hash-Ungleichheit kein vollstaendiger Beweis |
+| E7-3 | **WIDERLEGT ALS AKTUELLER BUG:** `C19bUnsyncedAcceptTxsAllowed(56)` verweigert explizit jede unsynced-Freigabe mit gesetztem Arm; bestehende Negativtests | **Kein Patch**. Bestehende Gate-Checks und Tests behalten; keine neue Mainnet-Option |
+| E7-4 | **BESTAETIGT, DOC-ONLY:** veralteter `bsc/native/tools/c14_ingress_interop.sh`-Pfad | Referenzen zu tatsaechlich vorhandener `bsc/tools/c14_ingress_interop.sh` korrigieren |
+| E7-WIRE-OFFSETS | **BESTAETIGTE POSITIVE PARITAET:** 50 direkt abgeglichene Layoutgroessen/Offsets Go `v2.go` und Rust `protocol_v2/layout.rs` identisch | Keine Layout-Aenderung; restliche SC-Atomics-/Epoch-/Ownership-Paritaet in Teil 2 separat |
+| E6-3-FOLLOWUP | **OFFEN:** beide Sprachen setzen `committed` vor Plain-Byte-Schreiben; Rust `Relaxed`, Go `sync/atomic` SC; keine bewiesene atomare Rewrite-/Aliasing-Sicherheit | Kein „2 Fences => FIXED“, Interop- und Memory-Model-Nachweis in Teil 2 |
+
+### E7-1 — Txpool akzeptiert laengere Transaktionen, die Audit-Evidence-Lane jedoch nicht
+
+**Harter Quellbefund:** `bsc/geth/overlay/darkbot/fastlane/ingress.go` ca. Z. 60–63 legt `c14TxpoolLaneSlotStride=4096`, `c14TxpoolLaneCapacity=4096` fest. `v2.go` verwendet `v2SlotHeaderSize=256`, also Nutzlast **maximal 3840 Bytes**. `ingress.go::PublishTxpoolAcceptedV2` / `publishTxpool` ca. Z. 852–891 ruft fuer **jede** vom lokalen Txpool beobachtete TX `serializeTxV2(tx)` auf und uebergibt ihre vollen signierten RLP-/Typed-Bytes an `txpool.publish`. Ausserhalb des Filter-Scopes stehende, zu lange TXs erzeugen `v2LHOversize` und `txpoolRefused`; wenn der Consumer bei Bursts zurueckliegt, kann `v2LHDroppedFull` entstehen. Der Go-Record-Code hat keinen separaten vorab klassifizierten In-Scope-only-Handoff.
+
+**Rust-Qualification:** `bsc/engine/crates/geth_ipc/src/ingress.rs::IngressAuditV2::qualification` ca. Z. 708–779 verlangt neben closed/drained/bound und null False-Negatives **auch** `p.refused==0`, `lane.dropped_full==0`, `lane.oversize==0` und `published==write_sequence==txpool_judged`. Eintretender Oversize **irgendeiner** TX des Fensters ergibt `Incomplete` selbst wenn `judge_txpool_record` fuer sie bei erhaltener Payload `NotRelevant` liefern wuerde. `ingress.rs::txpool_lane_drops_and_oversize_refusals_never_pass` prueft diese Branches historisch offline. Damit ist die Belastung durch out-of-scope-Records **als Mechanismus nachgewiesen**.
+
+**Scharfe Einschraenkung:** Weder eine Mainnet-Lastmessung noch eine echte Groessenverteilung/Zeitfensterstatistik liegen dieser Etappe bei; Fables „praktisch nie PASS“ ist eine **Vermutung**, nicht ein belegtes Mainnet-Resultat. Blob-Transaktionen mit Sidecars duerfen nicht unbesehen mit uebertragenen Txpool-RLP-Laengen gleichgesetzt werden; massgeblich sind tatsaechliche `serializeTxV2`-Bytes. Vor einer Aenderung Bandbreite, Ingress-Rate, Burst, Consumer-Drain, Slot-Full- und Oversize-Denominator auf exakt gepinnter BSC-Mainnet-Quelle messen. Keine fiktive Pass-Quote.
+
+**C1-Designauftrag, nicht sofort in G0.7 patchen:**
+1. **A) Vollstaendiger TX-Pfad** und **B) zweckgebundener, verlustlos klassifizierbarer Kurzrecord-Pfad** explizit vergleichen, bevor `Incomplete`-Gates gelockert werden. Eine full-record-Lane mit groesserem Slotstride oder dimensioniertem Backpressure-Budget kann den bisherigen Evidenzvertrag erhalten, erhoeht aber RAM/Cache-/Headroom-Kosten. `max_stride` ist in `v2.go` begrenzt; neue Werte nur nach gemessener Dimensionierung.
+2. Kurzrecord (Hash, original TX-Laenge, canonical `to`, Selector, tx type, Clock-/Source-/Status-Identity) **nicht** in einen angeblich vollstaendigen `TXPOOL_ACCEPTED`-Record des bestehenden ABI schmuggeln. Neuer versionierter RecordKind/Semantik oder separates Qualifikationsformat, mit explizitem `FULL` vs `SUMMARY`-Provenance-Flag, Source-Sequence-, Korrelation-/Hash- und Fehler-/Unknown-Klassen; Go und Rust gemeinsam; jede Entscheidung muss fuehrende Vertragstypen 0–4 und no-`to`-Creation korrekt behandeln. Fuer nicht parsebare vollstaendige TXs und Fehler beim Kurzrecord-Decoder bleibt `INCOMPLETE`, nicht `NotRelevant`.
+3. Alternativ `oversize` **nur im unzweideutig aus voller/korrekter Original-Envelope extrahierten Out-of-Scope-Fall** aus der engeren Launch-Audit-Denominator herausnehmen, aber **zusätzliche** Roh-Txpool-/Capture-Loss-Metrik fuer alle TXs erhalten. Niemals der gesamten Txpool-Lane einen pauschalen PASS attestieren, wenn full-record-Daten fehlen. In-Scope-Refusals, Provider-/Clock-/Serialize-Gaps, Consumer-Stall oder unbekannte Scope-Klassifikation bleiben hart fail-closed.
+4. Regressionen: >3840 Byte out-of-scope, >3840 Byte Portal/NewToken in-scope, 3840/3841-Grenze, NULL `to`/ContractCreation, Router-/Multicall-Faelle, Typed-TX mit Blob-Sidecar (korrekte wire vs sidecar Abgrenzung), hohes Aufkommen/Full-Lane/Backpressure, NaN-/missing Source-/Clock-Fields, closed/drained-/Gap-Accounting, hash-/selector-Manipulation. Historische Scope-Golden-Bytes und C1.4a/C1.9-Hotpath-Timing neu qualifizieren falls Wire-Record geaendert wird.
+
+**Abnahme:** Ein PASS ist stets an **exakt benannte** in-scope-Semantik und vollstaendige Coverage-/Loss-Denominator gebunden. Out-of-scope-Last darf keinen nachgewiesenen In-scope-Hit verschweigen; keine per Counter-Inhibition erfundene Mainnet-Qualifikation.
+
+### E7-2 — Chain-Evidence-Hooks sind enger als die moeglichen Head-Zustandsaenderungen
+
+**Quellbefund:** `bsc/tools/c1_apply_geth_overlay.py` ca. Z. 360–407 setzt `PublishCanonicalV2` in `BlockChain.writeBlockAndSetHead` sowie `BlockChain.SetCanonical`, und `PublishReorgV2` in `BlockChain.reorg`. Der statische Verifier ca. Z. 526–585 verlangt im gegenwaertigen Scope genau diese Hook-Callsites. **Andere** moegliche Head-Mutationen wie `SetHead` oder weitere Sync-/Reset-Pfade sind in dieser ausgerollten Overlay-Patchdatei nicht explizit instrumentiert. Fable hat selbst nicht den vollstaendigen, gepinnten BSC-geth-Quellbaum dieser Methoden gelesen. Deshalb ist eine **moegliche Observability-Gap** belegt, jedoch **nicht** die tatsaechliche Ausfuehrbarkeit einer von diesen Callpaths unabgedeckten Head-Mutation im gepinnten Build.
+
+**Bereits implementierte Chain-Format-Hilfe:** `bsc/geth/overlay/darkbot/fastlane/chain_v2.go::PublishCanonicalV2` ca. Z. 150–162 schreibt `header.ParentHash` in `aux` und den neuen Headerhash in `hash`, Blockhoehe und TX-Anzahl in `payload`. `PublishReorgV2` publiziert Old-/New-/Common-Ancestor-Identity. Fables Vorschlag „Parent-Hash in CANONICAL aufnehmen“ ist damit **schon umgesetzt**. **Parent != vorheriger Head** ist **ein Indiz**, kein universell exakter GAP-Detektor: Bei normalem Sprung ueber mehrere Bloecke, gepufferter/ausgelassener Chain-Evidence, Restart, unterschiedlichen Source-/Clock-Scopes oder einem uninstrumentierten Rewind kann er false positives oder unter Umstaenden false negatives liefern. Nicht einfach `GAP` zaehlen und gleichzeitig einen erdachten dazwischenliegenden Blockpfad akzeptieren.
+
+**C2-Vertragsfix, spaeter:** Gegen den **tatsaechlich gepinnten** geth-BSC-Quellstand jede durch External API, Startup-Recovery, Debug-`SetHead`, Header-/Snap-Sync, Canonical-/Rollback- und Reorg-Transition erreichbare Head-Mutation statisch inventarisieren und ihre V2-Evidenz-Kausalitaet nachweisen; ggf. zentralen, synchron unter `chainmu` oder anderem nachgewiesenem Owner gepinnten Hook nachrüsten, ohne doppelte/unerlaubte Producer. C2 Rust-single-state/reconciler muss Blockhash/Parent/Height/Sequence/Fork- und Canonical-Evidence **kontinuierlich** validieren; bei echten unbekannten Diskontinuitaeten `CHAIN_STATE_GAP / INCOMPLETE / HALT`, unabhaengige kanonische Read-only Reconciliation vor irgendeinem RESUME. Eine Luecke nicht durch nur positive Sequenz-Arithmetik als geschlossen erklaeren. Regressionen mit `SetHead`-Rewind, Reorg, Startup-Repair, Snap-Sync, Kopf-Spruengen und Chain-Lane-Publisher-Drops. Keine zweite Canonical-State-Authority in C1/HOT0.
+
+### E7-3 — C1.9b-Unsynced-Override ist schon mainnet-fail-closed
+
+**Vollstaendiger Quellbeleg:** `bsc/geth/overlay/darkbot/fastlane/ingress.go::C19bUnsyncedAcceptTxsAllowed` ca. Z. 209–237. Unset ENV => `false,nil`; jedes andere Arm-Token ausser `YES` => **Fehler**; `YES` nur mit `DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet`, dann **nur mit `networkID==97`** => `true,nil`. Bei `networkID=56` ist dies stets `false,error` statt unsynced-Zulassung. `bsc/tools/c1_apply_geth_overlay.py::patch_c19b_testnet_accept_txs` ca. Z. 413–457 fuegt in `eth/handler.go` eine fruehe `if err != nil { return nil, fmt.Errorf(...) }`-Sperre vor `h.acceptTxs.Store(true)` ein. `ingress_test.go` prueft `mainnet_scope_with_arm_fails_closed` und `testnet_scope_on_wrong_network_fails_closed`.
+
+**Entscheidung:** Keine Produktion-Sicherheitsluecke aus Fables Nachfrage; E7-3 **WIDERLEGT ALS AKTUELLER DEFECT**. Die Mainnet-ID-56-Sperre darf **nicht** durch reine ENV-Scope-Abfrage oder Startup-Fallback entfallen. Tests und Original-Overlay-Check weiter verpflichtend. Kein neues Ticket zum Umschreiben eines bereits korrekten Guards.
+
+### E7-4 — Veraltete Pfadangabe im Go-/Rust-Interop
+
+**Quellen:** `bsc/engine/crates/geth_ipc/src/ingress.rs` ca. Z. 1816 und Z. 1899/1989 verweist in Kommentar bzw. `#[ignore]`-Testlabeln auf `bsc/native/tools/c14_ingress_interop.sh`. `bsc/geth/overlay/darkbot/fastlane/ingress_test.go` ca. Z. 938/952 wiederholt dies. Tatsaechlich versioniert: **`bsc/tools/c14_ingress_interop.sh`**. Das ist Doku-/Testlabel-Drift ohne behauptete Aenderung der eigentlichen Datenbits.
+
+**Fix:** ausschliesslich Kommentare und Test-`ignore/Skip`-Messages auf den realen Skriptpfad aktualisieren; keine Dateien umziehen, keine Wrapper-Duplikate, kein neues `bsc/native/tools`-Verzeichnis erfinden. Enger grep-/Test-Label-Check. Kein Wire-/Egress-Codepatch.
+
+### Erstes echtes Go↔Rust-Offset-Audit (gegenueber Fables nicht aufgeloestem 404)
+
+**Durchgefuehrt:** `bsc/geth/overlay/darkbot/fastlane/v2.go` Konstanten und `bsc/engine/crates/geth_ipc/src/protocol_v2/layout.rs` offsetweise gelesen und mit 50 namentlich gemappten Werten **automatisch verglichen**. Ergebnis: **50/50 exakt gleich, 0 Abweichungen**. Darin enthalten:
+- SuperHeader/Directory/LaneHeader/SlotHeader-Groessen (`256/128/384/256`);
+- alle **12** SuperHeader-Feld-Offsets (Magic, Version, Endian, HeaderSize, Generation, LaneCount, DirSize, LaneHeaderSize, SlotHeaderSize, Alignment, CRC-Kind, TotalBytes);
+- **8** Directory-Offsets (LaneID/Direction/Class/Flags/Capacity/SlotStride/LaneOffset/LaneBytes);
+- **14** Lane-Header-Offsets (write/read, dropped/oversize, producer/corrupt/drained, generation/epoch/state, finalWrite/shutdown, owner/quarantineReason);
+- **12** Slot-Header-Offsets (committed/kind/flags/payloadlen/timestamp/clock/source/peer/hash/aux/epoch/crc32c).
+
+**Wichtig:** Das ist ein **statischer Konstantenvergleich**, kein durchgefuehrter Live-Interop-Test, kein Proof der dynamischen Go-/Rust-Publisher-/Consumer-Reihenfolge, kein geth-Code-Hook-Qualifikations-PASS. `v2.go` verwendet `sync/atomic.Load/Store` (Go-sequentiell konsistente Atomics) im v2-Publish/Consume, Rust dagegen `Ordering::Relaxed` bei Empty-Clear, `Release` bei Publish und `Acquire` bei Consumer. Im regulaeren **SPSC mit Lease/ReadSequence-Eigentum** ist der unterschiedliche atomare Default nicht per se ein Layoutfehler; bei regelwidrig concurrent Plain-Byte-Overwrite bleibt die unter E6-3 dokumentierte Aliasing-/Race-Frage offen. **Keine** Garantie, dass ein seqlock-aehnlicher 2-Fence-Patch dieses Problem behebt.
+
+**Teil 2 bleibt sinnvoll:** Go/Rust-V2-Interop-Goldens (RecordKind, Epoch, Checksum-Byte-Domain, Direction/LaneClass, Alignment/Endian, Wire-Version, Role-Lease, Quarantine-Grund, CRC32C) und dynamische SPSC-Publish/Consume-/Lifecycle-/Backpressure-/Stress-/Cross-Process-Memory-Ordering-Pruefung anhand der jetzt identifizierten `v2.go`, `v2_test.go`, `ingress.go` und ihrer Rust-Gegenstücke. Tests unter realem gepinnten geth-Checkout, insbesondere C1.3/4/4a-Freeze-Scope und Go `-race` bzw. ARM64-bezogenen kontrollierten Lauf; solche Messungen wurden **noch nicht** gestartet.
+
+### Einordnung / naechster Phasenschritt
+
+**E7-1/E7-2** sind C1/C2-Coverage-/State-Provenienzauftraege, keine begruendete Abkuerzung zur G0.7-LIVE-Freigabe. **E7-3 ist bereits behoben/sicher** und darf nicht zur kuenstlichen Bugzahl addiert werden. **E7-4 ist eine kleine Doku-Korrektur.** E6-3 bleibt nach realem Go-Source-Einblick weiter in der Speichermodell-Pruefung. Die User-Frage nach Dateinamen ist aufgeloest, Fable kann Teil 2 ohne neue Terminal-Kommandos lesen.
+
+**Etappe 7 Status:** **TEIL 1 REVIEWED / TEIL 2 (komplette Go/Rust-Runtime-Interop) OPEN**. C1/C2 `PAUSED` bis G0.7/G0.8, G0.7 `UNARMED`. Kein Codefix implementiert, kein Test-PASS erfunden.
+
+
+## 9. Nachfolgende Etappen
 
 Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** aufgenommen, aber erst nach unabhaengigem Code-/Phasenplanabgleich. Bereits behandelte Behauptungen nicht doppelt als Bug anlegen. Auch nach erfolgreicher Umsetzung bleibt eine Etappe „FIXED / TESTED“ erst mit konkretem Commit und Tests/Evidence belegbar; sonst `OPEN`.
 
@@ -733,5 +807,5 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | 4 | Trading/Signer/RLP/Intent | **4a + 4b REVIEWED; E4-3/E4-4 OPEN; 4b future C2/C3 items parked** |
 | 5 | Execution/Submission/TLS | **REVIEWED / E5-2..E5-4 FIXES OPEN; E5-1 C2 GATE; E5-5/6 DEFERRED** |
 | 6 | geth_ipc Rust | **PARTIAL REVIEWED / E6-1/E6-2 C1/C2 INTEGRATION OPEN; E6-3 MEMORY PROOF OPEN** |
-| 7 | Go-geth Overlay/Rust-Paritaet | AWAITING INPUT |
+| 7 | Go-geth Overlay/Rust-Paritaet | **PART 1 REVIEWED / E7-1/E7-2 FUTURE C1/C2; E7-3 SAFE; E7-4 DOC; PART 2 OPEN** |
 | 8 | Journal/Records/Legacy | AWAITING INPUT |
