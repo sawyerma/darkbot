@@ -75,6 +75,23 @@ pub enum Unsupported {
 }
 
 impl Unsupported {
+    /// Q3: the name in the census line (`unsupported_<name>=n`) — explicit, never the derived
+    /// Debug layout; the names every census line so far carries.
+    pub const fn record_name(self) -> &'static str {
+        match self {
+            Unsupported::UnknownLayout => "UnknownLayout",
+            Unsupported::Unsupported => "Unsupported",
+            Unsupported::Stale => "Stale",
+            Unsupported::MissingAccount => "MissingAccount",
+            Unsupported::Crate => "Crate",
+            Unsupported::Unavailable => "Unavailable",
+            Unsupported::Premium => "Premium",
+            Unsupported::Facts => "Facts",
+            Unsupported::ValueRange => "ValueRange",
+            Unsupported::AccountLayout => "AccountLayout",
+        }
+    }
+
     pub fn of(e: &HealthError) -> Self {
         match e {
             HealthError::Unsupported(s) if s.contains("UNKNOWN_LAYOUT") => Self::UnknownLayout,
@@ -407,7 +424,7 @@ impl std::fmt::Display for Census {
             write!(f, " unhealthy_oracle_setup_{setup}={n}")?;
         }
         for (r, n) in &self.unsupported {
-            write!(f, " unsupported_{r:?}={n}")?;
+            write!(f, " unsupported_{}={n}", r.record_name())?;
         }
         Ok(())
     }

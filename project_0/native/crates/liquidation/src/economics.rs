@@ -170,6 +170,18 @@ pub enum Path {
     JitoBundle,
 }
 
+impl Path {
+    /// Q3: the persisted name (`CandidateCostRecord::path`) — explicit, never the derived Debug
+    /// layout; the values every journal so far carries.
+    pub const fn record_name(self) -> &'static str {
+        match self {
+            Path::Rpc => "Rpc",
+            Path::JitoSingle => "JitoSingle",
+            Path::JitoBundle => "JitoBundle",
+        }
+    }
+}
+
 /// Pfadabhängige Kosten eines **fehlgeschlagenen** Versuchs (Ledger §4).
 /// Monetary unit: USD-micro, after explicit conversion; never raw lamports.
 /// `None` = ungemessen. Ein Kandidat mit `None` in seiner Pfadzelle ist nicht bewertbar.

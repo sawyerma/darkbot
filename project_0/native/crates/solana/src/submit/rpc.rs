@@ -515,7 +515,7 @@ pub fn reconcile(
         status
             .confirmation_status
             .as_ref()
-            .map(|c| format!("{:?}", c)),
+            .map(|c| super::confirmation_status_name(c).to_string()),
         finalized,
         status.err.as_ref().map(|e| format!("{:?}", e)),
         meta,

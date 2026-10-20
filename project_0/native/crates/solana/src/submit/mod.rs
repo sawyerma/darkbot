@@ -80,6 +80,35 @@ pub enum SimResult {
     BudgetRejected(&'static str),
 }
 
+impl SimResult {
+    /// Q3: the persisted `simulation_result` — written explicitly, never through the derived
+    /// Debug layout of this enum. The values are those every journal so far carries: `PASS`;
+    /// `Failed("<code>")`, `Unavailable("<reason>")`, `BudgetRejected("<code>")` with the text
+    /// quoted as a Rust string literal; `Deadline`.
+    pub fn record_text(&self) -> String {
+        match self {
+            SimResult::Ok { .. } => "PASS".into(),
+            SimResult::Failed(f) => format!("Failed({:?})", f.code),
+            SimResult::Unavailable(reason) => format!("Unavailable({reason:?})"),
+            SimResult::Deadline => "Deadline".into(),
+            SimResult::BudgetRejected(code) => format!("BudgetRejected({code:?})"),
+        }
+    }
+}
+
+/// Q3: the persisted confirmation status of a landing (`Processed`/`Confirmed`/`Finalized`) —
+/// explicit, never the SDK type's Debug layout.
+pub fn confirmation_status_name(
+    status: &solana_transaction_status::TransactionConfirmationStatus,
+) -> &'static str {
+    use solana_transaction_status::TransactionConfirmationStatus as S;
+    match status {
+        S::Processed => "Processed",
+        S::Confirmed => "Confirmed",
+        S::Finalized => "Finalized",
+    }
+}
+
 /// N2: why there is no fee quote — a timeout or a refused call never looks like "no quote".
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FeeQuoteError {

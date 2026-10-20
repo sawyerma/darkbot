@@ -47,6 +47,18 @@ pub enum BuildVersion {
     V1,
 }
 
+impl BuildVersion {
+    /// Q3: the persisted name (`OpportunityRecord::tx_version`) — explicit, never the derived
+    /// Debug layout; the values every journal so far carries.
+    pub const fn record_name(self) -> &'static str {
+        match self {
+            BuildVersion::Legacy => "Legacy",
+            BuildVersion::V0 => "V0",
+            BuildVersion::V1 => "V1",
+        }
+    }
+}
+
 /// Ressourcen-Anforderung — versionsneutral formuliert; der Builder übersetzt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Resources {

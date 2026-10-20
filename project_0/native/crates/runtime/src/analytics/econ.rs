@@ -2,7 +2,7 @@
 //! Arrival-time hourly snapshots are provisional; final drain atomically reconciles them.
 use crate::analytics::journal::{self, kind, Provenance};
 use crate::analytics::measurement::{MeasurementPlan, SNAPSHOT_COUNT};
-use crate::analytics::record::{CandidateCostRecord, Decision, OpportunityRecord};
+use crate::analytics::record::{CandidateCostRecord, Decision, LossReason, OpportunityRecord};
 use crate::market::winner::{Winner, WinnerIdentity};
 use crate::market_observer::{utc_compact, MarketConfig, ReceiverEvent};
 use darkbot_common::channel::{bounded, Consumer, Producer};
@@ -679,7 +679,7 @@ fn bottleneck(rec: &OpportunityRecord) -> String {
         "Simulation".into()
     } else {
         rec.loss
-            .map(|l| format!("{l:?}"))
+            .map(|l| l.record_name().into())
             .unwrap_or_else(|| "Unknown".into())
     }
 }
@@ -1281,38 +1281,20 @@ impl Worker {
         let mut stage_late: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
         let mut stage_weighted: BTreeMap<&str, f64> = BTreeMap::new();
         let mut stage_sufficient: BTreeMap<&str, EdgeCount> = BTreeMap::new();
-        // N1: every LossReason (Debug name) is pre-seeded, so each appears, with 0 if unseen.
-        let mut bottlenecks: BTreeMap<String, Bottleneck> = [
-            "Ingress",
-            "State",
-            "StateRace",
-            "Health",
-            "CircuitBreaker",
-            "Bankruptcy",
-            "IntegrationRefresh",
-            "Funding",
-            "MissingAta",
-            "UnsupportedIntegration",
-            "Sizing",
-            "Economics",
-            "Routing",
-            "Build",
-            "Submission",
-            "Tip",
-            "RpcBudget",
-            "RpcDeadline",
-            "Simulation",
-            "EconomicSkip",
-            "ThresholdTooHigh",
-            "RaceLate",
-            "RaceSameSlotUnknown",
-            "RaceUnresolved",
-            "Capital",
-            "Unknown",
-        ]
-        .into_iter()
-        .map(|s| (s.into(), Bottleneck::default()))
-        .collect();
+        // N1/Q3: every LossReason (record name) and every other bottleneck is pre-seeded, so each
+        // appears, with 0 if unseen.
+        let mut bottlenecks: BTreeMap<String, Bottleneck> = LossReason::ALL
+            .map(LossReason::record_name)
+            .into_iter()
+            .chain([
+                "Simulation",
+                "RaceLate",
+                "RaceSameSlotUnknown",
+                "RaceUnresolved",
+                "Capital",
+            ])
+            .map(|s| (s.into(), Bottleneck::default()))
+            .collect();
         let mut capital: Vec<Capital> = self
             .h
             .cfg

@@ -910,7 +910,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
         rec.serialized_bytes = Some(built.serialized_len);
         rec.locked_accounts = Some(built.locked_accounts);
-        rec.tx_version = Some(format!("{:?}", built.version));
+        rec.tx_version = Some(built.version.record_name().into());
         tl.mark(Stage::Ready, self.clock.now_ns());
 
         if let Err(e) = tx::sign(&mut built, &[self.payer]) {
@@ -1045,12 +1045,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 return rec.with_timeline(&tl);
             }
             other => {
-                rec.simulation_result = Some(format!("{:?}", other));
+                rec.simulation_result = Some(other.record_text());
                 if let SimResult::Failed(f) = &other {
                     self.simulation_failure = Some(f.clone());
                 }
                 rec.loss = Some(LossReason::Build);
-                rec.reason = Some(format!("simulation not ok: {:?}", other));
+                rec.reason = Some(format!("simulation not ok: {}", other.record_text()));
                 rec.decision = if self.mode == Mode::Shadow {
                     if rec.economics_known {
                         Decision::ShadowSimFailed

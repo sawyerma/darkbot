@@ -149,7 +149,7 @@ impl ShadowLedger {
                 self.day.expected_net_wins_count += 1;
             }
         } else if let Some(l) = loss {
-            *self.day.losses.entry(format!("{:?}", l)).or_insert(0) += 1;
+            *self.day.losses.entry(l.record_name().into()).or_insert(0) += 1;
         }
     }
 
