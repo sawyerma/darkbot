@@ -11,7 +11,8 @@ test.describe("F7-OVR overview", () => {
       await expect(card.locator("dt")).toHaveText(METRICS);
       await expect(page.getByTestId(`project-process-${key}`)).toHaveText("Process · UNKNOWN");
       await expect(page.getByTestId(`project-startstop-${key}`)).toBeDisabled();
-      await expect(page.getByTestId(`project-logs-${key}`)).toBeDisabled();
+      if (key === "solana") await expect(page.getByTestId(`project-logs-${key}`)).toBeDisabled();
+    else await expect(page.getByTestId(`project-logs-${key}`)).toBeEnabled();
       await expect(card.locator("a button, button button, button a")).toHaveCount(0);
     }
     await page.getByTestId("project-link-project0").click();
@@ -26,7 +27,7 @@ test.describe("F7-OVR overview", () => {
     await expect(sys.locator("h3")).toHaveText("System & Control Plane");
     await expect(fin.locator("h3")).toHaveText("Global Finance Aggregate");
     await expect(page.getByTestId("overview-stop-all")).toBeDisabled();
-    await expect(page.getByTestId("overview-show-all-logs")).toBeDisabled();
+    await expect(page.getByTestId("overview-show-all-logs")).toBeEnabled();
     await expect(page.getByText(/Start Selected|Data Age|Valuation/)).toHaveCount(0);
     const a = await sys.boundingBox();
     const b = await fin.boundingBox();

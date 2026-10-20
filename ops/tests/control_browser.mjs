@@ -25,7 +25,7 @@ try{
  await until(async()=>await p.getByTestId('project-process-project0').innerText().then(x=>x.includes('STOPPED')),'initial stopped');
  for(const project of ['bsc','solana']){
   assert.equal(await p.getByTestId(`project-startstop-${project}`).isDisabled(),true);
-  assert.equal(await p.getByTestId(`project-logs-${project}`).isDisabled(),true);
+  assert.equal(await p.getByTestId(`project-logs-${project}`).isDisabled(),project==='solana');
  }
  const boot=await api.get(base+'/api/v1/session');const csrf=boot.headers()['x-csrf-token'];assert(csrf);
  const id=crypto.randomUUID();const data=Buffer.from(encode(id,'project0.capture.start'));
@@ -55,7 +55,7 @@ try{
  await p.screenshot({path:`${dir}/project0-logs.png`,fullPage:true});
  await p.getByRole('button',{name:'Close logs',exact:true}).click();
  await p.getByTestId('overview-show-all-logs').click();
- await p.getByRole('heading',{name:'Gateway',exact:true}).waitFor();
+ await p.getByRole('heading',{name:'gateway',exact:true}).waitFor();
  await p.getByRole('button',{name:'Close logs',exact:true}).click();
  // Kill only this fixture's capture to verify FAILED is real supervisor state.
  const testLabel=`com.darkbot.test.${dir.split('.').at(-1)}.capture`;
@@ -66,9 +66,13 @@ try{
  await p.getByTestId('project-startstop-project0').click();
  await until(async()=> (await p.getByTestId('project-startstop-project0').innerText())==='Stop','restart after failure');
  // The individual Stop button seals the journal and preserves gateway availability.
- p.on('dialog',d=>d.accept());
+ p.on('dialog',d=>{ errors.push(`Unexpected native dialog: ${d.type()}`);void d.dismiss(); });
  const singleRun=(await getProcess()).run_id;
  await p.getByTestId('project-startstop-project0').click();
+ await p.getByRole('alertdialog').getByRole('button',{name:'Abbrechen',exact:true}).click();
+ assert.equal((await getProcess()).state,'RUNNING');
+ await p.getByTestId('project-startstop-project0').click();
+ await p.getByRole('alertdialog').getByRole('button',{name:'Capture stoppen',exact:true}).click();
  await until(async()=> (await getProcess()).state==='STOPPED','individual stop');
  assert(readFileSync(`${dir}/app/data/market/app-${singleRun}/market_completion.p0j`).length>0);
  await until(async()=> (await p.getByTestId('capture-command-receipt').innerText()).includes('COMPLETED'),'individual receipt');
@@ -79,6 +83,7 @@ try{
  const stopTarget=(await getProcess()).run_id;
  // Stop All is deliberately scoped to P0; gateway remains reachable throughout drain.
  await p.getByTestId('overview-stop-all').click();
+ await p.getByRole('alertdialog').getByRole('button',{name:'Aufzeichnungen stoppen',exact:true}).click();
  let sawStopping=false;
  await until(async()=>{const s=await getProcess();sawStopping ||= s.state==='STOPPING';return s.state==='STOPPED';},'UI stop all');
  assert.equal((await api.get(base+'/healthz')).status(),200);

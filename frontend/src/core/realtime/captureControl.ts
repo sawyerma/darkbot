@@ -80,7 +80,7 @@ export async function captureCommand(action: CaptureAction): Promise<void> {
   await refreshProcess();
 }
 export interface LogPart { source: string; text: string }
-export async function captureLogs(source: "project0" | "all"): Promise<LogPart[]> {
+export async function captureLogs(source: "project0" | "bsc" | "all"): Promise<LogPart[]> {
   await bootstrap();
   const r = await fetch(`/api/v1/logs?source=${source}`, { ...options, signal: AbortSignal.timeout(5000) });
   if (!r.ok) throw new Error(`Logs HTTP ${r.status}`);

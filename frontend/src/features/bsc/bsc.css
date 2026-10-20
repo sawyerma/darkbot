@@ -1,0 +1,3 @@
+.bsc-state[data-tone="green"] { background: var(--g-status-running); color: var(--g-text-strong); }
+.bsc-state[data-tone="red"] { background: var(--g-status-failed); color: var(--g-text-strong); }
+.bsc-state[data-tone="amber"] { background: var(--g-status-armed); color: var(--g-text-strong); }

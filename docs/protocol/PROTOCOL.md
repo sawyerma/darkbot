@@ -3,6 +3,21 @@
 
 ## Table of Contents
 
+- [darkbot/bsc/v1/status.proto](#darkbot_bsc_v1_status-proto)
+    - [BscLaunchState](#darkbot-bsc-v1-BscLaunchState)
+    - [BscMonitoringState](#darkbot-bsc-v1-BscMonitoringState)
+    - [BscStatus](#darkbot-bsc-v1-BscStatus)
+    - [BscWalletsState](#darkbot-bsc-v1-BscWalletsState)
+    - [BuilderStatus](#darkbot-bsc-v1-BuilderStatus)
+    - [DryStatus](#darkbot-bsc-v1-DryStatus)
+    - [Evidence](#darkbot-bsc-v1-Evidence)
+    - [GateStatus](#darkbot-bsc-v1-GateStatus)
+    - [GuardStatus](#darkbot-bsc-v1-GuardStatus)
+    - [JobStatus](#darkbot-bsc-v1-JobStatus)
+    - [PublicField](#darkbot-bsc-v1-PublicField)
+    - [ReadinessStatus](#darkbot-bsc-v1-ReadinessStatus)
+    - [WitnessStatus](#darkbot-bsc-v1-WitnessStatus)
+
 - [darkbot/control/v1/topics.proto](#darkbot_control_v1_topics-proto)
     - [TopicDescriptor](#darkbot-control-v1-TopicDescriptor)
 
@@ -93,6 +108,288 @@
     - [SystemStatus](#darkbot-project0-v1-SystemStatus)
 
 - [Scalar Value Types](#scalar-value-types)
+
+
+
+<a name="darkbot_bsc_v1_status-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/status.proto
+
+
+
+<a name="darkbot-bsc-v1-BscLaunchState"></a>
+
+### BscLaunchState
+Bound launch plan, without signatures, raw transactions or execution authority.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| contract_present | [bool](#bool) |  | True only if the current v4 contract is present and valid. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Contract identity. |
+| contract_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Public contract values, exact integer caps and binding hashes. |
+| runtime_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Observed runtime context; absent until such evidence actually exists. |
+| reason | [string](#string) |  | Missing/invalid contract explanation. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscMonitoringState"></a>
+
+### BscMonitoringState
+Read-only G0.8 results; submission acknowledgement is not acquisition.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| state | [string](#string) |  | NOT_EXECUTED, PASS, FAIL or UNKNOWN. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | G0.8 result identity. |
+| results | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Explicit public receipt, ordering, acquisition and cost fields. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscStatus"></a>
+
+### BscStatus
+Read-only BSC evidence projection.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_commit | [string](#string) |  | Source revision deployed with this reporter. |
+| evaluated_unix_s | [uint64](#uint64) |  | Projection evaluation time, not qualification freshness. |
+| live_state | [string](#string) |  | BLOCKED: the GUI never enables trading. |
+| guard | [GuardStatus](#darkbot-bsc-v1-GuardStatus) |  | Compiled guard and current contract observation. |
+| gates | [GateStatus](#darkbot-bsc-v1-GateStatus) | repeated | Separate qualification gates. |
+| readiness | [ReadinessStatus](#darkbot-bsc-v1-ReadinessStatus) |  | Latest native readiness evidence. |
+| builder | [BuilderStatus](#darkbot-bsc-v1-BuilderStatus) |  | Builder observations. |
+| witness | [WitnessStatus](#darkbot-bsc-v1-WitnessStatus) |  | Producer witness status. |
+| dry | [DryStatus](#darkbot-bsc-v1-DryStatus) |  | Historical DRY status and exact values. |
+| jobs | [JobStatus](#darkbot-bsc-v1-JobStatus) | repeated | Read-only jobs observed by launchd. |
+| warnings | [string](#string) | repeated | Missing or invalid data is made explicit. |
+| data_as_of_unix_s | [uint64](#uint64) |  | Time of the explicit source snapshot sync, never evidence freshness. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscWalletsState"></a>
+
+### BscWalletsState
+Public wallet identity and timestamped evidence balances, never keys.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| expected_address | [string](#string) |  | Optional configured public identity. |
+| wallet_status | [string](#string) |  | Public wallet configuration state. |
+| launcher_address | [string](#string) |  | Launcher address from bound evidence. |
+| buyer_address | [string](#string) |  | Buyer address from bound evidence. |
+| chain_id | [uint64](#uint64) | optional | Chain identity when recorded. |
+| launcher_balance_wei | [string](#string) | optional | Exact balance snapshot; absent if unknown. |
+| buyer_balance_wei | [string](#string) | optional | Exact balance snapshot; absent if unknown. |
+| observed_block | [uint64](#uint64) | optional | Block of the balance snapshot. |
+| observed_unix_s | [uint64](#uint64) |  | Time of the balance snapshot, not reporter time. |
+| source | [string](#string) |  | READINESS_SNAPSHOT or HISTORICAL_PREFLIGHT; no implicit live RPC. |
+| required_launcher_wei | [string](#string) | optional | Exact launcher funding requirement when recorded. |
+| required_buyer_wei | [string](#string) | optional | Exact buyer funding requirement when recorded. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Evidence identity makes snapshot age and provenance reviewable. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BuilderStatus"></a>
+
+### BuilderStatus
+Builder documentation and empirical qualification are separate observations.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| refresh_observed_unix_s | [uint64](#uint64) |  | Actual fetch time recorded in evidence. |
+| refresh_expires_unix_s | [uint64](#uint64) |  | Refresh expires after 24 hours; zero means unknown. |
+| floors | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Explicit documented floors in exact decimal wei. |
+| probe | [Evidence](#darkbot-bsc-v1-Evidence) |  | Probe evidence identity. |
+| price | [string](#string) |  | QUALIFIED or UNQUALIFIED; a response alone does not qualify price. |
+| no_merge | [string](#string) |  | Empirical qualification of noMerge effects. |
+| position_first | [string](#string) |  | Empirical qualification of positionFirst effects. |
+| inclusion | [string](#string) |  | Empirical qualification of actual inclusion. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-DryStatus"></a>
+
+### DryStatus
+Historical DRY parameters; reporting never runs signing or simulation.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Native DRY evidence identity. |
+| dry_id | [string](#string) |  | Evidence run identity. |
+| state | [string](#string) |  | PASS, FAIL or UNKNOWN. |
+| parameters | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Exact public parameters and results from the record. |
+| valid_for_current_portal | [bool](#bool) | optional | Absent without a qualified current deployment comparison. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-Evidence"></a>
+
+### Evidence
+Source identity of immutable evidence. Missing evidence is not a pass.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| path | [string](#string) |  | Path relative to the staged BSC source root. |
+| sha256 | [string](#string) |  | SHA-256 of the exact original bytes. |
+| observed_unix_s | [uint64](#uint64) |  | Time recorded by the producer, not file mtime. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-GateStatus"></a>
+
+### GateStatus
+Qualification status derived from identified evidence.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| gate_id | [string](#string) |  | G0.6a, G0.7, G0.8, C1.9 or C1.10. |
+| state | [string](#string) |  | PASS, FAIL, STOP, PARTIAL, NOT_EXECUTED or UNKNOWN. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Original evidence identity. |
+| reason_codes | [string](#string) | repeated | Reasons explaining this observation. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-GuardStatus"></a>
+
+### GuardStatus
+Public guard observation. This message cannot authorize execution.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| frozen_approved_sha256 | [string](#string) |  | Compiled authority hash or UNARMED. |
+| guard_state | [string](#string) |  | UNARMED, ARMED, ARMED_MISMATCH or UNKNOWN. |
+| contract_path | [string](#string) |  | Only the current v4 contract path is authoritative. |
+| contract_present | [bool](#bool) |  | Whether the current contract exists. |
+| contract_sha256 | [string](#string) |  | Hash of the current contract bytes, if present. |
+| approved | [bool](#bool) | optional | Absent if no valid contract can be inspected. |
+| execution_ready | [bool](#bool) | optional | Absent if no valid contract can be inspected. |
+| attempt_id | [string](#string) |  | Bound attempt identity. |
+| max_attempts | [uint64](#uint64) | optional | Bound attempt maximum. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-JobStatus"></a>
+
+### JobStatus
+Supervisor-owned read-only job lifecycle.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| job | [string](#string) |  | Only readiness is currently controllable. |
+| state | [string](#string) |  | RUNNING, STOPPED, STARTING, STOPPING, FAILED or UNKNOWN. |
+| launch_id | [string](#string) |  | Unique launch identity; never reused across runs. |
+| started_unix_s | [uint64](#uint64) |  | Start time recorded by the controller. |
+| ended_unix_s | [uint64](#uint64) |  | Completion time recorded by the controller. |
+| result_code | [string](#string) |  | Result associated with this launch, not an earlier one. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-PublicField"></a>
+
+### PublicField
+An explicitly selected public bound value, never a signed transaction or secret.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | Stable name from the native evidence schema. |
+| value | [string](#string) |  | Exact text; monetary integers use decimal wei, never floating point. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-ReadinessStatus"></a>
+
+### ReadinessStatus
+Native read-only readiness result and its original timestamp.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| verdict | [string](#string) |  | PASS_READ_ONLY, STOP, NOT_RUN or UNKNOWN; never LIVE authority. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Source evidence, possibly historical. |
+| funding_verdict | [string](#string) |  | Funding result, if reported. |
+| checks | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Individual native checks and their public details. |
+| portal_version_bound | [string](#string) |  | Bound portal version. |
+| portal_version_observed | [string](#string) |  | Observed portal version. |
+| portal_impl_bound | [string](#string) |  | Bound implementation address. |
+| portal_impl_observed | [string](#string) |  | Observed implementation address. |
+| code_hash_changed | [bool](#bool) | optional | Absent when no comparison was performed. |
+| head_block | [uint64](#uint64) | optional | Block for the readiness observation, when recorded. |
+| reasons | [string](#string) | repeated | Reported reasons for blocking. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WitnessStatus"></a>
+
+### WitnessStatus
+Original producer witness availability, not inferred timing.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_ready | [bool](#bool) | optional | Absent when the witness contract cannot be read. |
+| t0_to_buy_state | [string](#string) |  | UNKNOWN until original execution witnesses prove timing. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Witness contract identity. |
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

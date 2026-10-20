@@ -160,7 +160,37 @@ pub fn spawn_publisher(
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             seq += 1;
-            let msg = build(&registry);
+            let mut msg = build(&registry);
+            if let Some(p) = msg.projects.iter_mut().find(|p| {
+                p.project == ProjectId::Bsc as i32 && p.source == WireSourceState::Connected as i32
+            }) {
+                if let Some(frame) = hub
+                    .current(TopicId::BscStatus)
+                    .filter(|s| s.quality == crate::proto::StateQuality::Ok)
+                {
+                    if let Ok(status) =
+                        crate::proto::bsc::v1::BscStatus::decode(frame.payload.clone())
+                    {
+                        p.live_authorized = Some(false);
+                        p.warnings = status.warnings;
+                        if let Some(r) = status.readiness {
+                            p.warnings.insert(0, format!("Pre-Live: {}", r.verdict));
+                        }
+                        p.active_jobs = if status.jobs.iter().any(|j| j.state == "UNKNOWN") {
+                            None
+                        } else {
+                            Some(
+                                status
+                                    .jobs
+                                    .iter()
+                                    .filter(|j| ["RUNNING", "STOPPING"].contains(&j.state.as_str()))
+                                    .count() as u32,
+                            )
+                        };
+                        p.source_timestamp_unix_ns = frame.source_timestamp_unix_ns;
+                    }
+                }
+            }
             let payload = Bytes::from(msg.encode_to_vec());
             if let Err(e) = hub.publish(StateUpdate {
                 topic: TopicId::OverviewAggregates,

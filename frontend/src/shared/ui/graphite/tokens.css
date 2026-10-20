@@ -17,6 +17,7 @@
   /* Explicit lifecycle badge fills; white text remains readable. */
   --g-status-running: #15803d;
   --g-status-failed: #b91c1c;
+  --g-status-armed: #a16207;
 
   /* Linien */
   --g-line: #464646;

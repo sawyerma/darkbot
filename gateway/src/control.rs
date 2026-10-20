@@ -29,6 +29,12 @@ use tokio::{process::Command, sync::Mutex};
 
 const START: &str = "project0.capture.start";
 const STOP: &str = "project0.capture.stop";
+const BSC_START: &str = "bsc.readiness.start";
+const BSC_STOP: &str = "bsc.readiness.stop";
+fn allowed(project: i32, action: &str) -> bool {
+    (project == ProjectId::Project0 as i32 && [START, STOP].contains(&action))
+        || (project == ProjectId::Bsc as i32 && [BSC_START, BSC_STOP].contains(&action))
+}
 const MAX_RECORDS: usize = 1024;
 
 #[derive(Clone)]
@@ -164,6 +170,89 @@ impl Control {
         snapshot.observed_unix_ms = now_ms();
         snapshot
     }
+    pub async fn observe_project(&self, project: i32) -> ProcessSnapshot {
+        if project != ProjectId::Bsc as i32 {
+            return self.observe().await;
+        }
+        let mut s = ProcessSnapshot {
+            state: "UNKNOWN".into(),
+            run_id: String::new(),
+            pid: None,
+            reason: "BSC controller unavailable".into(),
+            observed_unix_ms: now_ms(),
+            controller_available: false,
+        };
+        let Some(p) = &self.paths else {
+            return s;
+        };
+        let label = p
+            .label
+            .strip_suffix(".capture")
+            .map(|x| format!("{x}.bsc.readiness"))
+            .unwrap_or_default();
+        if label.is_empty() {
+            return s;
+        }
+        s.controller_available = p.ctl.parent().is_some_and(|d| {
+            d.join("g07_pre_live_readiness").is_file()
+                && d.join("bsc-root/SNAPSHOT_SHA256").is_file()
+        });
+        let launch = text_file(&p.rundir.join("bsc.readiness.launch"));
+        s.run_id = kv(&launch, "launch_id");
+        let result = text_file(&p.rundir.join("bsc.readiness.result"));
+        let matched = !s.run_id.is_empty() && kv(&result, "launch_id") == s.run_id;
+        let completed = matched
+            && ["STOP", "PASS_READ_ONLY", "STOPPED"].contains(&kv(&result, "result_code").as_str());
+        let stopping = !s.run_id.is_empty()
+            && kv(
+                &text_file(&p.rundir.join("bsc.readiness.stopping")),
+                "launch_id",
+            ) == s.run_id;
+        let out = tokio::time::timeout(
+            Duration::from_secs(2),
+            Command::new("/bin/launchctl")
+                .args(["list", &label])
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await;
+        if let Ok(Ok(out)) = out {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                s.pid = field(&text, "PID").filter(|v| *v > 0).map(|v| v as u32);
+                s.state = if s.pid.is_some() {
+                    if stopping {
+                        "STOPPING"
+                    } else {
+                        "RUNNING"
+                    }
+                } else if completed {
+                    "STOPPED"
+                } else if field(&text, "LastExitStatus").is_some() || matched {
+                    "FAILED"
+                } else {
+                    "UNKNOWN"
+                }
+                .into();
+            } else if String::from_utf8_lossy(&out.stderr).contains("Could not find") {
+                s.state = if s.run_id.is_empty() || completed {
+                    "STOPPED"
+                } else {
+                    "FAILED"
+                }
+                .into();
+            }
+            s.reason = format!(
+                "launchd: {label}; result {}",
+                if matched {
+                    kv(&result, "result_code")
+                } else {
+                    String::new()
+                }
+            );
+        }
+        s
+    }
     fn record_path(&self, id: &str) -> Option<PathBuf> {
         self.paths
             .as_ref()
@@ -224,17 +313,21 @@ impl Control {
                 "request_id must be a UUID",
             );
         }
-        if req.project != ProjectId::Project0 as i32
-            || ![START, STOP].contains(&req.action.as_str())
-        {
+        if !allowed(req.project, &req.action) {
             return reply(
                 id,
                 CommandStatus::NotImplemented,
                 CommandRejectReason::Forbidden,
-                "Only Project 0 read-only capture start/stop is available",
+                "Only managed Project 0 capture and BSC read-only readiness start/stop are available",
             );
         }
-        if !req.resource_id.is_empty() || req.expected.is_some() || !req.params.is_empty() {
+        if (req.project != ProjectId::Bsc as i32 && !req.resource_id.is_empty())
+            || (req.project == ProjectId::Bsc as i32
+                && !req.resource_id.is_empty()
+                && !valid_id(&req.resource_id))
+            || req.expected.is_some()
+            || !req.params.is_empty()
+        {
             return reply(
                 id,
                 CommandStatus::Rejected,
@@ -280,8 +373,18 @@ impl Control {
             }
             _ => {}
         }
-        let before = self.observe().await;
-        if before.state == "UNKNOWN" || (req.action == START && before.state == "STOPPING") {
+        let before = self.observe_project(req.project).await;
+        if req.project == ProjectId::Bsc as i32 && req.resource_id != before.run_id {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::VersionConflict,
+                "Readiness launch changed; refresh process state",
+            );
+        }
+        if before.state == "UNKNOWN"
+            || ([START, BSC_START].contains(&req.action.as_str()) && before.state == "STOPPING")
+        {
             return reply(
                 id,
                 CommandStatus::Rejected,
@@ -311,7 +414,11 @@ impl Control {
                 "Cannot durably record command (ledger full or unavailable)",
             );
         }
-        let args = if req.action == START {
+        let args = if req.action == BSC_START {
+            vec!["bsc", "readiness", "start", &req.resource_id]
+        } else if req.action == BSC_STOP {
+            vec!["bsc", "readiness", "stop", &req.resource_id]
+        } else if req.action == START {
             vec!["capture", "start-configured"]
         } else {
             vec!["capture", "stop", "--signal-only"]
@@ -326,18 +433,22 @@ impl Control {
                 .output(),
         )
         .await;
-        let after = self.observe().await;
+        let after = self.observe_project(req.project).await;
         match output {
             Ok(Ok(out)) if out.status.success() => {
-                if req.action == START {
+                if [START, BSC_START].contains(&req.action.as_str()) {
                     record.launch_id = after.run_id;
-                    record.phase = if after.state == "RUNNING" {
+                    record.phase = if after.state == "RUNNING"
+                        || (req.action == BSC_START && after.state == "STOPPED")
+                    {
                         CommandPhase::Completed
                     } else {
                         CommandPhase::Failed
                     } as i32;
-                    record.detail = if after.state == "RUNNING" {
-                        "Capture running"
+                    record.detail = if after.state == "RUNNING"
+                        || (req.action == BSC_START && after.state == "STOPPED")
+                    {
+                        "Managed process started (a short read-only job may already be complete)"
                     } else {
                         "Capture did not reach RUNNING; inspect logs"
                     }
@@ -371,7 +482,7 @@ impl Control {
         tracing::info!(request_id=%id, action=%req.action, phase=record.phase, "capture command");
         accepted
     }
-    async fn lookup(&self, id: &str) -> CommandLookupResponse {
+    async fn lookup(&self, id: &str, project: i32) -> CommandLookupResponse {
         let _guard = self.serial.lock().await;
         let Some(mut record) = self.load(id).ok().flatten() else {
             return CommandLookupResponse {
@@ -381,8 +492,17 @@ impl Control {
                 detail: "No recorded command".into(),
             };
         };
+        let request = CommandRequest::decode(record.request.as_slice()).ok();
+        if request.as_ref().map(|r| r.project) != Some(project) {
+            return CommandLookupResponse {
+                found: false,
+                command_id: String::new(),
+                phase: CommandPhase::Unknown as i32,
+                detail: "No recorded command for project".into(),
+            };
+        }
         if record.phase == CommandPhase::Pending as i32 {
-            let state = self.observe().await;
+            let state = self.observe_project(project).await;
             if state.run_id != record.launch_id {
                 record.phase = CommandPhase::Completed as i32;
                 record.detail = "Target launch replaced; no signal sent to replacement".into();
@@ -488,10 +608,12 @@ pub async fn lookup(
     if let Err(s) = authorized(&app, &h, false) {
         return s.into_response();
     }
-    if q.project != ProjectId::Project0 as i32 || !valid_id(&q.request_id) {
+    if ![ProjectId::Project0 as i32, ProjectId::Bsc as i32].contains(&q.project)
+        || !valid_id(&q.request_id)
+    {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    protobuf(app.control.lookup(&q.request_id).await)
+    protobuf(app.control.lookup(&q.request_id, q.project).await)
 }
 pub async fn process(State(app): State<Arc<AppState>>, h: HeaderMap) -> Response {
     if let Err(s) = authorized(&app, &h, false) {
@@ -502,6 +624,21 @@ pub async fn process(State(app): State<Arc<AppState>>, h: HeaderMap) -> Response
         Json(app.control.observe().await),
     )
         .into_response()
+}
+pub async fn bsc_process(State(app): State<Arc<AppState>>, h: HeaderMap) -> Response {
+    if let Err(s) = authorized(&app, &h, false) {
+        return s.into_response();
+    }
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(app.control.observe_project(ProjectId::Bsc as i32).await),
+    )
+        .into_response()
+}
+fn kv(text: &str, key: &str) -> String {
+    text.lines()
+        .find_map(|l| l.strip_prefix(&format!("{key}=")).map(str::to_owned))
+        .unwrap_or_default()
 }
 #[derive(Deserialize)]
 pub struct LogQuery {
@@ -576,10 +713,16 @@ pub async fn logs(
     }
     let names = match q.source.as_str() {
         "project0" => vec![("project0", "capture-latest.log")],
+        "bsc" => vec![
+            ("bsc-readiness", "bsc-readiness-latest.log"),
+            ("bsc-reporter", "bsc-reporter.log"),
+        ],
         "gateway" => vec![("gateway", "gateway.log")],
         "all" => vec![
             ("project0", "capture-latest.log"),
             ("gateway", "gateway.log"),
+            ("bsc-readiness", "bsc-readiness-latest.log"),
+            ("bsc-reporter", "bsc-reporter.log"),
         ],
         _ => return StatusCode::BAD_REQUEST.into_response(),
     };
@@ -610,6 +753,26 @@ pub async fn logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bsc_commands_are_strictly_read_only() {
+        for action in [
+            "g07",
+            "arm",
+            "probe",
+            "send",
+            "bsc.g07",
+            "bsc.arm",
+            "bsc.probe",
+            "bsc.send",
+            "bsc.dry.start",
+            START,
+        ] {
+            assert!(!allowed(ProjectId::Bsc as i32, action));
+        }
+        assert!(allowed(ProjectId::Bsc as i32, BSC_START));
+        assert!(allowed(ProjectId::Bsc as i32, BSC_STOP));
+        assert!(!allowed(ProjectId::Solana as i32, BSC_START));
+    }
     #[test]
     fn rejects_path_ids_and_redacts_provider_credentials() {
         assert!(valid_id("12345678-1234-1234-1234-123456789abc"));

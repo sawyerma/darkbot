@@ -1,0 +1,11 @@
+.ov-confirm-view { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 101; box-sizing: border-box; width: min(480px, calc(100% - 32px)); max-height: 85vh; overflow: auto; padding: 24px; border: 1px solid var(--g-line-secondary); border-radius: var(--g-r-panel); background: var(--g-panel); color: var(--g-text); box-shadow: var(--g-shadow-panel); font: var(--g-fs-body)/var(--g-lh-base) var(--g-font); }
+.ov-confirm-context { margin: 0 0 var(--g-gap-md); color: var(--g-muted); font-size: var(--g-fs-small); }
+.ov-confirm-view h2 { margin: 0 0 var(--g-gap-md); font-size: var(--g-fs-h1); }
+.ov-confirm-view h2 + p { margin: 0; color: var(--g-text-label); }
+.ov-confirm-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--g-gap-sm); margin-top: var(--g-gap-xl); }
+.ov-btn-confirm { background: var(--g-accent); color: var(--g-accent-text); border-color: var(--g-accent-line); }
+.ov-confirm-view .ov-btn:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 3px; }
+
+.ov-log-overlay { position:fixed; inset:0; background:color-mix(in srgb, var(--g-bg) 78%, transparent); z-index:100; }
+
+.ov-confirm-view .ov-btn { border:1px solid var(--g-line-secondary); border-radius:var(--g-r-button); background:transparent; color:var(--g-accent); padding:6px 12px; font:var(--g-fw-semibold) var(--g-fs-small)/1.4 var(--g-font); }

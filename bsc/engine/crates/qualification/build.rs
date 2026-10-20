@@ -15,6 +15,7 @@ const BASELINE: &str = "92fa5204777e566acbaccf111721d9295ffb3a90";
 const FROZEN: [&str; 3] = ["../trading/src", "../tx_encoding/src", "../execution/src"];
 
 fn main() {
+    compile_status_protocol().expect("compile BSC status protocol");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../Cargo.lock");
     println!("cargo:rerun-if-env-changed=RUSTC");
@@ -107,4 +108,12 @@ fn locked(lock: &str, name: &str) -> String {
         (Some(version), None) if !version.is_empty() => version,
         _ => "unknown".to_owned(),
     }
+}
+
+fn compile_status_protocol() -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../protocol/schemas");
+    let files = ["darkbot/control/v1/topics.proto", "darkbot/control/v1/stream.proto", "darkbot/control/v1/engine_feed.proto", "darkbot/bsc/v1/status.proto"];
+    for file in files { println!("cargo:rerun-if-changed={}", root.join(file).display()); }
+    prost_build::Config::new().compile_fds(protox::compile(files.iter().map(|f|root.join(f)), [root.as_path()])?)?;
+    Ok(())
 }

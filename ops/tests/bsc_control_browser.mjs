@@ -1,0 +1,63 @@
+import {chromium} from '../../frontend/node_modules/playwright/index.mjs';
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync,chmodSync} from 'node:fs';
+import {create,toBinary,fromBinary} from '../../frontend/node_modules/@bufbuild/protobuf/dist/esm/index.js';
+import {createRequire} from 'node:module';
+const require=createRequire(new URL('../../frontend/package.json',import.meta.url));
+const [port,dir,root]=process.argv.slice(2);const base=`http://127.0.0.1:${port}`;
+require('esbuild').buildSync({entryPoints:[`${root}/frontend/src/core/generated/darkbot/control/v1/commands_pb.ts`],bundle:true,platform:'node',format:'cjs',outfile:`${dir}/commands.cjs`});
+const proto=require(`${dir}/commands.cjs`);
+const browser=await chromium.launch({headless:true});const p=await browser.newPage();const api=p.request;const errors=[];
+p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>{errors.push('native dialog');void d.dismiss();});
+const until=async(fn,msg)=>{for(let i=0;i<150;i++){if(await fn())return;await new Promise(r=>setTimeout(r,200));}throw Error(msg);};
+const state=async()=>await(await api.get(base+'/api/v1/bsc/process')).json();
+try{
+ assert.equal((await api.get(base+'/api/v1/bsc/process')).status(),401);
+ await p.goto(base+'/');
+ await until(async()=> (await p.getByTestId('project-process-bsc').innerText()).includes('STOPPED'),'BSC initial stopped');
+ await until(async()=>!(await p.getByTestId('project-startstop-bsc').isDisabled()),'BSC controller available');
+ const card=p.getByTestId('project-card-bsc');
+ await until(async()=> (await card.innerText()).includes('Pre-Live: STOP'),'reporter → gateway overview');
+ assert.equal(await card.locator('dd').first().innerText(),'UNKNOWN');
+ assert.equal(await p.getByTestId('project-startstop-solana').isDisabled(),true);
+ const boot=await api.get(base+'/api/v1/session');const headers={'Content-Type':'application/x-protobuf',Origin:base,'X-CSRF-Token':boot.headers()['x-csrf-token']};
+ const encode=(action,id=crypto.randomUUID(),resourceId='')=>Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:id,action,resourceId})));
+ assert.equal((await api.post(base+'/api/v1/command',{headers:{'Content-Type':'application/x-protobuf',Origin:base},data:encode('bsc.readiness.start')})).status(),403);
+ for(const action of ['g07','arm','probe','send','bsc.dry.start','bsc.arm','bsc.probe','bsc.send']){
+  const res=await api.post(base+'/api/v1/command',{headers,data:encode(action)});assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await res.body())).status,3);
+ }
+ await p.getByTestId('project-startstop-bsc').click();
+ await until(async()=>{const s=await state();return s.run_id&&s.state==='STOPPED';},'native readiness result');
+ assert(readFileSync(`${dir}/run/bsc.readiness.result`,'utf8').includes('result_code=STOP'));
+ await p.getByTestId('project-link-bsc').click();
+ await until(async()=> (await p.locator('body').innerText()).includes('isolated-fixture'),'BSC panel real feed');
+ assert((await p.locator('body').innerText()).includes('Data as of'));
+ for(const name of ['BUY','Send','Arm','Probe','Run DRY'])assert.equal(await p.getByRole('button',{name,exact:true}).count(),0);
+ await p.screenshot({path:`${dir}/bsc-overview.png`,fullPage:true});
+ await p.getByRole('tab',{name:'Wallets',exact:true}).click();
+ await until(async()=> (await p.locator('body').innerText()).includes('Wallet snapshots'),'wallet snapshots');
+ await p.screenshot({path:`${dir}/bsc-wallets.png`,fullPage:true});
+ // A bounded fixture child is used for explicit cancellation and crash tests only.
+ const fixture=`#!/usr/bin/python3\nimport pathlib,signal,time,sys\nmode=pathlib.Path(${JSON.stringify(dir+'/mode')}).read_text().strip()\nif mode=='crash': sys.exit(19)\ndef stop(a,b):\n time.sleep(3);sys.exit(0)\nsignal.signal(signal.SIGTERM,stop)\nwhile True: time.sleep(.1)\n`;
+ writeFileSync(`${dir}/app/releases/test/g07_pre_live_readiness`,fixture);chmodSync(`${dir}/app/releases/test/g07_pre_live_readiness`,0o755);writeFileSync(`${dir}/mode`,'hold');
+ await p.goto(base+'/');await until(async()=>!(await p.getByTestId('project-startstop-bsc').isDisabled()),'start button');
+ await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','held job');
+ const running=await state();const id=crypto.randomUUID();const data=encode('bsc.readiness.start',id,running.run_id);
+ const answers=await Promise.all([api.post(base+'/api/v1/command',{headers,data}),api.post(base+'/api/v1/command',{headers,data})]);
+ const receipts=await Promise.all(answers.map(async a=>fromBinary(proto.CommandResponseSchema,new Uint8Array(await a.body()))));assert.equal(receipts[0].commandId,receipts[1].commandId);assert.equal(receipts[0].status,1);assert.equal((await state()).pid,running.pid);
+ const stale=await api.post(base+'/api/v1/command',{headers,data:encode('bsc.readiness.stop',crypto.randomUUID(),crypto.randomUUID())});assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await stale.body())).rejectReason,2);
+ await until(async()=> (await p.getByTestId('project-startstop-bsc').innerText()).includes('Stop'),'stop available');
+ await p.getByTestId('project-startstop-bsc').click();await p.getByRole('alertdialog').getByRole('button',{name:'Abbrechen',exact:true}).click();assert.equal((await state()).state,'RUNNING');
+ await p.getByTestId('project-startstop-bsc').click();await p.getByRole('alertdialog').getByRole('button',{name:'Prüfung stoppen',exact:true}).click();
+ await until(async()=> (await state()).state==='STOPPING','actual STOPPING');
+ assert.equal(await p.getByRole('alertdialog').count(),0);
+ await until(async()=> (await state()).state==='STOPPED','orderly stop');assert.equal((await api.get(base+'/healthz')).status(),200);
+ writeFileSync(`${dir}/mode`,'crash');await until(async()=> (await p.getByTestId('project-startstop-bsc').innerText()).includes('Run readiness'),'restart button');
+ await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='FAILED','crash FAILED');
+ await until(async()=> (await p.getByTestId('project-process-bsc').innerText()).includes('FAILED'),'UI FAILED');
+ await p.getByTestId('project-logs-bsc').click();await p.getByRole('heading',{name:'bsc-readiness',exact:true}).waitFor();assert((await p.getByRole('dialog').innerText()).includes('FAILED'));await p.getByRole('button',{name:'Close logs',exact:true}).click();
+ writeFileSync(`${dir}/mode`,'hold');await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','run for Stop All');
+ await p.getByTestId('overview-stop-all').click();await p.getByRole('alertdialog').getByRole('button',{name:'Aufzeichnungen stoppen',exact:true}).click();await until(async()=> (await state()).state==='STOPPED','Stop All BSC');
+ assert.equal((await api.get(base+'/healthz')).status(),200);assert.deepEqual(errors,[]);
+ writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));console.log('PASS native readiness, reporter→gateway→frontend, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All');
+}finally{await browser.close();}

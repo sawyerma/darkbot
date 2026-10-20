@@ -2,19 +2,13 @@ import { TopicId, topics, type EventMeta, type StateMeta } from "@/core/realtime
 import { useBscStore, type BscStateKey } from "../store/bscStore";
 import type { BscLaunchView, BscMonitoringView, BscStatusView, BscWalletsView } from "../model/types";
 
-// Einzige Brücke Transport -> BSC-Store. Hier und nur hier dürfen später die generierten
-// darkbot.bsc.v1-Typen importiert werden (ESLint-Boundary Regel 1).
-//
-// F0-VAR-GATE: darkbot.bsc.v1 fehlt. Decoder verweigern die Verarbeitung
-// statt einen Null-Snapshot als erfolgreiches LIVE-Frame zu quittieren.
-
-function unavailable(_bytes: Uint8Array): never {
-  throw new Error("BSC_DOMAIN_SCHEMA_UNAVAILABLE: requires qualified F0-VAR protobuf adapter");
-}
-const decodeStatus: (_: Uint8Array) => BscStatusView = unavailable;
-const decodeLaunch: (_: Uint8Array) => BscLaunchView = unavailable;
-const decodeMonitoring: (_: Uint8Array) => BscMonitoringView = unavailable;
-const decodeWallets: (_: Uint8Array) => BscWalletsView = unavailable;
+import { fromBinary } from "@bufbuild/protobuf";
+import { BscStatusSchema, BscLaunchStateSchema, BscMonitoringStateSchema, BscWalletsStateSchema } from "@/core/generated/darkbot/bsc/v1/status_pb";
+// Contract: frontend/contracts/bsc-fields.json. Decoding never computes a trading gate.
+export const decodeStatus = (bytes:Uint8Array): BscStatusView => fromBinary(BscStatusSchema,bytes);
+export const decodeLaunch = (bytes:Uint8Array): BscLaunchView => fromBinary(BscLaunchStateSchema,bytes);
+export const decodeMonitoring = (bytes:Uint8Array): BscMonitoringView => fromBinary(BscMonitoringStateSchema,bytes);
+export const decodeWallets = (bytes:Uint8Array): BscWalletsView => fromBinary(BscWalletsStateSchema,bytes);
 
 const STATE_BINDINGS: ReadonlyArray<{ topic: TopicId; key: BscStateKey; decode: (b: Uint8Array) => unknown }> = [
   { topic: TopicId.BSC_STATUS, key: "status", decode: decodeStatus },

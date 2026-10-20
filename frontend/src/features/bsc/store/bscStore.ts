@@ -84,5 +84,5 @@ export const selectLaunch = (s: BscStore) => s.launch;
 export const selectMonitoring = (s: BscStore) => s.monitoring;
 export const selectWallets = (s: BscStore) => s.wallets;
 export const selectEvents = (s: BscStore) => s.executionEvents;
-export const selectGuardState = (s: BscStore) => s.status.projection?.guardState ?? "UNKNOWN";
+export const selectGuardState = (s: BscStore) => s.status.projection?.guard?.guardState ?? "UNKNOWN";
 export const selectStatusQuality = (s: BscStore) => s.status.status;

@@ -240,7 +240,7 @@ mod tests {
     fn rejects_unavailable_and_oversized() {
         let hub = StateHub::new(4);
         assert!(matches!(
-            hub.publish(upd(TopicId::BscStatus, 1, 1)),
+            hub.publish(upd(TopicId::SolanaStatus, 1, 1)),
             Err(PublishError::Unavailable(_))
         ));
         let mut big = upd(TopicId::OverviewAggregates, 1, 1);

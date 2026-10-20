@@ -1,3 +1,6 @@
+import { statusTone } from "./model/status";
+import "./bsc.css";
+
 import { useEffect, useState } from "react";
 import { GraphiteShell } from "@/shared/ui/graphite/GraphiteShell";
 import { Tabs } from "@/shared/ui/graphite/Tabs";
@@ -58,7 +61,7 @@ export default function BscPage() {
       right={
         <span className="g-row">
           <StatusBadge state={toNotice(statusTopic)} detail="bsc.status transport state" />
-          <span className="g-badge" data-testid="bsc-guard">Guard · {guard}</span>
+          <span className="g-badge bsc-state" data-tone={statusTone(guard)} data-testid="bsc-guard">Guard · {guard}</span>
         </span>
       }
       footer="Graphite V0 · BSC read-only shell · No BUY or transfers from this UI"

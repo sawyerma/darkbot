@@ -33,10 +33,10 @@ export const TOPIC_TABLE: readonly TopicBinding[] = [
   b(TopicId.PROJECT0_EXECUTION_EVENTS, "project0.execution.events", TopicClass.EVENT, ProjectId.PROJECT_0),
   b(TopicId.PROJECT0_CAPTURE_EVENTS, "project0.capture.events", TopicClass.EVENT, ProjectId.PROJECT_0),
 
-  b(TopicId.BSC_STATUS, "bsc.status", TopicClass.STATE, ProjectId.BSC),
-  b(TopicId.BSC_LAUNCH_STATE, "bsc.launch.state", TopicClass.STATE, ProjectId.BSC),
-  b(TopicId.BSC_MONITORING_STATE, "bsc.monitoring.state", TopicClass.STATE, ProjectId.BSC),
-  b(TopicId.BSC_WALLETS_STATE, "bsc.wallets.state", TopicClass.STATE, ProjectId.BSC),
+  b(TopicId.BSC_STATUS, "bsc.status", TopicClass.STATE, ProjectId.BSC, "darkbot.bsc.v1.BscStatus"),
+  b(TopicId.BSC_LAUNCH_STATE, "bsc.launch.state", TopicClass.STATE, ProjectId.BSC, "darkbot.bsc.v1.BscLaunchState"),
+  b(TopicId.BSC_MONITORING_STATE, "bsc.monitoring.state", TopicClass.STATE, ProjectId.BSC, "darkbot.bsc.v1.BscMonitoringState"),
+  b(TopicId.BSC_WALLETS_STATE, "bsc.wallets.state", TopicClass.STATE, ProjectId.BSC, "darkbot.bsc.v1.BscWalletsState"),
   b(TopicId.BSC_EXECUTION_EVENTS, "bsc.execution.events", TopicClass.EVENT, ProjectId.BSC),
 
   b(TopicId.SOLANA_STATUS, "solana.status", TopicClass.STATE, ProjectId.SOLANA),

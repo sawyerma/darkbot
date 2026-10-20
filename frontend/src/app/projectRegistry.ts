@@ -80,7 +80,7 @@ const bsc: ProjectRegistration<BscPanel> = {
       wallets: [TopicId.BSC_WALLETS_STATE],
     },
   },
-  capabilities: { readStatus: true, commands: false },
+  capabilities: { readStatus: true, commands: true },
 };
 
 const solana: ProjectRegistration<never> = {

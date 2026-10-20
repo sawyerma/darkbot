@@ -363,6 +363,6 @@ mod trust_boundary_tests {
         };
         assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::OverviewAggregates)).is_err());
         assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::Project0Status)).is_err());
-        assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::BscStatus)).is_err());
+        assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::BscStatus)).is_ok());
     }
 }

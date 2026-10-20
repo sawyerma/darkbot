@@ -118,28 +118,28 @@ pub const TOPICS: &[TopicSpec] = &[
         TopicClass::State,
         ProjectId::Bsc,
         "bsc.status",
-        "",
+        "darkbot.bsc.v1.BscStatus",
     ),
     s(
         TopicId::BscLaunchState,
         TopicClass::State,
         ProjectId::Bsc,
         "bsc.launch.state",
-        "",
+        "darkbot.bsc.v1.BscLaunchState",
     ),
     s(
         TopicId::BscMonitoringState,
         TopicClass::State,
         ProjectId::Bsc,
         "bsc.monitoring.state",
-        "",
+        "darkbot.bsc.v1.BscMonitoringState",
     ),
     s(
         TopicId::BscWalletsState,
         TopicClass::State,
         ProjectId::Bsc,
         "bsc.wallets.state",
-        "",
+        "darkbot.bsc.v1.BscWalletsState",
     ),
     s(
         TopicId::BscExecutionEvents,
@@ -190,7 +190,7 @@ mod tests {
         }
         assert!(spec(TopicId::OverviewAggregates).unwrap().available());
         assert!(
-            !spec(TopicId::BscStatus).unwrap().available(),
+            spec(TopicId::BscStatus).unwrap().available(),
             "BSC payload type only after F0-VAR"
         );
     }

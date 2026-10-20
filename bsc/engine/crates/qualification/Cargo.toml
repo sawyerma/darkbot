@@ -24,6 +24,12 @@ hex = { workspace = true }
 # features, so that the production build's features stay as they are.
 ring = { version = "=0.17.14", default-features = false }
 
+prost = "=0.13.5"
+
+[build-dependencies]
+prost-build = "=0.13.5"
+protox = "=0.7.2"
+
 [dev-dependencies]
 # A loopback TLS server for the offline end-to-end tests.
 rustls = { workspace = true }

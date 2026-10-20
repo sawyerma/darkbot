@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 8080",
-    "build": "npm run type-check && vite build",
+    "build": "npm run check:bsc-fields && npm run type-check && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "type-check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
@@ -19,7 +19,8 @@
     "visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots",
     "test": "vitest run",
     "test:project0": "playwright test -c playwright.project0.config.ts",
-    "test:project0-backend": "playwright test -c playwright.backend.config.ts"
+    "test:project0-backend": "playwright test -c playwright.backend.config.ts",
+    "check:bsc-fields": "node scripts/check-bsc-fields.mjs"
   },
   "bundlesize": [
     {

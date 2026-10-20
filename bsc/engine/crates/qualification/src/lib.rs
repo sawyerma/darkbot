@@ -26,3 +26,5 @@ pub mod measure;
 pub mod probe;
 pub mod stats;
 pub mod verdict;
+
+pub mod status;

@@ -14,3 +14,5 @@ pub use darkbot::control::v1::*;
 pub use darkbot::control::v1::Error as WireError;
 
 pub mod project0 { pub mod v1 { include!(concat!(env!("OUT_DIR"), "/darkbot.project0.v1.rs")); } }
+
+pub mod bsc { pub mod v1 { include!(concat!(env!("OUT_DIR"), "/darkbot.bsc.v1.rs")); } }

@@ -112,6 +112,10 @@ locked() {
   trap - EXIT
 }
 
+# Shared controller helpers are installed alongside this script in each release.
+if [ -f "$(dirname "${BASH_SOURCE[0]}")/bsc-control.sh" ]; then
+  source "$(dirname "${BASH_SOURCE[0]}")/bsc-control.sh"
+fi
 # ---------------------------------------------------------------- capture identity (launchd)
 capture_loaded() { launchctl list "$CAPTURE_LABEL" >/dev/null 2>&1; }
 capture_pid() {
@@ -189,7 +193,7 @@ write_plist() {
     $(plist_env DARKBOT_GATEWAY_STATIC_DIR "$APP_HOME/current/dist")
 $(plist_env DARKBOT_GATEWAY_BIND "127.0.0.1:$PORT")
 $(plist_env DARKBOT_GATEWAY_GENERATION_FILE "$RUNDIR/gateway.generation")
-    $(plist_env DARKBOT_GATEWAY_FEEDS "project0=$SOCK")
+    $(plist_env DARKBOT_GATEWAY_FEEDS "project0=$SOCK,bsc=$BSC_SOCKET")
 $(plist_env DARKBOT_CTL "$APP_HOME/current/darkbotctl")
 $(plist_env DARKBOT_RUNDIR "$RUNDIR")
 $(plist_env DARKBOT_LOGDIR "$LOGDIR")
@@ -260,32 +264,52 @@ stage_capture_env() {
 }
 
 cmd_build() {
+  rm -f "$ROOT/gateway/target/darkbot-release.json"
   command -v npm >/dev/null || die "npm nicht im PATH – im Terminal ausführen"
   command -v cargo >/dev/null || die "cargo nicht im PATH – im Terminal ausführen"
-  (cd "$ROOT/frontend" && npm run type-check && npm run lint && npm run check:freeze && npm run build)
-  (cd "$ROOT/gateway" && cargo build --release)
-  (cd "$ROOT/project_0/native" && cargo build --release -p darkbot-p0-reporter --bin p0-market-capture-reported)
+  (cd "$ROOT/frontend" && npm run lint && npm run lint:boundaries && npm run lint:css && npm run check:freeze && npm run build)
+  (cd "$ROOT/gateway" && cargo build --release --locked --offline)
+  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported)
+  (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness)
+  /usr/bin/python3 "$ROOT/ops/release_manifest.py" --write
   say "build ok – weiter mit: darkbotctl deploy"
 }
 
 cmd_deploy() {
+  /usr/bin/python3 "$ROOT/ops/release_manifest.py" || die "Kein kohärenter Release-Build"
   [ -x "$GATEWAY_BUILD" ] || die "Gateway nicht gebaut: darkbotctl build"
   [ -f "$DIST_BUILD/index.html" ] || die "Frontend nicht gebaut: darkbotctl build"
   [ -x "$CAPTURE_BUILD" ] || die "Capture nicht gebaut: darkbotctl build"
+  if capture_running && [ -f "$APP_HOME/current/SCHEMA_ID" ] && ! cmp -s "$ROOT/protocol/schema_id.txt" "$APP_HOME/current/SCHEMA_ID"; then
+    die "Schema geändert: Capture zuerst geordnet stoppen; Deploy und Neustart gemeinsam durchführen"
+  fi
+  if capture_running && [ ! -f "$APP_HOME/current/SCHEMA_ID" ]; then die "Alter Release ohne Schema-Nachweis: vor Deploy Capture geordnet stoppen"; fi
+  [ -z "$(bsc_pid)" ] || die "Readiness läuft; Deploy erst nach Abschluss"
+  [ -x "$ROOT/bsc/engine/target/release/bsc-status-reporter" ] || die "BSC Reporter nicht gebaut"
+  [ -x "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" ] || die "BSC Readiness nicht gebaut"
+  bsc_sync
   local rel; rel="$APP_HOME/releases/$(date +%Y%m%dT%H%M%S)"
   mkdir -p "$rel"
   cp "$GATEWAY_BUILD" "$rel/darkbot-gateway"
   cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
   cp "$ROOT/ops/darkbotctl" "$rel/darkbotctl"
+  cp "$ROOT/ops/bsc-control.sh" "$rel/bsc-control.sh"
+  cp "$ROOT/bsc/engine/target/release/bsc-status-reporter" "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" "$rel/"
+  cp "$ROOT/protocol/schema_id.txt" "$rel/SCHEMA_ID"
+  ln -s "$APP_HOME/bsc-source" "$rel/bsc-root"
   chmod 755 "$rel/darkbotctl"
   stage_capture_env
   cp -R "$DIST_BUILD" "$rel/dist"
   git -C "$ROOT" rev-parse HEAD > "$rel/COMMIT" 2>/dev/null || echo unknown > "$rel/COMMIT"
   ln -s "$rel" "$APP_HOME/.current-$$"
   mv -fh "$APP_HOME/.current-$$" "$APP_HOME/current"
+  if launchctl list "$BSC_REPORTER_LABEL" >/dev/null 2>&1; then
+    launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL"
+    bsc_reporter_up
+  fi
   # Previous releases stay; a running capture keeps executing the binary it was started from.
   say "deployed $(cat "$rel/COMMIT")"
-  if gateway_loaded; then say "Gateway läuft noch mit altem Stand: darkbotctl restart-gateway"; fi
+  if gateway_loaded; then _reload_gateway; fi
   if capture_running; then say "laufende Capture nutzt bis zu ihrem Ende den vorherigen Release"; fi
 }
 
@@ -311,6 +335,7 @@ cmd_up_inner() {
     write_plist
     launchctl bootstrap "$DOMAIN" "$PLIST"
   fi
+  bsc_reporter_up
   local i=0; until healthy || [ $i -ge 50 ]; do sleep 0.2; i=$((i+1)); done
   healthy || die "Gateway antwortet nicht – siehe $LOGDIR/gateway.log"
   say "gateway: $(/usr/bin/curl -fsS "${URL}healthz")"
@@ -439,6 +464,7 @@ _clear_stopping() {
 _capture_stop_request() {
   _suspend_autostart
   _capture_stop_signal
+  bsc_readiness_stop
 }
 cmd_capture_stop() {
   locked _capture_stop_request
@@ -493,16 +519,20 @@ _down_begin() {
   printf '%s\n' "$$" > "$DOWN_FILE"
   _suspend_autostart
   _capture_stop_signal
+  bsc_readiness_stop
 }
 _down_finish() {
   [ "$(cat "$DOWN_FILE" 2>/dev/null || true)" = "$$" ] || die "Stopp-Zuordnung geändert"
   capture_running && die "Capture noch aktiv; Gateway bleibt an"
+  [ -z "$(bsc_pid)" ] || die "BSC Readiness stoppt noch; Gateway bleibt aktiv"
+  launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL" >/dev/null 2>&1 || true
   _gateway_down
   rm -f "$DOWN_FILE"
 }
 cmd_down() {
   locked _down_begin
   if [ "$STOP_SENT" -eq 1 ]; then capture_wait_stopped; fi
+  bsc_wait_stopped
   locked _down_finish
 }
 
@@ -569,43 +599,13 @@ cmd_install_apps() {
   cat > "$src" <<EOF
 set ctl to quoted form of "$ctl"
 set logf to quoted form of "$LOGDIR/app.log"
-set runApp to ctl & " app >> " & logf & " 2>&1 || { tail -n 5 " & logf & " >&2; exit 1; }"
+-- Desktop opening owns only gateway availability and the cockpit window.
+-- Capture Start/Stop is explicit in the dashboard; reopening never signals it.
+set runApp to ctl & " up >> " & logf & " 2>&1 || { tail -n 5 " & logf & " >&2; exit 1; }"
 try
-	set isUp to true
-	try
-		do shell script ctl & " is-capturing"
-	on error
-		set isUp to false
-	end try
-	if isUp is false then
-		set progress total steps to 3
-		set progress description to "DarkBot startet"
-		set progress additional description to "Gateway · Project_0 · Cockpit"
-		set progress completed steps to 1
-		with timeout of 120 seconds
-			do shell script runApp
-		end timeout
-		set progress completed steps to 3
-		display notification (do shell script ctl & " status-short") with title "DarkBot"
-	else
-		set info to do shell script ctl & " status-short"
-		set choice to button returned of (display dialog ("DarkBot läuft." & return & info) buttons {"Stoppen", "Abbrechen", "Cockpit öffnen"} default button "Cockpit öffnen" cancel button "Abbrechen" with title "DarkBot" giving up after 15)
-		if choice is "Stoppen" then
-			if info contains "Capture läuft" then
-				display dialog "Capture läuft. Geordnet stoppen und Journal versiegeln?" buttons {"Abbrechen", "Stoppen"} default button "Abbrechen" cancel button "Abbrechen" with title "DarkBot" with icon caution
-			end if
-			set progress description to "DarkBot stoppt"
-			set progress additional description to "Drain und Versiegelung, bis zu 5 Minuten"
-			with timeout of 420 seconds
-				do shell script ctl & " down >> " & logf & " 2>&1 || { tail -n 5 " & logf & " >&2; exit 1; }"
-			end timeout
-			display notification "DarkBot gestoppt." with title "DarkBot"
-		else
-			with timeout of 120 seconds
-				do shell script runApp
-			end timeout
-		end if
-	end if
+	with timeout of 120 seconds
+		do shell script runApp
+	end timeout
 on error errMsg number errNum
 	if errNum is -128 then return
 	display dialog ("DarkBot:" & return & errMsg & return & return & "Details: ~/Library/Logs/DarkBot/app.log") buttons {"OK"} default button "OK" with title "DarkBot" with icon stop
@@ -645,8 +645,9 @@ EOF
 }
 
 case "${1:-status}" in
+  bsc) shift; cmd_bsc "$@" ;;
   build) cmd_build ;;
-  deploy) cmd_deploy ;;
+  deploy) locked cmd_deploy ;;
   app) cmd_app ;;
   up) shift; cmd_up "${1:-}" ;;
   down) cmd_down ;;

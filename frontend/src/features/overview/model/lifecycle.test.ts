@@ -10,7 +10,9 @@ describe("supervised capture controls", () => {
       const indicator = { state, label: state, reason: "launchd" };
       expect(projectControls("project0", indicator).startStop.enabled).toBe(["RUNNING", "STOPPED", "FAILED"].includes(state));
       expect(stopAllControl(indicator).enabled).toBe(state === "RUNNING");
-      for (const key of ["bsc", "solana"] as const) {
+      expect(projectControls("bsc", indicator).startStop.enabled).toBe(["RUNNING", "STOPPED", "FAILED"].includes(state));
+      expect(projectControls("bsc", indicator).logs.enabled).toBe(true);
+      for (const key of ["solana"] as const) {
         expect(projectControls(key, indicator).startStop.enabled).toBe(false);
         expect(projectControls(key, indicator).logs.enabled).toBe(false);
       }

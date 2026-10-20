@@ -1,4 +1,5 @@
-import { useCaptureControl, watchCaptureControl } from "@/core/realtime/captureControl";
+import {watchReadinessControl,useReadinessControl} from "@/core/realtime/readinessControl";
+import { watchCaptureControl } from "@/core/realtime/captureControl";
 import { Fragment, useEffect, type ReactNode } from "react";
 import { PROJECT_REGISTRY } from "@/app/projectRegistry";
 import { useRealtimeStatus } from "@/core/realtime/useRealtimeStatus";
@@ -8,10 +9,10 @@ import { Section } from "@/shared/ui/graphite/Rows";
 import { StatusBadge, type NoticeState } from "@/shared/ui/graphite/Notice";
 import { ensureOverviewAdapter } from "./api/overviewAdapter";
 import { ProjectEntry } from "./ProjectEntry";
-import { CommandAction, CommandReceipt, DisabledAction, LogsAction } from "./OverviewControls";
+import { StopManagedAction, CommandReceipt, LogsAction } from "./OverviewControls";
 import { selectReason, selectStatus, selectView, useOverviewStore } from "./overviewStore";
 import { financeRows, systemRows, type OverviewRow } from "./model/overviewRows";
-import { captureIndicator, stopAllControl } from "./model/lifecycle";
+
 import { useNowMs } from "./useNowMs";
 import "./overview.css";
 
@@ -57,15 +58,14 @@ function SystemTile() {
   const topicReason = useOverviewStore(selectReason);
   const view = useOverviewStore(selectView);
   const nowMs = useNowMs();
-  const capture = useCaptureControl(s => s.process);
-  const stopAll = stopAllControl(captureIndicator(capture));
+  const bscReceipt=useReadinessControl(s=>s.receipt);
   return (
     <OverviewTile title="System & Control Plane" testId="overview-system"
       rows={systemRows({ gatewayStatus, gatewayReason, topicStatus, topicReason, view, projectCount: CARDS.length, nowMs })}
       actions={<>
-        {stopAll.enabled && capture?.controller_available ? <CommandAction control={stopAll} testId="overview-stop-all" /> : <DisabledAction label="Stop All" control={{ enabled: false, reason: "No managed capture running" }} testId="overview-stop-all" />}
+        <StopManagedAction />
         <LogsAction label="Show All Logs" source="all" testId="overview-show-all-logs" />
-        <CommandReceipt/>
+        <CommandReceipt/>{bscReceipt?<p role="status" className="ov-note">BSC · {bscReceipt.phase} · {bscReceipt.detail}<br/>Command {bscReceipt.id}</p>:null}
       </>} />
   );
 }
@@ -83,7 +83,7 @@ function FinanceTile() {
 export default function OverviewPage() {
   const gatewayStatus = useRealtimeStatus();
   const gatewayReason = useGatewayReason();
-  useEffect(() => { ensureOverviewAdapter(); return watchCaptureControl(); }, []);
+  useEffect(() => { ensureOverviewAdapter(); const a=watchCaptureControl();const b=watchReadinessControl();return ()=>{a();b();}; }, []);
 
   return (
     <GraphiteShell

@@ -26,10 +26,11 @@ test("overview retains project navigation and renders two honest, responsive til
   await expect(finance.locator("dd").nth(2)).toHaveText("— USD");
   for (const key of ["project0", "bsc", "solana"]) {
     await expect(page.getByTestId(`project-startstop-${key}`)).toBeDisabled();
-    await expect(page.getByTestId(`project-logs-${key}`)).toBeDisabled();
+    if (key === "solana") await expect(page.getByTestId(`project-logs-${key}`)).toBeDisabled();
+    else await expect(page.getByTestId(`project-logs-${key}`)).toBeEnabled();
   }
   await expect(page.getByTestId("overview-stop-all")).toBeDisabled();
-  await expect(page.getByTestId("overview-show-all-logs")).toBeDisabled();
+  await expect(page.getByTestId("overview-show-all-logs")).toBeEnabled();
   await expect(page.getByText("Execution authorization").first()).toBeVisible();
 
   await page.setViewportSize({ width: 580, height: 800 });

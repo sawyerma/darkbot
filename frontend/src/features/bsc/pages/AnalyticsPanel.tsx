@@ -1,17 +1,5 @@
-import { Line, Section } from "@/shared/ui/graphite/Rows";
+import { Line,Section } from "@/shared/ui/graphite/Rows";
 import { Notice } from "@/shared/ui/graphite/Notice";
-
-// Analytics zeigt nur echte, versiegelte BSC-Ergebnisse. Reports werden in F7 paginiert
-// per expliziter Nutzeraktion geladen (historyClient, TanStack Query), nie gepollt.
-export function AnalyticsPanel() {
-  return (
-    <>
-      <Section title="Qualified results">
-        <Line label="Qualified runs" value="—" />
-        <Line label="Last sealed report" value="—" />
-        <Line label="Offline replay" value="—" hint="shown as OFFLINE/REPLAY, never counted as profit" />
-      </Section>
-      <Notice>No qualified BSC results are available. Nothing is simulated here.</Notice>
-    </>
-  );
-}
+import { selectStatus,useBscStore } from "../store/bscStore";
+import { EvidenceRows,PublicRows,ValueState } from "./EvidenceRows";
+export function AnalyticsPanel(){const {projection:s}=useBscStore(selectStatus);return <><Section title="Historical DRY evidence"><Line label="DRY result" value={<ValueState state={s?.dry?.state}/>}/><Line label="Current portal validity" value={s?.dry?.validForCurrentPortal===undefined?"UNKNOWN":String(s.dry.validForCurrentPortal)}/><EvidenceRows evidence={s?.dry?.evidence}/><PublicRows rows={s?.dry?.parameters}/></Section><Notice>Historical simulation is not live profit. DRY cannot be started from this interface.</Notice></>;}

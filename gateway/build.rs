@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "darkbot/control/v1/commands.proto",
         "darkbot/control/v1/overview.proto",
         "darkbot/control/v1/engine_feed.proto",
+        "darkbot/bsc/v1/status.proto",
         "darkbot/project0/v1/status.proto",
         "darkbot/project0/v1/capture.proto",
         "darkbot/project0/v1/system.proto",

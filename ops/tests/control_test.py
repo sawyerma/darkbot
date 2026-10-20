@@ -4,7 +4,7 @@ import shutil, subprocess
 import lifecycle_test as h
 try:
     release=h.WORK/'app/releases/test';release.mkdir(parents=True)
-    for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('p0-market-capture-reported','project_0/native/target/debug/p0-market-capture-reported'),('darkbotctl','ops/darkbotctl')]:shutil.copy2(h.ROOT/source,release/name)
+    for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('p0-market-capture-reported','project_0/native/target/debug/p0-market-capture-reported'),('darkbotctl','ops/darkbotctl'),('bsc-control.sh','ops/bsc-control.sh')]:shutil.copy2(h.ROOT/source,release/name)
     (release/'darkbotctl').chmod(0o755)
     shutil.copytree(h.ROOT/'frontend/dist',release/'dist')
     (h.WORK/'app/current').symlink_to(release,target_is_directory=True)

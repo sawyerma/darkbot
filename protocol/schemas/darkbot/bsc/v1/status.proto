@@ -1,0 +1,210 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+// An explicitly selected public bound value, never a signed transaction or secret.
+message PublicField {
+  // Stable name from the native evidence schema.
+  string name = 1;
+  // Exact text; monetary integers use decimal wei, never floating point.
+  string value = 2;
+}
+// Source identity of immutable evidence. Missing evidence is not a pass.
+message Evidence {
+  // Path relative to the staged BSC source root.
+  string path = 1;
+  // SHA-256 of the exact original bytes.
+  string sha256 = 2;
+  // Time recorded by the producer, not file mtime.
+  uint64 observed_unix_s = 3;
+}
+// Public guard observation. This message cannot authorize execution.
+message GuardStatus {
+  // Compiled authority hash or UNARMED.
+  string frozen_approved_sha256 = 1;
+  // UNARMED, ARMED, ARMED_MISMATCH or UNKNOWN.
+  string guard_state = 2;
+  // Only the current v4 contract path is authoritative.
+  string contract_path = 3;
+  // Whether the current contract exists.
+  bool contract_present = 4;
+  // Hash of the current contract bytes, if present.
+  string contract_sha256 = 5;
+  // Absent if no valid contract can be inspected.
+  optional bool approved = 6;
+  // Absent if no valid contract can be inspected.
+  optional bool execution_ready = 7;
+  // Bound attempt identity.
+  string attempt_id = 8;
+  // Bound attempt maximum.
+  optional uint64 max_attempts = 9;
+}
+// Qualification status derived from identified evidence.
+message GateStatus {
+  // G0.6a, G0.7, G0.8, C1.9 or C1.10.
+  string gate_id = 1;
+  // PASS, FAIL, STOP, PARTIAL, NOT_EXECUTED or UNKNOWN.
+  string state = 2;
+  // Original evidence identity.
+  Evidence evidence = 3;
+  // Reasons explaining this observation.
+  repeated string reason_codes = 4;
+}
+// Native read-only readiness result and its original timestamp.
+message ReadinessStatus {
+  // PASS_READ_ONLY, STOP, NOT_RUN or UNKNOWN; never LIVE authority.
+  string verdict = 1;
+  // Source evidence, possibly historical.
+  Evidence evidence = 2;
+  // Funding result, if reported.
+  string funding_verdict = 3;
+  // Individual native checks and their public details.
+  repeated PublicField checks = 4;
+  // Bound portal version.
+  string portal_version_bound = 5;
+  // Observed portal version.
+  string portal_version_observed = 6;
+  // Bound implementation address.
+  string portal_impl_bound = 7;
+  // Observed implementation address.
+  string portal_impl_observed = 8;
+  // Absent when no comparison was performed.
+  optional bool code_hash_changed = 9;
+  // Block for the readiness observation, when recorded.
+  optional uint64 head_block = 10;
+  // Reported reasons for blocking.
+  repeated string reasons = 11;
+}
+// Builder documentation and empirical qualification are separate observations.
+message BuilderStatus {
+  // Actual fetch time recorded in evidence.
+  uint64 refresh_observed_unix_s = 1;
+  // Refresh expires after 24 hours; zero means unknown.
+  uint64 refresh_expires_unix_s = 2;
+  // Explicit documented floors in exact decimal wei.
+  repeated PublicField floors = 3;
+  // Probe evidence identity.
+  Evidence probe = 4;
+  // QUALIFIED or UNQUALIFIED; a response alone does not qualify price.
+  string price = 5;
+  // Empirical qualification of noMerge effects.
+  string no_merge = 6;
+  // Empirical qualification of positionFirst effects.
+  string position_first = 7;
+  // Empirical qualification of actual inclusion.
+  string inclusion = 8;
+}
+// Original producer witness availability, not inferred timing.
+message WitnessStatus {
+  // Absent when the witness contract cannot be read.
+  optional bool source_ready = 1;
+  // UNKNOWN until original execution witnesses prove timing.
+  string t0_to_buy_state = 2;
+  // Witness contract identity.
+  Evidence evidence = 3;
+}
+// Historical DRY parameters; reporting never runs signing or simulation.
+message DryStatus {
+  // Native DRY evidence identity.
+  Evidence evidence = 1;
+  // Evidence run identity.
+  string dry_id = 2;
+  // PASS, FAIL or UNKNOWN.
+  string state = 3;
+  // Exact public parameters and results from the record.
+  repeated PublicField parameters = 4;
+  // Absent without a qualified current deployment comparison.
+  optional bool valid_for_current_portal = 5;
+}
+// Supervisor-owned read-only job lifecycle.
+message JobStatus {
+  // Only readiness is currently controllable.
+  string job = 1;
+  // RUNNING, STOPPED, STARTING, STOPPING, FAILED or UNKNOWN.
+  string state = 2;
+  // Unique launch identity; never reused across runs.
+  string launch_id = 3;
+  // Start time recorded by the controller.
+  uint64 started_unix_s = 4;
+  // Completion time recorded by the controller.
+  uint64 ended_unix_s = 5;
+  // Result associated with this launch, not an earlier one.
+  string result_code = 6;
+}
+// Read-only BSC evidence projection.
+message BscStatus {
+  // Source revision deployed with this reporter.
+  string source_commit = 1;
+  // Projection evaluation time, not qualification freshness.
+  uint64 evaluated_unix_s = 2;
+  // BLOCKED: the GUI never enables trading.
+  string live_state = 3;
+  // Compiled guard and current contract observation.
+  GuardStatus guard = 4;
+  // Separate qualification gates.
+  repeated GateStatus gates = 5;
+  // Latest native readiness evidence.
+  ReadinessStatus readiness = 6;
+  // Builder observations.
+  BuilderStatus builder = 7;
+  // Producer witness status.
+  WitnessStatus witness = 8;
+  // Historical DRY status and exact values.
+  DryStatus dry = 9;
+  // Read-only jobs observed by launchd.
+  repeated JobStatus jobs = 10;
+  // Missing or invalid data is made explicit.
+  repeated string warnings = 11;
+  // Time of the explicit source snapshot sync, never evidence freshness.
+  uint64 data_as_of_unix_s = 12;
+}
+// Bound launch plan, without signatures, raw transactions or execution authority.
+message BscLaunchState {
+  // True only if the current v4 contract is present and valid.
+  bool contract_present = 1;
+  // Contract identity.
+  Evidence evidence = 2;
+  // Public contract values, exact integer caps and binding hashes.
+  repeated PublicField contract_fields = 3;
+  // Observed runtime context; absent until such evidence actually exists.
+  repeated PublicField runtime_fields = 4;
+  // Missing/invalid contract explanation.
+  string reason = 5;
+}
+// Read-only G0.8 results; submission acknowledgement is not acquisition.
+message BscMonitoringState {
+  // NOT_EXECUTED, PASS, FAIL or UNKNOWN.
+  string state = 1;
+  // G0.8 result identity.
+  Evidence evidence = 2;
+  // Explicit public receipt, ordering, acquisition and cost fields.
+  repeated PublicField results = 3;
+}
+// Public wallet identity and timestamped evidence balances, never keys.
+message BscWalletsState {
+  // Optional configured public identity.
+  string expected_address = 1;
+  // Public wallet configuration state.
+  string wallet_status = 2;
+  // Launcher address from bound evidence.
+  string launcher_address = 3;
+  // Buyer address from bound evidence.
+  string buyer_address = 4;
+  // Chain identity when recorded.
+  optional uint64 chain_id = 5;
+  // Exact balance snapshot; absent if unknown.
+  optional string launcher_balance_wei = 6;
+  // Exact balance snapshot; absent if unknown.
+  optional string buyer_balance_wei = 7;
+  // Block of the balance snapshot.
+  optional uint64 observed_block = 8;
+  // Time of the balance snapshot, not reporter time.
+  uint64 observed_unix_s = 9;
+  // READINESS_SNAPSHOT or HISTORICAL_PREFLIGHT; no implicit live RPC.
+  string source = 10;
+  // Exact launcher funding requirement when recorded.
+  optional string required_launcher_wei = 11;
+  // Exact buyer funding requirement when recorded.
+  optional string required_buyer_wei = 12;
+  // Evidence identity makes snapshot age and provenance reviewable.
+  Evidence evidence = 13;
+}

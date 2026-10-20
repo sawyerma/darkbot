@@ -1,3 +1,4 @@
+import {useReadinessControl} from "@/core/realtime/readinessControl";
 import { useCaptureControl } from "@/core/realtime/captureControl";
 import { useId } from "react";
 import { Link } from "react-router-dom";
@@ -30,7 +31,9 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
   const titleId = useId();
   // Capture lifecycle comes from launchd, independently of the reporter feed.
   const capture = useCaptureControl(s => s.process);
-  const process = reg.key === "project0" ? captureIndicator(capture) : processIndicator(null);
+  const readiness = useReadinessControl(s=>s.process);
+  const owned = reg.key==="bsc"?readiness:capture;
+  const process = reg.key === "project0" ? captureIndicator(capture) : reg.key==="bsc"?captureIndicator(readiness):processIndicator(null);
   const controls = projectControls(reg.key, process);
 
   return (
@@ -39,7 +42,7 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
         <h3 id={titleId}>
           <Link to={reg.route} title={`Open ${reg.label}`} data-testid={`project-link-${reg.key}`}>{reg.label}</Link>
         </h3>
-        <StatusBadge state={reg.key === "project0" && process.state === "FAILED" ? "FAILED" : sourceNotice(summary?.source)} detail={reg.key === "project0" && process.state === "FAILED" ? process.reason : summary?.sourceId} />
+        <StatusBadge state={(reg.key === "project0" || reg.key==="bsc") && process.state === "FAILED" ? "FAILED" : sourceNotice(summary?.source)} detail={(reg.key === "project0" || reg.key==="bsc") && process.state === "FAILED" ? process.reason : summary?.sourceId} />
       </div>
       <p className="ov-domain">{summary?.domain ?? DASH}</p>
       <ProcessLine indicator={process} testId={`project-process-${reg.key}`} />
@@ -59,11 +62,12 @@ export function ProjectEntry({ reg }: { reg: ProjectRegistration }) {
         <p className="ov-warn">{summary.warnings.slice(0, 2).join(" · ")}</p>
       ) : null}
       <div className="ov-actions" role="group" aria-label={`${reg.label} controls`}>
-        {controls.startStop.enabled && capture?.controller_available
+        {controls.startStop.enabled && owned?.controller_available
           ? <CommandAction control={controls.startStop} testId={`project-startstop-${reg.key}`} />
           : <DisabledAction label="Start / Stop" control={{ enabled: false, reason: "No available controller or capture is stopping" }} testId={`project-startstop-${reg.key}`} />}
-        {controls.logs.enabled ? <LogsAction label="Logs" source="project0" testId={`project-logs-${reg.key}`} /> : <DisabledAction label="Logs" control={{ enabled: false, reason: controls.logs.reason }} testId={`project-logs-${reg.key}`} />}
+        {controls.logs.enabled ? <LogsAction label="Logs" source={reg.key==="bsc"?"bsc":"project0"} testId={`project-logs-${reg.key}`} /> : <DisabledAction label="Logs" control={{ enabled: false, reason: controls.logs.reason }} testId={`project-logs-${reg.key}`} />}
       </div>
+      {reg.key === "project0" ? <p className="ov-note">Gateway läuft unabhängig weiter</p> : null}
     </article>
   );
 }
