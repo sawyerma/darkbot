@@ -3,6 +3,10 @@
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-10-20 (G0.7 code-readiness clarification; existing freezes preserved)
 
+## BINDING OFFLINE BUGFIX EXCEPTION — 2026-10-21
+
+The user explicitly authorized offline corrections of E5–E8 in `bsc_bug_v1.md` despite the C1/C2 development stop below. This exception permits implementation and focused offline regression tests only. It does not qualify or activate C1/C2, change economic parameters, authorize a BUY/nonce burn, or arm G0.7. All production and economic gates remain binding.
+
 ## BINDING G0.7 CLARIFICATION — 2026-10-20: finish code before economic approval
 
 **Immediate development objective: complete the existing G0.7/G0.8 code up to the explicit authorization/send boundary. The actual Mainnet BUY is NOT part of this implementation task.** This dated clarification supersedes prior guidance only where it conflates pre-BUY technical readiness with results that require a real future trial. The signed-byte freeze, all safety constraints and the mandatory G0.7 -> G0.8 -> PASS/ADAPT/STOP order remain unchanged.

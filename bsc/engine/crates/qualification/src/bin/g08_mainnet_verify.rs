@@ -965,6 +965,7 @@ fn capture_chain_window(
 ) -> Result<ChainCaptureSummary, String> {
     let file = OpenOptions::new()
         .create_new(true)
+        .read(true)
         .write(true)
         .open(path)
         .map_err(|e| format!("create-new chain capture {path}: {e}"))?;
@@ -1080,13 +1081,7 @@ fn capture_chain_window(
         number = number.checked_add(1).ok_or("block number overflow")?;
     }
 
-    writer
-        .flush()
-        .map_err(|e| format!("chain capture flush: {e}"))?;
-    let manifest = writer.manifest();
-    let file = writer.into_inner();
-    file.sync_all()
-        .map_err(|e| format!("chain capture sync: {e}"))?;
+    let manifest = writer.commit_file().map_err(|e| format!("chain capture commit: {e}"))?;
 
     let parent = Path::new(path)
         .parent()

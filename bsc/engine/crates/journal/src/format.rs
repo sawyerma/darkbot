@@ -3,7 +3,7 @@
 //! (CRC-32) per frame and hashed (SHA-256) over the exact bytes written.
 
 use std::fmt;
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use crate::{Sha256, frame_crc};
 
@@ -49,6 +49,8 @@ pub struct CaptureRecord {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JournalManifest {
+    /// Diagnostic accepted-prefix hash only when true; never a complete file proof.
+    pub poisoned: bool,
     pub version: u16,
     pub records: u64,
     pub first_sequence: Option<u64>,
@@ -64,6 +66,7 @@ pub struct JournalWriter<W> {
     last_sequence: Option<u64>,
     bytes: u64,
     hasher: Sha256,
+    poisoned: bool,
 }
 
 impl<W: Write> JournalWriter<W> {
@@ -75,10 +78,16 @@ impl<W: Write> JournalWriter<W> {
             last_sequence: None,
             bytes: 0,
             hasher: Sha256::new(),
+            poisoned: false,
         }
     }
 
     pub fn append(&mut self, record: &CaptureRecord) -> Result<(), JournalError> {
+        if self.poisoned { return Err(JournalError::Poisoned); }
+        let records = self.records.checked_add(1).ok_or(JournalError::SequenceOverflow)?;
+        let bytes = self.bytes.checked_add(HEADER_LEN as u64)
+            .and_then(|n| n.checked_add(record.payload.len() as u64))
+            .ok_or(JournalError::SequenceOverflow)?;
         if record.payload.len() > u32::MAX as usize {
             return Err(JournalError::PayloadTooLarge);
         }
@@ -102,29 +111,34 @@ impl<W: Write> JournalWriter<W> {
         let checksum = frame_crc(&header, &record.payload);
         header[32..36].copy_from_slice(&checksum.to_le_bytes());
 
-        self.inner.write_all(&header).map_err(JournalError::Io)?;
-        self.inner
-            .write_all(&record.payload)
-            .map_err(JournalError::Io)?;
+        if let Err(error) = self.inner.write_all(&header).and_then(|()| self.inner.write_all(&record.payload)) {
+            self.poisoned = true;
+            return Err(JournalError::Io(error));
+        }
         self.hasher.update(&header);
         self.hasher.update(&record.payload);
 
-        self.records = self.records.saturating_add(1);
+        self.records = records;
         self.first_sequence.get_or_insert(record.sequence);
         self.last_sequence = Some(record.sequence);
-        self.bytes = self
-            .bytes
-            .saturating_add(u64::try_from(HEADER_LEN + record.payload.len()).unwrap_or(u64::MAX));
+        self.bytes = bytes;
         Ok(())
     }
 
     pub fn flush(&mut self) -> Result<(), JournalError> {
-        self.inner.flush().map_err(JournalError::Io)
+        if self.poisoned { return Err(JournalError::Poisoned); }
+        if let Err(error) = self.inner.flush() {
+            self.poisoned = true;
+            return Err(JournalError::Io(error));
+        }
+        Ok(())
     }
 
+    /// Accepted-prefix diagnostics, NOT durability authority. Poisoned means
+    /// the physical tail may differ and this hash must not certify the file.
     pub fn manifest(&self) -> JournalManifest {
         JournalManifest {
-            version: JOURNAL_VERSION,
+            poisoned: self.poisoned,            version: JOURNAL_VERSION,
             records: self.records,
             first_sequence: self.first_sequence,
             last_sequence: self.last_sequence,
@@ -133,14 +147,54 @@ impl<W: Write> JournalWriter<W> {
         }
     }
 
+    fn sync_with(&mut self, sync: impl FnOnce(&mut W) -> io::Result<()>) -> Result<(), JournalError> {
+        self.flush()?;
+        if let Err(error) = sync(&mut self.inner) {
+            self.poisoned = true;
+            return Err(JournalError::Io(error));
+        }
+        Ok(())
+    }
+
     pub fn into_inner(self) -> W {
         self.inner
+    }
+}
+
+impl JournalWriter<std::fs::File> {
+    /// File-only durability checkpoint; no generic Write::flush guarantee.
+    pub fn sync_file(&mut self) -> Result<(), JournalError> {
+        self.sync_with(|file| file.sync_all())
+    }
+
+    /// Consume the sole file writer, flush and fsync, then hash/read back the
+    /// exact file before returning its manifest. Caller must sync the containing
+    /// directory and atomically commit its session evidence/manifest separately.
+    /// Requires a read/write, create-new file; errors never yield a committed hash.
+    pub fn commit_file(mut self) -> Result<JournalManifest, JournalError> {
+        self.sync_file()?;
+        let manifest = self.manifest();
+        if self.inner.metadata().map_err(JournalError::Io)?.len() != manifest.bytes {
+            return Err(JournalError::FileMismatch);
+        }
+        self.inner.seek(SeekFrom::Start(0)).map_err(JournalError::Io)?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0u8; 8192];
+        loop {
+            let read = self.inner.read(&mut buffer).map_err(JournalError::Io)?;
+            if read == 0 { break; }
+            hash.update(&buffer[..read]);
+        }
+        if hash.finalize() != manifest.sha256 { return Err(JournalError::FileMismatch); }
+        Ok(manifest)
     }
 }
 
 #[derive(Debug)]
 pub enum JournalError {
     InvalidBound,
+    Poisoned,
+    FileMismatch,
     BadMagic,
     BadVersion(u16),
     UnknownKind(u16),
@@ -157,6 +211,8 @@ pub enum JournalError {
 impl fmt::Display for JournalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Poisoned => f.write_str("capture: writer poisoned; incomplete physical tail"),
+            Self::FileMismatch => f.write_str("capture: persistent bytes differ from accepted frames"),
             Self::InvalidBound => f.write_str("capture: invalid bound"),
             Self::BadMagic => f.write_str("capture: bad journal magic"),
             Self::BadVersion(version) => write!(f, "capture: unsupported version {version}"),
@@ -183,3 +239,88 @@ impl fmt::Display for JournalError {
 }
 
 impl std::error::Error for JournalError {}
+
+#[cfg(test)]
+mod write_failure_tests {
+    use super::*;
+    struct FailWrite { bytes: Vec<u8>, remaining: usize, flush_fails: bool }
+    impl Write for FailWrite {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.remaining == 0 { return Err(io::Error::other("injected write failure")); }
+            let n = self.remaining.min(bytes.len());
+            self.bytes.extend_from_slice(&bytes[..n]); self.remaining -= n; Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            if self.flush_fails { Err(io::Error::other("injected flush failure")) } else { Ok(()) }
+        }
+    }
+    fn record(sequence: u64) -> CaptureRecord {
+        CaptureRecord { sequence, kind: RecordKind::Runtime, timestamp_ns: 0, payload: b"test".to_vec().into_boxed_slice() }
+    }
+    #[test]
+    fn every_partial_write_and_flush_failure_is_terminal() {
+        for accepted in [0, 7, HEADER_LEN, HEADER_LEN + 2] {
+            let mut writer = JournalWriter::new(FailWrite { bytes: vec![], remaining: accepted, flush_fails: false });
+            assert!(writer.append(&record(0)).is_err());
+            assert!(writer.manifest().poisoned);
+            assert_eq!(writer.manifest().records, 0);
+            assert!(matches!(writer.append(&record(1)), Err(JournalError::Poisoned)));
+            assert!(matches!(writer.flush(), Err(JournalError::Poisoned)));
+            assert_eq!(writer.into_inner().bytes.len(), accepted);
+        }
+        let mut writer = JournalWriter::new(FailWrite { bytes: vec![], remaining: usize::MAX, flush_fails: true });
+        writer.append(&record(0)).unwrap();
+        assert!(writer.flush().is_err());
+        assert!(writer.manifest().poisoned);
+        assert!(matches!(writer.append(&record(1)), Err(JournalError::Poisoned)));
+    }
+    #[test]
+    fn failed_sync_and_second_frame_never_certify_a_complete_segment() {
+        let mut writer = JournalWriter::new(vec![]);
+        writer.append(&record(0)).unwrap();
+        assert!(writer.sync_with(|_| Err(io::Error::other("injected fsync"))).is_err());
+        assert!(writer.manifest().poisoned);
+        assert!(matches!(writer.append(&record(1)), Err(JournalError::Poisoned)));
+        let mut writer = JournalWriter::new(FailWrite { bytes: vec![], remaining: HEADER_LEN + 4 + 9, flush_fails: false });
+        writer.append(&record(0)).unwrap();
+        assert!(writer.append(&record(1)).is_err());
+        assert_eq!(writer.manifest().records, 1);
+        assert!(writer.manifest().poisoned);
+        let bytes = writer.into_inner().bytes;
+        let mut reader = crate::JournalReader::new(bytes.as_slice(), 64).unwrap();
+        assert!(reader.next_record().unwrap().is_some());
+        assert!(matches!(reader.next_record(), Err(JournalError::Truncated)));
+    }
+
+    #[test]
+    fn validation_errors_do_not_poison_but_counters_never_saturate() {
+        let mut writer = JournalWriter::new(vec![]);
+        writer.append(&record(0)).unwrap();
+        assert!(writer.append(&record(2)).is_err());
+        assert!(!writer.manifest().poisoned);
+        writer.append(&record(1)).unwrap();
+        writer.records = u64::MAX;
+        assert!(matches!(writer.append(&record(2)), Err(JournalError::SequenceOverflow)));
+        writer.records = 2; writer.bytes = u64::MAX;
+        assert!(matches!(writer.append(&record(2)), Err(JournalError::SequenceOverflow)));
+    }
+    #[test]
+    fn file_commit_matches_bytes_and_rejects_modified_or_unreadable_file() {
+        for variant in 0..3 {
+            let path = std::env::temp_dir().join(format!("journal-commit-{}-{variant}", std::process::id()));
+            let file = std::fs::OpenOptions::new().create_new(true).read(variant != 2).write(true).open(&path).unwrap();
+            let mut writer = JournalWriter::new(file);
+            writer.append(&record(0)).unwrap();
+            if variant == 1 { std::fs::write(&path, b"foreign bytes").unwrap(); }
+            let result = writer.commit_file();
+            if variant == 0 {
+                let manifest = result.unwrap();
+                let bytes = std::fs::read(&path).unwrap();
+                let mut hash = Sha256::new(); hash.update(&bytes);
+                assert_eq!(manifest.sha256, hash.finalize());
+                assert!(!manifest.poisoned);
+            } else { assert!(result.is_err()); }
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}

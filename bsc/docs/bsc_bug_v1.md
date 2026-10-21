@@ -4,6 +4,12 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Fortsetzung 2026-10-21 — E8-2
+
+- **FIXED / TESTED:** generischer Writer nach Header-/Payload-/Flush-/Sync-Fehler terminal POISONED, Diagnosemanifest explizit `poisoned`; Counter-Overflow vor Write abgelehnt. File-only `sync_file`/konsumierendes `commit_file` mit fsync, Größen-/SHA-Readback; G0.7-Pre-arm-Checkpoint und G0.7/G0.8-Abschluss verwenden diese API. Directory-fsync/atomare DBREC-Evidence bleiben bei den bestehenden Session-Ownern; der generische Writer behauptet keine Durability. Teilzustände erlauben keinen automatischen Restart/Recovery.
+- **Tests:** 13 Journal-Tests PASS (Header-/Payload-/zweiter-Frame-/Flush-/Sync-Fehler, korrekter/mutierter/unlesbarer File-Commit, Counter-Overflow), G0.7-Capture-Test PASS, G0.8-Compile PASS. Wire-V1 unverändert; versionierte Queue-GAPs folgen separat. Keine tatsächlichen Power-Cut-/Filesystem-Crash-Messungen behauptet.
+- E2-3/4-Klassifikation ist in `ed34a261` gepusht. Benutzer hat Offline-E5–E8-Ausnahme ausdrücklich freigegeben; Roadmap ergänzt, keine produktive Aktivierung.
+
 ## Fortsetzung 2026-10-21 — E2-3/E2-4 Teilpaket
 
 - **FIXED / TESTED:** Tax-/Event-Zuordnungsfehler sind typisiert von bewiesenen Receipt-Identitäts-/Statusfehlern getrennt. Unqualifizierte Event-/Transfer-Differenzen erzeugen persistiertes `UNRESOLVED` mit `UNVERIFIED_TAX_ATTRIBUTION`, niemals daraus abgeleitetes STOP/ADAPT/PASS. Bestehende Archive-/RPC-Fehler bleiben terminal UNRESOLVED. Keine neue ABI-Annahme oder geänderte Eventgleichung.

@@ -111,7 +111,7 @@ impl CaptureSession {
         }
 
         let mut options = OpenOptions::new();
-        options.create_new(true).write(true);
+        options.create_new(true).read(true).write(true);
         // The journal holds broadcastable signed bytes: owner read/write only.
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
@@ -147,9 +147,9 @@ impl CaptureSession {
                             }
                             writer_appended.fetch_add(1, Ordering::Release);
                             if let Some(tx) = prearm_ack.take() {
-                                if let Err(e) = journal.flush() {
+                                if let Err(e) = journal.sync_file() {
                                     writer_failed.store(true, Ordering::Release);
-                                    let msg = format!("capture pre-arm flush failed: {e}");
+                                    let msg = format!("capture pre-arm sync failed: {e}");
                                     let _ = tx.send(Err(msg.clone()));
                                     return Err(msg);
                                 }
@@ -159,14 +159,7 @@ impl CaptureSession {
                         Err(_) => break,
                     }
                 }
-                journal
-                    .flush()
-                    .map_err(|e| format!("capture flush failed: {e}"))?;
-                let manifest = journal.manifest();
-                let file = journal.into_inner();
-                file.sync_all()
-                    .map_err(|e| format!("capture final sync failed: {e}"))?;
-                Ok(manifest)
+                journal.commit_file().map_err(|e| format!("capture final commit failed: {e}"))
             })
             .map_err(|e| format!("spawn capture writer: {e}"))?;
 
