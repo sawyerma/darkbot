@@ -46,11 +46,11 @@ compile_error!("Fast-Lane Wire V2 requires a little-endian target");
 
 use std::collections::BTreeSet;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Read};
 use std::marker::PhantomData;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{self, NonNull};
 use std::slice;

@@ -10,12 +10,11 @@ impl ArenaV2 {
     pub fn create(path: &Path, generation: u64, lanes: &[LaneConfigV2]) -> Result<Self, V2Error> {
         validate_arena_config(generation, lanes)?;
         let layout = layout_for(lanes)?;
-        let file = match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(path)
-        {
+        let file = match crate::trust::open_trusted_file(
+            path,
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
+            0o600,
+        ) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 return Err(V2Error::ArenaExists {
@@ -97,11 +96,7 @@ impl ArenaV2 {
         if generation == 0 {
             return Err(V2Error::ZeroGeneration);
         }
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(V2Error::Io)?;
+        let file = crate::trust::open_trusted_file(path, libc::O_RDWR, 0).map_err(V2Error::Io)?;
         let len = usize::try_from(file.metadata().map_err(V2Error::Io)?.len())
             .map_err(|_| V2Error::SizeOverflow)?;
         let mapping = MappingV2::map(file, len)?;
@@ -323,7 +318,7 @@ pub fn probe_arena_v2(path: &Path, generation: u64) -> Result<ArenaProbeV2, V2Er
     if generation == 0 {
         return Err(V2Error::ZeroGeneration);
     }
-    let mut file = match File::open(path) {
+    let mut file = match crate::trust::open_trusted_file(path, libc::O_RDONLY, 0) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(ArenaProbeV2::Absent);
@@ -365,6 +360,8 @@ pub fn probe_arena_v2(path: &Path, generation: u64) -> Result<ArenaProbeV2, V2Er
 /// or deleted; disposal belongs to the startup orchestration.
 pub fn stale_arenas_v2(dir: &Path, generation: u64) -> Result<Vec<(u64, PathBuf)>, V2Error> {
     let mut stale = Vec::new();
+    // Listing only; every later open checks the trust contract again.
+    drop(crate::trust::open_trusted_dir(dir).map_err(V2Error::Io)?);
     for entry in fs::read_dir(dir).map_err(V2Error::Io)? {
         let entry = entry.map_err(V2Error::Io)?;
         let name = entry.file_name();
@@ -400,11 +397,7 @@ fn open_lane(
         return Err(V2Error::ZeroGeneration);
     }
     expected.validate()?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(V2Error::Io)?;
+    let file = crate::trust::open_trusted_file(path, libc::O_RDWR, 0).map_err(V2Error::Io)?;
     let len = usize::try_from(file.metadata().map_err(V2Error::Io)?.len())
         .map_err(|_| V2Error::SizeOverflow)?;
     let mapping = MappingV2::map(file, len)?;

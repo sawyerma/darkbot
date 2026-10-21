@@ -84,11 +84,7 @@ impl LaneSetV2 {
         if generation == 0 {
             return Err(V2Error::ZeroGeneration);
         }
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(V2Error::Io)?;
+        let file = crate::trust::open_trusted_file(path, libc::O_RDWR, 0).map_err(V2Error::Io)?;
         let len = usize::try_from(file.metadata().map_err(V2Error::Io)?.len())
             .map_err(|_| V2Error::SizeOverflow)?;
         let mapping = MappingV2::map(file, len)?;

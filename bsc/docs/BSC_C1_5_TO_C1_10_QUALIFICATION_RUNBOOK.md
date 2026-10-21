@@ -37,6 +37,8 @@ bsc/tools/c13_lifecycle_interop.sh     # C1_3_GO_RUST_LIFECYCLE_INTEROP_PASS
 bsc/tools/c14_ingress_interop.sh       # C1_4_GO_RUST_INGRESS_INTEROP_PASS
 ```
 
+**Fast-Lane directory trust contract (E7-5, Go `trust.go` = Rust `trust.rs`):** geth and the Rust runtime run as the **same Unix user**; separate users are not supported and fail closed. The Fast-Lane directory is owned by that user and not writable by group/others (`0700` recommended, e.g. `mktemp -d`); every ancestor of its resolved path is owned by root or that user and is not group/other-writable unless sticky. Role leases, arenas and V1 rings are opened via a verified directory descriptor with `O_NOFOLLOW|O_CLOEXEC` and must be regular `0600`-type files of that user with one link; symlinks, hard links, foreign owners or open modes are refused before lock/truncate/mmap. ACLs are not inspected; a compromised process of the same user is outside the boundary.
+
 ## C1.5 — Rust HOT0 / zero-copy
 
 ```bash

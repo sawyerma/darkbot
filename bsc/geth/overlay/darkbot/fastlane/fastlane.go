@@ -133,12 +133,8 @@ func InitFromEnv() error {
 	if err := validateConfig(generation, capacity, slotSize); err != nil {
 		return err
 	}
-	info, err := os.Stat(dir)
-	if err != nil {
+	if err := checkTrustedFastLaneDirV2(dir); err != nil {
 		return fmt.Errorf("darkbot fastlane dir: %w", err)
-	}
-	if !info.IsDir() {
-		return errors.New("darkbot fastlane path is not a directory")
 	}
 
 	ingress, err := createRing(filepath.Join(dir, "geth-to-rust.mmap"), generation, capacity, slotSize, directionIngress)
@@ -353,7 +349,7 @@ func createRing(path string, generation uint64, capacity, slotSize uint32, direc
 	if total > uint64(^uint(0)>>1) {
 		return nil, errors.New("darkbot fastlane mapping too large")
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	file, err := openTrustedFileV2(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +384,7 @@ func openRing(path string, generation uint64, capacity, slotSize uint32, directi
 	if err := validateConfig(generation, capacity, slotSize); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	file, err := openTrustedFileV2(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
 	}

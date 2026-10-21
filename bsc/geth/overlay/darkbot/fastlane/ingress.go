@@ -441,12 +441,8 @@ func startIngressRuntimeV2Scoped(cfg ingressConfigV2, scope *prefilterScopeV2) (
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	info, err := os.Stat(cfg.Dir)
-	if err != nil {
+	if err := checkTrustedFastLaneDirV2(cfg.Dir); err != nil {
 		return nil, fmt.Errorf("fastlane c1.4 dir: %w", err)
-	}
-	if !info.IsDir() {
-		return nil, errors.New("fastlane c1.4 path is not a directory")
 	}
 	rt, err := startGethRuntimeV2(cfg.Dir, cfg.Generation, cfg.lanePlan(),
 		peerLanePoolBoundsV2{MaxPeers: cfg.MaxPeers, ChurnReserve: cfg.ChurnReserve})

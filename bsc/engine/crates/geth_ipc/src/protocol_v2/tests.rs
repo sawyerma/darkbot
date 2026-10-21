@@ -9,11 +9,17 @@ static ID: TestAtomicU64 = TestAtomicU64::new(0);
 
 fn tmp(name: &str) -> std::path::PathBuf {
     let id = ID.fetch_add(1, TestOrdering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "darkbot-fastlane-v2-{}-{}-{name}.mmap",
-        std::process::id(),
-        id
-    ))
+    private_test_dir("darkbot-fastlane-v2").join(format!("{id}-{name}.mmap"))
+}
+
+/// A per-process 0700 directory under the temp dir; arena files must not sit
+/// directly in a shared sticky temp dir (E7-5 trust contract).
+fn private_test_dir(prefix: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    dir
 }
 
 fn peer_lane(id: u16) -> LaneConfigV2 {
@@ -1677,6 +1683,84 @@ fn role_leases_are_exclusive_per_role_and_coexist_across_roles() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+fn victim(dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join("victim");
+    fs::write(&path, b"keep").unwrap();
+    path
+}
+
+#[test]
+fn e75_linked_lock_files_are_refused_and_never_truncated() {
+    for hard in [false, true] {
+        let dir = tmp_dir("e75-lock");
+        let other = tmp_dir("e75-victim");
+        let victim = victim(&other);
+        let lock = dir.join("geth-owner.lock");
+        if hard {
+            fs::hard_link(&victim, &lock).unwrap();
+        } else {
+            std::os::unix::fs::symlink(&victim, &lock).unwrap();
+        }
+        assert!(RoleLeaseV2::acquire(&dir, RuntimeRoleV2::GethOwner, 1).is_err());
+        assert_eq!(fs::read(&victim).unwrap(), b"keep");
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(other).unwrap();
+    }
+}
+
+#[test]
+fn e75_untrusted_directories_and_arena_links_fail_closed() {
+    use std::os::unix::fs::PermissionsExt;
+    let lanes = [txpool_lane(1)];
+    let dir = tmp_dir("e75-open");
+    for mode in [0o770, 0o702, 0o777] {
+        fs::set_permissions(&dir, fs::Permissions::from_mode(mode)).unwrap();
+        let error = RoleLeaseV2::acquire(&dir, RuntimeRoleV2::RustOwner, 1)
+            .err()
+            .unwrap();
+        assert!(
+            matches!(&error, V2Error::Io(e) if crate::trust::is_untrusted(e)),
+            "{error}"
+        );
+        let error = ArenaV2::create(&arena_path_v2(&dir, 1), 1, &lanes)
+            .err()
+            .unwrap();
+        assert!(
+            matches!(&error, V2Error::Io(e) if crate::trust::is_untrusted(e)),
+            "{error}"
+        );
+        assert!(stale_arenas_v2(&dir, 1).is_err());
+    }
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+
+    let other = tmp_dir("e75-real");
+    let real = arena_path_v2(&other, 1);
+    let arena = ArenaV2::create(&real, 1, &lanes).unwrap();
+    let link = arena_path_v2(&dir, 1);
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    assert!(ArenaV2::open(&link, 1).is_err());
+    assert!(probe_arena_v2(&link, 1).is_err());
+    assert!(LaneSetV2::open(&link, 1, &lanes).is_err());
+    assert!(ConsumerV2::open(&link, 1, lanes[0]).is_err());
+    let victim = victim(&other);
+    let victim_link = arena_path_v2(&dir, 2);
+    std::os::unix::fs::symlink(&victim, &victim_link).unwrap();
+    assert!(ArenaV2::create(&victim_link, 2, &lanes).is_err());
+    assert_eq!(fs::read(&victim).unwrap(), b"keep");
+
+    fs::set_permissions(&real, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(ArenaV2::open(&real, 1).is_err());
+    fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(ArenaV2::open(&real, 1).is_ok());
+    assert_eq!(
+        probe_arena_v2(&arena_path_v2(&other, 9), 9).unwrap(),
+        ArenaProbeV2::Absent
+    );
+    drop(arena);
+    fs::remove_dir_all(dir).unwrap();
+    fs::remove_dir_all(other).unwrap();
+}
+
 const LEASE_CHILD_ENV: &str = "DARKBOT_FASTLANE_LEASE_CHILD_DIR";
 
 #[test]
@@ -1786,6 +1870,14 @@ fn existing_arenas_are_detected_never_attached_and_never_overwritten() {
     // A file that is not an arena.
     let junk = dir.join("fastlane-v2-g00000000000000000007.mmap");
     fs::write(&junk, b"not an arena").unwrap();
+    // A file with group/other bits is outside the trust contract (E7-5).
+    assert!(
+        matches!(probe_arena_v2(&junk, 7), Err(V2Error::Io(e)) if crate::trust::is_untrusted(&e))
+    );
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&junk, fs::Permissions::from_mode(0o600)).unwrap();
+    }
     assert_eq!(probe_arena_v2(&junk, 7).unwrap(), ArenaProbeV2::NotAnArena);
     assert!(matches!(
         ArenaV2::create(&junk, 7, &[lane]),

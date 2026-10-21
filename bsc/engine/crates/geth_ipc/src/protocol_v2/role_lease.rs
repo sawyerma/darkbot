@@ -38,13 +38,9 @@ impl RoleLeaseV2 {
             return Err(V2Error::ZeroGeneration);
         }
         let path = dir.join(format!("{}.lock", role.name()));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(&path)
+        // A symlinked, hard-linked or foreign lock file is refused before
+        // flock, so it is never truncated (E7-5).
+        let file = crate::trust::open_trusted_file(&path, libc::O_RDWR | libc::O_CREAT, 0o600)
             .map_err(V2Error::Io)?;
         // SAFETY: `file` owns a valid descriptor for the duration of the call.
         let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };

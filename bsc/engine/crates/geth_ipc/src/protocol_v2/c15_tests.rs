@@ -7,12 +7,12 @@ const CAPACITY: usize = 4;
 static ID: TestAtomicU64 = TestAtomicU64::new(0);
 
 fn tmp(name: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
     let id = ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "darkbot-fastlane-c15-{}-{}-{name}.mmap",
-        std::process::id(),
-        id
-    ))
+    let dir = std::env::temp_dir().join(format!("darkbot-fastlane-c15-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    dir.join(format!("{id}-{name}.mmap"))
 }
 
 fn lane(lane_id: u16) -> LaneConfigV2 {

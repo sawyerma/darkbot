@@ -4,7 +4,7 @@
 //! are re-exported at the crate root under their previous paths.
 
 use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io;
 use std::mem::{align_of, size_of};
 use std::os::fd::AsRawFd;
@@ -259,12 +259,12 @@ impl Mapping {
     fn create(path: &Path, config: RingConfig) -> Result<Self, FastLaneError> {
         config.validate()?;
         let len = total_len(config.capacity, config.slot_size)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(FastLaneError::Io)?;
+        let file = crate::trust::open_trusted_file(
+            path,
+            libc::O_RDWR | libc::O_CREAT | libc::O_EXCL,
+            0o600,
+        )
+        .map_err(FastLaneError::Io)?;
         file.set_len(u64::try_from(len).map_err(|_| FastLaneError::SizeOverflow)?)
             .map_err(FastLaneError::Io)?;
         let mapping = Self::map(file, len)?;
@@ -321,11 +321,8 @@ impl Mapping {
 
     fn open(path: &Path, expected: RingConfig) -> Result<Self, FastLaneError> {
         expected.validate()?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(FastLaneError::Io)?;
+        let file =
+            crate::trust::open_trusted_file(path, libc::O_RDWR, 0).map_err(FastLaneError::Io)?;
         let metadata = file.metadata().map_err(FastLaneError::Io)?;
         let observed_len =
             usize::try_from(metadata.len()).map_err(|_| FastLaneError::SizeOverflow)?;
@@ -650,12 +647,12 @@ mod tests {
     static ID: AtomicU64 = AtomicU64::new(0);
 
     fn tmp(name: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
         let id = ID.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "darkbot-fastlane-{}-{}-{name}.mmap",
-            std::process::id(),
-            id
-        ))
+        let dir = std::env::temp_dir().join(format!("darkbot-fastlane-v1-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        dir.join(format!("{id}-{name}.mmap"))
     }
 
     fn config(direction: Direction) -> RingConfig {

@@ -15,6 +15,7 @@ pub mod ingress;
 pub mod outbound;
 pub mod protocol_v1;
 pub mod protocol_v2;
+pub mod trust;
 
 // Wire V1 keeps its public paths at the crate root (`darkbot_bsc_geth_ipc::Producer`, ...).
 pub use protocol_v1::*;

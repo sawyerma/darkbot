@@ -402,7 +402,7 @@ func createArenaV2(path string, generation uint64, lanes []laneConfigV2) (*arena
 		return nil, errors.New("fastlane v2 arena too large")
 	}
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	file, err := openTrustedFileV2(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	if errors.Is(err, fs.ErrExist) {
 		probe, observed, probeErr := probeArenaV2(path, generation)
 		if probeErr != nil {
@@ -475,7 +475,7 @@ func openArenaV2(path string, generation uint64) (*arenaV2, error) {
 	if generation == 0 {
 		return nil, errors.New("fastlane v2 generation must be nonzero")
 	}
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	file, err := openTrustedFileV2(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1318,7 +1318,7 @@ func probeArenaV2(path string, generation uint64) (arenaProbeV2, uint64, error) 
 	if generation == 0 {
 		return 0, 0, errors.New("fastlane v2 generation must be nonzero")
 	}
-	file, err := os.Open(path)
+	file, err := openTrustedFileV2(path, os.O_RDONLY, 0)
 	if errors.Is(err, fs.ErrNotExist) {
 		return arenaAbsentV2, 0, nil
 	}
@@ -1368,7 +1368,7 @@ type staleArenaV2 struct {
 // generation, sorted by generation. Read-only: nothing is opened for writing,
 // attached or deleted; disposal belongs to the startup orchestration.
 func staleArenasV2(dir string, generation uint64) ([]staleArenaV2, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := readTrustedDirV2(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -1418,7 +1418,9 @@ func acquireRoleLeaseV2(dir, role string, generation uint64) (*roleLeaseV2, erro
 		return nil, errors.New("fastlane v2 generation must be nonzero")
 	}
 	path := filepath.Join(dir, role+".lock")
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	// A symlinked, hard-linked or foreign lock file is refused before flock,
+	// so it is never truncated (E7-5).
+	file, err := openTrustedFileV2(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
