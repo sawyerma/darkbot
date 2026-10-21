@@ -100,3 +100,50 @@ impl ProviderEvidence {
         })
     }
 }
+
+/// Validate the measured FREE_ONLY evidence for every usable endpoint (a proof per endpoint
+/// binding). This checks supplied evidence, not the provider's current quota availability.
+pub fn validate_provider_evidence(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    primary: &str,
+    proof: &ProviderEvidence,
+    now: f64,
+) -> Result<(), String> {
+    let endpoints: std::collections::BTreeSet<&str> = std::iter::once(primary)
+        .chain(
+            config
+                .rpc_endpoints
+                .iter()
+                .filter(|_| config.fallback)
+                .map(String::as_str),
+        )
+        .collect();
+    for endpoint in endpoints {
+        let binding = sha(endpoint.as_bytes());
+        let p = proof
+            .providers
+            .iter()
+            .find(|p| p.provider_binding == binding)
+            .ok_or("FE_PROVIDER_EVIDENCE_MISSING")?;
+        let measured = p.measured_at_unix_s;
+        let min_rps = config.limits.rpc_rps.min(config.limits.bootstrap_rps) as f64;
+        if !now.is_finite()
+            || now < 0.0
+            || !measured.is_finite()
+            || measured < 0.0
+            || measured > now
+            || now - measured > config.limits.fe_qualification_age_seconds as f64
+            || p.policy != "FREE_ONLY"
+            || !p.passed
+            || p.evidence_sha256
+                .as_deref()
+                .is_none_or(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
+            || p.allowed_rps.is_nan()
+            || p.allowed_rps < min_rps
+            || p.available_calls < config.limits.max_requests.min(config.limits.fe_calls)
+        {
+            return Err("FREE_ONLY_PROVIDER_CAPACITY_UNQUALIFIED".into());
+        }
+    }
+    Ok(())
+}

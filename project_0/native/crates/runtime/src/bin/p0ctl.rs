@@ -11,7 +11,7 @@
 //! p0ctl [--project DIR] run start --duration D [test.sh options…]
 //! p0ctl [--project DIR] run status [--run RUN_ID]
 //! p0ctl [--project DIR] run stop
-//! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict [--resume-verification] …
+//! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict|crosscheck [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
@@ -495,6 +495,34 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
+/// C0E1-P5-CLI: one verify contract. A run with native records verifies `strict` and `off`
+/// through the typed native driver (the request `p0-strict-verify --run` takes: online strict
+/// only with `--provider-evidence`); `index`, `crosscheck` and historical runs use the pinned
+/// Python verifier.
+fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::market_observer::strict_driver;
+    let mode = value(args, "--mode").unwrap_or_else(|| "index".into());
+    let native = value(args, "--run")
+        .and_then(|r| find_run(project, &r))
+        .filter(|run| run.join("capture/run_manifest.p0j").is_file());
+    let Some(run) = native.filter(|_| matches!(mode.as_str(), "strict" | "off")) else {
+        return delegate(project, "verify.sh", args);
+    };
+    let mut request = vec!["--run".to_string(), run.display().to_string()];
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--run" {
+            it.next();
+        } else {
+            request.push(a.clone());
+        }
+    }
+    let (text, verified) = strict_driver::cli(&request)?;
+    print!("{text}");
+    // `off` is a complete outcome (NOT_RUN); strict passes only CANONICAL_VERIFIED.
+    Ok(verified || mode == "off")
+}
+
 /// C0E1-P4-VC: the master qualification of a run with native records against its selected
 /// verification result; prints the axes and the verdict, `Ok(false)` (exit 2) unless MASTER_PASS.
 fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
@@ -556,7 +584,7 @@ fn main() -> ExitCode {
             (Some("run"), Some("start")) => run_start(&project, &rest[1..]),
             (Some("run"), Some("status")) => run_status(&project, &rest[1..]),
             (Some("run"), Some("stop")) => run_stop(&project),
-            (Some("verify"), _) => delegate(&project, "verify.sh", &rest),
+            (Some("verify"), _) => verify_cmd(&project, &rest),
             (Some("report"), _) => report_cmd(&project, &rest),
             (Some("export"), _) => export_cmd(&project, &rest),
             (Some("qualify"), _) => qualify_cmd(&project, &rest),

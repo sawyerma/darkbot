@@ -9,7 +9,7 @@
 //!
 //! `p0-strict-verify --run RUN [--mode strict|off] [--resume-verification] [--offline] [--verify-rps N]
 //!     [--verify-calls N] [--verify-seconds N] [--verify-bytes N] [--verify-disk-bytes N]
-//!     [--verify-ram-bytes N] [--verify-min-free-bytes N]`
+//!     [--verify-ram-bytes N] [--verify-min-free-bytes N] [--provider-evidence FILE.p0j]`
 //!                                   A3 native driver for a layout-V2 run: typed spec, capture
 //!                                   evidence, attempt and result identities (no JSON job)
 //!
@@ -28,7 +28,7 @@ fn main() {
             }
         }
         if args.first().map(String::as_str) == Some("--run") {
-            return native_driver(&args);
+            return darkbot_runner::market_observer::strict_driver::cli(&args);
         }
         let (path, compat) = match args.as_slice() {
             [path] => (path, false),
@@ -70,82 +70,4 @@ fn main() {
             std::process::exit(2);
         }
     }
-}
-
-/// A3: drive a strict verification of RUN natively (budgets default to the operational config).
-fn native_driver(args: &[String]) -> Result<(String, bool), String> {
-    use darkbot_runner::market_observer::strict_driver::{
-        drive, DriverRequest, StrictBudget, VerifyMode,
-    };
-    if std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
-        || std::env::var_os("P0_PROFILE").is_some()
-    {
-        let resolved =
-            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?
-                .native_only()?;
-        for (k, v) in resolved.config.environment() {
-            std::env::set_var(k, v);
-        }
-        resolved.activate()?;
-    }
-    darkbot_solana::provider::enable_measurement_budget();
-    let l = &darkbot_solana::runtime_config::active().limits;
-    let mib = 1024 * 1024;
-    let mut budget = StrictBudget {
-        rps: l.verify_rps,
-        max_calls: l.verify_calls,
-        max_seconds: l.verify_seconds,
-        max_bytes: l.verify_mib * mib,
-        max_disk_bytes: l.verify_disk_mib * mib,
-        max_ram_bytes: l.verify_ram_mib * mib,
-        min_free_bytes: l.verify_free_mib * mib,
-    };
-    let (mut run, mut offline, mut resume, mut mode) = (None, false, false, VerifyMode::Strict);
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        let mut number = || -> Result<u64, String> {
-            it.next()
-                .and_then(|v| v.parse().ok())
-                .filter(|n| *n > 0)
-                .ok_or(format!("{a} needs a positive integer"))
-        };
-        match a.as_str() {
-            "--run" => run = Some(it.next().ok_or("--run needs a directory")?.clone()),
-            "--offline" => offline = true,
-            "--mode" => {
-                mode = match it.next().map(String::as_str) {
-                    Some("strict") => VerifyMode::Strict,
-                    Some("off") => VerifyMode::Off,
-                    // index/crosscheck: the pinned Python verifier (verify.sh).
-                    _ => return Err("--mode strict|off (index/crosscheck: verify.sh)".into()),
-                }
-            }
-            "--resume-verification" => resume = true,
-            "--verify-rps" => budget.rps = number()?,
-            "--verify-calls" => budget.max_calls = number()?,
-            "--verify-seconds" => budget.max_seconds = number()?,
-            "--verify-bytes" => budget.max_bytes = number()?,
-            "--verify-disk-bytes" => budget.max_disk_bytes = number()?,
-            "--verify-ram-bytes" => budget.max_ram_bytes = number()?,
-            "--verify-min-free-bytes" => budget.min_free_bytes = number()?,
-            other => return Err(format!("UNKNOWN_ARGUMENT: {other}")),
-        }
-    }
-    let outcome = drive(&DriverRequest {
-        run: run.ok_or("--run required")?.into(),
-        budget,
-        offline,
-        resume,
-        mode,
-    })?;
-    let text = format!(
-        "{}verification_spec_id={}\nverification_attempt_id={}\nverification_result_id={}\nstatus={} reason={}\n",
-        outcome.terminal,
-        outcome.verification_spec_id,
-        outcome.verification_attempt_id,
-        outcome.verification_result_id.as_deref().unwrap_or("none"),
-        outcome.status,
-        outcome.reason.as_deref().unwrap_or("none")
-    );
-    Ok((text, outcome.status == "CANONICAL_VERIFIED"))
 }

@@ -672,6 +672,7 @@ mod supervise_tests {
                 offline: true,
                 resume: false,
                 mode: crate::market::observer::strict_driver::VerifyMode::Strict,
+                provider_evidence: None,
             })
             .unwrap();
             assert_ne!(strict.status, "CANONICAL_VERIFIED", "gap={gap}");

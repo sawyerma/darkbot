@@ -176,6 +176,28 @@ pub struct DriverRequest {
     pub offline: bool,
     pub resume: bool,
     pub mode: VerifyMode,
+    /// Typed measured FREE_ONLY provider evidence (`PROVIDER_EVIDENCE`): required for an online
+    /// strict verification (PHASENPLAN: strict only after an explicit provider preflight).
+    pub provider_evidence: Option<PathBuf>,
+}
+
+/// The provider gate of an online strict verification: measured, recent FREE_ONLY evidence for
+/// the endpoint (`validate_provider_evidence`) that also qualifies archive reads.
+pub fn strict_provider_gate(
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    url: &str,
+    evidence: &Path,
+    now_unix_s: f64,
+) -> Result<(), String> {
+    let proof: crate::orchestration::provider_evidence::ProviderEvidence =
+        journal::read_typed_value(evidence).map_err(|_| "STRICT_PROVIDER_EVIDENCE_INVALID")?;
+    crate::orchestration::provider_evidence::validate_provider_evidence(
+        config, url, &proof, now_unix_s,
+    )?;
+    if !proof.archive_qualified {
+        return Err("STRICT_ARCHIVE_UNQUALIFIED".into());
+    }
+    Ok(())
 }
 
 /// Post-capture verification mode of the native driver (PHASENPLAN L.2). `index`/`crosscheck`
@@ -391,9 +413,16 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     let provider = if req.offline || req.mode == VerifyMode::Off {
         None
     } else {
-        let url = darkbot_solana::runtime_config::active()
+        // Online strict only after the provider preflight, before any chain RPC.
+        let evidence = req
+            .provider_evidence
+            .as_deref()
+            .ok_or("STRICT_PROVIDER_EVIDENCE_REQUIRED")?;
+        let config = darkbot_solana::runtime_config::active();
+        let url = config
             .rpc_url(&|k| std::env::var(k).ok())
             .ok_or("RPC_URL_MISSING")?;
+        strict_provider_gate(config, &url, evidence, now_unix_ns() as f64 / 1e9)?;
         Some(solana_sdk::hash::hash(url.as_bytes()).to_bytes())
     };
     let spec = VerificationSpec {
@@ -528,9 +557,144 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     })
 }
 
+/// A3/C0E1-P5-CLI: the one typed request of a native verification (`p0-strict-verify --run`,
+/// `p0ctl verify`): budgets default to the operational config; online strict needs
+/// `--provider-evidence`.
+pub fn cli(args: &[String]) -> Result<(String, bool), String> {
+    if std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
+        || std::env::var_os("P0_PROFILE").is_some()
+    {
+        let resolved =
+            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?
+                .native_only()?;
+        for (k, v) in resolved.config.environment() {
+            std::env::set_var(k, v);
+        }
+        resolved.activate()?;
+    }
+    darkbot_solana::provider::enable_measurement_budget();
+    let l = &darkbot_solana::runtime_config::active().limits;
+    let mib = 1024 * 1024;
+    let mut budget = StrictBudget {
+        rps: l.verify_rps,
+        max_calls: l.verify_calls,
+        max_seconds: l.verify_seconds,
+        max_bytes: l.verify_mib * mib,
+        max_disk_bytes: l.verify_disk_mib * mib,
+        max_ram_bytes: l.verify_ram_mib * mib,
+        min_free_bytes: l.verify_free_mib * mib,
+    };
+    let (mut run, mut offline, mut resume, mut mode) = (None, false, false, VerifyMode::Strict);
+    let mut provider_evidence = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let mut number = || -> Result<u64, String> {
+            it.next()
+                .and_then(|v| v.parse().ok())
+                .filter(|n| *n > 0)
+                .ok_or(format!("{a} needs a positive integer"))
+        };
+        match a.as_str() {
+            "--run" => run = Some(it.next().ok_or("--run needs a directory")?.clone()),
+            "--offline" => offline = true,
+            "--provider-evidence" => {
+                provider_evidence = Some(PathBuf::from(
+                    it.next().ok_or("--provider-evidence needs a file")?,
+                ))
+            }
+            "--mode" => {
+                mode = match it.next().map(String::as_str) {
+                    Some("strict") => VerifyMode::Strict,
+                    Some("off") => VerifyMode::Off,
+                    // index/crosscheck: the pinned Python verifier (verify.sh).
+                    _ => return Err("--mode strict|off (index/crosscheck: verify.sh)".into()),
+                }
+            }
+            "--resume-verification" => resume = true,
+            "--verify-rps" => budget.rps = number()?,
+            "--verify-calls" => budget.max_calls = number()?,
+            "--verify-seconds" => budget.max_seconds = number()?,
+            "--verify-bytes" => budget.max_bytes = number()?,
+            "--verify-disk-bytes" => budget.max_disk_bytes = number()?,
+            "--verify-ram-bytes" => budget.max_ram_bytes = number()?,
+            "--verify-min-free-bytes" => budget.min_free_bytes = number()?,
+            other => return Err(format!("UNKNOWN_ARGUMENT: {other}")),
+        }
+    }
+    let outcome = drive(&DriverRequest {
+        run: run.ok_or("--run required")?.into(),
+        budget,
+        offline,
+        resume,
+        mode,
+        provider_evidence,
+    })?;
+    let text = format!(
+        "{}verification_spec_id={}\nverification_attempt_id={}\nverification_result_id={}\nstatus={} reason={}\n",
+        outcome.terminal,
+        outcome.verification_spec_id,
+        outcome.verification_attempt_id,
+        outcome.verification_result_id.as_deref().unwrap_or("none"),
+        outcome.status,
+        outcome.reason.as_deref().unwrap_or("none")
+    );
+    Ok((text, outcome.status == "CANONICAL_VERIFIED"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C0E1-P4-RESUME/P5-CLI: online strict needs measured, recent FREE_ONLY provider evidence
+    /// for its endpoint that also qualifies archive reads; anything else is refused.
+    #[test]
+    fn strict_provider_gate_requires_fresh_free_archive_evidence() {
+        use crate::orchestration::provider_evidence::{ProviderEvidence, ProviderProof};
+        let dir = std::env::temp_dir().join(format!("p0_gate_{}_{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = darkbot_solana::runtime_config::RuntimeConfig::default();
+        let url = "http://archive.invalid";
+        let sha = |b: &[u8]| hex(&solana_sdk::hash::hash(b).to_bytes());
+        let evidence = |archive_qualified| ProviderEvidence {
+            providers: vec![ProviderProof {
+                policy: "FREE_ONLY".into(),
+                passed: true,
+                provider_binding: sha(url.as_bytes()),
+                measured_at_unix_s: 1000.0,
+                evidence_sha256: Some(sha(b"fixture")),
+                allowed_rps: 5.0,
+                available_calls: 3,
+            }],
+            wss_provider_binding: None,
+            wss_free_only: false,
+            archive_qualified,
+            source_sha256: sha(b"measured"),
+        };
+        let write = |name: &str, e: &ProviderEvidence| {
+            let path = dir.join(name);
+            journal::write_typed_value(&path, source::FE01, e).unwrap();
+            path
+        };
+        let qualified = write("archive.p0j", &evidence(true));
+        let unqualified = write("no_archive.p0j", &evidence(false));
+        assert_eq!(
+            strict_provider_gate(&config, url, &qualified, 1001.0),
+            Ok(())
+        );
+        assert_eq!(
+            strict_provider_gate(&config, url, &unqualified, 1001.0),
+            Err("STRICT_ARCHIVE_UNQUALIFIED".into())
+        );
+        assert!(strict_provider_gate(&config, "http://other.invalid", &qualified, 1001.0).is_err());
+        let stale = 1001.0 + config.limits.fe_qualification_age_seconds as f64;
+        assert!(strict_provider_gate(&config, url, &qualified, stale).is_err());
+        assert_eq!(
+            strict_provider_gate(&config, url, &dir.join("missing.p0j"), 1001.0),
+            Err("STRICT_PROVIDER_EVIDENCE_INVALID".into())
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// C0E1-P4-RESUME: the post-capture deployment proof reads the program after the window
     /// through the production inspector (loopback RPC, never Mainnet) and records it, bound to
@@ -729,6 +893,7 @@ mod tests {
             offline: true,
             resume,
             mode: VerifyMode::Strict,
+            provider_evidence: None,
         };
         let first = drive(&req(false)).unwrap();
         assert_ne!(first.status, "CANONICAL_VERIFIED");
