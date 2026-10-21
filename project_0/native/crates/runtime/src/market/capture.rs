@@ -80,14 +80,16 @@ fn status_run_snapshot(
 }
 
 /// The one classification of a finished capture: what `run_embedded_with` returns and what the
-/// ENDED phase reports.
-fn capture_end(
+/// ENDED phase reports. A capture whose drain did not complete is sealed INCOMPLETE and never
+/// returns `Ok` — also when its ingress thread ends after the seal and is joined quiescent (R1).
+pub(super) fn capture_end(
     cfg: &MarketConfig,
     quiescent: &Result<(), String>,
     stop_reason: &str,
     stream_ready: bool,
     write_error: Option<&str>,
     ingress_end_error: Option<&str>,
+    drain_complete: bool,
 ) -> Result<(), String> {
     if let Err(e) = quiescent {
         return Err(e.clone());
@@ -115,6 +117,9 @@ fn capture_end(
     }
     if let Some(code) = ingress_end_error {
         return Err(format!("MARKET_CAPTURE_INCOMPLETE: {code}"));
+    }
+    if !drain_complete {
+        return Err("MARKET_CAPTURE_INCOMPLETE: DRAIN_INCOMPLETE".into());
     }
     Ok(())
 }
@@ -153,6 +158,22 @@ pub(super) fn quiesce<T>(
         .join()
         .map(drop)
         .map_err(|_| "INGRESS_THREAD_PANIC".to_string())
+}
+
+/// D8/R1: the ingress thread is joined within what is left of the drain budget — never a second
+/// full budget after the seal. A thread still alive at the drain deadline is reported at once
+/// (`INGRESS_NOT_QUIESCENT`); one whose drain was skipped (write error) keeps the remaining budget.
+pub(super) fn join_after_seal<T>(
+    ingress: Option<std::thread::JoinHandle<T>>,
+    drain_deadline: Instant,
+) -> Result<(), String> {
+    match ingress {
+        Some(thread) => quiesce(
+            thread,
+            drain_deadline.saturating_duration_since(Instant::now()),
+        ),
+        None => Ok(()),
+    }
 }
 
 /// The market ingress thread's result: `Err` holds a fixed, secret-free error class.
@@ -771,10 +792,7 @@ fn run_embedded_inner(
     // D8: the session was asked to stop; its thread is joined within the drain budget. One still
     // alive afterwards is reported, never declared quiescent (the journal is INCOMPLETE then,
     // since its drain did not complete).
-    let quiescent = match ingress.take() {
-        Some(thread) => quiesce(thread, Duration::from_secs(cfg.drain_timeout_secs)),
-        None => Ok(()),
-    };
+    let quiescent = join_after_seal(ingress.take(), drain_deadline);
     let end = capture_end(
         &cfg,
         &quiescent,
@@ -782,6 +800,7 @@ fn run_embedded_inner(
         window.is_some(),
         write_error.as_deref(),
         ingress_end_error,
+        drain_complete,
     );
     if let Some(tap) = &status_tap {
         tap.publish_market(core.market_snapshot());
@@ -856,29 +875,34 @@ mod status_tests {
                 "OPERATOR_STOP",
                 false,
                 Some("WRITE"),
-                Some("END")
+                Some("END"),
+                false
             ),
             Err("INGRESS_TIMEOUT".into())
         );
         assert_eq!(
-            capture_end(&cfg, &Ok(()), "OPERATOR_STOP", false, None, None),
+            capture_end(&cfg, &Ok(()), "OPERATOR_STOP", false, None, None, false),
             Err("MARKET_CAPTURE_INCOMPLETE: OPERATOR_STOP".into())
         );
         assert!(
-            capture_end(&cfg, &Ok(()), "TIMER", false, Some("WRITE"), None)
+            capture_end(&cfg, &Ok(()), "TIMER", false, Some("WRITE"), None, false)
                 .unwrap_err()
                 .starts_with("MARKET_OBSERVER_STREAM_NOT_READY:")
         );
         assert_eq!(
-            capture_end(&cfg, &Ok(()), "TIMER", true, Some("WRITE"), None),
+            capture_end(&cfg, &Ok(()), "TIMER", true, Some("WRITE"), None, false),
             Err("market evidence write failed: WRITE".into())
         );
         assert_eq!(
-            capture_end(&cfg, &Ok(()), "TIMER", true, None, Some("END")),
+            capture_end(&cfg, &Ok(()), "TIMER", true, None, Some("END"), false),
             Err("MARKET_CAPTURE_INCOMPLETE: END".into())
         );
         assert_eq!(
-            capture_end(&cfg, &Ok(()), "TIMER", true, None, None),
+            capture_end(&cfg, &Ok(()), "TIMER", true, None, None, false),
+            Err("MARKET_CAPTURE_INCOMPLETE: DRAIN_INCOMPLETE".into())
+        );
+        assert_eq!(
+            capture_end(&cfg, &Ok(()), "TIMER", true, None, None, true),
             Ok(())
         );
     }

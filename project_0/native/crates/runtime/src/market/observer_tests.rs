@@ -2172,6 +2172,157 @@ fn r1_full_and_half_full_queue_drain_completely_before_the_seal() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// R1 (deadline case): an ingress that is still alive when the drain deadline passes — it keeps
+/// its producer open and delivers a frame now and then — ends the drain at the deadline (bounded,
+/// never waiting for the thread), the frames received until then are processed, the thread is
+/// not joined, the drain is not complete and the capture seals INCOMPLETE: a real timeout is
+/// never a complete capture (fail-closed).
+#[test]
+fn r1_ingress_alive_past_the_drain_deadline_seals_incomplete() {
+    use std::time::{Duration, Instant};
+    let root = std::env::temp_dir().join(format!(
+        "c0mo_r1d_{}_{}",
+        std::process::id(),
+        utc_compact(unix_now_s())
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let root_s = root.to_string_lossy().to_string();
+    let cfg = MarketConfig::from_lookup(
+        &env_of(&[
+            ("P0_WS_URL", "wss://h"),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+            ),
+            ("P0_MARKET_SOURCE", "logs"),
+            ("P0_MARKET_OUT_DIR", root_s.as_str()),
+            ("P0_MARKET_RUN_ID", "deadline"),
+        ]),
+        0,
+    )
+    .unwrap();
+    fs::create_dir_all(&cfg.run_dir).unwrap();
+    let mut sink = JournalSink::create(&cfg.run_dir).unwrap();
+    let mut core = ObserverCore::new(cfg.program, cfg.source, cfg.enrich);
+    core.start_observation(0, 600_000_000_000);
+    let (tx, rx) = darkbot_common::channel::bounded::<IngressEvent>("r1d", 64);
+    let slot = |n: u64| {
+        IngressEvent::Slot(SlotUpdate {
+            slot: 100 + n,
+            parent: Some(99 + n),
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 1,
+        })
+    };
+    let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hold = release.clone();
+    // Alive well past the deadline: one frame every 20 ms until the test releases it.
+    let thread: super::capture::IngressThread = std::thread::spawn(move || {
+        let mut n = 0;
+        while !hold.load(std::sync::atomic::Ordering::Acquire) {
+            let _ = tx.try_push(slot(n));
+            n += 1;
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    });
+    let mut ingress = Some(thread);
+    let mut last_overflow = 0;
+    let deadline = Instant::now() + Duration::from_millis(300);
+    let (drain, write_error, end_error) = super::capture::drain_after_stop(
+        &rx,
+        &mut ingress,
+        &mut core,
+        &mut sink,
+        darkbot_common::timing::Clock::new(),
+        deadline,
+        &mut last_overflow,
+    );
+    let ended = Instant::now();
+    assert!(ended >= deadline, "not before the deadline");
+    assert!(
+        ended < deadline + Duration::from_millis(500),
+        "bounded: the drain never waits for the thread"
+    );
+    assert_eq!((drain, write_error, end_error), (false, None, None));
+    assert!(ingress.is_some(), "a live thread is not joined");
+    assert!(
+        core.stats.slot_notifications > 0,
+        "frames until then processed"
+    );
+    assert_eq!(
+        core.stats.slot_notifications,
+        rx.stats().received,
+        "every popped frame processed"
+    );
+    core.stop_observation();
+    let outcome = CaptureOutcome {
+        process_started_unix_s: 0,
+        ready_unix_s: Some(0),
+        window: Some((0, 600_000_000_000)),
+        capture_end_ns: 600_000_000_000,
+        observation_end_unix_s: 600,
+        stop_reason: "TIMER",
+        drain_complete: drain,
+        write_error: None,
+    };
+    let (summary, _, _) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
+    assert_eq!(view(&summary)["evidence_journal"]["status"], "INCOMPLETE");
+    let chain = crate::storage::segments::verify_chain(&cfg.run_dir.join(MARKET_JOURNAL)).unwrap();
+    assert_eq!((chain.sealed, chain.complete), (true, false));
+    // The thread ends after the seal, before the join (sealing can take long): the join past the
+    // deadline finds it finished — quiescent, `Ok` — and the run result is still the incomplete
+    // capture, never a successful run.
+    release.store(true, std::sync::atomic::Ordering::Release);
+    let thread = ingress.take().unwrap();
+    while !thread.is_finished() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let quiescent = super::capture::join_after_seal(Some(thread), deadline);
+    assert_eq!(quiescent, Ok(()), "a finished thread is joined at once");
+    assert_eq!(
+        super::capture::capture_end(&cfg, &quiescent, "TIMER", true, None, None, drain),
+        Err("MARKET_CAPTURE_INCOMPLETE: DRAIN_INCOMPLETE".into())
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// R1/D8: after the seal the ingress thread is joined within what is left of the drain budget:
+/// a thread still alive at the passed drain deadline is reported at once (`INGRESS_NOT_QUIESCENT`,
+/// no second full budget — the former call waited `drain_timeout_secs` again), a thread ending
+/// within the remaining budget is joined, no thread is quiescent.
+#[test]
+fn r1_ingress_is_joined_within_the_remaining_drain_budget() {
+    use std::time::{Duration, Instant};
+    let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hold = release.clone();
+    let alive = std::thread::spawn(move || {
+        while !hold.load(std::sync::atomic::Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+    let started = Instant::now();
+    assert_eq!(
+        super::capture::join_after_seal(Some(alive), started - Duration::from_millis(1)),
+        Err("INGRESS_NOT_QUIESCENT".into())
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "no second budget"
+    );
+    release.store(true, std::sync::atomic::Ordering::Release);
+    let ending = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(50)));
+    assert_eq!(
+        super::capture::join_after_seal(Some(ending), Instant::now() + Duration::from_secs(5)),
+        Ok(())
+    );
+    assert_eq!(
+        super::capture::join_after_seal::<()>(None, Instant::now()),
+        Ok(())
+    );
+}
+
 /// R9: the capture's periodic sink check surfaces a sticky background writer failure while no
 /// further row is written (the tick used to call a no-op `JournalSink::flush`).
 #[test]
