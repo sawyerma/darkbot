@@ -200,6 +200,31 @@ fn run_econ4h(
     if let Ok(url) = std::env::var("P0_MARKET_WS_URL") {
         market.ws_url = url;
     }
+    let owner = admission.map(|admission| {
+        move |handle: econ::Handle| {
+            run_shadow(clock, Some(handle), admission).map_err(|e| {
+                let report = failure_report(e.as_ref());
+                eprintln!("C0_E1_SHADOW_FAILED category={report}");
+                report
+            })
+        }
+    });
+    run_econ4h_with(cfg, market, clock, owner)
+}
+
+/// The C0-E1 run after configuration: the market capture bound to the measurement plan, the
+/// analytics worker, both owners under supervision (or the refusal before them) and the sealed
+/// phase journal. `owner` is the Shadow owner (`run_shadow` in production).
+pub(crate) fn run_econ4h_with<S>(
+    cfg: crate::analytics::econ::EconConfig,
+    mut market: crate::market::observer::MarketConfig,
+    clock: Clock,
+    owner: Result<S, &'static str>,
+) -> Result<(), String>
+where
+    S: FnOnce(crate::analytics::econ::Handle) -> Result<(), String> + Send + 'static,
+{
+    use crate::analytics::econ;
     market.duration_secs = cfg.plan.duration_seconds;
     market.ready_timeout_secs = cfg.plan.budgets.stream_ready_seconds;
     market.drain_timeout_secs = cfg.plan.budgets.market_drain_seconds;
@@ -211,8 +236,8 @@ fn run_econ4h(
     let (handle, analytics) = econ::spawn(cfg, clock, &market)?;
     let paths = handle.cfg.paths();
     // Every exit after BOOTSTRAP seals the phase journal and renders its JSONL view.
-    let result = match admission {
-        Ok(admission) => supervise(handle, analytics, market, clock, timeout, admission),
+    let result = match owner {
+        Ok(owner) => supervise(handle, analytics, market, clock, timeout, owner),
         Err(code) => refuse_before_owners(handle, analytics, clock, code),
     };
     let rendered = crate::analytics::measurement::finalize_phases(&paths, result.is_ok());
@@ -259,25 +284,24 @@ fn refuse_before_owners(
     Err(code.into())
 }
 
-fn supervise(
+fn supervise<S>(
     handle: crate::analytics::econ::Handle,
     analytics: std::thread::JoinHandle<Result<(), String>>,
     market: crate::market::observer::MarketConfig,
     clock: Clock,
     timeout: u64,
-    admission: Option<super::boot_audit::NetworkAudit>,
-) -> Result<(), String> {
+    owner: S,
+) -> Result<(), String>
+where
+    S: FnOnce(crate::analytics::econ::Handle) -> Result<(), String> + Send + 'static,
+{
     use crate::market::observer as market_observer;
     use std::sync::atomic::Ordering;
     let shadow_handle = handle.clone();
     let shadow = std::thread::Builder::new()
         .name("econ-shadow-owner".into())
         .spawn(move || {
-            let result = run_shadow(clock, Some(shadow_handle.clone()), admission).map_err(|e| {
-                let report = failure_report(e.as_ref());
-                eprintln!("C0_E1_SHADOW_FAILED category={report}");
-                report
-            });
+            let result = owner(shadow_handle.clone());
             record_shadow_end(
                 &shadow_handle.shared,
                 result.is_err(),
@@ -458,6 +482,225 @@ mod supervise_tests {
         assert!(started.elapsed() < Duration::from_secs(1));
         stuck.join().unwrap();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A loopback WebSocket peer (plain `ws://`, never Mainnet): acknowledges every subscription
+    /// and delivers slot progress every 50 ms; with `drop_after` it drops its first session after
+    /// that many slots (a transport gap) and serves the reconnect until the client closes.
+    fn loopback_peer(drop_after: Option<u64>) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tungstenite::Message;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = accepted.clone();
+        let sessions = if drop_after.is_some() { 2 } else { 1 };
+        std::thread::spawn(move || {
+            let mut slot = 1_000u64;
+            for session in 0..sessions {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                count.fetch_add(1, Ordering::Release);
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(50)))
+                    .unwrap();
+                let mut ws = tungstenite::accept(stream).unwrap();
+                let (mut acked, mut slot_subscription, mut sent) = (0, None, 0u64);
+                loop {
+                    match ws.read() {
+                        Ok(Message::Text(text)) => {
+                            let request: serde_json::Value = serde_json::from_str(&text).unwrap();
+                            let id = request["id"].as_u64().unwrap();
+                            if request["method"] == "slotSubscribe" {
+                                slot_subscription = Some(id);
+                            }
+                            acked += 1;
+                            let ack = serde_json::json!({"jsonrpc": "2.0", "id": id, "result": id});
+                            if ws.send(Message::Text(ack.to_string())).is_err() {
+                                break;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(tungstenite::Error::Io(e))
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                            ) => {}
+                        Err(_) => break,
+                    }
+                    if let (2, Some(subscription)) = (acked, slot_subscription) {
+                        if session == 0 && drop_after.is_some_and(|n| sent >= n) {
+                            break; // dropped without a close frame: a transport gap
+                        }
+                        slot += 1;
+                        sent += 1;
+                        let notification = serde_json::json!({"jsonrpc": "2.0",
+                            "method": "slotNotification", "params": {"subscription": subscription,
+                            "result": {"slot": slot, "parent": slot - 1, "root": slot - 2}}});
+                        if ws.send(Message::Text(notification.to_string())).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        (url, accepted)
+    }
+
+    /// The production C0-E1 run (`run_econ4h_with`: plan-bound market capture, analytics worker,
+    /// supervision, phase journal) over the loopback peer. The Shadow owner needs an RPC boot, so
+    /// a stand-in publishes its readiness exactly as `ShadowOwner` does (`lifecycle.rs`) and ends
+    /// at the drain expiry like its loop; it evaluates nothing.
+    fn unit_e_run(gap: bool) -> (std::path::PathBuf, Result<(), String>, usize) {
+        let (url, accepted) = loopback_peer(gap.then_some(20));
+        let out = std::env::temp_dir().join(format!("p0_unit_e_{}_{gap}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let env: std::collections::HashMap<&str, String> = [
+            ("P0_ECON_RUN_ID", "unit_e".to_string()),
+            ("P0_ECON_OUT_DIR", out.to_string_lossy().to_string()),
+            ("P0_RUN_LAYOUT", "v2".into()),
+            ("P0_ECON_DURATION_SECS", "4".into()),
+            ("P0_PROVIDER_CLASS", "test".into()),
+            ("P0_MARKET_READY_TIMEOUT_SECS", "10".into()),
+            ("P0_ECON_DRAIN_SECS", "1".into()),
+            ("P0_MARKET_DRAIN_TIMEOUT_SECS", "5".into()),
+            ("P0_WS_URL", url),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+            ),
+            ("P0_MARKET_SOURCE", "logs".into()),
+            ("P0_MARKET_HEARTBEAT_SECS", "1".into()),
+        ]
+        .into_iter()
+        .collect();
+        let get = |k: &str| env.get(k).cloned();
+        let clock = Clock::new();
+        let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
+        let cfg = crate::analytics::econ::EconConfig::from_lookup(&get, now_s).unwrap();
+        let market = crate::market_observer::MarketConfig::from_lookup(&get, now_s).unwrap();
+        let run = cfg.run_dir.clone();
+        let owner = |h: crate::analytics::econ::Handle| -> Result<(), String> {
+            h.shared.shadow_ready.store(true, Ordering::Release);
+            let _ = h.shared.shadow_ready_ns.compare_exchange(
+                0,
+                h.clock.now_ns(),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+            while !h.drain_expired() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(())
+        };
+        let result = run_econ4h_with(cfg, market, clock, Ok::<_, &'static str>(owner));
+        (run, result, accepted.load(Ordering::Acquire))
+    }
+
+    /// Readiness unit E (PHASENPLAN L.2): capture, optional post-capture verification, report and
+    /// qualification stay separate axes end to end on the production C0-E1 path. A capture that
+    /// ran its full clock is a finished capture (market owner without failure,
+    /// `capture_clock_complete`) with or without a transport gap; the gap stays
+    /// `LIVE_COVERAGE_INCOMPLETE` through every verification level; `off` is `NOT_RUN`, an offline
+    /// strict attempt without chain data is never canonical, the report stays PROVISIONAL and never
+    /// claims the C0-E1 master, and the technical qualification — the run result — is INCOMPLETE
+    /// (no canonical evidence, no evaluation), never PASS.
+    #[test]
+    fn unit_e_capture_verification_report_and_qualification_stay_separate() {
+        use crate::analytics::report::{self, ReportQuery};
+        use crate::market::observer::strict_driver::{drive, DriverRequest, StrictBudget};
+        for gap in [false, true] {
+            let (run, result, sessions) = unit_e_run(gap);
+            assert_eq!(
+                result,
+                Err("C0-E1 technical qualification incomplete; see economics_final.json".into()),
+                "gap={gap}"
+            );
+            assert_eq!(sessions, if gap { 2 } else { 1 }, "gap={gap}");
+            // Both owners ended without failure: the capture itself finished (also with the gap).
+            let paths = crate::run_layout::RunPaths::new(&run, crate::run_layout::RunLayout::V2);
+            let mut r = crate::analytics::journal::Reader::open(
+                &crate::analytics::journal::binary_path(&paths.phases()),
+            )
+            .unwrap();
+            let mut owners = None;
+            while let Ok(Some(f)) = r.next_frame() {
+                if f.kind != crate::analytics::journal::kind::MEASUREMENT_PHASE {
+                    continue;
+                }
+                let row = f
+                    .typed::<crate::analytics::measurement::PhaseRecord>()
+                    .unwrap();
+                if let crate::analytics::measurement::Phase::OwnersFinished {
+                    aborted,
+                    shadow_failed,
+                    market_failed,
+                } = row.phase
+                {
+                    owners = Some((aborted, shadow_failed, market_failed));
+                }
+            }
+            assert_eq!(owners, Some((false, false, false)), "gap={gap}");
+            let live = if gap {
+                "LIVE_COVERAGE_INCOMPLETE"
+            } else {
+                "LIVE_COVERAGE_COMPLETE"
+            };
+            // Verification off: the report is provisional and binds the capture axes only.
+            let q = ReportQuery::default();
+            let off = report::report(&run, &report::Options::default(), &q).unwrap();
+            let ds = &off.dataset;
+            assert_eq!(ds.verification_status, "NOT_RUN", "gap={gap}");
+            assert_eq!(ds.report_status, "PROVISIONAL/INCOMPLETE", "gap={gap}");
+            assert!(ds.capture_clock_complete, "gap={gap}");
+            assert_eq!(ds.live_coverage_status, live, "gap={gap}");
+            assert!(!ds.c0_e1_master_pass);
+            // Strict, offline (no provider, no cached chain data): never canonical, and the live
+            // coverage of the capture is unchanged.
+            let budget = StrictBudget {
+                rps: 2,
+                max_calls: 10,
+                max_seconds: 30,
+                max_bytes: 1 << 20,
+                max_disk_bytes: 1 << 24,
+                max_ram_bytes: 1 << 34,
+                min_free_bytes: 1,
+            };
+            let strict = drive(&DriverRequest {
+                run: run.clone(),
+                budget,
+                offline: true,
+                resume: false,
+            })
+            .unwrap();
+            assert_ne!(strict.status, "CANONICAL_VERIFIED", "gap={gap}");
+            let after = report::report(&run, &report::Options::default(), &q).unwrap();
+            let ds = &after.dataset;
+            assert_eq!(ds.verification_status, strict.status, "gap={gap}");
+            assert_eq!(
+                ds.identity.verification_result_id,
+                strict.verification_result_id
+            );
+            assert_eq!(ds.report_status, "PROVISIONAL/INCOMPLETE", "gap={gap}");
+            assert_eq!(ds.live_coverage_status, live, "gap={gap}");
+            assert!(ds.capture_clock_complete && !ds.c0_e1_master_pass);
+            // The technical qualification of the run is never PASS here.
+            let mut r = crate::analytics::journal::Reader::open(
+                &run.join("snapshots")
+                    .join(crate::analytics::econ::REPORT_JOURNAL),
+            )
+            .unwrap();
+            let mut last = None;
+            while let Ok(Some(f)) = r.next_frame() {
+                if f.kind == crate::analytics::journal::kind::ECON_FINAL {
+                    last = Some(f.typed::<crate::analytics::econ::SnapshotReport>().unwrap());
+                }
+            }
+            let technical = last.expect("ECON_FINAL").technical_qualification;
+            assert_eq!(technical.verdict, "INCOMPLETE", "gap={gap}");
+            assert!(!technical.market_capture_complete, "gap={gap}");
+            let _ = std::fs::remove_dir_all(run.parent().unwrap());
+        }
     }
 }
 
