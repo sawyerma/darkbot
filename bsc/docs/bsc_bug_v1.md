@@ -4,6 +4,13 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Implementierungsstand — 2026-10-21, Paket E5 / Phasengrenze
+
+- **FIXED / TESTED:** E5-2/3/4, ausschließlich `execution/src/startup.rs`. ASCII-Hex-Prüfung vor Slicing/Decode, redigierte Fehler ohne Unicode-Panic; MAX-1/MAX als Startgeneration gesperrt, MAX als unwiderruflicher Runtime-Widerruf (kein Wrap/Sättigungs-PASS), aktuelle Autorisierung lehnt terminale Generationen ab. Cold-start-Fence und Invalidation sind serialisiert; kein Mutex im BUY-/Authorization-Read-Pfad. Slippage 10000 wird wie in BuyPolicy abgelehnt.
+- **Tests:** 12 Startup-Tests PASS ohne G0.7-Feature, einschließlich Rohbytes/Hex/Unicode/63/65/Invalid-Hex, vier Generationsarten und paralleler terminaler Widerrufe, Arm/Revocation-Rennen sowie 9999/10000/10001. Normaler Execution-Library-Build `--locked --offline` PASS, rustc 1.93.1. Ein falscher erwarteter Fehlertext im neuen Test korrigiert. Kein produktiver Startup/Fence/Send; isolierte temporäre Verzeichnisse.
+- **DEFERRED durch G0.7/G0.8-Phasengate:** E5-1 Session-Risk, E5-5/6; E6-1/2/3; E7-5 vor C1-Produktiveinsatz, E7-6/7; E8-1/4 gemeinsames Ordering-/Gap-Design und E8-2 persistenter Writer-Owner. Diese offenen Punkte verhindern entsprechende spätere Produktivabnahmen; kein vorgezogener C1/C2-Patch und keine neue Journal-Wire-Version.
+- Bestehende lokale Operator-/Evidence-Dateien anhand der vorigen SHA-Inventur unverändert geprüft; keine Aufnahme dieser untracked Dateien in den Commit. GUI/Project 0/Solana unverändert. G0.7 UNARMED, G0.8 NOT_EXECUTED.
+
 ## Implementierungsstand — 2026-10-21, Paket E4
 
 - **FIXED / TESTED:** E4-3/4. G0.7-vs-Trading RLP/Hash-Parität für synthetische Launcher/BUY-Rollen und Null-/Long-RLP-Fall, Canonical-Decoding/Low-s/Sender-Recovery; RAII-Zeroizing für rohe Key-Strings und Decode-Puffer; ENV-Cleanup im ausdrücklich einthreadigen Startup vor RPC/TLS/Workern. `sign_legacy` unverändert, keine echten Wallet-Keys geladen.
@@ -1048,11 +1055,11 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 
 | Etappe | Geplanter Gegenstand | Stand |
 | --- | --- | --- |
-| 1 | G0.7 Guard/Vertrag/Readiness/Requal | **REVIEWED / FIXES OPEN** |
-| 2 | G0.8 Verifikation/Witness/Evidence | **REVIEWED / FIXES OPEN** |
-| 3 | G0.6a DRY-/Requal-Werkzeuge | **REVIEWED / FIXES OPEN; SALT A/B UNDECIDED** |
-| 4 | Trading/Signer/RLP/Intent | **4a + 4b REVIEWED; E4-3/E4-4 OPEN; 4b future C2/C3 items parked** |
-| 5 | Execution/Submission/TLS | **REVIEWED / E5-2..E5-4 FIXES OPEN; E5-1 C2 GATE; E5-5/6 DEFERRED** |
+| 1 | G0.7 Guard/Vertrag/Readiness/Requal | **FIXED/TESTED laut Paketstatus; verbleibende BLOCKED/DEFERRED siehe oben** |
+| 2 | G0.8 Verifikation/Witness/Evidence | **FIXED/TESTED laut Paketstatus; verbleibende BLOCKED/DEFERRED siehe oben** |
+| 3 | G0.6a DRY-/Requal-Werkzeuge | **E3-2..6 FIXED/TESTED; E3-1 BLOCKED (A/B); E3-7 DEFERRED** |
+| 4 | Trading/Signer/RLP/Intent | **E4-3/E4-4 FIXED/TESTED; Salt BLOCKED; Produktionsqualifikation DEFERRED** |
+| 5 | Execution/Submission/TLS | **E5-2..E5-4 FIXED/TESTED; E5-1/5/6 DEFERRED bis C2** |
 | 6 | geth_ipc Rust | **PARTIAL REVIEWED / E6-1/E6-2 C1/C2 INTEGRATION OPEN; E6-3 MEMORY PROOF OPEN** |
 | 7 | Go-geth Overlay/Rust-Paritaet | **PARTS 1+2 REVIEWED / E7-5 SECURITY FIX & E7-6 PERFORMANCE OPEN; E7-7/E6-3 MEMORY PROOF OPEN; E7-3 NO BUG** |
-| 8 | Journal/Records/Legacy | **REVIEWED / E8-1/E8-4 ORDER+GAP OPEN; E8-2 WRITER OPEN; E8-3 SHELL OPEN; LEGACY_IMPORT FOUND/REVIEWED** |
+| 8 | Journal/Records/Legacy | **REVIEWED / E8-1/E8-4 ORDER+GAP OPEN; E8-2 WRITER OPEN; E8-3 FIXED/TESTED; LEGACY_IMPORT FOUND/REVIEWED** |

@@ -9,7 +9,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use alloy_primitives::{Address, B256, U256};
@@ -119,6 +119,9 @@ pub struct GenerationSnapshot {
 
 #[derive(Debug)]
 struct GenerationAtoms {
+    // Serializes cold-start fence creation with background invalidation only;
+    // authorization reads and the hot path never take this lock.
+    transition: Mutex<()>,
     policy: AtomicU64,
     codehash: AtomicU64,
     capability: AtomicU64,
@@ -136,6 +139,7 @@ impl GenerationOwner {
     fn from_snapshot(snapshot: GenerationSnapshot) -> Self {
         Self {
             inner: Arc::new(GenerationAtoms {
+                transition: Mutex::new(()),
                 policy: AtomicU64::new(snapshot.policy),
                 codehash: AtomicU64::new(snapshot.codehash),
                 capability: AtomicU64::new(snapshot.capability),
@@ -153,27 +157,41 @@ impl GenerationOwner {
         }
     }
 
+    fn invalidate(&self, value: &AtomicU64) -> u64 {
+        let _transition = self.inner.transition.lock().unwrap_or_else(|e| e.into_inner());
+        bump(value)
+    }
+
     pub fn invalidate_policy(&self) -> u64 {
-        bump(&self.inner.policy)
+        self.invalidate(&self.inner.policy)
     }
 
     pub fn invalidate_codehash(&self) -> u64 {
-        bump(&self.inner.codehash)
+        self.invalidate(&self.inner.codehash)
     }
 
     pub fn invalidate_capability(&self) -> u64 {
-        bump(&self.inner.capability)
+        self.invalidate(&self.inner.capability)
     }
 
     pub fn revoke_authorization(&self) -> u64 {
-        bump(&self.inner.authorization)
+        self.invalidate(&self.inner.authorization)
     }
+}
+
+// MAX-1 is reserved; MAX is an irreversible terminal revocation marker.
+// Neither value can be an authorized generation, even in synthetic snapshots.
+const MAX_START_GENERATION: u64 = u64::MAX - 2;
+
+fn valid_generations(snapshot: GenerationSnapshot) -> bool {
+    [snapshot.policy, snapshot.codehash, snapshot.capability, snapshot.authorization]
+        .into_iter().all(|value| (1..=MAX_START_GENERATION).contains(&value))
 }
 
 fn bump(value: &AtomicU64) -> u64 {
     let mut current = value.load(Ordering::Acquire);
     loop {
-        let next = current.saturating_add(1);
+        let next = if current >= MAX_START_GENERATION { u64::MAX } else { current + 1 };
         match value.compare_exchange(current, next, Ordering::AcqRel, Ordering::Acquire) {
             Ok(_) => return next,
             Err(observed) => current = observed,
@@ -199,7 +217,10 @@ impl StartupAuthorization {
     }
 
     pub fn is_current(self, owner: &GenerationOwner) -> bool {
-        owner.snapshot() == self.generations
+        let current = owner.snapshot();
+        !owner.inner.transition.is_poisoned()
+            && valid_generations(current)
+            && current == self.generations
     }
 }
 
@@ -279,6 +300,10 @@ impl ValidatedStartup {
     /// sync fails after create_new, the file is deliberately left behind so
     /// the next startup is also quarantined.
     pub fn arm(self, root: &Path) -> Result<ArmedStartup, StartupError> {
+        // Invalidation either precedes this check (STOP), or follows creation
+        // and makes authorization_current() false. It cannot pass during fsync.
+        let generations = Arc::clone(&self.generations.inner);
+        let _transition = generations.transition.lock().map_err(|_| StartupError::StaleAuthorization)?;
         if !self.authorization.is_current(&self.generations) {
             return Err(StartupError::StaleAuthorization);
         }
@@ -363,6 +388,7 @@ pub enum StartupError {
     WrongChain,
     UnsupportedProfile,
     ZeroGeneration,
+    GenerationOutOfRange,
     CapabilityGenerationMismatch,
     SenderMismatch,
     InvalidNonceRange,
@@ -401,6 +427,7 @@ impl fmt::Display for StartupError {
             Self::WrongChain => f.write_str("startup: chain must be BSC mainnet"),
             Self::UnsupportedProfile => f.write_str("startup: unsupported release profile"),
             Self::ZeroGeneration => f.write_str("startup: generation must be nonzero"),
+            Self::GenerationOutOfRange => f.write_str("startup: generation is in reserved terminal range"),
             Self::CapabilityGenerationMismatch => {
                 f.write_str("startup: capability generation mismatch")
             }
@@ -528,6 +555,12 @@ fn validate_config(config: &StartupConfig, table: &AdapterTable) -> Result<(), S
     {
         return Err(StartupError::ZeroGeneration);
     }
+    if [config.policy_generation, config.codehash_generation,
+        config.capability_generation, config.authorization_generation]
+        .into_iter().any(|value| value > MAX_START_GENERATION)
+    {
+        return Err(StartupError::GenerationOutOfRange);
+    }
     if table.generation() != config.capability_generation {
         return Err(StartupError::CapabilityGenerationMismatch);
     }
@@ -615,7 +648,7 @@ fn validate_economics(e: StartupEconomics) -> Result<(), StartupError> {
     if e.buy_amount_wei == 0
         || e.gas_price_wei == 0
         || e.gas_limit == 0
-        || e.slippage_bps > 10_000
+        || e.slippage_bps >= 10_000
         || e.buy_amount_wei > e.max_buy_input_wei
         || e.provider_bid_wei > e.max_provider_payment_wei
     {
@@ -651,7 +684,9 @@ fn read_signer_secret(path: &Path) -> Result<[u8; 32], StartupError> {
                 std::str::from_utf8(&bytes).map_err(|_| StartupError::InvalidSignerEncoding)?;
             let trimmed = text.trim();
             let hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-            if hex.len() != 64 {
+            // Reject all non-ASCII/non-hex bytes before any string slicing or
+            // partial decode; errors contain no input and reach the wipe below.
+            if hex.len() != 64 || !hex.as_bytes().iter().all(u8::is_ascii_hexdigit) {
                 return Err(StartupError::InvalidSignerEncoding);
             }
             let mut out = [0u8; 32];
@@ -1010,4 +1045,118 @@ mod tests {
         assert!(!printed.contains("unit-test-secret"));
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn signer_file_encoding_is_panic_free_and_redacted() {
+        let root = tmp("encoding");
+        let path = root.join("key");
+        for good in [vec![0x22; 32], "22".repeat(32).into_bytes(),
+            format!(" \n0x{}\n", "22".repeat(32)).into_bytes()] {
+            fs::write(&path, good).unwrap();
+            assert_eq!(read_signer_secret(&path).unwrap(), [0x22; 32]);
+        }
+        for bad in [format!("{}éa", "a".repeat(61)).into_bytes(),
+            "a".repeat(63).into_bytes(), "a".repeat(65).into_bytes(),
+            "g".repeat(64).into_bytes(), vec![0xff; 64]] {
+            fs::write(&path, bad).unwrap();
+            let result = std::panic::catch_unwind(|| read_signer_secret(&path)).unwrap();
+            assert!(matches!(result, Err(StartupError::InvalidSignerEncoding)));
+            assert_eq!(result.unwrap_err().to_string(), "startup: signer key encoding is invalid");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generation_limits_are_rejected_for_all_four_startup_fields() {
+        for field in 0..4 {
+            for value in [0, u64::MAX - 1, u64::MAX] {
+                let mut config = config(Address::repeat_byte(1));
+                match field {
+                    0 => config.policy_generation = value,
+                    1 => config.codehash_generation = value,
+                    2 => config.capability_generation = value,
+                    _ => config.authorization_generation = value,
+                }
+                let error = validate_config(&config, &table()).unwrap_err();
+                assert!(if value == 0 { matches!(error, StartupError::ZeroGeneration) }
+                    else { matches!(error, StartupError::GenerationOutOfRange) });
+            }
+        }
+        let mut config = config(Address::repeat_byte(1));
+        config.authorization_generation = MAX_START_GENERATION;
+        assert!(validate_config(&config, &table()).is_ok());
+    }
+
+    #[test]
+    fn terminal_generation_revokes_irreversibly_under_concurrency() {
+        let root = tmp("terminal");
+        let (config, sources) = valid(&root);
+        let observed = facts(&config);
+        let startup = validate_startup(config, &table(), &sources, observed).unwrap();
+        for field in 0..4 {
+            let mut auth = startup.authorization();
+            match field {
+                0 => auth.generations.policy = MAX_START_GENERATION,
+                1 => auth.generations.codehash = MAX_START_GENERATION,
+                2 => auth.generations.capability = MAX_START_GENERATION,
+                _ => auth.generations.authorization = MAX_START_GENERATION,
+            }
+            let owner = GenerationOwner::from_snapshot(auth.generations);
+            assert!(auth.is_current(&owner));
+            std::thread::scope(|scope| {
+                for _ in 0..4 {
+                    let owner = &owner;
+                    scope.spawn(move || {
+                        let end = match field {
+                            0 => owner.invalidate_policy(),
+                            1 => owner.invalidate_codehash(),
+                            2 => owner.invalidate_capability(),
+                            _ => owner.revoke_authorization(),
+                        };
+                        assert_eq!(end, u64::MAX);
+                        assert!(!auth.is_current(owner));
+                    });
+                }
+            });
+            assert!(!auth.is_current(&owner));
+            // Even forging a matching terminal snapshot cannot reauthorize it.
+            auth.generations = owner.snapshot();
+            assert!(!auth.is_current(&owner));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revocation_and_cold_start_fence_are_serialized() {
+        let root = tmp("arm-race");
+        let (config, sources) = valid(&root);
+        let observed = facts(&config);
+        let startup = validate_startup(config, &table(), &sources, observed).unwrap();
+        let owner = startup.generations().clone();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let join = scope.spawn(|| { barrier.wait(); owner.revoke_authorization(); });
+            barrier.wait();
+            let result = startup.arm(&root.join("fence"));
+            join.join().unwrap();
+            match result {
+                Ok(armed) => assert!(!armed.authorization_current()),
+                Err(error) => assert!(matches!(error, StartupError::StaleAuthorization)),
+            }
+        });
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn slippage_boundaries_match_buy_policy() {
+        use darkbot_bsc_trading::economics::policy::BuyPolicy;
+        for bps in [9_999, 10_000, 10_001] {
+            let mut economics = config(Address::repeat_byte(1)).economics;
+            economics.slippage_bps = bps;
+            let startup = validate_economics(economics).is_ok();
+            let policy = BuyPolicy::new(1, U256::from(1), bps, 1, 1).is_ok();
+            assert_eq!(startup, bps < 10_000);
+            assert_eq!(startup, policy);
+        }
+    }
+
 }
