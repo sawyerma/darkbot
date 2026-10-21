@@ -29,7 +29,7 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 | JFI-FIX-04 handoffs | JFI-04 | `measurement_plan.json`, `storage_preflight.json`, `candidate_manifest.json` JSON handoffs (pinned `run_store.py` requires them) | **D4**: native records primary, JSON only as catalogued renders until a re-pin decision |
 | JFI-FIX-06/07 | JFI | FE-04 journal schema 1; Jupiter adapter wire exception | not on the observe-only 4h path (no FE-04 handoff, no submission); stays OPEN, recorded as deferred, not done |
 | Duration / RunHorizon | P1, STARTUP §3, task §8 | `MeasurementPlan` fixed, `s/m/h`, two parsers | **C5**: `RunHorizon::Fixed` + `d` unit, one parser; `UntilStopped` stays follow-up scope |
-| Verification levels | L.2, task §9 | off/index/strict/crosscheck separated (C0E1-P4/P5/P6 evidence) | **E** LOCAL_PASS for `off`/`strict` (`67ab023`); `index`/`crosscheck` BLOCKED (pinned Python verifier, re-pin decision); master qualification after verification missing (BUGS V21) |
+| Verification levels | L.2, task §9 | off/index/strict/crosscheck separated (C0E1-P4/P5/P6 evidence) | **E** LOCAL_PASS for `off`/`strict` (`67ab023`); `index`/`crosscheck` BLOCKED (pinned Python verifier, re-pin decision); master qualification `145784c` (C0E1-P4-VC) |
 | Mainnet smoke | task §11 | NOT_RUN | **F**: only with explicit user permission |
 
 ## Progress
