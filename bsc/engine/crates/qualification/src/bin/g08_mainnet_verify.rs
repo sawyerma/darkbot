@@ -707,15 +707,38 @@ fn portal_buys(receipt: &Receipt) -> Result<Vec<BuyEvent>, String> {
     Ok(events)
 }
 
+// Receipt identity/status are independently checkable. Event/Transfer economics
+// remain unqualified for v5.25 tax tokens until an original canonical receipt
+// proves their relation. A mismatch is incomplete evidence, not proof of failure.
+#[derive(Debug, PartialEq, Eq)]
+enum AcquisitionError {
+    Identity,
+    Unverified(String),
+}
+impl From<String> for AcquisitionError {
+    fn from(reason: String) -> Self { Self::Unverified(reason) }
+}
+impl From<&str> for AcquisitionError {
+    fn from(reason: &str) -> Self { Self::Unverified(reason.into()) }
+}
+impl std::fmt::Display for AcquisitionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Identity => f.write_str("BUY receipt execution/sender/recipient mismatch"),
+            Self::Unverified(reason) => write!(f, "UNVERIFIED_TAX_ATTRIBUTION: {reason}"),
+        }
+    }
+}
+
 fn attributable_acquisition(
     receipt: &Receipt,
     token: Address,
     buyer: Address,
     value: U256,
     minimum: U256,
-) -> Result<(U256, U256), String> {
+) -> Result<(U256, U256), AcquisitionError> {
     if receipt.status != 1 || receipt.from != buyer || receipt.to != Some(PORTAL) {
-        return Err("BUY receipt execution/sender/recipient mismatch".into());
+        return Err(AcquisitionError::Identity);
     }
     let buys = portal_buys(receipt)?;
     let matching: Vec<_> = buys
@@ -1217,6 +1240,12 @@ fn main() {
         expected_buy_value,
         expected_min_output,
     );
+    // Persist the exact bounded diagnostic using the existing versioned
+    // UNRESOLVED record. Do not reinterpret an unqualified tax ABI mismatch
+    // as STOP or ADAPT, even when archive state is otherwise available.
+    if let Err(error @ AcquisitionError::Unverified(_)) = &acquisition {
+        abort(&error.to_string());
+    }
     let acquisition_evidence_complete = token_absent_before.is_some()
         && token_exists_after.is_some()
         && buyer_balance_after.is_some();
@@ -1357,7 +1386,7 @@ fn main() {
         .set(result::CHAIN_RECORD_TIMESTAMP_IS_PRODUCER_TIME, false)
         .set(
             result::COMPETITION_SCAN,
-            "Complete canonical receipt sets; TokenBought events include router-internal Portal buys. Transfer net and event amount bind acquisition to the BUY receipt. Fees are included in BUY value, never added twice.",
+            "Complete canonical receipt sets; TokenBought events include router-internal Portal buys. Positive acquisition requires matching observed Transfer net and event amount in the exact BUY receipt; v5.25 tax semantics are not independently qualified. A mismatch is UNRESOLVED. Event fees are reported without adding them a second time to the transaction value.",
         )
         .set(result::CURRENT_HEAD, head)
         .set(
@@ -1516,6 +1545,37 @@ mod tests {
         assert!(
             attributable_acquisition(&r, token, buyer, U256::from(101), U256::from(19)).is_err()
         );
+    }
+
+    #[test]
+    fn unqualified_tax_mismatches_are_distinct_from_proven_identity_failure() {
+        let token = Address::repeat_byte(3);
+        let buyer = Address::repeat_byte(4);
+        let mut receipt = receipt(2, Some(5));
+        receipt.from = buyer;
+        receipt.to = Some(PORTAL);
+        receipt.logs = vec![buy_log(token, buyer, 20, 100, 1), transfer_log(token, buyer, 20)];
+        let assess = |r: &Receipt| attributable_acquisition(r, token, buyer, U256::from(100), U256::from(19));
+        assert!(assess(&receipt).is_ok()); // Synthetic structure only, no tax qualification.
+        for variant in 0..6 {
+            let mut changed = receipt.clone();
+            match variant {
+                0 => changed.logs.clear(),
+                1 => changed.logs[0] = buy_log(token, buyer, 21, 100, 1),
+                2 => changed.logs[0] = buy_log(token, buyer, 20, 99, 1),
+                3 => changed.logs[0] = buy_log(token, buyer, 20, 100, 101),
+                4 => changed.logs[0] = buy_log(token, Address::ZERO, 20, 100, 1),
+                _ => changed.logs[0] = buy_log(Address::ZERO, buyer, 20, 100, 1),
+            }
+            let error = assess(&changed).unwrap_err();
+            assert!(matches!(error, AcquisitionError::Unverified(_)));
+            assert!(error.to_string().starts_with("UNVERIFIED_TAX_ATTRIBUTION:"));
+        }
+        receipt.from = Address::ZERO;
+        assert_eq!(assess(&receipt), Err(AcquisitionError::Identity));
+        receipt.from = buyer;
+        receipt.status = 0;
+        assert_eq!(assess(&receipt), Err(AcquisitionError::Identity));
     }
 
     #[test]

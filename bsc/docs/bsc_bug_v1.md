@@ -4,6 +4,11 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Fortsetzung 2026-10-21 — E2-3/E2-4 Teilpaket
+
+- **FIXED / TESTED:** Tax-/Event-Zuordnungsfehler sind typisiert von bewiesenen Receipt-Identitäts-/Statusfehlern getrennt. Unqualifizierte Event-/Transfer-Differenzen erzeugen persistiertes `UNRESOLVED` mit `UNVERIFIED_TAX_ATTRIBUTION`, niemals daraus abgeleitetes STOP/ADAPT/PASS. Bestehende Archive-/RPC-Fehler bleiben terminal UNRESOLVED. Keine neue ABI-Annahme oder geänderte Eventgleichung.
+- **Tests:** 14 Verifier-Unit- und 5 Binary-Record-Tests PASS (`--locked --offline`); synthetische Normal-/Buyer-/Token-/Amount-/Fee-/Missing-Event-Fälle belegen Klassifikation, nicht reale v5.25-Tax-Semantik. **BLOCKED:** ursprüngliches kanonisches vergleichbares v5.25-Tax-Receipt samt TX/Version/State für fachliche Abnahme fehlt weiterhin.
+
 ## Implementierungsstand — 2026-10-21, Paket E5 / Phasengrenze
 
 - **FIXED / TESTED:** E5-2/3/4, ausschließlich `execution/src/startup.rs`. ASCII-Hex-Prüfung vor Slicing/Decode, redigierte Fehler ohne Unicode-Panic; MAX-1/MAX als Startgeneration gesperrt, MAX als unwiderruflicher Runtime-Widerruf (kein Wrap/Sättigungs-PASS), aktuelle Autorisierung lehnt terminale Generationen ab. Cold-start-Fence und Invalidation sind serialisiert; kein Mutex im BUY-/Authorization-Read-Pfad. Slippage 10000 wird wie in BuyPolicy abgelehnt.
