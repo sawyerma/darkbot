@@ -316,3 +316,14 @@ fn child_processes_are_spawned_only_with_a_cleared_environment() {
     assert!(chain_reads.contains("child_command(\"curl\")"));
     assert!(!chain_reads.contains("child_command(\"node\")"));
 }
+
+#[test]
+fn key_cleanup_precedes_every_external_or_concurrent_startup_boundary() {
+    let source = include_str!("../src/bin/g07_mainnet_self_launch_buy/main.rs");
+    let cleanup = source.find("unsafe { take_startup_keys() }").unwrap();
+    let prefix = &source[source.find("fn main()").unwrap()..cleanup];
+    for forbidden in ["rpc_", "connect_tls(", "HeadPoller::", "CaptureSession::", "thread::spawn", "Command::"] {
+        // Endpoint parsing is a pure local operation, not RPC IO.
+        assert!(!prefix.replace("parse_rpc_endpoint", "parse_endpoint").replace("rpc_endpoint", "endpoint").contains(forbidden), "{forbidden}");
+    }
+}

@@ -4,6 +4,13 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Implementierungsstand — 2026-10-21, Paket E4
+
+- **FIXED / TESTED:** E4-3/4. G0.7-vs-Trading RLP/Hash-Parität für synthetische Launcher/BUY-Rollen und Null-/Long-RLP-Fall, Canonical-Decoding/Low-s/Sender-Recovery; RAII-Zeroizing für rohe Key-Strings und Decode-Puffer; ENV-Cleanup im ausdrücklich einthreadigen Startup vor RPC/TLS/Workern. `sign_legacy` unverändert, keine echten Wallet-Keys geladen.
+- **Tests:** 27 G0.7-Unit-, 11 No-Send-/Startup-Order- und ein unabhängiger bestehender Trading-Golden-Test PASS, `--locked --offline`, Feature `g07-mainnet`, rustc 1.93.1. Key-Cleanup mit isoliertem Environment-Modell inklusive fehlender/ungültiger Keys; realer Child-Environment-Clear-Test PASS. Kein unsafe ENV-Mutieren im parallelen Testharness. Nullung ist RAII-Codegarantie, kein behaupteter Speicherforensik-Test.
+- **Neue Quellbindung:** `inputs.rs` `8f810861fe472baf0d6005e83ca92da28e753515ba7747187434ca3e9e35afb8`; `main.rs` `5aa77bc6d8054efb63a2336ea772d4bbe0049d61e37e99aede63a6d8688dbfd5`; `transactions.rs` `2da8c1dd3ee9f09bc8e481e72b129e8a65eb8cbcbd321a7489593a2da5e827a0`. Offline erzeugter Probe-Plan `20c4cfd212121a26d0e228ce4d8bb0f1bbf3e2ad119cf20f63f235fecd8e2b8a`; Ausgabe bestätigt keine Verbindung/Sendung. Die Quellen/Lockfile ändern den Plan: alte Probe-Plan-Freigaben gelten hierfür **nicht**. Eine spätere freigegebene Netzwerk-Probe ist hier nicht ausgeführt/qualifiziert. Historische Signed-Byte-Evidence bleibt unverändert; synthetische Parität ist kein erneutes Signieren des echten Hashpaars.
+- E4-1 und E4b-1/2 bleiben **DEFERRED** bis zur zulässigen Produktionsphase; E4b-3 bleibt UNRESOLVED/No-Retry, kein Nonce-Burn. G0.7 **UNARMED**.
+
 ## Implementierungsstand — 2026-10-21, Paket E3 / E8-3
 
 - **FIXED / TESTED:** E3-2/3/4/5/6 und E8-3. Explizite Child-Environment-Allowlist, Keys ausschließlich für Simulation/DRY-Signierer; DBREC-Fehler vor Vergleich/Export terminal, verpflichtende Werte/Typen/Hashes; überlaufsicheres aktuelles Attempt-Limit; präziser struktureller Zero-Egress-Scope; Workspace-Toolchain im Wrapper; Legacy-Probes vor IO gesperrt.

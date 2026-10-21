@@ -25,13 +25,39 @@ pub(crate) fn env_u128(name: &str) -> u128 {
         .unwrap_or_else(|_| panic!("{name} must be decimal u128"))
 }
 
-pub(crate) fn key_from_env(name: &str) -> SigningKey {
-    let raw = req_env(name);
-    let bytes = hex::decode(raw.trim().trim_start_matches("0x"))
-        .unwrap_or_else(|_| panic!("{name} is not valid hex"));
-    assert_eq!(bytes.len(), 32, "{name} must be exactly 32 bytes");
-    SigningKey::from_slice(&bytes)
-        .unwrap_or_else(|_| panic!("{name} is not a valid secp256k1 private key"))
+fn parse_private_key(raw: &str) -> Result<SigningKey, &'static str> {
+    let mut bytes = zeroize::Zeroizing::new([0u8;32]);
+    // Fixed zeroizing buffer also wipes partially decoded malformed input.
+    hex::decode_to_slice(raw.trim().trim_start_matches("0x"), &mut bytes[..])
+        .map_err(|_| "private key must be exactly 32 bytes of hex")?;
+    SigningKey::from_slice(&bytes[..]).map_err(|_| "invalid secp256k1 private key")
+}
+
+/// # Safety
+/// Standalone G0.7 main only, before any thread, TLS, child process or library
+/// worker is started. Not callable from a concurrent embedding/test harness.
+pub(crate) unsafe fn take_startup_keys() -> (SigningKey, SigningKey) {
+    read_and_clear_keys(
+        |name| env::var(name).ok(),
+        // SAFETY: caller guarantees exclusive process environment at startup.
+        |name| unsafe { env::remove_var(name) },
+    ).expect("invalid or missing startup private key")
+}
+
+// Callbacks let offline tests exercise the complete cleanup/error ordering
+// without mutating the multithreaded test harness's process environment.
+fn read_and_clear_keys(
+    read: impl Fn(&str) -> Option<String>,
+    clear: impl Fn(&str),
+) -> Result<(SigningKey, SigningKey), &'static str> {
+    let launcher = read("DARKBOT_G07_LAUNCHER_PRIVATE_KEY").map(zeroize::Zeroizing::new);
+    let buyer = read("DARKBOT_G07_BUYER_PRIVATE_KEY").map(zeroize::Zeroizing::new);
+    for name in ["DARKBOT_G07_LAUNCHER_PRIVATE_KEY", "DARKBOT_G07_BUYER_PRIVATE_KEY", "BSC_LAUNCHER_PRIVATE_KEY", "BSC_BUYER_PRIVATE_KEY"] {
+        clear(name);
+    }
+    let launcher = launcher.ok_or("launcher private key required")?;
+    let buyer = buyer.ok_or("buyer private key required")?;
+    Ok((parse_private_key(&launcher)?, parse_private_key(&buyer)?))
 }
 
 pub(crate) fn signer_address(key: &SigningKey) -> Address {
@@ -833,5 +859,49 @@ mod root_regression {
         assert!(absent_attempt_latch(&root,id).is_err());
         assert!(absent_attempt_latch(&root,"../escape").is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod key_regression {
+    use super::*;
+    #[test]
+    fn startup_clears_all_key_names_before_success_or_error() {
+        use std::collections::HashMap;
+        for input in [Some("22".repeat(32)), None, Some("private-invalid-dummy".into())] {
+            let environment = RefCell::new(HashMap::from([
+                ("DARKBOT_G07_BUYER_PRIVATE_KEY", "33".repeat(32)),
+                ("BSC_LAUNCHER_PRIVATE_KEY", "dummy".into()),
+                ("BSC_BUYER_PRIVATE_KEY", "dummy".into()),
+                ("PATH", "/usr/bin".into()),
+            ]));
+            if let Some(value) = &input {
+                environment.borrow_mut().insert("DARKBOT_G07_LAUNCHER_PRIVATE_KEY", value.clone());
+            }
+            let result = read_and_clear_keys(
+                |name| environment.borrow().get(name).cloned(),
+                |name| { environment.borrow_mut().remove(name); },
+            );
+            assert_eq!(environment.borrow().len(), 1);
+            assert!(environment.borrow().contains_key("PATH"));
+            if input.as_deref() == Some("22".repeat(32).as_str()) {
+                let (launcher, buyer) = result.unwrap();
+                assert_eq!(signer_address(&launcher), signer_address(&parse_private_key(&"22".repeat(32)).unwrap()));
+                assert_ne!(signer_address(&launcher), signer_address(&buyer));
+            } else {
+                assert!(!result.unwrap_err().contains("private-invalid-dummy"));
+            }
+        }
+    }
+
+    #[test]
+    fn key_parse_is_redacted_and_matches_synthetic_signer() {
+        let key = parse_private_key(&"22".repeat(32)).unwrap();
+        let signer = darkbot_bsc_trading::signer::Signer::from_secret_bytes(&[0x22;32]).unwrap();
+        assert_eq!(signer_address(&key), signer.address());
+        for bad in [String::new(), "22".repeat(31), "22".repeat(33), "00".repeat(32), format!("{}secret", "22".repeat(30))] {
+            let error = parse_private_key(&bad).unwrap_err();
+            assert!(!error.contains("secret"));
+        }
     }
 }

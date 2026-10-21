@@ -165,3 +165,34 @@ pub(crate) fn buy_calldata(token: Address, input: U256, minimum: U256) -> Vec<u8
     }
     .abi_encode()
 }
+
+#[cfg(test)]
+mod signer_parity {
+    use super::*;
+    use darkbot_bsc_trading::{signer::Signer, transactions::legacy::LegacyTx};
+    #[test]
+    fn g07_and_production_signers_have_identical_rlp_and_hash_for_both_roles() {
+        for (key_bytes, nonce, gas_limit, value, launch) in [
+            ([0x22;32],0,6_603_270,0u64,true),
+            ([0x33;32],0,3_000_000,1_000_000_000_000u64,false),
+            ([0x22;32],128,21_000,0u64,false),
+        ] {
+            let key = SigningKey::from_slice(&key_bytes).unwrap();
+            let signer = Signer::from_secret_bytes(&key_bytes).unwrap();
+            let input = if launch { launch_calldata(signer.address(), B256::repeat_byte(0x44)) }
+                else if value == 0 { vec![] } else { buy_calldata(Address::repeat_byte(0x55),U256::from(value),U256::from(1)) };
+            let portal: Address = PORTAL.parse().unwrap();
+            let old = sign_legacy(&key, nonce, 50_000_000, gas_limit, portal, U256::from(value), &input);
+            let tx = LegacyTx { chain_id:56, nonce,gas_price:50_000_000,gas_limit,to:portal,value:U256::from(value),input:&input };
+            let mut scratch=Vec::new(); let mut raw=Vec::new();
+            let hash=signer.sign_legacy(&tx,&mut scratch,&mut raw).unwrap();
+            assert_eq!(raw,old.raw); assert_eq!(hash,old.hash);
+            assert_eq!(hash,keccak256(&raw));
+            let decoded = darkbot_bsc_trading::transactions::legacy::decode_signed(&raw).unwrap();
+            // Recovery rejects high-s; all fields must survive canonical RLP.
+            assert_eq!(decoded.tx, tx);
+            assert_eq!(darkbot_bsc_trading::signer::recover_legacy_sender(&decoded, 56, &mut scratch).unwrap(), signer.address());
+            if launch { assert!(input.len()>1024); }
+        }
+    }
+}

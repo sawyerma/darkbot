@@ -3,7 +3,7 @@
 //! This binary is deliberately fail-closed and is NOT a generic live trading runner.
 //! It sends exactly one approved economic attempt: the byte-identical ordered
 //! [launch_A, buy_B] pair to 48Club and BlockRazor in parallel. There is no public
-//! mempool launch and no automatic retry. The compile-time v3 hash remains the
+//! mempool launch and no automatic retry. The compile-time v4 hash remains the
 //! execution authority. Each attempt starts at most once (latch under
 //! bsc/.local/g07/), and the bundle expiry comes from the canonical head read
 //! immediately before the release.
@@ -87,8 +87,10 @@ fn main() {
     assert_eq!(field(dry.text(d::STATUS)), "G0.6A_SELF_LAUNCH_BUNDLE_DRY");
     darkbot_bsc_execution::acceptance_contract::require_dry_pass(&dry).expect("individual DRY checks failed");
 
-    let launcher_key = key_from_env("DARKBOT_G07_LAUNCHER_PRIVATE_KEY");
-    let buyer_key = key_from_env("DARKBOT_G07_BUYER_PRIVATE_KEY");
+    // SAFETY: standalone main is still single-threaded. Above are only local
+    // environment/filesystem/record checks; no TLS, subprocess, capture worker
+    // or head poller has started. Remove key ENV before any of those boundaries.
+    let (launcher_key, buyer_key) = unsafe { take_startup_keys() };
     let launcher = signer_address(&launcher_key);
     let buyer = signer_address(&buyer_key);
     assert_ne!(

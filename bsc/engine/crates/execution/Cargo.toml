@@ -23,6 +23,7 @@ darkbot-bsc-journal = { path = "../journal", optional = true }
 darkbot-bsc-record = { path = "../record", optional = true }
 alloy-sol-types = { workspace = true, optional = true }
 k256 = { workspace = true, optional = true }
+zeroize = { version = "=1.9.0", optional = true }
 
 [features]
 default = []
@@ -34,7 +35,7 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 # and the strictly separate g07 binary. Never enabled by the production build.
 # serde_json only decodes external JSON-RPC responses at the transport
 # boundary into typed values; nothing internal is JSON.
-g07-mainnet = ["acceptance-guard", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256"]
+g07-mainnet = ["acceptance-guard", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.

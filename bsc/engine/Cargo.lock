@@ -723,6 +723,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "webpki-roots",
+ "zeroize",
 ]
 
 [[package]]
