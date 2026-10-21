@@ -126,6 +126,12 @@ impl Safety {
         self.halted
     }
 
+    /// Q2: the day's realized loss reached the limit — `-pnl >= max` without negating the PnL,
+    /// which overflows at `i128::MIN` (a release build would wrap it and never halt).
+    fn daily_loss_reached(&self) -> bool {
+        self.day.realized_pnl <= -i128::from(self.limits.max_daily_loss)
+    }
+
     fn roll_day(&mut self, now_unix_s: u64) {
         let idx = now_unix_s / 86_400;
         if idx != self.day.day_index {
@@ -187,7 +193,7 @@ impl Safety {
         if self.day.failed_attempts >= self.limits.max_failed_attempts_per_day {
             return Err(Deny::FailedAttempts);
         }
-        if -self.day.realized_pnl >= self.limits.max_daily_loss as i128 {
+        if self.daily_loss_reached() {
             return Err(Deny::DailyLoss);
         }
         if self.outstanding >= self.limits.max_outstanding_attempts {
@@ -316,7 +322,7 @@ impl Safety {
         self.inventory_outstanding = inventory;
         self.day.realized_pnl = pnl;
         self.day.failed_attempts = failed;
-        if -self.day.realized_pnl >= self.limits.max_daily_loss as i128 {
+        if self.daily_loss_reached() {
             self.halt(HaltReason::LimitBreached); // [FIX-12]
         }
         if self.day.failed_attempts >= self.limits.max_failed_attempts_per_day {
@@ -413,6 +419,153 @@ mod tests {
         let mut a = Allow::default();
         a.execution_classes.insert("longtail");
         a
+    }
+
+    /// Every ledger counter and the day statistics of `s` (Q2 full-state comparisons).
+    fn ledger(s: &Safety) -> (u32, u32, u64, u64, u64, DayStats, Option<HaltReason>) {
+        (
+            s.outstanding,
+            s.open_positions,
+            s.capital_in_use,
+            s.inventory_outstanding,
+            s.inventory_reserved,
+            s.day,
+            s.halted,
+        )
+    }
+
+    /// Q2 (21.10.): the daily-loss limit holds at the extreme — a realized loss of `i128::MIN`
+    /// halts (`record_outcome`) and denies (`preview`/`check`) instead of overflowing the
+    /// negation (debug: panic; release: wrap to `i128::MIN` and never halt); the boundary is
+    /// unchanged (exactly the limit halts, one less does not).
+    #[test]
+    fn q2_extreme_daily_loss_halts_without_negation_overflow() {
+        let mut s = Safety::new(lim(), allow(), true);
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        assert_eq!(
+            s.record_outcome(0, false, Some(i128::MIN), 50, 0, 0),
+            Ok(())
+        );
+        assert_eq!(s.halted(), Some(HaltReason::LimitBreached));
+        let mut s = Safety::new(lim(), allow(), true);
+        s.day.realized_pnl = i128::MIN;
+        assert_eq!(
+            s.preview(0, 1, 0, 1, 1, &[], "longtail"),
+            Err(Deny::DailyLoss)
+        );
+        for (pnl, reached) in [(-50, true), (-49, false), (0, false), (i128::MAX, false)] {
+            let mut s = Safety::new(lim(), allow(), true);
+            s.day.realized_pnl = pnl;
+            assert_eq!(s.daily_loss_reached(), reached, "{pnl}");
+        }
+        let mut s = Safety::new(
+            Limits {
+                max_daily_loss: u64::MAX,
+                ..lim()
+            },
+            allow(),
+            true,
+        );
+        s.day.realized_pnl = -i128::from(u64::MAX) + 1;
+        assert!(!s.daily_loss_reached());
+        s.day.realized_pnl -= 1;
+        assert!(s.daily_loss_reached());
+    }
+
+    /// Q2 (21.10.): a failed ledger transition changes nothing — no capital, inventory, PnL,
+    /// failure-count or outstanding change — also across UTC midnight, where the only change of a
+    /// timed transition (`record_outcome`) is the day roll every timed call at that instant makes
+    /// (the time-driven UTC-day contract): the state equals that of an identical ledger whose
+    /// next call at the same time was a preview. `release_without_outcome` has no time and never
+    /// touches the day statistics.
+    #[test]
+    fn q2_failed_transitions_leave_no_partial_change_across_midnight() {
+        let day0 = 86_400 - 1;
+        let day1 = 86_400;
+        type Op = fn(&mut Safety, u64) -> Result<(), LedgerViolation>;
+        // (operation, violation, also a violation after midnight, timed: rolls the day)
+        let violations: [(Op, LedgerViolation, bool, bool); 5] = [
+            (
+                |s, t| s.record_outcome(t, true, Some(0), 80, 0, 0),
+                LedgerViolation::CapitalReleaseExceedsReserved,
+                true,
+                true,
+            ),
+            (
+                |s, t| s.record_outcome(t, true, Some(0), 50, 0, 11),
+                LedgerViolation::InventoryReleaseExceedsReserved,
+                true,
+                true,
+            ),
+            (
+                |s, t| s.record_outcome(t, true, Some(0), 50, -5, 10),
+                LedgerViolation::InventoryNegative,
+                true,
+                true,
+            ),
+            (
+                |s, t| s.record_outcome(t, false, Some(i128::MIN), 50, 0, 10),
+                // Only on the same day: after the roll the day's PnL starts at 0 again.
+                LedgerViolation::PnlOverflow,
+                false,
+                true,
+            ),
+            (
+                |s, _| s.release_without_outcome(51, 10),
+                LedgerViolation::CapitalReleaseExceedsReserved,
+                true,
+                false,
+            ),
+        ];
+        for (at, label) in [(day0, "same day"), (day1, "after UTC midnight")] {
+            for (i, (op, expected, after_midnight, timed)) in violations.iter().enumerate() {
+                if at == day1 && !after_midnight {
+                    continue;
+                }
+                // A ledger with one reserved attempt and a realized loss earlier that day.
+                let mut s = Safety::new(
+                    Limits {
+                        max_outstanding_attempts: 3,
+                        ..lim()
+                    },
+                    allow(),
+                    true,
+                );
+                s.check(day0, 50, 0, 1, 1, &[], "longtail").unwrap();
+                assert_eq!(s.record_outcome(day0, false, Some(-7), 50, 0, 0), Ok(()));
+                s.check(day0, 50, 10, 1, 1, &[], "longtail").unwrap();
+                let mut reference = Safety::new(
+                    Limits {
+                        max_outstanding_attempts: 3,
+                        ..lim()
+                    },
+                    allow(),
+                    true,
+                );
+                reference.check(day0, 50, 0, 1, 1, &[], "longtail").unwrap();
+                assert_eq!(
+                    reference.record_outcome(day0, false, Some(-7), 50, 0, 0),
+                    Ok(())
+                );
+                reference
+                    .check(day0, 50, 10, 1, 1, &[], "longtail")
+                    .unwrap();
+                // The reference makes only the call every timed caller at `at` makes: the day
+                // roll.
+                if *timed {
+                    let _ = reference.preview(at, 1, 0, 1, 1, &[], "longtail");
+                }
+                assert_eq!(op(&mut s, at), Err(*expected), "{label} {i}");
+                let (o, p, c, io, ir, day, halted) = ledger(&s);
+                let (ro, rp, rc, rio, rir, rday, _) = ledger(&reference);
+                assert_eq!(
+                    (o, p, c, io, ir, day),
+                    (ro, rp, rc, rio, rir, rday),
+                    "{label} {i}"
+                );
+                assert_eq!(halted, Some(HaltReason::LedgerInvariant), "{label} {i}");
+            }
+        }
     }
 
     #[test]
