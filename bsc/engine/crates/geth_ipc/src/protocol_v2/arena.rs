@@ -388,22 +388,36 @@ pub fn stale_arenas_v2(dir: &Path, generation: u64) -> Result<Vec<(u64, PathBuf)
     Ok(stale)
 }
 
+/// Opens `expected` as `role`, holding the in-process claim of that role.
 fn open_lane(
     path: &Path,
     generation: u64,
     expected: LaneConfigV2,
-) -> Result<(MappingV2, usize), V2Error> {
+    role: LaneRoleV2,
+) -> Result<(MappingV2, usize, LaneClaimV2), V2Error> {
+    let (mapping, lane_offset, identity) = map_lane(path, generation, expected)?;
+    let claim = LaneClaimV2::acquire(identity, &[expected.lane_id], role)?;
+    Ok((mapping, lane_offset, claim))
+}
+
+/// Maps the arena and locates `expected` without claiming a role.
+fn map_lane(
+    path: &Path,
+    generation: u64,
+    expected: LaneConfigV2,
+) -> Result<(MappingV2, usize, (u64, u64)), V2Error> {
     if generation == 0 {
         return Err(V2Error::ZeroGeneration);
     }
     expected.validate()?;
     let file = crate::trust::open_trusted_file(path, libc::O_RDWR, 0).map_err(V2Error::Io)?;
+    let identity = arena_identity(&file)?;
     let len = usize::try_from(file.metadata().map_err(V2Error::Io)?.len())
         .map_err(|_| V2Error::SizeOverflow)?;
     let mapping = MappingV2::map(file, len)?;
     validate_super(&mapping, generation)?;
     let lane_offset = locate_lane(&mapping, expected)?;
-    Ok((mapping, lane_offset))
+    Ok((mapping, lane_offset, identity))
 }
 
 fn validate_super(mapping: &MappingV2, generation: u64) -> Result<(), V2Error> {

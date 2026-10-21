@@ -22,6 +22,13 @@ fn private_test_dir(prefix: &str) -> std::path::PathBuf {
     dir
 }
 
+/// A raw mapping of a lane without a role claim, only for tests that
+/// manipulate slot or header bytes beside the real producer and consumer.
+fn raw_lane(path: &std::path::Path, generation: u64, lane: LaneConfigV2) -> (MappingV2, usize) {
+    let (mapping, lane_offset, _) = map_lane(path, generation, lane).unwrap();
+    (mapping, lane_offset)
+}
+
 fn peer_lane(id: u16) -> LaneConfigV2 {
     LaneConfigV2 {
         lane_id: id,
@@ -171,7 +178,7 @@ fn header_and_payload_corruption_are_both_detected() {
         let mut producer = ProducerV2::open(&path, 11, lane).unwrap();
         producer.publish(&record(b"abc")).unwrap();
 
-        let (mut mapping, lane_offset) = open_lane(&path, 11, lane).unwrap();
+        let (mut mapping, lane_offset) = raw_lane(&path, 11, lane);
         let slot_offset = lane_offset + LANE_HEADER_SIZE_V2;
         if target == "header" {
             mapping.bytes_mut()[slot_offset + SLOT_OFF_HASH] ^= 0x01;
@@ -662,7 +669,7 @@ fn a_wrong_arena_or_lane_generation_is_rejected() {
     ));
 
     // A lane header that disagrees with the arena generation.
-    let (mapping, lane_offset) = open_lane(&path, 50, lane).unwrap();
+    let (mapping, lane_offset) = raw_lane(&path, 50, lane);
     mapping
         .atomic_u64(lane_offset + LH_OFF_GENERATION)
         .store(49, Ordering::Release);
@@ -692,7 +699,7 @@ fn a_record_of_another_epoch_quarantines_the_lane_once() {
 
     // Rewrite the record's epoch and re-seal its CRC, so that only the
     // epoch check can refuse it.
-    let (mut mapping, lane_offset) = open_lane(&path, 52, lane).unwrap();
+    let (mut mapping, lane_offset) = raw_lane(&path, 52, lane);
     let slot_offset = lane_offset + LANE_HEADER_SIZE_V2;
     {
         let slot = &mut mapping.bytes_mut()[slot_offset..slot_offset + lane.slot_stride];
@@ -1024,7 +1031,7 @@ fn slots_of_an_earlier_binding_are_never_accepted_after_reuse() {
     let mut producer = ProducerV2::open(&path, 72, lanes[0]).unwrap();
     let mut consumer = ConsumerV2::open(&path, 72, lanes[0]).unwrap();
     reuse_after_full_ring(&mut arena, &mut producer, &mut consumer, 72);
-    let (mapping, lane_offset) = open_lane(&path, 72, lanes[0]).unwrap();
+    let (mapping, lane_offset) = raw_lane(&path, 72, lanes[0]);
     mapping
         .atomic_u64(lane_offset + LH_OFF_WRITE_SEQUENCE)
         .store(5, Ordering::Release);
@@ -1043,7 +1050,7 @@ fn slots_of_an_earlier_binding_are_never_accepted_after_reuse() {
     let mut producer_b = ProducerV2::open(&path, 72, lanes[1]).unwrap();
     let mut consumer_b = ConsumerV2::open(&path, 72, lanes[1]).unwrap();
     let (first, second) = reuse_after_full_ring(&mut arena, &mut producer_b, &mut consumer_b, 75);
-    let (mapping_b, lane_offset_b) = open_lane(&path, 72, lanes[1]).unwrap();
+    let (mapping_b, lane_offset_b) = raw_lane(&path, 72, lanes[1]);
     mapping_b
         .atomic_u64(lane_offset_b + LH_OFF_WRITE_SEQUENCE)
         .store(5, Ordering::Release);
@@ -1076,7 +1083,7 @@ fn a_write_after_close_quarantines_the_lane() {
     assert_eq!(arena.begin_close_peer_lane(73, owner(1), epoch).unwrap(), 1);
     // A producer that passed its state check before the close lands one
     // more record.
-    let (mapping, lane_offset) = open_lane(&path, 73, lanes[0]).unwrap();
+    let (mapping, lane_offset) = raw_lane(&path, 73, lanes[0]);
     mapping
         .atomic_u64(lane_offset + LH_OFF_WRITE_SEQUENCE)
         .store(2, Ordering::Release);
@@ -1113,7 +1120,7 @@ fn a_write_after_close_quarantines_the_lane() {
     arena.begin_close_peer_lane(74, owner(2), epoch).unwrap();
     let consumer_b = ConsumerV2::open(&path, 73, lanes[1]).unwrap();
     assert!(consumer_b.acknowledge_drained_if_closing().unwrap());
-    let (mapping_b, lane_offset_b) = open_lane(&path, 73, lanes[1]).unwrap();
+    let (mapping_b, lane_offset_b) = raw_lane(&path, 73, lanes[1]);
     mapping_b
         .atomic_u64(lane_offset_b + LH_OFF_WRITE_SEQUENCE)
         .store(1, Ordering::Release);
@@ -1367,7 +1374,7 @@ fn every_structural_defect_quarantines_once_and_is_never_skipped() {
         producer.publish(&record(b"bad")).unwrap();
         producer.publish(&record(b"good")).unwrap();
 
-        let (mut mapping, lane_offset) = open_lane(&path, 110, lane).unwrap();
+        let (mut mapping, lane_offset) = raw_lane(&path, 110, lane);
         let slot_offset = lane_offset + LANE_HEADER_SIZE_V2;
         match defect {
             "sequence" => mapping
@@ -1463,7 +1470,7 @@ fn records_outside_a_binding_quarantine_as_late_writes_without_counting_corrupti
     let mut arena = ArenaV2::create(&path, 111, &lanes).unwrap();
 
     // A record on a FREE lane.
-    let (mapping, lane_offset) = open_lane(&path, 111, lanes[0]).unwrap();
+    let (mapping, lane_offset) = raw_lane(&path, 111, lanes[0]);
     mapping
         .atomic_u64(lane_offset + LH_OFF_WRITE_SEQUENCE)
         .store(1, Ordering::Release);
@@ -1491,7 +1498,7 @@ fn records_outside_a_binding_quarantine_as_late_writes_without_counting_corrupti
     let mut producer = ProducerV2::open(&path, 111, lanes[1]).unwrap();
     producer.publish(&record(b"in")).unwrap();
     arena.begin_close_peer_lane(112, owner(1), epoch).unwrap();
-    let (mapping_b, lane_offset_b) = open_lane(&path, 111, lanes[1]).unwrap();
+    let (mapping_b, lane_offset_b) = raw_lane(&path, 111, lanes[1]);
     mapping_b
         .atomic_u64(lane_offset_b + LH_OFF_WRITE_SEQUENCE)
         .store(2, Ordering::Release);
@@ -1761,6 +1768,56 @@ fn e75_untrusted_directories_and_arena_links_fail_closed() {
     fs::remove_dir_all(other).unwrap();
 }
 
+#[test]
+fn e63_a_lane_has_one_producer_and_one_consumer_per_process() {
+    let lanes = [txpool_lane(1), txpool_lane(2)];
+    let path = tmp("e63-claims");
+    let arena = ArenaV2::create(&path, 3, &lanes).unwrap();
+    let producer = ProducerV2::open(&path, 3, lanes[0]).unwrap();
+    let consumer = ConsumerV2::open(&path, 3, lanes[0]).unwrap();
+    assert!(matches!(
+        ProducerV2::open(&path, 3, lanes[0]),
+        Err(V2Error::LaneRoleHeld {
+            lane_id: 1,
+            role: "producer"
+        })
+    ));
+    assert!(matches!(
+        ConsumerV2::open(&path, 3, lanes[0]),
+        Err(V2Error::LaneRoleHeld {
+            lane_id: 1,
+            role: "consumer"
+        })
+    ));
+    // A lane set is the consumer of each of its lanes, all or none.
+    assert!(matches!(
+        LaneSetV2::open(&path, 3, &lanes),
+        Err(V2Error::LaneRoleHeld {
+            lane_id: 1,
+            role: "consumer"
+        })
+    ));
+    let other = ConsumerV2::open(&path, 3, lanes[1]).unwrap();
+    drop(other);
+    assert!(matches!(
+        LaneSetV2::open(&path, 3, &[lanes[1], lanes[1]]),
+        Err(V2Error::LaneRoleHeld {
+            lane_id: 2,
+            role: "consumer"
+        })
+    ));
+    // Separate mappings of the same arena share the claim; another arena does not.
+    let second_path = tmp("e63-claims-other");
+    let second = ArenaV2::create(&second_path, 3, &lanes).unwrap();
+    let independent = ProducerV2::open(&second_path, 3, lanes[0]).unwrap();
+    drop((producer, consumer));
+    let producer = ProducerV2::open(&path, 3, lanes[0]).unwrap();
+    let set = LaneSetV2::open(&path, 3, &lanes).unwrap();
+    drop((producer, set, independent, second, arena));
+    fs::remove_file(path).unwrap();
+    fs::remove_file(second_path).unwrap();
+}
+
 const LEASE_CHILD_ENV: &str = "DARKBOT_FASTLANE_LEASE_CHILD_DIR";
 
 #[test]
@@ -1907,7 +1964,7 @@ fn an_undefined_lifecycle_state_quarantines_even_an_empty_lane() {
     let mut producer = ProducerV2::open(&path, 160, lanes[1]).unwrap();
     producer.publish(&record(b"r")).unwrap();
     for lane in lanes {
-        let (mapping, lane_offset) = open_lane(&path, 160, lane).unwrap();
+        let (mapping, lane_offset) = raw_lane(&path, 160, lane);
         mapping
             .atomic_u32(lane_offset + LH_OFF_STATE)
             .store(99, Ordering::Release);

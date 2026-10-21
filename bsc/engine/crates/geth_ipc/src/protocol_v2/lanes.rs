@@ -77,6 +77,7 @@ pub struct LaneStatsV2 {
 pub struct LaneSetV2 {
     mapping: MappingV2,
     lanes: Vec<(LaneConfigV2, usize)>,
+    _claim: LaneClaimV2,
 }
 
 impl LaneSetV2 {
@@ -85,6 +86,8 @@ impl LaneSetV2 {
             return Err(V2Error::ZeroGeneration);
         }
         let file = crate::trust::open_trusted_file(path, libc::O_RDWR, 0).map_err(V2Error::Io)?;
+        let ids: Vec<u16> = lanes.iter().map(|lane| lane.lane_id).collect();
+        let claim = LaneClaimV2::acquire(arena_identity(&file)?, &ids, LaneRoleV2::Consumer)?;
         let len = usize::try_from(file.metadata().map_err(V2Error::Io)?.len())
             .map_err(|_| V2Error::SizeOverflow)?;
         let mapping = MappingV2::map(file, len)?;
@@ -97,6 +100,7 @@ impl LaneSetV2 {
         Ok(Self {
             mapping,
             lanes: located,
+            _claim: claim,
         })
     }
 

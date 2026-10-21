@@ -66,9 +66,11 @@ struct AcquiredSlotV2 {
 /// `read_sequence` with Release; the slot is reusable from then on. Before
 /// advancing, and after [`RecordGuardV2::copy_payload`], the guard confirms
 /// that the slot still carries the commit it validated: the producer clears
-/// `committed_sequence` before it writes a slot, so a slot rewritten against
-/// the protocol is detected, the lane is quarantined and `read_sequence` does
-/// not advance.
+/// `committed_sequence` before it writes a slot, so a visible change of the
+/// commit word quarantines the lane and `read_sequence` does not advance.
+/// This re-check is a diagnostic only. It does not make a concurrent writer
+/// that ignores `read_sequence` safe or reliably detectable; such a writer is
+/// excluded structurally (see the memory-ordering contract in `claims.rs`).
 ///
 /// The guard cannot outlive its consumer and a borrowed record cannot
 /// outlive its guard:
@@ -158,10 +160,13 @@ impl<'lane> RecordGuardV2<'lane> {
         self.committed() == self.slot.read.wrapping_add(1)
     }
 
-    /// Copies the payload into `out` and then confirms the slot is unchanged,
-    /// so the copy is exactly the validated record. Returns the payload
-    /// length. Fails without advancing if `out` is too small or the slot was
-    /// rewritten; the latter quarantines the lane.
+    /// Copies the payload into `out` and then re-checks the commit word.
+    /// Under the single-producer/single-consumer contract the slot cannot
+    /// change while the guard lives, so the copy is exactly the validated
+    /// record. Returns the payload length. Fails without advancing if `out` is
+    /// too small or the commit word changed visibly; the latter quarantines the
+    /// lane. The re-check is a diagnostic, not a guarantee against a writer
+    /// that breaks the contract (see `claims.rs`).
     pub fn copy_payload(&self, out: &mut [u8]) -> Result<usize, V2Error> {
         let len = self.slot.payload_len;
         if out.len() < len {

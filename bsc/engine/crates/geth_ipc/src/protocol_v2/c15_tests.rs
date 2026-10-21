@@ -188,12 +188,14 @@ fn a_corrupt_record_is_refused_and_never_released() {
 }
 
 #[test]
-fn a_slot_rewritten_under_the_guard_is_detected_and_not_released() {
+fn a_visible_commit_change_under_the_guard_quarantines_and_is_not_released() {
     let (path, arena, mut producer, mut consumer) = setup("rewrite");
     producer.publish(&record(1, &[1; 64])).unwrap();
     let guard = consumer.try_acquire().unwrap().unwrap();
-    // A producer that violated the protocol starts rewriting the slot:
-    // its first step clears committed_sequence.
+    // A writer outside the contract clears committed_sequence, sequentially.
+    // This proves only that a visible commit-word change is caught; a
+    // concurrent plain-byte rewrite is excluded structurally, not detected
+    // (see claims.rs).
     let committed = slot_offset(&arena, 16, 0) + SLOT_OFF_COMMITTED;
     arena
         .mapping

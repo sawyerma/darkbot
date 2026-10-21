@@ -1391,6 +1391,8 @@ mod tests {
         publish(&mut fixture.producer(16), 1, 500, &launch);
         let chain = ConsumerV2::open(&fixture.path, GENERATION, chain_lane()).unwrap();
         chain.quarantine();
+        // One consumer per lane: the quarantine stays in the arena.
+        drop(chain);
         let mut poller = fixture.poller(2);
         let mut decided = 0;
         let outcome = poller.poll_once(no_chain, |record| {

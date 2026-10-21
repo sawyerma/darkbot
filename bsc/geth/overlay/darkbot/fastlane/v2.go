@@ -820,6 +820,14 @@ func (l *laneV2) precheckTxpool() error {
 	return nil
 }
 
+// Memory-ordering contract (E6-3/E7-7, same as Rust protocol_v2/claims.rs):
+// slot bytes are plain mmap bytes, race-free only because a lane has exactly
+// one producer and one consumer. The producer reuses a slot only after it
+// loaded the consumer's read_sequence; the consumer copies the slot into a
+// private slice before it stores read_sequence. Clearing committed first is
+// no rewrite detection: a second concurrent writer is excluded structurally
+// (directory trust contract, role leases, one runtime owner per lane), not
+// detected.
 func (l *laneV2) publishChecked(record recordV2, leaseEpoch uint64, leased bool) error {
 	state := atomic.LoadUint32(v2AtomicU32(l.arena.data, l.offset+v2LHState))
 	if state != v2LaneStateBound {

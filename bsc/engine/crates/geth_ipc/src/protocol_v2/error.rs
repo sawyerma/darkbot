@@ -96,6 +96,12 @@ pub enum V2Error {
     ArenaExists {
         probe: ArenaProbeV2,
     },
+    /// An open handle of this process already holds this role of the lane;
+    /// a lane has exactly one producer and one consumer (E6-3/E7-7).
+    LaneRoleHeld {
+        lane_id: u16,
+        role: &'static str,
+    },
 }
 
 impl fmt::Display for V2Error {
@@ -184,6 +190,9 @@ impl fmt::Display for V2Error {
             }
             Self::ArenaExists { probe } => {
                 write!(f, "fastlane v2: arena already exists ({probe:?})")
+            }
+            Self::LaneRoleHeld { lane_id, role } => {
+                write!(f, "fastlane v2: lane {lane_id} {role} is already open in this process")
             }
         }
     }

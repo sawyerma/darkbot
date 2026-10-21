@@ -263,6 +263,8 @@ fn the_hot0_receive_path_allocates_nothing() {
             .publish(&early(hash_of(sequence, 0xe0), 500, &other))
             .unwrap();
     }
+    // One consumer per lane: the poller gives lane 16 up first.
+    drop(poller);
     let mut audit = ConsumerV2::open(&path, GENERATION, peers[0]).unwrap();
     let before = allocations();
     let mut consumed = 0u64;
@@ -273,6 +275,6 @@ fn the_hot0_receive_path_allocates_nothing() {
     assert_eq!(consumed, 8);
     assert!(owned_allocations >= 8, "{owned_allocations} allocations");
 
-    drop((poller, audit, peer16, peer17, chain, arena));
+    drop((audit, peer16, peer17, chain, arena));
     fs::remove_dir_all(dir).unwrap();
 }

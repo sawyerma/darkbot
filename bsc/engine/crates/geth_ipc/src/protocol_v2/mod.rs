@@ -65,6 +65,7 @@ use crate::{AUX_LEN, HASH_LEN, PEER_LEN, RecordKind, SOURCE_LEN};
 // single-file implementation they were split from.
 include!("arena.rs");
 include!("checksum.rs");
+include!("claims.rs");
 include!("consumer.rs");
 include!("error.rs");
 include!("guards.rs");

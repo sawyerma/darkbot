@@ -5,15 +5,18 @@ pub struct ConsumerV2 {
     mapping: MappingV2,
     config: LaneConfigV2,
     lane_offset: usize,
+    _claim: LaneClaimV2,
 }
 
 impl ConsumerV2 {
     pub fn open(path: &Path, generation: u64, expected: LaneConfigV2) -> Result<Self, V2Error> {
-        let (mapping, lane_offset) = open_lane(path, generation, expected)?;
+        let (mapping, lane_offset, claim) =
+            open_lane(path, generation, expected, LaneRoleV2::Consumer)?;
         Ok(Self {
             mapping,
             config: expected,
             lane_offset,
+            _claim: claim,
         })
     }
 
