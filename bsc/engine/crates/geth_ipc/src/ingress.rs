@@ -480,6 +480,8 @@ pub struct IngressAuditStatsV2 {
     /// Every record passed to [`IngressAuditV2::judge_txpool_record`].
     pub txpool_judged: u64,
     pub invalid_txpool_records: u64,
+    /// Decoded txpool transactions outside the frozen C1.4 scope (E6-1).
+    pub scope_outside: u64,
     pub relevant: u64,
     pub observed: u64,
     pub false_negatives: u64,
@@ -501,10 +503,46 @@ pub struct FalseNegativeEvidenceV2 {
     pub selector: [u8; 4],
 }
 
+/// What a C1.4 audit can and cannot claim (E6-1).
+///
+/// Population A: transactions of the frozen direct scope (Portal proxy,
+/// `newTokenV6` selector) that the local txpool accepted; the audit measures
+/// whether a peer lane saw each of them first. Population B: every launch the
+/// witnessed Portal realized on chain in the observed block window, including
+/// launches through other callers or selectors. A is no denominator for B: a
+/// [`AuditQualificationV2::Pass`] is a scope pass only. B needs an
+/// independent, read-only event-backed ground truth from the verified Portal
+/// code and canonical receipts, which does not exist yet; until then the
+/// launch coverage is [`LaunchCoverageV2::Unknown`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoverageReportV2 {
+    /// CRC32C fingerprint of the frozen scope the counts refer to.
+    pub scope_fingerprint: u32,
+    pub txpool_judged: u64,
+    /// Population A: in-scope txpool transactions.
+    pub direct_in_scope: u64,
+    pub scope_outside: u64,
+    /// In-scope transactions a peer lane carried before the txpool.
+    pub early_observed: u64,
+    pub false_negatives: u64,
+    /// Judged records whose scope could not be decided (unsupported or
+    /// malformed envelope, invalid or foreign record).
+    pub undecided: u64,
+    pub launch_coverage: LaunchCoverageV2,
+}
+
+/// Coverage of population B, all realized launches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaunchCoverageV2 {
+    /// No event-backed ground truth was reconciled; nothing is claimed.
+    Unknown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuditQualificationV2 {
     /// Closed, drained, contract-conforming evidence without a false
-    /// negative.
+    /// negative, for the frozen C1.4 scope only (population A, E6-1): no
+    /// statement about all launches.
     Pass,
     /// Evidence outside the C1.4 contract (record contract, record kind,
     /// consumer or wire errors): nothing qualifies.
@@ -626,6 +664,7 @@ impl IngressAuditV2 {
             }
         };
         if !self.scope.matches(&target) {
+            self.stats.scope_outside += 1;
             return AuditVerdictV2::NotRelevant;
         }
         self.stats.relevant += 1;
@@ -695,6 +734,24 @@ impl IngressAuditV2 {
 
     pub fn stats(&self) -> IngressAuditStatsV2 {
         self.stats
+    }
+
+    /// The scope-bound coverage statement of this audit (E6-1).
+    pub fn coverage(&self) -> CoverageReportV2 {
+        let s = self.stats;
+        CoverageReportV2 {
+            scope_fingerprint: self.scope.fingerprint(),
+            txpool_judged: s.txpool_judged,
+            direct_in_scope: s.relevant,
+            scope_outside: s.scope_outside,
+            early_observed: s.observed,
+            false_negatives: s.false_negatives,
+            undecided: s
+                .txpool_judged
+                .saturating_sub(s.relevant)
+                .saturating_sub(s.scope_outside),
+            launch_coverage: LaunchCoverageV2::Unknown,
+        }
     }
 
     pub fn false_negatives(&self) -> &[FalseNegativeEvidenceV2] {
@@ -1209,6 +1266,21 @@ mod tests {
         assert_eq!(
             audit.qualification(&LaneStatsV2::default(), None),
             AuditQualificationV2::InvalidEvidence("foreign record kinds")
+        );
+        // E6-1: the counts are bound to the scope and never claim launch
+        // coverage.
+        assert_eq!(
+            audit.coverage(),
+            CoverageReportV2 {
+                scope_fingerprint: C14_SCOPE_FINGERPRINT,
+                txpool_judged: 6,
+                direct_in_scope: 2,
+                scope_outside: 1,
+                early_observed: 1,
+                false_negatives: 1,
+                undecided: 3,
+                launch_coverage: LaunchCoverageV2::Unknown,
+            }
         );
     }
 
