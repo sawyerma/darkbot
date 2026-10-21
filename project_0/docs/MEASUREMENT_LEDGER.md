@@ -5821,3 +5821,13 @@ Commit `479c67a`.
 - A cached projection is consumed only once the owner processed every confirmed account notification up to its simulation slot (newest account notification − 1, snapshot lower bound or root; tradable state only); otherwise the work is parked and released in slot order. A ContextBehind requeue waits for one more processed slot. E9 closed on all code criteria of the 21.10 order.
 - Assumption (not checked against agave source or the provider): one confirmed-bank notification pass over all subscriptions, in slot order, per WSS connection.
 - NOT_MEASURED: that ordering at the real WSS provider, real oracle cadence, provider `minContextSlot` behaviour, drop rate of parked projections (`deferred` vs `dropped` on the first real run).
+
+## 2026-10-21 — BUGS V10 (bugs_b Q2) safety edge cases (LOCAL_PASS, offline only)
+
+Commit `c771881`.
+
+- Gate (exit 0): fmt, clippy all/default, `test --all-features` 685/0/6, default 683/0/6, release, Python 108 (1 skipped) exit 0.
+- `-realized_pnl` overflowed at `i128::MIN` (no release `overflow-checks`: wraps, the daily-loss HALT never fired — shown with the old code in a `--release` test run); replaced by `realized_pnl <= -max_daily_loss` at both sites.
+- `roll_day` before validation: time-driven UTC-day contract, no break; failed transitions leave the full ledger unchanged except the time-driven roll, also across UTC midnight.
+- Open contract question for the user: an outcome reconciled after midnight books its PnL and failed attempt into the new UTC day (daily limit by reconciliation time, not attempt time; documented as the current contract until decided).
+- NOT_RUN: no Mainnet read, capture or LIVE (the ledger has no production caller since B1).
