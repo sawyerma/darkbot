@@ -4,8 +4,8 @@
 use alloy_primitives::{Address, B256};
 
 use super::{
-    AdapterId, AdapterSet, ArmedFence, Dispatch, HaltReason, IntentState, LaneError, LaneStats,
-    MAX_ADAPTERS, MAX_LANE_CAPACITY, Outcome, SubmissionState, Ticket,
+    AdapterId, AdapterSet, ArmedFence, Dispatch, EgressWrite, HaltReason, IntentState, LaneError,
+    LaneStats, MAX_ADAPTERS, MAX_LANE_CAPACITY, Outcome, SubmissionState, Ticket,
 };
 use crate::chain_state::SnapshotId;
 use crate::chain_state::canonical::{
@@ -110,6 +110,43 @@ impl IntentLane {
     pub fn quarantined(chain_id: u64, sender: Address, capacity: usize) -> Result<Self, LaneError> {
         let halt = Some(HaltReason::RestartQuarantine);
         Self::allocate(chain_id, sender, 0, capacity, halt)
+    }
+
+    /// Test-only lane holding one dispatched intent: `raw` with `tx_hash`,
+    /// in `Sending`, with a permit for every adapter of `adapters`. The final
+    /// binding check is skipped, so the bytes need not be a Portal BUY. For
+    /// the egress tests and measurement harnesses of dependent crates behind
+    /// the `test-support` feature, which is enabled only under
+    /// `[dev-dependencies]`; never a production path.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn dispatched_for_tests(
+        fence: ArmedFence,
+        token: Address,
+        raw: &[u8],
+        tx_hash: B256,
+        adapters: AdapterSet,
+    ) -> Result<(Self, Dispatch), LaneError> {
+        if raw.len() > SIGNED_SLOT_LEN {
+            return Err(LaneError::Oversize);
+        }
+        let mut lane = Self::armed(fence, 1)?;
+        let ticket = lane.reserve(token)?;
+        let snapshot = SnapshotId {
+            canonical_block_hash: B256::ZERO,
+            ordered_state_cursor: 0,
+            pending_candidate: tx_hash,
+            policy_generation: 0,
+            codehash_generation: 0,
+        };
+        lane.signed[..raw.len()].copy_from_slice(raw);
+        let entry = &mut lane.entries[0];
+        entry.tx_hash = tx_hash;
+        entry.snapshot = Some(snapshot);
+        entry.signed_len = raw.len();
+        entry.state = IntentState::Prepared;
+        let dispatch = lane.begin_send(&snapshot, adapters)?;
+        debug_assert_eq!(dispatch.ticket, ticket);
+        Ok((lane, dispatch))
     }
 
     fn allocate(
@@ -404,8 +441,9 @@ impl IntentLane {
     }
 
     /// Consumes `adapter`'s permit and releases the signed bytes of the
-    /// intent to it. Must be called before the adapter's first transport
-    /// write of this intent; it is the only way to obtain the bytes.
+    /// intent to it as an [`EgressWrite`]. Must be called before the
+    /// adapter's first transport write of this intent; it is the only way to
+    /// obtain the bytes and the only constructor of the egress capability.
     ///
     /// `tx_hash` is the hash of the transaction the adapter is about to
     /// send. Another hash than the intent's stops the lane. A permit is
@@ -416,7 +454,7 @@ impl IntentLane {
         ticket: Ticket,
         adapter: AdapterId,
         tx_hash: B256,
-    ) -> Result<&[u8], LaneError> {
+    ) -> Result<EgressWrite<'_>, LaneError> {
         let index = self.index_of(ticket)?;
         let slot = adapter.index();
         match self.entries[index].submissions[slot] {
@@ -437,7 +475,12 @@ impl IntentLane {
         self.entries[index].submissions[slot] = SubmissionState::Writing;
         let start = index * SIGNED_SLOT_LEN;
         let len = self.entries[index].signed_len;
-        Ok(&self.signed[start..start + len])
+        Ok(EgressWrite {
+            ticket,
+            adapter,
+            tx_hash,
+            bytes: &self.signed[start..start + len],
+        })
     }
 
     /// Records that `adapter`'s transport handoff completed.

@@ -13,7 +13,10 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// the included G0.7 modules' sources, so any change to them, or to what a
 /// live run would send, changes this hash and needs a new approval. (Pinned
 /// here, not in plan.rs, which is itself part of that digest.)
-const PINNED_PLAN_SHA256: &str = "a5ad014f9ffebd32b6c2cc7fc36fa054d9c7118fdb1e76b8f3c5ae1606fbd039";
+/// Re-pinned 2026-10-21 (E6-2): Cargo.lock gained the geth_ipc -> trading
+/// edge. The earlier pin a5ad014f… was already stale at 214d603e (plan
+/// 20c4cfd2… after the E4 source changes). Neither value is an approval.
+const PINNED_PLAN_SHA256: &str = "b4489e0a519c1e90986dc9556159fbff2e8a749e45a9263507e88f8df26b1043";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

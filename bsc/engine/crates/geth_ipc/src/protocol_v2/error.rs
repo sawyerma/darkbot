@@ -96,6 +96,9 @@ pub enum V2Error {
     ArenaExists {
         probe: ArenaProbeV2,
     },
+    /// The signed-transaction egress lane has no generic producer; it is
+    /// written only against a consumed intent permit (E6-2).
+    EgressRequiresPermit,
     /// An open handle of this process already holds this role of the lane;
     /// a lane has exactly one producer and one consumer (E6-3/E7-7).
     LaneRoleHeld {
@@ -191,6 +194,9 @@ impl fmt::Display for V2Error {
             Self::ArenaExists { probe } => {
                 write!(f, "fastlane v2: arena already exists ({probe:?})")
             }
+            Self::EgressRequiresPermit => f.write_str(
+                "fastlane v2: the egress lane is written only through EgressProducerV2",
+            ),
             Self::LaneRoleHeld { lane_id, role } => {
                 write!(f, "fastlane v2: lane {lane_id} {role} is already open in this process")
             }

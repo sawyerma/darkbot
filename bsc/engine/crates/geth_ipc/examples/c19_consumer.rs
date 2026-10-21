@@ -6,6 +6,13 @@
 //! into an `IntentSlot`), publishes one prepared signed BUY per admitted
 //! launch on the egress lane, and reads geth's outbound evidence.
 //!
+//! Each BUY goes out exactly as in production: through
+//! `EgressProducerV2::publish_buy` against the `EgressWrite` of a consumed
+//! intent permit (E6-2). The harness prepares its intents with the
+//! test-support constructor `IntentLane::dispatched_for_tests` before the
+//! measured loop; that constructor skips the economic binding check, so these
+//! BUYs prove transport latency only, never an economic admission.
+//!
 //! It records raw boundaries only; `c19_analyze.py` derives every statistic:
 //!
 //! - `T_packet_decoded`, `T_ingress`: from the record (geth, clock id 1);
@@ -18,17 +25,18 @@
 //! Every timestamp is `CLOCK_MONOTONIC` of this host. Heap allocations of
 //! this thread inside the qualification window are counted and reported.
 
+use alloy_primitives::{Address, B256};
 use darkbot_bsc_geth_ipc::hot0::{
     Hot0Config, Hot0Decision, Hot0Outcome, Hot0Poller, IntentBuy, monotonic_ns,
 };
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
 use darkbot_bsc_geth_ipc::outbound::{
-    HandoffEvidence, OutboundStatus, chain_lane, decode_handoff, egress_lane, evidence_lane,
-    publish_buy,
+    EgressProducerV2, HandoffEvidence, OutboundStatus, chain_lane, decode_handoff, evidence_lane,
 };
 use darkbot_bsc_geth_ipc::protocol_v2::{
-    BorrowedRecordV2, DirectionV2, LaneClassV2, LaneConfigV2, LaneSetV2, ProducerV2, arena_path_v2,
+    BorrowedRecordV2, DirectionV2, LaneClassV2, LaneConfigV2, LaneSetV2, arena_path_v2,
 };
+use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, ArmedFence, Dispatch, IntentLane};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -267,8 +275,21 @@ fn main() {
     let chain = Some(chain_lane());
     let mut poller = Hot0Poller::open(&path, generation, &peers, chain, config).unwrap();
     // With outbound workers the egress and evidence lanes must open.
-    let open_egress = || ProducerV2::open(&path, generation, egress_lane()).unwrap();
+    let open_egress = || EgressProducerV2::open(&path, generation).unwrap();
     let mut egress = (workers > 0).then(open_egress);
+    // One dispatched intent per prepared BUY, allocated before the loop.
+    let adapter = AdapterId::new(0).unwrap();
+    let permits = AdapterSet::new(&[adapter]).unwrap();
+    let mut intents: Vec<(IntentLane, Dispatch)> = buys
+        .iter()
+        .enumerate()
+        .map(|(index, (hash, signed))| {
+            let fence = ArmedFence::for_tests(97, Address::repeat_byte(0x11), index as u64);
+            let token = Address::with_last_byte((index % 251) as u8 + 1);
+            IntentLane::dispatched_for_tests(fence, token, signed, B256::from_slice(hash), permits)
+                .expect("dispatched intent")
+        })
+        .collect();
     let evidence_lanes: Vec<LaneConfigV2> = (0..=workers).map(evidence_lane).collect();
     let open_evidence = || LaneSetV2::open(&path, generation, &evidence_lanes).unwrap();
     let mut evidence = (workers > 0).then(open_evidence);
@@ -336,10 +357,17 @@ fn main() {
                 buy_hash,
                 signed_buy: signed,
             };
+            // HOT0 storage only; the slot is no egress authority.
             slot.seal(&buy).expect("seal");
+            let (lane, dispatch) = &mut intents[ingress_rows.len() - 1];
+            let write = lane
+                .start_write(dispatch.ticket, adapter, dispatch.tx_hash)
+                .expect("permit");
             // The egress commit boundary: clock, then the one publish.
             let commit_ns = monotonic_ns();
-            publish_buy(egress, slot, commit_ns).expect("egress publish");
+            egress
+                .publish_buy(write, commit_ns)
+                .expect("egress publish");
             // One BUY outstanding: read its evidence before the next sample.
             let mut expected = usize::MAX;
             let mut seen = 0usize;

@@ -8,3 +8,12 @@ publish.workspace = true
 
 [dependencies]
 libc = { workspace = true }
+# The economic egress capability (`intent::EgressWrite`, E6-2). No feature:
+# the generic core only.
+darkbot-bsc-trading = { path = "../trading" }
+
+[dev-dependencies]
+# `IntentLane::dispatched_for_tests` for the egress tests and the C1.9
+# measurement harness (examples). Never a production dependency.
+darkbot-bsc-trading = { path = "../trading", features = ["test-support"] }
+alloy-primitives = { workspace = true }

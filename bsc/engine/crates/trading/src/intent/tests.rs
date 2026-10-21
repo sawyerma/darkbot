@@ -445,7 +445,8 @@ fn preparation_binds_sender_nonce_and_token_of_the_ticket() {
     // The bound bytes are exactly the verified ones.
     lane.begin_send(&ours.snapshot, adapters(&[0])).unwrap();
     assert_eq!(
-        lane.start_write(ticket, adapter(0), ours.hash),
+        lane.start_write(ticket, adapter(0), ours.hash)
+            .map(|write| write.bytes()),
         Ok(ours.raw.as_slice())
     );
 }
@@ -477,6 +478,7 @@ fn fan_out_uses_one_nonce_and_identical_bytes_for_every_adapter() {
         let bytes = lane
             .start_write(ticket, adapter(index), signed.hash)
             .unwrap()
+            .bytes()
             .to_vec();
         written.push(bytes);
         // Adapter B starts without waiting for adapter A's ACK.
@@ -1383,11 +1385,18 @@ fn bytes_are_released_only_by_a_successfully_consumed_permit() {
         Err(LaneError::AdapterNotSelected)
     );
 
-    // A successful consumption releases exactly the one signed byte string
-    // and moves that adapter, and only that adapter, to Writing.
+    // A successful consumption releases exactly the one signed byte string,
+    // as the egress capability of this intent and adapter, and moves that
+    // adapter, and only that adapter, to Writing.
+    let write = lane.start_write(ticket, adapter(0), signed.hash).unwrap();
     assert_eq!(
-        lane.start_write(ticket, adapter(0), signed.hash),
-        Ok(signed.raw.as_slice())
+        (
+            write.ticket(),
+            write.adapter(),
+            write.tx_hash(),
+            write.bytes()
+        ),
+        (ticket, adapter(0), signed.hash, signed.raw.as_slice())
     );
     assert_eq!(
         lane.submission(ticket, adapter(0)),
@@ -1416,7 +1425,8 @@ fn bytes_are_released_only_by_a_successfully_consumed_permit() {
 
     // A second adapter receives the identical bytes.
     assert_eq!(
-        lane.start_write(ticket, adapter(1), signed.hash),
+        lane.start_write(ticket, adapter(1), signed.hash)
+            .map(|write| write.bytes()),
         Ok(signed.raw.as_slice())
     );
 

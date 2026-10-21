@@ -6,9 +6,14 @@
 //!      <--worker evidence lane 0..N---------  one record per peer send
 //! ```
 //!
-//! HOT0 is the egress lane's only producer. It publishes the sealed BUY of an
-//! [`IntentSlot`] once: the same signed bytes and nonce every other adapter
-//! uses. Committing to the egress lane is `T_queue`. It is not a send.
+//! [`EgressProducerV2`] is the egress lane's only producer (E6-2). It
+//! publishes nothing but the signed bytes of an [`EgressWrite`], which only
+//! the one economic owner, `IntentLane::start_write`, creates after it
+//! consumed this adapter's permit: the same signed bytes and nonce every
+//! other adapter uses, one egress per permit. The generic [`ProducerV2`]
+//! refuses the egress lane, and an HOT0 `IntentSlot` is storage only, never
+//! an egress authority. Committing to the egress lane is `T_queue`. It is
+//! not a send.
 //!
 //! geth answers with evidence on lanes of class `OutboundHandoffEvidence`,
 //! one lane per producer: the coordinator and each permanent peer worker.
@@ -23,11 +28,12 @@
 use crate::HASH_LEN;
 use crate::PEER_LEN;
 use crate::RecordKind;
-use crate::hot0::{IntentSlot, IntentState};
 use crate::protocol_v2::{
-    BorrowedRecordV2, CLOCK_ID_MONOTONIC, DirectionV2, LaneClassV2, LaneConfigV2, ProducerV2,
-    RecordV2, V2Error,
+    BorrowedRecordV2, CLOCK_ID_MONOTONIC, DirectionV2, LaneClassV2, LaneConfigV2, LaneStatsV2,
+    ProducerV2, RecordV2, V2Error,
 };
+use darkbot_bsc_trading::intent::EgressWrite;
+use std::path::Path;
 
 pub const C15_CHAIN_LANE_ID: u16 = 2;
 pub const C15_CHAIN_LANE_CAPACITY: usize = 1024;
@@ -99,47 +105,66 @@ pub fn outbound_lanes(workers: usize) -> Vec<LaneConfigV2> {
     lanes
 }
 
-/// Why a BUY was not published on the egress lane.
+/// Why a BUY was not published on the egress lane. Nothing was written to
+/// the lane in every case, so geth saw nothing of it.
 #[derive(Debug)]
 pub enum EgressError {
-    /// The intent slot holds no sealed BUY.
-    NotSealed(IntentState),
     /// The clock could not be read; an egress record needs its commit time.
     Clock,
     Wire(V2Error),
 }
 
-/// Publishes the sealed BUY of `slot` on the egress lane, once per call.
-///
-/// `commit_ns` is HOT0's clock reading taken immediately before the call
-/// (`hot0::monotonic_ns`); geth's coordinator echoes it in its evidence, so
-/// the egress commit and every handoff share one clock domain. Returns the
-/// egress lane sequence, which the evidence also carries. A full lane or a
-/// sealed lane is an error and nothing is written; the caller records the
-/// skipped adapter and does not retry blindly.
-pub fn publish_buy(
-    egress: &mut ProducerV2,
-    slot: &IntentSlot,
-    commit_ns: u64,
-) -> Result<u64, EgressError> {
-    if slot.state() != IntentState::Sealed {
-        return Err(EgressError::NotSealed(slot.state()));
+/// The only producer of the signed-transaction egress lane (E6-2).
+pub struct EgressProducerV2 {
+    producer: ProducerV2,
+}
+
+impl EgressProducerV2 {
+    /// Opens the egress lane of the arena at `path`.
+    pub fn open(path: &Path, generation: u64) -> Result<Self, V2Error> {
+        Ok(Self {
+            producer: ProducerV2::open_any_class(path, generation, egress_lane())?,
+        })
     }
-    if commit_ns == 0 {
-        return Err(EgressError::Clock);
+
+    /// Publishes the BUY that `write` releases, once: `write` is consumed.
+    ///
+    /// `commit_ns` is HOT0's clock reading taken immediately before the call
+    /// (`hot0::monotonic_ns`); geth's coordinator echoes it in its evidence,
+    /// so the egress commit and every handoff share one clock domain.
+    /// Returns the egress lane sequence, which the evidence also carries.
+    ///
+    /// Disclosure boundary: `Ok` means the record is committed and geth may
+    /// broadcast it; that is a local queue, not a send, an inclusion or a
+    /// purchase. An error means nothing reached the lane. The intent lane has
+    /// no state for "permit consumed but nothing disclosed", so the caller
+    /// reports every error as `IntentLane::write_failed` (UNKNOWN, lane
+    /// halted) and never retries; `Ok` as `write_completed`.
+    pub fn publish_buy(
+        &mut self,
+        write: EgressWrite<'_>,
+        commit_ns: u64,
+    ) -> Result<u64, EgressError> {
+        if commit_ns == 0 {
+            return Err(EgressError::Clock);
+        }
+        let record = RecordV2 {
+            kind: RecordKind::OutboundSignedTx,
+            flags: 0,
+            timestamp_ns: commit_ns,
+            clock_id: CLOCK_ID_MONOTONIC,
+            source: SOURCE_HOT0_EGRESS,
+            peer: [0; PEER_LEN],
+            hash: write.tx_hash().0,
+            aux: [0; 32],
+            payload: write.bytes(),
+        };
+        self.producer.publish(&record).map_err(EgressError::Wire)
     }
-    let record = RecordV2 {
-        kind: RecordKind::OutboundSignedTx,
-        flags: 0,
-        timestamp_ns: commit_ns,
-        clock_id: CLOCK_ID_MONOTONIC,
-        source: SOURCE_HOT0_EGRESS,
-        peer: [0; PEER_LEN],
-        hash: *slot.buy_hash(),
-        aux: [0; 32],
-        payload: slot.buy_bytes(),
-    };
-    egress.publish(&record).map_err(EgressError::Wire)
+
+    pub fn stats(&self) -> LaneStatsV2 {
+        self.producer.stats()
+    }
 }
 
 /// The outcome of one worker slot, or of the dispatch (`aux[0]`).
@@ -325,8 +350,7 @@ pub fn decode_handoff(record: &BorrowedRecordV2<'_>) -> Result<HandoffEvidence, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hot0::{Hot0Config, Hot0Decision, Hot0Outcome, Hot0Poller, IntentBuy};
-    use crate::ingress::{SOURCE_ETH_BROADCAST, ingress_aux};
+    use crate::ingress::SOURCE_ETH_BROADCAST;
     use crate::protocol_v2::{ArenaV2, ConsumerV2, arena_path_v2};
     use std::fs;
     use std::path::PathBuf;
@@ -387,58 +411,59 @@ mod tests {
     }
 
     #[test]
-    fn a_sealed_buy_is_published_once_with_its_own_bytes() {
+    fn the_egress_lane_is_written_only_against_a_consumed_permit() {
+        use alloy_primitives::{Address, B256};
+        use darkbot_bsc_trading::intent::{
+            AdapterId, AdapterSet, ArmedFence, IntentLane, LaneError,
+        };
         let dir = tmp("egress");
         let path = arena_path_v2(&dir, GENERATION);
-        let peer = crate::ingress::C14LanePlan::production(1).peer_lane(16);
-        let mut arena = ArenaV2::create(&path, GENERATION, &[peer, egress_lane()]).unwrap();
-        arena.bind_peer_lane(16, [0x16; 32]).unwrap();
-        let mut ingress = ProducerV2::open(&path, GENERATION, peer).unwrap();
-        let launch = [0xc1, 0x01];
-        let record = RecordV2 {
-            kind: RecordKind::EarlyTxSeen,
-            flags: 0,
-            timestamp_ns: 500,
-            clock_id: CLOCK_ID_MONOTONIC,
-            source: SOURCE_ETH_BROADCAST,
-            peer: [0x22; 32],
-            hash: [0x01; 32],
-            aux: ingress_aux(499),
-            payload: &launch,
-        };
-        ingress.publish(&record).unwrap();
-        let config = Hot0Config {
-            intent_slots: 1,
-            dedup_sets: 4,
-        };
-        let mut poller = Hot0Poller::open(&path, GENERATION, &[peer], None, config).unwrap();
-        let outcome = poller.poll_once(|_| {}, |_| Hot0Decision::Admit);
-        let Hot0Outcome::Admitted(handle) = outcome else {
-            panic!("not admitted: {outcome:?}");
-        };
-        let mut egress = ProducerV2::open(&path, GENERATION, egress_lane()).unwrap();
-        let unsealed = poller.intents().get(handle).unwrap();
-        let refused = publish_buy(&mut egress, unsealed, 700);
-        assert!(matches!(refused, Err(EgressError::NotSealed(_))));
-
+        let arena = ArenaV2::create(&path, GENERATION, &[egress_lane()]).unwrap();
+        // The generic producer cannot write the egress lane.
+        assert!(matches!(
+            ProducerV2::open(&path, GENERATION, egress_lane()),
+            Err(V2Error::EgressRequiresPermit)
+        ));
+        let (first, second) = (AdapterId::new(0).unwrap(), AdapterId::new(1).unwrap());
+        let permits = AdapterSet::new(&[first, second]).unwrap();
         let signed = [0x5au8; 300];
-        let buy = IntentBuy {
-            intent_id: 1,
-            generation: GENERATION,
-            policy_generation: 1,
-            nonce: 9,
-            adapter_permit_mask: 1,
-            buy_hash: [0x77; 32],
-            signed_buy: &signed,
-        };
-        let sealing = poller.intents_mut().get_mut(handle).unwrap();
-        sealing.seal(&buy).unwrap();
-        let slot = poller.intents().get(handle).unwrap();
-        let no_clock = publish_buy(&mut egress, slot, 0);
-        assert!(matches!(no_clock, Err(EgressError::Clock)));
-        assert_eq!(publish_buy(&mut egress, slot, 700).unwrap(), 0);
+        let hash = B256::repeat_byte(0x77);
+        let fence = || ArmedFence::for_tests(56, Address::repeat_byte(0x11), 9);
+        let token = Address::repeat_byte(0x22);
+        let (mut lane, dispatch) =
+            IntentLane::dispatched_for_tests(fence(), token, &signed, hash, permits).unwrap();
+        let mut egress = EgressProducerV2::open(&path, GENERATION).unwrap();
 
-        // geth's coordinator reads exactly the sealed bytes and hash.
+        let write = lane.start_write(dispatch.ticket, first, hash).unwrap();
+        assert_eq!(egress.publish_buy(write, 700).unwrap(), 0);
+        lane.write_completed(dispatch.ticket, first).unwrap();
+        // One permit, one egress: the consumed permit releases nothing again.
+        assert_eq!(
+            lane.start_write(dispatch.ticket, first, hash).err(),
+            Some(LaneError::PermitConsumed)
+        );
+        // A write for another transaction than the intent's is refused and
+        // stops the lane; nothing reaches the egress lane.
+        assert_eq!(
+            lane.start_write(dispatch.ticket, second, B256::repeat_byte(0x78))
+                .err(),
+            Some(LaneError::WrongHash)
+        );
+        assert_eq!(egress.stats().write_sequence, 1);
+
+        // Without a clock nothing is written.
+        let (mut other, other_dispatch) =
+            IntentLane::dispatched_for_tests(fence(), token, &signed, hash, permits).unwrap();
+        let write = other
+            .start_write(other_dispatch.ticket, first, hash)
+            .unwrap();
+        assert!(matches!(
+            egress.publish_buy(write, 0),
+            Err(EgressError::Clock)
+        ));
+        assert_eq!(egress.stats().write_sequence, 1);
+
+        // geth's coordinator reads exactly the lane's bytes and hash, once.
         let mut coordinator = ConsumerV2::open(&path, GENERATION, egress_lane()).unwrap();
         let received = coordinator.try_consume().unwrap().unwrap();
         assert_eq!(received.kind, RecordKind::OutboundSignedTx);
@@ -447,7 +472,7 @@ mod tests {
         assert_eq!(received.hash, [0x77; 32]);
         assert_eq!(&received.payload[..], &signed[..]);
         assert!(coordinator.try_consume().unwrap().is_none());
-        drop((poller, ingress, egress, coordinator, arena));
+        drop((egress, coordinator, arena));
         fs::remove_dir_all(dir).unwrap();
     }
 

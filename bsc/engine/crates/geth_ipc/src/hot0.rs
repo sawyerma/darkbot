@@ -107,6 +107,11 @@ pub enum IntentState {
 }
 
 /// The identity and BUY material Core finalizes for an admitted launch.
+///
+/// Descriptive copies only (E6-2): the nonce, permit mask and hash here are
+/// no authority. The economic intent, its nonce, permits and signed bytes are
+/// owned by `darkbot_bsc_trading::intent::IntentLane`, and egress needs its
+/// `EgressWrite` (`outbound::EgressProducerV2`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IntentBuy<'a> {
     pub intent_id: u64,
@@ -134,8 +139,11 @@ pub enum IntentError {
 ///
 /// The launch fields are copied once from the borrowed record; the BUY
 /// fields are set once by [`IntentSlot::seal`]. After that the slot is
-/// immutable until released, and every adapter reads the same bytes: one
-/// nonce, one signed BUY. It holds no reference into the mmap arena.
+/// immutable until released. It holds no reference into the mmap arena.
+///
+/// Storage only: no egress path accepts a slot (E6-2). Signed bytes reach the
+/// wire only through `IntentLane::start_write` and
+/// `outbound::EgressProducerV2::publish_buy`.
 pub struct IntentSlot {
     state: IntentState,
     serial: u64,

@@ -730,6 +730,8 @@ dependencies = [
 name = "darkbot-bsc-geth-ipc"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
+ "darkbot-bsc-trading",
  "libc",
 ]
 

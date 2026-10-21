@@ -743,7 +743,7 @@ fn run<S: Slot>(
         // The permit. From here on every failure is unknown.
         let (transport, frame) = slot.parts();
         let written = match lane.start_write(ticket, adapter, buy_hash) {
-            Ok(bytes) => match frame.fill_buy(bytes) {
+            Ok(write) => match frame.fill_buy(write.bytes()) {
                 // Everything the transport must do before the wire, such
                 // as encrypting the request into TLS records, happens now,
                 // before the last clock read.

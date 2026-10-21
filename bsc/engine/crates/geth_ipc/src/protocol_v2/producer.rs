@@ -9,7 +9,22 @@ pub struct ProducerV2 {
 }
 
 impl ProducerV2 {
+    /// Opens the single producer of a lane. The signed-transaction egress
+    /// lane is refused: only `outbound::EgressProducerV2` writes it, and only
+    /// against a consumed intent permit (E6-2).
     pub fn open(path: &Path, generation: u64, expected: LaneConfigV2) -> Result<Self, V2Error> {
+        if expected.class == LaneClassV2::SignedTransactionEgress {
+            return Err(V2Error::EgressRequiresPermit);
+        }
+        Self::open_any_class(path, generation, expected)
+    }
+
+    /// `open` without the egress-class refusal; for `EgressProducerV2`.
+    pub(crate) fn open_any_class(
+        path: &Path,
+        generation: u64,
+        expected: LaneConfigV2,
+    ) -> Result<Self, V2Error> {
         let (mapping, lane_offset, claim) =
             open_lane(path, generation, expected, LaneRoleV2::Producer)?;
         Ok(Self {

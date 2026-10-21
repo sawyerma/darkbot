@@ -1134,7 +1134,7 @@ fn plan_is_bound_to_exactly_the_dispatch_of_the_intent_lane() {
     let released = lane
         .start_write(ticket, adapter(0), bound.buy().hash())
         .unwrap();
-    assert!(plan.buy().matches(released));
+    assert!(plan.buy().matches(released.bytes()));
 
     // Another ticket, another BUY hash or another adapter set is not this
     // plan's dispatch.

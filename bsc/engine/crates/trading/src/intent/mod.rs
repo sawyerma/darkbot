@@ -391,6 +391,61 @@ pub struct Dispatch {
     pub adapters: AdapterSet,
 }
 
+/// The release of an intent's signed bytes to one adapter (invariant 5).
+///
+/// Only [`IntentLane::start_write`] creates it, after it consumed that
+/// adapter's permit for the dispatched intent and checked the transaction
+/// hash. It borrows the lane and can be neither copied nor cloned. It is the
+/// capability every egress requires, including the local-geth Fast Lane
+/// (`darkbot_bsc_geth_ipc::outbound::EgressProducerV2`, E6-2): an egress
+/// takes it by value, so one permit yields at most one egress.
+///
+/// It cannot be duplicated:
+///
+/// ```compile_fail
+/// fn twice(write: darkbot_bsc_trading::intent::EgressWrite<'_>) {
+///     let _copy = write.clone();
+/// }
+/// ```
+///
+/// and it has no public constructor:
+///
+/// ```compile_fail
+/// use darkbot_bsc_trading::intent::EgressWrite;
+/// fn forge<'a>(bytes: &'a [u8]) -> EgressWrite<'a> {
+///     EgressWrite { ticket: todo!(), adapter: todo!(), tx_hash: todo!(), bytes }
+/// }
+/// ```
+#[derive(Debug, PartialEq, Eq)]
+pub struct EgressWrite<'lane> {
+    ticket: Ticket,
+    adapter: AdapterId,
+    tx_hash: B256,
+    bytes: &'lane [u8],
+}
+
+impl<'lane> EgressWrite<'lane> {
+    /// The dispatched intent.
+    pub fn ticket(&self) -> Ticket {
+        self.ticket
+    }
+
+    /// The adapter whose permit was consumed.
+    pub fn adapter(&self) -> AdapterId {
+        self.adapter
+    }
+
+    /// Hash of the intent's signed transaction.
+    pub fn tx_hash(&self) -> B256 {
+        self.tx_hash
+    }
+
+    /// The intent's signed bytes, as the lane holds them.
+    pub fn bytes(&self) -> &'lane [u8] {
+        self.bytes
+    }
+}
+
 /// Counters that keep refused and blocked work visible.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LaneStats {
