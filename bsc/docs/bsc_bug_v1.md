@@ -4,6 +4,12 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Fortsetzung 2026-10-21 — E7-6 / E7-4
+
+- **FIXED / TESTED E7-6:** `laneV2.precheckTxpool` (einziger Txpool-Producer) verweigert State≠BOUND/Shutdown/Full **vor** `serializeTxV2`; `publishChecked` bleibt unverändert die verbindliche Prüfung (Precheck ist keine Write-Erlaubnis). Jeder verweigerte Record erhöht `txpoolRefused`, Full zusätzlich `DroppedFull`; Oversize auf freier Lane wird weiterhin serialisiert und als `Oversize` gezählt. Auf voller Lane zählt ein auch übergroßer TX als `DroppedFull` (Bytes nie erzeugt) — jeder Verlust bewegt genau einen Verlustzähler, C1.4 bleibt `INCOMPLETE`. Keine Queue, kein Layoutwechsel. **Performance nicht gemessen → nicht `IMPROVED`.**
+- **FIXED E7-4:** veraltete `bsc/native/tools/c13_/c14_*interop.sh`-Verweise in Rust-/Go-Kommentaren und Ignore/Skip-Labels → `bsc/tools/…`.
+- **Tests:** Go `darkbot/fastlane` mit `-race`, gepinntes geth `cdb7548b` + Overlay-Tool, offline: PASS (inkl. neuem `TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal`: kein Marshal bei voller Lane, Oversize auf freier Lane, Wiederaufnahme nach Drain; angepasster Shutdown-Zähltest). `cargo check -p darkbot-bsc-geth-ipc --tests` PASS.
+
 ## Fortsetzung 2026-10-21 — E8-1/E8-4
 
 - **FIXED / TESTED:** `Recorder::try_record(&mut self)` erzwingt einen sequenzvergebenden/enqueueenden Owner; parallele immutable Producer sind per Compile-Fail ausgeschlossen. Separater `SpannedDrain` mit gebundenem Startcursor 0, exklusiver Receive-API, belegten QueueFull-Spans und trailing losses nach Producer-Ende. Oversize/Disconnected/Overflow bleiben separat, kein Verlust durch bloßes Reordering erfunden.

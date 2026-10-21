@@ -1854,7 +1854,7 @@ fn an_undefined_lifecycle_state_quarantines_even_an_empty_lane() {
 
 // -----------------------------------------------------------------
 // C1.3 Go<->Rust lifecycle interop. Four alternating processes on one
-// arena, run in order by bsc/native/tools/c13_lifecycle_interop.sh:
+// arena, run in order by bsc/tools/c13_lifecycle_interop.sh:
 // geth phase 1 -> rust phase 1 -> geth phase 2 -> rust phase 2.
 // -----------------------------------------------------------------
 
@@ -1874,7 +1874,7 @@ fn interop_arena() -> Option<std::path::PathBuf> {
 /// Phase 1: read what Go wrote, consume lane 1 to its final write, ack
 /// the drain; find Go's broken record on lane 2 and quarantine it.
 #[test]
-#[ignore = "C1.3 Go<->Rust interop phase; run by bsc/native/tools/c13_lifecycle_interop.sh"]
+#[ignore = "C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh"]
 fn interop_rust_phase_1() {
     let Some(path) = interop_arena() else {
         return;
@@ -1943,7 +1943,7 @@ fn interop_rust_phase_1() {
 /// Phase 2: Go released and rebound lane 1 with epoch + 1; consume the
 /// new binding's record, sequence continuing at 3.
 #[test]
-#[ignore = "C1.3 Go<->Rust interop phase; run by bsc/native/tools/c13_lifecycle_interop.sh"]
+#[ignore = "C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh"]
 fn interop_rust_phase_2() {
     let Some(path) = interop_arena() else {
         return;

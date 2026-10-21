@@ -797,6 +797,29 @@ func (l *laneV2) publishLeased(record recordV2, leaseEpoch uint64) error {
 	return l.publishChecked(record, leaseEpoch, true)
 }
 
+// Txpool-only optimization for its sole producer: refuse before marshalling a
+// transaction that publishChecked would refuse anyway (E7-6). It is no write
+// permit; the authoritative publish repeats every check. The caller counts each
+// refusal. A full lane counts DroppedFull even for a transaction that would also
+// be oversized, because its bytes are never produced; every refused record still
+// moves exactly one loss counter, so C1.4 qualification stays INCOMPLETE.
+func (l *laneV2) precheckTxpool() error {
+	state := atomic.LoadUint32(v2AtomicU32(l.arena.data, l.offset+v2LHState))
+	if state != v2LaneStateBound {
+		return v2StateError(v2LaneStateBound, state)
+	}
+	if atomic.LoadUint64(l.atomic(v2LHShutdown)) != 0 {
+		return errV2Shutdown
+	}
+	write := atomic.LoadUint64(l.atomic(v2LHWriteSeq))
+	read := atomic.LoadUint64(l.atomic(v2LHReadSeq))
+	if write-read >= uint64(l.config.Capacity) {
+		atomic.AddUint64(l.atomic(v2LHDroppedFull), 1)
+		return errV2QueueFull
+	}
+	return nil
+}
+
 func (l *laneV2) publishChecked(record recordV2, leaseEpoch uint64, leased bool) error {
 	state := atomic.LoadUint32(v2AtomicU32(l.arena.data, l.offset+v2LHState))
 	if state != v2LaneStateBound {

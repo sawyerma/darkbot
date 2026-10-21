@@ -1814,7 +1814,7 @@ mod tests {
 
     // -----------------------------------------------------------------
     // C1.4 Go<->Rust ingress interop, run by
-    // bsc/native/tools/c14_ingress_interop.sh
+    // bsc/tools/c14_ingress_interop.sh
     // -----------------------------------------------------------------
 
     const INTEROP_ENV: &str = "DARKBOT_C14_INTEROP_DIR";
@@ -1896,7 +1896,7 @@ mod tests {
     /// Phase 1: read what geth published, run the audit with its two
     /// planted false negatives, drain and acknowledge peer A's closed lane.
     #[test]
-    #[ignore = "C1.4 Go<->Rust ingress interop phase; run by bsc/native/tools/c14_ingress_interop.sh"]
+    #[ignore = "C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh"]
     fn interop_c14_rust_phase_1() {
         let Some(io) = Interop::load() else {
             return;
@@ -1986,7 +1986,7 @@ mod tests {
     /// Phase 2: geth released A's lane and bound it to C with epoch + 1;
     /// only C's record follows, under the new epoch.
     #[test]
-    #[ignore = "C1.4 Go<->Rust ingress interop phase; run by bsc/native/tools/c14_ingress_interop.sh"]
+    #[ignore = "C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh"]
     fn interop_c14_rust_phase_2() {
         let Some(io) = Interop::load() else {
             return;

@@ -896,7 +896,7 @@ func TestC14TxpoolProducerFailuresAreCounted(t *testing.T) {
 	r.shutdown()
 	r.publishTxpool([]*types.Transaction{bad, good})
 	s := r.snapshot()
-	if s.TxpoolPublished != 1 || s.TxpoolSerializeErrs != 2 || s.TxpoolRefused != 1 || s.TxpoolClockErrors != 0 {
+	if s.TxpoolPublished != 1 || s.TxpoolSerializeErrs != 1 || s.TxpoolRefused != 2 || s.TxpoolClockErrors != 0 {
 		t.Fatalf("txpool counters %+v", s)
 	}
 	consumer := c14Consumer(t, cfg, c14TxpoolLane(cfg))
@@ -935,7 +935,7 @@ func TestC14RoleLeaseAndGenerationRulesHold(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// C1.4 Go<->Rust ingress interop, run by bsc/native/tools/c14_ingress_interop.sh
+// C1.4 Go<->Rust ingress interop, run by bsc/tools/c14_ingress_interop.sh
 // ---------------------------------------------------------------------------
 
 func c14InteropConfig(dir string) ingressConfigV2 {
@@ -949,7 +949,7 @@ func c14InteropDir(t *testing.T) string {
 	t.Helper()
 	dir := os.Getenv(c14InteropEnv)
 	if dir == "" {
-		t.Skip("C1.4 Go<->Rust interop phase; run by bsc/native/tools/c14_ingress_interop.sh")
+		t.Skip("C1.4 Go<->Rust interop phase; run by bsc/tools/c14_ingress_interop.sh")
 	}
 	return dir
 }
@@ -1181,5 +1181,45 @@ func TestC19bUnsyncedAcceptTxsQualificationGate(t *testing.T) {
 				t.Fatalf("allowed=%v want=%v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal(t *testing.T) {
+	cfg := c14TestConfig(t, 1, 0, 8, 512)
+	r := c14Start(t, cfg)
+	tx := c14Tx(t, 0, &c14Portal, c14SmallLaunch(0), false)
+	saved := serializeTxV2
+	calls := 0
+	serializeTxV2 = func(tx *types.Transaction) ([]byte, error) { calls++; return saved(tx) }
+	defer func() { serializeTxV2 = saved }()
+	// A lane with free slots still marshals and classifies an oversized
+	// transaction as Oversize, exactly as before the precheck.
+	huge := c14Tx(t, 1, &c14Portal, make([]byte, 5000), false)
+	r.publishTxpool([]*types.Transaction{huge})
+	if calls != 1 || testStatsV2(t, r.rt.arena, c14TxpoolLane(cfg).ID).Oversize != 1 || r.snapshot().TxpoolRefused != 1 {
+		t.Fatalf("oversize on a free lane: calls=%d counters %+v", calls, r.snapshot())
+	}
+	capacity := int(r.txpool.config.Capacity)
+	for i := 0; i < capacity; i++ {
+		r.publishTxpool([]*types.Transaction{tx})
+	}
+	before := calls
+	r.publishTxpool([]*types.Transaction{tx, tx, tx})
+	if calls != before {
+		t.Fatal("full lane still marshals transactions")
+	}
+	if got := r.snapshot(); got.TxpoolRefused != 4 || got.TxpoolPublished != uint64(capacity) {
+		t.Fatalf("counters %+v", got)
+	}
+	if got := testStatsV2(t, r.rt.arena, c14TxpoolLane(cfg).ID); got.DroppedFull != 3 || got.Oversize != 1 {
+		t.Fatalf("loss accounting %+v", got)
+	}
+	consumer := c14Consumer(t, cfg, c14TxpoolLane(cfg))
+	if _, ok, err := consumer.tryConsume(); err != nil || !ok {
+		t.Fatalf("drain %v", err)
+	}
+	r.publishTxpool([]*types.Transaction{tx})
+	if calls != before+1 {
+		t.Fatal("freed slot did not resume marshal")
 	}
 }

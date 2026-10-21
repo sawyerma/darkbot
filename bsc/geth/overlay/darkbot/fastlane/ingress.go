@@ -868,6 +868,10 @@ func (r *ingressRuntimeV2) publishTxpool(txs []*types.Transaction) {
 		return
 	}
 	for _, tx := range txs {
+		if err := r.txpool.precheckTxpool(); err != nil {
+			r.txpoolRefused.Add(1)
+			continue
+		}
 		raw, err := serializeTxV2(tx)
 		if err != nil {
 			r.txpoolSerializeErrors.Add(1)

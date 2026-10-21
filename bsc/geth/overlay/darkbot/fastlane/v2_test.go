@@ -2026,7 +2026,7 @@ func TestV2UndefinedLifecycleStateQuarantinesEvenAnEmptyLane(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // C1.3 Go<->Rust lifecycle interop. Four alternating processes on one arena,
-// run in order by bsc/native/tools/c13_lifecycle_interop.sh:
+// run in order by bsc/tools/c13_lifecycle_interop.sh:
 //   geth phase 1 -> rust phase 1 -> geth phase 2 -> rust phase 2.
 // Without DARKBOT_C13_INTEROP_DIR these tests skip.
 // ---------------------------------------------------------------------------
@@ -2050,7 +2050,7 @@ func testInteropDirV2(t *testing.T) string {
 	t.Helper()
 	dir := os.Getenv(interopEnvV2)
 	if dir == "" {
-		t.Skip("C1.3 Go<->Rust interop phase; run by bsc/native/tools/c13_lifecycle_interop.sh")
+		t.Skip("C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh")
 	}
 	return dir
 }
