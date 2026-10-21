@@ -683,6 +683,14 @@ cargo build --locked --features "crate_health txv1"
 
 cargo test --locked --workspace --features crate_health
 cargo test --locked --workspace --features "crate_health txv1"
+
+# The runner library without the health engine (`default = []`; only `p0-longtail` requires
+# `crate_health`). A workspace build always unifies `crate_health` into the runner (the reporter
+# depends on it), so only an isolated package build checks this configuration
+# (tests/regression/test_feature_matrix.py).
+cargo clippy --locked -p darkbot-runner --all-targets -- -D warnings
+cargo test --locked -p darkbot-runner
+cargo test --locked -p darkbot-runner --features txv1
 ```
 
 Mainnet Shadow entry:

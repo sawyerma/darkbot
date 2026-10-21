@@ -79,7 +79,7 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
 /// Explicit offline import of measured provider evidence (X2): the JSON is decoded once into the
 /// typed record; the boot audit reads only that record and binds its bytes.
 fn import_provider_evidence(json: &Path, out: &Path) -> Result<(), String> {
-    use darkbot_runner::orchestration::fe_qualification::ProviderEvidence;
+    use darkbot_runner::orchestration::provider_evidence::ProviderEvidence;
     if std::fs::metadata(json).map_err(|e| e.to_string())?.len() > 65536 {
         return Err("PROVIDER_EVIDENCE_LIMIT".into());
     }

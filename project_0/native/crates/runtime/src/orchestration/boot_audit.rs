@@ -120,6 +120,26 @@ fn sha(bytes: &[u8]) -> String {
     journal::hex(&solana_sdk::hash::hash(bytes).to_bytes())
 }
 
+/// R4: minimum and worst case of the BOOT reads of the configured scope.
+#[cfg(feature = "crate_health")]
+fn boot_read_bounds(
+    c: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> (Result<u64, String>, Result<u64, String>) {
+    (
+        super::boot_network::required_reads(c),
+        super::boot_network::worst_case_reads(c),
+    )
+}
+/// Without the health engine there is no FE scope and no network audit: the budget is unknown,
+/// never PASS.
+#[cfg(not(feature = "crate_health"))]
+fn boot_read_bounds(
+    _: &darkbot_solana::runtime_config::RuntimeConfig,
+) -> (Result<u64, String>, Result<u64, String>) {
+    let e = || Err("BOOT_SCOPE_NEEDS_CRATE_HEALTH".to_string());
+    (e(), e())
+}
+
 fn git(project: &Path, args: &[&str]) -> Option<Vec<u8>> {
     let out = std::process::Command::new("git")
         .arg("-C")
@@ -645,10 +665,7 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
     // (config arithmetic only; the network audit itself stays NOT_RUN here).
     let c = darkbot_solana::runtime_config::active();
     let calls = c.limits.boot_calls.min(c.limits.max_requests);
-    match (
-        super::boot_network::required_reads(c),
-        super::boot_network::worst_case_reads(c),
-    ) {
+    match boot_read_bounds(c) {
         (Ok(min), Ok(worst)) => add(
             "BOOT-02",
             "boot_read_budget",
@@ -1173,6 +1190,7 @@ mod tests {
 
     /// R4: the doctor reports the BOOT read budget against the minimum and the worst case of the
     /// configured scope (non-critical; PASS only at or above the worst case).
+    #[cfg(feature = "crate_health")]
     #[test]
     fn boot_read_budget_is_reported_against_the_worst_case() {
         let d = temp(line!());
@@ -1193,6 +1211,23 @@ mod tests {
         };
         assert_eq!(c.state, expected, "{}", c.reason);
         assert!(c.reason.contains(&worst.to_string()), "{}", c.reason);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Without the health engine there is no FE scope: the BOOT read budget is unknown, never PASS.
+    #[cfg(not(feature = "crate_health"))]
+    #[test]
+    fn boot_read_budget_is_unknown_without_the_health_engine() {
+        let d = temp(line!());
+        let a = offline(&inputs(&d)).unwrap();
+        let c = a
+            .checks
+            .iter()
+            .find(|c| c.name == "boot_read_budget")
+            .unwrap();
+        assert!(!c.critical);
+        assert_eq!(c.state, CheckState::Unknown);
+        assert_eq!(c.reason, "BOOT_SCOPE_NEEDS_CRATE_HEALTH");
         std::fs::remove_dir_all(&d).unwrap();
     }
 
