@@ -170,7 +170,7 @@ impl ExpiryObservation {
     /// absent and is reported, never retried beyond the bound.
     fn read(launch: B256, buy: B256, launcher: Address, buyer: Address) -> Self {
         let mut o = Self::default();
-        let mut note = |e: String, o: &mut Self| {
+        let note = |e: String, o: &mut Self| {
             o.error.get_or_insert(e);
         };
         match read_rpc(wire::block_number) {
@@ -1602,6 +1602,74 @@ mod tests {
             ],
             data: U256::from(amount).to_be_bytes::<32>().to_vec(),
         }
+    }
+
+    /// E2-4: an original canonical Mainnet receipt of a direct EOA ->
+    /// Portal `swapExactInput` for a TAX_V3 token under Flap Portal v5.26.0
+    /// (bonding curve; read-only from bsc-dataseed.bnbchain.org on
+    /// 2026-10-21): BSC block 128999556, block hash
+    /// 0xda384629366456eec2ac97170c18fda0f8945af463503e766c844e9a0f4ea22c, transaction 0x9565641b62fa6ce4b1c3423a465a4e971834d3adc58ce6632b5f45cc241fa83d, index 21.
+    /// Every log is copied as served, so the frozen attribution rules are
+    /// checked against real v5.26.0 tax-token semantics, not a synthetic log.
+    #[test]
+    fn a_real_v5_26_tax_token_buy_receipt_is_attributable() {
+        const LOGS: &[(u64, &str, &[&str], &str)] = &[
+            (73, "9c4582d385fdda2057f09020a03382f213c0423e", &["1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"], "000000000000000000000000000000000000000000000000632a2c03a1ee212400000000000000000000000000000000000000000312da6f36558c3bb65d7a20"),
+            (74, "9c4582d385fdda2057f09020a03382f213c0423e", &["d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", "0000000000000000000000003b56d9905983723a870e6af9c251241d37079daa"], "0000000000000000000000000000000000000000000000000025ef4ba64f4ace000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000124660f3382916655c095"),
+            (75, "ce988183ddd2083dfd58565cd5de77b2cdcc7777", &["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", "0000000000000000000000003b56d9905983723a870e6af9c251241d37079daa"], "0000000000000000000000000000000000000000000124660f3382916655c095"),
+            (76, "4b35baea36b17d31974050ff281c1d0bdfd000ba", &["2a9333f5f64b9c9d299faa0d6699b5db8d59d08388fea8ae78ca2303836a10f8", "000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc7777", "0000000000000000000000003b56d9905983723a870e6af9c251241d37079daa"], "0000000000000000000000000000000000000000000124660f3382916655c09500000000000000000000000000000000000000000080ddb75d5fbae280e285e0"),
+            (77, "ce988183ddd2083dfd58565cd5de77b2cdcc7777", &["c4f02cd43bed595a7c3ee13e0ee1ec639470a7a0f374837ee7b910779d55f5ba"], "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de00000000000000000000000003b56d9905983723a870e6af9c251241d37079daa0000000000000000000000000000000000000000000124660f3382916655c095"),
+            (78, "e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", &["115c78ad17c4763fb97bca94f3e59dc8cb2e59c9d3862f24a694ec401200f562"], "000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc777700000000000000000000000000000000000000000080ddb75d5fbae280e285e0"),
+            (79, "8a08d98cbb218fceb318ecf3abc1ba43d8a7ab0e", &["3d0ce9bfc3ed7d6862dbb28b2dea94561fe714a1b4d019aa8af39730d1ad7c3d", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0"], "0000000000000000000000000000000000000000000000000000611cea9f834e"),
+            (80, "e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", &["b4aa5d6b2390b2b8892ff84cb0ef9a64e969e1af22d049fa61cc2cf66c6ab7bd", "000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc7777"], "0000000000000000000000000000000000000000000000000000c239d53f069e"),
+            (81, "bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", &["e1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0"], "0000000000000000000000000000000000000000000000000000c239d53f069e"),
+            (82, "bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", &["8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", "00000000000000000000000040e561d7e776c4f2e2b8fc1d59237040a268da2e"], "0000000000000000000000000000000000000000000000000000c239d53f069e"),
+            (83, "bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", &["ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", "00000000000000000000000040e561d7e776c4f2e2b8fc1d59237040a268da2e"], "0000000000000000000000000000000000000000000000000000c239d53f069e"),
+            (84, "40e561d7e776c4f2e2b8fc1d59237040a268da2e", &["e28939e2584c18d4cf50400652cdf80c00e35aa5bcf60991b33199aabc9d6a4c", "000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc7777"], "0000000000000000000000000000000000000000000000000000c239d53f069e"),
+            (85, "bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", &["8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", "00000000000000000000000040e561d7e776c4f2e2b8fc1d59237040a268da2e"], "0000000000000000000000000000000000000000000000000000000000000000"),
+            (86, "e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", &["a800a2038683844fac66747f771bfdfae862eb28b16bcfa387afa9fbacce8ff7"], "000000000000000000000000000000000000000000000000000000006ad91c10000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc77770000000000000000000000003b56d9905983723a870e6af9c251241d37079daa0000000000000000000000000000000000000000000124660f3382916655c0950000000000000000000000000000000000000000000000000025ef4ba64f4ace0000000000000000000000000000000000000000000000000000611cea9f834e00000000000000000000000000000000000000000000000000000001bfbcdd20"),
+            (87, "e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", &["4c35e20d1e9bce377c7d9ec1572d934e46d62961f4da8af5beb8002d5906742d"], "000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc777700000000000000000000000000000000000000000000000000df4f007d8f9aa3"),
+        ];
+        let decode = |s: &str| hex::decode(s).unwrap();
+        let receipt = Receipt {
+            block_number: 128999556,
+            block_hash: B256::from_slice(&decode("da384629366456eec2ac97170c18fda0f8945af463503e766c844e9a0f4ea22c")),
+            transaction_index: 21,
+            transaction_hash: B256::from_slice(&decode("9565641b62fa6ce4b1c3423a465a4e971834d3adc58ce6632b5f45cc241fa83d")),
+            from: Address::from_slice(&decode("3b56d9905983723a870e6af9c251241d37079daa")),
+            to: Some(PORTAL),
+            contract_address: None,
+            status: 1,
+            gas_used: 312218,
+            cumulative_gas_used: 2807236,
+            effective_gas_price: Some(U256::from(59999999u64)),
+            logs: LOGS
+                .iter()
+                .map(|(index, address, topics, data)| wire::Log {
+                    log_index: *index,
+                    address: Address::from_slice(&decode(address)),
+                    topics: topics.iter().map(|t| B256::from_slice(&decode(t))).collect(),
+                    data: decode(data),
+                })
+                .collect(),
+        };
+        let token = Address::from_slice(&decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777"));
+        let buyer = receipt.from;
+        let value = U256::from(10677682330094286u64);
+        // The tax goes to the tax processor in BNB; the event reports the
+        // whole input as value and only the 1 % protocol fee as fee.
+        let buys = portal_buys(&receipt).unwrap();
+        assert_eq!(buys.len(), 1);
+        assert_eq!((buys[0].token, buys[0].buyer, buys[0].value), (token, buyer, value));
+        assert_eq!(buys[0].fee, value / U256::from(100u8));
+        let (net, fee) = attributable_acquisition(&receipt, token, buyer, value, U256::from(1u8)).unwrap();
+        assert_eq!(net, buys[0].amount);
+        assert_eq!(fee, buys[0].fee);
+        // A minimum above the real output, another value or another buyer is
+        // refused as before.
+        assert!(attributable_acquisition(&receipt, token, buyer, value, net + U256::from(1u8)).is_err());
+        assert!(attributable_acquisition(&receipt, token, buyer, value + U256::from(1u8), U256::from(1u8)).is_err());
+        assert!(attributable_acquisition(&receipt, token, Address::repeat_byte(9), value, U256::from(1u8)).is_err());
     }
 
     #[test]

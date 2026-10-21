@@ -1,5 +1,11 @@
 # BSC Status — Code, Nachweise und LIVE getrennt
 
+## Current checkpoint — 2026-10-21: Portal v5.26.0 drift — readiness STOP; G0.7 not armable on the v5.25 DRY
+
+Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Portal v5.25.0 → **v5.26.0**, implementation `0x7a94f37b61a82c395f9812cf266b444783cc5e8c`, upgrade block 128914179). The requalified DRY of 2026-10-20 and its signed bytes are bound to v5.25.0 and are not valid for current Mainnet. Evidence: `native/evidence/g07/readiness_20261021T201733Z/`; ledger entry 2026-10-21. A requalification against v5.26.0 needs a separate decision (salt choice A/B from E3-1 first, because B changes the candidate anyway; DRY-1 signing by the user). Guard **UNARMED**; G0.7/G0.8 **NOT_EXECUTED**. Offline bugfix packages of 2026-10-21 (E7-6…E2-4) are listed in `bsc_bug_v1.md`.
+
+The 2026-10-20 checkpoint below is historical.
+
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN
 
 Source: G07_REQUALIFICATION_RESULT_20261020.md. R0 and DRY-0..DRY-4 **PASS** against Flap Portal v5.25.0; signed launch/BUY bytes unchanged; zero egress. The V4 proposal exists with approved=false, execution_ready=false and one allowed attempt; proposal SHA-256 **5da0068b0c8b1f7e3c682cc4ea7ce3950d83147e94946b46aafb11f6dd50ec3d**. The approved-variant SHA-256 **4308f2cb97414aea7d4ce9469ab101eb3f29ff1d272df0a72930e49a56c29ad0** was calculated only, not written/approved. Guard **UNARMED**; G0.7/G0.8 **NOT_EXECUTED**. Maximum one-attempt loss reserve **481163500000000 wei = 0.0004811635 BNB**.

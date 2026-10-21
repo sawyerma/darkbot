@@ -1,5 +1,10 @@
 # G0.7 attempt 1: requalification against Flap Portal v5.25.0
 
+> **Document status 2026-10-21 — read this first.** This plan is a technical reference with historical work steps. Authority: `BSC_DUAL_VENUE_ROADMAP.md` (binding update 2026-10-20) > `GATE0_TESTPLAN_SHORT.md`; the requalification against v5.25.0 is **concluded**: R0 and DRY-0…DRY-4 PASS per [G07_REQUALIFICATION_RESULT_20261020.md](G07_REQUALIFICATION_RESULT_20261020.md).
+> - Sections **3** (JSON tools; the DBREC migration is implemented), **5 steps 1–8** (original implementation/DRY steps), **7** (2026-10-17 run instructions) and **8 "Current verification status"** (2026-10-17 state) are **SUPERSEDED/HISTORICAL**. Do not execute them again; do not repeat an unchanged R0/DRY.
+> - **New invalidation 2026-10-21:** Flap Portal was upgraded to **v5.26.0** (implementation `0x7a94f37b61a82c395f9812cf266b444783cc5e8c`, block 128914179). The read-only readiness reports `CURRENT_DEPLOYMENT_DRIFT=STOP` ([evidence](../native/evidence/g07/readiness_20261021T201733Z/)). The v5.25.0 DRY and its signed bytes are therefore not valid for current Mainnet. A requalification against v5.26.0 is a new, separately decided step; it is not authorized by this document.
+> - Historical evidence stays unchanged.
+
 Historical status (2026-10-17): **Read-only analysis complete; sections 3 and 4 implemented (option A) and tested offline; the requalification DRY was then pending. See the binding 2026-10-20 update in section 5.**
 
 - Nothing was sent. No signature was made, no builder was contacted, and the guard stays `UNARMED`.
@@ -53,7 +58,9 @@ Basis: the frozen candidate unchanged — same wallets, salt, values, gas, `minO
 | DRY-4 expiry, nonces, zero egress | Existing structural zero-egress proof and expiry projection. | Fields in `dry_result.dbrec`. | Zero egress; nonces 0/0. |
 | Comparison | Field-by-field reports new DRY ↔ frozen DRY (`dbrec_compare`, derived Markdown) and the typed verdict `g06a_requal_check` (offline). | `requalification_status.dbrec` (type 26) plus derived views. | Every field equal except an explicit allow-list per record (head, block hash, implementation and code, gas price, balances, measured gas, projection, contract path/hash, builder evidence hash); signed hashes, token, salt, `minOutput`, economics and safety parameters identical. Anything else is `FLAP_REQUALIFICATION=STOP`. |
 
-## 3. Binary output of the DRY toolchain (gap and decision)
+## 3. Binary output of the DRY toolchain (gap and decision) — SUPERSEDED/HISTORICAL
+
+*Implemented (option A, §7); kept for the decision record. Do not re-implement.*
 
 The DRY tools still write JSON today. They are outside the minimal G0.7/G0.8 migration scope, but a new DRY run needs them without internal JSON:
 
@@ -101,6 +108,8 @@ Planned changes:
 
 ## 5. Order and approval points
 
+*The binding 2026-10-20 update below is current. The numbered steps 1–8 after it are the original 2026-10-17 order and are SUPERSEDED/HISTORICAL for v5.25.0 (completed per the 2026-10-20 result).*
+
 ### Binding 2026-10-20 implementation update — code-ready, not live authorization
 
 R0 and DRY-0..DRY-4 have now passed on Flap Portal v5.25.0; signed launch/BUY bytes are unchanged and zero egress was verified. Use G07_REQUALIFICATION_RESULT_20261020.md as the current evidence and preserve older records as historical. Do not repeat the R0 scan or unchanged DRY solely to prepare code.
@@ -115,6 +124,8 @@ Implement the readiness distinction in g07_pre_live_readiness.rs:
 Complete existing G0.7 and the immediate G0.8 acquisition/order/cost verification handoff using only targeted regressions. No GUI work, C1/C2, generic audit, refactor, requalification campaign or new tests without a specific changed-code need. Preserve the previously qualified exact bytes and all one-attempt, journal, budget and anti-replay protections.
 
 The separate **economic authorization** requires explicit user approval of the final V4 *approved variant* SHA-256, stated residual builder risk and the frozen maximum loss budget, followed by a distinct authorized arming step. Until then: approved=false, execution_ready=false, UNARMED, no Mainnet submission. Missing producer timing evidence continues to block a full sub-1-ms timing PASS, not the code-completion milestone.
+
+*SUPERSEDED/HISTORICAL (2026-10-17 order, completed for v5.25.0):*
 
 1. Decide the DRY-2 output (option A or B). This is the only architecture decision.
 2. Implement section 3 and section 4 with targeted tests (codec/schema, golden, guard v4, G0.7 no-send, readiness). No full regression until acceptance.
@@ -133,7 +144,7 @@ The separate **economic authorization** requires explicit user approval of the f
 - The eth_call/eth_simulateV1 results are read-only analysis with a random salt and dummy strings. They are not DRY evidence and not a Mainnet BUY.
 - The +17 % BUY gas is a simulator comparison, not a confirmed cost increase.
 
-## 7. Implementation status (2026-10-17, option A)
+## 7. Implementation status (2026-10-17, option A) — HISTORICAL
 
 Nothing was sent or signed, and the guard stays `UNARMED` (`FROZEN_APPROVED_V4_SHA256 = "UNARMED"`).
 
@@ -194,7 +205,9 @@ transaction bytes, token, minimum output, economics or safety
 parameters. Differences permitted by its explicit comparison
 contract require corresponding native evidence.
 
-### Current verification status
+### Verification status of 2026-10-17 — SUPERSEDED/HISTORICAL
+
+*Superseded by [G07_REQUALIFICATION_RESULT_20261020.md](G07_REQUALIFICATION_RESULT_20261020.md): R0 PASS (858 891 headers through 128724651, upgrade at 128103397) and DRY-0…DRY-4 PASS, evidence `native/evidence/g06a/g06a_requal_dry_20261020T072853Z/`. The text below is the 2026-10-17 state.*
 
 The BSC workspace build and workspace tests passed locally with
 the three new source files present on 2026-10-17.
