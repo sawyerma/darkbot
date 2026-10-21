@@ -30,7 +30,7 @@
 | N8 | `[x]` | WSS-ACK-Deadline ignoriert Subscription-Anzahl | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | L1 | `[x]` | Drop-Reihenfolge Finanzjournal und File-Lock | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | L2 | `[x]` | unsicherer 'sigs[sigs.len()-2]'-Index im Jito-Bundle | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
-| L3 | `[ ]` | Writer-/Channel-/Submission-Metriken | Nicht abgeschlossen / PARTIAL |
+| L3 | `[ ]` | Writer-/Channel-/Submission-Metriken | PARTIAL; kein Blocker des 4h-Gates (Begründung BUGS L3, 21.10.), persistierte Zähler zurückgestellt |
 | L4 | `[x]` | falsch konfigurierte Zero-Prefund-Flags fallen auf 'false' zurück | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | B1 | `[ ]` | LIVE-Pipeline umgeht FE-04-Durable-Admission | Nicht abgeschlossen / PARTIAL |
 | B2 | `[x]` | Prefix-Decode von MarginfiAccount, Group und FeeState | Abgehakt; Mainnet-Längen/Versionsfixtures fehlen als Zusatznachweis |
@@ -98,7 +98,7 @@
 | X1 | `[x]` | BOOT-12 muss aktuelle Identitäten vor Runtime-Admission erneut prüfen | Abgehakt; Z10 neue, noch unbewiesene Rent-Sysvar-Hypothese |
 | X2 | `[x]` | JFI-01/02-Verstoß im neuen BOOT-/Provider-Evidence-Pfad | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | X3 | `[x]` | BOOT-01/02 nicht nur als Offline-Token qualifizieren | Abgehakt lokal; Netzwerk-Gate separat offen |
-| R1 | `[ ]` | Market-Capture-Drain hängt an Quiescence der WSS-Session | PARTIAL: Deadline-Fall, Join im Restbudget, unvollständiger Drain nie `Ok` (`310be1c`); offen `run()`-Ende-zu-Ende mit Fake-WSS, TLS-Abbau NOT_RUN |
+| R1 | `[ ]` | Market-Capture-Drain hängt an Quiescence der WSS-Session | PARTIAL, offline vollständig: Deadline-Fall, Join im Restbudget, unvollständiger Drain nie `Ok` (`310be1c`), `run()`-Ende-zu-Ende über Loopback-WSS (`86f790c`); einziger Rest TLS-Abbau NOT_RUN (freigabepflichtiger Smoke) |
 | R2 | `[x]` | Ingress-Panic wird erst nach Capture-Journal-Seal geprüft | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | R3 | `[x]` | jeder Recovery-Ready löst im Sweep-Modus erneuten globalen Bank-/Debtor-Sweep aus | Abgehakt; reale Sweep-Rate nicht gemessen |
 | R4 | `[x]` | dynamische BOOT-Abhängigkeiten können das rechnerische Mindestbudget überschreiten | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |

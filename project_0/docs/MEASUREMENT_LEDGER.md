@@ -5840,3 +5840,13 @@ Commit `310be1c`.
 - Total post-stop timeout: was `drain_timeout_secs` + seal + a second full `drain_timeout_secs` join (≈ 240 s worst case at the 120 s default); now `drain_timeout_secs` + seal + ≤ 50 ms (join within the remaining drain budget). A thread still alive at the join ⇒ `INGRESS_NOT_QUIESCENT`, handle dropped, stop already requested.
 - RED reproduced: drain deadline with a live ingress ⇒ journal sealed INCOMPLETE, thread ends before the join ⇒ `run()` result `Ok(())`. Fixed: `MARKET_CAPTURE_INCOMPLETE: DRAIN_INCOMPLETE`, all earlier classes keep precedence. 8 fail-before mutations.
 - Open: `run()`-level end-to-end capture with a fake WSS; NOT_RUN: teardown of an established TLS session. No Mainnet read, capture or LIVE.
+
+## 2026-10-21 — BUGS V20 runner feature matrix and R1 run() end to end (LOCAL_PASS, offline only)
+
+Commits `0c269ad` (V20), `86f790c` (R1 test).
+
+- Gate (exit 0 each): fmt, clippy all/default and isolated `-p darkbot-runner` default/`txv1`, `test --all-features` 688/0/6, default 686/0/6, isolated runner default 334/0/3 and `txv1` 334/0/3, release, Python 110 (1 skipped).
+- V20: `cargo check -p darkbot-runner` without `crate_health` exited 101 since X2/R4; workspace builds unify `crate_health` into the runner through the reporter, so no gate built that configuration. RED/GREEN `tests/regression/test_feature_matrix.py`.
+- R1: `capture::run` over an established loopback `ws://` session through the real WSS adapter seals COMPLETE and returns `Ok` (≈ 1.08 s, 3 runs); a real hang (both stop paths disabled) returns `Err INGRESS_NOT_QUIESCENT` after window + one drain budget (6.11 s).
+- L3: persisted `deferred_intervals`/`ingress_dropped_count` judged not gate-relevant (no readiness requirement, PERSIST-02 met through the overflow count, no reader, nested schema migration MARKET_SUMMARY + ECON_SNAPSHOT/ECON_FINAL without verdict change); L3 stays PARTIAL.
+- NOT_RUN: teardown of an established TLS session (webpki roots only; authorized smoke). No Mainnet read, capture or LIVE.
