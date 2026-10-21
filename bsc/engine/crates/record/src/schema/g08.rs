@@ -414,11 +414,29 @@ pub mod unresolved {
     pub const BUY_RECEIPT_RESOLVED: u16 = 8;
     pub const AUTOMATIC_RETRY: u16 = 9;
     pub const T0_TO_BUY: u16 = 10;
+    /// E2-1: a non-conclusive expiry observation, recorded only when a sent
+    /// transaction stayed without receipt. One RPC's snapshot: it proves
+    /// neither non-execution nor that the attempt could be reused.
+    pub const EXPIRY_OBSERVATION_SCOPE: u16 = 20;
+    pub const OBSERVED_HEAD: u16 = 21;
+    pub const LAUNCH_TX_KNOWN: u16 = 22;
+    pub const BUY_TX_KNOWN: u16 = 23;
+    pub const LAUNCHER_NONCE_LATEST: u16 = 24;
+    pub const LAUNCHER_NONCE_PENDING: u16 = 25;
+    pub const BUYER_NONCE_LATEST: u16 = 26;
+    pub const BUYER_NONCE_PENDING: u16 = 27;
+    pub const OBSERVATION_ERROR: u16 = 28;
 
+    /// The only value of [`EXPIRY_OBSERVATION_SCOPE`].
+    pub const NON_CONCLUSIVE_SCOPE: &str =
+        "SINGLE_RPC_SNAPSHOT_NOT_CONCLUSIVE; NO_NON_EXECUTION_OR_REUSE_CLAIM";
+
+    /// Version 2 adds the optional expiry observation (E2-1); a v1 record
+    /// is not read as v2. The verdict stays UNRESOLVED.
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g08.mainnet-acquisition-unresolved.v1",
+        name: "darkbot.g08.mainnet-acquisition-unresolved.v2",
         record_type: 15,
-        schema_version: 1,
+        schema_version: 2,
         fields: &[
             Field::req(GATE, "gate", Text),
             Field::req(VERDICT, "verdict", Text),
@@ -430,6 +448,15 @@ pub mod unresolved {
             Field::req(BUY_RECEIPT_RESOLVED, "buy_receipt_resolved", Bool),
             Field::req(AUTOMATIC_RETRY, "automatic_retry", Bool),
             Field::req(T0_TO_BUY, "T0_TO_BUY", Text),
+            Field::opt(EXPIRY_OBSERVATION_SCOPE, "expiry_observation.scope", Text),
+            Field::opt(OBSERVED_HEAD, "expiry_observation.head", U64),
+            Field::opt(LAUNCH_TX_KNOWN, "expiry_observation.launch_tx_known", Bool),
+            Field::opt(BUY_TX_KNOWN, "expiry_observation.buy_tx_known", Bool),
+            Field::opt(LAUNCHER_NONCE_LATEST, "expiry_observation.launcher_nonce_latest", U64),
+            Field::opt(LAUNCHER_NONCE_PENDING, "expiry_observation.launcher_nonce_pending", U64),
+            Field::opt(BUYER_NONCE_LATEST, "expiry_observation.buyer_nonce_latest", U64),
+            Field::opt(BUYER_NONCE_PENDING, "expiry_observation.buyer_nonce_pending", U64),
+            Field::opt(OBSERVATION_ERROR, "expiry_observation.error", Text),
         ],
     };
 }

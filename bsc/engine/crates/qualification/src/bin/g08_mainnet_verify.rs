@@ -29,6 +29,16 @@ use wire::{Block, Receipt, Tx};
 const CHAIN_ID: u64 = 56;
 const PORTAL: Address = address!("0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0");
 const MARKET_WINDOW_SECS: u64 = 15;
+/// `budget_wei.max_total_per_attempt` of the frozen v4 attempt-1 contract,
+/// the same bound `g06a_requal_check` and the guard enforce. A cost above it
+/// means a limit failed: STOP (E2-9, read-only second check). Another
+/// contract needs a new G0.8 build.
+const MAX_TOTAL_PER_ATTEMPT_WEI: u128 = 481_163_500_000_000;
+
+/// Whether the attempt's on-chain cost stays within the frozen bound.
+fn within_attempt_budget(experiment_total_cost: U256) -> bool {
+    experiment_total_cost <= U256::from(MAX_TOTAL_PER_ATTEMPT_WEI)
+}
 const RECEIPT_TIMEOUT_POLLS: usize = 240;
 const RECEIPT_POLL: Duration = Duration::from_millis(500);
 const BLOCK_TIMESTAMP_SOURCE: &str = "BSC_BLOCK_HEADER_SECONDS";
@@ -141,6 +151,82 @@ fn unresolved_draft(
         .set(unresolved::AUTOMATIC_RETRY, false)
         .set(unresolved::T0_TO_BUY, "UNKNOWN");
     d
+}
+
+/// What one RPC showed of a sent attempt without receipts (E2-1).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ExpiryObservation {
+    head: Option<u64>,
+    launch_tx_known: Option<bool>,
+    buy_tx_known: Option<bool>,
+    launcher_nonce: (Option<u64>, Option<u64>),
+    buyer_nonce: (Option<u64>, Option<u64>),
+    /// The first read that failed; the observation stays partial.
+    error: Option<String>,
+}
+
+impl ExpiryObservation {
+    /// Reads each value once with the bounded recovery; a failure leaves it
+    /// absent and is reported, never retried beyond the bound.
+    fn read(launch: B256, buy: B256, launcher: Address, buyer: Address) -> Self {
+        let mut o = Self::default();
+        let mut note = |e: String, o: &mut Self| {
+            o.error.get_or_insert(e);
+        };
+        match read_rpc(wire::block_number) {
+            Ok(v) => o.head = Some(v),
+            Err(e) => note(e, &mut o),
+        }
+        match read_rpc(|| wire::transaction(launch)) {
+            Ok(v) => o.launch_tx_known = Some(v.is_some()),
+            Err(e) => note(e, &mut o),
+        }
+        match read_rpc(|| wire::transaction(buy)) {
+            Ok(v) => o.buy_tx_known = Some(v.is_some()),
+            Err(e) => note(e, &mut o),
+        }
+        for (account, slot) in [(launcher, 0usize), (buyer, 1)] {
+            for pending in [false, true] {
+                match read_rpc(|| wire::nonce(account, pending)) {
+                    Ok(v) => {
+                        let pair = if slot == 0 { &mut o.launcher_nonce } else { &mut o.buyer_nonce };
+                        if pending { pair.1 = Some(v) } else { pair.0 = Some(v) }
+                    }
+                    Err(e) => note(e, &mut o),
+                }
+            }
+        }
+        o
+    }
+
+    /// Adds the observation to an UNRESOLVED record; the verdict is not
+    /// touched.
+    fn record_into(&self, d: &mut Draft) {
+        d.set(unresolved::EXPIRY_OBSERVATION_SCOPE, unresolved::NON_CONCLUSIVE_SCOPE);
+        let u64s = [
+            (unresolved::OBSERVED_HEAD, self.head),
+            (unresolved::LAUNCHER_NONCE_LATEST, self.launcher_nonce.0),
+            (unresolved::LAUNCHER_NONCE_PENDING, self.launcher_nonce.1),
+            (unresolved::BUYER_NONCE_LATEST, self.buyer_nonce.0),
+            (unresolved::BUYER_NONCE_PENDING, self.buyer_nonce.1),
+        ];
+        for (tag, value) in u64s {
+            if let Some(value) = value {
+                d.set(tag, value);
+            }
+        }
+        for (tag, value) in [
+            (unresolved::LAUNCH_TX_KNOWN, self.launch_tx_known),
+            (unresolved::BUY_TX_KNOWN, self.buy_tx_known),
+        ] {
+            if let Some(value) = value {
+                d.set(tag, value);
+            }
+        }
+        if let Some(error) = &self.error {
+            d.set(unresolved::OBSERVATION_ERROR, bounded_error(error));
+        }
+    }
 }
 
 // ---- JSON-RPC wire boundary --------------------------------------------
@@ -426,6 +512,16 @@ mod wire {
         } else {
             decode(v).map(Some)
         }
+    }
+
+    /// `eth_getTransactionCount` at `pending` or `latest`.
+    pub fn nonce(address: Address, pending: bool) -> Result<u64, String> {
+        let tag = if pending { "\"pending\"" } else { "\"latest\"" };
+        let params = format!("[{},{tag}]", data(address.as_slice()));
+        u64_of(
+            &call("eth_getTransactionCount", &params)?,
+            "eth_getTransactionCount",
+        )
     }
 
     pub fn chain_id() -> Result<u64, String> {
@@ -1167,6 +1263,8 @@ fn main() {
             buy_receipt.is_some(),
             "SENT_TRANSACTION_UNRESOLVED",
         );
+        let mut pending = pending;
+        ExpiryObservation::read(launch_hash, buy_hash, launcher, buyer).record_into(&mut pending);
         let record =
             persist_result(&evidence_path, &pending).expect("persist missing-receipt result");
         print!("{}", record.render());
@@ -1297,7 +1395,8 @@ fn main() {
         || !launch_at_index
         || !buy_at_index
         || (acquisition_evidence_complete && !acquisition_positive)
-        || !ordered;
+        || !ordered
+        || !within_attempt_budget(experiment_total_cost);
     let adapt = !acquisition_evidence_complete
         || !same_block
         || !adjacent
@@ -1716,6 +1815,55 @@ mod tests {
         // verdict (None = UNKNOWN) before any network read.
         assert!(successful_competing_buys_between(10, 0, 9, 0, Address::ZERO).is_err());
         assert!(successful_competing_buys_between(0, 0, 33, 0, Address::ZERO).is_err());
+    }
+
+    #[test]
+    fn an_expiry_observation_is_recorded_but_never_resolves_the_attempt() {
+        let observation = ExpiryObservation {
+            head: Some(127_900_000),
+            launch_tx_known: Some(false),
+            buy_tx_known: None,
+            launcher_nonce: (Some(0), Some(0)),
+            buyer_nonce: (Some(0), None),
+            error: Some("curl eth_getTransactionByHash: transport failure".into()),
+        };
+        let mut d = unresolved_draft(
+            "offline-test",
+            B256::ZERO,
+            B256::ZERO,
+            false,
+            false,
+            "SENT_TRANSACTION_UNRESOLVED",
+        );
+        observation.record_into(&mut d);
+        let bytes = d.encode().unwrap();
+        let r = decode(&unresolved::SCHEMA, &bytes).unwrap();
+        assert_eq!(r.text(unresolved::VERDICT).unwrap(), "UNRESOLVED");
+        assert!(!r.bool(unresolved::AUTOMATIC_RETRY).unwrap());
+        assert_eq!(
+            r.text(unresolved::EXPIRY_OBSERVATION_SCOPE).unwrap(),
+            unresolved::NON_CONCLUSIVE_SCOPE
+        );
+        assert_eq!(r.opt_u64(unresolved::OBSERVED_HEAD).unwrap(), Some(127_900_000));
+        assert_eq!(r.opt_bool(unresolved::LAUNCH_TX_KNOWN).unwrap(), Some(false));
+        assert_eq!(r.opt_bool(unresolved::BUY_TX_KNOWN).unwrap(), None);
+        assert_eq!(r.opt_u64(unresolved::BUYER_NONCE_PENDING).unwrap(), None);
+        assert!(r.text(unresolved::OBSERVATION_ERROR).unwrap().contains("transport failure"));
+        // Without an observation the record carries none of its fields.
+        let plain = unresolved_draft("offline-test", B256::ZERO, B256::ZERO, false, false, "X");
+        let plain = decode(&unresolved::SCHEMA, &plain.encode().unwrap()).unwrap();
+        assert_eq!(plain.opt_u64(unresolved::OBSERVED_HEAD).unwrap(), None);
+    }
+
+    #[test]
+    fn a_cost_above_the_frozen_attempt_bound_is_a_stop() {
+        let bound = U256::from(MAX_TOTAL_PER_ATTEMPT_WEI);
+        assert!(within_attempt_budget(U256::ZERO));
+        assert!(within_attempt_budget(bound));
+        assert!(!within_attempt_budget(bound + U256::from(1u8)));
+        assert!(!within_attempt_budget(U256::MAX));
+        // The bound is the requal checker's and the v4 contract's.
+        assert_eq!(MAX_TOTAL_PER_ATTEMPT_WEI, (6_603_270 + 3_000_000) * 50_000_000 + 1_000_000_000_000);
     }
 
     #[test]
