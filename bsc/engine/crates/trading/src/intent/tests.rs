@@ -36,6 +36,20 @@ fn prepare_scratch() -> Vec<u8> {
     Vec::with_capacity(PREPARE_SCRATCH_CAPACITY)
 }
 
+/// The plan costs of every BUY these tests sign: the qualified input and the
+/// gas of their one policy, no own launch, no provider payment.
+fn buy_costs() -> PlanCosts {
+    let buy_input_wei = U256::from(QUALIFIED_MAINNET_INPUT_WEI);
+    let buy_gas_wei = U256::from(GAS_PRICE) * U256::from(GAS_LIMIT);
+    PlanCosts {
+        buy_input_wei,
+        buy_gas_wei,
+        own_launch_wei: U256::ZERO,
+        provider_payment_wei: U256::ZERO,
+        total_wei: buy_input_wei + buy_gas_wei,
+    }
+}
+
 fn adapter(index: u8) -> AdapterId {
     AdapterId::new(index).unwrap()
 }
@@ -153,7 +167,9 @@ fn prepared(lane: &mut IntentLane, id: u64) -> (Ticket, Signed) {
 /// Reserves, prepares and dispatches the intent of launch `id`.
 fn dispatched(lane: &mut IntentLane, id: u64, set: AdapterSet) -> (Ticket, Signed) {
     let (ticket, signed) = prepared(lane, id);
-    let dispatch = lane.begin_send(&signed.snapshot, set).unwrap();
+    let dispatch = lane
+        .begin_send(&signed.snapshot, set, &buy_costs())
+        .unwrap();
     assert_eq!(dispatch.ticket, ticket);
     assert_eq!(dispatch.tx_hash, signed.hash);
     (ticket, signed)
@@ -250,14 +266,16 @@ fn sixty_four_intents_dispatch_in_nonce_order_with_unique_hashes() {
     }
     let mut hashes: Vec<B256> = Vec::new();
     for (index, (ticket, signed)) in pending.iter().enumerate() {
-        let dispatch = lane.begin_send(&signed.snapshot, set).unwrap();
+        let dispatch = lane
+            .begin_send(&signed.snapshot, set, &buy_costs())
+            .unwrap();
         assert_eq!(dispatch.ticket, *ticket);
         assert_eq!(dispatch.ticket.nonce(), FIRST_NONCE + index as u64);
         assert!(!hashes.contains(&dispatch.tx_hash));
         hashes.push(dispatch.tx_hash);
         // The next intent cannot leave before this nonce is consumed.
         assert_eq!(
-            lane.begin_send(&signed.snapshot, set),
+            lane.begin_send(&signed.snapshot, set, &buy_costs()),
             Err(LaneError::NotReady)
         );
         lane.apply_inclusion(&included(*ticket, signed.hash, block(index as u64)))
@@ -265,7 +283,7 @@ fn sixty_four_intents_dispatch_in_nonce_order_with_unique_hashes() {
     }
     assert_eq!(hashes.len(), 64);
     assert_eq!(
-        lane.begin_send(&snapshot(0, POLICY_GENERATION), set),
+        lane.begin_send(&snapshot(0, POLICY_GENERATION), set, &buy_costs()),
         Err(LaneError::NotReady)
     );
 }
@@ -289,7 +307,7 @@ fn reversed_preparation_cannot_bypass_an_unready_or_unresolved_head() {
     )
     .unwrap();
     assert_eq!(
-        lane.begin_send(&signed_b.snapshot, set),
+        lane.begin_send(&signed_b.snapshot, set, &buy_costs()),
         Err(LaneError::NotReady)
     );
 
@@ -302,10 +320,15 @@ fn reversed_preparation_cannot_bypass_an_unready_or_unresolved_head() {
         &mut scratch,
     )
     .unwrap();
-    assert_eq!(lane.begin_send(&signed_a.snapshot, set).unwrap().ticket, a);
+    assert_eq!(
+        lane.begin_send(&signed_a.snapshot, set, &buy_costs())
+            .unwrap()
+            .ticket,
+        a
+    );
     // A is sent but unresolved: B still waits.
     assert_eq!(
-        lane.begin_send(&signed_b.snapshot, set),
+        lane.begin_send(&signed_b.snapshot, set, &buy_costs()),
         Err(LaneError::NotReady)
     );
     // Evidence for B before A contradicts nonce order and stops the lane.
@@ -443,7 +466,8 @@ fn preparation_binds_sender_nonce_and_token_of_the_ticket() {
     )
     .unwrap();
     // The bound bytes are exactly the verified ones.
-    lane.begin_send(&ours.snapshot, adapters(&[0])).unwrap();
+    lane.begin_send(&ours.snapshot, adapters(&[0]), &buy_costs())
+        .unwrap();
     assert_eq!(
         lane.start_write(ticket, adapter(0), ours.hash)
             .map(|write| write.bytes()),
@@ -464,7 +488,7 @@ fn fan_out_uses_one_nonce_and_identical_bytes_for_every_adapter() {
 
     // The economic admission is consumed once; it cannot be taken again.
     assert_eq!(
-        lane.begin_send(&signed.snapshot, set),
+        lane.begin_send(&signed.snapshot, set, &buy_costs()),
         Err(LaneError::NotReady)
     );
 
@@ -553,7 +577,7 @@ fn reversed_ack_order_and_ack_never_confirm_the_intent() {
     assert_eq!(lane.state(ticket), Ok(IntentState::Sending));
     assert_eq!(lane.outcome(ticket), Ok(None));
     assert_eq!(
-        lane.begin_send(&follower.snapshot, set),
+        lane.begin_send(&follower.snapshot, set, &buy_costs()),
         Err(LaneError::NotReady)
     );
     assert_eq!(lane.halt_reason(), None);
@@ -583,7 +607,7 @@ fn rejection_leaves_the_intent_unresolved_and_late_execution_is_kept() {
     // Rejections do not free the nonce or resolve the intent.
     assert_eq!(lane.state(ticket), Ok(IntentState::Sending));
     assert_eq!(
-        lane.begin_send(&follower.snapshot, set),
+        lane.begin_send(&follower.snapshot, set, &buy_costs()),
         Err(LaneError::NotReady)
     );
     assert_eq!(lane.withdraw(ticket), Err(LaneError::NotTail));
@@ -633,7 +657,7 @@ fn failed_write_is_unknown_halts_and_suppresses_unstarted_permits() {
         Err(LaneError::PermitSuppressed)
     );
     assert_eq!(
-        lane.begin_send(&signed.snapshot, set),
+        lane.begin_send(&signed.snapshot, set, &buy_costs()),
         Err(LaneError::Halted)
     );
     assert_eq!(lane.reserve(token(2)), Err(LaneError::Halted));
@@ -694,7 +718,7 @@ fn external_halt_stops_admission_and_keeps_the_first_reason() {
     lane.halt(HaltReason::Reorg);
     assert_eq!(lane.halt_reason(), Some(HaltReason::External));
     assert_eq!(
-        lane.begin_send(&signed.snapshot, adapters(&[0])),
+        lane.begin_send(&signed.snapshot, adapters(&[0]), &buy_costs()),
         Err(LaneError::Halted)
     );
     assert_eq!(lane.reserve(token(2)), Err(LaneError::Halted));
@@ -736,7 +760,7 @@ fn unresolved_head_blocks_every_prepared_follower_and_is_counted() {
         for id in 2..10 {
             let follower = prepared(&mut lane, id);
             assert_eq!(
-                lane.begin_send(&follower.1.snapshot, set),
+                lane.begin_send(&follower.1.snapshot, set, &buy_costs()),
                 Err(LaneError::NotReady)
             );
             followers.push(follower);
@@ -746,12 +770,14 @@ fn unresolved_head_blocks_every_prepared_follower_and_is_counted() {
         if resolve {
             lane.apply_inclusion(&included(head, signed.hash, block(1)))
                 .unwrap();
-            let next = lane.begin_send(&followers[0].1.snapshot, set).unwrap();
+            let next = lane
+                .begin_send(&followers[0].1.snapshot, set, &buy_costs())
+                .unwrap();
             assert_eq!(next.ticket.nonce(), FIRST_NONCE + 1);
         } else {
             lane.halt(HaltReason::External);
             assert_eq!(
-                lane.begin_send(&followers[0].1.snapshot, set),
+                lane.begin_send(&followers[0].1.snapshot, set, &buy_costs()),
                 Err(LaneError::Halted)
             );
         }
@@ -772,7 +798,7 @@ fn stale_preparation_is_not_dispatched_and_must_be_prepared_again() {
     // The operating policy changed: another snapshot identity.
     let current = snapshot(1, POLICY_GENERATION + 1);
     assert_eq!(
-        lane.begin_send(&current, set),
+        lane.begin_send(&current, set, &buy_costs()),
         Err(LaneError::StalePreparation)
     );
     assert_eq!(lane.state(ticket), Ok(IntentState::Prepared));
@@ -780,19 +806,19 @@ fn stale_preparation_is_not_dispatched_and_must_be_prepared_again() {
     let mut other = old.snapshot;
     other.pending_candidate = word(2, 0xca);
     assert_eq!(
-        lane.begin_send(&other, set),
+        lane.begin_send(&other, set, &buy_costs()),
         Err(LaneError::StalePreparation)
     );
     let mut other = old.snapshot;
     other.codehash_generation += 1;
     assert_eq!(
-        lane.begin_send(&other, set),
+        lane.begin_send(&other, set, &buy_costs()),
         Err(LaneError::StalePreparation)
     );
     let mut other = old.snapshot;
     other.ordered_state_cursor += 1;
     assert_eq!(
-        lane.begin_send(&other, set),
+        lane.begin_send(&other, set, &buy_costs()),
         Err(LaneError::StalePreparation)
     );
 
@@ -814,7 +840,7 @@ fn stale_preparation_is_not_dispatched_and_must_be_prepared_again() {
         &mut scratch,
     )
     .unwrap();
-    let dispatch = lane.begin_send(&current, set).unwrap();
+    let dispatch = lane.begin_send(&current, set, &buy_costs()).unwrap();
     assert_eq!(dispatch.ticket.nonce(), FIRST_NONCE);
     assert_eq!(dispatch.tx_hash, fresh.hash);
 }
@@ -841,7 +867,8 @@ fn only_the_newest_undisclosed_intent_can_be_withdrawn() {
     // A dispatched intent can never be withdrawn.
     lane.withdraw(c).unwrap();
     let signed_a = signed_by(&signer(), 1, a.nonce(), POLICY_GENERATION);
-    lane.begin_send(&signed_a.snapshot, adapters(&[0])).unwrap();
+    lane.begin_send(&signed_a.snapshot, adapters(&[0]), &buy_costs())
+        .unwrap();
     assert_eq!(lane.withdraw(a), Err(LaneError::InvalidState));
 }
 
@@ -873,7 +900,7 @@ fn inclusion_finality_and_reorg_transitions() {
     assert_eq!(lane.state(ticket), Ok(IntentState::Orphaned));
     assert_eq!(lane.halt_reason(), Some(HaltReason::Reorg));
     assert_eq!(
-        lane.begin_send(&follower.snapshot, set),
+        lane.begin_send(&follower.snapshot, set, &buy_costs()),
         Err(LaneError::Halted)
     );
     assert_eq!(
@@ -910,7 +937,9 @@ fn inclusion_finality_and_reorg_transitions() {
         lane.resume(&reconciled(FIRST_NONCE + 1)),
         Err(LaneError::InvalidState)
     );
-    let next = lane.begin_send(&follower.snapshot, set).unwrap();
+    let next = lane
+        .begin_send(&follower.snapshot, set, &buy_costs())
+        .unwrap();
     assert_eq!(next.ticket.nonce(), FIRST_NONCE + 1);
     assert_eq!(
         lane.submission(next.ticket, adapter(0)),
@@ -1188,7 +1217,7 @@ fn restart_from_every_phase_is_quarantined_and_cannot_be_released() {
         assert_eq!(lane.reserve(token(1)), Err(LaneError::Halted), "{phase}");
         assert_eq!(lane.reserve(token(2)), Err(LaneError::Halted), "{phase}");
         assert_eq!(
-            lane.begin_send(&snapshot(1, POLICY_GENERATION), set),
+            lane.begin_send(&snapshot(1, POLICY_GENERATION), set, &buy_costs()),
             Err(LaneError::Halted),
             "{phase}"
         );
@@ -1246,7 +1275,7 @@ fn crash_between_permits_cannot_continue_the_fan_out() {
     );
     assert_eq!(lane.reserve(ticket.token()), Err(LaneError::Halted));
     assert_eq!(
-        lane.begin_send(&signed.snapshot, adapters(&[1])),
+        lane.begin_send(&signed.snapshot, adapters(&[1]), &buy_costs()),
         Err(LaneError::Halted)
     );
     assert_eq!(
@@ -1292,7 +1321,7 @@ fn quarantined_lane_offers_no_operation_that_admits_again() {
     assert_eq!(lane.invalidate(ticket), Err(LaneError::Halted));
     assert_eq!(lane.withdraw(ticket), Err(LaneError::Halted));
     assert_eq!(
-        lane.begin_send(&signed.snapshot, set),
+        lane.begin_send(&signed.snapshot, set, &buy_costs()),
         Err(LaneError::Halted)
     );
     assert_eq!(
@@ -1349,7 +1378,9 @@ fn in_process_stop_without_disclosure_resumes_at_the_same_nonce() {
     assert_eq!(lane.halt_reason(), None);
     // The session's dedup record survived the stop.
     assert_eq!(lane.reserve(token(1)), Err(LaneError::Duplicate));
-    let dispatch = lane.begin_send(&signed.snapshot, adapters(&[0])).unwrap();
+    let dispatch = lane
+        .begin_send(&signed.snapshot, adapters(&[0]), &buy_costs())
+        .unwrap();
     assert_eq!(dispatch.ticket, ticket);
 }
 
@@ -1372,7 +1403,8 @@ fn bytes_are_released_only_by_a_successfully_consumed_permit() {
     }
     assert_eq!(lane.state(ticket), Ok(IntentState::Prepared));
 
-    lane.begin_send(&signed.snapshot, set).unwrap();
+    lane.begin_send(&signed.snapshot, set, &buy_costs())
+        .unwrap();
     // A permit that has not been consumed has released nothing.
     assert_eq!(
         lane.submission(ticket, adapter(0)),
@@ -1569,4 +1601,107 @@ fn too_small_scratch_is_refused_and_the_intent_stays_reserved() {
     )
     .unwrap();
     assert_eq!(lane.state(ticket), Ok(IntentState::Prepared));
+}
+
+// ---------------------------------------------------------------------------
+// Cumulative session exposure (E5-1)
+// ---------------------------------------------------------------------------
+
+/// A lane whose session cap admits exactly `intents` of the tests' BUYs.
+fn capped(capacity: usize, intents: u64) -> IntentLane {
+    let cap = buy_costs().total_wei * U256::from(intents);
+    let fence = ArmedFence::for_tests_with_session_cap(CHAIN, signer().address(), FIRST_NONCE, cap);
+    IntentLane::armed(fence, capacity).unwrap()
+}
+
+#[test]
+fn the_session_cap_admits_exactly_its_intents_and_refuses_the_next() {
+    for allowed in [1u64, 2, 3] {
+        let mut lane = capped(5, allowed);
+        // Fan-out of one intent to two adapters is one exposure.
+        let set = adapters(&[0, 1]);
+        for id in 1..=allowed {
+            let (ticket, signed) = dispatched(&mut lane, id, set);
+            for index in 0..2u8 {
+                lane.start_write(ticket, adapter(index), signed.hash)
+                    .unwrap();
+                lane.write_completed(ticket, adapter(index)).unwrap();
+            }
+            // Inclusion neither credits the reservation back nor counts it
+            // again.
+            lane.apply_inclusion(&included(ticket, signed.hash, block(id)))
+                .unwrap();
+        }
+        let reserved = buy_costs().total_wei * U256::from(allowed);
+        assert_eq!(lane.session_exposure().reserved_wei, reserved);
+        let (ticket, signed) = prepared(&mut lane, allowed + 1);
+        assert_eq!(
+            lane.begin_send(&signed.snapshot, set, &buy_costs()),
+            Err(LaneError::SessionBudgetExceeded)
+        );
+        // Refused without any state change; nothing can be written.
+        assert_eq!(lane.state(ticket), Ok(IntentState::Prepared));
+        assert_eq!(
+            lane.start_write(ticket, adapter(0), signed.hash),
+            Err(LaneError::AdapterNotSelected)
+        );
+        assert_eq!(lane.session_exposure().reserved_wei, reserved);
+        assert_eq!(lane.stats().session_budget_refusals, 1);
+    }
+}
+
+#[test]
+fn an_unknown_submission_keeps_its_reservation() {
+    let mut lane = capped(2, 1);
+    let (ticket, signed) = dispatched(&mut lane, 1, adapters(&[0]));
+    lane.start_write(ticket, adapter(0), signed.hash).unwrap();
+    lane.write_failed(ticket, adapter(0)).unwrap();
+    assert_eq!(lane.state(ticket), Ok(IntentState::Halted));
+    assert_eq!(lane.session_exposure().reserved_wei, buy_costs().total_wei);
+}
+
+#[test]
+fn plan_costs_must_match_the_prepared_intent_and_cannot_overflow() {
+    let base = buy_costs();
+    let one = U256::from(1u64);
+    let mut lane = armed(3);
+    let (ticket, signed) = prepared(&mut lane, 1);
+    let mut wrong_input = base;
+    wrong_input.buy_input_wei += one;
+    wrong_input.total_wei += one;
+    let mut wrong_gas = base;
+    wrong_gas.buy_gas_wei -= one;
+    wrong_gas.total_wei -= one;
+    // A total below the sum of its components hides a cost.
+    let mut hidden = base;
+    hidden.provider_payment_wei = one;
+    let mut overflow = base;
+    overflow.own_launch_wei = U256::MAX;
+    overflow.total_wei = U256::MAX;
+    for costs in [wrong_input, wrong_gas, hidden, overflow] {
+        assert_eq!(
+            lane.begin_send(&signed.snapshot, adapters(&[0]), &costs),
+            Err(LaneError::CostMismatch)
+        );
+    }
+    assert_eq!(lane.state(ticket), Ok(IntentState::Prepared));
+    assert_eq!(lane.session_exposure().reserved_wei, U256::ZERO);
+
+    // An own launch is part of the reserved total; the next intent's
+    // reservation overflows the cap's arithmetic and is refused.
+    let mut launch = base;
+    launch.own_launch_wei = U256::MAX - base.total_wei;
+    launch.total_wei = U256::MAX;
+    lane.begin_send(&signed.snapshot, adapters(&[0]), &launch)
+        .unwrap();
+    assert_eq!(lane.session_exposure().reserved_wei, U256::MAX);
+    lane.start_write(ticket, adapter(0), signed.hash).unwrap();
+    lane.write_completed(ticket, adapter(0)).unwrap();
+    lane.apply_inclusion(&included(ticket, signed.hash, block(1)))
+        .unwrap();
+    let (_, next) = prepared(&mut lane, 2);
+    assert_eq!(
+        lane.begin_send(&next.snapshot, adapters(&[0]), &base),
+        Err(LaneError::SessionBudgetExceeded)
+    );
 }

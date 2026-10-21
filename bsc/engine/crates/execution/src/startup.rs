@@ -75,6 +75,10 @@ pub struct StartupEconomics {
     pub max_buy_gas_wei: u128,
     pub max_provider_payment_wei: u128,
     pub max_total_wei: u128,
+    /// Operator cap on the cumulative exposure of the whole session, in wei
+    /// (E5-1). Independent of the wallet balance; at least one intent's
+    /// `max_total_wei`. The lane reserves every dispatched intent against it.
+    pub max_session_exposure_wei: u128,
 }
 
 /// Complete secret-free startup contract.
@@ -312,6 +316,7 @@ impl ValidatedStartup {
             self.config.chain_id,
             self.config.sender,
             self.config.first_nonce,
+            U256::from(self.config.economics.max_session_exposure_wei),
         );
         let lane =
             IntentLane::armed(fence, self.config.lane_capacity).map_err(StartupError::Lane)?;
@@ -669,6 +674,11 @@ fn validate_economics(e: StartupEconomics) -> Result<(), StartupError> {
     if total > e.max_total_wei {
         return Err(StartupError::InvalidEconomics);
     }
+    // A session cap below one intent's bound could never admit it; a cap is
+    // always explicit, never implied by the balance.
+    if e.max_session_exposure_wei < e.max_total_wei {
+        return Err(StartupError::InvalidEconomics);
+    }
     Ok(())
 }
 
@@ -733,11 +743,12 @@ fn durable_fence(
 
     let generations = authorization.generations();
     let record = format!(
-        "version=1\nchain_id={}\nsender={}\nfirst_nonce={}\nlane_capacity={}\ncapture_capacity={}\nclock_id={}\ncanonical_block_hash={}\npolicy_generation={}\ncodehash_generation={}\ncapability_generation={}\nauthorization_generation={}\nrestart_action=QUARANTINE\nautomatic_resume=false\n",
+        "version=1\nchain_id={}\nsender={}\nfirst_nonce={}\nlane_capacity={}\nmax_session_exposure_wei={}\ncapture_capacity={}\nclock_id={}\ncanonical_block_hash={}\npolicy_generation={}\ncodehash_generation={}\ncapability_generation={}\nauthorization_generation={}\nrestart_action=QUARANTINE\nautomatic_resume=false\n",
         authorization.chain_id,
         sender,
         authorization.first_nonce,
         authorization.lane_capacity,
+        config.economics.max_session_exposure_wei,
         config.capture_capacity,
         config.clock_id,
         authorization.canonical_block_hash,
@@ -844,6 +855,7 @@ mod tests {
                 max_buy_gas_wei: 400_000_000_000_000u128,
                 max_provider_payment_wei: 0,
                 max_total_wei: 500_000_000_000_000u128,
+                max_session_exposure_wei: 1_000_000_000_000_000u128,
             },
         }
     }
@@ -1000,6 +1012,11 @@ mod tests {
         assert!(armed.fence_path().exists());
         let fence = fs::read_to_string(armed.fence_path()).unwrap();
         assert!(fence.contains("canonical_block_hash=0x4444444444444444444444444444444444444444444444444444444444444444"));
+        // E5-1: the session cap is part of the durable record and the lane.
+        assert!(fence.contains("\nmax_session_exposure_wei=1000000000000000\n"));
+        let exposure = armed.lane().session_exposure();
+        assert_eq!(exposure.cap_wei, U256::from(1_000_000_000_000_000u128));
+        assert_eq!(exposure.reserved_wei, U256::ZERO);
         drop(armed);
 
         let startup = validate_startup(config, &table(), &sources, observed).unwrap();
@@ -1156,6 +1173,21 @@ mod tests {
             let policy = BuyPolicy::new(1, U256::from(1), bps, 1, 1).is_ok();
             assert_eq!(startup, bps < 10_000);
             assert_eq!(startup, policy);
+        }
+    }
+
+    #[test]
+    fn the_session_cap_is_explicit_and_covers_one_intent() {
+        let economics = config(Address::repeat_byte(1)).economics;
+        for (cap, ok) in [
+            (0, false),
+            (economics.max_total_wei - 1, false),
+            (economics.max_total_wei, true),
+            (u128::MAX, true),
+        ] {
+            let mut candidate = economics;
+            candidate.max_session_exposure_wei = cap;
+            assert_eq!(validate_economics(candidate).is_ok(), ok, "cap {cap}");
         }
     }
 

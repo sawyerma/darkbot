@@ -86,6 +86,14 @@
 //!     running still holds its intents. It resumes with a reconciliation
 //!     proof, and only when every consumed nonce is `Canonical` and no
 //!     dispatched intent is unresolved.
+//! 12. **Cumulative session exposure (E5-1).** Besides the per-intent plan
+//!     budget, the lane carries the operator's cap for the whole session.
+//!     [`IntentLane::begin_send`] reserves the plan's total once per intent,
+//!     however many adapters fan it out, and refuses a dispatch that would
+//!     exceed the cap. Reservations are never released in a session: a
+//!     disclosed BUY may still execute, and no cost is credited back without
+//!     the chain-state owner, so the bound over-reserves rather than under.
+//!     A restart starts quarantined (invariant 10) and trades nothing.
 //!
 //! # Hot path
 //!
@@ -112,9 +120,10 @@ mod lane;
 #[cfg(test)]
 mod tests;
 
+use crate::submission_policy::plan::PlanCosts;
 pub use lane::{IntentLane, PREPARE_SCRATCH_CAPACITY};
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 
 use crate::venues::flap::binding::BindingError;
 
@@ -307,6 +316,12 @@ pub enum LaneError {
     /// The lane is quarantined after a restart; no proof of this unit can
     /// release it.
     QuarantineNotReleasable,
+    /// The plan's BUY costs are not the prepared intent's, or its total is
+    /// not the sum of its components.
+    CostMismatch,
+    /// Dispatching would exceed the session's cumulative exposure cap
+    /// (E5-1).
+    SessionBudgetExceeded,
 }
 
 impl core::fmt::Display for LaneError {
@@ -337,6 +352,10 @@ impl core::fmt::Display for LaneError {
             Self::NonceMismatch => f.write_str("intent lane: reconciled nonce mismatch"),
             Self::QuarantineNotReleasable => {
                 f.write_str("intent lane: restart quarantine cannot be released")
+            }
+            Self::CostMismatch => f.write_str("intent lane: plan costs do not match the intent"),
+            Self::SessionBudgetExceeded => {
+                f.write_str("intent lane: session exposure cap exceeded")
             }
         }
     }
@@ -457,6 +476,18 @@ pub struct LaneStats {
     pub head_of_line_blocks: u64,
     /// Undisclosed intents that were withdrawn.
     pub withdrawn: u64,
+    /// Dispatches refused by the session exposure cap.
+    pub session_budget_refusals: u64,
+}
+
+/// Cumulative economic exposure of one session (E5-1): the upper bound of
+/// every dispatched intent's cost against the operator's session cap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionExposure {
+    /// Operator cap for the whole session, in wei.
+    pub cap_wei: U256,
+    /// Reserved by dispatched intents, in wei. Never released in a session.
+    pub reserved_wei: U256,
 }
 
 /// Attestation that a new fence for this chain and sender was durably
@@ -474,6 +505,8 @@ pub struct ArmedFence {
     chain_id: u64,
     sender: Address,
     first_nonce: u64,
+    /// Cumulative exposure cap of the session the lane trades in (E5-1).
+    session_cap_wei: U256,
 }
 
 impl ArmedFence {
@@ -484,13 +517,22 @@ impl ArmedFence {
     ///
     /// The runner must never call this before its create-new/write/fsync
     /// sequence and startup validation have all succeeded.
+    ///
+    /// `session_cap_wei` is the operator's validated cumulative exposure cap
+    /// for the session (E5-1); it is not derived from the wallet balance.
     #[cfg(feature = "runner-startup")]
     #[doc(hidden)]
-    pub fn from_durable_startup(chain_id: u64, sender: Address, first_nonce: u64) -> Self {
+    pub fn from_durable_startup(
+        chain_id: u64,
+        sender: Address,
+        first_nonce: u64,
+        session_cap_wei: U256,
+    ) -> Self {
         Self {
             chain_id,
             sender,
             first_nonce,
+            session_cap_wei,
         }
     }
 
@@ -498,12 +540,25 @@ impl ArmedFence {
     /// Also compiled for the tests of dependent crates behind the
     /// `test-support` feature, which is enabled only under
     /// `[dev-dependencies]`.
+    /// Its session cap is unbounded; see [`ArmedFence::for_tests_with_session_cap`].
     #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests(chain_id: u64, sender: Address, first_nonce: u64) -> Self {
+        Self::for_tests_with_session_cap(chain_id, sender, first_nonce, U256::MAX)
+    }
+
+    /// Test-only attestation with a session exposure cap.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_tests_with_session_cap(
+        chain_id: u64,
+        sender: Address,
+        first_nonce: u64,
+        session_cap_wei: U256,
+    ) -> Self {
         Self {
             chain_id,
             sender,
             first_nonce,
+            session_cap_wei,
         }
     }
 }

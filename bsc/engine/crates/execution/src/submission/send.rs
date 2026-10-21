@@ -692,7 +692,7 @@ fn run<S: Slot>(
 
     // ---- The one economic admission of this intent.
     let dispatch = lane
-        .begin_send(context.current, plan.adapters())
+        .begin_send(context.current, plan.adapters(), &plan.costs())
         .map_err(DispatchError::Lane)?;
     report.ticket = Some(dispatch.ticket);
     let bound = match plan.bind_dispatch(&dispatch) {

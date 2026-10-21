@@ -1124,7 +1124,7 @@ fn plan_is_bound_to_exactly_the_dispatch_of_the_intent_lane() {
     plan.check_dispatch(&table, &current, head(LAST_START_HEAD))
         .unwrap();
 
-    let dispatch = lane.begin_send(&current, adapters).unwrap();
+    let dispatch = lane.begin_send(&current, adapters, &plan.costs()).unwrap();
     let bound = plan.bind_dispatch(&dispatch).unwrap();
     assert_eq!(bound.ticket(), ticket);
     assert_eq!(bound.buy(), TxRef::of(&raw));

@@ -1,11 +1,12 @@
 //! The single-sender intent lane. See the module documentation of
 //! [`crate::intent`] for the model and its invariants.
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 
 use super::{
     AdapterId, AdapterSet, ArmedFence, Dispatch, EgressWrite, HaltReason, IntentState, LaneError,
-    LaneStats, MAX_ADAPTERS, MAX_LANE_CAPACITY, Outcome, SubmissionState, Ticket,
+    LaneStats, MAX_ADAPTERS, MAX_LANE_CAPACITY, Outcome, PlanCosts, SessionExposure,
+    SubmissionState, Ticket,
 };
 use crate::chain_state::SnapshotId;
 use crate::chain_state::canonical::{
@@ -38,6 +39,9 @@ struct Entry {
     /// Snapshot the preparation is valid for.
     snapshot: Option<SnapshotId>,
     signed_len: usize,
+    /// BUY input and gas of the bound signed bytes; zero while `Reserved`.
+    buy_input_wei: U256,
+    buy_gas_wei: U256,
     submissions: [SubmissionState; MAX_ADAPTERS],
     /// Transaction and block of the latest inclusion evidence.
     included_tx: B256,
@@ -53,6 +57,8 @@ impl Entry {
             tx_hash: B256::ZERO,
             snapshot: None,
             signed_len: 0,
+            buy_input_wei: U256::ZERO,
+            buy_gas_wei: U256::ZERO,
             submissions: [SubmissionState::NotSelected; MAX_ADAPTERS],
             included_tx: B256::ZERO,
             block_hash: B256::ZERO,
@@ -89,6 +95,8 @@ pub struct IntentLane {
     head: usize,
     halt: Option<HaltReason>,
     stats: LaneStats,
+    /// Cumulative exposure of the session (E5-1).
+    exposure: SessionExposure,
 }
 
 impl IntentLane {
@@ -101,6 +109,7 @@ impl IntentLane {
             fence.first_nonce,
             capacity,
             None,
+            fence.session_cap_wei,
         )
     }
 
@@ -109,7 +118,7 @@ impl IntentLane {
     /// can release it: [`IntentLane::resume`] refuses a restart quarantine.
     pub fn quarantined(chain_id: u64, sender: Address, capacity: usize) -> Result<Self, LaneError> {
         let halt = Some(HaltReason::RestartQuarantine);
-        Self::allocate(chain_id, sender, 0, capacity, halt)
+        Self::allocate(chain_id, sender, 0, capacity, halt, U256::ZERO)
     }
 
     /// Test-only lane holding one dispatched intent: `raw` with `tx_hash`,
@@ -144,7 +153,14 @@ impl IntentLane {
         entry.snapshot = Some(snapshot);
         entry.signed_len = raw.len();
         entry.state = IntentState::Prepared;
-        let dispatch = lane.begin_send(&snapshot, adapters)?;
+        let costs = PlanCosts {
+            buy_input_wei: U256::ZERO,
+            buy_gas_wei: U256::ZERO,
+            own_launch_wei: U256::ZERO,
+            provider_payment_wei: U256::ZERO,
+            total_wei: U256::ZERO,
+        };
+        let dispatch = lane.begin_send(&snapshot, adapters, &costs)?;
         debug_assert_eq!(dispatch.ticket, ticket);
         Ok((lane, dispatch))
     }
@@ -155,6 +171,7 @@ impl IntentLane {
         first_nonce: u64,
         capacity: usize,
         halt: Option<HaltReason>,
+        session_cap_wei: U256,
     ) -> Result<Self, LaneError> {
         if capacity == 0 || capacity > MAX_LANE_CAPACITY {
             return Err(LaneError::InvalidCapacity);
@@ -173,6 +190,10 @@ impl IntentLane {
             head: 0,
             halt,
             stats: LaneStats::default(),
+            exposure: SessionExposure {
+                cap_wei: session_cap_wei,
+                reserved_wei: U256::ZERO,
+            },
         })
     }
 
@@ -194,6 +215,11 @@ impl IntentLane {
 
     /// Counters of refused and blocked work.
     #[inline]
+    /// Cumulative exposure of the session against its cap (E5-1).
+    pub fn session_exposure(&self) -> SessionExposure {
+        self.exposure
+    }
+
     pub fn stats(&self) -> LaneStats {
         self.stats
     }
@@ -332,6 +358,8 @@ impl IntentLane {
         }
         let tx_hash =
             verify_final_buy(raw_signed, expected, current, scratch).map_err(LaneError::Binding)?;
+        // u64 * u64 always fits a U256.
+        let buy_gas_wei = U256::from(expected.gas_price()) * U256::from(expected.gas_limit());
 
         let start = index * SIGNED_SLOT_LEN;
         self.signed[start..start + raw_signed.len()].copy_from_slice(raw_signed);
@@ -339,6 +367,8 @@ impl IntentLane {
         entry.tx_hash = tx_hash;
         entry.snapshot = Some(*current);
         entry.signed_len = raw_signed.len();
+        entry.buy_input_wei = expected.input_amount();
+        entry.buy_gas_wei = buy_gas_wei;
         entry.state = IntentState::Prepared;
         Ok(tx_hash)
     }
@@ -394,10 +424,19 @@ impl IntentLane {
     /// Call immediately before egress. Fails, without changing state, if
     /// the head is not prepared or was prepared for another snapshot than
     /// `current`.
+    ///
+    /// `costs` are the upper bounds of the plan that submits the intent. Its
+    /// BUY components must be the prepared intent's and its total their sum.
+    /// The total is reserved against the session's cumulative exposure cap
+    /// (E5-1) once per intent, however many adapters fan it out, and is never
+    /// released in this session: a disclosed BUY may execute later, and no
+    /// cost is credited back without the chain-state owner. A dispatch that
+    /// would exceed the cap is refused without any state change.
     pub fn begin_send(
         &mut self,
         current: &SnapshotId,
         adapters: AdapterSet,
+        costs: &PlanCosts,
     ) -> Result<Dispatch, LaneError> {
         if self.halt.is_some() {
             return Err(LaneError::Halted);
@@ -418,6 +457,25 @@ impl IntentLane {
             return Err(LaneError::StalePreparation);
         }
         let nonce = self.nonce_at(index).ok_or(LaneError::NonceExhausted)?;
+        let total = costs
+            .buy_input_wei
+            .checked_add(costs.buy_gas_wei)
+            .and_then(|sum| sum.checked_add(costs.own_launch_wei))
+            .and_then(|sum| sum.checked_add(costs.provider_payment_wei));
+        if costs.buy_input_wei != self.entries[index].buy_input_wei
+            || costs.buy_gas_wei != self.entries[index].buy_gas_wei
+            || total != Some(costs.total_wei)
+        {
+            return Err(LaneError::CostMismatch);
+        }
+        let reserved = match self.exposure.reserved_wei.checked_add(costs.total_wei) {
+            Some(reserved) if reserved <= self.exposure.cap_wei => reserved,
+            _ => {
+                self.stats.session_budget_refusals += 1;
+                return Err(LaneError::SessionBudgetExceeded);
+            }
+        };
+        self.exposure.reserved_wei = reserved;
 
         let entry = &mut self.entries[index];
         entry.state = IntentState::Sending;
