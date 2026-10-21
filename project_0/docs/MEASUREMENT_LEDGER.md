@@ -5850,3 +5850,12 @@ Commits `0c269ad` (V20), `86f790c` (R1 test).
 - R1: `capture::run` over an established loopback `ws://` session through the real WSS adapter seals COMPLETE and returns `Ok` (≈ 1.08 s, 3 runs); a real hang (both stop paths disabled) returns `Err INGRESS_NOT_QUIESCENT` after window + one drain budget (6.11 s).
 - L3: persisted `deferred_intervals`/`ingress_dropped_count` judged not gate-relevant (no readiness requirement, PERSIST-02 met through the overflow count, no reader, nested schema migration MARKET_SUMMARY + ECON_SNAPSHOT/ECON_FINAL without verdict change); L3 stays PARTIAL.
 - NOT_RUN: teardown of an established TLS session (webpki roots only; authorized smoke). No Mainnet read, capture or LIVE.
+
+## 2026-10-21 — C0-E1 readiness unit E: verification levels end to end on the production run path (LOCAL_PASS, offline only)
+
+Commit `67ab023`.
+
+- Gate (exit 0 each): fmt, clippy all/default and isolated runner default/`txv1`, `test --all-features` 689/0/6, default 687/0/6, isolated runner default 334/0/3 and `txv1` 334/0/3, release, Python 110 (1 skipped), all exit 0.
+- `run_econ4h_with` (behaviour-identical split; production passes `run_shadow`) runs the plan-bound capture over a loopback `ws://` peer, the analytics worker, the supervision and the phase journal; a Shadow-owner stand-in publishes readiness like `ShadowOwner` and ends at the drain expiry. Without and with a transport gap (peer drops its first session; 2 sessions): owners finish without failure, `capture_clock_complete`; live coverage COMPLETE vs INCOMPLETE and unchanged after `off` (`NOT_RUN`) and offline `strict` (not canonical); report `PROVISIONAL/INCOMPLETE`, master false; technical qualification INCOMPLETE (run result). 3/3 runs ≈ 12.3 s; first reconnect ≤ 750 ms, gap at ≈ 1 s of a 4-s window.
+- Finding V21: no code path computes the separate master qualification after verification (PHASENPLAN L.2); the technical verdict at run end is INCOMPLETE for every C0-E1 run since L.2.
+- BLOCKED: `index`/`crosscheck` (pinned Python verifier, re-pin decision). No Mainnet read, capture or LIVE.

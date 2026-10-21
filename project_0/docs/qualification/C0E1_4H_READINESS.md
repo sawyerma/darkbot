@@ -29,13 +29,14 @@ Target state: `READY_FOR_AUTHORIZED_4H` only after every mandatory local gate **
 | JFI-FIX-04 handoffs | JFI-04 | `measurement_plan.json`, `storage_preflight.json`, `candidate_manifest.json` JSON handoffs (pinned `run_store.py` requires them) | **D4**: native records primary, JSON only as catalogued renders until a re-pin decision |
 | JFI-FIX-06/07 | JFI | FE-04 journal schema 1; Jupiter adapter wire exception | not on the observe-only 4h path (no FE-04 handoff, no submission); stays OPEN, recorded as deferred, not done |
 | Duration / RunHorizon | P1, STARTUP §3, task §8 | `MeasurementPlan` fixed, `s/m/h`, two parsers | **C5**: `RunHorizon::Fixed` + `d` unit, one parser; `UntilStopped` stays follow-up scope |
-| Verification levels | L.2, task §9 | off/index/strict/crosscheck separated (C0E1-P4/P5/P6 evidence) | keep; E2E in **E** |
+| Verification levels | L.2, task §9 | off/index/strict/crosscheck separated (C0E1-P4/P5/P6 evidence) | **E** LOCAL_PASS for `off`/`strict` (`67ab023`); `index`/`crosscheck` BLOCKED (pinned Python verifier, re-pin decision); master qualification after verification missing (BUGS V21) |
 | Mainnet smoke | task §11 | NOT_RUN | **F**: only with explicit user permission |
 
 ## Progress
 
 | Unit | State | Commit | Evidence |
 |---|---|---|---|
+| E — end to end over the verification levels on the production C0-E1 path (`run_econ4h_with`: plan-bound capture over a loopback WSS, analytics worker, supervision, phase journal; Shadow owner stand-in with the owner's readiness signals) → native strict driver → native report, without and with a transport gap | LOCAL_PASS in scope: capture finished (owners without failure, `capture_clock_complete`) also with a gap; gap stays `LIVE_COVERAGE_INCOMPLETE` through `off` (`NOT_RUN`) and offline `strict` (not canonical); report `PROVISIONAL/INCOMPLETE`, `c0_e1_master_pass=false`; technical qualification (run result) INCOMPLETE. `strict` CANONICAL_VERIFIED with a live gap: `native_report_binds_sources_and_filters_only_the_view`. `index`/`crosscheck` BLOCKED (re-pin). Finding V21: no separate master qualification after verification | `67ab023` | test `unit_e_capture_verification_report_and_qualification_stay_separate`, 6 fail-before mutations; ledger 2026-10-21 (unit E) |
 | D4d — JFI-FIX-04/05 rest: no productive JSON renders, native text config, p0ctl-only launch, recursion guard, operator Mainnet approval | LOCAL_PASS in scope; index/crosscheck verifier and pinned config bridge BLOCKED (re-pin) | (this unit) | ledger 2026-10-17 (JFI-FIX-04/05 rest) |
 | A — baseline/contradictions | done | — | this page |
 | Git isolation (after the 506c349 BSC incident) | Project_0 works in a separate worktree with its own index; guarded pathspec commits | — | memory rule; `dfc5e14` restore reported to the user |
