@@ -98,7 +98,7 @@
 | X1 | `[x]` | BOOT-12 muss aktuelle Identitäten vor Runtime-Admission erneut prüfen | Abgehakt; Z10 neue, noch unbewiesene Rent-Sysvar-Hypothese |
 | X2 | `[x]` | JFI-01/02-Verstoß im neuen BOOT-/Provider-Evidence-Pfad | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | X3 | `[x]` | BOOT-01/02 nicht nur als Offline-Token qualifizieren | Abgehakt lokal; Netzwerk-Gate separat offen |
-| R1 | `[ ]` | Market-Capture-Drain hängt an Quiescence der WSS-Session | Nicht abgeschlossen / OPEN oder REVIEW |
+| R1 | `[ ]` | Market-Capture-Drain hängt an Quiescence der WSS-Session | PARTIAL: Deadline-Fall, Join im Restbudget, unvollständiger Drain nie `Ok` (`310be1c`); offen `run()`-Ende-zu-Ende mit Fake-WSS, TLS-Abbau NOT_RUN |
 | R2 | `[x]` | Ingress-Panic wird erst nach Capture-Journal-Seal geprüft | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |
 | R3 | `[x]` | jeder Recovery-Ready löst im Sweep-Modus erneuten globalen Bank-/Debtor-Sweep aus | Abgehakt; reale Sweep-Rate nicht gemessen |
 | R4 | `[x]` | dynamische BOOT-Abhängigkeiten können das rechnerische Mindestbudget überschreiten | Ursprünglicher Fix dokumentiert; unabhängige Vollabnahme nicht durchgeführt |

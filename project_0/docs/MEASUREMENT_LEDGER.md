@@ -5831,3 +5831,12 @@ Commit `c771881`.
 - `roll_day` before validation: time-driven UTC-day contract, no break; failed transitions leave the full ledger unchanged except the time-driven roll, also across UTC midnight.
 - Open contract question for the user: an outcome reconciled after midnight books its PnL and failed attempt into the new UTC day (daily limit by reconciliation time, not attempt time; documented as the current contract until decided).
 - NOT_RUN: no Mainnet read, capture or LIVE (the ledger has no production caller since B1).
+
+## 2026-10-21 — BUGS R1 drain deadline case and run result (LOCAL_PASS package, R1 PARTIAL, offline only)
+
+Commit `310be1c`.
+
+- Gate (exit 0 each): fmt, clippy all/default, `test --all-features` 687/0/6, default 685/0/6, release, Python 108 (1 skipped).
+- Total post-stop timeout: was `drain_timeout_secs` + seal + a second full `drain_timeout_secs` join (≈ 240 s worst case at the 120 s default); now `drain_timeout_secs` + seal + ≤ 50 ms (join within the remaining drain budget). A thread still alive at the join ⇒ `INGRESS_NOT_QUIESCENT`, handle dropped, stop already requested.
+- RED reproduced: drain deadline with a live ingress ⇒ journal sealed INCOMPLETE, thread ends before the join ⇒ `run()` result `Ok(())`. Fixed: `MARKET_CAPTURE_INCOMPLETE: DRAIN_INCOMPLETE`, all earlier classes keep precedence. 8 fail-before mutations.
+- Open: `run()`-level end-to-end capture with a fake WSS; NOT_RUN: teardown of an established TLS session. No Mainnet read, capture or LIVE.
