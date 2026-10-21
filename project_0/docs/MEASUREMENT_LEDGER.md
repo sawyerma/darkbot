@@ -5859,3 +5859,11 @@ Commit `67ab023`.
 - `run_econ4h_with` (behaviour-identical split; production passes `run_shadow`) runs the plan-bound capture over a loopback `ws://` peer, the analytics worker, the supervision and the phase journal; a Shadow-owner stand-in publishes readiness like `ShadowOwner` and ends at the drain expiry. Without and with a transport gap (peer drops its first session; 2 sessions): owners finish without failure, `capture_clock_complete`; live coverage COMPLETE vs INCOMPLETE and unchanged after `off` (`NOT_RUN`) and offline `strict` (not canonical); report `PROVISIONAL/INCOMPLETE`, master false; technical qualification INCOMPLETE (run result). 3/3 runs ≈ 12.3 s; first reconnect ≤ 750 ms, gap at ≈ 1 s of a 4-s window.
 - Finding V21: no code path computes the separate master qualification after verification (PHASENPLAN L.2); the technical verdict at run end is INCOMPLETE for every C0-E1 run since L.2.
 - BLOCKED: `index`/`crosscheck` (pinned Python verifier, re-pin decision). No Mainnet read, capture or LIVE.
+
+## 2026-10-21 — BUGS E2 rest: tip transaction checked against its plan (LOCAL_PASS, E2 PARTIAL, offline only)
+
+Commit `ba4a3c3`.
+
+- Gate (exit 0 each): fmt, clippy all/default and isolated runner default/`txv1`, `test --all-features` 690/0/6, default 688/0/6, isolated runner default 334/0/3 and `txv1` 334/0/3, release, Python 110 (1 skipped), all exit 0.
+- `tx::message_matches` (extracted, `message_matches_plan` delegates); `submit::tip_matches` checks the production tip transaction (one System transfer of the planned lamports to the configured tip account); 8 manipulations with their own codes, 2 fail-before mutations.
+- E2 stays PARTIAL: amounts vs sizing, Jupiter swap discriminators (BLOCKED, no pinned IDL), prerequisite `Other`, Jupiter LUT on-chain content. No Mainnet read, capture or LIVE.
