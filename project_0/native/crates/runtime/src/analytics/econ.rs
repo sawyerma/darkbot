@@ -2240,7 +2240,7 @@ impl Capital {
 
 #[cfg(test)]
 #[path = "econ_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 /// Exposes the existing canonical selector/economics to offline reporting only.
 pub fn replay_canonical(

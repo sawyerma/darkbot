@@ -2504,3 +2504,325 @@ fn r12_econ_retention_bound_is_exact() {
     assert!(with("2000001").is_err());
     assert!(with("0").is_err());
 }
+
+/// C0E1-P4-VC fixture: the final report of a run whose every technical gate passes (`complete`
+/// plus one Shadow evaluation in the window), bound to `run_id` and `plan`.
+pub(crate) fn passing_final_report(run_id: &str, plan: &MeasurementPlan) -> SnapshotReport {
+    let mut w = worker();
+    complete(&mut w);
+    w.accept(Evidence::Shadow(Box::new(rec()))).unwrap();
+    w.final_technical = Some(w.technical(true));
+    assert_eq!(w.final_technical.as_ref().unwrap().verdict, "PASS");
+    let mut r = w.report(SNAPSHOT_COUNT, true);
+    r.identity.run_id = run_id.into();
+    r.identity.measurement_plan = plan.clone();
+    let t = &mut r.technical_qualification;
+    t.requested_duration_seconds = plan.duration_seconds;
+    t.actual_duration_seconds = Some(plan.duration_seconds as f64);
+    let _ = std::fs::remove_dir_all(&w.h.cfg.run_dir);
+    r
+}
+
+/// C0E1-P4-VC / V21: the master qualification passes only with every axis — a final canonical
+/// result, complete capture clock and live coverage, a canonical economics replay, every gate of
+/// the run's technical record, no LIVE or submission and a clean owners' end — and names each
+/// failed gate otherwise. The run-end technical verdict is INCOMPLETE for its capture-time
+/// market/canonical terms only; the verification replaces them, so the master can still pass.
+#[test]
+fn c0e1_master_qualification_requires_every_axis() {
+    use crate::analytics::qualification::{assess, Evidence as Q, OwnersEnd, MASTER_PASS};
+    use crate::analytics::report::{DatasetIdentity, DatasetRecord, Economics};
+    let plan = MeasurementPlan::new(60).unwrap();
+    let mut report = passing_final_report("run_q", &plan);
+    // As at every run end since L.2: no canonical evidence yet, so the run-end verdict fails.
+    report.technical_qualification.market_capture_complete = false;
+    report.technical_qualification.final_reconciliation_complete = false;
+    report.technical_qualification.verdict = "INCOMPLETE".into();
+    let dataset = DatasetRecord {
+        identity: DatasetIdentity {
+            renderer: "test".into(),
+            capture_run_id: "run_q".into(),
+            capture_evidence_digest: "evidence".into(),
+            verification_spec_id: Some("spec".into()),
+            verification_result_id: Some("result".into()),
+            report_binary_sha256: [0; 32],
+        },
+        record_count: 1,
+        records_sha256: [1; 32],
+        verification_status: "CANONICAL_VERIFIED".into(),
+        report_status: "FINAL_VERIFICATION_RESULT".into(),
+        live_coverage_status: "LIVE_COVERAGE_COMPLETE".into(),
+        capture_clock_complete: true,
+        economics_replay: "PASS events=1 shadow_available=true".into(),
+        c0_e1_master_pass: false,
+    };
+    let replayed = Economics::Replayed {
+        events: 1,
+        shadow_available: true,
+    };
+    let clean = OwnersEnd {
+        aborted: false,
+        shadow_failed: false,
+        market_failed: false,
+    };
+    // A capture that ran its clock with complete transport coverage and proven deployment
+    // continuity; the full-slot reconciliation is the verification's (not the capture's).
+    let capture = crate::market_observer::rows::MarketCompletion {
+        run_id: "run_q".into(),
+        verdict: "MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED".into(),
+        stream_ready: true,
+        full_duration_observed: true,
+        drain_complete: true,
+        coverage_complete: true,
+        decode_complete: true,
+        receivership_transport_capture_complete: true,
+        full_slot_reconciliation_complete: false,
+        liquidation_path_coverage_complete: true,
+        market_capture_complete: false,
+        source_coverage_verified: false,
+        incomplete_reasons: vec!["VERIFICATION_NOT_RUN".into()],
+    };
+    let assessed = |d: &DatasetRecord,
+                    e: &Economics,
+                    r: Option<&SnapshotReport>,
+                    o: Option<OwnersEnd>,
+                    p: &MeasurementPlan,
+                    c: &crate::market_observer::rows::MarketCompletion,
+                    journal: bool| {
+        let a = assess(&Q {
+            dataset: d,
+            economics: e,
+            plan: p,
+            capture: c,
+            capture_journal_complete: journal,
+            final_report: r,
+            owners: o,
+        });
+        (a.verdict(), a.failed)
+    };
+    let run = |d: &DatasetRecord,
+               e: &Economics,
+               r: Option<&SnapshotReport>,
+               o: Option<OwnersEnd>,
+               p: &MeasurementPlan| assessed(d, e, r, o, p, &capture, true);
+    assert_eq!(
+        run(&dataset, &replayed, Some(&report), Some(clean), &plan),
+        (MASTER_PASS, vec![])
+    );
+    let not = |failed: &[&'static str]| ("C0_E1_NOT_QUALIFIED", failed.to_vec());
+    // Capture, coverage and verification axes.
+    let with = |f: &dyn Fn(&mut DatasetRecord)| {
+        let mut d = dataset.clone();
+        f(&mut d);
+        run(&d, &replayed, Some(&report), Some(clean), &plan)
+    };
+    assert_eq!(
+        with(&|d| d.capture_clock_complete = false),
+        not(&["CAPTURE_CLOCK_INCOMPLETE"])
+    );
+    assert_eq!(
+        with(&|d| d.live_coverage_status = "LIVE_COVERAGE_INCOMPLETE".into()),
+        not(&["LIVE_COVERAGE_INCOMPLETE"])
+    );
+    for status in [
+        "NOT_RUN",
+        "INDEX_VERIFIED",
+        "CROSSCHECK_VERIFIED",
+        "HISTORICAL_INCOMPLETE",
+        "CANONICAL_INCOMPLETE",
+    ] {
+        // Also when the report status claims a final result (never trusted alone).
+        for report_status in ["PROVISIONAL/INCOMPLETE", "FINAL_VERIFICATION_RESULT"] {
+            assert_eq!(
+                with(&|d| {
+                    d.verification_status = status.into();
+                    d.report_status = report_status.into();
+                }),
+                not(&["VERIFICATION_NOT_CANONICAL"]),
+                "{status} {report_status}"
+            );
+        }
+    }
+    assert_eq!(
+        with(&|d| d.report_status = "PROVISIONAL/INCOMPLETE".into()),
+        not(&["VERIFICATION_NOT_CANONICAL"])
+    );
+    // The capture journal's own seal and the audited deployment continuity.
+    assert_eq!(
+        assessed(
+            &dataset,
+            &replayed,
+            Some(&report),
+            Some(clean),
+            &plan,
+            &capture,
+            false
+        ),
+        not(&["CAPTURE_JOURNAL_INCOMPLETE"])
+    );
+    let unproven = crate::market_observer::rows::MarketCompletion {
+        liquidation_path_coverage_complete: false,
+        ..capture.clone()
+    };
+    assert_eq!(
+        assessed(
+            &dataset,
+            &replayed,
+            Some(&report),
+            Some(clean),
+            &plan,
+            &unproven,
+            true
+        ),
+        not(&["DEPLOYMENT_CONTINUITY_UNPROVEN"])
+    );
+    // Economics axis.
+    assert_eq!(
+        run(
+            &dataset,
+            &Economics::Incomplete("JOIN".into()),
+            Some(&report),
+            Some(clean),
+            &plan
+        ),
+        not(&["ECONOMICS_REPLAY_INCOMPLETE"])
+    );
+    assert_eq!(
+        run(
+            &dataset,
+            &Economics::NotRun,
+            Some(&report),
+            Some(clean),
+            &plan
+        ),
+        not(&["ECONOMICS_NOT_REPLAYED"])
+    );
+    // The final technical record: missing, of another run or plan, and each of its gates.
+    assert_eq!(
+        run(&dataset, &replayed, None, Some(clean), &plan),
+        not(&["ECON_FINAL_MISSING"])
+    );
+    let tech = |f: &dyn Fn(&mut SnapshotReport)| {
+        let mut r = report.clone();
+        f(&mut r);
+        run(&dataset, &replayed, Some(&r), Some(clean), &plan)
+    };
+    assert_eq!(
+        tech(&|r| r.identity.run_id = "other".into()),
+        not(&["ECON_FINAL_OTHER_RUN"])
+    );
+    assert_eq!(
+        run(
+            &dataset,
+            &replayed,
+            Some(&report),
+            Some(clean),
+            &MeasurementPlan::new(120).unwrap()
+        ),
+        not(&["ECON_FINAL_OTHER_PLAN"])
+    );
+    type Gate<'a> = (&'a dyn Fn(&mut Technical), &'static str);
+    let gates: [Gate; 13] = [
+        (
+            &|t| t.startup_excluded_from_measurement = false,
+            "TECHNICAL_STARTUP_IN_WINDOW",
+        ),
+        (
+            &|t| t.shadow_evaluations_in_window = 0,
+            "TECHNICAL_NO_EVALUATIONS",
+        ),
+        (&|t| t.shadow_telemetry = None, "TECHNICAL_SHADOW_STATE"),
+        (
+            &|t| t.actual_duration_seconds = Some(59.0),
+            "TECHNICAL_DURATION",
+        ),
+        (&|t| t.four_snapshots_present = false, "TECHNICAL_SNAPSHOTS"),
+        (&|t| t.snapshot_write_failures = 1, "TECHNICAL_WRITER"),
+        (
+            &|t| t.shadow_evaluations_streamed = t.shadow_evaluations_received + 1,
+            "TECHNICAL_EVALUATIONS_NOT_STREAMED",
+        ),
+        (
+            &|t| t.shadow_semantic_evictions = 1,
+            "TECHNICAL_SEMANTIC_EVICTIONS",
+        ),
+        (&|t| t.analytics_queue_drops = 1, "TECHNICAL_QUEUE_DROPS"),
+        (
+            &|t| t.retention_overflow = 1,
+            "TECHNICAL_RETENTION_OVERFLOW",
+        ),
+        (
+            &|t| t.shadow_runtime_terminated_early = true,
+            "TECHNICAL_SHADOW_FAILED",
+        ),
+        (
+            &|t| t.shadow_runtime_finished = false,
+            "TECHNICAL_SHADOW_NOT_FINISHED",
+        ),
+        (
+            &|t| t.program_upgrade_halt = true,
+            "TECHNICAL_PROGRAM_UPGRADE",
+        ),
+    ];
+    for (f, code) in gates {
+        assert_eq!(
+            tech(&|r| f(&mut r.technical_qualification)),
+            not(&[code]),
+            "{code}"
+        );
+    }
+    let mut overflow = report.clone();
+    overflow
+        .technical_qualification
+        .shadow_telemetry
+        .as_mut()
+        .unwrap()
+        .ingress_overflow = 1;
+    assert_eq!(
+        run(&dataset, &replayed, Some(&overflow), Some(clean), &plan),
+        not(&["TECHNICAL_SHADOW_STATE"])
+    );
+    // Trading: no LIVE, no submission.
+    for f in [
+        &(|r: &mut SnapshotReport| r.technical_qualification.submissions = 1)
+            as &dyn Fn(&mut SnapshotReport),
+        &|r| r.technical_qualification.submission_attempts_blocked = 1,
+        &|r| r.technical_qualification.live_ready = true,
+        &|r| r.identity.live_enabled = true,
+    ] {
+        assert_eq!(tech(f), not(&["TRADING_LIVE_OR_SUBMISSION"]));
+    }
+    // The owners' end.
+    assert_eq!(
+        run(&dataset, &replayed, Some(&report), None, &plan),
+        not(&["OWNERS_END_UNKNOWN"])
+    );
+    for (o, code) in [
+        (
+            OwnersEnd {
+                aborted: true,
+                ..clean
+            },
+            "OWNERS_ABORTED",
+        ),
+        (
+            OwnersEnd {
+                shadow_failed: true,
+                ..clean
+            },
+            "OWNERS_SHADOW_FAILED",
+        ),
+        (
+            OwnersEnd {
+                market_failed: true,
+                ..clean
+            },
+            "OWNERS_MARKET_FAILED",
+        ),
+    ] {
+        assert_eq!(
+            run(&dataset, &replayed, Some(&report), Some(o), &plan),
+            not(&[code])
+        );
+    }
+}

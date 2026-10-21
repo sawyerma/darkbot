@@ -14,13 +14,16 @@
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict [--resume-verification] …
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
+//! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! ```
 //!
 //! `report` runs the native report (B7) for runs with native capture records (typed run
 //! manifest and market completion); index provenance, JSON output and historical runs use the
-//! pinned Python report.
+//! pinned Python report. `qualify` is the separate C0-E1 master qualification after the
+//! verification (PHASENPLAN L.2): it binds the report's axes, the run's final technical record
+//! and the owners' end, persists an immutable result and exits 0 only for `C0_E1_MASTER_PASS`.
 use darkbot_runner::analytics::journal;
-use darkbot_runner::analytics::{renders, report};
+use darkbot_runner::analytics::{qualification, renders, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::storage::preflight;
@@ -492,6 +495,21 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
+/// C0E1-P4-VC: the master qualification of a run with native records against its selected
+/// verification result; prints the axes and the verdict, `Ok(false)` (exit 2) unless MASTER_PASS.
+fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let wanted = value(args, "--run").ok_or("qualify --run ID|PATH required")?;
+    let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    let opts = report::Options {
+        verification_result: value(args, "--verification-result"),
+        ..Default::default()
+    };
+    let (record, path) = qualification::qualify(&run, &opts)?;
+    print!("{}", qualification::render(&record));
+    println!("record={}", path.display());
+    Ok(record.verdict == qualification::MASTER_PASS)
+}
+
 /// Explicit offline export (JFI-03): the legacy views the pinned Python readers need, rendered
 /// from the journals of a run with native records (`manifest.json`, `config.json`, phase and
 /// market JSONL, `summary.json`, hourly/final economics). Existing views must match; nothing is
@@ -541,7 +559,8 @@ fn main() -> ExitCode {
             (Some("verify"), _) => delegate(&project, "verify.sh", &rest),
             (Some("report"), _) => report_cmd(&project, &rest),
             (Some("export"), _) => export_cmd(&project, &rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export …".into()),
+            (Some("qualify"), _) => qualify_cmd(&project, &rest),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify …".into()),
         }
     });
     match result {

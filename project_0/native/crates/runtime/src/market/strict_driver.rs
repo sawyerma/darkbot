@@ -64,8 +64,8 @@ impl VerificationSpec {
     }
 }
 
-/// Immutable capture evidence: every capture-time file of the run (verification and reports
-/// excluded) with its size and SHA-256, bound to the capture identity.
+/// Immutable capture evidence: every capture-time file of the run (verification, reports and
+/// qualification excluded) with its size and SHA-256, bound to the capture identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaptureEvidence {
     pub capture_run_id: String,
@@ -128,8 +128,9 @@ fn sha_file(path: &Path) -> Result<[u8; 32], String> {
     journal::file_sha256(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The run's capture-time files: everything except `verification/`, `reports/`, dotfiles and the
-/// legacy views the explicit offline export may add later (derived from the journals, JFI-03).
+/// The run's capture-time files: everything except the post-capture layers (`verification/`,
+/// `reports/`, `qualification/`), dotfiles and the legacy views the explicit offline export may
+/// add later (derived from the journals, JFI-03).
 fn capture_files(run: &Path) -> Result<BTreeMap<String, (u64, [u8; 32])>, String> {
     let derived: BTreeSet<PathBuf> = crate::analytics::renders::detect(run)
         .and_then(|paths| crate::analytics::renders::views(&paths))
@@ -152,7 +153,12 @@ fn capture_files(run: &Path) -> Result<BTreeMap<String, (u64, [u8; 32])>, String
                 .next()
                 .map(|c| c.as_os_str().to_string_lossy().into_owned());
             if e.file_name().to_string_lossy().starts_with('.')
-                || matches!(first.as_deref(), Some("verification") | Some("reports"))
+                || matches!(
+                    first.as_deref(),
+                    Some("verification")
+                        | Some("reports")
+                        | Some(crate::analytics::qualification::QUALIFICATION_DIR)
+                )
                 || derived.contains(&p)
             {
                 continue;

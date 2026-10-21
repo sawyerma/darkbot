@@ -118,9 +118,21 @@ mod report_e2e {
         row[columns.iter().position(|c| *c == name).unwrap()].clone()
     }
 
-    #[test]
-    fn native_report_binds_sources_and_filters_only_the_view() {
-        let d = std::env::temp_dir().join(format!("p0_report_{}_{}", std::process::id(), line!()));
+    /// The V2 run of the native report: manifest, CAPTURE phase, one receivership liquidation in
+    /// the live journal, Shadow and opportunity rows, an incomplete first and a canonical resumed
+    /// strict verification from cached finalized blocks. `complete`: full capture clock and live
+    /// coverage, a passing final technical record and a clean owners' end (else cut short).
+    struct Fixture {
+        d: std::path::PathBuf,
+        run: std::path::PathBuf,
+        w_s: i64,
+        target: String,
+        first: super::super::strict_driver::DriverOutcome,
+        second: super::super::strict_driver::DriverOutcome,
+    }
+
+    fn canonical_run(tag: u32, complete: bool) -> Fixture {
+        let d = std::env::temp_dir().join(format!("p0_report_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let run = d.join("run_r");
         let paths = RunPaths::new(&run, RunLayout::V2);
@@ -159,24 +171,35 @@ mod report_e2e {
                 },
             }],
         );
-        // A cut-short live capture stays incomplete whatever is verified later.
+        // A cut-short live capture stays incomplete whatever is verified later; a complete one
+        // ran its full clock with complete transport coverage.
         journal::write_typed_value(
             &market.join(rows::MARKET_COMPLETION_JOURNAL),
             journal::source::MARKET,
             &rows::MarketCompletion {
                 run_id: "run_r".into(),
-                verdict: "MARKET_DATA_INCOMPLETE".into(),
+                verdict: if complete {
+                    "MARKET_DATA_SOURCE_COVERAGE_UNVERIFIED"
+                } else {
+                    "MARKET_DATA_INCOMPLETE"
+                }
+                .into(),
                 stream_ready: true,
-                full_duration_observed: false,
+                full_duration_observed: complete,
                 drain_complete: true,
                 coverage_complete: true,
                 decode_complete: true,
-                receivership_transport_capture_complete: false,
+                receivership_transport_capture_complete: complete,
                 full_slot_reconciliation_complete: false,
-                liquidation_path_coverage_complete: false,
+                // The complete run also proved the audited deployment before and after.
+                liquidation_path_coverage_complete: complete,
                 market_capture_complete: false,
                 source_coverage_verified: false,
-                incomplete_reasons: vec!["OBSERVATION_ENDED_EARLY".into()],
+                incomplete_reasons: if complete {
+                    vec![]
+                } else {
+                    vec!["OBSERVATION_ENDED_EARLY".into()]
+                },
             },
         )
         .unwrap();
@@ -195,19 +218,49 @@ mod report_e2e {
                 },
             }],
         );
-        write_frames(
+        let mut reports = journal::Writer::create(
             &run.join("snapshots")
                 .join(crate::analytics::econ::REPORT_JOURNAL),
-            journal::source::ECON,
-            &[crate::analytics::econ::OpportunityRow {
-                rec: record(&Pubkey::new_unique().to_string(), 31),
-                winner: None,
-                market: None,
-                slot_seen: None,
-                capital: vec![],
-                market_commitment: "finalized".into(),
-            }],
-        );
+        )
+        .unwrap();
+        let econ = Provenance {
+            source: journal::source::ECON,
+            ..Default::default()
+        };
+        reports
+            .append_typed(
+                econ.clone(),
+                &crate::analytics::econ::OpportunityRow {
+                    rec: record(&Pubkey::new_unique().to_string(), 31),
+                    winner: None,
+                    market: None,
+                    slot_seen: None,
+                    capital: vec![],
+                    market_commitment: "finalized".into(),
+                },
+            )
+            .unwrap();
+        if complete {
+            // The final technical record of a run whose every technical gate passed, and a
+            // clean end of both owners.
+            reports
+                .append_typed(
+                    econ,
+                    &crate::analytics::econ::tests::passing_final_report("run_r", &plan),
+                )
+                .unwrap();
+            phase_journal(
+                &paths,
+                clock,
+                Phase::OwnersFinished {
+                    aborted: false,
+                    shadow_failed: false,
+                    market_failed: false,
+                },
+            )
+            .unwrap();
+        }
+        reports.seal(true).unwrap();
 
         // Strict: a first offline attempt has no cached blocks (incomplete); the resumed one
         // verifies slots 10..=80 from cached finalized blocks bracketing the capture window.
@@ -273,6 +326,26 @@ mod report_e2e {
         }
         let second = drive(&req(true)).unwrap();
         assert_eq!(second.status, "CANONICAL_VERIFIED", "{:?}", second.reason);
+        Fixture {
+            d,
+            run,
+            w_s,
+            target,
+            first,
+            second,
+        }
+    }
+
+    #[test]
+    fn native_report_binds_sources_and_filters_only_the_view() {
+        let Fixture {
+            d,
+            run,
+            w_s,
+            target,
+            first,
+            second,
+        } = canonical_run(line!(), false);
 
         // Default query: strict result, entity once, related hidden, Shadow-only hidden.
         let q = ReportQuery::default();
@@ -469,6 +542,119 @@ mod report_e2e {
             "CAPTURE_EVIDENCE_CHANGED"
         );
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// C0E1-P4-VC / V21: the separate master qualification over the persisted run. A cut-short
+    /// capture without a final technical record or owners' end is verified canonically yet never
+    /// qualified, and the result names exactly why; the same inputs give the same immutable
+    /// record (never overwritten by a different one); another verification result is another
+    /// qualification. The complete chain — full capture clock and live coverage, the canonical
+    /// result, a canonical economics replay, a passing final technical record and a clean
+    /// owners' end — is `C0_E1_MASTER_PASS`, while the report itself still never claims it.
+    #[test]
+    fn c0e1_master_qualification_binds_the_persisted_run() {
+        use crate::analytics::qualification::{self, MASTER_PASS, NOT_QUALIFIED};
+        let opts = report::Options::default();
+        let f = canonical_run(line!(), false);
+        let (q, path) = qualification::qualify(&f.run, &opts).unwrap();
+        assert_eq!(q.verdict, NOT_QUALIFIED);
+        assert_eq!(q.verification, "CANONICAL_VERIFIED");
+        assert_eq!(q.economics, "CANONICAL_ECONOMICS_REPLAYED");
+        assert_eq!(
+            q.failed,
+            [
+                "CAPTURE_CLOCK_INCOMPLETE",
+                "LIVE_COVERAGE_INCOMPLETE",
+                "DEPLOYMENT_CONTINUITY_UNPROVEN",
+                "ECON_FINAL_MISSING",
+                "OWNERS_END_UNKNOWN"
+            ]
+        );
+        assert_eq!(q.inputs.capture_run_id, "run_r");
+        assert_eq!(
+            q.inputs.verification_result_id,
+            f.second.verification_result_id
+        );
+        assert!(path.starts_with(f.run.join(qualification::QUALIFICATION_DIR)));
+        let stored: qualification::QualificationRecord =
+            journal::read_typed_value(&path).unwrap();
+        assert_eq!(stored, q);
+        // Reproducible and immutable.
+        let bytes = std::fs::read(&path).unwrap();
+        let (again, again_path) = qualification::qualify(&f.run, &opts).unwrap();
+        assert_eq!(
+            (&again.qualification_id, &again_path),
+            (&q.qualification_id, &path)
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        // The incomplete first result is another qualification, never canonical.
+        let first_opts = report::Options {
+            verification_result: f.first.verification_result_id.clone(),
+            ..Default::default()
+        };
+        let (old, _) = qualification::qualify(&f.run, &first_opts).unwrap();
+        assert_ne!(old.qualification_id, q.qualification_id);
+        assert_eq!(old.verdict, NOT_QUALIFIED);
+        assert!(old.failed.contains(&"VERIFICATION_NOT_CANONICAL".to_string()));
+        // A stored result is never replaced by a different one for the same inputs.
+        let mut forged = q.clone();
+        forged.verdict = MASTER_PASS.into();
+        forged.failed.clear();
+        std::fs::remove_file(&path).unwrap();
+        journal::write_typed_value(&path, journal::source::REPORT, &forged).unwrap();
+        assert_eq!(
+            qualification::qualify(&f.run, &opts).unwrap_err(),
+            "QUALIFICATION_RESULT_CHANGED"
+        );
+        std::fs::remove_dir_all(&f.d).unwrap();
+
+        // The complete chain qualifies.
+        let f = canonical_run(line!(), true);
+        let (q, _) = qualification::qualify(&f.run, &opts).unwrap();
+        assert_eq!(q.failed, Vec::<String>::new());
+        assert_eq!(q.verdict, MASTER_PASS);
+        assert_eq!(
+            (
+                q.capture_clock.as_str(),
+                q.live_coverage.as_str(),
+                q.verification.as_str(),
+                q.economics.as_str(),
+                q.trading.as_str()
+            ),
+            (
+                "CAPTURE_CLOCK_COMPLETE",
+                "LIVE_COVERAGE_COMPLETE",
+                "CANONICAL_VERIFIED",
+                "CANONICAL_ECONOMICS_REPLAYED",
+                "LIVE_DISABLED_NO_SUBMISSION"
+            )
+        );
+        assert_eq!(
+            (q.capture_journal.as_str(), q.deployment_continuity.as_str()),
+            ("CAPTURE_JOURNAL_COMPLETE", "DEPLOYMENT_CONTINUITY_PROVEN")
+        );
+        assert_eq!(q.canonical_events_in_window, Some(1));
+        assert!(q.inputs.econ_final_frame_sha256.is_some());
+        assert_eq!(
+            q.inputs.owners,
+            Some(qualification::OwnersEnd {
+                aborted: false,
+                shadow_failed: false,
+                market_failed: false
+            })
+        );
+        let out = report::report(&f.run, &opts, &ReportQuery::default()).unwrap();
+        assert!(!out.dataset.c0_e1_master_pass);
+        // Only the canonical result qualifies the complete run.
+        let first_opts = report::Options {
+            verification_result: f.first.verification_result_id.clone(),
+            ..Default::default()
+        };
+        let (old, _) = qualification::qualify(&f.run, &first_opts).unwrap();
+        assert_eq!(old.verdict, NOT_QUALIFIED);
+        assert_eq!(old.failed, ["VERIFICATION_NOT_CANONICAL"]);
+        assert_eq!(old.economics, "ECONOMICS_REPLAYED_PROVISIONAL");
+        std::fs::remove_dir_all(&f.d).unwrap();
     }
 
     #[test]

@@ -67,6 +67,9 @@ pub mod kind {
     /// (`report_query_identity`), each a sealed single-value journal under `reports/native/`.
     pub const REPORT_DATASET: u16 = 340;
     pub const REPORT_QUERY: u16 = 341;
+    /// C0E1-P4-VC: the separate C0-E1 master qualification after the verification (PHASENPLAN
+    /// L.2), a sealed single-value journal under `qualification/`.
+    pub const C0E1_QUALIFICATION: u16 = 342;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -136,6 +139,7 @@ pub mod kind {
         SEGMENT_NEXT,
         REPORT_DATASET,
         REPORT_QUERY,
+        C0E1_QUALIFICATION,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,

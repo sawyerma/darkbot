@@ -699,6 +699,25 @@ mod supervise_tests {
             let technical = last.expect("ECON_FINAL").technical_qualification;
             assert_eq!(technical.verdict, "INCOMPLETE", "gap={gap}");
             assert!(!technical.market_capture_complete, "gap={gap}");
+            // C0E1-P4-VC: the separate master qualification of this production run is never a
+            // PASS — no canonical result, no evaluation, no Shadow telemetry from the stand-in
+            // (and with the gap no live coverage).
+            let (q, _) =
+                crate::analytics::qualification::qualify(&run, &Default::default()).unwrap();
+            assert_eq!(q.verdict, crate::analytics::qualification::NOT_QUALIFIED);
+            // No RPC: the audited deployment continuity is never proven offline.
+            let mut expected = vec![];
+            if gap {
+                expected.extend(["LIVE_COVERAGE_INCOMPLETE", "CAPTURE_JOURNAL_INCOMPLETE"]);
+            }
+            expected.extend([
+                "VERIFICATION_NOT_CANONICAL",
+                "DEPLOYMENT_CONTINUITY_UNPROVEN",
+                "TECHNICAL_NO_EVALUATIONS",
+                "TECHNICAL_SHADOW_STATE",
+            ]);
+            assert_eq!(q.failed, expected, "gap={gap}");
+            assert_eq!(q.inputs.owners.map(|o| o.aborted), Some(false));
             let _ = std::fs::remove_dir_all(run.parent().unwrap());
         }
     }

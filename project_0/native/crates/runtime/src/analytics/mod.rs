@@ -6,6 +6,7 @@ pub mod fixture;
 pub mod golden;
 pub mod market_report;
 pub mod measurement;
+pub mod qualification;
 pub mod record;
 pub mod report;
 pub mod shadow_ledger;

@@ -624,6 +624,26 @@ pub struct Dataset {
     pub record: DatasetRecord,
     pub records: Vec<Record>,
     pub path: PathBuf,
+    /// The typed canonical economics replay behind `record.economics_replay` (its text).
+    pub economics: Economics,
+    /// The run's measurement plan (its typed pre-capture manifest).
+    pub plan: crate::analytics::measurement::MeasurementPlan,
+    /// The capture's completion axes (`MARKET_COMPLETION`).
+    pub completion: MarketCompletion,
+    /// The market journal is sealed COMPLETE (D1: no gap, overflow, fatal, decoder or retention
+    /// reason, full clock, drain and no write error).
+    pub capture_journal_complete: bool,
+}
+
+/// Canonical economics replay over the selected strict result (C0E1-P4-VC reads it typed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Economics {
+    /// The canonical events in the capture window were joined to the Shadow evaluations.
+    Replayed { events: u64, shadow_available: bool },
+    /// A strict result exists but its canonical join did not complete (the reason).
+    Incomplete(String),
+    /// No strict result: only the capture-time canonical join.
+    NotRun,
 }
 
 // ------------------------------------------------------------------------------------------
@@ -1457,7 +1477,7 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
     };
     load_live(&mut b, &market_dir.join(MARKET_JOURNAL))?;
     let reports = capture.run.join("snapshots").join(ECON_REPORT_JOURNAL);
-    let economics_replay = match &selected {
+    let (economics_replay, economics) = match &selected {
         Some(sel) => {
             let events = load_strict(&mut b, sel)?;
             let (start, end) = capture.window;
@@ -1500,14 +1520,26 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
                     for row in &j.rows {
                         b.shadow_link(row, ShadowOrigin::StrictReplay)?;
                     }
-                    format!("PASS events={n} shadow_available={}", j.shadow_available)
+                    (
+                        format!("PASS events={n} shadow_available={}", j.shadow_available),
+                        Economics::Replayed {
+                            events: n as u64,
+                            shadow_available: j.shadow_available,
+                        },
+                    )
                 }
-                Err(e) => format!("INCOMPLETE {e}"),
+                Err(e) => (
+                    format!("INCOMPLETE {e}"),
+                    Economics::Incomplete(e.to_string()),
+                ),
             }
         }
         None => {
             load_capture_canonical(&mut b, &reports)?;
-            "NOT_RUN: no strict verification result (capture-time canonical join only)".into()
+            (
+                "NOT_RUN: no strict verification result (capture-time canonical join only)".into(),
+                Economics::NotRun,
+            )
         }
     };
     load_opportunities(&mut b, &reports)?;
@@ -1571,6 +1603,13 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
         record,
         records,
         path,
+        economics,
+        plan: capture.manifest.plan.clone(),
+        capture_journal_complete: crate::storage::segments::verify_chain(
+            &market_dir.join(MARKET_JOURNAL),
+        )
+        .map(|c| c.sealed && c.complete)?,
+        completion,
     })
 }
 
