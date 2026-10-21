@@ -424,6 +424,23 @@ fn word(x: U256) -> Value {
     Value::U256(x.to_be_bytes())
 }
 
+const MAX_ATTEMPT_WEI: u128 = 481_163_500_000_000;
+fn within_attempt_budget(cost: Option<u128>) -> bool {
+    cost.is_some_and(|cost| cost <= MAX_ATTEMPT_WEI)
+}
+
+#[cfg(test)]
+mod budget_regression {
+    use super::*;
+    #[test]
+    fn frozen_cap_and_overflow_fail_closed() {
+        assert!(within_attempt_budget(Some(MAX_ATTEMPT_WEI)));
+        assert!(!within_attempt_budget(Some(MAX_ATTEMPT_WEI+1)));
+        assert!(!within_attempt_budget(u128::MAX.checked_add(1)));
+        assert!(within_attempt_budget(Some((6_603_270+3_000_000)*50_000_000+1_000_000_000_000)));
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let (evidence_path, out_path) = match args.as_slice() {
@@ -573,8 +590,8 @@ fn main() {
         .and_then(|x| x.checked_add(worst_case_gas))
         .expect("attempt budget overflow");
     assert!(
-        reserved <= 10_603_270_000_000_000u128,
-        "DRY-3 precheck: attempt reserve exceeds v2 proposal ceiling"
+        within_attempt_budget(Some(reserved)),
+        "DRY-3 precheck: attempt reserve exceeds frozen G0.7 ceiling"
     );
 
     let mut dry2 = false;
@@ -646,11 +663,10 @@ fn main() {
             U256::from(gas_price) >= strict_floor,
             "DRY-3 signed gas price below strictest verified builder floor"
         );
-        let simulated_cost = launch_value
-            + buy_value as u128
-            + (launch_gas_used as u128 + buy_gas_used as u128) * gas_price as u128;
+        let simulated_cost = (launch_gas_used as u128 + buy_gas_used as u128).checked_mul(gas_price as u128)
+            .and_then(|gas| launch_value.checked_add(buy_value as u128).and_then(|value| value.checked_add(gas)));
         assert!(
-            simulated_cost <= 10_603_270_000_000_000u128,
+            within_attempt_budget(simulated_cost),
             "DRY-3 simulated attempt cost exceeds v2 proposal ceiling"
         );
         dry3 = true;
@@ -751,7 +767,7 @@ fn main() {
         .set(
             tag("qualification_note"),
             if wallets_distinct {
-                "eligible for DRY-1/DRY-4 qualification if all other predicates pass"
+                darkbot_bsc_qualification::DRY_STRUCTURAL_SCOPE_NOTE
             } else {
                 "SAME_WALLET_TEST_ONLY: construction/recovery diagnostics only; DRY-1 and DRY-4 intentionally cannot pass"
             },

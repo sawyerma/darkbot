@@ -321,6 +321,7 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         &f_d,
         &d,
         &[
+            "qualification_note",
             "contract.path",
             "contract.sha256",
             "bundle_projection.send_head",
@@ -330,6 +331,10 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         ],
         &[],
     );
+    match one(&d, "qualification_note") {
+        Some(Value::Text(note)) if note == "eligible for DRY-1/DRY-4 qualification if all other predicates pass" || note == darkbot_bsc_qualification::DRY_STRUCTURAL_SCOPE_NOTE => {},
+        _ => p.push("unexpected DRY structural scope note".into()),
+    }
     if one(&d, "contract.path") != Some(Value::Text(V3_RELATIVE_PATH.into()))
         || word(one(&d, "contract.sha256")) != Some(v3_sha)
     {
@@ -717,6 +722,12 @@ mod tests {
                     .set(tag_of(&dry::NATIVE, "contract.sha256"), Value::B256(v3))
                     .set(tag_of(&dry::NATIVE, "bundle_projection.send_head"), HEAD)
                     .set(tag_of(&dry::NATIVE, "bundle_projection.max_block"), HEAD + 2);
+                if breaks == "scope_note" {
+                    d.set(tag_of(&dry::NATIVE, "qualification_note"), darkbot_bsc_qualification::DRY_STRUCTURAL_SCOPE_NOTE);
+                }
+                if breaks == "bad_note" {
+                    d.set(tag_of(&dry::NATIVE, "qualification_note"), "unqualified claim");
+                }
                 if breaks == "launch" {
                     d.set(dry::LAUNCH_TX_HASH, Value::B256([7; 32]));
                 }
@@ -782,8 +793,10 @@ mod tests {
 
     #[test]
     fn consistent_requalification_records_pass_and_every_defect_stops() {
-        let (pass, checks) = verdict("none");
-        assert!(pass, "{checks:#?}");
+        for variant in ["none", "scope_note"] {
+            let (pass, checks) = verdict(variant);
+            assert!(pass, "{checks:#?}");
+        }
         for (breaks, failing) in [
             ("zero", "R0_UPGRADE"),
             ("two", "R0_UPGRADE"),
@@ -797,6 +810,7 @@ mod tests {
             ("version", "DRY0_PREFLIGHT"),
             ("fee", "DRY0_PREFLIGHT"),
             ("launch", "DRY1_BYTES_AND_SIGNERS"),
+            ("bad_note", "DRY1_BYTES_AND_SIGNERS"),
             ("salt", "DRY2_SIMULATION"),
             ("min_output", "DRY3_GAS_ECONOMICS_BUDGET"),
         ] {

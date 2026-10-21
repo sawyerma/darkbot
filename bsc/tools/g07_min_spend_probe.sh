@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+printf '%s\n' 'SUPERSEDED_INCOMPATIBLE_WITH_V4_DBREC; NO_LIVE_AUTHORITY. Use the frozen G0.7 candidate and g06a_final_dry.sh; no new minimum search is authorized.' >&2
+exit 2
+# Historical implementation below; unreachable, preserved for provenance.
 set -euo pipefail
 IFS=$'\n\t'
 umask 077

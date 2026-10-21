@@ -29,3 +29,6 @@ pub mod verdict;
 
 #[cfg(feature = "status-reporter")]
 pub mod status;
+
+/// Scope of the DRY binary's structural zero-egress assertion, not a transitive network proof.
+pub const DRY_STRUCTURAL_SCOPE_NOTE: &str = "STRUCTURAL_CODE_SCOPE_ONLY: zero-egress flag covers this binary, not all dependencies or read-only RPC helpers; eligible for DRY-1/DRY-4 if all other predicates pass";

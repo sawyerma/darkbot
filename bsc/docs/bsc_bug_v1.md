@@ -4,6 +4,12 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Implementierungsstand — 2026-10-21, Paket E3 / E8-3
+
+- **FIXED / TESTED:** E3-2/3/4/5/6 und E8-3. Explizite Child-Environment-Allowlist, Keys ausschließlich für Simulation/DRY-Signierer; DBREC-Fehler vor Vergleich/Export terminal, verpflichtende Werte/Typen/Hashes; überlaufsicheres aktuelles Attempt-Limit; präziser struktureller Zero-Egress-Scope; Workspace-Toolchain im Wrapper; Legacy-Probes vor IO gesperrt.
+- **Tests:** 5 isolierte Shell-Regressionen und Bash-Syntax PASS; 3 Requal- und 2 DRY-Binary-Tests PASS (inklusive alter/neuer Scope-Notiz und fremder Notiz STOP). Foreign-CWD-Wrapper: Workspace/Pin und Buildfehler-Weitergabe PASS, echter Offline-Build PASS, ungültiges Argument erwartungsgemäß Exit 2. Tatsächlich verwendetes rustc 1.93.1 (Homebrew); rustup nicht installiert. Kein echter DRY-/RPC-Lauf.
+- **E3-1 / E4-2 BLOCKED:** ausdrückliche Salt-Entscheidung A/B vor wirtschaftlicher Freigabe fehlt; historische Vertraulichkeitsaussage präzisiert. Kandidat und alte Evidence unverändert. E3-7 bleibt dokumentiertes Provenienzlimit, weitergehendes Pinning DEFERRED.
+
 ## Implementierungsstand — 2026-10-20, Paket E1
 
 - **FIXED / TESTED:** E1-1 bis E1-7. Requal-Verifier/PASS, sieben eindeutige Name/Hash-Bindungen (einschließlich Quote), sechs Einzelchecks und aliasfreie Lauf-/Frozen-/Policy-Pfade; eingefrorene DRY-/Wallet-/Nonce-/Funding-Identität; V4-Prosa; explizite Guard-Attempt-ID; Root-/Latch-Prüfung; einzelne DRY-Flags; UTF-8-Bytegrenze.

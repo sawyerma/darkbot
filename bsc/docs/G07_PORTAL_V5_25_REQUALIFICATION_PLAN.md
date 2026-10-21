@@ -3,7 +3,7 @@
 Historical status (2026-10-17): **Read-only analysis complete; sections 3 and 4 implemented (option A) and tested offline; the requalification DRY was then pending. See the binding 2026-10-20 update in section 5.**
 
 - Nothing was sent. No signature was made, no builder was contacted, and the guard stays `UNARMED`.
-- The DRY salt was not disclosed: every on-chain probe used a random salt and dummy strings of equal length.
+- Historical probes on 2026-10-17 used random salts and dummy strings of equal length. This does not establish confidentiality of the later frozen DRY salt: that deterministic salt is published in evidence/source and disclosed by estimateGas/eth_call (E3-1). Salt choice A/B remains an explicit decision before economic approval.
 - Trigger: the read-only readiness of 2026-10-17 (`native/evidence/g07/readiness_20261017T101215Z/`) → `CURRENT_DEPLOYMENT_DRIFT = STOP`.
 
 ## 1. Findings (read-only analysis)
