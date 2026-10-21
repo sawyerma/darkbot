@@ -155,7 +155,6 @@ fn the_hot0_receive_path_allocates_nothing() {
 
     let launch = launch_envelope(PORTAL);
     let other = launch_envelope([0xaa; 20]);
-    let head_payload = [0u8; 12];
     // Lane 16: launches (admitted) alternating with non-matches (rejected).
     // Lane 17: the same launches again (duplicates) and its own non-matches.
     for sequence in 0..RECORDS {
@@ -184,6 +183,12 @@ fn the_hot0_receive_path_allocates_nothing() {
             hash_of(sequence, 0xc0)
         };
         peer17.publish(&early(hash17, 400, payload17)).unwrap();
+        // A contiguous head history: each head is the child of the last.
+        let mut head_payload = [0u8; 12];
+        head_payload[..8].copy_from_slice(&sequence.to_le_bytes());
+        let parent = sequence
+            .checked_sub(1)
+            .map_or([0; 32], |p| hash_of(p, 0xd0));
         let head = RecordV2 {
             kind: RecordKind::CanonicalHead,
             flags: 0,
@@ -192,7 +197,7 @@ fn the_hot0_receive_path_allocates_nothing() {
             source: [0; 16],
             peer: [0; 32],
             hash: hash_of(sequence, 0xd0),
-            aux: [0; 32],
+            aux: parent,
             payload: &head_payload,
         };
         chain.publish(&head).unwrap();

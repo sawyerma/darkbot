@@ -11,15 +11,21 @@ The Wire-V2 Chain lane (lane 2, class `ChainEvidence`) has exactly one producer 
 
 `chainmu` is a `*syncx.ClosableMutex` (`internal/syncx/mutex.go`). Its `TryLock` is a blocking channel receive (`_, ok := <-cm.ch`). Despite the name it waits; it returns `false` only after `Close`, and a caller that gets `false` returns `errChainStopped` without writing. Holding it is mutual exclusion.
 
-## The three publishers
+## The publishers
 
 | Hook | In function | How `chainmu` is held |
 |---|---|---|
 | `fastlane.PublishCanonicalV2` | `BlockChain.writeBlockAndSetHead`, when the block became canonical | by every caller, see below |
 | `fastlane.PublishReorgV2` | `BlockChain.reorg`, before the tx-lookup mutation | by every caller, see below |
 | `fastlane.PublishCanonicalV2` | `BlockChain.SetCanonical` | `SetCanonical` locks `chainmu` itself before the hook |
+| `fastlane.PublishCanonicalV2` | `BlockChain.writeKnownBlock`, after its head write (E7-2) | by every caller, see below |
+| `fastlane.PublishHeadResetV2` (GAP, reason 1) | `BlockChain.setHeadBeyondRoot`, after the rewind and `loadLastState` (every `SetHead`/`SetHeadWithTimestamp` and startup repair) (E7-2) | locks `chainmu` itself before the hook |
+| `fastlane.PublishHeadResetV2` (GAP, reason 2) | `BlockChain.SnapSyncCommitHead`, after the head store (E7-2) | locks `chainmu` itself before the hook |
+| `fastlane.PublishHeadResetV2` (GAP, reason 3) | `BlockChain.ResetWithGenesisBlock`, after the genesis markers (E7-2) | locks `chainmu` itself before the hook |
 
-Call paths into the two functions that do not lock themselves, all inside `core/blockchain.go`:
+**Head-write inventory (E7-2, mechanical):** the overlay tool requires that the in-memory head (`bc.currentBlock.Store`) is written only by `writeHeadBlock`, `setHeadBeyondRoot`, `SnapSyncCommitHead`, `ResetWithGenesisBlock` and `loadLastState`; that `writeHeadBlock` is called only by `writeBlockAndSetHead`, `SetCanonical`, `reorg`, `writeKnownBlock` and `ResetWithGenesisBlock`; and that `loadLastState` is called by no other `BlockChain` method than `setHeadBeyondRoot` (its other caller, `NewBlockChain`, runs before the Fast Lane exists). A new head writer in a future pin fails the check. Every head change therefore leaves a CANONICAL_HEAD, REORG or GAP record; the Rust side checks that the records form a contiguous head history and fails closed otherwise.
+
+Call paths into the functions that do not lock themselves, all inside `core/blockchain.go`:
 
 ```text
 writeBlockAndSetHead <- WriteBlockAndSetHead            locks chainmu
@@ -47,7 +53,7 @@ The claim therefore rests on two things: the lock, and the configuration of one 
 
 - It is a statement about this pinned source with this overlay. A different pin or a changed overlay needs the check rerun.
 - C1 publishes evidence at reviewed hooks. It changes no chain mutation, ancestor determination, tx lookup, head state, canonical or reorg ordering.
-- Other head changes of the client (for example `SetHead`, snap-sync head commits) are not Chain-lane publishers. Whether C2 needs evidence for them is a C2 question.
+- Head changes outside canonical/reorg evidence (`SetHead` rewinds, snap-sync head commits, genesis resets) are reported only as reasoned GAP records: evidence that the history is broken, not a description of the new chain. C2 must reconcile independently before it trusts a chain view again.
 - The Rust side does not turn these records into chain state. C2 is the only reconciler.
 
 ## Tests

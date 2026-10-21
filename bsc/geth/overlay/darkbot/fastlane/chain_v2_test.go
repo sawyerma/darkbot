@@ -135,7 +135,8 @@ func TestC18FullChainLaneLosesNothingSilently(t *testing.T) {
 	// With room again, the gap precedes the next head.
 	PublishCanonicalV2(c15Header(capacity+5, 0x01), 0)
 	rest := testDrainV2(t, consumer)
-	if len(rest) != 2 || rest[0].Kind != Gap || binary.LittleEndian.Uint64(rest[0].Aux[0:8]) != 5 || rest[1].Kind != CanonicalHead {
+	if len(rest) != 2 || rest[0].Kind != Gap || binary.LittleEndian.Uint64(rest[0].Aux[0:8]) != 5 || rest[1].Kind != CanonicalHead ||
+		binary.LittleEndian.Uint64(rest[0].Aux[8:16]) != 0 || len(rest[0].Payload) != 0 {
 		t.Fatalf("after room: %+v", rest)
 	}
 	// No overwrite: the first record is still the first head.
@@ -223,5 +224,36 @@ func TestC18UnlockedChainPublishersNeverCorruptTheLane(t *testing.T) {
 	}
 	if heads != evidence.Published || reported+evidence.PendingLost != evidence.Lost {
 		t.Fatalf("heads=%d reported=%d evidence %+v", heads, reported, evidence)
+	}
+}
+
+func TestE72HeadResetsArePublishedAsReasonedGaps(t *testing.T) {
+	_, cfg := c15Installed(t)
+	oldHead, newHead := c15Header(90, 0x31), c15Header(40, 0x32)
+	PublishCanonicalV2(oldHead, 1)
+	PublishHeadResetV2(ChainHeadResetSetHeadV2, oldHead, newHead)
+	PublishHeadResetV2(ChainHeadResetSnapCommitV2, newHead, oldHead)
+	PublishHeadResetV2(ChainHeadResetGenesisResetV2, oldHead, c15Header(0, 0))
+
+	recs := testDrainV2(t, c14Consumer(t, cfg, c15ChainLane()))
+	if len(recs) != 4 || recs[0].Kind != CanonicalHead {
+		t.Fatalf("%d chain records", len(recs))
+	}
+	for i, reason := range []uint64{ChainHeadResetSetHeadV2, ChainHeadResetSnapCommitV2, ChainHeadResetGenesisResetV2} {
+		gap := recs[i+1]
+		if gap.Kind != Gap || gap.Source != [16]byte(chainSourceHeadResetV2) || gap.Hash != (common.Hash{}) ||
+			binary.LittleEndian.Uint64(gap.Aux[0:8]) != 0 || binary.LittleEndian.Uint64(gap.Aux[8:16]) != reason ||
+			len(gap.Payload) != 80 {
+			t.Fatalf("head reset %d record %+v", reason, gap)
+		}
+	}
+	first := recs[1].Payload
+	oldHash, newHash := oldHead.Hash(), newHead.Hash()
+	if binary.LittleEndian.Uint64(first[0:8]) != 90 || string(first[8:40]) != string(oldHash[:]) ||
+		binary.LittleEndian.Uint64(first[40:48]) != 40 || string(first[48:80]) != string(newHash[:]) {
+		t.Fatalf("set head payload %x", first)
+	}
+	if evidence, ok := ChainV2Snapshot(); !ok || evidence.Published != 4 || evidence.Lost != 0 {
+		t.Fatalf("chain evidence %+v", evidence)
 	}
 }

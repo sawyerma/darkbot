@@ -22,6 +22,7 @@ The tranche changes accepted code in three places. Each needs its earlier gate r
 | `v2.rs`: `try_consume` now runs through the borrowed guard (same validation, plus a slot-stability check at release) | C1.5 | C1.2 and C1.3 Rust tests (`cargo test -p darkbot-bsc-geth-ipc`), C1.3 interop |
 | `ingress.go`: the arena lane plan gains the Chain lane and, when configured, the outbound lanes; one config field; shutdown stops outbound first | C1.7, C1.8 | C1.4 Go tests, C1.4 interop, C1.4a harness |
 | geth hooks: chain evidence and outbound move from the V1 ring to V2 lanes; V1 init/close leave the handler; overlay marker is now `DARKBOT_C1_FASTLANE_C1_7` | C1.7, C1.8 | overlay apply, `go test ./eth/protocols/eth ./eth ./core`, `go build ./cmd/geth` |
+| E7-2: `writeKnownBlock` canonical hook; SetHead/snap-commit/genesis-reset GAP records with reason (`aux[8..16]`); head-write inventory in the overlay tool; HOT0 continuity check (`ChainContinuityV2`); overlay marker is now `DARKBOT_C1_FASTLANE_C1_7_E72` (reset an earlier patched checkout to the pin first) | C1.8 | overlay apply, `go test ./core` (hook paths), `go build ./cmd/geth`, Go fastlane tests, `cargo test -p darkbot-bsc-geth-ipc`, C1.4 interop |
 
 Peer-ingress semantics (`T_packet_decoded`, `T_ingress`, prefilter, one handler = one lane) are unchanged. The Wire V2 layout is unchanged. The bitwise CRC32C is unchanged.
 

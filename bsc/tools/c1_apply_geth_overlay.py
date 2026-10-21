@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 PIN = "cdb7548b5baacfdae92f9f63437d6456411665f3"
-MARKER = "DARKBOT_C1_FASTLANE_C1_7"
+MARKER = "DARKBOT_C1_FASTLANE_C1_7_E72"
 MARKER_FILE = ".darkbot-c1-fastlane-c17"
 # Earlier overlays: C1.1-C1.3 and C1.4. Their hooks differ (V1 chain
 # evidence and V1 outbound), so a tree carrying them is reset first.
@@ -407,6 +407,105 @@ func (h *handler) fastLaneOutboundMaintenance() {
 ''',
         "set canonical hook",
     )
+    # E7-2: head changes that previously left no Chain-lane evidence.
+    replace_once(
+        blockchain,
+        '''		if err := bc.reorg(current, block.Header()); err != nil {
+			return err
+		}
+	}
+	bc.writeHeadBlock(block)
+	return nil
+}
+''',
+        '''		if err := bc.reorg(current, block.Header()); err != nil {
+			return err
+		}
+	}
+	bc.writeHeadBlock(block)
+	fastlane.PublishCanonicalV2(block.Header(), len(block.Transactions()))
+	return nil
+}
+''',
+        "known block canonical hook",
+    )
+    replace_once(
+        blockchain,
+        '''func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Hash, repair bool) (uint64, error) {
+	if !bc.chainmu.TryLock() {
+		return 0, errChainStopped
+	}
+	defer bc.chainmu.Unlock()
+''',
+        '''func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Hash, repair bool) (uint64, error) {
+	if !bc.chainmu.TryLock() {
+		return 0, errChainStopped
+	}
+	defer bc.chainmu.Unlock()
+	darkbotOldHead := bc.CurrentBlock()
+''',
+        "set head old head",
+    )
+    replace_once(
+        blockchain,
+        '''	return rootNumber, bc.loadLastState()
+}
+''',
+        '''	darkbotErr := bc.loadLastState()
+	fastlane.PublishHeadResetV2(fastlane.ChainHeadResetSetHeadV2, darkbotOldHead, bc.CurrentBlock())
+	return rootNumber, darkbotErr
+}
+''',
+        "set head reset hook",
+    )
+    replace_once(
+        blockchain,
+        '''	if !bc.chainmu.TryLock() {
+		return errChainStopped
+	}
+	bc.currentBlock.Store(block.Header())
+	headBlockGauge.Update(int64(block.NumberU64()))
+	justifiedBlockGauge.Update(int64(bc.GetJustifiedNumber(block.Header())))
+	finalizedBlockGauge.Update(int64(bc.GetFinalizedNumber(block.Header())))
+	bc.chainmu.Unlock()
+''',
+        '''	if !bc.chainmu.TryLock() {
+		return errChainStopped
+	}
+	darkbotOldHead := bc.CurrentBlock()
+	bc.currentBlock.Store(block.Header())
+	headBlockGauge.Update(int64(block.NumberU64()))
+	justifiedBlockGauge.Update(int64(bc.GetJustifiedNumber(block.Header())))
+	finalizedBlockGauge.Update(int64(bc.GetFinalizedNumber(block.Header())))
+	fastlane.PublishHeadResetV2(fastlane.ChainHeadResetSnapCommitV2, darkbotOldHead, block.Header())
+	bc.chainmu.Unlock()
+''',
+        "snap commit reset hook",
+    )
+    replace_once(
+        blockchain,
+        '''	defer bc.chainmu.Unlock()
+
+	// Prepare the genesis block and reinitialise the chain
+''',
+        '''	defer bc.chainmu.Unlock()
+	darkbotOldHead := bc.CurrentBlock()
+
+	// Prepare the genesis block and reinitialise the chain
+''',
+        "genesis reset old head",
+    )
+    replace_once(
+        blockchain,
+        '''	bc.currentSnapBlock.Store(bc.genesisBlock.Header())
+	headFastBlockGauge.Update(int64(bc.genesisBlock.NumberU64()))
+''',
+        '''	bc.currentSnapBlock.Store(bc.genesisBlock.Header())
+	headFastBlockGauge.Update(int64(bc.genesisBlock.NumberU64()))
+	fastlane.PublishHeadResetV2(fastlane.ChainHeadResetGenesisResetV2, darkbotOldHead, bc.genesisBlock.Header())
+''',
+        "genesis reset hook",
+    )
 
 
 
@@ -526,7 +625,13 @@ CHAIN_HOOKS = {
     "writeBlockAndSetHead": "fastlane.PublishCanonicalV2(",
     "reorg": "fastlane.PublishReorgV2(",
     "SetCanonical": "fastlane.PublishCanonicalV2(",
+    "writeKnownBlock": "fastlane.PublishCanonicalV2(",
+    "setHeadBeyondRoot": "fastlane.PublishHeadResetV2(",
+    "SnapSyncCommitHead": "fastlane.PublishHeadResetV2(",
+    "ResetWithGenesisBlock": "fastlane.PublishHeadResetV2(",
 }
+# Hook functions that lock chainmu themselves before their hook.
+SELF_LOCKING_HOOKS = ("SetCanonical", "setHeadBeyondRoot", "SnapSyncCommitHead", "ResetWithGenesisBlock")
 CHAINMU_LOCK = "bc.chainmu.TryLock()"
 
 
@@ -579,15 +684,30 @@ def verify_chain_ownership(root: Path) -> None:
     require(re.search(r"chainmu\s+\*syncx\.ClosableMutex", blockchain) is not None, "chainmu is a ClosableMutex")
 
     all_core = "".join(core_sources.values())
-    require(all_core.count("fastlane.PublishCanonicalV2(") == 2, "two canonical hooks")
+    require(all_core.count("fastlane.PublishCanonicalV2(") == 3, "three canonical hooks")
     require(all_core.count("fastlane.PublishReorgV2(") == 1, "one reorg hook")
+    require(all_core.count("fastlane.PublishHeadResetV2(") == 3, "three head-reset hooks")
     require("fastlane.PublishCanonical(" not in all_core and "fastlane.PublishReorg(" not in all_core,
             "no V1 chain hook")
     for name, hook in CHAIN_HOOKS.items():
         require(name in methods and hook in methods[name], f"hook inside BlockChain.{name}")
-    set_canonical = methods["SetCanonical"]
-    require(0 <= set_canonical.find(CHAINMU_LOCK) < set_canonical.find(CHAIN_HOOKS["SetCanonical"]),
-            "SetCanonical locks chainmu before its hook")
+    for name in SELF_LOCKING_HOOKS:
+        body = methods[name]
+        require(0 <= body.find(CHAINMU_LOCK) < body.find(CHAIN_HOOKS[name]),
+                f"{name} locks chainmu before its hook")
+    # Every other write of the in-memory head is covered by a hook of its
+    # function, or happens before the Fast Lane can be active (E7-2).
+    head_writers = sorted(name for name, body in methods.items() if "bc.currentBlock.Store(" in body)
+    require(head_writers == ["ResetWithGenesisBlock", "SnapSyncCommitHead", "loadLastState",
+                             "setHeadBeyondRoot", "writeHeadBlock"],
+            f"reviewed head writers, found {head_writers}")
+    write_head_callers = sorted({name for name, body in methods.items() if "bc.writeHeadBlock(" in body})
+    require(write_head_callers == ["ResetWithGenesisBlock", "SetCanonical", "reorg",
+                                   "writeBlockAndSetHead", "writeKnownBlock"],
+            f"reviewed writeHeadBlock callers, found {write_head_callers}")
+    load_last_state_callers = sorted({name for name, body in methods.items() if "bc.loadLastState(" in body})
+    require(load_last_state_callers == ["setHeadBeyondRoot"],
+            f"loadLastState runs at construction or inside setHeadBeyondRoot, found {load_last_state_callers}")
 
     unlocked_exported = set()
 
@@ -614,7 +734,7 @@ def verify_chain_ownership(root: Path) -> None:
                 return False
         return True
 
-    for name in ("writeBlockAndSetHead", "reorg"):
+    for name in ("writeBlockAndSetHead", "reorg", "writeKnownBlock"):
         require(trace(name, {name}), f"every path into BlockChain.{name} holds chainmu")
 
     # An exported method that does not lock can be called from anywhere.

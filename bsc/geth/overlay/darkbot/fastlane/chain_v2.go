@@ -20,7 +20,16 @@
 //	REORG           hash = new head hash, aux = common ancestor hash,
 //	                payload = old number u64 LE | old hash | new number u64 LE
 //	                | new hash | common number u64 LE
-//	GAP             aux[0..8] = records lost before this point, u64 LE
+//	GAP             aux[0..8] = records lost before this point, u64 LE,
+//	                aux[8..16] = reason u64 LE: 0 = lost records (payload
+//	                empty); 1 = SetHead rewind, 2 = snap-sync head commit,
+//	                3 = reset to genesis (payload = old number u64 LE |
+//	                old hash | new number u64 LE | new hash)
+//
+// Every GAP means the lane is no contiguous head history at that point; a
+// consumer must stop trusting its chain view until it reconciles (E7-2).
+// Reason 0 is the layout of every earlier GAP record: aux[8..32] was always
+// zero, so the reason field is compatible with records and readers before it.
 //
 // Publishing changes no chain state and never blocks the chain-write path.
 
@@ -40,10 +49,18 @@ const (
 	c15ChainLaneSlotStride = uint32(512)
 )
 
+// Reasons of a head change outside canonical/reorg evidence (GAP aux[8..16]).
+const (
+	ChainHeadResetSetHeadV2      = uint64(1)
+	ChainHeadResetSnapCommitV2   = uint64(2)
+	ChainHeadResetGenesisResetV2 = uint64(3)
+)
+
 var (
 	chainSourceCanonicalV2 = newIngressSourceV2("canonical")
 	chainSourceReorgV2     = newIngressSourceV2("reorg")
 	chainSourceGapV2       = newIngressSourceV2("chain-gap")
+	chainSourceHeadResetV2 = newIngressSourceV2("chain-head-reset")
 )
 
 // chainPublisherV2 is the Chain lane's producer.
@@ -178,6 +195,30 @@ func PublishReorgV2(oldHead, newHead, commonHead *types.Header) {
 	copy(payload[48:80], newHash[:])
 	binary.LittleEndian.PutUint64(payload[80:88], commonHead.Number.Uint64())
 	r.chain.publish(Reorg, chainSourceReorgV2, newHash, aux, payload[:])
+}
+
+// PublishHeadResetV2 publishes a GAP record for a head change that no
+// CANONICAL_HEAD or REORG record describes: SetHead rewinds, snap-sync head
+// commits and resets to genesis. The caller holds BlockChain.chainmu.
+func PublishHeadResetV2(reason uint64, oldHead, newHead *types.Header) {
+	r := ingressActiveV2.Load()
+	if r == nil || r.chain == nil {
+		return
+	}
+	var aux [32]byte
+	binary.LittleEndian.PutUint64(aux[8:16], reason)
+	var payload [80]byte
+	if oldHead != nil {
+		oldHash := oldHead.Hash()
+		binary.LittleEndian.PutUint64(payload[0:8], oldHead.Number.Uint64())
+		copy(payload[8:40], oldHash[:])
+	}
+	if newHead != nil {
+		newHash := newHead.Hash()
+		binary.LittleEndian.PutUint64(payload[40:48], newHead.Number.Uint64())
+		copy(payload[48:80], newHash[:])
+	}
+	r.chain.publish(Gap, chainSourceHeadResetV2, common.Hash{}, aux, payload[:])
 }
 
 // ChainV2Snapshot returns the Chain lane's producer evidence, false when the

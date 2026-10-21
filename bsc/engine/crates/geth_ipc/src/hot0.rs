@@ -39,10 +39,12 @@
 //! dedup window records that.
 //!
 //! Chain-lane evidence is serviced before any peer record in every poll and
-//! handed to the `on_chain` closure. This module does not interpret it and is
-//! not a reconciler; C2 owns chain state. If the Chain lane faults, or geth
-//! reports lost chain evidence with a GAP record, admission is refused until
-//! the poller is rebuilt.
+//! handed to the `on_chain` closure. This module is not a reconciler and
+//! decides nothing about what is canonical; C2 owns chain state. It only checks
+//! that the evidence stays a contiguous head history ([`ChainContinuityV2`]).
+//! If the Chain lane faults, geth reports lost chain evidence or a head reset
+//! with a GAP record, or a head record does not follow from the previous one,
+//! admission is refused until the poller is rebuilt.
 //!
 //! # Hot-path properties
 //!
@@ -521,6 +523,199 @@ pub fn decode_reorg<'a>(record: &BorrowedRecordV2<'a>) -> Option<ReorgV2<'a>> {
     })
 }
 
+/// Why geth published a GAP record on the Chain lane (`aux[8..16]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChainGapReasonV2 {
+    /// Chain records were lost (lane full, clock failure, second publisher).
+    LostRecords,
+    /// `SetHead` rewound the head.
+    SetHead,
+    /// A snap-sync head commit replaced the head.
+    SnapSyncCommit,
+    /// The chain was reset to genesis.
+    GenesisReset,
+}
+
+/// A GAP record of the Chain lane: `aux[0..8]` the records lost before it,
+/// `aux[8..16]` the reason. A head reset carries the payload `old number u64
+/// LE | old hash 32 | new number u64 LE | new hash 32`; a loss has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChainGapV2<'a> {
+    pub observed_ns: u64,
+    pub lost: u64,
+    pub reason: ChainGapReasonV2,
+    /// `(old number, old hash, new number, new hash)` of a head reset.
+    pub reset: Option<(u64, &'a [u8], u64, &'a [u8])>,
+}
+
+/// Decodes a GAP record; `None` if it is not one or is malformed.
+pub fn decode_chain_gap<'a>(record: &BorrowedRecordV2<'a>) -> Option<ChainGapV2<'a>> {
+    if record.kind != RecordKind::Gap || record.aux[16..].iter().any(|b| *b != 0) {
+        return None;
+    }
+    let reason = match le_u64(&record.aux[8..16]) {
+        0 => ChainGapReasonV2::LostRecords,
+        1 => ChainGapReasonV2::SetHead,
+        2 => ChainGapReasonV2::SnapSyncCommit,
+        3 => ChainGapReasonV2::GenesisReset,
+        _ => return None,
+    };
+    let payload = record.payload;
+    let reset = match (reason, payload.len()) {
+        (ChainGapReasonV2::LostRecords, 0) => None,
+        (ChainGapReasonV2::LostRecords, _) => return None,
+        (_, 80) => Some((
+            le_u64(&payload[..8]),
+            &payload[8..40],
+            le_u64(&payload[40..48]),
+            &payload[48..80],
+        )),
+        _ => return None,
+    };
+    Some(ChainGapV2 {
+        observed_ns: record.timestamp_ns,
+        lost: le_u64(&record.aux[..8]),
+        reason,
+        reset,
+    })
+}
+
+/// Why the Chain lane stopped being a contiguous head history (E7-2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChainBreakV2 {
+    /// geth reported a GAP: lost records or a head reset.
+    Gap(ChainGapReasonV2),
+    /// A GAP record that does not decode.
+    MalformedGap,
+    /// A CANONICAL_HEAD or REORG record that does not decode.
+    MalformedRecord,
+    /// A CANONICAL_HEAD that neither repeats the head nor extends it by one
+    /// block with the head as parent.
+    CanonicalDiscontinuity,
+    /// A REORG whose old head is not the current head, or whose common
+    /// ancestor lies above one of its ends.
+    ReorgDiscontinuity,
+}
+
+/// The result of one Chain-lane record for [`ChainContinuityV2`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChainStepV2 {
+    /// The first head record: the stream starts here, unverified against any
+    /// earlier history.
+    Anchored,
+    /// The head advanced by one block onto its child.
+    Extended,
+    /// The current head again (e.g. the CANONICAL_HEAD after its REORG).
+    Repeated,
+    /// A REORG from the current head to a new one.
+    Reorged,
+    /// A record of another kind; continuity is unchanged.
+    Ignored,
+    /// Continuity is broken; sticky until the owner re-anchors after an
+    /// independent reconciliation.
+    Broken(ChainBreakV2),
+}
+
+/// Continuity check of the Chain-lane evidence (E7-2).
+///
+/// It decides nothing about what is canonical: that is C2's chain-state
+/// owner. It only refuses to treat the evidence as a contiguous head history
+/// once a record does not follow from the previous one, so a consumer can
+/// fail closed (`CHAIN_STATE_GAP`). A break is sticky; [`Self::reanchor`] is
+/// for the owner after an independent read-only reconciliation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChainContinuityV2 {
+    head: Option<(u64, [u8; 32])>,
+    broken: Option<ChainBreakV2>,
+}
+
+impl ChainContinuityV2 {
+    /// The last head, `(number, hash)`.
+    pub fn head(&self) -> Option<(u64, [u8; 32])> {
+        self.head
+    }
+
+    pub fn broken(&self) -> Option<ChainBreakV2> {
+        self.broken
+    }
+
+    /// Forgets the head and the break; the next head record anchors again.
+    pub fn reanchor(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn observe(&mut self, record: &BorrowedRecordV2<'_>) -> ChainStepV2 {
+        if let Some(cause) = self.broken {
+            return ChainStepV2::Broken(cause);
+        }
+        let step = match record.kind {
+            RecordKind::CanonicalHead => match decode_canonical_head(record) {
+                None => ChainStepV2::Broken(ChainBreakV2::MalformedRecord),
+                Some(head) => self.canonical(&head),
+            },
+            RecordKind::Reorg => match decode_reorg(record) {
+                None => ChainStepV2::Broken(ChainBreakV2::MalformedRecord),
+                Some(reorg) => self.reorg(&reorg),
+            },
+            RecordKind::Gap => match decode_chain_gap(record) {
+                None => ChainStepV2::Broken(ChainBreakV2::MalformedGap),
+                Some(gap) => ChainStepV2::Broken(ChainBreakV2::Gap(gap.reason)),
+            },
+            _ => ChainStepV2::Ignored,
+        };
+        if let ChainStepV2::Broken(cause) = step {
+            self.broken = Some(cause);
+        }
+        step
+    }
+
+    fn canonical(&mut self, head: &CanonicalHeadV2<'_>) -> ChainStepV2 {
+        let Some(hash) = hash32(head.hash) else {
+            return ChainStepV2::Broken(ChainBreakV2::MalformedRecord);
+        };
+        match self.head {
+            None => {
+                self.head = Some((head.number, hash));
+                ChainStepV2::Anchored
+            }
+            Some((number, current)) if hash == current => {
+                if head.number == number {
+                    ChainStepV2::Repeated
+                } else {
+                    ChainStepV2::Broken(ChainBreakV2::CanonicalDiscontinuity)
+                }
+            }
+            Some((number, current))
+                if head.parent_hash == current && Some(head.number) == number.checked_add(1) =>
+            {
+                self.head = Some((head.number, hash));
+                ChainStepV2::Extended
+            }
+            Some(_) => ChainStepV2::Broken(ChainBreakV2::CanonicalDiscontinuity),
+        }
+    }
+
+    fn reorg(&mut self, reorg: &ReorgV2<'_>) -> ChainStepV2 {
+        let Some(new_hash) = hash32(reorg.new_hash) else {
+            return ChainStepV2::Broken(ChainBreakV2::MalformedRecord);
+        };
+        if reorg.common_number > reorg.old_number || reorg.common_number > reorg.new_number {
+            return ChainStepV2::Broken(ChainBreakV2::ReorgDiscontinuity);
+        }
+        if let Some((number, current)) = self.head
+            && (reorg.old_number != number || reorg.old_hash != current)
+        {
+            return ChainStepV2::Broken(ChainBreakV2::ReorgDiscontinuity);
+        }
+        self.head = Some((reorg.new_number, new_hash));
+        ChainStepV2::Reorged
+    }
+}
+
+fn hash32(bytes: &[u8]) -> Option<[u8; 32]> {
+    bytes.try_into().ok()
+}
+
 // ---------------------------------------------------------------------------
 // Poller
 // ---------------------------------------------------------------------------
@@ -570,8 +765,11 @@ pub struct Hot0Stats {
     pub polls: u64,
     pub idle_polls: u64,
     pub chain_records: u64,
-    /// GAP records of the Chain lane: geth reported lost chain evidence.
+    /// GAP records of the Chain lane: geth reported lost chain evidence or a
+    /// head reset.
     pub chain_gaps: u64,
+    /// CANONICAL_HEAD / REORG records that broke continuity (E7-2).
+    pub chain_discontinuities: u64,
     pub chain_foreign_records: u64,
     pub peer_records: u64,
     pub duplicates: u64,
@@ -627,6 +825,7 @@ struct Hot0Core {
     stats: Hot0Stats,
     clock: fn() -> u64,
     chain_fault: bool,
+    continuity: ChainContinuityV2,
 }
 
 enum LanePoll {
@@ -688,6 +887,7 @@ impl Hot0Poller {
                 stats: Hot0Stats::default(),
                 clock: monotonic_ns,
                 chain_fault: false,
+                continuity: ChainContinuityV2::default(),
             },
         };
         poller.refresh_all();
@@ -718,6 +918,11 @@ impl Hot0Poller {
     /// Whether the Chain lane faulted. Admission is refused while it did.
     pub fn chain_faulted(&self) -> bool {
         self.core.chain_fault
+    }
+
+    /// Why the Chain-lane evidence stopped being contiguous, if it did.
+    pub fn chain_break(&self) -> Option<ChainBreakV2> {
+        self.core.continuity.broken()
     }
 
     /// The lane ids currently polled, in poll order from the cursor.
@@ -804,13 +1009,22 @@ impl Hot0Poller {
                 }
             };
             let record = guard.record();
+            let step = self.core.continuity.observe(&record);
             match record.kind {
                 RecordKind::CanonicalHead | RecordKind::Reorg => {
                     self.core.stats.chain_records += 1;
-                    on_chain(&record);
+                    if let ChainStepV2::Broken(_) = step {
+                        // The evidence no longer follows from the previous
+                        // head: an unreported head change (E7-2).
+                        self.core.stats.chain_discontinuities += 1;
+                        self.core.chain_fault = true;
+                    } else {
+                        on_chain(&record);
+                    }
                 }
                 // geth lost chain evidence before this point (lane full, or
-                // a second publisher detected). What follows is incomplete.
+                // a second publisher detected) or reset the head outside
+                // canonical/reorg evidence. What follows is incomplete.
                 RecordKind::Gap => {
                     self.core.stats.chain_gaps += 1;
                     self.core.chain_fault = true;
@@ -1346,10 +1560,10 @@ mod tests {
         let launch = envelope(PORTAL, 5);
         publish(&mut fixture.producer(16), 1, 500, &launch);
         let mut chain = fixture.chain_producer();
-        let mut payload = [0u8; 12];
-        payload[..8].copy_from_slice(&77u64.to_le_bytes());
-        payload[8..].copy_from_slice(&3u32.to_le_bytes());
         for number in [77u8, 78] {
+            let mut payload = [0u8; 12];
+            payload[..8].copy_from_slice(&u64::from(number).to_le_bytes());
+            payload[8..].copy_from_slice(&3u32.to_le_bytes());
             let record = RecordV2 {
                 kind: RecordKind::CanonicalHead,
                 flags: 0,
@@ -1379,7 +1593,7 @@ mod tests {
         );
         assert!(matches!(outcome, Hot0Outcome::Admitted(_)));
         // Both heads were delivered before the peer record was decided.
-        assert_eq!(heads, [(77, 3, (77, 76)), (77, 3, (78, 77))]);
+        assert_eq!(heads, [(77, 3, (77, 76)), (78, 3, (78, 77))]);
         assert_eq!(events, [1]);
         assert_eq!(poller.stats().chain_records, 2);
     }
@@ -1608,5 +1822,239 @@ mod tests {
             scope_decision,
         );
         assert_eq!(seen, Some(((10, 11, 8), 0xa1, 0xb2)));
+    }
+
+    fn chain_record(
+        kind: RecordKind,
+        hash: [u8; 32],
+        aux: [u8; 32],
+        payload: &[u8],
+    ) -> RecordV2<'_> {
+        RecordV2 {
+            kind,
+            flags: 0,
+            timestamp_ns: 400,
+            clock_id: CLOCK_ID_MONOTONIC,
+            source: [0; 16],
+            peer: [0; 32],
+            hash,
+            aux,
+            payload,
+        }
+    }
+
+    fn canonical_payload(number: u64) -> [u8; 12] {
+        let mut payload = [0u8; 12];
+        payload[..8].copy_from_slice(&number.to_le_bytes());
+        payload
+    }
+
+    fn reorg_payload(old: (u64, u8), new: (u64, u8), common: u64) -> [u8; 88] {
+        let mut payload = [0u8; 88];
+        payload[..8].copy_from_slice(&old.0.to_le_bytes());
+        payload[8..40].copy_from_slice(&[old.1; 32]);
+        payload[40..48].copy_from_slice(&new.0.to_le_bytes());
+        payload[48..80].copy_from_slice(&[new.1; 32]);
+        payload[80..88].copy_from_slice(&common.to_le_bytes());
+        payload
+    }
+
+    /// Publishes the records and returns each continuity step plus the
+    /// poller's verdict on one launch published after them.
+    fn chain_run(
+        name: &str,
+        records: &[RecordV2<'_>],
+    ) -> (Vec<ChainStepV2>, Hot0Outcome, Hot0Stats) {
+        let fixture = Fixture::new(name, 1, 1);
+        let mut chain = fixture.chain_producer();
+        let mut continuity = ChainContinuityV2::default();
+        let mut steps = Vec::new();
+        for record in records {
+            chain.publish(record).unwrap();
+            let owned = record.payload.to_vec();
+            let borrowed = BorrowedRecordV2 {
+                sequence: 0,
+                lane_id: 2,
+                lane_epoch: 1,
+                kind: record.kind,
+                flags: 0,
+                timestamp_ns: record.timestamp_ns,
+                clock_id: record.clock_id,
+                source: &record.source,
+                peer: &record.peer,
+                hash: &record.hash,
+                aux: &record.aux,
+                payload: &owned,
+            };
+            steps.push(continuity.observe(&borrowed));
+        }
+        publish(&mut fixture.producer(16), 1, 500, &envelope(PORTAL, 7));
+        let mut poller = fixture.poller(2);
+        let outcome = poller.poll_once(no_chain, scope_decision);
+        assert_eq!(poller.chain_break(), continuity.broken());
+        (steps, outcome, poller.stats())
+    }
+
+    #[test]
+    fn e72_a_contiguous_head_history_with_a_reorg_keeps_admission() {
+        let (p10, p11, reorg) = (
+            canonical_payload(10),
+            canonical_payload(11),
+            reorg_payload((11, 11), (11, 0xb1), 10),
+        );
+        let p11b = canonical_payload(11);
+        let p12 = canonical_payload(12);
+        let records = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::CanonicalHead, [11; 32], [10; 32], &p11),
+            chain_record(RecordKind::Reorg, [0xb1; 32], [10; 32], &reorg),
+            chain_record(RecordKind::CanonicalHead, [0xb1; 32], [10; 32], &p11b),
+            chain_record(RecordKind::CanonicalHead, [12; 32], [0xb1; 32], &p12),
+        ];
+        let (steps, outcome, stats) = chain_run("e72-contiguous", &records);
+        use ChainStepV2::*;
+        assert_eq!(steps, [Anchored, Extended, Reorged, Repeated, Extended]);
+        assert!(matches!(outcome, Hot0Outcome::Admitted(_)));
+        assert_eq!((stats.chain_records, stats.chain_discontinuities), (5, 0));
+    }
+
+    #[test]
+    fn e72_unreported_head_changes_refuse_admission() {
+        let (p10, p12, p11) = (
+            canonical_payload(10),
+            canonical_payload(12),
+            canonical_payload(11),
+        );
+        let skip = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::CanonicalHead, [12; 32], [11; 32], &p12),
+        ];
+        let wrong_parent = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::CanonicalHead, [11; 32], [0xee; 32], &p11),
+        ];
+        let wrong_number = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p11),
+        ];
+        let stale_reorg = reorg_payload((9, 9), (11, 0xb1), 8);
+        let foreign_old = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::Reorg, [0xb1; 32], [8; 32], &stale_reorg),
+        ];
+        let high_common = reorg_payload((10, 10), (11, 0xb1), 12);
+        let impossible = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::Reorg, [0xb1; 32], [12; 32], &high_common),
+        ];
+        for (name, records, cause) in [
+            ("e72-skip", &skip[..], ChainBreakV2::CanonicalDiscontinuity),
+            (
+                "e72-parent",
+                &wrong_parent[..],
+                ChainBreakV2::CanonicalDiscontinuity,
+            ),
+            (
+                "e72-number",
+                &wrong_number[..],
+                ChainBreakV2::CanonicalDiscontinuity,
+            ),
+            (
+                "e72-old",
+                &foreign_old[..],
+                ChainBreakV2::ReorgDiscontinuity,
+            ),
+            (
+                "e72-common",
+                &impossible[..],
+                ChainBreakV2::ReorgDiscontinuity,
+            ),
+        ] {
+            let (steps, outcome, stats) = chain_run(name, records);
+            assert_eq!(steps.last(), Some(&ChainStepV2::Broken(cause)), "{name}");
+            assert_eq!(outcome, Hot0Outcome::Rejected, "{name}");
+            assert_eq!(
+                (
+                    stats.chain_discontinuities,
+                    stats.rejected_chain_unavailable
+                ),
+                (1, 1),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn e72_head_reset_and_loss_gaps_decode_and_stay_broken() {
+        let p10 = canonical_payload(10);
+        let mut reset = [0u8; 80];
+        reset[..8].copy_from_slice(&10u64.to_le_bytes());
+        reset[8..40].copy_from_slice(&[10; 32]);
+        reset[40..48].copy_from_slice(&4u64.to_le_bytes());
+        reset[48..80].copy_from_slice(&[4; 32]);
+        let mut reset_aux = [0u8; 32];
+        reset_aux[8..16].copy_from_slice(&1u64.to_le_bytes());
+        let mut lost_aux = [0u8; 32];
+        lost_aux[..8].copy_from_slice(&5u64.to_le_bytes());
+        let p5 = canonical_payload(5);
+        let records = [
+            chain_record(RecordKind::CanonicalHead, [10; 32], [9; 32], &p10),
+            chain_record(RecordKind::Gap, [0; 32], reset_aux, &reset),
+            chain_record(RecordKind::CanonicalHead, [5; 32], [4; 32], &p5),
+        ];
+        let (steps, outcome, stats) = chain_run("e72-reset", &records);
+        let broken = ChainStepV2::Broken(ChainBreakV2::Gap(ChainGapReasonV2::SetHead));
+        assert_eq!(steps, [ChainStepV2::Anchored, broken, broken]);
+        assert_eq!(outcome, Hot0Outcome::Rejected);
+        assert_eq!(stats.chain_gaps, 1);
+
+        let view = |aux: &'static [u8; 32], payload: &'static [u8]| BorrowedRecordV2 {
+            sequence: 0,
+            lane_id: 2,
+            lane_epoch: 1,
+            kind: RecordKind::Gap,
+            flags: 0,
+            timestamp_ns: 1,
+            clock_id: CLOCK_ID_MONOTONIC,
+            source: &[0; 16],
+            peer: &[0; 32],
+            hash: &[0; 32],
+            aux,
+            payload,
+        };
+        static LOST: [u8; 32] = {
+            let mut aux = [0u8; 32];
+            aux[0] = 5;
+            aux
+        };
+        static RESET: [u8; 32] = {
+            let mut aux = [0u8; 32];
+            aux[8] = 3;
+            aux
+        };
+        static UNKNOWN: [u8; 32] = {
+            let mut aux = [0u8; 32];
+            aux[8] = 9;
+            aux
+        };
+        static PAYLOAD: [u8; 80] = [7; 80];
+        let lost = decode_chain_gap(&view(&LOST, &[])).unwrap();
+        assert_eq!(
+            (lost.lost, lost.reason, lost.reset),
+            (5, ChainGapReasonV2::LostRecords, None)
+        );
+        let genesis = decode_chain_gap(&view(&RESET, &PAYLOAD)).unwrap();
+        assert_eq!(genesis.reason, ChainGapReasonV2::GenesisReset);
+        assert!(genesis.reset.is_some());
+        assert!(decode_chain_gap(&view(&UNKNOWN, &PAYLOAD)).is_none());
+        assert!(decode_chain_gap(&view(&LOST, &PAYLOAD)).is_none());
+        assert!(decode_chain_gap(&view(&RESET, &[])).is_none());
+        let mut continuity = ChainContinuityV2::default();
+        assert_eq!(
+            continuity.observe(&view(&UNKNOWN, &PAYLOAD)),
+            ChainStepV2::Broken(ChainBreakV2::MalformedGap)
+        );
+        continuity.reanchor();
+        assert_eq!(continuity, ChainContinuityV2::default());
     }
 }

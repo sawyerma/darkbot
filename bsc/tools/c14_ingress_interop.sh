@@ -26,7 +26,7 @@
 set -euo pipefail
 
 PIN="cdb7548b5baacfdae92f9f63437d6456411665f3"
-MARKER="DARKBOT_C1_FASTLANE_C1_7"
+MARKER="DARKBOT_C1_FASTLANE_C1_7_E72"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENGINE="$ROOT/bsc/engine"
 OVERLAY="$ROOT/bsc/geth/overlay/darkbot/fastlane"
