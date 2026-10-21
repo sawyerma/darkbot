@@ -175,11 +175,26 @@ pub fn effective_instructions(plan: &TxPlan) -> Vec<Instruction> {
 }
 
 /// E2: the signed message is exactly its plan — the builder's compute-budget instructions and the
-/// validated instructions (`effective_instructions`), in order, with the same program, data and
-/// account keys (lookup-table addresses resolved from the plan's tables); every key carries
-/// exactly the privileges the instructions ask for (the payer: first key, signer, writable) and
-/// the message addresses no other key. `Err` is a stable code.
+/// validated instructions (`effective_instructions`); see [`message_matches`].
 pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result<(), &'static str> {
+    message_matches(
+        message,
+        &plan.payer,
+        &plan.lookup_tables,
+        &effective_instructions(plan),
+    )
+}
+
+/// E2: the signed message is exactly `expected`, in order, with the same program, data and
+/// account keys (lookup-table addresses resolved from `lookup_tables`); every key carries exactly
+/// the privileges the instructions ask for (the payer: first key, signer, writable) and the
+/// message addresses no other key. `Err` is a stable code.
+pub fn message_matches(
+    message: &VersionedMessage,
+    payer: &Pubkey,
+    lookup_tables: &[AddressLookupTableAccount],
+    expected: &[Instruction],
+) -> Result<(), &'static str> {
     let (header, statics, compiled, lookups) = match message {
         VersionedMessage::Legacy(m) => (m.header, &m.account_keys, &m.instructions, &[][..]),
         VersionedMessage::V0(m) => (
@@ -199,7 +214,7 @@ pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result
     {
         return Err("MESSAGE_HEADER");
     }
-    if statics.first() != Some(&plan.payer) {
+    if statics.first() != Some(payer) {
         return Err("MESSAGE_PAYER");
     }
     // (key, signer, writable) in message order: static keys, then loaded writable, then loaded
@@ -218,8 +233,7 @@ pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result
         .collect();
     let mut loaded_readonly = Vec::new();
     for lookup in lookups {
-        let table = plan
-            .lookup_tables
+        let table = lookup_tables
             .iter()
             .find(|t| t.key == lookup.account_key)
             .ok_or("MESSAGE_LOOKUP_TABLE_UNKNOWN")?;
@@ -238,7 +252,6 @@ pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result
         }
     }
     keys.extend(loaded_readonly);
-    let expected = effective_instructions(plan);
     if compiled.len() != expected.len() {
         return Err("MESSAGE_INSTRUCTION_COUNT");
     }
@@ -247,7 +260,7 @@ pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result
             .map(|k| k.0)
             .ok_or("MESSAGE_ACCOUNT_INDEX")
     };
-    for (c, e) in compiled.iter().zip(&expected) {
+    for (c, e) in compiled.iter().zip(expected) {
         if key(c.program_id_index)? != e.program_id {
             return Err("MESSAGE_PROGRAM");
         }
@@ -265,8 +278,8 @@ pub fn message_matches_plan(message: &VersionedMessage, plan: &TxPlan) -> Result
     }
     // Privileges: exactly the union the instructions ask for; the payer signs and pays.
     let mut wanted: std::collections::BTreeMap<Pubkey, (bool, bool)> =
-        std::collections::BTreeMap::from([(plan.payer, (true, true))]);
-    for e in &expected {
+        std::collections::BTreeMap::from([(*payer, (true, true))]);
+    for e in expected {
         wanted.entry(e.program_id).or_insert((false, false));
         for meta in &e.accounts {
             let w = wanted.entry(meta.pubkey).or_insert((false, false));

@@ -958,6 +958,14 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             bundle_txs.push(built.tx.clone());
             match submit::build_tip_tx(self.payer, &tip_account, plan.tip, bh.hash) {
                 Ok(t) => {
+                    // E2: the tip transaction is checked against its plan like every other one.
+                    if let Err(code) =
+                        submit::tip_matches(&t, &tx::payer_of(self.payer), &tip_account, plan.tip)
+                    {
+                        rec.loss = Some(LossReason::Build);
+                        rec.reason = Some(format!("tip tx differs from its plan ({code})"));
+                        return rec.with_timeline(&tl);
+                    }
                     rec.submitted_tip =
                         t.signatures
                             .first()

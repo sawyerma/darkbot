@@ -261,6 +261,33 @@ pub trait SubmissionAdapter {
 
 /// [FIX-4] Jito-Tip als eigene legacy-TX: ein System-Transfer an einen Tip-Account.
 /// Niemals in der Receivership-TX (System-Programm dort nicht allowlisted).
+/// [FIX-4] The one instruction of a bundle's tip transaction: a System transfer of `lamports`
+/// from the payer to the tip account (shared by the builder and its check).
+pub fn tip_instruction(
+    payer: &solana_sdk::pubkey::Pubkey,
+    tip_account: &solana_sdk::pubkey::Pubkey,
+    lamports: u64,
+) -> solana_sdk::instruction::Instruction {
+    solana_system_interface::instruction::transfer(payer, tip_account, lamports)
+    // [FIX-13]
+}
+
+/// E2: a tip transaction is exactly its plan — the single [`tip_instruction`] to the configured
+/// tip account, nothing else (`crate::tx::message_matches`; `Err` is a stable code).
+pub fn tip_matches(
+    tx: &VersionedTransaction,
+    payer: &solana_sdk::pubkey::Pubkey,
+    tip_account: &solana_sdk::pubkey::Pubkey,
+    lamports: u64,
+) -> Result<(), &'static str> {
+    crate::tx::message_matches(
+        &tx.message,
+        payer,
+        &[],
+        &[tip_instruction(payer, tip_account, lamports)],
+    )
+}
+
 pub fn build_tip_tx(
     payer: &solana_sdk::signature::Keypair,
     tip_account: &solana_sdk::pubkey::Pubkey,
@@ -268,7 +295,7 @@ pub fn build_tip_tx(
     blockhash: solana_sdk::hash::Hash,
 ) -> Result<VersionedTransaction, SubmitError> {
     use solana_sdk::signature::Signer;
-    let ix = solana_system_interface::instruction::transfer(&payer.pubkey(), tip_account, lamports); // [FIX-13]
+    let ix = tip_instruction(&payer.pubkey(), tip_account, lamports);
     let msg =
         solana_sdk::message::Message::new_with_blockhash(&[ix], Some(&payer.pubkey()), &blockhash);
     VersionedTransaction::try_new(solana_sdk::message::VersionedMessage::Legacy(msg), &[payer])
@@ -316,6 +343,67 @@ pub fn encode_base64(tx: &VersionedTransaction) -> Result<String, SubmitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// E2: the tip transaction of a bundle is exactly one System transfer of the planned
+    /// lamports from the payer to the configured tip account; every deviation of the signed
+    /// message has its own stable code (built with the production `build_tip_tx`).
+    #[test]
+    fn e2_tip_tx_is_exactly_one_transfer_to_the_tip_account() {
+        use solana_sdk::message::VersionedMessage;
+        use solana_sdk::pubkey::Pubkey;
+        use solana_sdk::signature::{Keypair, Signer};
+        let payer = Keypair::new();
+        let tip = Pubkey::new_unique();
+        let tx = build_tip_tx(&payer, &tip, 1_000, solana_sdk::hash::Hash::default()).unwrap();
+        let me = payer.pubkey();
+        assert_eq!(tip_matches(&tx, &me, &tip, 1_000), Ok(()));
+        assert_eq!(tip_matches(&tx, &me, &tip, 999), Err("MESSAGE_DATA"));
+        let other = Pubkey::new_unique();
+        assert_eq!(
+            tip_matches(&tx, &me, &other, 1_000),
+            Err("MESSAGE_ACCOUNTS")
+        );
+        assert_eq!(tip_matches(&tx, &other, &tip, 1_000), Err("MESSAGE_PAYER"));
+        let changed = |f: &dyn Fn(&mut solana_sdk::message::Message)| {
+            let mut t = tx.clone();
+            match &mut t.message {
+                VersionedMessage::Legacy(m) => f(m),
+                VersionedMessage::V0(_) => unreachable!("the tip transaction is legacy"),
+            }
+            tip_matches(&t, &me, &tip, 1_000)
+        };
+        // A second instruction (the same transfer again).
+        assert_eq!(
+            changed(&|m| {
+                let i = m.instructions[0].clone();
+                m.instructions.push(i);
+            }),
+            Err("MESSAGE_INSTRUCTION_COUNT")
+        );
+        // The tip account read-only (header privilege).
+        assert_eq!(
+            changed(&|m| m.header.num_readonly_unsigned_accounts += 1),
+            Err("MESSAGE_PRIVILEGES")
+        );
+        // Another program for the same data and accounts.
+        assert_eq!(
+            changed(&|m| m.instructions[0].program_id_index = 1),
+            Err("MESSAGE_PROGRAM")
+        );
+        // An unused extra key: appended alone it shifts the read-only region (the System program
+        // turns writable); appended read-only it is a key no instruction asks for.
+        assert_eq!(
+            changed(&|m| m.account_keys.push(Pubkey::new_unique())),
+            Err("MESSAGE_PRIVILEGES")
+        );
+        assert_eq!(
+            changed(&|m| {
+                m.account_keys.push(Pubkey::new_unique());
+                m.header.num_readonly_unsigned_accounts += 1;
+            }),
+            Err("MESSAGE_KEYS")
+        );
+    }
 
     #[test]
     fn path_names_match_ledger() {
