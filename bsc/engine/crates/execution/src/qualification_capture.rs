@@ -121,8 +121,8 @@ impl CaptureSession {
         file.sync_all()
             .map_err(|e| format!("sync capture fence {}: {e}", path.display()))?;
 
-        let (recorder, drain) =
-            Recorder::bounded(DEFAULT_CAPTURE_CAPACITY, DEFAULT_CAPTURE_MAX_PAYLOAD)
+        let (recorder, mut drain) =
+            Recorder::bounded_spanned(DEFAULT_CAPTURE_CAPACITY, DEFAULT_CAPTURE_MAX_PAYLOAD)
                 .map_err(|e| format!("create bounded capture recorder: {e}"))?;
 
         let failed = Arc::new(AtomicBool::new(false));
@@ -133,10 +133,10 @@ impl CaptureSession {
         let writer = thread::Builder::new()
             .name("g07-capture-writer".into())
             .spawn(move || {
-                let mut journal = JournalWriter::new(file);
+                let mut journal = JournalWriter::new_v2(file);
                 let mut prearm_ack = Some(prearm_ack_tx);
                 loop {
-                    match drain.recv() {
+                    match drain.recv_spanned() {
                         Ok(record) => {
                             if let Err(e) = journal.append(&record) {
                                 writer_failed.store(true, Ordering::Release);
@@ -156,7 +156,11 @@ impl CaptureSession {
                                 let _ = tx.send(Ok(()));
                             }
                         }
-                        Err(_) => break,
+                        Err(darkbot_bsc_journal::JournalError::QueueDisconnected) => break,
+                        Err(error) => {
+                            writer_failed.store(true, Ordering::Release);
+                            return Err(format!("capture drain failed: {error}"));
+                        },
                     }
                 }
                 journal.commit_file().map_err(|e| format!("capture final commit failed: {e}"))
@@ -240,7 +244,7 @@ impl CaptureSession {
         timestamp_ns: u64,
         payload: &[u8],
     ) -> Result<(), String> {
-        let Some(recorder) = self.recorder.as_ref() else {
+        let Some(recorder) = self.recorder.as_mut() else {
             self.failed.store(true, Ordering::Release);
             return Err("capture recorder already closed".into());
         };
@@ -295,6 +299,7 @@ impl CaptureSession {
 
         let failed = self.failed.load(Ordering::Acquire);
         let complete_local_journal = !failed
+            && !stats.exhausted
             && stats.dropped_full == 0
             && stats.rejected_oversize == 0
             && stats.disconnected == 0

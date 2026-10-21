@@ -9,6 +9,7 @@ use crate::{Sha256, frame_crc};
 
 pub const JOURNAL_MAGIC: [u8; 8] = *b"DBJNL001";
 pub const JOURNAL_VERSION: u16 = 1;
+pub const JOURNAL_SPAN_VERSION: u16 = 2;
 pub const HEADER_LEN: usize = 36;
 pub const DEFAULT_MAX_PAYLOAD: usize = 256 * 1024;
 
@@ -21,6 +22,8 @@ pub enum RecordKind {
     Reorg = 4,
     Gap = 5,
     Runtime = 6,
+    /// V2 only: u64 LE count of proven consecutive QueueFull losses.
+    GapSpan = 7,
 }
 
 impl TryFrom<u16> for RecordKind {
@@ -34,6 +37,7 @@ impl TryFrom<u16> for RecordKind {
             4 => Ok(Self::Reorg),
             5 => Ok(Self::Gap),
             6 => Ok(Self::Runtime),
+            7 => Ok(Self::GapSpan),
             _ => Err(JournalError::UnknownKind(value)),
         }
     }
@@ -49,6 +53,8 @@ pub struct CaptureRecord {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JournalManifest {
+    pub logical_records: u64,
+    pub lost_records: u64,
     /// Diagnostic accepted-prefix hash only when true; never a complete file proof.
     pub poisoned: bool,
     pub version: u16,
@@ -61,6 +67,9 @@ pub struct JournalManifest {
 
 pub struct JournalWriter<W> {
     inner: W,
+    version: u16,
+    logical_records: u64,
+    lost_records: u64,
     records: u64,
     first_sequence: Option<u64>,
     last_sequence: Option<u64>,
@@ -73,6 +82,9 @@ impl<W: Write> JournalWriter<W> {
     pub fn new(inner: W) -> Self {
         Self {
             inner,
+            version: JOURNAL_VERSION,
+            logical_records: 0,
+            lost_records: 0,
             records: 0,
             first_sequence: None,
             last_sequence: None,
@@ -82,8 +94,18 @@ impl<W: Write> JournalWriter<W> {
         }
     }
 
+    pub fn new_v2(inner: W) -> Self {
+        let mut writer = Self::new(inner);
+        writer.version = JOURNAL_SPAN_VERSION;
+        writer
+    }
+
     pub fn append(&mut self, record: &CaptureRecord) -> Result<(), JournalError> {
         if self.poisoned { return Err(JournalError::Poisoned); }
+        let span = logical_span(self.version, record.kind, &record.payload)?;
+        let last = record.sequence.checked_add(span - 1).ok_or(JournalError::SequenceOverflow)?;
+        let logical_records = self.logical_records.checked_add(span).ok_or(JournalError::SequenceOverflow)?;
+        let lost_records = self.lost_records.checked_add(if record.kind == RecordKind::GapSpan { span } else { 0 }).ok_or(JournalError::SequenceOverflow)?;
         let records = self.records.checked_add(1).ok_or(JournalError::SequenceOverflow)?;
         let bytes = self.bytes.checked_add(HEADER_LEN as u64)
             .and_then(|n| n.checked_add(record.payload.len() as u64))
@@ -103,7 +125,7 @@ impl<W: Write> JournalWriter<W> {
 
         let mut header = [0u8; HEADER_LEN];
         header[..8].copy_from_slice(&JOURNAL_MAGIC);
-        header[8..10].copy_from_slice(&JOURNAL_VERSION.to_le_bytes());
+        header[8..10].copy_from_slice(&self.version.to_le_bytes());
         header[10..12].copy_from_slice(&(record.kind as u16).to_le_bytes());
         header[12..20].copy_from_slice(&record.sequence.to_le_bytes());
         header[20..28].copy_from_slice(&record.timestamp_ns.to_le_bytes());
@@ -120,7 +142,9 @@ impl<W: Write> JournalWriter<W> {
 
         self.records = records;
         self.first_sequence.get_or_insert(record.sequence);
-        self.last_sequence = Some(record.sequence);
+        self.last_sequence = Some(last);
+        self.logical_records = logical_records;
+        self.lost_records = lost_records;
         self.bytes = bytes;
         Ok(())
     }
@@ -138,7 +162,9 @@ impl<W: Write> JournalWriter<W> {
     /// the physical tail may differ and this hash must not certify the file.
     pub fn manifest(&self) -> JournalManifest {
         JournalManifest {
-            poisoned: self.poisoned,            version: JOURNAL_VERSION,
+            poisoned: self.poisoned,            version: self.version,
+            logical_records: self.logical_records,
+            lost_records: self.lost_records,
             records: self.records,
             first_sequence: self.first_sequence,
             last_sequence: self.last_sequence,
@@ -190,9 +216,18 @@ impl JournalWriter<std::fs::File> {
     }
 }
 
+pub(crate) fn logical_span(version: u16, kind: RecordKind, payload: &[u8]) -> Result<u64, JournalError> {
+    if kind != RecordKind::GapSpan { return Ok(1); }
+    if version != JOURNAL_SPAN_VERSION || payload.len() != 8 { return Err(JournalError::InvalidSpan); }
+    let span = u64::from_le_bytes(payload.try_into().map_err(|_| JournalError::InvalidSpan)?);
+    if span == 0 { return Err(JournalError::InvalidSpan); }
+    Ok(span)
+}
+
 #[derive(Debug)]
 pub enum JournalError {
     InvalidBound,
+    InvalidSpan,
     Poisoned,
     FileMismatch,
     BadMagic,
@@ -213,6 +248,7 @@ impl fmt::Display for JournalError {
         match self {
             Self::Poisoned => f.write_str("capture: writer poisoned; incomplete physical tail"),
             Self::FileMismatch => f.write_str("capture: persistent bytes differ from accepted frames"),
+            Self::InvalidSpan => f.write_str("capture: invalid/version-incompatible GAP span"),
             Self::InvalidBound => f.write_str("capture: invalid bound"),
             Self::BadMagic => f.write_str("capture: bad journal magic"),
             Self::BadVersion(version) => write!(f, "capture: unsupported version {version}"),

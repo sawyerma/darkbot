@@ -12,6 +12,8 @@ pub struct JournalReader<R> {
     inner: R,
     max_payload: usize,
     last_sequence: Option<u64>,
+    version: Option<u16>,
+    failed: bool,
 }
 
 impl<R: Read> JournalReader<R> {
@@ -23,10 +25,19 @@ impl<R: Read> JournalReader<R> {
             inner,
             max_payload,
             last_sequence: None,
+            version: None,
+            failed: false,
         })
     }
 
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, JournalError> {
+        if self.failed { return Err(JournalError::Poisoned); }
+        let result = self.read_frame();
+        if result.is_err() { self.failed = true; }
+        result
+    }
+
+    fn read_frame(&mut self) -> Result<Option<CaptureRecord>, JournalError> {
         let mut header = [0u8; HEADER_LEN];
         let mut read = 0usize;
         while read < HEADER_LEN {
@@ -41,7 +52,7 @@ impl<R: Read> JournalReader<R> {
             return Err(JournalError::BadMagic);
         }
         let version = u16::from_le_bytes([header[8], header[9]]);
-        if version != JOURNAL_VERSION {
+        if ![JOURNAL_VERSION, crate::format::JOURNAL_SPAN_VERSION].contains(&version) || self.version.is_some_and(|v| v != version) {
             return Err(JournalError::BadVersion(version));
         }
         let kind = RecordKind::try_from(u16::from_le_bytes([header[10], header[11]]))?;
@@ -95,7 +106,9 @@ impl<R: Read> JournalReader<R> {
                 actual: actual_crc,
             });
         }
-        self.last_sequence = Some(sequence);
+        let span = crate::format::logical_span(version, kind, &payload)?;
+        self.last_sequence = Some(sequence.checked_add(span - 1).ok_or(JournalError::SequenceOverflow)?);
+        self.version = Some(version);
         Ok(Some(CaptureRecord {
             sequence,
             kind,

@@ -15,10 +15,10 @@ mod recorder;
 mod replay;
 
 pub use format::{
-    CaptureRecord, DEFAULT_MAX_PAYLOAD, HEADER_LEN, JOURNAL_MAGIC, JOURNAL_VERSION, JournalError,
+    CaptureRecord, DEFAULT_MAX_PAYLOAD, HEADER_LEN, JOURNAL_MAGIC, JOURNAL_VERSION, JOURNAL_SPAN_VERSION, JournalError,
     JournalManifest, JournalWriter, RecordKind,
 };
-pub use recorder::{RecordError, Recorder, RecorderDrain, RecorderStats};
+pub use recorder::{RecordError, Recorder, RecorderDrain, RecorderStats, SpannedDrain};
 pub use replay::JournalReader;
 
 // Checksum and hash primitives shared by the writer and the reader. They stay
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn recorder_never_waits_and_overflow_is_counted_with_sequence() {
-        let (recorder, drain) = Recorder::bounded(1, 64).unwrap();
+        let (mut recorder, drain) = Recorder::bounded(1, 64).unwrap();
         assert_eq!(recorder.try_record(RecordKind::Runtime, 1, b"a"), Ok(0));
         assert_eq!(
             recorder.try_record(RecordKind::Runtime, 2, b"b"),
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn oversize_payload_is_refused_before_sequence_consumption() {
-        let (recorder, _drain) = Recorder::bounded(1, 2).unwrap();
+        let (mut recorder, _drain) = Recorder::bounded(1, 2).unwrap();
         assert_eq!(
             recorder.try_record(RecordKind::Runtime, 1, b"abc"),
             Err(RecordError::PayloadTooLarge { len: 3, max: 2 })
@@ -362,3 +362,6 @@ mod tests {
         assert_eq!(manifest.bytes as usize, bytes.len());
     }
 }
+
+#[cfg(test)]
+mod span_tests;
