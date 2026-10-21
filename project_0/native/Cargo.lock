@@ -1090,6 +1090,7 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status",
  "spl-associated-token-account",
+ "tungstenite 0.24.0",
 ]
 
 [[package]]

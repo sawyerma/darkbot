@@ -40,6 +40,10 @@ kamino-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1
 drift-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
 juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.1.11-rc1", default-features = false, features = ["no-entrypoint"], optional = true }
 
+[dev-dependencies]
+# R1: loopback WebSocket peer for the capture end-to-end test (same version the WSS adapter uses).
+tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"] }
+
 [[bin]]
 name = "p0-longtail"
 path = "src/main.rs"

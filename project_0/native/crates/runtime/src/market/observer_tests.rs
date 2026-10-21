@@ -2288,6 +2288,117 @@ fn r1_ingress_alive_past_the_drain_deadline_seals_incomplete() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// R1 rest: the production `capture::run` end to end against a loopback WebSocket — an
+/// established plain `ws://` session through the real WSS adapter, never Mainnet. The peer
+/// acknowledges both subscriptions and delivers slot progress every 50 ms: StreamReady, the 1-s
+/// window, the requested stop ends the source and closes the session without waiting for the
+/// peer, the drain completes before its deadline, the journal seals COMPLETE and the run returns
+/// `Ok` — no avoidable INCOMPLETE for an ended stream.
+#[test]
+fn r1_capture_run_end_to_end_over_a_loopback_websocket() {
+    use std::time::{Duration, Instant};
+    use tungstenite::Message;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let mut ws = tungstenite::accept(stream).unwrap();
+        let mut methods = Vec::new();
+        let mut slot_subscription = None;
+        let mut slot = 1_000u64;
+        loop {
+            match ws.read() {
+                Ok(Message::Text(text)) => {
+                    let request: Value = serde_json::from_str(&text).unwrap();
+                    let id = request["id"].as_u64().unwrap();
+                    let method = request["method"].as_str().unwrap().to_string();
+                    if method == "slotSubscribe" {
+                        slot_subscription = Some(id);
+                    }
+                    methods.push(method);
+                    let ack = json!({"jsonrpc": "2.0", "id": id, "result": id});
+                    if ws.send(Message::Text(ack.to_string())).is_err() {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e))
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                // The client closed or dropped the session.
+                Err(_) => break,
+            }
+            if let (2, Some(subscription)) = (methods.len(), slot_subscription) {
+                slot += 1;
+                let notification = json!({"jsonrpc": "2.0", "method": "slotNotification",
+                    "params": {"subscription": subscription,
+                        "result": {"slot": slot, "parent": slot - 1, "root": slot - 2}}});
+                if ws.send(Message::Text(notification.to_string())).is_err() {
+                    break;
+                }
+            }
+        }
+        (methods, Instant::now())
+    });
+    let root = std::env::temp_dir().join(format!(
+        "c0mo_r1e2e_{}_{}",
+        std::process::id(),
+        utc_compact(unix_now_s())
+    ));
+    let _ = fs::remove_dir_all(&root);
+    let root_s = root.to_string_lossy().to_string();
+    let cfg = MarketConfig::from_lookup(
+        &env_of(&[
+            ("P0_WS_URL", url.as_str()),
+            (
+                "P0_PROGRAM_ID",
+                darkbot_project0::protocol::PROGRAM_ID_MAINNET,
+            ),
+            ("P0_MARKET_SOURCE", "logs"),
+            ("P0_MARKET_OUT_DIR", root_s.as_str()),
+            ("P0_MARKET_RUN_ID", "e2e"),
+            ("P0_MARKET_DURATION_SECS", "1"),
+            ("P0_MARKET_READY_TIMEOUT_SECS", "10"),
+            ("P0_MARKET_DRAIN_TIMEOUT_SECS", "5"),
+            ("P0_MARKET_HEARTBEAT_SECS", "1"),
+        ]),
+        unix_now_s(),
+    )
+    .unwrap();
+    let run_dir = cfg.run_dir.clone();
+    let started = Instant::now();
+    let result = super::capture::run(cfg);
+    let ended = Instant::now();
+    // Before the join: a session that never stops would never be closed for the peer.
+    assert_eq!(result, Ok(()));
+    let (mut methods, closed) = server.join().unwrap();
+    methods.sort();
+    assert_eq!(methods, ["logsSubscribe", "slotSubscribe"]);
+    assert!(
+        closed <= ended,
+        "the session is closed before the run returns"
+    );
+    assert!(
+        ended - started < Duration::from_secs(1 + 5),
+        "within the window and the drain budget: {:?}",
+        ended - started
+    );
+    let chain = crate::storage::segments::verify_chain(&run_dir.join(MARKET_JOURNAL)).unwrap();
+    assert_eq!((chain.sealed, chain.complete), (true, true));
+    let summary: MarketFinal =
+        crate::analytics::journal::read_typed_value(&run_dir.join(MARKET_SUMMARY_JOURNAL)).unwrap();
+    assert_eq!(summary.evidence_journal.unwrap().status, "COMPLETE");
+    let s = summary.summary;
+    assert!(s.stream_ready_at.is_some());
+    assert!(s.drain_complete && s.capture_clock_complete);
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// R1/D8: after the seal the ingress thread is joined within what is left of the drain budget:
 /// a thread still alive at the passed drain deadline is reported at once (`INGRESS_NOT_QUIESCENT`,
 /// no second full budget — the former call waited `drain_timeout_secs` again), a thread ending
