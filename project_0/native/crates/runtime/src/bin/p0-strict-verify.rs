@@ -7,7 +7,7 @@
 //!                                   Python driver/report only; removed with the native chain, B7)
 //! `p0-strict-verify --show DIR`     read and verify existing native evidence, no RPC
 //!
-//! `p0-strict-verify --run RUN [--resume-verification] [--offline] [--verify-rps N]
+//! `p0-strict-verify --run RUN [--mode strict|off] [--resume-verification] [--offline] [--verify-rps N]
 //!     [--verify-calls N] [--verify-seconds N] [--verify-bytes N] [--verify-disk-bytes N]
 //!     [--verify-ram-bytes N] [--verify-min-free-bytes N]`
 //!                                   A3 native driver for a layout-V2 run: typed spec, capture
@@ -74,7 +74,9 @@ fn main() {
 
 /// A3: drive a strict verification of RUN natively (budgets default to the operational config).
 fn native_driver(args: &[String]) -> Result<(String, bool), String> {
-    use darkbot_runner::market_observer::strict_driver::{drive, DriverRequest, StrictBudget};
+    use darkbot_runner::market_observer::strict_driver::{
+        drive, DriverRequest, StrictBudget, VerifyMode,
+    };
     if std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
         || std::env::var_os("P0_PROFILE").is_some()
     {
@@ -98,7 +100,7 @@ fn native_driver(args: &[String]) -> Result<(String, bool), String> {
         max_ram_bytes: l.verify_ram_mib * mib,
         min_free_bytes: l.verify_free_mib * mib,
     };
-    let (mut run, mut offline, mut resume) = (None, false, false);
+    let (mut run, mut offline, mut resume, mut mode) = (None, false, false, VerifyMode::Strict);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut number = || -> Result<u64, String> {
@@ -110,6 +112,14 @@ fn native_driver(args: &[String]) -> Result<(String, bool), String> {
         match a.as_str() {
             "--run" => run = Some(it.next().ok_or("--run needs a directory")?.clone()),
             "--offline" => offline = true,
+            "--mode" => {
+                mode = match it.next().map(String::as_str) {
+                    Some("strict") => VerifyMode::Strict,
+                    Some("off") => VerifyMode::Off,
+                    // index/crosscheck: the pinned Python verifier (verify.sh).
+                    _ => return Err("--mode strict|off (index/crosscheck: verify.sh)".into()),
+                }
+            }
             "--resume-verification" => resume = true,
             "--verify-rps" => budget.rps = number()?,
             "--verify-calls" => budget.max_calls = number()?,
@@ -126,6 +136,7 @@ fn native_driver(args: &[String]) -> Result<(String, bool), String> {
         budget,
         offline,
         resume,
+        mode,
     })?;
     let text = format!(
         "{}verification_spec_id={}\nverification_attempt_id={}\nverification_result_id={}\nstatus={} reason={}\n",

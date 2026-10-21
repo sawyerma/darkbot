@@ -216,6 +216,9 @@ macro_rules! typed_kinds {
             k::STRICT_ATTEMPT => {
                 $f::<crate::market::observer::strict_driver::AttemptRecord>($kind, $schema, $bytes)
             }
+            k::DEPLOYMENT_PROOF => $f::<crate::market::observer::strict_driver::DeploymentProof>(
+                $kind, $schema, $bytes,
+            ),
             k::CAPACITY_PREFLIGHT => {
                 $f::<crate::storage::preflight::CapacityReport>($kind, $schema, $bytes)
             }

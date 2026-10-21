@@ -22,6 +22,76 @@ pub const SPEC_SCHEMA: &str = "Project0/StrictVerificationSpec/1";
 /// Directory prefix of native specs under `verification/` (Python specs use bare ids).
 pub const NATIVE_PREFIX: &str = "native-";
 
+/// C0E1-P4-RESUME: the audited deployment continuity of the capture window, proven after the
+/// capture for one canonical result — the ProgramData read at capture start (market summary) and
+/// a finalized read at or after the result's last slot carry the audited reference hash and the
+/// same ProgramData (`paths::verified`). The strict slot scan does not prove it. Immutable,
+/// bound to its result (`deployment-<result>.p0j` beside the spec).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeploymentProof {
+    pub verification_result_id: String,
+    pub end_slot: u64,
+    pub before: Option<super::paths::Deployment>,
+    pub after: Option<super::paths::Deployment>,
+    pub error: Option<String>,
+    pub verified: bool,
+}
+impl Payload for DeploymentProof {
+    const KIND: u16 = kind::DEPLOYMENT_PROOF;
+}
+
+/// Where the deployment proof of `result_id` under spec `spec_id` lives.
+pub fn deployment_proof_path(run: &Path, spec_id: &str, result_id: &str) -> PathBuf {
+    run.join("verification")
+        .join(format!("{NATIVE_PREFIX}{spec_id}"))
+        .join(format!("deployment-{result_id}.p0j"))
+}
+
+/// Reads the deployment after the window (`url`, finalized, context slot ≥ `end_slot`) and
+/// records the proof of `result_id` (spec `spec_id`) next to its spec; never reads without an
+/// RPC (`DEPLOYMENT_RPC_MISSING`).
+pub fn prove_deployment(
+    run: &Path,
+    spec_id: &str,
+    result_id: &str,
+    end_slot: u64,
+    url: Option<&str>,
+) -> Result<DeploymentProof, String> {
+    let summary: super::MarketFinal = journal::read_typed_value(
+        &run.join("capture/market")
+            .join(super::MARKET_SUMMARY_JOURNAL),
+    )
+    .map_err(|_| "DEPLOYMENT_BEFORE_UNREADABLE")?;
+    let before = summary.summary.deployment_continuity.before;
+    use std::str::FromStr;
+    let program =
+        solana_sdk::pubkey::Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET)
+            .map_err(|e| e.to_string())?;
+    let (after, mut error) = match super::paths::inspect(url, &program) {
+        Ok(d) => (Some(d), None),
+        Err(e) => (None, Some(e.to_string())),
+    };
+    let verified = super::paths::verified(before.as_ref(), after.as_ref(), Some(end_slot));
+    if before.is_none() && error.is_none() {
+        error = Some("DEPLOYMENT_BEFORE_MISSING".into());
+    }
+    let proof = DeploymentProof {
+        verification_result_id: result_id.into(),
+        end_slot,
+        before,
+        after,
+        error,
+        verified,
+    };
+    let path = deployment_proof_path(run, spec_id, result_id);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    journal::write_typed_value(&path, source::STRICT, &proof)
+        .map_err(|e| format!("DEPLOYMENT_PROOF: {e}"))?;
+    Ok(proof)
+}
+
 /// Verifier budget of one spec (part of its identity).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StrictBudget {
@@ -105,6 +175,24 @@ pub struct DriverRequest {
     pub budget: StrictBudget,
     pub offline: bool,
     pub resume: bool,
+    pub mode: VerifyMode,
+}
+
+/// Post-capture verification mode of the native driver (PHASENPLAN L.2). `index`/`crosscheck`
+/// stay with the pinned Python verifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyMode {
+    /// No historical chain RPC: spec and attempt identities, status `NOT_RUN`, no result.
+    Off,
+    Strict,
+}
+impl VerifyMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VerifyMode::Off => "off",
+            VerifyMode::Strict => "strict",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -300,7 +388,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         ..
     } = bind_capture(&req.run)?;
     let binary = std::env::current_exe().map_err(|e| e.to_string())?;
-    let provider = if req.offline {
+    let provider = if req.offline || req.mode == VerifyMode::Off {
         None
     } else {
         let url = darkbot_solana::runtime_config::active()
@@ -314,7 +402,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         manifest_sha256: sha_file(&manifest_path)?,
         window_start_unix_ns: start,
         window_end_unix_ns: end,
-        mode: "strict".into(),
+        mode: req.mode.as_str().into(),
         program: darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
         decoder_binary_sha256: sha_file(&binary)?,
         protocol_pin: manifest.protocol_pin.clone(),
@@ -365,6 +453,25 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     };
     journal::write_typed_value(&attempt_dir.join("start.p0j"), source::STRICT, &record)
         .map_err(|e| format!("ATTEMPT: {e}"))?;
+    if req.mode == VerifyMode::Off {
+        // Off: the evidence stays bound and identified, no chain proof is attempted.
+        record.at_unix_ns = now_unix_ns();
+        record.status = Some("NOT_RUN".into());
+        record.reason = Some("VERIFICATION_OFF".into());
+        journal::write_typed_value(&attempt_dir.join("end.p0j"), source::STRICT, &record)
+            .map_err(|e| format!("ATTEMPT_END: {e}"))?;
+        if capture_files(&run)? != evidence.files {
+            return Err("CAPTURE_EVIDENCE_CHANGED_DURING_VERIFICATION".into());
+        }
+        return Ok(DriverOutcome {
+            verification_spec_id: spec_id,
+            verification_attempt_id: attempt_id,
+            verification_result_id: None,
+            status: "NOT_RUN".into(),
+            reason: record.reason,
+            terminal: "verification off: no historical chain RPC, no chain proof\n".into(),
+        });
+    }
     let job = Job {
         verification_spec_id: spec_id.clone(),
         output: out.join("strict"),
@@ -396,6 +503,17 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     }
     journal::write_typed_value(&attempt_dir.join("end.p0j"), source::STRICT, &record)
         .map_err(|e| format!("ATTEMPT_END: {e}"))?;
+    // A canonical result online also proves the deployment continuity of its window.
+    if let (Ok(result), Some(rid), false) = (&outcome, &record.verification_result_id, req.offline)
+    {
+        if record.status.as_deref() == Some("CANONICAL_VERIFIED") {
+            if let Some(end_slot) = result.scope.as_ref().map(|s| s.hi) {
+                let url =
+                    darkbot_solana::runtime_config::active().rpc_url(&|k| std::env::var(k).ok());
+                prove_deployment(&run, &spec_id, rid, end_slot, url.as_deref())?;
+            }
+        }
+    }
     // The capture must not have changed while it was verified.
     if capture_files(&run)? != evidence.files {
         return Err("CAPTURE_EVIDENCE_CHANGED_DURING_VERIFICATION".into());
@@ -413,6 +531,115 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C0E1-P4-RESUME: the post-capture deployment proof reads the program after the window
+    /// through the production inspector (loopback RPC, never Mainnet) and records it, bound to
+    /// its result, next to the spec. Bytes that do not carry the audited reference hash are no
+    /// continuity; no RPC is no read; continuity needs the reference hash before and after, the
+    /// same ProgramData and an after-read at or past the window's last slot.
+    #[test]
+    fn deployment_proof_is_read_after_the_window_and_bound_to_its_result() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::str::FromStr;
+        let run =
+            std::env::temp_dir().join(format!("p0_deploy_{}_{}", std::process::id(), line!()));
+        let _ = std::fs::remove_dir_all(&run);
+        let market = run.join("capture/market");
+        std::fs::create_dir_all(&market).unwrap();
+        let program =
+            solana_sdk::pubkey::Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET)
+                .unwrap();
+        let program_data = darkbot_project0::protocol::program_data_address(&program).to_string();
+        let reference = darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.to_string();
+        let before = super::super::paths::Deployment {
+            context_slot: 5,
+            hash: reference.clone(),
+            program_data: program_data.clone(),
+        };
+        let mut summary = crate::analytics::econ::tests::market_summary(4.0);
+        summary.deployment_continuity.before = Some(before.clone());
+        journal::write_typed_value(
+            &market.join(super::super::MARKET_SUMMARY_JOURNAL),
+            source::MARKET,
+            &super::super::MarketFinal::checkpoint(summary),
+        )
+        .unwrap();
+        // A loopback RPC with a ProgramData account of other bytes (not the audited build).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let mut data = vec![3u8, 0, 0, 0];
+            data.extend(7u64.to_le_bytes());
+            data.resize(45, 0);
+            data.extend(b"not the audited program");
+            let body = serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": {
+                "context": {"slot": 100},
+                "value": {"owner": darkbot_project0::protocol::BPF_LOADER_UPGRADEABLE_ID,
+                    "executable": false, "lamports": 1, "rentEpoch": 0,
+                    "data": [base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data), "base64"]}}})
+            .to_string();
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut request = vec![0u8; length];
+                let _ = reader.read_exact(&mut request);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        let proof = prove_deployment(&run, "spec", "result", 80, Some(&url)).unwrap();
+        let after = proof.after.clone().expect("after read");
+        assert_eq!(
+            (after.context_slot, after.program_data.as_str()),
+            (100, program_data.as_str())
+        );
+        assert_ne!(after.hash, reference);
+        assert_eq!((proof.verified, proof.error.as_deref()), (false, None));
+        assert_eq!(proof.before, Some(before.clone()));
+        let path = deployment_proof_path(&run, "spec", "result");
+        assert_eq!(
+            journal::read_typed_value::<DeploymentProof>(&path).unwrap(),
+            proof
+        );
+        // No RPC: no read, never continuity.
+        let none = prove_deployment(&run, "spec", "other", 80, None).unwrap();
+        assert_eq!(
+            (none.after, none.verified, none.error.as_deref()),
+            (None, false, Some("DEPLOYMENT_RPC_MISSING"))
+        );
+        // Continuity itself (the audited build before and after, same ProgramData, read at or past
+        // the window's last slot).
+        let audited = |slot| super::super::paths::Deployment {
+            context_slot: slot,
+            hash: reference.clone(),
+            program_data: program_data.clone(),
+        };
+        let verified = super::super::paths::verified;
+        assert!(verified(Some(&before), Some(&audited(100)), Some(80)));
+        assert!(!verified(Some(&before), Some(&audited(79)), Some(80)));
+        assert!(!verified(Some(&before), Some(&after), Some(80)));
+        assert!(!verified(None, Some(&audited(100)), Some(80)));
+        let moved = super::super::paths::Deployment {
+            program_data: "other".into(),
+            ..audited(100)
+        };
+        assert!(!verified(Some(&before), Some(&moved), Some(80)));
+        std::fs::remove_dir_all(&run).unwrap();
+    }
 
     /// The spec identity is stable for the same definition and changes with any bound input;
     /// evidence and attempt records round-trip as typed journals.
@@ -501,6 +728,7 @@ mod tests {
             budget: budget.clone(),
             offline: true,
             resume,
+            mode: VerifyMode::Strict,
         };
         let first = drive(&req(false)).unwrap();
         assert_ne!(first.status, "CANONICAL_VERIFIED");
@@ -530,6 +758,40 @@ mod tests {
             second.verification_attempt_id,
             first.verification_attempt_id
         );
+        // Off (C0E1-P4-RESUME): its own stable spec (the mode is part of the identity), an
+        // attempt NOT_RUN without any chain RPC and no result; resume keeps the spec.
+        let off = |resume| DriverRequest {
+            mode: VerifyMode::Off,
+            offline: false,
+            ..req(resume)
+        };
+        let o1 = drive(&off(false)).unwrap();
+        assert_eq!(
+            (
+                o1.status.as_str(),
+                o1.reason.as_deref(),
+                &o1.verification_result_id
+            ),
+            ("NOT_RUN", Some("VERIFICATION_OFF"), &None)
+        );
+        assert_ne!(o1.verification_spec_id, first.verification_spec_id);
+        let off_dir = root
+            .join("verification")
+            .join(format!("{NATIVE_PREFIX}{}", o1.verification_spec_id));
+        let off_spec: VerificationSpec =
+            journal::read_typed_value(&off_dir.join("spec.p0j")).unwrap();
+        assert_eq!(
+            (off_spec.mode.as_str(), off_spec.provider_binding_sha256),
+            ("off", None)
+        );
+        assert!(!off_dir.join("strict").exists(), "off reads no chain data");
+        assert_eq!(
+            drive(&off(false)).unwrap_err(),
+            "SPEC_EXISTS_USE_RESUME_VERIFICATION"
+        );
+        let o2 = drive(&off(true)).unwrap();
+        assert_eq!(o2.verification_spec_id, o1.verification_spec_id);
+        assert_ne!(o2.verification_attempt_id, o1.verification_attempt_id);
         std::fs::write(root.join("capture/late_file.bin"), b"x").unwrap();
         assert_eq!(drive(&req(true)).unwrap_err(), "CAPTURE_EVIDENCE_CHANGED");
         std::fs::remove_dir_all(d).unwrap();

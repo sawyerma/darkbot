@@ -58,6 +58,8 @@ pub mod kind {
     pub const STRICT_SPEC: u16 = 314;
     pub const CAPTURE_EVIDENCE: u16 = 315;
     pub const STRICT_ATTEMPT: u16 = 316;
+    /// C0E1-P4-RESUME: post-capture deployment continuity of one canonical strict result.
+    pub const DEPLOYMENT_PROOF: u16 = 317;
     /// SK-06 capacity preflight report (single-value journal before a capture).
     pub const CAPACITY_PREFLIGHT: u16 = 320;
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
@@ -134,6 +136,7 @@ pub mod kind {
         STRICT_SPEC,
         CAPTURE_EVIDENCE,
         STRICT_ATTEMPT,
+        DEPLOYMENT_PROOF,
         CAPACITY_PREFLIGHT,
         SEGMENT_LINK,
         SEGMENT_NEXT,

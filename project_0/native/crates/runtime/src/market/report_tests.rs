@@ -191,8 +191,8 @@ mod report_e2e {
                 decode_complete: true,
                 receivership_transport_capture_complete: complete,
                 full_slot_reconciliation_complete: false,
-                // The complete run also proved the audited deployment before and after.
-                liquidation_path_coverage_complete: complete,
+                // The capture alone never proves the deployment after the window.
+                liquidation_path_coverage_complete: false,
                 market_capture_complete: false,
                 source_coverage_verified: false,
                 incomplete_reasons: if complete {
@@ -278,6 +278,7 @@ mod report_e2e {
             budget: budget.clone(),
             offline: true,
             resume,
+            mode: super::super::strict_driver::VerifyMode::Strict,
         };
         let first = drive(&req(false)).unwrap();
         assert_eq!(first.status, "HISTORICAL_INCOMPLETE");
@@ -326,6 +327,37 @@ mod report_e2e {
         }
         let second = drive(&req(true)).unwrap();
         assert_eq!(second.status, "CANONICAL_VERIFIED", "{:?}", second.reason);
+        if complete {
+            // The post-capture deployment proof of the canonical result (C0E1-P4-RESUME): the
+            // audited build before and after the window, as `paths::verified` judges it.
+            let program_data = darkbot_project0::protocol::program_data_address(&program())
+                .to_string();
+            let audited = |slot| super::super::paths::Deployment {
+                context_slot: slot,
+                hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
+                program_data: program_data.clone(),
+            };
+            let (before, after) = (audited(9), audited(95));
+            let verified = super::super::paths::verified(Some(&before), Some(&after), Some(80));
+            let rid = second.verification_result_id.clone().unwrap();
+            journal::write_typed_value(
+                &super::super::strict_driver::deployment_proof_path(
+                    &run,
+                    &second.verification_spec_id,
+                    &rid,
+                ),
+                journal::source::STRICT,
+                &super::super::strict_driver::DeploymentProof {
+                    verification_result_id: rid.clone(),
+                    end_slot: 80,
+                    before: Some(before),
+                    after: Some(after),
+                    error: None,
+                    verified,
+                },
+            )
+            .unwrap();
+        }
         Fixture {
             d,
             run,
@@ -643,8 +675,19 @@ mod report_e2e {
                 market_failed: false
             })
         );
+        assert!(q.inputs.deployment_proof_sha256.is_some());
         let out = report::report(&f.run, &opts, &ReportQuery::default()).unwrap();
         assert!(!out.dataset.c0_e1_master_pass);
+        // Without the post-capture deployment proof the same run is not qualified.
+        let proof = super::super::strict_driver::deployment_proof_path(
+            &f.run,
+            &f.second.verification_spec_id,
+            f.second.verification_result_id.as_deref().unwrap(),
+        );
+        std::fs::remove_file(&proof).unwrap();
+        let (unproven, _) = qualification::qualify(&f.run, &opts).unwrap();
+        assert_eq!(unproven.failed, ["DEPLOYMENT_CONTINUITY_UNPROVEN"]);
+        assert_ne!(unproven.qualification_id, q.qualification_id);
         // Only the canonical result qualifies the complete run.
         let first_opts = report::Options {
             verification_result: f.first.verification_result_id.clone(),
@@ -652,7 +695,11 @@ mod report_e2e {
         };
         let (old, _) = qualification::qualify(&f.run, &first_opts).unwrap();
         assert_eq!(old.verdict, NOT_QUALIFIED);
-        assert_eq!(old.failed, ["VERIFICATION_NOT_CANONICAL"]);
+        // The deployment proof belongs to the canonical result only.
+        assert_eq!(
+            old.failed,
+            ["VERIFICATION_NOT_CANONICAL", "DEPLOYMENT_CONTINUITY_UNPROVEN"]
+        );
         assert_eq!(old.economics, "ECONOMICS_REPLAYED_PROVISIONAL");
         std::fs::remove_dir_all(&f.d).unwrap();
     }

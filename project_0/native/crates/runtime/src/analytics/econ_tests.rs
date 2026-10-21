@@ -146,7 +146,7 @@ pub(super) fn view<T: Serialize>(doc: &T) -> Value {
     serde_json::to_value(doc).unwrap()
 }
 /// The summary of an empty finished capture (a real market observer summary).
-pub(super) fn market_summary(secs: f64) -> crate::market_observer::MarketSummary {
+pub(crate) fn market_summary(secs: f64) -> crate::market_observer::MarketSummary {
     use crate::market_observer::{EnrichConfig, MarketSource, ObserverCore, SummaryContext};
     let program = darkbot_project0::protocol::PROGRAM_ID_MAINNET
         .parse()
@@ -2595,6 +2595,7 @@ fn c0e1_master_qualification_requires_every_axis() {
             plan: p,
             capture: c,
             capture_journal_complete: journal,
+            deployment_proven_after: false,
             final_report: r,
             owners: o,
         });
@@ -2675,6 +2676,21 @@ fn c0e1_master_qualification_requires_every_axis() {
             true
         ),
         not(&["DEPLOYMENT_CONTINUITY_UNPROVEN"])
+    );
+    // A verified post-capture deployment proof of the selected result proves it.
+    let proven_after = assess(&Q {
+        dataset: &dataset,
+        economics: &replayed,
+        plan: &plan,
+        capture: &unproven,
+        capture_journal_complete: true,
+        deployment_proven_after: true,
+        final_report: Some(&report),
+        owners: Some(clean),
+    });
+    assert_eq!(
+        (proven_after.verdict(), proven_after.failed),
+        (MASTER_PASS, vec![])
     );
     // Economics axis.
     assert_eq!(

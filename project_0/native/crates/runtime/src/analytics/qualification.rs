@@ -47,6 +47,8 @@ pub struct QualificationInputs {
     pub dataset_records_sha256: [u8; 32],
     /// Hash of the persisted `ECON_FINAL` frame; `None` without one.
     pub econ_final_frame_sha256: Option<[u8; 32]>,
+    /// The selected result's post-capture deployment proof (file hash); `None` without one.
+    pub deployment_proof_sha256: Option<[u8; 32]>,
     pub owners: Option<OwnersEnd>,
     /// The qualifying binary is the evaluation pin (a changed binary is a new qualification).
     pub qualifier_binary_sha256: [u8; 32],
@@ -96,6 +98,8 @@ pub struct Evidence<'a> {
     pub capture: &'a crate::market::observer::rows::MarketCompletion,
     /// The market journal is sealed COMPLETE.
     pub capture_journal_complete: bool,
+    /// The selected result's post-capture deployment proof is verified (C0E1-P4-RESUME).
+    pub deployment_proven_after: bool,
     pub final_report: Option<&'a SnapshotReport>,
     pub owners: Option<OwnersEnd>,
 }
@@ -151,12 +155,13 @@ pub fn assess(e: &Evidence) -> Assessment {
     }
     // Liquidation-path coverage needs the audited deployment before and after the window; the
     // strict slot verification does not prove it (PHASENPLAN: never silently validated).
-    let deployment_continuity = if e.capture.liquidation_path_coverage_complete {
-        "DEPLOYMENT_CONTINUITY_PROVEN"
-    } else {
-        failed.push("DEPLOYMENT_CONTINUITY_UNPROVEN");
-        "DEPLOYMENT_CONTINUITY_UNPROVEN"
-    };
+    let deployment_continuity =
+        if e.capture.liquidation_path_coverage_complete || e.deployment_proven_after {
+            "DEPLOYMENT_CONTINUITY_PROVEN"
+        } else {
+            failed.push("DEPLOYMENT_CONTINUITY_UNPROVEN");
+            "DEPLOYMENT_CONTINUITY_UNPROVEN"
+        };
     let (economics, canonical_events_in_window) = match e.economics {
         Economics::Replayed { events, .. } if canonical => {
             ("CANONICAL_ECONOMICS_REPLAYED", Some(*events))
@@ -324,6 +329,29 @@ pub fn qualify(
 ) -> Result<(QualificationRecord, PathBuf), String> {
     let dataset = report::normalize(run, opts)?;
     let final_report = final_report(run)?;
+    let id = &dataset.record.identity;
+    // The selected result's deployment proof, bound to exactly that result.
+    let proof = match (&id.verification_spec_id, &id.verification_result_id) {
+        (Some(spec), Some(result)) => {
+            let path =
+                crate::market::observer::strict_driver::deployment_proof_path(run, spec, result);
+            if path.exists() {
+                let p: crate::market::observer::strict_driver::DeploymentProof =
+                    journal::read_typed_value(&path)
+                        .map_err(|e| format!("DEPLOYMENT_PROOF: {e}"))?;
+                if p.verification_result_id != *result {
+                    return Err("DEPLOYMENT_PROOF_OTHER_RESULT".into());
+                }
+                Some((
+                    p.verified,
+                    journal::file_sha256(&path).map_err(|e| e.to_string())?,
+                ))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
     let owners = owners_end(run)?;
     let a = assess(&Evidence {
         dataset: &dataset.record,
@@ -331,10 +359,10 @@ pub fn qualify(
         plan: &dataset.plan,
         capture: &dataset.completion,
         capture_journal_complete: dataset.capture_journal_complete,
+        deployment_proven_after: proof.is_some_and(|p| p.0),
         final_report: final_report.as_ref().map(|(r, _)| r),
         owners,
     });
-    let id = &dataset.record.identity;
     let inputs = QualificationInputs {
         capture_run_id: id.capture_run_id.clone(),
         capture_evidence_digest: id.capture_evidence_digest.clone(),
@@ -342,6 +370,7 @@ pub fn qualify(
         verification_result_id: id.verification_result_id.clone(),
         dataset_records_sha256: dataset.record.records_sha256,
         econ_final_frame_sha256: final_report.as_ref().map(|(_, h)| *h),
+        deployment_proof_sha256: proof.map(|p| p.1),
         owners,
         qualifier_binary_sha256: std::env::current_exe()
             .ok()
