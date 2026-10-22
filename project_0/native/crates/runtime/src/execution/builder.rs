@@ -2229,6 +2229,120 @@ pub mod p0 {
             );
         }
 
+        /// P4A-JIT-02: one opportunity, four funding classes, deterministic executable net and
+        /// capital through the production economics. ZERO_PREFUND realizes at its on-chain
+        /// floor with no capital; NO_SWAP and PREHELD bind the full liability value, JIT only the
+        /// funding its buy spends; without a proven exit the inventory classes stay UNKNOWN,
+        /// never an invented profit. With an exit, the ranking is net, then capital efficiency —
+        /// never the class.
+        #[test]
+        fn p4a_jit_02_classes_compare_deterministically() {
+            use darkbot_project0::economics::{
+                compare_evaluations, evaluate, Evaluation, FailedCostMatrix,
+            };
+            let mut sz = sizing(500, 1_000);
+            sz.flat_sol_fee = 10;
+            sz.liability_inventory_value = 400;
+            sz.funding_bank = Some(Pubkey::new_unique());
+            sz.funding_available_value = 2_000;
+            let ctx = FundingContext {
+                liability_mint: Pubkey::new_unique(),
+                liability_needed: 500,
+                liability_inventory: 200,
+                liability_needed_value: 1_000,
+                liability_inventory_value: 400,
+                funding_bank: sz.funding_bank,
+                funding_available_value: 2_000,
+                zero_prefund_qualified: true,
+                route_available: true,
+            };
+            let failed = FailedCostMatrix {
+                jito_bundle_not_landed: Some(7),
+                jito_bundle_failed: Some(3),
+                ..Default::default()
+            };
+            let route = Route {
+                instructions: vec![],
+                lookup_tables: vec![],
+                swap_program: Pubkey::new_unique(),
+                amount_in: 1_000,
+                quoted_out: 640,
+                minimum_executable_out: Some(600),
+            };
+            let known = |mut c: CandidateInput| {
+                c.transaction_fee_usd_micro = Some(5);
+                evaluate(&c, &failed)
+            };
+            let zp = zero_prefund_input(
+                &sz,
+                &route,
+                funding::capital_required(FundingClass::ZeroPrefundSameTx, &ctx),
+                20,
+                Path::JitoBundle,
+            )
+            .unwrap();
+            // 640 quoted, 600 enforced: realizable at the floor, 600 * 1000 / 500 = 1200.
+            assert_eq!(zp.gross_seized_realizable_usd_micro, Some(1_200));
+            // Costs 1000 repay + 10 SOL fee + 5 TX fee + 20 tip + 7 failed = 1042.
+            let zp_eval = known(zp.clone());
+            assert_eq!(
+                zp_eval,
+                Evaluation::Known {
+                    net: 158,
+                    profit_per_capital_bps: i128::MAX
+                }
+            );
+            let jit_capital = jit_capital_usd_micro(
+                funding::capital_required(FundingClass::JitShortfall, &ctx),
+                630,
+                2_000,
+                2_000,
+            )
+            .unwrap();
+            let classes = [
+                (FundingClass::ZeroPrefundSameTx, 0),
+                (FundingClass::JitShortfall, jit_capital),
+                (
+                    FundingClass::NoSwapInventory,
+                    funding::capital_required(FundingClass::NoSwapInventory, &ctx),
+                ),
+                (
+                    FundingClass::PreheldInventory,
+                    funding::capital_required(FundingClass::PreheldInventory, &ctx),
+                ),
+            ];
+            assert_eq!(
+                classes.map(|c| c.1),
+                [0, 630, 1_000, 1_000],
+                "capital per class"
+            );
+            for (class, capital) in &classes[1..] {
+                let c = candidate_input(&sz, *class, None, *capital, 20, Path::JitoBundle);
+                assert_eq!(known(c), Evaluation::Unknown, "{class:?}: no proven exit");
+            }
+            // A proven exit at the same value: same net, ranked by capital efficiency only.
+            let jit = known(candidate_input(
+                &sz,
+                FundingClass::JitShortfall,
+                Some(1_200),
+                jit_capital,
+                20,
+                Path::JitoBundle,
+            ));
+            assert_eq!(
+                jit,
+                Evaluation::Known {
+                    net: 158,
+                    profit_per_capital_bps: 158 * 10_000 / 630
+                }
+            );
+            assert_eq!(
+                compare_evaluations(zp_eval, jit),
+                std::cmp::Ordering::Greater
+            );
+            assert_eq!(known(zp), zp_eval, "deterministic");
+        }
+
         include!("builder_n2_tests.rs");
 
         /// B15: the inventory hold of a plan is the seized collateral of its own sizing for
