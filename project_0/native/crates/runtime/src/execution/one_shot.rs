@@ -1044,6 +1044,49 @@ mod tests {
         fs::remove_dir_all(&path).unwrap();
     }
 
+    /// P8-RES-02/FE-04: the owner's book follows the durable journal — no journal is no hold, a
+    /// journal locked by a running attempt makes the book unreadable (nothing available), an
+    /// unreconciled hold survives the restart, a finalized reconciliation releases it.
+    #[test]
+    fn owner_book_follows_the_durable_journal() {
+        use crate::execution::reservation::WalletReservations;
+        let (path, a, i, c) = setup();
+        assert_eq!(
+            WalletReservations::from_fe04_journal(&path, &a.wallet)
+                .unwrap()
+                .held("SOL"),
+            0
+        );
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        let locked = WalletReservations::refreshed(&path, &a.wallet);
+        assert!(locked.is_unreadable());
+        assert_eq!(locked.available(&c.balances, "SOL"), Some(0));
+        assert!(WalletReservations::from_fe04_journal(&path, &a.wallet).is_err());
+        j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        drop(j);
+        let book = WalletReservations::refreshed(&path, &a.wallet);
+        assert!(!book.is_unreadable());
+        assert_eq!(
+            (book.held("SOL"), book.available(&c.balances, "SOL")),
+            (20, Some(80))
+        );
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reconcile(vec![Receipt {
+            signature: i.signatures[0].clone(),
+            finalized: true,
+            success: true,
+            fee_lamports: Some(20),
+            wallet_deltas: Some([("SOL".into(), -20)].into_iter().collect()),
+            exit_complete: true,
+        }])
+        .unwrap();
+        drop(j);
+        let released = WalletReservations::refreshed(&path, &a.wallet);
+        assert_eq!((released.held("SOL"), released.is_unreadable()), (0, false));
+        fs::remove_dir_all(&path).unwrap();
+    }
+
     /// A deadline no test simulation reaches.
     fn test_deadline() -> std::time::Instant {
         std::time::Instant::now() + std::time::Duration::from_secs(60)

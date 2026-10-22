@@ -58,6 +58,9 @@ pub(crate) fn available_liquidator_inventory<S: AccountSource + ?Sized>(
     liquidator: &Pubkey,
     reservations: &crate::execution::reservation::WalletReservations,
 ) -> u64 {
+    if reservations.is_unreadable() {
+        return 0;
+    }
     validated_liquidator_ata(state, mint, liquidator)
         .map(|(_, amount)| amount.saturating_sub(reservations.held(&mint.to_string())))
         .unwrap_or(0)
@@ -405,6 +408,12 @@ mod reservation_tests {
         );
         assert_eq!(
             available_liquidator_inventory(&state, &Pubkey::new_unique(), &liquidator, &book),
+            0
+        );
+        // A book whose durable journal cannot be read offers nothing.
+        let unreadable = crate::execution::reservation::WalletReservations::unreadable();
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &liquidator, &unreadable),
             0
         );
     }

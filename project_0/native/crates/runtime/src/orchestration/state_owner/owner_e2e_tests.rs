@@ -80,6 +80,8 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         optional_set: HashSet::new(),
         prereq_allowed: vec![],
         reservations: Default::default(),
+        fe04_journal: None,
+        fe04_refreshed: std::time::Instant::now(),
         min_profit: 0,
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,

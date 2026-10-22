@@ -794,6 +794,8 @@ pub(super) fn prepare(
     // enqueue; coalescing never touches it, so the first unserved trigger is kept.
     #[cfg(feature = "crate_health")]
     let mt0_order_rx: VecDeque<u64> = VecDeque::new();
+    // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
+    let (reservations, fe04_journal) = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?;
     let owner = ShadowOwner {
         metrics: OwnerMetrics {
             oracle_dependency_updates,
@@ -860,7 +862,9 @@ pub(super) fn prepare(
         required_set,
         optional_set,
         prereq_allowed,
-        reservations: Default::default(),
+        reservations,
+        fe04_journal,
+        fe04_refreshed: std::time::Instant::now(),
         min_profit,
         integration_probe_enabled,
         integration_probe_limit_per_kind,
@@ -958,6 +962,31 @@ pub(super) fn prepare(
     Ok((owner, fetch, ingress))
 }
 
+/// P8-RES-02: the owner's reservation book at start — rebuilt from the FE-04 journal of the
+/// liquidator in `P0_FE04_JOURNAL_DIR` (no directory: no FE-04 attempt, empty book); a journal
+/// that cannot be read is a start error (fail closed).
+pub(super) fn reservation_book(
+    get: &dyn Fn(&str) -> Option<String>,
+    liquidator: &Pubkey,
+) -> Result<
+    (
+        crate::execution::reservation::WalletReservations,
+        Option<std::path::PathBuf>,
+    ),
+    String,
+> {
+    let Some(dir) = get("P0_FE04_JOURNAL_DIR").filter(|v| !v.trim().is_empty()) else {
+        return Ok((Default::default(), None));
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let book = crate::execution::reservation::WalletReservations::from_fe04_journal(
+        &dir,
+        &liquidator.to_string(),
+    )
+    .map_err(|e| format!("RESERVATION_JOURNAL_UNREADABLE: {e}"))?;
+    Ok((book, Some(dir)))
+}
+
 /// L4: both zero-prefund flags are parsed strictly (an invalid value is a start error, never a
 /// silent `false`; no short circuit hides one); the Shadow probe applies only in Shadow mode.
 pub(super) fn zero_prefund_enabled(
@@ -1042,6 +1071,21 @@ pub(super) fn run_blockhash_refresh(
 #[cfg(test)]
 mod cluster_tests {
     use super::*;
+    #[test]
+    fn fe04_reservation_book_is_optional_and_starts_empty_without_a_journal() {
+        let liquidator = Pubkey::new_unique();
+        let (book, dir) = reservation_book(&|_| None, &liquidator).unwrap();
+        assert_eq!((book.held("SOL"), dir), (0, None));
+        let tmp = std::env::temp_dir().join(format!("p0_fe04_book_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.to_string_lossy().to_string();
+        let lookup = |k: &str| (k == "P0_FE04_JOURNAL_DIR").then(|| path.clone());
+        let (book, dir) = reservation_book(&lookup, &liquidator).unwrap();
+        assert_eq!((book.held("SOL"), dir), (0, Some(tmp.clone())));
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
     #[test]
     fn zero_prefund_flags_parse_strictly_and_never_enable_implicitly() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {

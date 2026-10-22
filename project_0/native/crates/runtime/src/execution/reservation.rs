@@ -10,6 +10,8 @@ pub struct WalletReservations {
     attempts: BTreeMap<String, BTreeMap<String, u64>>,
     /// P8-RES-02: a target belongs to at most one attempt (contending targets).
     targets: BTreeMap<String, String>,
+    /// The durable journals could not be read: nothing is available until they are.
+    unreadable: bool,
 }
 
 impl WalletReservations {
@@ -40,11 +42,46 @@ impl WalletReservations {
             .fold(0u64, |s, n| s.saturating_add(*n))
     }
 
-    /// The reconciled balance of `asset` that no attempt holds; `None` for an unknown balance.
+    /// The reconciled balance of `asset` that no attempt holds; `None` for an unknown balance,
+    /// `Some(0)` while the book is unreadable.
     pub fn available(&self, balances: &BTreeMap<String, u64>, asset: &str) -> Option<u64> {
-        balances
-            .get(asset)
-            .map(|b| b.saturating_sub(self.held(asset)))
+        balances.get(asset).map(|b| {
+            if self.unreadable {
+                0
+            } else {
+                b.saturating_sub(self.held(asset))
+            }
+        })
+    }
+
+    /// A book whose durable journals could not be read: every asset is unavailable.
+    pub fn unreadable() -> Self {
+        Self {
+            unreadable: true,
+            ..Self::default()
+        }
+    }
+    pub fn is_unreadable(&self) -> bool {
+        self.unreadable
+    }
+
+    /// P8-RES-02: the book of `wallet` from its durable FE-04 journal in `dir` (`<wallet>.p0j`):
+    /// a hold that is not finalized — reserved, UNKNOWN after a restart, or handed off with an
+    /// UNKNOWN outcome — stays held; a finalized one is released; no journal is no hold. A
+    /// journal that cannot be opened (damaged, or locked by a running attempt) is an error.
+    pub fn from_fe04_journal(dir: &std::path::Path, wallet: &str) -> Result<Self, String> {
+        if !dir.join(format!("{wallet}.p0j")).exists()
+            && !dir.join(format!("{wallet}.json")).exists()
+        {
+            return Ok(Self::default());
+        }
+        let journal = crate::execution::one_shot::Journal::open(dir, wallet)?;
+        Self::rebuild(journal.active_hold()).map_err(String::from)
+    }
+
+    /// The owner's periodic view: the journal's book, or an unreadable book (fail closed).
+    pub fn refreshed(dir: &std::path::Path, wallet: &str) -> Self {
+        Self::from_fe04_journal(dir, wallet).unwrap_or_else(|_| Self::unreadable())
     }
 
     /// Reserves every hold of `attempt` at once, or nothing.
@@ -56,6 +93,9 @@ impl WalletReservations {
     ) -> Result<(), &'static str> {
         if attempt.is_empty() {
             return Err("RESERVATION_ATTEMPT_ID_MISSING");
+        }
+        if self.unreadable {
+            return Err("RESERVATION_BOOK_UNREADABLE");
         }
         if self.attempts.contains_key(attempt) {
             return Err("RESERVATION_EXISTS");

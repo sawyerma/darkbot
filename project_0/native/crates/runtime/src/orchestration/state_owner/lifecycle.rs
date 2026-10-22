@@ -3,6 +3,17 @@ use super::*;
 
 impl ShadowOwner {
     pub(super) fn lifecycle(&mut self) -> bool {
+        // P8-RES-02: the book follows the durable FE-04 journal (a finalized reconciliation
+        // releases, UNKNOWN keeps holding, an unreadable journal blocks every offer).
+        if let Some(dir) = &self.fe04_journal {
+            if self.fe04_refreshed.elapsed() >= std::time::Duration::from_secs(5) {
+                self.reservations = crate::execution::reservation::WalletReservations::refreshed(
+                    dir,
+                    &self.liquidator.to_string(),
+                );
+                self.fe04_refreshed = std::time::Instant::now();
+            }
+        }
         self.mt0_owner
             .enter(darkbot_common::mt0::OwnerCat::RemoteResults);
         #[cfg(feature = "crate_health")]

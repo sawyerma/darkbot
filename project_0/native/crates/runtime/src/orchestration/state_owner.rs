@@ -105,6 +105,9 @@ pub(super) struct ShadowOwner {
     prereq_allowed: Vec<Pubkey>,
     /// P8-RES-01: the one global wallet reservation book; every offer and attempt sees its holds.
     reservations: crate::execution::reservation::WalletReservations,
+    /// P8-RES-02: the FE-04 journal directory the book is rebuilt from, and when it last was.
+    fe04_journal: Option<std::path::PathBuf>,
+    fe04_refreshed: std::time::Instant,
     min_profit: i128,
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,
