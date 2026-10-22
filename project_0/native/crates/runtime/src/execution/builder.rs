@@ -2284,7 +2284,7 @@ pub mod p0 {
             // 640 quoted, 600 enforced: realizable at the floor, 600 * 1000 / 500 = 1200.
             assert_eq!(zp.gross_seized_realizable_usd_micro, Some(1_200));
             // Costs 1000 repay + 10 SOL fee + 5 TX fee + 20 tip + 7 failed = 1042.
-            let zp_eval = known(zp.clone());
+            let zp_eval = known(zp);
             assert_eq!(
                 zp_eval,
                 Evaluation::Known {
