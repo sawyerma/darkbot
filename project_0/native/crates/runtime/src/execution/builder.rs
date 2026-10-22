@@ -428,6 +428,23 @@ pub mod p0 {
         ROUTE_DIAGNOSTICS.with(|d| std::mem::take(&mut *d.borrow_mut()))
     }
 
+    /// P5-JIT-01: the working capital of a JIT plan is the funding its ExactIn buy actually
+    /// spends — the buy input valued at the funding inventory's own value per token, rounded up —
+    /// never less than the shortfall value the class check used; `None` without funding.
+    pub(crate) fn jit_capital_usd_micro(
+        shortfall_value: u64,
+        buy_input: u64,
+        funding_amount: u64,
+        funding_value: u64,
+    ) -> Option<u64> {
+        if funding_amount == 0 {
+            return None;
+        }
+        let spent = (u128::from(buy_input) * u128::from(funding_value))
+            .div_ceil(u128::from(funding_amount));
+        u64::try_from(spent).ok().map(|s| s.max(shortfall_value))
+    }
+
     /// P4A-JIT-01: remote quotes of one JIT shortfall solve (the same bound as a route fit).
     pub(crate) const JIT_MAX_QUOTES: u32 = 6;
 
@@ -1204,6 +1221,15 @@ pub mod p0 {
                                     continue;
                                 }
                             };
+                            // P5-JIT-01: the capital is the funding the buy actually spends.
+                            let Some(capital) = jit_capital_usd_micro(
+                                capital,
+                                buy.amount_in,
+                                (self.inventory)(&fb),
+                                sz.funding_available_value,
+                            ) else {
+                                continue;
+                            };
                             let ixs =
                                 pair_try!('pairs, self.receivership(account, &obs, &sz, vec![]));
                             ReceivershipPlan {
@@ -1682,6 +1708,21 @@ pub mod p0 {
                     .is_none()
             );
             assert_eq!(none.calls.get(), 0);
+        }
+
+        /// P5-JIT-01: a JIT plan binds the capital its buy spends (spread and floor included),
+        /// never the bare shortfall value; no funding, no capital.
+        #[test]
+        fn jit_capital_is_the_funding_the_buy_spends() {
+            // 1_000 USD-micro shortfall; 2_000 tokens worth 2_000 USD-micro of funding.
+            assert_eq!(
+                jit_capital_usd_micro(1_000, 1_020, 2_000, 2_000),
+                Some(1_020)
+            );
+            // Rounded up, never below the shortfall value.
+            assert_eq!(jit_capital_usd_micro(1_000, 1, 3, 2), Some(1_000));
+            assert_eq!(jit_capital_usd_micro(0, 1, 3, 2), Some(1));
+            assert_eq!(jit_capital_usd_micro(1_000, 5, 0, 2_000), None);
         }
 
         struct TestRoutes(Option<Route>);
