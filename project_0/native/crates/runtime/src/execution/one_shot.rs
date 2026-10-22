@@ -84,6 +84,15 @@ pub struct Current {
     pub bundle_simulated: bool,
 }
 
+/// A durable FE-04 hold that is not finalized (P8-RES-02).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveHold {
+    pub attempt: String,
+    pub target: String,
+    pub unknown_outcome: bool,
+    pub holds: BTreeMap<String, u64>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Phase {
     Reserved,
@@ -494,6 +503,19 @@ impl Journal {
         s.phase = Phase::HaltFinalized;
         s.finalized = Some(receipts);
         self.persist(s, Transition::Finalize)
+    }
+    /// P8-RES-02: the attempt this journal still holds — reserved, or handed off with an UNKNOWN
+    /// outcome — to rebuild the global reservation book after a restart; `None` once finalized.
+    pub fn active_hold(&self) -> Option<ActiveHold> {
+        self.saved
+            .as_ref()
+            .filter(|s| s.phase != Phase::HaltFinalized)
+            .map(|s| ActiveHold {
+                attempt: s.approval.approval_id.clone(),
+                target: s.intent.target.clone(),
+                unknown_outcome: s.phase == Phase::HandoffUnknown,
+                holds: s.intent.holds.clone(),
+            })
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
         self.saved
@@ -948,6 +970,78 @@ mod tests {
         .unwrap();
         c.reserved_elsewhere = book.held_by_others("this");
         assert!(j.reserve(a, i, &c).is_ok());
+    }
+
+    /// P8-RES-02: the global reservation book is rebuilt from the durable FE-04 journals after a
+    /// crash — a reserved attempt (UNKNOWN after the restart) and a handed-off one with an UNKNOWN
+    /// outcome stay held, a finalized one is released — and a second attempt on the same target
+    /// is refused.
+    #[test]
+    fn reservation_book_survives_restart_until_finalized() {
+        use crate::execution::reservation::WalletReservations;
+        // Reserved, then a crash: held after the restart.
+        let (path, a, i, c) = setup();
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        drop(j);
+        let hold = Journal::open(&path, &a.wallet)
+            .unwrap()
+            .active_hold()
+            .unwrap();
+        // A crash between reservation and send cannot be told from a send: UNKNOWN after restart.
+        assert!(hold.unknown_outcome);
+        let mut book = WalletReservations::rebuild([hold.clone()]).unwrap();
+        assert_eq!(book.held("SOL"), 20);
+        assert_eq!(
+            book.reserve_target("b", &hold.target, &i.holds, &c.balances),
+            Err("RESERVATION_TARGET_CONTENDED")
+        );
+        assert_eq!(
+            book.reserve_target("b", "another target", &i.holds, &c.balances),
+            Ok(())
+        );
+        assert_eq!(
+            WalletReservations::rebuild([hold.clone(), hold]).unwrap_err(),
+            "RESERVATION_EXISTS"
+        );
+        fs::remove_dir_all(&path).unwrap();
+        // Handed off with an UNKNOWN outcome, then a crash: still held.
+        let (path, a, i, c) = setup();
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        assert!(j
+            .handoff::<()>(&i.signed_wire_sha256, &c, || Err(
+                "timeout after possible acceptance".into()
+            ))
+            .is_err());
+        drop(j);
+        let hold = Journal::open(&path, &a.wallet)
+            .unwrap()
+            .active_hold()
+            .unwrap();
+        assert!(hold.unknown_outcome);
+        assert_eq!(WalletReservations::rebuild([hold]).unwrap().held("SOL"), 20);
+        fs::remove_dir_all(&path).unwrap();
+        // Finalized: released, nothing to restore.
+        let (path, a, i, c) = setup();
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        j.reconcile(vec![Receipt {
+            signature: i.signatures[0].clone(),
+            finalized: true,
+            success: true,
+            fee_lamports: Some(20),
+            wallet_deltas: Some([("SOL".into(), -20)].into_iter().collect()),
+            exit_complete: true,
+        }])
+        .unwrap();
+        drop(j);
+        assert!(Journal::open(&path, &a.wallet)
+            .unwrap()
+            .active_hold()
+            .is_none());
+        fs::remove_dir_all(&path).unwrap();
     }
 
     /// A deadline no test simulation reaches.

@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WalletReservations {
     attempts: BTreeMap<String, BTreeMap<String, u64>>,
+    /// P8-RES-02: a target belongs to at most one attempt (contending targets).
+    targets: BTreeMap<String, String>,
 }
 
 impl WalletReservations {
@@ -70,9 +72,62 @@ impl WalletReservations {
         Ok(())
     }
 
+    /// Reserves `attempt` for `target`: refused while another attempt holds the same target.
+    pub fn reserve_target(
+        &mut self,
+        attempt: &str,
+        target: &str,
+        holds: &BTreeMap<String, u64>,
+        balances: &BTreeMap<String, u64>,
+    ) -> Result<(), &'static str> {
+        if self.targets.get(target).is_some_and(|a| a != attempt) {
+            return Err("RESERVATION_TARGET_CONTENDED");
+        }
+        self.reserve(attempt, holds, balances)?;
+        self.targets.insert(target.into(), attempt.into());
+        Ok(())
+    }
+
+    /// P8-RES-02: restores a hold a durable journal still carries after a restart — as it was,
+    /// without a balance check (its units were committed before the crash); a duplicate attempt
+    /// or a contended target is corrupt evidence.
+    pub fn restore(
+        &mut self,
+        attempt: &str,
+        target: &str,
+        holds: &BTreeMap<String, u64>,
+    ) -> Result<(), &'static str> {
+        if attempt.is_empty() {
+            return Err("RESERVATION_ATTEMPT_ID_MISSING");
+        }
+        if self.attempts.contains_key(attempt) {
+            return Err("RESERVATION_EXISTS");
+        }
+        if self.targets.contains_key(target) {
+            return Err("RESERVATION_TARGET_CONTENDED");
+        }
+        self.attempts.insert(attempt.into(), holds.clone());
+        self.targets.insert(target.into(), attempt.into());
+        Ok(())
+    }
+
+    /// P8-RES-02: the book after a restart, from every not finalized FE-04 hold (reserved or with
+    /// an UNKNOWN outcome — both stay held until their finalized reconciliation).
+    pub fn rebuild(
+        holds: impl IntoIterator<Item = crate::execution::one_shot::ActiveHold>,
+    ) -> Result<Self, &'static str> {
+        let mut book = Self::default();
+        for h in holds {
+            book.restore(&h.attempt, &h.target, &h.holds)?;
+        }
+        Ok(book)
+    }
+
     /// Releases `attempt` (after its finalized reconciliation) and returns what it held.
     pub fn release(&mut self, attempt: &str) -> Result<BTreeMap<String, u64>, &'static str> {
-        self.attempts.remove(attempt).ok_or("RESERVATION_UNKNOWN")
+        let held = self.attempts.remove(attempt).ok_or("RESERVATION_UNKNOWN")?;
+        self.targets.retain(|_, a| a != attempt);
+        Ok(held)
     }
 
     pub fn attempts(&self) -> impl Iterator<Item = (&str, &BTreeMap<String, u64>)> {
