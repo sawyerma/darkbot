@@ -1242,3 +1242,52 @@ fn recovery_ready_rebuild_and_full_sweep_is_measured() {
         );
     }
 }
+
+/// C11 latency (run with `--release -- --ignored --nocapture`): a validated ATA lookup with a fresh
+/// derivation against the owner's derived-once addresses. Prints, asserts no speed. (Here, not in
+/// `accounts.rs`: owner-thread sources never print — PERSIST-02 source scan.)
+#[test]
+#[ignore]
+fn c11_ata_lookup_latency_benchmark() {
+    struct One(Pubkey, Pubkey, Vec<u8>);
+    impl AccountSource for One {
+        fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            (*k == self.0).then_some((self.1, 0, self.2.as_slice()))
+        }
+    }
+    const N: usize = 20_000;
+    let (liquidator, mint) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let token = Pubkey::from_str(protocol::TOKEN_PROGRAM_ID).unwrap();
+    let mut data = vec![0u8; 165];
+    data[0..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(liquidator.as_ref());
+    data[108] = 1;
+    let state = One(
+        associated_token_address(&liquidator, &mint, &token),
+        token,
+        data,
+    );
+    let warm = LiquidatorAtas::new(liquidator);
+    let measure = |label: &str, run: &dyn Fn()| {
+        let mut ns: Vec<u128> = (0..N)
+            .map(|_| {
+                let t = std::time::Instant::now();
+                run();
+                t.elapsed().as_nanos()
+            })
+            .collect();
+        ns.sort_unstable();
+        println!(
+            "C11_BENCH {label} n={N} p50_ns={} p99_ns={}",
+            ns[N / 2],
+            ns[N * 99 / 100]
+        );
+    };
+    measure("validated_ata_derived", &|| {
+        let fresh = LiquidatorAtas::new(liquidator);
+        std::hint::black_box(validated_liquidator_ata(&state, &mint, &fresh));
+    });
+    measure("validated_ata_cached", &|| {
+        std::hint::black_box(validated_liquidator_ata(&state, &mint, &warm));
+    });
+}

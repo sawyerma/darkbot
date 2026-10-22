@@ -556,43 +556,4 @@ mod reservation_tests {
             50
         );
     }
-
-    /// C11 latency (run with `--release -- --ignored --nocapture`): a validated ATA lookup with a
-    /// fresh derivation against the owner's derived-once addresses. Prints, asserts no speed.
-    #[test]
-    #[ignore]
-    fn c11_ata_lookup_latency_benchmark() {
-        const N: usize = 20_000;
-        let (liquidator, mint) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let token = Pubkey::from_str(protocol::TOKEN_PROGRAM_ID).unwrap();
-        let ata = associated_token_address(&liquidator, &mint, &token);
-        let state = Accounts(
-            [(ata, (token, token_account(&mint, &liquidator, 1, 165)))]
-                .into_iter()
-                .collect(),
-        );
-        let warm = LiquidatorAtas::new(liquidator);
-        let measure = |label: &str, run: &dyn Fn()| {
-            let mut ns: Vec<u128> = (0..N)
-                .map(|_| {
-                    let t = std::time::Instant::now();
-                    run();
-                    t.elapsed().as_nanos()
-                })
-                .collect();
-            ns.sort_unstable();
-            println!(
-                "C11_BENCH {label} n={N} p50_ns={} p99_ns={}",
-                ns[N / 2],
-                ns[N * 99 / 100]
-            );
-        };
-        measure("validated_ata_derived", &|| {
-            let fresh = LiquidatorAtas::new(liquidator);
-            std::hint::black_box(validated_liquidator_ata(&state, &mint, &fresh));
-        });
-        measure("validated_ata_cached", &|| {
-            std::hint::black_box(validated_liquidator_ata(&state, &mint, &warm));
-        });
-    }
 }
