@@ -6,5 +6,6 @@ pub mod observe_only;
 pub mod one_shot;
 pub mod pending;
 pub mod pipeline;
+pub mod reservation;
 #[cfg(feature = "crate_health")]
 pub mod route;

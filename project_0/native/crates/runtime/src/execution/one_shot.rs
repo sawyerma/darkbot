@@ -73,6 +73,9 @@ pub struct Current {
     pub state_generation: u64,
     pub program_data_hash: String,
     pub balances: BTreeMap<String, u64>,
+    /// P8-RES-01: what every other active attempt holds (`WalletReservations::held_by_others`);
+    /// a hold is checked against the balance minus these, never twice the same units.
+    pub reserved_elsewhere: BTreeMap<String, u64>,
     /// Each existing gate must independently be known and passed. In particular
     /// a single-TX simulation cannot satisfy the bundle_simulated gate.
     pub health_funding_route_fee_exit_known: bool,
@@ -590,9 +593,11 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
             .any(|k| k != "SOL" && !key(k))
         || i.holds.get("SOL").copied().unwrap_or(0) < debit
         || i.holds.keys().any(|k| k != "SOL" && !key(k))
-        || i.holds
-            .iter()
-            .any(|(mint, n)| c.balances.get(mint).is_none_or(|balance| balance < n))
+        || i.holds.iter().any(|(mint, n)| {
+            c.balances.get(mint).is_none_or(|balance| {
+                balance.saturating_sub(c.reserved_elsewhere.get(mint).copied().unwrap_or(0)) < *n
+            })
+        })
     {
         return Err(err("WALLET_UNDERFUNDED_OR_HOLD_MISSING"));
     }
@@ -911,6 +916,7 @@ mod tests {
             state_generation: 1,
             program_data_hash: a.program_data_hash.clone(),
             balances: [("SOL".into(), 100)].into_iter().collect(),
+            reserved_elsewhere: BTreeMap::new(),
             health_funding_route_fee_exit_known: true,
             canonical_fresh_no_gap_or_fork: true,
             exact_signed_payload_simulated: true,
@@ -918,6 +924,32 @@ mod tests {
         };
         (path, a, i, c)
     }
+    /// P8-RES-01: a hold is checked against the balance minus what other attempts hold: the
+    /// same lamports are never reserved twice.
+    #[test]
+    fn hold_never_uses_units_another_attempt_holds() {
+        let (path, a, i, mut c) = setup();
+        let mut book = crate::execution::reservation::WalletReservations::default();
+        let other = [("SOL".to_string(), 81)].into_iter().collect();
+        book.reserve("other", &other, &c.balances).unwrap();
+        c.reserved_elsewhere = book.held_by_others("this");
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        // 100 SOL units, 81 held elsewhere: 19 left for a hold of 20.
+        assert_eq!(
+            j.reserve(a.clone(), i.clone(), &c).unwrap_err(),
+            "WALLET_UNDERFUNDED_OR_HOLD_MISSING"
+        );
+        book.release("other").unwrap();
+        book.reserve(
+            "other",
+            &[("SOL".to_string(), 80)].into_iter().collect(),
+            &c.balances,
+        )
+        .unwrap();
+        c.reserved_elsewhere = book.held_by_others("this");
+        assert!(j.reserve(a, i, &c).is_ok());
+    }
+
     /// A deadline no test simulation reaches.
     fn test_deadline() -> std::time::Instant {
         std::time::Instant::now() + std::time::Duration::from_secs(60)
