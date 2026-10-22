@@ -40,6 +40,26 @@ impl Payload for DeploymentProof {
     const KIND: u16 = kind::DEPLOYMENT_PROOF;
 }
 
+/// A stored proof re-checked on read (C0E1-P4-VC): bound to `result_id`, its slot bound equal to
+/// the result's last scoped slot, its before-read equal to the capture's own, and continuity judged
+/// anew from the stored ProgramData, hashes and slots — a stored `verified` alone proves nothing.
+pub fn proof_holds(
+    proof: &DeploymentProof,
+    result_id: &str,
+    scope_end: Option<u64>,
+    capture_before: Option<&super::paths::Deployment>,
+) -> bool {
+    proof.verification_result_id == result_id
+        && scope_end == Some(proof.end_slot)
+        && capture_before.is_some()
+        && proof.before.as_ref() == capture_before
+        && super::paths::verified(
+            proof.before.as_ref(),
+            proof.after.as_ref(),
+            Some(proof.end_slot),
+        )
+}
+
 /// Where the deployment proof of `result_id` under spec `spec_id` lives.
 pub fn deployment_proof_path(run: &Path, spec_id: &str, result_id: &str) -> PathBuf {
     run.join("verification")

@@ -167,6 +167,7 @@ usage() {
   echo 'Usage: capture.sh econ4h-launcher --duration 10m|1h|5h|24h [--capture-source logs|transactions]
          [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N] [--verify-bytes N]
          [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N] [--verify-max-pages N]
+         [--provider-evidence FILE.p0j]
          [--report-* VALUE ...] [--format table|csv] [-- OPERATIONAL_ARGS...]' >&2
   exit 2
 }
@@ -192,7 +193,7 @@ while [[ "$#" -gt 0 ]]; do
     --verify-rps|--verify-calls|--verify-seconds|--verify-bytes|--verify-disk-bytes)
       CAPACITY_VERIFY+=("$1" "$2"); STRICT_VERIFY+=("$1" "$2") ;;
     --verify-max-pages) CAPACITY_VERIFY+=("$1" "$2") ;;
-    --verify-ram-bytes|--verify-min-free-bytes) STRICT_VERIFY+=("$1" "$2") ;;
+    --verify-ram-bytes|--verify-min-free-bytes|--provider-evidence) STRICT_VERIFY+=("$1" "$2") ;;
     --report-*|--format|--verification-result) REPORT_ARGS+=("$1" "$2") ;;
     *) usage ;;
   esac
@@ -290,15 +291,11 @@ status=0
 wait # stderr tee must finish before immutable evidence hashing
 cat "$LOG_DIR/console_summary.txt"
 if [[ -f "$CAPTURE_DIR/run_manifest.p0j" ]]; then
-  # Post-capture, native and offline-first: strict verification (when selected) and the native
-  # report over the run's .p0j records. No JSON is written; legacy views stay an explicit export.
-  if [[ "$CHAIN_VERIFY" == strict ]]; then
-    "$BIN_DIR/p0-strict-verify" --run "$RUN_DIR" ${STRICT_VERIFY[@]+"${STRICT_VERIFY[@]}"} || status=2
-  fi
-  if [[ -f "$CAPTURE_DIR/market/market_completion.p0j" ]]; then
-    "$BIN_DIR/p0ctl" --project "$PROJECT_DIR" report --run "$RUN_DIR" ${REPORT_ARGS[@]+"${REPORT_ARGS[@]}"} \
-      > "$LOG_DIR/post_capture_report.txt" || status=2
-  fi
+  # Post-capture production chain (C0E1-P5-AUTO), one native entry over the run's .p0j records:
+  # verification (off|strict), native report, master qualification. No JSON is written.
+  "$BIN_DIR/p0ctl" --project "$PROJECT_DIR" post-capture --run "$RUN_DIR" --chain-verify "$CHAIN_VERIFY" \
+    ${STRICT_VERIFY[@]+"${STRICT_VERIFY[@]}"} ${REPORT_ARGS[@]+"${REPORT_ARGS[@]}"} \
+    > "$LOG_DIR/post_capture_report.txt" || status=2
 fi
 echo "Reports and detailed logs: $RUN_DIR"
 exit "$status"

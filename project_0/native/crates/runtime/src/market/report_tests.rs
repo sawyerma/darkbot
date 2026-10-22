@@ -131,6 +131,15 @@ mod report_e2e {
         second: super::super::strict_driver::DriverOutcome,
     }
 
+    /// The audited Mainnet deployment as read at `slot`.
+    fn audited(slot: u64) -> super::super::paths::Deployment {
+        super::super::paths::Deployment {
+            context_slot: slot,
+            hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
+            program_data: darkbot_project0::protocol::program_data_address(&program()).to_string(),
+        }
+    }
+
     fn canonical_run(tag: u32, complete: bool) -> Fixture {
         let d = std::env::temp_dir().join(format!("p0_report_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -241,6 +250,15 @@ mod report_e2e {
             )
             .unwrap();
         if complete {
+            // The capture's market summary with its deployment read at the window start.
+            let mut summary = crate::analytics::econ::tests::market_summary(60.0);
+            summary.deployment_continuity.before = Some(audited(9));
+            journal::write_typed_value(
+                &market.join(MARKET_SUMMARY_JOURNAL),
+                journal::source::MARKET,
+                &MarketFinal::checkpoint(summary),
+            )
+            .unwrap();
             // The final technical record of a run whose every technical gate passed, and a
             // clean end of both owners.
             reports
@@ -331,13 +349,6 @@ mod report_e2e {
         if complete {
             // The post-capture deployment proof of the canonical result (C0E1-P4-RESUME): the
             // audited build before and after the window, as `paths::verified` judges it.
-            let program_data = darkbot_project0::protocol::program_data_address(&program())
-                .to_string();
-            let audited = |slot| super::super::paths::Deployment {
-                context_slot: slot,
-                hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
-                program_data: program_data.clone(),
-            };
             let (before, after) = (audited(9), audited(95));
             let verified = super::super::paths::verified(Some(&before), Some(&after), Some(80));
             let rid = second.verification_result_id.clone().unwrap();
@@ -679,12 +690,34 @@ mod report_e2e {
         assert!(q.inputs.deployment_proof_sha256.is_some());
         let out = report::report(&f.run, &opts, &ReportQuery::default()).unwrap();
         assert!(!out.dataset.c0_e1_master_pass);
-        // Without the post-capture deployment proof the same run is not qualified.
+        // A stored `verified = true` proves nothing by itself: a forged after-read, a slot bound
+        // other than the result's last slot or a before-read other than the capture's is no
+        // continuity.
+        let rid = f.second.verification_result_id.clone().unwrap();
         let proof = super::super::strict_driver::deployment_proof_path(
             &f.run,
             &f.second.verification_spec_id,
-            f.second.verification_result_id.as_deref().unwrap(),
+            &rid,
         );
+        let honest: super::super::strict_driver::DeploymentProof =
+            journal::read_typed_value(&proof).unwrap();
+        let forged = |f: &dyn Fn(&mut super::super::strict_driver::DeploymentProof)| {
+            let mut p = honest.clone();
+            f(&mut p);
+            p.verified = true;
+            p
+        };
+        for (case, p) in [
+            ("after hash", forged(&|p| p.after.as_mut().unwrap().hash = "forged".into())),
+            ("slot bound", forged(&|p| p.end_slot = 79)),
+            ("before read", forged(&|p| p.before = Some(audited(8)))),
+        ] {
+            std::fs::remove_file(&proof).unwrap();
+            journal::write_typed_value(&proof, journal::source::STRICT, &p).unwrap();
+            let (forged_q, _) = qualification::qualify(&f.run, &opts).unwrap();
+            assert_eq!(forged_q.failed, ["DEPLOYMENT_CONTINUITY_UNPROVEN"], "{case}");
+        }
+        // Without the post-capture deployment proof the same run is not qualified.
         std::fs::remove_file(&proof).unwrap();
         let (unproven, _) = qualification::qualify(&f.run, &opts).unwrap();
         assert_eq!(unproven.failed, ["DEPLOYMENT_CONTINUITY_UNPROVEN"]);

@@ -633,6 +633,8 @@ pub struct Dataset {
     /// The market journal is sealed COMPLETE (D1: no gap, overflow, fatal, decoder or retention
     /// reason, full clock, drain and no write error).
     pub capture_journal_complete: bool,
+    /// The selected result's last scoped slot (the deployment proof's slot bound).
+    pub verification_scope_end: Option<u64>,
 }
 
 /// Canonical economics replay over the selected strict result (C0E1-P4-VC reads it typed).
@@ -1459,6 +1461,9 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
             "CAPTURE_NOT_FINALIZED: no MARKET_COMPLETION record (capture before B7: use the pinned report)"
         })?;
     let selected = select_result(&capture, opts.verification_result.as_deref())?;
+    let verification_scope_end = selected
+        .as_ref()
+        .and_then(|s| s.result.scope.as_ref().map(|scope| scope.hi));
     let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET)
         .map_err(|e| e.to_string())?;
     let mut b = Builder {
@@ -1610,6 +1615,7 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
         )
         .map(|c| c.sealed && c.complete)?,
         completion,
+        verification_scope_end,
     })
 }
 

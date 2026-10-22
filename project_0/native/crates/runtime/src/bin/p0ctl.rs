@@ -15,6 +15,7 @@
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
+//! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! ```
 //!
 //! `report` runs the native report (B7) for runs with native capture records (typed run
@@ -126,9 +127,11 @@ const RUN_START_USAGE: &str =
     "p0ctl run start --duration 10m|1h|5h|24h [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
     [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
     [--verify-bytes N] [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N]
-    [--verify-max-pages N] [--report-* VALUE ...] [--format table|csv] [-- OPERATIONAL_ARGS...]
-Typed C0-E1 measurement: offline boot audit, owner lock, capture, then native strict
-verification (when selected) and the native report. LIVE and submission stay disabled.
+    [--verify-max-pages N] [--provider-evidence FILE.p0j] [--report-* VALUE ...] [--format table|csv]
+    [-- OPERATIONAL_ARGS...]
+Typed C0-E1 measurement: offline boot audit, owner lock, capture, then the post-capture chain
+(verification off|strict — online strict only with provider evidence —, native report, master
+qualification). LIVE and submission stay disabled.
 OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release. A sealed, fresh READY network audit
 and the operator's explicit --mainnet-approved TOKEN for it are required.";
 
@@ -523,6 +526,27 @@ fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(verified || mode == "off")
 }
 
+/// C0E1-P5-AUTO: the production chain after a capture (verification, report, qualification);
+/// `Ok(false)` (exit 2) when the verification or the report did not complete.
+fn post_capture_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::analytics::post_capture;
+    let wanted = value(args, "--run").ok_or("post-capture --run ID|PATH required")?;
+    let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    let mode = value(args, "--chain-verify").unwrap_or_else(|| "off".into());
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--run" || a == "--chain-verify" {
+            it.next();
+        } else {
+            rest.push(a.clone());
+        }
+    }
+    let out = post_capture::post_capture(&run, &mode, &rest)?;
+    print!("{}", out.text);
+    Ok(out.verification_ok && out.report_ok)
+}
+
 /// C0E1-P4-VC: the master qualification of a run with native records against its selected
 /// verification result; prints the axes and the verdict, `Ok(false)` (exit 2) unless MASTER_PASS.
 fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
@@ -588,7 +612,8 @@ fn main() -> ExitCode {
             (Some("report"), _) => report_cmd(&project, &rest),
             (Some("export"), _) => export_cmd(&project, &rest),
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify …".into()),
+            (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture …".into()),
         }
     });
     match result {

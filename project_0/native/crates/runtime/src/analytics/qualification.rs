@@ -319,6 +319,12 @@ fn owners_end(run: &Path) -> Result<Option<OwnersEnd>, String> {
     Ok(end)
 }
 
+/// The qualifying binary's SHA-256 — never a placeholder: unreadable is an error (fail closed).
+fn binary_sha256(exe: std::io::Result<PathBuf>) -> Result<[u8; 32], String> {
+    let exe = exe.map_err(|e| format!("QUALIFIER_BINARY_UNREADABLE: {e}"))?;
+    journal::file_sha256(&exe).map_err(|e| format!("QUALIFIER_BINARY_UNREADABLE: {e}"))
+}
+
 /// Qualifies `run` against the selected verification result (`opts`, as the report selects it):
 /// binds every input, evaluates the axes and persists the result immutably under
 /// `qualification/qualification-<id>.p0j`. The same inputs give the same file; a different
@@ -342,8 +348,21 @@ pub fn qualify(
                 if p.verification_result_id != *result {
                     return Err("DEPLOYMENT_PROOF_OTHER_RESULT".into());
                 }
+                // Re-checked from its stored evidence, never its stored `verified` alone.
+                let capture_before =
+                    journal::read_typed_value::<crate::market::observer::MarketFinal>(
+                        &run.join("capture/market")
+                            .join(crate::market::observer::MARKET_SUMMARY_JOURNAL),
+                    )
+                    .ok()
+                    .and_then(|f| f.summary.deployment_continuity.before);
                 Some((
-                    p.verified,
+                    crate::market::observer::strict_driver::proof_holds(
+                        &p,
+                        result,
+                        dataset.verification_scope_end,
+                        capture_before.as_ref(),
+                    ),
                     journal::file_sha256(&path).map_err(|e| e.to_string())?,
                 ))
             } else {
@@ -372,10 +391,7 @@ pub fn qualify(
         econ_final_frame_sha256: final_report.as_ref().map(|(_, h)| *h),
         deployment_proof_sha256: proof.map(|p| p.1),
         owners,
-        qualifier_binary_sha256: std::env::current_exe()
-            .ok()
-            .and_then(|p| journal::file_sha256(&p).ok())
-            .unwrap_or([0; 32]),
+        qualifier_binary_sha256: binary_sha256(std::env::current_exe())?,
     };
     let encoded = bincode::DefaultOptions::new()
         .with_fixint_encoding()
@@ -433,4 +449,20 @@ pub fn render(r: &QualificationRecord) -> String {
             r.failed.join(",")
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    /// The qualification binary's hash is never a placeholder.
+    #[test]
+    fn unreadable_qualifier_binary_fails_closed() {
+        let missing = std::env::temp_dir().join(format!("p0_no_binary_{}", std::process::id()));
+        assert!(super::binary_sha256(Ok(missing))
+            .unwrap_err()
+            .starts_with("QUALIFIER_BINARY_UNREADABLE"));
+        assert!(super::binary_sha256(Err(std::io::Error::other("x")))
+            .unwrap_err()
+            .starts_with("QUALIFIER_BINARY_UNREADABLE"));
+        assert!(super::binary_sha256(std::env::current_exe()).is_ok());
+    }
 }

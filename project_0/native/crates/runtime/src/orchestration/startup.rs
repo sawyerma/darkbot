@@ -720,6 +720,43 @@ mod supervise_tests {
             ]);
             assert_eq!(q.failed, expected, "gap={gap}");
             assert_eq!(q.inputs.owners.map(|o| o.aborted), Some(false));
+            if !gap {
+                // C0E1-P5-AUTO: the production chain after the capture — verification, report and
+                // qualification as one entry; a refused or incomplete verification never
+                // suppresses the report or the qualification.
+                use crate::analytics::post_capture::post_capture;
+                let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                let off = post_capture(&run, "off", &[]).unwrap();
+                assert!(off.verification_ok && off.report_ok, "{}", off.text);
+                assert!(off.text.contains("status=NOT_RUN reason=VERIFICATION_OFF"));
+                assert_eq!(off.verdict.as_deref(), Some("C0_E1_NOT_QUALIFIED"));
+                assert!(off.text.contains("verdict=C0_E1_NOT_QUALIFIED"));
+                // Strict offline with the configured budgets (its own spec): incomplete without
+                // chain data, report and qualification still run; the same spec again needs resume.
+                let first = post_capture(&run, "strict", &args(&["--offline"])).unwrap();
+                assert!(!first.verification_ok && first.report_ok, "{}", first.text);
+                assert!(first.text.contains("status=HISTORICAL_INCOMPLETE"));
+                let again = post_capture(&run, "strict", &args(&["--offline"])).unwrap();
+                assert!(!again.verification_ok && again.report_ok);
+                assert!(again.text.contains("SPEC_EXISTS_USE_RESUME_VERIFICATION"));
+                let resumed = post_capture(
+                    &run,
+                    "strict",
+                    &args(&["--offline", "--resume-verification"]),
+                )
+                .unwrap();
+                assert!(!resumed.verification_ok && resumed.report_ok);
+                assert!(resumed.text.contains("status=HISTORICAL_INCOMPLETE"));
+                assert!(resumed.verdict.is_some());
+                // Online strict without provider evidence: refused before any chain RPC.
+                let online = post_capture(&run, "strict", &[]).unwrap();
+                assert!(!online.verification_ok && online.report_ok);
+                assert!(online.text.contains("STRICT_PROVIDER_EVIDENCE_REQUIRED"));
+                assert!(online.verdict.is_some());
+                assert!(post_capture(&run, "index", &[])
+                    .err()
+                    .is_some_and(|e| e.starts_with("CHAIN_VERIFY_index_BLOCKED")));
+            }
             let _ = std::fs::remove_dir_all(run.parent().unwrap());
         }
     }
