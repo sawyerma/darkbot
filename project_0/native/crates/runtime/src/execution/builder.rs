@@ -428,6 +428,81 @@ pub mod p0 {
         ROUTE_DIAGNOSTICS.with(|d| std::mem::take(&mut *d.borrow_mut()))
     }
 
+    /// P4A-JIT-01: remote quotes of one JIT shortfall solve (the same bound as a route fit).
+    pub(crate) const JIT_MAX_QUOTES: u32 = 6;
+
+    /// P4A-JIT-01: bounded ExactIn shortfall solver. Jupiter V2 `/build` documents no ExactOut, so
+    /// the JIT buy is the smallest ExactIn input whose on-chain enforced minimum output
+    /// (`minimum_executable_out`) covers `amount_out`: one reverse quote (the shortfall sold back)
+    /// gives the scale, then proportional steps from the observed floor and bisection — at most
+    /// `JIT_MAX_QUOTES` remote requests, none after the candidate deadline. An unknown floor never
+    /// covers; only a quoted covering route at or below `max_input` (the funding inventory) is
+    /// returned.
+    pub(crate) fn shortfall_exact_in<R: RouteProvider + ?Sized>(
+        routes: &R,
+        funding_mint: &Pubkey,
+        liab_mint: &Pubkey,
+        amount_out: u64,
+        max_input: u64,
+        prewarmed_atas: &[PrewarmedAta],
+        deadline: Instant,
+    ) -> Result<Option<Route>, String> {
+        if amount_out == 0 || max_input == 0 || Instant::now() >= deadline {
+            return Ok(None);
+        }
+        let mut used = 1;
+        let Some(reverse) = routes.quote_exact_in(
+            liab_mint,
+            funding_mint,
+            amount_out,
+            prewarmed_atas,
+            deadline,
+        )?
+        else {
+            return Ok(None);
+        };
+        let mut input = reverse.quoted_out.clamp(1, max_input);
+        // Largest input known not to cover; smallest covering input and its route.
+        let mut lo = 0u64;
+        let mut best: Option<(u64, Route)> = None;
+        while used < JIT_MAX_QUOTES && Instant::now() < deadline {
+            used += 1;
+            let route =
+                routes.quote_exact_in(funding_mint, liab_mint, input, prewarmed_atas, deadline)?;
+            let floor = route.as_ref().and_then(|r| r.minimum_executable_out);
+            let next = match (route, floor) {
+                (Some(r), Some(f)) if f >= amount_out => {
+                    best = Some((input, r));
+                    lo + (input - lo) / 2
+                }
+                _ => {
+                    lo = input;
+                    match &best {
+                        Some((hi, _)) => lo + (hi - lo) / 2,
+                        None if input >= max_input => break,
+                        // Proportional to the observed floor (+1/64), else double.
+                        None => {
+                            let step = match floor {
+                                Some(f) if f > 0 => {
+                                    u128::from(input) * u128::from(amount_out) * 65
+                                        / (64 * u128::from(f))
+                                        + 1
+                                }
+                                _ => u128::from(input) * 2,
+                            };
+                            step.clamp(u128::from(input) + 1, u128::from(max_input)) as u64
+                        }
+                    }
+                }
+            };
+            if next <= lo || best.as_ref().is_some_and(|(hi, _)| next >= *hi) {
+                break;
+            }
+            input = next;
+        }
+        Ok(best.map(|(_, r)| r))
+    }
+
     /// [FIX-123][R7/R6] Router caps are hints; only the complete compiled TX proves fit.
     /// Bound remote work to six requests. Every changed quote is revalidated and repriced.
     fn quote_fitting_route<T>(
@@ -1109,17 +1184,21 @@ pub mod p0 {
                             let Some(fb) = sz.funding_bank else { continue };
                             let (_, funding_mint, _) = pair_try!('pairs, self.bank(&fb));
                             let shortfall = funding::shortfall_token_amount(&base_ctx);
-                            let buy = match self.routes.quote_exact_out(
+                            // P4A-JIT-01: the bounded ExactIn solve (no documented ExactOut).
+                            let buy = match shortfall_exact_in(
+                                self.routes,
                                 &funding_mint,
                                 &liab_mint,
                                 shortfall,
+                                (self.inventory)(&fb),
+                                &prewarmed_atas,
                                 deadline,
                             ) {
                                 Ok(Some(route)) => route,
                                 Ok(None) => continue,
                                 Err(e) => {
                                     route_errors.push(format!(
-                                        "exact-out {}→{}: {}",
+                                        "jit exact-in {}→{}: {}",
                                         funding_mint, liab_mint, e
                                     ));
                                     continue;
@@ -1497,6 +1576,114 @@ pub mod p0 {
             }
         }
         /// The ExactIn route a router would return (or none).
+        /// A deterministic market: `out = input * num / den`, the on-chain floor 1 % below the
+        /// quote (`None` when `floor_known` is false); counts every request.
+        struct LinearMarket {
+            num: u64,
+            den: u64,
+            floor_known: bool,
+            calls: std::cell::Cell<u32>,
+        }
+        impl RouteProvider for LinearMarket {
+            fn quote_exact_in(
+                &self,
+                from: &Pubkey,
+                _: &Pubkey,
+                amount_in: u64,
+                _: &[PrewarmedAta],
+                _: Instant,
+            ) -> Result<Option<Route>, String> {
+                self.calls.set(self.calls.get() + 1);
+                // The reverse direction (liability sold for funding) is the inverse price.
+                let out = if *from == Pubkey::default() {
+                    amount_in * self.den / self.num
+                } else {
+                    amount_in * self.num / self.den
+                };
+                Ok(Some(Route {
+                    instructions: vec![],
+                    lookup_tables: vec![],
+                    swap_program: Pubkey::new_unique(),
+                    amount_in,
+                    quoted_out: out,
+                    minimum_executable_out: self.floor_known.then_some(out * 99 / 100),
+                }))
+            }
+            fn quote_exact_out(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                _: u64,
+                _: Instant,
+            ) -> Result<Option<Route>, String> {
+                Ok(None)
+            }
+        }
+
+        /// P4A-JIT-01: the bounded ExactIn shortfall solve finds a covering buy near the smallest
+        /// input in at most `JIT_MAX_QUOTES` requests; never an uncovered, unknown-floor, above
+        /// inventory or post-deadline route.
+        #[test]
+        fn jit_shortfall_exact_in_is_bounded_and_covers_on_chain() {
+            let (liab, funding) = (Pubkey::default(), Pubkey::new_unique());
+            let later = Instant::now() + std::time::Duration::from_secs(5);
+            let market = |floor_known| LinearMarket {
+                num: 3,
+                den: 2,
+                floor_known,
+                calls: std::cell::Cell::new(0),
+            };
+            let m = market(true);
+            let need = 1_000_000;
+            let r = shortfall_exact_in(&m, &funding, &liab, need, u64::MAX, &[], later)
+                .unwrap()
+                .expect("covering buy");
+            let floor = r.minimum_executable_out.unwrap();
+            assert!(floor >= need, "covers on chain: {floor}");
+            // Minimal input to cover: need / (1.5 * 0.99); the solve stays within 2 %.
+            let minimal = need * 2 * 100 / (3 * 99) + 1;
+            assert!(
+                r.amount_in >= minimal && r.amount_in <= minimal * 102 / 100,
+                "{}",
+                r.amount_in
+            );
+            assert!(m.calls.get() <= JIT_MAX_QUOTES, "{}", m.calls.get());
+            // Unknown on-chain floor: never a buy.
+            let unknown = market(false);
+            assert!(
+                shortfall_exact_in(&unknown, &funding, &liab, need, u64::MAX, &[], later)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(unknown.calls.get() <= JIT_MAX_QUOTES);
+            // The funding inventory cannot cover: no buy above it.
+            assert!(shortfall_exact_in(
+                &market(true),
+                &funding,
+                &liab,
+                need,
+                minimal - 1,
+                &[],
+                later
+            )
+            .unwrap()
+            .is_none());
+            // Nothing after the deadline, no shortfall, no inventory: no request at all.
+            let none = market(true);
+            let past = Instant::now() - std::time::Duration::from_millis(1);
+            assert!(
+                shortfall_exact_in(&none, &funding, &liab, need, u64::MAX, &[], past)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                shortfall_exact_in(&none, &funding, &liab, 0, u64::MAX, &[], later)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(none.calls.get(), 0);
+        }
+
         struct TestRoutes(Option<Route>);
         impl RouteProvider for TestRoutes {
             fn quote_exact_in(
