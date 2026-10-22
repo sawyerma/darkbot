@@ -1667,6 +1667,18 @@ Long-Tail/Premium-LIVE = DARF WEITERLAUFEN
 
 **FREE_ONLY-Override v4.5.1:** Ein Paid Geyser ist im aktiven Profil **immer gesperrt**; selbst ein positiver erwarteter Mehrgewinn erlaubt keine operative Aktivierung. Prüfung und Kostenvergleich sind nur kontrafaktisch. Ein Wechsel benötigt eine separate ausdrückliche Benutzerentscheidung und eine versionierte Änderung von §0.4; bei fehlender kostenloser qualifizierter Binary-Source bleibt Race-LIVE BLOCKED.
 
+### S1-08 FREE_ONLY-Binary-Quelle: verbindlicher Capability- und Abnahmevertrag (2026-10-22)
+
+**Eigener Client, kein zweiter Bot:** `BinaryGeyserSource` wird als adapterneutrale Rust-Implementierung von `darkbot-solana::ingress::IngressSource` gebaut. Vorhandene `IngressEvent`-Typen, Canonical Owner, Provider-Budgets, Gap/Recovery und binäres Journal nutzen. Ein selbst programmierter gRPC-Client ist kein selbst betriebener validatornaher Geyser-Server und garantiert keinen schnelleren Upstream. Ein eigener Validator bleibt K/Infrastructure-Option, nicht Voraussetzung.
+
+**Erster FREE_ONLY-Mainnet-Kandidat:** PublicNode Yellowstone-gRPC (`https://solana.publicnode.com/`, laut Anbieter kostenloser API-Token). Tatsächlicher Zugang für benötigte Accounts, Transactions, Slots, Roots, Filter und Laufzeit-/Datenrate ist **NOT_RUN**, nicht S1-RACE PASS. Andere nachweislich kostenlose Binary-Feeds bleiben austauschbar. Keine automatische Paid-Alternative.
+
+**Offline zuerst:** Versionierte Protobuf-Fixtures und lokale gRPC-Mocks für Accounts, TXs, Slots/Roots, `write_version`, Bank-/Fork-Provenienz (`bank_id`, sofern geliefert), ALT/v0/v1, korrekte Reihenfolge, Duplicate, Gap, Replay/`from_slot` nur nach Source-Capability, Reconnect und Backpressure. Nicht hinreichend unterscheidbare Fork-/Bank-Kontexte als UNKNOWN/HALT behandeln, niemals stillschweigend kanonisieren. Kein JSON im Hot-Path, keine neue Engine und kein blockierendes Owner-IO.
+
+**Spätere Live-Quellenqualifikation nur nach separater read-only Freigabe:** Vorab eng begrenztes Zeit-/Request-/Bytebudget und Provider-Quoten festlegen; TLS/Auth, Stream-/Filterfähigkeiten, `SubscribeDeshred` separat, Quota/429, Lücken/Recovery und reale Datenvollständigkeit prüfen. API-Token ausschließlich lokal geheim halten; redigierte Evidence im vorhandenen Journal/Qualifikationspfad führen, keinen neuen Primärspeicher.
+
+**S1-RACE-Gate bleibt strikt:** Verbindliche Mainnet-Belege für komplette relevante State-/TX-/Slot-/Root-Daten, Freshness, Bank/Fork, v0/v1, Gap/Recovery und p50/p95/p99/Source-Kosten. Quellen auf derselben Hardware nur über nachweisbar gleiche Signatur/Slot/Account/Fork-Ereignisse und monotone Empfangszeit vergleichen. Unvergleichbare Werte als UNKNOWN, keine Anbieter-Benchmarkzahlen als eigener PASS. Ein kurzer Capability-Smoke ist kein Race- oder Vollmarkt-PASS. Fehlt eine dauerhaft brauchbare kostenlose Quelle: `EXTERNAL_BLOCKED`, Long-Tail/Premium bleibt unabhängig.
+
 ## S1.3 LONG-TAIL/PREMIUM PRODUCTION — `WsRpcControlSource`
 
 `WsRpcControlSource` ist für folgende Rollen Production-zulässig:
@@ -1846,7 +1858,7 @@ Tickets:
 `S1-05 binary fast lane/queues` ·
 `S1-06 v1 fidelity` ·
 `S1-07 reconnect/gap/reconcile` ·
-`S1-08 Mainnet binary source + cost qualification`
+`S1-08 FREE_ONLY Mainnet binary source + PublicNode capability/coverage/quota/latency qualification (reale Evidence NOT_RUN)`
 
 ---
 # PHASE S2 — FINAL CANONICAL SOLANA STATE
@@ -3987,14 +3999,9 @@ prüfen, in dieser Reihenfolge:
 
 **BELEGT:** Yellowstone beschreibt `SubscribeDeshred` als separaten Stream für pre-execution Transactions. Der Server rekonstruiert Entries aus eingehenden Shreds und streamt decodierte Transactions, bevor Replay sie ausgeführt hat.
 
-**BELEGT / Einschränkung:** Die aktuelle Yellowstone-README sagt zugleich:
+**Quellenstand 2026-10-22 – serverseitige Fähigkeit prüfen:** Das offizielle Yellowstone-Changelog belegt die Open-Source-Implementierung von `SubscribeDeshred` seit 2026-07-02 (geyser 14.0.0), während die README teils weiterhin Triton-only/`UNIMPLEMENTED` angibt. Implementierter Open-Source-Code **beweist nicht**, dass der konkret ausgewählte PublicNode-Server diesen RPC aktiviert oder kostenlos erlaubt. `UNIMPLEMENTED`, fehlende Berechtigung/Quota und unvollständige ALT-/Fork-Fidelity getrennt protokollieren; keine unbelegte Capability als PASS.
 
-```text
-SubscribeDeshred is only available on Triton extension servers.
-Open-source yellowstone-grpc-geyser currently returns UNIMPLEMENTED.
-```
-
-Daher ist `SubscribeDeshred` **kein Bestandteil von S1**, keine kostenlose Annahme und keine Voraussetzung für Race-LIVE.
+Referenzen: `https://github.com/rpcpool/yellowstone-grpc/blob/master/CHANGELOG.md` und `https://github.com/rpcpool/yellowstone-grpc/blob/master/README.md`. `SubscribeDeshred` bleibt optionale K-INGRESS-PRE-Beschleunigung, keine S1-RACE-Ersatzquelle und keine Voraussetzung für die Produktentwicklung.
 
 Wenn wirtschaftlich verfügbar, ist seine Rolle ausschließlich:
 
@@ -4031,6 +4038,16 @@ incremental race wins / realized net profit
 ```
 
 Nur bei messbarem Netto-Mehrwert.
+
+### K-INGRESS-PRE FREE_ONLY-Alternativen: PublicNode Deshred und LocalShred Lite (2026-10-22)
+
+**Rangfolge:** (1) Nach S1-Adapter-/Offline-Arbeit `SubscribeDeshred` am kostenlosen PublicNode-Yellowstone-Zugang auf tatsächliche Freischaltung/Filter/ALT/Quoten prüfen. (2) Als unabhängige Alternative `LocalShred Lite` von DedicatedNodes (`https://www.dedicatednodes.io/localshred/`) prüfen: laut Anbieter kostenlos, kein DedicatedNodes-Server erforderlich, Amsterdam als Ausgangspunkt; Zugang/Whitelist, Verfügbarkeit, Limits und Latenz noch NICHT QUALIFIZIERT. Anbieter-eigene Millisekundenwerte sind keine Project_0-Evidence.
+
+**Netz:** UDP-Shreds setzen real erreichbare öffentliche Empfänger-IPv4, funktionierenden UDP-Port, NAT-/Router-/Firewall-Konfiguration und eine Anbieter-Freischaltung voraus; eine per HTTP sichtbare öffentliche IPv4 genügt als Beweis nicht. Lokale vorhandene Hardware zuerst; kein automatisch gebuchter VPS, Business-Vertrag, Paid-Feed oder Hosting. Eigene Validatorinfrastruktur bleibt eine separate kosten-/messungsgebundene K-Entscheidung.
+
+**Strikte Safety-Trennung:** Deshred und rohe UDP-Shreds liefern ausschließlich unbestätigte `PreExecution`-Hinweise (Signatur/Slot/Quelle/Zeit/Fork-/ALT-Provenienz, soweit belegt). Rust-Decoder und geprüfte Open-Source-FEC-/Proxy-Bausteine dürfen spekulativ betroffene Marginfi-/Oracle-/Bank-Abhängigkeiten erkennen und Prepared-Candidate-/TX-Templates vorwärmen. Keine direkte Canonical-State-Mutation, keine finale Health-/Economics-Behauptung, keine Signatur/Submission nur wegen eines Pre-Signals. Vor jeder Handelbarkeit müssen autoritative Account-/Slot-/Root-Updates, aktuelle Economics, Freshness und die bestehenden Safety-/LIVE-Gates erneut bestehen. Vorab gesehene TXs können scheitern, verworfen oder anders geforkt werden.
+
+**Mess- und Promotion-Gate:** Zuerst Offline-Mocks/Replay für Reorder, FEC-Verlust, unvollständige Frames, Duplicate, Fork, nicht ausgeführte TX, ALT und Backpressure. Danach nur explizit genehmigte kurze read-only Mainnet-Proben. Auf identischem Host und mit monotonen Timestamps je tatsächlich paarbarem Signatur-/Slot-/Fork-Ereignis `T_pre` gegen autoritative TX-/Account-Zeitpunkte messen: p50/p95/p99, Coverage, Fehltrigger, Gaps, Recovery und real eingesparte Vorbereitungslatenz. Ein Vorsprung beim Datenempfang beweist weder Race-Win noch Gewinn. Ohne belegten Zusatznutzen bleibt dies `DEFERRED_PRIORITY` oder `EXTERNAL_BLOCKED`, nicht Produkt-Sperre. Kein neues Hauptprojekt und keine Unterbrechung bestehender Phasen.
 
 ### K-INGRESS-RAW
 
@@ -4202,7 +4219,7 @@ S1-04 Long-Tail/Premium snapshot+reconcile
 S1-05 binary fast lane/queues
 S1-06 v1 fidelity
 S1-07 reconnect/gap/reconcile
-S1-08 Mainnet binary source + cost qualification
+S1-08 FREE_ONLY Mainnet binary source + PublicNode capability/coverage/quota/latency qualification (reale Evidence NOT_RUN)
 
 S2-01 canonical state
 S2-02 fork/root
