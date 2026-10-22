@@ -1673,6 +1673,8 @@ Long-Tail/Premium-LIVE = DARF WEITERLAUFEN
 
 **Erster FREE_ONLY-Mainnet-Kandidat:** PublicNode Yellowstone-gRPC (`https://solana.publicnode.com/`, laut Anbieter kostenloser API-Token). Tatsächlicher Zugang für benötigte Accounts, Transactions, Slots, Roots, Filter und Laufzeit-/Datenrate ist **NOT_RUN**, nicht S1-RACE PASS. Andere nachweislich kostenlose Binary-Feeds bleiben austauschbar. Keine automatische Paid-Alternative.
 
+**Versionen/Pin-Vertrag:** Für `SubscribeDeshred` ist `yellowstone-grpc-client` **ab 13.2.0** als API-Baseline belegt (Changelog 2026-07-02); die tatsächliche Client-/Proto-Version wird vor Implementierung nach Kompatibilitätsprüfung **exakt in Cargo.lock** fixiert und gegen den ausgewählten Server getestet. Das Open-Source-Geyser-Plugin implementiert `SubscribeDeshred` ab **14.0.0**; für korrekt aufgelöste ALT-Adressen in Deshred-TXs ist die **14.2.0-Korrektur** vom 2026-07-08 oder ein nachgewiesen gleichwertiger Backport nötig. Quell-/Versionsbeleg: [`yellowstone-grpc`-Changelog, Commit `2a548669`](https://github.com/rpcpool/yellowstone-grpc/blob/2a5486693a7ccf900ff7ccc2de1e6c6570899245/CHANGELOG.md). Der geprüfte Quellstand verwendet Agave **4.3.2**; keine stillschweigende Gleichsetzung mit dem tatsächlich eingesetzten Provider-Server. Serverversion, API-/Proto-Fidelity, ALT-/v0/v1-Verhalten und Fork-/`bank_id`-Abdeckung einzeln qualifizieren; inkompatibel/ungewiss = NOT_RUN/BLOCKED. Keine ungeprüfte Übernahme alter `eva01`-Pins.
+
 **Offline zuerst:** Versionierte Protobuf-Fixtures und lokale gRPC-Mocks für Accounts, TXs, Slots/Roots, `write_version`, Bank-/Fork-Provenienz (`bank_id`, sofern geliefert), ALT/v0/v1, korrekte Reihenfolge, Duplicate, Gap, Replay/`from_slot` nur nach Source-Capability, Reconnect und Backpressure. Nicht hinreichend unterscheidbare Fork-/Bank-Kontexte als UNKNOWN/HALT behandeln, niemals stillschweigend kanonisieren. Kein JSON im Hot-Path, keine neue Engine und kein blockierendes Owner-IO.
 
 **Spätere Live-Quellenqualifikation nur nach separater read-only Freigabe:** Vorab eng begrenztes Zeit-/Request-/Bytebudget und Provider-Quoten festlegen; TLS/Auth, Stream-/Filterfähigkeiten, `SubscribeDeshred` separat, Quota/429, Lücken/Recovery und reale Datenvollständigkeit prüfen. API-Token ausschließlich lokal geheim halten; redigierte Evidence im vorhandenen Journal/Qualifikationspfad führen, keinen neuen Primärspeicher.
@@ -4001,7 +4003,7 @@ prüfen, in dieser Reihenfolge:
 
 **Quellenstand 2026-10-22 – serverseitige Fähigkeit prüfen:** Das offizielle Yellowstone-Changelog belegt die Open-Source-Implementierung von `SubscribeDeshred` seit 2026-07-02 (geyser 14.0.0), während die README teils weiterhin Triton-only/`UNIMPLEMENTED` angibt. Implementierter Open-Source-Code **beweist nicht**, dass der konkret ausgewählte PublicNode-Server diesen RPC aktiviert oder kostenlos erlaubt. `UNIMPLEMENTED`, fehlende Berechtigung/Quota und unvollständige ALT-/Fork-Fidelity getrennt protokollieren; keine unbelegte Capability als PASS.
 
-Referenzen: `https://github.com/rpcpool/yellowstone-grpc/blob/master/CHANGELOG.md` und `https://github.com/rpcpool/yellowstone-grpc/blob/master/README.md`. `SubscribeDeshred` bleibt optionale K-INGRESS-PRE-Beschleunigung, keine S1-RACE-Ersatzquelle und keine Voraussetzung für die Produktentwicklung.
+**Gepinnte Quellen (Stand `2a548669`, 2026-10-20):** [CHANGELOG](https://github.com/rpcpool/yellowstone-grpc/blob/2a5486693a7ccf900ff7ccc2de1e6c6570899245/CHANGELOG.md) und [README](https://github.com/rpcpool/yellowstone-grpc/blob/2a5486693a7ccf900ff7ccc2de1e6c6570899245/README.md). Geyser 14.0.0 implementiert `SubscribeDeshred`, Geyser 14.2.0 behebt fehlende Deshred-ALT-Auflösung; PublicNode-Capability weiterhin NOT_RUN. `SubscribeDeshred` bleibt optionale K-INGRESS-PRE-Beschleunigung, keine S1-RACE-Ersatzquelle und keine Voraussetzung für die Produktentwicklung.
 
 Wenn wirtschaftlich verfügbar, ist seine Rolle ausschließlich:
 
@@ -4041,7 +4043,7 @@ Nur bei messbarem Netto-Mehrwert.
 
 ### K-INGRESS-PRE FREE_ONLY-Alternativen: PublicNode Deshred und LocalShred Lite (2026-10-22)
 
-**Rangfolge:** (1) Nach S1-Adapter-/Offline-Arbeit `SubscribeDeshred` am kostenlosen PublicNode-Yellowstone-Zugang auf tatsächliche Freischaltung/Filter/ALT/Quoten prüfen. (2) Als unabhängige Alternative `LocalShred Lite` von DedicatedNodes (`https://www.dedicatednodes.io/localshred/`) prüfen: laut Anbieter kostenlos, kein DedicatedNodes-Server erforderlich, Amsterdam als Ausgangspunkt; Zugang/Whitelist, Verfügbarkeit, Limits und Latenz noch NICHT QUALIFIZIERT. Anbieter-eigene Millisekundenwerte sind keine Project_0-Evidence.
+**Rangfolge (Tickets `K-02` und `K-02b`):** (1) Nach S1-Adapter-/Offline-Arbeit `SubscribeDeshred` am kostenlosen PublicNode-Yellowstone-Zugang auf tatsächliche Freischaltung/Filter/ALT/Quoten prüfen. (2) Als unabhängige Alternative `LocalShred Lite` von DedicatedNodes (`https://www.dedicatednodes.io/localshred/`) prüfen: laut Anbieter kostenlos, kein DedicatedNodes-Server erforderlich, Amsterdam als Ausgangspunkt; Zugang/Whitelist, Verfügbarkeit, Limits und Latenz noch NICHT QUALIFIZIERT. Anbieter-eigene Millisekundenwerte sind keine Project_0-Evidence.
 
 **Netz:** UDP-Shreds setzen real erreichbare öffentliche Empfänger-IPv4, funktionierenden UDP-Port, NAT-/Router-/Firewall-Konfiguration und eine Anbieter-Freischaltung voraus; eine per HTTP sichtbare öffentliche IPv4 genügt als Beweis nicht. Lokale vorhandene Hardware zuerst; kein automatisch gebuchter VPS, Business-Vertrag, Paid-Feed oder Hosting. Eigene Validatorinfrastruktur bleibt eine separate kosten-/messungsgebundene K-Entscheidung.
 
@@ -4334,8 +4336,9 @@ P9-03 inventory review
 P9-04 protocol-upgrade watch
 
 K-01 ingress loss attribution
-K-02 SubscribeDeshred economic/access qualification
-K-03 raw-shred/validator escalation only if justified
+K-02 SubscribeDeshred economic/access qualification (optional pre-execution sensor)
+K-02b LocalShred Lite FREE_ONLY UDP feed: access/whitelist, IPv4/port, open-source decoder, fidelity and pre-execution value (optional; no own validator)
+K-03 own raw-shred/validator infrastructure escalation only if justified (distinct from K-02b provider UDP feed)
 K-04 Jito/region optimization
 K-05 DirectTPU SWQoS/stake qualification
 K-06 DirectTPU build only if qualification passes
@@ -4540,7 +4543,7 @@ Fable soll diese Review-Fassung **nicht nur sprachlich**, sondern technisch gege
 ## A — Ingress
 
 - Ist v4.2-S1 weiterhin korrekt: Race=BinaryGeyser, Long-Tail/Premium=WSS+Snapshot/Reconcile?
-- Ist `SubscribeDeshred` korrekt als Triton-spezifischer optionaler K-Sensor eingeordnet?
+- Ist `SubscribeDeshred` in der geprüften Open-Source-Version implementiert, und welche tatsächlichen Server-/Provider-Capabilities, ALT-Fidelity, Freischaltungen und FREE_ONLY-Limits sind beim gewählten Endpunkt belegt? Ist der Sensor weiterhin ausschließlich optional in K eingeordnet?
 - Ist `SubscribeDeshred` tatsächlich pre-execution und nicht authoritative/canonical?
 - Gibt es aktuell bessere/kostenlose Mainnet-Binary-Quellen, die S1-RACE ohne Paid-Abo ermöglichen?
 
@@ -4606,8 +4609,9 @@ S1-RACE qualification
 **K-Research, Capability-Checks und Messentscheidungen bleiben verpflichtend.** Der produktive Ausbau einer K-Technik erfolgt weiterhin nur bei belegtem Bottleneck/Mehrwert, Machbarkeit, Safety und FREE_ONLY (insbesondere keine neuen kostenpflichtigen Nodes):
 
 ```text
-K SubscribeDeshred — prüfen und messen
-K Raw Shred — prüfen und messen
+K-02 SubscribeDeshred — Provider-Capability und Zusatznutzen prüfen und messen
+K-02b LocalShred Lite — kostenlosen UDP-Zugang, Decoder und Zusatznutzen prüfen und messen
+K-03 eigener Raw-Shred-/Validatorpfad — nur nach nachgewiesenem Engpass bewerten
 K Direct TPU + SWQoS/stake path — technische/ökonomische Qualifikation
 K own validator/node/region/kernel/NIC — bewerten, unter FREE_ONLY keine Paid-Pflicht
 ```
