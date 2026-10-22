@@ -68,8 +68,8 @@ pub mod p0 {
         base?.checked_add(rent?)
     }
 
-    /// B15: collateral a plan leaves in the wallet, valued like the seized amount itself
-    /// (`Sizing::seized_equity_value`: protocol equity price of the exact `withdraw_amount`).
+    /// B15: collateral a plan leaves in the wallet, valued conservatively
+    /// (`Sizing::seized_hold_value` of the exact `withdraw_amount`).
     /// Inventory classes keep the whole withdrawal.
     /// N7 (stage 1): ZERO_PREFUND and flash-funded plans hold the full seized value too. That
     /// their in-TX swap/repayment leaves nothing behind is not proven from the real token flows
@@ -81,8 +81,18 @@ pub mod p0 {
             | FundingClass::PreheldInventory
             | FundingClass::JitShortfall
             | FundingClass::ZeroPrefundSameTx
-            | FundingClass::FlashFunded => sz.seized_equity_value,
+            | FundingClass::FlashFunded => sz.seized_hold_value,
         }
+    }
+
+    /// B15: the hold value of a seizure — its conservative price (high bias, the larger of EMA
+    /// and spot, rounded up), never below the protocol equity value; an unknown price is a hold
+    /// no inventory limit admits.
+    pub(crate) fn conservative_hold_usd_micro(
+        equity: u64,
+        conservative: Result<u64, String>,
+    ) -> u64 {
+        conservative.map_or(u64::MAX, |v| v.max(equity))
     }
 
     /// Protocol-Sizing für ein Asset×Liability-Paar. Markt-Realisierbarkeit gehört nicht hierher.
@@ -94,6 +104,8 @@ pub mod p0 {
         pub repay_amount: u64,
         pub repay_all: bool,
         pub seized_equity_value: u64, // USD-Micro, Protocol/EMA only
+        /// B15: USD-Micro, conservative value of the seizure (`conservative_hold_usd_micro`).
+        pub seized_hold_value: u64,
         /// Actual economic value of the SPL amount transferred for repayment.
         pub repay_value: u64, // USD-Micro
         pub liability_needed_value: u64, // USD-Micro
@@ -201,6 +213,15 @@ pub mod p0 {
                     repay_amount: sz.repay_amount,
                     repay_all: sz.repay_all,
                     seized_equity_value: sz.seized_equity_value_micro,
+                    seized_hold_value: conservative_hold_usd_micro(
+                        sz.seized_equity_value_micro,
+                        sizer.native_amount_conservative_cost_usd_micro(
+                            &sz.asset_bank,
+                            sz.withdraw_amount,
+                            now_unix_s as i64,
+                            slot,
+                        ),
+                    ),
                     // [FIX-128] Economics/funding pay the actual SPL transfer. EndLiquidation
                     // premium/health parity is already encoded in premium_bps by ProtocolSizer.
                     repay_value: sz.repay_transfer_value_micro,
@@ -1538,6 +1559,7 @@ pub mod p0 {
                 repay_amount,
                 repay_all: false,
                 seized_equity_value: 0,
+                seized_hold_value: 0,
                 repay_value,
                 liability_needed_value: repay_value,
                 liability_inventory_value: 0,
@@ -1825,6 +1847,7 @@ pub mod p0 {
                         repay_amount: 500,
                         repay_all: false,
                         seized_equity_value: 1_050,
+                        seized_hold_value: 1_100,
                         repay_value: 500,
                         liability_needed_value: 500,
                         liability_inventory_value: 10_000,
@@ -2442,9 +2465,9 @@ pub mod p0 {
             assert_eq!(
                 holds,
                 [
-                    (FundingClass::NoSwapInventory, 1_050),
-                    (FundingClass::PreheldInventory, 1_050),
-                    (FundingClass::ZeroPrefundSameTx, 1_050),
+                    (FundingClass::NoSwapInventory, 1_100),
+                    (FundingClass::PreheldInventory, 1_100),
+                    (FundingClass::ZeroPrefundSameTx, 1_100),
                 ]
             );
         }
@@ -2571,17 +2594,25 @@ pub mod p0 {
         fn b15_inventory_hold_is_the_sized_seized_collateral() {
             let mut sz = sizing(950, 950);
             sz.seized_equity_value = 1_234_567;
+            sz.seized_hold_value = 1_300_000;
             for class in [
                 FundingClass::NoSwapInventory,
                 FundingClass::PreheldInventory,
                 FundingClass::JitShortfall,
             ] {
-                assert_eq!(inventory_hold_usd_micro(class, &sz), 1_234_567, "{class:?}");
+                assert_eq!(inventory_hold_usd_micro(class, &sz), 1_300_000, "{class:?}");
             }
             // N7 stage 1: the in-TX classes are not proven to leave nothing behind: full hold.
             for class in [FundingClass::ZeroPrefundSameTx, FundingClass::FlashFunded] {
-                assert_eq!(inventory_hold_usd_micro(class, &sz), 1_234_567, "{class:?}");
+                assert_eq!(inventory_hold_usd_micro(class, &sz), 1_300_000, "{class:?}");
             }
+            // The conservative value, never below equity; an unknown price fits no limit.
+            assert_eq!(conservative_hold_usd_micro(1_000, Ok(1_200)), 1_200);
+            assert_eq!(conservative_hold_usd_micro(1_000, Ok(999)), 1_000);
+            assert_eq!(
+                conservative_hold_usd_micro(1_000, Err("stale".into())),
+                u64::MAX
+            );
         }
 
         #[test]

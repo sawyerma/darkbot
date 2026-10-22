@@ -376,6 +376,7 @@ pub(super) fn prepare(
             })?;
     let limits = Limits {
         max_total_capital: config::parsed_or("P0_MAX_TOTAL_CAPITAL", 0)?,
+        // USD-micro, conservative hold values (B15).
         max_outstanding_inventory: config::parsed_or("P0_MAX_INVENTORY", 0)?,
         max_concurrent_positions: config::parsed_or("P0_MAX_CONCURRENT", 1)?,
         max_exposure_per_attempt: config::parsed_or("P0_MAX_EXPOSURE", 0)?,
