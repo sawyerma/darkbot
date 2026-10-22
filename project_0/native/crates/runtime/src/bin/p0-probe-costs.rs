@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ],
                 data,
             }],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 1_400_000,
                 priority_micro_lamports_per_cu: price,

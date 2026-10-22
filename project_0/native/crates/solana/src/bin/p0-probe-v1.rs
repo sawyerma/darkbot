@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             version: BuildVersion::V1,
             payer: payer.pubkey(),
             instructions,
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 1_400_000,
                 priority_micro_lamports_per_cu: 0,

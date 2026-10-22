@@ -300,7 +300,7 @@ pub mod run {
             version: BuildVersion::V0,
             payer: inp.liquidator,
             instructions: ixs.clone(),
-            lookup_tables: inp.route_lookup_tables.clone(),
+            lookup_tables: inp.route_lookup_tables.clone().into(),
             resources,
         };
         match tx::build(&v0, Hash::default(), limits) {
@@ -330,7 +330,7 @@ pub mod run {
             version: BuildVersion::V1,
             payer: inp.liquidator,
             instructions: ixs.clone(),
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources,
         };
         match tx::measure_v1(&v1, Hash::default(), limits) {

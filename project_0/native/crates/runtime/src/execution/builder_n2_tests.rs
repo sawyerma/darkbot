@@ -651,7 +651,7 @@ fn e9_projection_simulation_is_not_older_than_its_inputs() {
                 accounts: vec![],
                 data: vec![1],
             }],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 0,

@@ -191,7 +191,7 @@ impl ShadowOwner {
                                 version: tx::BuildVersion::V0,
                                 payer: self.liquidator,
                                 instructions: refreshes,
-                                lookup_tables: vec![],
+                                lookup_tables: vec![].into(),
                                 resources: self.resources,
                             };
                             let mut built =

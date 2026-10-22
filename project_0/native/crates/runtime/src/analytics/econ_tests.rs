@@ -825,7 +825,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             slippage_bps: 0,
             assets: vec![],
             tx_version: darkbot_solana::tx::BuildVersion::V0,
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             prerequisite_txs: vec![],
         }])
     }

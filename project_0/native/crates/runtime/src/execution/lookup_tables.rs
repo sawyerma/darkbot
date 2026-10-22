@@ -66,17 +66,23 @@ pub fn from_state<S: AccountSource + ?Sized>(
 
 /// State-backed protocol tables take precedence on duplicate keys. Any omitted
 /// newer entries remain static, preserving the compiler's index/address mapping.
+/// The protocol tables plus every route table they do not already contain (by key). B14: without
+/// a new table the protocol plan itself is shared, not copied.
 pub fn merge(
-    protocol: &[AddressLookupTableAccount],
+    protocol: &std::sync::Arc<[AddressLookupTableAccount]>,
     route: &[AddressLookupTableAccount],
-) -> Vec<AddressLookupTableAccount> {
+) -> std::sync::Arc<[AddressLookupTableAccount]> {
+    let new = |table: &&AddressLookupTableAccount| !protocol.iter().any(|t| t.key == table.key);
+    if !route.iter().any(|t| new(&t)) {
+        return protocol.clone();
+    }
     let mut merged = protocol.to_vec();
     for table in route {
         if !merged.iter().any(|t| t.key == table.key) {
             merged.push(table.clone());
         }
     }
-    merged
+    merged.into()
 }
 
 #[cfg(test)]
@@ -134,8 +140,18 @@ mod tests {
         let table = decode(Pubkey::new_unique(), owner, &data, 101).unwrap();
         let mut conflicting = table.clone();
         conflicting.addresses.reverse();
-        let tables = merge(std::slice::from_ref(&table), &[conflicting]);
+        let protocol: std::sync::Arc<[AddressLookupTableAccount]> = vec![table.clone()].into();
+        let tables = merge(&protocol, &[conflicting]);
         assert_eq!(tables.len(), 1);
+        // B14: a route without a new table shares the protocol plan; a new one extends a copy.
+        assert!(std::sync::Arc::ptr_eq(&tables, &protocol));
+        let extra = AddressLookupTableAccount {
+            key: Pubkey::new_unique(),
+            addresses: vec![],
+        };
+        let extended = merge(&protocol, std::slice::from_ref(&extra));
+        assert_eq!((extended.len(), &extended[1]), (2, &extra));
+        assert_eq!(protocol.len(), 1);
         assert_eq!(tables[0].addresses, table.addresses);
         let mut plan = TxPlan {
             version: BuildVersion::V0,
@@ -149,7 +165,7 @@ mod tests {
                     .collect(),
                 data: vec![],
             }],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 1_400_000,
                 priority_micro_lamports_per_cu: 0,

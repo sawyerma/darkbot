@@ -82,7 +82,8 @@ pub struct TxPlan {
     pub version: BuildVersion,
     pub payer: Pubkey,
     pub instructions: Vec<Instruction>,
-    pub lookup_tables: Vec<AddressLookupTableAccount>,
+    /// B14: shared, not copied, between a plan and its builds.
+    pub lookup_tables: std::sync::Arc<[AddressLookupTableAccount]>,
     pub resources: Resources,
 }
 
@@ -136,7 +137,7 @@ pub fn v1_build_capability() -> bool {
                 &payer.pubkey(),
                 0,
             )],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 0,
@@ -676,7 +677,7 @@ mod tests {
             version,
             payer: payer.pubkey(),
             instructions: instructions.clone(),
-            lookup_tables: tables,
+            lookup_tables: tables.into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 5,
@@ -791,7 +792,7 @@ mod tests {
                 &payer.pubkey(),
                 0,
             )],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 0,
@@ -881,7 +882,7 @@ mod tests {
                 &payer.pubkey(),
                 0,
             )],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 0,
@@ -973,7 +974,7 @@ mod tests {
                 &[],
                 vec![],
             )],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 5_000,
@@ -994,7 +995,7 @@ mod tests {
             version: BuildVersion::V0,
             payer,
             instructions: vec![Instruction::new_with_bytes(prog, &[], metas)],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 1,
                 priority_micro_lamports_per_cu: 0,
@@ -1021,7 +1022,7 @@ mod tests {
                 version: BuildVersion::V1,
                 payer: Pubkey::new_unique(),
                 instructions: vec![],
-                lookup_tables: vec![],
+                lookup_tables: vec![].into(),
                 resources: Resources {
                     compute_unit_limit: 1,
                     priority_micro_lamports_per_cu: 0,
@@ -1047,7 +1048,7 @@ mod tests {
                 &[1, 2, 3],
                 vec![AccountMeta::new(Pubkey::new_unique(), false)],
             )],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 5_000,

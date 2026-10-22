@@ -176,7 +176,8 @@ pub struct ReceivershipPlan {
     pub inventory_hold_usd_micro: u64,
     /// TX-Klasse ist Bestandteil des Execution-Candidates; v0 kann Route-LUTs nutzen.
     pub tx_version: BuildVersion,
-    pub lookup_tables: Vec<AddressLookupTableAccount>,
+    /// B14: shared with every build of this plan.
+    pub lookup_tables: std::sync::Arc<[AddressLookupTableAccount]>,
     /// [FIX-3] Vorab-TXs im Bundle (JIT_SHORTFALL: Buy-TX). Dürfen weder Start noch End enthalten;
     /// Receivership bleibt eine eigene TX mit End als letzter Ix.
     pub prerequisite_txs: Vec<Vec<Instruction>>,
@@ -1121,7 +1122,7 @@ mod plan_error_tests {
             version: BuildVersion::V0,
             payer: tx::payer_of(&payer),
             instructions: validated.clone(),
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: Resources {
                 compute_unit_limit: 200_000,
                 priority_micro_lamports_per_cu: 1,

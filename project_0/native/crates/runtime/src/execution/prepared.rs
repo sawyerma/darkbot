@@ -39,7 +39,7 @@ pub struct Skeleton {
 /// What every dependency was at preparation: absent, or exactly this owner, lamports and data.
 type Snapshot = Vec<(Pubkey, Option<(Pubkey, u64, Box<[u8]>)>)>;
 
-struct Entry<T> {
+struct Entry<T: ?Sized> {
     schema: u32,
     context: Context,
     slot: u64,
@@ -47,7 +47,7 @@ struct Entry<T> {
     value: Arc<T>,
 }
 
-impl<T> Entry<T> {
+impl<T: ?Sized> Entry<T> {
     fn holds<S: AccountSource + ?Sized>(&self, state: &S, context: &Context, slot: u64) -> bool {
         self.schema == SCHEMA
             && self.context == *context
@@ -111,7 +111,7 @@ pub struct PreparedCache {
     pinned: Vec<Pubkey>,
     skeletons: HashMap<Pubkey, Entry<Skeleton>>,
     order: VecDeque<Pubkey>,
-    luts: Option<Entry<Vec<AddressLookupTableAccount>>>,
+    luts: Option<Entry<[AddressLookupTableAccount]>>,
     pub stats: Stats,
 }
 
@@ -188,22 +188,24 @@ impl PreparedCache {
         context: Context,
         slot: u64,
         plan: impl Fn(&Recording<'_, S>, u64) -> Vec<AddressLookupTableAccount>,
-    ) -> Vec<AddressLookupTableAccount> {
+    ) -> Arc<[AddressLookupTableAccount]> {
         if let Some(e) = &self.luts {
             if e.holds(state, &context, slot) {
                 self.stats.hits += 1;
-                return e.value.as_ref().clone();
+                return e.value.clone();
             }
         }
         self.stats.misses += 1;
         let rec = Recording::new(state);
         let now = plan(&rec, slot);
-        self.luts = (now == plan(&rec, u64::MAX)).then(|| Entry {
+        let settled = now == plan(&rec, u64::MAX);
+        let now: Arc<[AddressLookupTableAccount]> = now.into();
+        self.luts = settled.then(|| Entry {
             schema: SCHEMA,
             context,
             slot,
             deps: rec.snapshot(&self.pinned),
-            value: Arc::new(now.clone()),
+            value: now.clone(),
         });
         now
     }
@@ -337,13 +339,13 @@ mod tests {
             |_: &Recording<'_, Map>, slot: u64| vec![table(if slot > 20 { 2 } else { 1 })];
         for slot in [10, 10, 20] {
             assert_eq!(
-                cache.lookup_tables(&state, ctx, slot, extending),
+                *cache.lookup_tables(&state, ctx, slot, extending),
                 [table(1)]
             );
         }
         assert_eq!((cache.stats.hits, cache.stats.misses), (0, 3));
-        assert_eq!(cache.lookup_tables(&state, ctx, 21, extending), [table(2)]);
-        assert_eq!(cache.lookup_tables(&state, ctx, 22, extending), [table(2)]);
+        assert_eq!(*cache.lookup_tables(&state, ctx, 21, extending), [table(2)]);
+        assert_eq!(*cache.lookup_tables(&state, ctx, 22, extending), [table(2)]);
         assert_eq!((cache.stats.hits, cache.stats.misses), (1, 4));
     }
 }

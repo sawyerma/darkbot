@@ -1144,7 +1144,8 @@ pub mod p0 {
                     (luts, prep)
                 }
                 None => (
-                    crate::execution::lookup_tables::from_state(self.state, &self.group, slot),
+                    crate::execution::lookup_tables::from_state(self.state, &self.group, slot)
+                        .into(),
                     std::sync::Arc::new(prepare_skeleton(
                         self.state,
                         &self.program,
@@ -1444,7 +1445,7 @@ pub mod p0 {
                                             slippage_bps: sz.slippage_bps,
                                             assets: vec![asset_mint, liab_mint],
                                             tx_version: BuildVersion::V1,
-                                            lookup_tables: vec![],
+                                            lookup_tables: vec![].into(),
                                             prerequisite_txs: vec![],
                                         });
                                     }
@@ -2189,6 +2190,20 @@ pub mod p0 {
             });
             measure("plans_build_uncached", &|| build(uncached()));
             measure("plans_build_cached", &|| build(cached()));
+            // B14: the published mainnet LUT plan shape (5 tables x 256 addresses), per copy.
+            let mainnet: Vec<AddressLookupTableAccount> = (0..5)
+                .map(|_| AddressLookupTableAccount {
+                    key: Pubkey::new_unique(),
+                    addresses: (0..256).map(|_| Pubkey::new_unique()).collect(),
+                })
+                .collect();
+            let shared: std::sync::Arc<[AddressLookupTableAccount]> = mainnet.clone().into();
+            measure("lut_plan_vec_clone_5x256", &|| {
+                black_box(mainnet.clone());
+            });
+            measure("lut_plan_arc_clone_5x256", &|| {
+                black_box(shared.clone());
+            });
             let s = cache.borrow().stats;
             println!("P2_07_BENCH cache hits={} misses={}", s.hits, s.misses);
         }
@@ -2771,7 +2786,7 @@ pub mod p0 {
                     version: BuildVersion::V0,
                     payer: Pubkey::new_unique(),
                     instructions: route.instructions.clone(),
-                    lookup_tables: route.lookup_tables.clone(),
+                    lookup_tables: route.lookup_tables.clone().into(),
                     resources: Resources {
                         compute_unit_limit: 1_400_000,
                         priority_micro_lamports_per_cu: 0,

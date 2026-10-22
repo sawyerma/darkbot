@@ -765,7 +765,7 @@ fn e9_projection_results_drive_the_bounded_requeue() {
                 accounts: vec![],
                 data: vec![1],
             }],
-            lookup_tables: vec![],
+            lookup_tables: vec![].into(),
             resources: f.owner.resources,
         },
         solana_sdk::hash::Hash::new_unique(),
