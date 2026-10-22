@@ -390,7 +390,7 @@ pub(super) fn prepare(
     let eval_slippage_bps = limits.max_slippage_bps;
     let mut allow = Allow::default();
     allow.execution_classes.insert("longtail");
-    let safety = Safety::new(limits, allow, false);
+    let mut safety = Safety::new(limits, allow, false);
     // [FIX-25] Semantische Kategorien getrennt; die globale Top-Level-Allowlist prüft die Pipeline separat.
     let mut allowlist = Allowlist::default();
     for s in [
@@ -796,7 +796,14 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let mt0_order_rx: VecDeque<u64> = VecDeque::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
-    let (reservations, fe04_journal) = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?;
+    let fe04 = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?;
+    // B3: a durable attempt halts the safety layer and keeps its capital reserved.
+    if let Some(replay) = fe04.replay {
+        safety
+            .restore_attempt(replay.held_capital_usd_micro)
+            .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
+    }
+    let (reservations, fe04_journal) = (fe04.book, fe04.dir);
     let inventory_targets = crate::execution::inventory::parse_targets(
         &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
@@ -978,26 +985,36 @@ pub(super) fn prepare(
 /// P2-07: bound of the prepared candidate cache (templates with their dependency bytes).
 const PREPARED_CANDIDATES: usize = 1024;
 
+/// P8-RES-02/B3: what the durable FE-04 journal implies at startup — the reservation book, the
+/// journal directory it is refreshed from and the safety replay.
+pub(super) struct Fe04Start {
+    pub(super) book: crate::execution::reservation::WalletReservations,
+    pub(super) dir: Option<std::path::PathBuf>,
+    pub(super) replay: Option<crate::execution::one_shot::SafetyReplay>,
+}
+
 pub(super) fn reservation_book(
     get: &dyn Fn(&str) -> Option<String>,
     liquidator: &Pubkey,
-) -> Result<
-    (
-        crate::execution::reservation::WalletReservations,
-        Option<std::path::PathBuf>,
-    ),
-    String,
-> {
+) -> Result<Fe04Start, String> {
     let Some(dir) = get("P0_FE04_JOURNAL_DIR").filter(|v| !v.trim().is_empty()) else {
-        return Ok((Default::default(), None));
+        return Ok(Fe04Start {
+            book: Default::default(),
+            dir: None,
+            replay: None,
+        });
     };
     let dir = std::path::PathBuf::from(dir);
-    let book = crate::execution::reservation::WalletReservations::from_fe04_journal(
+    let (book, replay) = crate::execution::reservation::WalletReservations::replay_fe04_journal(
         &dir,
         &liquidator.to_string(),
     )
     .map_err(|e| format!("RESERVATION_JOURNAL_UNREADABLE: {e}"))?;
-    Ok((book, Some(dir)))
+    Ok(Fe04Start {
+        book,
+        dir: Some(dir),
+        replay,
+    })
 }
 
 /// L4: both zero-prefund flags are parsed strictly (an invalid value is a start error, never a
@@ -1087,15 +1104,21 @@ mod cluster_tests {
     #[test]
     fn fe04_reservation_book_is_optional_and_starts_empty_without_a_journal() {
         let liquidator = Pubkey::new_unique();
-        let (book, dir) = reservation_book(&|_| None, &liquidator).unwrap();
-        assert_eq!((book.held("SOL"), dir), (0, None));
+        let start = reservation_book(&|_| None, &liquidator).unwrap();
+        assert_eq!(
+            (start.book.held("SOL"), start.dir, start.replay),
+            (0, None, None)
+        );
         let tmp = std::env::temp_dir().join(format!("p0_fe04_book_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let path = tmp.to_string_lossy().to_string();
         let lookup = |k: &str| (k == "P0_FE04_JOURNAL_DIR").then(|| path.clone());
-        let (book, dir) = reservation_book(&lookup, &liquidator).unwrap();
-        assert_eq!((book.held("SOL"), dir), (0, Some(tmp.clone())));
+        let start = reservation_book(&lookup, &liquidator).unwrap();
+        assert_eq!(
+            (start.book.held("SOL"), start.dir, start.replay),
+            (0, Some(tmp.clone()), None)
+        );
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

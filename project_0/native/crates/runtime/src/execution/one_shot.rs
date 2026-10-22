@@ -86,6 +86,12 @@ pub struct Current {
     pub bundle_simulated: bool,
 }
 
+/// B3: the safety state a durable FE-04 journal implies after a restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SafetyReplay {
+    pub held_capital_usd_micro: Option<u64>,
+}
+
 /// A durable FE-04 hold that is not finalized (P8-RES-02).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveHold {
@@ -518,6 +524,15 @@ impl Journal {
                 unknown_outcome: s.phase == Phase::HandoffUnknown,
                 holds: s.intent.holds.clone(),
             })
+    }
+    /// B3: what the safety layer replays after a restart — `None` without any attempt; with one,
+    /// the one-shot is consumed and its realized PnL is not booked (C3), so its HALT is sticky,
+    /// and until it is finalized it still binds its capital.
+    pub fn safety_replay(&self) -> Option<SafetyReplay> {
+        self.saved.as_ref().map(|s| SafetyReplay {
+            held_capital_usd_micro: (s.phase != Phase::HaltFinalized)
+                .then_some(s.intent.capital_usd_micro),
+        })
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
         self.saved
@@ -1096,6 +1111,77 @@ mod tests {
         drop(j);
         let released = WalletReservations::refreshed(&path, &a.wallet);
         assert_eq!((released.held("SOL"), released.is_unreadable()), (0, false));
+        fs::remove_dir_all(&path).unwrap();
+    }
+
+    /// B3: after a restart the safety layer replays the durable attempt — a crashed reserved or
+    /// UNKNOWN attempt halts it and keeps its capital and slot; a finalized one halts it without
+    /// capital (its PnL is not booked); without a journal nothing changes.
+    #[test]
+    fn b3_safety_replays_the_durable_attempt_after_restart() {
+        use crate::execution::reservation::WalletReservations;
+        use darkbot_common::error::HaltReason;
+        use darkbot_project0::safety::{Allow, Deny, Limits, Safety};
+        let (path, a, i, c) = setup();
+        let replay = || {
+            WalletReservations::replay_fe04_journal(&path, &a.wallet)
+                .unwrap()
+                .1
+        };
+        let restored = |replay: Option<SafetyReplay>| {
+            let limits = Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: 9,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: 9,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: 9,
+            };
+            let mut allow = Allow::default();
+            allow.execution_classes.insert("longtail");
+            let mut s = Safety::new(limits, allow, true);
+            if let Some(r) = replay {
+                s.restore_attempt(r.held_capital_usd_micro).unwrap();
+            }
+            let admitted = s.preview(0, 1, 0, 0, 0, &[], "longtail");
+            (s.halted(), s.capital_in_use(), admitted)
+        };
+        assert_eq!(replay(), None);
+        assert_eq!(restored(None), (None, 0, Ok(())));
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        drop(j); // crash before the handoff
+        let unknown = Deny::Halted(HaltReason::UnknownEconomics);
+        let held = Some(SafetyReplay {
+            held_capital_usd_micro: Some(i.capital_usd_micro),
+        });
+        assert_eq!(replay(), held);
+        assert_eq!(
+            restored(replay()),
+            (
+                Some(HaltReason::UnknownEconomics),
+                i.capital_usd_micro,
+                Err(unknown)
+            )
+        );
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reconcile(vec![Receipt {
+            signature: i.signatures[0].clone(),
+            finalized: true,
+            success: true,
+            fee_lamports: Some(20),
+            wallet_deltas: Some([("SOL".into(), -20)].into_iter().collect()),
+            exit_complete: true,
+        }])
+        .unwrap();
+        drop(j);
+        assert_eq!(
+            restored(replay()),
+            (Some(HaltReason::UnknownEconomics), 0, Err(unknown))
+        );
         fs::remove_dir_all(&path).unwrap();
     }
 

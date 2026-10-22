@@ -126,6 +126,30 @@ impl Safety {
         self.halted
     }
 
+    /// B3: replays a durable one-shot attempt after a restart (the FE-04 journal is the only
+    /// store): its economics are not booked, so the layer halts (sticky, no auto-reset); until it
+    /// is finalized its capital and its attempt/position slot stay reserved. Nothing is released.
+    #[must_use = "a ledger violation halts the safety layer; the caller must surface it"]
+    pub fn restore_attempt(&mut self, held_capital: Option<u64>) -> Result<(), LedgerViolation> {
+        self.halt(HaltReason::UnknownEconomics);
+        let Some(capital) = held_capital else {
+            return Ok(());
+        };
+        let next = (|| {
+            Some((
+                self.outstanding.checked_add(1)?,
+                self.open_positions.checked_add(1)?,
+                self.capital_in_use.checked_add(capital)?,
+            ))
+        })();
+        let (outstanding, open, capital) =
+            self.violation(next.ok_or(LedgerViolation::CounterOverflow))?;
+        self.outstanding = outstanding;
+        self.open_positions = open;
+        self.capital_in_use = capital;
+        Ok(())
+    }
+
     /// Q2: the day's realized loss reached the limit — `-pnl >= max` without negating the PnL,
     /// which overflows at `i128::MIN` (a release build would wrap it and never halt).
     fn daily_loss_reached(&self) -> bool {
@@ -419,6 +443,50 @@ mod tests {
         let mut a = Allow::default();
         a.execution_classes.insert("longtail");
         a
+    }
+
+    /// B3: a replayed attempt halts (sticky, first reason kept) and reserves its capital and
+    /// slot; an overflowing replay applies nothing; a finalized one reserves nothing.
+    #[test]
+    fn b3_restored_attempt_halts_and_keeps_its_capital() {
+        let mut s = Safety::new(lim(), allow(), true);
+        s.restore_attempt(Some(40)).unwrap();
+        assert_eq!(
+            ledger(&s),
+            (
+                1,
+                1,
+                40,
+                0,
+                0,
+                DayStats::default(),
+                Some(HaltReason::UnknownEconomics)
+            )
+        );
+        assert_eq!(
+            s.check(0, 1, 0, 0, 0, &[], "longtail"),
+            Err(Deny::Halted(HaltReason::UnknownEconomics))
+        );
+        let before = ledger(&s);
+        assert_eq!(
+            s.restore_attempt(Some(u64::MAX)),
+            Err(LedgerViolation::CounterOverflow)
+        );
+        assert_eq!(ledger(&s), before);
+        let mut finalized = Safety::new(lim(), allow(), true);
+        finalized.restore_attempt(None).unwrap();
+        assert_eq!(
+            ledger(&finalized),
+            (
+                0,
+                0,
+                0,
+                0,
+                0,
+                DayStats::default(),
+                Some(HaltReason::UnknownEconomics)
+            )
+        );
     }
 
     /// Every ledger counter and the day statistics of `s` (Q2 full-state comparisons).

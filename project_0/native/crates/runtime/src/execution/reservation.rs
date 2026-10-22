@@ -75,13 +75,22 @@ impl WalletReservations {
     /// UNKNOWN outcome — stays held; a finalized one is released; no journal is no hold. A
     /// journal that cannot be opened (damaged, or locked by a running attempt) is an error.
     pub fn from_fe04_journal(dir: &std::path::Path, wallet: &str) -> Result<Self, String> {
+        Self::replay_fe04_journal(dir, wallet).map(|(book, _)| book)
+    }
+
+    /// The book and the safety replay (B3) of the same journal read.
+    pub fn replay_fe04_journal(
+        dir: &std::path::Path,
+        wallet: &str,
+    ) -> Result<(Self, Option<crate::execution::one_shot::SafetyReplay>), String> {
         if !dir.join(format!("{wallet}.p0j")).exists()
             && !dir.join(format!("{wallet}.json")).exists()
         {
-            return Ok(Self::default());
+            return Ok((Self::default(), None));
         }
         let journal = crate::execution::one_shot::Journal::open(dir, wallet)?;
-        Self::rebuild(journal.active_hold()).map_err(String::from)
+        let book = Self::rebuild(journal.active_hold()).map_err(String::from)?;
+        Ok((book, journal.safety_replay()))
     }
 
     /// The owner's periodic view: the journal's book, or an unreadable book (fail closed).
