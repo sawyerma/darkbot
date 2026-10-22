@@ -397,6 +397,7 @@ impl ShadowOwner {
                         &self.submitter,
                         darkbot_solana::tx::BuildVersion::V1,
                     ),
+                prepared: Some((&self.prepared, self.ingress_session.generation)),
                 path: Path::Rpc,
                 resources: self.resources,
                 limits: TxLimits::default(),

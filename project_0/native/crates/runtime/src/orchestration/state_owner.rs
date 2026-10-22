@@ -110,6 +110,9 @@ pub(super) struct ShadowOwner {
     fe04_refreshed: std::time::Instant,
     /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
+    /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,
+    /// a ProgramData change or a new ingress generation.
+    prepared: std::cell::RefCell<crate::execution::prepared::PreparedCache>,
     min_profit: i128,
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,

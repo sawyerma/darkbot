@@ -869,6 +869,10 @@ pub(super) fn prepare(
         fe04_journal,
         fe04_refreshed: std::time::Instant::now(),
         inventory_targets,
+        prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
+            PREPARED_CANDIDATES,
+            vec![program_data],
+        )),
         min_profit,
         integration_probe_enabled,
         integration_probe_limit_per_kind,
@@ -969,6 +973,9 @@ pub(super) fn prepare(
 /// P8-RES-02: the owner's reservation book at start — rebuilt from the FE-04 journal of the
 /// liquidator in `P0_FE04_JOURNAL_DIR` (no directory: no FE-04 attempt, empty book); a journal
 /// that cannot be read is a start error (fail closed).
+/// P2-07: bound of the prepared candidate cache (templates with their dependency bytes).
+const PREPARED_CANDIDATES: usize = 1024;
+
 pub(super) fn reservation_book(
     get: &dyn Fn(&str) -> Option<String>,
     liquidator: &Pubkey,

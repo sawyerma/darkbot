@@ -83,6 +83,10 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         fe04_journal: None,
         fe04_refreshed: std::time::Instant::now(),
         inventory_targets: Default::default(),
+        prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
+            8,
+            vec![],
+        )),
         min_profit: 0,
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,

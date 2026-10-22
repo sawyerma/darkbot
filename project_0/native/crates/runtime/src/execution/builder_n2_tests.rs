@@ -280,6 +280,7 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
         zero_prefund_qualified: zero_prefund,
         instructions: &f.table,
         v1_plans: false,
+        prepared: None,
         path: Path::Rpc,
         resources: Resources {
             compute_unit_limit: 400_000,

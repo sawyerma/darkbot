@@ -15,7 +15,7 @@ pub mod p0 {
     use crate::execution::pipeline::{
         PlanError, PlanErrorKind, ReceivershipBuilder, ReceivershipPlan,
     };
-    use crate::execution::prepared::Skeleton;
+    use crate::execution::prepared::{Context, PreparedCache, Skeleton};
     use darkbot_project0::economics::{CandidateInput, Path};
     use darkbot_project0::funding::{self, FundingClass, FundingContext};
     use darkbot_project0::health::crate_impl::CrateHealth;
@@ -612,6 +612,9 @@ pub mod p0 {
         /// B9: offer V1 candidates only when the transaction layer builds and signs V1
         /// (`tx::v1_build_capability`) and the submission adapter supports V1.
         pub v1_plans: bool,
+        /// P2-07: the owner's prepared-candidate cache and its current generation; `None`
+        /// prepares every template afresh (the former path).
+        pub prepared: Option<(&'a std::cell::RefCell<PreparedCache>, u64)>,
         pub path: Path,
         pub resources: Resources,
         pub limits: TxLimits,
@@ -1100,9 +1103,35 @@ pub mod p0 {
             if sizings.is_empty() {
                 return Err(no_size_error(self.sizing.no_size_reason(account)?));
             }
-            let protocol_luts =
-                crate::execution::lookup_tables::from_state(self.state, &self.group, slot);
-            let prep = prepare_skeleton(self.state, &self.program, &self.group, account)?;
+            // P2-07: the prepared template and LUT plan, reused only while every account they
+            // were derived from is byte-identical (otherwise prepared afresh, as before).
+            let (protocol_luts, prep) = match self.prepared {
+                Some((cache, generation)) => {
+                    let context = Context {
+                        generation,
+                        program: self.program,
+                        group: self.group,
+                        liquidator: self.liquidator,
+                    };
+                    let mut cache = cache.borrow_mut();
+                    let luts = cache.lookup_tables(self.state, context, slot, |rec, at| {
+                        crate::execution::lookup_tables::from_state(rec, &self.group, at)
+                    });
+                    let prep = cache.skeleton(self.state, account, context, slot, |rec| {
+                        prepare_skeleton(rec, &self.program, &self.group, account)
+                    })?;
+                    (luts, prep)
+                }
+                None => (
+                    crate::execution::lookup_tables::from_state(self.state, &self.group, slot),
+                    std::sync::Arc::new(prepare_skeleton(
+                        self.state,
+                        &self.program,
+                        &self.group,
+                        account,
+                    )?),
+                ),
+            };
             let mut out = Vec::new();
 
             let mut route_errors = Vec::new();
@@ -1889,6 +1918,16 @@ pub mod p0 {
                 routes: &TestRoutes,
                 zero_prefund: bool,
             ) -> Vec<ReceivershipPlan> {
+                self.plans_with(src, rent, routes, zero_prefund, None)
+            }
+            fn plans_with(
+                &self,
+                src: &FixtureSource,
+                rent: &dyn Fn(u64) -> Option<u64>,
+                routes: &TestRoutes,
+                zero_prefund: bool,
+                prepared: Option<(&std::cell::RefCell<PreparedCache>, u64)>,
+            ) -> Vec<ReceivershipPlan> {
                 let inventory = |_: &Pubkey| 10_000u64;
                 let ata = |mint: &Pubkey| {
                     Some(get_associated_token_address_with_program_id(
@@ -1903,7 +1942,7 @@ pub mod p0 {
                     program: self.program,
                     group: self.group,
                     liquidator: self.liquidator,
-                    global_fee_wallet: Ok(Pubkey::new_unique()),
+                    global_fee_wallet: Ok(Pubkey::new_from_array([7; 32])),
                     sizing: &self.sizing,
                     routes,
                     inventory: &inventory,
@@ -1915,6 +1954,7 @@ pub mod p0 {
                     zero_prefund_qualified: zero_prefund,
                     instructions: &self.table,
                     v1_plans: false,
+                    prepared,
                     path: Path::Rpc,
                     resources: Resources {
                         compute_unit_limit: 400_000,
@@ -1966,6 +2006,163 @@ pub mod p0 {
             assert!(rent_of(&f.state(Pubkey::default(), false), &price)
                 .iter()
                 .all(|(_, c)| c.is_none()));
+        }
+
+        /// P2-07 through the production `plans()` path: with the prepared cache the plans are
+        /// exactly the uncached ones; a repeated call reuses template and LUT plan; a route (here a
+        /// ZERO_PREFUND swap) is per call and never cached; the generation, the account (record
+        /// link), a bank (its oracle configuration) and the ProgramData each invalidate.
+        #[test]
+        fn p2_07_prepared_plans_equal_uncached_and_invalidate_deterministically() {
+            use std::cell::RefCell;
+            let f = PlansFixture::new();
+            let program_data = Pubkey::new_unique();
+            let cache = RefCell::new(PreparedCache::new(16, vec![program_data]));
+            let price = |l: u64| Some(l);
+            let shape = |plans: &[ReceivershipPlan]| {
+                plans
+                    .iter()
+                    .map(|p| {
+                        (
+                            p.input.funding,
+                            p.instructions.clone(),
+                            p.lookup_tables.clone(),
+                            p.input.rent_and_token_usd_micro,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let run = |src: &FixtureSource, routes: &TestRoutes, generation| {
+                let cached = f.plans_with(src, &price, routes, true, Some((&cache, generation)));
+                assert!(!cached.is_empty());
+                assert_eq!(shape(&cached), shape(&f.plans(src, &price, routes, true)));
+                let s = cache.borrow().stats;
+                (s.hits, s.misses)
+            };
+            let with_program = |mut src: FixtureSource, version: u8| {
+                src.0
+                    .insert(program_data, (Pubkey::default(), vec![version]));
+                src
+            };
+            let src = with_program(f.state(Pubkey::default(), true), 1);
+            let none = TestRoutes(None);
+            assert_eq!(run(&src, &none, 1), (0, 2), "template + LUT plan prepared");
+            assert_eq!(run(&src, &none, 1), (2, 2), "both reused");
+            let swap_program = Pubkey::new_unique();
+            let route = Route {
+                instructions: vec![Instruction {
+                    program_id: swap_program,
+                    accounts: vec![],
+                    data: vec![1],
+                }],
+                lookup_tables: vec![],
+                swap_program,
+                amount_in: 1_000,
+                quoted_out: 600,
+                minimum_executable_out: Some(550),
+            };
+            assert_eq!(run(&src, &TestRoutes(Some(route)), 1), (4, 2));
+            assert_eq!(run(&src, &none, 2), (4, 4), "new generation");
+            let pda = darkbot_project0::protocol::liquidation_record_pda(&f.program, &f.account);
+            let linked = with_program(f.state(pda, true), 1);
+            assert_eq!(run(&linked, &none, 2), (5, 5), "account changed");
+            let mut repriced = with_program(f.state(pda, true), 1);
+            let data = &mut repriced.0.get_mut(&f.banks[0].0).unwrap().1;
+            let mut bank: Bank = bytemuck::pod_read_unaligned(&data[8..]);
+            bank.config.fixed_price.value = (2i128 << 48).to_le_bytes();
+            data[8..].copy_from_slice(bytemuck::bytes_of(&bank));
+            assert_eq!(run(&repriced, &none, 2), (6, 6), "bank changed");
+            assert_eq!(run(&repriced, &none, 2), (8, 6));
+            let upgraded = {
+                let mut s = with_program(f.state(pda, true), 2);
+                s.0.insert(f.banks[0].0, repriced.0[&f.banks[0].0].clone());
+                s
+            };
+            assert_eq!(run(&upgraded, &none, 2), (8, 8), "program upgraded");
+        }
+
+        /// P2-07/P5-07 offline benchmark on the fixture account (2 banks, Fixed oracles, no
+        /// integration refresh, no published LUT): template preparation, `plans()` (template +
+        /// dynamic patch) and the transaction build, uncached against a warm cache. Run explicitly
+        /// (`--release -- --ignored --nocapture`); it prints measurements and asserts no speed.
+        #[test]
+        #[ignore]
+        fn p2_07_prepared_latency_benchmark() {
+            use std::cell::RefCell;
+            use std::hint::black_box;
+            const N: usize = 5_000;
+            let f = PlansFixture::new();
+            let src = f.state(Pubkey::default(), true);
+            let price = |l: u64| Some(l);
+            let routes = TestRoutes(None);
+            let cache = RefCell::new(PreparedCache::new(16, vec![]));
+            let context = Context {
+                generation: 0,
+                program: f.program,
+                group: f.group,
+                liquidator: f.liquidator,
+            };
+            let measure = |label: &str, run: &dyn Fn()| {
+                for _ in 0..200 {
+                    run();
+                }
+                let mut ns: Vec<u128> = (0..N)
+                    .map(|_| {
+                        let t = Instant::now();
+                        run();
+                        t.elapsed().as_nanos()
+                    })
+                    .collect();
+                ns.sort_unstable();
+                println!(
+                    "P2_07_BENCH {label} n={N} p50_ns={} p95_ns={} p99_ns={}",
+                    ns[N / 2],
+                    ns[N * 95 / 100],
+                    ns[N * 99 / 100]
+                );
+            };
+            let build = |plans: Vec<ReceivershipPlan>| {
+                let p = &plans[0];
+                let tx = tx::build(
+                    &TxPlan {
+                        version: p.tx_version,
+                        payer: f.liquidator,
+                        instructions: p.instructions.clone(),
+                        lookup_tables: p.lookup_tables.clone(),
+                        resources: Resources {
+                            compute_unit_limit: 400_000,
+                            priority_micro_lamports_per_cu: 0,
+                            loaded_accounts_data_size: None,
+                        },
+                    },
+                    Hash::default(),
+                    &TxLimits::default(),
+                );
+                black_box(tx.unwrap());
+            };
+            let uncached = || f.plans(&src, &price, &routes, false);
+            let cached = || f.plans_with(&src, &price, &routes, false, Some((&cache, 0)));
+            measure("prepare_uncached", &|| {
+                black_box(prepare_skeleton(&src, &f.program, &f.group, &f.account).unwrap());
+            });
+            measure("prepare_cached_hit", &|| {
+                let hit = cache
+                    .borrow_mut()
+                    .skeleton(&src, &f.account, context, 10, |rec| {
+                        prepare_skeleton(rec, &f.program, &f.group, &f.account)
+                    });
+                black_box(hit.unwrap());
+            });
+            measure("plans_uncached", &|| {
+                black_box(uncached());
+            });
+            measure("plans_cached", &|| {
+                black_box(cached());
+            });
+            measure("plans_build_uncached", &|| build(uncached()));
+            measure("plans_build_cached", &|| build(cached()));
+            let s = cache.borrow().stats;
+            println!("P2_07_BENCH cache hits={} misses={}", s.hits, s.misses);
         }
 
         /// Z12: an error of one asset/liability pair (here: the liability bank's mint is not in
@@ -2028,6 +2225,7 @@ pub mod p0 {
                     zero_prefund_qualified: false,
                     instructions: &f.table,
                     v1_plans: false,
+                    prepared: None,
                     path: Path::Rpc,
                     resources: Resources {
                         compute_unit_limit: 400_000,
@@ -2104,6 +2302,7 @@ pub mod p0 {
                     zero_prefund_qualified: false,
                     instructions: &f.table,
                     v1_plans: false,
+                    prepared: None,
                     path: Path::Rpc,
                     resources: Resources {
                         compute_unit_limit: 400_000,
