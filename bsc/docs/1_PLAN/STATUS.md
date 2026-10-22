@@ -10,7 +10,7 @@ The 2026-10-20 checkpoint below is historical.
 
 Source: G07_REQUALIFICATION_RESULT_20261020.md. R0 and DRY-0..DRY-4 **PASS** against Flap Portal v5.25.0; signed launch/BUY bytes unchanged; zero egress. The V4 proposal exists with approved=false, execution_ready=false and one allowed attempt; proposal SHA-256 **5da0068b0c8b1f7e3c682cc4ea7ce3950d83147e94946b46aafb11f6dd50ec3d**. The approved-variant SHA-256 **4308f2cb97414aea7d4ce9469ab101eb3f29ff1d272df0a72930e49a56c29ad0** was calculated only, not written/approved. Guard **UNARMED**; G0.7/G0.8 **NOT_EXECUTED**. Maximum one-attempt loss reserve **481163500000000 wei = 0.0004811635 BNB**.
 
-**Required implementation, still open:** g07_pre_live_readiness.rs hard-codes BUILDER_SEMANTICS=BLOCKED and a final BLOCKED/exit 2, preventing technical PASS_READ_ONLY even after all real safety checks succeed. Implement the binding 2026-10-20 clarification in BSC_DUAL_VENUE_ROADMAP.md and G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md. Builder inclusion, 48Club pricing and noMerge/positionFirst building behavior remain UNQUALIFIED; original producer timing witness absent means T0 -> T_buy UNKNOWN. Do not call these results PASS, and do not confuse absent future outcome evidence with unsafe technical preflight. The bound witness *source contract* and all hard safety checks remain mandatory.
+**Required implementation, still open:** g07_pre_live_readiness.rs hard-codes BUILDER_SEMANTICS=BLOCKED and a final BLOCKED/exit 2, preventing technical PASS_READ_ONLY even after all real safety checks succeed. Implement the binding 2026-10-20 clarification in PHASENPLAN.md and G07_PORTAL_V5_25_REQUALIFICATION_PLAN.md. Builder inclusion, 48Club pricing and noMerge/positionFirst building behavior remain UNQUALIFIED; original producer timing witness absent means T0 -> T_buy UNKNOWN. Do not call these results PASS, and do not confuse absent future outcome evidence with unsafe technical preflight. The bound witness *source contract* and all hard safety checks remain mandatory.
 
 **Next milestone: G0.7 CODE READY — AWAITING EXPLICIT ECONOMIC APPROVAL.** Finish the existing G0.7 runner, true read-only readiness, V4 approval preparation, anti-replay/journal protections and G0.8 acquisition/order/cost handoff. Only narrowly targeted regressions. No GUI work, new phases, repeated historical scan, broad test series or actual BUY. Explicit user economic authorization of the exact V4 approved-variant hash and known risks is separate; no arming or send is authorized here.
 
@@ -43,7 +43,7 @@ Stand: 2026-10-15, nach der Strukturreform R1–R8 (Ausgangscommit `7f3c08b`). F
 Maßgeblich sind:
 
 - G0.1–G0.8: [GATE0_TESTPLAN_SHORT.md](GATE0_TESTPLAN_SHORT.md) §8 und die datierten Status-Freezes (u. a. „G0.6 final dry status — 2026-10-11: PASS“, G0.7-Single-Attempt-Spend-Freeze 2026-10-11).
-- Roadmap-Stand: [BSC_DUAL_VENUE_ROADMAP.md](BSC_DUAL_VENUE_ROADMAP.md) §2 und G0.6a–G0.8-Update 2026-10-13.
+- Roadmap-Stand: [PHASENPLAN.md](PHASENPLAN.md) §2 und G0.6a–G0.8-Update 2026-10-13.
 - C1: [BSC_C1_STATUS_AND_FABLE_HANDOFF_20261008.md](../9_ALT/BSC_C1_STATUS_AND_FABLE_HANDOFF_20261008.md), [BSC_C1_REV2_INTEGRATION_REPORT_20261008.md](../3_BEWEISE/BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
 - Register: [GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md](../3_BEWEISE/GATE0_MEASUREMENT_EVIDENCE_LEDGER_2026-09-28.md); Ablageorte und Umzüge: [EVIDENCE.md](../3_BEWEISE/EVIDENCE.md).
 

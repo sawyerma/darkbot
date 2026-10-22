@@ -7,7 +7,7 @@ Updated: 2026-09-27
 
 1. `docs/GATE0_TESTPLAN_SHORT.md`
 2. `docs/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
-3. `docs/BSC_DUAL_VENUE_ROADMAP.md`
+3. `../1_PLAN/PHASENPLAN.md`
 4. `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 5. active phase-specific contract
 6. `docs/BSC_PHASE_C_PYTHON_RETIREMENT.md` for retirement/history rules only

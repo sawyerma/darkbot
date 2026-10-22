@@ -6,7 +6,7 @@ End rule: **STOP after independent Phase-E review**
 
 Normative parents:
 - `docs/GATE0_TESTPLAN_SHORT.md`
-- `docs/BSC_DUAL_VENUE_ROADMAP.md`
+- `../1_PLAN/PHASENPLAN.md`
 - `docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
 ## 1. Scope

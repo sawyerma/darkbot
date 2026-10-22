@@ -6,7 +6,7 @@ Updated: 2026-09-27
 Higher-priority feasibility documents:
 1. `docs/bsc/GATE0_TESTPLAN_SHORT.md`
 2. `docs/bsc/BSC_BIRTH_ENTRY_ARCHITECTURE.md`
-3. `docs/bsc/BSC_DUAL_VENUE_ROADMAP.md`
+3. `bsc/docs/1_PLAN/PHASENPLAN.md`
 
 This production contract becomes active only after at least one BSC venue passes Gate 0.
 

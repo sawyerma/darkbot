@@ -17,7 +17,7 @@ Verification baseline: `5946b4dca5aeffbb44bef91106c17c9784f66444`.
 
 The inventory and work-package design below describe the migration baseline, not a request to reimplement completed packages. Original evidence and frozen signed transactions remain unchanged.
 
-- Binding source: `BSC_DUAL_VENUE_ROADMAP.md`, the "BINDING DATA-PATH INVARIANT" section and "Now, G0.7/G0.8".
+- Binding source: `PHASENPLAN.md`, the "BINDING DATA-PATH INVARIANT" section and "Now, G0.7/G0.8".
 - Unchanged throughout:
   - the frozen signed launch/BUY bytes;
   - the DRY hashes;

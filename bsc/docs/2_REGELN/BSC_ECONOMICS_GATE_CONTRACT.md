@@ -5,7 +5,7 @@ Updated: 2026-09-27
 
 Normative parents:
 - `docs/bsc/GATE0_TESTPLAN_SHORT.md`
-- `docs/bsc/BSC_DUAL_VENUE_ROADMAP.md`
+- `bsc/docs/1_PLAN/PHASENPLAN.md`
 - `docs/bsc/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md`
 
 ## Gate-0 relationship

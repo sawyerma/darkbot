@@ -1,16 +1,16 @@
-# BSC — Einstieg (Version 6, Repo-Fassung)
+# BSC — Einstieg (Version 7, Repo-Fassung)
 
 **Stand:** 2026-10-22 · **Quellstand:** tatsächlicher Git-HEAD zum Zeitpunkt der Umstellung, siehe Git-Commit · **Geltung:** ausschließlich `bsc/`
 
-Dies ist der **einzige Einstieg** in das BSC-Projekt. Verbindlich sind die Originaldateien in den Unterordnern dieses Verzeichnisses in der Rangfolge aus §2. Dieses Dokument ersetzt keinen Vertrag; bei Widerspruch gilt das Original. Inhaltlich entspricht es Version 6 des Paket-Einstiegs `00_BSC_VERBINDLICH.md`; nur die Pfade zeigen hier auf das Repository.
+Dies ist der **Dokumentations-Einstieg** in das BSC-Projekt. Verbindlich sind die Originaldateien in den Unterordnern dieses Verzeichnisses in der Rangfolge aus §2. Dieses Dokument ersetzt keinen Vertrag; bei Widerspruch gilt das Original. Inhaltlich entspricht es Version 7 des Repository-Einstiegs `00_BSC_VERBINDLICH.md`; nur die Pfade zeigen hier auf das Repository.
 
-**Aktuelle Plan-Revision: v6 (22.10.2026).** Revisionsliste und welche Messung zu welcher Revision gehört: `1_PLAN/REVISIONEN.md`.
+**Aktuelle Plan-Revision: v7 (22.10.2026).** Revisionsliste und welche Messung zu welcher Revision gehört: `1_PLAN/REVISIONEN.md`.
 
 **Ordner (Nummer = Lesereihenfolge):**
 
 | Ordner | Was drin ist | Was man damit tut |
 |---|---|---|
-| `1_PLAN/` | Roadmap (= Phasenplan), Prüfliste (= Gate-0-Testplan), Bauplan (= Masterplan), `STATUS.md`, `ACCEPTANCE_MAP.json`, `REVISIONEN.md` | lesen, danach arbeiten |
+| `1_PLAN/` | PHASENPLAN.md (= verbindliche Roadmap), Prüfliste (= Gate-0-Testplan), Bauplan (= Masterplan), `STATUS.md`, `ACCEPTANCE_MAP.json`, `REVISIONEN.md` | lesen, danach arbeiten |
 | `2_REGELN/` | die technischen Verträge je Baustein | nur den Vertrag des Bausteins lesen, an dem man arbeitet |
 | `3_BEWEISE/` | Ledger, Evidence-Register, Freezes, Mess-Reports | nachschlagen; nie ändern |
 | `4_G07_FREIGABE/` | Unterlagen für den nächsten Schritt G0.7 (Self-Launch) | bei G0.7-Arbeit |
@@ -22,16 +22,16 @@ Dies ist der **einzige Einstieg** in das BSC-Projekt. Verbindlich sind die Origi
 
 | Datei in `1_PLAN/` | Was sie ist | kurz |
 |---|---|---|
-| `BSC_DUAL_VENUE_ROADMAP.md` | Reihenfolge der Phasen, Stop-Regel, Entscheidungsregel | **Phasenplan** (Rang 1) |
+| `PHASENPLAN.md` | Reihenfolge der Phasen, Stop-Regel, Entscheidungsregel | **Phasenplan** (Rang 1) |
 | `GATE0_TESTPLAN_SHORT.md` | Prüfungen G0.1–G0.8 vor der Produktion | **Prüfliste** (Rang 2) |
 | `BSC_PRODUCTION_BUILD_MASTER_PLAN.md` | wie die Produktionssoftware gebaut und abgenommen wird | **Bauplan** (Rang 3) |
 
 
-**Lesereihenfolge für jede KI / jeden Implementierer:** dieses README → `1_PLAN/BSC_DUAL_VENUE_ROADMAP.md` → `1_PLAN/GATE0_TESTPLAN_SHORT.md` → `1_PLAN/STATUS.md` → aus `2_REGELN/` nur den Vertrag des Bausteins, an dem gearbeitet wird. `3_BEWEISE/` und `5_OFFENE_FEHLER/` bei Bedarf. `9_ALT/` nie als Auftrag lesen.
+**Lesereihenfolge für jede KI / jeden Implementierer:** dieses README → `1_PLAN/PHASENPLAN.md` → `1_PLAN/GATE0_TESTPLAN_SHORT.md` → `1_PLAN/STATUS.md` → aus `2_REGELN/` nur den Vertrag des Bausteins, an dem gearbeitet wird. `3_BEWEISE/` und `5_OFFENE_FEHLER/` bei Bedarf. `9_ALT/` nie als Auftrag lesen.
 
 ---
 
-**Neu in v6:** Fünf einzeln `OFF / SHADOW / LIVE` schaltbare Ingressquellen: eigene geth-Fast-Lane, PublicNode, dRPC, BlockReq, 48Club Auction Feed. Alle führen in **einen** Rust-BUY-Core; `FIRST VERIFIED ACTIONABLE WINS`. Die T0-Definition und der G0.7/G0.8-Vorrang bleiben unverändert. `T_head_local` und Blockintervall sind niemals `T0`. Einzelheiten: `1_PLAN/BSC_DUAL_VENUE_ROADMAP.md` §5a. WSS-Messungen vom 22.10. wurden **unter v5** erhoben und sind kein N+1-/T0-PASS.
+**Neue fünf-Quellen-Architektur seit v6; Dateiname v7:** Fünf einzeln `OFF / SHADOW / LIVE` schaltbare Ingressquellen: eigene geth-Fast-Lane, PublicNode, dRPC, BlockReq, 48Club Auction Feed. Alle führen in **einen** Rust-BUY-Core; `FIRST VERIFIED ACTIONABLE WINS`. Die T0-Definition und der G0.7/G0.8-Vorrang bleiben unverändert. `T_head_local` und Blockintervall sind niemals `T0`. Einzelheiten: `1_PLAN/PHASENPLAN.md` §5a. WSS-Messungen vom 22.10. wurden **unter v5** erhoben und sind kein N+1-/T0-PASS.
 
 ## 1. Projektziel in einem Satz
 
@@ -41,7 +41,7 @@ Frühestmöglicher **direkter On-Chain-BUY** nach einem unterstützten BSC-Launc
 
 | Rang | Datei | Ordner |
 |---|---|---|
-| 1 | `1_PLAN/BSC_DUAL_VENUE_ROADMAP.md` — Roadmap, Stop-Regel, Phasenfolge, Invarianten, Entscheidungsregel | `1_PLAN/` |
+| 1 | `1_PLAN/PHASENPLAN.md` — Roadmap, Stop-Regel, Phasenfolge, Invarianten, Entscheidungsregel | `1_PLAN/` |
 | 2 | `1_PLAN/GATE0_TESTPLAN_SHORT.md` — Gate-0-Qualifikation G0.1–G0.8, Zeitdefinitionen, Spend-Freeze | `1_PLAN/` |
 | 3 | `1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md` — Produktions-Masterplan, Abnahmematrix | `1_PLAN/` |
 | — | Technische Verträge (Birth-Entry-Architektur, Runtime-Contract, Economics-Gate, Phase C/D/E/F, C1-Plan, C1.8, C1-Runbook) | `2_REGELN/`; Wire V1/V2 in `../geth/` |
@@ -152,7 +152,7 @@ Status: **V** = verbindlich · **N** = Nachweis (unveränderlich) · **H** = his
 | Datei (`bsc/docs/` sofern nicht anders) | Ordner | Status |
 |---|---|---|
 | PHASENPLAN.md | `9_ALT/` | A — ersetzt durch dieses README |
-| BSC_DUAL_VENUE_ROADMAP.md | `1_PLAN/` | **V, Rang 1** |
+| PHASENPLAN.md | `1_PLAN/` | **V, Rang 1** |
 | GATE0_TESTPLAN_SHORT.md | `1_PLAN/` | **V, Rang 2** |
 | BSC_PRODUCTION_BUILD_MASTER_PLAN.md | `1_PLAN/` | **V, Rang 3** |
 | ARCHITECTURE.md, BSC_BIRTH_ENTRY_ARCHITECTURE.md, BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md, BSC_ECONOMICS_GATE_CONTRACT.md, BSC_PHASE_C/D/E/F-Verträge, C1-Plan, C1.8, C1-Runbook | `2_REGELN/` | V |

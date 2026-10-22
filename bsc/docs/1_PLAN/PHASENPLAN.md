@@ -1,4 +1,4 @@
-# DarkBot Solana + BSC Roadmap — Gate-0 First
+# BSC PHASENPLAN — DarkBot Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-10-20 (G0.7 code-readiness clarification; existing freezes preserved)

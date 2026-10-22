@@ -1,10 +1,10 @@
-# BSC Phasenplan — Einstieg
+# ARCHIV: historischer Phasenplan-Einstieg (nicht autoritativ)
 
 Dieses Dokument ist der **Einstiegspunkt** in den fachlichen BSC-Phasenplan. Es ersetzt **keinen** Vertrag und fasst keine Abnahmebedingung verbindlich neu. Verbindlich sind unverändert die folgenden Dokumente, vollständig und in dieser Rangfolge:
 
 | Rang | Dokument | Inhalt |
 |---|---|---|
-| 1 | [BSC_DUAL_VENUE_ROADMAP.md](../1_PLAN/BSC_DUAL_VENUE_ROADMAP.md) | Aktive, autoritative Roadmap: Stop-Regel, G0.6a–G0.8-Update (2026-10-13), Phasenfolge §3, Gate 0 ≠ C0 §4, C0–C3 §8–§11, D/E §12, F §13, G §14, H §15, I §16, J §17, KB §18, K §19, Architektur-Invarianten §20, Entscheidungsregel §21 |
+| 1 | [PHASENPLAN.md](../1_PLAN/PHASENPLAN.md) | Aktive, autoritative Roadmap: Stop-Regel, G0.6a–G0.8-Update (2026-10-13), Phasenfolge §3, Gate 0 ≠ C0 §4, C0–C3 §8–§11, D/E §12, F §13, G §14, H §15, I §16, J §17, KB §18, K §19, Architektur-Invarianten §20, Entscheidungsregel §21 |
 | 2 | [GATE0_TESTPLAN_SHORT.md](../1_PLAN/GATE0_TESTPLAN_SHORT.md) | Gate-0-Qualifikation G0.1–G0.8, Zeitdefinitionen, G0.7-Spend-Freeze und Status-Freezes |
 | 3 | [BSC_PRODUCTION_BUILD_MASTER_PLAN.md](../1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md) | Produktions-Masterplan und Abnahmematrix |
 | — | Technische Verträge | [BSC_BIRTH_ENTRY_ARCHITECTURE.md](../2_REGELN/BSC_BIRTH_ENTRY_ARCHITECTURE.md), [BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](../2_REGELN/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md), [BSC_ECONOMICS_GATE_CONTRACT.md](../2_REGELN/BSC_ECONOMICS_GATE_CONTRACT.md), [BSC_PHASE_C_PYTHON_RETIREMENT.md](../2_REGELN/BSC_PHASE_C_PYTHON_RETIREMENT.md), [BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md](../2_REGELN/BSC_PHASE_D_FLAP_READ_ONLY_CONTRACT.md), [BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md](../2_REGELN/BSC_PHASE_E_FOURMEME_READ_ONLY_CONTRACT.md), [BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md](../2_REGELN/BSC_PHASE_F_DUAL_CAPTURE_CONTRACT.md), [BSC_C1_PARALLEL_FAST_LANE_PLAN.md](../2_REGELN/BSC_C1_PARALLEL_FAST_LANE_PLAN.md), [ACCEPTANCE_MAP.json](../1_PLAN/ACCEPTANCE_MAP.json) |

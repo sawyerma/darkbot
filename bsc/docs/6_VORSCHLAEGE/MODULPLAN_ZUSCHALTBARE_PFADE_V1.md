@@ -229,7 +229,7 @@ KB / K        unverändert
 
 ## 11. Änderungstext für die Roadmap (zur Freigabe)
 
-Nach Freigabe durch den Nutzer in `BSC_DUAL_VENUE_ROADMAP.md` einfügen:
+Nach Freigabe durch den Nutzer in `PHASENPLAN.md` einfügen:
 
 > **§ Modulare Pfade (beschlossen am …):** Signal-, Filter-, Ausführungs- und Beobachtungswege sind Module mit den Zuständen AUS / SCHATTEN / LIVE gemäß `MODULPLAN_ZUSCHALTBARE_PFADE_V1.md` §3–§6. Kostenlose Module mit Erkenntnisgewinn werden vorgezogen. Kostenverursachende Module sind standardmäßig AUS, und ihr Nutzen wird nach §5 gemessen. Ein Kern, eine Entscheidung pro Launch, ein Nonce-Eigentümer. Abschalten ist immer sofort erlaubt, Einschalten nur über ein freigegebenes Profil.
 >
