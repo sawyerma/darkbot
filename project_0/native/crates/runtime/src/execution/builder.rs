@@ -1660,6 +1660,8 @@ pub mod p0 {
             token_program: Pubkey,
             table: darkbot_project0::planner::InstructionTable,
             sizing: OneSizing,
+            /// The liquidator's ATAs, derived once like the owner's `LiquidatorAtas` (C11).
+            atas: std::cell::RefCell<std::collections::HashMap<Pubkey, Pubkey>>,
         }
         struct FixtureSource(std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>);
         impl AccountSource for FixtureSource {
@@ -1859,6 +1861,7 @@ pub mod p0 {
                         premium_bps: 500,
                         slippage_bps: 0,
                     }),
+                    atas: Default::default(),
                 }
             }
             fn state(&self, record: Pubkey, rent_sysvar: bool) -> FixtureSource {
@@ -1953,11 +1956,13 @@ pub mod p0 {
             ) -> Vec<ReceivershipPlan> {
                 let inventory = |_: &Pubkey| 10_000u64;
                 let ata = |mint: &Pubkey| {
-                    Some(get_associated_token_address_with_program_id(
-                        &self.liquidator,
-                        mint,
-                        &self.token_program,
-                    ))
+                    Some(*self.atas.borrow_mut().entry(*mint).or_insert_with(|| {
+                        get_associated_token_address_with_program_id(
+                            &self.liquidator,
+                            mint,
+                            &self.token_program,
+                        )
+                    }))
                 };
                 let lamports = |l: u64| Some(l);
                 P0ReceivershipBuilder {

@@ -41,10 +41,13 @@ pub mod builders {
     use super::*;
     use crate::protocol;
     use anchor_lang::{InstructionData, ToAccountMetas};
-    use std::str::FromStr;
 
-    fn pk(s: &str) -> Pubkey {
-        Pubkey::from_str(s).expect("static")
+    /// B14: a static program pin, parsed at compile time (an invalid pin does not build).
+    macro_rules! pk {
+        ($s:expr) => {{
+            const KEY: Pubkey = Pubkey::from_str_const($s);
+            KEY
+        }};
     }
 
     fn disc8<D: anchor_lang::Discriminator>() -> [u8; 8] {
@@ -74,11 +77,10 @@ pub mod builders {
                 .into_iter()
                 .collect(),
             swap_programs: [
-                protocol::JUP_SWAP_PROGRAM_ID,
-                protocol::TITAN_SWAP_PROGRAM_ID,
+                pk!(protocol::JUP_SWAP_PROGRAM_ID),
+                pk!(protocol::TITAN_SWAP_PROGRAM_ID),
             ]
             .into_iter()
-            .map(pk)
             .collect(),
         })
     }
@@ -101,7 +103,7 @@ pub mod builders {
                 marginfi_account: *marginfi_account,
                 fee_payer: *fee_payer,
                 liquidation_record: protocol::liquidation_record_pda(program, marginfi_account),
-                system_program: pk(SYSTEM_PROGRAM),
+                system_program: pk!(SYSTEM_PROGRAM),
             }
             .to_account_metas(Some(true)),
             data: marginfi::instruction::MarginfiAccountInitLiqRecord.data(),
@@ -120,7 +122,7 @@ pub mod builders {
             liquidation_record: protocol::liquidation_record_pda(program, marginfi_account),
             group: *group,
             liquidation_receiver: *receiver,
-            instruction_sysvar: pk(INSTRUCTIONS_SYSVAR),
+            instruction_sysvar: pk!(INSTRUCTIONS_SYSVAR),
         }
         .to_account_metas(Some(true));
         accounts.extend_from_slice(observation);
@@ -161,7 +163,7 @@ pub mod builders {
         // [FIX-128f] Pinned p0-cli/test-utils parity: Token-2022 withdraw requires the
         // bank mint as the first remaining account, before the health observation accounts.
         // Classic SPL Token withdraw does not carry this mint account.
-        if *token_program == pk(protocol::TOKEN_2022_PROGRAM_ID) {
+        if *token_program == pk!(protocol::TOKEN_2022_PROGRAM_ID) {
             accounts.push(AccountMeta::new_readonly(*mint, false));
         }
         accounts.extend(obs(observation));
@@ -209,7 +211,7 @@ pub mod builders {
         // - repay_all performs a health observation because it closes the balance. During
         //   receivership the closing bank remains observable for this instruction even though
         //   it must be omitted from EndLiquidation after the balance is closed.
-        if *token_program == pk(protocol::TOKEN_2022_PROGRAM_ID) {
+        if *token_program == pk!(protocol::TOKEN_2022_PROGRAM_ID) {
             accounts.push(AccountMeta::new_readonly(*mint, false));
         }
         if repay_all.unwrap_or(false) {
@@ -265,11 +267,11 @@ pub mod builders {
             reserve_source_collateral: *reserve_source_collateral,
             obligation_farm_user_state,
             reserve_farm_state,
-            kamino_program: pk(protocol::KAMINO_PROGRAM_ID),
+            kamino_program: pk!(protocol::KAMINO_PROGRAM_ID),
             farms_program: marginfi_type_crate::pdas::FARMS_PROGRAM_ID,
-            collateral_token_program: pk(protocol::TOKEN_PROGRAM_ID),
+            collateral_token_program: pk!(protocol::TOKEN_PROGRAM_ID),
             liquidity_token_program: *token_program,
-            instruction_sysvar_account: pk(INSTRUCTIONS_SYSVAR),
+            instruction_sysvar_account: pk!(INSTRUCTIONS_SYSVAR),
         }
         .to_account_metas(Some(true));
         accounts.extend(obs(observation));
@@ -330,9 +332,9 @@ pub mod builders {
             drift_reward_mint_2,
             drift_signer,
             mint: bank.mint,
-            drift_program: pk(protocol::DRIFT_PROGRAM_ID),
+            drift_program: pk!(protocol::DRIFT_PROGRAM_ID),
             token_program: *token_program,
-            system_program: pk(SYSTEM_PROGRAM),
+            system_program: pk!(SYSTEM_PROGRAM),
         }
         .to_account_metas(Some(true));
         accounts.extend(obs(observation));
@@ -396,10 +398,10 @@ pub mod builders {
             liquidity: cpi.liquidity,
             liquidity_program: cpi.liquidity_program,
             rewards_rate_model: cpi.rewards_rate_model,
-            juplend_program: pk(protocol::JUPLEND_PROGRAM_ID),
+            juplend_program: pk!(protocol::JUPLEND_PROGRAM_ID),
             token_program: *token_program,
-            associated_token_program: pk(protocol::ASSOCIATED_TOKEN_PROGRAM_ID),
-            system_program: pk(SYSTEM_PROGRAM),
+            associated_token_program: pk!(protocol::ASSOCIATED_TOKEN_PROGRAM_ID),
+            system_program: pk!(SYSTEM_PROGRAM),
         }
         .to_account_metas(Some(true));
         accounts.extend(obs(observation));
@@ -429,7 +431,7 @@ pub mod builders {
             liquidation_receiver: *receiver,
             fee_state: protocol::fee_state_pda(program),
             global_fee_wallet: *global_fee_wallet,
-            system_program: pk(SYSTEM_PROGRAM),
+            system_program: pk!(SYSTEM_PROGRAM),
             fee_payer: None,
         }
         .to_account_metas(Some(true));
@@ -489,8 +491,8 @@ pub mod builders {
             use crate::planner::{steps_of, Step};
             let (program, account, liquidator, bank, mint) = (p(), p(), p(), p(), p());
             let table = instruction_table(&program).unwrap();
-            let kamino = pk(protocol::KAMINO_PROGRAM_ID);
-            let jup = pk(protocol::JUP_SWAP_PROGRAM_ID);
+            let kamino = pk!(protocol::KAMINO_PROGRAM_ID);
+            let jup = pk!(protocol::JUP_SWAP_PROGRAM_ID);
             let refresh = Instruction {
                 program_id: kamino,
                 accounts: vec![],
@@ -501,7 +503,7 @@ pub mod builders {
                 accounts: vec![],
                 data: vec![0xe5; 16],
             };
-            let token = pk(protocol::TOKEN_PROGRAM_ID);
+            let token = pk!(protocol::TOKEN_PROGRAM_ID);
             let ixs = build_receivership(ReceivershipParams {
                 program: &program,
                 group: &p(),
@@ -561,7 +563,7 @@ pub mod builders {
             let program = p();
             let mint = p();
             let observation = p();
-            let token_program = pk(protocol::TOKEN_2022_PROGRAM_ID);
+            let token_program = pk!(protocol::TOKEN_2022_PROGRAM_ID);
             let ix = withdraw(
                 &program,
                 &p(),
@@ -592,7 +594,7 @@ pub mod builders {
             let program = p();
             let mint = p();
             let observation = p();
-            let token_program = pk(protocol::TOKEN_PROGRAM_ID);
+            let token_program = pk!(protocol::TOKEN_PROGRAM_ID);
             let ix = withdraw(
                 &program,
                 &p(),
@@ -621,7 +623,7 @@ pub mod builders {
             let mint = p();
             let token_account = p();
             let vault = p();
-            let token_program = pk(protocol::TOKEN_PROGRAM_ID);
+            let token_program = pk!(protocol::TOKEN_PROGRAM_ID);
             let obs_keys = vec![p(), p(), p()];
 
             let ix = repay(
@@ -653,7 +655,7 @@ pub mod builders {
         #[test]
         fn partial_repay_does_not_append_health_observation() {
             let program = p();
-            let token_program = pk(protocol::TOKEN_PROGRAM_ID);
+            let token_program = pk!(protocol::TOKEN_PROGRAM_ID);
             let obs_key = p();
             let ix = repay(
                 &program,
@@ -677,7 +679,7 @@ pub mod builders {
             let program = p();
             let mint = p();
             let observation = p();
-            let token_program = pk(protocol::TOKEN_2022_PROGRAM_ID);
+            let token_program = pk!(protocol::TOKEN_2022_PROGRAM_ID);
             let ix = repay(
                 &program,
                 &p(),

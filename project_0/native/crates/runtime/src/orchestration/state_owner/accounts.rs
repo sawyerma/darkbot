@@ -23,8 +23,8 @@ pub(crate) fn associated_token_address(
     mint: &Pubkey,
     token_program: &Pubkey,
 ) -> Pubkey {
-    let ata_program =
-        Pubkey::from_str(protocol::ASSOCIATED_TOKEN_PROGRAM_ID).expect("static ATA program");
+    const ATA_PROGRAM: Pubkey = Pubkey::from_str_const(protocol::ASSOCIATED_TOKEN_PROGRAM_ID);
+    let ata_program = ATA_PROGRAM;
     Pubkey::find_program_address(
         &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ata_program,

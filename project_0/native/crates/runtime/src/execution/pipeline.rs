@@ -1211,7 +1211,6 @@ mod mt0_tests {
     use solana_sdk::pubkey::Pubkey;
     use solana_sdk::signature::Signature;
     use solana_sdk::transaction::VersionedTransaction;
-    use std::str::FromStr;
 
     fn tx_with(ixs: Vec<Instruction>) -> VersionedTransaction {
         let payer = Pubkey::new_unique();
@@ -1224,7 +1223,7 @@ mod mt0_tests {
 
     fn cb(data: Vec<u8>) -> Instruction {
         Instruction {
-            program_id: Pubkey::from_str(COMPUTE_BUDGET_PROGRAM_ID).unwrap(),
+            program_id: const { Pubkey::from_str_const(COMPUTE_BUDGET_PROGRAM_ID) },
             accounts: vec![],
             data,
         }

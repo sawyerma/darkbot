@@ -79,18 +79,41 @@ pub const LIQUIDATION_RECORD_SEED: &[u8] = b"liq_record";
 pub const LIQUIDITY_VAULT_AUTHORITY_SEED: &[u8] = b"liquidity_vault_auth";
 pub const FEE_STATE_SEED: &[u8] = b"feestate";
 
+/// B14 latency: a PDA is a pure function of its seeds, but each derivation hashes and
+/// curve-checks per bump (microseconds); the receivership builders need several per plan. A
+/// bounded per-thread memo keyed by (seed, program, key) — cleared when full, never stale.
+const PDA_MEMO_MAX: usize = 16_384;
+type PdaMemo = std::collections::HashMap<(&'static [u8], Pubkey, Option<Pubkey>), Pubkey>;
+thread_local!(static PDAS: std::cell::RefCell<PdaMemo> = Default::default());
+
+fn memo_pda(seed: &'static [u8], program: &Pubkey, key: Option<&Pubkey>) -> Pubkey {
+    PDAS.with(|memo| {
+        let id = (seed, *program, key.copied());
+        if let Some(pda) = memo.borrow().get(&id) {
+            return *pda;
+        }
+        let pda = match key {
+            Some(k) => Pubkey::find_program_address(&[seed, k.as_ref()], program),
+            None => Pubkey::find_program_address(&[seed], program),
+        }
+        .0;
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= PDA_MEMO_MAX {
+            memo.clear();
+        }
+        memo.insert(id, pda);
+        pda
+    })
+}
+
 pub fn liquidation_record_pda(program: &Pubkey, marginfi_account: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[LIQUIDATION_RECORD_SEED, marginfi_account.as_ref()],
-        program,
-    )
-    .0
+    memo_pda(LIQUIDATION_RECORD_SEED, program, Some(marginfi_account))
 }
 pub fn liquidity_vault_authority_pda(program: &Pubkey, bank: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[LIQUIDITY_VAULT_AUTHORITY_SEED, bank.as_ref()], program).0
+    memo_pda(LIQUIDITY_VAULT_AUTHORITY_SEED, program, Some(bank))
 }
 pub fn fee_state_pda(program: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(&[FEE_STATE_SEED], program).0
+    memo_pda(FEE_STATE_SEED, program, None)
 }
 /// Pyth-Push PriceUpdateV2-PDA: [shard(u16 LE)=0, feed_id] unter dem Push-Oracle-Programm.
 /// VERIFY: Shard-Index 0 und Seed-Layout (eva01 pyth_cranker: `PDA([0, feed_id], pyth-push-oracle)`).
@@ -388,6 +411,39 @@ pub fn deployment_pin(program: &Pubkey, d: &ProgramDeployment) -> DeploymentPin 
 
 #[cfg(test)]
 mod tests {
+    /// B14: the memoized PDAs equal the derivation, on a miss, a hit and after the bounded memo
+    /// was cleared.
+    #[test]
+    fn b14_memoized_pdas_equal_the_derivation() {
+        let (p, a) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let derive = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &p).0;
+        for _ in 0..2 {
+            assert_eq!(
+                liquidation_record_pda(&p, &a),
+                derive(&[LIQUIDATION_RECORD_SEED, a.as_ref()])
+            );
+            assert_eq!(
+                liquidity_vault_authority_pda(&p, &a),
+                derive(&[LIQUIDITY_VAULT_AUTHORITY_SEED, a.as_ref()])
+            );
+            assert_eq!(fee_state_pda(&p), derive(&[FEE_STATE_SEED]));
+        }
+        // Another program, same account: its own PDA.
+        let q = Pubkey::new_unique();
+        assert_eq!(
+            liquidation_record_pda(&q, &a),
+            Pubkey::find_program_address(&[LIQUIDATION_RECORD_SEED, a.as_ref()], &q).0
+        );
+        for _ in 0..PDA_MEMO_MAX {
+            liquidation_record_pda(&p, &Pubkey::new_unique());
+        }
+        assert!(PDAS.with(|m| m.borrow().len()) <= PDA_MEMO_MAX, "bounded");
+        assert_eq!(
+            liquidation_record_pda(&p, &a),
+            derive(&[LIQUIDATION_RECORD_SEED, a.as_ref()])
+        );
+    }
+
     use super::*;
 
     #[test]

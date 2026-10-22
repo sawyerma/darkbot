@@ -5,22 +5,22 @@ use darkbot_project0::health::AccountSource;
 use solana_address_lookup_table_interface::state::AddressLookupTable;
 use solana_message::AddressLookupTableAccount;
 use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
+
+/// B14: the pins, parsed at compile time (no base58 work per plan).
+const GROUP: Pubkey = Pubkey::from_str_const("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8");
+const PUBLISHED: [Pubkey; 5] = [
+    Pubkey::from_str_const("8dk6oxKXC4iMLMa8Q4AVtPJPkEfitZuHSB4JqUsLLV2R"),
+    Pubkey::from_str_const("43xneYSZYLFkaksMcfBMJANibRiKsWgxkPbsrmcYjqF6"),
+    Pubkey::from_str_const("67cS6yqmAy5D1QRJwAXcFv9GLvrMbe88GFGDJcntkL7C"),
+    Pubkey::from_str_const("FhVyrX2gfHmxKHq8wWWBJB3ZvHZcAQ6UAcjWxUyfyXuE"),
+    Pubkey::from_str_const("GYEJ3BcgwHfNSL2BAuDcth3KKKt9eiK14EHwLCjU9Eoo"),
+];
 
 pub fn published_keys(group: &Pubkey) -> Vec<Pubkey> {
-    if group.to_string() != "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8" {
+    if *group != GROUP {
         return vec![];
     }
-    [
-        "8dk6oxKXC4iMLMa8Q4AVtPJPkEfitZuHSB4JqUsLLV2R",
-        "43xneYSZYLFkaksMcfBMJANibRiKsWgxkPbsrmcYjqF6",
-        "67cS6yqmAy5D1QRJwAXcFv9GLvrMbe88GFGDJcntkL7C",
-        "FhVyrX2gfHmxKHq8wWWBJB3ZvHZcAQ6UAcjWxUyfyXuE",
-        "GYEJ3BcgwHfNSL2BAuDcth3KKKt9eiK14EHwLCjU9Eoo",
-    ]
-    .iter()
-    .map(|s| Pubkey::from_str(s).expect("published LUT key"))
-    .collect()
+    PUBLISHED.to_vec()
 }
 
 /// Optional optimization: malformed, absent, deactivating or future-state tables
