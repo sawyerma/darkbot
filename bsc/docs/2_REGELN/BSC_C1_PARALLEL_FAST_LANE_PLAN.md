@@ -7,7 +7,7 @@ in the project and compiled with local regression checks. This is not a new
 phase acceptance. Historical C1.1–C1.4a results remain recorded; changed
 interfaces need the reruns listed in the [qualification runbook](BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md).
 Acceptance order remains C1.5 → C1.6 → C1.7 → C1.8 → C1.9 → C1.9b → C1.10;
-C2 stays blocked until C1.10. See the [REV2 integration report](BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
+C2 stays blocked until C1.10. See the [REV2 integration report](../3_BEWEISE/BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
 Actual successful acquisition remains **T0 → T_buy < 1,000,000 ns**, with the
 original producer evidence and full 15-second capture required by the masterplan.
 

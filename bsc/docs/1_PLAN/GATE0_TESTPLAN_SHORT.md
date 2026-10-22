@@ -60,6 +60,13 @@ same-launch control sensor and, until the inclusion adapter is replaced, as
 the submission transport. The empirical P2P-vs-WSS timing remains unproven
 until a new controlled run is recorded in the measurement/evidence ledger.
 
+### Addendum 2026-10-22 / plan v6 — per-source public-WSS requalification (does not erase 2026-10-01 negative test)
+
+The historical rule above remains correct **for the specific tested 2026-10-01 WSS sensor and boundary**. New mainnet observations on 2026-10-22 justify independently testing PublicNode, dRPC, BlockReq and the authenticated 48Club Auction Feed against pinned local geth. The old blanket classification may be superseded **only for an exact source/chain/venue/deployment/version/build profile** after source-specific evidence establishes real complete/verified actionable launch input, canonical coverage, repeatable race timing, health/cost and native-path nonregression. Until that qualification, each WSS source is read-only/control or SHADOW, not a production race ingress. WSS data at the external JSON-RPC boundary must be verified and translated to native binary events; there is no JSON exception in the DarkBot internal hot path. No G0.7/G0.8 frozen economic guard, planned STOP, token acquisition or producer witness condition changes.
+
+Timing separation: `T_head_local - T_full` (or header timestamp minus signal) is **not** `T0 - T_full`, and block interval cannot be used to claim `T_buy - T0` or a qualified fast BUY. `T0` is the original first independently externally executable instant following launch; `T_buy` is our actual successful producing execution. Use `UNKNOWN` when source execution witness is unavailable. Ingress and inclusion are independent qualified dimensions; first **verified actionable** source wins, not first unchecked hash.
+
+
 ### Hard execution rule — direct on-chain only
 
 Gate 0 must test the path DarkBot will actually use: **construct, sign and submit the BUY directly for on-chain contract execution**.

@@ -1,6 +1,6 @@
 # BSC Evidence — Ablageorte, Originalpfade und Migrationsnachweis R1–R8
 
-Historische Nachweise wurden **nicht inhaltlich bearbeitet**. Referenzen in eingefrorenen Dokumenten und Evidence-Dateien (z. B. [ACCEPTANCE_MAP.json](ACCEPTANCE_MAP.json), das Ledger, `native/crates/core/fixtures/flap/MANIFEST.json`, die „Selected raw/code witnesses“ im Masterplan) nennen bewusst weiterhin die **Originalpfade**; die folgende Tabelle bildet sie auf die heutigen Orte ab.
+Historische Nachweise wurden **nicht inhaltlich bearbeitet**. Referenzen in eingefrorenen Dokumenten und Evidence-Dateien (z. B. [ACCEPTANCE_MAP.json](../1_PLAN/ACCEPTANCE_MAP.json), das Ledger, `native/crates/core/fixtures/flap/MANIFEST.json`, die „Selected raw/code witnesses“ im Masterplan) nennen bewusst weiterhin die **Originalpfade**; die folgende Tabelle bildet sie auf die heutigen Orte ab.
 
 Ausgangscommit aller Umzüge: `7f3c08b` (HEAD vor R1). Jede Datei ist im Git-Verlauf unter ihrem Originalpfad bei diesem Commit auffindbar.
 

@@ -154,7 +154,7 @@ Bei echten Änderungen an einem Rust-Modul sind dessen eigene Tests zu verwenden
 - Historische Evidence **niemals inhaltlich bearbeiten** und keine Hashes neu erfinden. Bei Standortwechsel Quellcommit, ursprünglichen Pfad, Inhaltshash, neuen Pfad und neue Consumer-Referenzen manifestieren. Referenzen, die einen unveränderlichen alten Pfad meinen, bleiben historisch als solche erkennbar.
 - Git-Hygiene: keinen `git clean`, keinen Hard-Reset, keine massenhaften `git add .`/`git add -A`, keine ungewollten Änderungen an lokalen Rohdaten/`node_modules`/Secrets. Gezielt `git mv` und nur erlaubte Pfade stagen.
 - **Nur vom Nutzer autorisierte Git-Commits/Pushs:** Claude berichtet je Gruppe geänderte Dateien, konkrete Checks, PASS/FAIL, offene Risiken und nächsten Schritt; Commit/Push durch den Nutzer bzw. nach eigenständiger Freigabe.
-- Die aktuelle fachliche Roadmap [BSC_DUAL_VENUE_ROADMAP.md](docs/BSC_DUAL_VENUE_ROADMAP.md), [GATE0_TESTPLAN_SHORT.md](docs/GATE0_TESTPLAN_SHORT.md), [BSC_PRODUCTION_BUILD_MASTER_PLAN.md](docs/BSC_PRODUCTION_BUILD_MASTER_PLAN.md) und technische Verträge bleiben **solange autoritativ**, bis die vollständige nachweisbare Übernahme in den neuen Phasenplan bestätigt ist. Eine kurze Zusammenfassung **ersetzt keinen** vollständigen verbindlichen Vertrag.
+- Die aktuelle fachliche Roadmap [BSC_DUAL_VENUE_ROADMAP.md](docs/1_PLAN/BSC_DUAL_VENUE_ROADMAP.md), [GATE0_TESTPLAN_SHORT.md](docs/1_PLAN/GATE0_TESTPLAN_SHORT.md), [BSC_PRODUCTION_BUILD_MASTER_PLAN.md](docs/1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md) und technische Verträge bleiben **solange autoritativ**, bis die vollständige nachweisbare Übernahme in den neuen Phasenplan bestätigt ist. Eine kurze Zusammenfassung **ersetzt keinen** vollständigen verbindlichen Vertrag.
 - **Verbindliche Rangfolge:** Der bestehende fachliche BSC-Phasenplan und seine technischen Verträge sind die **inhaltliche Basis und fachliche Autorität**; diese README legt **ausschließlich** das neue Datei-/Cargo-/Test-Layout und den schrittweisen Umzug fest. Bei einem Konflikt darf Claude den Phasenplan weder abschwächen noch stillschweigend umdeuten; die betroffene Stelle mit Lösung dokumentieren. Die ausdrückliche Nutzeranweisung erlaubt jetzt den **reinen Strukturumbau R1–R8 als begrenzte Ausnahme von der bisherigen Arbeitsreihenfolge**, nicht aber vorgezogene C1/C2-Featurearbeit oder eine Änderung der fachlichen G0.7/G0.8-Anforderungen. Der Umbau ist keine LIVE-, Budget-, Mainnet- oder Wirtschaftsfreigabe.
 
 ## 6. R1–R8: damalige Abnahmekriterien (für R9–R13 siehe §8)
@@ -173,7 +173,7 @@ Bei echten Änderungen an einem Rust-Modul sind dessen eigene Tests zu verwenden
 
 ## 7. Umsetzungsstand R1–R8 (2026-10-15)
 
-Ausgangscommit `7f3c08b`. Vollständige Migrationsmatrix, Originalpfade, Hash-Nachweise und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md). Einstieg: [docs/PHASENPLAN.md](docs/PHASENPLAN.md), [docs/STATUS.md](docs/STATUS.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Ausgangscommit `7f3c08b`. Vollständige Migrationsmatrix, Originalpfade, Hash-Nachweise und Prüfprotokoll: [docs/EVIDENCE.md](docs/3_BEWEISE/EVIDENCE.md). Einstieg: [docs/PHASENPLAN.md](docs/9_ALT/PHASENPLAN.md), [docs/STATUS.md](docs/1_PLAN/STATUS.md), [docs/ARCHITECTURE.md](docs/2_REGELN/ARCHITECTURE.md).
 
 **R1–R8-Ist-Baum am Commit `c8362c6`** (vor dem neuen Refactoring gemäß §8):
 
@@ -215,7 +215,7 @@ prestudy/bsc/{experiments,references,evidence}/   # historisch, kein Build-Membe
 
 ## 8. NEUER AUFTRAG R9–R13 — lesbare BSC-Architektur nach EVA01
 
-**Gültigkeit:** Dieser Abschnitt ersetzt für alle folgenden **Struktur- und Benennungsarbeiten** den alten Zielbaum in §2. Er ersetzt **nicht** den fachlichen [BSC-Phasenplan](docs/PHASENPLAN.md), [BSC_DUAL_VENUE_ROADMAP.md](docs/BSC_DUAL_VENUE_ROADMAP.md), [Runtime-Vertrag](docs/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md), Acceptance-Guard, Sicherheitsregeln aus §5 oder Nachweise. **Die hier gezeichnete Struktur ist ein Ziel, nicht der derzeitige Git-Baum.** Nach erfolgreichem Umbau die README zum geprüften Iststand aktualisieren.
+**Gültigkeit:** Dieser Abschnitt ersetzt für alle folgenden **Struktur- und Benennungsarbeiten** den alten Zielbaum in §2. Er ersetzt **nicht** den fachlichen [BSC-Phasenplan](docs/9_ALT/PHASENPLAN.md), [BSC_DUAL_VENUE_ROADMAP.md](docs/1_PLAN/BSC_DUAL_VENUE_ROADMAP.md), [Runtime-Vertrag](docs/2_REGELN/BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md), Acceptance-Guard, Sicherheitsregeln aus §5 oder Nachweise. **Die hier gezeichnete Struktur ist ein Ziel, nicht der derzeitige Git-Baum.** Nach erfolgreichem Umbau die README zum geprüften Iststand aktualisieren.
 
 ### 8.1 Vorbild und Entwurfsprinzip
 
@@ -347,7 +347,7 @@ Der Baum illustriert Zuständigkeiten, **nicht** die Pflicht, für jeden Eintrag
 
 ## 9. Umsetzungsstand R9–R13 (2026-10-15, Ausgangscommit `c8362c6`)
 
-Vollständige Alt→Neu-Matrix und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md) §5–§6; Baum und Ownership: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Vollständige Alt→Neu-Matrix und Prüfprotokoll: [docs/EVIDENCE.md](docs/3_BEWEISE/EVIDENCE.md) §5–§6; Baum und Ownership: [docs/ARCHITECTURE.md](docs/2_REGELN/ARCHITECTURE.md).
 
 **Realer Baum**
 
@@ -388,10 +388,10 @@ prestudy/bsc/                   # historisch, kein Build-Member
 
 ## 10. C1-Integration und `protocol_v2` (2026-10-16, Ausgangscommit `1c99127`)
 
-Auf ausdrückliche Nutzeranweisung (Ausnahme von der Roadmap-Stop-Regel; **keine C1-Phasenabnahme**) wurde der C1-Rev2-Stand aus dem Stash `5753f70` dateiweise integriert und Wire V2 anschließend gegliedert. Details, Herkunft und Prüfprotokoll: [docs/EVIDENCE.md](docs/EVIDENCE.md) §7.
+Auf ausdrückliche Nutzeranweisung (Ausnahme von der Roadmap-Stop-Regel; **keine C1-Phasenabnahme**) wurde der C1-Rev2-Stand aus dem Stash `5753f70` dateiweise integriert und Wire V2 anschließend gegliedert. Details, Herkunft und Prüfprotokoll: [docs/EVIDENCE.md](docs/3_BEWEISE/EVIDENCE.md) §7.
 
 - `geth_ipc`: `BorrowedRecordV2`, `RecordGuardV2`, `LaneSetV2`, `try_acquire`, `hot0`, `outbound`, `host` integriert; alle C1-Tests/-Beispiele kompilieren und bestehen (keine Ausblendung).
 - `protocol_v2/`: 13 Fachdateien (Layout, Prüfsummen, Fehler, Mapping, Lanes, Records, Guards, Arena, Producer, Consumer, Lifecycle, Peer-Pool, Role-Lease) als **ein** Modul (`include!`), weil echte Untermodule den Release-Hot-Path-Code änderten; mit `include!` ist der Maschinencode instruktionsidentisch (98/98 Funktionen).
 - Rust↔Go-Parität: Go 1.25.0 lokal, offline; Go-Race-Tests 86/0/5 SKIP; Interop c13/c14 PASS vor und nach der Gliederung.
 - Workspace-Regression ohne Filter: **479 PASS / 0 FAIL / 5 ignored**. Testbudget: 9 von 10.
-- Offen: C1-Phasenabnahme gemäß [BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md](docs/BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md); Entscheidung über den nun vollständig übernommenen Stash (nur `g07_testnet_birth_buy.rs`, heute Prestudie, nicht übernommen).
+- Offen: C1-Phasenabnahme gemäß [BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md](docs/2_REGELN/BSC_C1_5_TO_C1_10_QUALIFICATION_RUNBOOK.md); Entscheidung über den nun vollständig übernommenen Stash (nur `g07_testnet_birth_buy.rs`, heute Prestudie, nicht übernommen).

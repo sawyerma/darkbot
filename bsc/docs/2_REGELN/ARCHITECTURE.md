@@ -1,6 +1,6 @@
 # BSC Architektur — Datenfluss, Ownership, Schnittstellen
 
-Repository-Architektur nach R9–R13 (lesbare Benennung nach EVA01, siehe [../README.md](../README.md) §8). Die fachliche Architektur bleiben [BSC_BIRTH_ENTRY_ARCHITECTURE.md](BSC_BIRTH_ENTRY_ARCHITECTURE.md) und [BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md); bei Abweichung gelten diese. Ältere Verträge nennen die Crates noch mit ihren Namen vor R10 (Zuordnung unten).
+Repository-Architektur nach R9–R13 (lesbare Benennung nach EVA01, siehe [../README.md](../../README.md) §8). Die fachliche Architektur bleiben [BSC_BIRTH_ENTRY_ARCHITECTURE.md](BSC_BIRTH_ENTRY_ARCHITECTURE.md) und [BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md](BSC_NATIVE_SINGLE_RUNTIME_CONTRACT.md); bei Abweichung gelten diese. Ältere Verträge nennen die Crates noch mit ihren Namen vor R10 (Zuordnung unten).
 
 ## Baum
 

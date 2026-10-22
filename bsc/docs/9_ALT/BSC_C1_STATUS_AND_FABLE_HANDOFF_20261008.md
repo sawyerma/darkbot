@@ -42,7 +42,7 @@ Authoritative files:
 These C1.4a results are an ingress→Rust feasibility result only. They do not prove acquisition latency, Mainnet ingress coverage, provider ordering, inclusion quality, or LIVE readiness.
 
 REV2 implementation, executed commands, defects fixed and remaining gate work:
-[BSC_C1_REV2_INTEGRATION_REPORT_20261008.md](BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
+[BSC_C1_REV2_INTEGRATION_REPORT_20261008.md](../3_BEWEISE/BSC_C1_REV2_INTEGRATION_REPORT_20261008.md).
 The short devp2p transport run is a regression smoke test, not C1.9 acceptance.
 
 ## 2. Fable assignment

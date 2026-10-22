@@ -255,6 +255,62 @@ successful competing BUYs between = 0
 
 Local engineering target remains <1 ms for the controllable hot path.
 
+## 5a. BSC Parallel Ingress Portfolio — five independently switchable signal sources (binding proposal adopted 2026-10-22, v6)
+
+**Scope and priority.** This is an additive ingress contract, not a second engine, an alternative Gate-0 acceptance rule, an exception for signing/sending, or authority to continue paused C1/C2 product implementation. Preserve G0.7 -> G0.8 -> PASS/ADAPT/STOP, the frozen exact-V4 economic approval, the UNARMED default and all binary internal-format rules. Bounded read-only G0.4 observation of these candidates is allowed; no value-bearing send or unapproved private-feed expense follows from this section.
+
+### 5a.1 Product objective and timing — never confuse block arrival with T0
+
+Goal: first independently actionable evidence of a foreign Flap, Four Classic or OpenFour launch; prepare an exact valid BUY as early as possible, preferably before `T0`; obtain earliest valid successful external acquisition by qualified ordered inclusion. The existing objective **`T_buy - T0 < 1,000,000 ns`** is unchanged and requires original producing-execution evidence. Initial birth-entry placement also requires launch index N, our successful BUY index N+1 in the same canonical block, zero successful external BUYs between and attributable positive token acquisition. N/N+1 alone is not a physical sub-ms timing witness.
+
+- `T_first_hash`: first local hash observation (possibly non-actionable).
+- `T_full`: first locally received complete cryptographically bound transaction (where relevant).
+- `T_actionable`: first source event independently verified as sufficient for the exact venue, deployment, state and qualifying BUY path.
+- `T_ready`: exact valid BUY transaction/bundle completely built and signed.
+- `T_queue` and `T_send`: existing separately measured queue and real adapter handoff boundaries.
+- `T0`: first producing execution point at which independent external BUY becomes valid following successful launch/activation.
+- `T_buy`: our actually successful producing BUY execution with proven acquisition.
+- `T_head_local`: local arrival of a block/head, **not T0**. Header timestamp and chain block interval are also **not T0**.
+
+`T_head_local - T_full`, even when positive by hundreds of milliseconds, measures only a lead relative to *local head reception*. It does not establish `T_full < T0`, `T_ready < T0`, builder acceptance, or real `T_buy - T0`. Standard RPC, receipts and timestamps cannot invent the original producer's sub-ms execution clock. Preserve `UNKNOWN` where the original producer/validator witness is missing. Block interval is not an additive component of local `T_actionable -> T_send` latency; physical inclusion happens at the builder/validator and is measured separately.
+
+### 5a.2 Five independent inputs and switches
+
+| Source ID | Input | Class | Initial release eligibility |
+|---|---|---|---|
+| `BSC_INGRESS_GETH` | Pinned bsc-geth early Fast-Lane hook -> native binary IPC | P2P/full transaction | Native baseline; production LIVE still unqualified |
+| `BSC_INGRESS_PUBLICNODE` | PublicNode BSC `eth_subscribe` | Public WSS full pending TX | Read-only evidence; requalification needed |
+| `BSC_INGRESS_DRPC` | dRPC BSC `eth_subscribe` | Public WSS pending TX | Read-only evidence; observed public endpoint rate limit |
+| `BSC_INGRESS_BLOCKREQ` | BlockReq BSC `eth_subscribe` | Public WSS pending TX | Read-only evidence; observed rate limits/low coverage |
+| `BSC_INGRESS_48CLUB` | 48Club `newPendingAuctions` | Authenticated private/auction target | UNQUALIFIED, credentials/Soul Point eligibility not proven |
+
+Each input has a user-controlled, independently persisted configuration mode `OFF | SHADOW | LIVE` and a **separate**, automatically derived `HEALTHY | DEGRADED | RATE_LIMITED | DISCONNECTED | UNQUALIFIED` state. `OFF`: no candidate contribution; close/disable source safely. `SHADOW`: ingest and record without authorizing a source-triggered BUY. `LIVE`: source may contribute only after exact capability, chain/deployment, venue, version, health and release-profile qualification plus separate global economic/live authorization. Setting a source to LIVE is never an arming or send permission. A source disabled for signal ingress must not remove mandatory canonical chain, safety, state, reconciliation or reorg services; if such services lack an authorized replacement, safe operation is blocked.
+
+48Club Auction Feed access is not assumed free; never buy subscriptions, bind capital for Soul Points or silently introduce paid providers. `FREE_ONLY` is the baseline. If a source's free tier degrades, degrade/isolate that source, not the native path or safety controls. Every source is independently configurable from terminal/control plane and later from GUI, with coherent persisted atomic generations and measured mode-transition/rollback semantics.
+
+### 5a.3 Parallel race: FIRST VERIFIED ACTIONABLE WINS
+
+All eligible sources run concurrently. No serial wait, preference delay, or synchronous remote hash/receipt/quote lookup on the trading hot path. Preserve first hash, first full, first actionable and source provenance per source separately. The first independently verified actionable source event wins the candidate decision, regardless of provider brand. A hash-only event cannot outrank an already actionable full event, and merely accepting `newPendingTransactions(true)` is not proof that full TX objects are delivered: verify actual event shape and signed identity. A private builder target qualifies only when its exact capability/simulation/state/ordered-inclusion semantics allow correct construction without inventing missing full transaction bytes.
+
+One canonical candidate/intent/nonce/economic owner and **one existing native Rust venue/state/quote/risk/build/sign implementation** serve all inputs. Duplicates or later enrichments cannot create conflicting intents, nonces, signatures or duplicate economic exposure. Inclusion/output adapters (local geth, 48Club, BlockRazor) remain separately versioned and independently qualified; an ingress source does **not** implicitly authorize a corresponding inclusion adapter. Do not modify existing `submission_policy/capability.rs` to disguise ingress capability as inclusion.
+
+External WSS JSON-RPC is permitted only at the unavoidable network protocol boundary. Validate and convert it to typed/binary events before internal processing; no JSON/WSS parsing, HTTP lookup, file IO, logging, network await or dynamic parsing on the measured native decision/dispatch hot path. Separate source budgets for CPU, sockets, bounded queues, memory, reconnection/rate-limit/backpressure. An ill-behaved source cannot delay, starve or invalidate the native geth Fast Lane. Preserve current single binary journal with explicit source health, gaps, drops and replay identity.
+
+### 5a.4 Qualification, evidence and phases
+
+Per source + venue + deployment/version + inclusion adapter, record: actual full/hash/target object and crypto identity; canonical launch denominator; full and actionable coverage; true on-Mac same-hash/source timestamp races against local geth; p50/p95/p99/max and all tail failures; disconnects/reconnects/rate-limits/drops; resource overhead and nonregression; cost and eligibility. Distinguish `T_head_local - T_actionable` from producer `T0 - T_actionable` and retain UNKNOWN without a valid original source witness. Keep exact raw samples, fixture hashes, source/build/config identities and failed attempts, not only selected winners.
+
+- **G0.4:** scoped read-only parallel observation and evidence under the existing stop-rule; no production LIVE promotion.
+- **G0.5/G0.6:** integrated source-to-send and ingress x inclusion qualification when permitted under the Gate-0 execution sequence.
+- **G0.7/G0.8:** remain strictly tied to their original frozen controlled minimal-value attempt and approved SHA; no alteration of launch/BUY bytes or broader live source set by this amendment.
+- **C1/C2:** after G0.7/G0.8 verdict, source adapters, binary ingress and candidate/state dedup; pinned geth remains an independent baseline.
+- **C3/D/E/F/G/H:** exact native hot-path, distinct venue decoders, journal/market evidence, economics and common strategy.
+- **I/J:** all-mode switching, failure isolation and strict qualified LIVE gates; no unqualified source can trigger a BUY.
+- **K:** additional escalation only with reproducible evidence.
+
+**No automatic success claims.** The 2026-10-22 PublicNode/BlockReq/dRPC observations establish reachable public feeds and some earlier-than-local-head full launch sightings; they do not qualify `T_pre < T0`, a N+1 BUY or a production LIVE source. Recorded original producer execution evidence remains mandatory for actual physical `T_buy - T0 <1 ms` acceptance.
+
+
 ## 6. Gate-0 inclusion race is mandatory
 
 Do not wait until J/K to investigate builders.

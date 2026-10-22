@@ -106,7 +106,7 @@ Stand: 2026-10-16, nach der G0.7-Härtung. **Nichts gesendet. Guard `FROZEN_APPR
      - Ein Kill in den wenigen Millisekunden zwischen Freigabe und erster Fassung hinterlässt einen leeren Platzhalter. Rekonstruktion dann aus Latch-Body und Journal.
      - Ein Send-Thread, dem nach erfolgreichem Start das Go-Signal nicht zugestellt werden kann, ließe den Prozess hängen. Laut Code ist das nicht erreichbar.
      - iCloud: Das Repo liegt nicht in der iCloud-Desktop-Kopie. Bitte trotzdem bestätigen, dass die Desktop-Synchronisierung aus ist.
-2. **Builder-Semantik (Pre-Arm-Checks 6 und 10) — Probe gelaufen (2026-10-16, 18:34Z, Plan `77957205…`, Evidence `5636c463…`).** Ergebnis in [G07_BUILDER_PROBE_APPROVAL.md](G07_BUILDER_PROBE_APPROVAL.md) §9.
+2. **Builder-Semantik (Pre-Arm-Checks 6 und 10) — Probe gelaufen (2026-10-16, 18:34Z, Plan `77957205…`, Evidence `5636c463…`).** Ergebnis in [G07_BUILDER_PROBE_APPROVAL.md](../3_BEWEISE/G07_BUILDER_PROBE_APPROVAL.md) §9.
    - **Bei Einreichung bestanden (beide Builder):** Methode, Format, Token; Ablaufwerte werden vor den Transaktionen geprüft, und die G0.7-Werte wurden angenommen.
    - **BlockRazor:** Preisschranke genau 0,05 gwei; G0.7 besteht sie ohne Spielraum.
    - **Check 10:** 48Club erkennt `noMerge`/`positionFirst` als typisierte Felder.

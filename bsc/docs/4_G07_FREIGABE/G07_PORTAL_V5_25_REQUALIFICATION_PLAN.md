@@ -1,8 +1,8 @@
 # G0.7 attempt 1: requalification against Flap Portal v5.25.0
 
-> **Document status 2026-10-21 — read this first.** This plan is a technical reference with historical work steps. Authority: `BSC_DUAL_VENUE_ROADMAP.md` (binding update 2026-10-20) > `GATE0_TESTPLAN_SHORT.md`; the requalification against v5.25.0 is **concluded**: R0 and DRY-0…DRY-4 PASS per [G07_REQUALIFICATION_RESULT_20261020.md](G07_REQUALIFICATION_RESULT_20261020.md).
+> **Document status 2026-10-21 — read this first.** This plan is a technical reference with historical work steps. Authority: `BSC_DUAL_VENUE_ROADMAP.md` (binding update 2026-10-20) > `GATE0_TESTPLAN_SHORT.md`; the requalification against v5.25.0 is **concluded**: R0 and DRY-0…DRY-4 PASS per [G07_REQUALIFICATION_RESULT_20261020.md](../3_BEWEISE/G07_REQUALIFICATION_RESULT_20261020.md).
 > - Sections **3** (JSON tools; the DBREC migration is implemented), **5 steps 1–8** (original implementation/DRY steps), **7** (2026-10-17 run instructions) and **8 "Current verification status"** (2026-10-17 state) are **SUPERSEDED/HISTORICAL**. Do not execute them again; do not repeat an unchanged R0/DRY.
-> - **New invalidation 2026-10-21:** Flap Portal was upgraded to **v5.26.0** (implementation `0x7a94f37b61a82c395f9812cf266b444783cc5e8c`, block 128914179). The read-only readiness reports `CURRENT_DEPLOYMENT_DRIFT=STOP` ([evidence](../native/evidence/g07/readiness_20261021T201733Z/)). The v5.25.0 DRY and its signed bytes are therefore not valid for current Mainnet. A requalification against v5.26.0 is a new, separately decided step; it is not authorized by this document.
+> - **New invalidation 2026-10-21:** Flap Portal was upgraded to **v5.26.0** (implementation `0x7a94f37b61a82c395f9812cf266b444783cc5e8c`, block 128914179). The read-only readiness reports `CURRENT_DEPLOYMENT_DRIFT=STOP` ([evidence](../../native/evidence/g07/readiness_20261021T201733Z/)). The v5.25.0 DRY and its signed bytes are therefore not valid for current Mainnet. A requalification against v5.26.0 is a new, separately decided step; it is not authorized by this document.
 > - Historical evidence stays unchanged.
 
 Historical status (2026-10-17): **Read-only analysis complete; sections 3 and 4 implemented (option A) and tested offline; the requalification DRY was then pending. See the binding 2026-10-20 update in section 5.**
@@ -207,7 +207,7 @@ contract require corresponding native evidence.
 
 ### Verification status of 2026-10-17 — SUPERSEDED/HISTORICAL
 
-*Superseded by [G07_REQUALIFICATION_RESULT_20261020.md](G07_REQUALIFICATION_RESULT_20261020.md): R0 PASS (858 891 headers through 128724651, upgrade at 128103397) and DRY-0…DRY-4 PASS, evidence `native/evidence/g06a/g06a_requal_dry_20261020T072853Z/`. The text below is the 2026-10-17 state.*
+*Superseded by [G07_REQUALIFICATION_RESULT_20261020.md](../3_BEWEISE/G07_REQUALIFICATION_RESULT_20261020.md): R0 PASS (858 891 headers through 128724651, upgrade at 128103397) and DRY-0…DRY-4 PASS, evidence `native/evidence/g06a/g06a_requal_dry_20261020T072853Z/`. The text below is the 2026-10-17 state.*
 
 The BSC workspace build and workspace tests passed locally with
 the three new source files present on 2026-10-17.

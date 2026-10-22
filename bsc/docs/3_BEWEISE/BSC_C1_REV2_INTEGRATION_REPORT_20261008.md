@@ -11,14 +11,14 @@ A fresh current-source geth build was produced at `/tmp/darkbot-c1-rev2-geth-bin
 
 ## REV2-1 — bind every queued BUY to its selected peer
 
-[Outbound implementation](../geth/overlay/darkbot/fastlane/outbound.go):
+[Outbound implementation](../../geth/overlay/darkbot/fastlane/outbound.go):
 dispatch takes one immutable target snapshot per worker, using a fixed-size
 stack array, and puts that exact target into the job. Selected-count, send and
 evidence use that snapshot. Reassignment never retargets an already queued BUY.
 Closed/failed sends remain `SEND_ERROR_UNKNOWN`. Queue-full evidence includes
 the bound target. Maintenance stays outside dispatch.
 
-[TestC17QueuedBuyKeepsDispatchTargetAfterReassignment](../geth/overlay/darkbot/fastlane/outbound_test.go)
+[TestC17QueuedBuyKeepsDispatchTargetAfterReassignment](../../geth/overlay/darkbot/fastlane/outbound_test.go)
 queues for A while the worker is held, reassigns to C, then handles the old job
 and a later job separately. It checks both successful A and failed A, correct
 peer/hash/status evidence, and that only the later job reaches C. Existing
@@ -30,10 +30,10 @@ command exited successfully.
 
 ## REV2-2 — measure the actual production transport path
 
-[Harness](../tools/c19_native_latency.sh),
-[temporary bridge generator](../tools/c19_prepare_production.py),
-[real peer fixture](../tools/c19_production_peer.go.txt),
-[analyzer](../tools/c19_analyze.py).
+[Harness](../../tools/c19_native_latency.sh),
+[temporary bridge generator](../../tools/c19_prepare_production.py),
+[real peer fixture](../../tools/c19_production_peer.go.txt),
+[analyzer](../../tools/c19_analyze.py).
 
 Default mode: `production_devp2p_selected_peer_handoff`. Preconnected localhost
 p2p servers negotiate ETH68 and authenticated RLPx; each job uses the actual
@@ -55,7 +55,7 @@ DARKBOT_C19_PEERS=2 DARKBOT_C19_WARMUP_PER_PEER=8 \
 DARKBOT_C19_SAMPLES_PER_PEER=32 bash bsc/tools/c19_native_latency.sh
 ```
 
-[Final measured report](../native/evidence/c1/c1-9-native-latency-20261008T221328.json):
+[Final measured report](../../native/evidence/c1/c1-9-native-latency-20261008T221328.json):
 integrity PASS; 16 retained warmup records + 64 measured samples, two selected
 outbound peers; both legacy and typed transactions decoded. Maximum observed
 `T_ingress → L2` = 81,000 ns; egress publication timestamp → first local handoff
@@ -64,16 +64,16 @@ the full C1 gate. `c1_9_qualification_eligible=false` is explicit in the report.
 The earlier 22:11 diagnostic run is also retained; it has no phase acceptance.
 
 The real receiver exposed an additional existing envelope defect:
-[overlay tool](../tools/c1_apply_geth_overlay.py) now RLP-wraps EIP-2718
+[overlay tool](../../tools/c1_apply_geth_overlay.py) now RLP-wraps EIP-2718
 typed transaction bytes as a string inside the ETH Transactions list; legacy
 RLP-list envelopes stay intact. Transactions are not decoded/re-signed in the
 send path. Empty input fails explicitly.
 
 ## REV2-3 — bind the exact complete C1 source and refuse incomplete freeze
 
-[Freeze tool](../tools/c1_freeze.py),
-[inputs template](../native/evidence/c1/templates/c1-10-freeze-inputs.template.json),
-[negative/verification tests](../tools/test_c1_qualification_tools.py).
+[Freeze tool](../../tools/c1_freeze.py),
+[inputs template](../../native/evidence/c1/templates/c1-10-freeze-inputs.template.json),
+[negative/verification tests](../../tools/test_c1_qualification_tools.py).
 
 Required: expected exact DarkBot commit, clean working tree, deterministic
 complete tracked `bsc/native` source hash, source bytes matching HEAD, pinned
@@ -90,10 +90,10 @@ fixtures create no real acceptance records.
 
 ## Additional compiler/regression fixes
 
-- [C1.9b capture](../engine/crates/geth_ipc/examples/c19b_capture.rs):
+- [C1.9b capture](../../engine/crates/geth_ipc/examples/c19b_capture.rs):
   end the absent-guard borrow before acknowledging a drained lane. This fixes
   E0502 without weakening borrowed-slot lifetimes.
-- [C1.8 churn test](../engine/crates/geth_ipc/tests/c18_stress.rs):
+- [C1.8 churn test](../../engine/crates/geth_ipc/tests/c18_stress.rs):
   derive a guaranteed different negative-test owner. The original fixed `0xee`
   equals the real owner at cycle 237, incorrectly failing a correct release.
   All 300 churn cycles and the negative owner/epoch checks remain.
@@ -101,7 +101,7 @@ fixtures create no real acceptance records.
 
 ## Executed checks and phase disposition
 
-[Recorded regression logs](../native/evidence/c1/rev2-regression-20261008/).
+[Recorded regression logs](../../native/evidence/c1/rev2-regression-20261008/).
 
 - Rust debug and release: each 122 unit tests passed, 5 explicitly ignored;
   allocation test passed; all 8 stress tests passed; 3 doctests passed.
