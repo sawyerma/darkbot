@@ -113,6 +113,8 @@ pub(super) struct ShadowOwner {
     /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,
     /// a ProgramData change or a new ingress generation.
     prepared: std::cell::RefCell<crate::execution::prepared::PreparedCache>,
+    /// C11: the liquidator's ATA addresses per mint, derived once.
+    atas: accounts::LiquidatorAtas,
     min_profit: i128,
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,

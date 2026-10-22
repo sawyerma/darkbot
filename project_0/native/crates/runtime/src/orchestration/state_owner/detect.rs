@@ -323,19 +323,25 @@ impl ShadowOwner {
                 let Some(bank) = bank_from_state(eval_state, &self.program, bank_key) else {
                     return 0;
                 };
+                // The FE-04 keys are base58 strings: encoded only when a policy exists.
+                let reserve = if self.inventory_targets.is_empty() {
+                    0
+                } else {
+                    self.inventory_targets
+                        .get(&bank.mint.to_string())
+                        .map_or(0, |t| t.reserve)
+                };
                 available_liquidator_inventory(
                     eval_state,
                     &bank.mint,
-                    &self.liquidator,
+                    &self.atas,
                     &self.reservations,
-                    self.inventory_targets
-                        .get(&bank.mint.to_string())
-                        .map_or(0, |t| t.reserve),
+                    reserve,
                 )
             };
             #[cfg(feature = "crate_health")]
             let ata = |mint: &Pubkey| -> Option<Pubkey> {
-                validated_liquidator_ata(eval_state, mint, &self.liquidator).map(|(pk, _)| pk)
+                validated_liquidator_ata(eval_state, mint, &self.atas).map(|(pk, _)| pk)
             };
             #[cfg(feature = "crate_health")]
             let sizing = ProtocolSizingProvider {

@@ -15,6 +15,11 @@ pub struct WalletReservations {
 }
 
 impl WalletReservations {
+    /// No attempt holds anything.
+    pub fn is_empty(&self) -> bool {
+        self.attempts.is_empty()
+    }
+
     /// What all attempts hold of `asset`.
     pub fn held(&self, asset: &str) -> u64 {
         self.held_except(asset, None)

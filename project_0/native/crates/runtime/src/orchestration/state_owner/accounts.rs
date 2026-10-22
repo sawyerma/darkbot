@@ -49,6 +49,50 @@ pub(crate) fn ata_candidates_for_bank<S: AccountSource + ?Sized>(
         .collect()
 }
 
+/// C11 latency: the liquidator's two possible ATAs (Token, Token-2022) per mint, derived once —
+/// `find_program_address` hashes and curve-checks per bump on every call otherwise. Mints come
+/// from bank state; beyond `MAX_MINTS` an address is derived without being kept.
+pub(crate) struct LiquidatorAtas {
+    liquidator: Pubkey,
+    programs: [Pubkey; 2],
+    known: std::cell::RefCell<HashMap<Pubkey, [Pubkey; 2]>>,
+}
+
+impl LiquidatorAtas {
+    const MAX_MINTS: usize = 4_096;
+
+    pub(crate) fn new(liquidator: Pubkey) -> Self {
+        let program = |s: &str| Pubkey::from_str(s).expect("static token program");
+        Self {
+            liquidator,
+            programs: [
+                program(protocol::TOKEN_PROGRAM_ID),
+                program(protocol::TOKEN_2022_PROGRAM_ID),
+            ],
+            known: Default::default(),
+        }
+    }
+
+    /// `(token program, ATA)` of `mint` for both token programs.
+    pub(crate) fn of(&self, mint: &Pubkey) -> [(Pubkey, Pubkey); 2] {
+        let cached = self.known.borrow().get(mint).copied();
+        let atas = match cached {
+            Some(a) => a,
+            None => {
+                let a = self
+                    .programs
+                    .map(|tp| associated_token_address(&self.liquidator, mint, &tp));
+                let mut known = self.known.borrow_mut();
+                if known.len() < Self::MAX_MINTS {
+                    known.insert(*mint, a);
+                }
+                a
+            }
+        };
+        [(self.programs[0], atas[0]), (self.programs[1], atas[1])]
+    }
+}
+
 #[cfg(feature = "crate_health")]
 /// P8-RES-01: the liquidator's validated ATA amount of `mint` minus what every attempt holds of it
 /// in the global reservation book and minus its never-spent policy reserve (P8-INV-01) — the
@@ -56,39 +100,46 @@ pub(crate) fn ata_candidates_for_bank<S: AccountSource + ?Sized>(
 pub(crate) fn available_liquidator_inventory<S: AccountSource + ?Sized>(
     state: &S,
     mint: &Pubkey,
-    liquidator: &Pubkey,
+    atas: &LiquidatorAtas,
     reservations: &crate::execution::reservation::WalletReservations,
     reserve: u64,
 ) -> u64 {
     if reservations.is_unreadable() {
         return 0;
     }
-    validated_liquidator_ata(state, mint, liquidator)
-        .map(|(_, amount)| {
-            amount.saturating_sub(reservations.held(&mint.to_string()).saturating_add(reserve))
-        })
-        .unwrap_or(0)
+    let Some((_, amount)) = validated_liquidator_ata(state, mint, atas) else {
+        return 0;
+    };
+    // The FE-04 keys are base58 strings: encoded only while some attempt holds anything.
+    let held = if reservations.is_empty() {
+        0
+    } else {
+        reservations.held(&mint.to_string())
+    };
+    amount.saturating_sub(held.saturating_add(reserve))
 }
 
+/// C11: the liquidator's ATA of `mint` and its amount — only an initialized (not frozen) token
+/// account of the token program, exact base layout (Token-2022: base plus the `Account` type tag
+/// before its extensions), of this mint and owned by the liquidator; anything else is no ATA.
 pub(crate) fn validated_liquidator_ata<S: AccountSource + ?Sized>(
     state: &S,
     mint: &Pubkey,
-    liquidator: &Pubkey,
+    atas: &LiquidatorAtas,
 ) -> Option<(Pubkey, u64)> {
-    for token_program in [protocol::TOKEN_PROGRAM_ID, protocol::TOKEN_2022_PROGRAM_ID]
-        .iter()
-        .filter_map(|s| Pubkey::from_str(s).ok())
-    {
-        let ata = associated_token_address(liquidator, mint, &token_program);
+    const BASE: usize = 165;
+    const STATE: usize = 108;
+    const INITIALIZED: u8 = 1;
+    const ACCOUNT_TYPE: u8 = 2;
+    for (i, (token_program, ata)) in atas.of(mint).into_iter().enumerate() {
         let Some((owner, _, data)) = state.account(&ata) else {
             continue;
         };
-        if owner != token_program || data.len() < 72 {
+        let layout = data.len() == BASE || (i == 1 && data.get(BASE) == Some(&ACCOUNT_TYPE));
+        if owner != token_program || !layout || data[STATE] != INITIALIZED {
             continue;
         }
-        let account_mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
-        let account_owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
-        if account_mint != *mint || account_owner != *liquidator {
+        if data[0..32] != mint.to_bytes() || data[32..64] != atas.liquidator.to_bytes() {
             continue;
         }
         let amount = u64::from_le_bytes(data[64..72].try_into().ok()?);
@@ -383,10 +434,12 @@ mod reservation_tests {
         data[0..32].copy_from_slice(mint.as_ref());
         data[32..64].copy_from_slice(liquidator.as_ref());
         data[64..72].copy_from_slice(&1_000u64.to_le_bytes());
+        data[108] = 1;
+        let atas = LiquidatorAtas::new(liquidator);
         let state = Accounts([(ata, (token, data))].into_iter().collect());
         let mut book = crate::execution::reservation::WalletReservations::default();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book, 0),
+            available_liquidator_inventory(&state, &mint, &atas, &book, 0),
             1_000
         );
         let balances = [(mint.to_string(), 1_000)].into_iter().collect();
@@ -397,12 +450,12 @@ mod reservation_tests {
         )
         .unwrap();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book, 0),
+            available_liquidator_inventory(&state, &mint, &atas, &book, 0),
             300
         );
         // P8-INV-01: the policy reserve is never offered.
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book, 120),
+            available_liquidator_inventory(&state, &mint, &atas, &book, 120),
             180
         );
         book.reserve(
@@ -412,18 +465,134 @@ mod reservation_tests {
         )
         .unwrap();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book, 0),
+            available_liquidator_inventory(&state, &mint, &atas, &book, 0),
             0
         );
         assert_eq!(
-            available_liquidator_inventory(&state, &Pubkey::new_unique(), &liquidator, &book, 0),
+            available_liquidator_inventory(&state, &Pubkey::new_unique(), &atas, &book, 0),
             0
         );
         // A book whose durable journal cannot be read offers nothing.
         let unreadable = crate::execution::reservation::WalletReservations::unreadable();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &unreadable, 0),
+            available_liquidator_inventory(&state, &mint, &atas, &unreadable, 0),
             0
         );
+    }
+
+    fn token_account(mint: &Pubkey, owner: &Pubkey, amount: u64, len: usize) -> Vec<u8> {
+        let mut data = vec![0u8; len];
+        data[0..32].copy_from_slice(mint.as_ref());
+        data[32..64].copy_from_slice(owner.as_ref());
+        data[64..72].copy_from_slice(&amount.to_le_bytes());
+        data[108] = 1;
+        data
+    }
+
+    /// C11: only an initialized, unfrozen token account of the right program, exact layout, mint
+    /// and owner is inventory; a balance change is seen at once, minus every hold; the ATA
+    /// addresses are derived once and equal the derivation.
+    #[test]
+    fn c11_only_a_spendable_validated_ata_is_inventory() {
+        let (liquidator, mint, other) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let token = Pubkey::from_str(protocol::TOKEN_PROGRAM_ID).unwrap();
+        let token22 = Pubkey::from_str(protocol::TOKEN_2022_PROGRAM_ID).unwrap();
+        let atas = LiquidatorAtas::new(liquidator);
+        let [(p0, a0), (p1, a1)] = atas.of(&mint);
+        assert_eq!((p0, p1), (token, token22));
+        assert_eq!(a0, associated_token_address(&liquidator, &mint, &token));
+        assert_eq!(a1, associated_token_address(&liquidator, &mint, &token22));
+        assert_eq!(atas.of(&mint), [(p0, a0), (p1, a1)]);
+        assert_eq!(atas.known.borrow().len(), 1);
+        let book = crate::execution::reservation::WalletReservations::default();
+        let offer = |key: Pubkey, program: Pubkey, data: Vec<u8>| {
+            let state = Accounts([(key, (program, data))].into_iter().collect());
+            available_liquidator_inventory(&state, &mint, &atas, &book, 0)
+        };
+        let valid = token_account(&mint, &liquidator, 500, 165);
+        assert_eq!(offer(a0, token, valid.clone()), 500);
+        for (state, name) in [(0u8, "uninitialized"), (2, "frozen")] {
+            let mut d = valid.clone();
+            d[108] = state;
+            assert_eq!(offer(a0, token, d), 0, "{name}");
+        }
+        assert_eq!(
+            offer(a0, token, token_account(&mint, &other, 500, 165)),
+            0,
+            "foreign owner"
+        );
+        assert_eq!(
+            offer(a0, token, token_account(&other, &liquidator, 500, 165)),
+            0,
+            "mint"
+        );
+        assert_eq!(offer(a0, token22, valid.clone()), 0, "program");
+        assert_eq!(
+            offer(a0, token, token_account(&mint, &liquidator, 500, 170)),
+            0,
+            "layout"
+        );
+        // Token-2022: the base plus the `Account` type tag before its extensions.
+        let mut extended = token_account(&mint, &liquidator, 700, 175);
+        assert_eq!(offer(a1, token22, extended.clone()), 0, "no type tag");
+        extended[165] = 2;
+        assert_eq!(offer(a1, token22, extended), 700);
+        // A balance change after a reservation is seen at once, minus the hold.
+        let mut book = crate::execution::reservation::WalletReservations::default();
+        let holds = [(mint.to_string(), 200)].into_iter().collect();
+        book.reserve("a", &holds, &holds).unwrap();
+        let mut state = Accounts([(a0, (token, valid))].into_iter().collect());
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &atas, &book, 0),
+            300
+        );
+        state.0.get_mut(&a0).unwrap().1[64..72].copy_from_slice(&250u64.to_le_bytes());
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &atas, &book, 0),
+            50
+        );
+    }
+
+    /// C11 latency (run with `--release -- --ignored --nocapture`): a validated ATA lookup with a
+    /// fresh derivation against the owner's derived-once addresses. Prints, asserts no speed.
+    #[test]
+    #[ignore]
+    fn c11_ata_lookup_latency_benchmark() {
+        const N: usize = 20_000;
+        let (liquidator, mint) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let token = Pubkey::from_str(protocol::TOKEN_PROGRAM_ID).unwrap();
+        let ata = associated_token_address(&liquidator, &mint, &token);
+        let state = Accounts(
+            [(ata, (token, token_account(&mint, &liquidator, 1, 165)))]
+                .into_iter()
+                .collect(),
+        );
+        let warm = LiquidatorAtas::new(liquidator);
+        let measure = |label: &str, run: &dyn Fn()| {
+            let mut ns: Vec<u128> = (0..N)
+                .map(|_| {
+                    let t = std::time::Instant::now();
+                    run();
+                    t.elapsed().as_nanos()
+                })
+                .collect();
+            ns.sort_unstable();
+            println!(
+                "C11_BENCH {label} n={N} p50_ns={} p99_ns={}",
+                ns[N / 2],
+                ns[N * 99 / 100]
+            );
+        };
+        measure("validated_ata_derived", &|| {
+            let fresh = LiquidatorAtas::new(liquidator);
+            std::hint::black_box(validated_liquidator_ata(&state, &mint, &fresh));
+        });
+        measure("validated_ata_cached", &|| {
+            std::hint::black_box(validated_liquidator_ata(&state, &mint, &warm));
+        });
     }
 }

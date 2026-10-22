@@ -873,6 +873,7 @@ pub(super) fn prepare(
             PREPARED_CANDIDATES,
             vec![program_data],
         )),
+        atas: LiquidatorAtas::new(liquidator),
         min_profit,
         integration_probe_enabled,
         integration_probe_limit_per_kind,

@@ -87,6 +87,7 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
             8,
             vec![],
         )),
+        atas: accounts::LiquidatorAtas::new(liquidator),
         min_profit: 0,
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,
