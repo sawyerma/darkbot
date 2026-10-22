@@ -71,7 +71,7 @@ Details/Evidence: `project_0/docs/MEASUREMENT_LEDGER.md`.
 
 **Konsequenz:** Direct TPU QUIC bleibt technisch interessant, ist ohne qualifizierte SWQoS-/Stake-Beziehung aber **nicht Race-Primary** und wird nicht vorab gebaut.
 
-**BELEGT — Yellowstone:** `SubscribeDeshred` liefert pre-execution Transactions aus eingehenden Shreds, ist aktuell aber nur auf Triton-Extension-Servern verfügbar; der Open-Source-`yellowstone-grpc-geyser`-Server liefert dafür `UNIMPLEMENTED`.
+**BELEGT — Yellowstone (Quellenstand 2026-10-22):** `SubscribeDeshred` liefert pre-execution Transactions aus eingehenden Shreds. Das Yellowstone-Changelog dokumentiert die Open-Source-Implementierung seit 2026-07-02; die ältere README-Aussage zu Triton-only/`UNIMPLEMENTED` ist insoweit überholt. Ob ein konkreter Anbieter (z. B. PublicNode) den Stream freischaltet und kostenlos bereitstellt, bleibt `NOT_RUN` und erfordert einen Capability-Test. `SubscribeDeshred` bleibt ein optionaler K-INGRESS-PRE-Sensor, kein Ersatz für autoritative Geyser-State-Updates.
 
 **BELEGT — Agave:** `tpu-client-next` existiert und kann QUIC-Verbindungen zu kommenden Leadern vorhalten. Das beweist technische Verfügbarkeit, nicht wirtschaftliche Priorität für einen unstaked/ungepaarten Bot.
 
