@@ -15,6 +15,7 @@ pub mod p0 {
     use crate::execution::pipeline::{
         PlanError, PlanErrorKind, ReceivershipBuilder, ReceivershipPlan,
     };
+    use crate::execution::prepared::Skeleton;
     use darkbot_project0::economics::{CandidateInput, Path};
     use darkbot_project0::funding::{self, FundingClass, FundingContext};
     use darkbot_project0::health::crate_impl::CrateHealth;
@@ -651,6 +652,90 @@ pub mod p0 {
         }
     }
 
+    /// [FIX-100] MarginfiAccount itself is the authoritative source for whether its
+    /// liquidation-record PDA exists. The protocol writes this field when the record is
+    /// created and resets it to Pubkey::default() when the record is closed. This avoids
+    /// both hot-path RPC and the invalid assumption that "not present in our RAM state"
+    /// means "not present on-chain".
+    fn should_init_liquidation_record<S: AccountSource + ?Sized>(
+        state: &S,
+        program: &Pubkey,
+        account: &Pubkey,
+    ) -> Result<bool, String> {
+        let (owner, _, data) = state
+            .account(account)
+            .ok_or("marginfi account not in state")?;
+        if owner != *program {
+            return Err(format!("UNKNOWN_LAYOUT: marginfi account owner {}", owner));
+        }
+        // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
+        let a =
+            darkbot_project0::protocol::decode_marginfi_account(data).map_err(|e| e.to_string())?;
+        let expected = darkbot_project0::protocol::liquidation_record_pda(program, account);
+        liquidation_record_init_decision(a.liquidation_record, expected)
+            .map_err(|e| format!("{} account={}", e, account))
+    }
+
+    /// [FIX-107] Exact bank-only layout used by pinned p0-cli for EndLiquidation.
+    /// Active balance order is normalized descending by raw pubkey bytes, matching
+    /// load_observation_bank_only_metas().
+    fn active_bank_keys<S: AccountSource + ?Sized>(
+        state: &S,
+        program: &Pubkey,
+        account: &Pubkey,
+    ) -> Result<Vec<Pubkey>, String> {
+        let (owner, _, data) = state
+            .account(account)
+            .ok_or("marginfi account not in state")?;
+        if owner != *program
+            || darkbot_project0::protocol::classify(data)
+                != darkbot_project0::protocol::AccountType::MarginfiAccount
+        {
+            return Err("UNKNOWN_LAYOUT: invalid MarginfiAccount for observation layout".into());
+        }
+        // B2: strict pinned layout, never a prefix decode.
+        let a =
+            darkbot_project0::protocol::decode_marginfi_account(data).map_err(|e| e.to_string())?;
+        let mut banks: Vec<Pubkey> = a
+            .lending_account
+            .balances
+            .iter()
+            .filter(|bal| bal.is_active())
+            .map(|bal| bal.bank_pk)
+            .collect();
+        banks.sort_by(|x, y| y.cmp(x));
+        Ok(banks)
+    }
+
+    /// P2-06: the account-dependent template of `account`'s receivership plans, read only
+    /// through `state` — the parts the builder formerly re-derived for every pair and class.
+    /// An unknown observation set ends planning; the other errors stay per pair, as before.
+    pub(crate) fn prepare_skeleton<S: AccountSource + ?Sized>(
+        state: &S,
+        program: &Pubkey,
+        group: &Pubkey,
+        account: &Pubkey,
+    ) -> Result<Skeleton, PlanError> {
+        let observation = CrateHealth {
+            state,
+            group: *group,
+        }
+        .observation_accounts(account)
+        .map_err(SizingError::from)?;
+        let banks_and_refreshes = active_bank_keys(state, program, account).and_then(|banks| {
+            // [FIX-109][R6] Refresh every active integration balance before StartLiquidation.
+            // Deterministic from canonical RAM state; fails closed on any unknown layout.
+            let refreshes =
+                darkbot_project0::integration::refresh_plan_for_account(state, program, account)?;
+            Ok((banks, refreshes))
+        });
+        Ok(Skeleton {
+            observation,
+            banks_and_refreshes,
+            init_record: should_init_liquidation_record(state, program, account),
+        })
+    }
+
     impl<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider>
         P0ReceivershipBuilder<'a, S, Z, R>
     {
@@ -681,58 +766,6 @@ pub mod p0 {
             k: &Pubkey,
         ) -> Result<&T, String> {
             darkbot_project0::integration::integration_account::<T, S>(self.state, k)
-        }
-
-        /// [FIX-100] MarginfiAccount itself is the authoritative source for whether its
-        /// liquidation-record PDA exists. The protocol writes this field when the record is
-        /// created and resets it to Pubkey::default() when the record is closed. This avoids
-        /// both hot-path RPC and the invalid assumption that "not present in our RAM state"
-        /// means "not present on-chain".
-        fn should_init_liquidation_record(&self, account: &Pubkey) -> Result<bool, String> {
-            let (owner, _, data) = self
-                .state
-                .account(account)
-                .ok_or("marginfi account not in state")?;
-            if owner != self.program {
-                return Err(format!("UNKNOWN_LAYOUT: marginfi account owner {}", owner));
-            }
-            // B2: strict pinned layout (discriminator, exact length), never a prefix decode.
-            let a = darkbot_project0::protocol::decode_marginfi_account(data)
-                .map_err(|e| e.to_string())?;
-            let expected =
-                darkbot_project0::protocol::liquidation_record_pda(&self.program, account);
-            liquidation_record_init_decision(a.liquidation_record, expected)
-                .map_err(|e| format!("{} account={}", e, account))
-        }
-
-        /// [FIX-107] Exact bank-only layout used by pinned p0-cli for EndLiquidation.
-        /// Active balance order is normalized descending by raw pubkey bytes, matching
-        /// load_observation_bank_only_metas().
-        fn active_bank_keys(&self, account: &Pubkey) -> Result<Vec<Pubkey>, String> {
-            let (owner, _, data) = self
-                .state
-                .account(account)
-                .ok_or("marginfi account not in state")?;
-            if owner != self.program
-                || darkbot_project0::protocol::classify(data)
-                    != darkbot_project0::protocol::AccountType::MarginfiAccount
-            {
-                return Err(
-                    "UNKNOWN_LAYOUT: invalid MarginfiAccount for observation layout".into(),
-                );
-            }
-            // B2: strict pinned layout, never a prefix decode.
-            let a = darkbot_project0::protocol::decode_marginfi_account(data)
-                .map_err(|e| e.to_string())?;
-            let mut banks: Vec<Pubkey> = a
-                .lending_account
-                .balances
-                .iter()
-                .filter(|bal| bal.is_active())
-                .map(|bal| bal.bank_pk)
-                .collect();
-            banks.sort_by(|x, y| y.cmp(x));
-            Ok(banks)
         }
 
         fn asset_withdraw_instruction(
@@ -929,7 +962,7 @@ pub mod p0 {
         fn receivership(
             &self,
             account: &Pubkey,
-            obs: &[Pubkey],
+            prep: &Skeleton,
             sz: &Sizing,
             swaps: Vec<Instruction>,
         ) -> Result<Vec<Instruction>, String> {
@@ -972,6 +1005,7 @@ pub mod p0 {
                 }
             };
 
+            let obs = &prep.observation;
             let (withdraw, _underlying_out) =
                 self.asset_withdraw_instruction(account, obs, sz, &asset_ata, &asset_tp)?;
             let repay = builders::repay(
@@ -988,7 +1022,8 @@ pub mod p0 {
                 sz.repay_all.then_some(true),
                 obs,
             );
-            let active_banks_before = self.active_bank_keys(account)?;
+            // P2-06: the prepared template; its errors surface here, where they always did.
+            let (active_banks_before, pre_refreshes) = prep.banks_and_refreshes.clone()?;
             let start_observation: Vec<AccountMeta> = obs
                 .iter()
                 .map(|k| {
@@ -1003,15 +1038,7 @@ pub mod p0 {
             // bank-only layout. Start/Repay still observe the pre-close bank and its oracle.
             let end_banks = end_banks_after_repay(active_banks_before, sz.liab_bank, sz.repay_all);
 
-            // [FIX-109][R6] Refresh every active integration balance before StartLiquidation.
-            // The planner is deterministic from canonical RAM state and fails closed on any
-            // missing/unknown integration layout.
-            let pre_refreshes = darkbot_project0::integration::refresh_plan_for_account(
-                self.state,
-                &self.program,
-                account,
-            )?;
-            let init_record = self.should_init_liquidation_record(account)?;
+            let init_record = prep.init_record.clone()?;
             let ixs = builders::build_receivership(ReceivershipParams {
                 program: &self.program,
                 group: &self.group,
@@ -1075,13 +1102,7 @@ pub mod p0 {
             }
             let protocol_luts =
                 crate::execution::lookup_tables::from_state(self.state, &self.group, slot);
-            let health = CrateHealth {
-                state: self.state,
-                group: self.group,
-            };
-            let obs = health
-                .observation_accounts(account)
-                .map_err(SizingError::from)?;
+            let prep = prepare_skeleton(self.state, &self.program, &self.group, account)?;
             let mut out = Vec::new();
 
             let mut route_errors = Vec::new();
@@ -1174,7 +1195,7 @@ pub mod p0 {
                         FundingClass::ZeroPrefundSameTx => continue,
                         FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
                             let ixs =
-                                pair_try!('pairs, self.receivership(account, &obs, &sz, vec![]));
+                                pair_try!('pairs, self.receivership(account, &prep, &sz, vec![]));
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1231,7 +1252,7 @@ pub mod p0 {
                                 continue;
                             };
                             let ixs =
-                                pair_try!('pairs, self.receivership(account, &obs, &sz, vec![]));
+                                pair_try!('pairs, self.receivership(account, &prep, &sz, vec![]));
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1303,7 +1324,7 @@ pub mod p0 {
                         },
                         |route| {
                             let ixs = self
-                                .receivership(account, &obs, &sz, route.instructions.clone())
+                                .receivership(account, &prep, &sz, route.instructions.clone())
                                 .map_err(BuildError::Compile)?;
                             // Same payer/resources/LUTs/signature placeholders as final build.
                             // Hash bytes have fixed width; no RPC or signing needed for sizing.
@@ -1444,7 +1465,7 @@ pub mod p0 {
                     format!("ROUTING:{}", route_errors.join(" | ")),
                 ));
             }
-            if self.should_init_liquidation_record(account)? {
+            if prep.init_record.clone()? {
                 // B4: the record this plan creates costs its rent-exempt minimum. The pinned
                 // program can return it (`close_liquid_record`, to the record payer), but no plan
                 // contains that instruction, so no recovery is credited. Known only with the
