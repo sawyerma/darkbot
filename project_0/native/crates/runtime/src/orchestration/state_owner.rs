@@ -103,6 +103,8 @@ pub(super) struct ShadowOwner {
     required_set: HashSet<Pubkey>,
     optional_set: HashSet<Pubkey>,
     prereq_allowed: Vec<Pubkey>,
+    /// P8-RES-01: the one global wallet reservation book; every offer and attempt sees its holds.
+    reservations: crate::execution::reservation::WalletReservations,
     min_profit: i128,
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,

@@ -50,6 +50,19 @@ pub(crate) fn ata_candidates_for_bank<S: AccountSource + ?Sized>(
 }
 
 #[cfg(feature = "crate_health")]
+/// P8-RES-01: the liquidator's validated ATA amount of `mint` minus what every attempt holds of it
+/// in the global reservation book — the units an offer may use; no ATA is nothing.
+pub(crate) fn available_liquidator_inventory<S: AccountSource + ?Sized>(
+    state: &S,
+    mint: &Pubkey,
+    liquidator: &Pubkey,
+    reservations: &crate::execution::reservation::WalletReservations,
+) -> u64 {
+    validated_liquidator_ata(state, mint, liquidator)
+        .map(|(_, amount)| amount.saturating_sub(reservations.held(&mint.to_string())))
+        .unwrap_or(0)
+}
+
 pub(crate) fn validated_liquidator_ata<S: AccountSource + ?Sized>(
     state: &S,
     mint: &Pubkey,
@@ -339,4 +352,60 @@ pub(crate) fn wall_unix_s() -> Result<u64, &'static str> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .map_err(|_| "WALL_CLOCK_BEFORE_UNIX_EPOCH")
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+
+    struct Accounts(std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>);
+    impl AccountSource for Accounts {
+        fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+            self.0.get(key).map(|(o, d)| (*o, 0, d.as_slice()))
+        }
+    }
+
+    /// P8-RES-01: an offer uses only the liquidator's ATA units no attempt holds; a mint without
+    /// a validated ATA offers nothing.
+    #[test]
+    fn offers_use_only_units_no_attempt_holds() {
+        let (liquidator, mint) = (Pubkey::new_unique(), Pubkey::new_unique());
+        let token = Pubkey::from_str(protocol::TOKEN_PROGRAM_ID).unwrap();
+        let ata = associated_token_address(&liquidator, &mint, &token);
+        let mut data = vec![0u8; 165];
+        data[0..32].copy_from_slice(mint.as_ref());
+        data[32..64].copy_from_slice(liquidator.as_ref());
+        data[64..72].copy_from_slice(&1_000u64.to_le_bytes());
+        let state = Accounts([(ata, (token, data))].into_iter().collect());
+        let mut book = crate::execution::reservation::WalletReservations::default();
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &liquidator, &book),
+            1_000
+        );
+        let balances = [(mint.to_string(), 1_000)].into_iter().collect();
+        book.reserve(
+            "a",
+            &[(mint.to_string(), 700)].into_iter().collect(),
+            &balances,
+        )
+        .unwrap();
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &liquidator, &book),
+            300
+        );
+        book.reserve(
+            "b",
+            &[(mint.to_string(), 300)].into_iter().collect(),
+            &balances,
+        )
+        .unwrap();
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &liquidator, &book),
+            0
+        );
+        assert_eq!(
+            available_liquidator_inventory(&state, &Pubkey::new_unique(), &liquidator, &book),
+            0
+        );
+    }
 }

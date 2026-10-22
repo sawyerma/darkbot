@@ -79,6 +79,7 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         required_set: HashSet::new(),
         optional_set: HashSet::new(),
         prereq_allowed: vec![],
+        reservations: Default::default(),
         min_profit: 0,
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,

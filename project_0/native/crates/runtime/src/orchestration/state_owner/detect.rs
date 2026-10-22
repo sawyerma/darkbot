@@ -318,13 +318,17 @@ impl ShadowOwner {
                 group: self.group,
             };
             #[cfg(feature = "crate_health")]
+            // P8-RES-01: offers see only what no attempt holds (C11).
             let inventory = |bank_key: &Pubkey| -> u64 {
                 let Some(bank) = bank_from_state(eval_state, &self.program, bank_key) else {
                     return 0;
                 };
-                validated_liquidator_ata(eval_state, &bank.mint, &self.liquidator)
-                    .map(|(_, amount)| amount)
-                    .unwrap_or(0)
+                available_liquidator_inventory(
+                    eval_state,
+                    &bank.mint,
+                    &self.liquidator,
+                    &self.reservations,
+                )
             };
             #[cfg(feature = "crate_health")]
             let ata = |mint: &Pubkey| -> Option<Pubkey> {

@@ -860,6 +860,7 @@ pub(super) fn prepare(
         required_set,
         optional_set,
         prereq_allowed,
+        reservations: Default::default(),
         min_profit,
         integration_probe_enabled,
         integration_probe_limit_per_kind,
