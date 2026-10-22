@@ -260,7 +260,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | P2-01 RAM model / P2-02 reverse indices | `state`, `liquidation/index.rs` | R127d Shadow | LOCAL_PASS | requalification after FIX-134/135 not recorded |
 | P2-03 threshold index | `index.rs` | — | CODE | not the default since R127 |
 | P2-04 premium scheduler / P2-05 tag scheduler | `schedule.rs` | unit tests | CODE | 0.1.12 semantics |
-| P2-06 prepared candidate / TX template cache | `prepared.rs` | — | PARTIAL | template cache not built |
+| P2-06 prepared candidate / TX template cache | `runtime/src/execution/prepared.rs` (unwired draft `liquidation/src/prepared.rs` removed) | `5825d47`, `2774a5e` | LOCAL_PASS | real-account hit rate NOT_RUN |
 | P2-07 invalidation + prebuild benchmark | — | — | OPEN | — |
 | P3-01 crate integration / exact fallback | `health.rs` | R127d 12.4 M checks | LOCAL_PASS | — |
 | P3-02 premium health | — | RC2 API identified | OPEN | 0.1.12 promotion (`premium_scratch`) |

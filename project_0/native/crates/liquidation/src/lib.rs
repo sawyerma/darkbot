@@ -23,7 +23,6 @@ pub mod index;
 #[cfg(feature = "crate_health")]
 pub mod integration;
 pub mod planner;
-pub mod prepared;
 #[cfg(feature = "crate_health")]
 pub mod projection;
 pub mod protocol;
