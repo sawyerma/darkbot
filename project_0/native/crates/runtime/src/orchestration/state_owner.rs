@@ -108,6 +108,8 @@ pub(super) struct ShadowOwner {
     /// P8-RES-02: the FE-04 journal directory the book is rebuilt from, and when it last was.
     fe04_journal: Option<std::path::PathBuf>,
     fe04_refreshed: std::time::Instant,
+    /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
+    inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
     min_profit: i128,
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,

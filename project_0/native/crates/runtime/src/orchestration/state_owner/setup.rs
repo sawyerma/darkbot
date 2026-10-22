@@ -796,6 +796,9 @@ pub(super) fn prepare(
     let mt0_order_rx: VecDeque<u64> = VecDeque::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
     let (reservations, fe04_journal) = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?;
+    let inventory_targets = crate::execution::inventory::parse_targets(
+        &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
+    )?;
     let owner = ShadowOwner {
         metrics: OwnerMetrics {
             oracle_dependency_updates,
@@ -865,6 +868,7 @@ pub(super) fn prepare(
         reservations,
         fe04_journal,
         fe04_refreshed: std::time::Instant::now(),
+        inventory_targets,
         min_profit,
         integration_probe_enabled,
         integration_probe_limit_per_kind,

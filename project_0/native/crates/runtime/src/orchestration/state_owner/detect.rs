@@ -328,6 +328,9 @@ impl ShadowOwner {
                     &bank.mint,
                     &self.liquidator,
                     &self.reservations,
+                    self.inventory_targets
+                        .get(&bank.mint.to_string())
+                        .map_or(0, |t| t.reserve),
                 )
             };
             #[cfg(feature = "crate_health")]

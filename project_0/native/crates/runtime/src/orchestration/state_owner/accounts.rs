@@ -51,18 +51,22 @@ pub(crate) fn ata_candidates_for_bank<S: AccountSource + ?Sized>(
 
 #[cfg(feature = "crate_health")]
 /// P8-RES-01: the liquidator's validated ATA amount of `mint` minus what every attempt holds of it
-/// in the global reservation book — the units an offer may use; no ATA is nothing.
+/// in the global reservation book and minus its never-spent policy reserve (P8-INV-01) — the
+/// units an offer may use; no ATA is nothing.
 pub(crate) fn available_liquidator_inventory<S: AccountSource + ?Sized>(
     state: &S,
     mint: &Pubkey,
     liquidator: &Pubkey,
     reservations: &crate::execution::reservation::WalletReservations,
+    reserve: u64,
 ) -> u64 {
     if reservations.is_unreadable() {
         return 0;
     }
     validated_liquidator_ata(state, mint, liquidator)
-        .map(|(_, amount)| amount.saturating_sub(reservations.held(&mint.to_string())))
+        .map(|(_, amount)| {
+            amount.saturating_sub(reservations.held(&mint.to_string()).saturating_add(reserve))
+        })
         .unwrap_or(0)
 }
 
@@ -382,7 +386,7 @@ mod reservation_tests {
         let state = Accounts([(ata, (token, data))].into_iter().collect());
         let mut book = crate::execution::reservation::WalletReservations::default();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book),
+            available_liquidator_inventory(&state, &mint, &liquidator, &book, 0),
             1_000
         );
         let balances = [(mint.to_string(), 1_000)].into_iter().collect();
@@ -393,8 +397,13 @@ mod reservation_tests {
         )
         .unwrap();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book),
+            available_liquidator_inventory(&state, &mint, &liquidator, &book, 0),
             300
+        );
+        // P8-INV-01: the policy reserve is never offered.
+        assert_eq!(
+            available_liquidator_inventory(&state, &mint, &liquidator, &book, 120),
+            180
         );
         book.reserve(
             "b",
@@ -403,17 +412,17 @@ mod reservation_tests {
         )
         .unwrap();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &book),
+            available_liquidator_inventory(&state, &mint, &liquidator, &book, 0),
             0
         );
         assert_eq!(
-            available_liquidator_inventory(&state, &Pubkey::new_unique(), &liquidator, &book),
+            available_liquidator_inventory(&state, &Pubkey::new_unique(), &liquidator, &book, 0),
             0
         );
         // A book whose durable journal cannot be read offers nothing.
         let unreadable = crate::execution::reservation::WalletReservations::unreadable();
         assert_eq!(
-            available_liquidator_inventory(&state, &mint, &liquidator, &unreadable),
+            available_liquidator_inventory(&state, &mint, &liquidator, &unreadable, 0),
             0
         );
     }

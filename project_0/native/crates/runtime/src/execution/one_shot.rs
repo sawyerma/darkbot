@@ -76,6 +76,8 @@ pub struct Current {
     /// P8-RES-01: what every other active attempt holds (`WalletReservations::held_by_others`);
     /// a hold is checked against the balance minus these, never twice the same units.
     pub reserved_elsewhere: BTreeMap<String, u64>,
+    /// P8-INV-01: the never-spent reserve per asset (`inventory::reserves`, the LIVE gate floor).
+    pub policy_reserve: BTreeMap<String, u64>,
     /// Each existing gate must independently be known and passed. In particular
     /// a single-TX simulation cannot satisfy the bundle_simulated gate.
     pub health_funding_route_fee_exit_known: bool,
@@ -617,7 +619,9 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
         || i.holds.keys().any(|k| k != "SOL" && !key(k))
         || i.holds.iter().any(|(mint, n)| {
             c.balances.get(mint).is_none_or(|balance| {
-                balance.saturating_sub(c.reserved_elsewhere.get(mint).copied().unwrap_or(0)) < *n
+                let elsewhere = c.reserved_elsewhere.get(mint).copied().unwrap_or(0);
+                let reserve = c.policy_reserve.get(mint).copied().unwrap_or(0);
+                balance.saturating_sub(elsewhere.saturating_add(reserve)) < *n
             })
         })
     {
@@ -939,6 +943,7 @@ mod tests {
             program_data_hash: a.program_data_hash.clone(),
             balances: [("SOL".into(), 100)].into_iter().collect(),
             reserved_elsewhere: BTreeMap::new(),
+            policy_reserve: BTreeMap::new(),
             health_funding_route_fee_exit_known: true,
             canonical_fresh_no_gap_or_fork: true,
             exact_signed_payload_simulated: true,
@@ -969,6 +974,13 @@ mod tests {
         )
         .unwrap();
         c.reserved_elsewhere = book.held_by_others("this");
+        // P8-INV-01: the policy reserve is never spent either (100 - 80 - 1 < 20).
+        c.policy_reserve = [("SOL".to_string(), 1)].into_iter().collect();
+        assert_eq!(
+            j.reserve(a.clone(), i.clone(), &c).unwrap_err(),
+            "WALLET_UNDERFUNDED_OR_HOLD_MISSING"
+        );
+        c.policy_reserve.clear();
         assert!(j.reserve(a, i, &c).is_ok());
     }
 

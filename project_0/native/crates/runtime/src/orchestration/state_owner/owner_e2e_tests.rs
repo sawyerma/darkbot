@@ -82,6 +82,7 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         reservations: Default::default(),
         fe04_journal: None,
         fe04_refreshed: std::time::Instant::now(),
+        inventory_targets: Default::default(),
         min_profit: 0,
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,
