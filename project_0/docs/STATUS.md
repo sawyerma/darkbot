@@ -28,7 +28,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | First realized net profit | **NOT PROVEN** | `MEASUREMENT_LEDGER.json` overall |
 | LIVE / value-bearing submission | **DISABLED / NOT AUTHORIZED** | FE-06 remains locked |
 | FE-00 | **LOCAL_PASS; NO_ECONOMIC_GO** | Existing FE-00 ledger/evidence |
-| FE-01 | **PARTIAL_LOCAL / Mainnet parity NOT_RUN** | Offline one-class freeze and drift checks committed `6aac2e4f`; aktuell deployte ProgramData-/State-/Fundingparität ohne autorisierten Read nicht belegt |
+| FE-01 | **BLOCKED (Mainnet-Upgrade beobachtet)** | Offline one-class freeze `6aac2e4f`; genehmigter Smoke-Read 24.10. ([Evidence](evidence/FE01_SMOKE_20261024/fe01_observation.json), 3 Calls, öffentliches RPC): ProgramData-SHA-256 `3e3626a9…` ≠ 0.1.11-Referenz `H57mq…` (`eec8f8f7…`), Deployment-Slot 456 093 551 nach der Referenzbeobachtung ⇒ Programm neu deployed; Quelle neu identifizieren und pinnen (P1B→P1A) vor jeder Parität |
 | FE-02 / FE-03 | **OPEN / NOT_QUALIFIED** | FE-02/B4 `91ed707a`; ZERO_PREFUND-Härtung `106c11c2`/`4a2168f7`, E2E über echte Adapter (Loopback) `263624a0` (Repay-Floor aus signierten Swap-Bytes, Low-Price-Surplus, Token-2022-Fee/Hook fail-closed, Worst-Case-Tagesverlust, abgeleitete Admission-Evidenz, Qualified-Boolean verweigert) LOCAL_PASS; aktuell positiver simulierter Candidate/Exit NOT_PROVEN; FE-03 offen |
 | FE-04 | **PARTIAL_LOCAL** | FE-04-Journal und C3/P8-05 Settlement `2605556c`; Durable Admission `8bfa63f2`; `d850d478` Schema 3 (Blockhash-Ablauf), Blockhöhen-Nonlanding-Beweis, `settle_step`, konservative Bewertung; `122e7e9c` Owner-Settlement (Worker, einmalige Safety-Buchung, UNKNOWN hält); `8c7acbba` Buchungstag persistiert, realisiert ≠ offenes Inventar, abgelehnte Buchung hält, Journal einzige Finanzautorität; `c7b0e6f1` Exit-Kern im Journal (Schema 5), `cbb0c243` Owner-Exit-Settlement, `760f858c` Exit-Admission (nativer SOL-Verkauf, ein Send), `0b3db124` Freigabeprofil `p0ctl approval show`; Produktionsaufruf = FE-06, kein Produktionsaufrufer der Admission (CLI/FE-06), autorisierte Chain-Reconciliation NOT_RUN |
 | S1-02 / S1-08 Binary Geyser | **LOCAL_PASS (offline) / Provider NOT_RUN** | `BinaryGeyserSource` (Yellowstone-Protobuf `2a548669`, gRPC/HTTP2+TLS, Mapping, Recovery) und Quellensteuerung OFF/OBSERVE/ACTIVE `94086af8`…`8246fcfb`; PublicNode-Capabilities/Quoten/Latenz/Coverage/Fork-Fidelity NOT_RUN, S1-RACE/Race-LIVE nicht qualifiziert |
@@ -249,7 +249,7 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | Ticket | Code | Evidence | Status | Missing / next step |
 |---|---|---|---|---|
 | P0-01…07 | — | `evidence/P0_20261016/` | **PASS** | — |
-| P1A-01 current ProgramData | `protocol.rs` decoder, Shadow startup pin | ledger 2026-10-16 P1A | CODE · **BLOCKED** | finalized read of program + ProgramData (separate read-only permission) |
+| P1A-01 current ProgramData | `protocol.rs` decoder, Shadow startup pin | ledger 2026-10-16 P1A; Smoke 2026-10-24 | CODE · **BLOCKED** | 24.10. gelesen: ProgramData ≠ `PROGRAM_DATA_REFERENCE_HASH` (Upgrade, Slot 456 093 551); Owner startet `NotReference` (halted); neue Quellversion offen |
 | P1A-02 source/IDL manifest | `protocol.rs` parity tests | `manifests/CURRENT_MAINNET.md` | LOCAL_PASS | on-chain IDL hash NOT_RUN |
 | P1A-03 allowlists | `protocol.rs`, `planner.rs` | same | LOCAL_PASS | — |
 | P1A-04 upgrade watcher | `setup.rs`, `events.rs` | same | LOCAL_PASS | Mainnet behaviour NOT_RUN |

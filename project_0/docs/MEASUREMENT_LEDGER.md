@@ -5957,3 +5957,12 @@ Commits `760f858c`, `0b3db124`.
 - Exit admission over loopback Jupiter/RPC through the real adapters: native-SOL sale of the whole open position (floor 19 900 000 lamports from the signed bytes, exact message fee, one simulation, one send); seven refusals without hold or send.
 - `p0ctl approval show`: strict schema-1 attempt/exit profile, static check, bindings to the clean HEAD and the p0ctl+p0-longtail digest; exit 0 only when valid and both MATCH.
 - NOT_RUN: real Jupiter route, real chain exit, production caller (FE-06), Mainnet, LIVE.
+
+
+## 2026-10-24 — FE-01 smoke read, approved (Mainnet read-only)
+
+Evidence `docs/evidence/FE01_SMOKE_20261024/fe01_observation.json` (observed 2026-10-23T23:54:49Z).
+
+- User approval 2026-10-24: FE-01 smoke only, public `https://api.mainnet-beta.solana.com`, profile smoke (3 calls, 1 RPS, 1 attempt, no fallback, 30 s, 16 MiB). Actual: 3 calls (getAccountInfo ×2, getMultipleAccounts ×1), 610 B sent, 13 988 167 B received, status `OBSERVED_NOT_QUALIFIED`, exit 0.
+- Program `MFv2…VacA` executable; ProgramData `4Q8u…PQR7` SHA-256 `3e3626a9…00de`, deployment slot 456 093 551, context slots 460 637 278–294; both FE targets present (2312 B).
+- Finding: ProgramData ≠ pinned 0.1.11 reference `H57mq…` (`eec8f8f7…`, observed at slots ≈455.09 M); deployed after the reference ⇒ marginfi upgraded. FE-01 BLOCKED until the deployed source is identified and pinned; source parity UNKNOWN, no simulation, no LIVE.
