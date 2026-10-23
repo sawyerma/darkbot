@@ -6,6 +6,20 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 **Historischer Follow-up-Vermerk (`9047c7b`, 2026-10-16):** Die damalige Formulierung „uncommitted“ ist überholt und beschreibt **nicht** den heutigen Git-Arbeitsbaum. Die zugehörigen [Berichte](development_history/persist_followup_20261016.md) und [Evidence](evidence/PERSIST_FOLLOWUP_20261016/qualification.json) bleiben historische Nachweise. Aktuelle PERSIST-/JFI- und FE-Gates nur nach geprüftem Produktionscode und aktueller Evidence einstufen; kein historischer Eintrag erteilt eine LIVE-Freigabe.
 
+## A23 Code-/CI-Review 2026-10-23 — offene Härtung vor Owner-/Quellenintegration
+
+**Review-Register:** [BUGS.md §19 — A23-01 bis A23-09](BUGS.md). Der neueste geprüfte Code hat einen lokal getesteten S1-02/S1-08-Adapter (`8246fcfb`), aber noch keinen durchgängigen Geyser-Owner-Pfad und kein nachgewiesenes `p0ctl`-Runtime-Toggling. Das Offline-Gate `746/0/10`, `744/0/10`, Runner `355/0/3` ×2 ist dokumentiert; kein P6-MT-, GitHub-CI-, Mainnet- oder LIVE-PASS.
+
+| Priorität | Tickets | Aktueller Status / Abnahmegrenze |
+|---|---|---|
+| **HIGH, vor Owner-Integration** | **A23-01** Owner-Wakeup | `events.rs` 250-ms-Ingress-Wait, separate Worker-Result-Queues ohne nachgewiesenen Wakeup; P6-MT.4/.14/.15 OPEN, echter p99 NOT_MEASURED |
+| **HIGH, CI** | **A23-02** CI-Abdeckung | Project_0-GitHub-Actions prüft nur ausgewählte Crates/Tests; vollständiger `--locked`-Workspace, Feature-Matrix, Clippy, Toolchain und Actions-PASS noch OPEN |
+| **HIGH, vor LIVE-Quellenumschaltung** | **A23-03 / A23-04** Arbiter-Autorisierung und Lead-Retention | Statische Freigabe bei der Arbiter-Erstellung und unbounded `leads`; kein produktiver Geyser-Owner-Pfad; Tests/Fixes OPEN |
+| **LOW–MEDIUM, zusammen mit A23-01** | **A23-08** Worker-Sleep | 1-ms-Full-Queue-Wait auf Shutdown/Backpressure prüfen |
+| **REVIEW_REQUIRED** | **A23-05 / A23-06 / A23-07 / A23-09** | Release-Overflow-Profil, transparenter Provider-Cooldown, Wallet-Journal-16-MiB-Runway, reproduzierbares JFI-04-JSON-Inventar; keine unbewiesenen automatischen Umbauten |
+
+**Reihenfolge:** A23-01 + A23-08 und A23-03/A23-04 im beauftragten S1-02-OWNER-Arbeitspaket, A23-02 als separater CI-Nachweis; dann vollständiges Owner-E2E-/Offline-Gate. Restpunkte messen/triagieren. Das ändert keine FE-00…FE-07-, FREE_ONLY-, PERSIST-/JFI-, Provider-/Read-only- oder LIVE-Freigaben.
+
 ## 1. Bottom line
 
 | Scope | Verdict | Current evidence |
