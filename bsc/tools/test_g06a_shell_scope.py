@@ -73,7 +73,9 @@ with_public_salt 2>/dev/null && exit 1 || true
         self.assertNotIn('export ',text)
         # Keys reach only the two signing steps, with A's public salt; the
         # key-free launch path gets the salt alone; nothing exports a salt.
-        self.assertEqual(text.count('with_keys '),0)
+        # B's two signing steps get the keys only through the salt handoff.
+        self.assertEqual(text.count('with_keys '),2)
+        self.assertEqual(text.count('with_keys "$HANDOFF" exec-salt '),2)
         self.assertEqual(text.count('with_keys_public_salt '),2)
         self.assertIn('with_keys_public_salt "$A_SALT" node bsc/tools/g06a_local_simulate.cjs',text)
         self.assertIn('with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle"',text)

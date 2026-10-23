@@ -795,12 +795,16 @@ fn a_missing_manipulated_stale_or_contradictory_snapshot_or_candidate_makes_no_v
             "identity",
         ),
         (
-            candidate_with(&good, c::DEPLOYMENT_RECORD_SHA256, Value::B256([2; 32])),
-            "requalification preflight",
+            candidate_with(
+                &good,
+                c::PORTAL_IMPLEMENTATION_CODE_SHA256,
+                Value::B256([2; 32]),
+            ),
+            "deployment",
         ),
         (
             candidate_with(&good, c::PORTAL_VERSION, Value::Text("v5.26.0".into())),
-            "requalification preflight",
+            "deployment",
         ),
         (
             candidate_with(&good, c::TOKEN, Value::Address([3; 20])),
@@ -816,6 +820,14 @@ fn a_missing_manipulated_stale_or_contradictory_snapshot_or_candidate_makes_no_v
     }
     std::fs::remove_file(&record).unwrap();
     refuse("no candidate");
+    // A candidate created at an earlier preflight of the same deployment
+    // (H1 -> H2, v9.1 D3) stays the same candidate.
+    std::fs::write(
+        &record,
+        candidate_with(&good, c::DEPLOYMENT_RECORD_SHA256, Value::B256([2; 32])),
+    )
+    .unwrap();
+    assert!(attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).is_ok());
     std::fs::write(&record, &good).unwrap();
     // The superseded v4 must be the inactive proposal.
     let v4_path = root.join(V4_RELATIVE_PATH);

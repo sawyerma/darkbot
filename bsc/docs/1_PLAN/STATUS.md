@@ -20,6 +20,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 D3 (code, offline-tested): PREPARE ends with `g06a_dry_handoff prepare` → `prepare_handoff.dbrec` (type 36: only the coherent H1 R0 record by SHA-256 and chain + candidate ID/generation; H1 preflight hash diagnostic only); `verify` re-checks hash, schema, the shared R0 coherence (`execution::r0`, also used by the requal check; anchored at the pinned frozen preflight) and an unchanged selection, then creates a new 0700 SIGN dir with only the R0 record and the public candidate record; H2 extension refuses a reorged H1 end or a gap.
 
+2026-10-23 D4 (code, offline-tested): `g06a_final_dry.sh --sign <prepare_dir>` (only with `DARKBOT_G06A_SIGN=YES`, real keys = AWAITING_USER_AUTHORIZATION) verifies the handoff, extends R0 at H2 via DRY-0 (head must be beyond H1), recomputes preflight/quote/cross-check/builder/4b at H2, then steps 4/5 (B through exec-salt with keys) and the requal check (B with `--candidate`) in a new 0700 `bsc/.local/g06a_sign/*`; H1 economics never reused. Candidates bind by deployment identity (code hashes), not by the creation-preflight record, so the candidate stays unchanged H1→H2.
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

@@ -1057,9 +1057,11 @@ pub struct V5Evidence {
 /// Reads the v5 evidence: the v4 evidence of a requalification run that also
 /// passed its launch-path check, its snapshot (checked against the run's
 /// preflight and of the DRY's token), the public record of the candidate at
-/// `candidate_record` (its ID recomputed; derived against exactly that
-/// preflight, for the DRY's launcher and token and, where it carries them,
-/// the DRY's signed hashes) and the inactive v4 proposal it supersedes.
+/// `candidate_record` (its ID recomputed; of exactly that preflight's
+/// deployment — Portal, version, implementation and Tax-V3 with their code
+/// hashes; the candidate stays the one created earlier, v9.1 D3 — for the
+/// DRY's launcher and token and, where it carries them, the DRY's signed
+/// hashes) and the inactive v4 proposal it supersedes.
 pub fn attempt1_v5_evidence(
     root: &Path,
     requal_dir: &str,
@@ -1117,10 +1119,9 @@ pub fn attempt1_v5_evidence(
             c::TAX_V3_IMPLEMENTATION_CODE_SHA256,
             &pre,
             p::TAX_V3_IMPL_CODE_SHA256,
-        )?
-        && candidate.b256(c::DEPLOYMENT_RECORD_SHA256).map_err(e)? == base.preflight.record_sha256;
+        )?;
     if !deployment {
-        return Err("the candidate is not derived against the requalification preflight".into());
+        return Err("the candidate is not of the requalification preflight's deployment".into());
     }
     if !same_address(c::LAUNCHER, &dry, d::LAUNCHER)? || !same_address(c::TOKEN, &dry, d::TOKEN)? {
         return Err("the candidate's launcher or token differs from the DRY".into());

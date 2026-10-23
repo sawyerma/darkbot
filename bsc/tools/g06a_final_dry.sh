@@ -25,18 +25,27 @@ clear_exports
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
-# Modes (v9.1 D2): FULL, the default (A: R0 .. DRY-4 at one head, needs the
-# wallet keys); PREPARE (key-free preview at H1 for the selected candidate:
-# bsc/secrets.env is never read, steps 4 and 5 never run, the output is
-# PREPARE_ONLY / NOT_REQUALIFIED).
+# Modes (v9.1 D2-D4): FULL, the default (A: R0 .. DRY-4 at one head, needs
+# the wallet keys); PREPARE (key-free preview at H1 for the selected
+# candidate: bsc/secrets.env is never read, steps 4 and 5 never run, the
+# output is PREPARE_ONLY / NOT_REQUALIFIED); SIGN <prepare_dir> (at a fresh
+# head H2: only the verified R0 record and candidate reference of PREPARE
+# cross, everything else is recomputed before the wallet-key steps; private
+# output directory). Real-key SIGN needs the user's explicit authorization.
 MODE=FULL
 PROFILE=SELF_A
+PREPARED=""
 case "$#:${1:-}:${2:-}:${3:-}" in
   "0:::") ;;
   "1:--prepare::" | "3:--prepare:--profile:A") MODE=PREPARE ;;
   "3:--prepare:--profile:B") MODE=PREPARE PROFILE=SELF_B ;;
-  *) printf 'usage: g06a_final_dry.sh [--prepare [--profile A|B]]\n' >&2; exit 2 ;;
+  2:--sign:?*:) MODE=SIGN PREPARED="$2" ;;
+  *) printf 'usage: g06a_final_dry.sh [--prepare [--profile A|B] | --sign <prepare_dir>]\n' >&2; exit 2 ;;
 esac
+if [[ "$MODE" == SIGN && "${DARKBOT_G06A_SIGN:-}" != YES ]]; then
+  printf 'STOP: SIGN signs locally with the wallet keys; set DARKBOT_G06A_SIGN=YES only with the explicit user authorization (AWAITING_USER_AUTHORIZATION)\n' >&2
+  exit 2
+fi
 
 SECRETS="$ROOT/bsc/secrets.env"
 ENGINE="$ROOT/bsc/engine"
@@ -60,7 +69,7 @@ lower() {
   printf '%s' "$1" | run tr '[:upper:]' '[:lower:]'
 }
 
-if [[ "$MODE" == FULL ]]; then
+if [[ "$MODE" != PREPARE ]]; then
   [[ -f "$SECRETS" ]] || die "missing $SECRETS"
   run git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored by Git"
 fi
@@ -73,7 +82,7 @@ build -p darkbot-bsc-execution --features g07-mainnet --bin g06a_preflight_recor
 build -p darkbot-bsc-qualification --bin g06a_native_bnb_quote --bin g06a_self_launch_bundle \
   --bin g06a_builder_policy_record --bin g06a_requal_check
 
-if [[ "$MODE" == FULL ]]; then
+if [[ "$MODE" != PREPARE ]]; then
   set +a
   # shellcheck disable=SC1090
   source "$SECRETS"
@@ -103,25 +112,45 @@ DARKBOT_G06A_BUY_VALUE_WEI="1000000000000"
 DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI="50000000"
 
 HANDOFF="$ENGINE/target/debug/g06a_dry_handoff"
+ref() { printf '%s\n' "$CANDIDATE_REF" | run awk -F= -v k="$1" '$1 == k { print $2 }'; }
 if [[ "$MODE" == PREPARE ]]; then
   # The selected candidate's public reference (store-verified); B's salt
   # stays in the store until exec-salt hands it to one consumer.
   CANDIDATE_REF="$(run "$HANDOFF" selection --profile "$PROFILE")" || die "no verified selected $PROFILE candidate"
-  ref() { printf '%s\n' "$CANDIDATE_REF" | run awk -F= -v k="$1" '$1 == k { print $2 }'; }
-  CANDIDATE_ID="$(ref candidate_id)"
-  GENERATION="$(ref generation)"
   CANDIDATE_TOKEN="$(ref token)"
   CANDIDATE_COMMITMENT="$(ref salt_commitment)"
+  RUN_ID="g06a_prepare_$(run date -u +%Y%m%dT%H%M%SZ)"
+  OUT_DIR="$ROOT/bsc/native/evidence/g06a/$RUN_ID"
+  run mkdir -p "$OUT_DIR"
+elif [[ "$MODE" == SIGN ]]; then
+  # D3: verify the PREPARE handoff; it creates the new private SIGN
+  # directory with only the R0 record and the public candidate record.
+  PREPARED="$(cd "$PREPARED" 2>/dev/null && pwd)" || die "no PREPARE directory"
+  run git check-ignore -q bsc/.local/g06a_sign || die "bsc/.local is not ignored by Git"
+  run mkdir -p "$ROOT/bsc/.local/g06a_sign"
+  RUN_ID="g06a_sign_$(run date -u +%Y%m%dT%H%M%SZ)"
+  OUT_DIR="$ROOT/bsc/.local/g06a_sign/$RUN_ID"
+  CANDIDATE_REF="$(run "$HANDOFF" verify --prepare "$PREPARED" --frozen "$FROZEN" --out "$OUT_DIR")" \
+    || die "the PREPARE handoff does not verify (R0 record or candidate)"
+  PROFILE="$(ref profile)"
+  R0_H1_TO="$(ref r0_to_block)"
+  CANDIDATE_RECORD="$OUT_DIR/candidate.dbrec"
+  CANDIDATE_TOKEN="$(get_required token "$CANDIDATE_RECORD")" || die "candidate record unreadable"
+  CANDIDATE_COMMITMENT="$(get_required salt_commitment "$CANDIDATE_RECORD")" || die "candidate record unreadable"
+  [[ "$PROFILE" == SELF_A || "$PROFILE" == SELF_B ]] && [[ "$R0_H1_TO" =~ ^[0-9]+$ ]] || die "malformed handoff reference"
+else
+  RUN_ID="g06a_requal_dry_$(run date -u +%Y%m%dT%H%M%SZ)"
+  OUT_DIR="$ROOT/bsc/native/evidence/g06a/$RUN_ID"
+  run mkdir -p "$OUT_DIR"
+fi
+if [[ "$MODE" != FULL ]]; then
+  CANDIDATE_ID="$(ref candidate_id)"
+  GENERATION="$(ref generation)"
   [[ "$CANDIDATE_ID" =~ ^0x[[:xdigit:]]{64}$ && "$GENERATION" =~ ^[0-9]+$ \
     && "$CANDIDATE_TOKEN" =~ ^0x[[:xdigit:]]{40}$ && "$CANDIDATE_COMMITMENT" =~ ^0x[[:xdigit:]]{64}$ ]] \
     || die "malformed candidate reference"
   printf 'CANDIDATE=%s  id=%s  generation=%s\n' "$PROFILE" "$CANDIDATE_ID" "$GENERATION"
-  RUN_ID="g06a_prepare_$(run date -u +%Y%m%dT%H%M%SZ)"
-else
-  RUN_ID="g06a_requal_dry_$(run date -u +%Y%m%dT%H%M%SZ)"
 fi
-OUT_DIR="$ROOT/bsc/native/evidence/g06a/$RUN_ID"
-run mkdir -p "$OUT_DIR"
 PREFLIGHT="$OUT_DIR/preflight.dbrec"
 SCAN="$OUT_DIR/portal_upgrade_scan.dbrec"
 UPGRADE="$OUT_DIR/portal_upgrade.dbrec"
@@ -133,7 +162,11 @@ LAUNCH_PATH="$OUT_DIR/launch_path.dbrec"
 DRY="$OUT_DIR/dry_result.dbrec"
 
 printf '\n=== R0: PORTAL UPGRADE COVERAGE SINCE THE FROZEN DRY (READ-ONLY) ===\n'
-if [[ -n "${DARKBOT_G06A_UPGRADE_SCAN:-}" ]]; then
+if [[ "$MODE" == SIGN ]]; then
+  # The verified H1 coverage; DRY-0 extends it to H2 (a reorged end STOPs).
+  run "$ENGINE/target/debug/dbrec_show" "$SCAN" > "$OUT_DIR/portal_upgrade_scan.view.txt" || die "handed-off scan is not a record"
+  printf 'R0_SCAN=HANDED_OFF  prepare=%s  to=%s\n' "$PREPARED" "$R0_H1_TO"
+elif [[ -n "${DARKBOT_G06A_UPGRADE_SCAN:-}" ]]; then
   run cp "$DARKBOT_G06A_UPGRADE_SCAN" "$SCAN" || die "cannot reuse $DARKBOT_G06A_UPGRADE_SCAN"
   run "$ENGINE/target/debug/dbrec_show" "$SCAN" > "$OUT_DIR/portal_upgrade_scan.view.txt" || die "reused scan is not a record"
   printf 'R0_SCAN=REUSED  from=%s\n' "$DARKBOT_G06A_UPGRADE_SCAN"
@@ -154,6 +187,10 @@ printf '\n=== 0/6 DRY-0: READ-ONLY PREFLIGHT, R0 CLOSED AT ITS BLOCK ===\n'
 run "$ENGINE/target/debug/g06a_preflight_record" --out "$PREFLIGHT" --upgrade-scan "$SCAN" --upgrade-out "$UPGRADE" \
   > "$OUT_DIR/preflight.view.txt" 2> "$OUT_DIR/preflight.progress.txt" \
   || die "read-only preflight or the closing R0 coverage failed (see preflight.progress.txt)"
+if [[ "$MODE" == SIGN ]]; then
+  _dbrec_31="$(get_required latest_block_number "$PREFLIGHT")" || die "required typed DBREC field unavailable"
+  (( _dbrec_31 > R0_H1_TO )) || die "SIGN needs a fresh head H2 beyond the PREPARE coverage"
+fi
 _dbrec_5="$(get_required portal_implementation "$PREFLIGHT")" || die "required typed DBREC field unavailable"
 CURRENT_IMPL="${_dbrec_5}"
 # The typed R0 verdict is g06a_requal_check's; this only reports the count.
@@ -220,7 +257,7 @@ else
     || die "the deterministic salt differs from the frozen candidate: new economic decision required"
   printf 'EVM_CROSSCHECK=PASS  exact_output_match=true  frozen_salt=true\n'
 fi
-if [[ "$MODE" == PREPARE ]]; then
+if [[ "$MODE" != FULL ]]; then
   _dbrec_30="$(get_required token "$ECON")" || die "required typed DBREC field unavailable"
   [[ "$(lower "${_dbrec_30}")" == "$(lower "$CANDIDATE_TOKEN")" ]] || die "the cross-check token is not the selected candidate's"
 fi
@@ -270,9 +307,16 @@ if [[ "$MODE" == PREPARE ]]; then
 fi
 
 printf '\n=== 4/6 EXACT WALLET-BOUND LOCAL SIMULATION ===\n'
-BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
-  with_keys_public_salt "$A_SALT" node bsc/tools/g06a_local_simulate.cjs "$LOCAL_SIM" > "$OUT_DIR/local_simulation.out.txt" \
-  || die "exact local simulation failed"
+if [[ "$PROFILE" == SELF_B ]]; then
+  BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+    with_keys "$HANDOFF" exec-salt --candidate "$CANDIDATE_ID" --generation "$GENERATION" --preflight "$PREFLIGHT" -- \
+    node bsc/tools/g06a_local_simulate.cjs "$LOCAL_SIM" > "$OUT_DIR/local_simulation.out.txt" \
+    || die "exact local simulation failed"
+else
+  BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+    with_keys_public_salt "$A_SALT" node bsc/tools/g06a_local_simulate.cjs "$LOCAL_SIM" > "$OUT_DIR/local_simulation.out.txt" \
+    || die "exact local simulation failed"
+fi
 _dbrec_18="$(get_required launcher "$LOCAL_SIM")" || die "required typed DBREC field unavailable"
 [[ "${_dbrec_18}" == "$(lower "$BSC_LAUNCHER_ADDRESS")" ]] \
   || die "Launcher private key does not match frozen Launcher address"
@@ -288,8 +332,14 @@ _dbrec_21="$(get_required buy_success "$LOCAL_SIM")" || die "required typed DBRE
 printf 'WALLET_BINDING=PASS\nEXACT_LOCAL_SIMULATION=PASS\n'
 
 printf '\n=== 5/6 DRY1-DRY4 -- ZERO LIVE EGRESS ===\n'
-with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
-  > "$OUT_DIR/dry_result.view.txt" || die "final G0.6A DRY qualification failed"
+if [[ "$PROFILE" == SELF_B ]]; then
+  with_keys "$HANDOFF" exec-salt --candidate "$CANDIDATE_ID" --generation "$GENERATION" --preflight "$PREFLIGHT" -- \
+    "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
+    > "$OUT_DIR/dry_result.view.txt" || die "final G0.6A DRY qualification failed"
+else
+  with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
+    > "$OUT_DIR/dry_result.view.txt" || die "final G0.6A DRY qualification failed"
+fi
 for key in DRY_1_bytes_and_signers DRY_2_independent_local_simulation DRY_3_gas_floor_and_budget DRY_4_expiry_nonces_zero_egress all; do
 _dbrec_23="$(get_required "dry_pass.$key" "$DRY")" || die "required typed DBREC field unavailable"
   value="${_dbrec_23}"
@@ -309,17 +359,29 @@ for name in preflight economics_crosscheck local_simulation dry_result; do
   [[ "$rc" -le 1 ]] || die "dbrec_compare could not read $name (exit $rc)"
 done
 rc=0
-run "$ENGINE/target/debug/g06a_requal_check" "$OUT_DIR" "$FROZEN" "$BUILDER_POLICY" \
-  > "$OUT_DIR/requalification_status.view.txt" || rc=$?
+if [[ "$PROFILE" == SELF_B ]]; then
+  # B's own run: DRY6 binds the candidate (ID, deployment, token, commitment).
+  run "$ENGINE/target/debug/g06a_requal_check" "$OUT_DIR" "$FROZEN" "$BUILDER_POLICY" --candidate "$CANDIDATE_RECORD" \
+    > "$OUT_DIR/requalification_status.view.txt" || rc=$?
+else
+  run "$ENGINE/target/debug/g06a_requal_check" "$OUT_DIR" "$FROZEN" "$BUILDER_POLICY" \
+    > "$OUT_DIR/requalification_status.view.txt" || rc=$?
+fi
 run grep -E '^(FLAP_REQUALIFICATION|STATUS_SHA256)=|^checks\[[0-9]+\]\.(name|status) = ' "$OUT_DIR/requalification_status.view.txt" || true
 (cd "$OUT_DIR" && run shasum -a 256 ./*.dbrec ./*.txt ./*.md > SHA256SUMS)
 [[ "$rc" -eq 0 ]] || die "FLAP_REQUALIFICATION=STOP (exit $rc): see requalification_status.view.txt; evidence kept in $OUT_DIR"
-for field in transactions.launch_tx_hash transactions.buy_tx_hash transactions.token transactions.min_output; do
-_dbrec_26="$(get_required "$field" "$DRY")" || die "required typed DBREC field unavailable"
-_dbrec_25="$(get_required "$field" "$FROZEN/dry_result.dbrec")" || die "required typed DBREC field unavailable"
-  [[ "${_dbrec_26}" == "${_dbrec_25}" ]] \
-    || die "$field differs from the frozen DRY: the signed bytes changed, a new economic approval is required"
-done
-printf 'SIGNED_BYTES=IDENTICAL_TO_FROZEN_DRY\n'
+if [[ "$PROFILE" == SELF_A ]]; then
+  for field in transactions.launch_tx_hash transactions.buy_tx_hash transactions.token transactions.min_output; do
+  _dbrec_26="$(get_required "$field" "$DRY")" || die "required typed DBREC field unavailable"
+  _dbrec_25="$(get_required "$field" "$FROZEN/dry_result.dbrec")" || die "required typed DBREC field unavailable"
+    [[ "${_dbrec_26}" == "${_dbrec_25}" ]] \
+      || die "$field differs from the frozen DRY: the signed bytes changed, a new economic approval is required"
+  done
+  printf 'SIGNED_BYTES=IDENTICAL_TO_FROZEN_DRY\n'
+else
+  _dbrec_32="$(get_required transactions.token "$DRY")" || die "required typed DBREC field unavailable"
+  [[ "$(lower "${_dbrec_32}")" == "$(lower "$CANDIDATE_TOKEN")" ]] || die "the DRY token is not the selected candidate's"
+  printf 'SIGNED_BYTES=OWN_SELF_B_BYTES (separate economic approval required)\n'
+fi
 printf '\nFLAP_REQUALIFICATION=PASS\nEVIDENCE_DIR=%s\nLIVE_SUBMISSION=NOT_AUTHORIZED  GUARD=UNARMED\n' "$OUT_DIR"
 printf 'NEXT=Review the evidence; then contract v5 proposal and readiness. No live run without explicit authorization.\n'

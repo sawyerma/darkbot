@@ -612,9 +612,6 @@ fn evaluate(
                 p.push(format!("candidate {field} differs from {name}"));
             }
         }
-        if word(one(c, "deployment.record_sha256")) != Some(pre_sha) {
-            p.push("the candidate is not derived against this preflight".into());
-        }
         if one(c, "qualification") != Some(Value::Text("UNQUALIFIED".into()))
             || one(c, "evidence.dry_record_sha256").is_some()
         {
@@ -623,7 +620,7 @@ fn evaluate(
         checks.push(check(
             "DRY6_B_CANDIDATE",
             p,
-            "the SELF_B candidate (ID recomputed) is derived against this preflight; its launcher, token and salt commitment are this run's DRY, simulation and private cross-check",
+            "the SELF_B candidate (ID recomputed) is of this preflight's deployment; its launcher, token and salt commitment are this run's DRY, simulation and private cross-check",
         ));
     }
 
@@ -805,16 +802,26 @@ mod tests {
             };
             q.set(f.tag, v);
         }
-        q.set(quote::EXPECTED_OUTPUT, f_d.get(dry::LOCAL_EXPECTED_OUTPUT).unwrap().clone())
-            .set(
-                quote::MIN_OUTPUT,
-                if breaks == "min_output" {
-                    Value::u128(1)
-                } else {
-                    f_d.get(dry::MIN_OUTPUT).unwrap().clone()
-                },
-            )
-            .set(quote::PREFLIGHT_RECORD_SHA256, Value::B256(sha256(&pre)));
+        q.set(
+            quote::EXPECTED_OUTPUT,
+            f_d.get(dry::LOCAL_EXPECTED_OUTPUT).unwrap().clone(),
+        )
+        .set(
+            quote::MIN_OUTPUT,
+            if breaks == "min_output" {
+                Value::u128(1)
+            } else {
+                f_d.get(dry::MIN_OUTPUT).unwrap().clone()
+            },
+        )
+        .set(
+            quote::PREFLIGHT_RECORD_SHA256,
+            Value::B256(if breaks == "h1_quote" {
+                [6; 32]
+            } else {
+                sha256(&pre)
+            }),
+        );
         std::fs::write(dir.join("native_quote.dbrec"), q.encode().unwrap()).unwrap();
         let state = |d: &mut Draft, schema: &'static Schema| {
             d.set(tag_of(schema, "state_source.block_number"), HEAD);
@@ -825,6 +832,20 @@ mod tests {
                 state(d, &economics::NATIVE);
                 if breaks == "salt" {
                     d.set(tag_of(&economics::NATIVE, "salt"), Value::B256([9; 32]));
+                }
+                // v9.1 D4: H2 curve state changed without any drift field,
+                // or an H1 cross-check carried into the H2 run.
+                if breaks == "h2_curve" {
+                    d.set(
+                        tag_of(&economics::NATIVE, "simulated_received_amount"),
+                        Value::u128(1),
+                    );
+                }
+                if breaks == "h1_econ" {
+                    d.set(
+                        tag_of(&economics::NATIVE, "state_source.block_number"),
+                        HEAD - 1,
+                    );
                 }
             }),
         )
@@ -1077,7 +1098,14 @@ mod tests {
                 c::TAX_V3_IMPLEMENTATION_CODE_SHA256,
                 p.get(pf::TAX_V3_IMPL_CODE_SHA256).unwrap().clone(),
             )
-            .set(c::DEPLOYMENT_RECORD_SHA256, Value::B256(sha256(&pre_bytes)))
+            .set(
+                c::DEPLOYMENT_RECORD_SHA256,
+                Value::B256(if breaks == "b_h1_candidate" {
+                    [0x41; 32]
+                } else {
+                    sha256(&pre_bytes)
+                }),
+            )
             .set(c::LAUNCHER, f_d.get(dry::LAUNCHER).unwrap().clone())
             .set(c::TOKEN, Value::Address(token))
             .set(
@@ -1117,6 +1145,9 @@ mod tests {
             result
         };
         let (pass, checks) = b_verdict("none").unwrap();
+        assert!(pass, "{checks:#?}");
+        // Created at an earlier preflight of the same deployment (H1 -> H2).
+        let (pass, checks) = b_verdict("b_h1_candidate").unwrap();
         assert!(pass, "{checks:#?}");
         assert!(
             checks
@@ -1189,6 +1220,9 @@ mod tests {
             ("salt", "DRY2_SIMULATION"),
             ("min_output", "DRY3_GAS_ECONOMICS_BUDGET"),
             ("lp_stale", "DRY5_LAUNCH_PATH"),
+            ("h2_curve", "DRY2_SIMULATION"),
+            ("h1_econ", "DRY2_SIMULATION"),
+            ("h1_quote", "DRY3_GAS_ECONOMICS_BUDGET"),
             ("lp_token", "DRY5_LAUNCH_PATH"),
         ] {
             let (pass, checks) = verdict(breaks);
