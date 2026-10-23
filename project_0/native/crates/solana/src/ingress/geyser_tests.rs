@@ -503,6 +503,11 @@ fn transactions_map_legacy_v0_alt_v1_and_status() {
         (Some(TxWireVersion::Legacy), Some(3))
     );
     assert_eq!(legacy.signature, bs58::encode([7u8; 64]).into_string());
+    assert_eq!(chain.signatures.len(), 1);
+    assert_eq!(
+        chain.signatures[0], legacy.signature,
+        "encoded once, reused"
+    );
     assert_eq!(chain.message.address_table_lookups, None);
     let meta_out = chain.meta.unwrap();
     assert_eq!(
@@ -885,4 +890,50 @@ fn geyser_events_feed_the_one_canonical_core() {
         core.on_event(e);
     }
     assert!(core.gap_open());
+}
+
+/// S1.9 offline measurement (run with `--release -- --ignored --nocapture`): gRPC frame decode
+/// plus mapping per update — an account (165-byte data) and a v0 transaction with one ALT and
+/// meta — on prebuilt frames with distinct write versions. Prints; asserts no speed.
+#[test]
+#[ignore]
+fn geyser_decode_map_latency_benchmark() {
+    const N: usize = 20_000;
+    let k = Pubkey::new_unique();
+    let accounts: Vec<Vec<u8>> = (0..N as u64)
+        .map(|v| {
+            let mut u = account(k, 10 + v / 100, v, Some(1));
+            if let Some(U::Account(a)) = &mut u.update_oneof {
+                a.account.as_mut().unwrap().data = vec![7; 165];
+            }
+            frame(&u)
+        })
+        .collect();
+    let transaction = frame(&tx(10, 0, message(true, 1, false), Some(meta())));
+    let measure = |label: &str, frames: &mut dyn FnMut(usize) -> Vec<u8>| {
+        let mut m = GeyserMapper::new();
+        let mut ns = Vec::with_capacity(N);
+        let mut bytes = 0usize;
+        for i in 0..N {
+            let f = frames(i);
+            bytes += f.len();
+            let t = std::time::Instant::now();
+            let mut d = FrameDecoder::new(1 << 20);
+            d.push(&f);
+            let u = d.next_message::<SubscribeUpdate>().unwrap().unwrap();
+            std::hint::black_box(m.map(u, 1).unwrap());
+            ns.push(t.elapsed().as_nanos());
+        }
+        ns.sort_unstable();
+        println!(
+            "S1_GEYSER_BENCH {label} n={N} bytes_per_update={} p50_ns={} p95_ns={} p99_ns={} max_ns={}",
+            bytes / N,
+            ns[N / 2],
+            ns[N * 95 / 100],
+            ns[N * 99 / 100],
+            ns[N - 1]
+        );
+    };
+    measure("account_165b", &mut |i| accounts[i].clone());
+    measure("tx_v0_alt_meta", &mut |_| transaction.clone());
 }

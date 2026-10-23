@@ -622,14 +622,18 @@ impl GeyserMapper {
                     .map_err(|_| "GEYSER_SIGNATURE_LENGTH")?;
                 let tx_index = u32::try_from(info.index).ok();
                 self.observe_slot(t.slot);
+                // Base58 dominates the mapping cost: the envelope signature is encoded once and
+                // reused for the identical first transaction signature.
+                let signature_text = bs58::encode(signature).into_string();
+                let tx = chain_tx_with(info, t.slot, Some((&signature, &signature_text)));
                 out.events
                     .push(IngressEvent::Transaction(Box::new(TransactionObserved {
-                        signature: bs58::encode(signature).into_string(),
+                        signature: signature_text,
                         slot: t.slot,
                         tx_index_in_slot: tx_index,
                         source: SourceKind::Geyser,
                         t_rx_ns,
-                        tx: chain_tx(info, t.slot),
+                        tx,
                     })));
             }
             U::EntryUpdateParent(p) => {
@@ -656,6 +660,15 @@ pub fn chain_tx(
     info: proto::SubscribeUpdateTransactionInfo,
     slot: u64,
 ) -> Result<ChainTx, ChainError> {
+    chain_tx_with(info, slot, None)
+}
+
+/// `known`: an already encoded signature (raw bytes, text), reused where a signature equals it.
+fn chain_tx_with(
+    info: proto::SubscribeUpdateTransactionInfo,
+    slot: u64,
+    known: Option<(&[u8; 64], &String)>,
+) -> Result<ChainTx, ChainError> {
     let tx = info.transaction.ok_or(ChainError("GEYSER_TX_MISSING"))?;
     let m = tx.message.ok_or(ChainError("GEYSER_TX_MESSAGE_MISSING"))?;
     if !m.versioned && (m.config.is_some() || !m.address_table_lookups.is_empty()) {
@@ -674,9 +687,12 @@ pub fn chain_tx(
         .signatures
         .iter()
         .map(|s| {
-            <[u8; 64]>::try_from(s.as_slice())
-                .map(|s| bs58::encode(s).into_string())
-                .map_err(|_| ChainError("GEYSER_SIGNATURE_LENGTH"))
+            let raw = <[u8; 64]>::try_from(s.as_slice())
+                .map_err(|_| ChainError("GEYSER_SIGNATURE_LENGTH"))?;
+            Ok(match known {
+                Some((bytes, text)) if *bytes == raw => text.clone(),
+                _ => bs58::encode(raw).into_string(),
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let header = match &m.header {
