@@ -21,7 +21,6 @@ import { WalletsPanel } from "./pages/WalletsPanel";
  */
 
 export type BscTab = "overview" | "launch" | "monitoring" | "analytics" | "wallets";
-export type BscViewMode = "basic" | "advanced";
 
 const TABS: ReadonlyArray<{ key: BscTab; label: string }> = [
   { key: "overview", label: "Overview" },
@@ -48,7 +47,6 @@ function toNotice(topicStatus: string): NoticeState {
 
 export default function BscPage() {
   const [tab, setTab] = useState<BscTab>("overview");
-  const [viewMode, setViewMode] = useState<BscViewMode>("basic");
   const guard = useBscStore(selectGuardState);
   const statusTopic = useBscStore(selectStatusQuality);
 
@@ -61,24 +59,19 @@ export default function BscPage() {
       title="BSC Control"
       subtitle="DarkBot · Birth Entry"
       right={
-        <span className="bsc-header-actions">
+        <span className="g-row">
           <StatusBadge state={toNotice(statusTopic)} detail="Nur BSC-Datenverbindung, keine Trading-Freigabe" />
           <span className="g-badge bsc-state" data-tone={statusTone(guard)} data-testid="bsc-guard">Guard · {guard}</span>
-          <span className="bsc-view-switch" role="group" aria-label="BSC detail level">
-            <button type="button" aria-pressed={viewMode === "basic"} onClick={() => setViewMode("basic")}>Basic</button>
-            <button type="button" aria-pressed={viewMode === "advanced"} onClick={() => setViewMode("advanced")}>Advanced</button>
-          </span>
         </span>
       }
       footer="BSC · Readiness control and evidence · BUY execution unavailable"
     >
       <Tabs items={TABS} value={tab} onChange={setTab} ariaLabel="BSC areas" />
-      <p className="bsc-view-description" role="status">{viewMode === "basic" ? "Übersicht: wichtige Zustände, Sperrgründe und verfügbare Bedienung." : "Technische Ansicht: native Evidenz, Prüffelder und vollständige Diagnosen."}</p>
-      {tab === "overview" ? <OverviewPanel goto={setTab} viewMode={viewMode} /> : null}
-      {tab === "launch" ? <LaunchBuyPanel viewMode={viewMode} /> : null}
-      {tab === "monitoring" ? <MonitoringPanel viewMode={viewMode} /> : null}
-      {tab === "analytics" ? <AnalyticsPanel viewMode={viewMode} /> : null}
-      {tab === "wallets" ? <WalletsPanel viewMode={viewMode} /> : null}
+      {tab === "overview" ? <OverviewPanel goto={setTab} /> : null}
+      {tab === "launch" ? <LaunchBuyPanel /> : null}
+      {tab === "monitoring" ? <MonitoringPanel /> : null}
+      {tab === "analytics" ? <AnalyticsPanel /> : null}
+      {tab === "wallets" ? <WalletsPanel /> : null}
     </GraphiteShell>
   );
 }
