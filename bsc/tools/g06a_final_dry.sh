@@ -25,6 +25,19 @@ clear_exports
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
+# Modes (v9.1 D2): FULL, the default (A: R0 .. DRY-4 at one head, needs the
+# wallet keys); PREPARE (key-free preview at H1 for the selected candidate:
+# bsc/secrets.env is never read, steps 4 and 5 never run, the output is
+# PREPARE_ONLY / NOT_REQUALIFIED).
+MODE=FULL
+PROFILE=SELF_A
+case "$#:${1:-}:${2:-}:${3:-}" in
+  "0:::") ;;
+  "1:--prepare::" | "3:--prepare:--profile:A") MODE=PREPARE ;;
+  "3:--prepare:--profile:B") MODE=PREPARE PROFILE=SELF_B ;;
+  *) printf 'usage: g06a_final_dry.sh [--prepare [--profile A|B]]\n' >&2; exit 2 ;;
+esac
+
 SECRETS="$ROOT/bsc/secrets.env"
 ENGINE="$ROOT/bsc/engine"
 FROZEN="$ROOT/bsc/native/evidence/g06a/g07_binary_import_20261016"
@@ -47,34 +60,38 @@ lower() {
   printf '%s' "$1" | run tr '[:upper:]' '[:lower:]'
 }
 
-[[ -f "$SECRETS" ]] || die "missing $SECRETS"
-run git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored by Git"
+if [[ "$MODE" == FULL ]]; then
+  [[ -f "$SECRETS" ]] || die "missing $SECRETS"
+  run git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored by Git"
+fi
 run grep -Fq 'pub const FROZEN_APPROVED_V5_SHA256: &str = "UNARMED";' \
   bsc/engine/crates/execution/src/acceptance_guard.rs \
   || die "Mainnet live guard is not UNARMED"
 
 build -p darkbot-bsc-record --bin dbrec_show --bin dbrec_compare
-build -p darkbot-bsc-execution --features g07-mainnet --bin g06a_preflight_record
+build -p darkbot-bsc-execution --features g07-mainnet --bin g06a_preflight_record --bin g06a_dry_handoff
 build -p darkbot-bsc-qualification --bin g06a_native_bnb_quote --bin g06a_self_launch_bundle \
   --bin g06a_builder_policy_record --bin g06a_requal_check
 
-set +a
-# shellcheck disable=SC1090
-source "$SECRETS"
-set +a
-clear_exports
-
-: "${BSC_LAUNCHER_PRIVATE_KEY:?BSC_LAUNCHER_PRIVATE_KEY missing in bsc/secrets.env}"
-: "${BSC_BUYER_PRIVATE_KEY:?BSC_BUYER_PRIVATE_KEY missing in bsc/secrets.env}"
-: "${BSC_MAINNET_RPC_HTTPS:?BSC_MAINNET_RPC_HTTPS missing in bsc/secrets.env}"
+if [[ "$MODE" == FULL ]]; then
+  set +a
+  # shellcheck disable=SC1090
+  source "$SECRETS"
+  set +a
+  clear_exports
+  : "${BSC_LAUNCHER_PRIVATE_KEY:?BSC_LAUNCHER_PRIVATE_KEY missing in bsc/secrets.env}"
+  : "${BSC_BUYER_PRIVATE_KEY:?BSC_BUYER_PRIVATE_KEY missing in bsc/secrets.env}"
+  : "${BSC_MAINNET_RPC_HTTPS:?BSC_MAINNET_RPC_HTTPS missing in bsc/secrets.env}"
+else
+  # Only the read-only RPC endpoint, from the caller's environment.
+  : "${BSC_MAINNET_RPC_HTTPS:?PREPARE reads no key file: provide BSC_MAINNET_RPC_HTTPS (read-only RPC) in the environment}"
+fi
 DARKBOT_G06A_ARCHIVE_RPC_HTTPS="${DARKBOT_G06A_ARCHIVE_RPC_HTTPS:-https://bsc-mainnet.public.blastapi.io}"
 BSC_LAUNCHER_ADDRESS="${BSC_LAUNCHER_ADDRESS:-0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd}"
 BSC_BUYER_ADDRESS="${BSC_BUYER_ADDRESS:-0x9c8a0Db41914beEE52Dd49790c4F087E252743DE}"
 
 DARKBOT_G06A_LAUNCHER_ADDRESS="$BSC_LAUNCHER_ADDRESS"
 DARKBOT_G06A_BUYER_ADDRESS="$BSC_BUYER_ADDRESS"
-DARKBOT_G06A_LAUNCHER_PRIVATE_KEY="$BSC_LAUNCHER_PRIVATE_KEY"
-DARKBOT_G06A_BUYER_PRIVATE_KEY="$BSC_BUYER_PRIVATE_KEY"
 
 # The frozen attempt-1 candidate, unchanged (0.05 gwei, 0.000001 BNB BUY).
 DARKBOT_G06A_TAX_V3_IMPL="0x024f18294970b5c76c0691b87f138a0317156422"
@@ -85,7 +102,24 @@ DARKBOT_G06A_LAUNCH_VALUE_WEI="0"
 DARKBOT_G06A_BUY_VALUE_WEI="1000000000000"
 DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI="50000000"
 
-RUN_ID="g06a_requal_dry_$(run date -u +%Y%m%dT%H%M%SZ)"
+HANDOFF="$ENGINE/target/debug/g06a_dry_handoff"
+if [[ "$MODE" == PREPARE ]]; then
+  # The selected candidate's public reference (store-verified); B's salt
+  # stays in the store until exec-salt hands it to one consumer.
+  CANDIDATE_REF="$(run "$HANDOFF" selection --profile "$PROFILE")" || die "no verified selected $PROFILE candidate"
+  ref() { printf '%s\n' "$CANDIDATE_REF" | run awk -F= -v k="$1" '$1 == k { print $2 }'; }
+  CANDIDATE_ID="$(ref candidate_id)"
+  GENERATION="$(ref generation)"
+  CANDIDATE_TOKEN="$(ref token)"
+  CANDIDATE_COMMITMENT="$(ref salt_commitment)"
+  [[ "$CANDIDATE_ID" =~ ^0x[[:xdigit:]]{64}$ && "$GENERATION" =~ ^[0-9]+$ \
+    && "$CANDIDATE_TOKEN" =~ ^0x[[:xdigit:]]{40}$ && "$CANDIDATE_COMMITMENT" =~ ^0x[[:xdigit:]]{64}$ ]] \
+    || die "malformed candidate reference"
+  printf 'CANDIDATE=%s  id=%s  generation=%s\n' "$PROFILE" "$CANDIDATE_ID" "$GENERATION"
+  RUN_ID="g06a_prepare_$(run date -u +%Y%m%dT%H%M%SZ)"
+else
+  RUN_ID="g06a_requal_dry_$(run date -u +%Y%m%dT%H%M%SZ)"
+fi
 OUT_DIR="$ROOT/bsc/native/evidence/g06a/$RUN_ID"
 run mkdir -p "$OUT_DIR"
 PREFLIGHT="$OUT_DIR/preflight.dbrec"
@@ -156,21 +190,40 @@ printf 'QUOTE=PASS  expected_output=%s\n' "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT"
 printf '\n=== 2/6 INDEPENDENT READ-ONLY EVM CROSS-CHECK ===\n'
 # The state of the preflight's block is read on the archive endpoint (the
 # configured endpoint keeps only ~128 blocks of state).
-BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
-  run node bsc/tools/g06a_economics_evm_crosscheck.cjs "$PREFLIGHT" "$ECON" > "$OUT_DIR/economics_crosscheck.out.txt" \
-  || die "independent EVM cross-check failed"
+if [[ "$PROFILE" == SELF_B ]]; then
+  # B: local EVM only, the salt only through the handoff (D1).
+  BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+    run "$HANDOFF" exec-salt --candidate "$CANDIDATE_ID" --generation "$GENERATION" --preflight "$PREFLIGHT" -- \
+    node bsc/tools/g06a_economics_evm_crosscheck.cjs "$PREFLIGHT" "$ECON" --private > "$OUT_DIR/economics_crosscheck.out.txt" \
+    || die "private EVM cross-check failed"
+else
+  BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+    run node bsc/tools/g06a_economics_evm_crosscheck.cjs "$PREFLIGHT" "$ECON" > "$OUT_DIR/economics_crosscheck.out.txt" \
+    || die "independent EVM cross-check failed"
+fi
 _dbrec_13="$(get_required status "$ECON")" || die "required typed DBREC field unavailable"
 [[ "${_dbrec_13}" == "EVM_SEQUENCE_PASS" ]] || die "independent EVM cross-check did not pass"
 _dbrec_14="$(get_required simulated_received_amount "$ECON")" || die "required typed DBREC field unavailable"
 [[ "${_dbrec_14}" == "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT" ]] \
   || die "Curve-20 quote and independent EVM output differ"
-_dbrec_15="$(get_required salt "$ECON")" || die "required typed DBREC field unavailable"
-# A's frozen salt is public; it reaches only its local consumers (D1).
-A_SALT="${_dbrec_15}"
-_dbrec_16="$(get_required salt "$FROZEN/economics_crosscheck.dbrec")" || die "required typed DBREC field unavailable"
-[[ "$A_SALT" == "${_dbrec_16}" ]] \
-  || die "the deterministic salt differs from the frozen candidate: new economic decision required"
-printf 'EVM_CROSSCHECK=PASS  exact_output_match=true  frozen_salt=true\n'
+if [[ "$PROFILE" == SELF_B ]]; then
+  _dbrec_29="$(get_required salt_commitment "$ECON")" || die "required typed DBREC field unavailable"
+  [[ "$(lower "${_dbrec_29}")" == "$(lower "$CANDIDATE_COMMITMENT")" ]] \
+    || die "the private cross-check is not of the selected candidate's salt"
+  printf 'EVM_CROSSCHECK=PASS  exact_output_match=true  private_salt=commitment_only\n'
+else
+  _dbrec_15="$(get_required salt "$ECON")" || die "required typed DBREC field unavailable"
+  # A's frozen salt is public; it reaches only its local consumers (D1).
+  A_SALT="${_dbrec_15}"
+  _dbrec_16="$(get_required salt "$FROZEN/economics_crosscheck.dbrec")" || die "required typed DBREC field unavailable"
+  [[ "$A_SALT" == "${_dbrec_16}" ]] \
+    || die "the deterministic salt differs from the frozen candidate: new economic decision required"
+  printf 'EVM_CROSSCHECK=PASS  exact_output_match=true  frozen_salt=true\n'
+fi
+if [[ "$MODE" == PREPARE ]]; then
+  _dbrec_30="$(get_required token "$ECON")" || die "required typed DBREC field unavailable"
+  [[ "$(lower "${_dbrec_30}")" == "$(lower "$CANDIDATE_TOKEN")" ]] || die "the cross-check token is not the selected candidate's"
+fi
 
 printf '\n=== 3/6 BUILDER FLOOR RE-DETERMINATION (OFFICIAL DOCUMENTATION, READ-ONLY) ===\n'
 run "$ENGINE/target/debug/g06a_builder_policy_record" "$FROZEN/builder_policy.dbrec" "$BUILDER_POLICY" \
@@ -181,6 +234,36 @@ _dbrec_17="$(get_required strictest_explicit_verified_floor_wei "$BUILDER_POLICY
 DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256="$(required_sha256 "$BUILDER_POLICY")" || die "builder policy SHA unavailable"
 printf 'BUILDER_POLICY=RE-DETERMINED  floor_wei=%s  sha256=%s\n' \
   "$DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI" "$DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256"
+
+printf '\n=== 4b/6 LAUNCH-PATH SNAPSHOT (C1/R1, LOCAL EVM, READ-ONLY, KEY-FREE) ===\n'
+# Every executed contract's code hash and every storage word selecting one,
+# at the preflight's block; the typed verdict is g06a_requal_check's DRY5.
+# Independent of step 4 (no signed simulation), so it runs first.
+if [[ "$PROFILE" == SELF_B ]]; then
+  BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+    run "$HANDOFF" exec-salt --candidate "$CANDIDATE_ID" --generation "$GENERATION" --preflight "$PREFLIGHT" -- \
+    node bsc/tools/g06a_launch_path_trace.cjs "$PREFLIGHT" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.out.txt" \
+    || die "launch-path trace failed"
+else
+  BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+    with_public_salt "$A_SALT" node bsc/tools/g06a_launch_path_trace.cjs "$PREFLIGHT" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.out.txt" \
+    || die "launch-path trace failed"
+fi
+run "$ENGINE/target/debug/dbrec_show" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.view.txt" || die "launch path is not a record"
+_dbrec_27="$(get_required launch_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
+_dbrec_28="$(get_required buy_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
+[[ "${_dbrec_27}" == "true" && "${_dbrec_28}" == "true" ]] || die "traced launch/BUY failed"
+printf 'LAUNCH_PATH=RECORDED\n'
+
+if [[ "$MODE" == PREPARE ]]; then
+  printf '\n=== PREPARE COMPLETE (KEY-FREE; STEPS 4, 5 AND THE REQUALIFICATION VERDICT NOT RUN) ===\n'
+  printf 'PREPARE_ONLY / NOT_REQUALIFIED: key-free H1 preview of %s %s (generation %s); no signed bytes, no DRY PASS, no v5 readiness or approval\n' \
+    "$PROFILE" "$CANDIDATE_ID" "$GENERATION" > "$OUT_DIR/PREPARE_ONLY.txt"
+  (cd "$OUT_DIR" && run shasum -a 256 ./*.dbrec ./*.txt > SHA256SUMS)
+  printf 'MODE=PREPARE_ONLY  REQUALIFICATION=NOT_RUN  EVIDENCE_DIR=%s\n' "$OUT_DIR"
+  printf 'NEXT=SIGN at a fresh head H2 (wallet keys; AWAITING_USER_AUTHORIZATION). No live run without explicit authorization.\n'
+  exit 0
+fi
 
 printf '\n=== 4/6 EXACT WALLET-BOUND LOCAL SIMULATION ===\n'
 BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
@@ -199,18 +282,6 @@ _dbrec_21="$(get_required buy_success "$LOCAL_SIM")" || die "required typed DBRE
 [[ "${_dbrec_22}" == "true" && "${_dbrec_21}" == "true" ]] \
   || die "exact local launch/BUY sequence failed"
 printf 'WALLET_BINDING=PASS\nEXACT_LOCAL_SIMULATION=PASS\n'
-
-printf '\n=== 4b/6 LAUNCH-PATH SNAPSHOT (C1/R1, LOCAL EVM, READ-ONLY) ===\n'
-# Every executed contract's code hash and every storage word selecting one,
-# at the preflight's block; the typed verdict is g06a_requal_check's DRY5.
-BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
-  with_public_salt "$A_SALT" node bsc/tools/g06a_launch_path_trace.cjs "$PREFLIGHT" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.out.txt" \
-  || die "launch-path trace failed"
-run "$ENGINE/target/debug/dbrec_show" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.view.txt" || die "launch path is not a record"
-_dbrec_27="$(get_required launch_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
-_dbrec_28="$(get_required buy_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
-[[ "${_dbrec_27}" == "true" && "${_dbrec_28}" == "true" ]] || die "traced launch/BUY failed"
-printf 'LAUNCH_PATH=RECORDED\n'
 
 printf '\n=== 5/6 DRY1-DRY4 -- ZERO LIVE EGRESS ===\n'
 with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \

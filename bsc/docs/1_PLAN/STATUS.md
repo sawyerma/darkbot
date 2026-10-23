@@ -16,6 +16,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 D1 (code, offline-tested): `DARKBOT_G06A_SALT` removed from the `run()` allowlist; A's public salt only via `with_public_salt`/`with_keys_public_salt` to its three consumers; B's salt only via `g06a_dry_handoff exec-salt` (store-verified selected SELF_B, ID/generation/deployment checked, 4 allowlisted consumers, keys only for the 2 signing ones; wrong/stale/A STOP); mock-RPC run of `--private` shows no remote execution or private value sent. Root marker no longer needs a contract file.
 
+2026-10-23 D2 (code, offline-tested): `g06a_final_dry.sh --prepare [--profile A|B]` — no secrets.env read, RPC only from the environment, R0/DRY-0/quote/cross-check/builder/4b at H1 for the store-verified selected candidate (B via exec-salt), steps 4/5 and the verdict never run, output `g06a_prepare_*` marked PREPARE_ONLY / NOT_REQUALIFIED; 4b moved before step 4 (key-free, FULL unchanged otherwise).
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

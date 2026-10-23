@@ -2,8 +2,13 @@
 //! offline: no RPC, no key read, no signature, no send.
 //!
 //! ```text
+//! g06a_dry_handoff selection --profile SELF_A|SELF_B
 //! g06a_dry_handoff exec-salt --candidate <id> --generation <n> --preflight <preflight.dbrec> -- <consumer...>
 //! ```
+//!
+//! `selection` (D2) verifies the selected candidate of the expected profile
+//! in the private store (salt re-derived) and prints only its public
+//! reference: profile, ID, generation, token and salt commitment.
 //!
 //! `exec-salt` (D1) runs exactly one allowlisted local EVM/DRY consumer with
 //! the selected SELF_B candidate's secret salt in that child's environment
@@ -160,6 +165,34 @@ fn selected_b(
     Ok(format!("0x{}", hex::encode(salt.launch_word())))
 }
 
+fn selection(args: &[String]) -> Result<i32, String> {
+    let profile = Profile::parse(flag(args, "--profile")?)?;
+    repository_root_check(Path::new("."))?;
+    let store = Store::existing(Path::new(CANDIDATE_STATE_ROOT))?.ok_or("no G0.7 candidate state")?;
+    let selection = store.selection()?.ok_or("no G0.7 candidate selected")?;
+    if selection.profile != profile {
+        return Err(format!(
+            "the selected candidate is {}, not {}",
+            selection.profile.name(),
+            profile.name()
+        ));
+    }
+    let (candidate, _) = store
+        .load(profile)?
+        .ok_or_else(|| format!("candidate {} does not exist", profile.name()))?;
+    if candidate.id != selection.candidate_id {
+        return Err("the selection names another candidate than the stored one".into());
+    }
+    // Public values only (the candidate record holds them as well).
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "profile={}", profile.name()).map_err(|e| e.to_string())?;
+    writeln!(out, "candidate_id={}", candidate.id).map_err(|e| e.to_string())?;
+    writeln!(out, "generation={}", selection.generation).map_err(|e| e.to_string())?;
+    writeln!(out, "token={:#x}", candidate.token).map_err(|e| e.to_string())?;
+    writeln!(out, "salt_commitment={}", candidate.salt_commitment).map_err(|e| e.to_string())?;
+    Ok(0)
+}
+
 fn exec_salt(args: &[String]) -> Result<i32, String> {
     let split = args
         .iter()
@@ -192,8 +225,9 @@ fn exec_salt(args: &[String]) -> Result<i32, String> {
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
+        Some("selection") => selection(&args[1..]),
         Some("exec-salt") => exec_salt(&args[1..]),
-        _ => Err("usage: g06a_dry_handoff exec-salt --candidate <id> --generation <n> --preflight <preflight.dbrec> -- <consumer...>".into()),
+        _ => Err("usage: g06a_dry_handoff selection --profile SELF_A|SELF_B | exec-salt --candidate <id> --generation <n> --preflight <preflight.dbrec> -- <consumer...>".into()),
     };
     match result {
         Ok(code) => std::process::exit(code),
