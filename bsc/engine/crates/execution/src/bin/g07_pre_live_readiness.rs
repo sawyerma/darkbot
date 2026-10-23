@@ -4,6 +4,8 @@
 #![allow(dead_code, unused_imports)]
 #[path = "g07_mainnet_self_launch_buy/builder_submission.rs"]
 mod builder_submission;
+#[path = "g07_candidate/candidate.rs"]
+mod candidate;
 #[path = "g07_mainnet_self_launch_buy/chain_reads.rs"]
 mod chain_reads;
 #[path = "g07_mainnet_self_launch_buy/inputs.rs"]
@@ -299,6 +301,15 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             B256::from(field(dry.b256(d::BUY_TX_HASH)))
         ),
     );
+    // Readiness counts only for the selected candidate the v4 binds.
+    let (status, detail) = candidate::contract_candidate_check(
+        Path::new(candidate::CANDIDATE_STATE_ROOT),
+        Address::from(field(dry.address(d::TOKEN))),
+        launcher,
+        B256::from(field(dry.b256(d::LAUNCH_TX_HASH))),
+        B256::from(field(dry.b256(d::BUY_TX_HASH))),
+    );
+    check(report, "CANDIDATE_SELECTION", status, &detail);
     validate_attempt_id(&snap.attempt_id)?;
     match absent_attempt_latch(Path::new("."), &snap.attempt_id) {
         Ok(()) => check(report, "ATTEMPT_LATCH", "PASS", "Verified main checkout; no attempt directory; no latch created"),
@@ -456,6 +467,7 @@ const REQUIRED_TECHNICAL_CHECKS: &[&str] = &[
     "WITNESS_SOURCE_BINDING",
     "BUDGET_GAS_SLIPPAGE",
     "SIGNED_TX_HASHES",
+    "CANDIDATE_SELECTION",
     "ATTEMPT_LATCH",
     "FROZEN_PREFLIGHT",
     "BUILDER_FRESHNESS",

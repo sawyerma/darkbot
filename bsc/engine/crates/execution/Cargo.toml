@@ -84,6 +84,15 @@ required-features = ["g07-mainnet"]
 name = "g07_pre_live_readiness"
 required-features = ["g07-mainnet"]
 
+# G0.7 self-launch candidates A/B (plan v8/v9): offline, no RPC, key or send.
+[[bin]]
+name = "g07_candidate"
+required-features = ["g07-mainnet"]
+
 [[test]]
 name = "g07_readiness"
+required-features = ["g07-mainnet"]
+
+[[test]]
+name = "g07_candidate"
 required-features = ["g07-mainnet"]

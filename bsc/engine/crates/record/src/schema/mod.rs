@@ -10,6 +10,7 @@ use crate::{Record, RecordError, Schema, decode, header};
 
 pub mod g06a;
 pub mod g07;
+pub mod g07_candidate;
 pub mod g08;
 
 /// Provenance of an imported legacy file: tags 1 and 2 of every import
@@ -28,6 +29,7 @@ pub fn all() -> Vec<&'static Schema> {
     g06a::ALL
         .iter()
         .chain(g07::ALL)
+        .chain(g07_candidate::ALL)
         .chain(g08::ALL)
         .copied()
         .collect()

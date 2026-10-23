@@ -1,0 +1,521 @@
+//! G0.7 self-launch candidate manager A/B (plan v8/v9), offline only.
+//!
+//! ```text
+//! g07_candidate init-a --economics <dbrec> --dry <dbrec> --preflight <dbrec>
+//! g07_candidate create-b --dry <dbrec> --preflight <dbrec>
+//! g07_candidate select A|B --expect-generation <n>
+//! g07_candidate show [--readiness <dbrec>]
+//! ```
+//!
+//! Runs at the root of the main checkout; state in bsc/.local/g07_candidates.
+//! No RPC, no key, no signature, no send; the guard is only read. Prints the
+//! public identity, never a salt. Exit 2 on every refusal.
+#![allow(dead_code, unused_imports)]
+#[path = "../g07_mainnet_self_launch_buy/builder_submission.rs"]
+mod builder_submission;
+mod candidate;
+#[path = "../g07_mainnet_self_launch_buy/chain_reads.rs"]
+mod chain_reads;
+#[path = "../g07_mainnet_self_launch_buy/inputs.rs"]
+mod inputs;
+#[path = "../g07_mainnet_self_launch_buy/shared.rs"]
+mod shared;
+#[path = "../g07_mainnet_self_launch_buy/transactions.rs"]
+mod transactions;
+
+use builder_submission::*;
+use candidate::*;
+use chain_reads::*;
+use darkbot_bsc_execution::acceptance_guard::FROZEN_APPROVED_V4_SHA256;
+use darkbot_bsc_record::decode;
+use inputs::*;
+use shared::*;
+use transactions::*;
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+fn flag<'a>(args: &'a [String], name: &str) -> Result<&'a str, String> {
+    let at = args
+        .iter()
+        .position(|a| a == name)
+        .ok_or_else(|| format!("{name} is required"))?;
+    args.get(at + 1)
+        .map(String::as_str)
+        .ok_or_else(|| format!("{name} needs a value"))
+}
+
+fn read_input(path: &str) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|e| format!("read {path}: {e}"))
+}
+
+fn print_candidate(candidate: &Candidate) {
+    let p = candidate.profile.name();
+    let dep = &candidate.deployment;
+    println!("{p}.state = PRESENT");
+    println!("{p}.candidate_id = {}", candidate.id);
+    println!("{p}.token = {}", candidate.token);
+    println!("{p}.launcher = {}", candidate.launcher);
+    println!("{p}.chain_id = {}", dep.chain_id);
+    println!("{p}.deployment.portal = {}", dep.portal);
+    println!("{p}.deployment.portal_version = {}", dep.portal_version);
+    println!(
+        "{p}.deployment.portal_implementation = {}",
+        dep.portal_implementation
+    );
+    println!("{p}.deployment.tax_v3_implementation = {}", dep.tax_v3);
+    println!("{p}.deployment.record_sha256 = {}", dep.record_sha256);
+    println!(
+        "{p}.launch_calldata_sha256 = {}",
+        candidate.launch_calldata_sha256
+    );
+    println!("{p}.salt_commitment = {}", candidate.salt_commitment);
+    match &candidate.evidence {
+        Some(e) => {
+            println!(
+                "{p}.evidence.economics_record_sha256 = {}",
+                e.economics_sha256
+            );
+            println!("{p}.evidence.dry_record_sha256 = {}", e.dry_sha256);
+            println!("{p}.evidence.launch_tx_hash = {}", e.launch_tx_hash);
+            println!("{p}.evidence.buy_tx_hash = {}", e.buy_tx_hash);
+        }
+        None => println!("{p}.evidence = NONE"),
+    }
+    println!("{p}.qualification = {}", candidate.qualification);
+    println!("{p}.provenance = {}", candidate.provenance);
+}
+
+fn run(args: &[String]) -> Result<(), String> {
+    repository_root_check(Path::new("."))?;
+    let dir = Path::new(CANDIDATE_STATE_ROOT);
+    match args.first().map(String::as_str) {
+        Some("init-a") => {
+            let (candidate, salt) = frozen_a(
+                &read_input(flag(args, "--economics")?)?,
+                &read_input(flag(args, "--dry")?)?,
+                &read_input(flag(args, "--preflight")?)?,
+                now_ms(),
+            )?;
+            print_candidate(&Store::create(dir)?.init_a(candidate, salt)?);
+        }
+        Some("create-b") => {
+            let store = Store::create(dir)?;
+            let (candidate, salt) = fresh_b(
+                &read_input(flag(args, "--preflight")?)?,
+                &read_input(flag(args, "--dry")?)?,
+                now_ms(),
+                &mut os_random,
+            )?;
+            print_candidate(&store.create_b(candidate, salt)?);
+        }
+        Some("select") => {
+            let profile = Profile::parse(args.get(1).ok_or("select needs A or B")?)?;
+            let expected = flag(args, "--expect-generation")?
+                .parse::<u64>()
+                .map_err(|_| "--expect-generation must be an unsigned integer")?;
+            let store = Store::existing(dir)?.ok_or("no candidate state")?;
+            let selection = store.select(
+                profile,
+                expected,
+                FROZEN_APPROVED_V4_SHA256,
+                Path::new(ATTEMPT_STATE_ROOT),
+                now_ms(),
+            )?;
+            println!("selection.generation = {}", selection.generation);
+            println!("selection.profile = {}", selection.profile.name());
+            println!("selection.candidate_id = {}", selection.candidate_id);
+            println!(
+                "selection.invalidated = READINESS,SIGNED_BYTE_AUTHORIZATION,ECONOMIC_APPROVAL"
+            );
+        }
+        Some("show") => {
+            let readiness = match args.iter().position(|a| a == "--readiness") {
+                Some(_) => Some(
+                    decode(
+                        &schema::g07::readiness::SCHEMA,
+                        &read_input(flag(args, "--readiness")?)?,
+                    )
+                    .map_err(|e| format!("readiness: {e}"))?,
+                ),
+                None => None,
+            };
+            println!("guard = {FROZEN_APPROVED_V4_SHA256}");
+            let Some(store) = Store::existing(dir)? else {
+                println!("selection = NONE");
+                println!("SELF_A.state = ABSENT");
+                println!("SELF_B.state = ABSENT");
+                return Ok(());
+            };
+            let selection = store.selection()?;
+            match &selection {
+                Some(s) => {
+                    println!("selection.generation = {}", s.generation);
+                    println!("selection.profile = {}", s.profile.name());
+                    println!("selection.candidate_id = {}", s.candidate_id);
+                    println!("selection.activated_unix_ms = {}", s.activated_unix_ms);
+                }
+                None => println!("selection = NONE"),
+            }
+            for profile in [Profile::A, Profile::B] {
+                match store.load(profile)? {
+                    Some((candidate, _)) => {
+                        print_candidate(&candidate);
+                        if let Some(r) = &readiness {
+                            println!(
+                                "{}.readiness = {}",
+                                profile.name(),
+                                readiness_for(r, selection.as_ref(), &candidate)
+                            );
+                        }
+                    }
+                    None => println!("{}.state = ABSENT", profile.name()),
+                }
+            }
+        }
+        _ => return Err("usage: g07_candidate init-a|create-b|select|show (see source)".into()),
+    }
+    Ok(())
+}
+
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    if let Err(e) = run(&args) {
+        eprintln!("G07_CANDIDATE=REFUSED: {e}");
+        std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn evidence(name: &str) -> Vec<u8> {
+        fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../native/evidence/g06a/g07_binary_import_20261016")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    fn frozen() -> (Candidate, Salt) {
+        frozen_a(
+            &evidence("economics_crosscheck.dbrec"),
+            &evidence("dry_result.dbrec"),
+            &evidence("preflight.dbrec"),
+            1,
+        )
+        .unwrap()
+    }
+
+    fn private_dir(tag: &str) -> PathBuf {
+        let base = fs::canonicalize(env::temp_dir()).unwrap().join(format!(
+            "g07-candidate-{tag}-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&base).unwrap();
+        base
+    }
+
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    fn word(hex: &str) -> B256 {
+        hex.parse().unwrap()
+    }
+
+    #[test]
+    fn profile_a_reproduces_the_frozen_token_calldata_and_signed_hashes() {
+        let (a, salt) = frozen();
+        assert_eq!(
+            a.token,
+            "0xe51c4deb1038afcd95ef12d4a649cdbcf6fa7777"
+                .parse::<Address>()
+                .unwrap()
+        );
+        let e = a.evidence.as_ref().unwrap();
+        assert_eq!(
+            e.launch_tx_hash,
+            word("0xdb468c01529ee4c9597eae056f420f0d4d6d0753a1f785f8dbb3163028be5146")
+        );
+        assert_eq!(
+            e.buy_tx_hash,
+            word("0xb086f683550d1aa221db2add1aa1426444b7ef716de98594c40b9b6da765db32")
+        );
+        // The exact calldata the G0.7 runner signs for this launcher and salt.
+        assert_eq!(
+            a.launch_calldata_sha256,
+            B256::from(darkbot_bsc_record::sha256(&launch_calldata(
+                a.launcher,
+                salt.expose()
+            )))
+        );
+        assert_eq!(
+            a.launcher,
+            "0x3e7b487ae5e1c49ab1cf6222bdb5cf016e86aacd"
+                .parse::<Address>()
+                .unwrap()
+        );
+        assert_eq!(
+            (a.profile, a.qualification.as_str()),
+            (Profile::A, UNQUALIFIED)
+        );
+        // v5.24.0 evidence never qualifies a later deployment by itself.
+        assert!(a.provenance.contains("v5.24.0") && a.provenance.contains("requalification"));
+    }
+
+    #[test]
+    fn profile_b_draws_a_fresh_vanity_salt_with_the_pinned_create2() {
+        let (a, a_salt) = frozen();
+        let (b, b_salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            2,
+            &mut os_random,
+        )
+        .unwrap();
+        assert_eq!(b.token.as_slice()[18..], [0x77, 0x77]);
+        assert_eq!(
+            b.token,
+            predicted_token(b.deployment.portal, b.deployment.tax_v3, b_salt.expose())
+        );
+        assert_ne!(b.token, a.token);
+        assert_ne!(b.salt_commitment, a.salt_commitment);
+        assert_ne!(b_salt.expose(), a_salt.expose());
+        assert!(b.evidence.is_none() && b.qualification == UNQUALIFIED);
+        assert_eq!(b.launcher, a.launcher);
+        // Draws without the suffix are skipped, a failing RNG fails.
+        let mut n = 0u8;
+        let mut fails = || -> Result<[u8; 32], String> {
+            n += 1;
+            if n > 3 {
+                Err("rng down".into())
+            } else {
+                Ok([n; 32])
+            }
+        };
+        assert!(
+            fresh_b(
+                &evidence("preflight.dbrec"),
+                &evidence("dry_result.dbrec"),
+                2,
+                &mut fails
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn candidate_b_survives_a_restart_and_is_never_rerolled() {
+        let root = private_dir("restart");
+        let dir = root.join("state");
+        let store = Store::create(&dir).unwrap();
+        let (b, salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            3,
+            &mut os_random,
+        )
+        .unwrap();
+        let created = store.create_b(b, salt).unwrap();
+        for f in ["b.candidate.dbrec", "b.salt.dbrec"] {
+            assert_eq!(
+                fs::metadata(dir.join(f)).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        // A new process view of the same directory.
+        let reopened = Store::existing(&dir).unwrap().unwrap();
+        let (again, _) = reopened.load(Profile::B).unwrap().unwrap();
+        assert_eq!(again, created);
+        let (other, other_salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            4,
+            &mut os_random,
+        )
+        .unwrap();
+        assert!(
+            reopened
+                .create_b(other, other_salt)
+                .unwrap_err()
+                .contains("never re-rolled")
+        );
+        assert_eq!(reopened.load(Profile::B).unwrap().unwrap().0, created);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_switch_invalidates_readiness_bound_to_the_other_candidate() {
+        let root = private_dir("switch");
+        let dir = root.join("state");
+        let attempts = root.join("attempts");
+        let store = Store::create(&dir).unwrap();
+        let (a, a_salt) = frozen();
+        let a = store.init_a(a, a_salt).unwrap();
+        let (b, b_salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            5,
+            &mut os_random,
+        )
+        .unwrap();
+        let b = store.create_b(b, b_salt).unwrap();
+        let e = a.evidence.clone().unwrap();
+        let check = |dir: &Path| {
+            contract_candidate_check(dir, a.token, a.launcher, e.launch_tx_hash, e.buy_tx_hash)
+        };
+
+        assert_eq!(check(&dir).0, "BLOCKED"); // nothing selected
+        let on_a = store
+            .select(Profile::A, 0, "UNARMED", &attempts, 10)
+            .unwrap();
+        let (status, detail) = check(&dir);
+        assert_eq!((status, detail.as_str()), ("PASS", on_a.binding().as_str()));
+
+        let mut readiness = Draft::new(&schema::g07::readiness::SCHEMA);
+        readiness
+            .set(schema::g07::readiness::STATUS, "BLOCKED")
+            .set(schema::g07::readiness::MODE, "READ_ONLY_RPC")
+            .set(schema::g07::readiness::OBSERVED_UNIX_MS, 11u64)
+            .set(schema::g07::readiness::LIVE_AUTHORIZED, false);
+        let mut row = Draft::new(&schema::g07::readiness::check::SCHEMA);
+        row.set(schema::g07::readiness::check::NAME, "CANDIDATE_SELECTION")
+            .set(schema::g07::readiness::check::STATUS, "PASS")
+            .set(schema::g07::readiness::check::DETAIL, detail.as_str());
+        readiness.push(schema::g07::readiness::CHECKS, row.into_nested());
+        let readiness = decode(
+            &schema::g07::readiness::SCHEMA,
+            &readiness.encode().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(readiness_for(&readiness, Some(&on_a), &a), "BLOCKED");
+        assert_eq!(readiness_for(&readiness, Some(&on_a), &b), "NOT_SELECTED");
+
+        // Switching to B: A's readiness is stale, B has none, v4 (A) blocks.
+        let on_b = store
+            .select(Profile::B, 1, "UNARMED", &attempts, 20)
+            .unwrap();
+        assert_eq!((on_b.generation, on_b.previous), (2, Some(a.id)));
+        assert_eq!(readiness_for(&readiness, Some(&on_b), &b), "STALE");
+        assert_eq!(readiness_for(&readiness, Some(&on_b), &a), "NOT_SELECTED");
+        assert_eq!(check(&dir).0, "BLOCKED");
+        // Back to A: the old verdict names generation 1, not 3.
+        let again = store
+            .select(Profile::A, 2, "UNARMED", &attempts, 30)
+            .unwrap();
+        assert_eq!(readiness_for(&readiness, Some(&again), &a), "STALE");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stale_generation_tampering_and_missing_candidates_fail_closed() {
+        let root = private_dir("tamper");
+        let dir = root.join("state");
+        let attempts = root.join("attempts");
+        let store = Store::create(&dir).unwrap();
+        let (a, a_salt) = frozen();
+        let a = store.init_a(a, a_salt).unwrap();
+        let e = a.evidence.clone().unwrap();
+        assert!(
+            store
+                .select(Profile::B, 0, "UNARMED", &attempts, 1)
+                .unwrap_err()
+                .contains("does not exist")
+        );
+        assert!(
+            store
+                .select(Profile::A, 5, "UNARMED", &attempts, 1)
+                .unwrap_err()
+                .contains("stale")
+        );
+        store
+            .select(Profile::A, 0, "UNARMED", &attempts, 1)
+            .unwrap();
+        // Wrong address or deployment against the v4 DRY: contradiction.
+        let other = Address::repeat_byte(7);
+        assert_eq!(
+            contract_candidate_check(&dir, other, a.launcher, e.launch_tx_hash, e.buy_tx_hash).0,
+            "STOP"
+        );
+        assert_eq!(
+            contract_candidate_check(&dir, a.token, a.launcher, B256::ZERO, e.buy_tx_hash).0,
+            "STOP"
+        );
+        // A changed public record (token, deployment) or salt never verifies.
+        let public = dir.join("a.candidate.dbrec");
+        let original = fs::read(&public).unwrap();
+        for edit in [
+            c_edit(&a, |x| x.token = other),
+            c_edit(&a, |x| x.deployment.portal_version = "v5.26.0".into()),
+        ] {
+            rewrite(&public, &edit);
+            assert!(store.load(Profile::A).is_err());
+            assert_eq!(
+                contract_candidate_check(
+                    &dir,
+                    a.token,
+                    a.launcher,
+                    e.launch_tx_hash,
+                    e.buy_tx_hash
+                )
+                .0,
+                "STOP"
+            );
+        }
+        rewrite(&public, &original);
+        let mut secret = Draft::new(&schema::g07_candidate::secret::SCHEMA);
+        secret
+            .set(
+                schema::g07_candidate::secret::CANDIDATE_ID,
+                darkbot_bsc_record::Value::B256(a.id.0),
+            )
+            .set(
+                schema::g07_candidate::secret::SALT,
+                darkbot_bsc_record::Value::B256([9; 32]),
+            );
+        rewrite(&dir.join("a.salt.dbrec"), &secret.encode().unwrap());
+        assert!(store.load(Profile::A).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn c_edit(a: &Candidate, f: impl FnOnce(&mut Candidate)) -> Vec<u8> {
+        let mut x = a.clone();
+        f(&mut x);
+        x.draft().encode().unwrap()
+    }
+
+    fn rewrite(path: &Path, bytes: &[u8]) {
+        fs::write(path, bytes).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    #[test]
+    fn switching_is_refused_while_armed_or_with_attempt_state() {
+        let root = private_dir("armed");
+        let dir = root.join("state");
+        let attempts = root.join("attempts");
+        let store = Store::create(&dir).unwrap();
+        let (a, a_salt) = frozen();
+        store.init_a(a, a_salt).unwrap();
+        assert!(
+            store
+                .select(Profile::A, 0, "6f877ae0", &attempts, 1)
+                .unwrap_err()
+                .contains("armed")
+        );
+        fs::create_dir_all(attempts.join("attempt-1")).unwrap();
+        assert!(
+            store
+                .select(Profile::A, 0, "UNARMED", &attempts, 1)
+                .unwrap_err()
+                .contains("attempt state")
+        );
+        assert!(store.selection().unwrap().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
