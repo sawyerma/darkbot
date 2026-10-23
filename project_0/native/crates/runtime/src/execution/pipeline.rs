@@ -1158,6 +1158,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 net_usd_micro: rec.net_profit.unwrap_or(i128::MIN),
                 max_loss_usd_micro,
                 slot,
+                last_valid_block_height: bh.last_valid_block_height,
                 now_unix_ms: now_unix_s.saturating_mul(1_000),
                 state_valid,
                 deadline,

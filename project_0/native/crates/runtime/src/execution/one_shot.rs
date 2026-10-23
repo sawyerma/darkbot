@@ -66,6 +66,69 @@ pub struct Intent {
     pub holds: BTreeMap<String, u64>,
     /// Includes credited exit/collateral mints even when no inventory is reserved.
     pub expected_wallet_assets: BTreeSet<String>,
+    /// C12: the `lastValidBlockHeight` of the signed blockhash (block-height domain, not a
+    /// slot): a non-landing proof needs a finalized block height beyond it. `None` for an intent
+    /// of schema 2 (before C12): its non-landing is never provable, it stays UNKNOWN until
+    /// observed — never a zero.
+    #[serde(default)]
+    pub last_valid_block_height: Option<u64>,
+}
+
+/// Schema-2 layout of `Intent` (FE-04 frames before C12): no `last_valid_block_height`.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct IntentV2 {
+    code_sha: String,
+    binary_sha256: String,
+    wallet: String,
+    program: String,
+    program_data_hash: String,
+    funding_class: String,
+    target: String,
+    signatures: Vec<String>,
+    signed_wire_sha256: String,
+    state_generation: u64,
+    state_slot: u64,
+    valid_until_slot: u64,
+    evaluated_unix_ms: u64,
+    capital_usd_micro: u64,
+    transaction_fee_lamports: u64,
+    tip_lamports: u64,
+    rent_lamports: u64,
+    max_loss_usd_micro: u64,
+    conservative_net_usd_micro: i128,
+    slippage_bps: u64,
+    holds: BTreeMap<String, u64>,
+    expected_wallet_assets: BTreeSet<String>,
+}
+impl From<IntentV2> for Intent {
+    fn from(v: IntentV2) -> Self {
+        Self {
+            code_sha: v.code_sha,
+            binary_sha256: v.binary_sha256,
+            wallet: v.wallet,
+            program: v.program,
+            program_data_hash: v.program_data_hash,
+            funding_class: v.funding_class,
+            target: v.target,
+            signatures: v.signatures,
+            signed_wire_sha256: v.signed_wire_sha256,
+            state_generation: v.state_generation,
+            state_slot: v.state_slot,
+            valid_until_slot: v.valid_until_slot,
+            evaluated_unix_ms: v.evaluated_unix_ms,
+            capital_usd_micro: v.capital_usd_micro,
+            transaction_fee_lamports: v.transaction_fee_lamports,
+            tip_lamports: v.tip_lamports,
+            rent_lamports: v.rent_lamports,
+            max_loss_usd_micro: v.max_loss_usd_micro,
+            conservative_net_usd_micro: v.conservative_net_usd_micro,
+            slippage_bps: v.slippage_bps,
+            holds: v.holds,
+            expected_wallet_assets: v.expected_wallet_assets,
+            last_valid_block_height: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +192,27 @@ struct Saved {
     #[serde(default)]
     observations: BTreeMap<String, receipts::FinalizedObservation>,
 }
+/// Schema-2 layout of `Saved` (its intent without `last_valid_block_height`).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV2 {
+    approval: Approval,
+    intent: IntentV2,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+}
+impl From<SavedV2> for Saved {
+    fn from(v: SavedV2) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent.into(),
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Receipt {
     pub signature: String,
@@ -180,15 +264,31 @@ struct VersionRef<'a> {
     state: &'a Saved,
 }
 /// F2: one durable transition of the wallet automaton as a typed binary frame
-/// (`FE04_TRANSITION`, schema 2). Schema-1 JSON frames of older journals stay readable.
+/// (`FE04_TRANSITION`, schema 3 since C12). Schema-2 and schema-1 JSON frames of older journals
+/// stay readable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Version {
     transition: Transition,
     state: Saved,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV2 {
+    transition: Transition,
+    state: SavedV2,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == crate::analytics::payload::TYPED).then(|| {
+            crate::analytics::payload::decode_wire::<VersionV2>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })
+        })
+    }
 }
 /// F2: the import of a pre-binary JSON wallet journal as a typed frame (`FE04_LEGACY_IMPORT`,
 /// schema 2); the JSON file itself stays unchanged and is only read.
@@ -198,8 +298,22 @@ pub(crate) struct LegacyImport {
     legacy_sha256: String,
     state: Saved,
 }
+#[derive(Deserialize)]
+struct LegacyImportV2 {
+    legacy_sha256: String,
+    state: SavedV2,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == crate::analytics::payload::TYPED).then(|| {
+            crate::analytics::payload::decode_wire::<LegacyImportV2>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })
+        })
+    }
 }
 /// A wallet journal holds a handful of state versions; anything larger is not ours.
 const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024;
@@ -377,6 +491,12 @@ fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), 
 }
 
 impl Journal {
+    /// The current attempt's intent (tests: what the admission bound).
+    #[cfg(test)]
+    pub(crate) fn intent(&self) -> Option<&Intent> {
+        self.saved.as_ref().map(|s| &s.intent)
+    }
+
     pub fn open(directory: &Path, wallet: &str) -> Result<Self, String> {
         if !key(wallet) {
             return Err(err("WALLET_INVALID"));
@@ -736,6 +856,7 @@ mod tests {
             slippage_bps: 30,
             holds: [("SOL".to_string(), 5_000u64)].into_iter().collect(),
             expected_wallet_assets: ["SOL".to_string()].into_iter().collect(),
+            last_valid_block_height: Some(500),
         };
         let state = Saved {
             approval,
@@ -764,29 +885,83 @@ mod tests {
             .into_iter()
             .collect(),
         };
-        let version = Version {
+        // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
+        // read — with the expiry unknown (`None`), never a zero.
+        let i = &state.intent;
+        let v2 = VersionV2 {
             transition: Transition::Finalize,
-            state: state.clone(),
+            state: SavedV2 {
+                approval: state.approval.clone(),
+                intent: IntentV2 {
+                    code_sha: i.code_sha.clone(),
+                    binary_sha256: i.binary_sha256.clone(),
+                    wallet: i.wallet.clone(),
+                    program: i.program.clone(),
+                    program_data_hash: i.program_data_hash.clone(),
+                    funding_class: i.funding_class.clone(),
+                    target: i.target.clone(),
+                    signatures: i.signatures.clone(),
+                    signed_wire_sha256: i.signed_wire_sha256.clone(),
+                    state_generation: i.state_generation,
+                    state_slot: i.state_slot,
+                    valid_until_slot: i.valid_until_slot,
+                    evaluated_unix_ms: i.evaluated_unix_ms,
+                    capital_usd_micro: i.capital_usd_micro,
+                    transaction_fee_lamports: i.transaction_fee_lamports,
+                    tip_lamports: i.tip_lamports,
+                    rent_lamports: i.rent_lamports,
+                    max_loss_usd_micro: i.max_loss_usd_micro,
+                    conservative_net_usd_micro: i.conservative_net_usd_micro,
+                    slippage_bps: i.slippage_bps,
+                    holds: i.holds.clone(),
+                    expected_wallet_assets: i.expected_wallet_assets.clone(),
+                },
+                phase: state.phase.clone(),
+                finalized: state.finalized.clone(),
+                observations: state.observations.clone(),
+            },
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
-        let back: Version = crate::analytics::payload::decode(
-            journal::kind::FE04_TRANSITION,
-            crate::analytics::payload::TYPED,
-            &bytes,
-        )
-        .unwrap();
-        assert_eq!((back.transition, back.state), (Transition::Finalize, state));
+        let old = crate::analytics::payload::encode_wire(&v2).unwrap();
         assert_eq!(
-            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (old.len(), solana_sdk::hash::hash(&old).to_string()),
             (
                 1108,
                 "HwhygqtWc6VthHdUKxendZqFqfWF593a6mo8EFvxmWtn".to_string()
             ),
             "FE04_TRANSITION schema-2 layout changed"
         );
+        let back: Version = crate::analytics::payload::decode(
+            journal::kind::FE04_TRANSITION,
+            crate::analytics::payload::TYPED,
+            &old,
+        )
+        .unwrap();
+        let mut unknown_expiry = state.clone();
+        unknown_expiry.intent.last_valid_block_height = None;
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::Finalize, unknown_expiry)
+        );
+        // Schema 3 (C12): the intent carries the blockhash expiry.
+        let version = Version {
+            transition: Transition::Finalize,
+            state: state.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 3, &bytes).unwrap();
+        assert_eq!((back.transition, back.state), (Transition::Finalize, state));
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                1117,
+                "BziVEDHHNU4NgYv4LyN6uU9EvMqKbcDWsR7joesPBsJA".to_string()
+            ),
+            "FE04_TRANSITION schema-3 layout changed"
+        );
     }
 
-    /// F2: every new wallet-journal frame is a typed binary frame (schema 2, no JSON value
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 3, no JSON value
     /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
     /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
     #[test]
@@ -802,12 +977,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
+        // Schema 3 since C12 (the intent's blockhash expiry); schema 2 stays readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (
-                journal::kind::FE04_TRANSITION,
-                crate::analytics::payload::TYPED
-            )
+            (journal::kind::FE04_TRANSITION, 3)
         );
         assert!(frames[0].legacy_value().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -845,7 +1018,7 @@ mod tests {
         let frames = frames_of(&file);
         assert_eq!(
             frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-            [1, crate::analytics::payload::TYPED],
+            [1, 3],
             "historical frame kept, the reopen transition is typed"
         );
         fs::remove_dir_all(dir).unwrap();
@@ -988,6 +1161,7 @@ mod tests {
             slippage_bps: 50,
             holds: [("SOL".into(), 20)].into_iter().collect(),
             expected_wallet_assets: ["SOL".into()].into_iter().collect(),
+            last_valid_block_height: Some(60),
         };
         let c = Current {
             now_unix_ms: 1001,
@@ -1638,7 +1812,7 @@ mod tests {
             observations: BTreeMap::new(),
         }
     }
-    fn path_of(j: &Journal) -> PathBuf {
+    pub(super) fn path_of(j: &Journal) -> PathBuf {
         j.writer.path.clone()
     }
     fn kinds(path: &Path) -> Vec<u16> {

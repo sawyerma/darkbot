@@ -48,6 +48,8 @@ pub struct Candidate<'a> {
     /// Worst-case loss of the attempt (USD micro); `None` is unknown.
     pub max_loss_usd_micro: Option<u64>,
     pub slot: u64,
+    /// C12: `lastValidBlockHeight` of the blockhash the payload is signed with.
+    pub last_valid_block_height: u64,
     pub now_unix_ms: u64,
     pub state_valid: bool,
     pub deadline: std::time::Instant,
@@ -136,6 +138,7 @@ impl Fe04Admission {
             expected_wallet_assets: std::iter::once("SOL".to_string())
                 .chain(c.plan.assets.iter().map(ToString::to_string))
                 .collect(),
+            last_valid_block_height: Some(c.last_valid_block_height),
         };
         let current = Current {
             now_unix_ms: c.now_unix_ms,

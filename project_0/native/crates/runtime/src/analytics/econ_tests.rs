@@ -1265,6 +1265,11 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     let hold = fe04.journal.active_hold().unwrap();
     assert!(hold.unknown_outcome, "submitted is UNKNOWN until settled");
     assert_eq!(
+        fe04.journal.intent().unwrap().last_valid_block_height,
+        Some(100),
+        "C12: the signed blockhash's expiry is bound"
+    );
+    assert_eq!(
         hold.holds["SOL"], 205,
         "fee 200 + tip 0 + flat fee 5 + record rent 0"
     );

@@ -224,6 +224,7 @@ impl Journal {
             .wallet
             .parse()
             .map_err(|_| err("WALLET_INVALID"))?;
+        let before = saved.observations.clone();
         let mut unknown = Vec::new();
         for signature in &saved.intent.signatures {
             let sig = signature
@@ -248,7 +249,11 @@ impl Journal {
                 Err(reason) => unknown.push(format!("{signature}:{reason}")),
             }
         }
-        self.persist(saved, Transition::Observe)?;
+        // Only a changed observation is a durable transition: a waiting UNKNOWN attempt does
+        // not grow the bounded wallet journal step by step.
+        if saved.observations != before {
+            self.persist(saved, Transition::Observe)?;
+        }
         Ok(unknown)
     }
 }
