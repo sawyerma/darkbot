@@ -2,6 +2,8 @@
 //! No signer, provider, state/price engine or automatic LIVE activation.
 pub mod admission;
 pub mod exit;
+#[cfg(feature = "crate_health")]
+pub mod exit_admission;
 pub mod receipts;
 pub mod settlement;
 pub mod transport;

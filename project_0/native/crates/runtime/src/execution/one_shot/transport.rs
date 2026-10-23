@@ -85,6 +85,12 @@ impl SignedPayload {
             && self.digest == i.signed_wire_sha256
     }
 
+    fn matches_exit(&self, i: &super::exit::ExitIntent) -> bool {
+        self.wallet == i.wallet
+            && self.signatures == i.signatures
+            && self.digest == i.signed_wire_sha256
+    }
+
     /// Reuse the production adapter's full single-TX or sequential bundle
     /// simulation. Unavailable/failed simulation never yields a sendable token.
     /// N2: the simulation ends by `deadline`; a deadline or a refused call is no PASS.
@@ -190,5 +196,67 @@ impl Journal {
             return Err(err("SUBMISSION_ACK_MISMATCH_UNKNOWN"));
         }
         Ok(ack) // ACK is deliberately not a receipt or a released hold.
+    }
+}
+
+/// The adapter's typed submit error: whatever it is, the action stays UNKNOWN.
+fn unknown(e: SubmitError) -> String {
+    err(match e {
+        SubmitError::Rejected(_) => "SUBMISSION_RESULT_UNKNOWN:REJECTED",
+        SubmitError::Transport(_) => "SUBMISSION_RESULT_UNKNOWN:TRANSPORT_AMBIGUOUS",
+        SubmitError::Serialize(_) => "SUBMISSION_RESULT_UNKNOWN:SERIALIZE",
+    })
+}
+
+impl Journal {
+    /// FE-04 exit: the reservation bound to the single-transaction payload that passed
+    /// simulation (an exit is never a bundle).
+    pub fn reserve_exit_payload(
+        &mut self,
+        approval: super::exit::ExitApproval,
+        intent: super::exit::ExitIntent,
+        now: &Current,
+        simulated: &SimulatedPayload<'_>,
+    ) -> Result<(), String> {
+        if simulated.payload.path == SubmissionPath::JitoBundle {
+            return Err(err("EXIT_BUNDLE_UNSUPPORTED"));
+        }
+        if !simulated.payload.matches_exit(&intent) {
+            return Err(err("SIGNED_PAYLOAD_CHANGED"));
+        }
+        self.reserve_exit(approval, intent, now)
+    }
+
+    /// FE-04 exit: exactly one adapter call, only after the exit's UNKNOWN state was fsynced; no
+    /// error releases its hold; the ACK must be this payload's.
+    pub fn submit_exit_payload(
+        &mut self,
+        simulated: &SimulatedPayload<'_>,
+        now: &Current,
+        t_handoff_ns: u64,
+    ) -> Result<SubmitAck, String> {
+        let p = &simulated.payload;
+        let (intent, _) = self
+            .exit_reserved()
+            .ok_or_else(|| err("EXIT_NOT_RESERVED"))?;
+        if p.path == SubmissionPath::JitoBundle || !p.matches_exit(&intent) {
+            return Err(err("SIGNED_PAYLOAD_CHANGED"));
+        }
+        let ack = self.handoff_exit(&p.digest, now, || {
+            simulated
+                .adapter
+                .submit(&p.txs[0], t_handoff_ns)
+                .map_err(unknown)
+        })?;
+        let returned: Vec<_> = ack.signatures.iter().map(ToString::to_string).collect();
+        if ack.path != p.path
+            || returned != p.signatures
+            || ack.signature.to_string() != p.signatures[0]
+            || ack.serialized_len != p.wire_len
+            || ack.t_handoff_ns != t_handoff_ns
+        {
+            return Err(err("SUBMISSION_ACK_MISMATCH_UNKNOWN"));
+        }
+        Ok(ack)
     }
 }

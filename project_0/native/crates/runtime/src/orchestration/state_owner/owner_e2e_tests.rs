@@ -2176,7 +2176,12 @@ fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
     assert_eq!(job.subject.signatures, exit.signatures);
     assert_eq!(
         job.subject.expected_wallet_assets,
-        ["SOL".to_string(), exit.mint.clone()].into()
+        [
+            "SOL".to_string(),
+            exit.mint.clone(),
+            crate::execution::one_shot::exit::WSOL_MINT.to_string()
+        ]
+        .into()
     );
     let day_before = f.owner.safety.day().realized_pnl;
     let sig = &exit.signatures[0];

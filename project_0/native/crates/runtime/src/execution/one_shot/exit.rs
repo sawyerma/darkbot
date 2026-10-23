@@ -15,6 +15,9 @@ use super::{err, hex, key, Current, Journal, Phase, Receipt, Saved, Transition};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The native mint (wrapped SOL); an exit's proceeds are native SOL, never WSOL.
+pub const WSOL_MINT: &str = "So11111111111111111111111111111111111111112";
+
 /// The explicit one-shot approval of one exit.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -363,6 +366,15 @@ impl Journal {
             .and_then(active)
             .filter(|e| e.phase == ExitPhase::HandoffUnknown)
             .map(|e| (e.intent.clone(), e.observations.keys().cloned().collect()))
+    }
+
+    /// The reserved (not yet handed off) exit: its intent and approval.
+    pub(super) fn exit_reserved(&self) -> Option<(ExitIntent, ExitApproval)> {
+        self.saved
+            .as_ref()
+            .and_then(active)
+            .filter(|e| e.phase == ExitPhase::Reserved)
+            .map(|e| (e.intent.clone(), e.approval.clone()))
     }
 
     /// The open exit's approval id (reserved, UNKNOWN or finalized but not booked).
@@ -797,12 +809,31 @@ pub(crate) mod tests {
         open_exit(dir, wallet, booked).1
     }
 
+    /// Test seam: `wallet`'s journal in `dir` with a settled attempt that left 1000 units of a
+    /// fresh mint open (mark 1000); closed again. The mint.
     #[cfg(feature = "crate_health")]
-    fn open_exit(
+    pub(crate) fn settled_with_position(
         dir: &std::path::Path,
         wallet: &str,
         booked: u64,
-    ) -> (Journal, ExitIntent, String) {
+    ) -> String {
+        settled_in(dir, wallet, booked).2
+    }
+
+    /// Test seam: an exit approval of that attempt (`exit_for`'s limits: floor 9 000 lamports,
+    /// fee 10 000, slippage 100 bps; no expiry within the tests) for `mint` via `route_program`.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn exit_approval(wallet: &str, mint: &str, route_program: &str) -> ExitApproval {
+        let (_, mut a, _, _) = setup();
+        a.wallet = wallet.into();
+        let (mut approval, _, _) = exit_for(&a, mint, 1_000, "exit-1");
+        approval.route_program = route_program.into();
+        approval.expires_unix_s = u64::MAX / 1_000;
+        approval
+    }
+
+    #[cfg(feature = "crate_health")]
+    fn settled_in(dir: &std::path::Path, wallet: &str, booked: u64) -> (Journal, Approval, String) {
         let (_, mut a, mut i, c) = setup();
         a.wallet = wallet.into();
         i.wallet = wallet.into();
@@ -819,6 +850,16 @@ pub(crate) mod tests {
         j.persist(s, Transition::Observe).unwrap();
         j.reconcile_observed().unwrap();
         j.settle(&value, booked).unwrap();
+        (j, a, mint)
+    }
+
+    #[cfg(feature = "crate_health")]
+    fn open_exit(
+        dir: &std::path::Path,
+        wallet: &str,
+        booked: u64,
+    ) -> (Journal, ExitIntent, String) {
+        let (mut j, a, mint) = settled_in(dir, wallet, booked);
         let ei = handed_off_exit(&mut j, &a, &mint, "exit-1");
         (j, ei, mint)
     }
@@ -989,9 +1030,10 @@ pub(crate) mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
-    /// FE-04 exit ("unvollständiger Exit"): a partial or mismatched sale, foreign wallet activity,
-    /// proceeds below the signed floor, a failure that sold, or an observation with unknown
-    /// reasons never finalizes — the exit stays UNKNOWN with every hold, nothing is booked.
+    /// FE-04 exit ("unvollständiger Exit"): a partial or mismatched sale, foreign wallet activity
+    /// (also WSOL the unwrap paid out), proceeds below the signed floor, a failure that sold, or an
+    /// observation with unknown reasons never finalizes — the exit stays UNKNOWN with every hold,
+    /// nothing is booked.
     #[test]
     fn inconsistent_exit_receipts_stay_unknown_with_every_hold() {
         let other = solana_sdk::pubkey::Pubkey::new_unique().to_string();
@@ -1020,6 +1062,19 @@ pub(crate) mod tests {
             drop(j);
             fs::remove_dir_all(path).unwrap();
         }
+        // The unwrap paid out WSOL that was already in the wallet: observed, foreign, UNKNOWN.
+        let (path, mut j, mint, a) = settled(1_000);
+        let ei = handed_off_exit(&mut j, &a, &mint, "exit-1");
+        let sig = &ei.signatures[0];
+        let o = observation(sig, true, 7_000, &[(&mint, -1_000), (WSOL_MINT, -2_000)]);
+        assert!(matches!(
+            j.apply_exit_evidence(evidence(sig, o), &value, 2_000)
+                .unwrap(),
+            ExitStep::Unknown(_)
+        ));
+        assert!(j.active_hold().unwrap().unknown_outcome);
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
     }
 
     /// FE-04 exit: refused before anything durable — no settled attempt, an amount other than the

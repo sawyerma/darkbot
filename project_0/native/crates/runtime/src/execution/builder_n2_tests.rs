@@ -836,3 +836,325 @@ fn fe02_zero_prefund_end_to_end_through_the_real_adapters() {
     assert!(zp.net_profit_usd_micro.is_some_and(|n| n < 0), "{zp:?}");
     assert_ne!(rec.funding.as_deref(), Some("ZERO_PREFUND_SAME_TX"));
 }
+
+/// FE-04 exit tests: the production adapter for fee and simulation, a counting submit (no
+/// network send).
+struct CountingAdapter<A> {
+    inner: A,
+    submits: std::cell::Cell<u32>,
+}
+impl<A: darkbot_solana::submit::SubmissionAdapter> darkbot_solana::submit::SubmissionAdapter
+    for CountingAdapter<A>
+{
+    fn path(&self) -> darkbot_solana::submit::SubmissionPath {
+        self.inner.path()
+    }
+    fn fee_for_message(
+        &self,
+        tx: &solana_sdk::transaction::VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> Result<darkbot_solana::submit::MessageFeeQuote, darkbot_solana::submit::FeeQuoteError>
+    {
+        self.inner.fee_for_message(tx, deadline)
+    }
+    fn simulate_bundle(
+        &self,
+        txs: &[solana_sdk::transaction::VersionedTransaction],
+        deadline: std::time::Instant,
+    ) -> darkbot_solana::submit::SimResult {
+        self.inner.simulate_bundle(txs, deadline)
+    }
+    fn simulate(
+        &self,
+        tx: &solana_sdk::transaction::VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> darkbot_solana::submit::SimResult {
+        self.inner.simulate(tx, deadline)
+    }
+    fn submit(
+        &self,
+        tx: &solana_sdk::transaction::VersionedTransaction,
+        t_handoff_ns: u64,
+    ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError> {
+        self.submits.set(self.submits.get() + 1);
+        Ok(darkbot_solana::submit::SubmitAck {
+            path: self.path(),
+            signature: tx.signatures[0],
+            signatures: vec![tx.signatures[0]],
+            submission_id: None,
+            t_handoff_ns,
+            serialized_len: darkbot_solana::submit::serialize_tx(tx).unwrap().len(),
+        })
+    }
+}
+
+/// FE-04 exit: a synthetic Jupiter `/build` of the native-SOL sale of 1 000 units of `mint` by
+/// `taker` (create the WSOL ATA, `route` 1 000 → quoted 20 000 000 lamports at 50 bps, close the
+/// WSOL ATA to the taker); `edit` changes it.
+fn exit_build(
+    taker: &Pubkey,
+    mint: &Pubkey,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> serde_json::Value {
+    use base64::Engine;
+    let jup: Pubkey = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID.parse().unwrap();
+    let token: Pubkey = darkbot_project0::protocol::TOKEN_PROGRAM_ID.parse().unwrap();
+    let wsol: Pubkey = crate::execution::route::WSOL_MINT.parse().unwrap();
+    let ata = |m: &Pubkey| get_associated_token_address_with_program_id(taker, m, &token);
+    let json_ix = |ix: &solana_sdk::instruction::Instruction| {
+        serde_json::json!({
+            "programId": ix.program_id.to_string(),
+            "data": base64::engine::general_purpose::STANDARD.encode(&ix.data),
+            "accounts": ix.accounts.iter().map(|a| serde_json::json!({
+                "pubkey": a.pubkey.to_string(), "isSigner": a.is_signer,
+                "isWritable": a.is_writable})).collect::<Vec<_>>()})
+    };
+    let mut data = vec![229, 23, 203, 151, 122, 227, 173, 42];
+    data.extend(1u32.to_le_bytes());
+    data.extend([7, 100, 0, 1]);
+    data.extend(1_000u64.to_le_bytes());
+    data.extend(20_000_000u64.to_le_bytes());
+    data.extend(50u16.to_le_bytes());
+    data.push(0);
+    use solana_sdk::instruction::AccountMeta;
+    let swap = solana_sdk::instruction::Instruction {
+        program_id: jup,
+        accounts: vec![
+            AccountMeta::new_readonly(token, false),
+            AccountMeta::new_readonly(*taker, true),
+            AccountMeta::new(ata(mint), false),
+            AccountMeta::new(ata(&wsol), false),
+            AccountMeta::new_readonly(jup, false),
+            AccountMeta::new_readonly(wsol, false),
+            AccountMeta::new_readonly(jup, false),
+            AccountMeta::new_readonly(Pubkey::new_unique(), false),
+            AccountMeta::new_readonly(jup, false),
+        ],
+        data,
+    };
+    let close = solana_sdk::instruction::Instruction {
+        program_id: token,
+        accounts: vec![
+            AccountMeta::new(ata(&wsol), false),
+            AccountMeta::new(*taker, false),
+            AccountMeta::new_readonly(*taker, true),
+        ],
+        data: vec![9],
+    };
+    let create = spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+        taker, taker, &wsol, &token,
+    );
+    let mut build = serde_json::json!({
+        "inAmount": "1000", "outAmount": "20000000", "otherAmountThreshold": "19900000",
+        "swapMode": "ExactIn", "setupInstructions": [json_ix(&create)],
+        "swapInstruction": json_ix(&swap), "cleanupInstruction": json_ix(&close),
+        "otherInstructions": [], "addressesByLookupTableAddress": null});
+    edit(&mut build);
+    build
+}
+
+/// FE-04 exit: the candidate of an exit by `payer` with the given route and WSOL balance.
+fn exit_candidate<'a>(
+    route: &'a Route,
+    payer: &'a solana_sdk::signature::Keypair,
+    mint: &str,
+    wsol_balance: u64,
+) -> crate::execution::one_shot::exit_admission::ExitCandidate<'a> {
+    crate::execution::one_shot::exit_admission::ExitCandidate {
+        route,
+        payer,
+        blockhash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 500,
+        resources: darkbot_solana::tx::Resources {
+            compute_unit_limit: 300_000,
+            priority_micro_lamports_per_cu: 1,
+            loaded_accounts_data_size: None,
+        },
+        limits: darkbot_solana::tx::TxLimits::default(),
+        slot: 90,
+        now_unix_ms: 3_000,
+        state_valid: true,
+        balances: [
+            ("SOL".to_string(), 1_000_000),
+            (mint.to_string(), 1_000),
+            (crate::execution::route::WSOL_MINT.to_string(), wsol_balance),
+        ]
+        .into(),
+        reserved_elsewhere: Default::default(),
+        policy_reserve: Default::default(),
+        deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+        t_handoff_ns: 7,
+    }
+}
+
+/// FE-04 exit through the real Jupiter (loopback `/build`) and RPC adapters: the route asks for
+/// the native-SOL sale of the whole open position (WSOL out, unwrapped); the admission binds the
+/// signed floor (19 900 000 lamports), the exact message fee and the simulated payload into a
+/// durable exit and submits it exactly once; the exit is UNKNOWN with its hold.
+#[test]
+fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() {
+    use crate::execution::one_shot::admission::Admission;
+    use solana_sdk::signer::Signer;
+    let payer = solana_sdk::signature::Keypair::new();
+    let taker = payer.pubkey();
+    let dir = std::env::temp_dir().join(format!("p0_exit_admit_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mint_s = crate::execution::one_shot::exit::tests::settled_with_position(
+        &dir,
+        &taker.to_string(),
+        1_000,
+    );
+    let mint: Pubkey = mint_s.parse().unwrap();
+    let build = exit_build(&taker, &mint, |_| {});
+    let jupiter = Endpoint::start(move |_, _| Answer::Raw(build.clone()));
+    let rpc = Endpoint::start(|kind, _| match kind {
+        "getFeeForMessage" => fee_ok(),
+        "simulateTransaction" => simulation_ok(),
+        _ => Answer::Status(500),
+    });
+    let routes = crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false, false)
+        .unwrap()
+        .with_base_url(jupiter.url.clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let route = routes.exit_to_sol(&mint, 1_000, deadline).unwrap();
+    let query = jupiter.bodies_of("/build")[0].as_str().unwrap().to_string();
+    for part in [
+        format!("inputMint={mint}"),
+        format!("outputMint={}", crate::execution::route::WSOL_MINT),
+        "amount=1000".to_string(),
+        "wrapAndUnwrapSol=true".to_string(),
+    ] {
+        assert!(query.contains(&part), "{query} lacks {part}");
+    }
+    let adapter = CountingAdapter {
+        inner: rpc_submitter(&rpc.url, n2_budget(4)),
+        submits: std::cell::Cell::new(0),
+    };
+    let jup = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
+    let approval =
+        crate::execution::one_shot::exit::tests::exit_approval(&taker.to_string(), &mint_s, jup);
+    let mut journal = crate::execution::one_shot::Journal::open(&dir, &taker.to_string()).unwrap();
+    let admitted = crate::execution::one_shot::exit_admission::admit_exit(
+        &mut journal,
+        approval,
+        exit_candidate(&route, &payer, &mint_s, 0),
+        &adapter,
+    );
+    assert!(matches!(admitted, Admission::Submitted(_)), "{admitted:?}");
+    assert_eq!(adapter.submits.get(), 1, "exactly one send");
+    let (intent, _) = journal.exit_job().expect("the exit is UNKNOWN");
+    assert_eq!(
+        (intent.amount_in, intent.minimum_out_lamports, intent.transaction_fee_lamports),
+        (1_000, 19_900_000, 5_000)
+    );
+    let hold = journal.active_hold().unwrap();
+    assert!(hold.unknown_outcome);
+    assert_eq!(hold.holds, intent.holds());
+    assert_eq!(rpc.arrivals_of("simulateTransaction").len(), 1);
+    drop(journal);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// FE-04 exit: refused before anything durable and without a send — a build without the unwrap
+/// or with another setup instruction (route), a close to another wallet, a route for another mint,
+/// a non-empty WSOL account, a floor below the approval, a failed simulation (admission).
+#[test]
+fn fe04_exit_admission_refuses_before_anything_durable() {
+    use crate::execution::one_shot::admission::Admission;
+    use solana_sdk::signer::Signer;
+    let payer = solana_sdk::signature::Keypair::new();
+    let taker = payer.pubkey();
+    let dir = std::env::temp_dir().join(format!("p0_exit_refuse_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mint_s = crate::execution::one_shot::exit::tests::settled_with_position(
+        &dir,
+        &taker.to_string(),
+        1_000,
+    );
+    let mint: Pubkey = mint_s.parse().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let route_of = |build: serde_json::Value| {
+        let jupiter = Endpoint::start(move |_, _| Answer::Raw(build.clone()));
+        crate::execution::route::JupiterV2RouteProvider::new(taker, None, 50, 64, false, false)
+            .unwrap()
+            .with_base_url(jupiter.url.clone())
+            .exit_to_sol(&mint, 1_000, deadline)
+    };
+    assert_eq!(
+        route_of(exit_build(&taker, &mint, |b| b["cleanupInstruction"] = serde_json::Value::Null))
+            .unwrap_err(),
+        "EXIT_ROUTE_UNWRAP_MISSING"
+    );
+    let extra = exit_build(&taker, &mint, |b| {
+        let setup = b["setupInstructions"][0].clone();
+        b["setupInstructions"] = serde_json::json!([setup.clone(), setup]);
+    });
+    assert!(route_of(extra).unwrap_err().starts_with("EXIT_ROUTE_SHAPE"));
+    let route = route_of(exit_build(&taker, &mint, |_| {})).unwrap();
+    let ok_rpc = Endpoint::start(|kind, _| match kind {
+        "getFeeForMessage" => fee_ok(),
+        "simulateTransaction" => simulation_ok(),
+        _ => Answer::Status(500),
+    });
+    let failing_rpc = Endpoint::start(|kind, _| match kind {
+        "getFeeForMessage" => fee_ok(),
+        "simulateTransaction" => Answer::Result(serde_json::json!({"context": {"slot": 1},
+            "value": {"err": {"InstructionError": [2, "InvalidArgument"]}, "logs": [],
+            "accounts": null, "unitsConsumed": 100, "returnData": null,
+            "innerInstructions": null, "replacementBlockhash": null}})),
+        _ => Answer::Status(500),
+    });
+    let jup = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
+    let mut stolen = route.clone();
+    stolen.instructions.last_mut().unwrap().accounts[1].pubkey = Pubkey::new_unique();
+    let other_mint = Pubkey::new_unique().to_string();
+    type Edit = fn(&mut crate::execution::one_shot::exit::ExitApproval);
+    let cases: [(&str, &Route, &str, u64, Edit, &Endpoint); 5] = [
+        ("EXIT_ROUTE_UNWRAP_MISSING", &stolen, &mint_s, 0, |_| {}, &ok_rpc),
+        ("SWAP_SOURCE_NOT_OWN_ATA", &route, &other_mint, 0, |_| {}, &ok_rpc),
+        ("EXIT_WSOL_ACCOUNT_NOT_EMPTY_OR_UNKNOWN", &route, &mint_s, 1, |_| {}, &ok_rpc),
+        (
+            "EXIT_APPROVAL_BUDGET_EXCEEDED",
+            &route,
+            &mint_s,
+            0,
+            |a| a.min_out_lamports = 19_900_001,
+            &ok_rpc,
+        ),
+        (
+            "EXACT_PAYLOAD_SIMULATION_NOT_PASSED",
+            &route,
+            &mint_s,
+            0,
+            |_| {},
+            &failing_rpc,
+        ),
+    ];
+    for (code, route, approved_mint, wsol, edit, rpc) in cases {
+        let adapter = CountingAdapter {
+            inner: rpc_submitter(&rpc.url, n2_budget(4)),
+            submits: std::cell::Cell::new(0),
+        };
+        let mut approval = crate::execution::one_shot::exit::tests::exit_approval(
+            &taker.to_string(),
+            approved_mint,
+            jup,
+        );
+        edit(&mut approval);
+        let mut journal =
+            crate::execution::one_shot::Journal::open(&dir, &taker.to_string()).unwrap();
+        let admitted = crate::execution::one_shot::exit_admission::admit_exit(
+            &mut journal,
+            approval,
+            exit_candidate(route, &payer, &mint_s, wsol),
+            &adapter,
+        );
+        match admitted {
+            Admission::Refused(reason) => assert!(reason.starts_with(code), "{code}: {reason}"),
+            other => panic!("{code}: {other:?}"),
+        }
+        assert_eq!(adapter.submits.get(), 0, "{code}: no send");
+        assert!(journal.open_exit_id().is_none(), "{code}: nothing durable");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

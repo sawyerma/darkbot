@@ -133,11 +133,18 @@ impl From<&Intent> for SettlementSubject {
     }
 }
 impl From<&super::exit::ExitIntent> for SettlementSubject {
+    /// An exit's receipts carry SOL, its mint and the wrapped-SOL mint: the unwrap closes the
+    /// wallet's WSOL account, so any WSOL delta is observed (and, being foreign, never proceeds).
     fn from(i: &super::exit::ExitIntent) -> Self {
         Self {
             wallet: i.wallet.clone(),
             signatures: i.signatures.clone(),
-            expected_wallet_assets: ["SOL".to_string(), i.mint.clone()].into(),
+            expected_wallet_assets: [
+                "SOL".to_string(),
+                i.mint.clone(),
+                super::exit::WSOL_MINT.to_string(),
+            ]
+            .into(),
             last_valid_block_height: Some(i.last_valid_block_height),
             state_slot: i.state_slot,
         }

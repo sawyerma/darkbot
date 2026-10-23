@@ -23,6 +23,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_millis(1500);
 
 const DEFAULT_BASE: &str = "https://api.jup.ag/swap/v2";
 const JUP_PROGRAM: &str = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
+/// The native mint (wrapped SOL).
+pub use crate::execution::one_shot::exit::WSOL_MINT;
 
 /// FE-02/E2: Jupiter v6 swap instructions pinned from the public IDL `jup-ag/jupiter-cpi` commit
 /// `12bc5f67` (`idl.json` SHA-256 `764ea6d7…5c50`); parity with the deployed program is FE-01
@@ -185,15 +187,17 @@ impl JupiterV2RouteProvider {
         self
     }
 
-    fn exact_in(
+    /// One `/build` request: local refusals, the N2 deadline, MT0 measurement, the classified
+    /// transport/status errors and the parsed response.
+    fn request_build(
         &self,
         from_mint: &Pubkey,
         to_mint: &Pubkey,
         amount: u64,
-        prewarmed_atas: &[PrewarmedAta],
         max_accounts: u8,
+        wrap_and_unwrap_sol: bool,
         deadline: Instant,
-    ) -> Result<Option<Route>, String> {
+    ) -> Result<BuildResponse, String> {
         // N2: no request after the candidate deadline; one in flight ends at it.
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -223,7 +227,7 @@ impl JupiterV2RouteProvider {
                     "maxAccounts",
                     max_accounts.min(self.max_accounts).max(1).to_string(),
                 ),
-                ("wrapAndUnwrapSol", "false".to_string()),
+                ("wrapAndUnwrapSol", wrap_and_unwrap_sol.to_string()),
                 ("forJitoBundle", self.for_jito_bundle.to_string()),
             ]);
         if self.fast {
@@ -284,9 +288,22 @@ impl JupiterV2RouteProvider {
             );
             return Err(jupiter_error(status, &body));
         }
-        let build: BuildResponse = response
+        response
             .json()
-            .map_err(|e| format!("jupiter /build json: {e}"))?;
+            .map_err(|e| format!("jupiter /build json: {e}"))
+    }
+
+    fn exact_in(
+        &self,
+        from_mint: &Pubkey,
+        to_mint: &Pubkey,
+        amount: u64,
+        prewarmed_atas: &[PrewarmedAta],
+        max_accounts: u8,
+        deadline: Instant,
+    ) -> Result<Option<Route>, String> {
+        let build =
+            self.request_build(from_mint, to_mint, amount, max_accounts, false, deadline)?;
         if build.swap_mode != "ExactIn" {
             return Err(format!("jupiter unexpected swapMode {}", build.swap_mode));
         }
@@ -358,6 +375,98 @@ impl JupiterV2RouteProvider {
             minimum_executable_out,
             enforced_slippage_bps: Some(terms.slippage_bps),
         }))
+    }
+}
+
+/// FE-04 exit: the instructions of a native-SOL exit of `mint` by `taker`, exactly — an optional
+/// idempotent creation of the taker's WSOL ATA, the Jupiter v6 ExactIn swap from the taker's
+/// `mint` ATA into it, the SPL Token close of that ATA to the taker (the unwrap) — and the swap's
+/// signed terms. Anything else is refused.
+pub(crate) fn exit_route_terms(
+    instructions: &[Instruction],
+    taker: &Pubkey,
+    mint: &Pubkey,
+) -> Result<SwapTerms, String> {
+    let wsol = Pubkey::from_str(WSOL_MINT).map_err(|e| e.to_string())?;
+    let token = Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID)
+        .map_err(|e| e.to_string())?;
+    let wsol_ata = get_associated_token_address_with_program_id(taker, &wsol, &token);
+    let create = create_associated_token_account_idempotent(taker, taker, &wsol, &token);
+    let close = Instruction {
+        program_id: token,
+        accounts: vec![
+            AccountMeta::new(wsol_ata, false),
+            AccountMeta::new(*taker, false),
+            AccountMeta::new_readonly(*taker, true),
+        ],
+        // SPL Token `CloseAccount`.
+        data: vec![9],
+    };
+    let rest = match instructions.first() {
+        Some(ix) if *ix == create => &instructions[1..],
+        _ => instructions,
+    };
+    match rest {
+        [swap, unwrap] if *unwrap == close => swap_terms(swap, taker, mint, &wsol),
+        [_] | [_, _] => Err("EXIT_ROUTE_UNWRAP_MISSING".into()),
+        _ => Err("EXIT_ROUTE_SHAPE: create? swap close".into()),
+    }
+}
+
+impl JupiterV2RouteProvider {
+    /// FE-04 exit: the native-SOL sale of `amount` of `mint` — a Jupiter v6 ExactIn route into the
+    /// taker's own WSOL ATA, unwrapped by closing that ATA to the taker in the same transaction.
+    /// Exactly: an idempotent creation of that ATA (optional), the swap (its floor from the signed
+    /// bytes, as for every route), the close; any other instruction, a missing or foreign close,
+    /// another destination or an amount other than `amount` is refused.
+    pub fn exit_to_sol(
+        &self,
+        mint: &Pubkey,
+        amount: u64,
+        deadline: Instant,
+    ) -> Result<Route, String> {
+        let wsol = Pubkey::from_str(WSOL_MINT).map_err(|e| e.to_string())?;
+        let build = self.request_build(mint, &wsol, amount, self.max_accounts, true, deadline)?;
+        if build.swap_mode != "ExactIn" {
+            return Err(format!("jupiter unexpected swapMode {}", build.swap_mode));
+        }
+        let (in_amount, quoted_out, threshold) = parse_build_amounts(
+            amount,
+            &build.in_amount,
+            &build.out_amount,
+            build.other_amount_threshold.as_ref(),
+        )?;
+        if !build.other_instructions.is_empty() {
+            return Err("EXIT_ROUTE_OTHER_INSTRUCTIONS".into());
+        }
+        let mut instructions = build
+            .setup_instructions
+            .iter()
+            .map(to_instruction)
+            .collect::<Result<Vec<_>, _>>()?;
+        instructions.push(to_instruction(&build.swap_instruction)?);
+        if let Some(ix) = &build.cleanup_instruction {
+            instructions.push(to_instruction(ix)?);
+        }
+        let terms = exit_route_terms(&instructions, &self.taker, mint)?;
+        if terms.in_amount != in_amount || terms.quoted_out != quoted_out || in_amount != amount {
+            return Err(format!(
+                "SWAP_TERMS_MISMATCH: instruction in={} out={} response in={in_amount} out={quoted_out}",
+                terms.in_amount, terms.quoted_out
+            ));
+        }
+        if threshold.is_some_and(|t| t > terms.minimum_out) {
+            return Err("SWAP_FLOOR_MISMATCH".into());
+        }
+        Ok(Route {
+            instructions,
+            lookup_tables: transform_alts(build.addresses_by_lookup_table_address)?,
+            swap_program: Pubkey::from_str(JUP_PROGRAM).map_err(|e| e.to_string())?,
+            amount_in: in_amount,
+            quoted_out,
+            minimum_executable_out: Some(terms.minimum_out),
+            enforced_slippage_bps: Some(terms.slippage_bps),
+        })
     }
 }
 
