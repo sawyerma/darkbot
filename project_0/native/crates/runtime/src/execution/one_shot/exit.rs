@@ -365,6 +365,31 @@ impl Journal {
             .map(|e| (e.intent.clone(), e.observations.keys().cloned().collect()))
     }
 
+    /// The open exit's approval id (reserved, UNKNOWN or finalized but not booked).
+    pub fn open_exit_id(&self) -> Option<String> {
+        self.saved
+            .as_ref()
+            .and_then(active)
+            .map(|e| e.approval.approval_id.clone())
+    }
+
+    /// The open exit is finalized but not yet booked (its SOL value was unknown): settled from
+    /// the journal alone.
+    pub fn exit_awaits_booking(&self) -> bool {
+        self.saved
+            .as_ref()
+            .and_then(active)
+            .is_some_and(|e| e.phase == ExitPhase::Finalized)
+    }
+
+    /// Something to settle: the attempt UNKNOWN or unbooked, or its open exit UNKNOWN or unbooked.
+    pub fn needs_settlement(&self) -> bool {
+        self.settlement_job().is_some()
+            || self.awaits_booking()
+            || self.exit_job().is_some()
+            || self.exit_awaits_booking()
+    }
+
     /// Reserves one exit durably: validated against the approval, the open position and the
     /// current wallet; one approval is consumed once; at most one exit is open.
     pub fn reserve_exit(
@@ -751,6 +776,33 @@ pub(crate) mod tests {
     /// both booked at `booked`; closed again.
     #[cfg(feature = "crate_health")]
     pub(crate) fn exited(dir: &std::path::Path, wallet: &str, booked: u64) {
+        let (mut j, ei, mint) = open_exit(dir, wallet, booked);
+        let sig = &ei.signatures[0];
+        let sold = evidence(sig, observation(sig, true, 5_000, &[(&mint, -1_000)]));
+        assert!(matches!(
+            j.apply_exit_evidence(sold, &value, booked).unwrap(),
+            ExitStep::Settled(_)
+        ));
+    }
+
+    /// Test seam: `wallet`'s journal in `dir` with a settled attempt (fee −500 realized, 1000
+    /// units of a fresh mint open, mark 1000, booked at `booked`) and its exit `exit-1` handed off
+    /// (UNKNOWN); closed again. The exit's intent.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn handed_off_exit_journal(
+        dir: &std::path::Path,
+        wallet: &str,
+        booked: u64,
+    ) -> ExitIntent {
+        open_exit(dir, wallet, booked).1
+    }
+
+    #[cfg(feature = "crate_health")]
+    fn open_exit(
+        dir: &std::path::Path,
+        wallet: &str,
+        booked: u64,
+    ) -> (Journal, ExitIntent, String) {
         let (_, mut a, mut i, c) = setup();
         a.wallet = wallet.into();
         i.wallet = wallet.into();
@@ -768,12 +820,7 @@ pub(crate) mod tests {
         j.reconcile_observed().unwrap();
         j.settle(&value, booked).unwrap();
         let ei = handed_off_exit(&mut j, &a, &mint, "exit-1");
-        let sig = &ei.signatures[0];
-        let sold = evidence(sig, observation(sig, true, 5_000, &[(&mint, -1_000)]));
-        assert!(matches!(
-            j.apply_exit_evidence(sold, &value, booked).unwrap(),
-            ExitStep::Settled(_)
-        ));
+        (j, ei, mint)
     }
 
     fn handed_off_exit(j: &mut Journal, a: &Approval, mint: &str, id: &str) -> ExitIntent {

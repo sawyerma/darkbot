@@ -110,11 +110,48 @@ pub struct NonLandingProof {
     pub absent_signatures: BTreeSet<String>,
 }
 
+/// What one settlement read is about — the attempt's or an exit's: the wallet and the assets its
+/// receipts carry, the bound signatures and the bounds of their non-landing proof.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SettlementSubject {
+    pub wallet: String,
+    pub signatures: Vec<String>,
+    pub expected_wallet_assets: BTreeSet<String>,
+    /// `None` (an intent before C12): never provably absent.
+    pub last_valid_block_height: Option<u64>,
+    pub state_slot: u64,
+}
+impl From<&Intent> for SettlementSubject {
+    fn from(i: &Intent) -> Self {
+        Self {
+            wallet: i.wallet.clone(),
+            signatures: i.signatures.clone(),
+            expected_wallet_assets: i.expected_wallet_assets.clone(),
+            last_valid_block_height: i.last_valid_block_height,
+            state_slot: i.state_slot,
+        }
+    }
+}
+impl From<&super::exit::ExitIntent> for SettlementSubject {
+    fn from(i: &super::exit::ExitIntent) -> Self {
+        Self {
+            wallet: i.wallet.clone(),
+            signatures: i.signatures.clone(),
+            expected_wallet_assets: ["SOL".to_string(), i.mint.clone()].into(),
+            last_valid_block_height: Some(i.last_valid_block_height),
+            state_slot: i.state_slot,
+        }
+    }
+}
+
 /// C12: acquires the proof through the reconciliation RPC — the finalized block height first,
 /// then the history floor, then the bound signatures with history search. An unknown expiry (an
 /// intent before C12), an unexpired blockhash, a history starting after the intent, any status
 /// (landed or pending: it must be observed instead) or any failed call is no proof.
-pub fn non_landing_proof(rpc: &RpcClient, intent: &Intent) -> Result<NonLandingProof, String> {
+pub fn non_landing_proof(
+    rpc: &RpcClient,
+    intent: &SettlementSubject,
+) -> Result<NonLandingProof, String> {
     let expiry = intent
         .last_valid_block_height
         .ok_or_else(|| err("NON_LANDING_EXPIRY_UNKNOWN"))?;
@@ -184,7 +221,7 @@ pub struct SettlementEvidence {
 /// The settlement worker's reads for `intent` (signatures in `observed` are not read again).
 pub fn fetch_settlement_evidence(
     rpc: &RpcClient,
-    intent: &Intent,
+    intent: &SettlementSubject,
     observed: &BTreeSet<String>,
 ) -> SettlementEvidence {
     let wallet = intent.wallet.parse();
@@ -307,7 +344,9 @@ impl Journal {
         now_unix_s: u64,
     ) -> Result<SettleStep, String> {
         let evidence = match self.settlement_job() {
-            Some((intent, observed)) => fetch_settlement_evidence(rpc, &intent, &observed),
+            Some((intent, observed)) => {
+                fetch_settlement_evidence(rpc, &SettlementSubject::from(&intent), &observed)
+            }
             None => SettlementEvidence {
                 observations: vec![],
                 proof: None,
@@ -765,7 +804,7 @@ mod tests {
         };
         let (client, calls) = rpc_of(61, 50, Value::Null);
         assert_eq!(
-            non_landing_proof(&client, &i),
+            non_landing_proof(&client, &(&i).into()),
             Ok(NonLandingProof {
                 finalized_block_height: 61,
                 history_from_slot: 50,
@@ -782,7 +821,7 @@ mod tests {
         );
         let (client, calls) = rpc_of(60, 0, Value::Null);
         assert_eq!(
-            non_landing_proof(&client, &i).unwrap_err(),
+            non_landing_proof(&client, &(&i).into()).unwrap_err(),
             "NON_LANDING_BLOCKHASH_NOT_EXPIRED"
         );
         assert_eq!(
@@ -792,26 +831,26 @@ mod tests {
         );
         let (client, _) = rpc_of(61, 51, Value::Null);
         assert_eq!(
-            non_landing_proof(&client, &i).unwrap_err(),
+            non_landing_proof(&client, &(&i).into()).unwrap_err(),
             "NON_LANDING_HISTORY_INCOMPLETE"
         );
         let seen = json!({"slot": 55, "confirmations": null, "err": null,
             "status": {"Ok": null}, "confirmationStatus": "finalized"});
         let (client, _) = rpc_of(61, 0, seen);
         assert_eq!(
-            non_landing_proof(&client, &i).unwrap_err(),
+            non_landing_proof(&client, &(&i).into()).unwrap_err(),
             "NON_LANDING_SIGNATURE_SEEN"
         );
         let (client, _) = rpc(vec![]);
         assert_eq!(
-            non_landing_proof(&client, &i).unwrap_err(),
+            non_landing_proof(&client, &(&i).into()).unwrap_err(),
             "NON_LANDING_HEIGHT_UNAVAILABLE"
         );
         let mut old = i.clone();
         old.last_valid_block_height = None;
         let (client, calls) = rpc_of(u64::MAX, 0, Value::Null);
         assert_eq!(
-            non_landing_proof(&client, &old).unwrap_err(),
+            non_landing_proof(&client, &(&old).into()).unwrap_err(),
             "NON_LANDING_EXPIRY_UNKNOWN"
         );
         assert!(calls.lock().unwrap().is_empty());

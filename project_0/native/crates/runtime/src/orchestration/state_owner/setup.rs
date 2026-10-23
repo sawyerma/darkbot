@@ -1128,7 +1128,7 @@ impl Fe04Start {
         let settle_due = self
             .journal
             .as_ref()
-            .filter(|j| j.settlement_job().is_some() || j.awaits_booking())
+            .filter(|j| j.needs_settlement())
             .map(|_| std::time::Instant::now());
         Ok(Fe04Owner {
             book: self.book,

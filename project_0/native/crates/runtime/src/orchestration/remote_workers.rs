@@ -106,14 +106,18 @@ pub struct OraclePriceProjectionResultMessage {
     pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
 }
 
-/// FE-04/C3: the settlement reads of one UNKNOWN attempt (its intent and observed signatures).
+/// FE-04/C3: the settlement reads of one UNKNOWN attempt or exit (its subject and observed
+/// signatures); `exit` names the exit (its approval id), `None` the attempt.
 pub struct Fe04SettlementWork {
-    pub intent: crate::execution::one_shot::Intent,
+    pub subject: crate::execution::one_shot::settlement::SettlementSubject,
     pub observed: std::collections::BTreeSet<String>,
+    pub exit: Option<String>,
 }
 
 pub struct Fe04SettlementResult {
     pub evidence: crate::execution::one_shot::settlement::SettlementEvidence,
+    /// The work's `exit`: the result applies only to what it was read for.
+    pub exit: Option<String>,
 }
 
 /// Test seam of `RemoteWorkers::detached`: the producers a test drives as the workers, the
@@ -266,12 +270,15 @@ impl RemoteWorkers {
                         let evidence =
                             crate::execution::one_shot::settlement::fetch_settlement_evidence(
                                 &rpc,
-                                &work.intent,
+                                &work.subject,
                                 &work.observed,
                             );
                         if !push_result(
                             &fe04_settlement_done_tx,
-                            Fe04SettlementResult { evidence },
+                            Fe04SettlementResult {
+                                evidence,
+                                exit: work.exit,
+                            },
                             &fe04_shutdown,
                             &fe04_space,
                         ) {

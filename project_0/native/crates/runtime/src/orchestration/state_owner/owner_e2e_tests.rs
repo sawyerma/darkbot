@@ -1660,10 +1660,22 @@ fn fe04_job(f: &Fixture) -> Option<crate::orchestration::remote_workers::Fe04Set
 
 /// The worker's answer through the production result queue (it rings the owner's doorbell).
 fn fe04_answer(f: &Fixture, evidence: crate::execution::one_shot::settlement::SettlementEvidence) {
+    fe04_answer_for(f, evidence, None)
+}
+
+/// The worker's answer for `exit` (`None`: the attempt).
+fn fe04_answer_for(
+    f: &Fixture,
+    evidence: crate::execution::one_shot::settlement::SettlementEvidence,
+    exit: Option<&str>,
+) {
     let d = f.results.as_ref().unwrap();
     assert!(crate::orchestration::remote_workers::push_result(
         &d.fe04_results,
-        crate::orchestration::remote_workers::Fe04SettlementResult { evidence },
+        crate::orchestration::remote_workers::Fe04SettlementResult {
+            evidence,
+            exit: exit.map(str::to_string),
+        },
         &f.owner.shutdown,
         &d.space
     ));
@@ -1689,7 +1701,7 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
     run_until(&mut f, |o| o.fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the read is handed to the worker");
-    assert_eq!(job.intent.signatures, intent.signatures);
+    assert_eq!(job.subject.signatures, intent.signatures);
     assert!(job.observed.is_empty());
     let evidence = SettlementEvidence {
         observations: vec![],
@@ -2035,4 +2047,235 @@ fn fe04_exit_restart_replays_the_attempt_and_its_exit() {
     );
     drop(start);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// FE-04 exit: the canonical state that prices SOL — the chain clock and the SOL bank with a
+/// fixed oracle price of 150 USD (9 decimals).
+fn install_sol_price(f: &mut Fixture) {
+    use marginfi_type_crate::types::{Bank, BankOperationalState, OracleSetup, WrappedI80F48};
+    let fixed = |v: i128| WrappedI80F48 {
+        value: (v << 48).to_le_bytes(),
+    };
+    let mut b: Bank = bytemuck::Zeroable::zeroed();
+    b.group = f.owner.group;
+    b.mint = Pubkey::from_str("So11111111111111111111111111111111111111112").unwrap();
+    b.mint_decimals = 9;
+    b.asset_share_value = fixed(1);
+    b.liability_share_value = fixed(1);
+    b.config.asset_weight_init = fixed(1);
+    b.config.asset_weight_maint = fixed(1);
+    b.config.liability_weight_init = fixed(1);
+    b.config.liability_weight_maint = fixed(1);
+    b.config.operational_state = BankOperationalState::Operational;
+    b.config.oracle_setup = OracleSetup::Fixed;
+    b.config.fixed_price = fixed(150);
+    let mut clock = 100u64.to_le_bytes().to_vec();
+    clock.extend_from_slice(&[0u8; 24]);
+    clock.extend_from_slice(&(wall_unix_s().unwrap() as i64).to_le_bytes());
+    let account = |pubkey, owner, data| AccountUpdate {
+        pubkey,
+        owner,
+        lamports: 1,
+        data,
+        slot: 100,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    };
+    f.owner.st.install_snapshot(
+        100,
+        vec![
+            account(
+                solana_sdk::sysvar::clock::id(),
+                solana_sdk::sysvar::id(),
+                clock,
+            ),
+            account(
+                f.owner.sol_bank,
+                f.owner.program,
+                [
+                    darkbot_project0::protocol::DISC_BANK.as_slice(),
+                    bytemuck::bytes_of(&b),
+                ]
+                .concat(),
+            ),
+        ],
+    );
+}
+
+/// FE-04 exit: the detached fixture started from a journal with a settled attempt (1000 units
+/// open, mark 1000) and its exit `exit-1` handed off, through the production startup replay.
+fn fe04_exit_fixture(tag: &str) -> (Fixture, crate::execution::one_shot::exit::ExitIntent) {
+    let mut f = fixture_with(tag, None);
+    let dir = f.dir.join("fe04");
+    let exit = crate::execution::one_shot::exit::tests::handed_off_exit_journal(
+        &dir,
+        &f.owner.liquidator.to_string(),
+        wall_unix_s().unwrap(),
+    );
+    let dir_s = dir.display().to_string();
+    let start = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &f.owner.liquidator,
+    )
+    .unwrap()
+    .start(&mut f.owner.safety, wall_unix_s().unwrap())
+    .unwrap();
+    f.owner.reservations = start.book;
+    f.owner.fe04_journal = start.dir;
+    f.owner.fe04_held = start.held;
+    f.owner.fe04_settle_due = start.settle_due;
+    f.owner.fe04_unbooked = start.unbooked;
+    (f, exit)
+}
+
+fn exit_observation(
+    sig: &str,
+    success: bool,
+    sol: i128,
+    tokens: &[(&str, i128)],
+) -> crate::execution::one_shot::settlement::SettlementEvidence {
+    crate::execution::one_shot::settlement::SettlementEvidence {
+        observations: vec![(
+            sig.to_string(),
+            Ok(crate::execution::one_shot::receipts::FinalizedObservation {
+                signature: sig.into(),
+                slot: 85,
+                success,
+                fee_lamports: 5_000,
+                wallet_sol_delta_lamports: sol,
+                wallet_token_deltas: Some(
+                    tokens.iter().map(|(m, d)| (m.to_string(), *d)).collect(),
+                ),
+                unknown_reasons: vec![],
+            }),
+        )],
+        proof: None,
+    }
+}
+
+fn exit_open(o: &ShadowOwner) -> bool {
+    o.fe04_held
+        .as_ref()
+        .is_some_and(|j| j.open_exit_id().is_some())
+}
+
+/// FE-04 exit in the running owner: the open exit (its hold in the book, the attempt's open
+/// inventory in Safety) is read by the settlement worker for exactly this exit; the sold position
+/// settles and is booked once as the restart replays it — realized the SOL proceeds at the fixed
+/// SOL price, the mark released, the book empty. A repeated or a stale read books nothing.
+#[test]
+fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
+    let (mut f, exit) = fe04_exit_fixture("fe04_exit_once");
+    install_sol_price(&mut f);
+    assert_eq!(f.owner.safety.inventory_outstanding(), 1_000);
+    assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    let job = fe04_job(&f).expect("the exit read is handed to the worker");
+    assert_eq!(job.exit.as_deref(), Some("exit-1"));
+    assert_eq!(job.subject.signatures, exit.signatures);
+    assert_eq!(
+        job.subject.expected_wallet_assets,
+        ["SOL".to_string(), exit.mint.clone()].into()
+    );
+    let day_before = f.owner.safety.day().realized_pnl;
+    let sig = &exit.signatures[0];
+    let sold = exit_observation(sig, true, 5_000, &[(&exit.mint, -1_000)]);
+    fe04_answer_for(&f, sold.clone(), Some("exit-1"));
+    run_until(&mut f, |o| !exit_open(o));
+    // +5000 lamports at 150 USD/SOL = 750 USD micro, a gain rounded down (749), realized; the
+    // mark 1000 released.
+    let booked = (
+        f.owner.safety.day().realized_pnl - day_before,
+        f.owner.safety.inventory_outstanding(),
+        f.owner.reservations.is_empty(),
+    );
+    assert_eq!(booked, (749, 0, true));
+    for exit_tag in [Some("exit-1"), Some("exit-0"), None] {
+        fe04_answer_for(&f, sold.clone(), exit_tag);
+        run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+        assert_eq!(
+            (
+                f.owner.safety.day().realized_pnl - day_before,
+                f.owner.safety.inventory_outstanding(),
+                f.owner.reservations.is_empty(),
+            ),
+            booked,
+            "{exit_tag:?} books nothing again"
+        );
+    }
+    cleanup(f);
+}
+
+/// FE-04 exit ("unvollständiger Exit") in the running owner: a read made for another exit never
+/// applies; a partial sale never finalizes — the exit stays UNKNOWN, its hold stays in the book,
+/// Safety books nothing, the next read waits the backoff.
+#[test]
+fn fe04_exit_owner_keeps_a_partial_sale_unknown_with_its_holds() {
+    let (mut f, exit) = fe04_exit_fixture("fe04_exit_partial");
+    install_sol_price(&mut f);
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    let ledger = |o: &ShadowOwner| (o.safety.day(), o.safety.inventory_outstanding());
+    let before = ledger(&f.owner);
+    let sig = &exit.signatures[0];
+    // A read made for another exit never applies to this one, even a complete sale.
+    fe04_answer_for(
+        &f,
+        exit_observation(sig, true, 5_000, &[(&exit.mint, -1_000)]),
+        Some("exit-0"),
+    );
+    run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+    assert!(exit_open(&f.owner) && ledger(&f.owner) == before);
+    f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    let sent = std::time::Instant::now();
+    fe04_answer_for(
+        &f,
+        exit_observation(sig, true, 5_000, &[(&exit.mint, -500)]),
+        Some("exit-1"),
+    );
+    run_until(&mut f, |o| o.fe04_settle_due.is_some());
+    assert!(exit_open(&f.owner));
+    assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
+    assert_eq!(ledger(&f.owner), before);
+    assert!(f.owner.fe04_settle_due.unwrap() >= sent + super::fe04::FE04_SETTLE_RETRY);
+    f.owner.remote_apply().unwrap();
+    assert!(fe04_job(&f).is_none(), "no read before the backoff ends");
+    cleanup(f);
+}
+
+/// FE-04 exit: a consistent receipt without a SOL price finalizes the exit but books nothing and
+/// keeps the book; once canonical state prices SOL the exit is settled from the journal alone (no
+/// read) and booked.
+#[test]
+fn fe04_exit_owner_books_a_finalized_exit_once_sol_is_priced() {
+    let (mut f, exit) = fe04_exit_fixture("fe04_exit_unpriced");
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    let before = (f.owner.safety.day(), f.owner.safety.inventory_outstanding());
+    let sig = &exit.signatures[0];
+    fe04_answer_for(
+        &f,
+        exit_observation(sig, true, 5_000, &[(&exit.mint, -1_000)]),
+        Some("exit-1"),
+    );
+    run_until(&mut f, |o| {
+        o.fe04_held
+            .as_ref()
+            .is_some_and(|j| j.exit_awaits_booking())
+    });
+    assert_eq!(
+        (f.owner.safety.day(), f.owner.safety.inventory_outstanding()),
+        before
+    );
+    assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
+    install_sol_price(&mut f);
+    f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| !exit_open(o));
+    assert!(fe04_job(&f).is_none(), "settled from the journal alone");
+    assert_eq!(f.owner.safety.inventory_outstanding(), 0);
+    assert!(f.owner.reservations.is_empty());
+    cleanup(f);
 }
