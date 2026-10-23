@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &schema::g07_candidate::selection::SCHEMA,
             &schema::g07_candidate::request::SCHEMA,
             &schema::g07_candidate::request_result::SCHEMA,
+            &schema::g07_candidate::qualification::SCHEMA,
         ];
         let mut fields = Vec::new();
         for schema in schemas {

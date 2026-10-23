@@ -14,7 +14,7 @@ def regular(path):
     return path.read_bytes()
 CANDIDATE_STATE='bsc/.local/g07_candidates'
 CANDIDATE_MIRROR='bsc/native/state/g07_candidates'
-CANDIDATE_PUBLIC=['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec']
+CANDIDATE_PUBLIC=['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec','a.qualification.dbrec','b.qualification.dbrec']
 def apply_candidate_requests(root, run):
     requests=run/'bsc-operational/g07_candidates/requests'
     pending=[p for p in sorted(requests.glob('*.request.dbrec')) if not p.with_name(p.name.replace('.request.','.result.')).exists()] if requests.is_dir() else []

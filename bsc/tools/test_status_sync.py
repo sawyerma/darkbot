@@ -35,10 +35,10 @@ class SyncTests(unittest.TestCase):
    subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
    state=root/'bsc/.local/g07_candidates';state.mkdir(parents=True)
-   for name in ['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec','b.salt.dbrec','a.salt.dbrec']:(state/name).write_bytes(name.encode())
+   for name in ['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec','a.qualification.dbrec','b.salt.dbrec','a.salt.dbrec']:(state/name).write_bytes(name.encode())
    mod.sync(root,app,run)
    snapshot=(app/'bsc-source').resolve();mirror=snapshot/'bsc/native/state/g07_candidates'
-   self.assertEqual(sorted(p.name for p in mirror.iterdir()),['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec'])
+   self.assertEqual(sorted(p.name for p in mirror.iterdir()),['a.candidate.dbrec','a.qualification.dbrec','b.candidate.dbrec','selection.dbrec'])
    self.assertFalse(any('salt' in p.name for p in snapshot.rglob('*')))
    self.assertNotIn('salt',(snapshot/'sources.json').read_text())
    # A pending GUI request is never skipped: without the native store build the sync stops.

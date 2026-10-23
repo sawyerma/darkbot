@@ -187,12 +187,59 @@ pub mod request_result {
     };
 }
 
+/// A candidate bound to one PASSing requalification of exactly its token,
+/// launcher and signed transactions, against the deployment of that run.
+/// Not economic approval; a later deployment needs a new requalification.
+pub mod qualification {
+    use super::*;
+
+    pub const CANDIDATE_ID: u16 = 1;
+    pub const PROFILE: u16 = 2;
+    pub const REQUAL_RECORD_SHA256: u16 = 3;
+    pub const DRY_RECORD_SHA256: u16 = 4;
+    pub const PREFLIGHT_RECORD_SHA256: u16 = 5;
+    pub const PORTAL_VERSION: u16 = 6;
+    pub const PORTAL_IMPLEMENTATION: u16 = 7;
+    pub const PORTAL_IMPLEMENTATION_CODE_SHA256: u16 = 8;
+    pub const TOKEN: u16 = 9;
+    pub const LAUNCH_TX_HASH: u16 = 10;
+    pub const BUY_TX_HASH: u16 = 11;
+    pub const QUALIFIED_UNIX_MS: u16 = 12;
+    pub const SCOPE: u16 = 13;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g07.self-launch-candidate.qualification",
+        record_type: 32,
+        schema_version: 1,
+        fields: &[
+            Field::req(CANDIDATE_ID, "candidate_id", B256),
+            Field::req(PROFILE, "profile", Text),
+            Field::req(REQUAL_RECORD_SHA256, "requal_record_sha256", B256),
+            Field::req(DRY_RECORD_SHA256, "dry_record_sha256", B256),
+            Field::req(PREFLIGHT_RECORD_SHA256, "preflight_record_sha256", B256),
+            Field::req(PORTAL_VERSION, "portal_version", Text),
+            Field::req(PORTAL_IMPLEMENTATION, "portal_implementation", Address),
+            Field::req(
+                PORTAL_IMPLEMENTATION_CODE_SHA256,
+                "portal_implementation_code_sha256",
+                B256,
+            ),
+            Field::req(TOKEN, "token", Address),
+            Field::req(LAUNCH_TX_HASH, "launch_tx_hash", B256),
+            Field::req(BUY_TX_HASH, "buy_tx_hash", B256),
+            Field::req(QUALIFIED_UNIX_MS, "qualified_unix_ms", U64),
+            Field::req(SCOPE, "scope", Text),
+        ],
+    };
+}
+
 /// The decodable public schemas; the salt record is excluded on purpose.
 pub const ALL: &[&Schema] = &[
     &candidate::SCHEMA,
     &selection::SCHEMA,
     &request::SCHEMA,
     &request_result::SCHEMA,
+    &qualification::SCHEMA,
 ];
 
 const ID_DOMAIN: &[u8] = b"darkbot.g07.candidate.id.v1";

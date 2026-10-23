@@ -7,10 +7,12 @@
 //! printed, logged or part of an error.
 
 use super::*;
-use darkbot_bsc_record::schema::g06a::{dry as d, economics, preflight as pf};
+use darkbot_bsc_record::schema::g06a::{
+    dry as d, economics, preflight as pf, requalification as rqs,
+};
 use darkbot_bsc_record::schema::g07_candidate::{
-    self as g07c, SelectionView, candidate as c, request as rq, request_result as rs, secret as s,
-    selection as sel,
+    self as g07c, SelectionView, candidate as c, qualification as q, request as rq,
+    request_result as rs, secret as s, selection as sel,
 };
 use darkbot_bsc_record::{Value, decode};
 use darkbot_bsc_trading::venues::flap::{
@@ -834,6 +836,158 @@ impl Store {
             .set(sel::GUARD_AT_SWITCH, guard);
         self.replace("selection.dbrec", &r.encode().map_err(|e| e.to_string())?)?;
         Ok(next)
+    }
+}
+
+/// One candidate's binding to a PASSing requalification run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Qualification {
+    pub(crate) candidate_id: B256,
+    pub(crate) requal_sha256: B256,
+    pub(crate) dry_sha256: B256,
+    pub(crate) preflight_sha256: B256,
+    pub(crate) portal_version: String,
+    pub(crate) portal_implementation: Address,
+    pub(crate) portal_implementation_code_sha256: B256,
+    pub(crate) token: Address,
+    pub(crate) launch_tx_hash: B256,
+    pub(crate) buy_tx_hash: B256,
+}
+
+/// Binds `candidate` to a requalification run only if the run PASSed, its
+/// bound DRY and preflight are exactly these files, the DRY carries the
+/// candidate's token and launcher on its Portal/Tax-V3 basis, and, for A,
+/// the frozen signed hashes are unchanged. B gets its own signed identity
+/// from its own DRY; A's run can never qualify B (other token).
+pub(crate) fn qualification_for(
+    candidate: &Candidate,
+    requal: &[u8],
+    dry_bytes: &[u8],
+    preflight_bytes: &[u8],
+) -> Result<Qualification, String> {
+    let r = decode(&rqs::SCHEMA, requal).map_err(|e| format!("requalification: {e}"))?;
+    if r.text(rqs::VERDICT).ok() != Some("PASS") {
+        return Err("the requalification did not PASS".into());
+    }
+    let bound = |name: &str| -> Option<[u8; 32]> {
+        r.nested_all(rqs::RECORDS).ok()?.iter().find_map(|row| {
+            (row.text(rqs::bound::NAME).ok()? == name).then(|| row.b256(rqs::bound::SHA256).ok())?
+        })
+    };
+    let dry_sha = darkbot_bsc_record::sha256(dry_bytes);
+    let preflight_sha = darkbot_bsc_record::sha256(preflight_bytes);
+    if bound("dry_result.dbrec") != Some(dry_sha) || bound("preflight.dbrec") != Some(preflight_sha)
+    {
+        return Err("DRY or preflight is not the record the requalification bound".into());
+    }
+    let dry = decode_dry(dry_bytes)?;
+    let deployment = Deployment::from_preflight(preflight_bytes)?;
+    let e = |e: darkbot_bsc_record::RecordError| format!("DRY: {e}");
+    let launch = B256::from(dry.b256(d::LAUNCH_TX_HASH).map_err(e)?);
+    let buy = B256::from(dry.b256(d::BUY_TX_HASH).map_err(e)?);
+    if dry_identity(&dry, &deployment)? != candidate.launcher
+        || Address::from(dry.address(d::TOKEN).map_err(e)?) != candidate.token
+        || deployment.portal != candidate.deployment.portal
+        || deployment.tax_v3 != candidate.deployment.tax_v3
+    {
+        return Err(format!(
+            "the requalified DRY is not candidate {} (token, launcher or Portal/Tax-V3 basis differ)",
+            candidate.profile.name()
+        ));
+    }
+    if r.b256(rqs::LAUNCH_TX_HASH).ok() != Some(launch.0)
+        || r.b256(rqs::BUY_TX_HASH).ok() != Some(buy.0)
+    {
+        return Err("requalification and DRY signed hashes differ".into());
+    }
+    if let Some(frozen) = &candidate.evidence
+        && (frozen.launch_tx_hash != launch || frozen.buy_tx_hash != buy)
+    {
+        return Err("the signed bytes of A changed: a new economic decision is required".into());
+    }
+    Ok(Qualification {
+        candidate_id: candidate.id,
+        requal_sha256: B256::from(darkbot_bsc_record::sha256(requal)),
+        dry_sha256: B256::from(dry_sha),
+        preflight_sha256: B256::from(preflight_sha),
+        portal_version: deployment.portal_version,
+        portal_implementation: deployment.portal_implementation,
+        portal_implementation_code_sha256: deployment.portal_implementation_code_sha256,
+        token: candidate.token,
+        launch_tx_hash: launch,
+        buy_tx_hash: buy,
+    })
+}
+
+impl Qualification {
+    fn encode(&self, profile: Profile, now_ms: u64) -> Result<Vec<u8>, String> {
+        let mut r = Draft::new(&q::SCHEMA);
+        r.set(q::CANDIDATE_ID, Value::B256(self.candidate_id.0))
+            .set(q::PROFILE, profile.name())
+            .set(q::REQUAL_RECORD_SHA256, Value::B256(self.requal_sha256.0))
+            .set(q::DRY_RECORD_SHA256, Value::B256(self.dry_sha256.0))
+            .set(
+                q::PREFLIGHT_RECORD_SHA256,
+                Value::B256(self.preflight_sha256.0),
+            )
+            .set(q::PORTAL_VERSION, self.portal_version.as_str())
+            .set(
+                q::PORTAL_IMPLEMENTATION,
+                Value::Address(self.portal_implementation.into_array()),
+            )
+            .set(
+                q::PORTAL_IMPLEMENTATION_CODE_SHA256,
+                Value::B256(self.portal_implementation_code_sha256.0),
+            )
+            .set(q::TOKEN, Value::Address(self.token.into_array()))
+            .set(q::LAUNCH_TX_HASH, Value::B256(self.launch_tx_hash.0))
+            .set(q::BUY_TX_HASH, Value::B256(self.buy_tx_hash.0))
+            .set(q::QUALIFIED_UNIX_MS, now_ms)
+            .set(
+                q::SCOPE,
+                "OFFLINE_DRY_REQUALIFICATION_OF_THIS_DEPLOYMENT; NOT_ECONOMIC_APPROVAL",
+            );
+        r.encode().map_err(|e| e.to_string())
+    }
+}
+
+impl Store {
+    /// Records the qualification of a verified candidate (replacing an older
+    /// one: a later deployment needs a new requalification).
+    pub(crate) fn qualify(
+        &self,
+        profile: Profile,
+        qualification: &Qualification,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        let (candidate, _) = self
+            .load(profile)?
+            .ok_or_else(|| format!("candidate {} does not exist", profile.name()))?;
+        if candidate.id != qualification.candidate_id || candidate.token != qualification.token {
+            return Err("the qualification belongs to another candidate".into());
+        }
+        self.replace(
+            &format!("{}.qualification.dbrec", profile.stem()),
+            &qualification.encode(profile, now_ms)?,
+        )
+    }
+
+    /// The recorded qualification of `profile`, bound to its current ID.
+    pub(crate) fn qualification(&self, profile: Profile) -> Result<Option<String>, String> {
+        let Some(bytes) = self.read(&format!("{}.qualification.dbrec", profile.stem()))? else {
+            return Ok(None);
+        };
+        let r = decode(&q::SCHEMA, &bytes).map_err(|e| format!("qualification: {e}"))?;
+        let (candidate, _) = self
+            .load(profile)?
+            .ok_or("a qualification without its candidate")?;
+        if r.b256(q::CANDIDATE_ID).ok() != Some(candidate.id.0) {
+            return Err("the qualification belongs to another candidate".into());
+        }
+        Ok(Some(format!(
+            "QUALIFIED_FOR {}",
+            r.text(q::PORTAL_VERSION).map_err(|e| e.to_string())?
+        )))
     }
 }
 

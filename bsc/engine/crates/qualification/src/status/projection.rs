@@ -265,6 +265,19 @@ fn candidate_fields(
             selected_present = true;
         }
         put(format!("candidate.{profile}.state"), "PRESENT".into());
+        // A bound requalification replaces UNQUALIFIED by the deployment it
+        // qualified; one bound to another ID makes the mirror invalid.
+        let stem = if profile == "SELF_A" { "a" } else { "b" };
+        let qualified = match read(&dir.join(format!("{stem}.qualification.dbrec"))) {
+            None => None,
+            Some(bytes) => match record::decode(&gc::qualification::SCHEMA, &bytes) {
+                Ok(q) if q.b256(gc::qualification::CANDIDATE_ID).ok() == Some(id) => Some(format!(
+                    "QUALIFIED_FOR {}",
+                    field(&q, "portal_version").unwrap_or_default()
+                )),
+                _ => return invalid(warnings, "qualification of another candidate"),
+            },
+        };
         for name in [
             "candidate_id",
             "token",
@@ -277,7 +290,6 @@ fn candidate_fields(
             "evidence.dry_record_sha256",
             "evidence.launch_tx_hash",
             "evidence.buy_tx_hash",
-            "qualification",
             "provenance",
         ] {
             put(
@@ -285,6 +297,11 @@ fn candidate_fields(
                 field(&r, name).unwrap_or_else(|| "NONE".into()),
             );
         }
+        put(
+            format!("candidate.{profile}.qualification"),
+            qualified
+                .unwrap_or_else(|| field(&r, "qualification").unwrap_or_else(|| "NONE".into())),
+        );
         put(
             format!("candidate.{profile}.readiness"),
             readiness

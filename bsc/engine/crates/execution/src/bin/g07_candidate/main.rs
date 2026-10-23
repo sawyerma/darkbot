@@ -5,6 +5,7 @@
 //! g07_candidate create-b --dry <dbrec> --preflight <dbrec>
 //! g07_candidate select A|B --expect-generation <n>
 //! g07_candidate show [--readiness <dbrec>]
+//! g07_candidate qualify A|B --requal-dir <requalification run>
 //! g07_candidate apply-requests --rundir <dir>
 //! g07_candidate request A|B --expect-generation <n> --request-id <uuid> --rundir <dir> --snapshot <dir>
 //! ```
@@ -162,6 +163,27 @@ fn run(args: &[String]) -> Result<(), String> {
                 "selection.invalidated = READINESS,SIGNED_BYTE_AUTHORIZATION,ECONOMIC_APPROVAL"
             );
         }
+        Some("qualify") => {
+            let profile = Profile::parse(args.get(1).ok_or("qualify needs A or B")?)?;
+            let run = Path::new(flag(args, "--requal-dir")?);
+            let store = Store::existing(dir)?.ok_or("no candidate state")?;
+            let (candidate, _) = store
+                .load(profile)?
+                .ok_or_else(|| format!("candidate {} does not exist", profile.name()))?;
+            let qualification = qualification_for(
+                &candidate,
+                &read_input(&run.join("requalification_status.dbrec").to_string_lossy())?,
+                &read_input(&run.join("dry_result.dbrec").to_string_lossy())?,
+                &read_input(&run.join("preflight.dbrec").to_string_lossy())?,
+            )?;
+            store.qualify(profile, &qualification, now_ms())?;
+            println!(
+                "{}.qualification = QUALIFIED_FOR {} ({}); not economic approval",
+                profile.name(),
+                qualification.portal_version,
+                qualification.portal_implementation
+            );
+        }
         Some("apply-requests") => {
             let store = Store::existing(dir)?.ok_or("no candidate state")?;
             for (id, state, detail) in apply_requests(
@@ -206,6 +228,9 @@ fn run(args: &[String]) -> Result<(), String> {
                 match store.load(profile)? {
                     Some((candidate, _)) => {
                         print_candidate(&candidate);
+                        if let Some(bound) = store.qualification(profile)? {
+                            println!("{}.qualification_binding = {bound}", profile.name());
+                        }
                         if let Some(r) = &readiness {
                             println!(
                                 "{}.readiness = {}",
@@ -705,6 +730,97 @@ mod tests {
             )
             .0,
             "PASS"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A PASSing requalification status that binds the given DRY and
+    /// preflight, as g06a_requal_check writes it.
+    fn requal(
+        verdict: &str,
+        dry: &[u8],
+        preflight: &[u8],
+        hashes: Option<(B256, B256)>,
+    ) -> Vec<u8> {
+        use darkbot_bsc_record::{Value, schema::g06a::requalification as rqs};
+        let mut r = Draft::new(&rqs::SCHEMA);
+        r.set(rqs::VERDICT, verdict)
+            .set(rqs::REQUAL_DIR, "fixture")
+            .set(rqs::FROZEN_DIR, "fixture")
+            .set(schema::PROVENANCE_TOOL, "fixture")
+            .set(schema::PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+        let real = evidence("dry_result.dbrec");
+        let dry_record = decode(&schema::g06a::dry::SCHEMA, &real)
+            .or_else(|_| decode(&schema::g06a::dry::NATIVE, &real))
+            .unwrap();
+        let (l, b) = hashes.unwrap_or((
+            B256::from(dry_record.b256(schema::g06a::dry::LAUNCH_TX_HASH).unwrap()),
+            B256::from(dry_record.b256(schema::g06a::dry::BUY_TX_HASH).unwrap()),
+        ));
+        r.set(rqs::LAUNCH_TX_HASH, Value::B256(l.0))
+            .set(rqs::BUY_TX_HASH, Value::B256(b.0));
+        for (name, bytes) in [("dry_result.dbrec", dry), ("preflight.dbrec", preflight)] {
+            let mut row = Draft::new(&rqs::bound::SCHEMA);
+            row.set(rqs::bound::NAME, name).set(
+                rqs::bound::SHA256,
+                Value::B256(darkbot_bsc_record::sha256(bytes)),
+            );
+            r.push(rqs::RECORDS, row.into_nested());
+        }
+        r.encode().unwrap()
+    }
+
+    #[test]
+    fn only_a_passing_requalification_of_exactly_the_candidate_qualifies_it() {
+        let root = private_dir("qualify");
+        let store = Store::create(&root.join("state")).unwrap();
+        let (a, a_salt) = frozen();
+        let a = store.init_a(a, a_salt).unwrap();
+        let (b, b_salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            7,
+            &mut os_random,
+        )
+        .unwrap();
+        let b = store.create_b(b, b_salt).unwrap();
+        // Offline creation is never a qualification.
+        assert_eq!(store.qualification(Profile::B).unwrap(), None);
+        assert_eq!(b.qualification, UNQUALIFIED);
+        let (dry, pre) = (evidence("dry_result.dbrec"), evidence("preflight.dbrec"));
+        let pass = requal("PASS", &dry, &pre, None);
+        let qa = qualification_for(&a, &pass, &dry, &pre).unwrap();
+        assert_eq!((qa.portal_version.as_str(), qa.token), ("v5.24.0", a.token));
+        store.qualify(Profile::A, &qa, 8).unwrap();
+        assert_eq!(
+            store.qualification(Profile::A).unwrap().as_deref(),
+            Some("QUALIFIED_FOR v5.24.0")
+        );
+        // A's run never qualifies B, and a STOP, an unbound record or
+        // changed signed hashes never qualify anything.
+        assert!(
+            qualification_for(&b, &pass, &dry, &pre)
+                .unwrap_err()
+                .contains("not candidate SELF_B")
+        );
+        assert!(qualification_for(&a, &requal("STOP", &dry, &pre, None), &dry, &pre).is_err());
+        assert!(
+            qualification_for(&a, &requal("PASS", b"other", &pre, None), &dry, &pre)
+                .unwrap_err()
+                .contains("bound")
+        );
+        let moved = requal(
+            "PASS",
+            &dry,
+            &pre,
+            Some((B256::repeat_byte(1), B256::repeat_byte(2))),
+        );
+        assert!(qualification_for(&a, &moved, &dry, &pre).is_err());
+        assert!(
+            store
+                .qualify(Profile::B, &qa, 9)
+                .unwrap_err()
+                .contains("another candidate")
         );
         fs::remove_dir_all(root).unwrap();
     }

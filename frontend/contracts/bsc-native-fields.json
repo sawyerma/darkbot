@@ -2931,7 +2931,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "profile",
     "type": "Text",
     "unit": "text"
@@ -2942,7 +2942,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "candidate_id",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -2953,7 +2953,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "integer_native_units"
@@ -2964,7 +2964,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "deployment.portal_version",
     "type": "Text",
     "unit": "text"
@@ -2975,7 +2975,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "deployment.portal_implementation",
     "type": "Address",
     "unit": "EVM_address"
@@ -2986,7 +2986,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "deployment.record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -2997,7 +2997,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "launcher",
     "type": "Address",
     "unit": "EVM_address"
@@ -3008,7 +3008,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "token",
     "type": "Address",
     "unit": "EVM_address"
@@ -3019,7 +3019,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "salt_origin",
     "type": "Text",
     "unit": "text"
@@ -3030,7 +3030,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "launch_calldata_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3041,7 +3041,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "evidence.dry_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3052,7 +3052,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "evidence.launch_tx_hash",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3063,7 +3063,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "evidence.buy_tx_hash",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3074,7 +3074,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "qualification",
     "type": "Text",
     "unit": "text"
@@ -3085,7 +3085,7 @@
     "schema": "darkbot.g07.self-launch-candidate",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "provenance",
     "type": "Text",
     "unit": "text"
@@ -3096,7 +3096,7 @@
     "schema": "darkbot.g07.self-launch-candidate.selection",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "profile",
     "type": "Text",
     "unit": "text"
@@ -3107,7 +3107,7 @@
     "schema": "darkbot.g07.self-launch-candidate.selection",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "candidate_id",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3118,7 +3118,7 @@
     "schema": "darkbot.g07.self-launch-candidate.request",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "request_id",
     "type": "Text",
     "unit": "text"
@@ -3129,7 +3129,7 @@
     "schema": "darkbot.g07.self-launch-candidate.request",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "profile",
     "type": "Text",
     "unit": "text"
@@ -3140,7 +3140,7 @@
     "schema": "darkbot.g07.self-launch-candidate.request",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "expected_generation",
     "type": "U64",
     "unit": "integer_native_units"
@@ -3151,7 +3151,7 @@
     "schema": "darkbot.g07.self-launch-candidate.request-result",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "request_id",
     "type": "Text",
     "unit": "text"
@@ -3162,7 +3162,7 @@
     "schema": "darkbot.g07.self-launch-candidate.request-result",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "outcome",
     "type": "Text",
     "unit": "text"
@@ -3173,9 +3173,75 @@
     "schema": "darkbot.g07.self-launch-candidate.request-result",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
-    "source_sha": "1d471b75f47b79ae949f69478d64c47eb09871a1ce72cc5d6b898ba6330bc21d",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
     "symbol": "detail",
     "type": "Text",
     "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.self-launch-candidate.qualification",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
+    "symbol": "candidate_id",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.self-launch-candidate.qualification",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
+    "symbol": "profile",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.self-launch-candidate.qualification",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
+    "symbol": "portal_version",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.self-launch-candidate.qualification",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
+    "symbol": "portal_implementation",
+    "type": "Address",
+    "unit": "EVM_address"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.self-launch-candidate.qualification",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
+    "symbol": "portal_implementation_code_sha256",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.self-launch-candidate.qualification",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07_candidate.rs",
+    "source_sha": "4ef3d64162388fc3a08b14c0f77c64605466fe94709bed97a2d3a2f1d4488af4",
+    "symbol": "token",
+    "type": "Address",
+    "unit": "EVM_address"
   }
 ]

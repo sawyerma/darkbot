@@ -243,6 +243,52 @@ fn candidate_state_is_projected_only_from_a_verified_public_mirror() {
         get(&f, "candidate.SELF_B.qualification").as_deref(),
         Some("UNQUALIFIED")
     );
+    // A requalification bound to B's ID is shown with its deployment only.
+    let mut q = Draft::new(&gc::qualification::SCHEMA);
+    q.set(gc::qualification::CANDIDATE_ID, Value::B256(b_id))
+        .set(gc::qualification::PROFILE, "SELF_B")
+        .set(
+            gc::qualification::REQUAL_RECORD_SHA256,
+            Value::B256([1; 32]),
+        )
+        .set(gc::qualification::DRY_RECORD_SHA256, Value::B256([2; 32]))
+        .set(
+            gc::qualification::PREFLIGHT_RECORD_SHA256,
+            Value::B256([3; 32]),
+        )
+        .set(gc::qualification::PORTAL_VERSION, "v5.26.0")
+        .set(
+            gc::qualification::PORTAL_IMPLEMENTATION,
+            Value::Address([4; 20]),
+        )
+        .set(
+            gc::qualification::PORTAL_IMPLEMENTATION_CODE_SHA256,
+            Value::B256([5; 32]),
+        )
+        .set(gc::qualification::TOKEN, Value::Address([0x77; 20]))
+        .set(gc::qualification::LAUNCH_TX_HASH, Value::B256([6; 32]))
+        .set(gc::qualification::BUY_TX_HASH, Value::B256([7; 32]))
+        .set(gc::qualification::QUALIFIED_UNIX_MS, 1u64)
+        .set(gc::qualification::SCOPE, "fixture");
+    fs::write(mirror.join("b.qualification.dbrec"), q.encode().unwrap()).unwrap();
+    let f = fields(&root);
+    assert_eq!(
+        get(&f, "candidate.SELF_B.qualification").as_deref(),
+        Some("QUALIFIED_FOR v5.26.0")
+    );
+    assert_eq!(
+        f.iter()
+            .filter(|(k, _)| k == "candidate.SELF_B.qualification")
+            .count(),
+        1
+    );
+    q.set(gc::qualification::CANDIDATE_ID, Value::B256([9; 32]));
+    fs::write(mirror.join("b.qualification.dbrec"), q.encode().unwrap()).unwrap();
+    assert_eq!(
+        get(&fields(&root), "candidate.backend").as_deref(),
+        Some("INVALID")
+    );
+    fs::remove_file(mirror.join("b.qualification.dbrec")).unwrap();
     assert_eq!(
         get(&f, "candidate.SELF_B.readiness").as_deref(),
         Some("NONE")
