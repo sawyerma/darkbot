@@ -142,6 +142,69 @@ fn first_external_scan(
     }
 }
 
+/// The facts the G0.8 verdict is decided from (all observed or derived
+/// before the verdict; nothing here is producer timing).
+#[derive(Clone, Copy, Debug)]
+struct VerdictFacts {
+    receipt_identity: bool,
+    launch_succeeded: bool,
+    buy_succeeded: bool,
+    launch_scope_ok: bool,
+    buy_scope_ok: bool,
+    buy_calldata_ok: bool,
+    canonical: bool,
+    launch_at_index: bool,
+    buy_at_index: bool,
+    acquisition_evidence_complete: bool,
+    acquisition_positive: bool,
+    ordered: bool,
+    within_budget: bool,
+    same_block: bool,
+    adjacent: bool,
+    competitor_count: Option<usize>,
+    local_capture_complete: bool,
+    chain_capture_complete: bool,
+}
+
+/// UNRESOLVED without complete canonical evidence; STOP on a proven failure
+/// (identity, status, scope, order, no acquisition, budget); ADAPT when the
+/// BUY was not the adjacent same-block successor, a competitor bought in
+/// between or a capture is incomplete; otherwise PASS.
+fn verdict(f: &VerdictFacts) -> &'static str {
+    let hard_stop = !f.receipt_identity
+        || !f.launch_succeeded
+        || !f.buy_succeeded
+        || !f.launch_scope_ok
+        || !f.buy_scope_ok
+        || !f.buy_calldata_ok
+        || !f.canonical
+        || !f.launch_at_index
+        || !f.buy_at_index
+        || (f.acquisition_evidence_complete && !f.acquisition_positive)
+        || !f.ordered
+        || !f.within_budget;
+    let adapt = !f.acquisition_evidence_complete
+        || !f.same_block
+        || !f.adjacent
+        || f.competitor_count != Some(0)
+        || !f.local_capture_complete
+        || !f.chain_capture_complete;
+    if !f.canonical
+        || !f.acquisition_evidence_complete
+        || !f.chain_capture_complete
+        || !f.local_capture_complete
+        || f.competitor_count.is_none()
+    {
+        "UNRESOLVED"
+    } else if hard_stop {
+        "STOP"
+    } else if adapt {
+        "ADAPT"
+    } else {
+        "PASS"
+    }
+}
+
 fn req_env(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
 }
@@ -993,20 +1056,31 @@ fn successful_competing_buys_between(
         previous = Some(block.hash);
         let receipts = read_rpc(|| block_receipts(&block))?;
         for r in receipts {
-            let after_launch = number > launch_block || r.transaction_index > launch_index;
-            let before_buy = number < buy_block || r.transaction_index < buy_index;
-            if after_launch
-                && before_buy
-                && r.status == 1
-                && portal_buys(&r)?
-                    .iter()
-                    .any(|b| b.token == token && b.amount > U256::ZERO)
-            {
+            if competes(&r, number, (launch_block, launch_index), (buy_block, buy_index), token)? {
                 hashes.push(r.transaction_hash);
             }
         }
     }
     Ok(hashes)
+}
+
+/// A successful positive Portal BUY of `token` strictly between the launch
+/// and our BUY in canonical (block, index) order.
+fn competes(
+    r: &Receipt,
+    number: u64,
+    (launch_block, launch_index): (u64, u64),
+    (buy_block, buy_index): (u64, u64),
+    token: Address,
+) -> Result<bool, String> {
+    let after_launch = number > launch_block || r.transaction_index > launch_index;
+    let before_buy = number < buy_block || r.transaction_index < buy_index;
+    Ok(after_launch
+        && before_buy
+        && r.status == 1
+        && portal_buys(r)?
+            .iter()
+            .any(|b| b.token == token && b.amount > U256::ZERO))
 }
 
 fn block_receipts(block: &Block) -> Result<Vec<Receipt>, String> {
@@ -1459,33 +1533,26 @@ fn main() {
         && launch_receipt.to == Some(PORTAL)
         && buy_receipt.from == buyer
         && buy_receipt.to == Some(PORTAL);
-    let hard_stop = !receipt_identity
-        || launch_status != 1
-        || buy_status != 1
-        || !launch_scope_ok
-        || !buy_scope_ok
-        || !buy_calldata_ok
-        || !canonical
-        || !launch_at_index
-        || !buy_at_index
-        || (acquisition_evidence_complete && !acquisition_positive)
-        || !ordered
-        || !within_attempt_budget(experiment_total_cost);
-    let adapt = !acquisition_evidence_complete
-        || !same_block
-        || !adjacent
-        || competitor_count != Some(0)
-        || !local_capture_complete
-        || !chain_capture_complete;
-    let verdict = if !canonical || !acquisition_evidence_complete || !chain_capture_complete || !local_capture_complete || competitor_count.is_none() {
-        "UNRESOLVED"
-    } else if hard_stop {
-        "STOP"
-    } else if adapt {
-        "ADAPT"
-    } else {
-        "PASS"
-    };
+    let verdict = verdict(&VerdictFacts {
+        receipt_identity,
+        launch_succeeded: launch_status == 1,
+        buy_succeeded: buy_status == 1,
+        launch_scope_ok,
+        buy_scope_ok,
+        buy_calldata_ok,
+        canonical,
+        launch_at_index,
+        buy_at_index,
+        acquisition_evidence_complete,
+        acquisition_positive,
+        ordered,
+        within_budget: within_attempt_budget(experiment_total_cost),
+        same_block,
+        adjacent,
+        competitor_count,
+        local_capture_complete,
+        chain_capture_complete,
+    });
 
     let head = resolved!(read_rpc(wire::block_number));
     let mut r = Draft::new(&result::SCHEMA);
@@ -2137,6 +2204,101 @@ mod tests {
         let plain = unresolved_draft("offline-test", B256::ZERO, B256::ZERO, false, false, "X");
         let plain = decode(&unresolved::SCHEMA, &plain.encode().unwrap()).unwrap();
         assert_eq!(plain.opt_u64(unresolved::OBSERVED_HEAD).unwrap(), None);
+    }
+
+    #[test]
+    fn a_competitor_is_a_successful_buy_strictly_between_launch_and_ours() {
+        let real = real_v5_26_tax_token_buy_receipt();
+        let token =
+            Address::from_slice(&hex::decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777").unwrap());
+        let at = |index: u64| {
+            let mut r = real.clone();
+            r.transaction_index = index;
+            r
+        };
+        // Same block: launch at 10, ours at 30.
+        let same = |r: &Receipt| competes(r, 100, (100, 10), (100, 30), token).unwrap();
+        assert!(same(&at(21)));
+        assert!(!same(&at(10)) && !same(&at(5)) && !same(&at(30)) && !same(&at(31)));
+        // Ours in the next block: everything after the launch until our index.
+        let next = |r: &Receipt, n: u64| competes(r, n, (100, 10), (101, 3), token).unwrap();
+        assert!(next(&at(50), 100) && next(&at(2), 101));
+        assert!(!next(&at(3), 101) && !next(&at(9), 100));
+        // A failed BUY or another token is no competitor.
+        let mut failed = at(21);
+        failed.status = 0;
+        assert!(!same(&failed));
+        assert!(!competes(&at(21), 100, (100, 10), (100, 30), Address::repeat_byte(9)).unwrap());
+    }
+
+    #[test]
+    fn the_verdict_matrix_separates_unresolved_stop_adapt_and_pass() {
+        let pass = VerdictFacts {
+            receipt_identity: true,
+            launch_succeeded: true,
+            buy_succeeded: true,
+            launch_scope_ok: true,
+            buy_scope_ok: true,
+            buy_calldata_ok: true,
+            canonical: true,
+            launch_at_index: true,
+            buy_at_index: true,
+            acquisition_evidence_complete: true,
+            acquisition_positive: true,
+            ordered: true,
+            within_budget: true,
+            same_block: true,
+            adjacent: true,
+            competitor_count: Some(0),
+            local_capture_complete: true,
+            chain_capture_complete: true,
+        };
+        assert_eq!(verdict(&pass), "PASS");
+        let with = |f: &dyn Fn(&mut VerdictFacts)| {
+            let mut x = pass;
+            f(&mut x);
+            verdict(&x)
+        };
+        // Missing or non-canonical evidence (reorg, missing receipts, gaps).
+        assert_eq!(with(&|x| x.canonical = false), "UNRESOLVED");
+        assert_eq!(with(&|x| x.competitor_count = None), "UNRESOLVED");
+        assert_eq!(with(&|x| x.chain_capture_complete = false), "UNRESOLVED");
+        assert_eq!(with(&|x| x.local_capture_complete = false), "UNRESOLVED");
+        assert_eq!(
+            with(&|x| x.acquisition_evidence_complete = false),
+            "UNRESOLVED"
+        );
+        // Proven failures.
+        assert_eq!(with(&|x| x.buy_succeeded = false), "STOP");
+        assert_eq!(with(&|x| x.acquisition_positive = false), "STOP");
+        assert_eq!(with(&|x| x.ordered = false), "STOP");
+        assert_eq!(with(&|x| x.within_budget = false), "STOP");
+        assert_eq!(with(&|x| x.receipt_identity = false), "STOP");
+        // Placement: N+1 block, a gap in the same block, a competitor between.
+        assert_eq!(
+            with(&|x| {
+                x.same_block = false;
+                x.adjacent = false
+            }),
+            "ADAPT"
+        );
+        assert_eq!(with(&|x| x.adjacent = false), "ADAPT");
+        assert_eq!(with(&|x| x.competitor_count = Some(1)), "ADAPT");
+        // A failure outranks placement; missing evidence outranks failure.
+        assert_eq!(
+            with(&|x| {
+                x.competitor_count = Some(2);
+                x.buy_succeeded = false
+            }),
+            "STOP"
+        );
+        assert_eq!(
+            with(&|x| {
+                x.canonical = false;
+                x.buy_succeeded = false
+            }),
+            "UNRESOLVED"
+        );
     }
 
     #[test]
