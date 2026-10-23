@@ -1,6 +1,7 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
 pub mod receipts;
+pub mod settlement;
 pub mod transport;
 
 use crate::analytics::journal;
@@ -106,6 +107,15 @@ pub enum Phase {
     Reserved,
     HandoffUnknown,
     HaltFinalized,
+    /// C3: the finalized attempt's realized outcome, booked once (appended variant: earlier
+    /// journal frames keep their encoding).
+    Settled(settlement::Settlement),
+}
+impl Phase {
+    /// Finalized (with or without a booked settlement): no hold remains.
+    pub fn finalized(&self) -> bool {
+        matches!(self, Phase::HaltFinalized | Phase::Settled(_))
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Saved {
@@ -154,6 +164,9 @@ enum Transition {
     ReopenUnknown,
     Observe,
     Finalize,
+    /// C3 (appended): a proven non-landing finalizes without receipts; the settlement booking.
+    NotLanded,
+    Settle,
 }
 /// Historical schema-1 frame (JSON value tree) of a transition: written in tests only, to
 /// replay journals from before F2.
@@ -280,6 +293,21 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
                 && p.phase == Phase::HandoffUnknown
                 && next.phase == Phase::HaltFinalized
                 && next.finalized.is_some()
+                && next.observations == p.observations
+        }
+        (Some(p), Transition::NotLanded) => {
+            same(p)
+                && p.phase == Phase::HandoffUnknown
+                && next.phase == Phase::HaltFinalized
+                && next.finalized.as_ref().is_some_and(Vec::is_empty)
+                && p.observations.is_empty()
+                && next.observations.is_empty()
+        }
+        (Some(p), Transition::Settle) => {
+            same(p)
+                && p.phase == Phase::HaltFinalized
+                && matches!(next.phase, Phase::Settled(_))
+                && next.finalized == p.finalized
                 && next.observations == p.observations
         }
         _ => false,
@@ -517,7 +545,7 @@ impl Journal {
     pub fn active_hold(&self) -> Option<ActiveHold> {
         self.saved
             .as_ref()
-            .filter(|s| s.phase != Phase::HaltFinalized)
+            .filter(|s| !s.phase.finalized())
             .map(|s| ActiveHold {
                 attempt: s.approval.approval_id.clone(),
                 target: s.intent.target.clone(),
@@ -530,14 +558,13 @@ impl Journal {
     /// and until it is finalized it still binds its capital.
     pub fn safety_replay(&self) -> Option<SafetyReplay> {
         self.saved.as_ref().map(|s| SafetyReplay {
-            held_capital_usd_micro: (s.phase != Phase::HaltFinalized)
-                .then_some(s.intent.capital_usd_micro),
+            held_capital_usd_micro: (!s.phase.finalized()).then_some(s.intent.capital_usd_micro),
         })
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
         self.saved
             .as_ref()
-            .filter(|s| s.phase != Phase::HaltFinalized)
+            .filter(|s| !s.phase.finalized())
             .map(|s| s.intent.holds.clone())
             .unwrap_or_default()
     }
