@@ -13,7 +13,7 @@ pub const FEE_STATE_UNAVAILABLE: &str = "FEE_STATE_UNAVAILABLE";
 #[cfg(feature = "crate_health")]
 pub mod p0 {
     use crate::execution::pipeline::{
-        PlanError, PlanErrorKind, ReceivershipBuilder, ReceivershipPlan,
+        PlanError, PlanErrorKind, ReceivershipBuilder, ReceivershipPlan, SolCosts,
     };
     use crate::execution::prepared::{Context, PreparedCache, Skeleton};
     use darkbot_project0::economics::{CandidateInput, Path};
@@ -112,8 +112,10 @@ pub mod p0 {
         pub liability_inventory_value: u64,
         pub funding_bank: Option<Pubkey>,
         pub funding_available_value: u64,
-        pub protocol_fees: u64,  // USD-Micro
-        pub flat_sol_fee: u64,   // USD-Micro after explicit SOL conversion
+        pub protocol_fees: u64, // USD-Micro
+        pub flat_sol_fee: u64,  // USD-Micro after explicit SOL conversion
+        /// FE-02: the same flat protocol fee in lamports (a SOL debit of the wallet).
+        pub flat_sol_fee_lamports: u64,
         pub rent_and_token: u64, // USD-Micro
         pub premium_bps: u64,
         pub slippage_bps: u64,
@@ -200,7 +202,8 @@ pub mod p0 {
                     now_unix_s as i64,
                     slot,
                 )?;
-                let flat_sol_fee = sizer.native_amount_value_usd_micro(
+                // FE-02: a cost, converted at the conservative (high-bias) SOL price.
+                let flat_sol_fee = sizer.native_amount_conservative_cost_usd_micro(
                     &self.sol_bank,
                     sz.flat_sol_fee_lamports,
                     now_unix_s as i64,
@@ -233,6 +236,7 @@ pub mod p0 {
                     // EndLiquidation premium is already represented by seized-vs-repaid value.
                     protocol_fees: 0,
                     flat_sol_fee,
+                    flat_sol_fee_lamports: sz.flat_sol_fee_lamports,
                     // [FIX-102] Receivership uses prewarmed ATAs created outside the liquidation
                     // transaction. Historical ATA rent is not charged to every opportunity.
                     rent_and_token: 0,
@@ -1267,6 +1271,10 @@ pub mod p0 {
                                 tx_version: BuildVersion::V0,
                                 lookup_tables: protocol_luts.clone(),
                                 prerequisite_txs: vec![],
+                                sol_costs: SolCosts {
+                                    flat_fee_lamports: sz.flat_sol_fee_lamports,
+                                    record_rent_lamports: Some(0),
+                                },
                             }
                         }
                         FundingClass::JitShortfall => {
@@ -1327,6 +1335,10 @@ pub mod p0 {
                                     &buy.lookup_tables,
                                 ),
                                 prerequisite_txs: vec![buy.instructions],
+                                sol_costs: SolCosts {
+                                    flat_fee_lamports: sz.flat_sol_fee_lamports,
+                                    record_rent_lamports: Some(0),
+                                },
                             }
                         }
                         FundingClass::FlashFunded => continue,
@@ -1447,6 +1459,10 @@ pub mod p0 {
                                             tx_version: BuildVersion::V1,
                                             lookup_tables: vec![].into(),
                                             prerequisite_txs: vec![],
+                                            sol_costs: SolCosts {
+                                                flat_fee_lamports: sz.flat_sol_fee_lamports,
+                                                record_rent_lamports: Some(0),
+                                            },
                                         });
                                     }
                                     out.push(ReceivershipPlan {
@@ -1475,6 +1491,10 @@ pub mod p0 {
                                             &mark.lookup_tables,
                                         ),
                                         prerequisite_txs: vec![],
+                                        sol_costs: SolCosts {
+                                            flat_fee_lamports: sz.flat_sol_fee_lamports,
+                                            record_rent_lamports: Some(0),
+                                        },
                                     });
                                 }
                             }
@@ -1516,7 +1536,17 @@ pub mod p0 {
                     format!("ROUTING:{}", route_errors.join(" | ")),
                 ));
             }
-            if prep.init_record.clone()? {
+            let creates_record = prep.init_record.clone()?;
+            // B4: the record rent in lamports, the SOL the intent binds (unknown sysvar: None).
+            let record_rent_lamports = if creates_record {
+                liquidation_record_rent_lamports(self.state).ok()
+            } else {
+                Some(0)
+            };
+            for plan in &mut out {
+                plan.sol_costs.record_rent_lamports = record_rent_lamports;
+            }
+            if creates_record {
                 // B4: the record this plan creates costs its rent-exempt minimum. The pinned
                 // program can return it (`close_liquid_record`, to the record payer), but no plan
                 // contains that instruction, so no recovery is credited. Known only with the
@@ -1568,6 +1598,7 @@ pub mod p0 {
                 funding_available_value: 0,
                 protocol_fees: 0,
                 flat_sol_fee: 150_000,
+                flat_sol_fee_lamports: 1_000,
                 rent_and_token: 0,
                 premium_bps: 0,
                 slippage_bps: 50,
@@ -1858,6 +1889,7 @@ pub mod p0 {
                         funding_available_value: 0,
                         protocol_fees: 0,
                         flat_sol_fee: 0,
+                        flat_sol_fee_lamports: 0,
                         rent_and_token: 7,
                         premium_bps: 500,
                         slippage_bps: 0,
@@ -2762,6 +2794,90 @@ pub mod p0 {
             assert!(
                 zero_prefund_input(&sz, &floor_route(1_000, Some(1_001)), 0, 0, Path::Rpc).is_err()
             );
+        }
+
+        /// FE-02/B4 through the production `plans()` path: every plan carries the SOL it debits
+        /// besides fee and tip — the flat protocol fee and, only when it creates the liquidation
+        /// record, the record rent in lamports (the intent's later `rent_lamports`); the plan's
+        /// full SOL debit adds the exact message fee and the tip, and is UNKNOWN for an unknown
+        /// fee, an unknown Rent sysvar or an overflow.
+        #[test]
+        fn fe02_plans_carry_their_exact_sol_debit() {
+            let mut f = PlansFixture::new();
+            f.sizing.0.flat_sol_fee_lamports = 5_000;
+            let price = |l: u64| Some(l);
+            let routes = TestRoutes(None);
+            let unlinked = f.plans(&f.state(Pubkey::default(), true), &price, &routes, false);
+            assert!(!unlinked.is_empty());
+            for p in &unlinked {
+                assert_eq!(p.sol_costs.flat_fee_lamports, 5_000);
+                assert_eq!(p.sol_costs.record_rent_lamports, Some(4_510_080));
+                assert_eq!(
+                    p.sol_debit_lamports(Some(7_000)),
+                    Some(7_000 + 5_000 + 4_510_080)
+                );
+                assert_eq!(p.sol_debit_lamports(None), None, "unknown fee quote");
+            }
+            let pda = darkbot_project0::protocol::liquidation_record_pda(&f.program, &f.account);
+            for p in f.plans(&f.state(pda, true), &price, &routes, false) {
+                assert_eq!(p.sol_costs.record_rent_lamports, Some(0), "record exists");
+                assert_eq!(p.sol_debit_lamports(Some(7_000)), Some(12_000));
+            }
+            for mut p in f.plans(&f.state(Pubkey::default(), false), &price, &routes, false) {
+                assert_eq!(
+                    p.sol_costs.record_rent_lamports, None,
+                    "Rent sysvar unknown"
+                );
+                assert_eq!(p.sol_debit_lamports(Some(7_000)), None);
+                p.sol_costs.record_rent_lamports = Some(0);
+                p.tip = u64::MAX;
+                assert_eq!(p.sol_debit_lamports(Some(1)), None, "overflow");
+            }
+        }
+
+        /// FE-02: a positive executable net needs every cost and executability proof — the
+        /// executable floor (or a proven exit), the exact message fee, rent/token costs and the
+        /// path's failure cost. Missing any one of them is UNKNOWN: never actionable in LIVE,
+        /// never a net, at most a Shadow technical probe.
+        #[test]
+        fn fe02_positive_net_requires_every_cost_and_executability_proof() {
+            use crate::execution::pipeline::{plan_economic_gate, Mode};
+            use darkbot_project0::economics::{
+                rpc_message_failure_costs, Evaluation, FailedCostMatrix,
+            };
+            let sz = sizing(1_000, 1_000_000);
+            let mut complete =
+                zero_prefund_input(&sz, &floor_route(5_000, Some(1_200)), 0, 0, Path::Rpc).unwrap();
+            complete.transaction_fee_usd_micro = Some(1_000);
+            let failed = rpc_message_failure_costs(Some(1_000));
+            let (eval, actionable, _) =
+                plan_economic_gate(&complete, &failed, 0, Mode::Live, true, true);
+            assert!(matches!(eval, Evaluation::Known { net, .. } if net > 0) && actionable);
+            type Gap = fn(&mut darkbot_project0::economics::CandidateInput);
+            let gaps: [(&str, Gap); 3] = [
+                ("no executable floor / exit", |i| {
+                    i.gross_seized_realizable_usd_micro = None
+                }),
+                ("fee quote unknown", |i| i.transaction_fee_usd_micro = None),
+                ("rent unknown", |i| i.rent_and_token_usd_micro = None),
+            ];
+            for (gap, remove) in gaps {
+                let mut input = complete;
+                remove(&mut input);
+                let live = plan_economic_gate(&input, &failed, 0, Mode::Live, true, true);
+                assert_eq!(live, (Evaluation::Unknown, false, false), "{gap}");
+                let shadow = plan_economic_gate(&input, &failed, 0, Mode::Shadow, true, true);
+                assert_eq!(shadow, (Evaluation::Unknown, false, true), "{gap}");
+            }
+            let unmeasured = FailedCostMatrix::default();
+            assert_eq!(
+                plan_economic_gate(&complete, &unmeasured, 0, Mode::Live, true, true),
+                (Evaluation::Unknown, false, false),
+                "failure cost unknown"
+            );
+            // Known but state or safety invalid: never actionable either.
+            assert!(!plan_economic_gate(&complete, &failed, 0, Mode::Live, false, true).1);
+            assert!(!plan_economic_gate(&complete, &failed, 0, Mode::Live, true, false).1);
         }
 
         fn route_for_budget(cap: u8, data_len: usize, accounts: usize) -> Route {

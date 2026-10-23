@@ -827,6 +827,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             tx_version: darkbot_solana::tx::BuildVersion::V0,
             lookup_tables: vec![].into(),
             prerequisite_txs: vec![],
+            sol_costs: Default::default(),
         }])
     }
 }

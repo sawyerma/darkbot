@@ -181,6 +181,29 @@ pub struct ReceivershipPlan {
     /// [FIX-3] Vorab-TXs im Bundle (JIT_SHORTFALL: Buy-TX). Dürfen weder Start noch End enthalten;
     /// Receivership bleibt eine eigene TX mit End als letzter Ix.
     pub prerequisite_txs: Vec<Vec<Instruction>>,
+    /// FE-02/B4: the SOL this plan debits besides the network fee and the tip.
+    pub sol_costs: SolCosts,
+}
+
+/// FE-02/B4: SOL a plan's execution debits from the wallet beyond the network fee and the tip:
+/// the protocol's flat liquidation fee and the rent of a liquidation record the plan creates
+/// (`None`: the Rent sysvar is unknown, so the plan's SOL debit is UNKNOWN).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SolCosts {
+    pub flat_fee_lamports: u64,
+    pub record_rent_lamports: Option<u64>,
+}
+
+impl ReceivershipPlan {
+    /// FE-02: every lamport this plan debits — the exact message's network fee (`fee_lamports`,
+    /// from the fee quote), tip, flat protocol fee and record rent; `None` if any part is
+    /// unknown or the sum overflows. FE-04 binds exactly this as the intent's SOL debit.
+    pub fn sol_debit_lamports(&self, fee_lamports: Option<u64>) -> Option<u64> {
+        fee_lamports?
+            .checked_add(self.tip)?
+            .checked_add(self.sol_costs.flat_fee_lamports)?
+            .checked_add(self.sol_costs.record_rent_lamports?)
+    }
 }
 
 /// Q5: why a builder produced no plan, typed where it arises. The text is the former message
