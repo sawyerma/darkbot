@@ -5,8 +5,8 @@
 //! transaction hashes, token, salt, minimum output, economics, budget and
 //! safety parameters must be identical; the Portal upgrade scan must cover
 //! every block from the frozen DRY's block to the preflight's block with a
-//! verified hash chain anchored at both block hashes and hold exactly one
-//! verified upgrade from the frozen implementation to the current one; the
+//! verified hash chain anchored at both block hashes and hold a gapless chain
+//! of verified upgrades from the frozen implementation to the current one; the
 //! builder floor must be a native re-determination from fetched sources,
 //! unchanged and bound by the simulation. Writes `requalification_status.dbrec` (DBREC001) and prints
 //! `FLAP_REQUALIFICATION=PASS` or `=STOP`; exit 0 for PASS, 1 for STOP,
@@ -35,8 +35,9 @@ const FROZEN_HEAD: u64 = 127_865_760;
 /// The signed transactions of the approved candidate.
 const LAUNCH_TX: &str = "db468c01529ee4c9597eae056f420f0d4d6d0753a1f785f8dbb3163028be5146";
 const BUY_TX: &str = "b086f683550d1aa221db2add1aa1426444b7ef716de98594c40b9b6da765db32";
-/// The Portal version the requalification targets.
-const TARGET_VERSION: &str = "v5.25.0";
+/// The Portal version the requalification targets: current Mainnet since
+/// block 128914179 (readiness 2026-10-21, `native/evidence/g07/readiness_20261021T201733Z`).
+const TARGET_VERSION: &str = "v5.26.0";
 const SIGNED_GAS_PRICE: u64 = 50_000_000;
 const MAX_TOTAL_PER_ATTEMPT: u128 = 481_163_500_000_000;
 
@@ -200,8 +201,8 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
     let mut checks = Vec::new();
     let head = int(one(&pre, "latest_block_number")).unwrap_or(0);
 
-    // R0: complete, anchored coverage and exactly one verified upgrade,
-    // frozen -> current implementation.
+    // R0: complete, anchored coverage and a verified, gapless chain of
+    // upgrades from the frozen to the current implementation.
     let mut p = Vec::new();
     let upgrades = scan.nested_all(up::UPGRADES).map_err(|e| e.0)?;
     let from = int(one(&scan, "scanned_from_block"));
@@ -231,8 +232,8 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
             int(one(&scan, "headers_verified"))
         ));
     }
-    if upgrades.len() != 1 {
-        p.push(format!("{} upgrades since the frozen head, exactly 1 required", upgrades.len()));
+    if upgrades.is_empty() {
+        p.push("no upgrade since the frozen head".into());
     }
     let frozen_impl = addr(one(&f_pre, "portal_implementation"));
     let current_impl = addr(one(&pre, "portal_implementation"));
@@ -249,22 +250,42 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
     {
         p.push("current implementation code differs between scan and preflight".into());
     }
-    let mut facts = Draft::new(&rq::SCHEMA);
-    if let [u] = upgrades.as_slice() {
+    // Each upgrade starts at the implementation the previous one left (the
+    // first at the frozen one), in strict chain order; the last ends at the
+    // current implementation. The facts record that last upgrade.
+    let mut expected_before = frozen_impl;
+    let mut previous = None;
+    for (index, u) in upgrades.iter().enumerate() {
         let g = |name| one(u, name);
         let block = int(g("block")).unwrap_or(0);
+        let position = (block, int(g("log_index")).unwrap_or(0));
+        if previous.is_some_and(|before| position <= before) {
+            p.push(format!("upgrade {index} is not after the previous one"));
+        }
+        previous = Some(position);
         if !(from.unwrap_or(u64::MAX) <= block && Some(block) <= to) {
             p.push(format!("upgrade block {block} outside the scanned range"));
         }
         if int(g("receipt_status")) != Some(1) {
-            p.push("upgrade receipt status is not 1".into());
+            p.push(format!("upgrade {index} receipt status is not 1"));
         }
-        if addr(g("implementation")) != current_impl || addr(g("implementation_slot_after")) != current_impl {
-            p.push("upgrade target is not the current implementation".into());
+        if addr(g("implementation")) != addr(g("implementation_slot_after")) {
+            p.push(format!("upgrade {index} event target differs from the slot after it"));
         }
-        if addr(g("implementation_slot_before")) != frozen_impl {
-            p.push("implementation before the upgrade is not the frozen one".into());
+        if addr(g("implementation_slot_before")) != expected_before {
+            p.push(format!(
+                "upgrade {index} does not start at the implementation left by the previous upgrade (the first at the frozen one)"
+            ));
         }
+        expected_before = addr(g("implementation_slot_after"));
+    }
+    if !upgrades.is_empty() && expected_before != current_impl {
+        p.push("the upgrade chain does not end at the current implementation".into());
+    }
+    let mut facts = Draft::new(&rq::SCHEMA);
+    if let Some(u) = upgrades.last() {
+        let g = |name| one(u, name);
+        let block = int(g("block")).unwrap_or(0);
         facts
             .set(rq::UPGRADE_BLOCK, block)
             .set_opt(rq::UPGRADE_TRANSACTION, word(g("transaction_hash")).map(Value::B256))
@@ -278,7 +299,7 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
     checks.push(check(
         "R0_UPGRADE",
         p,
-        "every block from the frozen DRY's block to the preflight's block covered by a verified, anchored header hash chain; exactly one Upgraded event, its receipts verified against receiptsRoot, the implementation slot before and after it on an archive endpoint",
+        "every block from the frozen DRY's block to the preflight's block covered by a verified, anchored header hash chain; a gapless chain of Upgraded events from the frozen to the current implementation, receipts verified against receiptsRoot, the implementation slot before and after each on an archive endpoint",
     ));
 
     // DRY-0: deployment, wallets, nonces, funding, gas.
@@ -629,7 +650,8 @@ mod tests {
     const NEW_IMPL: [u8; 20] = [0xe1; 20];
 
     /// Stand-in requalification records consistent with the frozen DRY and a
-    /// single upgrade; `breaks` names one deliberate defect.
+    /// single upgrade (or the variant's chain); `breaks` names one deliberate
+    /// defect.
     fn stand_in(tag: &str, breaks: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("requal-check-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -643,7 +665,7 @@ mod tests {
                 .clear(tag_of(&pf::SCHEMA, "dependencies"))
                 .set(pf::LATEST_BLOCK_NUMBER, HEAD)
                 .set(pf::LATEST_BLOCK_HASH, Value::B256(HEAD_HASH))
-                .set(pf::PORTAL_VERSION, if breaks == "version" { "v5.26.0" } else { TARGET_VERSION })
+                .set(pf::PORTAL_VERSION, if breaks == "version" { "v5.25.0" } else { TARGET_VERSION })
                 .set(pf::PORTAL_IMPLEMENTATION, Value::Address(NEW_IMPL))
                 .set(pf::PORTAL_IMPLEMENTATION_CODE_SHA256, Value::B256(code));
             if breaks == "fee" {
@@ -735,22 +757,29 @@ mod tests {
         )
         .unwrap();
         let mut s = Draft::new(&up::SCHEMA);
-        let count = match breaks {
-            "zero" => 0,
-            "two" => 2,
-            "ten" => 10,
-            _ => 1,
+        // (block offset, slot before, event target, slot after) per upgrade.
+        const MID: [u8; 20] = [0xd5; 20];
+        let steps: Vec<(u64, [u8; 20], [u8; 20], [u8; 20])> = match breaks {
+            "zero" => vec![],
+            "two" => vec![(1000, old_impl, NEW_IMPL, NEW_IMPL), (1001, old_impl, NEW_IMPL, NEW_IMPL)],
+            "ten" => (0..10).map(|n| (1000 + n, old_impl, NEW_IMPL, NEW_IMPL)).collect(),
+            "chain" => vec![(1000, old_impl, MID, MID), (1001, MID, NEW_IMPL, NEW_IMPL)],
+            "chain_gap" => vec![(1000, old_impl, MID, MID), (1001, [0xd6; 20], NEW_IMPL, NEW_IMPL)],
+            "chain_order" => vec![(1001, old_impl, MID, MID), (1000, MID, NEW_IMPL, NEW_IMPL)],
+            "chain_short" => vec![(1000, old_impl, MID, MID)],
+            "target" => vec![(1000, old_impl, MID, NEW_IMPL)],
+            _ => vec![(1000, old_impl, NEW_IMPL, NEW_IMPL)],
         };
-        for n in 0..count {
+        for (offset, before, target, after) in steps {
             let mut u = Draft::new(&up::upgrade::SCHEMA);
-            u.set(up::upgrade::BLOCK, FROZEN_HEAD + 1000 + n)
+            u.set(up::upgrade::BLOCK, FROZEN_HEAD + offset)
                 .set(up::upgrade::BLOCK_HASH, Value::B256([3; 32]))
                 .set(up::upgrade::TRANSACTION_HASH, Value::B256([4; 32]))
                 .set(up::upgrade::LOG_INDEX, 1u64)
-                .set(up::upgrade::IMPLEMENTATION, Value::Address(NEW_IMPL))
+                .set(up::upgrade::IMPLEMENTATION, Value::Address(target))
                 .set(up::upgrade::RECEIPT_STATUS, if breaks == "receipt" { 0u64 } else { 1u64 })
-                .set(up::upgrade::SLOT_BEFORE, Value::Address(old_impl))
-                .set(up::upgrade::SLOT_AFTER, Value::Address(NEW_IMPL));
+                .set(up::upgrade::SLOT_BEFORE, Value::Address(before))
+                .set(up::upgrade::SLOT_AFTER, Value::Address(after));
             s.push(up::UPGRADES, u.into_nested());
         }
         let to = if breaks == "short_scan" { HEAD - 10 } else { HEAD };
@@ -793,7 +822,7 @@ mod tests {
 
     #[test]
     fn consistent_requalification_records_pass_and_every_defect_stops() {
-        for variant in ["none", "scope_note"] {
+        for variant in ["none", "scope_note", "chain"] {
             let (pass, checks) = verdict(variant);
             assert!(pass, "{checks:#?}");
         }
@@ -801,6 +830,10 @@ mod tests {
             ("zero", "R0_UPGRADE"),
             ("two", "R0_UPGRADE"),
             ("ten", "R0_UPGRADE"),
+            ("chain_gap", "R0_UPGRADE"),
+            ("chain_order", "R0_UPGRADE"),
+            ("chain_short", "R0_UPGRADE"),
+            ("target", "R0_UPGRADE"),
             ("receipt", "R0_UPGRADE"),
             ("short_scan", "R0_UPGRADE"),
             ("headers", "R0_UPGRADE"),
