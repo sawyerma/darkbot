@@ -607,9 +607,11 @@ GitHub-Release ≠ Mainnet-Deployment.
 
 ---
 
-# 3. Aktueller belegter Ausgangszustand
+# 3. Historischer Ausgangszustand — Snapshot 2026-09-30
 
 ## 3.1 Eigenes Repo
+
+**HISTORISCHER SNAPSHOT, NICHT HEUTIGER IST-ZUSTAND:** Die folgenden Zeilen bewahren den Stand vom **2026-09-30**; insbesondere „Project-0 Production Rust: noch nicht aufgebaut“ und „native/: wird durch S0 eingeführt“ gelten **nicht** mehr als aktuelle Implementierungsaussagen. Auf `main` (2026-10-23, zuletzt geprüfter Projekt-Code bis `2605556c`) existiert der produktive Rust-Workspace `project_0/native/` mit **fünf** Cargo-Mitgliedern (`common`, `solana`, `liquidation`, `runtime`, `reporter`); die Runtime enthält unter anderem `orchestration`, `execution`, `market`, `analytics` und `storage`. Der reale Entwicklungs-/Qualifikationsstand folgt aus Code, `STATUS.md` und aktueller Evidence. Diese historische Momentaufnahme erteilt keine Freigabe.
 
 Stand 2026-09-30:
 
@@ -4447,7 +4449,9 @@ gates/project_0/
 
 ---
 
-# 12. Startstatus 2026-09-30
+# 12. Historischer Startstatus 2026-09-30 (keine heutige Autorität)
+
+**HISTORISCHE VERSIONSAUSSAGE:** Die nachfolgende Zeile `v4.2 REMAINS AUTHORITATIVE UNTIL PROMOTION` ist ein damaliger Beschlussstand vom 30.09.2026, **keine gegenwärtige Prioritäts- oder Gültigkeitsregel**. Verbindlich ist der oben definierte **Produktions-Phasenplan v4.5.2 einschließlich aller späteren bindenden Ergänzungen**, insbesondere FE-00…FE-07, PERSIST/JFI, S1-RACE, FREE_ONLY, S1-02/S1-08 und K-02/K-02b/K-03. Historie wird erhalten, ohne ältere Gates stillschweigend zu streichen oder LIVE zu autorisieren.
 
 ```text
 ARCHITECTURE:
