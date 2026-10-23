@@ -574,7 +574,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -585,7 +585,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -596,7 +596,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -607,7 +607,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -618,7 +618,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -629,7 +629,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -640,7 +640,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -651,7 +651,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -662,7 +662,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -673,7 +673,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -684,7 +684,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -695,7 +695,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -706,7 +706,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -717,7 +717,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -728,7 +728,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -739,7 +739,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -750,7 +750,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -761,7 +761,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -772,7 +772,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -783,7 +783,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -794,7 +794,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -805,7 +805,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -816,7 +816,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -827,7 +827,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -838,7 +838,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -849,7 +849,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -860,7 +860,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -871,7 +871,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -882,7 +882,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -893,7 +893,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -904,7 +904,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -915,7 +915,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -926,7 +926,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -937,7 +937,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -948,7 +948,51 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
+    "symbol": "authorization.evidence_bindings.launch_path_record_sha256",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.acceptance-contract.v5",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
+    "symbol": "authorization.evidence_paths.launch_path_record",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.acceptance-contract.v5",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
+    "symbol": "authorization.candidate.profile",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.acceptance-contract.v5",
+    "sensitivity": "public; text redacted; binary transactions excluded",
+    "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
+    "symbol": "authorization.candidate.candidate_id",
+    "type": "B256",
+    "unit": "hash_32_bytes"
+  },
+  {
+    "owner": "BSC",
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -959,7 +1003,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -970,7 +1014,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -981,7 +1025,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -992,7 +1036,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1003,7 +1047,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1014,7 +1058,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1025,7 +1069,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1036,7 +1080,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1047,7 +1091,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1058,7 +1102,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1069,7 +1113,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1080,7 +1124,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1091,7 +1135,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1102,7 +1146,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1113,7 +1157,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1124,7 +1168,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1135,7 +1179,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1146,7 +1190,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1157,7 +1201,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1168,7 +1212,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1179,7 +1223,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1190,7 +1234,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1201,7 +1245,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1212,7 +1256,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1223,7 +1267,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1234,7 +1278,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1245,7 +1289,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1256,7 +1300,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1267,7 +1311,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1278,7 +1322,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1289,7 +1333,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1300,7 +1344,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1311,7 +1355,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1322,7 +1366,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1333,7 +1377,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1344,7 +1388,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1355,7 +1399,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1366,7 +1410,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1377,7 +1421,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1388,7 +1432,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1399,7 +1443,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1410,7 +1454,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1421,7 +1465,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1432,7 +1476,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1443,7 +1487,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1454,7 +1498,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1465,7 +1509,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1476,7 +1520,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1487,7 +1531,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1498,7 +1542,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1509,7 +1553,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1520,7 +1564,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1531,7 +1575,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1542,7 +1586,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1553,7 +1597,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1564,7 +1608,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1575,7 +1619,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1586,7 +1630,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1597,7 +1641,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1608,7 +1652,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1619,7 +1663,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1630,7 +1674,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1641,7 +1685,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1652,7 +1696,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1663,7 +1707,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1674,7 +1718,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1685,7 +1729,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1696,7 +1740,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1707,7 +1751,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1718,7 +1762,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1729,7 +1773,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1740,7 +1784,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1751,7 +1795,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1762,7 +1806,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1773,7 +1817,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1784,7 +1828,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1795,7 +1839,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1806,7 +1850,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1817,7 +1861,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1828,7 +1872,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1839,7 +1883,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1850,7 +1894,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1861,7 +1905,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
@@ -1872,7 +1916,7 @@
   {
     "owner": "BSC",
     "required_gate": "READ_ONLY_OBSERVATION",
-    "schema": "darkbot.g07.acceptance-contract.v4",
+    "schema": "darkbot.g07.acceptance-contract.v5",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
     "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",

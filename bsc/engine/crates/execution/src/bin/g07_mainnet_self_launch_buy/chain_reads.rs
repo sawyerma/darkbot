@@ -561,6 +561,80 @@ pub(crate) fn preflight_with(
     darkbot_bsc_record::decode(&f::SCHEMA, &bytes).map_err(|e| e.0)
 }
 
+/// v9.1 C1/R1: the guard-bound launch-path snapshot re-read at exactly the
+/// block of the current preflight `current` (EIP-1898, `requireCanonical`):
+/// every bound code hash and storage selector, then the block must still be
+/// canonical. Nothing falls back to "latest".
+pub(crate) fn current_launch_path(
+    bound: &darkbot_bsc_execution::launch_path::Bound,
+    current: &Record,
+) -> Result<darkbot_bsc_execution::launch_path::Current, String> {
+    launch_path_with(&mut |method, params| rpc(method, params), bound, current)
+}
+
+/// [`current_launch_path`] over a transport.
+pub(crate) fn launch_path_with(
+    rpc: Rpc<'_>,
+    bound: &darkbot_bsc_execution::launch_path::Bound,
+    current: &Record,
+) -> Result<darkbot_bsc_execution::launch_path::Current, String> {
+    pinned_launch_path_reads(rpc, current, &mut |hash, code, storage| {
+        darkbot_bsc_execution::launch_path::verify_current(bound, hash, code, storage)
+    })
+}
+
+/// Code SHA-256 and storage words, each read at the block of `current`
+/// pinned by hash, for `verify`; then that block must still be canonical.
+#[allow(clippy::type_complexity)]
+fn pinned_launch_path_reads<T>(
+    rpc: Rpc<'_>,
+    current: &Record,
+    verify: &mut dyn FnMut(
+        [u8; 32],
+        &mut dyn FnMut([u8; 20]) -> Result<[u8; 32], String>,
+        &mut dyn FnMut([u8; 20], [u8; 32]) -> Result<[u8; 32], String>,
+    ) -> Result<T, String>,
+) -> Result<T, String> {
+    use schema::g06a::preflight as f;
+    let number = current
+        .u64(f::LATEST_BLOCK_NUMBER)
+        .map_err(|e| e.to_string())?;
+    let hash = current
+        .b256(f::LATEST_BLOCK_HASH)
+        .map_err(|e| e.to_string())?;
+    let at = pinned(&hash);
+    let rpc = std::cell::RefCell::new(rpc);
+    let call = |method: &str, params: String| (**rpc.borrow_mut())(method, &params);
+    let address = |a: [u8; 20]| wire_string(&format!("0x{}", hex::encode(a)));
+    let result = verify(
+        hash,
+        &mut |a| {
+            let code = call("eth_getCode", format!("[{},{at}]", address(a)))
+                .and_then(|v| wire_data(&v, "eth_getCode"))?;
+            Ok(darkbot_bsc_record::sha256(&code))
+        },
+        &mut |a, slot| {
+            let word = call(
+                "eth_getStorageAt",
+                format!(
+                    "[{},{},{at}]",
+                    address(a),
+                    wire_string(&format!("0x{}", hex::encode(slot)))
+                ),
+            )
+            .and_then(|v| wire_data(&v, "eth_getStorageAt"))?;
+            <[u8; 32]>::try_from(word).map_err(|_| "storage word is not 32 bytes".to_string())
+        },
+    )?;
+    let (_, still) = block_at(&mut **rpc.borrow_mut(), &format!("0x{number:x}"))?;
+    if still != hash {
+        return Err(
+            "the pinned launch-path block left the canonical chain during the reads".into(),
+        );
+    }
+    Ok(result)
+}
+
 fn field_name(tag: u16) -> &'static str {
     schema::g06a::preflight::SCHEMA
         .field(tag)
@@ -1208,6 +1282,59 @@ mod tests {
             0,
             1_000_000_000_000,
         )
+    }
+
+    #[test]
+    fn the_launch_path_is_re_read_pinned_at_the_current_block_and_a_reorg_fails() {
+        use darkbot_bsc_execution::launch_path::{Snapshot, drift};
+        let mut node = FakeNode::new();
+        let current = run(&mut node).unwrap();
+        let proxy = [0x11; 20];
+        let mut selector = [0u8; 32];
+        selector[12..]
+            .copy_from_slice(&hex::decode("7a94f37b61a82c395f9812cf266b444783cc5e8c").unwrap());
+        let snapshot = |value: [u8; 32]| Snapshot {
+            block_number: 16,
+            block_hash: [0xab; 32],
+            token: [0x77; 20],
+            code: vec![(proxy, darkbot_bsc_record::sha256(&[0x60, 0x00]))],
+            storage: vec![(proxy, [0x22; 32], value)],
+        };
+        let reread = |node: &mut FakeNode, s: &Snapshot| {
+            pinned_launch_path_reads(
+                &mut |m, p| node.answer(m, p),
+                &current,
+                &mut |hash, code, storage| {
+                    assert_eq!(hash, [0xab; 32]);
+                    drift(s, code, storage)
+                },
+            )
+        };
+        let before = node.calls.len();
+        assert!(reread(&mut node, &snapshot(selector)).unwrap().is_empty());
+        let pin = format!(
+            r#"{{"blockHash":"0x{}","requireCanonical":true}}"#,
+            "ab".repeat(32)
+        );
+        let reads: Vec<_> = node.calls[before..]
+            .iter()
+            .filter(|(m, _)| m != "eth_getBlockByNumber")
+            .collect();
+        assert_eq!(reads.len(), 2);
+        assert!(
+            reads
+                .iter()
+                .all(|(_, p)| p.contains(&pin) && !p.contains("latest")),
+            "{reads:?}"
+        );
+        // An upgraded selector is drift; a reorg of the pinned block fails.
+        assert_eq!(reread(&mut node, &snapshot([0x33; 32])).unwrap().len(), 1);
+        node.hash_after = [0xcd; 32];
+        assert!(
+            reread(&mut node, &snapshot(selector))
+                .unwrap_err()
+                .contains("canonical")
+        );
     }
 
     #[test]

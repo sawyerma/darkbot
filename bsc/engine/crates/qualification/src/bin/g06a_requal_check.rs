@@ -8,7 +8,9 @@
 //! verified hash chain anchored at both block hashes and hold a gapless chain
 //! of verified upgrades from the frozen implementation to the current one; the
 //! builder floor must be a native re-determination from fetched sources,
-//! unchanged and bound by the simulation. Writes `requalification_status.dbrec` (DBREC001) and prints
+//! unchanged and bound by the simulation; the launch-path snapshot (DRY-5,
+//! v9.1 C1/R1) must be of the preflight's block, Portal and implementation
+//! code and the DRY's token. Writes `requalification_status.dbrec` (DBREC001) and prints
 //! `FLAP_REQUALIFICATION=PASS` or `=STOP`; exit 0 for PASS, 1 for STOP,
 //! 2 for unusable input. Offline: reads local records only.
 //!
@@ -40,6 +42,9 @@ const BUY_TX: &str = "b086f683550d1aa221db2add1aa1426444b7ef716de98594c40b9b6da7
 const TARGET_VERSION: &str = "v5.26.0";
 const SIGNED_GAS_PRICE: u64 = 50_000_000;
 const MAX_TOTAL_PER_ATTEMPT: u128 = 481_163_500_000_000;
+
+/// The launch-path snapshot of the requalification run (DRY-5).
+const LAUNCH_PATH: &str = "launch_path.dbrec";
 
 /// Record files of the requalification run and of the frozen DRY.
 const FILES: [&str; 6] = [
@@ -520,6 +525,21 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         "expiry head..head+2, nonces 0/0, single attempt under the UNARMED proposal, nothing submitted or persisted raw",
     ));
 
+    // DRY-5 (v9.1 C1/R1): the launch-path code identity of this run.
+    let lp_path = dir.join(LAUNCH_PATH);
+    let lp_bytes = std::fs::read(&lp_path).map_err(|e| format!("{}: {e}", lp_path.display()))?;
+    let mut p = Vec::new();
+    match darkbot_bsc_execution::launch_path::check(&lp_bytes, &pre) {
+        Ok(snapshot) if Some(snapshot.token) == addr(one(&d, "transactions.token")) => {}
+        Ok(_) => p.push("the launch path traces another token than the DRY".into()),
+        Err(e) => p.push(e),
+    }
+    checks.push(check(
+        "DRY5_LAUNCH_PATH",
+        p,
+        "every executed contract's code hash and every storage selector of the candidate's launch and first BUY, traced at the preflight's block, bound to its Portal, implementation and Tax-V3 code",
+    ));
+
     let bound = vec![
         ("preflight.dbrec".to_string(), pre_sha),
         ("native_quote.dbrec".to_string(), q_sha),
@@ -528,6 +548,7 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         ("dry_result.dbrec".to_string(), d_sha),
         ("portal_upgrade.dbrec".to_string(), scan_sha),
         (policy_path.display().to_string(), policy_sha),
+        (LAUNCH_PATH.to_string(), sha256(&lp_bytes)),
     ];
     let _ = (IMPORT_LEGACY_PATH, IMPORT_LEGACY_SHA256, tag_of);
     Ok(Evaluation { checks, bound, facts })
@@ -805,7 +826,56 @@ mod tests {
             )
             .set(up::LAST_BLOCK_HASH, Value::B256(HEAD_HASH));
         std::fs::write(dir.join("portal_upgrade.dbrec"), s.encode().unwrap()).unwrap();
+        // DRY-5: a launch path consistent with this preflight.
+        use darkbot_bsc_record::schema::g06a::launch_path as lp;
+        let p = decode_any(&pre).unwrap();
+        let token = if breaks == "lp_token" {
+            [0x11; 20]
+        } else {
+            f_d.address(dry::TOKEN).unwrap()
+        };
+        let mut l = Draft::new(&lp::SCHEMA);
+        l.set(PROVENANCE_TOOL, "test")
+            .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(
+                lp::BLOCK_NUMBER,
+                if breaks == "lp_stale" { HEAD - 1 } else { HEAD },
+            )
+            .set(lp::BLOCK_HASH, Value::B256(HEAD_HASH))
+            .set(lp::PORTAL, p.get(pf::PORTAL).unwrap().clone())
+            .set(lp::METHOD, lp::TRACE_METHOD)
+            .set(lp::TOKEN, Value::Address(token))
+            .set(lp::LAUNCH_SUCCESS, true)
+            .set(lp::BUY_SUCCESS, true)
+            .set(lp::LAUNCH_RETURN_TOKEN, Value::Address(token));
+        for (address, sha) in [
+            (pf::PORTAL, pf::PORTAL_CODE_SHA256),
+            (
+                pf::PORTAL_IMPLEMENTATION,
+                pf::PORTAL_IMPLEMENTATION_CODE_SHA256,
+            ),
+            (pf::TAX_V3_IMPL, pf::TAX_V3_IMPL_CODE_SHA256),
+        ] {
+            l.push(lp::CODE_ADDRESS, p.get(address).unwrap().clone())
+                .push(lp::CODE_SHA256, p.get(sha).unwrap().clone())
+                .push(lp::CODE_BYTES, 1u64)
+                .push(lp::CODE_ROLES, "launch:CALL");
+        }
+        let mut selects = [0u8; 32];
+        selects[12..].copy_from_slice(&NEW_IMPL);
+        l.push(lp::STORAGE_ADDRESS, p.get(pf::PORTAL).unwrap().clone())
+            .push(
+                lp::STORAGE_SLOT,
+                Value::B256(darkbot_bsc_execution::launch_path::EIP1967_IMPLEMENTATION_SLOT),
+            )
+            .push(lp::STORAGE_VALUE, Value::B256(selects))
+            .push(lp::STORAGE_SELECTS, Value::Address(NEW_IMPL));
+        std::fs::write(dir.join(LAUNCH_PATH), l.encode().unwrap()).unwrap();
         dir
+    }
+
+    fn policy_of(dir: &Path) -> std::path::PathBuf {
+        dir.join("builder_policy.dbrec")
     }
 
     fn verdict(breaks: &str) -> (bool, Vec<Check>) {
@@ -847,6 +917,8 @@ mod tests {
             ("bad_note", "DRY1_BYTES_AND_SIGNERS"),
             ("salt", "DRY2_SIMULATION"),
             ("min_output", "DRY3_GAS_ECONOMICS_BUDGET"),
+            ("lp_stale", "DRY5_LAUNCH_PATH"),
+            ("lp_token", "DRY5_LAUNCH_PATH"),
         ] {
             let (pass, checks) = verdict(breaks);
             assert!(!pass, "{breaks} passed");
@@ -867,6 +939,12 @@ mod tests {
         assert!(evaluate(&dir, &frozen, &policy).is_err());
         std::fs::write(dir.join("preflight.dbrec"), b"garbage").unwrap();
         assert!(evaluate(&dir, &frozen, &policy).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+        // Without its launch-path snapshot a run is unusable for v5.
+        let dir = stand_in("no-launch-path", "none");
+        std::fs::remove_file(dir.join(LAUNCH_PATH)).unwrap();
+        let error = evaluate(&dir, &frozen, &policy_of(&dir)).err().unwrap();
+        assert!(error.contains(LAUNCH_PATH), "{error}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

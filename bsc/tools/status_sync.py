@@ -52,7 +52,7 @@ def sync(root, app, run):
             files.append(path)
     for pattern in ['builder_requirements_refresh_*.json','*/probe.evidence.json']:
         files.extend(sorted((root/'bsc/native/evidence/g06a').glob(pattern)))
-    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/wallet.public.env','bsc/tools/readiness_job.py']:
+    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
     manifest={}

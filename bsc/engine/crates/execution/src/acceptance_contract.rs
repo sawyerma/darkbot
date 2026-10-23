@@ -25,6 +25,9 @@ pub const BUYER: &str = "0x9c8a0Db41914beEE52Dd49790c4F087E252743DE";
 pub const FROZEN_DIR: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";
 pub const REQUAL_STATUS: &str = "requalification_status.dbrec";
 pub const REQUAL_CHECKS: &[&str] = &["R0_UPGRADE", "DRY0_PREFLIGHT", "DRY1_BYTES_AND_SIGNERS", "DRY2_SIMULATION", "DRY3_GAS_ECONOMICS_BUDGET", "DRY4_EXPIRY_NONCES_ZERO_EGRESS"];
+/// The check and record a requalification adds for a v5 contract (C1/R1).
+pub const REQUAL_LAUNCH_PATH_CHECK: &str = "DRY5_LAUNCH_PATH";
+pub const REQUAL_LAUNCH_PATH: &str = "launch_path.dbrec";
 
 /// No aliases across the approval boundary: paths are repository-relative,
 /// normalized and every existing component must be non-symlinked.
@@ -44,7 +47,14 @@ fn evidence_path(root: &Path, relative: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn requalification_pass(root: &Path, dir: &str, policy: &str) -> Result<(), String> {
+/// `launch_path`: the v5 shape (with the launch-path check and record);
+/// otherwise exactly the v4 shape.
+fn requalification_pass(
+    root: &Path,
+    dir: &str,
+    policy: &str,
+    launch_path: bool,
+) -> Result<(), String> {
     use g06a::requalification as r;
     use std::collections::{BTreeMap, BTreeSet};
     let e = |x: darkbot_bsc_record::RecordError| x.0;
@@ -66,11 +76,15 @@ fn requalification_pass(root: &Path, dir: &str, policy: &str) -> Result<(), Stri
     let mut checks = BTreeSet::new();
     for check in record.nested_all(r::CHECKS).map_err(e)? {
         let name = check.text(r::check::NAME).map_err(e)?.to_owned();
-        if !REQUAL_CHECKS.contains(&name.as_str()) || !checks.insert(name) || check.text(r::check::STATUS).map_err(e)? != "PASS" {
+        let known = REQUAL_CHECKS.contains(&name.as_str())
+            || (launch_path && name == REQUAL_LAUNCH_PATH_CHECK);
+        if !known || !checks.insert(name) || check.text(r::check::STATUS).map_err(e)? != "PASS" {
             return Err("requalification check missing, duplicated or not PASS".into());
         }
     }
-    if checks.len() != REQUAL_CHECKS.len() { return Err("incomplete requalification checks".into()); }
+    if checks.len() != REQUAL_CHECKS.len() + usize::from(launch_path) {
+        return Err("incomplete requalification checks".into());
+    }
     let mut records = BTreeMap::new();
     for row in record.nested_all(r::RECORDS).map_err(e)? {
         let raw_name = row.text(r::bound::NAME).map_err(e)?;
@@ -79,8 +93,28 @@ fn requalification_pass(root: &Path, dir: &str, policy: &str) -> Result<(), Stri
             return Err("duplicate requalification record".into());
         }
     }
-    for name in [REQUAL_PREFLIGHT, "native_quote.dbrec", REQUAL_ECONOMICS, REQUAL_LOCAL_SIMULATION, REQUAL_DRY, REQUAL_PORTAL_UPGRADE, policy] {
-        let path = if name == policy { name.to_owned() } else { format!("{dir}/{name}") };
+    let extra = if launch_path {
+        Some(REQUAL_LAUNCH_PATH)
+    } else {
+        None
+    };
+    for name in [
+        REQUAL_PREFLIGHT,
+        "native_quote.dbrec",
+        REQUAL_ECONOMICS,
+        REQUAL_LOCAL_SIMULATION,
+        REQUAL_DRY,
+        REQUAL_PORTAL_UPGRADE,
+        policy,
+    ]
+    .into_iter()
+    .chain(extra)
+    {
+        let path = if name == policy {
+            name.to_owned()
+        } else {
+            format!("{dir}/{name}")
+        };
         evidence_path(root, &path)?;
         let bytes = std::fs::read(root.join(path)).map_err(|e| e.to_string())?;
         if records.remove(name) != Some(sha256(&bytes)) { return Err(format!("requalification record binding mismatch: {name}")); }
@@ -638,11 +672,21 @@ pub fn attempt1_v4_evidence(
     requal_dir: &str,
     builder_policy: &str,
 ) -> Result<V4Evidence, String> {
+    base_evidence(root, requal_dir, builder_policy, false).map(|(e, _, _)| e)
+}
+
+/// The v4 evidence with the requalification's DRY and preflight records.
+fn base_evidence(
+    root: &Path,
+    requal_dir: &str,
+    builder_policy: &str,
+    launch_path: bool,
+) -> Result<(V4Evidence, Record, Record), String> {
     use g06a::{
         builder_policy as b, dry as d, economics, local_simulation, portal_upgrade as up,
         preflight as p,
     };
-    requalification_pass(root, requal_dir, builder_policy)?;
+    requalification_pass(root, requal_dir, builder_policy, launch_path)?;
     let at = |name: &str| format!("{}/{name}", requal_dir.trim_end_matches('/'));
     let e = |x: darkbot_bsc_record::RecordError| x.0;
     let (dry, dry_rec) = read_input(root, &at(REQUAL_DRY), &[&d::NATIVE])?;
@@ -695,7 +739,7 @@ pub fn attempt1_v4_evidence(
     }
     let v3 = std::fs::read(root.join(crate::acceptance_guard::V3_RELATIVE_PATH))
         .map_err(|x| format!("{}: {x}", crate::acceptance_guard::V3_RELATIVE_PATH))?;
-    Ok(V4Evidence {
+    let evidence = V4Evidence {
         dry,
         preflight,
         builder_policy,
@@ -723,7 +767,8 @@ pub fn attempt1_v4_evidence(
         ),
         builder_observed: policy.text(b::OBSERVED_DATE).map_err(e)?.to_string(),
         builder_floor: policy.u256(b::STRICTEST_FLOOR_WEI).map_err(e)?,
-    })
+    };
+    Ok((evidence, dry_rec, pre))
 }
 
 /// Replaces item `index` of the repeated text field `name`.
@@ -957,5 +1002,220 @@ pub fn attempt1_v4(e: &V4Evidence, authorization: Authorization) -> Result<Vec<u
         contract::PORTAL_UPGRADE_RECORD_PATH,
         e.portal_upgrade.path.as_str(),
     );
+    d.encode().map_err(|x| x.0)
+}
+
+/// What the v5 contract binds beyond v4 (v9.1 C1/R1): the launch-path
+/// snapshot of the requalification run, the candidate it signs for and the
+/// v4 proposal it supersedes.
+#[derive(Clone, Debug)]
+pub struct V5Evidence {
+    pub base: V4Evidence,
+    pub launch_path: V4Input,
+    pub candidate_profile: String,
+    pub candidate_id: [u8; 32],
+    /// The superseded v4 proposal.
+    pub supersedes_v4_sha256: [u8; 32],
+    launch_path_entries: (usize, usize),
+}
+
+/// Reads the v5 evidence: the v4 evidence of a requalification run that also
+/// passed its launch-path check, its snapshot (checked against the run's
+/// preflight and of the DRY's token), the public record of the candidate at
+/// `candidate_record` (its ID recomputed; derived against exactly that
+/// preflight, for the DRY's launcher and token and, where it carries them,
+/// the DRY's signed hashes) and the inactive v4 proposal it supersedes.
+pub fn attempt1_v5_evidence(
+    root: &Path,
+    requal_dir: &str,
+    builder_policy: &str,
+    candidate_record: &str,
+) -> Result<V5Evidence, String> {
+    use darkbot_bsc_record::schema::g07_candidate::{candidate as c, candidate_id_of};
+    use g06a::{dry as d, preflight as p};
+    let (base, dry, pre) = base_evidence(root, requal_dir, builder_policy, true)?;
+    let e = |x: darkbot_bsc_record::RecordError| x.0;
+    let path = format!("{}/{REQUAL_LAUNCH_PATH}", requal_dir.trim_end_matches('/'));
+    evidence_path(root, &path)?;
+    let bytes = std::fs::read(root.join(&path)).map_err(|x| format!("{path}: {x}"))?;
+    let snapshot = crate::launch_path::check(&bytes, &pre)?;
+    if snapshot.token != dry.address(d::TOKEN).map_err(e)? {
+        return Err("the launch path traces another token than the DRY".into());
+    }
+    evidence_path(root, candidate_record)?;
+    let candidate_bytes = std::fs::read(root.join(candidate_record))
+        .map_err(|x| format!("{candidate_record}: {x}"))?;
+    let candidate =
+        decode(&c::SCHEMA, &candidate_bytes).map_err(|x| format!("{candidate_record}: {x}"))?;
+    let id = candidate.b256(c::CANDIDATE_ID).map_err(e)?;
+    let profile = candidate.text(c::PROFILE).map_err(e)?.to_string();
+    if candidate_id_of(&candidate).map_err(e)? != id
+        || !matches!(profile.as_str(), "SELF_A" | "SELF_B")
+    {
+        return Err("the candidate record fails its identity".into());
+    }
+    let same_address = |ct: u16, r: &Record, rt: u16| -> Result<bool, String> {
+        Ok(candidate.address(ct).map_err(e)? == r.address(rt).map_err(e)?)
+    };
+    let same_word = |ct: u16, r: &Record, rt: u16| -> Result<bool, String> {
+        Ok(candidate.b256(ct).map_err(e)? == r.b256(rt).map_err(e)?)
+    };
+    let deployment = candidate.u64(c::CHAIN_ID).map_err(e)? == pre.u64(p::CHAIN_ID).map_err(e)?
+        && same_address(c::PORTAL, &pre, p::PORTAL)?
+        && candidate.text(c::PORTAL_VERSION).map_err(e)?
+            == pre.text(p::PORTAL_VERSION).map_err(e)?
+        && same_address(c::PORTAL_IMPLEMENTATION, &pre, p::PORTAL_IMPLEMENTATION)?
+        && same_word(
+            c::PORTAL_IMPLEMENTATION_CODE_SHA256,
+            &pre,
+            p::PORTAL_IMPLEMENTATION_CODE_SHA256,
+        )?
+        && same_address(c::TAX_V3_IMPLEMENTATION, &pre, p::TAX_V3_IMPL)?
+        && same_word(
+            c::TAX_V3_IMPLEMENTATION_CODE_SHA256,
+            &pre,
+            p::TAX_V3_IMPL_CODE_SHA256,
+        )?
+        && candidate.b256(c::DEPLOYMENT_RECORD_SHA256).map_err(e)? == base.preflight.record_sha256;
+    if !deployment {
+        return Err("the candidate is not derived against the requalification preflight".into());
+    }
+    if !same_address(c::LAUNCHER, &dry, d::LAUNCHER)? || !same_address(c::TOKEN, &dry, d::TOKEN)? {
+        return Err("the candidate's launcher or token differs from the DRY".into());
+    }
+    for (ct, dt) in [
+        (c::LAUNCH_TX_HASH, d::LAUNCH_TX_HASH),
+        (c::BUY_TX_HASH, d::BUY_TX_HASH),
+    ] {
+        if candidate
+            .opt_b256(ct)
+            .map_err(e)?
+            .is_some_and(|h| Some(h) != dry.b256(dt).ok())
+        {
+            return Err("the candidate's signed hashes differ from the DRY".into());
+        }
+    }
+    let v4 = std::fs::read(root.join(crate::acceptance_guard::V4_RELATIVE_PATH))
+        .map_err(|x| format!("{}: {x}", crate::acceptance_guard::V4_RELATIVE_PATH))?;
+    let superseded = decode(&contract::V4, &v4).map_err(|x| format!("v4 proposal: {x}"))?;
+    if superseded.bool(contract::APPROVED).map_err(e)?
+        || superseded.bool(contract::EXECUTION_READY).map_err(e)?
+    {
+        return Err("the superseded v4 contract is not the inactive proposal".into());
+    }
+    Ok(V5Evidence {
+        launch_path: V4Input {
+            path,
+            record_sha256: sha256(&bytes),
+            legacy_sha256: None,
+        },
+        candidate_profile: profile,
+        candidate_id: id,
+        supersedes_v4_sha256: sha256(&v4),
+        launch_path_entries: (snapshot.code.len(), snapshot.storage.len()),
+        base,
+    })
+}
+
+/// The exact bytes of the attempt-1 contract v5: the v4 bytes of the same
+/// evidence field for field, with the v5 authority texts, the launch-path
+/// and candidate binding and the superseded v4 proposal.
+pub fn attempt1_v5(e: &V5Evidence, authorization: Authorization) -> Result<Vec<u8>, String> {
+    let approved = authorization == Authorization::Approved;
+    let v4 = decode(&contract::V4, &attempt1_v4(&e.base, authorization)?).map_err(|x| x.0)?;
+    let mut d = Draft::new(&contract::V5);
+    for (field, value) in v4.fields() {
+        d.push(*field, value.clone());
+    }
+    let implementation = format!("0x{}", hex(&e.base.portal_implementation));
+    let candidate = format!("{} 0x{}", e.candidate_profile, hex(&e.candidate_id));
+    d.set(
+        tag("supersedes")?,
+        format!(
+            "bsc/config/g07_attempt1_acceptance_v4.dbrec (proposal SHA-256 {}; binds no launch-path snapshot, v9.1 C1/R1), the v3 proposal and, as legacy only, the JSON v1/v2 contracts and the JSON v2 draft",
+            hex(&e.supersedes_v4_sha256)
+        ),
+    );
+    d.set(
+        tag("authorization.note")?,
+        if approved {
+            format!(
+                "Final single-attempt authorization for G0.7 attempt {ATTEMPT_ID}, candidate {candidate}, requalified against Flap Portal {} (implementation {implementation}) with its launch-path snapshot. Effective only after the user explicitly approves these exact bytes and a dedicated arming commit sets FROZEN_APPROVED_V5_SHA256 to their SHA-256 while this file sits at bsc/config/g07_attempt1_acceptance_v5.dbrec.",
+                e.base.portal_version
+            )
+        } else {
+            format!(
+                "PROPOSAL ONLY: no real-money authorization exists for G0.7 attempt {ATTEMPT_ID} (candidate {candidate}, Flap Portal {}); the guard refuses this contract (approved=false, execution_ready=false). The approved variant differs only in status, note, approved and execution_ready; it is written only for the exact SHA-256 the user approves, and a dedicated arming commit must then compile that SHA-256 as FROZEN_APPROVED_V5_SHA256.",
+                e.base.portal_version
+            )
+        },
+    );
+    d.set(
+        tag("authorization.execution_authority")?,
+        "Only this binary v5 contract may authorize the self-launch Mainnet send path; the superseded v4 and v3 proposals and the JSON v1/v2 contracts and drafts are forbidden as runtime authority",
+    );
+    replace_item(
+        &mut d,
+        "pre_arm_checks",
+        9,
+        "Explicit user approval of this v5 scope, candidate and numeric absolute budget ceiling",
+    )?;
+    replace_item(
+        &mut d,
+        "send_guard.required_checks",
+        0,
+        "Runtime file path is exactly bsc/config/g07_attempt1_acceptance_v5.dbrec (relative to the repository root)",
+    )?;
+    replace_item(
+        &mut d,
+        "send_guard.required_checks",
+        1,
+        "SHA-256 of the exact v5 record bytes equals the hash compiled/frozen into the armed harness",
+    )?;
+    replace_item(
+        &mut d,
+        "send_guard.required_checks",
+        2,
+        "The file decodes fail-closed as DBREC001 record type 34, schema version 5 (darkbot.g07.acceptance-contract.v5)",
+    )?;
+    replace_item(
+        &mut d,
+        "send_guard.required_checks",
+        8,
+        "The contract does not hold its own hash (no guard check): the hash binding is external via FROZEN_APPROVED_V5_SHA256 in the arming commit, because a file cannot contain its own SHA-256",
+    )?;
+    d.push(
+        tag("send_guard.required_checks")?,
+        "The launch-path snapshot bound by authorization.evidence_bindings.launch_path_record_sha256 is of the bound preflight's block and the DRY's token, and the runner re-reads every bound code hash and storage selector at its current pinned preflight block before the latch; any drift refuses",
+    );
+    d.push(
+        tag("send_guard.required_checks")?,
+        "The selected candidate (profile and ID, verified from its salt) equals authorization.candidate",
+    );
+    d.push(
+        tag("send_guard.forbidden_authorities")?,
+        "bsc/config/g07_attempt1_acceptance_v4.dbrec (superseded proposal without launch-path binding)",
+    );
+    d.push(
+        tag("pre_arm_check_status")?,
+        format!(
+            "C1/R1 BOUND: launch-path snapshot {} ({} code entries, {} storage selectors) at the preflight block",
+            e.launch_path.path, e.launch_path_entries.0, e.launch_path_entries.1
+        ),
+    );
+    d.set(
+        contract::SUPERSEDES_CONTRACT_SHA256,
+        Value::B256(e.supersedes_v4_sha256),
+    )
+    .set(
+        contract::LAUNCH_PATH_RECORD_SHA256,
+        Value::B256(e.launch_path.record_sha256),
+    )
+    .set(
+        contract::LAUNCH_PATH_RECORD_PATH,
+        e.launch_path.path.as_str(),
+    )
+    .set(contract::CANDIDATE_PROFILE, e.candidate_profile.as_str())
+    .set(contract::CANDIDATE_ID, Value::B256(e.candidate_id));
     d.encode().map_err(|x| x.0)
 }

@@ -17,8 +17,9 @@ mod transactions;
 use builder_submission::*;
 use chain_reads::*;
 use darkbot_bsc_execution::acceptance_guard::{
-    FROZEN_APPROVED_V4_SHA256, V4_RELATIVE_PATH, inspect_v4,
+    FROZEN_APPROVED_V5_SHA256, V5_RELATIVE_PATH, inspect_v5, verify_further_v5_evidence,
 };
+use darkbot_bsc_execution::launch_path::Current;
 use darkbot_bsc_record::{
     Value, decode,
     schema::g07::{contract as c, readiness as r},
@@ -67,7 +68,7 @@ fn deployment_drift(baseline: &Record, current: &Record) -> Vec<String> {
         .collect()
 }
 
-/// A bound input of the v4 contract: decoded against one of the accepted
+/// A bound input of the v5 contract: decoded against one of the accepted
 /// schemas, its record SHA-256 equal to the binding and, where the contract
 /// binds a legacy hash (an audited import), the carried legacy hash and the
 /// immutable source file equal to it; a natively bound input must not be an
@@ -129,37 +130,34 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     use schema::g06a::{
         builder_policy as b, dry as d, economics, local_simulation, portal_upgrade, preflight as f,
     };
-    if !Path::new(V4_RELATIVE_PATH).is_file() {
+    if !Path::new(V5_RELATIVE_PATH).is_file() {
         check(
             report,
-            "V4_CONTRACT",
+            "V5_CONTRACT",
             "BLOCKED",
-            "No v4 contract yet: the v3 proposal is superseded by the Portal v5.25.0 drift; run the requalification DRY (tools/g06a_final_dry.sh), then write the v4 proposal",
+            "No v5 contract yet: v4 binds no launch-path snapshot (C1/R1); run the requalification DRY with its launch-path trace (tools/g06a_final_dry.sh), then write the v5 proposal (g07_acceptance_contract)",
         );
-        return Err("requalification pending: no v4 contract".into());
+        return Err("requalification pending: no v5 contract".into());
     }
-    let snap = inspect_v4(Path::new(V4_RELATIVE_PATH))?;
-    if FROZEN_APPROVED_V4_SHA256 != "UNARMED"
+    let snap = inspect_v5(Path::new(V5_RELATIVE_PATH))?;
+    if FROZEN_APPROVED_V5_SHA256 != "UNARMED"
         || snap.approved
         || snap.execution_ready
         || snap.max_attempts != 1
     {
         return Err(
-            "readiness requires an inactive v4 proposal, UNARMED and exactly one attempt".into(),
+            "readiness requires an inactive v5 proposal, UNARMED and exactly one attempt".into(),
         );
     }
     report.set(r::CONTRACT_SHA256, snap.sha256.as_str());
     check(
         report,
-        "V4_GUARD",
+        "V5_GUARD",
         "PASS",
         "UNARMED; approved=false; execution_ready=false; attempts.maximum=1",
     );
-    let contract = decode(
-        &c::V4,
-        &fs::read(V4_RELATIVE_PATH).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
+    let contract_bytes = fs::read(V5_RELATIVE_PATH).map_err(|e| e.to_string())?;
+    let contract = decode(&c::V5, &contract_bytes).map_err(|e| e.to_string())?;
     let dry = bound_input(
         &contract,
         c::DRY_RECORD_PATH,
@@ -204,14 +202,33 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             c::PORTAL_UPGRADE_RECORD_SHA256,
             &portal_upgrade::SCHEMA,
         ),
+        (
+            c::LAUNCH_PATH_RECORD_PATH,
+            c::LAUNCH_PATH_RECORD_SHA256,
+            &schema::g06a::launch_path::SCHEMA,
+        ),
     ] {
         bound_input(&contract, path, hash, None, &[accepted])?;
     }
     check(
         report,
-        "V4_INPUT_BINDINGS",
+        "V5_INPUT_BINDINGS",
         "PASS",
-        "Four G0.7 inputs plus local simulation, economics cross-check and Portal upgrade scan match their bound SHA-256 (legacy source hashes where an input is an import)",
+        "Four G0.7 inputs plus local simulation, economics cross-check, Portal upgrade scan and launch-path snapshot match their bound SHA-256 (legacy source hashes where an input is an import)",
+    );
+    // The guard's own pre-egress binding, the launch path included.
+    let (_, launch_path) = verify_further_v5_evidence(Path::new("."), &contract_bytes)?;
+    let traced = launch_path.snapshot();
+    check(
+        report,
+        "LAUNCH_PATH_BINDING",
+        "PASS",
+        &format!(
+            "{} code entries and {} storage selectors traced at the bound preflight block {}, of the DRY's token",
+            traced.code.len(),
+            traced.storage.len(),
+            traced.block_number
+        ),
     );
     for tag in [
         d::DRY_1,
@@ -229,7 +246,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         report,
         "DRY1_DRY4",
         "PASS",
-        "Requalification DRY records verified (bound by v4)",
+        "Requalification DRY records verified (bound by v5)",
     );
     let launcher = Address::from(field(dry.address(d::LAUNCHER)));
     let buyer = Address::from(field(dry.address(d::BUYER)));
@@ -242,7 +259,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             .to_lowercase()
             != snap.portal_address
     {
-        return Err("DRY identity differs from v4".into());
+        return Err("DRY identity differs from v5".into());
     }
     let gas = field(dry.u64(d::GAS_PRICE_WEI));
     let lg = field(dry.u64(d::LAUNCH_GAS_LIMIT));
@@ -265,7 +282,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         || reserve > snap.max_total_per_attempt
         || reserve > snap.absolute_budget_wei
     {
-        return Err("exact DRY parameters exceed v4 budget".into());
+        return Err("exact DRY parameters exceed v5 budget".into());
     }
     let _ = validate_builder_policy(field(contract.text(c::BUILDER_POLICY_RECORD_PATH)), gas);
     let _ = validate_producer_witness_source(
@@ -301,10 +318,12 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             B256::from(field(dry.b256(d::BUY_TX_HASH)))
         ),
     );
-    // Readiness counts only for the selected candidate the v4 binds.
+    // Readiness counts only for the selected candidate the v5 binds.
     let (status, detail) = candidate::contract_candidate_check(
         Path::new(candidate::CANDIDATE_STATE_ROOT),
         Path::new(candidate::PUBLIC_MIRROR_ROOT),
+        snap.candidate_profile.as_deref().unwrap_or_default(),
+        snap.candidate_id.as_deref().unwrap_or_default(),
         Address::from(field(dry.address(d::TOKEN))),
         launcher,
         B256::from(field(dry.b256(d::LAUNCH_TX_HASH))),
@@ -407,6 +426,31 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             "PASS",
             "Existing native preflight, exact DRY parameters",
         );
+        match current_launch_path(&launch_path, &current)? {
+            Current::Unchanged(_) => check(
+                report,
+                "CURRENT_LAUNCH_PATH",
+                "PASS",
+                &format!(
+                    "{} code hashes and {} storage selectors unchanged at the current preflight block {}",
+                    traced.code.len(),
+                    traced.storage.len(),
+                    field(current.u64(f::LATEST_BLOCK_NUMBER))
+                ),
+            ),
+            Current::Drift(drift) => {
+                check(
+                    report,
+                    "CURRENT_LAUNCH_PATH",
+                    "STOP",
+                    &format!(
+                        "The launch path differs from the v5-bound snapshot; the bound DRY is not valid for it: {}",
+                        drift.join("; ")
+                    ),
+                );
+                return Err("current launch-path drift from the v5-bound snapshot".into());
+            }
+        }
         let endpoint = parse_rpc_endpoint(&req_env("BSC_MAINNET_RPC_HTTPS"))?;
         let mut poller = HeadPoller::connect(&endpoint)?;
         let fresh = poller.next_head(HEAD_TRANSITION_TIMEOUT)?;
@@ -436,6 +480,12 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         );
         check(
             report,
+            "CURRENT_LAUNCH_PATH",
+            "BLOCKED",
+            "Offline mode cannot re-read the launch path; --current-rpc required",
+        );
+        check(
+            report,
             "CLOCK_HEAD",
             "BLOCKED",
             "No live head observation in zero-egress mode",
@@ -462,8 +512,9 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
 // Completeness is mandatory: an early return, panic or missing check can never
 // become PASS. Future outcome evidence is kept separate from technical safety.
 const REQUIRED_TECHNICAL_CHECKS: &[&str] = &[
-    "V4_GUARD",
-    "V4_INPUT_BINDINGS",
+    "V5_GUARD",
+    "V5_INPUT_BINDINGS",
+    "LAUNCH_PATH_BINDING",
     "DRY1_DRY4",
     "WITNESS_SOURCE_BINDING",
     "BUDGET_GAS_SLIPPAGE",
@@ -473,6 +524,7 @@ const REQUIRED_TECHNICAL_CHECKS: &[&str] = &[
     "FROZEN_PREFLIGHT",
     "BUILDER_FRESHNESS",
     "CURRENT_DEPLOYMENTS_NONCES_FUNDING_GAS",
+    "CURRENT_LAUNCH_PATH",
     "CLOCK_HEAD",
     "CLOCK_CONFIG",
     "SIGNED_EGRESS",
@@ -584,7 +636,7 @@ fn main() {
     } else {
         print!("{}", record.render());
         println!(
-            "PRE_LIVE_READINESS={}\nLIVE_GUARD={FROZEN_APPROVED_V4_SHA256}\nLIVE=BLOCKED",
+            "PRE_LIVE_READINESS={}\nLIVE_GUARD={FROZEN_APPROVED_V5_SHA256}\nLIVE=BLOCKED",
             field(record.text(r::STATUS))
         );
     }
@@ -639,7 +691,7 @@ mod readiness_tests {
         assert_eq!(code, 0);
         assert_eq!(result.text(r::STATUS).unwrap(), "PASS_READ_ONLY");
         assert!(!result.bool(r::LIVE_AUTHORIZED).unwrap());
-        assert_eq!(FROZEN_APPROVED_V4_SHA256, "UNARMED");
+        assert_eq!(FROZEN_APPROVED_V5_SHA256, "UNARMED");
         assert!(result.render().contains("UNQUALIFIED"));
         assert!(result.render().contains("UNKNOWN"));
     }
@@ -670,7 +722,7 @@ mod readiness_tests {
         for (name, status) in [
             ("VALIDATION", "BLOCKED"),
             ("CURRENT_DEPLOYMENT_DRIFT", "STOP"),
-            ("V4_GUARD", "PASS"),
+            ("V5_GUARD", "PASS"),
             ("BUILDER_SEMANTICS", "PASS"),
             ("PRODUCER_WITNESS", "PASS"),
         ] {

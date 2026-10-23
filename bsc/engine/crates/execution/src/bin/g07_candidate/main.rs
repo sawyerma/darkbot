@@ -33,7 +33,7 @@ mod transactions;
 use builder_submission::*;
 use candidate::*;
 use chain_reads::*;
-use darkbot_bsc_execution::acceptance_guard::FROZEN_APPROVED_V4_SHA256;
+use darkbot_bsc_execution::acceptance_guard::FROZEN_APPROVED_V5_SHA256;
 use darkbot_bsc_record::decode;
 use inputs::*;
 use shared::*;
@@ -114,7 +114,7 @@ fn run(args: &[String]) -> Result<(), String> {
             profile,
             expected,
             flag(args, "--request-id")?,
-            FROZEN_APPROVED_V4_SHA256,
+            FROZEN_APPROVED_V5_SHA256,
             now_ms(),
         )?;
         println!(
@@ -152,7 +152,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let selection = store.select(
                 profile,
                 expected,
-                FROZEN_APPROVED_V4_SHA256,
+                FROZEN_APPROVED_V5_SHA256,
                 Path::new(ATTEMPT_STATE_ROOT),
                 now_ms(),
             )?;
@@ -189,7 +189,7 @@ fn run(args: &[String]) -> Result<(), String> {
             for (id, state, detail) in apply_requests(
                 &store,
                 Path::new(flag(args, "--rundir")?),
-                FROZEN_APPROVED_V4_SHA256,
+                FROZEN_APPROVED_V5_SHA256,
                 Path::new(ATTEMPT_STATE_ROOT),
                 now_ms(),
             )? {
@@ -207,7 +207,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 ),
                 None => None,
             };
-            println!("guard = {FROZEN_APPROVED_V4_SHA256}");
+            println!("guard = {FROZEN_APPROVED_V5_SHA256}");
             let Some(store) = Store::existing(dir)? else {
                 println!("selection = NONE");
                 println!("SELF_A.state = ABSENT");
@@ -428,6 +428,7 @@ mod tests {
         let store = Store::create(&dir).unwrap();
         let (a, a_salt) = frozen();
         let a = store.init_a(a, a_salt).unwrap();
+        let a_id = darkbot_bsc_record::hex(a.id.as_slice());
         let (b, b_salt) = fresh_b(
             &evidence("preflight.dbrec"),
             &evidence("dry_result.dbrec"),
@@ -441,6 +442,8 @@ mod tests {
             contract_candidate_check(
                 dir,
                 no_mirror(),
+                "SELF_A",
+                &a_id,
                 a.token,
                 a.launcher,
                 e.launch_tx_hash,
@@ -498,6 +501,7 @@ mod tests {
         let store = Store::create(&dir).unwrap();
         let (a, a_salt) = frozen();
         let a = store.init_a(a, a_salt).unwrap();
+        let a_id = darkbot_bsc_record::hex(a.id.as_slice());
         let e = a.evidence.clone().unwrap();
         assert!(
             store
@@ -514,12 +518,14 @@ mod tests {
         store
             .select(Profile::A, 0, "UNARMED", &attempts, 1)
             .unwrap();
-        // Wrong address or deployment against the v4 DRY: contradiction.
+        // Wrong address or deployment against the v5 DRY: contradiction.
         let other = Address::repeat_byte(7);
         assert_eq!(
             contract_candidate_check(
                 &dir,
                 no_mirror(),
+                "SELF_A",
+                &a_id,
                 other,
                 a.launcher,
                 e.launch_tx_hash,
@@ -532,6 +538,8 @@ mod tests {
             contract_candidate_check(
                 &dir,
                 no_mirror(),
+                "SELF_A",
+                &a_id,
                 a.token,
                 a.launcher,
                 B256::ZERO,
@@ -540,6 +548,24 @@ mod tests {
             .0,
             "STOP"
         );
+        // Another candidate ID than the v5 binds: contradiction; another
+        // bound profile: the selected candidate needs its own contract.
+        let check_bound = |profile: &str, id: &str| {
+            contract_candidate_check(
+                &dir,
+                no_mirror(),
+                profile,
+                id,
+                a.token,
+                a.launcher,
+                e.launch_tx_hash,
+                e.buy_tx_hash,
+            )
+            .0
+        };
+        assert_eq!(check_bound("SELF_A", &"00".repeat(32)), "STOP");
+        assert_eq!(check_bound("SELF_B", &a_id), "BLOCKED");
+        assert_eq!(check_bound("SELF_A", &a_id.to_uppercase()), "PASS");
         // A changed public record (token, deployment) or salt never verifies.
         let public = dir.join("a.candidate.dbrec");
         let original = fs::read(&public).unwrap();
@@ -553,6 +579,8 @@ mod tests {
                 contract_candidate_check(
                     &dir,
                     no_mirror(),
+                    "SELF_A",
+                    &a_id,
                     a.token,
                     a.launcher,
                     e.launch_tx_hash,
@@ -588,6 +616,7 @@ mod tests {
         let store = Store::create(&dir).unwrap();
         let (a, a_salt) = frozen();
         let a = store.init_a(a, a_salt).unwrap();
+        let a_id = darkbot_bsc_record::hex(a.id.as_slice());
         let (b, b_salt) = fresh_b(
             &evidence("preflight.dbrec"),
             &evidence("dry_result.dbrec"),
@@ -671,6 +700,8 @@ mod tests {
             contract_candidate_check(
                 &none,
                 m,
+                "SELF_A",
+                &a_id,
                 a.token,
                 a.launcher,
                 e.launch_tx_hash,
@@ -694,13 +725,14 @@ mod tests {
     }
 
     #[test]
-    fn the_public_mirror_passes_readiness_only_for_the_v4_candidate() {
+    fn the_public_mirror_passes_readiness_only_for_the_v5_candidate() {
         let root = private_dir("mirror");
         let dir = root.join("state");
         let mirror = root.join("mirror");
         let store = Store::create(&dir).unwrap();
         let (a, a_salt) = frozen();
         let a = store.init_a(a, a_salt).unwrap();
+        let a_id = darkbot_bsc_record::hex(a.id.as_slice());
         let on_a = store
             .select(Profile::A, 0, "UNARMED", &root.join("attempts"), 1)
             .unwrap();
@@ -712,6 +744,8 @@ mod tests {
         let (status, detail) = contract_candidate_check(
             &root.join("absent"),
             &mirror,
+            "SELF_A",
+            &a_id,
             a.token,
             a.launcher,
             e.launch_tx_hash,
@@ -723,6 +757,8 @@ mod tests {
             contract_candidate_check(
                 &dir,
                 &root.join("absent"),
+                "SELF_A",
+                &a_id,
                 a.token,
                 a.launcher,
                 e.launch_tx_hash,
@@ -759,6 +795,20 @@ mod tests {
         ));
         r.set(rqs::LAUNCH_TX_HASH, Value::B256(l.0))
             .set(rqs::BUY_TX_HASH, Value::B256(b.0));
+        if verdict != "PASS_WITHOUT_DRY5" {
+            let mut check = Draft::new(&rqs::check::SCHEMA);
+            check
+                .set(rqs::check::NAME, "DRY5_LAUNCH_PATH")
+                .set(rqs::check::STATUS, "PASS")
+                .set(rqs::check::DETAIL, "fixture");
+            r.push(rqs::CHECKS, check.into_nested());
+            let mut row = Draft::new(&rqs::bound::SCHEMA);
+            row.set(rqs::bound::NAME, "launch_path.dbrec")
+                .set(rqs::bound::SHA256, Value::B256([5; 32]));
+            r.push(rqs::RECORDS, row.into_nested());
+        } else {
+            r.set(rqs::VERDICT, "PASS");
+        }
         for (name, bytes) in [("dry_result.dbrec", dry), ("preflight.dbrec", preflight)] {
             let mut row = Draft::new(&rqs::bound::SCHEMA);
             row.set(rqs::bound::NAME, name).set(
@@ -804,6 +854,17 @@ mod tests {
                 .contains("not candidate SELF_B")
         );
         assert!(qualification_for(&a, &requal("STOP", &dry, &pre, None), &dry, &pre).is_err());
+        // A run without its launch-path snapshot (pre-C1/R1) never qualifies.
+        assert!(
+            qualification_for(
+                &a,
+                &requal("PASS_WITHOUT_DRY5", &dry, &pre, None),
+                &dry,
+                &pre
+            )
+            .unwrap_err()
+            .contains("DRY5")
+        );
         assert!(
             qualification_for(&a, &requal("PASS", b"other", &pre, None), &dry, &pre)
                 .unwrap_err()

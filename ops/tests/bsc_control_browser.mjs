@@ -45,7 +45,7 @@ try{
  assert((await checkSection.innerText()).includes('No matching fields.'));
  await checkSection.getByRole('button',{name:'Clear filter',exact:true}).click();
  assert.equal(await checks.inputValue(),'');
- await until(async()=> (await checkSection.innerText()).includes('V4_CONTRACT'),'new readiness result reaches Launch panel');
+ await until(async()=> (await checkSection.innerText()).includes('V5_CONTRACT'),'new readiness result reaches Launch panel');
  await p.screenshot({path:`${dir}/bsc-launch.png`,fullPage:true});
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
  await p.getByLabel('Report',{exact:true}).selectOption('g08');

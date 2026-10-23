@@ -340,7 +340,7 @@ fn key_cleanup_precedes_every_external_or_concurrent_startup_boundary() {
 fn a_secret_salt_profile_never_sends_launch_calldata_to_an_external_rpc() {
     // v9.1 B2: the salt is the selected candidate's (never DARKBOT_G07_SALT
     // as authority), and only SELF_A keeps the external estimateGas; SELF_B
-    // takes the v4-bound local simulation's gas instead.
+    // takes the v5-bound local simulation's gas instead.
     assert!(!SOURCE.contains("req_env(\"DARKBOT_G07_SALT\")"));
     assert!(SOURCE.contains("candidate::selected_launch("));
     assert!(SOURCE.contains("candidate::check_env_salt("));
@@ -353,6 +353,22 @@ fn a_secret_salt_profile_never_sends_launch_calldata_to_an_external_rpc() {
         "estimateGas outside the SELF_A arm"
     );
     let b_end = SOURCE[b_arm..].find("};").unwrap() + b_arm;
-    assert!(SOURCE[b_arm..b_end].contains("verify_further_v4_evidence("));
+    assert!(SOURCE[b_arm..b_end].contains("further.local_launch_gas_used"));
     assert!(!SOURCE[b_arm..b_end].contains("rpc_"));
+    assert!(pos("verify_further_v5_evidence(") < b_arm);
+}
+
+#[test]
+fn the_launch_path_is_re_verified_before_signing_and_the_latch_and_bound_by_the_guard() {
+    // v9.1 C1/R1: the v5-bound snapshot is re-read at the current preflight
+    // block before any signature or latch; drift panics pre-egress, and the
+    // guard receives exactly that proof.
+    let reread = pos("current_launch_path(&bound_launch_path, &current)");
+    assert!(pos("run_current_preflight(") < reread);
+    assert!(reread < pos("sign_legacy("));
+    assert!(reread < pos("latch_attempt("));
+    assert!(SOURCE.contains("launch_path::Current::Drift(drift) => panic!("));
+    assert!(SOURCE.contains("launch_path_current: Some(launch_path_current.clone())"));
+    assert!(SOURCE.contains("Path::new(V5_RELATIVE_PATH),"));
+    assert!(!SOURCE.contains("V4_RELATIVE_PATH"));
 }

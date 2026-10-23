@@ -1,27 +1,31 @@
-//! The binary acceptance contract of the requalified G0.7 attempt 1
-//! (`V4_RELATIVE_PATH`), from its reviewed source values and the records of
-//! the requalification DRY. Offline; run from the repository root.
+//! The binary acceptance contract of G0.7 attempt 1 (`V5_RELATIVE_PATH`),
+//! from its reviewed source values, the records of the requalification DRY
+//! (with its launch-path snapshot) and the public record of the candidate.
+//! Offline; run from the repository root.
 //!
-//! - `<requal_dir> <builder_policy>`: writes the v4 proposal
-//!   (`approved=false`) to a new file;
-//! - `<requal_dir> <builder_policy> --proposal-out=<new-path>`: exports a
-//!   new inactive review proposal, preserving the existing operator file;
-//! - `<requal_dir> <builder_policy> --check`: verifies the committed file is
-//!   exactly that proposal;
-//! - `<requal_dir> <builder_policy> --approved-sha`: prints the SHA-256 of
-//!   the approved variant (the hash the user approves) and writes nothing;
-//! - `<requal_dir> <builder_policy> --write-approved`: replaces the file with
-//!   the approved variant, only when `DARKBOT_G07_CONTRACT_APPROVED_SHA256`
-//!   equals that hash;
+//! - `<requal_dir> <builder_policy> <candidate_record>`: writes the v5
+//!   proposal (`approved=false`) to a new file;
+//! - `... --proposal-out=<new-path>`: exports a new inactive review
+//!   proposal, preserving the existing operator file;
+//! - `... --check`: verifies the file is exactly that proposal;
+//! - `... --approved-sha`: prints the SHA-256 of the approved variant (the
+//!   hash the user approves) and writes nothing;
+//! - `... --write-approved`: replaces the file with the approved variant,
+//!   only when `DARKBOT_G07_CONTRACT_APPROVED_SHA256` equals that hash;
+//! - `<requal_dir> <builder_policy> --check-v4`: verifies the superseded v4
+//!   proposal is still reproduced from its (pre-C1/R1) requalification;
 //! - `--check-v3`: verifies the superseded v3 proposal is still reproduced.
 //!
 //! None of this arms anything: the guard stays UNARMED until a separate,
 //! explicitly approved arming commit compiles the approved file's SHA-256.
 
 use darkbot_bsc_execution::acceptance_contract::{
-    Authorization, attempt1_bindings, attempt1_v3, attempt1_v4, attempt1_v4_evidence,
+    Authorization, attempt1_bindings, attempt1_v3, attempt1_v4, attempt1_v4_evidence, attempt1_v5,
+    attempt1_v5_evidence,
 };
-use darkbot_bsc_execution::acceptance_guard::{V3_RELATIVE_PATH, V4_RELATIVE_PATH, sha256_hex};
+use darkbot_bsc_execution::acceptance_guard::{
+    V3_RELATIVE_PATH, V4_RELATIVE_PATH, V5_RELATIVE_PATH, sha256_hex,
+};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -32,93 +36,87 @@ fn stop(message: impl std::fmt::Display) -> ExitCode {
     ExitCode::FAILURE
 }
 
-fn check_v3() -> ExitCode {
-    let bytes = match attempt1_bindings(Path::new("."))
-        .and_then(|b| attempt1_v3(&b, Authorization::Proposed))
-    {
-        Ok(bytes) => bytes,
-        Err(e) => return stop(e),
-    };
-    match fs::read(V3_RELATIVE_PATH) {
-        Ok(on_disk) if on_disk == bytes => {
+/// `path` holds exactly `bytes` (a reproduced proposal).
+fn reproduced(label: &str, path: &str, bytes: Result<Vec<u8>, String>) -> ExitCode {
+    match (bytes, fs::read(path)) {
+        (Ok(bytes), Ok(on_disk)) if on_disk == bytes => {
             println!(
-                "CONTRACT_V3_PROPOSAL_REPRODUCED={V3_RELATIVE_PATH} sha256={}",
+                "CONTRACT_{label}_PROPOSAL_REPRODUCED={path} sha256={}",
                 sha256_hex(&bytes)
             );
             ExitCode::SUCCESS
         }
-        Ok(_) => stop(format!("{V3_RELATIVE_PATH} is not the v3 proposal")),
-        Err(e) => stop(format!("{V3_RELATIVE_PATH}: {e}")),
+        (Ok(_), Ok(_)) => stop(format!("{path} is not the {label} proposal")),
+        (Err(e), _) => stop(e),
+        (_, Err(e)) => stop(format!("{path}: {e}")),
     }
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.as_slice() == ["--check-v3"] {
-        return check_v3();
+        let bytes = attempt1_bindings(Path::new("."))
+            .and_then(|b| attempt1_v3(&b, Authorization::Proposed));
+        return reproduced("V3", V3_RELATIVE_PATH, bytes);
     }
-    let (requal_dir, builder_policy, mode) = match args.as_slice() {
-        [dir, policy] => (dir, policy, None),
-        [dir, policy, mode] => (dir, policy, Some(mode.as_str())),
+    if let [dir, policy, mode] = args.as_slice()
+        && mode == "--check-v4"
+    {
+        let bytes = attempt1_v4_evidence(Path::new("."), dir, policy)
+            .and_then(|e| attempt1_v4(&e, Authorization::Proposed));
+        return reproduced("V4", V4_RELATIVE_PATH, bytes);
+    }
+    let (requal_dir, builder_policy, candidate, mode) = match args.as_slice() {
+        [dir, policy, candidate] => (dir, policy, candidate, None),
+        [dir, policy, candidate, mode] => (dir, policy, candidate, Some(mode.as_str())),
         _ => {
             eprintln!(
-                "usage: g07_acceptance_contract <requal_dir> <builder_policy> [--check | --approved-sha | --write-approved] | --check-v3"
+                "usage: g07_acceptance_contract <requal_dir> <builder_policy> <candidate_record> [--check | --approved-sha | --write-approved | --proposal-out=<path>] | <requal_dir> <builder_policy> --check-v4 | --check-v3"
             );
             return ExitCode::from(2);
         }
     };
-    let evidence = match attempt1_v4_evidence(Path::new("."), requal_dir, builder_policy) {
+    let evidence = match attempt1_v5_evidence(Path::new("."), requal_dir, builder_policy, candidate)
+    {
         Ok(evidence) => evidence,
         Err(e) => return stop(e),
     };
-    let contract = |authorization| attempt1_v4(&evidence, authorization);
+    let contract = |authorization| attempt1_v5(&evidence, authorization);
+    let create_new = |path: &str, bytes: &[u8]| {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .and_then(|mut f| f.write_all(bytes).and_then(|()| f.sync_all()))
+    };
     match mode {
         None => match contract(Authorization::Proposed) {
-            Ok(bytes) => {
-                let written = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(V4_RELATIVE_PATH)
-                    .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()));
-                match written {
-                    Ok(()) => {
-                        println!(
-                            "WROTE_PROPOSAL={V4_RELATIVE_PATH} sha256={}",
-                            sha256_hex(&bytes)
-                        );
-                        ExitCode::SUCCESS
-                    }
-                    Err(e) => stop(format!("create-new {V4_RELATIVE_PATH}: {e}")),
+            Ok(bytes) => match create_new(V5_RELATIVE_PATH, &bytes) {
+                Ok(()) => {
+                    println!(
+                        "WROTE_PROPOSAL={V5_RELATIVE_PATH} sha256={}",
+                        sha256_hex(&bytes)
+                    );
+                    ExitCode::SUCCESS
                 }
-            }
+                Err(e) => stop(format!("create-new {V5_RELATIVE_PATH}: {e}")),
+            },
             Err(e) => stop(e),
         },
         Some(mode) if mode.starts_with("--proposal-out=") => {
             let out = &mode["--proposal-out=".len()..];
             match contract(Authorization::Proposed) {
-                Ok(bytes) => match fs::OpenOptions::new().write(true).create_new(true).open(out)
-                    .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all())) {
-                    Ok(()) => { println!("PROPOSAL_SHA256={}\nGUARD=UNARMED", sha256_hex(&bytes)); ExitCode::SUCCESS },
+                Ok(bytes) => match create_new(out, &bytes) {
+                    Ok(()) => {
+                        println!("PROPOSAL_SHA256={}\nGUARD=UNARMED", sha256_hex(&bytes));
+                        ExitCode::SUCCESS
+                    }
                     Err(e) => stop(e),
                 },
                 Err(e) => stop(e),
             }
         }
-        Some("--check") => match (
-            contract(Authorization::Proposed),
-            fs::read(V4_RELATIVE_PATH),
-        ) {
-            (Ok(bytes), Ok(on_disk)) if on_disk == bytes => {
-                println!(
-                    "CONTRACT_V4_PROPOSAL_REPRODUCED={V4_RELATIVE_PATH} sha256={}",
-                    sha256_hex(&bytes)
-                );
-                ExitCode::SUCCESS
-            }
-            (Ok(_), Ok(_)) => stop(format!("{V4_RELATIVE_PATH} is not the proposal")),
-            (Err(e), _) => stop(e),
-            (_, Err(e)) => stop(format!("{V4_RELATIVE_PATH}: {e}")),
-        },
+        Some("--check") => reproduced("V5", V5_RELATIVE_PATH, contract(Authorization::Proposed)),
         Some("--approved-sha") => match contract(Authorization::Approved) {
             Ok(bytes) => {
                 println!("APPROVED_VARIANT_SHA256={}", sha256_hex(&bytes));
@@ -146,20 +144,14 @@ fn main() -> ExitCode {
                     );
                 }
             }
-            let staged = format!("{V4_RELATIVE_PATH}.approved-staging");
-            let written = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&staged)
-                .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
-                .and_then(|()| fs::rename(&staged, V4_RELATIVE_PATH));
-            match written {
+            let staged = format!("{V5_RELATIVE_PATH}.approved-staging");
+            match create_new(&staged, &bytes).and_then(|()| fs::rename(&staged, V5_RELATIVE_PATH)) {
                 Ok(()) => {
-                    println!("WROTE_APPROVED={V4_RELATIVE_PATH} sha256={sha}");
+                    println!("WROTE_APPROVED={V5_RELATIVE_PATH} sha256={sha}");
                     println!("GUARD=UNARMED (arming needs a separate approved commit)");
                     ExitCode::SUCCESS
                 }
-                Err(e) => stop(format!("write {V4_RELATIVE_PATH}: {e}")),
+                Err(e) => stop(format!("write {V5_RELATIVE_PATH}: {e}")),
             }
         }
         Some(other) => {

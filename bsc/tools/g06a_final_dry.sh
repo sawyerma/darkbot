@@ -49,7 +49,7 @@ lower() {
 
 [[ -f "$SECRETS" ]] || die "missing $SECRETS"
 run git check-ignore -q bsc/secrets.env || die "bsc/secrets.env is not ignored by Git"
-run grep -Fq 'pub const FROZEN_APPROVED_V4_SHA256: &str = "UNARMED";' \
+run grep -Fq 'pub const FROZEN_APPROVED_V5_SHA256: &str = "UNARMED";' \
   bsc/engine/crates/execution/src/acceptance_guard.rs \
   || die "Mainnet live guard is not UNARMED"
 
@@ -95,6 +95,7 @@ QUOTE="$OUT_DIR/native_quote.dbrec"
 ECON="$OUT_DIR/economics_crosscheck.dbrec"
 BUILDER_POLICY="$OUT_DIR/builder_policy.dbrec"
 LOCAL_SIM="$OUT_DIR/local_simulation.dbrec"
+LAUNCH_PATH="$OUT_DIR/launch_path.dbrec"
 DRY="$OUT_DIR/dry_result.dbrec"
 
 printf '\n=== R0: PORTAL UPGRADE COVERAGE SINCE THE FROZEN DRY (READ-ONLY) ===\n'
@@ -198,6 +199,18 @@ _dbrec_21="$(get_required buy_success "$LOCAL_SIM")" || die "required typed DBRE
   || die "exact local launch/BUY sequence failed"
 printf 'WALLET_BINDING=PASS\nEXACT_LOCAL_SIMULATION=PASS\n'
 
+printf '\n=== 4b/6 LAUNCH-PATH SNAPSHOT (C1/R1, LOCAL EVM, READ-ONLY) ===\n'
+# Every executed contract's code hash and every storage word selecting one,
+# at the preflight's block; the typed verdict is g06a_requal_check's DRY5.
+BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
+  run node bsc/tools/g06a_launch_path_trace.cjs "$PREFLIGHT" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.out.txt" \
+  || die "launch-path trace failed"
+run "$ENGINE/target/debug/dbrec_show" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.view.txt" || die "launch path is not a record"
+_dbrec_27="$(get_required launch_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
+_dbrec_28="$(get_required buy_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
+[[ "${_dbrec_27}" == "true" && "${_dbrec_28}" == "true" ]] || die "traced launch/BUY failed"
+printf 'LAUNCH_PATH=RECORDED\n'
+
 printf '\n=== 5/6 DRY1-DRY4 -- ZERO LIVE EGRESS ===\n'
 with_keys "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
   > "$OUT_DIR/dry_result.view.txt" || die "final G0.6A DRY qualification failed"
@@ -233,4 +246,4 @@ _dbrec_25="$(get_required "$field" "$FROZEN/dry_result.dbrec")" || die "required
 done
 printf 'SIGNED_BYTES=IDENTICAL_TO_FROZEN_DRY\n'
 printf '\nFLAP_REQUALIFICATION=PASS\nEVIDENCE_DIR=%s\nLIVE_SUBMISSION=NOT_AUTHORIZED  GUARD=UNARMED\n' "$OUT_DIR"
-printf 'NEXT=Review the evidence; then contract v4 proposal and readiness. No live run without explicit authorization.\n'
+printf 'NEXT=Review the evidence; then contract v5 proposal and readiness. No live run without explicit authorization.\n'

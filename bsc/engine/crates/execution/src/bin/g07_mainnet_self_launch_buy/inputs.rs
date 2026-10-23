@@ -133,7 +133,7 @@ pub(crate) fn validate_attempt_id(attempt_id: &str) -> Result<(), String> {
 /// git-ignored (the capture journal holds broadcastable signed bytes) and
 /// every run shares one latch directory (a linked worktree has its own).
 pub(crate) fn repository_root_check(root: &Path) -> Result<(), String> {
-    if !root.join(V4_RELATIVE_PATH).is_file() { return Err("v4 missing from repository root".into()); }
+    if !root.join(V5_RELATIVE_PATH).is_file() { return Err("v5 missing from repository root".into()); }
     if !fs::symlink_metadata(root.join(".git")).is_ok_and(|m| m.file_type().is_dir()) { return Err("main checkout .git directory required".into()); }
     let ignored = fs::read_to_string(root.join("bsc/.gitignore")).is_ok_and(|rules| {
         rules.lines().any(|rule| rule.trim() == "/.local/") && !rules.lines().any(|rule| rule.trim_start().starts_with('!') && rule.contains(".local"))
@@ -840,7 +840,7 @@ mod root_regression {
     fn latch_requires_safe_main_root_and_absent_real_state() {
         let root = std::env::temp_dir().join(format!("g07-root-check-{}", std::process::id()));
         fs::create_dir_all(root.join("bsc/config")).unwrap();
-        fs::write(root.join(V4_RELATIVE_PATH), b"offline-test").unwrap();
+        fs::write(root.join(V5_RELATIVE_PATH), b"offline-test").unwrap();
         let id = "offline-test";
         assert!(absent_attempt_latch(&root, id).is_err());
         fs::write(root.join(".git"), "gitdir: other").unwrap();

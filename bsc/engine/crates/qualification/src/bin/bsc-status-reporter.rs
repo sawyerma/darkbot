@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &schema::g06a::builder_policy::SCHEMA,
             &schema::g06a::builder_policy::NATIVE,
             &schema::g07::witness_source::SCHEMA,
-            &schema::g07::contract::V4,
+            &schema::g07::contract::V5,
             &schema::g07::readiness::SCHEMA,
             &schema::g07::readiness::check::SCHEMA,
             &schema::g07::evidence::SCHEMA,
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if matches!(field.kind, Kind::Bytes | Kind::Nested) {
                     continue;
                 }
-                if schema != &schema::g07::contract::V4
+                if schema != &schema::g07::contract::V5
                     && schema != &schema::g08::result::SCHEMA
                     && schema != &schema::g08::unresolved::SCHEMA
                     && !projection_source.contains(&format!("\"{}\"", field.name))

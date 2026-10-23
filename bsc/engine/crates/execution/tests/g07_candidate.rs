@@ -27,9 +27,9 @@ fn fake_root(tag: &str) -> PathBuf {
     std::fs::create_dir_all(root.join(".git")).unwrap();
     std::fs::create_dir_all(root.join("bsc/config")).unwrap();
     std::fs::write(root.join("bsc/.gitignore"), "/.local/\n").unwrap();
-    // The checkout check only needs the v4 path to exist.
+    // The checkout check only needs the v5 path to exist.
     std::fs::write(
-        root.join("bsc/config/g07_attempt1_acceptance_v4.dbrec"),
+        root.join("bsc/config/g07_attempt1_acceptance_v5.dbrec"),
         b"unused",
     )
     .unwrap();
@@ -264,6 +264,7 @@ fn the_candidate_sources_have_no_network_key_signing_or_send_path() {
             "submit_",
             "latch_attempt",
             "FROZEN_APPROVED_V4_SHA256 =",
+            "FROZEN_APPROVED_V5_SHA256 =",
         ] {
             assert!(!source.contains(forbidden), "{forbidden}");
         }

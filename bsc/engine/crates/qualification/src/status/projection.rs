@@ -1,5 +1,5 @@
 use super::wire::bsc::*;
-use darkbot_bsc_execution::acceptance_guard::{FROZEN_APPROVED_V4_SHA256, V4_RELATIVE_PATH};
+use darkbot_bsc_execution::acceptance_guard::{FROZEN_APPROVED_V5_SHA256, V5_RELATIVE_PATH};
 use darkbot_bsc_record::{self as record, Record, Value, schema};
 use std::{
     fs,
@@ -385,34 +385,34 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             records.push((p, r));
         }
     }
-    let contract_path = root.join(V4_RELATIVE_PATH);
+    let contract_path = root.join(V5_RELATIVE_PATH);
     let contract = load(&contract_path);
     let mut guard = GuardStatus {
-        frozen_approved_sha256: FROZEN_APPROVED_V4_SHA256.into(),
-        guard_state: if FROZEN_APPROVED_V4_SHA256 == "UNARMED" {
+        frozen_approved_sha256: FROZEN_APPROVED_V5_SHA256.into(),
+        guard_state: if FROZEN_APPROVED_V5_SHA256 == "UNARMED" {
             "UNARMED"
         } else {
             "ARMED_MISMATCH"
         }
         .into(),
-        contract_path: V4_RELATIVE_PATH.into(),
+        contract_path: V5_RELATIVE_PATH.into(),
         contract_present: contract_path.is_file(),
         contract_sha256: evidence(root, &contract_path, None).sha256,
         ..Default::default()
     };
     let mut launch = BscLaunchState {
-        reason: "No active v4 contract".into(),
+        reason: "No active v5 contract".into(),
         ..Default::default()
     };
     if let Some(r) = contract
         .as_ref()
-        .filter(|r| r.schema() == &schema::g07::contract::V4)
+        .filter(|r| r.schema() == &schema::g07::contract::V5)
     {
         guard.approved = optional_bool(r, "authorization.approved");
         guard.execution_ready = optional_bool(r, "authorization.execution_ready");
         guard.attempt_id = field(r, "authorization.attempt_id").unwrap_or_default();
         guard.max_attempts = optional_u64(r, "attempts.maximum");
-        if guard.guard_state != "UNARMED" && guard.contract_sha256 == FROZEN_APPROVED_V4_SHA256 {
+        if guard.guard_state != "UNARMED" && guard.contract_sha256 == FROZEN_APPROVED_V5_SHA256 {
             guard.guard_state = "ARMED".into();
         }
         launch.contract_present = true;
@@ -424,9 +424,9 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     } else {
         warnings.push(
             if contract_path.exists() {
-                "V4_CONTRACT_INVALID"
+                "V5_CONTRACT_INVALID"
             } else {
-                "V4_CONTRACT_MISSING"
+                "V5_CONTRACT_MISSING"
             }
             .into(),
         );

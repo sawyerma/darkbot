@@ -5,7 +5,7 @@
 pub(crate) use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 pub(crate) use alloy_sol_types::{SolCall, sol};
 pub(crate) use darkbot_bsc_execution::{
-    acceptance_guard::{InputHashes, V4_RELATIVE_PATH, sha256_hex},
+    acceptance_guard::{InputHashes, V5_RELATIVE_PATH, sha256_hex},
     qualification_capture::CaptureClock,
 };
 pub(crate) use darkbot_bsc_record::{Draft, Record, schema};

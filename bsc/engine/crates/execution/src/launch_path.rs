@@ -199,6 +199,84 @@ pub fn drift(
     Ok(differences)
 }
 
+/// A snapshot the acceptance guard read at its v5-bound path, matched to
+/// its bound SHA-256 and checked against the bound preflight. Only the guard
+/// creates it.
+///
+/// ```compile_fail
+/// let _ = darkbot_bsc_execution::launch_path::Bound { record_sha256: [0; 32], snapshot: todo!() };
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Bound {
+    record_sha256: [u8; 32],
+    snapshot: Snapshot,
+}
+
+impl Bound {
+    pub(crate) fn new(record_sha256: [u8; 32], snapshot: Snapshot) -> Self {
+        Self {
+            record_sha256,
+            snapshot,
+        }
+    }
+
+    pub fn record_sha256(&self) -> [u8; 32] {
+        self.record_sha256
+    }
+
+    pub fn snapshot(&self) -> &Snapshot {
+        &self.snapshot
+    }
+}
+
+/// Proof that a guard-bound snapshot showed no drift at one pinned block.
+/// Only [`verify_current`] creates it.
+///
+/// ```compile_fail
+/// let _ = darkbot_bsc_execution::launch_path::CurrentProof { record_sha256: [0; 32], block_hash: [0; 32] };
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CurrentProof {
+    record_sha256: [u8; 32],
+    block_hash: [u8; 32],
+}
+
+impl CurrentProof {
+    pub fn record_sha256(&self) -> [u8; 32] {
+        self.record_sha256
+    }
+
+    pub fn block_hash(&self) -> [u8; 32] {
+        self.block_hash
+    }
+}
+
+/// The current chain against a bound snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Current {
+    Unchanged(CurrentProof),
+    Drift(Vec<String>),
+}
+
+/// [`drift`] of a guard-bound snapshot, re-read by the caller at the block
+/// `block_hash`; no drift yields the proof the live guard requires.
+pub fn verify_current(
+    bound: &Bound,
+    block_hash: [u8; 32],
+    code_sha256_at: &mut dyn FnMut([u8; 20]) -> Result<[u8; 32], String>,
+    storage_at: &mut dyn FnMut([u8; 20], [u8; 32]) -> Result<[u8; 32], String>,
+) -> Result<Current, String> {
+    let differences = drift(&bound.snapshot, code_sha256_at, storage_at)?;
+    Ok(if differences.is_empty() {
+        Current::Unchanged(CurrentProof {
+            record_sha256: bound.record_sha256,
+            block_hash,
+        })
+    } else {
+        Current::Drift(differences)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,7 +383,8 @@ mod tests {
         let pre = preflight();
         let good = check(&snapshot(|_, _| {}), &pre).unwrap();
         assert_eq!((good.code.len(), good.storage.len()), (5, 2));
-        let defects: [(&str, Box<dyn Fn(&mut Draft, &Record)>); 7] = [
+        type Defect = Box<dyn Fn(&mut Draft, &Record)>;
+        let defects: [(&str, Defect); 7] = [
             (
                 "stale block",
                 Box::new(|d, p| {
@@ -452,5 +531,42 @@ mod tests {
         );
         let mut failing = |_: [u8; 20]| Err("rpc down".to_string());
         assert!(drift(&s, &mut failing, &mut same_storage).is_err());
+    }
+
+    #[test]
+    fn only_an_unchanged_chain_yields_the_current_proof_of_the_bound_record() {
+        let s = check(&snapshot(|_, _| {}), &preflight()).unwrap();
+        let bound = Bound::new([7; 32], s.clone());
+        let code = |a: [u8; 20]| Ok(s.code.iter().find(|(x, _)| *x == a).unwrap().1);
+        let storage = |a: [u8; 20], slot: [u8; 32]| {
+            Ok(if a == PROXY {
+                word_of([0xcc; 20])
+            } else {
+                s.storage
+                    .iter()
+                    .find(|(x, y, _)| *x == a && *y == slot)
+                    .unwrap()
+                    .2
+            })
+        };
+        let unchanged = |a: [u8; 20], slot: [u8; 32]| {
+            Ok(s.storage
+                .iter()
+                .find(|(x, y, _)| *x == a && *y == slot)
+                .unwrap()
+                .2)
+        };
+        match verify_current(&bound, [8; 32], &mut { code }, &mut { unchanged }).unwrap() {
+            Current::Unchanged(p) => {
+                assert_eq!((p.record_sha256(), p.block_hash()), ([7; 32], [8; 32]))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            verify_current(&bound, [8; 32], &mut { code }, &mut { storage }).unwrap(),
+            Current::Drift(d) if d.len() == 1
+        ));
+        let mut failing = |_: [u8; 20]| Err("rpc down".to_string());
+        assert!(verify_current(&bound, [8; 32], &mut failing, &mut { unchanged }).is_err());
     }
 }

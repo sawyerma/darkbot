@@ -879,6 +879,16 @@ pub(crate) fn qualification_for(
             (row.text(rqs::bound::NAME).ok()? == name).then(|| row.b256(rqs::bound::SHA256).ok())?
         })
     };
+    // v9.1 C1/R1: only a run that bound its launch-path snapshot qualifies.
+    let launch_path_checked = r.nested_all(rqs::CHECKS).is_ok_and(|checks| {
+        checks.iter().any(|c| {
+            c.text(rqs::check::NAME).ok() == Some("DRY5_LAUNCH_PATH")
+                && c.text(rqs::check::STATUS).ok() == Some("PASS")
+        })
+    });
+    if !launch_path_checked || bound("launch_path.dbrec").is_none() {
+        return Err("the requalification bound no launch-path snapshot (DRY5)".into());
+    }
     let dry_sha = darkbot_bsc_record::sha256(dry_bytes);
     let preflight_sha = darkbot_bsc_record::sha256(preflight_bytes);
     if bound("dry_result.dbrec") != Some(dry_sha) || bound("preflight.dbrec") != Some(preflight_sha)
@@ -1139,14 +1149,19 @@ pub(crate) fn load_public(dir: &Path) -> Result<Option<PublicState>, String> {
     Ok(Some(state))
 }
 
-/// Readiness: the selected candidate must be exactly the one the v4 contract
-/// binds (its DRY token, launcher and signed hashes). The private store is
-/// verified from the salt; in a runtime snapshot only its public mirror
-/// exists and is verified from its public identity. B, or no selection, is a
-/// missing precondition; a contradiction or a failed verification STOPs.
+/// Readiness: the selected candidate must be exactly the one the v5 contract
+/// binds (profile and candidate ID, its DRY token and launcher and, where the
+/// candidate carries them, the signed hashes). The private store is verified
+/// from the salt; in a runtime snapshot only its public mirror exists and is
+/// verified from its public identity. Another profile than the bound one, or
+/// no selection, is a missing precondition; a contradiction or a failed
+/// verification STOPs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn contract_candidate_check(
     private_dir: &Path,
     mirror_dir: &Path,
+    bound_profile: &str,
+    bound_id: &str,
     token: Address,
     launcher: Address,
     launch_tx_hash: B256,
@@ -1199,25 +1214,33 @@ pub(crate) fn contract_candidate_check(
             "selection names another candidate than the stored one".into(),
         );
     }
-    let bound = candidate.token == token
+    if candidate.profile.name() != bound_profile {
+        return (
+            "BLOCKED",
+            format!(
+                "selected {} {} is not the candidate the v5 contract binds ({bound_profile}); it needs its own DRY, requalification and contract",
+                candidate.profile.name(),
+                candidate.id
+            ),
+        );
+    }
+    let bound = darkbot_bsc_record::hex(candidate.id.as_slice()).eq_ignore_ascii_case(bound_id)
+        && candidate.token == token
         && candidate.launcher == launcher
         && candidate
             .evidence
             .as_ref()
-            .is_some_and(|e| e.launch_tx_hash == launch_tx_hash && e.buy_tx_hash == buy_tx_hash);
-    match (bound, candidate.profile) {
-        (true, _) => ("PASS", selection.binding()),
-        (false, Profile::B) => (
-            "BLOCKED",
-            format!(
-                "selected SELF_B {} is not the candidate the v4 contract binds; B needs its own DRY, requalification and contract",
-                candidate.id
-            ),
-        ),
-        (false, Profile::A) => (
+            .is_none_or(|e| e.launch_tx_hash == launch_tx_hash && e.buy_tx_hash == buy_tx_hash);
+    if bound {
+        ("PASS", selection.binding())
+    } else {
+        (
             "STOP",
-            "selected SELF_A differs from the v4-bound DRY token, launcher or signed hashes".into(),
-        ),
+            format!(
+                "selected {} differs from the v5-bound candidate ID, DRY token, launcher or signed hashes",
+                candidate.profile.name()
+            ),
+        )
     }
 }
 

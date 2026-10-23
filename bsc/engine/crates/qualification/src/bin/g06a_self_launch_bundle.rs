@@ -13,7 +13,7 @@
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use alloy_sol_types::{SolCall, sol};
 use darkbot_bsc_execution::acceptance_guard::{
-    FROZEN_APPROVED_V4_SHA256, V3_RELATIVE_PATH, inspect_v3,
+    FROZEN_APPROVED_V5_SHA256, V3_RELATIVE_PATH, inspect_v3,
 };
 use darkbot_bsc_record::schema::{
     PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL,
@@ -458,7 +458,7 @@ fn main() {
     // approval flags, is the execution authority).
     let contract = inspect_v3(Path::new(CONTRACT_PATH)).expect("v3 contract invalid");
     assert_eq!(
-        FROZEN_APPROVED_V4_SHA256, "UNARMED",
+        FROZEN_APPROVED_V5_SHA256, "UNARMED",
         "DRY harness must not run after source guard is armed"
     );
 
@@ -718,7 +718,7 @@ fn main() {
         )
         .set(tag("contract.approved"), contract.approved)
         .set(tag("contract.execution_ready"), contract.execution_ready)
-        .set(tag("contract.compiled_live_hash"), FROZEN_APPROVED_V4_SHA256)
+        .set(tag("contract.compiled_live_hash"), FROZEN_APPROVED_V5_SHA256)
         .set(dry::LAUNCHER, Value::Address(launcher.into_array()))
         .set(dry::BUYER, Value::Address(buyer.into_array()))
         .set(dry::DISTINCT, wallets_distinct)

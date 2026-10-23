@@ -3,7 +3,7 @@
 //! This binary is deliberately fail-closed and is NOT a generic live trading runner.
 //! It sends exactly one approved economic attempt: the byte-identical ordered
 //! [launch_A, buy_B] pair to 48Club and BlockRazor in parallel. There is no public
-//! mempool launch and no automatic retry. The compile-time v4 hash remains the
+//! mempool launch and no automatic retry. The compile-time v5 hash remains the
 //! execution authority. Each attempt starts at most once (latch under
 //! bsc/.local/g07/), and the bundle expiry comes from the canonical head read
 //! immediately before the release.
@@ -93,7 +93,7 @@ fn main() {
         field(producer_witness_contract.bool(schema::g07::witness_source::SOURCE_READY));
 
     use schema::g06a::dry as d;
-    // The requalification DRY's native records (contract v4).
+    // The requalification DRY's native records (contract v5).
     let (dry, dry_hashes) = load_record(&dry_path, &[&d::NATIVE]);
     let (baseline, baseline_hashes) =
         load_record(&baseline_path, &[&schema::g06a::preflight::SCHEMA]);
@@ -174,6 +174,24 @@ fn main() {
         selected.token, token,
         "predicted token differs from the selected candidate"
     );
+    // v9.1 C1/R1: the v5-bound evidence and launch-path snapshot, re-read at
+    // the current preflight block; any code or selector drift stops before
+    // signing and the latch.
+    let (further, bound_launch_path) =
+        darkbot_bsc_execution::acceptance_guard::verify_further_v5_evidence(
+            Path::new("."),
+            &fs::read(V5_RELATIVE_PATH).expect("read the v5 contract"),
+        )
+        .unwrap_or_else(|e| panic!("G0.7 v5 evidence: {e}"));
+    let launch_path_current = match current_launch_path(&bound_launch_path, &current)
+        .unwrap_or_else(|e| panic!("G0.7 launch-path re-read: {e}"))
+    {
+        darkbot_bsc_execution::launch_path::Current::Unchanged(proof) => proof,
+        darkbot_bsc_execution::launch_path::Current::Drift(drift) => panic!(
+            "G0.7 launch path drifted from the v5-bound snapshot: {}",
+            drift.join("; ")
+        ),
+    };
 
     let min_output =
         local_expected_output * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
@@ -223,21 +241,14 @@ fn main() {
     );
 
     // SELF_B: no external call may carry its launch calldata before the
-    // release; the v4-bound local EVM simulation is the gas evidence and its
+    // release; the v5-bound local EVM simulation is the gas evidence and its
     // absence or failure STOPs. SELF_A keeps the historical estimate.
     let launch_estimate = match selected.profile {
         candidate::Profile::A => {
             rpc_estimate_gas(launcher, portal, U256::from(launch_value), &launch_data)
                 .expect("current launch gas estimate failed")
         }
-        candidate::Profile::B => {
-            darkbot_bsc_execution::acceptance_guard::verify_further_v4_evidence(
-                Path::new("."),
-                &fs::read(V4_RELATIVE_PATH).expect("read the v4 contract"),
-            )
-            .map(|e| e.local_launch_gas_used)
-            .unwrap_or_else(|e| panic!("SELF_B local simulation evidence: {e}"))
-        }
+        candidate::Profile::B => further.local_launch_gas_used,
     };
     assert!(
         launch_estimate <= launch_gas_limit,
@@ -307,7 +318,7 @@ fn main() {
     };
 
     let contract = match verify_live_authorization(
-        Path::new(V4_RELATIVE_PATH),
+        Path::new(V5_RELATIVE_PATH),
         &LiveGuardContext {
             attempt_id: attempt_id.clone(),
             launcher_address: launcher.to_string(),
@@ -330,6 +341,9 @@ fn main() {
             preflight_evidence: baseline_hashes.clone(),
             builder_policy_evidence: builder_policy_hashes.clone(),
             producer_witness_source: producer_witness_hashes.clone(),
+            candidate_profile: selected.profile.name().to_string(),
+            candidate_id: hex::encode(selected.id),
+            launch_path_current: Some(launch_path_current.clone()),
         },
     ) {
         Ok(contract) => contract,
@@ -343,8 +357,10 @@ fn main() {
     };
 
     let evidence_binding = format!(
-        "contract_sha256={}\ndry_record_sha256={}\ndry_legacy_sha256={}\npreflight_record_sha256={}\npreflight_legacy_sha256={}\nbuilder_policy_record_sha256={}\nbuilder_policy_legacy_sha256={}\nproducer_witness_source_record_sha256={}\nproducer_witness_source_legacy_sha256={}\nlaunch_tx_hash={}\nbuy_tx_hash={}\ntoken={}",
+        "contract_sha256={}\nlaunch_path_record_sha256={}\nlaunch_path_verified_block_hash={}\ndry_record_sha256={}\ndry_legacy_sha256={}\npreflight_record_sha256={}\npreflight_legacy_sha256={}\nbuilder_policy_record_sha256={}\nbuilder_policy_legacy_sha256={}\nproducer_witness_source_record_sha256={}\nproducer_witness_source_legacy_sha256={}\nlaunch_tx_hash={}\nbuy_tx_hash={}\ntoken={}",
         contract.sha256,
+        hex::encode(launch_path_current.record_sha256()),
+        hex::encode(launch_path_current.block_hash()),
         dry_hashes.record_sha256,
         dry_hashes.legacy_sha256.as_deref().unwrap_or("none"),
         baseline_hashes.record_sha256,
@@ -397,7 +413,7 @@ fn main() {
             evidence::CRITICAL_RULE,
             "DO NOT RETRY THIS ATTEMPT AUTOMATICALLY; reconcile canonical execution first.",
         )
-        .set(evidence::CONTRACT_PATH, V4_RELATIVE_PATH)
+        .set(evidence::CONTRACT_PATH, V5_RELATIVE_PATH)
         .set(evidence::CONTRACT_SHA256, word(&contract.sha256))
         .set(evidence::DRY_PATH, dry_path.as_str())
         .set(evidence::DRY_SHA256, word(&dry_hashes.record_sha256))

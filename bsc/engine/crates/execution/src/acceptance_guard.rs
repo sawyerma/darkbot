@@ -1,5 +1,6 @@
+use crate::launch_path;
 use darkbot_bsc_record::schema::g06a::{
-    dry, economics, local_simulation, portal_upgrade, preflight,
+    dry, economics, launch_path as lp, local_simulation, portal_upgrade, preflight,
 };
 use darkbot_bsc_record::schema::g07::contract;
 use darkbot_bsc_record::{Record, RecordError, Schema, decode, hex, sha256};
@@ -12,15 +13,21 @@ use std::{
 /// is superseded by v4 and can only be inspected, never authorize.
 pub const V3_RELATIVE_PATH: &str = "bsc/config/g07_attempt1_acceptance_v3.dbrec";
 
-/// The binary acceptance contract of the requalified G0.7 attempt 1
-/// (DBREC001, v4): the only possible execution authority. The v3 proposal,
-/// the JSON v1/v2 contracts and the JSON v2 draft never authorize.
+/// The v4 contract of the requalified G0.7 attempt 1. It binds no
+/// launch-path snapshot (v9.1 C1/R1) and is superseded by v5: it can only be
+/// inspected, never authorize.
 pub const V4_RELATIVE_PATH: &str = "bsc/config/g07_attempt1_acceptance_v4.dbrec";
 
+/// The binary acceptance contract of G0.7 attempt 1 (DBREC001, v5): every v4
+/// binding plus the launch-path snapshot and the candidate. The only possible
+/// execution authority; v4, the v3 proposal, the JSON v1/v2 contracts and the
+/// JSON v2 draft never authorize.
+pub const V5_RELATIVE_PATH: &str = "bsc/config/g07_attempt1_acceptance_v5.dbrec";
+
 // Deliberately UNARMED. Only a dedicated, explicitly approved arming commit may
-// replace this with the SHA-256 of the exact approved v4 record bytes.
+// replace this with the SHA-256 of the exact approved v5 record bytes.
 // Environment variables and CLI flags are never execution authority.
-pub const FROZEN_APPROVED_V4_SHA256: &str = "UNARMED";
+pub const FROZEN_APPROVED_V5_SHA256: &str = "UNARMED";
 
 /// The hashes binding one input at runtime: the SHA-256 of the binary
 /// record file G0.7 read and, for an audited import, the legacy SHA-256
@@ -139,6 +146,11 @@ pub struct LiveGuardContext {
     pub preflight_evidence: InputHashes,
     pub builder_policy_evidence: InputHashes,
     pub producer_witness_source: InputHashes,
+    /// The selected candidate (profile name, candidate ID hex) the run signs.
+    pub candidate_profile: String,
+    pub candidate_id: String,
+    /// The v5-bound launch path, re-verified at the current pinned block.
+    pub launch_path_current: Option<launch_path::CurrentProof>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,11 +178,15 @@ pub struct ContractSnapshot {
     pub preflight_evidence: InputHashes,
     pub builder_policy_evidence: InputHashes,
     pub producer_witness_source: InputHashes,
-    /// v4 only: the further bound evidence.
+    /// v4 and v5: the further bound evidence.
     pub local_simulation: Option<InputHashes>,
     pub economics: Option<InputHashes>,
     pub portal_upgrade_record_sha256: Option<String>,
     pub supersedes_contract_sha256: Option<String>,
+    /// v5 only: the launch-path snapshot and the candidate.
+    pub launch_path_record_sha256: Option<String>,
+    pub candidate_profile: Option<String>,
+    pub candidate_id: Option<String>,
 }
 
 fn norm_addr(s: &str) -> String {
@@ -216,7 +232,14 @@ fn opt_word_hex(r: &Record, tag: u16) -> Result<Option<String>, RecordError> {
     Ok(r.opt_b256(tag)?.map(|w| hex(&w)))
 }
 
-/// The further evidence a v4 contract binds (absent in v3).
+fn opt_text(r: &Record, tag: u16) -> Result<Option<String>, RecordError> {
+    if r.schema().field(tag).is_none() {
+        return Ok(None);
+    }
+    Ok(Some(r.text(tag)?.to_string()))
+}
+
+/// The further evidence a v4/v5 contract binds (absent in v3).
 fn v4_hashes(r: &Record, record: u16) -> Result<Option<InputHashes>, RecordError> {
     Ok(opt_word_hex(r, record)?.map(|record_sha256| InputHashes {
         record_sha256,
@@ -230,6 +253,9 @@ fn snapshot(r: &Record, sha256: String) -> Result<ContractSnapshot, RecordError>
         economics: v4_hashes(r, contract::ECONOMICS_RECORD_SHA256)?,
         portal_upgrade_record_sha256: opt_word_hex(r, contract::PORTAL_UPGRADE_RECORD_SHA256)?,
         supersedes_contract_sha256: opt_word_hex(r, contract::SUPERSEDES_CONTRACT_SHA256)?,
+        launch_path_record_sha256: opt_word_hex(r, contract::LAUNCH_PATH_RECORD_SHA256)?,
+        candidate_profile: opt_text(r, contract::CANDIDATE_PROFILE)?,
+        candidate_id: opt_word_hex(r, contract::CANDIDATE_ID)?,
         sha256,
         approved: r.bool(contract::APPROVED)?,
         execution_ready: r.bool(contract::EXECUTION_READY)?,
@@ -289,6 +315,7 @@ pub fn parse_v4(bytes: &[u8]) -> Result<ContractSnapshot, String> {
         .map_err(|e| format!("acceptance contract v4: {e}"))
 }
 
+/// The superseded v4 contract, for inspection only.
 pub fn inspect_v4(path: &Path) -> Result<ContractSnapshot, String> {
     if path != Path::new(V4_RELATIVE_PATH) {
         return Err(format!(
@@ -298,6 +325,24 @@ pub fn inspect_v4(path: &Path) -> Result<ContractSnapshot, String> {
     }
     let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     parse_v4(&bytes)
+}
+
+/// A v5 contract from its exact bytes (fail-closed decode).
+pub fn parse_v5(bytes: &[u8]) -> Result<ContractSnapshot, String> {
+    decode(&contract::V5, bytes)
+        .and_then(|r| snapshot(&r, sha256_hex(bytes)))
+        .map_err(|e| format!("acceptance contract v5: {e}"))
+}
+
+pub fn inspect_v5(path: &Path) -> Result<ContractSnapshot, String> {
+    if path != Path::new(V5_RELATIVE_PATH) {
+        return Err(format!(
+            "wrong acceptance contract path: expected exactly {V5_RELATIVE_PATH}, got {}",
+            path.display()
+        ));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    parse_v5(&bytes)
 }
 
 fn verify_bound_sha256(label: &str, frozen: &str, runtime: &str) -> Result<(), String> {
@@ -335,7 +380,7 @@ fn verify_input(label: &str, frozen: &InputHashes, runtime: &InputHashes) -> Res
     }
 }
 
-/// The SHA-256 of the further v4-bound records the guard verified itself.
+/// The SHA-256 of the further v4/v5-bound records the guard verified itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FurtherEvidence {
     pub local_simulation_sha256: String,
@@ -346,8 +391,8 @@ pub struct FurtherEvidence {
     pub portal_upgrade_sha256: String,
 }
 
-/// One v4-bound record, read once at its exact bound path (relative, no
-/// `..`), hashed and decoded from the same bytes.
+/// One contract-bound record, read once at its exact bound path (relative,
+/// no `..`), hashed and decoded from the same bytes.
 fn bound_record(
     root: &Path,
     c: &Record,
@@ -355,7 +400,17 @@ fn bound_record(
     hash_tag: u16,
     schema: &'static Schema,
 ) -> Result<(Record, String), String> {
-    let e = |e: RecordError| format!("acceptance contract v4: {e}");
+    bound_bytes(root, c, path_tag, hash_tag, schema).map(|(r, sha, _)| (r, sha))
+}
+
+fn bound_bytes(
+    root: &Path,
+    c: &Record,
+    path_tag: u16,
+    hash_tag: u16,
+    schema: &'static Schema,
+) -> Result<(Record, String, Vec<u8>), String> {
+    let e = |e: RecordError| format!("acceptance contract: {e}");
     let path = c.text(path_tag).map_err(e)?;
     let relative = Path::new(path);
     if path.is_empty()
@@ -364,16 +419,14 @@ fn bound_record(
             .components()
             .any(|p| !matches!(p, Component::Normal(_)))
     {
-        return Err(format!(
-            "v4-bound path {path:?} must be a plain relative path"
-        ));
+        return Err(format!("bound path {path:?} must be a plain relative path"));
     }
-    let bytes = fs::read(root.join(relative)).map_err(|x| format!("read v4-bound {path}: {x}"))?;
+    let bytes = fs::read(root.join(relative)).map_err(|x| format!("read bound {path}: {x}"))?;
     if sha256(&bytes) != c.b256(hash_tag).map_err(e)? {
-        return Err(format!("v4-bound record {path} does not match its SHA-256"));
+        return Err(format!("bound record {path} does not match its SHA-256"));
     }
-    let record = decode(schema, &bytes).map_err(|x| format!("v4-bound {path}: {x}"))?;
-    Ok((record, sha256_hex(&bytes)))
+    let record = decode(schema, &bytes).map_err(|x| format!("bound {path}: {x}"))?;
+    Ok((record, sha256_hex(&bytes), bytes))
 }
 
 fn named<'a>(r: &'a Record, name: &str) -> Option<&'a darkbot_bsc_record::Value> {
@@ -391,40 +444,83 @@ pub fn verify_further_v4_evidence(
     root: &Path,
     contract_bytes: &[u8],
 ) -> Result<FurtherEvidence, String> {
-    use darkbot_bsc_record::Value;
     let c = decode(&contract::V4, contract_bytes)
         .map_err(|e| format!("acceptance contract v4: {e}"))?;
-    let (d, _) = bound_record(
+    further(root, &c).map(|(further, _, _)| further)
+}
+
+/// [`verify_further_v4_evidence`] of a v5 contract plus its launch-path
+/// snapshot (v9.1 C1/R1): read once at its bound path, matched to its bound
+/// SHA-256, taken at exactly the bound preflight's block, of the DRY's token,
+/// and the candidate binding well-formed. The caller re-verifies the
+/// returned snapshot against the current chain.
+pub fn verify_further_v5_evidence(
+    root: &Path,
+    contract_bytes: &[u8],
+) -> Result<(FurtherEvidence, launch_path::Bound), String> {
+    let c = decode(&contract::V5, contract_bytes)
+        .map_err(|e| format!("acceptance contract v5: {e}"))?;
+    let (further, d, pre) = further(root, &c)?;
+    let (_, _, bytes) = bound_bytes(
         root,
         &c,
+        contract::LAUNCH_PATH_RECORD_PATH,
+        contract::LAUNCH_PATH_RECORD_SHA256,
+        &lp::SCHEMA,
+    )?;
+    let snapshot = launch_path::check(&bytes, &pre).map_err(|e| format!("v5-bound {e}"))?;
+    let e = |e: RecordError| format!("acceptance contract v5: {e}");
+    if snapshot.token != d.address(dry::TOKEN).map_err(e)? {
+        return Err("v5-bound launch path traces another token than the DRY".into());
+    }
+    if !matches!(
+        c.text(contract::CANDIDATE_PROFILE).map_err(e)?,
+        "SELF_A" | "SELF_B"
+    ) || c.b256(contract::CANDIDATE_ID).map_err(e)? == [0; 32]
+    {
+        return Err("v5 candidate binding is not a SELF_A/SELF_B candidate ID".into());
+    }
+    Ok((
+        further,
+        launch_path::Bound::new(darkbot_bsc_record::sha256(&bytes), snapshot),
+    ))
+}
+
+/// The further evidence of a v4 or v5 contract, with the bound DRY and
+/// preflight records it was checked against.
+fn further(root: &Path, c: &Record) -> Result<(FurtherEvidence, Record, Record), String> {
+    use darkbot_bsc_record::Value;
+    let (d, _) = bound_record(
+        root,
+        c,
         contract::DRY_RECORD_PATH,
         contract::DRY_RECORD_SHA256,
         &dry::NATIVE,
     )?;
     let (pre, _) = bound_record(
         root,
-        &c,
+        c,
         contract::PREFLIGHT_RECORD_PATH,
         contract::PREFLIGHT_RECORD_SHA256,
         &preflight::SCHEMA,
     )?;
     let (sim, sim_sha) = bound_record(
         root,
-        &c,
+        c,
         contract::LOCAL_SIMULATION_RECORD_PATH,
         contract::LOCAL_SIMULATION_RECORD_SHA256,
         &local_simulation::NATIVE,
     )?;
     let (econ, econ_sha) = bound_record(
         root,
-        &c,
+        c,
         contract::ECONOMICS_RECORD_PATH,
         contract::ECONOMICS_RECORD_SHA256,
         &economics::NATIVE,
     )?;
     let (up, up_sha) = bound_record(
         root,
-        &c,
+        c,
         contract::PORTAL_UPGRADE_RECORD_PATH,
         contract::PORTAL_UPGRADE_RECORD_SHA256,
         &portal_upgrade::SCHEMA,
@@ -448,7 +544,7 @@ pub fn verify_further_v4_evidence(
     for (name, expected) in simulated {
         if named(&sim, name) != Some(expected) {
             return Err(format!(
-                "v4-bound local simulation differs from the DRY: {name}"
+                "bound local simulation differs from the DRY: {name}"
             ));
         }
     }
@@ -460,60 +556,69 @@ pub fn verify_further_v4_evidence(
     ] {
         if named(&econ, name) != Some(expected) {
             return Err(format!(
-                "v4-bound economics cross-check differs from the DRY: {name}"
+                "bound economics cross-check differs from the DRY: {name}"
             ));
         }
     }
     let implementation = Value::Address(pre.address(preflight::PORTAL_IMPLEMENTATION).map_err(e)?);
     if named(&up, "current_implementation") != Some(&implementation) {
         return Err(
-            "v4-bound Portal upgrade scan does not end at the preflight implementation".into(),
+            "bound Portal upgrade scan does not end at the preflight implementation".into(),
         );
     }
     let local_launch_gas_used = match named(&sim, "launch_gas_used") {
         Some(Value::U64(gas)) => *gas,
-        _ => return Err("v4-bound local simulation lacks launch_gas_used".into()),
+        _ => return Err("bound local simulation lacks launch_gas_used".into()),
     };
-    Ok(FurtherEvidence {
-        local_simulation_sha256: sim_sha,
-        local_launch_gas_used,
-        economics_sha256: econ_sha,
-        portal_upgrade_sha256: up_sha,
-    })
+    Ok((
+        FurtherEvidence {
+            local_simulation_sha256: sim_sha,
+            local_launch_gas_used,
+            economics_sha256: econ_sha,
+            portal_upgrade_sha256: up_sha,
+        },
+        d,
+        pre,
+    ))
 }
 
 pub fn verify_live_authorization(
     path: &Path,
     ctx: &LiveGuardContext,
 ) -> Result<ContractSnapshot, String> {
-    if path != Path::new(V4_RELATIVE_PATH) {
+    if path == Path::new(V4_RELATIVE_PATH) {
         return Err(format!(
-            "wrong acceptance contract path: expected exactly {V4_RELATIVE_PATH}, got {}",
+            "{V4_RELATIVE_PATH} is superseded by {V5_RELATIVE_PATH}: v4 binds no launch-path snapshot"
+        ));
+    }
+    if path != Path::new(V5_RELATIVE_PATH) {
+        return Err(format!(
+            "wrong acceptance contract path: expected exactly {V5_RELATIVE_PATH}, got {}",
             path.display()
         ));
     }
     // Refused before anything is read: no contract file can stand in for the
     // compiled authority.
-    if FROZEN_APPROVED_V4_SHA256 == "UNARMED" {
+    if FROZEN_APPROVED_V5_SHA256 == "UNARMED" {
         return Err(
-            "live guard is deliberately UNARMED: no approved v4 SHA-256 is compiled in".into(),
+            "live guard is deliberately UNARMED: no approved v5 SHA-256 is compiled in".into(),
         );
     }
     // One read: the approved hash, the snapshot and the further evidence
     // binding all come from these exact bytes.
     let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let snap = parse_v4(&bytes)?;
-    if snap.sha256 != FROZEN_APPROVED_V4_SHA256 {
+    let snap = parse_v5(&bytes)?;
+    if snap.sha256 != FROZEN_APPROVED_V5_SHA256 {
         return Err(format!(
-            "v4 SHA-256 mismatch: file={} frozen={}",
-            snap.sha256, FROZEN_APPROVED_V4_SHA256
+            "v5 SHA-256 mismatch: file={} frozen={}",
+            snap.sha256, FROZEN_APPROVED_V5_SHA256
         ));
     }
     if !snap.approved {
-        return Err("v4 authorization.approved is not true".into());
+        return Err("v5 authorization.approved is not true".into());
     }
     if !snap.execution_ready {
-        return Err("v4 authorization.execution_ready is not true".into());
+        return Err("v5 authorization.execution_ready is not true".into());
     }
     if !ctx
         .dry_pass
@@ -541,7 +646,16 @@ pub fn verify_live_authorization(
     }
 
     verify_attempt_id(&snap.attempt_id, &ctx.attempt_id)?;
-    verify_further_v4_evidence(Path::new("."), &bytes)?;
+    let (_, launch_path) = verify_further_v5_evidence(Path::new("."), &bytes)?;
+    verify_v5_runtime(
+        (
+            snap.candidate_profile.as_deref(),
+            snap.candidate_id.as_deref(),
+        ),
+        &launch_path,
+        ctx.launch_path_current.as_ref(),
+        (&ctx.candidate_profile, &ctx.candidate_id),
+    )?;
     verify_input("dry_evidence", &snap.dry_evidence, &ctx.dry_evidence)?;
     verify_input(
         "preflight_evidence",
@@ -560,10 +674,10 @@ pub fn verify_live_authorization(
     )?;
 
     if norm_addr(&snap.launcher_address) != norm_addr(&ctx.launcher_address) {
-        return Err("runtime launcher does not equal frozen v4 launcher".into());
+        return Err("runtime launcher does not equal frozen v5 launcher".into());
     }
     if norm_addr(&snap.buyer_address) != norm_addr(&ctx.buyer_address) {
-        return Err("runtime buyer does not equal frozen v4 buyer".into());
+        return Err("runtime buyer does not equal frozen v5 buyer".into());
     }
     if norm_addr(&snap.launcher_address) == norm_addr(&snap.buyer_address) {
         return Err("launcher and buyer must be distinct".into());
@@ -628,6 +742,27 @@ pub fn verify_live_authorization(
     Ok(snap)
 }
 
+/// The v5 runtime binding: a current-chain proof of exactly the bound
+/// launch-path record, and the runtime candidate (profile, ID) the bound one.
+fn verify_v5_runtime(
+    bound_candidate: (Option<&str>, Option<&str>),
+    launch_path: &launch_path::Bound,
+    current: Option<&launch_path::CurrentProof>,
+    candidate: (&str, &str),
+) -> Result<(), String> {
+    if current.is_none_or(|p| p.record_sha256() != launch_path.record_sha256()) {
+        return Err("the v5-bound launch path is not re-verified against the current chain".into());
+    }
+    if bound_candidate.0 != Some(candidate.0)
+        || !bound_candidate
+            .1
+            .is_some_and(|id| !candidate.1.is_empty() && id.eq_ignore_ascii_case(candidate.1))
+    {
+        return Err("runtime candidate is not the v5-bound candidate".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -668,11 +803,68 @@ mod tests {
     }
 
     #[test]
+    fn the_v5_runtime_needs_the_current_proof_of_the_bound_record_and_candidate() {
+        use crate::launch_path::{Bound, Current, Snapshot, verify_current};
+        let snapshot = Snapshot {
+            block_number: 1,
+            block_hash: [1; 32],
+            token: [2; 20],
+            code: vec![([3; 20], [4; 32])],
+            storage: vec![],
+        };
+        let bound = Bound::new([7; 32], snapshot.clone());
+        let other = Bound::new([8; 32], snapshot);
+        let proof =
+            |b: &Bound| match verify_current(b, [9; 32], &mut |_| Ok([4; 32]), &mut |_, _| {
+                Ok([0; 32])
+            })
+            .unwrap()
+            {
+                Current::Unchanged(p) => p,
+                Current::Drift(d) => panic!("{d:?}"),
+            };
+        let id = "ab".repeat(32);
+        let ok = proof(&bound);
+        let bound_candidate = (Some("SELF_A"), Some(id.as_str()));
+        assert!(verify_v5_runtime(bound_candidate, &bound, Some(&ok), ("SELF_A", &id)).is_ok());
+        assert!(
+            verify_v5_runtime(
+                bound_candidate,
+                &bound,
+                Some(&ok),
+                ("SELF_A", &id.to_uppercase())
+            )
+            .is_ok()
+        );
+        // Missing, or a proof of another snapshot record.
+        assert!(verify_v5_runtime(bound_candidate, &bound, None, ("SELF_A", &id)).is_err());
+        let foreign = proof(&other);
+        assert!(
+            verify_v5_runtime(bound_candidate, &bound, Some(&foreign), ("SELF_A", &id))
+                .unwrap_err()
+                .contains("re-verified")
+        );
+        // Another profile or candidate ID, or an empty one.
+        for (profile, candidate) in [
+            ("SELF_B", id.as_str()),
+            ("SELF_A", ""),
+            ("SELF_A", &"cd".repeat(32)),
+        ] {
+            assert!(
+                verify_v5_runtime(bound_candidate, &bound, Some(&ok), (profile, candidate))
+                    .unwrap_err()
+                    .contains("candidate")
+            );
+        }
+        assert!(verify_v5_runtime((None, None), &bound, Some(&ok), ("SELF_A", &id)).is_err());
+    }
+
+    #[test]
     fn frozen_hash_is_unarmed_or_sha256() {
         assert!(
-            FROZEN_APPROVED_V4_SHA256 == "UNARMED"
-                || (FROZEN_APPROVED_V4_SHA256.len() == 64
-                    && FROZEN_APPROVED_V4_SHA256
+            FROZEN_APPROVED_V5_SHA256 == "UNARMED"
+                || (FROZEN_APPROVED_V5_SHA256.len() == 64
+                    && FROZEN_APPROVED_V5_SHA256
                         .bytes()
                         .all(|b| b.is_ascii_hexdigit()))
         );
@@ -681,6 +873,8 @@ mod tests {
 
 /// Exact runtime identity binding; no normalization or empty identity.
 pub fn verify_attempt_id(expected: &str, actual: &str) -> Result<(), String> {
-    if expected.is_empty() || expected != actual { return Err("runtime attempt_id differs from frozen v4".into()); }
+    if expected.is_empty() || expected != actual {
+        return Err("runtime attempt_id differs from the frozen contract".into());
+    }
     Ok(())
 }

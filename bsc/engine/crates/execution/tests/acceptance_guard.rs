@@ -11,12 +11,12 @@ mod requalification_fixture;
 
 use darkbot_bsc_execution::acceptance_contract::{
     Authorization, WITNESS_SOURCE_RECORD, attempt1_bindings, attempt1_v3, attempt1_v4,
-    attempt1_v4_evidence,
+    attempt1_v4_evidence, attempt1_v5, attempt1_v5_evidence,
 };
 use darkbot_bsc_execution::acceptance_guard::{
-    FROZEN_APPROVED_V4_SHA256, InputHashes, LiveGuardContext, V3_RELATIVE_PATH, V4_RELATIVE_PATH,
-    DryPassProof, WitnessSourceProof, inspect_v3, parse_v4, sha256_hex, verify_further_v4_evidence,
-    verify_live_authorization,
+    DryPassProof, FROZEN_APPROVED_V5_SHA256, InputHashes, LiveGuardContext, V3_RELATIVE_PATH,
+    V4_RELATIVE_PATH, V5_RELATIVE_PATH, WitnessSourceProof, inspect_v3, parse_v4, parse_v5,
+    sha256_hex, verify_further_v4_evidence, verify_further_v5_evidence, verify_live_authorization,
 };
 use darkbot_bsc_record::schema::{
     PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, g06a, g07::contract,
@@ -71,12 +71,15 @@ fn matching_context() -> LiveGuardContext {
         preflight_evidence: snap.preflight_evidence.clone(),
         builder_policy_evidence: snap.builder_policy_evidence.clone(),
         producer_witness_source: snap.producer_witness_source.clone(),
+        candidate_profile: "SELF_A".into(),
+        candidate_id: "00".repeat(32),
+        launch_path_current: None,
     }
 }
 
 #[test]
 fn guard_is_compiled_unarmed() {
-    assert_eq!(FROZEN_APPROVED_V4_SHA256, "UNARMED");
+    assert_eq!(FROZEN_APPROVED_V5_SHA256, "UNARMED");
 }
 
 #[test]
@@ -88,6 +91,10 @@ fn contract_paths_are_the_binary_config_contracts() {
     assert_eq!(
         V4_RELATIVE_PATH,
         "bsc/config/g07_attempt1_acceptance_v4.dbrec"
+    );
+    assert_eq!(
+        V5_RELATIVE_PATH,
+        "bsc/config/g07_attempt1_acceptance_v5.dbrec"
     );
 }
 
@@ -165,14 +172,14 @@ fn any_other_contract_path_is_rejected() {
 #[test]
 fn unarmed_guard_refuses_a_fully_matching_context_before_reading() {
     at_repo_root();
-    // No v4 file exists yet: the UNARMED refusal comes before any read.
+    // No v5 file exists yet: the UNARMED refusal comes before any read.
     let err =
-        verify_live_authorization(Path::new(V4_RELATIVE_PATH), &matching_context()).unwrap_err();
+        verify_live_authorization(Path::new(V5_RELATIVE_PATH), &matching_context()).unwrap_err();
     assert!(err.contains("UNARMED"), "{err}");
 }
 
 #[test]
-fn only_the_v4_path_can_authorize() {
+fn only_the_v5_path_can_authorize_and_v4_is_superseded() {
     at_repo_root();
     let mut ctx = matching_context();
     ctx.dry_evidence = InputHashes {
@@ -186,6 +193,11 @@ fn only_the_v4_path_can_authorize() {
             "{path}: {err}"
         );
     }
+    let err = verify_live_authorization(Path::new(V4_RELATIVE_PATH), &ctx).unwrap_err();
+    assert!(
+        err.contains("superseded") && err.contains("launch-path"),
+        "{err}"
+    );
 }
 
 const FROZEN: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";
@@ -366,11 +378,9 @@ fn v4_binds_native_inputs_without_and_imports_with_legacy_hashes() {
         }
         if case != 0 { std::fs::write(&status_path, status.encode().unwrap()).unwrap(); }
         assert!(attempt1_v4_evidence(&root, dir, &policy).is_err(), "case {case}");
-        for mode in ["--check", "--approved-sha"] {
-            let output = std::process::Command::new(env!("CARGO_BIN_EXE_g07_acceptance_contract")).current_dir(&root).args([dir, policy.as_str(), mode]).env_clear().output().unwrap();
-            assert!(!output.status.success());
-            assert!(output.stdout.is_empty());
-        }
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_g07_acceptance_contract")).current_dir(&root).args([dir, policy.as_str(), "--check-v4"]).env_clear().output().unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
         std::fs::write(&status_path, &original).unwrap();
     }
     assert!(attempt1_v4_evidence(&root, dir, &policy.replace("/builder_policy", "/./builder_policy")).is_err());
@@ -577,4 +587,340 @@ fn guard_proofs_come_only_from_their_checks() {
     assert!(WitnessSourceProof::check(&witness, &attempt, schema).is_ok());
     assert!(WitnessSourceProof::check(&witness, "another-attempt", schema).is_err());
     assert!(WitnessSourceProof::check(&witness, &attempt, "other.schema.json").is_err());
+}
+
+const CANDIDATE: &str = requalification_fixture::CANDIDATE_RECORD;
+
+/// A v5-shaped stand-in run: the v4 stand-ins, their v4 proposal at the v4
+/// path, the real launch-path snapshot, the candidate record and DRY5.
+fn v5_root(tag: &str) -> (PathBuf, &'static str, String) {
+    let (root, dir) = requal_root_at(tag);
+    let policy = format!("{FROZEN}/builder_policy.dbrec");
+    requalification_fixture::upgrade_to_v5(&root, dir, &policy, Path::new("."));
+    (root, dir, policy)
+}
+
+/// `bytes` of `schema` with one field set, every other field kept.
+fn with_field(bytes: &[u8], schema: &'static Schema, tag: u16, value: Value) -> Vec<u8> {
+    let record = decode(schema, bytes).unwrap();
+    let mut d = Draft::new(schema);
+    for (t, v) in record.fields() {
+        d.push(*t, v.clone());
+    }
+    d.set(tag, value);
+    d.encode().unwrap()
+}
+
+/// The candidate record with one field set and its ID recomputed.
+fn candidate_with(bytes: &[u8], tag: u16, value: Value) -> Vec<u8> {
+    use darkbot_bsc_record::schema::g07_candidate::{candidate as c, candidate_id_of};
+    let edited = with_field(bytes, &c::SCHEMA, tag, value);
+    let id = candidate_id_of(&decode(&c::SCHEMA, &edited).unwrap()).unwrap();
+    with_field(&edited, &c::SCHEMA, c::CANDIDATE_ID, Value::B256(id))
+}
+
+#[test]
+fn v5_binds_the_launch_path_and_candidate_and_supersedes_the_v4_proposal() {
+    at_repo_root();
+    let (root, dir, policy) = v5_root("v5");
+    let evidence = attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).unwrap();
+    let bytes = attempt1_v5(&evidence, Authorization::Proposed).unwrap();
+    let proposal = parse_v5(&bytes).unwrap();
+    let approved = parse_v5(&attempt1_v5(&evidence, Authorization::Approved).unwrap()).unwrap();
+    assert!(!proposal.approved && !proposal.execution_ready);
+    assert!(approved.approved && approved.execution_ready);
+    assert_ne!(proposal.sha256, approved.sha256);
+    let v4 = std::fs::read(root.join(V4_RELATIVE_PATH)).unwrap();
+    let file = |name: &str| std::fs::read(root.join(dir).join(name)).unwrap();
+    assert_eq!(proposal.supersedes_contract_sha256, Some(sha256_hex(&v4)));
+    assert_eq!(
+        proposal.launch_path_record_sha256,
+        Some(sha256_hex(&file("launch_path.dbrec")))
+    );
+    assert_eq!(proposal.candidate_profile.as_deref(), Some("SELF_A"));
+    assert_eq!(
+        proposal.candidate_id.as_deref(),
+        Some(darkbot_bsc_record::hex(&evidence.candidate_id).as_str())
+    );
+    // Every v4 binding and term carries over unchanged.
+    let old = parse_v4(&v4).unwrap();
+    assert_eq!(
+        [
+            &proposal.dry_evidence,
+            &proposal.preflight_evidence,
+            &proposal.builder_policy_evidence,
+            &proposal.producer_witness_source
+        ],
+        [
+            &old.dry_evidence,
+            &old.preflight_evidence,
+            &old.builder_policy_evidence,
+            &old.producer_witness_source
+        ]
+    );
+    assert_eq!(
+        (&proposal.local_simulation, &proposal.economics),
+        (&old.local_simulation, &old.economics)
+    );
+    assert_eq!(
+        (
+            proposal.max_total_per_attempt,
+            proposal.absolute_budget_wei,
+            proposal.max_attempts,
+            &proposal.attempt_id
+        ),
+        (
+            old.max_total_per_attempt,
+            old.absolute_budget_wei,
+            old.max_attempts,
+            &old.attempt_id
+        )
+    );
+    assert_eq!(proposal.absolute_budget_wei, 481_163_500_000_000);
+    // Neither version decodes as the other.
+    assert!(parse_v5(&v4).is_err() && parse_v4(&bytes).is_err());
+    let text = decode(&contract::V5, &bytes).unwrap().render();
+    for expected in [
+        "bsc/config/g07_attempt1_acceptance_v5.dbrec",
+        "FROZEN_APPROVED_V5_SHA256",
+        "record type 34, schema version 5",
+        "superseded proposal without launch-path binding",
+        "22 code entries, 4 storage selectors",
+    ] {
+        assert!(text.contains(expected), "{expected}");
+    }
+    let (_, bound) = verify_further_v5_evidence(&root, &bytes).unwrap();
+    assert_eq!(
+        (bound.snapshot().code.len(), bound.snapshot().storage.len()),
+        (22, 4)
+    );
+    // The tool writes exactly these bytes once and reproduces them; a v5 run
+    // never reproduces the v4 proposal.
+    let tool = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_g07_acceptance_contract"))
+            .current_dir(&root)
+            .args(args)
+            .env_clear()
+            .output()
+            .unwrap()
+    };
+    let wrote = tool(&[dir, &policy, CANDIDATE]);
+    assert!(
+        wrote.status.success(),
+        "{}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+    assert_eq!(std::fs::read(root.join(V5_RELATIVE_PATH)).unwrap(), bytes);
+    assert!(tool(&[dir, &policy, CANDIDATE, "--check"]).status.success());
+    assert!(!tool(&[dir, &policy, CANDIDATE]).status.success());
+    assert!(!tool(&[dir, &policy, "--check-v4"]).status.success());
+    let sha = tool(&[dir, &policy, CANDIDATE, "--approved-sha"]);
+    assert!(String::from_utf8_lossy(&sha.stdout).contains(&approved.sha256));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_missing_manipulated_stale_or_contradictory_snapshot_or_candidate_makes_no_v5() {
+    use darkbot_bsc_record::schema::g06a::launch_path as lp;
+    use darkbot_bsc_record::schema::g07_candidate::candidate as c;
+    at_repo_root();
+    let (root, dir, policy) = v5_root("v5-negative");
+    let refuse = |what: &str| attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).expect_err(what);
+    let lp_file = root.join(dir).join("launch_path.dbrec");
+    let original = std::fs::read(&lp_file).unwrap();
+    // Missing, or manipulated under the run's binding.
+    std::fs::remove_file(&lp_file).unwrap();
+    refuse("missing");
+    let mut flipped = original.clone();
+    flipped[40] ^= 1;
+    std::fs::write(&lp_file, &flipped).unwrap();
+    assert!(refuse("mutated").contains("binding mismatch"));
+    // Re-bound by the run, but stale, foreign or contradicting the DRY.
+    let block = decode(&lp::SCHEMA, &original)
+        .unwrap()
+        .u64(lp::BLOCK_NUMBER)
+        .unwrap();
+    let other_token = with_field(
+        &with_field(
+            &original,
+            &lp::SCHEMA,
+            lp::TOKEN,
+            Value::Address([0x11; 20]),
+        ),
+        &lp::SCHEMA,
+        lp::LAUNCH_RETURN_TOKEN,
+        Value::Address([0x11; 20]),
+    );
+    for (bytes, expected) in [
+        (
+            with_field(
+                &original,
+                &lp::SCHEMA,
+                lp::BLOCK_NUMBER,
+                Value::U64(block + 1),
+            ),
+            "stale or foreign",
+        ),
+        (
+            with_field(&original, &lp::SCHEMA, lp::BLOCK_HASH, Value::B256([9; 32])),
+            "stale or foreign",
+        ),
+        (
+            with_field(&original, &lp::SCHEMA, lp::BUY_SUCCESS, Value::Bool(false)),
+            "did not succeed",
+        ),
+        (other_token, "another token"),
+    ] {
+        std::fs::write(&lp_file, &bytes).unwrap();
+        requalification_fixture::refresh_v5(&root, dir, &policy);
+        assert!(refuse(expected).contains(expected), "{expected}");
+    }
+    std::fs::write(&lp_file, &original).unwrap();
+    // A v4-shaped run (no DRY5, no launch-path record) never makes a v5.
+    requalification_fixture::refresh(&root, dir, &policy);
+    refuse("v4-shaped run");
+    requalification_fixture::refresh_v5(&root, dir, &policy);
+    assert!(attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).is_ok());
+    // The candidate: tampered ID, another profile, deployment, token or
+    // signed hash, or absent.
+    let record = root.join(CANDIDATE);
+    let good = std::fs::read(&record).unwrap();
+    for (bytes, expected) in [
+        (
+            with_field(&good, &c::SCHEMA, c::CANDIDATE_ID, Value::B256([1; 32])),
+            "identity",
+        ),
+        (
+            candidate_with(&good, c::PROFILE, Value::Text("SELF_C".into())),
+            "identity",
+        ),
+        (
+            candidate_with(&good, c::DEPLOYMENT_RECORD_SHA256, Value::B256([2; 32])),
+            "requalification preflight",
+        ),
+        (
+            candidate_with(&good, c::PORTAL_VERSION, Value::Text("v5.26.0".into())),
+            "requalification preflight",
+        ),
+        (
+            candidate_with(&good, c::TOKEN, Value::Address([3; 20])),
+            "launcher or token",
+        ),
+        (
+            candidate_with(&good, c::LAUNCH_TX_HASH, Value::B256([4; 32])),
+            "signed hashes",
+        ),
+    ] {
+        std::fs::write(&record, &bytes).unwrap();
+        assert!(refuse(expected).contains(expected), "{expected}");
+    }
+    std::fs::remove_file(&record).unwrap();
+    refuse("no candidate");
+    std::fs::write(&record, &good).unwrap();
+    // The superseded v4 must be the inactive proposal.
+    let v4_path = root.join(V4_RELATIVE_PATH);
+    let v4 = std::fs::read(&v4_path).unwrap();
+    std::fs::write(
+        &v4_path,
+        with_field(&v4, &contract::V4, contract::APPROVED, Value::Bool(true)),
+    )
+    .unwrap();
+    assert!(refuse("approved v4").contains("inactive proposal"));
+    std::fs::remove_file(&v4_path).unwrap();
+    refuse("no v4");
+    std::fs::write(&v4_path, &v4).unwrap();
+    assert!(attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).is_ok());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn the_guard_itself_binds_the_v5_launch_path_and_refuses_every_deviation() {
+    use darkbot_bsc_record::schema::g06a::launch_path as lp;
+    at_repo_root();
+    let (root, dir, policy) = v5_root("v5-guard");
+    let v5 = attempt1_v5(
+        &attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).unwrap(),
+        Authorization::Proposed,
+    )
+    .unwrap();
+    assert!(verify_further_v5_evidence(&root, &v5).is_ok());
+    // A v4 contract is no v5 for the guard.
+    assert!(
+        verify_further_v5_evidence(&root, &std::fs::read(root.join(V4_RELATIVE_PATH)).unwrap())
+            .is_err()
+    );
+    let lp_file = root.join(dir).join("launch_path.dbrec");
+    let original = std::fs::read(&lp_file).unwrap();
+    let refused = |contract: &[u8]| verify_further_v5_evidence(&root, contract).unwrap_err();
+    std::fs::remove_file(&lp_file).unwrap();
+    assert!(refused(&v5).contains("launch_path.dbrec"));
+    let mut flipped = original.clone();
+    flipped[40] ^= 1;
+    std::fs::write(&lp_file, &flipped).unwrap();
+    assert!(refused(&v5).contains("SHA-256"));
+    std::fs::write(
+        &lp_file,
+        std::fs::read(root.join(dir).join("dry_result.dbrec")).unwrap(),
+    )
+    .unwrap();
+    assert!(verify_further_v5_evidence(&root, &v5).is_err());
+    // Correctly re-bound in the contract, but stale or contradicting the DRY.
+    let block = decode(&lp::SCHEMA, &original)
+        .unwrap()
+        .u64(lp::BLOCK_NUMBER)
+        .unwrap();
+    let other_token = with_field(
+        &with_field(
+            &original,
+            &lp::SCHEMA,
+            lp::TOKEN,
+            Value::Address([0x11; 20]),
+        ),
+        &lp::SCHEMA,
+        lp::LAUNCH_RETURN_TOKEN,
+        Value::Address([0x11; 20]),
+    );
+    for (bytes, expected) in [
+        (
+            with_field(
+                &original,
+                &lp::SCHEMA,
+                lp::BLOCK_NUMBER,
+                Value::U64(block + 1),
+            ),
+            "stale or foreign",
+        ),
+        (other_token, "another token"),
+    ] {
+        std::fs::write(&lp_file, &bytes).unwrap();
+        let rebound = with_field(
+            &v5,
+            &contract::V5,
+            contract::LAUNCH_PATH_RECORD_SHA256,
+            Value::B256(darkbot_bsc_record::sha256(&bytes)),
+        );
+        assert!(refused(&rebound).contains(expected), "{expected}");
+    }
+    std::fs::write(&lp_file, &original).unwrap();
+    // A malformed candidate binding or an escaping path.
+    for (tag, value, expected) in [
+        (
+            contract::CANDIDATE_PROFILE,
+            Value::Text("SELF_C".into()),
+            "candidate",
+        ),
+        (contract::CANDIDATE_ID, Value::B256([0; 32]), "candidate"),
+        (
+            contract::LAUNCH_PATH_RECORD_PATH,
+            Value::Text("../outside/launch_path.dbrec".into()),
+            "plain relative",
+        ),
+    ] {
+        assert!(
+            refused(&with_field(&v5, &contract::V5, tag, value)).contains(expected),
+            "{expected}"
+        );
+    }
+    assert!(verify_further_v5_evidence(&root, &v5).is_ok());
+    std::fs::remove_dir_all(root).unwrap();
 }
