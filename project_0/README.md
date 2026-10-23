@@ -28,6 +28,92 @@ Der langfristige Zielaufbau ist absichtlich **klein**: ein Rust-Workspace (optio
 - Der gesamte Produktumfang **FE-00…FE-07, S0–S4, S1-RACE, S3.R, P2–P9, C0/C0-E1/H0/T, JIT, Tagger, P6-MT/M4, P8-RES/INV, P7/P4B, K, Frontend, Jito und Binary-Geyser** bleibt im Phasenplan verpflichtend. Geplante Modulnamen sind keine implementierten Features.
 - Keine neue Mock-/Fake-/Stub-/Demo-Engine. Echte aufgezeichnete Chain-Daten, erforderliche Protokollkomponenten und historische Evidence dürfen nicht blind entfernt werden. `FREE_ONLY`, LIVE-/Submission-Sperren und Gepinnte-Identitätsverträge bleiben unverändert.
 
+
+### Systemdiagramm — Gesamtfluss Project_0 (SOLL-Architektur)
+
+Dieses Mermaid-Diagramm zeigt den verbindlich geplanten Gesamtfluss von Solana/Marginfi über **Long-Tail/WSS** und den eigenen **Binary-Geyser-Adapter** bis zu den optionalen **Deshred-/LocalShred-Frühwarnsensoren**, der gemeinsamen Rust-Engine, FE-04 und Settlement. Die Darstellung ist ein **Architekturziel, kein Implementierungs- oder LIVE-PASS**. Insbesondere sind die Quellen-Modi **AUS / SHADOW / QUALIFIED** hier Soll-Zustände und **noch keine nachgewiesen vorhandenen, bedienbaren CLI-/GUI-Schalter**. QUALIFIED bezeichnet ein belegtes Quellengate, nicht automatisch eine LIVE-Freigabe.
+
+```mermaid
+flowchart TB
+    CHAIN["Solana / Marginfi / Oracles<br/>Accounts · TXs · Slots · Roots"]
+
+    subgraph SOURCES["PARALLELE DATENQUELLEN"]
+        direction LR
+        LT["Long-Tail WebSocket / RPC<br/>AUS / SHADOW / QUALIFIED"]
+        GY["BinaryGeyserSource<br/>AUS / OFFLINE / SHADOW / QUALIFIED"]
+        PN["PublicNode Yellowstone<br/>FREE_ONLY Kandidat"]
+        DS["SubscribeDeshred<br/>optional Frühwarnpfad"]
+        LS["LocalShred Lite / UDP Shreds<br/>optional Frühwarnpfad"]
+    end
+
+    CHAIN --> LT
+    CHAIN --> PN
+    CHAIN --> DS
+    CHAIN --> LS
+    PN --> GY
+
+    LT --> LTN["WsRpcControlSource<br/>JSON nur an externer Grenze"]
+    GY --> GYN["Native gRPC / Protobuf<br/>binärer Ingress"]
+    DS --> PRE["Pre-Execution-Sensor<br/>nur spekulative Hinweise"]
+    LS --> PRE
+
+    LTN --> ING["Gemeinsame Ingress-Schicht<br/>IngressSource / IngressEvent"]
+    GYN --> ING
+    PRE --> PRECHK["Spekulative Preparation<br/>kein kanonischer State"]
+
+    ING --> CANON["Canonical State Owner<br/>Accounts · Banks · Oracles · Roots"]
+    CANON --> DETECT["Detection / Health / Liability Scan"]
+    DETECT --> SIZE["Sizing / Repay / Seize / Constraints"]
+    SIZE --> ECON["Economics<br/>Fees · Tip · Rent · Exit · JIT"]
+
+    PRECHK --> PREP["Prepared Candidates / Templates"]
+    ECON --> PREP
+    PREP --> REVAL["Autoritative Revalidierung<br/>State · Slot/Fork · Freshness · Economics"]
+    CANON --> REVAL
+
+    REVAL --> DECIDE{"Opportunity<br/>wirklich ausführbar?"}
+    DECIDE -->|"Nein"| OBS["Nur Shadow / Journal / Beobachtung"]
+    DECIDE -->|"Ja"| BUILD["TX aufbauen, signieren, simulieren<br/>Beträge · Fees · Tips · Rent"]
+    BUILD --> SAFE{"Safety / Admission / Reservations<br/>Capital · Daily Loss · Inventory"}
+
+    SAFE -->|"FAIL / UNKNOWN"| HALT["HALT / HOLD / Keine Freigabe"]
+    SAFE -->|"PASS + separate Autorisierung"| FE04["FE-04 Durable Admission<br/>gebundene signierte Bytes + fsync-Hold"]
+    FE04 --> SUBMIT{"Submission-Pfad<br/>gesondert qualifiziert?"}
+
+    SUBMIT -->|"Nein"| BLOCK["LIVE_SEND_REQUIRES_FE04<br/>oder weitere Gates offen"]
+    SUBMIT -->|"Ja"| EXEC["One-Shot Execution Owner<br/>einziger kontrollierter Sendepfad"]
+
+    EXEC --> PATH1["RPC Submitter<br/>qualifizierter Long-Tail"]
+    EXEC --> PATH2["Jito Single / Bundle / gRPC<br/>separat zu qualifizieren"]
+    EXEC --> PATH3["Direct TPU QUIC<br/>nur nach SWQoS-/Stake-Gate"]
+
+    PATH1 --> NET["Solana Netzwerk"]
+    PATH2 --> NET
+    PATH3 --> NET
+    NET --> RECON["Finalized Reconciliation<br/>TX/Bundle-Receipts · Wallet-Deltas"]
+    RECON --> SETTLE["Settlement<br/>Inventory · Fees · Rent · Exit · Realized PnL"]
+    FE04 --> JOURNAL["Ein einziges binäres FE-04-Journal<br/>durable · idempotent · UNKNOWN-Holds"]
+    SETTLE --> JOURNAL
+    JOURNAL -.->|"Replay / Holds"| SAFE
+    JOURNAL --> REPORT["Status / Measurement Ledger / Reports<br/>Read-only Frontend und Terminal"]
+
+    classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef core fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef prep fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef safety fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef stop fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+
+    class LT,GY,PN,DS,LS input
+    class ING,CANON,DETECT,SIZE,ECON,REVAL,FE04,BUILD,EXEC,RECON,SETTLE,JOURNAL,REPORT core
+    class PRE,PRECHK,PREP prep
+    class SAFE,DECIDE,SUBMIT safety
+    class OBS,HALT,BLOCK stop
+```
+
+**Verbindliche Leserichtung / Safety:** `BinaryGeyserSource` ist ein **Ingress-Client**, kein Submission-Adapter. `SubscribeDeshred` und `LocalShred Lite` sind **spekulative Pre-Execution-Sensoren**; sie dürfen Templates vorwärmen, aber keinen autoritativen Account-State ersetzen und niemals eigenständig Signieren/Senden auslösen. Jede Chance braucht vor einer werttragenden Aktion erneut gültige kanonische Zustände, aktuelle Oracle-/Bank-/Program-Identität, Economics, durable Approval/Reservation und die separaten FE-06-/P8-Freigaben. Der FE-04-Owner bindet **bereits gebaute und signierte Bytes** vor dem Versand an die fsync-bestätigte Reservation; das eine Journal enthält sowohl den Handoff als auch finalisierte Settlement-Transitions. Ein Geyser-Race-Feed entscheidet nur über **Informationseingang/Preparation**, der Versand erfolgt ausschließlich über einen jeweils qualifizierten Submission-Adapter. Jito und Direct TPU sind keine automatisch nutzbaren Wege. `FREE_ONLY` gilt für alle Quellen und Infrastrukturentscheidungen.
+
+**Verbindliche Zuordnung:** S1-02 = Rust-`BinaryGeyserSource`; S1-08 = kostenlose PublicNode-/Alternative-Binary-Quellenqualifikation; K-02 = optionaler `SubscribeDeshred`-Sensor; K-02b = optionaler `LocalShred Lite` UDP-Sensor; K-03 = eigener Raw-Shred-/Validatoraufbau nur bei begründetem Mehrwert. Verbindliche Einzelabnahmen und tatsächliche Implementierungsstände: [PHASENPLAN](docs/PHASENPLAN.md), [STATUS](docs/STATUS.md), [MEASUREMENT_LEDGER](docs/MEASUREMENT_LEDGER.md). Diese README allein erteilt keine Berechtigung zu Mainnet, LIVE, Submission oder Paid-Providern.
+
 **Arbeitsreihenfolge:** A0 lokaler Stand / staged 30–32 + Pfad-/Keypair-Fixes prüfen → A1 aktive Dateien/Verbraucher/Ownership inventarisieren → A2 Regressions-/Performance-Baseline → A3 Runtime-Orchestrierung → A4 Market/Winner → A5 WSS/Execution → A6 optional Namens-/Pfadmigration → A7 vollständige Differenzqualifikation. Jede Gruppe hat ein eigenes Stop-Gate, kein pauschaler Umbau. Details, Datei-/Modulgrenzen, Migrationsmatrix, Checks und Verbote: **[Architecture Refactor Contract](docs/architecture/production_architecture_refactor_contract.md)**.
 
 ### Lokale Git-Arbeit ist zu schützen
