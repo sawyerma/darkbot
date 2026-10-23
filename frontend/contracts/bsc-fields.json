@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source_commit": "8dd7ce20e5d536bfd2343cb4c097b2b9c3c57ed0",
+  "source_commit": "84eb791a84edd0a8745dd42853d78612ed7810c2",
   "schema": "protocol/schemas/darkbot/bsc/v1/status.proto",
   "schema_sha256": "2944f3e0529e1b9f89b2aea4cb26fe912736a534f65e234974ffd401acf2d305",
   "fields": [
@@ -23,7 +23,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -44,7 +48,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -65,7 +73,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -86,7 +98,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -107,14 +123,18 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.frozen_approved_sha256",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "string",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -128,14 +148,17 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.guard_state",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "string",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -149,14 +172,17 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.contract_path",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "string",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -170,14 +196,17 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.contract_present",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "bool",
       "unit": "boolean",
       "scale": 0,
@@ -191,14 +220,18 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 3,
+      "status": "IST_BUG",
+      "status_reason": "shown with a stale v4 label (AU-09)"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.contract_sha256",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "string",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -212,14 +245,18 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.approved",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "bool",
       "unit": "boolean",
       "scale": 0,
@@ -233,14 +270,17 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.execution_ready",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "bool",
       "unit": "boolean",
       "scale": 0,
@@ -254,14 +294,17 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.attempt_id",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "string",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -275,14 +318,17 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "GuardStatus",
       "field": "GuardStatus.max_attempts",
       "source_path": "bsc/engine/crates/execution/src/acceptance_guard.rs",
-      "symbol": "ContractSnapshot / FROZEN_APPROVED_V4_SHA256",
+      "symbol": "GuardStatus / FROZEN_APPROVED_V5_SHA256",
       "type": "uint64",
       "unit": "count",
       "scale": 0,
@@ -296,7 +342,10 @@
       "source_sha": "1d28eb13a2717e4698c4a48b77b6b2405785390ef60f0289c7625710c07fd88f",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -317,7 +366,10 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -338,7 +390,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 5,
+      "status": "IST_BUG",
+      "status_reason": "G0.7 classifications / G0.8 ADAPT, UNRESOLVED render neutral (AU-08)"
     },
     {
       "project": "bsc",
@@ -359,7 +415,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 5,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
@@ -380,7 +440,10 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -401,7 +464,11 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 4,
+      "status": "IST_BUG",
+      "status_reason": "BLOCKED arrives as STOP (AU-03/AU-04)"
     },
     {
       "project": "bsc",
@@ -422,7 +489,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 8,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -443,7 +513,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -464,7 +537,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 8,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -485,7 +561,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 2,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -506,7 +585,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 2,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -527,7 +609,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 2,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -548,7 +633,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 2,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -569,7 +657,11 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
@@ -590,7 +682,11 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "BLOCKED",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 8,
+      "status": "SOLL_MISSING",
+      "status_reason": "never set by the projection"
     },
     {
       "project": "bsc",
@@ -611,7 +707,11 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 4,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
@@ -632,7 +732,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -653,7 +756,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -674,7 +780,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -695,7 +804,10 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -716,7 +828,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -737,7 +852,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -758,7 +876,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -779,7 +900,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -800,7 +924,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -821,7 +948,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -842,7 +972,11 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 7,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
@@ -863,7 +997,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -884,7 +1021,11 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 4,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
@@ -905,7 +1046,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -926,7 +1070,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -947,7 +1094,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -968,7 +1118,11 @@
       "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -989,7 +1143,11 @@
       "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -1010,7 +1168,11 @@
       "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -1031,7 +1193,11 @@
       "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -1052,7 +1218,11 @@
       "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -1073,7 +1243,11 @@
       "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -1094,7 +1268,10 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 6,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1115,7 +1292,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 6,
+      "status": "SOLL_MISSING",
+      "status_reason": "projected, not displayed"
     },
     {
       "project": "bsc",
@@ -1136,7 +1317,10 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1157,7 +1341,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -1178,7 +1366,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -1199,7 +1391,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -1220,7 +1416,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -1241,7 +1441,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -1262,7 +1466,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "reusable message / container"
     },
     {
       "project": "bsc",
@@ -1283,7 +1491,11 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "SOLL_MISSING",
+      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
     },
     {
       "project": "bsc",
@@ -1304,7 +1516,10 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 6,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1325,14 +1540,17 @@
       "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 6,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "BscLaunchState",
       "field": "BscLaunchState.contract_present",
       "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-      "symbol": "contract::V4",
+      "symbol": "contract::V5",
       "type": "bool",
       "unit": "boolean",
       "scale": 0,
@@ -1346,14 +1564,18 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "IST_BUG",
+      "status_reason": "shown with a stale v4 label (AU-09)"
     },
     {
       "project": "bsc",
       "feature": "BscLaunchState",
       "field": "BscLaunchState.evidence",
       "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-      "symbol": "contract::V4",
+      "symbol": "contract::V5",
       "type": "Evidence",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -1367,14 +1589,17 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "BscLaunchState",
       "field": "BscLaunchState.contract_fields",
       "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-      "symbol": "contract::V4",
+      "symbol": "contract::V5",
       "type": "PublicField",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -1388,14 +1613,17 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
       "feature": "BscLaunchState",
       "field": "BscLaunchState.runtime_fields",
       "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-      "symbol": "contract::V4",
+      "symbol": "contract::V5",
       "type": "PublicField",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -1405,18 +1633,22 @@
       "owner": "BSC",
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
-      "quality": "SOLL_MISSING",
+      "quality": "OBSERVATION_ONLY",
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
-      "required_gate": "BLOCKED",
+      "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 1,
+      "status": "IST_CONNECTED",
+      "status_reason": "carries the candidate.* mirror"
     },
     {
       "project": "bsc",
       "feature": "BscLaunchState",
       "field": "BscLaunchState.reason",
       "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-      "symbol": "contract::V4",
+      "symbol": "contract::V5",
       "type": "string",
       "unit": "public_text_or_struct",
       "scale": 0,
@@ -1430,7 +1662,10 @@
       "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "launch",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1451,7 +1686,11 @@
       "source_sha": "5e3282c21cc3969aa216dd9f32c193d0a271efbc83921454ad32658ded013b6a",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 5,
+      "status": "IST_BUG",
+      "status_reason": "ADAPT/UNRESOLVED render neutral (AU-08)"
     },
     {
       "project": "bsc",
@@ -1472,7 +1711,10 @@
       "source_sha": "5e3282c21cc3969aa216dd9f32c193d0a271efbc83921454ad32658ded013b6a",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 5,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1493,7 +1735,11 @@
       "source_sha": "5e3282c21cc3969aa216dd9f32c193d0a271efbc83921454ad32658ded013b6a",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "monitoring",
+      "section_order": 5,
+      "status": "IST_BUG",
+      "status_reason": "re-listed unfiltered in Analytics (bindings section 4)"
     },
     {
       "project": "bsc",
@@ -1514,7 +1760,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 1,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1535,7 +1784,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1556,7 +1808,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 1,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1577,7 +1832,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 2,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1598,7 +1856,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1619,7 +1880,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1640,7 +1904,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 3,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1661,7 +1928,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1682,7 +1952,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1703,7 +1976,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1724,7 +2000,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1745,7 +2024,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 4,
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1766,7 +2048,10 @@
       "source_sha": "56130976c17bd92a70903a0aee7e6453da836b8c8c31305a50e1fdd030fc1b41",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
-      "test": "status::tests + bsc-golden.test.ts"
+      "test": "status::tests + bsc-golden.test.ts",
+      "frontend_panel": "wallets",
+      "section_order": 7,
+      "status": "IST_CONNECTED"
     }
   ],
   "decisions": {
@@ -1813,6 +2098,1196 @@
       "source_sha": "b2ff5d0fb0379de20040a00b10f61e68eb14d1c5af7250af9c536162936ea68a",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
+    }
+  ],
+  "panel_sections": {
+    "overview": [
+      "System / Source",
+      "Process / Controller",
+      "Guard / Authorization",
+      "Readiness verdict / Mode / Clock",
+      "Gates G0.6a / G0.7 / G0.8",
+      "Warnings / Data age / Evidence"
+    ],
+    "launch": [
+      "Candidate SELF_A/SELF_B / Request / Native apply",
+      "Launch path / Deployment / Portal / R0",
+      "Quote / Simulation / Economics",
+      "DRY1-DRY6 / PREPARE / Requalification",
+      "V5 contract / Guard / Hash bindings",
+      "Budget / Reservations / Nonces",
+      "Attempt / Builder plan",
+      "Readiness run / Checks / Evidence"
+    ],
+    "monitoring": [
+      "Sources / Ingress",
+      "Venues / Source x Venue",
+      "P2P / Builder / Inclusion",
+      "G0.7 submission / Receipts",
+      "G0.8 acquisition / First external BUY",
+      "Chain / Canonical / Reorg",
+      "Producer timing / Reconciliation"
+    ],
+    "analytics": [
+      "Runs / Run identity",
+      "Capture / Coverage",
+      "Latencies / Samples",
+      "Competition / Race",
+      "Fees / Costs",
+      "Proven outcomes",
+      "Historical DRY / G0.8 reports",
+      "Evidence / Quality / Filters"
+    ],
+    "wallets": [
+      "Launcher",
+      "Buyer",
+      "Balances",
+      "Funding",
+      "Reserved / Budget / Spent",
+      "Nonces",
+      "Snapshots / Block / Age / Evidence"
+    ]
+  },
+  "native_bindings_rules": "Each census field resolves to exactly one rule: an explicit field list beats the longest matching prefix, which beats '*'. Rows inside a section keep the native schema order. EXCLUDED needs panel none.",
+  "native_bindings": [
+    {
+      "schemas": [
+        "darkbot.g07.readiness"
+      ],
+      "match": [
+        "status"
+      ],
+      "panel": "launch",
+      "section": 8,
+      "status": "IST_BUG",
+      "wire": "ReadinessStatus.verdict",
+      "topic": "bsc.status",
+      "reason": "native BLOCKED projected as STOP (AU-03/AU-04)"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.readiness"
+      ],
+      "match": [
+        "mode"
+      ],
+      "panel": "launch",
+      "section": 8,
+      "status": "SOLL_MISSING",
+      "wire": "additive typed ReadinessStatus field",
+      "topic": "bsc.status",
+      "reason": "G1 READ_ONLY_RPC/OFFLINE_ZERO_EGRESS not transported"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.readiness"
+      ],
+      "match": [
+        "observed_unix_ms"
+      ],
+      "panel": "launch",
+      "section": 8,
+      "status": "IST_CONNECTED",
+      "wire": "ReadinessStatus.evidence.observed_unix_s",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.readiness"
+      ],
+      "match": [
+        "live_authorized",
+        "contract_sha256"
+      ],
+      "panel": "launch",
+      "section": 8,
+      "status": "SOLL_MISSING",
+      "wire": "additive typed ReadinessStatus field",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.readiness"
+      ],
+      "match": "prefix:checks[].",
+      "panel": "launch",
+      "section": 8,
+      "status": "IST_CONNECTED",
+      "wire": "ReadinessStatus.checks (PublicField 'STATUS · detail')",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.self-launch-bundle-dry.import.v1",
+        "darkbot.g06a.self-launch-bundle-dry.v2"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 4,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.status",
+      "reason": "not in DryStatus.parameters"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.self-launch-bundle-dry.import.v1",
+        "darkbot.g06a.self-launch-bundle-dry.v2"
+      ],
+      "match": [
+        "transactions.gas_price_wei",
+        "transactions.buy_value_wei",
+        "transactions.launch_value_wei",
+        "transactions.launch_gas_limit",
+        "transactions.buy_gas_limit",
+        "transactions.local_expected_output",
+        "transactions.min_output",
+        "bundle_projection.send_head",
+        "dry_pass.all",
+        "dry_pass.zero_egress_structural"
+      ],
+      "panel": "launch",
+      "section": 4,
+      "status": "IST_CONNECTED",
+      "wire": "DryStatus.parameters / DryStatus.state",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.self-launch-bundle-dry.import.v1",
+        "darkbot.g06a.self-launch-bundle-dry.v2"
+      ],
+      "match": "prefix:budget.",
+      "panel": "launch",
+      "section": 6,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.self-launch-bundle-dry.import.v1",
+        "darkbot.g06a.self-launch-bundle-dry.v2"
+      ],
+      "match": [
+        "budget.worst_case_reserved_wei"
+      ],
+      "panel": "launch",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "DryStatus.parameters",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.self-launch-bundle-dry.import.v1",
+        "darkbot.g06a.self-launch-bundle-dry.v2"
+      ],
+      "match": [
+        "_provenance.observed_unix_ms"
+      ],
+      "panel": "launch",
+      "section": 4,
+      "status": "IST_CONNECTED",
+      "wire": "DryStatus.evidence.observed_unix_s",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 2,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "deployment/portal identity of the snapshot"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "portal_version"
+      ],
+      "panel": "launch",
+      "section": 2,
+      "status": "IST_CONNECTED",
+      "wire": "ReadinessStatus.portal_version_bound (fallback)",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "gas_price_wei",
+        "tax_on_bonding_curve_enabled"
+      ],
+      "panel": "launch",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": "prefix:native_quote_configuration.",
+      "panel": "launch",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": "prefix:protocol_fee_bps.",
+      "panel": "launch",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "launcher_address"
+      ],
+      "panel": "wallets",
+      "section": 1,
+      "status": "IST_CONNECTED",
+      "wire": "BscWalletsState.launcher_address",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "buyer_address"
+      ],
+      "panel": "wallets",
+      "section": 2,
+      "status": "IST_CONNECTED",
+      "wire": "BscWalletsState.buyer_address",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "launcher_balance_wei",
+        "buyer_balance_wei"
+      ],
+      "panel": "wallets",
+      "section": 3,
+      "status": "IST_CONNECTED",
+      "wire": "BscWalletsState.*_balance_wei",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": "prefix:wallet_qualification.",
+      "panel": "wallets",
+      "section": 4,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "wallet_qualification.launcher_required_worst_case_wei",
+        "wallet_qualification.buyer_required_worst_case_wei"
+      ],
+      "panel": "wallets",
+      "section": 4,
+      "status": "IST_CONNECTED",
+      "wire": "BscWalletsState.required_*_wei",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "wallet_qualification.combined_attempt_reserve_wei",
+        "wallet_qualification.proposal_max_attempt_reserve_wei"
+      ],
+      "panel": "wallets",
+      "section": 5,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "launcher_pending_nonce",
+        "buyer_pending_nonce"
+      ],
+      "panel": "wallets",
+      "section": 6,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "chain_id",
+        "latest_block_number"
+      ],
+      "panel": "wallets",
+      "section": 7,
+      "status": "IST_CONNECTED",
+      "wire": "BscWalletsState.chain_id / observed_block",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.preflight-readonly.v3"
+      ],
+      "match": [
+        "latest_block_hash",
+        "schema",
+        "network_actions",
+        "signed_tx_submitted",
+        "bundle_submitted",
+        "dependencies",
+        "_import.legacy_sha256",
+        "_import.legacy_path"
+      ],
+      "panel": "wallets",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
+        "darkbot.g06a.builder-floor-policy.v2"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
+        "darkbot.g06a.builder-floor-policy.v2"
+      ],
+      "match": [
+        "strictest_explicit_verified_floor_wei",
+        "stage1_signed_gas_price_policy_wei",
+        "blockrazor.explicit_minimum_bundle_gas_price_wei",
+        "fortyeightclub.explicit_minimum_bundle_gas_price_wei"
+      ],
+      "panel": "monitoring",
+      "section": 3,
+      "status": "IST_CONNECTED",
+      "wire": "BuilderStatus.floors",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
+        "darkbot.g06a.builder-floor-policy.v2"
+      ],
+      "match": [
+        "sources[].fetched_unix_ms"
+      ],
+      "panel": "monitoring",
+      "section": 3,
+      "status": "IST_CONNECTED",
+      "wire": "BuilderStatus.refresh_observed_unix_s (oldest source)",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
+        "darkbot.g06a.builder-floor-policy.v2"
+      ],
+      "match": [
+        "sources[].url"
+      ],
+      "panel": "monitoring",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.status",
+      "reason": "provider id only, never a URL"
+    },
+    {
+      "schemas": [
+        "darkbot.producer-witness-source.import.v1"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.producer-witness-source.import.v1"
+      ],
+      "match": [
+        "source_ready"
+      ],
+      "panel": "monitoring",
+      "section": 7,
+      "status": "IST_CONNECTED",
+      "wire": "WitnessStatus.source_ready",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v5"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 5,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v5"
+      ],
+      "match": "prefix:budget_wei.",
+      "panel": "launch",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v5"
+      ],
+      "match": "prefix:attempts.",
+      "panel": "launch",
+      "section": 7,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v5"
+      ],
+      "match": "prefix:bundle_bytes.",
+      "panel": "launch",
+      "section": 7,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v5"
+      ],
+      "match": "prefix:dry_pass.criteria[].",
+      "panel": "launch",
+      "section": 5,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "nested criteria are not projected"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v5"
+      ],
+      "match": [
+        "authorization.evidence_paths.dry_record",
+        "authorization.evidence_paths.preflight_record",
+        "authorization.evidence_paths.builder_policy_record",
+        "authorization.evidence_paths.producer_witness_source_record",
+        "authorization.evidence_paths.builder_requirements_refresh",
+        "authorization.evidence_paths.note",
+        "authorization.evidence_paths.local_simulation_record",
+        "authorization.evidence_paths.economics_record",
+        "authorization.evidence_paths.portal_upgrade_record",
+        "authorization.evidence_paths.launch_path_record"
+      ],
+      "panel": "launch",
+      "section": 5,
+      "status": "IST_BUG",
+      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "topic": "bsc.launch.state",
+      "reason": "path text is passed through without repo-relative enforcement"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.acceptance-contract.v3",
+        "darkbot.g07.acceptance-contract.v4"
+      ],
+      "match": "*",
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "superseded acceptance contract; V5 is the only active authority (historical bytes stay evidence, never shown as authority)"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 4,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state",
+      "reason": "G4-G7: only classification is projected"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": [
+        "classification"
+      ],
+      "panel": "monitoring",
+      "section": 4,
+      "status": "IST_CONNECTED",
+      "wire": "GateStatus(G0.7).state",
+      "topic": "bsc.status"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": [
+        "gate",
+        "attempt_id",
+        "next_required_gate",
+        "critical_rule",
+        "chain_id",
+        "portal"
+      ],
+      "panel": "launch",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:attempt.",
+      "panel": "launch",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "state_dir only as redacted status, never a local path (G7)"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": [
+        "attempt.spent_before_wei",
+        "attempt.reserved_worst_case_wei"
+      ],
+      "panel": "wallets",
+      "section": 5,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:wallets.",
+      "panel": "launch",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": [
+        "wallets.launcher_nonce",
+        "wallets.buyer_nonce"
+      ],
+      "panel": "wallets",
+      "section": 6,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.wallets.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:transactions.",
+      "panel": "launch",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": [
+        "transactions.salt"
+      ],
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "candidate salt: SECRET_NEVER_BROWSER"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:preflight[].",
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "embedded copy of the bound preflight; shown from its own record and bound via evidence_inputs.preflight_sha256"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:acceptance_contract.",
+      "panel": "launch",
+      "section": 5,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:evidence_inputs.",
+      "panel": "launch",
+      "section": 5,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:capture.",
+      "panel": "analytics",
+      "section": 2,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.mainnet-self-launch-buy.v4"
+      ],
+      "match": "prefix:timing.",
+      "panel": "monitoring",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 5,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": [
+        "ordering.canonical"
+      ],
+      "panel": "monitoring",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": "prefix:confirmation.",
+      "panel": "monitoring",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": "prefix:timing.",
+      "panel": "monitoring",
+      "section": 7,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": [
+        "ordering.successful_external_buys_between_count",
+        "ordering.successful_external_buys_between_hashes"
+      ],
+      "panel": "analytics",
+      "section": 4,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": "prefix:costs.",
+      "panel": "analytics",
+      "section": 5,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": "prefix:capture.",
+      "panel": "analytics",
+      "section": 2,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": "prefix:capture.chain_journal[].",
+      "panel": "analytics",
+      "section": 2,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state",
+      "reason": "nested journal rows are not projected"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-ordering.v5"
+      ],
+      "match": [
+        "capture.chain_journal_error"
+      ],
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "external error text; deliberately filtered by the projection"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.mainnet-acquisition-unresolved.v2"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 7,
+      "status": "IST_CONNECTED",
+      "wire": "BscMonitoringState.results (PublicField)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.chain-capture-session.v2"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 6,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.chain-block.v1",
+        "darkbot.g08.chain-transaction.v1",
+        "darkbot.g08.chain-receipt.v1"
+      ],
+      "match": "*",
+      "panel": "analytics",
+      "section": 8,
+      "status": "FUTURE_PHASE_BLOCKED",
+      "wire": "history/report query (F4), not a STATE frame",
+      "topic": "bsc history (F4)",
+      "reason": "per-block/transaction/receipt rows"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.chain-transaction.v1"
+      ],
+      "match": [
+        "input"
+      ],
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "raw calldata: BINARY_EXCLUDED"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.chain-receipt.v1"
+      ],
+      "match": [
+        "logs[].data"
+      ],
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "raw log data: BINARY_EXCLUDED"
+    },
+    {
+      "schemas": [
+        "darkbot.producer-execution-witness.v2"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state",
+      "reason": "needs an original producer witness; verifier exists"
+    },
+    {
+      "schemas": [
+        "darkbot.g08.producer-timing-verdict.v2"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 7,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.monitoring.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.builder-probe"
+      ],
+      "match": "*",
+      "panel": "monitoring",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.status",
+      "reason": "only the legacy probe.evidence.json time is read today"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 1,
+      "status": "SOLL_MISSING",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate"
+      ],
+      "match": [
+        "candidate_id",
+        "token",
+        "launcher",
+        "deployment.portal_version",
+        "deployment.portal_implementation",
+        "deployment.record_sha256",
+        "launch_calldata_sha256",
+        "salt_origin",
+        "evidence.dry_record_sha256",
+        "evidence.launch_tx_hash",
+        "evidence.buy_tx_hash",
+        "provenance",
+        "qualification",
+        "profile"
+      ],
+      "panel": "launch",
+      "section": 1,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.<profile>.* (PublicField)",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.selection"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 1,
+      "status": "SOLL_MISSING",
+      "wire": "BscLaunchState.runtime_fields candidate.selection.* (PublicField)",
+      "topic": "bsc.launch.state",
+      "reason": "G15"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.selection"
+      ],
+      "match": [
+        "generation",
+        "profile",
+        "candidate_id",
+        "activated_unix_ms"
+      ],
+      "panel": "launch",
+      "section": 1,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.selection.*",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.request"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 1,
+      "status": "SOLL_MISSING",
+      "wire": "BscLaunchState.runtime_fields candidate.request.*",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.request"
+      ],
+      "match": [
+        "request_id",
+        "profile",
+        "expected_generation"
+      ],
+      "panel": "launch",
+      "section": 1,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.request.*",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.request-result"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 1,
+      "status": "SOLL_MISSING",
+      "wire": "BscLaunchState.runtime_fields candidate.request.*",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.request-result"
+      ],
+      "match": [
+        "outcome",
+        "detail"
+      ],
+      "panel": "launch",
+      "section": 1,
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.request.state/detail",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.qualification"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 1,
+      "status": "SOLL_MISSING",
+      "wire": "BscLaunchState.runtime_fields candidate.<profile>.qualification",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.self-launch-candidate.qualification"
+      ],
+      "match": [
+        "portal_version"
+      ],
+      "panel": "launch",
+      "section": 1,
+      "status": "IST_CONNECTED",
+      "wire": "candidate.<profile>.qualification = QUALIFIED_FOR <portal_version>",
+      "topic": "bsc.launch.state"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.native-bnb-quote.v2"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "G10"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.economics-evm-crosscheck.import.v1",
+        "darkbot.g06a.economics-evm-crosscheck.v2"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "G12"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.economics-evm-crosscheck.import.v1",
+        "darkbot.g06a.economics-evm-crosscheck.v2"
+      ],
+      "match": [
+        "salt"
+      ],
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "raw salt: SECRET_NEVER_BROWSER (A frozen salt included; B never)"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.economics-evm-crosscheck.private.v1"
+      ],
+      "match": "*",
+      "panel": "none",
+      "section": 0,
+      "status": "EXCLUDED",
+      "wire": "none",
+      "topic": "none",
+      "reason": "private B economics record; field-level audit before any exposure, at most salt_commitment and identity (G12)"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.local-simulation.import.v1",
+        "darkbot.g06a.local-simulation.v2"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 3,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "G11"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.launch-path"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 2,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "G9"
+    },
+    {
+      "schemas": [
+        "darkbot.g07.portal-upgrade-scan.v2"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 2,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "G8 R0; chain/archive source only as provider id"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.requalification-status.v1"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 4,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "G21 DRY5/DRY6 checks"
+    },
+    {
+      "schemas": [
+        "darkbot.g06a.prepare-handoff"
+      ],
+      "match": "*",
+      "panel": "launch",
+      "section": 4,
+      "status": "SOLL_MISSING",
+      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "topic": "bsc.launch.state",
+      "reason": "D2/D3 PREPARE handoff"
     }
   ]
 }
