@@ -115,8 +115,8 @@ pub(super) struct ShadowOwner {
     fe04_held: Option<crate::execution::one_shot::Journal>,
     /// When the next settlement step is due (`None`: a read in flight, or nothing to settle).
     fe04_settle_due: Option<std::time::Instant>,
-    /// The capital the startup replay reserved for that attempt; released once, by its settlement.
-    fe04_reserved_capital: Option<u64>,
+    /// What Safety has still to book for that attempt (`None`: nothing, or booked).
+    fe04_unbooked: Option<fe04::Fe04Unbooked>,
     /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
     /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,

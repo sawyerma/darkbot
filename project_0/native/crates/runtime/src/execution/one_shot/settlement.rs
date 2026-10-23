@@ -3,7 +3,13 @@
 //! bound signature (`reconcile_observed`) or a strict non-landing proof (`reconcile_not_landed`);
 //! the realized i128 net PnL is booked exactly once as a journal transition (`Phase::Settled`).
 //! An incomplete bundle, an observation with unknown reasons, a missing proof or any delta without
-//! a conservative value (inventory whose exit is not proven) stays UNKNOWN: holds and HALT remain.
+//! a conservative value stays UNKNOWN: holds and HALT remain.
+//!
+//! Realized is only what left or reached the wallet as SOL (fees, tip, rent, protocol fee, SOL
+//! proceeds) and every token outflow (spent). A token inflow — collateral or surplus left in the
+//! wallet — is open inventory: marked at its conservative (lower-bound) value, unrealized, never
+//! realized net PnL, since no receipt is evidence of its exit (sale). The attempt's expected edge
+//! stays the intent's `conservative_net_usd_micro`.
 use super::{err, Intent, Journal, Phase, Receipt, Transition};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
@@ -11,6 +17,7 @@ use solana_commitment_config::CommitmentConfig;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The booked outcome of one attempt (USD micro where named so; lamports and base units else).
+/// Journal schema 4; earlier layouts read through `SettlementV3`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settlement {
     /// Some own transaction landed (false: a proven non-landing, nothing was paid).
@@ -23,7 +30,72 @@ pub struct Settlement {
     pub wallet_deltas: BTreeMap<String, i128>,
     /// The conservative USD-micro value of every non-zero delta.
     pub valuation: BTreeMap<String, i128>,
+    /// The SOL delta and every token outflow; never a token inflow.
     pub realized_net_usd_micro: i128,
+    /// Token inflows left in the wallet (base units, positive): open inventory.
+    pub open_inventory: BTreeMap<String, i128>,
+    /// Their conservative mark (≥ 0): unrealized until an exit is evidenced.
+    pub unrealized_inventory_usd_micro: i128,
+    /// The second whose UTC day the settlement is booked into, persisted with it: the running
+    /// owner and a restart book the same day. `None`: settled before schema 4 (booked into the
+    /// evaluation day, as then).
+    pub booked_unix_s: Option<u64>,
+}
+
+/// Schema ≤ 3 layout of `Settlement`: one net that included token inflows.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(super) struct SettlementV3 {
+    pub(super) landed: bool,
+    pub(super) landed_success: bool,
+    pub(super) fee_lamports: u64,
+    pub(super) wallet_deltas: BTreeMap<String, i128>,
+    pub(super) valuation: BTreeMap<String, i128>,
+    pub(super) realized_net_usd_micro: i128,
+}
+impl TryFrom<SettlementV3> for Settlement {
+    type Error = String;
+    /// Reclassified from its own deltas and valuation, as `compute` books today; the parts must
+    /// sum to the net it booked then (else the frame is damaged).
+    fn try_from(v: SettlementV3) -> Result<Self, String> {
+        let (realized, open, unrealized) = classify(&v.wallet_deltas, &v.valuation)?;
+        if realized.checked_add(unrealized) != Some(v.realized_net_usd_micro) {
+            return Err(err("SETTLEMENT_LEGACY_NET_MISMATCH"));
+        }
+        Ok(Self {
+            landed: v.landed,
+            landed_success: v.landed_success,
+            fee_lamports: v.fee_lamports,
+            wallet_deltas: v.wallet_deltas,
+            valuation: v.valuation,
+            realized_net_usd_micro: realized,
+            open_inventory: open,
+            unrealized_inventory_usd_micro: unrealized,
+            booked_unix_s: None,
+        })
+    }
+}
+
+/// Realized net (SOL and token outflows), open inventory (token inflows) and its mark.
+fn classify(
+    deltas: &BTreeMap<String, i128>,
+    valuation: &BTreeMap<String, i128>,
+) -> Result<(i128, BTreeMap<String, i128>, i128), String> {
+    let overflow = || err("SETTLEMENT_OVERFLOW");
+    let (mut realized, mut open, mut unrealized) = (0i128, BTreeMap::new(), 0i128);
+    for (asset, v) in valuation {
+        let d = deltas
+            .get(asset)
+            .copied()
+            .ok_or_else(|| format!("SETTLEMENT_VALUE_UNKNOWN:{asset}"))?;
+        if asset != "SOL" && d > 0 {
+            open.insert(asset.clone(), d);
+            unrealized = unrealized.checked_add(*v).ok_or_else(overflow)?;
+        } else {
+            realized = realized.checked_add(*v).ok_or_else(overflow)?;
+        }
+    }
+    Ok((realized, open, unrealized))
 }
 
 /// C12: a strict non-landing proof in the domain of blockhash validity, block height: a finalized
@@ -180,6 +252,8 @@ impl Journal {
                 success: o.success,
                 fee_lamports: Some(o.fee_lamports),
                 wallet_deltas: Some(deltas),
+                // The receipt is complete (every bound transaction, all deltas). It is no
+                // evidence of an inventory exit: token inflows stay open inventory (`classify`).
                 exit_complete: true,
             });
         }
@@ -230,6 +304,7 @@ impl Journal {
         &mut self,
         rpc: &RpcClient,
         value: &dyn Fn(&str, i128) -> Option<i128>,
+        now_unix_s: u64,
     ) -> Result<SettleStep, String> {
         let evidence = match self.settlement_job() {
             Some((intent, observed)) => fetch_settlement_evidence(rpc, &intent, &observed),
@@ -238,23 +313,25 @@ impl Journal {
                 proof: None,
             },
         };
-        self.apply_settlement_evidence(evidence, value)
+        self.apply_settlement_evidence(evidence, value, now_unix_s)
     }
 
     /// FE-04/C3: applies the worker's evidence to the attempt. New observations are durable
     /// (only when something changed); every bound signature observed finalized without unknown
     /// reasons ⇒ reconcile and book (`value`); nothing observed and a strict non-landing proof
     /// ⇒ finalized and booked with nothing paid; anything partial or unproven stays UNKNOWN with
-    /// its reasons (holds retained). Idempotent across steps and restarts.
+    /// its reasons (holds retained). Idempotent across steps and restarts. A settlement made now
+    /// is booked at `now_unix_s`.
     pub fn apply_settlement_evidence(
         &mut self,
         evidence: SettlementEvidence,
         value: &dyn Fn(&str, i128) -> Option<i128>,
+        now_unix_s: u64,
     ) -> Result<SettleStep, String> {
         let mut saved = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
         match &saved.phase {
             Phase::Settled(done) => return Ok(SettleStep::Settled(done.clone())),
-            Phase::HaltFinalized => return self.settle(value).map(SettleStep::Settled),
+            Phase::HaltFinalized => return self.settle(value, now_unix_s).map(SettleStep::Settled),
             Phase::Reserved => return Ok(SettleStep::Unknown(vec![err("NOT_HANDED_OFF")])),
             Phase::HandoffUnknown => {}
         }
@@ -282,13 +359,13 @@ impl Journal {
         }
         if complete && reasons.is_empty() {
             self.reconcile_observed()?;
-            return self.settle(value).map(SettleStep::Settled);
+            return self.settle(value, now_unix_s).map(SettleStep::Settled);
         }
         if none {
             match evidence.proof {
                 Some(Ok(proof)) => {
                     self.reconcile_not_landed(&proof)?;
-                    return self.settle(value).map(SettleStep::Settled);
+                    return self.settle(value, now_unix_s).map(SettleStep::Settled);
                 }
                 Some(Err(reason)) => reasons.push(reason),
                 None => reasons.push(err("NON_LANDING_NOT_ATTEMPTED")),
@@ -297,12 +374,13 @@ impl Journal {
         Ok(SettleStep::Unknown(reasons))
     }
 
-    /// Books the realized net PnL of a finalized attempt exactly once. `value(asset, delta)` is
-    /// the conservative USD-micro value of a signed delta (`None`: not valued, e.g. inventory
-    /// without a proven exit); a booked settlement is returned unchanged, never booked twice.
+    /// Books the outcome of a finalized attempt exactly once, at `booked_unix_s` (persisted: its
+    /// UTC booking day). `value(asset, delta)` is the conservative USD-micro value of a signed
+    /// delta (`None`: not valued); a booked settlement is returned unchanged, never booked twice.
     pub fn settle(
         &mut self,
         value: &dyn Fn(&str, i128) -> Option<i128>,
+        booked_unix_s: u64,
     ) -> Result<Settlement, String> {
         let s = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
         let receipts = match &s.phase {
@@ -310,7 +388,7 @@ impl Journal {
             Phase::HaltFinalized => s.finalized.clone().ok_or_else(|| err("NOT_FINALIZED"))?,
             _ => return Err(err("NOT_FINALIZED_HOLD_RETAINED")),
         };
-        let settlement = compute(&receipts, value)?;
+        let settlement = compute(&receipts, value, booked_unix_s)?;
         let mut next = s;
         next.phase = Phase::Settled(settlement.clone());
         self.persist(next, Transition::Settle)?;
@@ -321,6 +399,7 @@ impl Journal {
 fn compute(
     receipts: &[Receipt],
     value: &dyn Fn(&str, i128) -> Option<i128>,
+    booked_unix_s: u64,
 ) -> Result<Settlement, String> {
     let overflow = || err("SETTLEMENT_OVERFLOW");
     let mut deltas: BTreeMap<String, i128> = BTreeMap::new();
@@ -342,22 +421,24 @@ fn compute(
         }
     }
     let mut valuation = BTreeMap::new();
-    let mut net: i128 = 0;
     for (asset, d) in deltas.iter().filter(|(_, d)| **d != 0) {
         let v = value(asset, *d).ok_or_else(|| format!("SETTLEMENT_VALUE_UNKNOWN:{asset}"))?;
         if v.signum() * d.signum() < 0 {
             return Err(format!("SETTLEMENT_VALUE_SIGN:{asset}"));
         }
-        net = net.checked_add(v).ok_or_else(overflow)?;
         valuation.insert(asset.clone(), v);
     }
+    let (realized, open_inventory, unrealized) = classify(&deltas, &valuation)?;
     Ok(Settlement {
         landed: !receipts.is_empty(),
         landed_success: !receipts.is_empty() && receipts.iter().all(|r| r.success),
         fee_lamports: fee,
         wallet_deltas: deltas,
         valuation,
-        realized_net_usd_micro: net,
+        realized_net_usd_micro: realized,
+        open_inventory,
+        unrealized_inventory_usd_micro: unrealized,
+        booked_unix_s: Some(booked_unix_s),
     })
 }
 
@@ -409,6 +490,9 @@ mod tests {
         j.persist(s, Transition::Observe).unwrap();
     }
 
+    /// The booking second of the tests' settlements.
+    const BOOKED: u64 = 1_000;
+
     /// USD micro: 1 lamport = 0.1, 1 token base unit = 1 (positive and negative alike here).
     fn value(asset: &str, d: i128) -> Option<i128> {
         match asset {
@@ -426,20 +510,28 @@ mod tests {
         let (s1, s2) = (&i.signatures[0], &i.signatures[1]);
         observe(&mut j, s1, true, -5_000, Some(("MINT", -1_000)));
         observe(&mut j, s2, true, -15_000, Some(("MINT", 1_600)));
-        assert_eq!(j.settle(&value).unwrap_err(), "NOT_FINALIZED_HOLD_RETAINED");
+        assert_eq!(
+            j.settle(&value, BOOKED).unwrap_err(),
+            "NOT_FINALIZED_HOLD_RETAINED"
+        );
         j.reconcile_observed().unwrap();
-        let s = j.settle(&value).unwrap();
+        let s = j.settle(&value, BOOKED).unwrap();
         assert!(s.landed && s.landed_success);
         assert_eq!(s.fee_lamports, 10_000);
         assert_eq!(s.wallet_deltas["SOL"], -20_000);
         assert_eq!(s.wallet_deltas["MINT"], 600);
-        assert_eq!(s.realized_net_usd_micro, 600 - 2_000);
+        // The net token inflow is open inventory, not realized.
+        assert_eq!(s.realized_net_usd_micro, -2_000);
+        assert_eq!(
+            (s.open_inventory["MINT"], s.unrealized_inventory_usd_micro),
+            (600, 600)
+        );
         assert!(j.active_hold().is_none() && j.holds().is_empty());
         // Idempotent: the same settlement, no second booking; after a restart as well.
-        assert_eq!(j.settle(&|_, _| None).unwrap(), s);
+        assert_eq!(j.settle(&|_, _| None, BOOKED).unwrap(), s);
         drop(j);
         let mut reopened = Journal::open(&path, &i.wallet).unwrap();
-        assert_eq!(reopened.settle(&|_, _| None).unwrap(), s);
+        assert_eq!(reopened.settle(&|_, _| None, BOOKED).unwrap(), s);
         assert!(
             reopened.reconcile_observed().is_err(),
             "no second finalization"
@@ -453,7 +545,7 @@ mod tests {
         let (path, mut j, i) = handed_off(1);
         observe(&mut j, &i.signatures[0], false, -5_000, Some(("MINT", 0)));
         j.reconcile_observed().unwrap();
-        let s = j.settle(&value).unwrap();
+        let s = j.settle(&value, BOOKED).unwrap();
         assert!(s.landed && !s.landed_success);
         assert_eq!(s.realized_net_usd_micro, -500);
         fs::remove_dir_all(path).unwrap();
@@ -484,14 +576,14 @@ mod tests {
         observe(&mut j, s1, true, -5_000, Some(("OTHER", 10)));
         j.reconcile_observed().unwrap();
         assert_eq!(
-            j.settle(&value).unwrap_err(),
+            j.settle(&value, BOOKED).unwrap_err(),
             "SETTLEMENT_VALUE_UNKNOWN:OTHER",
             "inventory without a proven exit"
         );
         assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HaltFinalized);
         let wrong_sign = |_: &str, d: i128| Some(-d);
         assert!(j
-            .settle(&wrong_sign)
+            .settle(&wrong_sign, BOOKED)
             .unwrap_err()
             .starts_with("SETTLEMENT_VALUE_SIGN"));
         fs::remove_dir_all(path).unwrap();
@@ -522,7 +614,10 @@ mod tests {
             "duplicated receipt event"
         );
         assert!(j.active_hold().is_some_and(|h| h.unknown_outcome));
-        assert_eq!(j.settle(&value).unwrap_err(), "NOT_FINALIZED_HOLD_RETAINED");
+        assert_eq!(
+            j.settle(&value, BOOKED).unwrap_err(),
+            "NOT_FINALIZED_HOLD_RETAINED"
+        );
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -560,7 +655,7 @@ mod tests {
         j.saved = saved;
         j.reconcile_not_landed(&proof(expiry + 1, i.state_slot, all))
             .unwrap();
-        let s = j.settle(&value).unwrap();
+        let s = j.settle(&value, BOOKED).unwrap();
         assert_eq!(
             (s.landed, s.realized_net_usd_micro, s.fee_lamports),
             (false, 0, 0)
@@ -741,14 +836,17 @@ mod tests {
             wallet_deltas: Default::default(),
             valuation: Default::default(),
             realized_net_usd_micro: 0,
+            open_inventory: Default::default(),
+            unrealized_inventory_usd_micro: 0,
+            booked_unix_s: Some(BOOKED),
         };
         assert_eq!(
-            j.settle_step(&client, &value),
+            j.settle_step(&client, &value, BOOKED),
             Ok(SettleStep::Settled(none.clone()))
         );
         assert!(j.active_hold().is_none());
         assert_eq!(
-            j.settle_step(&client, &value),
+            j.settle_step(&client, &value, BOOKED),
             Ok(SettleStep::Settled(none))
         );
 
@@ -764,7 +862,7 @@ mod tests {
             ("minimumLedgerSlot", json!(0)),
             statuses(Value::Null),
         ]);
-        let SettleStep::Unknown(reasons) = k.settle_step(&client, &value).unwrap() else {
+        let SettleStep::Unknown(reasons) = k.settle_step(&client, &value, BOOKED).unwrap() else {
             panic!("still waiting");
         };
         assert!(
@@ -792,7 +890,7 @@ mod tests {
                 "preTokenBalances": [], "postTokenBalances": [],
                 "loadedAddresses": {"writable": [], "readonly": []}}});
         let (client, _) = rpc(vec![("getTransaction", tx)]);
-        let SettleStep::Settled(s) = l.settle_step(&client, &value).unwrap() else {
+        let SettleStep::Settled(s) = l.settle_step(&client, &value, BOOKED).unwrap() else {
             panic!("landed");
         };
         assert!(s.landed && s.landed_success);
@@ -801,6 +899,36 @@ mod tests {
         assert!(l.active_hold().is_none());
         for p in [path, path2, path3] {
             fs::remove_dir_all(p).unwrap();
+        }
+    }
+
+    /// C3: realized is the SOL delta and every token outflow; a token inflow (collateral or
+    /// surplus left in the wallet) is open inventory at its conservative mark — never realized,
+    /// whatever its value; the booking second is persisted with the settlement.
+    #[test]
+    fn c3_token_inflow_is_open_inventory_never_realized() {
+        for (mint, realized, open) in [(1_000, -500, Some(1_000)), (-1_000, -1_500, None)] {
+            let (path, mut j, i) = handed_off(1);
+            observe(&mut j, &i.signatures[0], true, -5_000, Some(("MINT", mint)));
+            j.reconcile_observed().unwrap();
+            let s = j.settle(&value, BOOKED).unwrap();
+            assert_eq!(s.realized_net_usd_micro, realized, "{mint}");
+            assert_eq!(s.open_inventory.get("MINT").copied(), open);
+            assert_eq!(s.unrealized_inventory_usd_micro, open.unwrap_or(0));
+            assert_eq!(s.booked_unix_s, Some(BOOKED));
+            drop(j);
+            let reopened = Journal::open(&path, &i.wallet).unwrap();
+            let replay = reopened.safety_replay().unwrap().settled.unwrap();
+            assert_eq!(
+                (
+                    replay.unix_s,
+                    replay.realized_net_usd_micro,
+                    replay.open_inventory_usd_micro
+                ),
+                (BOOKED, realized, open.unwrap_or(0))
+            );
+            drop(reopened);
+            fs::remove_dir_all(path).unwrap();
         }
     }
 

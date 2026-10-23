@@ -1,16 +1,48 @@
 //! FE-04/C3: settlement of the durable FE-04 attempt in the running owner — the wallet journal is
-//! the one financial record. The settlement worker reads (finalized receipts or the strict
-//! non-landing proof) off the owner; the owner applies the evidence to the held journal, values
-//! every wallet delta conservatively from canonical state (a gain at the low-biased, a loss at the
-//! high-biased price), books a settled attempt into Safety exactly once (the capital the startup
-//! replay reserved is released once; an attempt finalized before the restart reserved none and
-//! books its day only; one settled before was booked by the replay; the one-shot HALT stays) and
-//! rebuilds the reservation book from the journal. UNKNOWN keeps every hold and is read again
-//! after `FE04_SETTLE_RETRY`; a finalized attempt whose valuation is still unknown is settled
-//! again (locally, no RPC) after the same wait.
+//! the one financial record (the RAM P8 reconcile path is telemetry only). The settlement worker
+//! reads (finalized receipts or the strict non-landing proof) off the owner; the owner applies the
+//! evidence to the held journal, values every wallet delta conservatively from canonical state (a
+//! gain at the low-biased, a loss at the high-biased price) and books the step that settles the
+//! attempt into Safety exactly once, as a restart replays it (`book_settlement`). Only a
+//! successful booking rebuilds the reservation book from the journal; a refused booking (ledger
+//! violation: Safety halts, applies nothing) keeps every hold and the capital to release, the
+//! settlement stays in the journal for the restart replay. UNKNOWN keeps every hold and is read
+//! again after `FE04_SETTLE_RETRY`; a finalized attempt whose valuation is still unknown is
+//! settled again (locally, no RPC) after the same wait. The one-shot HALT stays.
 use super::*;
-use crate::execution::one_shot::settlement::{conservative_value, SettleStep};
+use crate::execution::one_shot::settlement::{conservative_value, SettleStep, Settlement};
 use crate::orchestration::remote_workers::Fe04SettlementWork;
+use darkbot_project0::safety::{LedgerViolation, SettledAttempt};
+
+/// What Safety has still to book for the held attempt: the capital the startup replay reserved
+/// (`None`: finalized before the restart, none was reserved).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Fe04Unbooked {
+    pub(super) reserved_capital: Option<u64>,
+}
+
+/// FE-04/C3: books a settled attempt into Safety the way a restart replays it — the realized net
+/// and the outcome into the persisted booking day, the open inventory as held inventory — and
+/// releases the capital the startup replay reserved (none reserved: the replay booking itself).
+/// One checked transaction: a violation halts Safety and applies nothing.
+pub(super) fn book_settlement(
+    safety: &mut Safety,
+    unbooked: Fe04Unbooked,
+    s: &Settlement,
+    settled: SettledAttempt,
+) -> Result<(), LedgerViolation> {
+    match unbooked.reserved_capital {
+        Some(capital) => safety.record_outcome(
+            settled.unix_s,
+            s.landed_success,
+            Some(s.realized_net_usd_micro),
+            capital,
+            s.unrealized_inventory_usd_micro,
+            0,
+        ),
+        None => safety.restore_attempt(settled.unix_s, None, Some(settled)),
+    }
+}
 
 /// Wait between two settlement reads of a still UNKNOWN attempt.
 pub(super) const FE04_SETTLE_RETRY: Duration = Duration::from_secs(10);
@@ -57,12 +89,18 @@ impl ShadowOwner {
         &mut self,
         evidence: crate::execution::one_shot::settlement::SettlementEvidence,
     ) {
-        // Prices at the canonical chain clock (none: every price is unknown); the Safety day by
-        // the wall clock, as every other outcome booking.
+        // Prices at the canonical chain clock (none: every price is unknown); the booking second
+        // by the wall clock (unreadable: no step, the attempt is read again).
         let clock = chain_clock(&self.st).ok();
         let (price_s, slot) = clock.map_or((0, 0), |c| (c.unix_s() as i64, c.slot));
-        let now_s = wall_unix_s().unwrap_or(0);
-        // Booked by the startup replay already (a settled journal replays into its day).
+        let Ok(now_s) = wall_unix_s() else {
+            owner_log!(
+                self,
+                "fe04_settlement: wall clock unavailable; holds retained"
+            );
+            return;
+        };
+        // Settled by an earlier step: booked then (or refused then, retained for the restart).
         let settled_before = self
             .fe04_held
             .as_ref()
@@ -123,54 +161,48 @@ impl ShadowOwner {
             };
             let value = |asset: &str, delta: i128| conservative_value(&low, &high, asset, delta);
             match self.fe04_held.as_mut() {
-                Some(journal) => journal.apply_settlement_evidence(evidence, &value),
+                Some(journal) => journal.apply_settlement_evidence(evidence, &value, now_s),
                 None => return,
             }
         };
         match step {
+            Ok(SettleStep::Settled(_)) if settled_before => {}
             Ok(SettleStep::Settled(s)) => {
-                // Inventory the attempt left in the wallet: its token deltas' conservative value.
-                let inventory: i128 = s
-                    .valuation
-                    .iter()
-                    .filter(|(asset, _)| asset.as_str() != "SOL")
-                    .map(|(_, v)| *v)
-                    .sum();
-                let booked = match self.fe04_reserved_capital.take() {
-                    Some(capital) => self.safety.record_outcome(
-                        now_s,
-                        s.landed_success,
-                        Some(s.realized_net_usd_micro),
-                        capital,
-                        inventory,
-                        0,
-                    ),
-                    // Finalized before the restart: no capital was reserved, the day is booked.
-                    None if !settled_before => self.safety.restore_attempt(
-                        now_s,
-                        None,
-                        self.fe04_held
-                            .as_ref()
-                            .and_then(|j| j.safety_replay())
-                            .and_then(|r| r.settled),
-                    ),
-                    None => Ok(()),
+                let (Some(unbooked), Some(settled)) = (
+                    self.fe04_unbooked,
+                    self.fe04_held
+                        .as_ref()
+                        .and_then(|j| j.safety_replay())
+                        .and_then(|r| r.settled),
+                ) else {
+                    return;
                 };
-                if let Some(j) = self.fe04_held.as_ref() {
-                    self.reservations =
-                        crate::execution::reservation::WalletReservations::rebuild(j.active_hold())
+                let booked = book_settlement(&mut self.safety, unbooked, &s, settled);
+                if booked.is_ok() {
+                    self.fe04_unbooked = None;
+                    if let Some(j) = self.fe04_held.as_ref() {
+                        self.reservations =
+                            crate::execution::reservation::WalletReservations::rebuild(
+                                j.active_hold(),
+                            )
                             .unwrap_or_else(|_| {
                                 crate::execution::reservation::WalletReservations::unreadable()
                             });
+                    }
                 }
                 owner_log!(
                     self,
-                    "fe04_settlement: settled landed={} landed_success={} fee_lamports={} realized_net_usd_micro={} safety={}",
+                    "fe04_settlement: settled landed={} landed_success={} fee_lamports={} realized_net_usd_micro={} unrealized_inventory_usd_micro={} booked_unix_s={} safety={}",
                     s.landed,
                     s.landed_success,
                     s.fee_lamports,
                     s.realized_net_usd_micro,
-                    booked.map_or_else(|v| v.code().to_string(), |()| "booked".into())
+                    s.unrealized_inventory_usd_micro,
+                    settled.unix_s,
+                    booked.map_or_else(
+                        |v| format!("{}; holds retained, replayed at restart", v.code()),
+                        |()| "booked".into()
+                    )
                 );
             }
             Ok(SettleStep::Unknown(reasons)) => owner_log!(

@@ -101,7 +101,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_refreshed: std::time::Instant::now(),
         fe04_held: None,
         fe04_settle_due: None,
-        fe04_reserved_capital: None,
+        fe04_unbooked: None,
         inventory_targets: Default::default(),
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             8,
@@ -1649,7 +1649,7 @@ fn fe04_fixture(
     f.owner.fe04_journal = start.dir;
     f.owner.fe04_held = start.held;
     f.owner.fe04_settle_due = start.settle_due;
-    f.owner.fe04_reserved_capital = start.reserved_capital;
+    f.owner.fe04_unbooked = start.unbooked;
     (f, intent, proof)
 }
 
@@ -1725,7 +1725,7 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     .start(&mut safety, wall_unix_s().unwrap())
     .unwrap();
     assert!(again.book.is_empty() && again.settle_due.is_none());
-    assert_eq!((again.reserved_capital, safety.capital_in_use()), (None, 0));
+    assert_eq!((again.unbooked, safety.capital_in_use()), (None, 0));
     cleanup(f);
 }
 
@@ -1780,4 +1780,231 @@ fn c3_owner_books_a_finalized_attempt_without_a_read() {
     run_until(&mut f, |o| o.fe04_settle_due.is_none());
     assert!(fe04_settled(&f.owner) && fe04_job(&f).is_none());
     cleanup(f);
+}
+
+/// C3 Safety booking refused: another path released the attempt's capital first, so the
+/// settlement's booking is a ledger violation. Safety halts and applies nothing; the owner keeps
+/// the hold, the capital to release and the booking itself; a repeated answer books nothing. The
+/// settlement stays in the journal: a restart books exactly it (day, no capital, empty book).
+#[test]
+fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
+    use crate::execution::one_shot::settlement::SettlementEvidence;
+    let (mut f, intent, proof) = fe04_fixture("fe04_refused", "unknown");
+    f.owner
+        .safety
+        .release_without_outcome(intent.capital_usd_micro, 0)
+        .unwrap();
+    let day = (0, 0);
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    let evidence = SettlementEvidence {
+        observations: vec![],
+        proof: Some(Ok(proof)),
+    };
+    fe04_answer(&f, evidence.clone());
+    run_until(&mut f, fe04_settled);
+    let retained = |o: &ShadowOwner| {
+        (
+            o.fe04_unbooked,
+            o.reservations.held("SOL"),
+            (o.safety.day().realized_pnl, o.safety.day().failed_attempts),
+            o.safety.halted().is_some(),
+        )
+    };
+    let expected = (
+        Some(super::fe04::Fe04Unbooked {
+            reserved_capital: Some(intent.capital_usd_micro),
+        }),
+        intent.holds["SOL"],
+        day,
+        true,
+    );
+    assert_eq!(retained(&f.owner), expected);
+    fe04_answer(&f, evidence);
+    run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+    assert_eq!(
+        retained(&f.owner),
+        expected,
+        "a repeated answer books nothing"
+    );
+    // Restart: the journal's settlement is booked by the replay.
+    f.owner.fe04_held = None;
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    let dir_s = f.dir.join("fe04").display().to_string();
+    let now = wall_unix_s().unwrap();
+    let again = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &f.owner.liquidator,
+    )
+    .unwrap()
+    .start(&mut safety, now)
+    .unwrap();
+    assert!(again.book.is_empty() && again.unbooked.is_none());
+    assert_eq!(safety.capital_in_use(), 0);
+    assert_eq!(
+        (safety.day().realized_pnl, safety.day().failed_attempts),
+        (0, 1)
+    );
+    cleanup(f);
+}
+
+/// C3/P8: a RAM reconcile result of the FE-04 attempt is landing telemetry only — Safety books
+/// nothing (capital, day, inventory unchanged); the journal settlement is the financial close.
+#[test]
+fn p8_ram_reconcile_is_telemetry_and_never_books_an_fe04_attempt() {
+    use crate::execution::pending::{PendingSubmission, ReconcileRecord, ReconcileResult};
+    use crate::orchestration::remote_workers::{ReconcileResultMessage, ReconcileWork};
+    let (mut f, intent, _) = fe04_fixture("fe04_ram", "unknown");
+    let ledger = |o: &ShadowOwner| {
+        (
+            o.safety.capital_in_use(),
+            o.safety.inventory_outstanding(),
+            o.safety.day(),
+        )
+    };
+    let before = ledger(&f.owner);
+    let signature: solana_sdk::signature::Signature = intent.signatures[0].parse().unwrap();
+    let d = f.results.as_ref().unwrap();
+    assert!(d
+        .reconcile
+        .try_push(ReconcileResultMessage {
+            work: ReconcileWork {
+                submission: PendingSubmission {
+                    signature,
+                    signatures: vec![signature],
+                    bundle_id: None,
+                    path: darkbot_solana::submit::SubmissionPath::Rpc,
+                    exposure: intent.capital_usd_micro,
+                    submitted_unix_s: 0,
+                    tip: None,
+                },
+                next_check_unix_s: 0,
+            },
+            result: Ok(Some(ReconcileResult {
+                record: ReconcileRecord {
+                    signature: signature.to_string(),
+                    path: "RPC".into(),
+                    outcome: "LANDED_FAILED".into(),
+                    landed_slot: Some(70),
+                    fee_lamports: Some(5_000),
+                    compute_units_consumed: None,
+                    paid_tip_lamports: None,
+                    network_and_tip_lamports: Some(5_000),
+                    error: None,
+                    exposure_released: intent.capital_usd_micro,
+                    pnl_complete: false,
+                },
+                landed_success: false,
+                realized_pnl: Some(-500),
+            })),
+        })
+        .is_ok());
+    run_until(&mut f, |o| !o.remote.reconcile_results.pending());
+    assert_eq!(ledger(&f.owner), before);
+    assert!(f.owner.pending.is_empty(), "the telemetry record is final");
+    cleanup(f);
+}
+
+/// C3 UTC day: an attempt evaluated long before (1970) lands with a token inflow and is settled
+/// near midnight. The running owner books it at the persisted booking second; a restart replays
+/// the same ledger — day PnL/outcome, open inventory, no capital — before and after midnight.
+#[test]
+fn c3_settlement_day_is_the_same_in_the_run_and_after_a_restart_across_midnight() {
+    use crate::execution::one_shot::receipts::FinalizedObservation;
+    use crate::execution::one_shot::settlement::{SettleStep, SettlementEvidence};
+    let midnight = 20_750 * 86_400;
+    let value = |asset: &str, d: i128| match asset {
+        "SOL" => Some(d / 10),
+        "MINT" => Some(d),
+        _ => None,
+    };
+    for (n, (booked, restart)) in [
+        (midnight - 1, midnight - 1),
+        (midnight - 1, midnight + 30),
+        (midnight + 1, midnight + 30),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dir = std::env::temp_dir().join(format!("p0_c3_day_{}_{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let wallet = Pubkey::new_unique();
+        let intent = crate::execution::one_shot::test_unknown_attempt(&dir, &wallet.to_string());
+        let start = |safety: &mut Safety, now| {
+            let dir_s = dir.display().to_string();
+            setup::reservation_book(
+                &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+                &wallet,
+            )
+            .unwrap()
+            .start(safety, now)
+            .unwrap()
+        };
+        // The run: startup replay, then the settling step at `booked`.
+        let mut live = Safety::new(e2e_limits(), Allow::default(), false);
+        let mut run = start(&mut live, booked - 600);
+        let SettleStep::Settled(s) = run
+            .held
+            .as_mut()
+            .unwrap()
+            .apply_settlement_evidence(
+                SettlementEvidence {
+                    observations: vec![(
+                        intent.signatures[0].clone(),
+                        Ok(FinalizedObservation {
+                            signature: intent.signatures[0].clone(),
+                            slot: 70,
+                            success: true,
+                            fee_lamports: 5_000,
+                            wallet_sol_delta_lamports: -5_000,
+                            wallet_token_deltas: Some([("MINT".to_string(), 1_000)].into()),
+                            unknown_reasons: vec![],
+                        }),
+                    )],
+                    proof: None,
+                },
+                &value,
+                booked,
+            )
+            .unwrap()
+        else {
+            panic!("settled");
+        };
+        let settled = run
+            .held
+            .as_ref()
+            .unwrap()
+            .safety_replay()
+            .unwrap()
+            .settled
+            .unwrap();
+        super::fe04::book_settlement(&mut live, run.unbooked.unwrap(), &s, settled).unwrap();
+        // A later operation of the run at `restart` (rolls its day).
+        let _ = live.admit_loss(restart, 0);
+        drop(run);
+        // The restart at `restart`.
+        let mut restarted = Safety::new(e2e_limits(), Allow::default(), false);
+        let again = start(&mut restarted, restart);
+        assert!(again.unbooked.is_none() && again.book.is_empty());
+        let ledger = |s: &Safety| (s.capital_in_use(), s.inventory_outstanding(), s.day());
+        assert_eq!(
+            ledger(&restarted),
+            ledger(&live),
+            "booked {booked}, restart {restart}"
+        );
+        assert_eq!(
+            live.inventory_outstanding(),
+            1_000,
+            "open inventory, unrealized"
+        );
+        assert_eq!(
+            live.day().realized_pnl,
+            if booked / 86_400 == restart / 86_400 {
+                -500
+            } else {
+                0
+            }
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

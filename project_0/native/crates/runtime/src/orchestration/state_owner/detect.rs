@@ -589,7 +589,8 @@ impl ShadowOwner {
                     now,
                 );
             }
-            // [FIX-18][FIX-23] Submitted und AmbiguousSubmission landen beide in der Reconciliation.
+            // [FIX-18][FIX-23] Submitted und AmbiguousSubmission landen beide in der Reconciliation
+            // (Telemetrie; finanzieller Abschluss: FE-04-Journal-Settlement).
             if let (Some(sig), Some(exp)) = (rec.signature.as_deref(), rec.exposure) {
                 if let Ok(s) = sig.parse() {
                     let sigs = rec

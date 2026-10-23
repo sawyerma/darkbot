@@ -121,6 +121,7 @@ pub struct Fe04SettlementResult {
 #[cfg(all(test, feature = "crate_health"))]
 pub(crate) struct Detached {
     pub(crate) projection: Producer<ProjectionResultMessage>,
+    pub(crate) reconcile: Producer<ReconcileResultMessage>,
     pub(crate) fe04_jobs: Consumer<Fe04SettlementWork>,
     pub(crate) fe04_results: Producer<Fe04SettlementResult>,
     pub(crate) space: Wakeup,
@@ -498,6 +499,8 @@ impl RemoteWorkers {
         shutdown.ring_on_request(&space);
         let (projection_done_tx, projection_results) =
             result_queue("projection-rpc-results", capacity, wake, &space);
+        let (reconcile, reconcile_results) =
+            result_queue("reconcile-rpc-results", capacity, wake, &space);
         let (fe04_settlement_jobs, fe04_jobs) = bounded("fe04-settlement-jobs", 1);
         let (fe04_results, fe04_settlement_results) =
             result_queue("fe04-settlement-results", 1, wake, &space);
@@ -506,7 +509,7 @@ impl RemoteWorkers {
             winner_jobs: bounded("winner-rpc-jobs", capacity).0,
             winner_results: result_queue("winner-rpc-results", capacity, wake, &space).1,
             reconcile_jobs: bounded("reconcile-rpc-jobs", capacity).0,
-            reconcile_results: result_queue("reconcile-rpc-results", capacity, wake, &space).1,
+            reconcile_results,
             projection_jobs: bounded("projection-rpc-jobs", capacity).0,
             projection_results,
             oracle_price_projection_jobs: bounded("oracle-price-projection-rpc-jobs", capacity).0,
@@ -524,6 +527,7 @@ impl RemoteWorkers {
             workers,
             Detached {
                 projection: projection_done_tx,
+                reconcile,
                 fe04_jobs,
                 fe04_results,
                 space,

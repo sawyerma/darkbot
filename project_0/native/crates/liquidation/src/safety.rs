@@ -64,13 +64,16 @@ impl LedgerViolation {
     }
 }
 
-/// C3/B3: a settled one-shot as the safety layer replays it: when it was evaluated, its booked
-/// realized net (USD micro) and whether every transaction landed successfully.
+/// C3/B3: a settled one-shot as the safety layer books it, in the run and after a restart alike:
+/// the second whose UTC day it is booked into (the persisted booking time), its realized net (USD
+/// micro), whether every transaction landed successfully, and the conservative value of the open
+/// inventory it left in the wallet (unrealized, held whatever the day until an exit).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SettledAttempt {
     pub unix_s: u64,
     pub realized_net_usd_micro: i128,
     pub landed_success: bool,
+    pub open_inventory_usd_micro: i128,
 }
 
 /// The counters after releasing one attempt's reservation (computed before anything applies).
@@ -136,10 +139,11 @@ impl Safety {
     }
 
     /// B3: replays a durable one-shot attempt after a restart (the FE-04 journal is the only
-    /// store) — never released, never re-armed. A settled attempt (C3) books its realized net and
-    /// a failure into the day it was evaluated (if that is today) and halts as a consumed one-shot
-    /// (`LimitBreached`); any other attempt has no booked economics and halts `UnknownEconomics`,
-    /// and until it is finalized its capital and its attempt/position slot stay reserved.
+    /// store) — never released, never re-armed. A settled attempt (C3) holds its open inventory,
+    /// books its realized net and a failure into its booking day (if that is today) and halts as
+    /// a consumed one-shot (`LimitBreached`); any other attempt has no booked economics and halts
+    /// `UnknownEconomics`, and until it is finalized its capital and its attempt/position slot
+    /// stay reserved. One checked transaction: a violation applies nothing.
     #[must_use = "a ledger violation halts the safety layer; the caller must surface it"]
     pub fn restore_attempt(
         &mut self,
@@ -149,8 +153,23 @@ impl Safety {
     ) -> Result<(), LedgerViolation> {
         if let Some(s) = settled {
             self.halt(HaltReason::LimitBreached);
+            let inventory = self.violation(
+                i128::from(self.inventory_outstanding)
+                    .checked_add(s.open_inventory_usd_micro)
+                    .ok_or(LedgerViolation::InventoryOverflow)
+                    .and_then(|v| {
+                        u64::try_from(v).map_err(|_| {
+                            if v < 0 {
+                                LedgerViolation::InventoryNegative
+                            } else {
+                                LedgerViolation::InventoryOverflow
+                            }
+                        })
+                    }),
+            )?;
             self.roll_day(now_unix_s);
             if s.unix_s / 86_400 != self.day.day_index {
+                self.inventory_outstanding = inventory;
                 return Ok(());
             }
             let pnl = self.violation(
@@ -169,6 +188,7 @@ impl Safety {
                         .ok_or(LedgerViolation::CounterOverflow),
                 )?
             };
+            self.inventory_outstanding = inventory;
             self.day.realized_pnl = pnl;
             self.day.failed_attempts = failed;
             return Ok(());
@@ -474,6 +494,11 @@ impl Safety {
     pub fn capital_in_use(&self) -> u64 {
         self.capital_in_use
     }
+
+    /// Inventory held from finalized attempts (USD micro, conservative mark).
+    pub fn inventory_outstanding(&self) -> u64 {
+        self.inventory_outstanding
+    }
 }
 
 #[cfg(test)]
@@ -552,6 +577,7 @@ mod tests {
             unix_s: day + 5,
             realized_net_usd_micro: net,
             landed_success: ok,
+            open_inventory_usd_micro: 0,
         };
         let mut s = Safety::new(lim(), allow(), true);
         s.restore_attempt(day + 60, None, Some(settled(-30, false)))
@@ -590,6 +616,37 @@ mod tests {
             Err(LedgerViolation::PnlOverflow)
         );
         assert_eq!(ledger(&s).5, before.5, "nothing applied");
+    }
+
+    /// C3: a settled attempt's open inventory is held whatever its booking day (unrealized until
+    /// an exit); its PnL and outcome book only on that day; an overflow applies nothing.
+    #[test]
+    fn c3_settled_open_inventory_is_held_on_any_day() {
+        let day = 20_000 * 86_400;
+        let settled = |unix_s, inventory| SettledAttempt {
+            unix_s,
+            realized_net_usd_micro: -5,
+            landed_success: true,
+            open_inventory_usd_micro: inventory,
+        };
+        let mut s = Safety::new(lim(), allow(), true);
+        s.restore_attempt(day + 86_400, None, Some(settled(day, 40)))
+            .unwrap();
+        assert_eq!((s.inventory_outstanding(), s.day().realized_pnl), (40, 0));
+        let before = ledger(&s);
+        assert_eq!(
+            s.restore_attempt(
+                day + 86_400,
+                None,
+                Some(settled(day + 86_400, i128::from(u64::MAX)))
+            ),
+            Err(LedgerViolation::InventoryOverflow)
+        );
+        assert_eq!(
+            s.restore_attempt(day + 86_400, None, Some(settled(day + 86_400, -41))),
+            Err(LedgerViolation::InventoryNegative)
+        );
+        assert_eq!(ledger(&s), before, "nothing applied");
     }
 
     /// Every ledger counter and the day statistics of `s` (Q2 full-state comparisons).

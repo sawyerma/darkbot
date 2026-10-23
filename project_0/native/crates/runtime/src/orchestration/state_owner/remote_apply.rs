@@ -103,20 +103,10 @@ impl ShadowOwner {
                     return Err(format!("RECONCILE_CLOCK_UNAVAILABLE:{e}").into());
                 }
                 Ok(Some(r)) => {
-                    // Q2: a ledger violation has halted the safety layer and applied nothing;
-                    // the run ends fail-closed (like an unreadable reconcile clock).
-                    if let Err(v) = self.safety.record_outcome(
-                        worker_now_s,
-                        r.landed_success,
-                        r.realized_pnl,
-                        r.record.exposure_released,
-                        0,
-                        // B15: the shadow pipeline reserves no inventory hold (B1: no send).
-                        0,
-                    ) {
-                        self.pending.push(work);
-                        return Err(format!("SAFETY_LEDGER_INVARIANT:{}", v.code()).into());
-                    }
+                    // FE-04/C3: landing telemetry only. Every submission is an FE-04 attempt
+                    // (B1: the admission is the only send); its financial close — capital,
+                    // PnL, inventory, the day — is the wallet journal's settlement (`fe04.rs`),
+                    // never booked here as well.
                     self.evidence.emit(OwnerEvidence::Reconcile(r.record))?;
                 }
                 Ok(None) => {

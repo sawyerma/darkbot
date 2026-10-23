@@ -192,26 +192,73 @@ struct Saved {
     #[serde(default)]
     observations: BTreeMap<String, receipts::FinalizedObservation>,
 }
+/// Schema ≤ 3 layout of `Phase` (its settlement before the realized/unrealized split).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+enum PhaseV3 {
+    Reserved,
+    HandoffUnknown,
+    HaltFinalized,
+    Settled(settlement::SettlementV3),
+}
+impl TryFrom<PhaseV3> for Phase {
+    type Error = String;
+    fn try_from(v: PhaseV3) -> Result<Self, String> {
+        Ok(match v {
+            PhaseV3::Reserved => Phase::Reserved,
+            PhaseV3::HandoffUnknown => Phase::HandoffUnknown,
+            PhaseV3::HaltFinalized => Phase::HaltFinalized,
+            PhaseV3::Settled(s) => Phase::Settled(s.try_into()?),
+        })
+    }
+}
 /// Schema-2 layout of `Saved` (its intent without `last_valid_block_height`).
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Serialize))]
 struct SavedV2 {
     approval: Approval,
     intent: IntentV2,
-    phase: Phase,
+    phase: PhaseV3,
     finalized: Option<Vec<Receipt>>,
     observations: BTreeMap<String, receipts::FinalizedObservation>,
 }
-impl From<SavedV2> for Saved {
-    fn from(v: SavedV2) -> Self {
-        Self {
+impl TryFrom<SavedV2> for Saved {
+    type Error = String;
+    fn try_from(v: SavedV2) -> Result<Self, String> {
+        Ok(Self {
             approval: v.approval,
             intent: v.intent.into(),
-            phase: v.phase,
+            phase: v.phase.try_into()?,
             finalized: v.finalized,
             observations: v.observations,
-        }
+        })
     }
+}
+/// Schema-3 layout of `Saved` (C12 intent, settlement before the split).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV3 {
+    approval: Approval,
+    intent: Intent,
+    phase: PhaseV3,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+}
+impl TryFrom<SavedV3> for Saved {
+    type Error = String;
+    fn try_from(v: SavedV3) -> Result<Self, String> {
+        Ok(Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase.try_into()?,
+            finalized: v.finalized,
+            observations: v.observations,
+        })
+    }
+}
+/// An earlier layout that no longer converts (an overflowing settlement) is damaged data.
+fn earlier<T>(v: Result<T, String>) -> std::io::Result<T> {
+    v.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Receipt {
@@ -264,8 +311,8 @@ struct VersionRef<'a> {
     state: &'a Saved,
 }
 /// F2: one durable transition of the wallet automaton as a typed binary frame
-/// (`FE04_TRANSITION`, schema 3 since C12). Schema-2 and schema-1 JSON frames of older journals
-/// stay readable.
+/// (`FE04_TRANSITION`, schema 4 since the realized/unrealized settlement, schema 3 since C12).
+/// Schema-3, schema-2 and schema-1 JSON frames of older journals stay readable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Version {
@@ -278,16 +325,32 @@ struct VersionV2 {
     transition: Transition,
     state: SavedV2,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV3 {
+    transition: Transition,
+    state: SavedV3,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    const SCHEMA: u16 = 3;
+    const SCHEMA: u16 = 4;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == crate::analytics::payload::TYPED).then(|| {
-            crate::analytics::payload::decode_wire::<VersionV2>(bytes).map(|v| Self {
-                transition: v.transition,
-                state: v.state.into(),
-            })
-        })
+        use crate::analytics::payload::{decode_wire, TYPED};
+        match schema {
+            TYPED => Some(decode_wire::<VersionV2>(bytes).and_then(|v| {
+                Ok(Self {
+                    transition: v.transition,
+                    state: earlier(v.state.try_into())?,
+                })
+            })),
+            3 => Some(decode_wire::<VersionV3>(bytes).and_then(|v| {
+                Ok(Self {
+                    transition: v.transition,
+                    state: earlier(v.state.try_into())?,
+                })
+            })),
+            _ => None,
+        }
     }
 }
 /// F2: the import of a pre-binary JSON wallet journal as a typed frame (`FE04_LEGACY_IMPORT`,
@@ -303,16 +366,31 @@ struct LegacyImportV2 {
     legacy_sha256: String,
     state: SavedV2,
 }
+#[derive(Deserialize)]
+struct LegacyImportV3 {
+    legacy_sha256: String,
+    state: SavedV3,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 3;
+    const SCHEMA: u16 = 4;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == crate::analytics::payload::TYPED).then(|| {
-            crate::analytics::payload::decode_wire::<LegacyImportV2>(bytes).map(|v| Self {
-                legacy_sha256: v.legacy_sha256,
-                state: v.state.into(),
-            })
-        })
+        use crate::analytics::payload::{decode_wire, TYPED};
+        match schema {
+            TYPED => Some(decode_wire::<LegacyImportV2>(bytes).and_then(|v| {
+                Ok(Self {
+                    legacy_sha256: v.legacy_sha256,
+                    state: earlier(v.state.try_into())?,
+                })
+            })),
+            3 => Some(decode_wire::<LegacyImportV3>(bytes).and_then(|v| {
+                Ok(Self {
+                    legacy_sha256: v.legacy_sha256,
+                    state: earlier(v.state.try_into())?,
+                })
+            })),
+            _ => None,
+        }
     }
 }
 /// A wallet journal holds a handful of state versions; anything larger is not ours.
@@ -690,16 +768,21 @@ impl Journal {
             })
     }
     /// B3: what the safety layer replays after a restart — `None` without any attempt; with one,
-    /// the one-shot is consumed and its realized PnL is not booked (C3), so its HALT is sticky,
-    /// and until it is finalized it still binds its capital.
+    /// the one-shot is consumed, so its HALT is sticky; until it is finalized it still binds its
+    /// capital; once settled (C3) its booking — the persisted booking day (a settlement before
+    /// schema 4: the evaluation day), realized net, outcome and open inventory — is the same the
+    /// running owner booked.
     pub fn safety_replay(&self) -> Option<SafetyReplay> {
         self.saved.as_ref().map(|s| SafetyReplay {
             held_capital_usd_micro: (!s.phase.finalized()).then_some(s.intent.capital_usd_micro),
             settled: match &s.phase {
                 Phase::Settled(done) => Some(darkbot_project0::safety::SettledAttempt {
-                    unix_s: s.intent.evaluated_unix_ms / 1_000,
+                    unix_s: done
+                        .booked_unix_s
+                        .unwrap_or(s.intent.evaluated_unix_ms / 1_000),
                     realized_net_usd_micro: done.realized_net_usd_micro,
                     landed_success: done.landed_success,
+                    open_inventory_usd_micro: done.unrealized_inventory_usd_micro,
                 }),
                 _ => None,
             },
@@ -929,7 +1012,7 @@ mod tests {
                     holds: i.holds.clone(),
                     expected_wallet_assets: i.expected_wallet_assets.clone(),
                 },
-                phase: state.phase.clone(),
+                phase: PhaseV3::HaltFinalized,
                 finalized: state.finalized.clone(),
                 observations: state.observations.clone(),
             },
@@ -955,15 +1038,23 @@ mod tests {
             (back.transition, back.state),
             (Transition::Finalize, unknown_expiry)
         );
-        // Schema 3 (C12): the intent carries the blockhash expiry.
-        let version = Version {
-            transition: Transition::Finalize,
-            state: state.clone(),
+        // Schema 3 (C12): the intent carries the blockhash expiry; the mirror reproduces the
+        // pinned bytes, which read unchanged.
+        let v3 = |transition, phase| VersionV3 {
+            transition,
+            state: SavedV3 {
+                approval: state.approval.clone(),
+                intent: state.intent.clone(),
+                phase,
+                finalized: state.finalized.clone(),
+                observations: state.observations.clone(),
+            },
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
-        let back: Version =
-            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 3, &bytes).unwrap();
-        assert_eq!((back.transition, back.state), (Transition::Finalize, state));
+        let bytes = crate::analytics::payload::encode_wire(&v3(
+            Transition::Finalize,
+            PhaseV3::HaltFinalized,
+        ))
+        .unwrap();
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
             (
@@ -972,9 +1063,84 @@ mod tests {
             ),
             "FE04_TRANSITION schema-3 layout changed"
         );
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 3, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::Finalize, state.clone())
+        );
+        // Schema 4: an unsettled phase encodes as in schema 3.
+        let version = Version {
+            transition: Transition::Finalize,
+            state: state.clone(),
+        };
+        assert_eq!(crate::analytics::payload::encode(&version).unwrap(), bytes);
+        // A schema-3 settlement (one net incl. the token inflow) reads reclassified: realized the
+        // SOL part, the inflow open inventory, no booking second; parts not summing to its net
+        // are damaged data.
+        let legacy = |net| settlement::SettlementV3 {
+            landed: true,
+            landed_success: true,
+            fee_lamports: 5_000,
+            wallet_deltas: [("SOL".to_string(), -5_000), ("MINT".to_string(), 1_000)].into(),
+            valuation: [("SOL".to_string(), -500), ("MINT".to_string(), 900)].into(),
+            realized_net_usd_micro: net,
+        };
+        let settled = settlement::Settlement {
+            landed: true,
+            landed_success: true,
+            fee_lamports: 5_000,
+            wallet_deltas: [("SOL".to_string(), -5_000), ("MINT".to_string(), 1_000)].into(),
+            valuation: [("SOL".to_string(), -500), ("MINT".to_string(), 900)].into(),
+            realized_net_usd_micro: -500,
+            open_inventory: [("MINT".to_string(), 1_000)].into(),
+            unrealized_inventory_usd_micro: 900,
+            booked_unix_s: None,
+        };
+        let old = crate::analytics::payload::encode_wire(&v3(
+            Transition::Settle,
+            PhaseV3::Settled(legacy(400)),
+        ))
+        .unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 3, &old).unwrap();
+        assert_eq!(back.state.phase, Phase::Settled(settled.clone()));
+        let damaged = crate::analytics::payload::encode_wire(&v3(
+            Transition::Settle,
+            PhaseV3::Settled(legacy(401)),
+        ))
+        .unwrap();
+        assert!(crate::analytics::payload::decode::<Version>(
+            journal::kind::FE04_TRANSITION,
+            3,
+            &damaged
+        )
+        .is_err());
+        // Schema 4 settled layout (split net, open inventory, booking second) is pinned.
+        let mut booked = state.clone();
+        booked.phase = Phase::Settled(settlement::Settlement {
+            booked_unix_s: Some(1_760_000_100),
+            ..settled
+        });
+        let version = Version {
+            transition: Transition::Settle,
+            state: booked.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 4, &bytes).unwrap();
+        assert_eq!((back.transition, back.state), (Transition::Settle, booked));
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                1330,
+                "3GKXhSzPgSVs6BGS6wWwUTSuU2vNKiccKiKQsL8vJcwQ".to_string()
+            ),
+            "FE04_TRANSITION schema-4 layout changed"
+        );
     }
 
-    /// F2: every new wallet-journal frame is a typed binary frame (schema 3, no JSON value
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 4, no JSON value
     /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
     /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
     #[test]
@@ -990,10 +1156,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 3 since C12 (the intent's blockhash expiry); schema 2 stays readable.
+        // Schema 4 since the realized/unrealized settlement; schemas 3 and 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 3)
+            (journal::kind::FE04_TRANSITION, 4)
         );
         assert!(frames[0].legacy_value().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -1031,7 +1197,7 @@ mod tests {
         let frames = frames_of(&file);
         assert_eq!(
             frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-            [1, 3],
+            [1, 4],
             "historical frame kept, the reopen transition is typed"
         );
         fs::remove_dir_all(dir).unwrap();
@@ -1412,7 +1578,12 @@ mod tests {
         // C3: once settled, the replay books the realized net and the outcome into the day the
         // attempt was evaluated, and the consumed one-shot halts as `LimitBreached`.
         let mut j = Journal::open(&path, &a.wallet).unwrap();
-        let settled = j.settle(&|asset, d| (asset == "SOL").then_some(d)).unwrap();
+        let settled = j
+            .settle(
+                &|asset, d| (asset == "SOL").then_some(d),
+                i.evaluated_unix_ms / 1_000,
+            )
+            .unwrap();
         drop(j);
         let replayed = replay().unwrap();
         let day = i.evaluated_unix_ms / 1_000;
@@ -1422,6 +1593,7 @@ mod tests {
                 unix_s: day,
                 realized_net_usd_micro: -20,
                 landed_success: true,
+                open_inventory_usd_micro: 0,
             })
         );
         assert_eq!(settled.realized_net_usd_micro, -20);

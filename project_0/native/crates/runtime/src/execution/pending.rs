@@ -1,4 +1,6 @@
-//! [FIX-5] Reconciliation offener Submissions → `Pipeline::reconcile_outcome` (Safety-Buchhaltung).
+//! [FIX-5] Reconciliation offener Submissions → Landing-Telemetrie (`OwnerEvidence::Reconcile`).
+//! FE-04/C3: keine Safety-Buchung — der finanzielle Abschluss jedes Versuchs ist das Settlement
+//! des FE-04-Wallet-Journals (`state_owner/fe04.rs`).
 //! Jede Submission wird genau einmal abgeschlossen: Landed (Erfolg/Fehler) oder nach Timeout NotLanded.
 //! Realisierter PnL ist erst mit Token-Deltas (P8-05) bekannt; bis dahin wird nur die bekannte
 //! Gebühr als negativer Anteil gebucht und `pnl_complete=false` im Record geführt — nie 0 erfinden.

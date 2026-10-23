@@ -892,7 +892,7 @@ pub(super) fn prepare(
         dir: fe04_journal,
         held: fe04_held,
         settle_due: fe04_settle_due,
-        reserved_capital: fe04_reserved_capital,
+        unbooked: fe04_unbooked,
     } = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?
         .start(&mut safety, wall_unix_s().unwrap_or(0))?;
     let inventory_targets = crate::execution::inventory::parse_targets(
@@ -970,7 +970,7 @@ pub(super) fn prepare(
         fe04_refreshed: std::time::Instant::now(),
         fe04_held,
         fe04_settle_due,
-        fe04_reserved_capital,
+        fe04_unbooked,
         inventory_targets,
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             PREPARED_CANDIDATES,
@@ -1099,15 +1099,21 @@ pub(super) struct Fe04Owner {
     pub(super) dir: Option<std::path::PathBuf>,
     pub(super) held: Option<crate::execution::one_shot::Journal>,
     pub(super) settle_due: Option<std::time::Instant>,
-    pub(super) reserved_capital: Option<u64>,
+    pub(super) unbooked: Option<super::fe04::Fe04Unbooked>,
 }
 
 impl Fe04Start {
     /// B3/C3: a durable attempt halts the safety layer and keeps its capital reserved (released
-    /// once, by its settlement; a settled attempt books its day); an UNKNOWN or unbooked attempt
-    /// is settled at once.
+    /// once, by the booking of its settlement); a settled attempt is booked by this replay (its
+    /// day, open inventory); an UNKNOWN or unbooked attempt is settled at once.
     pub(super) fn start(self, safety: &mut Safety, now_unix_s: u64) -> Result<Fe04Owner, String> {
-        let reserved_capital = self.replay.as_ref().and_then(|r| r.held_capital_usd_micro);
+        let unbooked = self
+            .replay
+            .as_ref()
+            .filter(|r| r.settled.is_none())
+            .map(|r| super::fe04::Fe04Unbooked {
+                reserved_capital: r.held_capital_usd_micro,
+            });
         if let Some(replay) = self.replay {
             safety
                 .restore_attempt(now_unix_s, replay.held_capital_usd_micro, replay.settled)
@@ -1123,7 +1129,7 @@ impl Fe04Start {
             dir: self.dir,
             held: self.journal,
             settle_due,
-            reserved_capital,
+            unbooked,
         })
     }
 }
