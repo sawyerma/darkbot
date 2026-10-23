@@ -1,5 +1,7 @@
 # Project_0 – geprüfte Code- und Variablenmatrix für das Frontend
 
+**HINWEIS 2026-10-23:** Die Abschnitte 1–9 sind ein historischer Quell-Snapshot und enthalten ausdrücklich überholte IST-Aussagen (Project0Page „Platzhalter“, p0ctl „nicht umgesetzt“, nur ein P0-Topic). Die aktuelle Implementierungs-/Verkabelungsmatrix steht in [§10](#10-revalidierung-2026-10-23--aktueller-reactprotocolnative-abgleich), der Projektplan verweist auf sie. Bestehende F0-VAR-Rohinventare sind ebenfalls historisch und keine Freigabe.
+
 Stand: 2026-10-17. Historische Quellenbasis Project_0 `0e0544d`; **heutige React-V0-Oberfläche existiert bereits**. Vor Implementierung aktuellen HEAD und [SOURCE_VARIABLE_MATRIX](SOURCE_VARIABLE_MATRIX.md) prüfen. **IST** = Symbol existiert, nicht zwingend QUALIFIED. **SOLL** = im [Frontend-Plan](FRONTEND_PHASENPLAN.md) vorgesehen. [Control-Protokoll](GATEWAY_WIRE_PROTOCOL_V1_3.md).
 
 ## 1. Frontend IST: bereits vorhandener Code
@@ -140,3 +142,80 @@ Verbindliche Layout-/Felddefinitionen: [GRAPHITE_V5_UI_FINANCE_CONTRACT.md](GRAP
 **Neue SOLL-Variablen:** `PortfolioFinancialSnapshot.snapshot_id,portfolio_total_capital_usd_micro,portfolio_available_capital_usd_micro,portfolio_reserved_capital_usd_micro,realized_net_pnl_usd_micro,withdrawable_profit_usd_micro,transferred_to_treasury_usd_micro,wallet_asset_balances,as_of_slot,as_of_unix_ns,valuation_status,pnl_status,price_sources`. Keine dieser Variablen ist heute als produktive globale Rust-Portfolio-API nachgewiesen. `Overview` und `Wallets` teilen dieselbe Snapshotidentität und PnL-/Kapitalberechnung. Geldwerte verlustfrei in Rust, UI nur formatieren.
 
 **Latenz IST:** `solana/src/ingress/mod.rs::t_rx_ns`, `market/core.rs::MarketStats.max_stream_silence_ms`/`last_observed_slot`, `storage/writer.rs::StorageStatus.queue_bytes/lag_frames`, `analytics/econ.rs::Distribution` mit p50/p99. **SOLL:** per-Provider RPC RTT-Histogramm, rolling decision-time p50/p95/p99, Stream-Age-Messwert und später submission stage latencies; p95 ist kein automatisch aus `P0_RPC_TIMEOUT_MS` ableitbarer Messwert.
+
+---
+
+## 10. Revalidierung 2026-10-23 – aktueller React/Protocol/Native-Abgleich
+
+**Scope:** belegte GitHub-Quellen des gemeinsamen Repositories auf main am 2026-10-23; IST/SOLL nicht aus dem Design ableiten. **Normativ:** [Frontend Master](FRONTEND_PHASENPLAN.md), [Wire V1.3](GATEWAY_WIRE_PROTOCOL_V1_3.md), [F0-VAR](../../project_0/docs/F0_VAR_00_SCOPE.md), [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.md). Dieses Kapitel ist eine **fachliche Control-/UI-Zuordnung** und KEIN zweites Protobuf-, Config- oder Control-Protokoll. Die UI-Schlüssel unten sind Inventar-IDs, **keine neuen Gateway-Action-Namen oder Wire-Felder**. Source-HEAD erneut vor jedem Implementierungspaket prüfen.
+
+### 10.1 Aktueller Implementierungsstand des gemeinsamen Systems
+
+| Schicht | Tatsächlich vorhanden | Verbindliche Grenze |
+|---|---|---|
+| React Shell | Project0Page mit Overview, Liquidator, Capture, Analytics, Wallets; vorhandene Graphite-V0-Komponenten, scoped CSS, Health-Drawer | F1/V7-Design bleibt; **kein** neuer Reiter, zweites Frontend oder neues Wallet-Layout |
+| Native binary states | protocol Project0 SystemStatus und CaptureState; topicTable.ts/gateway topics.rs: project0.status (10) und project0.capture.state (13) **available** | UI liest beide via project0Adapter.ts/project0ViewAdapter.ts/store. Topic-Enum allein beweist keine verfügbare Fachprojektion |
+| Weitere P0-Topic-IDs | finance.summary (11), liquidator.state (12), wallets.state (14), analytics.jobs (15), execution.events (20), capture.events (21) | **RESERVED/UNAVAILABLE**: kein nicht-leeres payload_type in topicTable. Fehlende Finance nicht zu 0 rechnen |
+| Gateway Capture Control | frontend/core/realtime/captureControl.ts; gateway/control.rs; HTTP GET /api/v1/project0/process, POST /api/v1/command, Lookup, CSRF/Receipts; action project0.capture.start/stop | Start hat **keine frei gewählten Parameter**: gateway startet bestehendes ops/darkbotctl **capture start-configured**. Das ist nicht der CLI-Vorschau-Run |
+| Project0 CapturePanel | Duration-Presets, Source, Observation, Verify, Marker, CLI-Preview, Check & start / Stop | Die zwei Panel-Buttons erzeugen **nur lokale Notice**, kein Command. Bestehenden captureControl wiederverwenden, nicht zweiten HTTP-Client/Command bauen |
+| Native CLI | runtime/src/bin/p0ctl.rs: doctor, preflight, run start/status/stop, verify, report, export, qualify, post-capture | **IST, kein Phantom**. run start benötigt --duration, gegebenenfalls NetworkAudit/Mainnet-Approval. **index/crosscheck werden in run start durch CHAIN_VERIFY_*_BLOCKED verweigert**; off/strict sind dort zulässig (strict nach Provider-/Audit-Gates) |
+| Geyser/SourceControl | solana/src/ingress/{geyser,geyser_grpc,sources}.rs: BinaryGeyserSource, ProviderConfig, SourceUnit, OperatingMode OFF/OBSERVE/ACTIVE, Qualification, SourceArbiter | Adapter-Offline-Code vorhanden; Owner-Wiring und tatsächliches p0ctl-Source-Toggling sind derzeit noch Entwicklungsarbeit. Keine Quelle wegen GUI-Checkbox als qualifiziert behandeln |
+| Finanz-/Safety-Code | runtime/src/execution/one_shot.rs + admission.rs, settlement.rs, reservations; liquidation health/economics/funding; FE-01/02/04 Codepakete | Kein nachgewiesener globaler finalisierter PortfolioFinancialSnapshot, kein Ledger-to-UI Finance-Topic und keine Treasury-/LIVE-Authorization. Ein Codeobjekt ist kein UI-Button |
+
+### 10.2 Exakte Bestandszuordnung für die fünf vorhandenen Reiter
+
+**Statuswerte:** DISPLAY_WIRED = existierender Binary-Topic-Read; COMMAND_EXISTING_OTHER_UI = vorhandener Commandpfad, aber noch nicht im P0-Reiter angeschlossen; DRAFT_LOCAL = Browser-State ohne Runtime-Wirkung; RESERVED = nur Topic/Phase/Backend-Entwurf; DISABLED = UI ausdrücklich nicht ausführbar; PARTIAL = vorhandener Rust-Owner, aber fehlender eindeutiger Publisher/Qualifikationsbeweis.
+
+| Inventar-ID / vorhandener Slot | Aktuelle React-Datei / Variable | Native Source / bestehender Wire- oder CLI-Vertrag | IST / Korrektur (keine Doppel-UI) |
+|---|---|---|---|
+| OV-01 System Health / Phase / Stream freshness | OverviewPanel, HealthSection; capture.transport/phase, topicStatus | CaptureState(13), status_tap.rs → reporter → gateway → project0ViewAdapter | **DISPLAY_WIRED**; stale/detached klar markieren |
+| OV-02 RPC p95, Decision p95 | OverviewPanel UnknownMetric, HealthSection | künftige native rolling-latency distributions/OwnerMetrics; P6-MT | **RESERVED**; kein aus Timeout oder max errechneter p95 |
+| OV-03 Total capital, Realized net PnL | OverviewPanel; UNCONNECTED_MONITOR.finance | topic project0.finance.summary(11) + native finalisiertes PortfolioFinancialSnapshot erst nach FE-04/07/P8 | **RESERVED**, kein Markt-Winner-PnL als eigener Gewinn |
+| OV-04 Liquidator status / Open Liquidator | OverviewPanel.goto("liquidator") | künftiges liquidator.state(12), FE-04/Gates | Navigation **IST**; aktive Instanz **UNVERIFIED** |
+| OV-05 Capture status / Open Capture | OverviewPanel.goto("capture"), CaptureView | CaptureState(13) | **DISPLAY_WIRED**; kein Start/Stop aus Navigation |
+| OV-06 Analytics / Open Analytics | OverviewPanel.goto("analytics") | künftiges analytics.jobs(15), Rust Report/Replay | Navigation **IST**; Jobs **RESERVED** |
+| LIQ-01 Add / Duplicate / Remove / Select bot | LiquidatorPanel, useFleetDrafts::{create,duplicate,remove,select} | nur useState-Drafts; F8 spätere Runtime-Profile | **DRAFT_LOCAL**. Keine persistierte Botinstanz; Fleet später |
+| LIQ-02 Name / Origin | LiquidatorPanel.d.name/d.origin | LiquidatorDraft; spätere typed Profile-Owner | **DRAFT_LOCAL**, Origin-Select ist disabled |
+| LIQ-03 Classic / Receivership | LiquidatorPanel.enabledStrategies | Native Liquidation-Klassen/Planner und F8 Profile-Entwurf | **DRAFT_LOCAL**, keine nativ selektierte LIVE-Strategie. VIER Marktklassen/SIX Reportmarker nicht damit verwechseln |
+| LIQ-04 Capital limit / Min net / Fee / Max in-flight | LiquidatorPanel capitalUsd/minimumNetUsd/maximumFeeUsd/maximumInFlight | runtime_config::descriptors, economics, Safety/Limits, global WalletReservations; später Profile-/CAS | **DRAFT_LOCAL**; React-Zahlen sind NICHT Engine-Defaults oder reserviertes Kapital |
+| LIQ-05 Validate draft | LiquidatorPanel→validateDraft | Browser-Eingabeprüfung | **DRAFT_LOCAL**; kein Boot-/Simulation-/Health-/Economic-PASS |
+| LIQ-06 Start selected bot / Start fleet | LiquidatorPanel disabled | FE-01…FE-06, F8 native Scheduler/Approval/OneShot | **DISABLED**, KEIN GUI-LIVE vor separater Freigabe |
+| CAP-01 Run phase / duration / stream / counts / verdict | CapturePanel.RunningCapture | CaptureState(13)::run/phase/transport/market/assessment/writer | **DISPLAY_WIRED** (nur bei echtem Publisher), Verdict live ist noch keine Strict-Verifikation |
+| CAP-02 Duration preset / custom / Until stopped | CapturePanel preset, amount, unit; CLI-Preview | p0ctl run start --duration; native runtime_config::duration_seconds; managed desktop configured capture | **DRAFT_LOCAL**. UI-"custom" d aktuell nicht automatisch native gültig; "Until stopped" disabled. Native Config/Controller-Effekt separat abnehmen |
+| CAP-03 Logs/Transactions Source | CapturePanel.source | p0ctl --capture-source logs/transactions; MarketSource | **DRAFT_LOCAL**; Source-Coverage weiter unqualifiziert |
+| CAP-04 Market / Econ4h / Shadow | CapturePanel.observation | Market Capture / run_econ4h / Shadow Owner in Rust; p0ctl run start usage | **DRAFT_LOCAL**; nicht voraussetzen, dass CLI --mode aus Preview tatsächlich unterstützt oder Gateway solche Parameter akzeptiert |
+| CAP-05 Check & start / Stop | CapturePanel local Notice; captureControl.ts elsewhere | bestehende Action project0.capture.start/stop, /api/v1/project0/process, ops/darkbotctl start-configured | **DUPLICATE_PATH_TO_RECONCILE**: vorhandenen Control-Client wiederverwenden; erst echte Param-Semantik/CAS/Gates klären; nie optimistic RUNNING |
+| CAP-06 Verification off/index/strict/crosscheck | CapturePanel.verify | p0ctl run start blockiert index/crosscheck; CLI/post-capture separate Parser/Verifier | **DRAFT_LOCAL**; index/crosscheck als Legacy/offline-only oder BLOCKED kennzeichnen, nicht als startfähige Einstellung |
+| CAP-07 Sechs Report-Marker / All / None | CapturePanel.markers, REPORT_MARKERS | operations/cli/measurement_contract.py::ReportQuery.markers, sechs gepinnte Marker | **DRAFT_LOCAL / report-only**; keine Rohcapture- oder Trading-Filter |
+| CAP-08 Vier Liquidationsklassen, Related-Types, Provenance, Cost/Time Filters | Noch kein vollständiger Panel-Control | ReportQuery.types/related_*/view/provenance/from/to/min_net; p0ctl report/verify | **FEHLENDE UI-SURFACES innerhalb Capture/Analytics**, keine zweite Engine; alle vier Klassen und vier Related-Kategorien getrennt |
+| CAP-09 Boot doctor, Preflight, Capacity, FREE_ONLY/provider quota | HealthSection teilweise read-only | p0ctl doctor/preflight; runtime storage/preflight.rs, provider.rs, ProviderEvidence | **PARTIAL/RESERVED**: Native Gates existieren, qualifizierte GUI-Projektion/Commandfreigabe fehlen |
+| CAP-10 Source modes und Provider Readiness | Noch keine reale P0 Quellenleiste | solana/ingress/sources.rs::SourceControl/OperatingMode/Qualification; S1-02/S1-08/K-02/K-02b, zukünftige Source-DTOs | **RESERVED**: OFF/OBSERVE/ACTIVE; WSS vs Geyser(PublicNode provider) vs Deshred vs LocalShred getrennt, ACTIVE != LIVE |
+| AN-01 Report / Backtest / Optimize tabs | AnalyticsPanel.tab | native p0ctl report, verify, qualify, export; p0-econ-replay.rs; OptimizationJob SOLL | Tabs **IST**; Ergebnisdaten ohne verfügbare analytics.jobs Projektion **UNCONNECTED** |
+| AN-02 Recorded run selector / Run backtest | AnalyticsPanel disabled | binäre .p0j Run-/Report-IDs, p0ctl export/replay; analytics.jobs(15) RESERVED | **DISABLED**; Replay darf keine heutige Chain-Gewinnbeweiskette ersetzen |
+| AN-03 Market, Shadow edge, Realized PnL | AnalyticsPanel values "—" | Marktbericht/Economics, FE-04-Settlement, Finance-Owner getrennt | **RESERVED**, Market-Winner-Economics != eigener realisierter Net PnL |
+| AN-04 Capital / Minimum net / Optimize / Add as bot draft | AnalyticsPanel input + createDraft | Analytics nur Browser-Draft; später native Optimizer/Runs | Draft-Erstellung **IST**, Optimizer **DISABLED**; niemals als qualifizierte Strategie |
+| WAL-01 Balances: sieben feste Zeilen | WalletsPanel.financialRows(finance) | Wallets(14) + Finance(11) RESERVED, finalisierte Account-/Price-/PnL-Owner | **DESIGN FROZEN/UNCONNECTED**. Gleiche künftige finance_snapshot_id wie Overview |
+| WAL-02 Send: Ziel/Asset/Adresse/Menge/Review | WalletsPanel.send | FEUI-10B, Wallet-Treasury-Policy, native separate Approval erst nach Gate | **UI PREVIEW ONLY**; kein Transfer-Handler/Signer |
+| WAL-03 Auto-Sweep: threshold/share/preview | WalletsPanel.auto | FEUI-10C, finale verfügbare Gewinne, eigener Policy-Owner | **UI PREVIEW ONLY**; nicht als automatisch aktive Regel behandeln |
+| HLTH-01 Gateway, Stream, Transport, Writer, Market verdict, Counter, AllValues | HealthSection + AllValues | verfügbare Status(10) / Capture(13)-Protobuf; system.operational, capture run/transport/market/writer | **DISPLAY_WIRED** soweit Publisher sendet; übrige Health-/Boot-/Fee-/Provider-Zeilen klar NOT_COLLECTED statt Null |
+
+### 10.3 Neue Engine-Funktionen, die derzeit in den Reitern fehlen
+
+**Kein zweites Protocol erfinden:** folgende Ergänzungen bleiben an bestehende Phasen/Owner und die reservierten Project0-Topics gebunden:
+
+1. **Quellenkontrolle:** SourceUnit WsRpcControl, BinaryGeyser pro Provider (PublicNode nur Kandidat), Deshred und LocalShred (NOT_IMPLEMENTED); pro Einheit requested/effective, Qualification, Capabilities, Health, gap_open, reconnects, observed T_rx und Run-/Config-Generation; nach Runtime-Integration terminal zuerst und später **im bestehenden Capture/Health-Bereich**, kein neuer Hauptreiter. Spekulative Quellen niemals kanonischer State.
+2. **Boot-/Run-Steuerung:** p0ctl doctor/preflight/run start/status/stop/verify/report/qualify/post-capture. Bestehende Gateway-Capture-Commands verwenden; freie Dauer/Quelle/Verify/Budgets benötigen erst typisierte gültige Command-Params und Engine-Bestätigung. Es darf keinen generischen Shell-/RPC-Befehl aus React geben.
+3. **FE-Qualifikation:** FE-00…FE-07, First-Profit NO_ECONOMIC_GO, ProgramData/Bank/Oracle/Fees/Funding/Intent/Approval/Unknown/HALT und Ergebnisprovenienz als **read-only** unter Liquidator/Health/Analytics; Freigabe-/Submit-Schalter bleiben gesperrt.
+4. **PERSIST/JFI/Kapazität:** .p0j Writer queue, lag, disk/ram, CapacityReport, segment/root/coverage, strict verifier/qualifier, Ergebnis- und Quelle-Identität; keine Browser-Hotpath-Journale oder JSON-in-bytes.
+5. **P6-MT/Race:** Owner-Wakeup p50/p95/p99, state-to-detect/admit, Source lead/fork/gap, simulation/route/landing nur nach echter Sample-/Provenienz-Qualifikation. Keine UI-Erfindung von Latenzen, Winning oder Quoten.
+6. **Wallet-/Finanzstatus:** FE-04-Reservations, finalized wallet deltas, net realized i128, UNKNOWN holds, policy-reserve, available funds – **erst bei validiertem globalen Finanzsnapshot**, keine aktuelle Bestätigung aus lokalen Datentypen ableiten.
+
+### 10.4 Migrations- und Abnahmereihenfolge
+
+- **F0-P0UI-1 SOURCE-TRUTH:** F0_VAR_RUST_FIELDS.tsv/F0_VAR_GUI_SURFACES.tsv/F0_VAR_ENV_REFERENCES.tsv/F0_VAR_PUSH_ANCHORS.tsv aus vorhandenem Inventurskript neu erzeugen; die bisherige F0_VAR_MANIFEST.json pinnt 988ae47 und ist historische Lexer-Evidence. Alle gegenwärtigen Controls/Labels gegen HEAD, native Besitzer/Typen/Units, Qualität, Schutzgates und bestehenden Topic-/Command-Vertrag einzeln zuordnen. Kein neuer unabhängiger TS-Defaults-Katalog.
+- **F0-P0UI-2 EXISTING-CAPTURE:** bereits vorhandene Capture-Prozesskontrolle mit CapturePanel UI **einmal** zusammenführen; Optionen, die Gateway-Start derzeit nicht akzeptiert, bleiben klar "DRAFT / NOT APPLIED". Besonders index/crosscheck und die nicht bewiesene --mode-CLI-Semantik nicht als startfähige Optionen anzeigen.
+- **F0-P0UI-3 NATIVE-STATUS:** nur wirklich vorhandene Publisher und validierte Protobuf-Payloads freischalten, projektgebundene Wallets/Analytics/Liquidator Topics sonst UNAVAILABLE belassen. Jede neue Payload braucht engine→reporter→gateway→frontend und Rust/TS-Goldens plus Quality-/Generation-/Gap-Tests.
+- **F0-P0UI-4 QUELLEN/GATES:** S1-02 Owner-Integration, sichere Mode-Wechsel und A23, später authentisierte Mode-Commands/Status; UI OFF/OBSERVE/ACTIVE erst nach qualifiziertem Native-Control, LIVE separat.
+- **F0-P0UI-5 DESIGN/TEST:** exakt fünf Graphite-Tabs und Wallets-Layout, Pixel-/A11y-Regression. Playwright "Check & start sendet keinen Fake-Start", bestehender command receipt/reopen/stop-flow, Invalid Params, 429/DETACHED, Epoch/Schema-Konflikt, NO_ECONOMIC_GO und Keine-Vermischung mit BSC. Testresultate nur bei echter Ausführung PASS.
+
+**Design-Leitlinie:** Heute vorhandene UI-Komponenten wiederverwenden, Inhalte innerhalb der fünf Tabs verfeinern. Fehlende Backendfelder sind offen/UNKNOWN/DISABLED mit fachlichem Grund, nicht als fertige Toggle-Logik oder Nullwert. Die globalen Overview-Capture-Controls sind eine **weitere UI-Position desselben bestehenden Actions**, keine zweite Command-Implementierung.
