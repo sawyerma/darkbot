@@ -1,7 +1,51 @@
 # BSC PHASENPLAN — DarkBot Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-23 (v8 A/B-Salt/Frontend amendment; all earlier Gate-0 freezes preserved)
+Updated: 2026-10-23 (v9 granular identity/ingress contract; v8 A/B and all earlier Gate-0 freezes preserved)
+
+
+## BINDING v9 AMENDMENT — 2026-10-23: independently verified token addresses and granular ingress selection
+
+**Problem and separation:** An externally received WebSocket/auction/p2p event is evidence about a candidate, **never an authoritative token-address source merely because one or several providers agree**. G0.7 salt profiles A/B apply exclusively to **our own self-launch**; foreign launch candidates use an independently verified decoded transaction. Neither provider count nor GUI selection can override a failed cryptographic/venue/deployment verification.
+
+### 1. Three distinct frontend address/candidate contexts
+
+| Selector | Purpose | Address contract |
+|---|---|---|
+| `FOREIGN_AUTO` — **Auto: fremde Launches** | Later production foreign Flap/Four launch detection | Recover from an independently validated **complete signed pending launch transaction** using the correct **version-pinned venue-specific** derivation (Flap uses CREATE2 with pinned Portal/deployer and initcode/implementation). No A/B match required. No human-entered or provider-reported token address trusted as authority. |
+| `SELF_A` — **Eigener Test A** | Controlled G0.7 self-launch with frozen public salt | Exact predicted address AND signed launch identity must match **separately frozen A**; mismatch = STOP, never auto-swap to B/AUTO. |
+| `SELF_B` — **Eigener Test B** | Controlled G0.7 self-launch with private CSPRNG salt | Exact predicted address AND signed launch identity must match **separately qualified B**; mismatch = STOP, never auto-swap to A/AUTO. |
+
+These are **operating/candidate scopes**, **not three mutually-exclusive provider sources** and **not** an alternative to the mandatory source authenticity/address verification. The B profile salt remains secret only up to any unavoidable publication/disclosure; do not advertise lasting on-chain secrecy. The active frozen/approved profile may not be changed while an intent is armed or executing. A/B offline results are separately measured, not silently granted extra paid Mainnet attempts.
+
+### 2. Independent granular enable controls (never conflate dimensions)
+
+1. **Candidate scope**: `FOREIGN_AUTO | SELF_A | SELF_B`.
+2. **Five independent ingress source modes**: `BSC_INGRESS_GETH | PUBLICNODE | DRPC | BLOCKREQ | 48CLUB`, each `OFF | SHADOW | LIVE`, as in v6. No sixth provider silently introduced.
+3. **Per-venue admission mode**: at least `FLAP | FOUR_CLASSIC | OPENFOUR`, independently `OFF | SHADOW | LIVE`, qualified only where code and evidence exist. A source is economically eligible only if both its own effective mode **and** the venue's effective mode are LIVE; OFF in either layer rejects the candidate for that scope, SHADOW in either layer permits **shadow-only** evaluation.
+4. **Automatically derived non-overridable capability/health** per provider and venue/deployment: `HASH_ONLY | FULL_SIGNED_TX | QUALIFIED_PRIVATE_TARGET | UNKNOWN` and `HEALTHY | DEGRADED | RATE_LIMITED | DISCONNECTED | UNQUALIFIED`. A user-selected LIVE setting does not turn a hash, an unqualified private target or a degraded deployment into an actionable trade event. Distinguish **requested** mode vs **effective** mode in GUI/control/evidence.
+5. **Global independent execution modes**: `REPLAY | PAPER | SHADOW | LIVE`, economic exact-hash approval, guard, budget, nonce/intent, inclusion route, provider readiness and one-attempt limit. The LIVE ingress/venue switches **never** authorize signing or broadcasting. Required canonical-state, reorg and safety services remain available or the whole operation fails closed, including when trade-ingress geth is OFF.
+
+All settings are typed/versioned **binary control records** with one monotonic configuration generation, atomic activation, validation and rollback. No frontend per-event roundtrip, no JSON internal config and no UI callback in HOT0. Safe mode transitions cannot leave an old queued candidate/intent with new authority.
+
+### 3. Address verification and fastest valid source wins
+
+- Each isolated ingress adapter independently timestamps arrival and decodes its external wire format (external JSON-RPC if the provider requires it) into a bounded native typed/binary event. The pinned geth P2P hook remains independent and must not be starved by WSS/48Club workers.
+- For `FULL_SIGNED_TX`, verify signed transaction hash and recovered sender, chain ID, destination Portal/venue address, selector, deployment/ABI version and required launch calldata; extract the creator's salt only when that method actually contains it. **Version-pinned local derivation:** for Flap Tax V3, use the current qualified Portal CREATE2 deployer and exact minimal-proxy initcode hash for the matching implementation, then verify predicted address/vanity against any provided candidate. **Do not apply Flap CREATE2 rules to Four Classic/OpenFour without their own proven venue contract.**
+- No synchronous RPC lookup, provider cross-check wait, HTTP/JSON parsing, file/DB reads or on-demand address mining in the native decision/dispatch hot path. Keep verified deployment/chain rules and necessary state preloaded; if unavailable or drifted, mark unqualified and fail closed. A remote provider's `tokenAddress` is an untrusted comparison field, **not a bypass** of local derivation.
+- `HASH_ONLY` can contribute first-seen provenance/counters or shadow enrichment only, not an actionable buy by itself; `QUALIFIED_PRIVATE_TARGET` requires its own prequalified versioned proof of exact target/order/simulation and all fields needed for safely preparing a BUY. Do not mislabel 48Club newPendingAuctions as a full signed transaction.
+- `FIRST VERIFIED ACTIONABLE WINS`: first fully verified LIVE-eligible event claims the candidate's economic decision **atomically** without waiting for slower peers or a majority/quorum. Later matching events enrich per-source measurement; duplicate notifications cannot spawn another LIVE intent/nonce. A SHADOW-source event is evaluated with the **same Rust business logic** in a separated non-economic scope but **can neither claim nor block** a LIVE candidate.
+- Canonical identity / collision handling: retain source provenance, signed launch tx hash, chain ID, venue/deployment/version, salt derivation identity and locally predicted token address. **Same signed TX hash + conflicting signed bytes/address** => source or decoder inconsistency: quarantine disputed source/event and fail closed for that conflicted candidate. **Different launch TX hashes claiming the same predicted token address** => collision/conflict, prohibit economic release pending canonical resolution (no automatic A/B fallback). Never accept “3 of 5 providers agree” as proof if the math, signature, deployment or state fails.
+- Asynchronous comparison across all enabled sources logs first hash / first full / first actionable, computed address, exact verified identity, timestamp, mismatch, gaps/drops, eligibility and configuration generation in the existing **one binary journal**. Do not introduce a second engine or delay winning LIVE decisions for comparisons. All addresses are 20-byte native values, with constant-format equality in Rust; no hex-string comparisons in the hot path.
+- **No BUY readiness claim from address derivation alone.** Successful launch/actual resulting token code, quote/state and intended BUY feasibility must still pass the existing mandatory conditions; pending TX is not guaranteed to be included. `T0` and on-chain `T_buy` remain independent producer-execution facts. Preserve target `T_buy - T0 < 1,000,000 ns` and UNKNOWN without producer witness.
+
+### 4. GUI observability / tests / phase constraint
+
+The frontend later presents **three different control groups**: (A) candidate scope `FOREIGN_AUTO / SELF_A / SELF_B`; (B) five source-mode switches plus separate venue-mode switches; (C) global runtime/economic safety and individually qualified inclusion adapters. Per-source status shows requested/effective mode, capabilities and health, last first-full/actionable latency and locally **computed** token address; show `VERIFIED / PARTIAL / CONFLICT / UNQUALIFIED / NO_EVENT` distinctly. Comparison is **always-on asynchronous diagnosis**, not a separate trust/verification bypass switch. For own SELF_A/B, an observed launch can additionally be compared against the selected pinned address and signed identity.
+
+Minimal future acceptance matrix: (1) full-TX source ahead of four slower sources => immediate qualified decision; (2) earlier hash-only cannot outrank a later full verified event; (3) wrong chain/selector/deployment/CREATE2 address => fail closed; (4) source mismatch and same-address distinct-launch collisions => fail closed without duplicate intent; (5) SHADOW source cannot block LIVE; (6) source/venue OFF, degraded/unqualified status and rapid config changes cannot bypass mandatory state/safety or consume live nonce; (7) SELF_A/B mismatch or selector switch during armed intent => STOP; (8) 48Club target-only not admitted without provider-specific original qualification. Deterministic negative unit tests are allowed but **not** Mainnet timing/economic proof.
+
+**Phase gate unchanged:** This amendment **specifies the later architecture** and permits only the isolated A/B offline-only frontend preparation already authorized in v8. It **does not** authorize implementation of foreign `AUTO` production ingress, source×venue LIVE switching, new builders, C1/C2 work, additional real G0.7 attempts, R0/DRY re-signing or economic activation before the existing `G0.7 → G0.8 → PASS/ADAPT/STOP` gate. Current guard stays UNARMED.
 
 ## BINDING v8 AMENDMENT — 2026-10-23: two Salt profiles A/B and BSC frontend selector
 

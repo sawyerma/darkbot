@@ -1,12 +1,14 @@
 # DarkBot BSC – Early Launch Detection und On-Chain-BUY
 
-**Verbindlicher Plan:** [PHASENPLAN.md (v8)](docs/1_PLAN/PHASENPLAN.md) · **Status:** G0.7/G0.8 vor Produktions-LIVE · **In Arbeit:** ein nativer Rust-BSC-Core, zusätzliche früheste Signaleingänge sind geplant.
+**Verbindlicher Plan:** [PHASENPLAN.md (v9)](docs/1_PLAN/PHASENPLAN.md) · **Status:** G0.7/G0.8 vor Produktions-LIVE · **In Arbeit:** ein nativer Rust-BSC-Core, zusätzliche früheste Signaleingänge sind geplant.
 
 DarkBot BSC soll fremde Flap- und Four.meme-Launches möglichst früh erkennen, einen validen BUY rechtzeitig vorbereiten und **als erster unabhängiger externer Käufer direkt auf der BSC ausführen**. Es gibt keinen Trading-Website-, Frontend- oder Browser-Schritt im BUY-Pfad.
 
 **Erfolg = BUY tatsächlich auf der Chain ausgeführt und Token im Wallet-Chain-State erhalten.** Weder das Abschicken noch ein Builder-ACK noch eine Wallet-Anzeige allein zählen als Kauf.
 
 **G0.7-Testprofile (Plan v8):** Für **unseren eigenen Self-Launch** stehen A (bekannter eingefrorener Salt) und B (neuer lokal zufälliger Salt) als getrennt zu prüfende Varianten zur Auswahl; später über einen eigenen Frontend-Schalter, unabhängig von den fünf Ingressmodi. Umschalten erteilt keine LIVE-Freigabe. **Bei fremden Launches** wird der Salt aus rechtzeitig empfangener vollständiger Launch-Calldata ermittelt und die CREATE2-Adresse lokal abgeleitet. Ein bloßer Hash oder nach T0 eintreffende Daten beweisen keine Früherkennung.
+
+**Adress- und Quellensteuerung (Plan v9):** `FOREIGN_AUTO` berechnet und prüft fremde Tokenadressen aus rechtzeitig verfügbaren vollständigen Launch-Transaktionen; `SELF_A` und `SELF_B` gelten nur für unsere eigenen Testlaunches. Jeder der fünf Eingänge und jedes unterstützte Launchpad ist separat OFF/SHADOW/LIVE schaltbar, mit automatisch begrenzter tatsächlicher Qualifikation. Mehrere Quellen werden **asynchron** verglichen: die erste vollständig verifizierte LIVE-Quelle gewinnt ohne Mehrheitsabfrage. Gleiche TX mit widersprüchlicher Adresse oder Adresskollision => kein wirtschaftlicher Versand. Das ist eine **Zielarchitektur nach G0.7/G0.8**, aktuell kein LIVE-Feature. Siehe [PHASENPLAN.md – v9](docs/1_PLAN/PHASENPLAN.md).
 
 ## Architektur – fünf parallele Signaleingänge, eine gemeinsame Engine
 

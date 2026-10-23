@@ -1,10 +1,10 @@
-# BSC — Einstieg (Version 8, Repo-Fassung)
+# BSC — Einstieg (Version 9, Repo-Fassung)
 
 **Stand:** 2026-10-23 · **Quellstand:** tatsächlicher Git-HEAD zum Zeitpunkt der Umstellung, siehe Git-Commit · **Geltung:** ausschließlich `bsc/`
 
-Dies ist der **Dokumentations-Einstieg** in das BSC-Projekt. Verbindlich sind die Originaldateien in den Unterordnern dieses Verzeichnisses in der Rangfolge aus §2. Dieses Dokument ersetzt keinen Vertrag; bei Widerspruch gilt das Original. Inhaltlich entspricht es Version 8 des Repository-Einstiegs `00_BSC_VERBINDLICH.md`; nur die Pfade zeigen hier auf das Repository.
+Dies ist der **Dokumentations-Einstieg** in das BSC-Projekt. Verbindlich sind die Originaldateien in den Unterordnern dieses Verzeichnisses in der Rangfolge aus §2. Dieses Dokument ersetzt keinen Vertrag; bei Widerspruch gilt das Original. Inhaltlich entspricht es Version 9 des Repository-Einstiegs `00_BSC_VERBINDLICH.md`; nur die Pfade zeigen hier auf das Repository.
 
-**Aktuelle Plan-Revision: v8 (23.10.2026).** Revisionsliste und welche Messung zu welcher Revision gehört: `1_PLAN/REVISIONEN.md`.
+**Aktuelle Plan-Revision: v9 (23.10.2026).** Revisionsliste und welche Messung zu welcher Revision gehört: `1_PLAN/REVISIONEN.md`.
 
 **Ordner (Nummer = Lesereihenfolge):**
 
@@ -34,6 +34,8 @@ Dies ist der **Dokumentations-Einstieg** in das BSC-Projekt. Verbindlich sind di
 **Neue fünf-Quellen-Architektur seit v6; Dateiname v7:** Fünf einzeln `OFF / SHADOW / LIVE` schaltbare Ingressquellen: eigene geth-Fast-Lane, PublicNode, dRPC, BlockReq, 48Club Auction Feed. Alle führen in **einen** Rust-BUY-Core; `FIRST VERIFIED ACTIONABLE WINS`. Die T0-Definition und der G0.7/G0.8-Vorrang bleiben unverändert. `T_head_local` und Blockintervall sind niemals `T0`. Einzelheiten: `1_PLAN/PHASENPLAN.md` §5a. WSS-Messungen vom 22.10. wurden **unter v5** erhoben und sind kein N+1-/T0-PASS.
 
 **Verbindliche Ergänzung v8:** A/B-Salt-Profile für eigenen G0.7-Self-Launch (A bekannter Salt, B neuer CSPRNG-Salt), mit eigener Evidenz, Sicherheitsbindung und späterer isolierter BSC-Frontend-Umschaltung. A/B ist unabhängig von den fünf OFF/SHADOW/LIVE-Ingressquellen. Bei *fremden* Launches wird der Salt, wenn eine vollständige Transaktion rechtzeitig sichtbar ist, aus deren Calldata extrahiert. Kein Geldtransfer, keine Freigabe durch diese Ergänzung. Details im PHASENPLAN.md (v8).
+
+**Verbindliche Ergänzung v9:** Drei Adress-Kontexte: `FOREIGN_AUTO` (aus vollständigen signierten Pending-Transaktionen unabhängig lokal verifizierte fremde Tokenadresse), `SELF_A` und `SELF_B` (je exakte eigene Testkandidatenbindung). Fünf Quellen und Launchpads unabhängig OFF/SHADOW/LIVE; tatsächliche LIVE-Zulassung nur bei automatischer Quellenqualifikation und globaler Safety-Freigabe. Adressvergleich erfolgt asynchron ohne Quorum und ohne Hot-Path-Stopp, Widersprüche fail-closed. **Keine vorgezogene externe WSS-Produktionsimplementation oder wirtschaftliche Freigabe.** Details: `1_PLAN/PHASENPLAN.md` v9.
 
 ## 1. Projektziel in einem Satz
 
