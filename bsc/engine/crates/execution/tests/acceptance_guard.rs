@@ -924,3 +924,95 @@ fn the_guard_itself_binds_the_v5_launch_path_and_refuses_every_deviation() {
     assert!(verify_further_v5_evidence(&root, &v5).is_ok());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+const B_CANDIDATE: &str = requalification_fixture::B_CANDIDATE_RECORD;
+
+/// A SELF_B-shaped stand-in run (`v5_root` made B's by the fixture).
+fn b_root(tag: &str) -> (PathBuf, &'static str, String) {
+    let (root, dir, policy) = v5_root(tag);
+    requalification_fixture::make_b(&root, dir, &policy);
+    (root, dir, policy)
+}
+
+#[test]
+fn a_secret_salt_v5_binds_its_own_run_and_only_the_private_cross_check() {
+    use darkbot_bsc_record::schema::g06a::economics;
+    at_repo_root();
+    let (root, dir, policy) = b_root("v5-b");
+    let evidence = attempt1_v5_evidence(&root, dir, &policy, B_CANDIDATE).unwrap();
+    let bytes = attempt1_v5(&evidence, Authorization::Proposed).unwrap();
+    let v5 = parse_v5(&bytes).unwrap();
+    assert_eq!(v5.candidate_profile.as_deref(), Some("SELF_B"));
+    let file = root.join(dir).join("economics_crosscheck.dbrec");
+    let econ = std::fs::read(&file).unwrap();
+    assert_eq!(
+        v5.economics.as_ref().map(|h| h.record_sha256.clone()),
+        Some(sha256_hex(&econ))
+    );
+    let (_, bound) = verify_further_v5_evidence(&root, &bytes).unwrap();
+    assert_eq!(bound.snapshot().token, requalification_fixture::B_TOKEN);
+    // A's candidate never takes B's run: the frozen A identity differs.
+    assert!(attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).is_err());
+    let refuse =
+        |what: &str| attempt1_v5_evidence(&root, dir, &policy, B_CANDIDATE).expect_err(what);
+    // A plain v5 status (no DRY6, no candidate binding) is no B run.
+    requalification_fixture::refresh_v5(&root, dir, &policy);
+    refuse("no DRY6");
+    // Another salt commitment than the candidate's.
+    std::fs::write(
+        &file,
+        requalification_fixture::with(
+            &econ,
+            &economics::PRIVATE,
+            &[("salt_commitment", Value::B256([0x5d; 32]))],
+        ),
+    )
+    .unwrap();
+    requalification_fixture::refresh_b(&root, dir, &policy);
+    assert!(refuse("commitment").contains("candidate's salt"));
+    // A cross-check with the salt in clear (the native record) is no B evidence.
+    let native = requalification_fixture::with(
+        &native_copy(
+            "economics_crosscheck.dbrec",
+            &economics::SCHEMA,
+            &economics::NATIVE,
+        ),
+        &economics::NATIVE,
+        &[("token", Value::Address(requalification_fixture::B_TOKEN))],
+    );
+    std::fs::write(&file, &native).unwrap();
+    requalification_fixture::refresh_b(&root, dir, &policy);
+    assert!(refuse("native cross-check").contains("not an accepted input"));
+    std::fs::write(&file, &econ).unwrap();
+    requalification_fixture::refresh_b(&root, dir, &policy);
+    assert!(attempt1_v5_evidence(&root, dir, &policy, B_CANDIDATE).is_ok());
+    // The guard pins the cross-check record to the profile: B re-bound to a
+    // native record, or the B contract relabelled SELF_A.
+    let other = format!("{dir}/economics_native.dbrec");
+    std::fs::write(root.join(&other), &native).unwrap();
+    let rebound = with_field(
+        &with_field(
+            &bytes,
+            &contract::V5,
+            contract::ECONOMICS_RECORD_PATH,
+            Value::Text(other),
+        ),
+        &contract::V5,
+        contract::ECONOMICS_RECORD_SHA256,
+        Value::B256(darkbot_bsc_record::sha256(&native)),
+    );
+    let relabelled = with_field(
+        &bytes,
+        &contract::V5,
+        contract::CANDIDATE_PROFILE,
+        Value::Text("SELF_A".into()),
+    );
+    for contract_bytes in [rebound, relabelled] {
+        assert!(
+            verify_further_v5_evidence(&root, &contract_bytes)
+                .unwrap_err()
+                .contains("wrong cross-check record")
+        );
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

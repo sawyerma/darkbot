@@ -28,6 +28,18 @@ pub const REQUAL_CHECKS: &[&str] = &["R0_UPGRADE", "DRY0_PREFLIGHT", "DRY1_BYTES
 /// The check and record a requalification adds for a v5 contract (C1/R1).
 pub const REQUAL_LAUNCH_PATH_CHECK: &str = "DRY5_LAUNCH_PATH";
 pub const REQUAL_LAUNCH_PATH: &str = "launch_path.dbrec";
+/// The check a secret-salt SELF_B run adds (`g06a_requal_check --candidate`).
+pub const REQUAL_B_CANDIDATE_CHECK: &str = "DRY6_B_CANDIDATE";
+
+/// What a requalification run must hold: exactly the v4 checks and records,
+/// those plus the launch path (v5), or those plus the SELF_B candidate
+/// record at its path (v5 of B).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shape<'a> {
+    V4,
+    V5,
+    B(&'a str),
+}
 
 /// No aliases across the approval boundary: paths are repository-relative,
 /// normalized and every existing component must be non-symlinked.
@@ -47,18 +59,23 @@ fn evidence_path(root: &Path, relative: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `launch_path`: the v5 shape (with the launch-path check and record);
-/// otherwise exactly the v4 shape.
 fn requalification_pass(
     root: &Path,
     dir: &str,
     policy: &str,
-    launch_path: bool,
+    shape: Shape<'_>,
 ) -> Result<(), String> {
+    let launch_path = shape != Shape::V4;
+    let b = match shape {
+        Shape::B(candidate) => Some(candidate),
+        _ => None,
+    };
     use g06a::requalification as r;
     use std::collections::{BTreeMap, BTreeSet};
     let e = |x: darkbot_bsc_record::RecordError| x.0;
-    for path in [dir, FROZEN_DIR, policy] { evidence_path(root, path)?; }
+    for path in [dir, FROZEN_DIR, policy].into_iter().chain(b) {
+        evidence_path(root, path)?;
+    }
     let status = format!("{dir}/{REQUAL_STATUS}");
     evidence_path(root, &status)?;
     let bytes = std::fs::read(root.join(&status)).map_err(|e| e.to_string())?;
@@ -77,27 +94,32 @@ fn requalification_pass(
     for check in record.nested_all(r::CHECKS).map_err(e)? {
         let name = check.text(r::check::NAME).map_err(e)?.to_owned();
         let known = REQUAL_CHECKS.contains(&name.as_str())
-            || (launch_path && name == REQUAL_LAUNCH_PATH_CHECK);
+            || (launch_path && name == REQUAL_LAUNCH_PATH_CHECK)
+            || (b.is_some() && name == REQUAL_B_CANDIDATE_CHECK);
         if !known || !checks.insert(name) || check.text(r::check::STATUS).map_err(e)? != "PASS" {
             return Err("requalification check missing, duplicated or not PASS".into());
         }
     }
-    if checks.len() != REQUAL_CHECKS.len() + usize::from(launch_path) {
+    if checks.len() != REQUAL_CHECKS.len() + usize::from(launch_path) + usize::from(b.is_some()) {
         return Err("incomplete requalification checks".into());
     }
     let mut records = BTreeMap::new();
     for row in record.nested_all(r::RECORDS).map_err(e)? {
         let raw_name = row.text(r::bound::NAME).map_err(e)?;
-        let name = if same_path(raw_name, policy) { policy } else { raw_name };
+        let name = if same_path(raw_name, policy) {
+            policy
+        } else if let Some(candidate) = b.filter(|c| same_path(raw_name, c)) {
+            candidate
+        } else {
+            raw_name
+        };
         if records.insert(name.to_owned(), row.b256(r::bound::SHA256).map_err(e)?).is_some() {
             return Err("duplicate requalification record".into());
         }
     }
-    let extra = if launch_path {
-        Some(REQUAL_LAUNCH_PATH)
-    } else {
-        None
-    };
+    let extra = [launch_path.then_some(REQUAL_LAUNCH_PATH), b]
+        .into_iter()
+        .flatten();
     for name in [
         REQUAL_PREFLIGHT,
         "native_quote.dbrec",
@@ -110,7 +132,7 @@ fn requalification_pass(
     .into_iter()
     .chain(extra)
     {
-        let path = if name == policy {
+        let path = if name == policy || Some(name) == b {
             name.to_owned()
         } else {
             format!("{dir}/{name}")
@@ -672,7 +694,7 @@ pub fn attempt1_v4_evidence(
     requal_dir: &str,
     builder_policy: &str,
 ) -> Result<V4Evidence, String> {
-    base_evidence(root, requal_dir, builder_policy, false).map(|(e, _, _)| e)
+    base_evidence(root, requal_dir, builder_policy, Shape::V4).map(|(e, _, _)| e)
 }
 
 /// The v4 evidence with the requalification's DRY and preflight records.
@@ -680,13 +702,14 @@ fn base_evidence(
     root: &Path,
     requal_dir: &str,
     builder_policy: &str,
-    launch_path: bool,
+    shape: Shape<'_>,
 ) -> Result<(V4Evidence, Record, Record), String> {
     use g06a::{
         builder_policy as b, dry as d, economics, local_simulation, portal_upgrade as up,
         preflight as p,
     };
-    requalification_pass(root, requal_dir, builder_policy, launch_path)?;
+    requalification_pass(root, requal_dir, builder_policy, shape)?;
+    let b = matches!(shape, Shape::B(_));
     let at = |name: &str| format!("{}/{name}", requal_dir.trim_end_matches('/'));
     let e = |x: darkbot_bsc_record::RecordError| x.0;
     let (dry, dry_rec) = read_input(root, &at(REQUAL_DRY), &[&d::NATIVE])?;
@@ -697,7 +720,13 @@ fn base_evidence(
     }
     let frozen = decode(&d::SCHEMA, &frozen_bytes).map_err(e)?;
     for tag in [d::LAUNCHER, d::BUYER, d::DISTINCT, d::CHAIN_ID, d::PORTAL, d::GAS_PRICE_WEI, d::LAUNCH_GAS_LIMIT, d::BUY_GAS_LIMIT, d::LAUNCH_VALUE_WEI, d::BUY_VALUE_WEI, d::LAUNCH_TX_HASH, d::BUY_TX_HASH, d::TOKEN, d::LOCAL_EXPECTED_OUTPUT, d::MIN_OUTPUT] {
-        if dry_rec.get(tag) != frozen.get(tag) { return Err(format!("frozen DRY identity mismatch: {tag}")); }
+        // A SELF_B run has its own token and signed bytes, all else is A's.
+        if b && [d::LAUNCH_TX_HASH, d::BUY_TX_HASH, d::TOKEN].contains(&tag) {
+            continue;
+        }
+        if dry_rec.get(tag) != frozen.get(tag) {
+            return Err(format!("frozen DRY identity mismatch: {tag}"));
+        }
     }
     if dry_rec.address(d::LAUNCHER).map_err(e)? != hex_literal::<20>(LAUNCHER)? || dry_rec.address(d::BUYER).map_err(e)? != hex_literal::<20>(BUYER)? {
         return Err("DRY wallets differ from contract".into());
@@ -729,7 +758,13 @@ fn base_evidence(
         &at(REQUAL_LOCAL_SIMULATION),
         &[&local_simulation::NATIVE],
     )?;
-    let (economics, _) = read_input(root, &at(REQUAL_ECONOMICS), &[&economics::NATIVE])?;
+    // A secret salt is only ever recorded as its commitment.
+    let accepted: &[&'static Schema] = if b {
+        &[&economics::PRIVATE]
+    } else {
+        &[&economics::NATIVE]
+    };
+    let (economics, _) = read_input(root, &at(REQUAL_ECONOMICS), accepted)?;
     let (portal_upgrade, upgrade) = read_input(root, &at(REQUAL_PORTAL_UPGRADE), &[&up::SCHEMA])?;
     let implementation = pre.address(p::PORTAL_IMPLEMENTATION).map_err(e)?;
     if upgrade.address(up::CURRENT_IMPLEMENTATION).map_err(e)? != implementation {
@@ -1033,8 +1068,20 @@ pub fn attempt1_v5_evidence(
 ) -> Result<V5Evidence, String> {
     use darkbot_bsc_record::schema::g07_candidate::{candidate as c, candidate_id_of};
     use g06a::{dry as d, preflight as p};
-    let (base, dry, pre) = base_evidence(root, requal_dir, builder_policy, true)?;
     let e = |x: darkbot_bsc_record::RecordError| x.0;
+    evidence_path(root, candidate_record)?;
+    let candidate_bytes = std::fs::read(root.join(candidate_record))
+        .map_err(|x| format!("{candidate_record}: {x}"))?;
+    let candidate =
+        decode(&c::SCHEMA, &candidate_bytes).map_err(|x| format!("{candidate_record}: {x}"))?;
+    // SELF_B: its own run (DRY6, private cross-check); SELF_A: the frozen identity.
+    let secret_salt = candidate.text(c::PROFILE).map_err(e)? == "SELF_B";
+    let shape = if secret_salt {
+        Shape::B(candidate_record)
+    } else {
+        Shape::V5
+    };
+    let (base, dry, pre) = base_evidence(root, requal_dir, builder_policy, shape)?;
     let path = format!("{}/{REQUAL_LAUNCH_PATH}", requal_dir.trim_end_matches('/'));
     evidence_path(root, &path)?;
     let bytes = std::fs::read(root.join(&path)).map_err(|x| format!("{path}: {x}"))?;
@@ -1042,11 +1089,6 @@ pub fn attempt1_v5_evidence(
     if snapshot.token != dry.address(d::TOKEN).map_err(e)? {
         return Err("the launch path traces another token than the DRY".into());
     }
-    evidence_path(root, candidate_record)?;
-    let candidate_bytes = std::fs::read(root.join(candidate_record))
-        .map_err(|x| format!("{candidate_record}: {x}"))?;
-    let candidate =
-        decode(&c::SCHEMA, &candidate_bytes).map_err(|x| format!("{candidate_record}: {x}"))?;
     let id = candidate.b256(c::CANDIDATE_ID).map_err(e)?;
     let profile = candidate.text(c::PROFILE).map_err(e)?.to_string();
     if candidate_id_of(&candidate).map_err(e)? != id
@@ -1093,6 +1135,19 @@ pub fn attempt1_v5_evidence(
             .is_some_and(|h| Some(h) != dry.b256(dt).ok())
         {
             return Err("the candidate's signed hashes differ from the DRY".into());
+        }
+    }
+    if secret_salt {
+        let econ_bytes =
+            std::fs::read(root.join(&base.economics.path)).map_err(|x| x.to_string())?;
+        if sha256(&econ_bytes) != base.economics.record_sha256 {
+            return Err("the private cross-check changed while it was read".into());
+        }
+        let econ = decode(&g06a::economics::PRIVATE, &econ_bytes).map_err(e)?;
+        if econ.b256(g06a::economics::SALT_COMMITMENT).map_err(e)?
+            != candidate.b256(c::SALT_COMMITMENT).map_err(e)?
+        {
+            return Err("the private cross-check is not of the candidate's salt".into());
         }
     }
     let v4 = std::fs::read(root.join(crate::acceptance_guard::V4_RELATIVE_PATH))

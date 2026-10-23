@@ -2,14 +2,14 @@
 #![allow(dead_code)]
 use std::path::Path;
 use darkbot_bsc_execution::acceptance_contract::{
-    Authorization, DRY_RECORD, FROZEN_DIR, REQUAL_CHECKS, REQUAL_LAUNCH_PATH,
-    REQUAL_LAUNCH_PATH_CHECK, REQUAL_STATUS, attempt1_v4, attempt1_v4_evidence,
+    Authorization, DRY_RECORD, FROZEN_DIR, REQUAL_B_CANDIDATE_CHECK, REQUAL_CHECKS,
+    REQUAL_LAUNCH_PATH, REQUAL_LAUNCH_PATH_CHECK, REQUAL_STATUS, attempt1_v4, attempt1_v4_evidence,
 };
 use darkbot_bsc_execution::acceptance_guard::V4_RELATIVE_PATH;
 use darkbot_bsc_record::schema::{
     PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, g06a::requalification as r,
 };
-use darkbot_bsc_record::{Draft, Value, decode, sha256};
+use darkbot_bsc_record::{Draft, Schema, Value, decode, sha256};
 
 /// The real launch-path snapshot of the frozen A DRY state: it checks
 /// against the frozen preflight the stand-in records copy.
@@ -17,6 +17,14 @@ pub const LAUNCH_PATH_EVIDENCE: &str =
     "bsc/native/evidence/g06a/launch_path_frozen_a_20261023/launch_path.dbrec";
 /// Where the stand-in public record of candidate A is written.
 pub const CANDIDATE_RECORD: &str = "bsc/native/state/g07_candidates/a.candidate.dbrec";
+/// Where the stand-in public record of candidate B is written.
+pub const B_CANDIDATE_RECORD: &str = "bsc/native/state/g07_candidates/b.candidate.dbrec";
+/// The stand-in SELF_B token (Tax-V3 vanity suffix) and salt commitment.
+pub const B_TOKEN: [u8; 20] = [
+    0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb, 0xbb,
+    0xbb, 0xbb, 0x77, 0x77,
+];
+pub const B_COMMITMENT: [u8; 32] = [0x5c; 32];
 
 pub fn fixture(root: &Path, dir: &str, policy: &str, repo: &Path) {
     std::fs::copy(repo.join(DRY_RECORD), root.join(DRY_RECORD)).unwrap();
@@ -24,25 +32,32 @@ pub fn fixture(root: &Path, dir: &str, policy: &str, repo: &Path) {
     refresh(root, dir, policy);
 }
 pub fn refresh(root: &Path, dir: &str, policy: &str) {
-    status(root, dir, policy, false);
+    status(root, dir, policy, false, None);
 }
 /// The v5 shape: DRY5 and the launch-path record bound as well.
 pub fn refresh_v5(root: &Path, dir: &str, policy: &str) {
-    status(root, dir, policy, true);
+    status(root, dir, policy, true, None);
 }
-fn status(root: &Path, dir: &str, policy: &str, v5: bool) {
+/// The SELF_B shape: also DRY6 and the B candidate record at its path.
+pub fn refresh_b(root: &Path, dir: &str, policy: &str) {
+    status(root, dir, policy, true, Some(B_CANDIDATE_RECORD));
+}
+fn status(root: &Path, dir: &str, policy: &str, v5: bool, b: Option<&str>) {
     let mut d = Draft::new(&r::SCHEMA);
     d.set(PROVENANCE_TOOL, "g06a_requal_check")
         .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64)
         .set(r::VERDICT, "PASS")
         .set(r::REQUAL_DIR, dir)
         .set(r::FROZEN_DIR, FROZEN_DIR);
-    let extra = if v5 {
-        Some(REQUAL_LAUNCH_PATH_CHECK)
-    } else {
-        None
-    };
-    for name in REQUAL_CHECKS.iter().copied().chain(extra) {
+    let extra = [
+        v5.then_some(REQUAL_LAUNCH_PATH_CHECK),
+        b.map(|_| REQUAL_B_CANDIDATE_CHECK),
+    ];
+    for name in REQUAL_CHECKS
+        .iter()
+        .copied()
+        .chain(extra.into_iter().flatten())
+    {
         let mut row = Draft::new(&r::check::SCHEMA);
         row.set(r::check::NAME, name)
             .set(r::check::STATUS, "PASS")
@@ -52,7 +67,7 @@ fn status(root: &Path, dir: &str, policy: &str, v5: bool) {
             );
         d.push(r::CHECKS, row.into_nested());
     }
-    let extra = if v5 { Some(REQUAL_LAUNCH_PATH) } else { None };
+    let extra = [v5.then_some(REQUAL_LAUNCH_PATH), b].into_iter().flatten();
     for name in [
         "preflight.dbrec",
         "native_quote.dbrec",
@@ -65,7 +80,7 @@ fn status(root: &Path, dir: &str, policy: &str, v5: bool) {
     .into_iter()
     .chain(extra)
     {
-        let path = if name == policy {
+        let path = if name == policy || Some(name) == b {
             root.join(name)
         } else {
             root.join(dir).join(name)
@@ -80,6 +95,12 @@ fn status(root: &Path, dir: &str, policy: &str, v5: bool) {
 /// The public record of candidate A derived against the run's preflight
 /// (its ID recomputed; the salt commitment and calldata hash are stand-ins).
 pub fn candidate(root: &Path, dir: &str) {
+    candidate_at(root, dir, CANDIDATE_RECORD, "SELF_A");
+}
+
+/// The candidate record of `profile` at `at` (SELF_B: no A evidence, the
+/// stand-in B commitment).
+fn candidate_at(root: &Path, dir: &str, at: &str, profile: &str) {
     use darkbot_bsc_record::schema::g06a::{dry as d, preflight as p};
     use darkbot_bsc_record::schema::g07_candidate::{candidate as c, candidate_id_of};
     let pre_bytes = std::fs::read(root.join(dir).join("preflight.dbrec")).unwrap();
@@ -90,7 +111,7 @@ pub fn candidate(root: &Path, dir: &str) {
     let copy = |x: &mut Draft, to: u16, from: &darkbot_bsc_record::Record, tag: u16| {
         x.set(to, from.get(tag).unwrap().clone());
     };
-    x.set(c::PROFILE, "SELF_A")
+    x.set(c::PROFILE, profile)
         .set(c::CANDIDATE_ID, Value::B256([0; 32]))
         .set(c::CHAIN_ID, 56u64);
     copy(&mut x, c::PORTAL, &pre, p::PORTAL);
@@ -116,20 +137,25 @@ pub fn candidate(root: &Path, dir: &str) {
     );
     copy(&mut x, c::LAUNCHER, &dry, d::LAUNCHER);
     copy(&mut x, c::TOKEN, &dry, d::TOKEN);
-    copy(&mut x, c::LAUNCH_TX_HASH, &dry, d::LAUNCH_TX_HASH);
-    copy(&mut x, c::BUY_TX_HASH, &dry, d::BUY_TX_HASH);
     x.set(c::DEPLOYMENT_RECORD_SHA256, Value::B256(sha256(&pre_bytes)))
-        .set(c::SALT_COMMITMENT, Value::B256([0x5a; 32]))
-        .set(c::SALT_ORIGIN, "FROZEN_PUBLIC_ECONOMICS_RECORD")
-        .set(c::LAUNCH_CALLDATA_SHA256, Value::B256([0x5b; 32]))
-        .set(c::ECONOMICS_RECORD_SHA256, Value::B256([0x5c; 32]))
-        .set(c::DRY_RECORD_SHA256, Value::B256(sha256(&dry_bytes)))
-        .set(c::QUALIFICATION, "UNQUALIFIED")
+        .set(c::LAUNCH_CALLDATA_SHA256, Value::B256([0x5b; 32]));
+    if profile == "SELF_A" {
+        copy(&mut x, c::LAUNCH_TX_HASH, &dry, d::LAUNCH_TX_HASH);
+        copy(&mut x, c::BUY_TX_HASH, &dry, d::BUY_TX_HASH);
+        x.set(c::SALT_COMMITMENT, Value::B256([0x5a; 32]))
+            .set(c::SALT_ORIGIN, "FROZEN_PUBLIC_ECONOMICS_RECORD")
+            .set(c::ECONOMICS_RECORD_SHA256, Value::B256([0x5c; 32]))
+            .set(c::DRY_RECORD_SHA256, Value::B256(sha256(&dry_bytes)));
+    } else {
+        x.set(c::SALT_COMMITMENT, Value::B256(B_COMMITMENT))
+            .set(c::SALT_ORIGIN, "OS_CSPRNG");
+    }
+    x.set(c::QUALIFICATION, "UNQUALIFIED")
         .set(c::PROVENANCE, "offline-test")
         .set(c::CREATED_UNIX_MS, 1u64);
     let id = candidate_id_of(&decode(&c::SCHEMA, &x.encode().unwrap()).unwrap()).unwrap();
     x.set(c::CANDIDATE_ID, Value::B256(id));
-    let to = root.join(CANDIDATE_RECORD);
+    let to = root.join(at);
     std::fs::create_dir_all(to.parent().unwrap()).unwrap();
     std::fs::write(to, x.encode().unwrap()).unwrap();
 }
@@ -153,4 +179,85 @@ pub fn upgrade_to_v5(root: &Path, dir: &str, policy: &str, repo: &Path) {
     .unwrap();
     candidate(root, dir);
     refresh_v5(root, dir, policy);
+}
+
+/// `bytes` of `schema` with the named fields set, every other field kept.
+pub fn with(bytes: &[u8], schema: &'static Schema, set: &[(&str, Value)]) -> Vec<u8> {
+    let record = decode(schema, bytes).unwrap();
+    let mut d = Draft::new(schema);
+    for (tag, value) in record.fields() {
+        d.push(*tag, value.clone());
+    }
+    for (name, value) in set {
+        let tag = schema.fields.iter().find(|f| f.name == *name).unwrap().tag;
+        d.set(tag, value.clone());
+    }
+    d.encode().unwrap()
+}
+
+/// A v5-shaped stand-in run (see [`upgrade_to_v5`]) made SELF_B's: its own
+/// token and signed hashes in the DRY and the simulation, the private
+/// cross-check (salt only as its commitment), the launch path of its token,
+/// the public B candidate record and the DRY6 status.
+pub fn make_b(root: &Path, dir: &str, policy: &str) {
+    use darkbot_bsc_record::schema::g06a::{
+        dry, economics, launch_path as lp, local_simulation as ls,
+    };
+    let file = |name: &str| root.join(dir).join(name);
+    let token = Value::Address(B_TOKEN);
+    let (launch, buy) = (Value::B256([0x1b; 32]), Value::B256([0x2b; 32]));
+    let edit = |name: &str, schema: &'static Schema, set: &[(&str, Value)]| {
+        let bytes = std::fs::read(file(name)).unwrap();
+        std::fs::write(file(name), with(&bytes, schema, set)).unwrap();
+    };
+    edit(
+        "dry_result.dbrec",
+        &dry::NATIVE,
+        &[
+            ("transactions.token", token.clone()),
+            ("transactions.launch_tx_hash", launch.clone()),
+            ("transactions.buy_tx_hash", buy.clone()),
+        ],
+    );
+    edit(
+        "local_simulation.dbrec",
+        &ls::NATIVE,
+        &[
+            ("token", token.clone()),
+            ("launch_tx_hash", launch),
+            ("buy_tx_hash", buy),
+        ],
+    );
+    let native = decode(
+        &economics::NATIVE,
+        &std::fs::read(file("economics_crosscheck.dbrec")).unwrap(),
+    )
+    .unwrap();
+    let mut private = Draft::new(&economics::PRIVATE);
+    for (tag, value) in native.fields() {
+        if economics::PRIVATE.field(*tag).is_some() {
+            private.push(*tag, value.clone());
+        }
+    }
+    let token_tag = economics::PRIVATE
+        .fields
+        .iter()
+        .find(|f| f.name == "token")
+        .unwrap()
+        .tag;
+    private
+        .set(token_tag, token.clone())
+        .set(economics::SALT_COMMITMENT, Value::B256(B_COMMITMENT));
+    std::fs::write(
+        file("economics_crosscheck.dbrec"),
+        private.encode().unwrap(),
+    )
+    .unwrap();
+    edit(
+        REQUAL_LAUNCH_PATH,
+        &lp::SCHEMA,
+        &[("token", token.clone()), ("launch_return_token", token)],
+    );
+    candidate_at(root, dir, B_CANDIDATE_RECORD, "SELF_B");
+    refresh_b(root, dir, policy);
 }

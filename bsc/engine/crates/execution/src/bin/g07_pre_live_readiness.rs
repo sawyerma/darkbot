@@ -186,29 +186,31 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
         Some(c::WITNESS_SOURCE_LEGACY_SHA256),
         &[&schema::g07::witness_source::SCHEMA],
     )?;
-    for (path, hash, accepted) in [
+    let further: [(u16, u16, &[&'static darkbot_bsc_record::Schema]); 4] = [
         (
             c::LOCAL_SIMULATION_RECORD_PATH,
             c::LOCAL_SIMULATION_RECORD_SHA256,
-            &local_simulation::NATIVE,
+            &[&local_simulation::NATIVE],
         ),
+        // SELF_B: the private cross-check (the guard pins it to the profile).
         (
             c::ECONOMICS_RECORD_PATH,
             c::ECONOMICS_RECORD_SHA256,
-            &economics::NATIVE,
+            &[&economics::NATIVE, &economics::PRIVATE],
         ),
         (
             c::PORTAL_UPGRADE_RECORD_PATH,
             c::PORTAL_UPGRADE_RECORD_SHA256,
-            &portal_upgrade::SCHEMA,
+            &[&portal_upgrade::SCHEMA],
         ),
         (
             c::LAUNCH_PATH_RECORD_PATH,
             c::LAUNCH_PATH_RECORD_SHA256,
-            &schema::g06a::launch_path::SCHEMA,
+            &[&schema::g06a::launch_path::SCHEMA],
         ),
-    ] {
-        bound_input(&contract, path, hash, None, &[accepted])?;
+    ];
+    for (path, hash, accepted) in further {
+        bound_input(&contract, path, hash, None, accepted)?;
     }
     check(
         report,

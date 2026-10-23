@@ -17,8 +17,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// edge. The earlier pin a5ad014f… was already stale at 214d603e (plan
 /// 20c4cfd2… after the E4 source changes). Re-pinned 2026-10-23 (C1/R1):
 /// the guard, preflight reads and root check moved to the v5 contract (was
-/// 32cd2947…). Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "ee8d4aebc6455bda5acc4c9b066466915ec7028d0a04d62f36488072a1d4449e";
+/// 32cd2947…); again for the B private cross-check binding (ee8d4aeb…).
+/// Neither value is an approval.
+const PINNED_PLAN_SHA256: &str = "dd62ff528019c6fb02ec7420dacc731c4a9d5523fb86529d112c58d453466ed5";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

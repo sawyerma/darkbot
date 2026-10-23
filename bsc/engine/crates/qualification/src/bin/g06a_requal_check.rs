@@ -14,7 +14,13 @@
 //! `FLAP_REQUALIFICATION=PASS` or `=STOP`; exit 0 for PASS, 1 for STOP,
 //! 2 for unusable input. Offline: reads local records only.
 //!
-//! usage: g06a_requal_check <requal_dir> <frozen_dir> <builder_policy.dbrec>
+//! With `--candidate <record>` of a secret-salt SELF_B candidate (plan v8,
+//! v9.1 B2) the run is B's own DRY: token and signed hashes may (and must)
+//! differ from the frozen A DRY, the cross-check is the private record and
+//! DRY6 binds the candidate (ID, deployment, launcher, token, salt
+//! commitment) to this run; every other comparison is unchanged.
+//!
+//! usage: g06a_requal_check <requal_dir> <frozen_dir> <builder_policy.dbrec> [--candidate <b.candidate.dbrec>]
 
 use darkbot_bsc_execution::acceptance_guard::{V3_RELATIVE_PATH, sha256_hex};
 use darkbot_bsc_record::schema::g06a::{
@@ -189,12 +195,40 @@ struct Evaluation {
     facts: Draft,
 }
 
-fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluation, String> {
+fn evaluate(
+    dir: &Path,
+    frozen_dir: &Path,
+    policy_path: &Path,
+    candidate_path: Option<&Path>,
+) -> Result<Evaluation, String> {
     let new = |name: &str, accepted: &[&'static Schema]| load(&dir.join(name), accepted);
     let old = |name: &str, accepted: &[&'static Schema]| load(&frozen_dir.join(name), accepted);
+    let candidate = candidate_path
+        .map(|p| {
+            load(
+                p,
+                &[&darkbot_bsc_record::schema::g07_candidate::candidate::SCHEMA],
+            )
+        })
+        .transpose()?;
+    let b = candidate.is_some();
+    if let Some((c, _)) = &candidate
+        && one(c, "profile") != Some(Value::Text("SELF_B".into()))
+    {
+        return Err(
+            "--candidate takes a SELF_B record; A is requalified against the frozen DRY".into(),
+        );
+    }
     let (pre, pre_sha) = new(FILES[0], &[&pf::SCHEMA])?;
     let (q, q_sha) = new(FILES[1], &[&quote::SCHEMA])?;
-    let (econ, econ_sha) = new(FILES[2], &[&economics::NATIVE])?;
+    let (econ, econ_sha) = new(
+        FILES[2],
+        if b {
+            &[&economics::PRIVATE]
+        } else {
+            &[&economics::NATIVE]
+        },
+    )?;
     let (ls, ls_sha) = new(FILES[3], &[&sim::NATIVE])?;
     let (d, d_sha) = new(FILES[4], &[&dry::NATIVE])?;
     let (scan, scan_sha) = new(FILES[5], &[&up::SCHEMA])?;
@@ -343,18 +377,32 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
     let v3_sha = std::fs::read(V3_RELATIVE_PATH)
         .map(|b| sha256(&b))
         .map_err(|e| format!("{V3_RELATIVE_PATH}: {e}"))?;
+    // B's own token and signed bytes; everything else as the frozen DRY.
+    let b_identity: &[&str] = if b {
+        &[
+            "transactions.token",
+            "transactions.launch_tx_hash",
+            "transactions.buy_tx_hash",
+        ]
+    } else {
+        &[]
+    };
     let mut p = unexpected_differences(
         &f_d,
         &d,
         &[
-            "qualification_note",
-            "contract.path",
-            "contract.sha256",
-            "bundle_projection.send_head",
-            "bundle_projection.max_block",
-            "bundle_projection.blockrazor_payload_sha256",
-            "bundle_projection.fortyeightclub_payload_sha256",
-        ],
+            &[
+                "qualification_note",
+                "contract.path",
+                "contract.sha256",
+                "bundle_projection.send_head",
+                "bundle_projection.max_block",
+                "bundle_projection.blockrazor_payload_sha256",
+                "bundle_projection.fortyeightclub_payload_sha256",
+            ][..],
+            b_identity,
+        ]
+        .concat(),
         &[],
     );
     match one(&d, "qualification_note") {
@@ -368,8 +416,15 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
     }
     let launch = word(one(&d, "transactions.launch_tx_hash"));
     let buy = word(one(&d, "transactions.buy_tx_hash"));
-    if launch != Some(hex32(LAUNCH_TX)) || buy != Some(hex32(BUY_TX)) {
+    if !b && (launch != Some(hex32(LAUNCH_TX)) || buy != Some(hex32(BUY_TX))) {
         p.push("signed launch/BUY hashes differ from the approved candidate".into());
+    }
+    if b && (launch.is_none()
+        || buy.is_none()
+        || launch == Some(hex32(LAUNCH_TX))
+        || buy == Some(hex32(BUY_TX)))
+    {
+        p.push("B must sign its own launch/BUY bytes, never A's".into());
     }
     if one(&d, "dry_pass.DRY_1_bytes_and_signers") != Some(Value::Bool(true)) {
         p.push("DRY-1 did not pass".into());
@@ -392,32 +447,62 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         &f_ls,
         &ls,
         &[
-            "state_source.block_number",
-            "state_source.block_hash",
-            "launch_execution_gas",
-            "buy_execution_gas",
-            "launch_gas_used",
-            "buy_gas_used",
-            "builder_floor_evidence_sha256",
-        ],
+            &[
+                "state_source.block_number",
+                "state_source.block_hash",
+                "launch_execution_gas",
+                "buy_execution_gas",
+                "launch_gas_used",
+                "buy_gas_used",
+                "builder_floor_evidence_sha256",
+            ][..],
+            if b {
+                &["launch_tx_hash", "buy_tx_hash", "token"][..]
+            } else {
+                &[][..]
+            },
+        ]
+        .concat(),
         &[],
     );
     if word(one(&ls, "builder_floor_evidence_sha256")) != Some(policy_sha) {
         p.push("builder floor evidence of the simulation is not the re-determined builder policy".into());
     }
+    // B's private record: its token and the salt commitment instead of the
+    // salt and the remote checks, which a secret salt never makes.
+    let (econ_allowed, econ_absent): (&[&str], &[&str]) = if b {
+        (
+            &["token", "salt_commitment", "network_actions", "limitations"],
+            &[
+                "schema",
+                "salt",
+                "salt_counter",
+                "mainnet_estimate_gas_launch_success",
+                "mainnet_eth_call_launch_success",
+                "mainnet_eth_call_launch_return",
+                "mainnet_eth_call_predicted_token_match",
+            ],
+        )
+    } else {
+        (&[], &[])
+    };
     p.extend(unexpected_differences(
         &f_econ,
         &econ,
         &[
-            "preflight_path",
-            "state_source.block_number",
-            "state_source.block_hash",
-            "mainnet_launch_gas_estimate",
-            "mainnet_launch_gas_limit_120pct",
-            "launch_execution_gas",
-            "buy_execution_gas",
-        ],
-        &[],
+            &[
+                "preflight_path",
+                "state_source.block_number",
+                "state_source.block_hash",
+                "mainnet_launch_gas_estimate",
+                "mainnet_launch_gas_limit_120pct",
+                "launch_execution_gas",
+                "buy_execution_gas",
+            ][..],
+            econ_allowed,
+        ]
+        .concat(),
+        econ_absent,
     ));
     for (name, r) in [("simulation", &ls), ("cross-check", &econ)] {
         if int(one(r, "state_source.block_number")) != Some(head) {
@@ -540,6 +625,57 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         "every executed contract's code hash and every storage selector of the candidate's launch and first BUY, traced at the preflight's block, bound to its Portal, implementation and Tax-V3 code",
     ));
 
+    // DRY-6 (B only): this run is exactly the SELF_B candidate's.
+    if let Some((c, _)) = &candidate {
+        let mut p = Vec::new();
+        let id = darkbot_bsc_record::schema::g07_candidate::candidate_id_of(c).map_err(|e| e.0)?;
+        if word(one(c, "candidate_id")) != Some(id) {
+            p.push("the candidate record fails its identity".into());
+        }
+        for (field, record, name) in [
+            ("portal", &pre, "portal"),
+            ("deployment.portal_version", &pre, "portal_version"),
+            (
+                "deployment.portal_implementation",
+                &pre,
+                "portal_implementation",
+            ),
+            (
+                "deployment.portal_implementation_code_sha256",
+                &pre,
+                "portal_implementation_code_sha256",
+            ),
+            ("deployment.tax_v3_implementation", &pre, "tax_v3_impl"),
+            (
+                "deployment.tax_v3_implementation_code_sha256",
+                &pre,
+                "tax_v3_impl_code_sha256",
+            ),
+            ("launcher", &d, "wallets.launcher"),
+            ("token", &d, "transactions.token"),
+            ("token", &ls, "token"),
+            ("token", &econ, "token"),
+            ("salt_commitment", &econ, "salt_commitment"),
+        ] {
+            if one(c, field).is_none() || one(c, field) != one(record, name) {
+                p.push(format!("candidate {field} differs from {name}"));
+            }
+        }
+        if word(one(c, "deployment.record_sha256")) != Some(pre_sha) {
+            p.push("the candidate is not derived against this preflight".into());
+        }
+        if one(c, "qualification") != Some(Value::Text("UNQUALIFIED".into()))
+            || one(c, "evidence.dry_record_sha256").is_some()
+        {
+            p.push("the candidate record is not an unqualified SELF_B record".into());
+        }
+        checks.push(check(
+            "DRY6_B_CANDIDATE",
+            p,
+            "the SELF_B candidate (ID recomputed) is derived against this preflight; its launcher, token and salt commitment are this run's DRY, simulation and private cross-check",
+        ));
+    }
+
     let bound = vec![
         ("preflight.dbrec".to_string(), pre_sha),
         ("native_quote.dbrec".to_string(), q_sha),
@@ -550,6 +686,10 @@ fn evaluate(dir: &Path, frozen_dir: &Path, policy_path: &Path) -> Result<Evaluat
         (policy_path.display().to_string(), policy_sha),
         (LAUNCH_PATH.to_string(), sha256(&lp_bytes)),
     ];
+    let mut bound = bound;
+    if let (Some(path), Some((_, sha))) = (candidate_path, &candidate) {
+        bound.push((path.display().to_string(), *sha));
+    }
     let _ = (IMPORT_LEGACY_PATH, IMPORT_LEGACY_SHA256, tag_of);
     Ok(Evaluation { checks, bound, facts })
 }
@@ -589,12 +729,20 @@ fn status_record(dir: &Path, frozen: &Path, e: Evaluation) -> (bool, Vec<u8>) {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [dir, frozen, policy] = args.as_slice() else {
-        eprintln!("usage: g06a_requal_check <requal_dir> <frozen_dir> <builder_policy.dbrec>");
-        return ExitCode::from(2);
+    let (dir, frozen, policy, candidate) = match args.as_slice() {
+        [dir, frozen, policy] => (dir, frozen, policy, None),
+        [dir, frozen, policy, flag, candidate] if flag == "--candidate" => {
+            (dir, frozen, policy, Some(Path::new(candidate)))
+        }
+        _ => {
+            eprintln!(
+                "usage: g06a_requal_check <requal_dir> <frozen_dir> <builder_policy.dbrec> [--candidate <b.candidate.dbrec>]"
+            );
+            return ExitCode::from(2);
+        }
     };
     let (dir, frozen, policy) = (Path::new(dir), Path::new(frozen), Path::new(policy));
-    let evaluation = match evaluate(dir, frozen, policy) {
+    let evaluation = match evaluate(dir, frozen, policy, candidate) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("STOP: {e}");
@@ -874,6 +1022,178 @@ mod tests {
         dir
     }
 
+    /// A SELF_B run: the A stand-ins with B's token and signed hashes, the
+    /// private cross-check (salt only as its commitment) and the public B
+    /// candidate record derived against the stand-in preflight; `breaks`
+    /// names one deliberate defect.
+    fn b_stand_in(tag: &str, breaks: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use darkbot_bsc_record::schema::g06a::launch_path as lp;
+        use darkbot_bsc_record::schema::g07_candidate::{candidate as c, candidate_id_of};
+        let dir = stand_in(tag, "none");
+        let mut token = [0xbb; 20];
+        token[18..].copy_from_slice(&[0x77, 0x77]);
+        let commitment = [0x5c; 32];
+        let edit = |name: &str, schema: &'static Schema, f: &dyn Fn(&mut Draft)| {
+            let path = dir.join(name);
+            let r = decode_any(&std::fs::read(&path).unwrap()).unwrap();
+            let mut d = Draft::new(schema);
+            for (t, v) in r.fields() {
+                d.push(*t, v.clone());
+            }
+            f(&mut d);
+            std::fs::write(&path, d.encode().unwrap()).unwrap();
+        };
+        edit("dry_result.dbrec", &dry::NATIVE, &|d| {
+            let launch = if breaks == "b_reuses_a" {
+                hex32(LAUNCH_TX)
+            } else {
+                [0x1b; 32]
+            };
+            d.set(
+                dry::TOKEN,
+                Value::Address(if breaks == "b_token" {
+                    [0xcc; 20]
+                } else {
+                    token
+                }),
+            )
+            .set(dry::LAUNCH_TX_HASH, Value::B256(launch))
+            .set(dry::BUY_TX_HASH, Value::B256([0x2b; 32]));
+        });
+        edit("local_simulation.dbrec", &sim::NATIVE, &|d| {
+            d.set(tag_of(&sim::NATIVE, "token"), Value::Address(token))
+                .set(
+                    tag_of(&sim::NATIVE, "launch_tx_hash"),
+                    Value::B256([0x1b; 32]),
+                )
+                .set(tag_of(&sim::NATIVE, "buy_tx_hash"), Value::B256([0x2b; 32]));
+        });
+        if breaks != "b_native_econ" {
+            let native =
+                decode_any(&std::fs::read(dir.join("economics_crosscheck.dbrec")).unwrap())
+                    .unwrap();
+            let mut private = Draft::new(&economics::PRIVATE);
+            for (t, v) in native.fields() {
+                if economics::PRIVATE.field(*t).is_some() {
+                    private.push(*t, v.clone());
+                }
+            }
+            private
+                .set(tag_of(&economics::PRIVATE, "token"), Value::Address(token))
+                .set(economics::SALT_COMMITMENT, Value::B256(commitment));
+            std::fs::write(
+                dir.join("economics_crosscheck.dbrec"),
+                private.encode().unwrap(),
+            )
+            .unwrap();
+        }
+        edit("launch_path.dbrec", &lp::SCHEMA, &|d| {
+            d.set(lp::TOKEN, Value::Address(token))
+                .set(lp::LAUNCH_RETURN_TOKEN, Value::Address(token));
+        });
+        let pre_bytes = std::fs::read(dir.join("preflight.dbrec")).unwrap();
+        let p = decode_any(&pre_bytes).unwrap();
+        let f_d = frozen("dry_result.dbrec");
+        let mut x = Draft::new(&c::SCHEMA);
+        let profile = if breaks == "b_profile_a" {
+            "SELF_A"
+        } else {
+            "SELF_B"
+        };
+        x.set(c::PROFILE, profile)
+            .set(c::CANDIDATE_ID, Value::B256([0; 32]))
+            .set(c::CHAIN_ID, 56u64)
+            .set(c::PORTAL, p.get(pf::PORTAL).unwrap().clone())
+            .set(
+                c::PORTAL_VERSION,
+                p.get(pf::PORTAL_VERSION).unwrap().clone(),
+            )
+            .set(
+                c::PORTAL_IMPLEMENTATION,
+                p.get(pf::PORTAL_IMPLEMENTATION).unwrap().clone(),
+            )
+            .set(
+                c::PORTAL_IMPLEMENTATION_CODE_SHA256,
+                p.get(pf::PORTAL_IMPLEMENTATION_CODE_SHA256)
+                    .unwrap()
+                    .clone(),
+            )
+            .set(
+                c::TAX_V3_IMPLEMENTATION,
+                p.get(pf::TAX_V3_IMPL).unwrap().clone(),
+            )
+            .set(
+                c::TAX_V3_IMPLEMENTATION_CODE_SHA256,
+                p.get(pf::TAX_V3_IMPL_CODE_SHA256).unwrap().clone(),
+            )
+            .set(c::DEPLOYMENT_RECORD_SHA256, Value::B256(sha256(&pre_bytes)))
+            .set(c::LAUNCHER, f_d.get(dry::LAUNCHER).unwrap().clone())
+            .set(c::TOKEN, Value::Address(token))
+            .set(
+                c::SALT_COMMITMENT,
+                Value::B256(if breaks == "b_commitment" {
+                    [0x5d; 32]
+                } else {
+                    commitment
+                }),
+            )
+            .set(c::SALT_ORIGIN, "OS_CSPRNG")
+            .set(c::LAUNCH_CALLDATA_SHA256, Value::B256([0x5b; 32]))
+            .set(c::QUALIFICATION, "UNQUALIFIED")
+            .set(c::PROVENANCE, "test")
+            .set(c::CREATED_UNIX_MS, 1u64);
+        let id = candidate_id_of(&decode_any(&x.encode().unwrap()).unwrap()).unwrap();
+        x.set(
+            c::CANDIDATE_ID,
+            Value::B256(if breaks == "b_id" { [1; 32] } else { id }),
+        );
+        let candidate = dir.join("b.candidate.dbrec");
+        std::fs::write(&candidate, x.encode().unwrap()).unwrap();
+        (dir, candidate)
+    }
+
+    #[test]
+    fn a_secret_salt_b_run_qualifies_only_as_its_own_candidate() {
+        std::env::set_current_dir(repo("")).unwrap();
+        let frozen = repo(FROZEN);
+        let b_verdict = |breaks: &str| {
+            let (dir, candidate) = b_stand_in(&format!("b-{breaks}"), breaks);
+            let result = evaluate(&dir, &frozen, &policy_of(&dir), Some(&candidate)).map(|e| {
+                let checks = e.checks.clone();
+                (status_record(&dir, &frozen, e).0, checks)
+            });
+            std::fs::remove_dir_all(&dir).unwrap();
+            result
+        };
+        let (pass, checks) = b_verdict("none").unwrap();
+        assert!(pass, "{checks:#?}");
+        assert!(
+            checks
+                .iter()
+                .any(|c| c.name == "DRY6_B_CANDIDATE" && c.pass)
+        );
+        for (breaks, failing) in [
+            ("b_token", "DRY6_B_CANDIDATE"),
+            ("b_reuses_a", "DRY1_BYTES_AND_SIGNERS"),
+            ("b_commitment", "DRY6_B_CANDIDATE"),
+            ("b_id", "DRY6_B_CANDIDATE"),
+        ] {
+            let (pass, checks) = b_verdict(breaks).unwrap();
+            assert!(!pass, "{breaks} passed");
+            let failed: Vec<_> = checks.iter().filter(|c| !c.pass).map(|c| c.name).collect();
+            assert!(failed.contains(&failing), "{breaks}: {failed:?}");
+        }
+        // A's candidate is not a B run; a cross-check with the salt in clear
+        // is unusable for B.
+        assert!(b_verdict("b_profile_a").is_err());
+        assert!(b_verdict("b_native_econ").is_err());
+        // Without --candidate, B's files are a STOP of A's requalification.
+        let (dir, _) = b_stand_in("b-as-a", "b_native_econ");
+        let e = evaluate(&dir, &frozen, &policy_of(&dir), None).unwrap();
+        assert!(!status_record(&dir, &frozen, e).0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     fn policy_of(dir: &Path) -> std::path::PathBuf {
         dir.join("builder_policy.dbrec")
     }
@@ -884,7 +1204,7 @@ mod tests {
         std::env::set_current_dir(&root).unwrap();
         let frozen = repo(FROZEN);
         let policy = dir.join("builder_policy.dbrec");
-        let e = evaluate(&dir, &frozen, &policy).unwrap();
+        let e = evaluate(&dir, &frozen, &policy, None).unwrap();
         let checks = e.checks.clone();
         let (pass, _) = status_record(&dir, &frozen, e);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -934,16 +1254,18 @@ mod tests {
         let frozen = repo(FROZEN);
         let policy = dir.join("builder_policy.dbrec");
         // The frozen import is history, not a re-determination.
-        assert!(evaluate(&dir, &frozen, &frozen.join("builder_policy.dbrec")).is_err());
+        assert!(evaluate(&dir, &frozen, &frozen.join("builder_policy.dbrec"), None).is_err());
         std::fs::copy(frozen.join("dry_result.dbrec"), dir.join("preflight.dbrec")).unwrap();
-        assert!(evaluate(&dir, &frozen, &policy).is_err());
+        assert!(evaluate(&dir, &frozen, &policy, None).is_err());
         std::fs::write(dir.join("preflight.dbrec"), b"garbage").unwrap();
-        assert!(evaluate(&dir, &frozen, &policy).is_err());
+        assert!(evaluate(&dir, &frozen, &policy, None).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
         // Without its launch-path snapshot a run is unusable for v5.
         let dir = stand_in("no-launch-path", "none");
         std::fs::remove_file(dir.join(LAUNCH_PATH)).unwrap();
-        let error = evaluate(&dir, &frozen, &policy_of(&dir)).err().unwrap();
+        let error = evaluate(&dir, &frozen, &policy_of(&dir), None)
+            .err()
+            .unwrap();
         assert!(error.contains(LAUNCH_PATH), "{error}");
         std::fs::remove_dir_all(&dir).unwrap();
     }

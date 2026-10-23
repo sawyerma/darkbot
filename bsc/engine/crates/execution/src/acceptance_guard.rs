@@ -400,15 +400,16 @@ fn bound_record(
     hash_tag: u16,
     schema: &'static Schema,
 ) -> Result<(Record, String), String> {
-    bound_bytes(root, c, path_tag, hash_tag, schema).map(|(r, sha, _)| (r, sha))
+    bound_bytes(root, c, path_tag, hash_tag, &[schema]).map(|(r, sha, _)| (r, sha))
 }
 
+/// [`bound_record`] of one of the `accepted` schemas, with the exact bytes.
 fn bound_bytes(
     root: &Path,
     c: &Record,
     path_tag: u16,
     hash_tag: u16,
-    schema: &'static Schema,
+    accepted: &[&'static Schema],
 ) -> Result<(Record, String, Vec<u8>), String> {
     let e = |e: RecordError| format!("acceptance contract: {e}");
     let path = c.text(path_tag).map_err(e)?;
@@ -425,7 +426,14 @@ fn bound_bytes(
     if sha256(&bytes) != c.b256(hash_tag).map_err(e)? {
         return Err(format!("bound record {path} does not match its SHA-256"));
     }
-    let record = decode(schema, &bytes).map_err(|x| format!("bound {path}: {x}"))?;
+    let record =
+        darkbot_bsc_record::schema::decode_any(&bytes).map_err(|x| format!("bound {path}: {x}"))?;
+    if !accepted.contains(&record.schema()) {
+        return Err(format!(
+            "bound {path}: {} is not accepted here",
+            record.schema().name
+        ));
+    }
     Ok((record, sha256_hex(&bytes), bytes))
 }
 
@@ -446,7 +454,11 @@ pub fn verify_further_v4_evidence(
 ) -> Result<FurtherEvidence, String> {
     let c = decode(&contract::V4, contract_bytes)
         .map_err(|e| format!("acceptance contract v4: {e}"))?;
-    further(root, &c).map(|(further, _, _)| further)
+    let (further, _, _, econ) = further(root, &c)?;
+    if econ.schema() != &economics::NATIVE {
+        return Err("a v4 contract binds the native cross-check".into());
+    }
+    Ok(further)
 }
 
 /// [`verify_further_v4_evidence`] of a v5 contract plus its launch-path
@@ -460,25 +472,30 @@ pub fn verify_further_v5_evidence(
 ) -> Result<(FurtherEvidence, launch_path::Bound), String> {
     let c = decode(&contract::V5, contract_bytes)
         .map_err(|e| format!("acceptance contract v5: {e}"))?;
-    let (further, d, pre) = further(root, &c)?;
+    let (further, d, pre, econ) = further(root, &c)?;
     let (_, _, bytes) = bound_bytes(
         root,
         &c,
         contract::LAUNCH_PATH_RECORD_PATH,
         contract::LAUNCH_PATH_RECORD_SHA256,
-        &lp::SCHEMA,
+        &[&lp::SCHEMA],
     )?;
     let snapshot = launch_path::check(&bytes, &pre).map_err(|e| format!("v5-bound {e}"))?;
     let e = |e: RecordError| format!("acceptance contract v5: {e}");
     if snapshot.token != d.address(dry::TOKEN).map_err(e)? {
         return Err("v5-bound launch path traces another token than the DRY".into());
     }
-    if !matches!(
-        c.text(contract::CANDIDATE_PROFILE).map_err(e)?,
-        "SELF_A" | "SELF_B"
-    ) || c.b256(contract::CANDIDATE_ID).map_err(e)? == [0; 32]
-    {
+    // A secret salt (SELF_B) is bound only through its private cross-check.
+    let cross_check = match c.text(contract::CANDIDATE_PROFILE).map_err(e)? {
+        "SELF_A" => &economics::NATIVE,
+        "SELF_B" => &economics::PRIVATE,
+        _ => return Err("v5 candidate binding is not a SELF_A/SELF_B candidate ID".into()),
+    };
+    if c.b256(contract::CANDIDATE_ID).map_err(e)? == [0; 32] {
         return Err("v5 candidate binding is not a SELF_A/SELF_B candidate ID".into());
+    }
+    if econ.schema() != cross_check {
+        return Err("v5 binds the wrong cross-check record for its candidate profile".into());
     }
     Ok((
         further,
@@ -486,9 +503,9 @@ pub fn verify_further_v5_evidence(
     ))
 }
 
-/// The further evidence of a v4 or v5 contract, with the bound DRY and
-/// preflight records it was checked against.
-fn further(root: &Path, c: &Record) -> Result<(FurtherEvidence, Record, Record), String> {
+/// The further evidence of a v4 or v5 contract, with the bound DRY,
+/// preflight and cross-check records it was checked against.
+fn further(root: &Path, c: &Record) -> Result<(FurtherEvidence, Record, Record, Record), String> {
     use darkbot_bsc_record::Value;
     let (d, _) = bound_record(
         root,
@@ -511,12 +528,12 @@ fn further(root: &Path, c: &Record) -> Result<(FurtherEvidence, Record, Record),
         contract::LOCAL_SIMULATION_RECORD_SHA256,
         &local_simulation::NATIVE,
     )?;
-    let (econ, econ_sha) = bound_record(
+    let (econ, econ_sha, _) = bound_bytes(
         root,
         c,
         contract::ECONOMICS_RECORD_PATH,
         contract::ECONOMICS_RECORD_SHA256,
-        &economics::NATIVE,
+        &[&economics::NATIVE, &economics::PRIVATE],
     )?;
     let (up, up_sha) = bound_record(
         root,
@@ -579,6 +596,7 @@ fn further(root: &Path, c: &Record) -> Result<(FurtherEvidence, Record, Record),
         },
         d,
         pre,
+        econ,
     ))
 }
 
