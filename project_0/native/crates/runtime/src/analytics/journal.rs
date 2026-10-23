@@ -102,6 +102,8 @@ pub mod kind {
     pub const FE01_CONFIG: u16 = 700;
     pub const FE01_READ: u16 = 701;
     pub const FE01_RESULT: u16 = 702;
+    /// FE-01 one-class offline freeze (`payload::Fe01Freeze`), its own journal `fe01_freeze.p0j`.
+    pub const FE01_FREEZE: u16 = 703;
     /// C0 account census rows (`c0_census.py` via `p0-journal import`): program accounts and
     /// group indexer accounts of one context slot.
     pub const C0_CENSUS_ACCOUNT: u16 = 900;
@@ -158,6 +160,7 @@ pub mod kind {
         FE01_CONFIG,
         FE01_READ,
         FE01_RESULT,
+        FE01_FREEZE,
         C0_CENSUS_ACCOUNT,
         C0_CENSUS_GROUP_ACCOUNT,
         C0_CENSUS_ROW,

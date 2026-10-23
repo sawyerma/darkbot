@@ -3,6 +3,8 @@
 pub mod boot_audit;
 pub mod control;
 #[cfg(feature = "crate_health")]
+pub mod fe_freeze;
+#[cfg(feature = "crate_health")]
 pub mod fe_qualification;
 pub mod provider_evidence;
 pub mod remote_workers;

@@ -140,6 +140,15 @@ pub fn replay(
     directory: &Path,
     class: FundingClass,
 ) -> Result<Value, String> {
+    replay_frozen(config, directory, class).map(|(report, _)| report)
+}
+
+/// The replay report and the historical one-class freeze of the same saved scope (FE-01).
+pub fn replay_frozen(
+    config: &RuntimeConfig,
+    directory: &Path,
+    class: FundingClass,
+) -> Result<(Value, Result<crate::analytics::payload::Fe01Freeze, String>), String> {
     first_class(class.as_str())?;
     if config.fe_mode != "full" {
         return Err("FE_REPLAY_REQUIRES_FULL_MODE".into());
@@ -157,43 +166,48 @@ pub fn replay(
     )?;
     let mut total = 0u64;
     let mut reads = Vec::new();
-    let mut report = fe::collect(config, |keys, floor| {
-        if reads.len() as u64 >= config.limits.fe_calls.min(config.limits.max_requests) {
-            return Err("FE_REPLAY_CALL_LIMIT".into());
-        }
-        if let Some(frames) = &saved {
-            let (entry, integrity) = frames.get(reads.len()).ok_or("FE_REPLAY_READ_MISSING")?;
-            let decoded = decode_saved(entry.clone(), keys, floor)?;
-            total += integrity["bytes"].as_u64().unwrap_or(0);
-            reads.push(integrity.clone());
-            return Ok(decoded);
-        }
-        let name = format!("read_{:06}.json", reads.len() + 1);
-        let path = directory.join(&name);
-        if fs::symlink_metadata(&path)
-            .map_err(|_| "FE_REPLAY_READ_MISSING")?
-            .file_type()
-            .is_symlink()
-        {
-            return Err("FE_REPLAY_SYMLINK".into());
-        }
-        let mut bytes = Vec::new();
-        fs::File::open(path)
-            .map_err(|_| "FE_REPLAY_READ_MISSING")?
-            .take(limit.saturating_sub(total).saturating_add(1))
-            .read_to_end(&mut bytes)
-            .map_err(|_| "FE_REPLAY_IO")?;
-        total = total
-            .checked_add(bytes.len() as u64)
-            .ok_or("FE_REPLAY_BYTE_LIMIT")?;
-        if total > limit {
-            return Err("FE_REPLAY_BYTE_LIMIT".into());
-        }
-        let entry = serde_json::from_slice(&bytes).map_err(|_| "FE_REPLAY_JSON")?;
-        let decoded = decode_saved(entry, keys, floor)?;
-        reads.push(json!({"file":name,"sha256":fe::sha(&bytes),"bytes":bytes.len()}));
-        Ok(decoded)
-    })?;
+    let (mut report, freeze) = fe::collect_frozen(
+        config,
+        |keys, floor| {
+            if reads.len() as u64 >= config.limits.fe_calls.min(config.limits.max_requests) {
+                return Err("FE_REPLAY_CALL_LIMIT".into());
+            }
+            if let Some(frames) = &saved {
+                let (entry, integrity) = frames.get(reads.len()).ok_or("FE_REPLAY_READ_MISSING")?;
+                let decoded = decode_saved(entry.clone(), keys, floor)?;
+                total += integrity["bytes"].as_u64().unwrap_or(0);
+                reads.push(integrity.clone());
+                return Ok(decoded);
+            }
+            let name = format!("read_{:06}.json", reads.len() + 1);
+            let path = directory.join(&name);
+            if fs::symlink_metadata(&path)
+                .map_err(|_| "FE_REPLAY_READ_MISSING")?
+                .file_type()
+                .is_symlink()
+            {
+                return Err("FE_REPLAY_SYMLINK".into());
+            }
+            let mut bytes = Vec::new();
+            fs::File::open(path)
+                .map_err(|_| "FE_REPLAY_READ_MISSING")?
+                .take(limit.saturating_sub(total).saturating_add(1))
+                .read_to_end(&mut bytes)
+                .map_err(|_| "FE_REPLAY_IO")?;
+            total = total
+                .checked_add(bytes.len() as u64)
+                .ok_or("FE_REPLAY_BYTE_LIMIT")?;
+            if total > limit {
+                return Err("FE_REPLAY_BYTE_LIMIT".into());
+            }
+            let entry = serde_json::from_slice(&bytes).map_err(|_| "FE_REPLAY_JSON")?;
+            let decoded = decode_saved(entry, keys, floor)?;
+            reads.push(json!({"file":name,"sha256":fe::sha(&bytes),"bytes":bytes.len()}));
+            Ok(decoded)
+        },
+        class,
+        true,
+    )?;
     // An extra saved read indicates a different/partial collection, not this replay.
     let saved_count = match &saved {
         Some(frames) => frames.len(),
@@ -222,7 +236,7 @@ pub fn replay(
         ),
     };
     report["replay"] = json!({"mode":"OFFLINE_SAVED_OBSERVATIONS","source":source,"reads":reads,"total_bytes":total,"freshness":"HISTORICAL_NOT_CURRENT","integrity":integrity});
-    Ok(report)
+    Ok((report, freeze))
 }
 
 #[cfg(test)]

@@ -144,6 +144,46 @@ impl Payload for C0CensusResult {
     const KIND: u16 = journal::kind::C0_CENSUS_RESULT;
 }
 
+/// FE-01 (PHASENPLAN §13): one bank of a frozen one-class scope — its identity, its oracle setup
+/// and observation keys, every dependency (mint, oracles, integration accounts) and a hash of its
+/// governance configuration.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FrozenBank {
+    pub bank: solana_sdk::pubkey::Pubkey,
+    pub mint: solana_sdk::pubkey::Pubkey,
+    pub mint_decimals: u8,
+    pub liquidity_vault: solana_sdk::pubkey::Pubkey,
+    pub oracle_setup: u8,
+    pub oracle_keys: Vec<solana_sdk::pubkey::Pubkey>,
+    pub dependencies: Vec<solana_sdk::pubkey::Pubkey>,
+    pub config_sha256: String,
+}
+
+/// FE-01 one-class offline freeze: the pinned identities of one closed observation scope for
+/// exactly one funding class (`orchestration::fe_freeze`). Never a qualification by itself.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Freeze {
+    pub funding_class: String,
+    pub source_commit: String,
+    pub program: solana_sdk::pubkey::Pubkey,
+    pub program_data: solana_sdk::pubkey::Pubkey,
+    pub program_data_sha256: String,
+    pub deployment_slot: u64,
+    pub group: solana_sdk::pubkey::Pubkey,
+    pub fee_state: solana_sdk::pubkey::Pubkey,
+    pub transaction_version: String,
+    /// The class's own pins beyond the scope (swap programs, published LUTs, token programs).
+    pub class_pins: Vec<solana_sdk::pubkey::Pubkey>,
+    pub targets: Vec<solana_sdk::pubkey::Pubkey>,
+    pub banks: Vec<FrozenBank>,
+    pub observed_slot: u64,
+    /// From saved observations (replay), not a current read.
+    pub historical: bool,
+}
+impl Payload for Fe01Freeze {
+    const KIND: u16 = journal::kind::FE01_FREEZE;
+}
+
 /// The registry: every typed kind and its payload type, listed once.
 macro_rules! typed_kinds {
     ($kind:expr, $schema:expr, $bytes:expr, $f:ident) => {{
@@ -157,6 +197,7 @@ macro_rules! typed_kinds {
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }
+            k::FE01_FREEZE => $f::<Fe01Freeze>($kind, $schema, $bytes),
             journal::MANIFEST => $f::<Manifest>($kind, $schema, $bytes),
             k::OWNER_DIAGNOSTIC => $f::<OwnerDiagnostic>($kind, $schema, $bytes),
             k::OWNER_RECORD => $f::<super::evidence::OwnerRecord>($kind, $schema, $bytes),

@@ -331,6 +331,26 @@ pub fn collect<F>(config: &RuntimeConfig, read: F) -> Result<Value, String>
 where
     F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
 {
+    Ok(report(&collect_scope(config, read, false)?))
+}
+
+/// FE-01: the observation report and the one-class freeze of the same closed scope (the freeze
+/// error, if any, is the reason it is blocked; the report is still evidence).
+pub fn collect_frozen<F>(
+    config: &RuntimeConfig,
+    read: F,
+    class: darkbot_project0::funding::FundingClass,
+    historical: bool,
+) -> Result<(Value, Result<crate::analytics::payload::Fe01Freeze, String>), String>
+where
+    F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
+{
+    let scope = collect_scope(config, read, false)?;
+    let freeze = super::fe_freeze::freeze(&scope, class, historical);
+    Ok((report(&scope), freeze))
+}
+
+fn report(scope: &CollectedScope) -> Value {
     let CollectedScope {
         state,
         clock,
@@ -340,19 +360,17 @@ where
         pd,
         deployment: baseline,
         round,
-    } = collect_scope(config, read, false)?;
-    let health = CrateHealth {
-        state: &state,
-        group,
-    };
+    } = scope;
+    let (program, group) = (*program, *group);
+    let health = CrateHealth { state, group };
     let sizer = ProtocolSizer {
-        state: &state,
+        state,
         program,
         group,
         headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
     };
     let mut rows = Vec::new();
-    for target in &targets {
+    for target in targets {
         let h = health.health(target, clock.unix_timestamp, clock.slot);
         let eligibility = health.receivership_eligibility(target, clock.unix_timestamp, clock.slot);
         let mut row = json!({"account":target.to_string(),"health":"UNKNOWN","liquidatable":null,"receivership_eligibility":eligibility.as_ref().map(|_|"PASS").unwrap_or("FAIL"),"eligibility_reason":eligibility.err().map(|e|e.to_string()),"funding":"UNKNOWN","net_edge_usd_micro":null,"simulation":"NOT_RUN","collateral_exit":"UNKNOWN","source_parity":"UNKNOWN"});
@@ -373,9 +391,7 @@ where
         rows.push(row);
     }
     let accounts:Vec<_>=state.0.iter().map(|(key,a)|json!({"pubkey":key.to_string(),"owner":a.owner.to_string(),"lamports":a.lamports,"bytes":a.data.len(),"sha256":sha(&a.data)})).collect();
-    Ok(
-        json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
-    )
+    json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false})
 }
 
 #[cfg(test)]

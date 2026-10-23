@@ -20,6 +20,7 @@ fn run() -> Result<(), String> {
     let mut output = None;
     let mut qualification = None;
     let mut replay = None;
+    let mut against = None;
     let mut funding_class = "ZERO_PREFUND_SAME_TX".to_string();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -32,13 +33,20 @@ fn run() -> Result<(), String> {
                 )
             }
             "--funding-class" => funding_class = args.next().ok_or("FE_FUNDING_CLASS_REQUIRED")?,
+            "--against" => {
+                against = Some(
+                    args.next()
+                        .map(PathBuf::from)
+                        .ok_or("FE_AGAINST_DIRECTORY_REQUIRED")?,
+                )
+            }
             "--output" => output = args.next().map(PathBuf::from),
             "--provider-qualification" => qualification = args.next().map(PathBuf::from),
             _ => operational.push(arg),
         }
     }
     if operational.iter().any(|s| s == "--help" || s == "-h") {
-        println!("p0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [operational options]\n{}",Resolved::help());
+        println!("p0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
         return Ok(());
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
@@ -58,12 +66,19 @@ fn run() -> Result<(), String> {
         return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
     }
     if let Some(directory) = replay {
-        let report = darkbot_runner::orchestration::fe_replay::replay(
+        let (mut report, freeze) = darkbot_runner::orchestration::fe_replay::replay_frozen(
             &resolved.config,
             &directory,
             funding_class,
         )?;
         fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
+        // FE-01 freeze: its own typed journal; drift against an earlier freeze blocks.
+        let (summary, unblocked) = darkbot_runner::orchestration::fe_freeze::record(
+            &output,
+            Some(freeze),
+            against.as_deref(),
+        )?;
+        report["freeze"] = summary;
         persist(
             &output.join("operational_config.json"),
             &json!({"requested":resolved.json(),"execution":"OFFLINE_REPLAY_NO_RPC_NO_SIGNER"}),
@@ -73,6 +88,9 @@ fn run() -> Result<(), String> {
             "{}",
             serde_json::to_string_pretty(&report).map_err(|_| "FE_EVIDENCE_JSON")?
         );
+        if !unblocked {
+            return Err("FE_FREEZE_BLOCKED_EVIDENCE_SAVED".into());
+        }
         return Ok(());
     }
     let url = resolved
@@ -139,7 +157,7 @@ fn run() -> Result<(), String> {
     provider::enable_measurement_budget();
     let deadline = Instant::now() + Duration::from_secs(config.limits.fe_seconds);
     let mut calls = 0u64;
-    let mut result = {
+    let result = {
         let mut read = |keys: &[Pubkey], floor: u64| -> Result<(u64, ObservedState), String> {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -170,13 +188,28 @@ fn run() -> Result<(), String> {
             }
             fe::decode_batch(response.map_err(|_| "FE_RPC_FAILURE")?, keys, floor)
         };
-        fe::collect(&config,&mut read).unwrap_or_else(|e|json!({"schema":"Project0/FE01FullObservation/1","status":"INCOMPLETE","reason":e,"source_parity":"UNKNOWN","fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}))
+        match fe::collect_frozen(&config, &mut read, funding_class, false) {
+            Ok((report, freeze)) => (report, Some(freeze)),
+            Err(e) => (
+                json!({"schema":"Project0/FE01FullObservation/1","status":"INCOMPLETE","reason":e,"source_parity":"UNKNOWN","fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false}),
+                None,
+            ),
+        }
     };
+    let (mut result, freeze) = result;
     if Instant::now() >= deadline {
         result["status"] = json!("INCOMPLETE");
         result["reason"] = json!("FE_TIME_BUDGET");
     }
     darkbot_runner::orchestration::fe_replay::bind_scope(&mut result, funding_class)?;
+    let freeze = if result["status"] == "INCOMPLETE" {
+        None
+    } else {
+        freeze
+    };
+    let (summary, unblocked) =
+        darkbot_runner::orchestration::fe_freeze::record(&output, freeze, against.as_deref())?;
+    result["freeze"] = summary;
     result["logical_reads"] = json!(calls);
     result["provider_actual"] = json!(provider::shared().snapshot());
     record(&mut evidence, kind::FE01_RESULT, &result, None)?;
@@ -187,6 +220,9 @@ fn run() -> Result<(), String> {
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
     if result["status"] == "INCOMPLETE" {
         return Err("FE_FULL_OBSERVATION_INCOMPLETE_EVIDENCE_SAVED".into());
+    }
+    if !unblocked {
+        return Err("FE_FREEZE_BLOCKED_EVIDENCE_SAVED".into());
     }
     Ok(())
 }
