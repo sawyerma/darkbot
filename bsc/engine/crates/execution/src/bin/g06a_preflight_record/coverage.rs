@@ -651,6 +651,35 @@ pub(crate) mod wire {
 mod tests {
     use super::*;
 
+    fn segment(from: u64, to: u64, first_parent: u8, last: u8) -> Coverage {
+        Coverage {
+            from,
+            to,
+            first_parent_hash: [first_parent; 32],
+            last_hash: [last; 32],
+            headers: to - from + 1,
+            candidates: 0,
+            upgrades: Vec::new(),
+        }
+    }
+
+    /// v9.1 D3: a verified H1 coverage extends at H2 only by a segment that
+    /// starts at the next block with the H1 end hash as its parent; a reorg
+    /// of the H1 end (another parent) or a gap stops.
+    #[test]
+    fn coverage_extends_only_contiguously_from_the_same_canonical_end() {
+        let joined = segment(10, 20, 1, 2).then(segment(21, 30, 2, 3));
+        assert_eq!((joined.from, joined.to, joined.headers), (10, 30, 21));
+        assert_eq!(
+            (joined.first_parent_hash, joined.last_hash),
+            ([1; 32], [3; 32])
+        );
+        for next in [segment(21, 30, 9, 3), segment(22, 30, 2, 3)] {
+            let refused = std::panic::catch_unwind(|| segment(10, 20, 1, 2).then(next.clone()));
+            assert!(refused.is_err());
+        }
+    }
+
     fn nibbles(key: &[u8]) -> Vec<u8> {
         key.iter().flat_map(|b| [b >> 4, b & 0x0f]).collect()
     }

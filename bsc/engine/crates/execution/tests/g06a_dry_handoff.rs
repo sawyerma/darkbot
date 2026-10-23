@@ -331,3 +331,344 @@ fn the_handoff_source_never_reads_keys_rpc_or_writes_the_salt() {
     assert_eq!(source.matches("Command::new(").count(), 1);
     assert_eq!(source.matches(".env_clear()").count(), 1);
 }
+
+/// A PREPARE run directory in the fixture: an H1 preflight (the frozen one
+/// moved to block `to` with hash `last`) and a coherent R0 record from the
+/// frozen block to it, `edit` applied to the R0 draft.
+fn prepare_dir(f: &Fixture, name: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
+    use darkbot_bsc_record::schema::g06a::portal_upgrade as up;
+    use darkbot_bsc_record::schema::{PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL};
+    let dir = f.root.join("bsc/native/evidence/g06a").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let frozen = decode(
+        &pf::SCHEMA,
+        &std::fs::read(f.root.join("inputs/preflight.dbrec")).unwrap(),
+    )
+    .unwrap();
+    let (to, last) = (128_000_000u64, [0x4c; 32]);
+    let mut h1 = Draft::new(&pf::SCHEMA);
+    for (tag, value) in frozen.fields() {
+        h1.push(*tag, value.clone());
+    }
+    h1.set(pf::LATEST_BLOCK_NUMBER, to)
+        .set(pf::LATEST_BLOCK_HASH, Value::B256(last));
+    std::fs::write(dir.join("preflight.dbrec"), h1.encode().unwrap()).unwrap();
+    let old = frozen.address(pf::PORTAL_IMPLEMENTATION).unwrap();
+    let new = [0xe1; 20];
+    let mut u = Draft::new(&up::upgrade::SCHEMA);
+    u.set(up::upgrade::BLOCK, 127_900_000u64)
+        .set(up::upgrade::BLOCK_HASH, Value::B256([3; 32]))
+        .set(up::upgrade::TRANSACTION_HASH, Value::B256([4; 32]))
+        .set(up::upgrade::LOG_INDEX, 1u64)
+        .set(up::upgrade::IMPLEMENTATION, Value::Address(new))
+        .set(up::upgrade::RECEIPT_STATUS, 1u64)
+        .set(up::upgrade::SLOT_BEFORE, Value::Address(old))
+        .set(up::upgrade::SLOT_AFTER, Value::Address(new));
+    let from = frozen.u64(pf::LATEST_BLOCK_NUMBER).unwrap() + 1;
+    let mut s = Draft::new(&up::SCHEMA);
+    s.set(PROVENANCE_TOOL, "test")
+        .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+        .set(up::PROXY, frozen.get(pf::PORTAL).unwrap().clone())
+        .set(up::SCANNED_FROM_BLOCK, from)
+        .set(up::SCANNED_TO_BLOCK, to)
+        .push(up::UPGRADES, u.into_nested())
+        .set(up::CURRENT_IMPLEMENTATION, Value::Address(new))
+        .set(up::BASELINE_IMPLEMENTATION, Value::Address(old))
+        .set(up::COVERAGE_METHOD, up::METHOD)
+        .set(up::CHAIN_SOURCE, "test")
+        .set(up::ARCHIVE_SOURCE, "test")
+        .set(up::HEADERS_VERIFIED, to - from + 1)
+        .set(up::BLOOM_CANDIDATE_BLOCKS, 1u64)
+        .set(
+            up::CURRENT_IMPLEMENTATION_CODE_SHA256,
+            Value::B256([0x42; 32]),
+        )
+        .set(up::CURRENT_IMPLEMENTATION_CODE_BYTES, 1u64)
+        .set(
+            up::FIRST_PARENT_HASH,
+            frozen.get(pf::LATEST_BLOCK_HASH).unwrap().clone(),
+        )
+        .set(up::LAST_BLOCK_HASH, Value::B256(last));
+    edit(&mut s);
+    std::fs::write(dir.join("portal_upgrade.dbrec"), s.encode().unwrap()).unwrap();
+    dir
+}
+
+fn run_ok(f: &Fixture, args: &[&str]) -> Output {
+    cmd(&f.root, HANDOFF, args, "/usr/bin:/bin")
+}
+
+const FROZEN_ARG: &str = "inputs";
+
+#[test]
+fn prepare_binds_only_a_coherent_r0_record_and_the_candidate_and_verify_hands_it_to_a_new_private_dir()
+ {
+    use darkbot_bsc_record::schema::g06a::{portal_upgrade as up, prepare_handoff as h};
+    use std::os::unix::fs::MetadataExt;
+    let f = fixture("d3");
+    let run = prepare_dir(&f, "g06a_prepare_test", |_| {});
+    let run_arg = run.display().to_string();
+    let out = run_ok(
+        &f,
+        &[
+            "prepare",
+            "--run",
+            &run_arg,
+            "--profile",
+            "SELF_B",
+            "--frozen",
+            FROZEN_ARG,
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let handoff = decode(
+        &h::SCHEMA,
+        &std::fs::read(run.join("prepare_handoff.dbrec")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        handoff.text(h::MODE).unwrap(),
+        "PREPARE_ONLY / NOT_REQUALIFIED"
+    );
+    assert_eq!(handoff.text(h::CANDIDATE_PROFILE).unwrap(), "SELF_B");
+    // Nothing of the salt in the handoff.
+    let raw = std::fs::read(run.join("prepare_handoff.dbrec")).unwrap();
+    assert!(!darkbot_bsc_record::hex(&raw).contains(&f.salt[2..]));
+    let before = std::fs::read(run.join("portal_upgrade.dbrec")).unwrap();
+    let sign_root = f.root.join("bsc/.local/g06a_sign");
+    std::fs::create_dir_all(&sign_root).unwrap();
+    let sign = sign_root.join("run1");
+    let sign_arg = sign.display().to_string();
+    let verify = |out: &str| {
+        run_ok(
+            &f,
+            &[
+                "verify",
+                "--prepare",
+                &run_arg,
+                "--frozen",
+                FROZEN_ARG,
+                "--out",
+                out,
+            ],
+        )
+    };
+    let ok = verify(&sign_arg);
+    assert_eq!(
+        ok.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let printed = String::from_utf8_lossy(&ok.stdout).to_string();
+    assert!(
+        printed.contains("profile=SELF_B")
+            && printed.contains(&format!("generation={}", f.generation))
+    );
+    assert_eq!(
+        std::fs::read(sign.join("portal_upgrade_scan.dbrec")).unwrap(),
+        before
+    );
+    assert!(sign.join("candidate.dbrec").is_file());
+    assert_eq!(std::fs::metadata(&sign).unwrap().mode() & 0o777, 0o700);
+    assert_eq!(
+        std::fs::read_dir(&sign).unwrap().count(),
+        2,
+        "only the R0 record and the candidate cross"
+    );
+    // Never into an existing directory; the PREPARE run is untouched.
+    assert_eq!(verify(&sign_arg).status.code(), Some(2));
+    assert_eq!(
+        std::fs::read(run.join("portal_upgrade.dbrec")).unwrap(),
+        before
+    );
+
+    // Manipulated, substituted, incomplete or missing R0 records STOP.
+    let stop = |case: &str, expected: &str| {
+        let target = sign_root.join(format!("case-{case}"));
+        let out = verify(&target.display().to_string());
+        let error = String::from_utf8_lossy(&out.stderr).to_string();
+        assert_eq!(out.status.code(), Some(2), "{case}: {error}");
+        assert!(error.contains(expected), "{case}: {error}");
+        assert!(!target.exists(), "{case}: SIGN dir created");
+    };
+    let mut flipped = before.clone();
+    flipped[40] ^= 1;
+    std::fs::write(run.join("portal_upgrade.dbrec"), &flipped).unwrap();
+    stop("flipped", "modified or substituted");
+    std::fs::remove_file(run.join("portal_upgrade.dbrec")).unwrap();
+    stop("missing", "portal_upgrade.dbrec");
+    // A substitute re-bound in a rewritten handoff is still checked for
+    // its meaning: wrong start, a gap in the headers, a broken chain.
+    for (case, edit, expected) in [
+        (
+            "start",
+            (up::SCANNED_FROM_BLOCK, Value::U64(127_865_762)),
+            "right after the frozen head",
+        ),
+        ("gap", (up::HEADERS_VERIFIED, Value::U64(5)), "do not cover"),
+        (
+            "anchor",
+            (up::FIRST_PARENT_HASH, Value::B256([9; 32])),
+            "frozen DRY's block hash",
+        ),
+        (
+            "chain",
+            (up::CURRENT_IMPLEMENTATION, Value::Address([0xee; 20])),
+            "does not end at the current",
+        ),
+    ] {
+        let dir = prepare_dir(&f, "g06a_prepare_test", |d| {
+            d.set(edit.0, edit.1.clone());
+        });
+        let bytes = std::fs::read(dir.join("portal_upgrade.dbrec")).unwrap();
+        let record = decode(&h::SCHEMA, &raw).unwrap();
+        let mut rebound = Draft::new(&h::SCHEMA);
+        for (tag, value) in record.fields() {
+            rebound.push(*tag, value.clone());
+        }
+        rebound.set(
+            h::R0_RECORD_SHA256,
+            Value::B256(darkbot_bsc_record::sha256(&bytes)),
+        );
+        std::fs::write(dir.join("prepare_handoff.dbrec"), rebound.encode().unwrap()).unwrap();
+        stop(case, expected);
+    }
+    // A coherent R0 record, but the handoff states another chain end.
+    prepare_dir(&f, "g06a_prepare_test", |_| {});
+    let record = decode(&h::SCHEMA, &raw).unwrap();
+    let mut other = Draft::new(&h::SCHEMA);
+    for (tag, value) in record.fields() {
+        other.push(*tag, value.clone());
+    }
+    other.set(h::R0_TO_BLOCK, 127_999_999u64);
+    std::fs::write(run.join("prepare_handoff.dbrec"), other.encode().unwrap()).unwrap();
+    stop("stated", "chain differs from the handoff");
+    std::fs::write(run.join("prepare_handoff.dbrec"), &raw).unwrap();
+    // The candidate changed after PREPARE: switch to A and back to B.
+    let a = cmd(
+        &f.root,
+        CANDIDATE,
+        &[
+            "init-a",
+            "--economics",
+            &repo()
+                .join(FROZEN)
+                .join("economics_crosscheck.dbrec")
+                .display()
+                .to_string(),
+            "--dry",
+            "inputs/dry_result.dbrec",
+            "--preflight",
+            "inputs/preflight.dbrec",
+        ],
+        "/usr/bin:/bin",
+    );
+    assert!(a.status.success());
+    let g = f.generation.parse::<u64>().unwrap();
+    assert!(
+        cmd(
+            &f.root,
+            CANDIDATE,
+            &["select", "A", "--expect-generation", &g.to_string()],
+            "/usr/bin:/bin"
+        )
+        .status
+        .success()
+    );
+    stop("profile", "not SELF_B");
+    assert!(
+        cmd(
+            &f.root,
+            CANDIDATE,
+            &["select", "B", "--expect-generation", &(g + 1).to_string()],
+            "/usr/bin:/bin"
+        )
+        .status
+        .success()
+    );
+    stop("generation", "stale");
+    std::fs::remove_dir_all(&f.root).unwrap();
+}
+
+#[test]
+fn prepare_refuses_an_r0_record_not_closed_at_its_own_preflight_or_incoherent() {
+    use darkbot_bsc_record::schema::g06a::portal_upgrade as up;
+    let f = fixture("d3-prepare");
+    for (name, edit, expected) in [
+        (
+            "short",
+            (up::SCANNED_TO_BLOCK, Value::U64(127_999_999)),
+            "coherent",
+        ),
+        (
+            "end",
+            (up::LAST_BLOCK_HASH, Value::B256([8; 32])),
+            "H1 preflight block",
+        ),
+        (
+            "method",
+            (up::COVERAGE_METHOD, Value::Text("eth_getLogs".into())),
+            "coverage method",
+        ),
+    ] {
+        let run = prepare_dir(&f, name, |d| {
+            d.set(edit.0, edit.1.clone());
+        });
+        let out = run_ok(
+            &f,
+            &[
+                "prepare",
+                "--run",
+                &run.display().to_string(),
+                "--profile",
+                "SELF_B",
+                "--frozen",
+                FROZEN_ARG,
+            ],
+        );
+        let error = String::from_utf8_lossy(&out.stderr).to_string();
+        assert_eq!(out.status.code(), Some(2), "{name}: {error}");
+        assert!(error.contains(expected), "{name}: {error}");
+        assert!(!run.join("prepare_handoff.dbrec").exists());
+    }
+    // Another profile than the selected one, or a foreign frozen start.
+    let run = prepare_dir(&f, "profile", |_| {});
+    let out = run_ok(
+        &f,
+        &[
+            "prepare",
+            "--run",
+            &run.display().to_string(),
+            "--profile",
+            "SELF_A",
+            "--frozen",
+            FROZEN_ARG,
+        ],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    std::fs::write(
+        f.root.join("inputs/preflight.dbrec"),
+        b"not the frozen preflight",
+    )
+    .unwrap();
+    let out = run_ok(
+        &f,
+        &[
+            "prepare",
+            "--run",
+            &run.display().to_string(),
+            "--profile",
+            "SELF_B",
+            "--frozen",
+            FROZEN_ARG,
+        ],
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("pinned"));
+    std::fs::remove_dir_all(&f.root).unwrap();
+}

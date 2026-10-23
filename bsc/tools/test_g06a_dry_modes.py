@@ -58,6 +58,8 @@ selection) [ "$3" = "$(val selected)" ] || { echo "STOP: selected $(val selected
   printf 'profile=%s\\ncandidate_id=%s\\ngeneration=4\\ntoken=%s\\nsalt_commitment=%s\\n' "$3" "{id}" "$(val token)" "$(val commitment)";;
 exec-salt) while [ "$1" != "--" ]; do shift; done; shift
   exec env DARKBOT_G06A_SALT="{b_salt}" "$@";;
+prepare) [ "$(val handoff)" = "refuse" ] && { echo "STOP: R0 record is not coherent" >&2; exit 2; }
+  printf 'mode=PREPARE_ONLY\nprofile=%s\n' "$5" > "$3/prepare_handoff.dbrec";;
 *) exit 2;;
 esac
 """,
@@ -178,6 +180,8 @@ class Prepare(unittest.TestCase):
         self.assertEqual(len(runs), 1)
         self.assertIn("PREPARE_ONLY / NOT_REQUALIFIED", (runs[0] / "PREPARE_ONLY.txt").read_text())
         self.assertTrue((runs[0] / "SHA256SUMS").exists())
+        self.assertTrue((runs[0] / "prepare_handoff.dbrec").exists())
+        self.assertIn("prepare_handoff.dbrec", (runs[0] / "SHA256SUMS").read_text())
         self.assertFalse((runs[0] / "dry_result.dbrec").exists())
         self.assertFalse((runs[0] / "local_simulation.dbrec").exists())
 
@@ -211,6 +215,13 @@ class Prepare(unittest.TestCase):
             self.assertNotEqual(out.returncode, 0, scenario)
             self.assertIn(message, out.stderr, scenario)
             self.assertFalse(any(c[0] == "node" and "trace.cjs" in c[1][0] for c in w.calls()) and "selected" in message)
+
+    def test_prepare_without_a_valid_handoff_does_not_complete(self):
+        w = self.world({"handoff": "refuse"})
+        out = w.run("--prepare", env={"BSC_MAINNET_RPC_HTTPS": RPC})
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("cannot be handed off", out.stderr)
+        self.assertNotIn("MODE=PREPARE_ONLY", out.stdout)
 
     def test_prepare_stops_on_another_output_than_the_quote(self):
         w = self.world({"econ_output": "1"})

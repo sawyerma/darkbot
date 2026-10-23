@@ -931,6 +931,54 @@ pub mod launch_path {
     };
 }
 
+/// The PREPARE → SIGN handoff of a DRY run (plan v9.1 D3): what a key-free
+/// PREPARE at H1 passes to the later SIGN at H2 — only the validated R0
+/// coverage record (by SHA-256 and its stated chain) and the unchanged
+/// candidate reference, never a salt and no H1 economics.
+pub mod prepare_handoff {
+    use super::*;
+
+    pub const MODE: u16 = 10;
+    pub const R0_RECORD: u16 = 11;
+    pub const R0_RECORD_SHA256: u16 = 12;
+    pub const R0_FROM_BLOCK: u16 = 13;
+    pub const R0_TO_BLOCK: u16 = 14;
+    pub const R0_FIRST_PARENT_HASH: u16 = 15;
+    pub const R0_LAST_BLOCK_HASH: u16 = 16;
+    pub const CANDIDATE_PROFILE: u16 = 20;
+    pub const CANDIDATE_ID: u16 = 21;
+    pub const CANDIDATE_GENERATION: u16 = 22;
+    /// Diagnostic only: SIGN computes its own preflight at H2.
+    pub const H1_PREFLIGHT_SHA256: u16 = 30;
+
+    pub const MODE_TEXT: &str = "PREPARE_ONLY / NOT_REQUALIFIED";
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g06a.prepare-handoff",
+        record_type: 36,
+        schema_version: 1,
+        fields: &[
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(MODE, "mode", Text),
+            Field::req(R0_RECORD, "r0.record", Text),
+            Field::req(R0_RECORD_SHA256, "r0.record_sha256", B256),
+            Field::req(R0_FROM_BLOCK, "r0.scanned_from_block", U64),
+            Field::req(R0_TO_BLOCK, "r0.scanned_to_block", U64),
+            Field::req(R0_FIRST_PARENT_HASH, "r0.first_parent_hash", B256),
+            Field::req(R0_LAST_BLOCK_HASH, "r0.last_block_hash", B256),
+            Field::req(CANDIDATE_PROFILE, "candidate.profile", Text),
+            Field::req(CANDIDATE_ID, "candidate.candidate_id", B256),
+            Field::req(CANDIDATE_GENERATION, "candidate.selection_generation", U64),
+            Field::req(H1_PREFLIGHT_SHA256, "h1.preflight_record_sha256", B256),
+        ],
+    };
+}
+
 pub const ALL: &[&Schema] = &[
     &dry::SCHEMA,
     &preflight::SCHEMA,
@@ -946,4 +994,5 @@ pub const ALL: &[&Schema] = &[
     &portal_upgrade::SCHEMA,
     &requalification::SCHEMA,
     &launch_path::SCHEMA,
+    &prepare_handoff::SCHEMA,
 ];

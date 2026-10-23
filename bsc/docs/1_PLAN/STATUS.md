@@ -18,6 +18,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 D2 (code, offline-tested): `g06a_final_dry.sh --prepare [--profile A|B]` — no secrets.env read, RPC only from the environment, R0/DRY-0/quote/cross-check/builder/4b at H1 for the store-verified selected candidate (B via exec-salt), steps 4/5 and the verdict never run, output `g06a_prepare_*` marked PREPARE_ONLY / NOT_REQUALIFIED; 4b moved before step 4 (key-free, FULL unchanged otherwise).
 
+2026-10-23 D3 (code, offline-tested): PREPARE ends with `g06a_dry_handoff prepare` → `prepare_handoff.dbrec` (type 36: only the coherent H1 R0 record by SHA-256 and chain + candidate ID/generation; H1 preflight hash diagnostic only); `verify` re-checks hash, schema, the shared R0 coherence (`execution::r0`, also used by the requal check; anchored at the pinned frozen preflight) and an unchanged selection, then creates a new 0700 SIGN dir with only the R0 record and the public candidate record; H2 extension refuses a reorged H1 end or a gap.
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

@@ -257,6 +257,10 @@ printf 'LAUNCH_PATH=RECORDED\n'
 
 if [[ "$MODE" == PREPARE ]]; then
   printf '\n=== PREPARE COMPLETE (KEY-FREE; STEPS 4, 5 AND THE REQUALIFICATION VERDICT NOT RUN) ===\n'
+  # D3: only the coherent R0 record (by SHA-256) and the candidate reference
+  # cross to SIGN; H1 economics never do.
+  run "$HANDOFF" prepare --run "$OUT_DIR" --profile "$PROFILE" --frozen "$FROZEN" \
+    || die "the H1 R0 record or the candidate reference cannot be handed off"
   printf 'PREPARE_ONLY / NOT_REQUALIFIED: key-free H1 preview of %s %s (generation %s); no signed bytes, no DRY PASS, no v5 readiness or approval\n' \
     "$PROFILE" "$CANDIDATE_ID" "$GENERATION" > "$OUT_DIR/PREPARE_ONLY.txt"
   (cd "$OUT_DIR" && run shasum -a 256 ./*.dbrec ./*.txt > SHA256SUMS)

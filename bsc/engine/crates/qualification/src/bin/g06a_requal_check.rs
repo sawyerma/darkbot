@@ -38,7 +38,9 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The head of the frozen DRY: the R0 scan starts at the next block.
+/// The head of the frozen DRY (the shared R0 check reads it from the frozen
+/// preflight; the stand-in records use it).
+#[cfg(test)]
 const FROZEN_HEAD: u64 = 127_865_760;
 /// The signed transactions of the approved candidate.
 const LAUNCH_TX: &str = "db468c01529ee4c9597eae056f420f0d4d6d0753a1f785f8dbb3163028be5146";
@@ -240,23 +242,14 @@ fn evaluate(
     let mut checks = Vec::new();
     let head = int(one(&pre, "latest_block_number")).unwrap_or(0);
 
-    // R0: complete, anchored coverage and a verified, gapless chain of
-    // upgrades from the frozen to the current implementation.
-    let mut p = Vec::new();
+    // R0: the record's own anchored, contiguous chain of upgrades (shared
+    // with the PREPARE -> SIGN handoff, v9.1 D3), closed at this run's
+    // preflight block, hash and implementation.
+    let mut p = darkbot_bsc_execution::r0::chain_problems(&scan, &f_pre);
     let upgrades = scan.nested_all(up::UPGRADES).map_err(|e| e.0)?;
-    let from = int(one(&scan, "scanned_from_block"));
     let to = int(one(&scan, "scanned_to_block"));
-    if one(&scan, "coverage_method") != Some(Value::Text(up::METHOD.into())) {
-        p.push(format!("coverage method is not {}", up::METHOD));
-    }
-    if addr(one(&scan, "proxy")) != addr(one(&f_pre, "portal")) || addr(one(&pre, "portal")) != addr(one(&f_pre, "portal")) {
-        p.push("scanned proxy is not the frozen Portal".into());
-    }
-    if from != Some(FROZEN_HEAD + 1) {
-        p.push(format!("scan starts at {from:?}, not right after the frozen head {FROZEN_HEAD}"));
-    }
-    if word(one(&scan, "first_parent_hash")) != word(one(&f_pre, "latest_block_hash")) {
-        p.push("the hash chain does not start at the frozen DRY's block hash".into());
+    if addr(one(&pre, "portal")) != addr(one(&f_pre, "portal")) {
+        p.push("the preflight's Portal is not the frozen Portal".into());
     }
     if to != Some(head) {
         p.push(format!("scan ends at {to:?}, not at the preflight head {head}"));
@@ -264,21 +257,11 @@ fn evaluate(
     if word(one(&scan, "last_block_hash")) != word(one(&pre, "latest_block_hash")) {
         p.push("the hash chain does not end at the preflight's block hash".into());
     }
-    let blocks = to.zip(from).map_or(0, |(t, f)| (t + 1).saturating_sub(f));
-    if blocks == 0 || int(one(&scan, "headers_verified")) != Some(blocks) {
-        p.push(format!(
-            "{:?} verified headers do not cover the {blocks} blocks scanned",
-            int(one(&scan, "headers_verified"))
-        ));
-    }
     if upgrades.is_empty() {
         p.push("no upgrade since the frozen head".into());
     }
     let frozen_impl = addr(one(&f_pre, "portal_implementation"));
     let current_impl = addr(one(&pre, "portal_implementation"));
-    if addr(one(&scan, "baseline_implementation")) != frozen_impl {
-        p.push("baseline implementation is not the frozen DRY's".into());
-    }
     if addr(one(&scan, "current_implementation")) != current_impl {
         p.push("current implementation of the scan differs from the preflight".into());
     }
@@ -288,38 +271,6 @@ fn evaluate(
             != int(one(&pre, "portal_implementation_code_bytes"))
     {
         p.push("current implementation code differs between scan and preflight".into());
-    }
-    // Each upgrade starts at the implementation the previous one left (the
-    // first at the frozen one), in strict chain order; the last ends at the
-    // current implementation. The facts record that last upgrade.
-    let mut expected_before = frozen_impl;
-    let mut previous = None;
-    for (index, u) in upgrades.iter().enumerate() {
-        let g = |name| one(u, name);
-        let block = int(g("block")).unwrap_or(0);
-        let position = (block, int(g("log_index")).unwrap_or(0));
-        if previous.is_some_and(|before| position <= before) {
-            p.push(format!("upgrade {index} is not after the previous one"));
-        }
-        previous = Some(position);
-        if !(from.unwrap_or(u64::MAX) <= block && Some(block) <= to) {
-            p.push(format!("upgrade block {block} outside the scanned range"));
-        }
-        if int(g("receipt_status")) != Some(1) {
-            p.push(format!("upgrade {index} receipt status is not 1"));
-        }
-        if addr(g("implementation")) != addr(g("implementation_slot_after")) {
-            p.push(format!("upgrade {index} event target differs from the slot after it"));
-        }
-        if addr(g("implementation_slot_before")) != expected_before {
-            p.push(format!(
-                "upgrade {index} does not start at the implementation left by the previous upgrade (the first at the frozen one)"
-            ));
-        }
-        expected_before = addr(g("implementation_slot_after"));
-    }
-    if !upgrades.is_empty() && expected_before != current_impl {
-        p.push("the upgrade chain does not end at the current implementation".into());
     }
     let mut facts = Draft::new(&rq::SCHEMA);
     if let Some(u) = upgrades.last() {
