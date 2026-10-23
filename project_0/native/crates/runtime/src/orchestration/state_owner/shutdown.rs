@@ -44,6 +44,18 @@ impl ShadowOwner {
             .projection_stats
             .line(self.projection_pending.len(), self.projection_cache.len());
         owner_log!(self, "{projection}");
+        // A23-01: doorbell wakeups (signal → owner running); quantiles are bucket upper bounds.
+        let w = self.metrics.owner_wakeup_ns.snapshot();
+        let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
+        owner_log!(
+            self,
+            "owner_wakeup_ns: n={} p50={} p95={} p99={} max={}",
+            w.count,
+            q(w.p50),
+            q(w.p95),
+            q(w.p99),
+            q(w.max)
+        );
         if let Some(line) = self.bootstrap_probe_line() {
             owner_log!(self, "{line}");
         }

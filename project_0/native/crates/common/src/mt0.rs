@@ -406,10 +406,25 @@ impl Registry {
     }
 
     /// Owner only: book `booked_ns` to `from`, then publish `to` as the section in progress
-    /// since `now_ns`. Seqlock-protected so readers never mix old and new state.
+    /// since `now_ns`. Seqlock-protected so readers never mix old and new state. The writer
+    /// claims the odd state by CAS: a second writer (several owners in one test process) waits
+    /// instead of leaving the sequence odd, which would spin every reader forever.
     pub fn owner_switch(&self, from: OwnerCat, booked_ns: u64, to: OwnerCat, now_ns: u64) {
-        let seq = self.owner_seq.load(Relaxed);
-        self.owner_seq.store(seq.wrapping_add(1), Relaxed);
+        let mut seq = self.owner_seq.load(Relaxed);
+        loop {
+            if seq % 2 == 1 {
+                std::hint::spin_loop();
+                seq = self.owner_seq.load(Relaxed);
+                continue;
+            }
+            match self
+                .owner_seq
+                .compare_exchange_weak(seq, seq.wrapping_add(1), Relaxed, Relaxed)
+            {
+                Ok(_) => break,
+                Err(now) => seq = now,
+            }
+        }
         fence(Ordering::Release);
         self.owner_ns[from.idx()].fetch_add(booked_ns, Relaxed);
         self.owner_current.store(to.idx() as u64 + 1, Relaxed);
@@ -973,6 +988,30 @@ pub fn spawn_reporter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Racing owner-section writers (several owners in one test process) leave the seqlock
+    /// even, the booked time exact, and a reader never spins.
+    #[test]
+    fn racing_owner_writers_never_leave_the_seqlock_odd() {
+        static REG: Registry = Registry::new();
+        const N: u64 = 200_000;
+        let writers: Vec<_> = (0..4)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    for i in 0..N {
+                        REG.owner_switch(OwnerCat::Wait, 1, OwnerCat::Wait, i);
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        assert_eq!(REG.owner_seq.load(Relaxed) % 2, 0);
+        assert_eq!(REG.owner_ns(OwnerCat::Wait), 4 * N);
+        let (busy, _) = REG.owner_totals_at(0);
+        assert_eq!(busy, 0);
+    }
 
     #[test]
     fn histogram_is_deterministic_bounded_and_conservative() {

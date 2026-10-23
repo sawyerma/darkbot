@@ -5,7 +5,7 @@ use crate::analytics::measurement::{MeasurementPlan, SNAPSHOT_COUNT};
 use crate::analytics::record::{CandidateCostRecord, Decision, LossReason, OpportunityRecord};
 use crate::market::winner::{Winner, WinnerIdentity};
 use crate::market_observer::{utc_compact, MarketConfig, ReceiverEvent};
-use darkbot_common::channel::{bounded, Consumer, Producer};
+use darkbot_common::channel::{bounded, Consumer, Producer, Wakeup};
 use darkbot_common::timing::Clock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -232,6 +232,16 @@ pub struct Shared {
     pub market_done: AtomicBool,
     pub market_failed: AtomicBool,
     pub finish: AtomicBool,
+    /// A23-01: the Shadow owner's doorbell; `request_abort` rings it.
+    pub owner_wake: Wakeup,
+}
+
+impl Shared {
+    /// Sets `abort` and wakes the Shadow owner, so a stop never waits for its next event.
+    pub fn request_abort(&self) {
+        self.abort.store(true, Ordering::Release);
+        self.owner_wake.notify();
+    }
 }
 #[derive(Clone)]
 pub struct Handle {
@@ -283,6 +293,21 @@ impl Handle {
     pub fn admission_closed(&self) -> bool {
         self.shared.abort.load(Ordering::Acquire)
             || self.cutoff().is_some_and(|c| self.clock.now_ns() >= c)
+    }
+    /// Time left until `admission_closed` turns true at the cutoff; `None` without a cutoff.
+    pub fn until_cutoff(&self) -> Option<Duration> {
+        self.cutoff()
+            .map(|c| Duration::from_nanos(c.saturating_sub(self.clock.now_ns())))
+    }
+    /// Time left until `drain_expired` turns true; `None` without a cutoff.
+    pub fn until_drain_deadline(&self) -> Option<Duration> {
+        let drain_ns = self.cfg.plan.budgets.shadow_drain_seconds * 1_000_000_000;
+        self.cutoff().map(|c| {
+            Duration::from_nanos(
+                c.saturating_add(drain_ns)
+                    .saturating_sub(self.clock.now_ns()),
+            )
+        })
     }
     pub fn drain_expired(&self) -> bool {
         self.shared.abort.load(Ordering::Acquire)

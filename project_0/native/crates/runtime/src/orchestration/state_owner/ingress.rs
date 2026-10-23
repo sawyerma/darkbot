@@ -131,9 +131,7 @@ pub(super) fn run_ingress<S: IngressSource>(
             shared
                 .shadow_failed
                 .store(true, std::sync::atomic::Ordering::Release);
-            shared
-                .abort
-                .store(true, std::sync::atomic::Ordering::Release);
+            shared.request_abort();
         }
     }
 }

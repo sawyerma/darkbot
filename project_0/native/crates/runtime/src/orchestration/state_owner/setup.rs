@@ -44,7 +44,14 @@ pub(super) fn prepare(
     let shutdown = Shutdown::new();
     let halt = IngressHalt::new();
     let slot_watch = SlotWatch::new(); // [FIX-40]
+                                       // A23-01: one doorbell for ingress, worker results, census and stop; an econ run's abort
+                                       // rings the same one.
+    let wake = econ
+        .as_ref()
+        .map_or_else(Default::default, |h| h.shared.owner_wake.clone());
+    shutdown.ring_on_request(&wake);
     let (producer, consumer) = bounded::<IngressEvent>("ingress", buffer_cap);
+    let producer = producer.with_wakeup(&wake);
 
     // [FIX-78] Bootstrap only the configured group's Banks first. Full-program GPA was ~387 MB
     // in C0 and is unnecessary for dependency discovery.
@@ -469,7 +476,13 @@ pub(super) fn prepare(
     if remote_worker_capacity == 0 {
         return Err("P0_REMOTE_WORKER_BUFFER must be > 0".into());
     }
-    let remote = RemoteWorkers::start(rpc_url.clone(), program, &shutdown, remote_worker_capacity)?;
+    let remote = RemoteWorkers::start(
+        rpc_url.clone(),
+        program,
+        &shutdown,
+        remote_worker_capacity,
+        &wake,
+    )?;
     let pending: Vec<ReconcileWork> = Vec::new();
 
     #[cfg(feature = "crate_health")]
@@ -864,11 +877,12 @@ pub(super) fn prepare(
             sweep_batch_ns_max: 0,
             sweep_batch_ns_max_accounts: 0,
             bootstrap_probes_queued: 0,
+            owner_wakeup_ns: Default::default(),
         },
         eval_slippage_bps,
         zero_prefund_enabled: zero_prefund_enabled(&mode, &|k| std::env::var(k).ok())?,
         c0_census: match super::census::config(&census_journal, use_threshold_trigger)? {
-            Some(c) => Some(super::census::spawn(c, shutdown.clone())?),
+            Some(c) => Some(super::census::spawn(c, shutdown.clone(), &wake)?),
             None => None,
         },
         mode,
@@ -940,6 +954,7 @@ pub(super) fn prepare(
         slot_watch,
         producer,
         consumer,
+        wake,
         program_data,
         program_data_baseline_hash,
         program_data_executable: program_data_account.executable,

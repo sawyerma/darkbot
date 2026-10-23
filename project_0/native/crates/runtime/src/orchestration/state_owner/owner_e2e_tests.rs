@@ -13,6 +13,13 @@ struct Fixture {
     producer: darkbot_common::channel::Producer<IngressEvent>,
     program_data_account: AccountUpdate,
     dir: std::path::PathBuf,
+    /// A23-01: detached result queues — the projection result producer and its space doorbell.
+    results: Option<(
+        darkbot_common::channel::Producer<
+            crate::orchestration::remote_workers::ProjectionResultMessage,
+        >,
+        darkbot_common::channel::Wakeup,
+    )>,
 }
 
 fn fixture(tag: &str) -> Fixture {
@@ -21,6 +28,13 @@ fn fixture(tag: &str) -> Fixture {
 
 /// The fixture with its remote workers against `rpc` (default: a closed port).
 fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
+    fixture_with(tag, Some(rpc))
+}
+
+/// `rpc = None`: the production result queues without worker threads (A23-01 test seam).
+fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
+    let detached = rpc.is_none();
+    let rpc = rpc.unwrap_or("http://127.0.0.1:9");
     let dir = std::env::temp_dir().join(format!("p0_owner_e2e_{}_{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -42,8 +56,12 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         source: SourceKind::Snapshot,
         t_rx_ns: 0,
     };
+    let wake = darkbot_common::channel::Wakeup::default();
+    shutdown.ring_on_request(&wake);
     let (producer, consumer) = bounded::<IngressEvent>("ingress", 1024);
+    let producer = producer.with_wakeup(&wake);
     let unused_rpc = rpc.to_string();
+    let mut results = None;
     let limits = Limits {
         max_total_capital: 0,
         max_outstanding_inventory: 0,
@@ -140,6 +158,7 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         slot_watch: SlotWatch::new(),
         producer: producer.clone(),
         consumer,
+        wake: wake.clone(),
         program_data,
         program_data_baseline_hash: hash(&program_data_account.data),
         program_data_executable: false,
@@ -176,7 +195,13 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
             max_opportunity_age_ns: 2_000_000_000,
             execution_deadline_ns: 2_000_000_000,
         },
-        remote: RemoteWorkers::start(unused_rpc, program, &shutdown, 16).unwrap(),
+        remote: if detached {
+            let (remote, tx, space) = RemoteWorkers::detached(&shutdown, 16, &wake);
+            results = Some((tx, space));
+            remote
+        } else {
+            RemoteWorkers::start(unused_rpc, program, &shutdown, 16, &wake).unwrap()
+        },
         integration_probe_projection_ready: 0,
         integration_probe_projection_failed: 0,
         integration_probe_projection_stale: 0,
@@ -205,6 +230,7 @@ fn fixture_rpc(tag: &str, rpc: &str) -> Fixture {
         producer,
         program_data_account,
         dir,
+        results,
     }
 }
 
@@ -694,11 +720,15 @@ fn scripted_rpc(results: Vec<serde_json::Value>) -> String {
                     answer["jsonrpc"] = "2.0".into();
                     answer["id"] = 1.into();
                     let body = answer.to_string();
-                    let _ = write!(
-                        stream,
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
-                        body.len(),
-                        body
+                    // One write (no Nagle/delayed-ACK stall between header and body pieces).
+                    let _ = stream.set_nodelay(true);
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                        .as_bytes(),
                     );
                 }
             });
@@ -935,4 +965,362 @@ fn e9_consume_gate_waits_for_the_projection_slot() {
     let dir = f.dir.clone();
     drop(f);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A23-01: a fixture whose projection worker gets `answers` failed simulations from a loopback
+/// RPC, and the projection work for one candidate.
+fn a23_fixture(
+    tag: &str,
+    answers: usize,
+) -> (
+    Fixture,
+    Box<dyn Fn() -> crate::orchestration::remote_workers::ProjectionWork>,
+) {
+    use solana_sdk::signature::Signer;
+    let failed = serde_json::json!({"result": {"context": {"slot": 12}, "value": {
+        "err": {"InstructionError": [0, "InvalidArgument"]}, "logs": [], "unitsConsumed": 5,
+        "accounts": null, "returnData": null, "innerInstructions": null,
+        "replacementBlockhash": null}}});
+    let f = fixture_rpc(tag, &scripted_rpc(vec![failed; answers]));
+    let payer = solana_sdk::signature::Keypair::new();
+    let mut built = darkbot_solana::tx::build(
+        &darkbot_solana::tx::TxPlan {
+            version: darkbot_solana::tx::BuildVersion::V0,
+            payer: payer.pubkey(),
+            instructions: vec![solana_sdk::instruction::Instruction {
+                program_id: Pubkey::new_unique(),
+                accounts: vec![],
+                data: vec![1],
+            }],
+            lookup_tables: vec![].into(),
+            resources: f.owner.resources,
+        },
+        solana_sdk::hash::Hash::new_unique(),
+        &darkbot_solana::tx::TxLimits::default(),
+    )
+    .unwrap();
+    darkbot_solana::tx::sign(&mut built, &[&payer]).unwrap();
+    let fingerprint = dependency_fingerprint(&f.owner.st, &[]);
+    let candidate = Pubkey::new_unique();
+    let work = move || crate::orchestration::remote_workers::ProjectionWork {
+        account: candidate,
+        base_slot: 12,
+        base_account_hash: solana_sdk::hash::Hash::default(),
+        t_rx_ns: 0,
+        tx: built.tx.clone(),
+        targets: vec![Pubkey::new_unique()],
+        dependencies: vec![],
+        dependency_fingerprint: fingerprint,
+        min_context_slot: 12,
+    };
+    (f, Box::new(work))
+}
+
+/// A failed projection as the projection worker reports it.
+fn projection_failure() -> crate::orchestration::remote_workers::ProjectionResultMessage {
+    crate::orchestration::remote_workers::ProjectionResultMessage {
+        account: Pubkey::new_unique(),
+        base_slot: 12,
+        base_account_hash: solana_sdk::hash::Hash::default(),
+        t_rx_ns: 0,
+        dependencies: vec![],
+        dependency_fingerprint: solana_sdk::hash::Hash::default(),
+        result: Err(crate::orchestration::remote_workers::ProjectionFailure {
+            context_behind: false,
+            error: "A23".into(),
+        }),
+    }
+}
+
+/// A worker thread pushing `n` results through the production `push_result` (it waits on the
+/// full queue's space doorbell), pausing `gap` after each; the push instants.
+fn result_worker(
+    f: &Fixture,
+    n: usize,
+    gap: Duration,
+) -> std::thread::JoinHandle<Vec<std::time::Instant>> {
+    let (tx, space) = f
+        .results
+        .as_ref()
+        .map(|(t, s)| (t.clone(), s.clone()))
+        .unwrap();
+    let stop = f.owner.shutdown.clone();
+    std::thread::spawn(move || {
+        (0..n)
+            .map(|_| {
+                assert!(crate::orchestration::remote_workers::push_result(
+                    &tx,
+                    projection_failure(),
+                    &stop,
+                    &space
+                ));
+                let pushed = std::time::Instant::now();
+                std::thread::sleep(gap);
+                pushed
+            })
+            .collect()
+    })
+}
+
+/// Production loop passes (`remote_apply`, then `events` with its doorbell wait) until `done`
+/// holds after a `remote_apply` (the loop's next stage); the time it took. No snapshot fetch is
+/// reachable without an event.
+fn run_until(f: &mut Fixture, done: impl Fn(&ShadowOwner) -> bool) -> Duration {
+    let mut fetch = || -> Result<SnapshotData, String> { Err("A23_NO_FETCH".into()) };
+    let t = std::time::Instant::now();
+    loop {
+        f.owner.remote_apply().unwrap();
+        if done(&f.owner) {
+            return t.elapsed();
+        }
+        assert!(t.elapsed() < Duration::from_secs(10));
+        f.owner.events(&mut fetch, &f.ingress).unwrap();
+    }
+}
+
+fn cleanup(f: Fixture) {
+    let dir = f.dir.clone();
+    drop(f);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A23-01 through the real projection worker: with no ingress at all each completion arrives
+/// while the idle owner sleeps and wakes it through the doorbell (signalled wakeups; the old
+/// owner waited on ingress only and had none). Throughput is the provider budget's, not tested.
+#[test]
+fn a23_01_worker_completion_wakes_the_idle_owner_without_ingress() {
+    const N: usize = 8;
+    let (mut f, work) = a23_fixture("a23_done", N);
+    for _ in 0..N {
+        let before = f.owner.projection_stats.failed;
+        assert!(f.owner.remote.projection_jobs.try_push(work()).is_ok());
+        run_until(&mut f, |o| o.projection_stats.failed > before);
+    }
+    assert_eq!(f.owner.consumer.stats().sent, 0, "no ingress event at all");
+    assert_eq!(
+        f.owner.projection_stats.failed, N as u64,
+        "each result once"
+    );
+    let woken = f.owner.metrics.owner_wakeup_ns.snapshot().count as usize;
+    assert!(woken >= N / 2, "the results woke the owner: {woken}");
+    cleanup(f);
+}
+
+/// A23-01 measurement: 1000 completions at 0.2–1 ms gaps, owner idle in between. Every result
+/// is applied within a bounded time of its push (old owner: up to its 250-ms ingress wait);
+/// prints owner_wakeup_ns (signal → owner running) and push → applied.
+#[test]
+fn a23_01_owner_wakeup_latency_is_measured() {
+    const N: usize = 1000;
+    let mut f = fixture_with("a23_measure", None);
+    let mut fetch = || -> Result<SnapshotData, String> { Err("A23_NO_FETCH".into()) };
+    let gaps = [200u64, 500, 1000];
+    let worker = {
+        let (tx, space) = f
+            .results
+            .as_ref()
+            .map(|(t, s)| (t.clone(), s.clone()))
+            .unwrap();
+        let stop = f.owner.shutdown.clone();
+        std::thread::spawn(move || {
+            (0..N)
+                .map(|i| {
+                    assert!(crate::orchestration::remote_workers::push_result(
+                        &tx,
+                        projection_failure(),
+                        &stop,
+                        &space
+                    ));
+                    let pushed = std::time::Instant::now();
+                    std::thread::sleep(Duration::from_micros(gaps[i % gaps.len()]));
+                    pushed
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    let mut applied = Vec::with_capacity(N);
+    let t = std::time::Instant::now();
+    while applied.len() < N {
+        f.owner.remote_apply().unwrap();
+        let now = std::time::Instant::now();
+        applied.resize(f.owner.projection_stats.failed as usize, now);
+        assert!(t.elapsed() < Duration::from_secs(30));
+        if applied.len() < N {
+            f.owner.events(&mut fetch, &f.ingress).unwrap();
+        }
+    }
+    let pushed = worker.join().unwrap();
+    let mut lag: Vec<Duration> = pushed
+        .iter()
+        .zip(&applied)
+        .map(|(p, a)| a.saturating_duration_since(*p))
+        .collect();
+    lag.sort();
+    let h = f.owner.metrics.owner_wakeup_ns.snapshot();
+    eprintln!(
+        "A23-01 owner_wakeup_ns n={} p50={:?} p95={:?} p99={:?} max={:?}; push->applied p50={:?} p95={:?} p99={:?} max={:?}",
+        h.count, h.p50, h.p95, h.p99, h.max,
+        lag[N / 2], lag[N * 95 / 100], lag[N * 99 / 100], lag[N - 1]
+    );
+    assert!(h.count as usize >= N / 2, "the owner slept between results");
+    assert!(
+        lag[N * 99 / 100] < Duration::from_millis(50),
+        "{:?}",
+        &lag[N * 99 / 100..]
+    );
+    cleanup(f);
+}
+
+/// A23-01: four workers completing concurrently (queue capacity 16, so they also wait on the
+/// full queue) plus an ingress event of a new session generation (the producer clone a
+/// respawned session gets): every result is applied exactly once, the event is received, no
+/// element is dropped and nothing waits for the idle tick.
+#[test]
+fn a23_01_concurrent_completions_and_a_new_generation_wake_the_owner() {
+    const WORKERS: usize = 4;
+    const EACH: usize = 50;
+    let mut f = fixture_with("a23_many", None);
+    let workers: Vec<_> = (0..WORKERS)
+        .map(|_| result_worker(&f, EACH, Duration::from_micros(100)))
+        .collect();
+    let next_generation = f.owner.producer.clone();
+    let ingress = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(next_generation
+            .try_push(IngressEvent::Slot(darkbot_solana::ingress::SlotUpdate {
+                slot: 13,
+                parent: None,
+                status: darkbot_solana::ingress::SlotStatus::Processed,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            }))
+            .is_ok());
+    });
+    let all = run_until(&mut f, |o| {
+        o.projection_stats.failed == (WORKERS * EACH) as u64 && o.consumer.stats().received == 1
+    });
+    for w in workers {
+        assert_eq!(w.join().unwrap().len(), EACH);
+    }
+    ingress.join().unwrap();
+    let s = f.owner.remote.projection_results.stats();
+    assert_eq!(f.owner.projection_stats.failed, (WORKERS * EACH) as u64);
+    assert_eq!((s.sent, s.received, s.dropped), (200, 200, 0));
+    assert_eq!(f.owner.consumer.stats().received, 1);
+    assert!(all < Duration::from_millis(500), "{all:?}");
+    cleanup(f);
+}
+
+/// A23-01/A23-08: a saturated result queue — the worker blocks on the full queue (overflow
+/// counted, nothing dropped) and resumes on the owner's pops, so all results arrive in well
+/// under one 1-s liveness bound of its wait.
+#[test]
+fn a23_08_saturated_result_queue_resumes_on_owner_pops() {
+    const QUEUE: u64 = 16;
+    const MORE: u64 = 4;
+    let mut f = fixture_with("a23_full", None);
+    let worker = result_worker(&f, (QUEUE + MORE) as usize, Duration::ZERO);
+    let t = std::time::Instant::now();
+    while f.owner.remote.projection_results.stats().overflow == 0 {
+        assert!(t.elapsed() < Duration::from_secs(5));
+        std::thread::yield_now();
+    }
+    assert_eq!(f.owner.remote.projection_results.stats().sent, QUEUE);
+    let drain = run_until(&mut f, |o| o.projection_stats.failed == QUEUE + MORE);
+    worker.join().unwrap();
+    let s = f.owner.remote.projection_results.stats();
+    assert_eq!((s.sent, s.received, s.dropped), (20, 20, 0));
+    assert!(s.overflow >= 1);
+    assert!(drain < Duration::from_millis(200), "{drain:?}");
+    cleanup(f);
+}
+
+/// A23-01 control: a shutdown request and an econ abort each wake the idle owner at once; the
+/// loop's lifecycle check then ends it.
+#[test]
+fn a23_01_shutdown_and_abort_wake_the_idle_owner() {
+    let mut f = fixture("a23_stop");
+    let own = f.owner.wake.clone();
+    let (handle, _evidence) = crate::analytics::econ::test_handle(16);
+    f.owner.wake = handle.shared.owner_wake.clone();
+    f.owner.econ = Some(handle.clone());
+    let shared = handle.shared.clone();
+    let abort = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(30));
+        shared.request_abort();
+    });
+    let aborted = run_until(&mut f, |o| o.stop_pending());
+    abort.join().unwrap();
+    // The fixture's own doorbell again (registered on its shutdown).
+    f.owner.econ = None;
+    f.owner.wake = own;
+    let stop = f.owner.shutdown.clone();
+    let request = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(30));
+        stop.request();
+    });
+    let stopped = run_until(&mut f, |o| o.stop_pending());
+    request.join().unwrap();
+    assert!(!f.owner.lifecycle(), "the stop ends the loop");
+    for d in [aborted, stopped] {
+        assert!(d < Duration::from_millis(200), "{d:?}");
+    }
+    let woken = f.owner.metrics.owner_wakeup_ns.snapshot().count;
+    assert!(woken >= 2);
+    // The ordered end journals the wakeup quantiles once.
+    use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut lines = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == OwnerDiagnostic::KIND {
+            let d: OwnerDiagnostic = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            lines.extend(d.line.starts_with("owner_wakeup_ns: ").then_some(d.line));
+        }
+    }
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].starts_with(&format!("owner_wakeup_ns: n={woken} p50=")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A23-01: an open R127 sweep batch ends the idle wait at its age bound (no 1-ms poll); a batch
+/// that cannot flush (state not tradable) never turns its past deadline into a busy loop — the
+/// wait is the housekeeping tick.
+#[test]
+fn a23_01_open_sweep_batch_bounds_the_idle_wait_by_its_age() {
+    let mut f = fixture("a23_sweep");
+    let mut fetch = || -> Result<SnapshotData, String> { Err("A23_NO_FETCH".into()) };
+    let mut wait = |f: &mut Fixture| {
+        let t = std::time::Instant::now();
+        f.owner.events(&mut fetch, &f.ingress).unwrap();
+        t.elapsed()
+    };
+    f.owner
+        .sweep_dirty_banks
+        .insert(Pubkey::new_unique(), (0, 12));
+    f.owner.sweep_batch_started_ns = Some(0);
+    let idle = wait(&mut f);
+    assert!(idle >= Duration::from_millis(200), "no spin: {idle:?}");
+    let snapshot = vec![AccountUpdate {
+        pubkey: Pubkey::new_unique(),
+        owner: f.owner.program,
+        lamports: 1,
+        data: vec![1; 8],
+        slot: 12,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    }];
+    f.owner.st.install_snapshot(12, snapshot.clone());
+    f.owner.st.reconcile(12, &snapshot);
+    f.owner.st.confirm_ready();
+    f.owner.sweep_batch_started_ns = Some(f.owner.clock.now_ns());
+    let batch = wait(&mut f);
+    assert!(
+        batch >= Duration::from_millis(4) && batch < Duration::from_millis(100),
+        "the 5-ms batch age ends the wait: {batch:?}"
+    );
+    cleanup(f);
 }

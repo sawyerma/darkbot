@@ -686,9 +686,7 @@ fn run_embedded_inner(
             h.shared
                 .market_failed
                 .store(true, std::sync::atomic::Ordering::Release);
-            h.shared
-                .abort
-                .store(true, std::sync::atomic::Ordering::Release);
+            h.shared.request_abort();
         }
     }
     let observation_end_s = window

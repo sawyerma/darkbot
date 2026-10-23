@@ -2,6 +2,46 @@
 use super::*;
 
 impl ShadowOwner {
+    /// A23-01: a worker result or the census outcome waits for `remote_apply`.
+    pub(super) fn remote_pending(&self) -> bool {
+        self.remote.winner_results.pending()
+            || self.remote.reconcile_results.pending()
+            || self.remote.projection_results.pending()
+            || self.remote.oracle_price_projection_results.pending()
+            || self.c0_census.as_ref().is_some_and(|c| c.outcome_pending())
+    }
+
+    /// A23-01: a stop (shutdown or econ abort) waits for the loop's lifecycle check.
+    pub(super) fn stop_pending(&self) -> bool {
+        self.shutdown.is_requested()
+            || self
+                .econ
+                .as_ref()
+                .is_some_and(|h| h.shared.abort.load(std::sync::atomic::Ordering::Acquire))
+    }
+
+    /// A23-01 drain wait (admission closed, ingress no longer applied): sleeps on the doorbell
+    /// until the next worker result or stop, at most `bound` (else `IDLE_TICK`). The token is
+    /// taken before the checks, so a result after them is never slept through.
+    pub(super) fn await_remote(&mut self, bound: Option<Duration>) {
+        let token = self.wake.token();
+        if self.remote_pending() || self.stop_pending() {
+            return;
+        }
+        self.sleep_on_wake(token, bound.map_or(IDLE_TICK, |b| b.min(IDLE_TICK)));
+    }
+
+    pub(super) fn sleep_on_wake(&mut self, token: u64, timeout: Duration) {
+        if timeout.is_zero() {
+            return;
+        }
+        if let darkbot_common::channel::Woken::Signalled { latency_ns } =
+            self.wake.wait(token, timeout)
+        {
+            self.metrics.owner_wakeup_ns.record(latency_ns);
+        }
+    }
+
     pub(super) fn remote_apply(&mut self) -> Result<u64, Box<dyn std::error::Error>> {
         #[cfg(feature = "crate_health")]
         self.poll_c0_census();

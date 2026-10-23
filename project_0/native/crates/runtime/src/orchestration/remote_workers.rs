@@ -6,7 +6,7 @@
 use crate::analytics::record::LossReason;
 use crate::execution::pending::{try_reconcile, PendingSubmission, ReconcileResult};
 use crate::market::winner::{find_winner, Winner};
-use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer};
+use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer, Wakeup};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
 use darkbot_solana::submit::rpc::RpcSubmitter;
@@ -118,16 +118,40 @@ pub struct RemoteWorkers {
     pub oracle_price_projection_results: Consumer<OraclePriceProjectionResultMessage>,
 }
 
-fn push_result<T>(tx: &Producer<T>, mut value: T, shutdown: &Shutdown) -> bool {
+/// A23-08: liveness bound of one wait on a full result queue. Progress is event-driven: the
+/// owner's pop and a shutdown request both ring `space`; the bound only re-checks a closed queue.
+const FULL_WAIT_BOUND: Duration = Duration::from_secs(1);
+
+/// A23-01/A23-08: a result queue — its pushes ring the owner's doorbell `wake`, the owner's pops
+/// ring `space` (the doorbell of workers waiting on a full queue).
+fn result_queue<T>(
+    name: &'static str,
+    capacity: usize,
+    wake: &Wakeup,
+    space: &Wakeup,
+) -> (Producer<T>, Consumer<T>) {
+    let (tx, rx) = bounded::<T>(name, capacity);
+    (tx.with_wakeup(wake), rx.with_space_wakeup(space))
+}
+
+/// Pushes a worker result; a full queue waits for the owner's next pop (its space doorbell)
+/// instead of a 1-ms poll, and gives up only on shutdown or a closed queue.
+pub(super) fn push_result<T>(
+    tx: &Producer<T>,
+    mut value: T,
+    shutdown: &Shutdown,
+    space: &Wakeup,
+) -> bool {
     loop {
         if shutdown.is_requested() {
             return false;
         }
+        let token = space.token();
         match tx.try_push(value) {
             Ok(()) => return true,
             Err(ChannelError::Full(v)) => {
                 value = v;
-                std::thread::sleep(Duration::from_millis(1));
+                let _ = space.wait(token, FULL_WAIT_BOUND);
             }
             Err(ChannelError::Disconnected(_)) => return false,
         }
@@ -154,34 +178,46 @@ impl RemoteWorkers {
         Ok(())
     }
 
+    /// `wake`: the owner's doorbell, rung by every completed result (A23-01).
     pub fn start(
         rpc_url: String,
         program: Pubkey,
         shutdown: &Shutdown,
         capacity: usize,
+        wake: &Wakeup,
     ) -> std::io::Result<Self> {
+        // A23-08: rung by every owner pop of a result queue and by the shutdown request.
+        let space = Wakeup::default();
+        shutdown.ring_on_request(&space);
         let (winner_jobs, winner_job_rx) = bounded::<WinnerWatch>("winner-rpc-jobs", capacity);
         let (winner_done_tx, winner_results) =
-            bounded::<WinnerResult>("winner-rpc-results", capacity);
+            result_queue::<WinnerResult>("winner-rpc-results", capacity, wake, &space);
         let (reconcile_jobs, reconcile_job_rx) =
             bounded::<ReconcileWork>("reconcile-rpc-jobs", capacity);
         let (reconcile_done_tx, reconcile_results) =
-            bounded::<ReconcileResultMessage>("reconcile-rpc-results", capacity);
+            result_queue::<ReconcileResultMessage>("reconcile-rpc-results", capacity, wake, &space);
         let (projection_jobs, projection_job_rx) =
             bounded::<ProjectionWork>("projection-rpc-jobs", capacity);
-        let (projection_done_tx, projection_results) =
-            bounded::<ProjectionResultMessage>("projection-rpc-results", capacity);
+        let (projection_done_tx, projection_results) = result_queue::<ProjectionResultMessage>(
+            "projection-rpc-results",
+            capacity,
+            wake,
+            &space,
+        );
         let (oracle_price_projection_jobs, oracle_price_projection_job_rx) =
             bounded::<OraclePriceProjectionWork>("oracle-price-projection-rpc-jobs", capacity);
         let (oracle_price_projection_done_tx, oracle_price_projection_results) =
-            bounded::<OraclePriceProjectionResultMessage>(
+            result_queue::<OraclePriceProjectionResultMessage>(
                 "oracle-price-projection-rpc-results",
                 capacity,
+                wake,
+                &space,
             );
 
         let mut threads = Vec::new();
         let winner_rpc_url = rpc_url.clone();
         let winner_shutdown = shutdown.clone();
+        let winner_space = space.clone();
         threads.push(
             std::thread::Builder::new()
                 .name("winner-rpc".into())
@@ -207,6 +243,7 @@ impl RemoteWorkers {
                             &winner_done_tx,
                             WinnerResult { watch, result },
                             &winner_shutdown,
+                            &winner_space,
                         ) {
                             return;
                         }
@@ -215,6 +252,7 @@ impl RemoteWorkers {
         );
 
         let reconcile_shutdown = shutdown.clone();
+        let reconcile_space = space.clone();
         let reconcile_rpc_url = rpc_url.clone();
         threads.push(
             std::thread::Builder::new()
@@ -251,6 +289,7 @@ impl RemoteWorkers {
                             &reconcile_done_tx,
                             ReconcileResultMessage { work, result },
                             &reconcile_shutdown,
+                            &reconcile_space,
                         ) {
                             return;
                         }
@@ -259,6 +298,7 @@ impl RemoteWorkers {
         );
 
         let projection_shutdown = shutdown.clone();
+        let projection_space = space.clone();
         let projection_rpc_url = rpc_url.clone();
         threads.push(
             std::thread::Builder::new()
@@ -311,6 +351,7 @@ impl RemoteWorkers {
                                 result,
                             },
                             &projection_shutdown,
+                            &projection_space,
                         ) {
                             return;
                         }
@@ -319,6 +360,7 @@ impl RemoteWorkers {
         );
 
         let oracle_projection_shutdown = shutdown.clone();
+        let oracle_projection_space = space.clone();
         let oracle_projection_rpc_url = rpc_url.clone();
         threads.push(
             std::thread::Builder::new()
@@ -357,6 +399,7 @@ impl RemoteWorkers {
                                 result,
                             },
                             &oracle_projection_shutdown,
+                            &oracle_projection_space,
                         ) {
                             return;
                         }
@@ -376,21 +419,84 @@ impl RemoteWorkers {
             oracle_price_projection_results,
         })
     }
+
+    /// Test seam (A23-01): the production result queues without worker threads; returns the
+    /// projection result producer (rings `wake`) and the space doorbell its pushes wait on.
+    #[cfg(all(test, feature = "crate_health"))]
+    pub(crate) fn detached(
+        shutdown: &Shutdown,
+        capacity: usize,
+        wake: &Wakeup,
+    ) -> (Self, Producer<ProjectionResultMessage>, Wakeup) {
+        let space = Wakeup::default();
+        shutdown.ring_on_request(&space);
+        let (projection_done_tx, projection_results) =
+            result_queue("projection-rpc-results", capacity, wake, &space);
+        let workers = Self {
+            threads: Vec::new(),
+            winner_jobs: bounded("winner-rpc-jobs", capacity).0,
+            winner_results: result_queue("winner-rpc-results", capacity, wake, &space).1,
+            reconcile_jobs: bounded("reconcile-rpc-jobs", capacity).0,
+            reconcile_results: result_queue("reconcile-rpc-results", capacity, wake, &space).1,
+            projection_jobs: bounded("projection-rpc-jobs", capacity).0,
+            projection_results,
+            oracle_price_projection_jobs: bounded("oracle-price-projection-rpc-jobs", capacity).0,
+            oracle_price_projection_results: result_queue(
+                "oracle-price-projection-rpc-results",
+                capacity,
+                wake,
+                &space,
+            )
+            .1,
+        };
+        (workers, projection_done_tx, space)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A23-08: a worker blocked on a full result queue resumes on the owner's pop and stops on
+    /// the shutdown request, both far inside the 1-s liveness bound (no poll decides either).
     #[test]
-    fn full_result_queue_does_not_block_shutdown() {
-        let (tx, _rx) = bounded("stop-test", 1);
+    fn a23_08_full_result_queue_resumes_on_pop_and_stops_on_shutdown() {
+        let space = Wakeup::default();
+        let (tx, rx) = bounded("stop-test", 1);
+        let rx = rx.with_space_wakeup(&space);
         tx.try_push(1_u64).unwrap();
         let shutdown = Shutdown::new();
-        let stop = shutdown.clone();
-        let worker = std::thread::spawn(move || push_result(&tx, 2, &stop));
+        shutdown.ring_on_request(&space);
+        let (stop, worker_space) = (shutdown.clone(), space.clone());
+        let worker = std::thread::spawn(move || {
+            let pushed = push_result(&tx, 2, &stop, &worker_space);
+            (pushed, push_result(&tx, 3, &stop, &worker_space))
+        });
+        while rx.stats().overflow == 0 {
+            std::thread::yield_now();
+        }
+        let popped = std::time::Instant::now();
+        assert_eq!(rx.try_pop(), Some(1));
+        while rx.stats().sent < 2 {
+            std::thread::yield_now();
+        }
+        let resumed = popped.elapsed();
+        while rx.stats().overflow < 2 {
+            std::thread::yield_now();
+        }
+        let requested = std::time::Instant::now();
         shutdown.request();
-        assert!(!worker.join().unwrap());
+        assert_eq!(worker.join().unwrap(), (true, false));
+        let stopped = requested.elapsed();
+        assert_eq!(
+            rx.try_pop(),
+            Some(2),
+            "order kept, nothing lost or duplicated"
+        );
+        assert_eq!(rx.try_pop(), None);
+        for d in [resumed, stopped] {
+            assert!(d < Duration::from_millis(200), "{d:?}");
+        }
     }
 
     #[test]
@@ -401,6 +507,7 @@ mod tests {
             Pubkey::new_unique(),
             &shutdown,
             1,
+            &Wakeup::default(),
         )
         .unwrap();
         shutdown.request();

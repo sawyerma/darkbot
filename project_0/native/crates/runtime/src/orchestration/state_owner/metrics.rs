@@ -53,4 +53,6 @@ pub(super) struct OwnerMetrics {
     pub(super) sweep_batch_ns_max_accounts: usize,
     /// V13: bootstrap probes scheduled (Z14); taken for detection = scheduled − still queued.
     pub(super) bootstrap_probes_queued: usize,
+    /// A23-01: doorbell → owner running again, per wakeup by a notification (not by the tick).
+    pub(super) owner_wakeup_ns: darkbot_common::mt0::Hist,
 }

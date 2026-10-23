@@ -2,17 +2,22 @@
 use super::*;
 
 impl ShadowOwner {
+    /// An R127 sweep batch is open: it flushes once full or older than its age bound.
+    #[cfg(feature = "crate_health")]
+    pub(super) fn sweep_batch_open(&self) -> bool {
+        !self.use_threshold_trigger
+            && self.st.run_state().is_tradable()
+            && (!self.sweep_dirty_banks.is_empty()
+                || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some()))
+    }
+
     pub(super) fn sweep(&mut self) {
         self.mt0_owner.enter(darkbot_common::mt0::OwnerCat::Sweep);
         // [R127c] Flush the accumulated Bank set only after an ingress burst is drained,
         // or after a bounded number of dependency events. This mirrors eva01's "drain updates,
         // dedupe affected accounts, then evaluate" behavior and prevents per-update fanout.
         #[cfg(feature = "crate_health")]
-        if !self.use_threshold_trigger
-            && self.st.run_state().is_tradable()
-            && (!self.sweep_dirty_banks.is_empty()
-                || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some()))
-        {
+        if self.sweep_batch_open() {
             let batch_age_ns = self
                 .sweep_batch_started_ns
                 .map(|t| self.clock.now_ns().saturating_sub(t))

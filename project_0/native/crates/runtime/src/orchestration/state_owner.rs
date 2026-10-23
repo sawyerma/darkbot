@@ -174,6 +174,8 @@ pub(super) struct ShadowOwner {
     slot_watch: SlotWatch,
     producer: darkbot_common::channel::Producer<IngressEvent>,
     consumer: darkbot_common::channel::Consumer<IngressEvent>,
+    /// A23-01: the one doorbell of every owner input (ingress, worker results, census, stop).
+    wake: darkbot_common::channel::Wakeup,
     program_data: Pubkey,
     program_data_baseline_hash: Hash,
     /// X1: `executable` of the ProgramData account as read at startup.
@@ -224,6 +226,10 @@ pub(super) struct ShadowOwner {
     mt0_owner: darkbot_common::mt0::OwnerTimer,
 }
 
+/// A23-01: the owner's idle bound without an event: time-based housekeeping only (operational
+/// window, econ cutoff, FE-04 refresh). Every event ends the wait through the doorbell.
+const IDLE_TICK: Duration = Duration::from_millis(250);
+
 /// C9: the one blockhash freshness bound of the Shadow owner (detection gates and the pipeline's
 /// build limit); a change needs evidence, never a silent widening at one gate.
 const BLOCKHASH_MAX_AGE_NS: u64 = 30_000_000_000;
@@ -263,7 +269,9 @@ pub(super) fn run_shadow(
                     if owner.winner_tracker.stats().len == 0 {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(10));
+                    // A23-01: the drain waits for the next winner result or the drain deadline.
+                    let left = h.until_drain_deadline();
+                    owner.await_remote(left);
                     continue;
                 }
             }

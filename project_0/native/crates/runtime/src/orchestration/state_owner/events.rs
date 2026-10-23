@@ -2,6 +2,40 @@
 use super::*;
 
 impl ShadowOwner {
+    /// A23-01: the owner's only idle wait. Without an ingress event it returns at once when a
+    /// worker result, the census outcome or a stop is waiting (applied by the next loop pass);
+    /// else it sleeps on the doorbell until any of them arrives or the next deadline: the open
+    /// sweep batch's age bound, otherwise `IDLE_TICK`. No poll interval decides latency.
+    #[cfg(feature = "crate_health")]
+    fn next_event(&mut self) -> Option<IngressEvent> {
+        let token = self.wake.token();
+        if let Some(ev) = self.consumer.try_pop() {
+            return Some(ev);
+        }
+        if self.remote_pending() || self.stop_pending() {
+            return None;
+        }
+        // Deadlines that end the wait without an event: the open sweep batch's age bound
+        // (`sweep` flushes it at that age) and the econ cutoff (the loop then drains), so a
+        // zero timeout never repeats; else only the housekeeping tick.
+        let sweep = self
+            .sweep_batch_started_ns
+            .filter(|_| self.sweep_batch_open())
+            .map(|started| {
+                Duration::from_nanos(
+                    self.sweep_batch_max_age_ns
+                        .saturating_sub(self.clock.now_ns().saturating_sub(started)),
+                )
+            });
+        let cutoff = self.econ.as_ref().and_then(|h| h.until_cutoff());
+        let timeout = [sweep, cutoff]
+            .into_iter()
+            .flatten()
+            .fold(IDLE_TICK, Duration::min);
+        self.sleep_on_wake(token, timeout);
+        self.consumer.try_pop()
+    }
+
     pub(super) fn events(
         &mut self,
         fetch: &mut impl FnMut() -> Result<SnapshotData, String>,
@@ -21,10 +55,8 @@ impl ShadowOwner {
             None
         } else if queued_detection_available {
             self.consumer.try_pop()
-        } else if !self.sweep_dirty_banks.is_empty() {
-            self.consumer.pop_timeout(Duration::from_millis(1))
         } else {
-            self.consumer.pop_timeout(Duration::from_millis(250))
+            self.next_event()
         };
         // C6/D10: the StreamReady of a replaced session is no readiness of the current one and
         // never starts a recovery; its data events are applied as usual.

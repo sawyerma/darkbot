@@ -13,7 +13,7 @@
 use super::*;
 use crate::analytics::journal::{self as journal_mod, Provenance as JournalProvenance};
 use crate::analytics::payload::{C0CensusAccount, C0CensusResult};
-use darkbot_common::channel::{Consumer, Producer};
+use darkbot_common::channel::{Consumer, Producer, Wakeup};
 use darkbot_project0::census::{classify, Census, CensusModel, CensusRow, Unsupported};
 use std::path::PathBuf;
 
@@ -64,6 +64,10 @@ impl CensusRequest {
     pub(super) fn wants_population(&self) -> bool {
         !self.complete && !self.in_flight
     }
+    /// A23-01: an outcome is queued for the owner.
+    pub(super) fn outcome_pending(&self) -> bool {
+        self.results.pending()
+    }
     pub(super) fn arm(&mut self, population: CensusPopulation) {
         if self.wants_population() {
             self.armed = Some(population);
@@ -107,12 +111,15 @@ pub(super) fn config(
     Ok(Some(c))
 }
 
+/// `wake`: the owner's doorbell, rung by the outcome (A23-01).
 pub(super) fn spawn(
     config: CensusConfig,
     shutdown: Shutdown,
+    wake: &Wakeup,
 ) -> Result<CensusRequest, Box<dyn std::error::Error>> {
     let (jobs, job_rx) = bounded::<CensusJob>("c0-census-jobs", 1);
     let (result_tx, results) = bounded::<CensusOutcome>("c0-census-results", 1);
+    let result_tx = result_tx.with_wakeup(wake);
     std::thread::Builder::new()
         .name("c0-census".into())
         .spawn(move || {

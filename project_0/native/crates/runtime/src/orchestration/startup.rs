@@ -151,7 +151,7 @@ pub(crate) fn record_shadow_end(
     use std::sync::atomic::Ordering;
     if failed || !admission_closed {
         shared.shadow_failed.store(true, Ordering::Release);
-        shared.abort.store(true, Ordering::Release);
+        shared.request_abort();
     }
     shared.shadow_done.store(true, Ordering::Release);
 }
@@ -320,7 +320,7 @@ where
                     .shared
                     .market_failed
                     .store(true, Ordering::Release);
-                market_handle.shared.abort.store(true, Ordering::Release);
+                market_handle.shared.request_abort();
             }
             market_handle
                 .shared

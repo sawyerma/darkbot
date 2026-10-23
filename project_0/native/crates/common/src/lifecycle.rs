@@ -3,13 +3,16 @@
 //! RunState ist fail-closed: aus `Halted` gibt es keinen impliziten Weg zurück
 //! nach `Ready`; nur eine explizite Recovery (`reconcile_ok`) darf freigeben.
 
+use crate::channel::Wakeup;
 use crate::error::HaltReason;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, Default)]
 pub struct Shutdown {
     flag: Arc<AtomicBool>,
+    /// A23-01: doorbells rung by `request`, so a sleeping consumer sees the stop at once.
+    wakes: Arc<Mutex<Vec<Wakeup>>>,
 }
 
 impl Shutdown {
@@ -19,6 +22,20 @@ impl Shutdown {
 
     pub fn request(&self) {
         self.flag.store(true, Ordering::SeqCst);
+        for w in self.wakes.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            w.notify();
+        }
+    }
+
+    /// A23-01: `request` rings `wake`; rung at once when the stop was already requested.
+    pub fn ring_on_request(&self, wake: &Wakeup) {
+        self.wakes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(wake.clone());
+        if self.is_requested() {
+            wake.notify();
+        }
     }
 
     #[inline]
@@ -86,6 +103,23 @@ mod tests {
         assert!(!s.is_requested());
         s2.request();
         assert!(s.is_requested());
+    }
+
+    /// A23-01: a request rings every registered doorbell (also through clones); one registered
+    /// after the request is rung at once.
+    #[test]
+    fn shutdown_rings_registered_wakeups() {
+        let s = Shutdown::new();
+        let (a, b) = (Wakeup::default(), Wakeup::default());
+        s.ring_on_request(&a);
+        s.clone().ring_on_request(&b);
+        let (ta, tb) = (a.token(), b.token());
+        s.clone().request();
+        assert!(a.token() > ta && b.token() > tb);
+        let late = Wakeup::default();
+        let t = late.token();
+        s.ring_on_request(&late);
+        assert!(late.token() > t);
     }
 
     #[test]
