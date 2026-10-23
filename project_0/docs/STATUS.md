@@ -1,6 +1,6 @@
 # Project 0 — Current status
 
-**Current GitHub snapshot: 2026-10-23 · letzter vor dieser Dokumentpflege geprüfter Project_0-Code `2605556c` auf `main`.** Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
+**Current GitHub snapshot: 2026-10-23 · letzter Project_0-Code `8246fcfb` auf `main`, Offline-Gate PASS (siehe unten).** Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`, FE-04-Admission `8bfa63f2`, S1-02/S1-08 Binary-Geyser offline `94086af8`…`8246fcfb`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
 
 Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md), their JSON navigation indices, actual Rust code and [PERSIST evidence](evidence/PERSIST_BINARY_20261016/qualification.json). Previous October 14 code locations and test counts are historical; no gate is upgraded by this status page.
 
@@ -15,7 +15,8 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | FE-00 | **LOCAL_PASS; NO_ECONOMIC_GO** | Existing FE-00 ledger/evidence |
 | FE-01 | **PARTIAL_LOCAL / Mainnet parity NOT_RUN** | Offline one-class freeze and drift checks committed `6aac2e4f`; aktuell deployte ProgramData-/State-/Fundingparität ohne autorisierten Read nicht belegt |
 | FE-02 / FE-03 | **OPEN / NOT_QUALIFIED** | FE-02/B4-SOL-Debit/Cost-Fix committed `91ed707a`, jedoch kein vollständig simulierter aktuell positiver Candidate/Exit; FE-03 targeted Production Shadow weiterhin offen |
-| FE-04 | **PARTIAL_LOCAL** | FE-04-Journal und C3/P8-05 finalized Settlement-/`i128`-PnL-Funktionen `2605556c` committet; kompletter produktiver FE-04-Handoff, echter Exit/Realized-Economics und autorisierte Chain-Reconciliation weiter offen |
+| FE-04 | **PARTIAL_LOCAL** | FE-04-Journal und C3/P8-05 finalized Settlement-/`i128`-PnL-Funktionen `2605556c`; Durable Admission am Pipeline-Handoff `8bfa63f2` (einziger Send, Fake-Submitter-Tests); kein Produktionsaufrufer der Admission (CLI/FE-06), echter Exit/Realized-Economics und autorisierte Chain-Reconciliation offen |
+| S1-02 / S1-08 Binary Geyser | **LOCAL_PASS (offline) / Provider NOT_RUN** | `BinaryGeyserSource` (Yellowstone-Protobuf `2a548669`, gRPC/HTTP2+TLS, Mapping, Recovery) und Quellensteuerung OFF/OBSERVE/ACTIVE `94086af8`…`8246fcfb`; PublicNode-Capabilities/Quoten/Latenz/Coverage/Fork-Fidelity NOT_RUN, S1-RACE/Race-LIVE nicht qualifiziert |
 | FE-05 / FE-06 / FE-07 | **NOT_RUN / NOT_AUTHORIZED / NOT_RUN** | Separate provider/Mainnet/value-bearing permissions still required |
 | C0-E1 long-duration market master | **NOT_QUALIFIED** | Historical 4h/5h incomplete |
 | Binary journal PERSIST-01–05 | **PARTIAL overall, NOT QUALIFIED** | [Qualification](evidence/PERSIST_BINARY_20261016/qualification.json); see below |
@@ -28,8 +29,10 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | `6aac2e4f` | FE-01-Offline-One-Class-Freeze, Drift-Prüfung, gepinnte Marginfi-Fixtures | Offline-Code vorhanden; aktuelle Mainnet-Identität/Providerkapazität `NOT_RUN` |
 | `91ed707a` | FE-02/B4: `SolCosts`, vollständigerer SOL-Debit aus Fee/Tip/Flat-Fee/Record-Rent; UNKNOWN bleibt nicht handelbar | Keine vollständig ausführbare aktuelle positive Opportunity nachgewiesen |
 | `2605556c` | C3/P8-05: finalized Settlement/`i128`-PnL im einzigen FE-04-Journal, neue Offline-Tests und Replay-Regeln laut Commit | Vollständige Integration in produktiven FE-04-LIVE-Handoff sowie reale Chain-/Exit-Evidence weiterhin `NOT_RUN`/offen |
+| `8bfa63f2` | FE-04/B1/B3/B15: Durable Admission am Pipeline-Handoff (Safety-`check`, exakte Payload-Simulation, Intent-Bindung inkl. voller SOL-Belastung, durable Reserve, genau ein Submit); Settled-Replay in die Tages-Safety | Kein Produktionsaufrufer (Owner `fe04: None`), LIVE gesperrt |
+| `94086af8`, `6c83355f`, `dc54bdda`, `8246fcfb` | S1-02/S1-08: native `BinaryGeyserSource` (gepinntes Yellowstone-Protobuf, Mapping auf `IngressEvent`/`StateCore`, Gap/Fork/Duplikat/Reconnect), gRPC-Transport (h2 + rustls, typisierte Auth-/Quota-/Capability-Ablehnung), Provider-/Quellensteuerung OFF/OBSERVE/ACTIVE, Arbiter, Offline-Benchmark | Nur Mock-/Loopback-Tests; keine Provider-/Mainnet-Verbindung |
 
-Diese drei Commits wurden auf GitHub auf Dateiumfang und Commit-Beschreibungen geprüft, **nicht** durch einen hier selbst ausgeführten vollständigen Offline-Gate-Lauf. Lokale Test-Evidence erst nach protokolliertem Exit 0 als `LOCAL_PASS` übernehmen.
+**Offline-Gate 2026-10-23 auf `8246fcfb` (enthält alle obigen Commits): `scripts/gate.sh` PASS** — fmt, Clippy all/default/runner default/`txv1`, Tests `--all-features` 746/0/10, default 744/0/10, runner default und `txv1` je 355/0/3, Release-Build, Python OK (1 skipped), alle Exit 0. Damit `LOCAL_PASS` nur für die Offline-Teile; keine FE-/Provider-/Mainnet-Qualifikation.
 
 ## 2. Current code and evidence
 

@@ -5867,3 +5867,26 @@ Commit `ba4a3c3`.
 - Gate (exit 0 each): fmt, clippy all/default and isolated runner default/`txv1`, `test --all-features` 690/0/6, default 688/0/6, isolated runner default 334/0/3 and `txv1` 334/0/3, release, Python 110 (1 skipped), all exit 0.
 - `tx::message_matches` (extracted, `message_matches_plan` delegates); `submit::tip_matches` checks the production tip transaction (one System transfer of the planned lamports to the configured tip account); 8 manipulations with their own codes, 2 fail-before mutations.
 - E2 stays PARTIAL: amounts vs sizing, Jupiter swap discriminators (BLOCKED, no pinned IDL), prerequisite `Other`, Jupiter LUT on-chain content. No Mainnet read, capture or LIVE.
+
+## 2026-10-22 — Nachtrag: offline packages of 22.10 (LOCAL_PASS per package, offline only)
+
+Recorded after the fact from the commit messages and the STATUS rows of 22.10; no number below is new.
+
+- `3e631ab` C0E1-P5-AUTO/REPORT post-capture chain (verify → report → qualify), deployment proof re-checked, qualifier hash fail-closed: tests 696/0/6, 694/0/6, runner 340/0/3, 4 fail-before mutations; index/crosscheck BLOCKED (re-pin).
+- `d144f6b` C0E1-P6-GATE `scripts/gate.sh`: P6_GATE_OFFLINE=PASS, 696/0/6, 694/0/6, runner 340/0/3 ×2, release, Python OK.
+- `e242639` JIT ExactIn solver (`02b16cd`), JIT capital (`a82f1a7`), class comparison (`71287b3`/`bb7a3dc`), P8-RES-01/02 (`1be59b3`): gate PASS 702/0/6, 700/0/6, runner 343/0/3; real routes NOT_RUN.
+- `a79ec2a`, `a132618`, `8390b8a`, `5825d47`, `2774a5e` P8-RES owner integration, FE-04-backed owner book, P8-INV-01, P2-06, P2-07/P5-07: gate PASS 710/0/7, 708/0/7, runner 348/0/3 ×2; 19 fail-before mutations; plans() fixture bench p50 52.3 → 49.0 µs.
+- `154a223`, `3e28b1a`, `4bb683d`, `1a97a5b`, `8fe7ce0`, `b2f0f58`, `6d0d9e8`, `90252d3` BUGS pass C11/B15/B3/B14/B7: gate PASS 713/0/9, 711/0/9, runner 349/0/3 ×2; 13 fail-before mutations; plans() fixture p50 33.5 → 4.25 µs; B7 profile health 16 banks p50 6.1 µs / 54 allocations, sizing 64 pairs 36.8 µs / 74 allocations.
+- NOT_RUN for all: Mainnet read, provider, capture, LIVE.
+
+## 2026-10-23 — FE-01 freeze, FE-02/B4, C3/P8-05, FE-04 admission, S1-02/S1-08 Binary Geyser (LOCAL_PASS offline; gates NOT_RUN where stated)
+
+Commits `6aac2e4f`, `91ed707a`, `2605556c`, `8bfa63f2`, `94086af8`, `6c83355f`, `dc54bdda`, `8246fcfb`.
+
+- Gate on `8246fcfb` (exit 0 each): fmt, clippy all/default/runner default/`txv1`, `test --all-features` 746/0/10, default 744/0/10, runner default and `txv1` 355/0/3 each, release, Python OK (1 skipped).
+- FE-01 `6aac2e4f`: typed `Fe01Freeze` (journal kind `FE01_FREEZE`), drift check, `p0-fe-qualify --against`; tests on the pinned marginfi source `33c67987` accounts (SHA-256 pinned): 7 real banks decode with the exact 0.1.11 layout, the 1064-byte historical group layout and a foreign-owned bank are refused; 5 mutations. FE-01 stays INCOMPLETE: current Mainnet parity NOT_RUN.
+- FE-02/B4 `91ed707a`: `SolCosts`, `sol_debit_lamports`, flat SOL fee as conservative cost; 4 mutations. No current executable candidate: NO_ECONOMIC_GO unchanged.
+- C3 `2605556c`: settlement in the FE-04 journal (`reconcile_observed`, `reconcile_not_landed`, `settle` → `Phase::Settled`); 6 tests, 5 mutations; C3 PARTIAL (no production caller, no RPC non-landing proof).
+- FE-04 `8bfa63f2`: durable admission at the pipeline handoff, settled replay into the day; counting fake submitter (1 submit, double trigger 0, refusal without hold, SOL budget, lost transport UNKNOWN + HALT); 6 mutations; B1/B3/B15 PARTIAL.
+- S1-02/S1-08: Yellowstone protobuf of `rpcpool/yellowstone-grpc` `2a548669` (field-number fidelity test), mapping onto `IngressEvent`/`StateCore` (write version, roots, fork orphaning, duplicates, contradicting copies, dead/cleared banks, parent gaps), gRPC transport h2 0.4.19 + rustls (loopback HTTP/2 tests: streaming, ping/pong, token header, 6 rejection cases, unreachable provider, endpoint rules), source control OFF/OBSERVE/ACTIVE, provider admission, arbiter, health; 18 mutations. Offline bench (release, M4 Max, n=20000, frame decode + map): account 165 B p50 0.92 µs / p99 1.08 µs, v0 transaction with ALT and meta p50 7.0 µs / p99 9.96 µs.
+- NOT_RUN: PublicNode capability/quota/latency/coverage/fork fidelity, real TLS session, S1-RACE, K-02/K-02b, Mainnet read, LIVE.
