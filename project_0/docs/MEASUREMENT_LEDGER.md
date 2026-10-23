@@ -5902,8 +5902,8 @@ Commits `f1f90572`, `39d53f67`, `0db0a1f2`, `34ecc8a6`, `2fb6d214`, `caa605dc`.
 
 ## 2026-10-23 — FE-02 ZERO_PREFUND hardening (LOCAL_PASS offline)
 
-Commits `282a3c4d`, `57f47611`.
+Commits `106c11c2`, `4a2168f7`.
 
-- Gate on `57f47611` (exit 0 each): 771/0/10, 769/0/10, runner 358/0/3 ×2, release, Python OK.
+- Gate on `4a2168f7` (exit 0 each): 771/0/10, 769/0/10, runner 358/0/3 ×2, release, Python OK.
 - Repay floor from the signed Jupiter v6 swap bytes (IDL `jupiter-cpi@12bc5f67`, SHA-256 `764ea6d7`); enforced slippage on the plan; floor rejections visible beside other plans; Token-2022 fee/hook/undecodable mints refused before quoting; surplus at the low-biased price; worst-case daily loss; derived admission evidence; `P0_ZERO_PREFUND_QUALIFIED=true` refused. 13 mutations fail-before.
 - Synthetic Jupiter responses only (no recorded `/build`); deployed Jupiter program parity, current candidate, positive net edge: NOT_RUN / NOT_PROVEN.
