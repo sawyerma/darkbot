@@ -243,6 +243,11 @@ async function main() {
   });
   const launchError = launchRes.execResult.exceptionError?.error || null;
   if (launchError) throw new Error(`local launch simulation reverted: ${launchError}`);
+  // v9.1 R2/T2: newTokenV6 must return exactly the CREATE2-predicted token.
+  const launchRet = bytesToHex(launchRes.execResult.returnValue);
+  if (launchRet.length !== 66 || ('0x' + launchRet.slice(-40)).toLowerCase() !== token.toLowerCase()) {
+    throw new Error(`newTokenV6 returned ${launchRet}, not the predicted CREATE2 token ${token}`);
+  }
 
   const buyRes = await evm.runCall({
     caller: buyerAddr,
