@@ -165,9 +165,10 @@ _dbrec_14="$(get_required simulated_received_amount "$ECON")" || die "required t
 [[ "${_dbrec_14}" == "$DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT" ]] \
   || die "Curve-20 quote and independent EVM output differ"
 _dbrec_15="$(get_required salt "$ECON")" || die "required typed DBREC field unavailable"
-DARKBOT_G06A_SALT="${_dbrec_15}"
+# A's frozen salt is public; it reaches only its local consumers (D1).
+A_SALT="${_dbrec_15}"
 _dbrec_16="$(get_required salt "$FROZEN/economics_crosscheck.dbrec")" || die "required typed DBREC field unavailable"
-[[ "$DARKBOT_G06A_SALT" == "${_dbrec_16}" ]] \
+[[ "$A_SALT" == "${_dbrec_16}" ]] \
   || die "the deterministic salt differs from the frozen candidate: new economic decision required"
 printf 'EVM_CROSSCHECK=PASS  exact_output_match=true  frozen_salt=true\n'
 
@@ -183,7 +184,7 @@ printf 'BUILDER_POLICY=RE-DETERMINED  floor_wei=%s  sha256=%s\n' \
 
 printf '\n=== 4/6 EXACT WALLET-BOUND LOCAL SIMULATION ===\n'
 BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
-  with_keys node bsc/tools/g06a_local_simulate.cjs "$LOCAL_SIM" > "$OUT_DIR/local_simulation.out.txt" \
+  with_keys_public_salt "$A_SALT" node bsc/tools/g06a_local_simulate.cjs "$LOCAL_SIM" > "$OUT_DIR/local_simulation.out.txt" \
   || die "exact local simulation failed"
 _dbrec_18="$(get_required launcher "$LOCAL_SIM")" || die "required typed DBREC field unavailable"
 [[ "${_dbrec_18}" == "$(lower "$BSC_LAUNCHER_ADDRESS")" ]] \
@@ -203,7 +204,7 @@ printf '\n=== 4b/6 LAUNCH-PATH SNAPSHOT (C1/R1, LOCAL EVM, READ-ONLY) ===\n'
 # Every executed contract's code hash and every storage word selecting one,
 # at the preflight's block; the typed verdict is g06a_requal_check's DRY5.
 BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
-  run node bsc/tools/g06a_launch_path_trace.cjs "$PREFLIGHT" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.out.txt" \
+  with_public_salt "$A_SALT" node bsc/tools/g06a_launch_path_trace.cjs "$PREFLIGHT" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.out.txt" \
   || die "launch-path trace failed"
 run "$ENGINE/target/debug/dbrec_show" "$LAUNCH_PATH" > "$OUT_DIR/launch_path.view.txt" || die "launch path is not a record"
 _dbrec_27="$(get_required launch_success "$LAUNCH_PATH")" || die "required typed DBREC field unavailable"
@@ -212,7 +213,7 @@ _dbrec_28="$(get_required buy_success "$LAUNCH_PATH")" || die "required typed DB
 printf 'LAUNCH_PATH=RECORDED\n'
 
 printf '\n=== 5/6 DRY1-DRY4 -- ZERO LIVE EGRESS ===\n'
-with_keys "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
+with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
   > "$OUT_DIR/dry_result.view.txt" || die "final G0.6A DRY qualification failed"
 for key in DRY_1_bytes_and_signers DRY_2_independent_local_simulation DRY_3_gas_floor_and_budget DRY_4_expiry_nonces_zero_egress all; do
 _dbrec_23="$(get_required "dry_pass.$key" "$DRY")" || die "required typed DBREC field unavailable"

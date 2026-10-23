@@ -27,12 +27,9 @@ fn fake_root(tag: &str) -> PathBuf {
     std::fs::create_dir_all(root.join(".git")).unwrap();
     std::fs::create_dir_all(root.join("bsc/config")).unwrap();
     std::fs::write(root.join("bsc/.gitignore"), "/.local/\n").unwrap();
-    // The checkout check only needs the v5 path to exist.
-    std::fs::write(
-        root.join("bsc/config/g07_attempt1_acceptance_v5.dbrec"),
-        b"unused",
-    )
-    .unwrap();
+    // The checkout check needs the engine manifest at the root (no contract).
+    std::fs::create_dir_all(root.join("bsc/engine")).unwrap();
+    std::fs::write(root.join("bsc/engine/Cargo.toml"), b"unused").unwrap();
     root
 }
 

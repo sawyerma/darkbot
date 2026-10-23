@@ -13,7 +13,7 @@
 //! builder_submission), decoded there into typed values.
 
 use darkbot_bsc_execution::{
-    acceptance_guard::{LiveGuardContext, verify_live_authorization},
+    acceptance_guard::{LiveGuardContext, V5_RELATIVE_PATH, verify_live_authorization},
     qualification_capture::{CaptureSession, CaptureSummary},
 };
 use darkbot_bsc_record::Value as RecordValue;

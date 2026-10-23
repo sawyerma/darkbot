@@ -113,3 +113,77 @@ test('the egress guard refuses private values and remote execution before sendin
   assert.throws(() => guardEgress(['0x1234']), /at least 20 bytes/);
   assert.throws(() => guardEgress([]), /at least 20 bytes/);
 });
+
+// D1 (v9.1): the real cross-check in --private mode against a recording
+// mock JSON-RPC server. The Portal stand-in is zero code, so the local EVM
+// launch returns nothing and the tool stops there; everything it sent up to
+// that point is checked: no remote execution method and no salt, launch
+// calldata or token in any request.
+test('the private cross-check sends no remote execution and no private value', async () => {
+  const http = require('node:http');
+  const { spawn } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const ethers = require(path.join(__dirname, 'abi-tools/node_modules/ethers'));
+  const dbrec = require('./dbrec.cjs');
+  // Synthetic, test-only: keccak256("darkbot-d1-test-only-salt:130983").
+  const salt = ethers.keccak256(ethers.toUtf8Bytes('darkbot-d1-test-only-salt:130983'));
+  const init = ethers.concat(['0x3d602d80600a3d3981f3363d3d373d3d3d363d73', '0x024f18294970b5c76c0691b87f138a0317156422', '0x5af43d82803e903d91602b57fd5bf3']);
+  const token = ethers.getCreate2Address('0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0', salt, ethers.keccak256(init)).toLowerCase();
+  assert.ok(token.endsWith('7777'));
+  const preflightPath = path.join(__dirname, '../native/evidence/g06a/g07_binary_import_20261016/preflight.dbrec');
+  const pre = dbrec.decode('darkbot.g06a.preflight-readonly.v3', fs.readFileSync(preflightPath)).fields;
+  const zeros = (n) => '0x' + '00'.repeat(Number(n));
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      seen.push(body);
+      const { id, method, params } = JSON.parse(body);
+      const word = '0x' + '00'.repeat(32);
+      let result;
+      if (method === 'eth_chainId') result = '0x38';
+      else if (method === 'eth_getBlockByNumber') {
+        result = { number: '0x' + pre.latest_block_number.toString(16), hash: pre.latest_block_hash, miner: '0x' + '00'.repeat(20), timestamp: '0x1', difficulty: '0x0', gasLimit: '0x8000000', baseFeePerGas: '0x0', mixHash: word };
+      } else if (method === 'eth_getCode') {
+        const a = String(params[0]).toLowerCase();
+        result = a === pre.portal ? zeros(pre.portal_code_bytes) : a === pre.tax_v3_impl ? zeros(pre.tax_v3_impl_code_bytes) : '0x';
+      } else if (method === 'eth_getBalance' || method === 'eth_getTransactionCount') result = '0x0';
+      else if (method === 'eth_getStorageAt') result = word;
+      else result = null;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ jsonrpc: '2.0', id, result }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'd1-private-')), 'econ.dbrec');
+  try {
+    const child = spawn(process.execPath, [path.join(__dirname, 'g06a_economics_evm_crosscheck.cjs'), preflightPath, out, '--private'], {
+      env: {
+        PATH: process.env.PATH, BSC_MAINNET_RPC_HTTPS: `http://127.0.0.1:${server.address().port}`,
+        DARKBOT_G06A_SALT: salt, DARKBOT_G06A_LAUNCH_GAS_LIMIT: '6603270', DARKBOT_G06A_BUY_VALUE_WEI: '1000000000000',
+      },
+    });
+    let stderr = '';
+    let stdout = '';
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.stdout.on('data', (c) => { stdout += c; });
+    const code = await new Promise((r) => child.on('exit', r));
+    assert.notEqual(code, 0);
+    assert.match(stderr, /did not return the predicted CREATE2 token/);
+    assert.doesNotMatch(stderr, /PRIVATE_EGRESS_REFUSED/);
+    assert.ok(seen.some((b) => b.includes('eth_getStorageAt') || b.includes('eth_getBalance')), 'the local EVM read state');
+    const calldataSalt = salt.slice(2).toLowerCase();
+    for (const body of seen) {
+      const { method } = JSON.parse(body);
+      assert.ok(!['eth_call', 'eth_estimateGas', 'eth_createAccessList', 'eth_sendRawTransaction'].includes(method), method);
+      assert.ok(!body.toLowerCase().includes(calldataSalt), 'salt or launch calldata sent');
+      assert.ok(!body.toLowerCase().includes(token.slice(2)), 'token sent');
+    }
+    assert.ok(!(stdout + stderr).toLowerCase().includes(calldataSalt), 'salt printed');
+    assert.ok(!fs.existsSync(out));
+  } finally {
+    server.close();
+  }
+});

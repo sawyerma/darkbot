@@ -28,6 +28,25 @@ run /bin/bash -c '[[ ! ${DARKBOT_G06A_LAUNCHER_PRIVATE_KEY+x} ]]'
         self.assertEqual(out.stdout,"")
         self.assertNotIn("FAKE_",out.stderr)
 
+    def test_no_salt_reaches_an_ordinary_child_and_scoped_helpers_give_exactly_one(self):
+        # v9.1 D1: DARKBOT_G06A_SALT is not in the run() allowlist; only the
+        # scoped helpers set the public A salt for their one consumer.
+        code = r'''clear_exports
+export DARKBOT_G06A_SALT=0xFAKESALT_ONLY_FOR_TEST
+export BSC_LAUNCHER_PRIVATE_KEY=FAKE_LAUNCHER_ONLY_FOR_TEST
+export BSC_BUYER_PRIVATE_KEY=FAKE_BUYER_ONLY_FOR_TEST
+run /bin/bash -c '[[ ! ${DARKBOT_G06A_SALT+x} && ! ${DARKBOT_G06A_LAUNCHER_PRIVATE_KEY+x} ]]'
+with_keys /bin/bash -c '[[ ! ${DARKBOT_G06A_SALT+x} && ${DARKBOT_G06A_LAUNCHER_PRIVATE_KEY+x} ]]'
+with_public_salt 0xPUBLIC /bin/bash -c '[[ $DARKBOT_G06A_SALT == 0xPUBLIC && ! ${DARKBOT_G06A_LAUNCHER_PRIVATE_KEY+x} && ! ${BSC_LAUNCHER_PRIVATE_KEY+x} ]]'
+with_keys_public_salt 0xPUBLIC /bin/bash -c '[[ $DARKBOT_G06A_SALT == 0xPUBLIC && ${DARKBOT_G06A_BUYER_PRIVATE_KEY+x} && ! ${BSC_BUYER_PRIVATE_KEY+x} ]]'
+run /bin/bash -c '[[ ! ${DARKBOT_G06A_SALT+x} ]]'
+with_public_salt 2>/dev/null && exit 1 || true
+'''
+        out=self.shell(code,{"DARKBOT_G06A_SALT":"0xINHERITED_FAKE"})
+        self.assertEqual(out.returncode,0,out.stderr)
+        self.assertNotIn("FAKE",out.stdout+out.stderr)
+        self.assertNotIn("DARKBOT_G06A_SALT ",(ROOT/"bsc/tools/g06a_shell_scope.sh").read_text().split("allowed_environment() {")[1].split("}")[0]+" ")
+
     def test_missing_failed_empty_and_zero_fields(self):
         for status,value,ok in [(0,"0",True),(0,"",False),(1,"",False),(2,"0",False),(3,"",False),(0,"garbage",False)]:
             code='get() { printf "%s" "$VALUE"; return "$STATUS"; }; v="$(get_required launcher_pending_nonce fixture)" || exit 23; [[ "$v" == 0 ]]'
@@ -52,9 +71,14 @@ run /bin/bash -c '[[ ! ${DARKBOT_G06A_LAUNCHER_PRIVATE_KEY+x} ]]'
         text=(ROOT/"bsc/tools/g06a_final_dry.sh").read_text()
         self.assertNotIn('$(get ',text)
         self.assertNotIn('export ',text)
-        self.assertEqual(text.count('with_keys '),2)
-        self.assertIn('with_keys node bsc/tools/g06a_local_simulate.cjs',text)
-        self.assertIn('with_keys "$ENGINE/target/debug/g06a_self_launch_bundle"',text)
+        # Keys reach only the two signing steps, with A's public salt; the
+        # key-free launch path gets the salt alone; nothing exports a salt.
+        self.assertEqual(text.count('with_keys '),0)
+        self.assertEqual(text.count('with_keys_public_salt '),2)
+        self.assertIn('with_keys_public_salt "$A_SALT" node bsc/tools/g06a_local_simulate.cjs',text)
+        self.assertIn('with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle"',text)
+        self.assertIn('with_public_salt "$A_SALT" node bsc/tools/g06a_launch_path_trace.cjs',text)
+        self.assertNotIn('DARKBOT_G06A_SALT=',text)
         for line in text.splitlines():
             if '$(get_required ' in line or '$(required_sha256 ' in line:
                 self.assertIn('|| die ',line)

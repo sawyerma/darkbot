@@ -12,15 +12,33 @@ allowed_environment() {
     DARKBOT_G06A_GAS_PRICE_WEI DARKBOT_G06A_LAUNCH_GAS_LIMIT DARKBOT_G06A_BUY_GAS_LIMIT \
     DARKBOT_G06A_LAUNCH_VALUE_WEI DARKBOT_G06A_BUY_VALUE_WEI DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI \
     DARKBOT_G06A_LAUNCHER_NONCE DARKBOT_G06A_BUYER_NONCE DARKBOT_G06A_SEND_HEAD DARKBOT_G06A_MAX_BLOCK \
-    DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT DARKBOT_G06A_SALT DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256; do
+    DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256; do
     if [[ ${!name+x} ]]; then export "$name"; fi
   done
 }
+# No salt and no key ever reaches an ordinary child (v9.1 D1).
 run() ( clear_exports; allowed_environment; exec "$@"; )
 with_keys() (
   clear_exports; allowed_environment
   export DARKBOT_G06A_LAUNCHER_PRIVATE_KEY="${BSC_LAUNCHER_PRIVATE_KEY:?launcher key required}"
   export DARKBOT_G06A_BUYER_PRIVATE_KEY="${BSC_BUYER_PRIVATE_KEY:?buyer key required}"
+  exec "$@"
+)
+# A's public frozen salt, for exactly one local consumer. B's secret salt
+# never enters this shell: `g06a_dry_handoff exec-salt` gives it to its
+# allowlisted consumer only.
+with_public_salt() (
+  local salt="${1:?salt required}"; shift
+  clear_exports; allowed_environment
+  export DARKBOT_G06A_SALT="$salt"
+  exec "$@"
+)
+with_keys_public_salt() (
+  local salt="${1:?salt required}"; shift
+  clear_exports; allowed_environment
+  export DARKBOT_G06A_LAUNCHER_PRIVATE_KEY="${BSC_LAUNCHER_PRIVATE_KEY:?launcher key required}"
+  export DARKBOT_G06A_BUYER_PRIVATE_KEY="${BSC_BUYER_PRIVATE_KEY:?buyer key required}"
+  export DARKBOT_G06A_SALT="$salt"
   exec "$@"
 )
 get_required() {

@@ -91,6 +91,12 @@ required-features = ["g07-mainnet"]
 name = "g07_candidate"
 required-features = ["g07-mainnet"]
 
+# G0.6a DRY secret/evidence handoffs (plan v9.1 D1-D3): offline, no RPC,
+# key read or send; the SELF_B salt only to allowlisted local consumers.
+[[bin]]
+name = "g06a_dry_handoff"
+required-features = ["g07-mainnet"]
+
 [[test]]
 name = "g07_readiness"
 required-features = ["g07-mainnet"]
