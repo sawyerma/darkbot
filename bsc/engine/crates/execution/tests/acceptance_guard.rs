@@ -15,7 +15,7 @@ use darkbot_bsc_execution::acceptance_contract::{
 };
 use darkbot_bsc_execution::acceptance_guard::{
     FROZEN_APPROVED_V4_SHA256, InputHashes, LiveGuardContext, V3_RELATIVE_PATH, V4_RELATIVE_PATH,
-    inspect_v3, parse_v4, sha256_hex, verify_live_authorization,
+    inspect_v3, parse_v4, sha256_hex, verify_further_v4_evidence, verify_live_authorization,
 };
 use darkbot_bsc_record::schema::{
     PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, g06a, g07::contract,
@@ -209,8 +209,12 @@ fn native_copy(import: &str, schema: &'static Schema, native: &'static Schema) -
 /// A temporary repository root holding the committed inputs v4 reads and a
 /// requalification directory of stand-in records.
 fn requal_root() -> (PathBuf, &'static str) {
+    requal_root_at("v4")
+}
+
+fn requal_root_at(tag: &str) -> (PathBuf, &'static str) {
     use g06a::{dry, economics, local_simulation, portal_upgrade as up, preflight};
-    let root = std::env::temp_dir().join(format!("darkbot-v4-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("darkbot-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let dir = "bsc/native/evidence/g06a/requal_test";
     for path in [
@@ -412,4 +416,121 @@ fn explicit_attempt_identity_and_individual_dry_flags_fail_closed() {
         record.set(flag, false);
         assert!(require_dry_pass(&decode(&d::SCHEMA, &record.encode().unwrap()).unwrap()).is_err());
     }
+}
+
+/// The v4 bytes with one record hash re-bound, keeping every other field.
+fn rebound(v4: &[u8], tag: u16, sha: [u8; 32]) -> Vec<u8> {
+    let record = decode(&contract::V4, v4).unwrap();
+    let mut d = Draft::new(&contract::V4);
+    for (t, value) in record.fields() {
+        d.push(*t, value.clone());
+    }
+    d.set(tag, Value::B256(sha));
+    d.encode().unwrap()
+}
+
+/// A record of `schema` with one named field replaced.
+fn edited(bytes: &[u8], schema: &'static Schema, name: &str, value: Value) -> Vec<u8> {
+    let record = decode(schema, bytes).unwrap();
+    let mut d = Draft::new(schema);
+    for (t, v) in record.fields() {
+        d.push(*t, v.clone());
+    }
+    d.set(
+        schema.fields.iter().find(|f| f.name == name).unwrap().tag,
+        value,
+    );
+    d.encode().unwrap()
+}
+
+#[test]
+fn the_guard_itself_binds_local_simulation_economics_and_portal_upgrade() {
+    use g06a::{economics, local_simulation, portal_upgrade};
+    at_repo_root();
+    let (root, dir) = requal_root_at("v4-further");
+    let policy = format!("{FROZEN}/builder_policy.dbrec");
+    let evidence = attempt1_v4_evidence(&root, dir, &policy).unwrap();
+    let v4 = attempt1_v4(&evidence, Authorization::Proposed).unwrap();
+    let verified = verify_further_v4_evidence(&root, &v4).unwrap();
+    let file = |name: &str| root.join(dir).join(name);
+    assert_eq!(
+        verified.local_simulation_sha256,
+        sha256_hex(&std::fs::read(file("local_simulation.dbrec")).unwrap())
+    );
+    let cases: [(&str, u16, &'static Schema, &str, Value); 3] = [
+        (
+            "local_simulation.dbrec",
+            contract::LOCAL_SIMULATION_RECORD_SHA256,
+            &local_simulation::NATIVE,
+            "token",
+            Value::Address([0x11; 20]),
+        ),
+        (
+            "economics_crosscheck.dbrec",
+            contract::ECONOMICS_RECORD_SHA256,
+            &economics::NATIVE,
+            "token",
+            Value::Address([0x11; 20]),
+        ),
+        (
+            "portal_upgrade.dbrec",
+            contract::PORTAL_UPGRADE_RECORD_SHA256,
+            &portal_upgrade::SCHEMA,
+            "current_implementation",
+            Value::Address([0x11; 20]),
+        ),
+    ];
+    for (name, tag, schema, field, value) in cases {
+        let path = file(name);
+        let original = std::fs::read(&path).unwrap();
+        // Missing.
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            verify_further_v4_evidence(&root, &v4).is_err(),
+            "{name} missing"
+        );
+        // Mutated bytes.
+        let mut mutated = original.clone();
+        mutated[20] ^= 1;
+        std::fs::write(&path, &mutated).unwrap();
+        assert!(
+            verify_further_v4_evidence(&root, &v4)
+                .unwrap_err()
+                .contains("SHA-256"),
+            "{name} mutated"
+        );
+        // Swapped for another bound record.
+        std::fs::write(&path, std::fs::read(file("dry_result.dbrec")).unwrap()).unwrap();
+        assert!(
+            verify_further_v4_evidence(&root, &v4).is_err(),
+            "{name} swapped"
+        );
+        // Correctly bound, but another identity than the DRY / preflight.
+        let other = edited(&original, schema, field, value);
+        std::fs::write(&path, &other).unwrap();
+        let v4_other = rebound(&v4, tag, darkbot_bsc_record::sha256(&other));
+        let error = verify_further_v4_evidence(&root, &v4_other).unwrap_err();
+        assert!(
+            error.contains("differs") || error.contains("does not end"),
+            "{name}: {error}"
+        );
+        std::fs::write(&path, &original).unwrap();
+        assert!(verify_further_v4_evidence(&root, &v4).is_ok());
+    }
+    // A bound path may not leave the root.
+    let record = decode(&contract::V4, &v4).unwrap();
+    let mut d = Draft::new(&contract::V4);
+    for (t, value) in record.fields() {
+        d.push(*t, value.clone());
+    }
+    d.set(
+        contract::ECONOMICS_RECORD_PATH,
+        "../outside/economics_crosscheck.dbrec",
+    );
+    assert!(
+        verify_further_v4_evidence(&root, &d.encode().unwrap())
+            .unwrap_err()
+            .contains("plain relative")
+    );
+    std::fs::remove_dir_all(root).unwrap();
 }

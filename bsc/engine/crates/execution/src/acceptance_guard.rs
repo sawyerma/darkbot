@@ -1,6 +1,12 @@
+use darkbot_bsc_record::schema::g06a::{
+    dry, economics, local_simulation, portal_upgrade, preflight,
+};
 use darkbot_bsc_record::schema::g07::contract;
-use darkbot_bsc_record::{Record, RecordError, decode, hex, sha256};
-use std::{fs, path::Path};
+use darkbot_bsc_record::{Record, RecordError, Schema, decode, hex, sha256};
+use std::{
+    fs,
+    path::{Component, Path},
+};
 
 /// The v3 proposal of G0.7 attempt 1, bound to the Portal v5.24.0 DRY. It
 /// is superseded by v4 and can only be inspected, never authorize.
@@ -244,6 +250,145 @@ fn verify_input(label: &str, frozen: &InputHashes, runtime: &InputHashes) -> Res
     }
 }
 
+/// The SHA-256 of the further v4-bound records the guard verified itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FurtherEvidence {
+    pub local_simulation_sha256: String,
+    pub economics_sha256: String,
+    pub portal_upgrade_sha256: String,
+}
+
+/// One v4-bound record, read once at its exact bound path (relative, no
+/// `..`), hashed and decoded from the same bytes.
+fn bound_record(
+    root: &Path,
+    c: &Record,
+    path_tag: u16,
+    hash_tag: u16,
+    schema: &'static Schema,
+) -> Result<(Record, String), String> {
+    let e = |e: RecordError| format!("acceptance contract v4: {e}");
+    let path = c.text(path_tag).map_err(e)?;
+    let relative = Path::new(path);
+    if path.is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|p| !matches!(p, Component::Normal(_)))
+    {
+        return Err(format!(
+            "v4-bound path {path:?} must be a plain relative path"
+        ));
+    }
+    let bytes = fs::read(root.join(relative)).map_err(|x| format!("read v4-bound {path}: {x}"))?;
+    if sha256(&bytes) != c.b256(hash_tag).map_err(e)? {
+        return Err(format!("v4-bound record {path} does not match its SHA-256"));
+    }
+    let record = decode(schema, &bytes).map_err(|x| format!("v4-bound {path}: {x}"))?;
+    Ok((record, sha256_hex(&bytes)))
+}
+
+fn named<'a>(r: &'a Record, name: &str) -> Option<&'a darkbot_bsc_record::Value> {
+    r.fields()
+        .iter()
+        .find_map(|(tag, v)| (r.schema().field(*tag)?.name == name).then_some(v))
+}
+
+/// Pre-egress binding of the further v4 evidence the read-only readiness
+/// checks (local simulation, economics cross-check, Portal upgrade scan):
+/// the guard itself reads each record once at its v4-bound path, verifies
+/// SHA-256 and schema, and checks its identity with the v4-bound DRY and
+/// preflight. Prefers the bound paths over any runtime input.
+pub fn verify_further_v4_evidence(
+    root: &Path,
+    contract_bytes: &[u8],
+) -> Result<FurtherEvidence, String> {
+    use darkbot_bsc_record::Value;
+    let c = decode(&contract::V4, contract_bytes)
+        .map_err(|e| format!("acceptance contract v4: {e}"))?;
+    let (d, _) = bound_record(
+        root,
+        &c,
+        contract::DRY_RECORD_PATH,
+        contract::DRY_RECORD_SHA256,
+        &dry::NATIVE,
+    )?;
+    let (pre, _) = bound_record(
+        root,
+        &c,
+        contract::PREFLIGHT_RECORD_PATH,
+        contract::PREFLIGHT_RECORD_SHA256,
+        &preflight::SCHEMA,
+    )?;
+    let (sim, sim_sha) = bound_record(
+        root,
+        &c,
+        contract::LOCAL_SIMULATION_RECORD_PATH,
+        contract::LOCAL_SIMULATION_RECORD_SHA256,
+        &local_simulation::NATIVE,
+    )?;
+    let (econ, econ_sha) = bound_record(
+        root,
+        &c,
+        contract::ECONOMICS_RECORD_PATH,
+        contract::ECONOMICS_RECORD_SHA256,
+        &economics::NATIVE,
+    )?;
+    let (up, up_sha) = bound_record(
+        root,
+        &c,
+        contract::PORTAL_UPGRADE_RECORD_PATH,
+        contract::PORTAL_UPGRADE_RECORD_SHA256,
+        &portal_upgrade::SCHEMA,
+    )?;
+    let e = |e: RecordError| e.to_string();
+    let token = Value::Address(d.address(dry::TOKEN).map_err(e)?);
+    let launch = Value::B256(d.b256(dry::LAUNCH_TX_HASH).map_err(e)?);
+    let buy = Value::B256(d.b256(dry::BUY_TX_HASH).map_err(e)?);
+    let launcher = Value::Address(d.address(dry::LAUNCHER).map_err(e)?);
+    let buyer = Value::Address(d.address(dry::BUYER).map_err(e)?);
+    let simulated = [
+        ("launch_tx_hash", &launch),
+        ("buy_tx_hash", &buy),
+        ("token", &token),
+        ("launcher", &launcher),
+        ("buyer", &buyer),
+        ("launch_success", &Value::Bool(true)),
+        ("buy_success", &Value::Bool(true)),
+        ("output_difference", &Value::Text("0".into())),
+    ];
+    for (name, expected) in simulated {
+        if named(&sim, name) != Some(expected) {
+            return Err(format!(
+                "v4-bound local simulation differs from the DRY: {name}"
+            ));
+        }
+    }
+    let portal = Value::Address(d.address(dry::PORTAL).map_err(e)?);
+    for (name, expected) in [
+        ("token", &token),
+        ("portal", &portal),
+        ("status", &Value::Text("EVM_SEQUENCE_PASS".into())),
+    ] {
+        if named(&econ, name) != Some(expected) {
+            return Err(format!(
+                "v4-bound economics cross-check differs from the DRY: {name}"
+            ));
+        }
+    }
+    let implementation = Value::Address(pre.address(preflight::PORTAL_IMPLEMENTATION).map_err(e)?);
+    if named(&up, "current_implementation") != Some(&implementation) {
+        return Err(
+            "v4-bound Portal upgrade scan does not end at the preflight implementation".into(),
+        );
+    }
+    Ok(FurtherEvidence {
+        local_simulation_sha256: sim_sha,
+        economics_sha256: econ_sha,
+        portal_upgrade_sha256: up_sha,
+    })
+}
+
 pub fn verify_live_authorization(
     path: &Path,
     ctx: &LiveGuardContext,
@@ -261,7 +406,10 @@ pub fn verify_live_authorization(
             "live guard is deliberately UNARMED: no approved v4 SHA-256 is compiled in".into(),
         );
     }
-    let snap = inspect_v4(path)?;
+    // One read: the approved hash, the snapshot and the further evidence
+    // binding all come from these exact bytes.
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let snap = parse_v4(&bytes)?;
     if snap.sha256 != FROZEN_APPROVED_V4_SHA256 {
         return Err(format!(
             "v4 SHA-256 mismatch: file={} frozen={}",
@@ -285,6 +433,7 @@ pub fn verify_live_authorization(
     }
 
     verify_attempt_id(&snap.attempt_id, &ctx.attempt_id)?;
+    verify_further_v4_evidence(Path::new("."), &bytes)?;
     verify_input("dry_evidence", &snap.dry_evidence, &ctx.dry_evidence)?;
     verify_input(
         "preflight_evidence",
