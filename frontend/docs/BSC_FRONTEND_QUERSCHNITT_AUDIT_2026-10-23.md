@@ -37,6 +37,20 @@
 | AU-19 | **Veralteter Code, aktiver Pfad nicht bewiesen** | `frontend/src/core/realtime/RealtimeClient.ts` implementiert separaten JSON-WebSocket-Client; aktiver `RouteTopics.tsx` nutzt dagegen den einen Protobuf-`GatewayConnection`. | Imports/Laufzeitbundle verifizieren, alten Client erst nach belegter Nichtnutzung entfernen. **Dieser Befund beweist KEINE zweite aktive WebSocket-Verbindung.** |
 | AU-20 | **Phasentreu noch offen, kein gegenwärtiger Defekt** | `gateway/src/ws.rs` lehnt EVENT-Themen bewusst in F3 ab; `BSC_EXECUTION_EVENTS` hat noch keinen autorisierten Payload. `BscPage` Basic/Advanced bislang nur als Plan. | F4/EVENT bzw. Phase F und UI-Mode erst nach eigenen Gates auf bestehender Architektur bauen, keine Mock-Events oder vorgetäuschte Analytics. |
 
+## II.a Quellcode-Nachprüfung N1–N5 (2026-10-24)
+
+**Prüfbasis:** GitHub-HEAD fd8f7561; statische Rust-/Python-/Proto-/React-/Gateway-Leseprüfung, keine ausgeführten Tests. AU-01–AU-20 bleiben als historisches Audit bestehen; Folgendes präzisiert sie.
+
+| Befund | Status | Bestätigter Quellcode-Sachverhalt | Korrektur |
+|---|---|---|---|
+| N1 – Protobuf-Werte | BESTÄTIGT | `status.proto` kommentiert `GateStatus.state` und `BscMonitoringState.state` unvollständig. G0.7 verwendet vollständige `classification`-Strings; G0.8 `PASS/ADAPT/STOP/UNRESOLVED`. Wire-Felder sind bereits Strings. | Tatsächliche Werte dokumentieren, sichere TS-Severity und Native→TS-Goldens; kein unbegründeter Breaking-Typwechsel. |
+| N2 – jobs leer | WIDERLEGT | `projection.rs` startet mit `jobs=[]`, aber `publisher.rs` hängt **vor dem Senden** `job(rundir,label)` an. | Vorhandenen Push nutzen; fehlende `controller_available`- und Receipt-Wahrheit gesondert abbilden. |
+| N3 – BLOCKED-Lifecycle | BESTÄTIGT | `publisher.rs::job` und `gateway/src/control.rs::observe_project` prüfen als abgeschlossene Ergebniswerte nur STOP, STOPPED, PASS_READ_ONLY. BLOCKED kann als Prozess-FAILED erscheinen. | Prozessabschluss STOPPED und fachlichen Verdict BLOCKED getrennt erhalten; Wrapper/Projection ebenfalls korrigieren. |
+| N4 – Candidate busy | BESTÄTIGT MIT NATIVEM GEGENGATE | `candidateControl.ts::lookup` setzt `busy=false` selbst bei PENDING/PENDING_RECONCILE. Native `write_request()`, CAS, Guard-/Attempt-Lock und `PENDING_DESKTOP_SYNC` bestehen zusätzlich. | UI sperrt bei offenem Intent, Native-Schutz behalten; Gateway-Request-COMPLETED ≠ Native APPLIED. |
+| N5 – GUI Clock | BESTÄTIGT | `readiness_job.py` gibt isolierten öffentlichen RPC an `--current-rpc` weiter, jedoch nicht `DARKBOT_G07_CLOCK_ID` und `DARKBOT_G07_BOOT_ID`; nativer `CLOCK_CONFIG` fordert beide für PASS. | Ohne authentisch gelieferten Clock-/Boot-Kontext GUI-BLOCKED anzeigen, nicht IDs erfinden oder Tests überspringen. |
+
+**Einordnung:** Hauptarbeit ist die Vervollständigung der **bestehenden** BSC-Native-/Protobuf-Feldliste und ihre Verdrahtung in fünf React-Reitern. Diese Audit-Fixes sind begrenzte Paket-1-Blocker, keine neuen Produkt- oder BSC-Produktionsphasen. Verbindliche Reihenfolge in `ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md` §E. `NOT_RUN` bedeutet nicht `PASS`.
+
 ## III. Akzeptanzfolge für Astra – bis dahin STOP für neue UI-Scope-Ausweitung
 
 1. **Erst Paket 0 (Prüfung), danach eng begrenzte Paket-1-Bugfixes**, keinen Umbau von GUI-Architektur und keine BSC-Produktionsphasenumsetzung. Fehlerregister samt Source-SHA/Ticket in der vorhandenen Frontend-Dokumentationsstruktur ergänzen, aber keine zweite F0-Masterdatei.
