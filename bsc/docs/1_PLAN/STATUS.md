@@ -22,6 +22,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 D4 (code, offline-tested): `g06a_final_dry.sh --sign <prepare_dir>` (only with `DARKBOT_G06A_SIGN=YES`, real keys = AWAITING_USER_AUTHORIZATION) verifies the handoff, extends R0 at H2 via DRY-0 (head must be beyond H1), recomputes preflight/quote/cross-check/builder/4b at H2, then steps 4/5 (B through exec-salt with keys) and the requal check (B with `--candidate`) in a new 0700 `bsc/.local/g06a_sign/*`; H1 economics never reused. Candidates bind by deployment identity (code hashes), not by the creation-preflight record, so the candidate stays unchanged H1→H2.
 
+2026-10-23 D5 (code, offline-tested): A parity pinned (signing source `transactions.rs` 2da8c1dd…, every frozen A evidence file against its SHA256SUMS, A salt = public keccak label sequence, requal A hashes = frozen DRY); `g07_candidate qualify` gives B a qualification only from its own run (DRY6); B rejects A hashes, the native cross-check and a wrong commitment (requal/v5/guard tests).
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

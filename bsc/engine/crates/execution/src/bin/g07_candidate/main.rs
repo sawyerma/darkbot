@@ -795,6 +795,15 @@ mod tests {
         ));
         r.set(rqs::LAUNCH_TX_HASH, Value::B256(l.0))
             .set(rqs::BUY_TX_HASH, Value::B256(b.0));
+        if verdict == "PASS_B" {
+            let mut check = Draft::new(&rqs::check::SCHEMA);
+            check
+                .set(rqs::check::NAME, "DRY6_B_CANDIDATE")
+                .set(rqs::check::STATUS, "PASS")
+                .set(rqs::check::DETAIL, "fixture");
+            r.push(rqs::CHECKS, check.into_nested());
+            r.set(rqs::VERDICT, "PASS");
+        }
         if verdict != "PASS_WITHOUT_DRY5" {
             let mut check = Draft::new(&rqs::check::SCHEMA);
             check
@@ -854,6 +863,33 @@ mod tests {
                 .contains("not candidate SELF_B")
         );
         assert!(qualification_for(&a, &requal("STOP", &dry, &pre, None), &dry, &pre).is_err());
+        // B qualifies only by its own run (DRY6), never by an A-shaped one.
+        let b_dry = {
+            let record = decode(&schema::g06a::dry::SCHEMA, &dry)
+                .or_else(|_| decode(&schema::g06a::dry::NATIVE, &dry))
+                .unwrap();
+            let mut d = Draft::new(&schema::g06a::dry::NATIVE);
+            for (tag, value) in record.fields() {
+                if *tag > 2 {
+                    d.push(*tag, value.clone());
+                }
+            }
+            d.set(schema::PROVENANCE_TOOL, "fixture")
+                .set(schema::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+                .set(
+                    schema::g06a::dry::TOKEN,
+                    darkbot_bsc_record::Value::Address(b.token.into_array()),
+                );
+            d.encode().unwrap()
+        };
+        assert!(
+            qualification_for(&b, &requal("PASS", &b_dry, &pre, None), &b_dry, &pre)
+                .unwrap_err()
+                .contains("DRY6")
+        );
+        let qb =
+            qualification_for(&b, &requal("PASS_B", &b_dry, &pre, None), &b_dry, &pre).unwrap();
+        assert_eq!(qb.token, b.token);
         // A run without its launch-path snapshot (pre-C1/R1) never qualifies.
         assert!(
             qualification_for(

@@ -879,14 +879,16 @@ pub(crate) fn qualification_for(
             (row.text(rqs::bound::NAME).ok()? == name).then(|| row.b256(rqs::bound::SHA256).ok())?
         })
     };
-    // v9.1 C1/R1: only a run that bound its launch-path snapshot qualifies.
-    let launch_path_checked = r.nested_all(rqs::CHECKS).is_ok_and(|checks| {
-        checks.iter().any(|c| {
-            c.text(rqs::check::NAME).ok() == Some("DRY5_LAUNCH_PATH")
-                && c.text(rqs::check::STATUS).ok() == Some("PASS")
+    let passed = |name: &str| {
+        r.nested_all(rqs::CHECKS).is_ok_and(|checks| {
+            checks.iter().any(|c| {
+                c.text(rqs::check::NAME).ok() == Some(name)
+                    && c.text(rqs::check::STATUS).ok() == Some("PASS")
+            })
         })
-    });
-    if !launch_path_checked || bound("launch_path.dbrec").is_none() {
+    };
+    // v9.1 C1/R1: only a run that bound its launch-path snapshot qualifies.
+    if !passed("DRY5_LAUNCH_PATH") || bound("launch_path.dbrec").is_none() {
         return Err("the requalification bound no launch-path snapshot (DRY5)".into());
     }
     let dry_sha = darkbot_bsc_record::sha256(dry_bytes);
@@ -919,6 +921,10 @@ pub(crate) fn qualification_for(
         && (frozen.launch_tx_hash != launch || frozen.buy_tx_hash != buy)
     {
         return Err("the signed bytes of A changed: a new economic decision is required".into());
+    }
+    // v9.1 D5: B qualifies only by its own run, which bound this candidate.
+    if candidate.profile == Profile::B && !passed("DRY6_B_CANDIDATE") {
+        return Err("a SELF_B requalification must bind the candidate (DRY6)".into());
     }
     Ok(Qualification {
         candidate_id: candidate.id,

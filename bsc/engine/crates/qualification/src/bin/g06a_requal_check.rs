@@ -722,6 +722,14 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
+    /// v9.1 D5: the A hashes this check pins are the frozen DRY's.
+    #[test]
+    fn the_pinned_a_signed_hashes_are_the_frozen_dry_hashes() {
+        let d = frozen("dry_result.dbrec");
+        assert_eq!(d.b256(dry::LAUNCH_TX_HASH).unwrap(), hex32(LAUNCH_TX));
+        assert_eq!(d.b256(dry::BUY_TX_HASH).unwrap(), hex32(BUY_TX));
+    }
+
     #[test]
     fn utf8_status_details_are_byte_bounded_and_preserve_stop() {
         for detail in ["a".repeat(4000), "a".repeat(4001), "é".repeat(4000), "€".repeat(4000), "🦀".repeat(4000), format!("{}€🦀", "a".repeat(3999))] {
