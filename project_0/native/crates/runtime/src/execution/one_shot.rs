@@ -1,5 +1,6 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
+pub mod admission;
 pub mod receipts;
 pub mod settlement;
 pub mod transport;
@@ -91,6 +92,8 @@ pub struct Current {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SafetyReplay {
     pub held_capital_usd_micro: Option<u64>,
+    /// C3: the booked settlement of a settled attempt.
+    pub settled: Option<darkbot_project0::safety::SettledAttempt>,
 }
 
 /// A durable FE-04 hold that is not finalized (P8-RES-02).
@@ -559,6 +562,14 @@ impl Journal {
     pub fn safety_replay(&self) -> Option<SafetyReplay> {
         self.saved.as_ref().map(|s| SafetyReplay {
             held_capital_usd_micro: (!s.phase.finalized()).then_some(s.intent.capital_usd_micro),
+            settled: match &s.phase {
+                Phase::Settled(done) => Some(darkbot_project0::safety::SettledAttempt {
+                    unix_s: s.intent.evaluated_unix_ms / 1_000,
+                    realized_net_usd_micro: done.realized_net_usd_micro,
+                    landed_success: done.landed_success,
+                }),
+                _ => None,
+            },
         })
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
@@ -1171,7 +1182,8 @@ mod tests {
             allow.execution_classes.insert("longtail");
             let mut s = Safety::new(limits, allow, true);
             if let Some(r) = replay {
-                s.restore_attempt(r.held_capital_usd_micro).unwrap();
+                s.restore_attempt(0, r.held_capital_usd_micro, r.settled)
+                    .unwrap();
             }
             let admitted = s.preview(0, 1, 0, 0, 0, &[], "longtail");
             (s.halted(), s.capital_in_use(), admitted)
@@ -1184,6 +1196,7 @@ mod tests {
         let unknown = Deny::Halted(HaltReason::UnknownEconomics);
         let held = Some(SafetyReplay {
             held_capital_usd_micro: Some(i.capital_usd_micro),
+            settled: None,
         });
         assert_eq!(replay(), held);
         assert_eq!(
@@ -1208,6 +1221,50 @@ mod tests {
         assert_eq!(
             restored(replay()),
             (Some(HaltReason::UnknownEconomics), 0, Err(unknown))
+        );
+        // C3: once settled, the replay books the realized net and the outcome into the day the
+        // attempt was evaluated, and the consumed one-shot halts as `LimitBreached`.
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        let settled = j.settle(&|asset, d| (asset == "SOL").then_some(d)).unwrap();
+        drop(j);
+        let replayed = replay().unwrap();
+        let day = i.evaluated_unix_ms / 1_000;
+        assert_eq!(
+            replayed.settled,
+            Some(darkbot_project0::safety::SettledAttempt {
+                unix_s: day,
+                realized_net_usd_micro: -20,
+                landed_success: true,
+            })
+        );
+        assert_eq!(settled.realized_net_usd_micro, -20);
+        let book = |now: u64| {
+            let mut allow = Allow::default();
+            allow.execution_classes.insert("longtail");
+            let mut s = Safety::new(
+                Limits {
+                    max_total_capital: u64::MAX,
+                    max_outstanding_inventory: u64::MAX,
+                    max_concurrent_positions: 9,
+                    max_exposure_per_attempt: u64::MAX,
+                    max_daily_loss: u64::MAX,
+                    max_failed_attempts_per_day: 9,
+                    max_tip: u64::MAX,
+                    max_slippage_bps: u64::MAX,
+                    max_outstanding_attempts: 9,
+                },
+                allow,
+                true,
+            );
+            s.restore_attempt(now, replayed.held_capital_usd_micro, replayed.settled)
+                .unwrap();
+            (s.halted(), s.capital_in_use(), s.day().realized_pnl)
+        };
+        assert_eq!(book(day), (Some(HaltReason::LimitBreached), 0, -20));
+        assert_eq!(
+            book(day + 86_400),
+            (Some(HaltReason::LimitBreached), 0, 0),
+            "another day"
         );
         fs::remove_dir_all(&path).unwrap();
     }

@@ -828,6 +828,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             lookup_tables: vec![].into(),
             prerequisite_txs: vec![],
             sol_costs: Default::default(),
+            liability_hold: None,
         }])
     }
 }
@@ -907,6 +908,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        fe04: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::ShadowReady);
@@ -1013,6 +1015,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        fe04: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
@@ -1028,6 +1031,307 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
     assert_eq!(sims.load(Ordering::Relaxed), 1);
     assert_eq!(calls.load(Ordering::Relaxed), 0, "no submit call");
     assert_eq!(safety.capital_in_use(), 0, "no reservation left");
+}
+/// FE-04 test adapter: counts simulations and submits; a submit answers the exact ACK of the
+/// bytes, or fails like a lost transport.
+struct HandoffSubmitter {
+    submits: Arc<AtomicU64>,
+    sims: Arc<AtomicU64>,
+    transport_fails: bool,
+}
+impl SubmissionAdapter for HandoffSubmitter {
+    fn path(&self) -> SubmissionPath {
+        SubmissionPath::Rpc
+    }
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        _: std::time::Instant,
+    ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
+        Ok(MessageFeeQuote {
+            message_hash: tx.message.hash().to_string(),
+            context_slot: 1,
+            lamports: 200,
+        })
+    }
+    fn simulate(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
+        assert!(tx.verify_and_hash_message().is_ok());
+        self.sims.fetch_add(1, Ordering::Relaxed);
+        SimResult::Ok {
+            units_consumed: Some(100),
+        }
+    }
+    fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
+        SimResult::Unavailable("no bundle".into())
+    }
+    fn submit(&self, tx: &VersionedTransaction, t: u64) -> Result<SubmitAck, SubmitError> {
+        self.submits.fetch_add(1, Ordering::Relaxed);
+        if self.transport_fails {
+            return Err(SubmitError::Transport("lost".into()));
+        }
+        Ok(SubmitAck {
+            path: SubmissionPath::Rpc,
+            signature: tx.signatures[0],
+            signatures: vec![tx.signatures[0]],
+            submission_id: None,
+            t_handoff_ns: t,
+            serialized_len: darkbot_solana::submit::serialize_tx(tx).unwrap().len(),
+        })
+    }
+    fn submit_bundle(&self, _: &[VersionedTransaction], _: u64) -> Result<SubmitAck, SubmitError> {
+        panic!("no bundle path")
+    }
+}
+/// `TestBuilder`'s plan with a known record rent (no record created), a flat protocol fee of
+/// 5 lamports and an exposure of 1 000.
+struct AdmissionBuilder;
+impl crate::execution::pipeline::ReceivershipBuilder for AdmissionBuilder {
+    fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+        Some(n)
+    }
+    fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+        test_table()
+    }
+    fn plans(
+        &self,
+        a: &Pubkey,
+        n: u64,
+        s: u64,
+        d: std::time::Instant,
+    ) -> Result<
+        Vec<crate::execution::pipeline::ReceivershipPlan>,
+        crate::execution::pipeline::PlanError,
+    > {
+        let mut plans = TestBuilder.plans(a, n, s, d)?;
+        for p in &mut plans {
+            p.sol_costs.record_rent_lamports = Some(0);
+            p.sol_costs.flat_fee_lamports = 5;
+            p.exposure = 1_000;
+        }
+        Ok(plans)
+    }
+}
+fn admission(
+    dir: &std::path::Path,
+    payer: &solana_sdk::signature::Keypair,
+    target: Pubkey,
+    class: &str,
+) -> crate::execution::one_shot::admission::Fe04Admission {
+    use solana_sdk::signer::Signer;
+    let wallet = payer.pubkey().to_string();
+    crate::execution::one_shot::admission::Fe04Admission {
+        journal: crate::execution::one_shot::Journal::open(dir, &wallet).unwrap(),
+        approval: crate::execution::one_shot::Approval {
+            schema: 1,
+            authorized: true,
+            approval_id: "approval-1".into(),
+            code_sha: "a".repeat(40),
+            binary_sha256: "b".repeat(64),
+            wallet,
+            program: test_table().program.to_string(),
+            program_data_hash: "pd".into(),
+            funding_class: class.into(),
+            allowed_targets: [target.to_string()].into_iter().collect(),
+            expires_unix_s: u64::MAX,
+            max_state_age_ms: 60_000,
+            max_capital_usd_micro: u64::MAX,
+            max_total_sol_debit_lamports: 1_000_000,
+            max_tip_lamports: 0,
+            max_rent_lamports: 0,
+            max_loss_usd_micro: u64::MAX,
+            min_net_usd_micro: 1,
+            max_slippage_bps: 50,
+        },
+        state_generation: 1,
+        program_data_hash: "pd".into(),
+        balances: [("SOL".to_string(), 1_000_000_000)].into_iter().collect(),
+        reserved_elsewhere: Default::default(),
+        policy_reserve: Default::default(),
+        valid_until_slot: 160,
+    }
+}
+/// B1/FE-04: the admission is the pipeline's only send. A LIVE candidate is reserved durably
+/// first (intent bound to the exact signed bytes, fee, tip, rent and the full SOL debit), then
+/// submitted exactly once; a second trigger never submits again; a refusal before anything
+/// durable sends nothing and releases the Safety reservation; a lost transport after the durable
+/// handoff stays UNKNOWN with its hold and halts.
+#[test]
+fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
+    use crate::execution::pipeline::{Mode, Pipeline};
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let run =
+        |adapter: &HandoffSubmitter,
+         safety: &mut Safety,
+         fe04: Option<&mut crate::execution::one_shot::admission::Fe04Admission>| {
+            let clock = Clock::new();
+            let bh = BlockhashCache::new();
+            bh.set(CachedBlockhash {
+                hash: solana_sdk::hash::Hash::new_unique(),
+                last_valid_block_height: 100,
+                refreshed_ns: clock.now_ns(),
+            });
+            let allow = Allowlist::default();
+            let failed = FailedCostMatrix::default();
+            let slots = darkbot_solana::ingress::SlotWatch::new();
+            slots.observe(10);
+            let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+            let mut p = Pipeline {
+                mode: Mode::Live,
+                clock: &clock,
+                health: &TestHealth,
+                builder: &AdmissionBuilder,
+                submitter: adapter,
+                safety,
+                blockhash: &bh,
+                payer: &payer,
+                allowlist: &allow,
+                failed_costs: &failed,
+                limits: TxLimits::default(),
+                resources: Resources {
+                    compute_unit_limit: 100_000,
+                    priority_micro_lamports_per_cu: 0,
+                    loaded_accounts_data_size: None,
+                },
+                min_profit: 0,
+                blockhash_max_age_ns: u64::MAX,
+                p7_passed: false,
+                freshness: Freshness {
+                    max_opportunity_age_ns: u64::MAX,
+                    execution_deadline_ns: u64::MAX,
+                },
+                tip_account: None,
+                global_allowed: std::slice::from_ref(&test_table().program),
+                prereq_allowed: &[],
+                slot_watch: &slots,
+                network: &mut network,
+                simulation_failure: None,
+                fe04,
+            };
+            p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
+        };
+    let open_safety = || {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let adapter = |transport_fails| HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails,
+    };
+    let dir = |n: &str| {
+        let d = std::env::temp_dir().join(format!("p0-fe04-adm-{n}-{}", Pubkey::new_unique()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    };
+
+    // Durable reserve, then exactly one submit of the simulated bytes.
+    let (ok_dir, ok) = (dir("ok"), adapter(false));
+    let mut safety = open_safety();
+    let mut fe04 = admission(&ok_dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    let r = run(&ok, &mut safety, Some(&mut fe04));
+    assert_eq!(r.decision, Decision::Submitted, "{:?}", r.reason);
+    assert_eq!(ok.submits.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        ok.sims.load(Ordering::Relaxed),
+        2,
+        "pipeline + exact payload simulation"
+    );
+    assert!(r.timing.t_handoff_ns.is_some());
+    let hold = fe04.journal.active_hold().unwrap();
+    assert!(hold.unknown_outcome, "submitted is UNKNOWN until settled");
+    assert_eq!(
+        hold.holds["SOL"], 205,
+        "fee 200 + tip 0 + flat fee 5 + record rent 0"
+    );
+    assert_eq!(safety.capital_in_use(), 1_000, "reserved until settled");
+    assert_eq!(hold.target, target.to_string());
+    assert_eq!(r.signature.as_deref(), Some(r.all_signatures[0].as_str()));
+    // A second trigger never submits again (the one-shot is consumed) and releases its check.
+    let again = run(&ok, &mut safety, Some(&mut fe04));
+    assert_eq!(again.decision, Decision::Unavailable);
+    assert!(again.reason.unwrap().contains("ONE_SHOT_ALREADY_CONSUMED"));
+    assert_eq!(ok.submits.load(Ordering::Relaxed), 1);
+
+    // Refused before anything durable: nothing sent, no hold, Safety released.
+    let (refused_dir, none) = (dir("refused"), adapter(false));
+    let mut safety = open_safety();
+    let mut fe04 = admission(&refused_dir, &payer, target, "NO_SWAP_INVENTORY");
+    let r = run(&none, &mut safety, Some(&mut fe04));
+    assert_eq!(r.decision, Decision::Unavailable);
+    assert_eq!(r.reason.as_deref(), Some("FE04_FUNDING_CLASS_MISMATCH"));
+    assert_eq!(none.submits.load(Ordering::Relaxed), 0);
+    assert!(fe04.journal.active_hold().is_none());
+    assert_eq!((safety.capital_in_use(), safety.halted()), (0, None));
+    // The full SOL debit (with the flat fee) is checked against the approval.
+    drop(fe04);
+    let mut fe04 = admission(&refused_dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    fe04.approval.max_total_sol_debit_lamports = 204;
+    let r = run(&none, &mut safety, Some(&mut fe04));
+    assert_eq!(
+        r.reason.as_deref(),
+        Some("APPROVAL_BUDGET_EXCEEDED:SOL_DEBIT")
+    );
+    assert_eq!(
+        (
+            none.submits.load(Ordering::Relaxed),
+            safety.capital_in_use()
+        ),
+        (0, 0)
+    );
+
+    // Lost transport after the durable handoff: UNKNOWN, hold kept, Safety halted.
+    let (lost_dir, lost) = (dir("lost"), adapter(true));
+    let mut safety = open_safety();
+    let mut fe04 = admission(&lost_dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    let r = run(&lost, &mut safety, Some(&mut fe04));
+    assert_eq!(r.decision, Decision::AmbiguousSubmission);
+    assert_eq!(lost.submits.load(Ordering::Relaxed), 1);
+    assert!(fe04
+        .journal
+        .active_hold()
+        .is_some_and(|h| h.unknown_outcome));
+    assert_eq!(
+        safety.halted(),
+        Some(darkbot_common::error::HaltReason::UnknownEconomics)
+    );
+    assert_eq!(safety.capital_in_use(), 1_000, "UNKNOWN releases nothing");
+
+    // Without an admission LIVE still never sends.
+    let (_, idle) = (dir("idle"), adapter(false));
+    let mut safety = open_safety();
+    assert_eq!(
+        run(&idle, &mut safety, None).decision,
+        Decision::Unavailable
+    );
+    assert_eq!(idle.submits.load(Ordering::Relaxed), 0);
+    for d in [ok_dir, refused_dir, lost_dir] {
+        std::fs::remove_dir_all(d).unwrap();
+    }
 }
 /// B18: a plan with a tip on a submitter without bundle path is signed as one transaction:
 /// T_sign and its slot are recorded once, at that signature (before: no T_sign at all).
@@ -1124,6 +1428,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        fe04: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -1245,6 +1550,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             slot_watch: &slots,
             network: &mut network,
             simulation_failure: None,
+            fe04: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         let reason = r.reason.clone().unwrap_or_default();
@@ -1394,6 +1700,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             slot_watch: &slots,
             network: &mut network,
             simulation_failure: None,
+            fe04: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
         assert_eq!(
@@ -2156,6 +2463,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        fe04: None,
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
     // events/s into a 1,024-event queue. `guarded`: an empty queue opens a new drain window of
@@ -2395,6 +2703,7 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        fe04: None,
     };
     p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
 }

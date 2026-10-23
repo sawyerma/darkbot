@@ -1271,6 +1271,7 @@ pub mod p0 {
                                 tx_version: BuildVersion::V0,
                                 lookup_tables: protocol_luts.clone(),
                                 prerequisite_txs: vec![],
+                                liability_hold: Some((liab_mint, sz.repay_amount)),
                                 sol_costs: SolCosts {
                                     flat_fee_lamports: sz.flat_sol_fee_lamports,
                                     record_rent_lamports: Some(0),
@@ -1335,6 +1336,7 @@ pub mod p0 {
                                     &buy.lookup_tables,
                                 ),
                                 prerequisite_txs: vec![buy.instructions],
+                                liability_hold: None,
                                 sol_costs: SolCosts {
                                     flat_fee_lamports: sz.flat_sol_fee_lamports,
                                     record_rent_lamports: Some(0),
@@ -1459,6 +1461,7 @@ pub mod p0 {
                                             tx_version: BuildVersion::V1,
                                             lookup_tables: vec![].into(),
                                             prerequisite_txs: vec![],
+                                            liability_hold: None,
                                             sol_costs: SolCosts {
                                                 flat_fee_lamports: sz.flat_sol_fee_lamports,
                                                 record_rent_lamports: Some(0),
@@ -1491,6 +1494,7 @@ pub mod p0 {
                                             &mark.lookup_tables,
                                         ),
                                         prerequisite_txs: vec![],
+                                        liability_hold: None,
                                         sol_costs: SolCosts {
                                             flat_fee_lamports: sz.flat_sol_fee_lamports,
                                             record_rent_lamports: Some(0),

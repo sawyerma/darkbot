@@ -323,6 +323,7 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        fe04: None,
     };
     let started = std::time::Instant::now();
     let rec = p.evaluate(f.account, "n2", clock.now_ns(), 1_000, 10, true);

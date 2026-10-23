@@ -485,6 +485,7 @@ impl ShadowOwner {
                 slot_watch: &self.slot_watch,
                 network: &mut self.network,
                 simulation_failure: None,
+                fe04: None,
             };
             #[cfg(feature = "crate_health")]
             let pipeline_started_ns = self.clock.now_ns();

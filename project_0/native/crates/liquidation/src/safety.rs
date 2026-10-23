@@ -64,6 +64,15 @@ impl LedgerViolation {
     }
 }
 
+/// C3/B3: a settled one-shot as the safety layer replays it: when it was evaluated, its booked
+/// realized net (USD micro) and whether every transaction landed successfully.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SettledAttempt {
+    pub unix_s: u64,
+    pub realized_net_usd_micro: i128,
+    pub landed_success: bool,
+}
+
 /// The counters after releasing one attempt's reservation (computed before anything applies).
 struct Released {
     outstanding: u32,
@@ -127,10 +136,43 @@ impl Safety {
     }
 
     /// B3: replays a durable one-shot attempt after a restart (the FE-04 journal is the only
-    /// store): its economics are not booked, so the layer halts (sticky, no auto-reset); until it
-    /// is finalized its capital and its attempt/position slot stay reserved. Nothing is released.
+    /// store) — never released, never re-armed. A settled attempt (C3) books its realized net and
+    /// a failure into the day it was evaluated (if that is today) and halts as a consumed one-shot
+    /// (`LimitBreached`); any other attempt has no booked economics and halts `UnknownEconomics`,
+    /// and until it is finalized its capital and its attempt/position slot stay reserved.
     #[must_use = "a ledger violation halts the safety layer; the caller must surface it"]
-    pub fn restore_attempt(&mut self, held_capital: Option<u64>) -> Result<(), LedgerViolation> {
+    pub fn restore_attempt(
+        &mut self,
+        now_unix_s: u64,
+        held_capital: Option<u64>,
+        settled: Option<SettledAttempt>,
+    ) -> Result<(), LedgerViolation> {
+        if let Some(s) = settled {
+            self.halt(HaltReason::LimitBreached);
+            self.roll_day(now_unix_s);
+            if s.unix_s / 86_400 != self.day.day_index {
+                return Ok(());
+            }
+            let pnl = self.violation(
+                self.day
+                    .realized_pnl
+                    .checked_add(s.realized_net_usd_micro)
+                    .ok_or(LedgerViolation::PnlOverflow),
+            )?;
+            let failed = if s.landed_success {
+                self.day.failed_attempts
+            } else {
+                self.violation(
+                    self.day
+                        .failed_attempts
+                        .checked_add(1)
+                        .ok_or(LedgerViolation::CounterOverflow),
+                )?
+            };
+            self.day.realized_pnl = pnl;
+            self.day.failed_attempts = failed;
+            return Ok(());
+        }
         self.halt(HaltReason::UnknownEconomics);
         let Some(capital) = held_capital else {
             return Ok(());
@@ -450,7 +492,7 @@ mod tests {
     #[test]
     fn b3_restored_attempt_halts_and_keeps_its_capital() {
         let mut s = Safety::new(lim(), allow(), true);
-        s.restore_attempt(Some(40)).unwrap();
+        s.restore_attempt(0, Some(40), None).unwrap();
         assert_eq!(
             ledger(&s),
             (
@@ -469,12 +511,12 @@ mod tests {
         );
         let before = ledger(&s);
         assert_eq!(
-            s.restore_attempt(Some(u64::MAX)),
+            s.restore_attempt(0, Some(u64::MAX), None),
             Err(LedgerViolation::CounterOverflow)
         );
         assert_eq!(ledger(&s), before);
         let mut finalized = Safety::new(lim(), allow(), true);
-        finalized.restore_attempt(None).unwrap();
+        finalized.restore_attempt(0, None, None).unwrap();
         assert_eq!(
             ledger(&finalized),
             (
@@ -487,6 +529,55 @@ mod tests {
                 Some(HaltReason::UnknownEconomics)
             )
         );
+    }
+
+    /// C3/B3: a settled attempt books its realized net and a failure into its own day only, never
+    /// releases or reserves anything, and halts as a consumed one-shot; an overflow applies nothing.
+    #[test]
+    fn b3_settled_attempt_books_its_day_once() {
+        let day = 20_000 * 86_400;
+        let settled = |net, ok| SettledAttempt {
+            unix_s: day + 5,
+            realized_net_usd_micro: net,
+            landed_success: ok,
+        };
+        let mut s = Safety::new(lim(), allow(), true);
+        s.restore_attempt(day + 60, None, Some(settled(-30, false)))
+            .unwrap();
+        assert_eq!(
+            ledger(&s),
+            (
+                0,
+                0,
+                0,
+                0,
+                0,
+                DayStats {
+                    day_index: 20_000,
+                    realized_pnl: -30,
+                    failed_attempts: 1,
+                    attempts: 0
+                },
+                Some(HaltReason::LimitBreached)
+            )
+        );
+        let mut later = Safety::new(lim(), allow(), true);
+        later
+            .restore_attempt(day + 86_400, None, Some(settled(-30, false)))
+            .unwrap();
+        assert_eq!(
+            (later.day().realized_pnl, later.day().failed_attempts),
+            (0, 0)
+        );
+        let mut s = Safety::new(lim(), allow(), true);
+        s.restore_attempt(day, None, Some(settled(i128::MIN, true)))
+            .unwrap();
+        let before = ledger(&s);
+        assert_eq!(
+            s.restore_attempt(day, None, Some(settled(-1, true))),
+            Err(LedgerViolation::PnlOverflow)
+        );
+        assert_eq!(ledger(&s).5, before.5, "nothing applied");
     }
 
     /// Every ledger counter and the day statistics of `s` (Q2 full-state comparisons).

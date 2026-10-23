@@ -183,6 +183,9 @@ pub struct ReceivershipPlan {
     pub prerequisite_txs: Vec<Vec<Instruction>>,
     /// FE-02/B4: the SOL this plan debits besides the network fee and the tip.
     pub sol_costs: SolCosts,
+    /// FE-04: the liability inventory an inventory-funded plan spends (mint, base units); the
+    /// intent holds it. `None`: the plan spends no held inventory.
+    pub liability_hold: Option<(Pubkey, u64)>,
 }
 
 /// FE-02/B4: SOL a plan's execution debits from the wallet beyond the network fee and the tip:
@@ -369,6 +372,9 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub network: &'a mut NetworkBudget,
     /// F1: logs of the last failed simulation, taken by the owner for its journal.
     pub simulation_failure: Option<darkbot_solana::submit::SimulationFailure>,
+    /// B1/FE-04: the one durable admission of a LIVE candidate (the one-shot owner's journal and
+    /// approval). `None`: LIVE stops at the send boundary, no submit call exists.
+    pub fe04: Option<&'a mut crate::execution::one_shot::admission::Fe04Admission>,
 }
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
@@ -1093,13 +1099,96 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(format!("{:?}", d));
             return rec.with_timeline(&tl);
         }
-        // Not a Safety denial: the send capability is unavailable on this path.
-        rec.decision = Decision::Unavailable;
-        rec.loss = Some(LossReason::Submission);
-        rec.reason = Some(format!(
-            "{LIVE_SEND_REQUIRES_FE04}: simulated {} candidate is handed off only by the FE-04 one-shot owner",
-            if use_bundle { "bundle" } else { "single-TX" }
-        ));
+        let Some(fe04) = self.fe04.as_deref_mut() else {
+            // Not a Safety denial: the send capability is unavailable on this path.
+            rec.decision = Decision::Unavailable;
+            rec.loss = Some(LossReason::Submission);
+            rec.reason = Some(format!(
+                "{LIVE_SEND_REQUIRES_FE04}: simulated {} candidate is handed off only by the FE-04 one-shot owner",
+                if use_bundle { "bundle" } else { "single-TX" }
+            ));
+            return rec.with_timeline(&tl);
+        };
+        // B1/B15: capital and the worst-case inventory are reserved before the durable admission.
+        if let Err(d) = self.safety.check(
+            now_unix_s,
+            plan.exposure,
+            plan.inventory_hold_usd_micro,
+            plan.tip,
+            plan.slippage_bps,
+            &plan.assets,
+            "longtail",
+        ) {
+            rec.decision = Decision::DeniedBySafety;
+            rec.reason = Some(format!("{:?}", d));
+            return rec.with_timeline(&tl);
+        }
+        let fee_lamports = rec
+            .selected_costs
+            .as_ref()
+            .and_then(|c| c.message_fee_quote.as_ref())
+            .map(|q| q.lamports);
+        let max_loss_usd_micro = plan
+            .sol_debit_lamports(fee_lamports)
+            .and_then(|l| self.builder.native_cost_usd_micro(l))
+            .and_then(|usd| usd.checked_add(plan.input.required_capital_usd_micro));
+        let (path, txs) = if use_bundle {
+            (SubmissionPath::JitoBundle, bundle_txs)
+        } else {
+            (self.submitter.path(), vec![built.tx.clone()])
+        };
+        let t_handoff_ns = self.clock.now_ns();
+        let admission = fe04.admit(
+            crate::execution::one_shot::admission::Candidate {
+                plan: &plan,
+                target: account,
+                txs,
+                path,
+                payer: tx::payer_of(self.payer),
+                fee_lamports,
+                net_usd_micro: rec.net_profit.unwrap_or(i128::MIN),
+                max_loss_usd_micro,
+                slot,
+                now_unix_ms: now_unix_s.saturating_mul(1_000),
+                state_valid,
+                deadline,
+                t_handoff_ns,
+            },
+            self.submitter,
+        );
+        use crate::execution::one_shot::admission::Admission;
+        match admission {
+            Admission::Submitted(ack) => {
+                tl.mark(Stage::Handoff, ack.t_handoff_ns);
+                rec.decision = Decision::Submitted;
+                rec.signature = Some(ack.signature.to_string());
+                rec.all_signatures = ack.signatures.iter().map(ToString::to_string).collect();
+                rec.bundle_id = ack.submission_id.clone();
+                rec.exposure = Some(plan.exposure);
+            }
+            Admission::Refused(reason) => {
+                // Nothing durable exists and nothing was sent: the reservation is released.
+                if let Err(v) = self
+                    .safety
+                    .release_without_outcome(plan.exposure, plan.inventory_hold_usd_micro)
+                {
+                    rec.reason = Some(format!("{reason}; {}", v.code()));
+                } else {
+                    rec.reason = Some(reason);
+                }
+                rec.decision = Decision::Unavailable;
+                rec.loss = Some(LossReason::Submission);
+            }
+            Admission::Unknown(reason) => {
+                // A durable reservation/handoff exists: UNKNOWN keeps every hold and halts.
+                self.safety
+                    .halt(darkbot_common::error::HaltReason::UnknownEconomics);
+                rec.decision = Decision::AmbiguousSubmission;
+                rec.loss = Some(LossReason::Submission);
+                rec.exposure = Some(plan.exposure);
+                rec.reason = Some(reason);
+            }
+        }
         rec.with_timeline(&tl)
     }
 

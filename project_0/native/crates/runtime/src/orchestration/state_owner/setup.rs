@@ -800,7 +800,13 @@ pub(super) fn prepare(
     // B3: a durable attempt halts the safety layer and keeps its capital reserved.
     if let Some(replay) = fe04.replay {
         safety
-            .restore_attempt(replay.held_capital_usd_micro)
+            .restore_attempt(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs()),
+                replay.held_capital_usd_micro,
+                replay.settled,
+            )
             .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
     }
     let (reservations, fe04_journal) = (fe04.book, fe04.dir);
