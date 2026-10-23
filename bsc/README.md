@@ -12,73 +12,84 @@ GitHub rendert dieses **Mermaid-Blockschaltbild direkt**. Es zeigt die **verbind
 
 ```mermaid
 flowchart TB
-    CHAIN["BSC P2P / Pending-Launch-Transaktionen"]
+  CHAIN["BSC: Pending- und Launch-Transaktionen"]
 
-    subgraph SOURCES["FÜNF UNABHÄNGIGE FRÜHERKENNUNGSQUELLEN"]
-        direction LR
-        G["Eigene geth-Fast-Lane<br/>OFF / SHADOW / LIVE"]
-        P["PublicNode WSS<br/>OFF / SHADOW / LIVE"]
-        D["dRPC WSS<br/>OFF / SHADOW / LIVE"]
-        B["BlockReq WSS<br/>OFF / SHADOW / LIVE"]
-        F["48Club Auction Feed<br/>OFF / SHADOW / LIVE"]
-    end
+  subgraph INPUT["1 – FRÜHERKENNUNG: 5 unabhängige Quellen"]
+    direction LR
+    G["Eigene geth-Fast-Lane<br/>OFF / SHADOW / LIVE"]
+    P["PublicNode WSS<br/>OFF / SHADOW / LIVE"]
+    D["dRPC WSS<br/>OFF / SHADOW / LIVE"]
+    B["BlockReq WSS<br/>OFF / SHADOW / LIVE"]
+    F["48Club Auction Feed<br/>OFF / SHADOW / LIVE"]
+  end
 
-    CHAIN --> G
-    CHAIN --> P
-    CHAIN --> D
-    CHAIN --> B
-    CHAIN --> F
+  CHAIN --> G & P & D & B & F
+  G --> N["Gepinnter geth Hook<br/>native binäre IPC"]
+  P --> W["Isolierte WSS-Protokolladapter"]
+  D --> W
+  B --> W
+  W --> V["Fremdes Wire-Protokoll<br/>validieren → Binärereignis"]
+  F --> A["Separater privater Adapter<br/>Target- und Auth-Prüfung"]
+  N --> BIN["Gemeinsame binäre Eingangsgrenze"]
+  V --> BIN
+  A --> BIN
 
-    G --> N["Gepinnter geth-Hook<br/>native binäre IPC"]
-    P --> W["Isolierte WSS-Protokolladapter<br/>Health / Rate-Limits je Quelle"]
-    D --> W
-    B --> W
-    F --> PRIV["Privater Feed-Adapter<br/>Auth / Target-Semantik"]
+  BIN --> MODE{"Modus dieser Quelle?"}
+  MODE -->|"OFF"| OFF["Kein Kandidat"]
+  MODE -->|"SHADOW"| SCOPE_S["Schattenkandidat<br/>keine LIVE-Autorität"]
+  MODE -->|"LIVE + qualifiziert"| SCOPE_L["Qualifizierter Live-Kandidat"]
+  SCOPE_S --> RACE["Verifizierte Kandidaten je Modus<br/>getrennt vergleichen"]
+  SCOPE_L --> RACE
 
-    W --> V["Externes Protokoll dekodieren<br/>prüfen und SOFORT binär übergeben"]
-    N --> BIN["Gemeinsame native Binär-Eingangsgrenze"]
-    V --> BIN
-    PRIV --> BIN
+  RACE --> CORE["EIN GEMEINSAMER RUST-CORE<br/>Launch / State / Quote / Risiko<br/>BUY-Plan / Deduplizierung"]
+  CORE --> PLAN["Gleiche Adaptervorbereitung<br/>Local geth / 48Club / BlockRazor"]
+  PLAN --> EXEC{"Quelle LIVE, global LIVE<br/>und alle Safety-Gates PASS?"}
 
-    BIN --> MODE{"Quellenmodus und<br/>Qualifikation?"}
-    MODE -->|"OFF"| OFF["Kein Kandidat"]
-    MODE -->|"SHADOW / unqualifiziert"| OBS["Nur Beobachtung<br/>binäres Journal"]
-    MODE -->|"LIVE + gesund + qualifiziert"| FIRST["FIRST VERIFIED ACTIONABLE WINS<br/>früheste vollständig nutzbare Information"]
+  EXEC -->|"NEIN: SHADOW / PAPER"| DRY["Gleiche BUY-/Adapterberechnung<br/>Would-send messen und aufzeichnen<br/>KEINE echte Signatur / KEIN Versand"]
+  EXEC -->|"JA: LIVE freigegeben"| SIGN["Ein echter Intent-/Nonce-Owner<br/>BUY signieren und freigeben"]
+  SIGN --> E1["Local geth / P2P"]
+  SIGN --> E2["48Club Builder"]
+  SIGN --> E3["BlockRazor Builder"]
+  E1 --> VAL["Builder / Validator<br/>Launch N → BUY N+1"]
+  E2 --> VAL
+  E3 --> VAL
+  VAL --> BUY["T_buy: BUY on-chain erfolgreich<br/>Token im Wallet-Chain-State"]
+  BUY --> VERIFY["G0.8: Token / N+1 / Kosten<br/>Konkurrenz / T0-Witness"]
+  DRY --> JOURNAL["Binäres Journal / Replay"]
+  VERIFY --> JOURNAL
 
-    FIRST --> DEDUP["Launch-Identität / Deduplizierung<br/>ein Launch = ein Intent"]
-    DEDUP --> CORE["EIN RUST-TRADING-CORE<br/>Venue / Tokenadresse / State<br/>Quote / Kosten / Risiko"]
-    CORE --> SAFE{"Globale wirtschaftliche Freigabe<br/>Safety / Budget / Nonce PASS?"}
-    SAFE -->|"NEIN"| STOP["Kein BUY"]
-    SAFE -->|"JA"| SIGN["BUY aufbauen und signieren<br/>T_ready"]
-    SIGN --> OWNER["Ein Intent- und Nonce-Owner<br/>T_queue und T_send messen"]
-
-    OWNER --> E1["Local geth / P2P"]
-    OWNER --> E2["48Club Builder"]
-    OWNER --> E3["BlockRazor Builder"]
-    E1 --> PROD["Builder / Validator<br/>Launch N → unser BUY N+1"]
-    E2 --> PROD
-    E3 --> PROD
-
-    PROD --> BOUGHT["T_buy – BUY erfolgreich ausgeführt<br/>Token dem Wallet im Chain-State zugeordnet"]
-    BOUGHT --> VERIFY["G0.8: On-Chain-Kontrolle<br/>Token / Menge / N+1 / Kosten<br/>Konkurrenz / T0-Witness"]
-    VERIFY --> OBS
-
-    classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
-    classDef core fill:#dcfce7,stroke:#16a34a,color:#14532d
-    classDef safety fill:#fef3c7,stroke:#d97706,color:#78350f
-    class G,P,D,B,F input
-    class FIRST,DEDUP,CORE,SIGN,OWNER,BOUGHT core
-    class MODE,SAFE,STOP safety
+  classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef core fill:#dcfce7,stroke:#16a34a,color:#14532d
+  classDef safety fill:#fef3c7,stroke:#d97706,color:#78350f
+  class G,P,D,B,F input
+  class BIN,RACE,CORE,PLAN,SIGN,BUY core
+  class MODE,EXEC,OFF,DRY safety
 ```
 
-### Technisches Zusammenspiel
+### Eingänge und Ausgänge sind verschiedene Schnittstellen
 
-1. **Alle fünf Quellen gleichzeitig.** geth, PublicNode, dRPC, BlockReq und 48Club beobachten parallel. Keine Quelle hält eine schnellere auf. 48Club ist ein gesondert zu qualifizierender privater Feed und wird nicht als kostenlos vorausgesetzt.
-2. **Externe Protokollgrenze, danach ausschließlich binär.** Ethereum-WebSockets liefern JSON-RPC als **fremdes Netzwerkprotokoll**. Nur der isolierte Provider-Adapter dekodiert diesen Wire-Frame und erzeugt ein geprüftes, typisiertes **Binärereignis**. **Kein internes JSON** – weder IPC, State, Konfiguration, Journal noch HOT0. Die geth-Fast-Lane liefert bereits native binäre IPC.
-3. **Individuelle Quellenschalter.** OFF beendet ihren Kandidaten-Ingress; SHADOW empfängt und misst ohne BUY-Auslösung; LIVE darf **nur qualifizierte** Signale an den Core liefern. Jeder Provider hat getrennten Health-/Rate-Limit-/Reconnect-Zustand. Ein LIVE-Signal **schaltet niemals den globalen Handels-Guard scharf**. Notwendige Chain-/Reorg-/Safety-Dienste dürfen nicht mit der geth-Trade-Quelle versehentlich abgeschaltet werden.
-4. **First Verified Actionable Wins.** Nicht der früheste nackte Hash, sondern die früheste **vollständig und unabhängig als kaufvorbereitungsfähig verifizierte** Information gewinnt. Keine serielle Providerabfrage und kein Remote-Lookup im nativen HOT0. Doppelte Quellenmeldungen erzeugen keinen zweiten Intent.
-5. **Nur eine Trading-Engine.** Derselbe Rust-Core verantwortet Venue-/Deployment-Verifikation, Tokenableitung, Quote, Risiko, Signatur, Intent, Nonce und Exposure. Der BUY geht anschließend über einen **separat qualifizierten** geth-, 48Club- oder BlockRazor-Inclusion-Adapter.
-6. **Echter Kauf und unabhängige Prüfung.** Der Produzent führt die Launch-Transaktion und danach unseren BUY aus. G0.8 weist kanonischen Tokenzugang, richtige Walletadresse, Kaufposition N/N+1, konkurrierende erfolgreiche Käufe, Kosten und die getrennte Producer-Timing-Evidence nach.
+| Anbieter | **VOR dem BUY: Früherkennung** | **NACH dem BUY-Plan: Versand** |
+|---|---|---|
+| Eigene geth-Node | Native P2P-/Txpool-Fast-Lane | Local-geth-/P2P-Sendeadapter |
+| 48Club | Separater Auction Feed, aktuell UNQUALIFIED | Separater 48Club Builder |
+| BlockRazor | Separate Public-/Private-Mempool-Streams vorhanden, **nicht im verbindlichen Fünf-Quellen-Plan** und nicht FREE_ONLY | BlockRazor Builder / RPC |
+| PublicNode, dRPC, BlockReq | Öffentliche Pending-WebSocket-Feeds | Nicht automatisch qualifizierte BUY-Ausgänge |
+
+**Ein Builder ist nicht automatisch ein Früherkennungs-Feed.** Eigene geth-Node und 48Club können in beiden Bereichen jeweils über **verschiedene** Schnittstellen vorkommen. BlockRazor bietet eigene BSC-Mempool-Streams für frühere Signale, derzeit aber als separate kostenpflichtige Produkte. Der 48Club Auction Feed erfordert Berechtigung und stellt besonders Backrun-/Target-Informationen bereit; ob er Flap-/Four.meme-Launches früh genug erkennt, muss erst bewiesen werden. Die fünf verbindlichen Ingressquellen des Phasenplans werden dadurch **nicht** eigenmächtig erweitert.
+
+### Was im SHADOW-Modus tatsächlich passiert
+
+1. **Dieselben Datenadapter und dieselbe Fachlogik:** Alle eingeschalteten Quellen werden geprüft, ihre externen Frames vor dem Hot-Path ins Binärformat umgewandelt und ihre handlungsfähigen Signale dem **einen Rust-Core** zugeführt. Quellenstatus OFF, SHADOW oder LIVE bleibt am Ereignis gebunden.
+2. **SHADOW endet nicht vor der BUY-Vorbereitung.** Derselbe Code prüft Venue, Deployment, Tokenadresse, State, Quote, Risk, Filters, BUY-Aufbau und die Auswahl des geth-, 48Club- oder BlockRazor-Inclusion-Adapters. Die Shadow-Auswertung verwendet aber einen logisch getrennten, nichtwirtschaftlichen Intent-/Nonce-Kontext. **Ein Shadow-Signal darf nie einen Live-Kandidaten verdrängen, dessen Nonce beanspruchen oder die geth-Fast-Lane verlangsamen.**
+3. **Einziger Unterschied ist die wirtschaftliche Außenwirkung:** Bei SHADOW/PAPER werden die vorgesehenen Adapter-Payloads, Kosten, Latenz und der hypothetische Übergabezeitpunkt **T_would_send** lokal berechnet und im binären Journal aufgezeichnet. **Keine ausführbaren Mainnet-Bytes signieren, kein Broadcasting, kein Gas, keine BNB-Zahlung.**
+4. **LIVE arbeitet mit derselben Kernberechnung und derselben Adapterwahl**, aber nur nach globaler Freigabe werden echte Signatur, Nonce-Fence, Transaktionsversand und spätere On-Chain-Abnahme ausgelöst. **Quellen-LIVE allein erteilt keinerlei Versandfreigabe.**
+5. **Kein erfundener Erfolg:** SHADOW kann nicht wissen, ob der echte Builder den BUY übernommen hätte, ob N/N+1 gelungen wäre oder ob Tokens angekommen wären. Das bleibt **UNKNOWN**, bis es echte On-Chain-Nachweise gibt. Für beide Modi gelten dieselben fachlichen Funktionen, nicht zwei Bots und nicht zwei Trading-Engines.
+
+Wichtig sind **zwei unabhängige Steuerschichten**: Jeder der fünf *Dateneingänge* besitzt OFF / SHADOW / LIVE; der *gesamte Bot* besitzt unabhängig REPLAY / PAPER / SHADOW / LIVE und die globale wirtschaftliche Freigabe. Wird ein Eingang nur als SHADOW geschaltet, darf sein Signal niemals direkt einen echten BUY auslösen – auch dann nicht, wenn andere Quellen live sind.
+
+**JSON-Regel:** Fremdes JSON-RPC ist nur an der externen WebSocket- bzw. Provider-Protokollgrenze zulässig. **Alle** DarkBot-internen Datenstrukturen, Übergaben, Konfigurations- und Journalformate bleiben binär. Ein Isolationsadapter ist **nicht** Bestandteil des Rust-BUY-Entscheidungshotpaths.
+
+Weitere Produktinformationen: [48Club Auction Feed](https://docs.48.club/puissant-builder/auction-transaction-feed), [BlockRazor Public Mempool](https://www.blockrazor.io/chains/bsc/), [BlockRazor Stream-Tarife](https://github.com/BlockRazorinc/blockrazor_docs_en/blob/main/get-started/pricing.md).
 
 ## Zeitmodell: tatsächlicher BUY im Block, nicht nur abgesendet
 
