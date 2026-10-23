@@ -75,7 +75,15 @@ jobs:
           P6_GATE_STEPS: ${{ matrix.steps }}
         run: |
           logs="$RUNNER_TEMP/p6-gate"
-          bash project_0/scripts/gate.sh "$logs" || {
+          bash project_0/scripts/gate.sh "$logs" | tee "$RUNNER_TEMP/gate.out"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
             for f in "$logs"/*.log; do echo "== $f"; tail -n 120 "$f"; done
-            exit 1
-          }
+            # One annotation per failed step with its error lines (annotations are public).
+            for name in $(grep -E ' exit=[1-9]' "$RUNNER_TEMP/gate.out" | awk '{print $1}'); do
+              f="$logs/$name.log"
+              msg=$( (grep -E '^(error|warning)|FAILED|panicked|^(FAIL|ERROR):|Error|^Diff in|^-->|  --> ' "$f" || tail -n 25 "$f") | head -n 40 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+              echo "::error title=gate $name::$msg"
+            done
+            exit "$code"
+          fi
