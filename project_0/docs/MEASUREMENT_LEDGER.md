@@ -5890,3 +5890,20 @@ Commits `6aac2e4f`, `91ed707a`, `2605556c`, `8bfa63f2`, `94086af8`, `6c83355f`, 
 - FE-04 `8bfa63f2`: durable admission at the pipeline handoff, settled replay into the day; counting fake submitter (1 submit, double trigger 0, refusal without hold, SOL budget, lost transport UNKNOWN + HALT); 6 mutations; B1/B3/B15 PARTIAL.
 - S1-02/S1-08: Yellowstone protobuf of `rpcpool/yellowstone-grpc` `2a548669` (field-number fidelity test), mapping onto `IngressEvent`/`StateCore` (write version, roots, fork orphaning, duplicates, contradicting copies, dead/cleared banks, parent gaps), gRPC transport h2 0.4.19 + rustls (loopback HTTP/2 tests: streaming, ping/pong, token header, 6 rejection cases, unreachable provider, endpoint rules), source control OFF/OBSERVE/ACTIVE, provider admission, arbiter, health; 18 mutations. Offline bench (release, M4 Max, n=20000, frame decode + map): account 165 B p50 0.92 µs / p99 1.08 µs, v0 transaction with ALT and meta p50 7.0 µs / p99 9.96 µs.
 - NOT_RUN: PublicNode capability/quota/latency/coverage/fork fidelity, real TLS session, S1-RACE, K-02/K-02b, Mainnet read, LIVE.
+
+## 2026-10-23 — A23 package and S1-02 owner integration (LOCAL_PASS offline; Actions PASS)
+
+Commits `f1f90572`, `39d53f67`, `0db0a1f2`, `34ecc8a6`, `2fb6d214`, `caa605dc`.
+
+- Gate on `caa605dc` (exit 0 each): 764/0/10, 762/0/10, runner 358/0/3 ×2, release, Python OK. GitHub Actions `project0-gate` 5/5 PASS (run 39993951105, Linux, toolchain 1.93.1); job `native` (gateway) red since BSC `9a43fb05`, outside Project_0.
+- owner_wakeup_ns (debug test, 1000 results): p50 27 µs, p95 49 µs, p99 74 µs, max 135 µs; push→applied p99 87 µs. Real-run p99 NOT_MEASURED (P6-MT open).
+- Mutations fail-before: A23-01/08 11, A23-03/04 6, S1-02 4 (+1 equivalent).
+- NOT_RUN: Mainnet, provider, S1-RACE, LIVE.
+
+## 2026-10-23 — FE-02 ZERO_PREFUND hardening (LOCAL_PASS offline)
+
+Commits `282a3c4d`, `57f47611`.
+
+- Gate on `57f47611` (exit 0 each): 771/0/10, 769/0/10, runner 358/0/3 ×2, release, Python OK.
+- Repay floor from the signed Jupiter v6 swap bytes (IDL `jupiter-cpi@12bc5f67`, SHA-256 `764ea6d7`); enforced slippage on the plan; floor rejections visible beside other plans; Token-2022 fee/hook/undecodable mints refused before quoting; surplus at the low-biased price; worst-case daily loss; derived admission evidence; `P0_ZERO_PREFUND_QUALIFIED=true` refused. 13 mutations fail-before.
+- Synthetic Jupiter responses only (no recorded `/build`); deployed Jupiter program parity, current candidate, positive net edge: NOT_RUN / NOT_PROVEN.
