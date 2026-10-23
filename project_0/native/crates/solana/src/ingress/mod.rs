@@ -5,6 +5,7 @@
 //! `S1-RACE`) liefern dasselbe Event-Modell. Businesslogik sieht nur `IngressEvent`.
 
 pub mod geyser;
+pub mod geyser_grpc;
 pub mod ws_rpc;
 
 use std::sync::atomic::{AtomicBool, Ordering};

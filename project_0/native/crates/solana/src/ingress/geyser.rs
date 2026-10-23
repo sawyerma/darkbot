@@ -943,17 +943,25 @@ impl GeyserConfig {
     }
 }
 
+/// Why a stream or connection failed: a retry may help, or the source is rejected with a reason
+/// no retry fixes (auth, quota, capability, configuration).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StreamError {
+    Retryable(String),
+    Rejected(&'static str),
+}
+
 /// One gRPC `Subscribe` stream: response DATA chunks and the pong a server ping asks for.
 pub trait GeyserStream {
     /// `Ok(None)`: the stream ended.
-    fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String>;
-    fn pong(&mut self, id: i32) -> Result<(), String>;
+    fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, StreamError>;
+    fn pong(&mut self, id: i32) -> Result<(), StreamError>;
 }
 
-/// Opens a `Subscribe` stream with the encoded request (the network transport is a later step).
+/// Opens a `Subscribe` stream with the encoded request (`geyser_grpc::GrpcTransport`).
 pub trait GeyserTransport {
     type Stream: GeyserStream;
-    fn connect(&mut self, request: &[u8]) -> Result<Self::Stream, String>;
+    fn connect(&mut self, request: &[u8]) -> Result<Self::Stream, StreamError>;
 }
 
 pub struct BinaryGeyserSource<T: GeyserTransport> {
@@ -1031,7 +1039,8 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
             let request = subscribe_request(&self.subscription, self.config.commitment, resume);
             let mut stream = match self.transport.connect(&request) {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(StreamError::Rejected(code)) => return Err(fatal(code, self.clock.now_ns())),
+                Err(StreamError::Retryable(_)) => continue,
             };
             let t = self.clock.now_ns();
             if attempt > 1 {
@@ -1064,7 +1073,10 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
                 }
                 match stream.next_chunk() {
                     Ok(Some(chunk)) => frames.push(&chunk),
-                    Ok(None) | Err(_) => break,
+                    Err(StreamError::Rejected(code)) => {
+                        return Err(fatal(code, self.clock.now_ns()))
+                    }
+                    Ok(None) | Err(StreamError::Retryable(_)) => break,
                 }
                 loop {
                     let update = match frames.next_message::<proto::SubscribeUpdate>() {
@@ -1079,8 +1091,12 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
                     };
                     if mapped.ping {
                         ping_id = ping_id.wrapping_add(1);
-                        if stream.pong(ping_id).is_err() {
-                            break;
+                        match stream.pong(ping_id) {
+                            Ok(()) => {}
+                            Err(StreamError::Rejected(code)) => {
+                                return Err(fatal(code, self.clock.now_ns()))
+                            }
+                            Err(StreamError::Retryable(_)) => break,
                         }
                     }
                     for ev in mapped.events {

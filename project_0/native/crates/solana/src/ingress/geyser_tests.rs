@@ -625,7 +625,7 @@ fn deshred_needs_the_pinned_alt_fix() {
 
 /// Mock transport: scripted streams (chunks) per connect, recorded requests and pongs.
 struct Mock {
-    streams: RefCell<VecDeque<Result<Vec<Vec<u8>>, String>>>,
+    streams: RefCell<VecDeque<Result<Vec<Vec<u8>>, StreamError>>>,
     requests: Rc<RefCell<Vec<Vec<u8>>>>,
     pongs: Rc<RefCell<Vec<i32>>>,
 }
@@ -634,17 +634,17 @@ struct MockStream {
     pongs: Rc<RefCell<Vec<i32>>>,
 }
 impl GeyserStream for MockStream {
-    fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
+    fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, StreamError> {
         Ok(self.chunks.pop_front())
     }
-    fn pong(&mut self, id: i32) -> Result<(), String> {
+    fn pong(&mut self, id: i32) -> Result<(), StreamError> {
         self.pongs.borrow_mut().push(id);
         Ok(())
     }
 }
 impl GeyserTransport for Mock {
     type Stream = MockStream;
-    fn connect(&mut self, request: &[u8]) -> Result<MockStream, String> {
+    fn connect(&mut self, request: &[u8]) -> Result<MockStream, StreamError> {
         self.requests.borrow_mut().push(request.to_vec());
         match self.streams.borrow_mut().pop_front() {
             Some(Ok(chunks)) => Ok(MockStream {
@@ -652,7 +652,7 @@ impl GeyserTransport for Mock {
                 pongs: self.pongs.clone(),
             }),
             Some(Err(e)) => Err(e),
-            None => Err("down".into()),
+            None => Err(StreamError::Retryable("down".into())),
         }
     }
 }
@@ -663,7 +663,7 @@ type Scripted = (
     Rc<RefCell<Vec<i32>>>,
 );
 
-fn source(streams: Vec<Result<Vec<Vec<u8>>, String>>, replay: bool) -> Scripted {
+fn source(streams: Vec<Result<Vec<Vec<u8>>, StreamError>>, replay: bool) -> Scripted {
     let (requests, pongs) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(vec![])));
     let mut config = GeyserConfig::publicnode();
     config.max_reconnects = 2;
