@@ -5940,3 +5940,11 @@ Commit `c7b0e6f1`.
 - Gate on `c7b0e6f1` (exit 0 each): 789/0/10, 787/0/10, runner 367/0/3 ×2, release, Python OK; GitHub Actions `project0-gate` 5/5 PASS. 11 mutations fail-before.
 - Exit automaton in the wallet journal (schema 5, pin 2291 B; schema-4 pin 1330 B reproduced): only a settled whole-position sale at/above its floor realizes; partial/foreign/below-floor/unknown stay UNKNOWN with holds; restart replays each exit into its day.
 - NOT_RUN: exit route/build (native SOL unwrap), owner exit settlement, approval CLI, real chain exit, Mainnet, LIVE.
+
+## 2026-10-23 — FE-04 owner exit settlement (LOCAL_PASS offline)
+
+Commit `cbb0c243`.
+
+- Gate on `cbb0c243` (exit 0 each): 792/0/10, 790/0/10, runner 367/0/3 ×2, release, Python OK; GitHub Actions `project0-gate` 5/5 PASS. 6 mutations fail-before.
+- Owner reads, applies and books exits (tagged worker reads, booking = restart replay, unpriced finalized exit settled later from the journal); fixed-oracle SOL test: +5000 lamports → 749 USD micro realized.
+- NOT_RUN: exit route/build, approval CLI, real chain exit, Mainnet, LIVE.
