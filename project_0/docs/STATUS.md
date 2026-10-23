@@ -1,24 +1,25 @@
 # Project 0 — Current status
 
-**Current GitHub snapshot: 2026-10-23 · letzter Project_0-Code `8246fcfb` auf `main`, Offline-Gate PASS (siehe unten).** Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`, FE-04-Admission `8bfa63f2`, S1-02/S1-08 Binary-Geyser offline `94086af8`…`8246fcfb`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
+**Current GitHub snapshot: 2026-10-23 · letzter Project_0-Code `caa605dc` auf `main` (A23-Paket), Offline-Gate PASS `764/0/10`, `762/0/10`, Runner `358/0/3` ×2, Release, Python; GitHub-Actions `project0-gate` 5/5 PASS (Run 39993951105).** Vorheriger Stand `8246fcfb`. Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`, FE-04-Admission `8bfa63f2`, S1-02/S1-08 Binary-Geyser offline `94086af8`…`8246fcfb`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
 
 Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md), their JSON navigation indices, actual Rust code and [PERSIST evidence](evidence/PERSIST_BINARY_20261016/qualification.json). Previous October 14 code locations and test counts are historical; no gate is upgraded by this status page.
 
 **Historischer Follow-up-Vermerk (`9047c7b`, 2026-10-16):** Die damalige Formulierung „uncommitted“ ist überholt und beschreibt **nicht** den heutigen Git-Arbeitsbaum. Die zugehörigen [Berichte](development_history/persist_followup_20261016.md) und [Evidence](evidence/PERSIST_FOLLOWUP_20261016/qualification.json) bleiben historische Nachweise. Aktuelle PERSIST-/JFI- und FE-Gates nur nach geprüftem Produktionscode und aktueller Evidence einstufen; kein historischer Eintrag erteilt eine LIVE-Freigabe.
 
-## A23 Code-/CI-Review 2026-10-23 — offene Härtung vor Owner-/Quellenintegration
+## A23 Code-/CI-Review 2026-10-23 — Härtung und Owner-/Quellenintegration
 
 **Review-Register:** [BUGS.md §19 — A23-01 bis A23-09](BUGS.md). Der neueste geprüfte Code hat einen lokal getesteten S1-02/S1-08-Adapter (`8246fcfb`), aber noch keinen durchgängigen Geyser-Owner-Pfad und kein nachgewiesenes `p0ctl`-Runtime-Toggling. Das Offline-Gate `746/0/10`, `744/0/10`, Runner `355/0/3` ×2 ist dokumentiert; kein P6-MT-, GitHub-CI-, Mainnet- oder LIVE-PASS.
 
 | Priorität | Tickets | Aktueller Status / Abnahmegrenze |
 |---|---|---|
-| **HIGH, vor Owner-Integration** | **A23-01** Owner-Wakeup | `events.rs` 250-ms-Ingress-Wait, separate Worker-Result-Queues ohne nachgewiesenen Wakeup; P6-MT.4/.14/.15 OPEN, echter p99 NOT_MEASURED |
-| **HIGH, CI** | **A23-02** CI-Abdeckung | Project_0-GitHub-Actions prüft nur ausgewählte Crates/Tests; vollständiger `--locked`-Workspace, Feature-Matrix, Clippy, Toolchain und Actions-PASS noch OPEN |
-| **HIGH, vor LIVE-Quellenumschaltung** | **A23-03 / A23-04** Arbiter-Autorisierung und Lead-Retention | Statische Freigabe bei der Arbiter-Erstellung und unbounded `leads`; kein produktiver Geyser-Owner-Pfad; Tests/Fixes OPEN |
-| **LOW–MEDIUM, zusammen mit A23-01** | **A23-08** Worker-Sleep | 1-ms-Full-Queue-Wait auf Shutdown/Backpressure prüfen |
-| **REVIEW_REQUIRED** | **A23-05 / A23-06 / A23-07 / A23-09** | Release-Overflow-Profil, transparenter Provider-Cooldown, Wallet-Journal-16-MiB-Runway, reproduzierbares JFI-04-JSON-Inventar; keine unbewiesenen automatischen Umbauten |
+| **HIGH, vor Owner-Integration** | **A23-01** Owner-Wakeup | CODE_FIXED `f1f90572`; Debug-Test owner_wakeup_ns p50 27 µs / p99 74 µs / max 135 µs; **P6-MT OPEN** (Echtlauf-p99 NOT_MEASURED) |
+| **HIGH, CI** | **A23-02** CI-Abdeckung | `project0-gate` (gate.sh, 5 Jobs, 1.93.1, `--locked`) **Actions PASS** auf `caa605dc`; Job `native`/Gateway rot seit BSC `9a43fb05`, außerhalb Project_0 |
+| **HIGH, vor LIVE-Quellenumschaltung** | **A23-03 / A23-04** Arbiter-Autorisierung und Lead-Retention | CODE_FIXED `39d53f67`; Owner-Pfad `0db0a1f2` |
+| **S1-02 Owner** | Geyser im State-Owner | `0db0a1f2`: OFF/OBSERVE produktiv, `p0ctl source set/status` zur Laufzeit; ACTIVE nur mit Qualifikation (keine vorhanden ⇒ refused); Loopback-gRPC-E2E. Kein S1-RACE-/Provider-/Mainnet-Nachweis |
+| **LOW–MEDIUM, zusammen mit A23-01** | **A23-08** Worker-Sleep | CODE_FIXED `f1f90572` (Space-Doorbell) |
+| **REVIEW_REQUIRED** | **A23-05 / A23-06 / A23-07 / A23-09** | geprüft, unverändert (BUGS §19): kein Release-Profil-Flag ohne Benchmark; Retry-After ungekürzt ohne Grund im Snapshot; FE-04-Runway ≈ 2.400 Versuche; 402 JSON-Vorkommen/40 Dateien, Kategorisierung OPEN |
 
-**Reihenfolge:** A23-01 + A23-08 und A23-03/A23-04 im beauftragten S1-02-OWNER-Arbeitspaket, A23-02 als separater CI-Nachweis; dann vollständiges Owner-E2E-/Offline-Gate. Restpunkte messen/triagieren. Das ändert keine FE-00…FE-07-, FREE_ONLY-, PERSIST-/JFI-, Provider-/Read-only- oder LIVE-Freigaben.
+**Offen:** Echtlauf-Messung owner_wakeup (P6-MT), S1-RACE-Qualifikation für Geyser ACTIVE, A23-05/06/07/09-Pakete. Das ändert keine FE-00…FE-07-, FREE_ONLY-, PERSIST-/JFI-, Provider-/Read-only- oder LIVE-Freigaben.
 
 ## 1. Bottom line
 
