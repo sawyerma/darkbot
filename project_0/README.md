@@ -2,11 +2,11 @@
 
 **Ein produktives System für Marginfi-Liquidationen auf Solana.** Diese README ist der zentrale Einstieg für Menschen und ausführende KI-Agenten: tatsächliche Dateien, Zuständigkeiten, verbindliche Produktphasen, Architekturziel und sichere Arbeitsreihenfolge.
 
-**Stand: 2026-10-16.** Der lokale Produktionscode verwendet `native/crates/{common,solana,liquidation,runtime}` und die implementierten Runtime-Domains `orchestration`, `execution`, `market`, `analytics`. [Tatsächlicher Baum, Migration und Offline-Qualifikation](docs/architecture/runtime_modularization_20261016.md). Die neue Modularisierung ist uncommitted; `native → engine` bleibt optional.
+**Stand: 2026-10-23 (GitHub `main`, geprüfter Code bis `2605556c`).** Der committete Rust-Workspace `native/` umfasst **fünf** Crates: `common`, `solana`, `liquidation`, `runtime`, `reporter`. Die Runtime-Domains `orchestration`, `execution`, `market`, `analytics` und `storage` existieren auf `main`. [Historischer Modularisierungsnachweis](docs/architecture/runtime_modularization_20261016.md); `native → engine` ist keine durchgeführte Migration. Der aktuelle Code- und Gate-Status steht in [STATUS](docs/STATUS.md), nicht im historischen Strukturbericht.
 
 **VERBINDLICHES NEUES DOKUMENT:** [Produktionsarchitektur und vollständiger Ausführungsauftrag](docs/architecture/production_architecture_refactor_contract.md). Der Produkt-[PHASENPLAN v4.5.2](docs/PHASENPLAN.md) und das [Measurement Ledger](docs/MEASUREMENT_LEDGER.md) bleiben fachlich autoritativ. Keine dieser Dokumentationsänderungen autorisiert LIVE, Submission, Paid-Provider oder Mainnet-Runs.
 
-Der ausdrückliche Auftrag vom 2026-10-16 hat A0–A7 autorisiert und den früheren A0-Stopp ersetzt. Der [Abschlussnachweis](docs/architecture/runtime_modularization_20261016.md) beschreibt den tatsächlich qualifizierten lokalen Stand. Kein automatisches Überschreiben oder Auflösen des lokal gestagten Project_0-Standes durch `git pull`. `bsc/` ist explizit außerhalb dieses Auftrags.
+Der Auftrag vom 2026-10-16 zu A0–A7 und sein [historischer Abschlussnachweis](docs/architecture/runtime_modularization_20261016.md) bleiben als Entwicklungshistorie erhalten. Der separate `DarkBot-project0`-Worktree wurde am 2026-10-22 entfernt: maßgeblich ist der Hauptordner `DarkBot` auf `main`. Vor einem lokalen Fast-Forward immer den Arbeitsbaum und parallele BSC-Änderungen prüfen; weder BSC-Dateien noch fremde Änderungen stagen, überschreiben, resetten oder bereinigen.
 
 For the current engineering state and the next technically necessary steps, start here:
 
@@ -18,7 +18,7 @@ The 2026-10-05 audit handoff is historical: [docs/development_history/audit_hand
 
 ## Architektur- und Ausführungsentscheidung (verbindlich)
 
-Der langfristige Zielaufbau ist absichtlich **klein**: ein Rust-Workspace (optional nach qualifizierter Migration `engine/`), vier Crates `common`, `solana`, `liquidation`, `runtime`; keine zweite Race-/Shadow-/Live-Engine, keine neue Crate ohne nachgewiesenen Bedarf. `runtime` wird **nicht** zu `execution` umbenannt. Die Runtime enthält die vier fachlichen Bereiche `orchestration`, `execution`, `market`, `analytics`.
+Der langfristige Zielaufbau ist absichtlich **klein**: der vorhandene Rust-Workspace mit **fünf Crates** `common`, `solana`, `liquidation`, `runtime`, `reporter` (Reporter für Capture/Verifikation, kein zweiter Trading-Core). Keine zweite Race-/Shadow-/Live-Engine, keine neue Crate ohne nachgewiesenen Bedarf. `runtime` wird **nicht** zu `execution` umbenannt. Die Runtime enthält `orchestration`, `execution`, `market`, `analytics` und `storage`; zusätzlich existieren weitere unterstützende Module. Die frühere Vier-Crate-Aussage ist überholt.
 
 - **`solana/state`** ist der einzige kanonische Chain-/Fork-State. **`runtime/orchestration`** koordiniert Ereignisreihenfolge, Owner, Generationen, Recovery und Kandidaten, ohne einen zweiten State zu erzeugen.
 - **`solana/submit`** ist der Blockchain-Submission-Adapter; **`runtime/execution`** orchestriert zulässige Pläne, Build/Sign/Submit, persistente One-Shot-/Wallet-/Inventory-Holds, Reconciliation und tatsächliche Abrechnung.
@@ -114,7 +114,7 @@ flowchart TB
 
 **Verbindliche Zuordnung:** S1-02 = Rust-`BinaryGeyserSource`; S1-08 = kostenlose PublicNode-/Alternative-Binary-Quellenqualifikation; K-02 = optionaler `SubscribeDeshred`-Sensor; K-02b = optionaler `LocalShred Lite` UDP-Sensor; K-03 = eigener Raw-Shred-/Validatoraufbau nur bei begründetem Mehrwert. Verbindliche Einzelabnahmen und tatsächliche Implementierungsstände: [PHASENPLAN](docs/PHASENPLAN.md), [STATUS](docs/STATUS.md), [MEASUREMENT_LEDGER](docs/MEASUREMENT_LEDGER.md). Diese README allein erteilt keine Berechtigung zu Mainnet, LIVE, Submission oder Paid-Providern.
 
-**Arbeitsreihenfolge:** A0 lokaler Stand / staged 30–32 + Pfad-/Keypair-Fixes prüfen → A1 aktive Dateien/Verbraucher/Ownership inventarisieren → A2 Regressions-/Performance-Baseline → A3 Runtime-Orchestrierung → A4 Market/Winner → A5 WSS/Execution → A6 optional Namens-/Pfadmigration → A7 vollständige Differenzqualifikation. Jede Gruppe hat ein eigenes Stop-Gate, kein pauschaler Umbau. Details, Datei-/Modulgrenzen, Migrationsmatrix, Checks und Verbote: **[Architecture Refactor Contract](docs/architecture/production_architecture_refactor_contract.md)**.
+**Aktuelle Arbeitspriorität:** Der verbindliche [Phasenplan v4.5.2](docs/PHASENPLAN.md) §8/§13 priorisiert FE-00…FE-07 und die noch offenen Sicherheits-/Economic-Gates; S1-RACE/Geyser bleibt verpflichtender paralleler Produktumfang. Die A0–A7-Folge ist ein **historischer, separater Architektur-Refactoring-Auftrag**, kein neuer Startbefehl. Details: [Architecture Refactor Contract](docs/architecture/production_architecture_refactor_contract.md).
 
 ### Lokale Git-Arbeit ist zu schützen
 
@@ -141,6 +141,7 @@ Bevor du die neue Dokumentation lokal übernimmst, prüfe `git status --short` u
 | Marginfi / Project 0 domain logic | [native/crates/liquidation/](native/crates/liquidation/) |
 | Solana ingress/state/transaction/submission infrastructure | [native/crates/solana/](native/crates/solana/) |
 | Shared timing/config/lifecycle primitives | [native/crates/common/](native/crates/common/) |
+| Reporting-/Capture-Crate (`darkbot-p0-reporter`) | [native/crates/reporter/](native/crates/reporter/) |
 | Qualification and Mainnet-shadow scripts | [scripts/](scripts/) |
 | Versioned raw evidence | [docs/evidence/](docs/evidence/) |
 | Public/non-secret config | [config/](config/) |
@@ -172,7 +173,7 @@ When resuming Project 0 after a break, audit, model switch or handoff, read in t
 
 `docs/STATUS.md` summarizes; the newest dated ledger entries and the code remain canonical. Historical documents and measurements are never erased.
 
-**For the local, staged 30–32 final qualification**, first read [restructure_handoff.md](docs/operations/restructure_handoff.md) and [32-step progress register](docs/architecture/restructure_32_step_plan.md), then verify their local state; the tracked versions are older than the reported staged work. The follow-on architecture work is defined separately in [production_architecture_refactor_contract.md](docs/architecture/production_architecture_refactor_contract.md). Both are separate from the FE-00…FE-07 product gate.
+**Für historische Nachprüfung der damaligen lokalen Iterationen 30–32**, first read [restructure_handoff.md](docs/operations/restructure_handoff.md) and [32-step progress register](docs/architecture/restructure_32_step_plan.md), then verify their local state; the tracked versions are older than the reported staged work. The follow-on architecture work is defined separately in [production_architecture_refactor_contract.md](docs/architecture/production_architecture_refactor_contract.md). Both are separate from the FE-00…FE-07 product gate.
 
 ---
 
@@ -185,7 +186,7 @@ aus dem [aktiven Struktur-Handoff](docs/operations/restructure_handoff.md), der
 [Roadmap](docs/architecture/restructure_32_step_plan.md) und dem aktuellen Code ableiten.
 Die fachliche FE-00–FE-07-Roadmap ist davon unabhängig. Die **nachfolgende** interne Architektur-Härtung A0–A7 hat ihren eigenen [verbindlichen Vertrag](docs/architecture/production_architecture_refactor_contract.md); der ältere §3.1-Baum beschreibt nicht die neue interne Modulaufteilung.
 
-### 3.1 Zielbaum (nach Schritt 32)
+### 3.1 Historischer Zielbaum (nach Schritt 32; heutiger Cargo-Workspace hat zusätzlich `reporter`)
 
 ~~~text
 project_0/
@@ -203,7 +204,8 @@ project_0/
 │       ├── common/                      # ehemals darkbot-common
 │       ├── solana/                      # ehemals darkbot-solana
 │       ├── liquidation/                 # ehemals darkbot-project0
-│       └── runtime/                     # ehemals darkbot-runner
+│       ├── runtime/                     # ehemals darkbot-runner
+│       └── reporter/                    # darkbot-p0-reporter; heutiges Workspace-Mitglied
 ├── operations/
 │   ├── cli/                             # Python-CLI, ein typisierter Steuerungsvertrag
 │   ├── capture/                         # Capture-/Beobachtungsprogramme
@@ -319,11 +321,9 @@ Verbraucher- und Altlastenbereinigung; 31 = sämtliche Verweise; 32 = unabhängi
 Endqualifikation**. Eine saubere Ordnerstruktur allein ist noch keine vollständige
 Codequalitäts-, Performance- oder Economics-Freigabe.
 
-### 3.4 Aktueller Ist-Baum (während der Migration)
+### 3.4 Historischer Ist-Baum der Migration (aktualisierte Cargo-Mitglieder)
 
-Der folgende ältere Abschnitt dokumentiert die *derzeit noch real vorhandenen Pfade*
-und ist ausdrücklich **nicht** der fertige Soll-Baum. Solange Umzüge noch nicht
-qualifiziert sind, sind diese Pfade weiterhin gültig.
+Der folgende Abschnitt bewahrt die damalige Strukturerfassung; er ist **kein vollständiger aktueller Dateibaum**. Die heute vorhandenen Cargo-Mitglieder sind im nachfolgenden `native/crates/`-Ausschnitt aktualisiert. Für den tatsächlichen Stand gelten `native/Cargo.toml`, Quellcode und aktuelle Qualification-Evidence; keine alte Migrationsnotiz ist ein erneuter Arbeitsauftrag.
 
 ```text
 project_0/
@@ -368,7 +368,8 @@ project_0/
 │       ├── common/                   <- package darkbot-common: common runtime primitives
 │       ├── solana/                   <- package darkbot-solana: Solana transport/state/tx/submit
 │       ├── liquidation/              <- package darkbot-project0: Project 0 protocol/domain logic
-│       └── runtime/                  <- package darkbot-runner: production orchestration/runtime
+│       ├── runtime/                  <- package darkbot-runner: production orchestration/runtime
+│       └── reporter/                 <- package darkbot-p0-reporter: reporter/capture tools
 │
 ├── operations/                       <- Python implementations (package `operations`, iterations 16-20)
 │   ├── cli/                          <- measurement_cli.py, measurement_contract.py, operational_config.py
@@ -448,7 +449,7 @@ Directory: [native/crates/liquidation/](native/crates/liquidation/)
 | deterministic economics / candidate ranking | [economics.rs](native/crates/liquidation/src/economics.rs) |
 | funding classification | [funding.rs](native/crates/liquidation/src/funding.rs) |
 | execution abstractions | [execution.rs](native/crates/liquidation/src/execution.rs) |
-| prepared candidate / execution state | [prepared.rs](native/crates/liquidation/src/prepared.rs) |
+| prepared candidate cache / execution state | [prepared.rs](native/crates/runtime/src/execution/prepared.rs) (älterer unverdrahteter Liquidation-Entwurf entfernt) |
 | scheduling logic | [schedule.rs](native/crates/liquidation/src/schedule.rs) |
 | safety rules | [safety.rs](native/crates/liquidation/src/safety.rs) |
 | protocol constants / IDs | [protocol.rs](native/crates/liquidation/src/protocol.rs) |
@@ -475,6 +476,11 @@ Directory: [native/crates/runtime/](native/crates/runtime/)
 | fixture support | [fixture.rs](native/crates/runtime/src/analytics/fixture.rs) |
 | remote worker helpers | [remote_workers.rs](native/crates/runtime/src/orchestration/remote_workers.rs) |
 | runtime/probe binaries | [src/bin/](native/crates/runtime/src/bin/) |
+| typed persistent storage / preflight | [storage/](native/crates/runtime/src/storage/) |
+
+### 4.5 `crates/reporter` (package `darkbot-p0-reporter`) — Reporting/Capture
+
+Directory: [native/crates/reporter/](native/crates/reporter/). Enthält `p0-market-capture-reported` und ein optionales Test-Fixture-Binary. Dieser Workspace-Member ist **keine** zweite State-/Execution-Engine.
 
 ---
 
