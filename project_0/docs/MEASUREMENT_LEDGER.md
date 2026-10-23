@@ -5948,3 +5948,12 @@ Commit `cbb0c243`.
 - Gate on `cbb0c243` (exit 0 each): 792/0/10, 790/0/10, runner 367/0/3 ×2, release, Python OK; GitHub Actions `project0-gate` 5/5 PASS. 6 mutations fail-before.
 - Owner reads, applies and books exits (tagged worker reads, booking = restart replay, unpriced finalized exit settled later from the journal); fixed-oracle SOL test: +5000 lamports → 749 USD micro realized.
 - NOT_RUN: exit route/build, approval CLI, real chain exit, Mainnet, LIVE.
+
+## 2026-10-23/24 — FE-04 exit admission and approval profile (LOCAL_PASS offline)
+
+Commits `760f858c`, `0b3db124`.
+
+- Gates (exit 0 each): `760f858c` 794/0/10, 792/0/10, runner 367/0/3 ×2; `0b3db124` 796/0/10, 794/0/10, runner 368/0/3 ×2; release, Python OK; GitHub Actions `project0-gate` 5/5 PASS on both. 5 + 4 mutations fail-before.
+- Exit admission over loopback Jupiter/RPC through the real adapters: native-SOL sale of the whole open position (floor 19 900 000 lamports from the signed bytes, exact message fee, one simulation, one send); seven refusals without hold or send.
+- `p0ctl approval show`: strict schema-1 attempt/exit profile, static check, bindings to the clean HEAD and the p0ctl+p0-longtail digest; exit 0 only when valid and both MATCH.
+- NOT_RUN: real Jupiter route, real chain exit, production caller (FE-06), Mainnet, LIVE.
