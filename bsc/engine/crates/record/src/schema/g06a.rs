@@ -471,6 +471,55 @@ pub mod economics {
             ),
         ),
     };
+
+    /// SHA-256 over the candidate salt domain and the salt (the commitment
+    /// of the candidate record).
+    pub const SALT_COMMITMENT: u16 = 60;
+
+    /// The independent EVM cross-check of a secret-salt candidate (SELF_B,
+    /// plan v8/v9.1 B2): local EVM only, no salt search and no remote
+    /// estimateGas/eth_call; the salt only as its commitment. The other
+    /// fields keep the names and tags of the native record.
+    pub const PRIVATE: Schema = Schema {
+        name: "darkbot.g06a.economics-evm-crosscheck.private.v1",
+        record_type: 35,
+        schema_version: 1,
+        fields: &[
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(11, "preflight_path", Text),
+            Field::req(STATUS, "status", Text),
+            Field::req(20, "state_source.block_number", U64),
+            Field::req(21, "state_source.block_hash", B256),
+            Field::req(22, "state_source.rpc_state_reads_only", Bool),
+            Field::req(36, "portal", Address),
+            Field::req(37, "tax_v3_impl", Address),
+            Field::req(38, "launcher", Address),
+            Field::req(39, "buyer", Address),
+            Field::req(40, "local_only_funded_callers", Bool),
+            Field::req(43, "token", Address),
+            Field::req(44, "launch_value_wei", U256),
+            Field::req(45, "buy_value_wei", U256),
+            Field::req(46, "buy_min_output_used_for_execution", U256),
+            Field::req(47, "launch_success", Bool),
+            Field::req(48, "buy_success", Bool),
+            Field::req(49, "simulated_received_amount", U256),
+            Field::req(50, "simulated_buyer_balance_after", U256),
+            Field::req(51, "launch_execution_gas", U64),
+            Field::req(52, "buy_execution_gas", U64),
+            Field::req(53, "rust_expected_output_was_execution_input", Bool),
+            Field::req(54, "signed_transactions_created", Bool),
+            Field::req(55, "signed_transactions_submitted", Bool),
+            Field::req(56, "bundle_submitted", Bool),
+            Field::req(57, "network_actions", Text),
+            Field::rep(58, "limitations", Text),
+            Field::req(SALT_COMMITMENT, "salt_commitment", B256),
+        ],
+    };
 }
 
 /// The builder gas-floor policy: the frozen 2026-10-11 import
@@ -891,6 +940,7 @@ pub const ALL: &[&Schema] = &[
     &dry::NATIVE,
     &local_simulation::NATIVE,
     &economics::NATIVE,
+    &economics::PRIVATE,
     &builder_policy::NATIVE,
     &quote::SCHEMA,
     &portal_upgrade::SCHEMA,

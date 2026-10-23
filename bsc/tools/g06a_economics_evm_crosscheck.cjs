@@ -44,12 +44,16 @@ const {
 } = require(path.join(LEGACY_TOOLS, '@ethereumjs/util'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const dbrec = require('./dbrec.cjs');
+const { guardEgress, localCreations } = require('./g06a_private_mode.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
 const TAX_V3_IMPL = '0x024f18294970b5c76c0691b87f138a0317156422';
 const PREFLIGHT_SCHEMA = 'darkbot.g06a.preflight-readonly.v3';
 const OUTPUT_SCHEMA = 'darkbot.g06a.economics-evm-crosscheck.v2';
+const PRIVATE_SCHEMA = 'darkbot.g06a.economics-evm-crosscheck.private.v1';
+// The candidate record's salt commitment domain (g07_candidate SALT_DOMAIN).
+const SALT_DOMAIN = 'darkbot.g07.candidate.salt.v1';
 
 const BUY_VALUE = BigInt(process.env.DARKBOT_G06A_BUY_VALUE_WEI || '1000000000000000');
 const LAUNCH_VALUE = 0n;
@@ -217,9 +221,22 @@ function revertHex(res) {
 
 async function main() {
   const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
-  const [preflightPath, outPath] = process.argv.slice(2);
-  if (!preflightPath || !outPath) {
-    throw new Error('usage: node g06a_economics_evm_crosscheck.cjs <preflight.dbrec> <economics_crosscheck.dbrec>');
+  const [preflightPath, outPath, mode] = process.argv.slice(2);
+  // --private (SELF_B, v8/v9.1 B2): the candidate's secret salt from this
+  // process's environment only; no salt search, no remote estimateGas or
+  // eth_call, the salt never printed, sent or recorded (only its commitment).
+  const secret = mode === '--private';
+  if (!preflightPath || !outPath || (mode !== undefined && !secret)) {
+    throw new Error('usage: node g06a_economics_evm_crosscheck.cjs <preflight.dbrec> <economics_crosscheck.dbrec> [--private]');
+  }
+  let secretChoice = null;
+  if (secret) {
+    const salt = req('DARKBOT_G06A_SALT');
+    if (!/^0x[0-9a-fA-F]{64}$/.test(salt)) throw new Error('DARKBOT_G06A_SALT must be 32-byte hex');
+    const token = predictedToken(ethers.getAddress(PORTAL), ethers.getAddress(TAX_V3_IMPL), salt);
+    if (!token.toLowerCase().endsWith('7777')) throw new Error('the secret salt misses the Tax-V3 vanity suffix 7777');
+    guardEgress([salt, launchCalldata(LAUNCHER, salt), token]);
+    secretChoice = { salt, token, counter: null };
   }
   const preflight = dbrec.decode(PREFLIGHT_SCHEMA, fs.readFileSync(preflightPath)).fields;
 
@@ -264,9 +281,10 @@ async function main() {
   if (BigInt(ethers.getBytes(portalCode).length) !== preflight.portal_code_bytes) throw new Error('Portal code length mismatch');
   if (BigInt(ethers.getBytes(taxCode).length) !== preflight.tax_v3_impl_code_bytes) throw new Error('TAX_V3 code length mismatch');
 
-  const saltChoice = await chooseSalt(rpcUrl, parentTag);
+  const saltChoice = secretChoice ?? await chooseSalt(rpcUrl, parentTag);
   const launchData = launchCalldata(LAUNCHER, saltChoice.salt);
   const buyData = buyCalldata(saltChoice.token);
+  if (secret) return privateSequence(rpcUrl, preflightPath, outPath, parentNum, parent, saltChoice, launchData, buyData);
 
   // Differential authority check: ask the real BSC node to execute exactly the same
   // launch call at the exact frozen parent state. This is eth_call only: no transaction
@@ -448,6 +466,94 @@ async function main() {
   dbrec.writeNew(outPath, record);
   const sha = require('crypto').createHash('sha256').update(record).digest('hex');
   console.log(`ECONOMICS_CROSSCHECK=EVM_SEQUENCE_PASS\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNum}\nSALT=${saltChoice.salt}\nSALT_COUNTER=${saltChoice.counter}\nTOKEN=${saltChoice.token}\nSIMULATED_RECEIVED_AMOUNT=${returned}`);
+}
+
+/** The local EVM sequence of --private: the remote checks above never run. */
+async function privateSequence(rpcUrl, preflightPath, outPath, parentNum, parent, saltChoice, launchData, buyData) {
+  const launchGasLimit = BigInt(req('DARKBOT_G06A_LAUNCH_GAS_LIMIT'));
+  const common = createCustomCommon({ chainId: Number(CHAIN_ID) }, Mainnet, { hardfork: Hardfork.Osaka });
+  const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNum });
+  installBasicAccountLoader(state, rpcUrl, '0x' + parentNum.toString(16));
+  const evm = await createEVM({ common, stateManager: state, blockchain: new RPCBlockChain(rpcUrl) });
+  localCreations(evm, state, [saltChoice.token]);
+  const launcherAddr = createAddressFromString(LAUNCHER);
+  const buyerAddr = createAddressFromString(BUYER);
+  const portalAddr = createAddressFromString(PORTAL);
+  await state.putAccount(launcherAddr, new Account(0n, 100_000_000_000_000_000_000n));
+  await state.putAccount(buyerAddr, new Account(0n, 100_000_000_000_000_000_000n));
+  const block = { header: blockHeaderFromRpc(parent) };
+  const launchRes = await evm.runCall({
+    caller: launcherAddr, origin: launcherAddr, to: portalAddr, value: LAUNCH_VALUE,
+    data: hexToBytes(launchData), gasLimit: launchGasLimit, gasPrice: GAS_PRICE, block,
+  });
+  if (launchRes.execResult.exceptionError) throw new Error(`local launch simulation reverted: ${launchRes.execResult.exceptionError.error}`);
+  const launchReturn = bytesToHex(launchRes.execResult.returnValue);
+  if (launchReturn.length !== 66 || ('0x' + launchReturn.slice(-40)).toLowerCase() !== saltChoice.token.toLowerCase()) {
+    throw new Error('newTokenV6 did not return the predicted CREATE2 token');
+  }
+  const buyRes = await evm.runCall({
+    caller: buyerAddr, origin: buyerAddr, to: portalAddr, value: BUY_VALUE,
+    data: hexToBytes(buyData), gasLimit: BUY_GAS_LIMIT, gasPrice: GAS_PRICE, block,
+  });
+  if (buyRes.execResult.exceptionError) throw new Error(`local BUY simulation reverted: ${buyRes.execResult.exceptionError.error}`);
+  const retHex = bytesToHex(buyRes.execResult.returnValue);
+  const returned = BigInt(retHex === '0x' ? '0x0' : retHex);
+  const balanceRes = await evm.runCall({
+    caller: buyerAddr, origin: buyerAddr, to: createAddressFromString(saltChoice.token), value: 0n,
+    data: hexToBytes(balanceOfCalldata(BUYER)), gasLimit: 500_000n, gasPrice: 0n, block, isStatic: true,
+  });
+  if (balanceRes.execResult.exceptionError) throw new Error('local balanceOf failed');
+  const balHex = bytesToHex(balanceRes.execResult.returnValue);
+  const balance = BigInt(balHex === '0x' ? '0x0' : balHex);
+  if (returned <= 0n || balance !== returned) throw new Error(`BUY return ${returned} != buyer token balance ${balance}`);
+  const commitment = '0x' + require('crypto').createHash('sha256')
+    .update(Buffer.concat([Buffer.from(SALT_DOMAIN), Buffer.from(saltChoice.salt.slice(2), 'hex')])).digest('hex');
+  const record = privateRecord({
+    preflightPath, parentNum, parent, commitment, token: saltChoice.token, returned, balance,
+    launchGas: launchRes.execResult.executionGasUsed, buyGas: buyRes.execResult.executionGasUsed,
+  });
+  dbrec.writeNew(outPath, record);
+  const sha = require('crypto').createHash('sha256').update(record).digest('hex');
+  console.log(`ECONOMICS_CROSSCHECK=EVM_SEQUENCE_PASS\nMODE=PRIVATE_SALT\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNum}\nSALT_COMMITMENT=${commitment}\nTOKEN=${saltChoice.token}\nSIMULATED_RECEIVED_AMOUNT=${returned}`);
+}
+
+function privateRecord(x) {
+  return dbrec.encode(PRIVATE_SCHEMA, {
+    '_provenance.tool': 'bsc/tools/g06a_economics_evm_crosscheck.cjs',
+    '_provenance.observed_unix_ms': BigInt(Date.now()),
+    preflight_path: x.preflightPath,
+    status: 'EVM_SEQUENCE_PASS',
+    'state_source.block_number': x.parentNum,
+    'state_source.block_hash': x.parent.hash,
+    'state_source.rpc_state_reads_only': true,
+    portal: PORTAL,
+    tax_v3_impl: TAX_V3_IMPL,
+    launcher: LAUNCHER,
+    buyer: BUYER,
+    local_only_funded_callers: true,
+    salt_commitment: x.commitment,
+    token: x.token,
+    launch_value_wei: LAUNCH_VALUE,
+    buy_value_wei: BUY_VALUE,
+    buy_min_output_used_for_execution: 1n,
+    launch_success: true,
+    buy_success: true,
+    simulated_received_amount: x.returned,
+    simulated_buyer_balance_after: x.balance,
+    launch_execution_gas: x.launchGas,
+    buy_execution_gas: x.buyGas,
+    rust_expected_output_was_execution_input: false,
+    signed_transactions_created: false,
+    signed_transactions_submitted: false,
+    bundle_submitted: false,
+    network_actions: 'READ_ONLY_RPC_STATE_AND_HEADER_ONLY_NO_REMOTE_EXECUTION',
+    limitations: [
+      'EthereumJS local message execution against frozen BSC Mainnet state; not BSC consensus/block validation',
+      'Secret-salt candidate: no salt search and no remote estimateGas/eth_call; every request passed the private egress guard, created addresses stayed local',
+      'Dummy caller balances exist only in the local StateManager overlay',
+      'This probe proves economics/contract semantics only; wallet nonces, builder floors and signed bundle validity belong to later DRY checks'
+    ],
+  });
 }
 
 main().catch((e) => {

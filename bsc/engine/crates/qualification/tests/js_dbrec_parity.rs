@@ -191,7 +191,16 @@ fn javascript_decodes_the_preflight_and_refuses_tampered_records() {
 
 /// The field names of a tool's `dbrec.encode(...)` object literal.
 fn encoded_names(source: &str) -> BTreeSet<String> {
-    let start = source.find("dbrec.encode(").expect("encode call");
+    encoded_names_at(source, 0)
+}
+
+/// [`encoded_names`] of the `n`-th `dbrec.encode(` call.
+fn encoded_names_at(source: &str, n: usize) -> BTreeSet<String> {
+    let start = source
+        .match_indices("dbrec.encode(")
+        .nth(n)
+        .expect("encode call")
+        .0;
     let body = &source[start..start + source[start..].find("\n  });").expect("end of encode call")];
     // Top-level keys only: the literal's members sit at four spaces.
     body.lines()
@@ -253,9 +262,52 @@ fn the_secret_carrying_tools_keep_the_salt_calldata_and_created_addresses_local(
     for tool in ["g06a_local_simulate.cjs", "g06a_launch_path_trace.cjs"] {
         let source = std::fs::read_to_string(path(&format!("{TOOLS}/{tool}"))).unwrap();
         assert!(source.contains("guardEgress([salt, "), "{tool}");
-        assert!(source.contains("localCreations(evm, state, [token])"), "{tool}");
+        assert!(
+            source.contains("localCreations(evm, state, [token])"),
+            "{tool}"
+        );
         for remote in ["'eth_call'", "'eth_estimateGas'"] {
             assert!(!source.contains(remote), "{tool}: {remote}");
         }
     }
+}
+
+#[test]
+fn the_private_cross_check_records_only_the_salt_commitment_and_executes_nothing_remotely() {
+    let source =
+        std::fs::read_to_string(path(&format!("{TOOLS}/g06a_economics_evm_crosscheck.cjs")))
+            .unwrap();
+    let expected: BTreeSet<String> = economics::PRIVATE
+        .fields
+        .iter()
+        .map(|f| f.name.to_string())
+        .collect();
+    assert_eq!(encoded_names_at(&source, 1), expected);
+    assert!(!expected.contains("salt") && expected.contains("salt_commitment"));
+    let private = &source[source.find("async function privateSequence(").unwrap()
+        ..source.find("function privateRecord(").unwrap()];
+    for forbidden in ["eth_call", "eth_estimateGas", "chooseSalt", "SALT="] {
+        assert!(!private.contains(forbidden), "{forbidden}");
+    }
+    assert!(source.contains("if (secret) return privateSequence("));
+    // The commitment is the candidate record's: SHA-256(domain || salt).
+    let candidate =
+        std::fs::read_to_string(path("../execution/src/bin/g07_candidate/candidate.rs")).unwrap();
+    assert!(candidate.contains(r#"SALT_DOMAIN: &[u8] = b"darkbot.g07.candidate.salt.v1";"#));
+    assert!(source.contains("const SALT_DOMAIN = 'darkbot.g07.candidate.salt.v1';"));
+    let salt = [0x5au8; 32];
+    let out = Command::new("node")
+        .arg("-e")
+        .arg(format!(
+            "process.stdout.write(require('crypto').createHash('sha256').update(Buffer.concat([Buffer.from('darkbot.g07.candidate.salt.v1'), Buffer.from('{}', 'hex')])).digest('hex'))",
+            darkbot_bsc_record::hex(&salt)
+        ))
+        .output()
+        .expect("node is required for this test");
+    let mut preimage = b"darkbot.g07.candidate.salt.v1".to_vec();
+    preimage.extend_from_slice(&salt);
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(&preimage))
+    );
 }

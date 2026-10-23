@@ -9,11 +9,12 @@ use crate::{Kind, Presence, Schema};
 use std::fmt::Write as _;
 
 /// The schemas the JavaScript tools use.
-pub fn exported() -> [&'static Schema; 4] {
+pub fn exported() -> [&'static Schema; 5] {
     [
         &g06a::preflight::SCHEMA,
         &g06a::local_simulation::NATIVE,
         &g06a::economics::NATIVE,
+        &g06a::economics::PRIVATE,
         &g06a::launch_path::SCHEMA,
     ]
 }
