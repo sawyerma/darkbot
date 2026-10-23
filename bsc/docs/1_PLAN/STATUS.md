@@ -12,6 +12,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 regression: `gateway/tests/ws_integration` (2 failures since 9a43fb05 made the BSC topics available) now uses SolanaStatus as the unavailable topic and asserts BscStatus available; gateway suite green. Old clippy lints (coverage.rs, acceptance_contract.rs `!= true`, projection.rs leap year) left as is: cosmetic, in hash-pinned sources.
 
+2026-10-23 B privacy foundation (code, offline-tested): `tools/g06a_private_mode.cjs` — fail-closed egress guard (no request may carry the salt, launch calldata or token; eth_call/estimateGas/send refused) and local-only state for every address the EVM creates (fail-before test shows the unprotected RPC state manager leaks the created address); installed in local simulation and launch-path trace (frozen-A snapshot reproduced identically). Open for B: an economics record without the salt in clear (the cross-check record holds it and uses mainnet eth_call), a B DRY/qualification check and the B v5 — PLANNED.
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

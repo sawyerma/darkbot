@@ -29,6 +29,7 @@ const {
 const { createLegacyTx } = require(path.join(LEGACY_TOOLS, '@ethereumjs/tx'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const dbrec = require('./dbrec.cjs');
+const { guardEgress, localCreations } = require('./g06a_private_mode.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
@@ -173,10 +174,13 @@ async function main() {
   }
   const pin = { blockHash: parent.hash, requireCanonical: true };
   const token = predictedToken(portal, pre.tax_v3_impl, salt);
+  // The salt, the launch calldata and the token never leave the process.
+  guardEgress([salt, launchCalldata(pre.launcher_address, salt), token]);
   const common = createCustomCommon({ chainId: Number(CHAIN_ID) }, Mainnet, { hardfork: Hardfork.Osaka });
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: number });
   installBasicAccountLoader(state, rpcUrl, tag);
   const evm = await createEVM({ common, stateManager: state, blockchain: new RPCBlockChain(rpcUrl) });
+  const created = localCreations(evm, state, [token]);
   const block = { header: blockHeaderFromRpc(parent) };
   const roles = new Map();
   const loads = new Map();
@@ -213,8 +217,10 @@ async function main() {
   const code = { address: [], sha: [], bytes: [], roles: [] };
   const executed = new Set();
   for (const [address, set] of [...roles].sort(([a], [b]) => a.localeCompare(b))) {
+    // Created during the run (never asked of the RPC): its creator's code is bound.
+    if (created.has(address.toLowerCase().replace(/^0x/, ''))) continue;
     const bytecode = await rpc(rpcUrl, 'eth_getCode', [address, pin]);
-    if (bytecode === '0x') continue; // created during the run: its creator's code is bound
+    if (bytecode === '0x') continue;
     executed.add(address.toLowerCase());
     code.address.push(address);
     code.sha.push('0x' + require('crypto').createHash('sha256').update(Buffer.from(bytecode.slice(2), 'hex')).digest('hex'));

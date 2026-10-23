@@ -29,6 +29,7 @@ const {
 const { createLegacyTx } = require(path.join(LEGACY_TOOLS, '@ethereumjs/tx'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const dbrec = require('./dbrec.cjs');
+const { guardEgress, localCreations } = require('./g06a_private_mode.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
@@ -183,6 +184,8 @@ async function main() {
 
   const launchData = launchCalldata(launcherWallet.address, salt);
   const buyData = buyCalldata(token, buyValue, minOutput);
+  // The salt, the launch calldata and the token never leave the process.
+  guardEgress([salt, launchData, token]);
 
   const launchReq = {
     chainId: CHAIN_ID, nonce: launcherNonce, gasPrice, gasLimit: launchGasLimit,
@@ -215,6 +218,7 @@ async function main() {
   installBasicAccountLoader(state, rpcUrl, parentTag);
   const blockchain = new RPCBlockChain(rpcUrl);
   const evm = await createEVM({ common, stateManager: state, blockchain });
+  localCreations(evm, state, [token]);
   const block = { header: blockHeaderFromRpc(parent) };
 
   const launcherAddr = createAddressFromString(launcherWallet.address);

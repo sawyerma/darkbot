@@ -235,3 +235,27 @@ fn both_ethereumjs_tools_set_exactly_their_schema_fields() {
         assert_eq!(json_uses, 2, "{tool}: JSON only in the rpc() wire function");
     }
 }
+
+#[test]
+fn the_secret_carrying_tools_keep_the_salt_calldata_and_created_addresses_local() {
+    // v9.1 B2: offline node regression (fake provider) of the private mode,
+    // including the fail-before control that shows the unprotected leak.
+    let out = Command::new("node")
+        .arg("--test")
+        .arg(path(&format!("{TOOLS}/test_g06a_private_mode.cjs")))
+        .output()
+        .expect("node is required for this test");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    for tool in ["g06a_local_simulate.cjs", "g06a_launch_path_trace.cjs"] {
+        let source = std::fs::read_to_string(path(&format!("{TOOLS}/{tool}"))).unwrap();
+        assert!(source.contains("guardEgress([salt, "), "{tool}");
+        assert!(source.contains("localCreations(evm, state, [token])"), "{tool}");
+        for remote in ["'eth_call'", "'eth_estimateGas'"] {
+            assert!(!source.contains(remote), "{tool}: {remote}");
+        }
+    }
+}
