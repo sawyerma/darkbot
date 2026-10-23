@@ -70,6 +70,77 @@ flowchart TB
   class MODE,EXEC,OFF,DRY safety
 ```
 
+### Adressstrategie und WebSocket-Abgleich – AUTO / Test A / Test B
+
+Das zweite **Architekturdiagramm** vertieft den Eingangs- und Adressprüfpfad des ersten Diagramms. Es ist die **v9-Zielarchitektur, noch kein implementiertes LIVE-Feature**. Der Frontend-Schalter wählt hier **den Kandidatenkontext**, nicht den vertrauenswürdigsten WebSocket-Anbieter. Jede aktive Quelle wird unabhängig empfangen und auf ihre tatsächliche technische Eignung geprüft.
+
+```mermaid
+flowchart TB
+    C["BSC-Steuerung<br/>AUTO / Test A / Test B"]
+
+    subgraph INPUT["Fünf Quellen unabhängig: OFF / SHADOW / LIVE"]
+        direction LR
+        G["geth P2P"]
+        P["PublicNode"]
+        D["dRPC"]
+        B["BlockReq"]
+        F["48Club Feed"]
+    end
+
+    G --> N["Native Binär-Events"]
+    P --> W["Isolierte WSS-Adapter"]
+    D --> W
+    B --> W
+    F --> PRIV["Separater privater Feed-Adapter<br/>Auth / Target / Capability prüfen"]
+    W --> N
+    PRIV --> N
+
+    N --> V["RUST: Transaktion identifizieren<br/>Signatur / Chain / Venue / ABI prüfen"]
+    V --> SALT["Salt aus Launch-Calldata ermitteln<br/>Adresse lokal ableiten: Flap CREATE2<br/>andere Venues nur nach eigener Qualifikation"]
+    C --> MODE{"Adressmodus"}
+    SALT --> MODE
+
+    MODE -->|"AUTO"| AUTO["Fremde Launch-Adresse<br/>dynamisch unabhängig verifizieren"]
+    MODE -->|"A"| A["Nur festgeschriebene<br/>Testadresse A und exakte Launch-Identität"]
+    MODE -->|"B"| BB["Nur festgeschriebene<br/>Testadresse B und exakte Launch-Identität"]
+
+    AUTO --> DEC{"Validiert, vollständig und<br/>für den konkreten Pfad qualifiziert?"}
+    A --> DEC
+    BB --> DEC
+    DEC -->|"Nein"| STOP["Nicht für LIVE zulassen<br/>ggf. isolierte SHADOW-Diagnose"]
+    DEC -->|"Ja"| RACE["Schnellstes verifiziertes Signal<br/>gewinnt – ohne Warten"]
+    RACE --> CORE["Eine Rust-Engine<br/>BUY-Plan / Quote / Risiko"]
+    CORE --> ECON{"Quellen- und Venue-Modus,<br/>globaler Modus, wirtschaftliche Freigabe"}
+    ECON -->|"SHADOW / keine Freigabe"| PAPER["Identische Fachlogik / Adapterplanung<br/>Would-send-Projektion, kein Echtgeld"]
+    ECON -->|"LIVE + alle Freigaben"| BUY["Qualifizierter echter BUY"]
+    BUY --> VERIFY["On-Chain-Akquisition prüfen"]
+
+    classDef input fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef engine fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef gate fill:#fef3c7,stroke:#d97706,color:#78350f
+    class G,P,D,B,F input
+    class V,SALT,AUTO,A,BB,RACE,CORE engine
+    class MODE,DEC,ECON,STOP gate
+```
+
+#### Wie Auswahl, Ableitung und Abgleich zusammenspielen
+
+| Adressstrategie | Woher kommt der Salt? | Wann ist eine Adresse für diesen Modus gültig? |
+|---|---|---|
+| **AUTO / fremder Launch** | Aus der vollständigen, authentisch geprüften Pending-Launch-Transaktion des fremden Erstellers, sofern verfügbar | Nur nach lokaler, version-/deployment-gebundener und **venue-spezifischer** Adressableitung; bei Flap mit den **zutreffenden CREATE2-Parametern**. Kein Vertrauen in eine vom Anbieter angegebene Adresse. |
+| **Test A / eigener Launch** | Bereits eingefrorener, öffentlich bekannter eigener G0.7-Salt | Die lokal abgeleitete Adresse **und** die komplette Launch-/Kandidatenidentität müssen zum separat gebundenen A-Profil passen. |
+| **Test B / eigener Launch** | Separater kryptografisch zufälliger, nach Auswahl eingefrorener eigener G0.7-Salt | Die lokal abgeleitete Adresse **und** die komplette Launch-/Kandidatenidentität müssen zum separat gebundenen B-Profil passen. B ist kein automatisch ersetzbarer Live-Fallback für A. |
+
+**Paralleler Wettbewerb ohne Quorum:** Die fünf Quellen dürfen **nicht** nacheinander abgefragt werden. Sobald die erste technisch qualifizierte LIVE-Quelle eine vollständig verifizierte und für den konkreten BUY-Pfad handlungsfähige Information liefert, darf der **eine** Rust-Core den Kandidaten verarbeiten. Er wartet **nicht** auf Bestätigung durch die übrigen Quellen; mehrere übereinstimmende Provider sind kein Ersatz für Signatur-, Deployment-, Calldata- und State-Prüfung. Ein früher Hash-only-Hinweis bleibt noch nicht handlungsfähig. Der 48Club-Auction-Feed kann andere Target-Daten als eine vollständige signierte Pending-Transaktion liefern: Ohne gesonderte nachgewiesene Capability darf er nicht als Full-TX-Quelle behandelt werden.
+
+**Vergleichen und Fehler erkennen:** Nachfolgende Quellenereignisse werden asynchron gegen die kanonische Launch-Identität, den signierten Transaktionshash und die **lokal berechnete native 20-Byte-Tokenadresse** verglichen und mit Quell-/Zeit-/Health-Provenienz im **binären Journal** protokolliert. Gleiche Launch-Transaktion bedeutet **kein zweiter BUY**. Widersprüchliche Adressen/Bytes oder mehrere Launch-Identitäten für dieselbe Zieladresse werden isoliert beziehungsweise für den betroffenen wirtschaftlichen Intent **fail-closed** behandelt. SHADOW-Ereignisse können messen und dieselbe Fachlogik durchlaufen, aber keinen LIVE-Kandidaten verdrängen, keine reale Nonce belegen und keinen Versand auslösen.
+
+**Die drei Schalterebenen sind unabhängig:** (1) Kandidatenmodus **AUTO / Test A / Test B**, (2) je Quelle **OFF / SHADOW / LIVE** und je Launchpad eine gesonderte Zulassung, (3) **globaler REPLAY-/PAPER-/SHADOW-/LIVE-Modus, exakte wirtschaftliche Freigabe und Guard**. Die UI zeigt angeforderten und tatsächlich qualifizierten Modus getrennt an. Ein Quellenschalter auf LIVE ist **niemals** automatisch eine Kaufberechtigung. Ein Wechsel zwischen A und B darf eingefrorene Signaturen, Freigaben, Nonces oder DRY-Ergebnisse nicht übertragen. Im HOT0 gibt es weder GUI-Abfrage noch JSON, RPC-Nachforderung, Netzwerk-Wartezeit oder String-Adressvergleich.
+
+**Wichtig für die Zeitmessung:** Eine korrekte zukünftige Tokenadresse allein beweist weder tatsächliche Launch-Ausführung noch Kaufbarkeit. Selbst ein vor `T_head_local` empfangener WebSocket-Event beweist keine Beobachtung vor `T0`. `T_buy - T0 < 1 ms` erfordert **tatsächlich erfolgreichen BUY beim Producer** mit gültiger Original-Producer-Zeitevidenz; N/N+1 und spätere Wallet-Anzeige sind andere Nachweise.
+
+**Umsetzungsstatus:** Der v9-Vertrag beschreibt die spätere AUTO-Adress-/Quellensteuerung. Er **autorisiert keine vorgezogene produktive WSS-/C1/C2-Integration**. Die isolierte A/B-Frontend-Vorbereitung bleibt allein OFFLINE/SHADOW; G0.7 ist bis zur gesonderten exakt gebundenen wirtschaftlichen Entscheidung `UNARMED`.
+
 ### Eingänge und Ausgänge sind verschiedene Schnittstellen
 
 | Anbieter | **VOR dem BUY: Früherkennung** | **NACH dem BUY-Plan: Versand** |
@@ -152,7 +223,7 @@ flowchart TB
 | [docs/1_PLAN/PHASENPLAN.md](docs/1_PLAN/PHASENPLAN.md) | **Verbindlicher Phasenplan, Rang 1** – Stop-Regeln, Gesamtfolge, fünf Quellen §5a |
 | [docs/1_PLAN/GATE0_TESTPLAN_SHORT.md](docs/1_PLAN/GATE0_TESTPLAN_SHORT.md) | **Abnahmevertrag, Rang 2** – tatsächlicher Kauf und Zeit-/Safety-Evidence |
 | [docs/1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md](docs/1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md) | **Technischer Bauplan, Rang 3** |
-| [docs/1_PLAN/STATUS.md](docs/1_PLAN/STATUS.md) / [REVISIONEN.md](docs/1_PLAN/REVISIONEN.md) | Implementierungsstand und Revision v7 |
+| [docs/1_PLAN/STATUS.md](docs/1_PLAN/STATUS.md) / [REVISIONEN.md](docs/1_PLAN/REVISIONEN.md) | Implementierungsstand und Revision v9 |
 | [docs/2_REGELN/](docs/2_REGELN/) | Technische Bausteinverträge |
 | [docs/3_BEWEISE/](docs/3_BEWEISE/) | Historisches Ledger und getrennte neue Evidence |
 | [docs/4_G07_FREIGABE/](docs/4_G07_FREIGABE/) | G0.7-Freigabe-/Requalifikationsunterlagen |
