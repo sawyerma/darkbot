@@ -10,6 +10,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 C1/R1 (code, offline-tested): contract v5 (type 34) = v4 + launch-path snapshot + candidate binding; guard, runner, readiness and status accept only `config/g07_attempt1_acceptance_v5.dbrec` (`FROZEN_APPROVED_V5_SHA256 = "UNARMED"`, v4 refused as superseded); runner and `--current-rpc` readiness re-read every bound code hash/selector at the current pinned block (drift → STOP before signing/latch; guard requires that proof); requal check DRY5, DRY script step 4b, `g07_candidate qualify` needs DRY5. No v5 proposal yet: needs the v5.26 requal run (AWAITING_USER_AUTHORIZATION: DRY-1 local signing with the real keys).
 
+2026-10-23 regression: `gateway/tests/ws_integration` (2 failures since 9a43fb05 made the BSC topics available) now uses SolanaStatus as the unavailable topic and asserts BscStatus available; gateway suite green. Old clippy lints (coverage.rs, acceptance_contract.rs `!= true`, projection.rs leap year) left as is: cosmetic, in hash-pinned sources.
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

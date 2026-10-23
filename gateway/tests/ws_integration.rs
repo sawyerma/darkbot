@@ -181,10 +181,15 @@ async fn accepted_handshake_and_topics() {
         .topics
         .iter()
         .any(|x| x.topic == TopicId::OverviewAggregates as i32 && x.available));
+    // BSC status is a read-only feed since 9a43fb05; Solana has no payload yet.
     assert!(w
         .topics
         .iter()
-        .any(|x| x.topic == TopicId::BscStatus as i32 && !x.available));
+        .any(|x| x.topic == TopicId::BscStatus as i32 && x.available));
+    assert!(w
+        .topics
+        .iter()
+        .any(|x| x.topic == TopicId::SolanaStatus as i32 && !x.available));
 }
 #[tokio::test]
 async fn major_and_schema_mismatch_rejected() {
@@ -274,7 +279,7 @@ async fn unavailable_topic_rejected() {
         &mut ws,
         client_message::Msg::Subscribe(Subscribe {
             request_id: 9,
-            topic: TopicId::BscStatus as i32,
+            topic: TopicId::SolanaStatus as i32,
             cursor: None,
             start_policy: 0,
         }),
