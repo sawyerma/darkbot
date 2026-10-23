@@ -374,9 +374,19 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             return Err("current deployment/economics drift from the frozen DRY baseline".into());
         }
         let (ln, bn, head) = validate_current_preflight(&baseline, &current, launcher, buyer, gas);
-        if ln != field(baseline.u64(f::LAUNCHER_PENDING_NONCE))
-            || bn != field(baseline.u64(f::BUYER_PENDING_NONCE))
-        {
+        let (signed_ln, signed_bn) = (
+            field(baseline.u64(f::LAUNCHER_PENDING_NONCE)),
+            field(baseline.u64(f::BUYER_PENDING_NONCE)),
+        );
+        if ln != signed_ln || bn != signed_bn {
+            check(
+                report,
+                "CURRENT_NONCES",
+                "STOP",
+                &format!(
+                    "Pending nonces {ln}/{bn} differ from the signed DRY's {signed_ln}/{signed_bn}; the signed bytes cannot execute as bound"
+                ),
+            );
             return Err("nonce drift from signed DRY".into());
         }
         check(
@@ -486,12 +496,24 @@ fn technical_ready(report: &Record) -> bool {
         && seen.contains("PRODUCER_WITNESS")
 }
 
+// PASS_READ_ONLY only when technically ready; STOP when a check found a
+// contradiction with the bound attempt (deployment or nonce drift); otherwise
+// BLOCKED (a precondition is missing). Both refusals exit 2.
 fn finish_report(report: &mut Draft) -> (Vec<u8>, i32) {
     let before = report.encode().expect("encode evaluated readiness");
-    let pass = technical_ready(&decode(&r::SCHEMA, &before).expect("decode evaluated readiness"));
-    report
-        .set(r::STATUS, if pass { "PASS_READ_ONLY" } else { "BLOCKED" })
-        .set(r::LIVE_AUTHORIZED, false);
+    let evaluated = decode(&r::SCHEMA, &before).expect("decode evaluated readiness");
+    let pass = technical_ready(&evaluated);
+    let stop = evaluated.nested_all(r::CHECKS).is_ok_and(|checks| {
+        checks
+            .iter()
+            .any(|row| row.text(r::check::STATUS).ok() == Some("STOP"))
+    });
+    let status = match (pass, stop) {
+        (true, _) => "PASS_READ_ONLY",
+        (false, true) => "STOP",
+        (false, false) => "BLOCKED",
+    };
+    report.set(r::STATUS, status).set(r::LIVE_AUTHORIZED, false);
     (
         report.encode().expect("encode readiness verdict"),
         if pass { 0 } else { 2 },
@@ -658,6 +680,30 @@ mod readiness_tests {
         let mut incomplete = evaluated_report(None, None);
         incomplete.clear(r::CHECKS);
         assert_eq!(finish_report(&mut incomplete).1, 2);
+    }
+
+    #[test]
+    fn a_contradiction_stops_and_a_missing_precondition_blocks() {
+        let status = |report: &mut Draft| {
+            let (bytes, code) = finish_report(report);
+            assert_eq!(code, 2);
+            let record = decode(&r::SCHEMA, &bytes).unwrap();
+            assert!(!record.bool(r::LIVE_AUTHORIZED).unwrap());
+            record.text(r::STATUS).unwrap().to_string()
+        };
+        let mut blocked = evaluated_report(None, Some(("BUILDER_FRESHNESS", "BLOCKED")));
+        assert_eq!(status(&mut blocked), "BLOCKED");
+        for name in ["CURRENT_DEPLOYMENT_DRIFT", "CURRENT_NONCES"] {
+            let mut stop = evaluated_report(None, Some(("BUILDER_FRESHNESS", "BLOCKED")));
+            check(
+                &mut stop,
+                name,
+                "STOP",
+                "contradiction with the bound attempt",
+            );
+            check(&mut stop, "VALIDATION", "BLOCKED", "drift");
+            assert_eq!(status(&mut stop), "STOP", "{name}");
+        }
     }
 
     #[test]
