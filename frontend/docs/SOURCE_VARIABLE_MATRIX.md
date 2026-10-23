@@ -117,3 +117,8 @@ Jede Variable benötigt genau einen nativen fachlichen Owner. 'EXISTS_INTERNAL' 
 7. Verbotene Frontend-Wallet-/Private-Key-/Secret-Aktionen in Negativtests nachweisen.
 
 **F0-VAR-Abnahme:** Datenfelder/Commands und schreibgeschützte Quellen sind vollständig bezogen auf den definierten UI-Scope inventarisiert; offene native Adapter erhalten eigene Tickets. Die **hier** vorliegende Matrix ist ein initialer, quellenbasierter Startstand – **nicht** die behauptete vollständige Codegen-Schnittstelle.
+
+
+## 5. BSC v9.1 — Feldinventur und spätere Phasen (verbindlicher Verweis, 2026-10-23)
+
+Die vorstehenden BSC-§2-Angaben sind ein **historischer F0-VAR-Auszug** und teilweise V4-zentriert. Gültige umfassende BSC-Audit-/Sollmatrix (A/B/C/D, G1–G23) ist `frontend/docs/BSC_FRONTEND_BINDINGS_V1.md`, dazu Implementierungsfolge `frontend/docs/ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md` und BSC-Phasenplan `bsc/docs/1_PLAN/PHASENPLAN.md`. V5 ist die aktive Guard-Vertragsgeneration; G0.7/G0.8 bleiben nicht ausgeführt, LIVE nicht autorisiert. Diese allgemeine Matrix nicht durch eine zweite komplette Feldkopie konkurrieren lassen. Alle neuen Feld-Owner/Proto-Tags/Units/Evidence-Nachweise im BSC-Inventar zuerst aktualisieren, sodann hier den Versions-/Gate-Stand nachführen. Der bestehende Native→Reporter→Proto→Gateway→BSC-Adapter→Zustand→Graphite-Pfad wird ausschließlich **ergänzt**, nicht ersetzt.
