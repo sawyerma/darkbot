@@ -792,3 +792,22 @@ Forbidden:
 If Gate 0 returns STOP for both Four.meme and Flap, the BSC Birth-Sniping production roadmap stops.
 
 If one venue passes, production work proceeds only for the proven venue first. The second venue may remain ADAPT/STOP until separately proven.
+
+
+## Verbindliche BSC-Frontend-Verdrahtung und Phasen-Handoff (2026-10-23)
+
+**Referenz:** `frontend/docs/BSC_FRONTEND_BINDINGS_V1.md` (A/B/C/D-Feldinventur, G1–G23, fünf Panels) und `frontend/docs/FRONTEND_PHASENPLAN.md`. **Keine zweite Architektur:** vorhandene React/Vite-App, `frontend/src/features/bsc/`, Graphite, Gateway, `control/v1` + `bsc/v1`-Protobuf, native `qualification/src/status/projection.rs` und bestehender BSC-Rust-Core sind die einzigen Owner. Frontend-Komponenten dürfen Native-Safety, Quotes, Signaturen und wirtschaftliche Admission nicht nachbilden. Fehlende Felder als `SOLL_MISSING` dokumentieren; keine simulierte LIVE-Bereitschaft.
+
+**Pflicht bei jeder künftigen BSC-Phase:** Jedes neue öffentliche Status-/Messfeld, jedes native Control und jeder Filter bekommt im vorhandenen F0-VAR-Manifest eine Zeile mit `native_path, symbol, source_sha, type/unit, native_owner, sensitivity, evidence/provenance, source_quality, mode/gate, protobuf_field, gateway_topic_or_command, frontend_panel, tests`. Beim jeweiligen Phasenabschluss entweder durchgängig Native → sanitizierte Projektion → Proto/Golden → Gateway → vorhandener BSC-Adapter/Store → React-Panel → End-to-End-/Negativtest **nachweislich** angeschlossen oder als `SOLL_MISSING/BLOCKED` mit Owner/Ticket ausgewiesen. Nie vermeintliche Erledigung nur wegen einer Rust-Struct oder GUI-Darstellung.
+
+| BSC-Phase | Frontend-Zuordnung, erst nach Gate freischalten |
+|---|---|
+| G0.6a/G0.7/G0.8 | Overview und Launch: Readiness mode/verdict/checks, V5, A/B-Candidate, DRY5/DRY6/R0, Quote/Sim, attempt/latch/budget; Monitoring/Analytics: Builder-Send, Capture, G0.8-Akquisition, Ranking/erster fremder BUY/Miner, Gebühren, originaler T0-Witness; Wallets: historische versus aktuelle Funding-Snapshots und getrennte Nonces. Vor tatsächlichem BUY nur offline/read-only; Gate-0-Reihenfolge unverändert. |
+| C0/C1/C2 | Monitoring: fünf unabhängige Source-Health-/Capability-/requested-/effective-Modi, geth-P2P, full/hash/actionable, canonical/reorg/dedup, sichere Konfigurationsgeneration; keine LIVE-Umstellung aus dem Browser ohne native freigegebene CAS-Commands. |
+| C3/D/E | Monitoring: qualifizierte Inclusion-Adapter getrennt von Signaleingängen; Flap/Four Classic/OpenFour als getrennte Venues, Deployment-/ABI-/Tokenadressverifikation; Analytics: echte Latenz und Failure-Denominatoren. |
+| F | Analytics: natives Journal, 15-s-Window, 30-min-Capture, vollständige Source-Census, Queue-/RAM-/Disk-/Segment-/Manifest-/Replay-Qualität. 4/24/48-h-Läufe nur bei separater Berechtigung. Filter ausschließlich auf Report-/History-Ebene. |
+| G/H | Analytics: nachweisbare reale Kosten, Gebühren, Taxes, EV, Outcome und Risiken; Launch: read-only native policies. Kein Frontend-Quote- oder Strategie-Duplikat. |
+| I/J | Launch: getrennte requested/effective REPLAY/PAPER/SHADOW/LIVE und tatsächliche wirtschaftliche/native Autorisierung; Monitoring: Inclusion und Reconciliation; Analytics: freezegebundene Kampagne, T0→T_buy original producer evidence. LIVE nur nach J und separater expliziter Freigabe. |
+| KB/K | Erweitern nur nach eigener gemessener Qualifikation; bestehende Topics/Controls benutzen oder versioniert additiv erweitern. |
+
+**Sperre:** Dies ist eine Dokumentations-/F0-VAR-Ergänzung, **keine Freigabe** zur Umsetzung der derzeit pausierten C1/C2-Produktionsphasen oder zum Starten eines Mainnet-BUY. Kein Wechsel des Designsystems, keine Parallel-Engine, kein zweites Wire-Protokoll, keine heimliche Änderung von Project_0/Solana und keine Entkopplung des BSC-STOP-Gates.
