@@ -23,7 +23,7 @@ use darkbot_common::lifecycle::Shutdown;
 use darkbot_common::timing::Clock;
 use prost::Message;
 use solana_sdk::pubkey::Pubkey;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 /// The pinned Yellowstone source of the message layout below.
 pub const PROTO_SOURCE_COMMIT: &str = "2a5486693a7ccf900ff7ccc2de1e6c6570899245";
@@ -449,7 +449,8 @@ pub struct MapperStats {
 /// account versions (duplicates), the highest slot seen and the last root.
 pub struct GeyserMapper {
     banks: BTreeMap<u64, u64>,
-    seen: HashSet<(Pubkey, u64, u64)>,
+    /// (pubkey, slot, write version) → content digest of its first copy.
+    seen: HashMap<(Pubkey, u64, u64), [u8; 32]>,
     seen_order: VecDeque<(Pubkey, u64, u64)>,
     pub max_slot: Option<u64>,
     pub root: Option<u64>,
@@ -474,7 +475,7 @@ impl GeyserMapper {
     pub fn new() -> Self {
         Self {
             banks: BTreeMap::new(),
-            seen: HashSet::new(),
+            seen: HashMap::new(),
             seen_order: VecDeque::new(),
             max_slot: None,
             root: None,
@@ -522,10 +523,25 @@ impl GeyserMapper {
                     }
                 }
                 let id = (pubkey, a.slot, info.write_version);
-                if !self.seen.insert(id) {
-                    self.stats.duplicates += 1;
-                    return Ok(out);
+                let digest = solana_sdk::hash::hashv(&[
+                    &info.owner,
+                    &info.lamports.to_le_bytes(),
+                    &info.data,
+                ])
+                .to_bytes();
+                match self.seen.get(&id) {
+                    Some(d) if *d == digest => {
+                        self.stats.duplicates += 1;
+                        return Ok(out);
+                    }
+                    // The same write with other content: the stream contradicts itself.
+                    Some(_) => {
+                        out.events.push(self.gap(a.slot, t_rx_ns));
+                        return Ok(out);
+                    }
+                    None => {}
                 }
+                self.seen.insert(id, digest);
                 self.seen_order.push_back(id);
                 if self.seen_order.len() > SEEN_MAX {
                     if let Some(old) = self.seen_order.pop_front() {

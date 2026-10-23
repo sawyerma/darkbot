@@ -6,6 +6,7 @@
 
 pub mod geyser;
 pub mod geyser_grpc;
+pub mod sources;
 pub mod ws_rpc;
 
 use std::sync::atomic::{AtomicBool, Ordering};

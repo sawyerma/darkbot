@@ -344,6 +344,18 @@ fn accounts_keep_write_version_drop_duplicates_and_gap_on_fork_ambiguity() {
         1,
         "newer version"
     );
+    // The same write with other content contradicts the stream: a gap, nothing delivered.
+    let mut contradicting = account(k, 10, 8, Some(1));
+    if let Some(U::Account(a)) = &mut contradicting.update_oneof {
+        a.account.as_mut().unwrap().lamports = 6;
+    }
+    assert!(matches!(
+        m.map(contradicting, 4).unwrap().events[..],
+        [IngressEvent::Gap {
+            to_slot: Some(10),
+            ..
+        }]
+    ));
     let fork = m.map(account(k, 10, 9, Some(2)), 4).unwrap();
     assert!(matches!(
         fork.events[..],
