@@ -52,33 +52,25 @@ fn rpc(method: &str, params: &str) -> Result<serde_json::Value, String> {
         r#"{{"jsonrpc":"2.0","id":1,"method":{},"params":{params}}}"#,
         wire_string(method)
     );
-    // -q first: no .curlrc, whatever the environment.
-    let out = child_command("curl")
-        .args([
-            "-q",
-            "--connect-timeout",
-            "2",
-            "--max-time",
-            "5",
-            "-sS",
-            &rpc,
-            "-H",
-            "Content-Type: application/json",
-            "--data",
-            &body,
-        ])
-        .output()
-        .map_err(|e| format!("execute curl: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "curl {method}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
-    }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout)
+    // URL and request reach curl on stdin, never on its argv (C4).
+    let out = darkbot_bsc_execution::rpc_wire::post(
+        child_command("curl"),
+        &rpc,
+        &body,
+        darkbot_bsc_execution::rpc_wire::Limits {
+            connect_timeout_s: 2,
+            max_time_s: 5,
+            compressed: false,
+        },
+    )
+    .map_err(|e| format!("{method}: {e}"))?;
+    let v: serde_json::Value = serde_json::from_slice(&out)
         .map_err(|e| format!("invalid JSON-RPC response for {method}: {e}"))?;
     if let Some(err) = v.get("error") {
-        return Err(format!("JSON-RPC {method}: {err}"));
+        return Err(format!(
+            "JSON-RPC {method}: {}",
+            darkbot_bsc_execution::rpc_wire::redact(&rpc, &err.to_string())
+        ));
     }
     v.get("result")
         .cloned()
@@ -180,6 +172,7 @@ pub(crate) fn rpc_block_number() -> Result<u64, String> {
 }
 
 /// The balance of `who` at latest. Never panics.
+#[allow(dead_code)] // The builder probe; the preflight reads balances pinned.
 pub(crate) fn rpc_balance(who: Address) -> Result<U256, String> {
     rpc_quantity(
         "eth_getBalance",
@@ -188,6 +181,7 @@ pub(crate) fn rpc_balance(who: Address) -> Result<U256, String> {
 }
 
 /// The pending nonce of `who`. Never panics.
+#[allow(dead_code)] // The builder probe; the preflight reads nonces itself.
 pub(crate) fn rpc_pending_nonce(who: Address) -> Result<u64, String> {
     rpc_u64(
         "eth_getTransactionCount",
@@ -253,24 +247,40 @@ pub(crate) fn rpc_logs(
         .collect()
 }
 
-/// Number and hash of the latest block.
-fn latest_block() -> Result<(u64, [u8; 32]), String> {
-    let block = rpc("eth_getBlockByNumber", r#"["latest",false]"#)?;
+/// A JSON-RPC transport: the wire `rpc` in production, a fake in tests.
+pub(crate) type Rpc<'a> = &'a mut dyn FnMut(&str, &str) -> Result<serde_json::Value, String>;
+
+/// Number and hash of the block `tag` ("latest" or a hex number).
+fn block_at(rpc: Rpc<'_>, tag: &str) -> Result<(u64, [u8; 32]), String> {
+    let block = rpc(
+        "eth_getBlockByNumber",
+        &format!("[{},false]", wire_string(tag)),
+    )?;
+    if block.is_null() {
+        return Err(format!("block {tag} is unavailable"));
+    }
     let number = block
         .get("number")
-        .ok_or("latest block lacks number")
+        .ok_or("block lacks number")
         .map_err(str::to_string)
-        .and_then(|n| wire_quantity(n, "latest block number"))
-        .and_then(|n| small(n, "latest block number"))?;
+        .and_then(|n| wire_quantity(n, "block number"))
+        .and_then(|n| small(n, "block number"))?;
     let hash = block
         .get("hash")
-        .ok_or("latest block lacks hash")
+        .ok_or("block lacks hash")
         .map_err(str::to_string)
-        .and_then(|h| wire_data(h, "latest block hash"))
-        .and_then(|h| {
-            <[u8; 32]>::try_from(h).map_err(|_| "latest block hash is not 32 bytes".into())
-        })?;
+        .and_then(|h| wire_data(h, "block hash"))
+        .and_then(|h| <[u8; 32]>::try_from(h).map_err(|_| "block hash is not 32 bytes".into()))?;
     Ok((number, hash))
+}
+
+/// The EIP-1898 block parameter of exactly this block; the node must refuse
+/// it when the block is not canonical. Never replaced by "latest".
+fn pinned(hash: &[u8; 32]) -> String {
+    format!(
+        r#"{{"blockHash":"0x{}","requireCanonical":true}}"#,
+        hex::encode(hash)
+    )
 }
 
 const TAX_V3_IMPL_EXPECTED: &str = "0x024f18294970b5c76c0691b87f138a0317156422";
@@ -318,24 +328,23 @@ pub(crate) fn abi_words(raw: &[u8], count: usize) -> Result<Vec<U256>, String> {
         .collect())
 }
 
-fn eth_call(to: &str, data: &str) -> Result<Vec<u8>, String> {
-    rpc_data(
+fn eth_call(rpc: Rpc<'_>, at: &str, to: &str, data: &str) -> Result<Vec<u8>, String> {
+    rpc(
         "eth_call",
         &format!(
-            r#"[{{"to":{},"data":{}}},"latest"]"#,
+            r#"[{{"to":{},"data":{}}},{at}]"#,
             wire_string(to),
             wire_string(data)
         ),
     )
+    .and_then(|v| wire_data(&v, "eth_call"))
 }
 
-fn code_at(address: &str, what: &str) -> Result<Vec<u8>, String> {
-    let code = rpc_data(
-        "eth_getCode",
-        &format!(r#"[{},"latest"]"#, wire_string(address)),
-    )?;
+fn code_at(rpc: Rpc<'_>, at: &str, address: &str, what: &str) -> Result<Vec<u8>, String> {
+    let code = rpc("eth_getCode", &format!("[{},{at}]", wire_string(address)))
+        .and_then(|v| wire_data(&v, "eth_getCode"))?;
     if code.is_empty() {
-        return Err(format!("{what} has no code at latest"));
+        return Err(format!("{what} has no code at the pinned block"));
     }
     Ok(code)
 }
@@ -345,6 +354,35 @@ fn code_at(address: &str, what: &str) -> Result<Vec<u8>, String> {
 /// launch economics and the funding of the exact signed parameters, as a
 /// preflight record comparable with the imported DRY baseline.
 pub(crate) fn run_current_preflight(
+    launcher: Address,
+    buyer: Address,
+    gas_price: u64,
+    launch_gas_limit: u64,
+    buy_gas_limit: u64,
+    launch_value: u128,
+    buy_value: u64,
+) -> Result<Record, String> {
+    preflight_with(
+        &mut |method, params| rpc(method, params),
+        launcher,
+        buyer,
+        gas_price,
+        launch_gas_limit,
+        buy_gas_limit,
+        launch_value,
+        buy_value,
+    )
+}
+
+/// [`run_current_preflight`] over a transport. Every state read (code,
+/// calls, the implementation slot, balances) is pinned to one block by its
+/// EIP-1898 hash with `requireCanonical`; only the nonces are read at
+/// "pending". An unsupported hash parameter, a non-canonical block or a
+/// reorg of the pinned block before the last read fails; nothing falls
+/// back to "latest".
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn preflight_with(
+    rpc: Rpc<'_>,
     launcher: Address,
     buyer: Address,
     gas_price: u64,
@@ -363,23 +401,28 @@ pub(crate) fn run_current_preflight(
     {
         return Err("planned preflight parameters exceed the frozen v2 ceilings".into());
     }
-    let chain = rpc_u64("eth_chainId", "[]")?;
+    let chain = rpc("eth_chainId", "[]")
+        .and_then(|v| wire_quantity(&v, "eth_chainId"))
+        .and_then(|q| small(q, "eth_chainId"))?;
     if chain != CHAIN_ID {
         return Err(format!("wrong chain: expected {CHAIN_ID}, got {chain}"));
     }
-    let (block_number, block_hash) = latest_block()?;
-    let portal_code = code_at(PORTAL, "portal")?;
-    let impl_code = code_at(TAX_V3_IMPL_EXPECTED, "tax-v3 implementation")?;
-    let network_gas_price = rpc_quantity("eth_gasPrice", "[]")?;
-    let portal_version = decode_abi_string(&eth_call(PORTAL, VERSION_SELECTOR)?)?;
-    let slot = rpc_data(
+    let (block_number, block_hash) = block_at(rpc, "latest")?;
+    let at = pinned(&block_hash);
+    let portal_code = code_at(rpc, &at, PORTAL, "portal")?;
+    let impl_code = code_at(rpc, &at, TAX_V3_IMPL_EXPECTED, "tax-v3 implementation")?;
+    let network_gas_price =
+        rpc("eth_gasPrice", "[]").and_then(|v| wire_quantity(&v, "eth_gasPrice"))?;
+    let portal_version = decode_abi_string(&eth_call(rpc, &at, PORTAL, VERSION_SELECTOR)?)?;
+    let slot = rpc(
         "eth_getStorageAt",
         &format!(
-            r#"[{},{},"latest"]"#,
+            "[{},{},{at}]",
             wire_string(PORTAL),
             wire_string(EIP1967_IMPLEMENTATION_SLOT)
         ),
-    )?;
+    )
+    .and_then(|v| wire_data(&v, "eth_getStorageAt"))?;
     if slot.len() != 32 {
         return Err("invalid EIP-1967 implementation slot".into());
     }
@@ -387,27 +430,47 @@ pub(crate) fn run_current_preflight(
     if portal_impl == Address::ZERO {
         return Err("portal implementation slot is zero".into());
     }
-    let portal_impl_code = code_at(&portal_impl.to_string(), "portal implementation")?;
+    let portal_impl_code = code_at(rpc, &at, &portal_impl.to_string(), "portal implementation")?;
     let quote = abi_words(
         &eth_call(
+            rpc,
+            &at,
             PORTAL,
             &format!("{GET_QUOTE_CONFIG_SELECTOR}{}", "0".repeat(64)),
         )?,
         5,
     )?;
-    let fees = abi_words(&eth_call(PORTAL, GET_FEE_RATE_SELECTOR)?, 2)?;
-    let tax = abi_words(&eth_call(PORTAL, TAX_ON_BC_SELECTOR)?, 1)?;
+    let fees = abi_words(&eth_call(rpc, &at, PORTAL, GET_FEE_RATE_SELECTOR)?, 2)?;
+    let tax = abi_words(&eth_call(rpc, &at, PORTAL, TAX_ON_BC_SELECTOR)?, 1)?;
     if quote[0] != U256::from(1u64) {
         return Err("native BNB quote token is not enabled".into());
     }
     if fees.iter().any(|bps| *bps >= U256::from(10_000u64)) {
         return Err("invalid protocol fee bps".into());
     }
-    let account = |who: Address| -> Result<(u64, U256), String> {
-        Ok((rpc_pending_nonce(who)?, rpc_balance(who)?))
+    // Nonces stay separate at "pending"; balances belong to the pinned block.
+    let mut account = |who: Address| -> Result<(u64, U256), String> {
+        let address = wire_string(&who.to_string());
+        let nonce = rpc(
+            "eth_getTransactionCount",
+            &format!(r#"[{address},"pending"]"#),
+        )
+        .and_then(|v| wire_quantity(&v, "eth_getTransactionCount"))
+        .and_then(|q| small(q, "eth_getTransactionCount"))?;
+        let balance = rpc("eth_getBalance", &format!("[{address},{at}]"))
+            .and_then(|v| wire_quantity(&v, "eth_getBalance"))?;
+        Ok((nonce, balance))
     };
     let (launcher_nonce, launcher_balance) = account(launcher)?;
     let (buyer_nonce, buyer_balance) = account(buyer)?;
+    // Every pinned read is of one canonical block: still the block at its
+    // height after the last read, or the reads straddled a reorg.
+    let (_, still) = block_at(rpc, &format!("0x{block_number:x}"))?;
+    if still != block_hash {
+        return Err(
+            "the pinned preflight block left the canonical chain during the reads (reorg)".into(),
+        );
+    }
 
     let launcher_required =
         U256::from(launch_value) + U256::from(launch_gas_limit) * U256::from(gas_price);
@@ -1053,5 +1116,167 @@ mod tests {
             .map(|l| l.split('=').next().unwrap_or("").to_string())
             .collect();
         assert!(vars.iter().all(|k| k == "PATH"), "{vars:?}");
+    }
+
+    /// A fake node: the preflight's answers at one canonical block, with
+    /// optional faults; records every (method, params).
+    struct FakeNode {
+        calls: Vec<(String, String)>,
+        hash: [u8; 32],
+        hash_after: [u8; 32],
+        refuse_block_hash: bool,
+        behind: bool,
+    }
+
+    impl FakeNode {
+        fn new() -> Self {
+            Self {
+                calls: Vec::new(),
+                hash: [0xab; 32],
+                hash_after: [0xab; 32],
+                refuse_block_hash: false,
+                behind: false,
+            }
+        }
+
+        fn answer(&mut self, method: &str, params: &str) -> Result<serde_json::Value, String> {
+            use serde_json::json;
+            self.calls.push((method.into(), params.into()));
+            if self.refuse_block_hash && params.contains("blockHash") {
+                return Err("JSON-RPC: invalid argument 1: hex string has length 0, want 64 for common.Hash".into());
+            }
+            // A backend behind the pinned block knows neither it nor its state.
+            if self.behind && (params.contains("blockHash") || params.contains("0x10")) {
+                return Ok(serde_json::Value::Null);
+            }
+            let word = |n: u64| format!("{n:064x}");
+            Ok(match method {
+                "eth_chainId" => json!("0x38"),
+                "eth_gasPrice" => json!("0x2faf080"),
+                "eth_getBlockByNumber" if params.contains("latest") => {
+                    json!({"number": "0x10", "hash": format!("0x{}", hex::encode(self.hash))})
+                }
+                "eth_getBlockByNumber" => {
+                    json!({"number": "0x10", "hash": format!("0x{}", hex::encode(self.hash_after))})
+                }
+                "eth_getCode" => json!("0x6000"),
+                "eth_getStorageAt" => json!(format!(
+                    "0x{}{}",
+                    "0".repeat(24),
+                    "7a94f37b61a82c395f9812cf266b444783cc5e8c"
+                )),
+                "eth_getBalance" => json!("0x1"),
+                "eth_getTransactionCount" => json!("0x0"),
+                "eth_call" if params.contains(VERSION_SELECTOR) => {
+                    json!(format!(
+                        "0x{}{}{}",
+                        word(32),
+                        word(7),
+                        format!("{:0<64}", hex::encode("v5.26.0"))
+                    ))
+                }
+                "eth_call" if params.contains(GET_QUOTE_CONFIG_SELECTOR) => {
+                    json!(format!(
+                        "0x{}{}{}{}{}",
+                        word(1),
+                        word(20),
+                        word(20),
+                        word(0),
+                        word(0)
+                    ))
+                }
+                "eth_call" if params.contains(GET_FEE_RATE_SELECTOR) => {
+                    json!(format!("0x{}{}", word(100), word(100)))
+                }
+                "eth_call" if params.contains(TAX_ON_BC_SELECTOR) => {
+                    json!(format!("0x{}", word(1)))
+                }
+                other => return Err(format!("unexpected {other}")),
+            })
+        }
+    }
+
+    fn run(node: &mut FakeNode) -> Result<Record, String> {
+        let wallet = |b: u8| Address::repeat_byte(b);
+        preflight_with(
+            &mut |m, p| node.answer(m, p),
+            wallet(1),
+            wallet(2),
+            50_000_000,
+            6_603_270,
+            3_000_000,
+            0,
+            1_000_000_000_000,
+        )
+    }
+
+    #[test]
+    fn every_preflight_state_read_is_pinned_to_one_canonical_block() {
+        let mut node = FakeNode::new();
+        let record = run(&mut node).unwrap();
+        let pin = format!(
+            r#"{{"blockHash":"0x{}","requireCanonical":true}}"#,
+            "ab".repeat(32)
+        );
+        let pinned: Vec<_> = node
+            .calls
+            .iter()
+            .filter(|(_, p)| p.contains(&pin))
+            .map(|(m, _)| m.as_str())
+            .collect();
+        assert_eq!(pinned.len(), 10, "{pinned:?}");
+        assert_eq!(pinned.iter().filter(|m| **m == "eth_getCode").count(), 3);
+        assert_eq!(pinned.iter().filter(|m| **m == "eth_call").count(), 4);
+        assert_eq!(pinned.iter().filter(|m| **m == "eth_getBalance").count(), 2);
+        for (method, params) in &node.calls {
+            let state = [
+                "eth_getCode",
+                "eth_call",
+                "eth_getStorageAt",
+                "eth_getBalance",
+            ]
+            .contains(&method.as_str());
+            assert!(
+                !state || !params.contains("latest"),
+                "{method} unpinned: {params}"
+            );
+            if method == "eth_getTransactionCount" {
+                assert!(params.contains("pending") && !params.contains("blockHash"));
+            }
+        }
+        assert_eq!(
+            record
+                .u64(schema::g06a::preflight::LATEST_BLOCK_NUMBER)
+                .unwrap(),
+            16
+        );
+        assert_eq!(
+            record
+                .text(schema::g06a::preflight::PORTAL_VERSION)
+                .unwrap(),
+            "v5.26.0"
+        );
+    }
+
+    #[test]
+    fn an_unsupported_hash_parameter_or_a_reorg_fails_without_a_latest_fallback() {
+        let mut node = FakeNode::new();
+        node.refuse_block_hash = true;
+        assert!(run(&mut node).unwrap_err().contains("common.Hash"));
+        assert!(
+            !node
+                .calls
+                .iter()
+                .any(|(m, p)| m == "eth_getCode" && p.contains("latest"))
+        );
+        // Another load-balanced head answers the closing check: a reorg of
+        // the pinned height during the reads.
+        let mut node = FakeNode::new();
+        node.hash_after = [0xcd; 32];
+        assert!(run(&mut node).unwrap_err().contains("reorg"));
+        // A stale backend without the pinned block answers null: no state.
+        let mut node = FakeNode::new();
+        node.behind = true;
+        assert!(run(&mut node).is_err());
     }
 }

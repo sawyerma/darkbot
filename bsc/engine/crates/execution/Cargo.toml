@@ -35,7 +35,9 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 # and the strictly separate g07 binary. Never enabled by the production build.
 # serde_json only decodes external JSON-RPC responses at the transport
 # boundary into typed values; nothing internal is JSON.
-g07-mainnet = ["acceptance-guard", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
+# JSON-RPC over curl with the endpoint and request on stdin, never argv.
+rpc-wire = []
+g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.

@@ -386,29 +386,19 @@ mod wire {
         if let Some(path) = env::var_os("PATH") {
             curl.env("PATH", path);
         }
-        let out = curl
-            .args([
-                "-q",
-                "--connect-timeout",
-                "2",
-                "--max-time",
-                "5",
-                "-sS",
-                &url,
-                "-H",
-                "Content-Type: application/json",
-                "--data",
-                &body,
-            ])
-            .output()
-            .map_err(|e| format!("execute curl: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "curl {method}: transport failure (exit {:?})",
-                out.status.code()
-            ));
-        }
-        response(method, &out.stdout)
+        // URL and request reach curl on stdin, never on its argv (C4).
+        let out = darkbot_bsc_execution::rpc_wire::post(
+            curl,
+            &url,
+            &body,
+            darkbot_bsc_execution::rpc_wire::Limits {
+                connect_timeout_s: 2,
+                max_time_s: 5,
+                compressed: false,
+            },
+        )
+        .map_err(|_| format!("curl {method}: transport failure"))?;
+        response(method, &out)
     }
 
     fn response(method: &str, bytes: &[u8]) -> Result<Json, String> {

@@ -28,6 +28,11 @@ pub mod acceptance_contract;
 #[cfg(feature = "acceptance-guard")]
 pub mod acceptance_guard;
 
+/// JSON-RPC over curl with endpoint and request on stdin, never on argv.
+/// Built only with the `rpc-wire` feature (G0.7, R0 and G0.8 tools).
+#[cfg(feature = "rpc-wire")]
+pub mod rpc_wire;
+
 /// G0.7 bounded qualification capture (adapter over `darkbot-bsc-journal`).
 /// Built only with the `g07-mainnet` feature.
 #[cfg(feature = "g07-mainnet")]

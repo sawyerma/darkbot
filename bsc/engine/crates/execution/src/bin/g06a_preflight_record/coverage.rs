@@ -424,28 +424,18 @@ pub(crate) mod wire {
     use super::*;
 
     fn post(url: &str, body: &str) -> Result<serde_json::Value, String> {
-        // -q first: no .curlrc, whatever the environment.
-        let out = child_command("curl")
-            .args([
-                "-q",
-                "--compressed",
-                "--connect-timeout",
-                "5",
-                "--max-time",
-                "30",
-                "-sS",
-                url,
-                "-H",
-                "Content-Type: application/json",
-                "--data-binary",
-                body,
-            ])
-            .output()
-            .map_err(|e| format!("execute curl: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("curl: {}", String::from_utf8_lossy(&out.stderr)));
-        }
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("invalid JSON-RPC response: {e}"))
+        // URL and request reach curl on stdin, never on its argv (C4).
+        let out = darkbot_bsc_execution::rpc_wire::post(
+            child_command("curl"),
+            url,
+            body,
+            darkbot_bsc_execution::rpc_wire::Limits {
+                connect_timeout_s: 5,
+                max_time_s: 30,
+                compressed: true,
+            },
+        )?;
+        serde_json::from_slice(&out).map_err(|e| format!("invalid JSON-RPC response: {e}"))
     }
 
     fn result(v: serde_json::Value, what: &str) -> Result<serde_json::Value, String> {

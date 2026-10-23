@@ -243,7 +243,15 @@ fn nothing_after_the_release_can_panic() {
     for forbidden in PANICKING {
         assert!(!rpc.contains(forbidden), "{forbidden} in rpc");
     }
-    assert!(rpc.contains("\"--max-time\""));
+    // The bounded transport lives in rpc_wire::post (URL and request on
+    // stdin, C4); it must not panic either and keeps curl's whole-call bound.
+    assert!(rpc.contains("rpc_wire::post(") && rpc.contains("max_time_s: 5"));
+    let wire = include_str!("../src/rpc_wire.rs");
+    let post = &wire[wire.find("pub fn post(").unwrap()..wire.find("#[cfg(test)]").unwrap()];
+    for forbidden in PANICKING {
+        assert!(!post.contains(forbidden), "{forbidden} in rpc_wire::post");
+    }
+    assert!(post.contains("\"--max-time\""));
     assert!(after.contains("panicked_provider_result(\"48Club/Puissant\")"));
     assert!(after.contains("panicked_provider_result(\"BlockRazor\")"));
     // Evidence right after the release (before the joins), after the send
