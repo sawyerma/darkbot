@@ -12,7 +12,7 @@ impl ShadowOwner {
         if let Some(ev) = self.consumer.try_pop() {
             return Some(ev);
         }
-        if self.remote_pending() || self.stop_pending() {
+        if self.remote_pending() || self.stop_pending() || self.sources.pending() {
             return None;
         }
         // Deadlines that end the wait without an event: the open sweep batch's age bound
@@ -41,6 +41,8 @@ impl ShadowOwner {
         fetch: &mut impl FnMut() -> Result<SnapshotData, String>,
         ingress: &IngressSessions,
     ) -> Result<OwnerStep<Option<DetectWork>>, Box<dyn std::error::Error>> {
+        // S1-02: control changes and observed (never applied) source events first.
+        self.sources_step(ingress)?;
         self.mt0_owner.enter(darkbot_common::mt0::OwnerCat::Wait);
         #[cfg(feature = "crate_health")]
         let queued_detection_available = !self.detect_queue.is_empty()
@@ -811,20 +813,6 @@ impl ShadowOwner {
                     if let Ok(mut g) = self.opt_shared.lock() {
                         *g = self.optional_dependency_keys.clone();
                     }
-                    let mut all_keys: Vec<Pubkey> = self.subscribed.iter().copied().collect();
-                    all_keys.sort_unstable_by_key(|k| k.to_bytes());
-                    let sub2 = Subscription {
-                        programs: vec![],
-                        program_filters: vec![
-                            (self.program, liability_account_filters(&self.group)),
-                            (self.program, bank_filters(&self.group)),
-                        ],
-                        accounts: all_keys,
-                        slots: true,
-                        roots: true,
-                        transactions_mentioning: vec![],
-                        logs_mentioning: vec![],
-                    };
                     let generation = self.ingress_session.generation.saturating_add(1);
                     owner_log!(
                         self,
@@ -833,12 +821,11 @@ impl ShadowOwner {
                         queued,
                         generation
                     );
-                    self.ingress_session = ingress.spawn(
-                        sub2,
-                        self.producer.clone(),
-                        self.halt.clone(),
-                        generation,
-                    )?;
+                    // S1-02: the canonical unit's next generation (WSS or an ACTIVE Geyser unit);
+                    // without one the state stays halted.
+                    if let Some(session) = self.spawn_canonical(ingress)? {
+                        self.ingress_session = session;
+                    }
                 }
             }
             #[cfg(feature = "crate_health")]

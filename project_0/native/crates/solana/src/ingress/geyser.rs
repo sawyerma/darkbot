@@ -1075,26 +1075,26 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
                 Err(StreamError::Retryable(_)) => continue,
             };
             let t = self.clock.now_ns();
-            if attempt > 1 {
-                let reconnected = IngressEvent::Reconnected {
+            // StreamReady after every connect (the WSS contract: the owner's recovery starts on
+            // it); a reconnect without proven replay also opens a gap.
+            let ready = IngressEvent::Reconnected {
+                source: SourceKind::Geyser,
+                attempt,
+                t_rx_ns: t,
+            };
+            if !deliver(&sink, &halt, &slots, mapper.max_slot, ready, t)? {
+                return Ok(());
+            }
+            if attempt > 1 && !self.config.replay_from_slot {
+                // No proven replay: everything since the last slot must be recovered.
+                let gap = IngressEvent::Gap {
                     source: SourceKind::Geyser,
-                    attempt,
+                    from_slot: mapper.max_slot,
+                    to_slot: None,
                     t_rx_ns: t,
                 };
-                if !deliver(&sink, &halt, &slots, mapper.max_slot, reconnected, t)? {
+                if !deliver(&sink, &halt, &slots, mapper.max_slot, gap, t)? {
                     return Ok(());
-                }
-                if !self.config.replay_from_slot {
-                    // No proven replay: everything since the last slot must be recovered.
-                    let gap = IngressEvent::Gap {
-                        source: SourceKind::Geyser,
-                        from_slot: mapper.max_slot,
-                        to_slot: None,
-                        t_rx_ns: t,
-                    };
-                    if !deliver(&sink, &halt, &slots, mapper.max_slot, gap, t)? {
-                        return Ok(());
-                    }
                 }
             }
             let mut frames = FrameDecoder::new(self.config.max_message_bytes);

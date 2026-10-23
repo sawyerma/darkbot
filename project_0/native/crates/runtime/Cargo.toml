@@ -43,6 +43,8 @@ juplend-mocks = { git = "https://github.com/0dotxyz/marginfi-v2", tag = "mrgn-0.
 [dev-dependencies]
 # R1: loopback WebSocket peer for the capture end-to-end test (same version the WSS adapter uses).
 tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"] }
+# S1-02: the loopback gRPC server of the owner's source E2E tests.
+darkbot-solana = { path = "../solana", features = ["test-support"] }
 
 [[bin]]
 name = "p0-longtail"

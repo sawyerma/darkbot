@@ -104,6 +104,21 @@ impl Payload for OwnerDiagnostic {
     const KIND: u16 = journal::kind::OWNER_DIAGNOSTIC;
 }
 
+/// S1-02: one operator request to change a source unit's control (`p0ctl source set`). The
+/// runtime's control thread validates it; only the state owner applies it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceControlRequest {
+    pub seq: u64,
+    /// `wss` or `geyser:<provider>`.
+    pub unit: String,
+    /// `off`, `observe` or `active`.
+    pub mode: String,
+    pub requested_unix_s: u64,
+}
+impl Payload for SourceControlRequest {
+    const KIND: u16 = journal::kind::SOURCE_CONTROL_REQUEST;
+}
+
 /// C0 census row: one debtor (or undecodable member) of the configured group, evaluated against
 /// one canonical state view and chain clock; `class` under the result frame's model.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -229,6 +244,7 @@ macro_rules! typed_kinds {
             }
             k::OWNER_SUMMARY => $f::<super::shadow_ledger::DaySummary>($kind, $schema, $bytes),
             k::OWNER_RECOVERY => $f::<super::evidence::OwnerRecovery>($kind, $schema, $bytes),
+            k::SOURCE_CONTROL_REQUEST => $f::<SourceControlRequest>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_RESULT => $f::<C0CensusResult>($kind, $schema, $bytes),
             k::MARKET_TRANSACTION => $f::<market::MarketTransaction>($kind, $schema, $bytes),

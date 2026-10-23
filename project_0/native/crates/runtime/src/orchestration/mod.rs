@@ -8,6 +8,7 @@ pub mod fe_freeze;
 pub mod fe_qualification;
 pub mod provider_evidence;
 pub mod remote_workers;
+pub mod source_control;
 #[cfg(feature = "crate_health")]
 mod startup;
 #[cfg(feature = "crate_health")]

@@ -482,7 +482,7 @@ fn a23_04_lead_telemetry_is_bounded_with_evicted_evidence() {
 }
 
 /// Health never hides a gap: a gap or reconnect stays visible through later data until an
-/// explicit recovery; a fatal source stays unhealthy.
+/// explicit recovery; a fatal source stays unhealthy; the first StreamReady is no reconnect.
 #[test]
 fn health_never_hides_a_gap() {
     let mut h = SourceHealth::default();
@@ -496,7 +496,12 @@ fn health_never_hides_a_gap() {
         })
     };
     h.observe(&slot(1));
-    assert!(h.healthy());
+    h.observe(&IngressEvent::Reconnected {
+        source: SourceKind::Geyser,
+        attempt: 1,
+        t_rx_ns: 1,
+    });
+    assert!(h.healthy(), "the first StreamReady is no reconnect");
     h.observe(&IngressEvent::Gap {
         source: SourceKind::Geyser,
         from_slot: Some(1),

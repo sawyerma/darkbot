@@ -367,6 +367,10 @@ fn owner_thread_sources_have_no_json_io_env_or_blocking_logging() {
             include_str!("../orchestration/state_owner/shutdown.rs"),
         ),
         (
+            "sources.rs",
+            include_str!("../orchestration/state_owner/sources.rs"),
+        ),
+        (
             "sweep.rs",
             include_str!("../orchestration/state_owner/sweep.rs"),
         ),

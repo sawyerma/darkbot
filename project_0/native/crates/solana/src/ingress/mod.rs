@@ -6,6 +6,8 @@
 
 pub mod geyser;
 pub mod geyser_grpc;
+#[cfg(any(test, feature = "test-support"))]
+pub mod geyser_loopback;
 pub mod sources;
 pub mod ws_rpc;
 

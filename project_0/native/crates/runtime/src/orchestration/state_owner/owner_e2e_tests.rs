@@ -159,6 +159,21 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         producer: producer.clone(),
         consumer,
         wake: wake.clone(),
+        sources: sources::OwnerSources::new(
+            darkbot_solana::ingress::sources::SourceArbiter::new(&[
+                crate::orchestration::source_control::control_of(
+                    darkbot_solana::ingress::sources::SourceUnit::WsRpcControl,
+                    darkbot_solana::ingress::sources::OperatingMode::Active,
+                )
+                .unwrap(),
+            ])
+            .unwrap(),
+            None,
+            Box::new(|_, _, _, _, _, _, _| Err("A23_NO_SOURCE".to_string())),
+            64,
+            &wake,
+            None,
+        ),
         program_data,
         program_data_baseline_hash: hash(&program_data_account.data),
         program_data_executable: false,
@@ -1067,6 +1082,16 @@ fn result_worker(
 /// reachable without an event.
 fn run_until(f: &mut Fixture, done: impl Fn(&ShadowOwner) -> bool) -> Duration {
     let mut fetch = || -> Result<SnapshotData, String> { Err("A23_NO_FETCH".into()) };
+    run_until_with(f, &mut fetch, done)
+}
+
+/// `run_until` with a snapshot fetch for the owner's recovery.
+fn run_until_with(
+    f: &mut Fixture,
+    fetch: &mut dyn FnMut() -> Result<SnapshotData, String>,
+    done: impl Fn(&ShadowOwner) -> bool,
+) -> Duration {
+    let mut fetch = || fetch();
     let t = std::time::Instant::now();
     loop {
         f.owner.remote_apply().unwrap();
@@ -1323,4 +1348,266 @@ fn a23_01_open_sweep_batch_bounds_the_idle_wait_by_its_age() {
         "the 5-ms batch age ends the wait: {batch:?}"
     );
     cleanup(f);
+}
+
+type ControlTx =
+    darkbot_common::channel::Producer<crate::orchestration::source_control::ControlMessage>;
+type LoopbackSeen = Arc<Mutex<darkbot_solana::ingress::geyser_loopback::Seen>>;
+
+fn loopback_unit() -> darkbot_solana::ingress::sources::SourceUnit {
+    darkbot_solana::ingress::sources::SourceUnit::BinaryGeyser {
+        provider: "loopback".into(),
+    }
+}
+
+/// S1-02: the owner's sources with the Geyser unit `geyser:loopback` in `mode` against a
+/// loopback gRPC server (one write of a new account at slot 50 and a processed slot, then an
+/// open, pinging stream); the owner's control queue, the server log and the account.
+fn with_loopback_geyser(
+    f: &mut Fixture,
+    mode: darkbot_solana::ingress::sources::OperatingMode,
+) -> (ControlTx, LoopbackSeen, Pubkey) {
+    use darkbot_solana::ingress::geyser::{frame, proto, BinaryGeyserSource, GeyserConfig};
+    use darkbot_solana::ingress::geyser_grpc::GrpcTransport;
+    use darkbot_solana::ingress::geyser_loopback::{serve, Reply};
+    use darkbot_solana::ingress::sources::{Qualification, SourceArbiter, SourceControl};
+    use proto::subscribe_update::UpdateOneof as U;
+    let k = Pubkey::new_unique();
+    let account = frame(&proto::SubscribeUpdate {
+        filters: vec![],
+        update_oneof: Some(U::Account(proto::SubscribeUpdateAccount {
+            account: Some(proto::SubscribeUpdateAccountInfo {
+                pubkey: k.to_bytes().to_vec(),
+                lamports: 1,
+                owner: f.owner.program.to_bytes().to_vec(),
+                data: vec![1; 8],
+                write_version: 1,
+                ..Default::default()
+            }),
+            slot: 50,
+            is_startup: false,
+            bank_id: None,
+        })),
+    });
+    let slot = frame(&proto::SubscribeUpdate {
+        filters: vec![],
+        update_oneof: Some(U::Slot(proto::SubscribeUpdateSlot {
+            slot: 50,
+            parent: Some(49),
+            status: proto::SlotStatus::SlotProcessed as i32,
+            dead_error: None,
+            bank_id: None,
+        })),
+    });
+    let (url, seen) = serve(Reply::Hold(vec![account, slot]));
+    let clock = f.owner.clock;
+    let spawn: sources::GeyserSpawner =
+        Box::new(move |_control, sub, sink, stop, halt, slots, _canonical| {
+            let transport =
+                GrpcTransport::new(&url, None, Duration::from_secs(2), Duration::from_secs(2))
+                    .map_err(|_| "LOOPBACK_TRANSPORT".to_string())?;
+            let src = BinaryGeyserSource {
+                config: GeyserConfig {
+                    endpoint: url.clone(),
+                    token_env: "",
+                    commitment: proto::CommitmentLevel::Processed,
+                    max_message_bytes: 1 << 20,
+                    max_reconnects: 0,
+                    replay_from_slot: false,
+                },
+                subscription: sub,
+                transport,
+                clock,
+            };
+            Ok(std::thread::spawn(move || {
+                ingress::run_ingress(src, sink, stop, halt, slots, None)
+            }))
+        });
+    let arbiter = SourceArbiter::new(&[
+        crate::orchestration::source_control::control_of(
+            darkbot_solana::ingress::sources::SourceUnit::WsRpcControl,
+            darkbot_solana::ingress::sources::OperatingMode::Active,
+        )
+        .unwrap(),
+        SourceControl::new(loopback_unit(), mode, Qualification::NotRun).unwrap(),
+    ])
+    .unwrap();
+    let (tx, rx) = bounded("source-control", 8);
+    let tx = tx.with_wakeup(&f.owner.wake);
+    f.owner.sources = sources::OwnerSources::new(
+        arbiter,
+        Some(loopback_unit()),
+        spawn,
+        64,
+        &f.owner.wake,
+        Some(rx),
+    );
+    f.owner.start_sources().unwrap();
+    (tx, seen, k)
+}
+
+/// S1-02 OFF / OBSERVE through the real gRPC transport (loopback): OFF constructs and connects
+/// nothing; OBSERVE connects once with the owner's subscription and is measured (StreamReady,
+/// account, slot; healthy) — its write never reaches state, nothing enters the canonical queue,
+/// the owner's halt stays down.
+#[test]
+fn s1_02_geyser_off_connects_nothing_and_observe_never_feeds_state() {
+    use darkbot_solana::ingress::sources::OperatingMode;
+    let mut f = fixture("s102_off");
+    let (_control, seen, _) = with_loopback_geyser(&mut f, OperatingMode::Off);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(seen.lock().unwrap().calls, 0, "OFF never connects");
+    assert!(f
+        .owner
+        .sources
+        .line()
+        .contains("canonical=wss observing=none"));
+    cleanup(f);
+    let mut f = fixture("s102_observe");
+    let (_control, seen, k) = with_loopback_geyser(&mut f, OperatingMode::Observe);
+    run_until(&mut f, |o| o.sources.stats.observed >= 3);
+    {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.calls, 1);
+        let request = seen.request.as_ref().unwrap();
+        assert!(!request.accounts.is_empty(), "the owner's program filters");
+    }
+    assert!(
+        f.owner.st.get(&k).is_none(),
+        "an observed write never reaches state"
+    );
+    assert_eq!(
+        f.owner.consumer.stats().sent,
+        0,
+        "nothing in the canonical queue"
+    );
+    assert!(f.owner.sources.health.healthy());
+    assert_eq!(f.owner.sources.health.last_slot, Some(50));
+    assert!(!f.owner.halt.is_raised());
+    assert!(f.owner.sources.line().contains("observing=geyser:loopback"));
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// S1-02 runtime control through the owner's control queue (as `p0ctl source set` delivers it):
+/// OBSERVE→OFF ends the session; ACTIVE beside the canonical WSS unit is refused without any
+/// change; WSS OFF revokes canonical authority (halted, no canonical unit — no feed alone lets
+/// trading run); Geyser ACTIVE (a test-only qualification; production refuses ACTIVE) starts a
+/// new canonical generation that trades only after its StreamReady drove a recovery, and its
+/// write reaches state; a revoked qualification halts at once.
+#[test]
+fn s1_02_runtime_control_toggles_and_hands_canonical_authority_over() {
+    use crate::orchestration::source_control::{control_of, ControlMessage};
+    use darkbot_solana::ingress::sources::{
+        OperatingMode, Qualification, SourceControl, SourceUnit,
+    };
+    let mut f = fixture("s102_handoff");
+    let (control, seen, k) = with_loopback_geyser(&mut f, OperatingMode::Observe);
+    let good = snapshot(&f, false);
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: good.slot,
+            accounts: good.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.st.run_state().is_tradable() && o.sources.stats.observed >= 3
+    });
+    assert!(f.owner.st.get(&k).is_none());
+    let apply = |seq, control| ControlMessage::Apply { seq, control };
+    let test_active = || {
+        SourceControl::new(
+            loopback_unit(),
+            OperatingMode::Active,
+            Qualification::Qualified {
+                evidence: "TEST_ONLY_LOOPBACK".into(),
+            },
+        )
+        .unwrap()
+    };
+    assert!(control
+        .try_push(apply(
+            1,
+            control_of(loopback_unit(), OperatingMode::Off).unwrap()
+        ))
+        .is_ok());
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.sources.stats.controls_applied == 1
+    });
+    assert!(f.owner.sources.line().contains("observing=none"));
+    assert!(control.try_push(apply(2, test_active())).is_ok());
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.sources.stats.controls_refused == 1
+    });
+    assert!(f.owner.sources.line().contains("canonical=wss"));
+    assert!(f.owner.st.run_state().is_tradable());
+    assert!(control
+        .try_push(apply(
+            3,
+            control_of(SourceUnit::WsRpcControl, OperatingMode::Off).unwrap()
+        ))
+        .is_ok());
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.sources.stats.controls_applied == 2
+    });
+    assert!(!f.owner.st.run_state().is_tradable());
+    assert!(f.owner.sources.line().contains("canonical=none"));
+    let generation = f.owner.ingress_session.generation;
+    assert!(control.try_push(apply(4, test_active())).is_ok());
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.sources.stats.controls_applied == 3
+    });
+    assert_eq!(f.owner.ingress_session.generation, generation + 1);
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.st.run_state().is_tradable() && o.st.get(&k).is_some()
+    });
+    assert_eq!(f.owner.st.get(&k).unwrap().source, SourceKind::Geyser);
+    assert!(f.owner.sources.line().contains("canonical=geyser:loopback"));
+    assert_eq!(
+        seen.lock().unwrap().calls,
+        2,
+        "the observer, then the canonical session"
+    );
+    let revoked = SourceControl {
+        unit: loopback_unit(),
+        mode: OperatingMode::Active,
+        qualification: Qualification::Blocked("QUALIFICATION_REVOKED"),
+    };
+    assert!(control.try_push(apply(5, revoked)).is_ok());
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.sources.stats.controls_applied == 4
+    });
+    assert!(!f.owner.st.run_state().is_tradable());
+    assert!(f.owner.halt.is_raised());
+    assert!(f.owner.sources.line().contains("canonical=none"));
+    // Journaled order: trading resumed after the grant only through a recovery.
+    use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut lines = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == OwnerDiagnostic::KIND {
+            let d: OwnerDiagnostic = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            lines.push(d.line);
+        }
+    }
+    let at = |p: &str| lines.iter().position(|l| l.starts_with(p)).unwrap();
+    let (granted, revoked) = (
+        at("source_control: applied seq=4"),
+        at("source_control: applied seq=5"),
+    );
+    assert!(lines[granted].contains("canonical_granted_recovery_required"));
+    assert!(lines[revoked].contains("canonical_revoked"));
+    assert!(
+        lines[granted..revoked]
+            .iter()
+            .any(|l| l.starts_with("recovery: Ready")),
+        "{lines:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

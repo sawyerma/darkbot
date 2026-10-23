@@ -709,9 +709,9 @@ fn drain(rx: &darkbot_common::channel::Consumer<IngressEvent>) -> Vec<IngressEve
 }
 
 /// S1-08 offline source: frames split across chunks are delivered in order; a server ping gets a
-/// pong; a stream end reconnects with `Reconnected` and, without proven replay, a `Gap` from the
-/// last slot; exhausted reconnects end `Fatal` with the halt raised. PublicNode is configured,
-/// never connected.
+/// pong; every connect reports StreamReady (`Reconnected`), a reconnect without proven replay
+/// also a `Gap` from the last slot; exhausted reconnects end `Fatal` with the halt raised.
+/// PublicNode is configured, never connected.
 #[test]
 fn source_reconnects_with_gap_answers_pings_and_fails_closed() {
     use proto::SlotStatus as P;
@@ -752,6 +752,7 @@ fn source_reconnects_with_gap_answers_pings_and_fails_closed() {
     assert_eq!(
         kinds,
         [
+            "reconnected",
             "account",
             "slot",
             "root",
@@ -762,7 +763,11 @@ fn source_reconnects_with_gap_answers_pings_and_fails_closed() {
         ]
     );
     assert!(matches!(
-        events[4],
+        events[0],
+        IngressEvent::Reconnected { attempt: 1, .. }
+    ));
+    assert!(matches!(
+        events[5],
         IngressEvent::Gap {
             from_slot: Some(30),
             to_slot: None,

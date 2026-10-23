@@ -84,6 +84,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mode = config::require("P0_MODE")?;
     let _owner = match std::env::var_os("P0_RUNTIME_LOCK") {
         Some(path) => {
+            // S1-02: `p0ctl source set` signals any lock holder; the doorbell exists first.
+            super::source_control::install_signal()?;
             let run_id = ["P0_ECON_RUN_ID", "P0_MARKET_RUN_ID"]
                 .iter()
                 .find_map(|k| std::env::var(k).ok())

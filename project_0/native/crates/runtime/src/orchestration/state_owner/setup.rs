@@ -3,6 +3,82 @@ use super::*;
 
 type Prepared<F> = Result<(ShadowOwner, F, IngressSessions), Box<dyn std::error::Error>>;
 
+/// S1-02: the controlled sources. The long-tail WSS feed is the canonical baseline; one Geyser
+/// unit (`P0_SOURCE_GEYSER=off|observe`, default `off`; provider `P0_SOURCE_GEYSER_PROVIDER`,
+/// default `publicnode`) observes only: ACTIVE needs a qualification this build has none of. OFF
+/// constructs and connects nothing. The provider token is read once here, never logged. With
+/// `P0_PROJECT_DIR` the control thread serves `p0ctl source set` at runtime.
+fn configured_sources(
+    econ: Option<&crate::analytics::econ::Handle>,
+    clock: Clock,
+    wake: &darkbot_common::channel::Wakeup,
+    shutdown: &Shutdown,
+) -> Result<super::sources::OwnerSources, Box<dyn std::error::Error>> {
+    use crate::orchestration::source_control;
+    use darkbot_solana::ingress::sources::{
+        geyser_source, OperatingMode, ProviderConfig, SourceArbiter, SourceUnit,
+    };
+    let mode: OperatingMode = config::parsed_or("P0_SOURCE_GEYSER", OperatingMode::Off)?;
+    let provider_id: String =
+        config::parsed_or("P0_SOURCE_GEYSER_PROVIDER", "publicnode".to_string())?;
+    let provider = ProviderConfig::publicnode();
+    if provider_id != provider.id {
+        return Err(format!("SOURCE_PROVIDER_UNKNOWN: {provider_id}").into());
+    }
+    let unit = SourceUnit::BinaryGeyser {
+        provider: provider.id.clone(),
+    };
+    let arbiter = SourceArbiter::new(&[
+        source_control::control_of(SourceUnit::WsRpcControl, OperatingMode::Active)?,
+        source_control::control_of(unit.clone(), mode)?,
+    ])?;
+    let token_env = provider.auth.map(|a| a.token_env);
+    let token = token_env.and_then(|k| std::env::var(k).ok());
+    let failure = econ.map(|h| h.shared.clone());
+    let spawn: super::sources::GeyserSpawner =
+        Box::new(move |control, sub, sink, stop, halt, slots, canonical| {
+            let env = |k: &str| (Some(k) == token_env).then(|| token.clone()).flatten();
+            let mut src = geyser_source(control, &provider, sub, &env)
+                .map_err(|reasons| reasons.join(","))?
+                .ok_or_else(|| "SOURCE_OFF".to_string())?;
+            // One clock with the owner: T_rx stays comparable to its queue-wait measurement.
+            src.clock = clock;
+            // Only a canonical session's failure ends an econ run; an observer's is measured.
+            let failure = if canonical { failure.clone() } else { None };
+            std::thread::Builder::new()
+                .name(
+                    if canonical {
+                        "ingress-geyser"
+                    } else {
+                        "observe-geyser"
+                    }
+                    .into(),
+                )
+                .spawn(move || super::ingress::run_ingress(src, sink, stop, halt, slots, failure))
+                .map_err(|e| format!("SOURCE_THREAD: {e}"))
+        });
+    let controls = match std::env::var_os("P0_PROJECT_DIR") {
+        Some(project) => {
+            let (tx, rx) = bounded::<source_control::ControlMessage>("source-control", 8);
+            source_control::spawn(
+                source_control::request_dir(std::path::Path::new(&project)),
+                tx.with_wakeup(wake),
+                shutdown.clone(),
+            )?;
+            Some(rx)
+        }
+        None => None,
+    };
+    Ok(super::sources::OwnerSources::new(
+        arbiter,
+        Some(unit),
+        spawn,
+        4_096,
+        wake,
+        controls,
+    ))
+}
+
 pub(super) fn prepare(
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
@@ -231,6 +307,8 @@ pub(super) fn prepare(
     let subscribed: HashSet<Pubkey> = subscription_keys.iter().copied().collect();
     let required_set: HashSet<Pubkey> = required_dependency_keys.iter().copied().collect();
     let optional_set: HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
+    // Refused source controls fail the start before any session runs.
+    let sources = configured_sources(econ.as_ref(), clock, &wake, &shutdown)?;
     let ingress_session = ingress.spawn(sub.clone(), producer.clone(), halt.clone(), 1)?;
 
     // State + Recovery (Snapshot via RPC, außerhalb des Decision-Loops aufgerufen).
@@ -826,7 +904,7 @@ pub(super) fn prepare(
     let inventory_targets = crate::execution::inventory::parse_targets(
         &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
-    let owner = ShadowOwner {
+    let mut owner = ShadowOwner {
         metrics: OwnerMetrics {
             oracle_dependency_updates,
             oracle_candidate_hits,
@@ -955,6 +1033,7 @@ pub(super) fn prepare(
         producer,
         consumer,
         wake,
+        sources,
         program_data,
         program_data_baseline_hash,
         program_data_executable: program_data_account.executable,
@@ -997,6 +1076,7 @@ pub(super) fn prepare(
         threshold_ready,
         mt0_owner,
     };
+    owner.start_sources()?;
     Ok((owner, fetch, ingress))
 }
 

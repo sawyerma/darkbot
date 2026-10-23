@@ -349,7 +349,8 @@ impl SourceHealth {
                 self.gaps += 1;
                 self.gap_open = true;
             }
-            IngressEvent::Reconnected { .. } => {
+            // The first StreamReady is no reconnect; every later one needs a recovery.
+            IngressEvent::Reconnected { attempt, .. } if *attempt > 1 => {
                 self.reconnects += 1;
                 self.gap_open = true;
             }

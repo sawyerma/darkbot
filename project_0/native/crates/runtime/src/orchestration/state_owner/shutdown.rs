@@ -44,6 +44,10 @@ impl ShadowOwner {
             .projection_stats
             .line(self.projection_pending.len(), self.projection_cache.len());
         owner_log!(self, "{projection}");
+        // S1-02: the observing source ends with the owner; its measurement once.
+        let observer = self.stop_observer();
+        let sources = self.sources.line();
+        owner_log!(self, "{sources}");
         // A23-01: doorbell wakeups (signal → owner running); quantiles are bucket upper bounds.
         let w = self.metrics.owner_wakeup_ns.snapshot();
         let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
@@ -85,6 +89,7 @@ impl ShadowOwner {
         // It is reported last, so it never hides an evidence or operational failure.
         let mt0_complete = self.mt0_reporter.finish();
         evidence_result?;
+        observer?;
         if let Some(reason) = self.operational_failure.take() {
             return Err(reason.into());
         }

@@ -116,6 +116,9 @@ pub mod kind {
     pub const IMPORTABLE: &[u16] = &[C0_CENSUS_ACCOUNT, C0_CENSUS_GROUP_ACCOUNT];
     /// Owner events that could not reach the primary journal (recovery journal only).
     pub const OWNER_RECOVERY: u16 = 1000;
+    /// S1-02: one operator source-control request (`p0ctl source set`), a sealed single-value
+    /// journal `data/source-control/request_<seq>.p0j`.
+    pub const SOURCE_CONTROL_REQUEST: u16 = 1100;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -166,6 +169,7 @@ pub mod kind {
         C0_CENSUS_ROW,
         C0_CENSUS_RESULT,
         OWNER_RECOVERY,
+        SOURCE_CONTROL_REQUEST,
         super::MANIFEST,
     ];
 }
@@ -187,6 +191,8 @@ pub mod source {
     pub const STORAGE: u32 = 11;
     /// Native C0-E1 report (B7).
     pub const REPORT: u32 = 12;
+    /// S1-02 operator source control (`p0ctl source set`).
+    pub const SOURCE_CONTROL: u32 = 13;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never

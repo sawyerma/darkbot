@@ -82,6 +82,7 @@ mod remote_apply;
 mod setup;
 use ingress::{IngressSession, IngressSessions, RetiredEvents};
 mod shutdown;
+mod sources;
 mod sweep;
 mod telemetry;
 
@@ -176,6 +177,8 @@ pub(super) struct ShadowOwner {
     consumer: darkbot_common::channel::Consumer<IngressEvent>,
     /// A23-01: the one doorbell of every owner input (ingress, worker results, census, stop).
     wake: darkbot_common::channel::Wakeup,
+    /// S1-02: the controlled data sources (arbiter, observing Geyser session, control queue).
+    sources: sources::OwnerSources,
     program_data: Pubkey,
     program_data_baseline_hash: Hash,
     /// X1: `executable` of the ProgramData account as read at startup.

@@ -16,7 +16,13 @@
 //! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
+//! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
+//! p0ctl [--project DIR] source status
 //! ```
+//!
+//! `source set` (S1-02) records a typed source-control request and rings the running runtime;
+//! the state owner applies or refuses it (journal `source_control: applied|refused seq=N`). A
+//! Geyser unit can be OFF or OBSERVE; ACTIVE is refused without a qualification record.
 //!
 //! `report` runs the native report (B7) for runs with native capture records (typed run
 //! manifest and market completion); index provenance, JSON output and historical runs use the
@@ -27,6 +33,7 @@ use darkbot_runner::analytics::journal;
 use darkbot_runner::analytics::{qualification, renders, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
+use darkbot_runner::orchestration::source_control;
 use darkbot_runner::storage::preflight;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::process::CommandExt;
@@ -583,6 +590,49 @@ fn export_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
+const SOURCE_USAGE: &str =
+    "usage: p0ctl source set wss|geyser:PROVIDER off|observe|active | p0ctl source status";
+
+fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let dir = source_control::request_dir(project);
+    match args {
+        [set, unit, mode] if set == "set" => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "SOURCE_CONTROL_CLOCK")?
+                .as_secs();
+            let seq = source_control::write_request(&dir, unit, mode, now)?;
+            match control::owner_state(&lock_path(project))? {
+                OwnerState::Running { pid, run_id, .. } => {
+                    source_control::signal(pid)?;
+                    println!("[p0ctl] source request seq={seq} {unit} {mode} sent to runtime pid {pid} (run {run_id}); the owner journals `source_control: applied|refused seq={seq}`");
+                }
+                OwnerState::NotRunning { .. } => println!(
+                    "[p0ctl] source request seq={seq} {unit} {mode} recorded; no runtime is running, nothing applies it (a run starts from P0_SOURCE_GEYSER)"
+                ),
+            }
+            Ok(true)
+        }
+        [status] if status == "status" => {
+            match source_control::latest_request(&dir)? {
+                Some(r) => println!(
+                    "last source request: seq={} unit={} mode={} requested_unix_s={}",
+                    r.seq, r.unit, r.mode, r.requested_unix_s
+                ),
+                None => println!("no source request"),
+            }
+            match control::owner_state(&lock_path(project))? {
+                OwnerState::Running { pid, run_id, .. } => {
+                    println!("runtime: running pid={pid} run_id={run_id} (applied state: its journal `source_control:` / `sources:` lines)")
+                }
+                OwnerState::NotRunning { .. } => println!("runtime: not running"),
+            }
+            Ok(true)
+        }
+        _ => Err(SOURCE_USAGE.into()),
+    }
+}
+
 fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
     let e = Command::new(project.join("scripts").join(script))
         .args(args)
@@ -613,7 +663,8 @@ fn main() -> ExitCode {
             (Some("export"), _) => export_cmd(&project, &rest),
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture …".into()),
+            (Some("source"), _) => source_cmd(&project, &rest),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture|source …".into()),
         }
     });
     match result {
