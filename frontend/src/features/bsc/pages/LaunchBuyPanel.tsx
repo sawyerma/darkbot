@@ -6,7 +6,7 @@ import { selectLaunch, selectStatus, useBscStore } from "../store/bscStore";
 import { ReadinessActions } from "../ReadinessActions";
 import { EvidenceRows, PublicRows, ValueState } from "./EvidenceRows";
 import { FilteredEvidence } from "./FilteredEvidence";
-import { MISSING_INTEGRATION, PLANNED_SCOPES, PLANNED_SOURCES, candidateControlView } from "../model/candidate";
+import { MISSING_INTEGRATION, candidateControlView } from "../model/candidate";
 import { CandidateActions } from "../CandidateActions";
 import { useCandidateControl } from "@/core/realtime/candidateControl";
 
@@ -36,8 +36,7 @@ export function LaunchBuyPanel() {
       {candidate.rows.map(row => <Line key={row.label} label={row.label} value={row.value} />)}
       {candidate.readiness.map(row => <Line key={row.profile} label={`Readiness ${row.profile}`} value={<ValueState state={row.value} />} />)}
       {candidate.request.map(row => <Line key={row.label} label={row.label} value={row.value} />)}
-      {PLANNED_SCOPES.map(scope => <Line key={scope.id} label={`${scope.id} · ${scope.label}`} value={scope.state} />)}
-      {PLANNED_SOURCES.map(source => <Line key={source.id} label={`Source ${source.label}`} value={source.state} />)}
+      <Line label="FOREIGN_AUTO · sources · venues" value="Controls · geplant" hint="BSC_FRONTEND_BINDINGS_V1: one registry, no second list" />
       <Notice>{candidate.available ? null : <>{MISSING_INTEGRATION} </>}The native offline manager (g07_candidate) is the only authority: a request becomes effective only after its native apply at the next desktop sync, and switching never grants approval, signing or sending.</Notice>
     </Section>
     <Section title="Readiness check · no signing or sending">

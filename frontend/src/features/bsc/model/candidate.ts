@@ -29,12 +29,6 @@ export interface CandidateControlView {
   request: { label: string; value: string }[];
 }
 
-export interface PlannedControl {
-  id: string;
-  label: string;
-  state: string;
-}
-
 const LABELS: Record<CandidateProfile, string> = { SELF_A: "A – Frozen Salt", SELF_B: "B – Fresh Random Salt" };
 const PROFILES: CandidateProfile[] = ["SELF_A", "SELF_B"];
 
@@ -95,16 +89,3 @@ export function candidateControlView({ fields, guardState, statusOk, busy }: Can
     ],
   };
 }
-
-/** Later scopes and sources: shown with their real state, never switchable. */
-export const PLANNED_SCOPES: PlannedControl[] = [
-  { id: "FOREIGN_AUTO", label: "Auto: fremde Launches", state: "PLANNED · not implemented" },
-];
-
-export const PLANNED_SOURCES: PlannedControl[] = [
-  "BSC_INGRESS_GETH",
-  "PUBLICNODE",
-  "DRPC",
-  "BLOCKREQ",
-  "48CLUB",
-].map(id => ({ id, label: id, state: "PLANNED · OFF/SHADOW/LIVE not implemented" }));

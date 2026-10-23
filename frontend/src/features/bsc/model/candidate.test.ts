@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  BACKEND_UNAVAILABLE,
-  PLANNED_SCOPES,
-  PLANNED_SOURCES,
-  candidateControlView,
-} from "./candidate";
+import { BACKEND_UNAVAILABLE, candidateControlView } from "./candidate";
 
 const mirror = (extra: Record<string, string> = {}) =>
   Object.entries({
@@ -71,9 +66,4 @@ describe("G0.7 candidate control", () => {
     expect(view.rows.find(r => r.label === "Selected profile")?.value).toBe("SELF_A · generation 2");
   });
 
-  it("shows FOREIGN_AUTO and the five sources only as planned", () => {
-    expect(PLANNED_SCOPES.map(s => s.id)).toEqual(["FOREIGN_AUTO"]);
-    expect(PLANNED_SOURCES.map(s => s.id)).toEqual(["BSC_INGRESS_GETH", "PUBLICNODE", "DRPC", "BLOCKREQ", "48CLUB"]);
-    for (const control of [...PLANNED_SCOPES, ...PLANNED_SOURCES]) expect(control.state).toMatch(/^PLANNED/);
-  });
 });
