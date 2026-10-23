@@ -86,6 +86,11 @@ pub mod contract {
     pub const SUPERSEDES_CONTRACT_SHA256: u16 = 129;
     pub const PORTAL_UPGRADE_RECORD_SHA256: u16 = 130;
     pub const PORTAL_UPGRADE_RECORD_PATH: u16 = 131;
+    /// v5: the launch-path code identity snapshot and the candidate.
+    pub const LAUNCH_PATH_RECORD_SHA256: u16 = 132;
+    pub const LAUNCH_PATH_RECORD_PATH: u16 = 133;
+    pub const CANDIDATE_PROFILE: u16 = 134;
+    pub const CANDIDATE_ID: u16 = 135;
     pub const CHAIN_ID: u16 = 200;
     pub const PORTAL: u16 = 204;
     pub const MAX_ATTEMPTS: u16 = 400;
@@ -375,15 +380,11 @@ pub mod contract {
         ),
     };
 
-    /// The contract of the requalified attempt 1 (Portal v5.25.0): the same
-    /// fields as v3, binding native DRY records (legacy hashes only where an
-    /// input is an audited import), the local simulation, the economics
-    /// cross-check, the Portal upgrade scan and the superseded v3 proposal.
-    pub const V4: Schema = Schema {
-        name: "darkbot.g07.acceptance-contract.v4",
-        record_type: 25,
-        schema_version: 4,
-        fields: contract_fields!(
+    /// The v4 field list (the v3 fields with native/legacy bindings, the
+    /// local simulation, economics and upgrade scan), shared by v5.
+    macro_rules! v4_bindings {
+        ($($extra:expr),* $(,)?) => {
+            contract_fields!(
             Field::req(
                 DRY_RECORD_SHA256,
                 "authorization.evidence_bindings.dry_record_sha256",
@@ -490,6 +491,43 @@ pub mod contract {
                 "authorization.evidence_paths.portal_upgrade_record",
                 Text,
             ),
+                $($extra,)*
+            )
+        };
+    }
+
+    /// The contract of the requalified attempt 1 (Portal v5.25.0): the same
+    /// fields as v3, binding native DRY records (legacy hashes only where an
+    /// input is an audited import), the local simulation, the economics
+    /// cross-check, the Portal upgrade scan and the superseded v3 proposal.
+    pub const V4: Schema = Schema {
+        name: "darkbot.g07.acceptance-contract.v4",
+        record_type: 25,
+        schema_version: 4,
+        fields: v4_bindings!(),
+    };
+
+    /// The successor contract of the Portal v5.26 requalification (v9.1
+    /// C1/R1): every v4 field unchanged, plus the launch-path code identity
+    /// snapshot and the exact A/B candidate it was made for. v4 records stay
+    /// historical and readable; only v5 may authorize from then on.
+    pub const V5: Schema = Schema {
+        name: "darkbot.g07.acceptance-contract.v5",
+        record_type: 34,
+        schema_version: 5,
+        fields: v4_bindings!(
+            Field::req(
+                LAUNCH_PATH_RECORD_SHA256,
+                "authorization.evidence_bindings.launch_path_record_sha256",
+                B256,
+            ),
+            Field::req(
+                LAUNCH_PATH_RECORD_PATH,
+                "authorization.evidence_paths.launch_path_record",
+                Text,
+            ),
+            Field::req(CANDIDATE_PROFILE, "authorization.candidate.profile", Text),
+            Field::req(CANDIDATE_ID, "authorization.candidate.candidate_id", B256),
         ),
     };
 }
@@ -1096,5 +1134,45 @@ pub const ALL: &[&Schema] = &[
     &witness_source::SCHEMA,
     &contract::SCHEMA,
     &contract::V4,
+    &contract::V5,
     &evidence::SCHEMA,
 ];
+
+#[cfg(test)]
+mod contract_versions {
+    use super::contract::{V4, V5};
+
+    fn fingerprint(fields: &[crate::Field]) -> String {
+        let mut text = String::new();
+        for f in fields {
+            text.push_str(&format!(
+                "{}|{}|{:?}|{:?}|{}\n",
+                f.tag, f.name, f.kind, f.presence, f.max_len
+            ));
+        }
+        crate::hex(&crate::sha256(text.as_bytes()))
+    }
+
+    #[test]
+    fn v4_is_unchanged_and_v5_extends_it_field_for_field() {
+        // Pinned before the v5 successor was introduced (2026-10-23).
+        assert_eq!(
+            fingerprint(V4.fields),
+            "fc75c809c2c4662f416f4ca94eaaec8b110403745a49069072576b14afead2d5"
+        );
+        assert_eq!((V4.record_type, V4.schema_version), (25, 4));
+        assert_eq!((V5.record_type, V5.schema_version), (34, 5));
+        let v4: Vec<_> = V4
+            .fields
+            .iter()
+            .map(|f| (f.tag, f.name, f.kind, f.presence))
+            .collect();
+        let v5: Vec<_> = V5
+            .fields
+            .iter()
+            .map(|f| (f.tag, f.name, f.kind, f.presence))
+            .collect();
+        assert!(v4.iter().all(|f| v5.contains(f)));
+        assert_eq!(v5.len(), v4.len() + 4);
+    }
+}

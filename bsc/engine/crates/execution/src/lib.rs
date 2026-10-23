@@ -27,6 +27,9 @@ pub mod submission;
 pub mod acceptance_contract;
 #[cfg(feature = "acceptance-guard")]
 pub mod acceptance_guard;
+/// The launch-path code identity snapshot (v9.1 C1/R1): check and drift.
+#[cfg(feature = "acceptance-guard")]
+pub mod launch_path;
 
 /// JSON-RPC over curl with endpoint and request on stdin, never on argv.
 /// Built only with the `rpc-wire` feature (G0.7, R0 and G0.8 tools).

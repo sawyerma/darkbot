@@ -5,7 +5,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -16,7 +16,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "budget.worst_case_reserved_wei",
     "type": "U256",
     "unit": "wei"
@@ -27,7 +27,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "bundle_projection.send_head",
     "type": "U64",
     "unit": "integer_native_units"
@@ -38,7 +38,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "dry_pass.all",
     "type": "Bool",
     "unit": "boolean"
@@ -49,7 +49,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "dry_pass.zero_egress_structural",
     "type": "Bool",
     "unit": "boolean"
@@ -60,7 +60,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.buy_gas_limit",
     "type": "U64",
     "unit": "integer_native_units"
@@ -71,7 +71,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.buy_value_wei",
     "type": "U256",
     "unit": "wei"
@@ -82,7 +82,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.gas_price_wei",
     "type": "U64",
     "unit": "wei"
@@ -93,7 +93,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.launch_gas_limit",
     "type": "U64",
     "unit": "integer_native_units"
@@ -104,7 +104,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.launch_value_wei",
     "type": "U256",
     "unit": "wei"
@@ -115,7 +115,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.local_expected_output",
     "type": "U256",
     "unit": "atomic_integer"
@@ -126,7 +126,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.min_output",
     "type": "U256",
     "unit": "atomic_integer"
@@ -137,7 +137,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -148,7 +148,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -159,7 +159,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "budget.worst_case_reserved_wei",
     "type": "U256",
     "unit": "wei"
@@ -170,7 +170,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "bundle_projection.send_head",
     "type": "U64",
     "unit": "integer_native_units"
@@ -181,7 +181,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "dry_pass.all",
     "type": "Bool",
     "unit": "boolean"
@@ -192,7 +192,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "dry_pass.zero_egress_structural",
     "type": "Bool",
     "unit": "boolean"
@@ -203,7 +203,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.buy_gas_limit",
     "type": "U64",
     "unit": "integer_native_units"
@@ -214,7 +214,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.buy_value_wei",
     "type": "U256",
     "unit": "wei"
@@ -225,7 +225,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.gas_price_wei",
     "type": "U64",
     "unit": "wei"
@@ -236,7 +236,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.launch_gas_limit",
     "type": "U64",
     "unit": "integer_native_units"
@@ -247,7 +247,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.launch_value_wei",
     "type": "U256",
     "unit": "wei"
@@ -258,7 +258,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.local_expected_output",
     "type": "U256",
     "unit": "atomic_integer"
@@ -269,7 +269,7 @@
     "schema": "darkbot.g06a.self-launch-bundle-dry.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "transactions.min_output",
     "type": "U256",
     "unit": "atomic_integer"
@@ -280,7 +280,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "schema",
     "type": "Text",
     "unit": "text"
@@ -291,7 +291,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "integer_native_units"
@@ -302,7 +302,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "latest_block_number",
     "type": "U64",
     "unit": "integer_native_units"
@@ -313,7 +313,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "portal_version",
     "type": "Text",
     "unit": "text"
@@ -324,7 +324,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "portal_implementation",
     "type": "Address",
     "unit": "EVM_address"
@@ -335,7 +335,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "portal_implementation_code_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -346,7 +346,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "launcher_address",
     "type": "Address",
     "unit": "EVM_address"
@@ -357,7 +357,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "launcher_balance_wei",
     "type": "U256",
     "unit": "wei"
@@ -368,7 +368,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "buyer_address",
     "type": "Address",
     "unit": "EVM_address"
@@ -379,7 +379,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "buyer_balance_wei",
     "type": "U256",
     "unit": "wei"
@@ -390,7 +390,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "wallet_qualification.launcher_required_worst_case_wei",
     "type": "U256",
     "unit": "wei"
@@ -401,7 +401,7 @@
     "schema": "darkbot.g06a.preflight-readonly.v3",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "wallet_qualification.buyer_required_worst_case_wei",
     "type": "U256",
     "unit": "wei"
@@ -412,7 +412,7 @@
     "schema": "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "schema",
     "type": "Text",
     "unit": "text"
@@ -423,7 +423,7 @@
     "schema": "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -434,7 +434,7 @@
     "schema": "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "blockrazor.explicit_minimum_bundle_gas_price_wei",
     "type": "U256",
     "unit": "wei"
@@ -445,7 +445,7 @@
     "schema": "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "fortyeightclub.explicit_minimum_bundle_gas_price_wei",
     "type": "U256",
     "unit": "wei"
@@ -456,7 +456,7 @@
     "schema": "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "strictest_explicit_verified_floor_wei",
     "type": "U256",
     "unit": "wei"
@@ -467,7 +467,7 @@
     "schema": "darkbot.g06a.builder-floor-evidence-addendum.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "stage1_signed_gas_price_policy_wei",
     "type": "U256",
     "unit": "wei"
@@ -478,7 +478,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -489,7 +489,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "schema",
     "type": "Text",
     "unit": "text"
@@ -500,7 +500,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -511,7 +511,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "blockrazor.explicit_minimum_bundle_gas_price_wei",
     "type": "U256",
     "unit": "wei"
@@ -522,7 +522,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "fortyeightclub.explicit_minimum_bundle_gas_price_wei",
     "type": "U256",
     "unit": "wei"
@@ -533,7 +533,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "strictest_explicit_verified_floor_wei",
     "type": "U256",
     "unit": "wei"
@@ -544,7 +544,7 @@
     "schema": "darkbot.g06a.builder-floor-policy.v2",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
-    "source_sha": "33d2750d21fedd6b84e06c4cd88f699ab41d0ecf789eecc8fcf8ecc2156ed4da",
+    "source_sha": "74b1921a132ce70faf4da490051d306841eaafb3953432a220112bb1b64de9fd",
     "symbol": "stage1_signed_gas_price_policy_wei",
     "type": "U256",
     "unit": "wei"
@@ -555,7 +555,7 @@
     "schema": "darkbot.producer-witness-source.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "schema",
     "type": "Text",
     "unit": "text"
@@ -566,7 +566,7 @@
     "schema": "darkbot.producer-witness-source.import.v1",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "source_ready",
     "type": "Bool",
     "unit": "boolean"
@@ -577,7 +577,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -588,7 +588,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "supersedes",
     "type": "Text",
     "unit": "text"
@@ -599,7 +599,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "purpose",
     "type": "Text",
     "unit": "text"
@@ -610,7 +610,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.approved",
     "type": "Bool",
     "unit": "boolean"
@@ -621,7 +621,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.execution_ready",
     "type": "Bool",
     "unit": "boolean"
@@ -632,7 +632,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.approval_required_for",
     "type": "Text",
     "unit": "text"
@@ -643,7 +643,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.note",
     "type": "Text",
     "unit": "text"
@@ -654,7 +654,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.launcher_address",
     "type": "Address",
     "unit": "EVM_address"
@@ -665,7 +665,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.buyer_address",
     "type": "Address",
     "unit": "EVM_address"
@@ -676,7 +676,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.execution_authority",
     "type": "Text",
     "unit": "text"
@@ -687,7 +687,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.approval_scope",
     "type": "Text",
     "unit": "text"
@@ -698,7 +698,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.attempt_id",
     "type": "Text",
     "unit": "text"
@@ -709,7 +709,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.dry_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -720,7 +720,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.preflight_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -731,7 +731,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.builder_policy_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -742,7 +742,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.producer_witness_source_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -753,7 +753,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.dry_legacy_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -764,7 +764,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.preflight_legacy_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -775,7 +775,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.builder_policy_legacy_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -786,7 +786,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.producer_witness_source_legacy_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -797,7 +797,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.local_simulation_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -808,7 +808,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.economics_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -819,7 +819,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.dry_record",
     "type": "Text",
     "unit": "text"
@@ -830,7 +830,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.preflight_record",
     "type": "Text",
     "unit": "text"
@@ -841,7 +841,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.builder_policy_record",
     "type": "Text",
     "unit": "text"
@@ -852,7 +852,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.producer_witness_source_record",
     "type": "Text",
     "unit": "text"
@@ -863,7 +863,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.builder_requirements_refresh",
     "type": "Text",
     "unit": "text"
@@ -874,7 +874,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.builder_requirements_refresh_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -885,7 +885,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.note",
     "type": "Text",
     "unit": "text"
@@ -896,7 +896,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.local_simulation_record",
     "type": "Text",
     "unit": "text"
@@ -907,7 +907,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.economics_record",
     "type": "Text",
     "unit": "text"
@@ -918,7 +918,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.supersedes_contract_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -929,7 +929,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_bindings.portal_upgrade_record_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -940,7 +940,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "authorization.evidence_paths.portal_upgrade_record",
     "type": "Text",
     "unit": "text"
@@ -951,7 +951,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.chain_id",
     "type": "U64",
     "unit": "integer_native_units"
@@ -962,7 +962,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.venue",
     "type": "Text",
     "unit": "text"
@@ -973,7 +973,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.launch",
     "type": "Text",
     "unit": "text"
@@ -984,7 +984,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.tokenVersion",
     "type": "U64",
     "unit": "integer_native_units"
@@ -995,7 +995,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.portal_expected_from_current_evidence",
     "type": "Address",
     "unit": "EVM_address"
@@ -1006,7 +1006,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.portal_rule",
     "type": "Text",
     "unit": "text"
@@ -1017,7 +1017,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.launch_mode",
     "type": "Text",
     "unit": "text"
@@ -1028,7 +1028,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.quoteToken",
     "type": "Address",
     "unit": "EVM_address"
@@ -1039,7 +1039,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.quoteAmt",
     "type": "U256",
     "unit": "atomic_integer"
@@ -1050,7 +1050,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.buy",
     "type": "Text",
     "unit": "text"
@@ -1061,7 +1061,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "scope.historical_g03_authority",
     "type": "Text",
     "unit": "text"
@@ -1072,7 +1072,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "wallet_separation.launcher",
     "type": "Address",
     "unit": "EVM_address"
@@ -1083,7 +1083,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "wallet_separation.buyer",
     "type": "Address",
     "unit": "EVM_address"
@@ -1094,7 +1094,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "wallet_separation.must_be_distinct_addresses",
     "type": "Bool",
     "unit": "boolean"
@@ -1105,7 +1105,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "wallet_separation.reason",
     "type": "Text",
     "unit": "text"
@@ -1116,7 +1116,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "wallet_separation.secret_storage",
     "type": "Text",
     "unit": "text"
@@ -1127,7 +1127,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.maximum",
     "type": "U64",
     "unit": "integer_native_units"
@@ -1138,7 +1138,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.economic_attempt_definition",
     "type": "Text",
     "unit": "text"
@@ -1149,7 +1149,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.builder_fanout",
     "type": "Text",
     "unit": "text"
@@ -1160,7 +1160,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.parallel",
     "type": "Bool",
     "unit": "boolean"
@@ -1171,7 +1171,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.no_public_launch_broadcast",
     "type": "Bool",
     "unit": "boolean"
@@ -1182,7 +1182,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.no_automatic_retry",
     "type": "Bool",
     "unit": "boolean"
@@ -1193,7 +1193,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.no_parallel_fallback_buy_bundle_in_stage_1",
     "type": "Bool",
     "unit": "boolean"
@@ -1204,7 +1204,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "attempts.selected_attempts_remain_in_denominator",
     "type": "Bool",
     "unit": "boolean"
@@ -1215,7 +1215,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.tx_order",
     "type": "Text",
     "unit": "text"
@@ -1226,7 +1226,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.identical_raw_transactions_across_builders",
     "type": "Bool",
     "unit": "boolean"
@@ -1237,7 +1237,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.reverting_transactions_allowed",
     "type": "Bool",
     "unit": "boolean"
@@ -1248,7 +1248,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.max_block_window",
     "type": "Text",
     "unit": "text"
@@ -1259,7 +1259,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.expiry_mismatch",
     "type": "Text",
     "unit": "text"
@@ -1270,7 +1270,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.fortyeightclub.noMerge",
     "type": "Bool",
     "unit": "boolean"
@@ -1281,7 +1281,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.fortyeightclub.positionFirst",
     "type": "Bool",
     "unit": "boolean"
@@ -1292,7 +1292,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.fortyeightclub.rationale",
     "type": "Text",
     "unit": "text"
@@ -1303,7 +1303,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "bundle_bytes.send_head_rule",
     "type": "Text",
     "unit": "text"
@@ -1314,7 +1314,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.min_output.must_be_positive",
     "type": "Bool",
     "unit": "boolean"
@@ -1325,7 +1325,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.min_output.source",
     "type": "Text",
     "unit": "text"
@@ -1336,7 +1336,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.min_output.independent_cross_check",
     "type": "Text",
     "unit": "text"
@@ -1347,7 +1347,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.min_output.slippage_max_bps",
     "type": "U64",
     "unit": "integer_native_units"
@@ -1358,7 +1358,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.min_output.historical_min_output_reuse_forbidden",
     "type": "Bool",
     "unit": "boolean"
@@ -1369,7 +1369,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.gas_floor.policy",
     "type": "Text",
     "unit": "text"
@@ -1380,7 +1380,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.gas_floor.blockrazor_current_documented_reference",
     "type": "Text",
     "unit": "text"
@@ -1391,7 +1391,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.gas_floor.fortyeightclub",
     "type": "Text",
     "unit": "text"
@@ -1402,7 +1402,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.gas_floor.max_signed_gas_price_wei",
     "type": "U256",
     "unit": "wei"
@@ -1413,7 +1413,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.gas_floor.freshness_rule",
     "type": "Text",
     "unit": "text"
@@ -1424,7 +1424,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.gas_floor.bound_policy_superseded_fields",
     "type": "Text",
     "unit": "text"
@@ -1435,7 +1435,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.bid_policy.stage_1",
     "type": "Text",
     "unit": "text"
@@ -1446,7 +1446,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.bid_policy.max_direct_builder_tip_wei",
     "type": "U256",
     "unit": "wei"
@@ -1457,7 +1457,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "economics_validation.bid_policy.policy_change_requires_new_contract_version",
     "type": "Bool",
     "unit": "boolean"
@@ -1468,7 +1468,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_buy_value_per_attempt",
     "type": "U256",
     "unit": "wei"
@@ -1479,7 +1479,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_launch_call_value_per_attempt",
     "type": "U256",
     "unit": "wei"
@@ -1490,7 +1490,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_launch_gas_limit",
     "type": "U64",
     "unit": "wei"
@@ -1501,7 +1501,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_buy_gas_limit",
     "type": "U64",
     "unit": "wei"
@@ -1512,7 +1512,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_gas_price_wei",
     "type": "U256",
     "unit": "wei"
@@ -1523,7 +1523,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_gas_cost_per_attempt",
     "type": "U256",
     "unit": "wei"
@@ -1534,7 +1534,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.max_total_per_attempt",
     "type": "U256",
     "unit": "wei"
@@ -1545,7 +1545,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.absolute_max_total_all_attempts",
     "type": "U256",
     "unit": "wei"
@@ -1556,7 +1556,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "budget_wei.note",
     "type": "Text",
     "unit": "wei"
@@ -1567,7 +1567,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "pre_arm_checks",
     "type": "Text",
     "unit": "text"
@@ -1578,7 +1578,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "success.acquisition",
     "type": "Text",
     "unit": "text"
@@ -1589,7 +1589,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "success.ordering",
     "type": "Text",
     "unit": "text"
@@ -1600,7 +1600,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "success.builder_evidence",
     "type": "Text",
     "unit": "text"
@@ -1611,7 +1611,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "success.timing",
     "type": "Text",
     "unit": "text"
@@ -1622,7 +1622,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.record_send_head",
     "type": "Bool",
     "unit": "boolean"
@@ -1633,7 +1633,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.record_inclusion_block",
     "type": "Bool",
     "unit": "boolean"
@@ -1644,7 +1644,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.record_builder",
     "type": "Bool",
     "unit": "boolean"
@@ -1655,7 +1655,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.record_validator",
     "type": "Bool",
     "unit": "boolean"
@@ -1666,7 +1666,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.record_bundle_status",
     "type": "Bool",
     "unit": "boolean"
@@ -1677,7 +1677,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.on_expiry_without_inclusion",
     "type": "Text",
     "unit": "text"
@@ -1688,7 +1688,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.interpretation",
     "type": "Text",
     "unit": "text"
@@ -1699,7 +1699,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.pre_arm_bounded_capture_required",
     "type": "Bool",
     "unit": "boolean"
@@ -1710,7 +1710,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.producer_witness_contract_required_before_execution",
     "type": "Bool",
     "unit": "boolean"
@@ -1721,7 +1721,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "retention_observability.g07_local_attempt_state",
     "type": "Text",
     "unit": "text"
@@ -1732,7 +1732,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "thresholds.PASS",
     "type": "Text",
     "unit": "text"
@@ -1743,7 +1743,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "thresholds.ADAPT",
     "type": "Text",
     "unit": "text"
@@ -1754,7 +1754,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "thresholds.STOP",
     "type": "Text",
     "unit": "text"
@@ -1765,7 +1765,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "coverage.foreign_launch_coverage_requirement",
     "type": "Text",
     "unit": "text"
@@ -1776,7 +1776,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "coverage.note",
     "type": "Text",
     "unit": "text"
@@ -1787,7 +1787,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "send_guard.fail_closed",
     "type": "Bool",
     "unit": "boolean"
@@ -1798,7 +1798,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "send_guard.required_checks",
     "type": "Text",
     "unit": "text"
@@ -1809,7 +1809,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "send_guard.forbidden_authorities",
     "type": "Text",
     "unit": "text"
@@ -1820,7 +1820,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "dry_pass.status",
     "type": "Text",
     "unit": "text"
@@ -1831,7 +1831,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "dry_pass.valid_mainnet_bytes_may_leave_machine",
     "type": "Bool",
     "unit": "boolean"
@@ -1842,7 +1842,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "dry_pass.provider_prequalification",
     "type": "Text",
     "unit": "text"
@@ -1853,7 +1853,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "dry_pass.all_four_required",
     "type": "Bool",
     "unit": "boolean"
@@ -1864,7 +1864,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "dry_pass.evidence_scope_note",
     "type": "Text",
     "unit": "text"
@@ -1875,7 +1875,7 @@
     "schema": "darkbot.g07.acceptance-contract.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "pre_arm_check_status",
     "type": "Text",
     "unit": "text"
@@ -1886,7 +1886,7 @@
     "schema": "darkbot.g07.readiness",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -1897,7 +1897,7 @@
     "schema": "darkbot.g07.readiness",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -1908,7 +1908,7 @@
     "schema": "darkbot.g07.readiness-check",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "name",
     "type": "Text",
     "unit": "text"
@@ -1919,7 +1919,7 @@
     "schema": "darkbot.g07.readiness-check",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "status",
     "type": "Text",
     "unit": "text"
@@ -1930,7 +1930,7 @@
     "schema": "darkbot.g07.readiness-check",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "detail",
     "type": "Text",
     "unit": "text"
@@ -1941,7 +1941,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "classification",
     "type": "Text",
     "unit": "text"
@@ -1952,7 +1952,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "integer_native_units"
@@ -1963,7 +1963,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.launch_value_wei",
     "type": "U256",
     "unit": "wei"
@@ -1974,7 +1974,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.buy_value_wei",
     "type": "U256",
     "unit": "wei"
@@ -1985,7 +1985,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.gas_price_wei",
     "type": "U64",
     "unit": "wei"
@@ -1996,7 +1996,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.launch_gas_limit",
     "type": "U64",
     "unit": "integer_native_units"
@@ -2007,7 +2007,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.buy_gas_limit",
     "type": "U64",
     "unit": "integer_native_units"
@@ -2018,7 +2018,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.local_expected_output",
     "type": "U256",
     "unit": "atomic_integer"
@@ -2029,7 +2029,7 @@
     "schema": "darkbot.g07.mainnet-self-launch-buy.v4",
     "sensitivity": "public; text redacted; binary transactions excluded",
     "source_path": "bsc/engine/crates/record/src/schema/g07.rs",
-    "source_sha": "6df8c1485958e6cdf3b815fa0a05cc9d1e7d9f95b7029cb0bdfcb74267f1cd86",
+    "source_sha": "b45bc2ef594d26998d79b294668c85591a1412bdb8fafdc89788864faf644973",
     "symbol": "transactions.min_output",
     "type": "U256",
     "unit": "atomic_integer"

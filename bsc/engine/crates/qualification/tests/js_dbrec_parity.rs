@@ -7,7 +7,7 @@
 
 use darkbot_bsc_record::schema::{
     PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL,
-    g06a::{economics, local_simulation, preflight},
+    g06a::{economics, launch_path, local_simulation, preflight},
 };
 use darkbot_bsc_record::{Draft, Kind, Schema, decode, plain};
 use std::collections::BTreeSet;
@@ -218,6 +218,7 @@ fn both_ethereumjs_tools_set_exactly_their_schema_fields() {
     for (tool, schema) in [
         ("g06a_economics_evm_crosscheck.cjs", &economics::NATIVE),
         ("g06a_local_simulate.cjs", &local_simulation::NATIVE),
+        ("g06a_launch_path_trace.cjs", &launch_path::SCHEMA),
     ] {
         let source = std::fs::read_to_string(path(&format!("{TOOLS}/{tool}"))).unwrap();
         let names = encoded_names(&source);

@@ -819,6 +819,69 @@ pub mod requalification {
     };
 }
 
+/// The launch-path code identity of a requalification (v9.1 C1/R1): every
+/// contract that had code at the pinned block and executed in the local EVM
+/// run of the candidate's launch and first BUY, with its code SHA-256, and
+/// every storage word of such a contract that selects an executed code
+/// address (proxy implementation slots, storage-selected clone targets).
+/// Re-verified at the current pinned block before any release.
+pub mod launch_path {
+    use super::*;
+
+    pub const BLOCK_NUMBER: u16 = 10;
+    pub const BLOCK_HASH: u16 = 11;
+    pub const PORTAL: u16 = 12;
+    pub const METHOD: u16 = 13;
+    pub const TOKEN: u16 = 14;
+    pub const LAUNCH_SUCCESS: u16 = 15;
+    pub const BUY_SUCCESS: u16 = 16;
+    pub const LAUNCH_RETURN_TOKEN: u16 = 17;
+    /// One code entry per index of these four equally long lists.
+    pub const CODE_ADDRESS: u16 = 20;
+    pub const CODE_SHA256: u16 = 21;
+    pub const CODE_BYTES: u16 = 22;
+    /// How it executed, e.g. "launch:DELEGATECALL buy:CALL".
+    pub const CODE_ROLES: u16 = 23;
+    /// One storage selector per index of these four equally long lists.
+    pub const STORAGE_ADDRESS: u16 = 30;
+    pub const STORAGE_SLOT: u16 = 31;
+    pub const STORAGE_VALUE: u16 = 32;
+    /// The executed code address the word selects.
+    pub const STORAGE_SELECTS: u16 = 33;
+    /// The trace method of `tools/g06a_launch_path_trace.cjs`.
+    pub const TRACE_METHOD: &str = "local-evm-message+sload-trace:newTokenV6+swapExactInput";
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g06a.launch-path",
+        record_type: 33,
+        schema_version: 1,
+        fields: &[
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(BLOCK_NUMBER, "block_number", U64),
+            Field::req(BLOCK_HASH, "block_hash", B256),
+            Field::req(PORTAL, "portal", Address),
+            Field::req(METHOD, "method", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(LAUNCH_SUCCESS, "launch_success", Bool),
+            Field::req(BUY_SUCCESS, "buy_success", Bool),
+            Field::req(LAUNCH_RETURN_TOKEN, "launch_return_token", Address),
+            Field::rep(CODE_ADDRESS, "code.address", Address),
+            Field::rep(CODE_SHA256, "code.code_sha256", B256),
+            Field::rep(CODE_BYTES, "code.code_bytes", U64),
+            Field::rep(CODE_ROLES, "code.roles", Text),
+            Field::rep(STORAGE_ADDRESS, "storage.address", Address),
+            Field::rep(STORAGE_SLOT, "storage.slot", B256),
+            Field::rep(STORAGE_VALUE, "storage.value", B256),
+            Field::rep(STORAGE_SELECTS, "storage.selects", Address),
+        ],
+    };
+}
+
 pub const ALL: &[&Schema] = &[
     &dry::SCHEMA,
     &preflight::SCHEMA,
@@ -832,4 +895,5 @@ pub const ALL: &[&Schema] = &[
     &quote::SCHEMA,
     &portal_upgrade::SCHEMA,
     &requalification::SCHEMA,
+    &launch_path::SCHEMA,
 ];
