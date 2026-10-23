@@ -5924,3 +5924,11 @@ Commit `122e7e9c`.
 - Gate on `122e7e9c` (exit 0 each): 778/0/10, 776/0/10, runner 361/0/3 ×2, release, Python OK. 6 mutations fail-before.
 - Owner holds the FE-04 journal; settlement worker reads off the owner; Safety booked once (reserved capital released once, pre-restart finalized attempt books its day, settled attempt not again); UNKNOWN keeps holds, 10-s backoff.
 - NOT_RUN: real RPC settlement read, landed attempt with real token deltas, Mainnet, LIVE.
+
+## 2026-10-23 — FE-04 financial close hardening (LOCAL_PASS offline)
+
+Commit `8c7acbba`.
+
+- Gate on `8c7acbba` (exit 0 each): 783/0/10, 781/0/10, runner 362/0/3 ×2, release, Python OK; GitHub Actions `project0-gate` 5/5 PASS. 4 repro tests FAIL on `122e7e9c`, 8 mutations fail-before.
+- Booking second persisted (FE04_TRANSITION schema 4, settled pin 1330 B; schema-3 pin 1117 B unchanged); token inflows = open inventory (unrealized), realized = SOL + outflows; refused Safety booking retains holds; RAM reconcile telemetry only.
+- NOT_RUN: inventory exit (sale) evidence, real chain reconciliation, Mainnet, LIVE.
