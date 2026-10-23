@@ -811,3 +811,12 @@ If one venue passes, production work proceeds only for the proven venue first. T
 | KB/K | Erweitern nur nach eigener gemessener Qualifikation; bestehende Topics/Controls benutzen oder versioniert additiv erweitern. |
 
 **Sperre:** Dies ist eine Dokumentations-/F0-VAR-Ergänzung, **keine Freigabe** zur Umsetzung der derzeit pausierten C1/C2-Produktionsphasen oder zum Starten eines Mainnet-BUY. Kein Wechsel des Designsystems, keine Parallel-Engine, kein zweites Wire-Protokoll, keine heimliche Änderung von Project_0/Solana und keine Entkopplung des BSC-STOP-Gates.
+
+### Basic / Advanced BSC-Frontend-Ansichten — nur Darstellung, keine neue Produktionsphase
+
+**Design-/Verdrahtungspflicht für alle späteren BSC-Phasen:** Das bestehende BSC-Frontend verfügt nach Umsetzung des Frontend-Masters §13 über einen **reinen Darstellungsmodus** `Basic` (Standard) und `Advanced` (mit aufklappbaren technischen Details). Für jede in G0.x, C0–J, KB oder K neu qualifizierte öffentliche Engine-Variable ist **vor** der Frontend-Abnahme festzulegen, ob sie in Basic zur Betriebs-/Risikozusammenfassung, in Advanced oder nur als technisches Disclosure angezeigt wird. Kritische Safety-/LIVE-Sperren, `UNKNOWN`-/`STOP`-/`BLOCKED`- und Datenqualitätszustände bleiben **immer in Basic sichtbar**. Die komplette Fach-Evidence bleibt in Advanced nachvollziehbar, ohne unnötige Wiederholung auf den Hauptflächen.
+
+**Keine zusätzliche Runtime-Architektur:** Ein gemeinsamer React-Darstellungszustand in `BscPage.tsx`, vorhandene BSC-Panels und vorhandenes Native→Proto→Gateway→BSC-Adapter/Store-Wire. Die Anzeigeebene erteilt weder `REPLAY/PAPER/SHADOW/LIVE`-Rechte noch kann sie Guard, Wirtschaftsgates, V5, Candidate Generation, Nonce, Order, Journal oder Sicherheits-/Konfigurationszustände überschreiben. Ein Source-/Venue-LIVE-Control wird auch im Advanced-Modus nicht vor seiner tatsächlichen BSC-Phasenqualifikation aktiviert.
+
+**Pflicht bei Phasenübergabe:** Die bestehende F0-Feldmatrix erhält für jedes neue Feld `display_tier`, `critical_always_visible`, Quelle/Evidenz und Gate; Tests bestätigen Basic-/Advanced-Gleichheit der nativen Fakten und Unveränderlichkeit der wirtschaftlichen Autorisierung. Detaillierter Darstellungsvertrag ausschließlich `frontend/docs/FRONTEND_PHASENPLAN.md` §13 und `frontend/docs/BSC_FRONTEND_BINDINGS_V1.md` §12. Dies ist kein neuer BSC-Stopp- oder Arbeitsabschnitt und verändert `G0.7 → G0.8 → PASS/ADAPT/STOP` nicht.
+
