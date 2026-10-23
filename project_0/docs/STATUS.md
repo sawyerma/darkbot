@@ -1,10 +1,10 @@
 # Project 0 — Current status
 
-**Snapshot:** 2026-10-17 · project_0 code at `0e0544d` plus the SK-06 completion of this date (readiness tracker [C0E1_4H_READINESS](qualification/C0E1_4H_READINESS.md)) · Ticket 3: A0/A1/A2 LOCAL_PASS, A3 PARTIAL, A4 LOCAL_PASS in scope (class coverage BLOCKED) · storage: SK-03 PARTIAL, SK-04 LOCAL_PASS, SK-05 PARTIAL, SK-06 LOCAL_PASS in scope (real basis NOT_MEASURED), SK-07 OPEN, SK-08 DEFERRED_PRIORITY, SK-09 OPEN · BSC-only commits on `main` qualify nothing in project_0. Sections 1–2 below keep the 2026-10-16 PERSIST base (`4a27a1c`); §12 is the current per-ticket matrix.
+**Current GitHub snapshot: 2026-10-23 · letzter vor dieser Dokumentpflege geprüfter Project_0-Code `2605556c` auf `main`.** Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
 
 Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md), their JSON navigation indices, actual Rust code and [PERSIST evidence](evidence/PERSIST_BINARY_20261016/qualification.json). Previous October 14 code locations and test counts are historical; no gate is upgraded by this status page.
 
-**Local follow-up on `9047c7b` (uncommitted):** strict batches now use the binary sink; deterministic fsync error paths and bounded, sealed FE-01 replay pass offline. [Follow-up report](development_history/persist_followup_20261016.md), [evidence](evidence/PERSIST_FOLLOWUP_20261016/qualification.json). Overall PERSIST PARTIAL and FE-01 OPEN remain unchanged.
+**Historischer Follow-up-Vermerk (`9047c7b`, 2026-10-16):** Die damalige Formulierung „uncommitted“ ist überholt und beschreibt **nicht** den heutigen Git-Arbeitsbaum. Die zugehörigen [Berichte](development_history/persist_followup_20261016.md) und [Evidence](evidence/PERSIST_FOLLOWUP_20261016/qualification.json) bleiben historische Nachweise. Aktuelle PERSIST-/JFI- und FE-Gates nur nach geprüftem Produktionscode und aktueller Evidence einstufen; kein historischer Eintrag erteilt eine LIVE-Freigabe.
 
 ## 1. Bottom line
 
@@ -13,12 +13,23 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | First realized net profit | **NOT PROVEN** | `MEASUREMENT_LEDGER.json` overall |
 | LIVE / value-bearing submission | **DISABLED / NOT AUTHORIZED** | FE-06 remains locked |
 | FE-00 | **LOCAL_PASS; NO_ECONOMIC_GO** | Existing FE-00 ledger/evidence |
-| FE-01 | **OPEN** | Offline replay/integration-account observation improved at `4a27a1c`; current deployed ProgramData/state and funding-class parity NOT_RUN |
-| FE-02 / FE-03 | **OPEN** | No current profitable executable candidate / qualified targeted Shadow |
-| FE-04 | **PARTIAL_LOCAL** | Durable binary wallet transitions locally tested; production integration and exit/PnL remain OPEN; deterministic fsync error paths pass locally |
+| FE-01 | **PARTIAL_LOCAL / Mainnet parity NOT_RUN** | Offline one-class freeze and drift checks committed `6aac2e4f`; aktuell deployte ProgramData-/State-/Fundingparität ohne autorisierten Read nicht belegt |
+| FE-02 / FE-03 | **OPEN / NOT_QUALIFIED** | FE-02/B4-SOL-Debit/Cost-Fix committed `91ed707a`, jedoch kein vollständig simulierter aktuell positiver Candidate/Exit; FE-03 targeted Production Shadow weiterhin offen |
+| FE-04 | **PARTIAL_LOCAL** | FE-04-Journal und C3/P8-05 finalized Settlement-/`i128`-PnL-Funktionen `2605556c` committet; kompletter produktiver FE-04-Handoff, echter Exit/Realized-Economics und autorisierte Chain-Reconciliation weiter offen |
 | FE-05 / FE-06 / FE-07 | **NOT_RUN / NOT_AUTHORIZED / NOT_RUN** | Separate provider/Mainnet/value-bearing permissions still required |
 | C0-E1 long-duration market master | **NOT_QUALIFIED** | Historical 4h/5h incomplete |
 | Binary journal PERSIST-01–05 | **PARTIAL overall, NOT QUALIFIED** | [Qualification](evidence/PERSIST_BINARY_20261016/qualification.json); see below |
+
+
+**Neue Code-Checkpoints vom 2026-10-23 (GitHub-Commit-Nachweis; keine neue Mainnet-Qualification):**
+
+| Commit | Tatsächliche Entwicklung | Gate-Grenze |
+|---|---|---|
+| `6aac2e4f` | FE-01-Offline-One-Class-Freeze, Drift-Prüfung, gepinnte Marginfi-Fixtures | Offline-Code vorhanden; aktuelle Mainnet-Identität/Providerkapazität `NOT_RUN` |
+| `91ed707a` | FE-02/B4: `SolCosts`, vollständigerer SOL-Debit aus Fee/Tip/Flat-Fee/Record-Rent; UNKNOWN bleibt nicht handelbar | Keine vollständig ausführbare aktuelle positive Opportunity nachgewiesen |
+| `2605556c` | C3/P8-05: finalized Settlement/`i128`-PnL im einzigen FE-04-Journal, neue Offline-Tests und Replay-Regeln laut Commit | Vollständige Integration in produktiven FE-04-LIVE-Handoff sowie reale Chain-/Exit-Evidence weiterhin `NOT_RUN`/offen |
+
+Diese drei Commits wurden auf GitHub auf Dateiumfang und Commit-Beschreibungen geprüft, **nicht** durch einen hier selbst ausgeführten vollständigen Offline-Gate-Lauf. Lokale Test-Evidence erst nach protokolliertem Exit 0 als `LOCAL_PASS` übernehmen.
 
 ## 2. Current code and evidence
 
@@ -111,10 +122,10 @@ Acceptance criteria: `PHASENPLAN.json` → `first_profit_tickets`. Status: `MEAS
 | Ticket | Goal | Status | What exists / what is missing |
 |---|---|---|---|
 | FE-00 Opportunity Selection | Positive current candidate or `NO_ECONOMIC_GO` | **LOCAL_PASS · `NO_ECONOMIC_GO`** (`b1e6930`) | First requalification class: `ZERO_PREFUND_SAME_TX`. `NO_SWAP_INVENTORY` blocked (no qualified exit); `JIT_SHORTFALL_EXACT_IN` still required for the full product |
-| FE-01 One-Class Freeze | Verified deployment/source/state parity and one executable funding class | **OPEN** | WIP tool `p0-fe-qualify` in code (`4c271cb`); its `--execute` refuses to run without measured FREE_ONLY provider evidence (`FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED`, `bin/p0-fe-qualify.rs`). Current on-chain observation NOT_RUN; requires separate permission |
-| FE-02 Executable Economics | Full signed TX simulation, all costs, exit, positive net edge | **OPEN** | Current executable route floor, full simulation, realizable exit NOT_PROVEN |
+| FE-01 One-Class Freeze | Verified deployment/source/state parity and one executable funding class | **PARTIAL_LOCAL / OPEN** | `6aac2e4f` ergänzt Offline-Freeze und Source-Drift-Tests; aktuelle on-chain ProgramData-/Account-/Fundingparität weiterhin `NOT_RUN`, separate Freigabe erforderlich |
+| FE-02 Executable Economics | Full signed TX simulation, all costs, exit, positive net edge | **OPEN** | SOL-Debit/Flat-Fee/Rent-Fix `91ed707a` committet; aktuelle ausführbare signierte Gesamt-Simulation, Exit und positiver Nettoedge `NOT_PROVEN` |
 | FE-03 Targeted Production Shadow | Shadow/replay with winner/latency/loss evidence | **OPEN** | No targeted Shadow for the selected class |
-| FE-04 Serial Safety and Accounting | One-shot approval, persistent holds, crash-safe UNKNOWN, finalized reconciliation | **PARTIAL_LOCAL** (`a9a8c34`, `48db13c`, `cf540f4`) | Done locally: durable journal, signed adapter binding, finalized fee/SOL/token observation. Missing: terminal approval lifecycle, production Intent/Current at the pipeline boundary, qualified exit, attempt/cumulative-loss and realized-PnL accounting |
+| FE-04 Serial Safety and Accounting | One-shot approval, persistent holds, crash-safe UNKNOWN, finalized reconciliation | **PARTIAL_LOCAL** (`a9a8c34`, `48db13c`, `cf540f4`, `2605556c`) | Ein Journal und neuer C3/P8-05-Settlement-/PnL-Pfad committed; vollständige Runtime-Handoff-Verdrahtung, autorisierter echter Exit und finale Produktabnahme weiter offen |
 | FE-05 Read-only Preflight | Authorized bounded FREE_ONLY Mainnet observation → `PILOT_READY` or `BLOCKED` | **NOT_RUN** | Needs separate user permission and provider qualification |
 | FE-06 Controlled One-Shot Mainnet | One authorized attempt, then HALT | **NOT_AUTHORIZED** | LIVE refused in code |
 | FE-07 Realized Net PnL | Positive cumulative realized PnL from finalized evidence | **NOT_RUN** | No attempt exists |
