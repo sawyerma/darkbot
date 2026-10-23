@@ -32,3 +32,18 @@
 * Die BSC-Regel `G0.7 → G0.8 → PASS/ADAPT/STOP` gilt weiter. Keine pausierten C1/C2/FOREIGN_AUTO/source×venue-LIVE-Produktionsfeatures implementieren, bis BSC selbst es freigibt. F0-Dokumentation und gegenwärtige Read-only-/Offline-GUI dürfen getrennt abgearbeitet werden.
 * Kein eigenständiger neuer Architektur-/Masterplan; keine parallelen Repo-Branches/Worktrees, kein unkontrolliertes riesiges Refactoring. Bei unvermeidbarer Protokolländerung nur bestehendes Schema additiv mit Regressionstests. Keine Überschreibung gleichzeitig laufender BSC-Arbeiten.
 * Ergebnis an Auftraggeber: Nachweis, **was konkret verbunden**, **was wegen fehlenden Native-Owners noch nicht verbindbar** und **welches Backend-Gate noch offen** ist – keine Behauptung, dass ein sichtbarer Button einsatzbereit sei.
+
+## D. Verbindliche Präsentationsschicht Basic / Advanced (ergänzender Arbeitsauftrag)
+
+**Nutzerentscheidung:** `Basic` ist die Standardansicht, `Advanced` die bestehende volle technische Ansicht. Ein einziger Schalter im bestehenden BSC-Header von `BscPage.tsx` wirkt auf **alle fünf** vorhandenen Panels. Innerhalb Advanced werden umfangreiche Rohfelder in benannten, einzeln aufklappbaren Technical-Details-Gruppen gezeigt. Kein eigenes Router-/Store-/Gateway-/Proto-System, keine zweiten Panel-Komponenten, keine zusätzliche Backend-Berechtigung und keine zweite GUI. Die Advanced-Darstellung des vorhandenen HTML-Reviews nur als Designorientierung verwenden.
+
+**In Paket 0 ergänzen:** Inventarisiere jedes Feld aus `BSC_FRONTEND_BINDINGS_V1.md` mit `BASIC_SUMMARY | ADVANCED | DETAIL_ONLY`, `critical_always_visible`, Native-Quelle, Datenqualität und Owner. Erstelle reproduzierbare Tabellen der Basic-Kernwerte pro Reiter und der Advanced-Detailblöcke. Melde native Lücken statt sie aus JS zu schätzen. Nenne bestehende React-Komponenten und Props statt neue Pages/Controls zu erfinden.
+
+**In Paket 1 ergänzen:** Readiness `BLOCKED` vs. `STOP` und Source-Quality/STALE/DETACHED richtigstellen; die Sicherheitszusammenfassung für beide Modi gleich qualifizieren. Erst danach Darstellungsschalter in `BscPage.tsx` als UI-State integrieren. Default `Basic` bei neuem Aufruf; bei Wechsel innerhalb derselben BSC-Session einheitlicher Wert über alle Tabs, kein Rücksetzen beim Panelwechsel. Keine Änderung an nativer Konfiguration, Freigabe oder Kandidatenwechsel durch die Umschaltung.
+
+**In Paketen 2–5 ergänzen:** Für Launch / BUY, Monitoring, Analytics und Wallets je eine kurze Basic-Oberfläche nach Master §13 liefern, während die gesamte nachgewiesene Fachdatentiefe in den bisherigen Panels als Advanced + Disclosure verbleibt. Safety-Gründe, Geld-/LIVE-Sperren und Unknown immer prominent in Basic. HISTORY-Detailabfragen nur bei tatsächlich geöffnetem Detail; keine unnötigen Hintergrund-Downloads und keine neue Browser-HOT0-Abhängigkeit. Die fünf Navigationsreiter bleiben identisch.
+
+**Paket 6 – zusätzlichen Visual-/Safety-DoD:** Playwright Screenshots für Basic/Advanced auf Desktop und schmaler Mobilbreite, A11y/Keyboard-Navigation, globale UI-State-Konsistenz, Toggling unter Source-Detach/Stale, A/B-Pending-Sync und Guard-Block, keine verdeckten Buttons, keine Doppelabfragen/Commands, keine Regression von Project_0/Solana/Graphite. Konten, Gas, Gewinne und Live-Status nur aus den belegten bisherigen nativen Projektionen. Dichtewechsel darf niemals einen nativen Command auslösen. Lieferung mit exakten Exitcodes/Screenshot-Hashes; `NOT_RUN` bleibt `NOT_RUN`.
+
+**Scope:** Diese Ergänzung autorisiert **nur** frontendseitige Darstellungsarbeit für bereits freigegebene Offline-/Read-only-Funktionen, keine C1/C2-Implementierung, keine Mainnet-Sends, keine SOURCE/VENUE-LIVE-Schalter. Bei Konflikten hat der BSC-Phasenplan Vorrang.
+
