@@ -1,0 +1,7 @@
+LAUNCH_PATH=WRITTEN
+RECORD=/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/native/evidence/g06a/g06a_prepare_20261023T211704Z/launch_path.dbrec
+BLOCK=129392405
+CODE_ENTRIES=21
+STORAGE_SELECTORS=4
+LAUNCH_OK=true
+BUY_OK=true

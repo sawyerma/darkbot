@@ -26,6 +26,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 D6 (offline regression PASS, not an operational E2E): no g06a schema has a bytes field and no g06a evidence record on disk holds raw-transaction-sized hex (planted control detected); B salt in no PREPARE/SIGN output file; full regression execution 373/0, qualification 85/0, record 9/0, trading 178/0, journal 20/0, node 4/0, python 40/0, vitest 7/0, gateway 26/0, F0-VAR PASS. D1–D6 code complete; real-key SIGN = AWAITING_USER_AUTHORIZATION.
 
+2026-10-23 v5.26 requal prepared (key-free, read-only): candidate A created/selected (gen 1, ID 0x5d0732…cc6e, token 0xe51c…7777, frozen signed hashes); PREPARE A `native/evidence/g06a/g06a_prepare_20261023T211704Z/` at H1 129392405: Portal v5.26.0, R0 127865761→129392405 (2 upgrades), quote = EVM output = frozen 176693134169499757962, frozen salt, builder floor 50000000 unchanged, launch path 21 code/4 selectors, handoff written. AWAITING_USER_AUTHORIZATION: (1) SIGN with the real wallet keys `DARKBOT_G06A_SIGN=YES bsc/tools/g06a_final_dry.sh --sign <that dir>` (local DRY-1..4 signing, no send); then key-free v5 proposal (`g07_acceptance_contract <sign dir> <policy> <sign dir>/candidate.dbrec`) and readiness; (2) approval of the exact v5 bytes + arming commit; (3) economic authorization of the one Mainnet attempt.
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN

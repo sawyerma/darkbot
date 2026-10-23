@@ -1,0 +1,6 @@
+R0 coverage: header batch 0/38 (block 129388632)
+R0 coverage: 3735 headers verified, 51 bloom candidates to read in full
+R0 coverage: candidate 0/51 (block 129388752)
+R0 coverage: header batch 0/1 (block 129392367)
+R0 coverage: 39 headers verified, 1 bloom candidates to read in full
+R0 coverage: candidate 0/1 (block 129392382)

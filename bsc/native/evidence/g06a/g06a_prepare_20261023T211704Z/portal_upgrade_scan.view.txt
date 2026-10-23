@@ -1,0 +1,35 @@
+## /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/native/evidence/g06a/g06a_prepare_20261023T211704Z/portal_upgrade_scan.dbrec
+# darkbot.g07.portal-upgrade-scan.v2 (record type 24, schema version 2)
+file_sha256 = b66ca1ee7d096396ffd2978847dd31fe02f89a1b3fd7ef80fbe7c5e1ff79c179
+_provenance.tool = "g06a_preflight_record"
+_provenance.observed_unix_ms = 1792788619300
+proxy = 0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0
+scanned_from_block = 127865761
+scanned_to_block = 129388631
+upgrades[0].block = 128103397
+upgrades[0].block_hash = 0x8d0c79abc7b91534c3f8de9d86500ec342f314aa326592c2615eb3e51942badb
+upgrades[0].transaction_hash = 0x5a4faae55bfb31ab7c6a9e63f1d58885e0c97a9abf00c6528eb029638dd83d4a
+upgrades[0].log_index = 235
+upgrades[0].implementation = 0xe13227370996f892a56d2ff4a30f6026887b48fb
+upgrades[0].receipt_status = 1
+upgrades[0].implementation_slot_before = 0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20
+upgrades[0].implementation_slot_after = 0xe13227370996f892a56d2ff4a30f6026887b48fb
+upgrades[1].block = 128914179
+upgrades[1].block_hash = 0x025425840e296cff96ca378705da73882429d0b8cff3276c81bec26494e07616
+upgrades[1].transaction_hash = 0x04791db127459ee67718e1ce7610fc87c90483a94411b8c143d97db1bb8cd702
+upgrades[1].log_index = 335
+upgrades[1].implementation = 0x7a94f37b61a82c395f9812cf266b444783cc5e8c
+upgrades[1].receipt_status = 1
+upgrades[1].implementation_slot_before = 0xe13227370996f892a56d2ff4a30f6026887b48fb
+upgrades[1].implementation_slot_after = 0x7a94f37b61a82c395f9812cf266b444783cc5e8c
+current_implementation = 0x7a94f37b61a82c395f9812cf266b444783cc5e8c
+baseline_implementation = 0x27a0f9da7f5bead616fe0bf02bf0c793bece4e20
+coverage_method = "header-hash-chain+logs-bloom+receipts-root"
+chain_source = "bsc-dataseed.bnbchain.org"
+archive_source = "bsc-mainnet.public.blastapi.io"
+headers_verified = 1522871
+bloom_candidate_blocks = 99563
+current_implementation_code_sha256 = 0x68aeff3ec1de884c6e13005b57d5c8589197067d6130803f74fd0fe4fca49391
+current_implementation_code_bytes = 20347
+first_parent_hash = 0xb8f3cec4f6f874338f00ca12a8679df9eb1485ee6f3b8b3d2bb800f89cc4cb01
+last_block_hash = 0xecd551e26636169007271a2c9dd850653fa6412ce169452f28e1ead132782c82
