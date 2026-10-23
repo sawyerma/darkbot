@@ -15,7 +15,8 @@ use darkbot_bsc_execution::acceptance_contract::{
 };
 use darkbot_bsc_execution::acceptance_guard::{
     FROZEN_APPROVED_V4_SHA256, InputHashes, LiveGuardContext, V3_RELATIVE_PATH, V4_RELATIVE_PATH,
-    inspect_v3, parse_v4, sha256_hex, verify_further_v4_evidence, verify_live_authorization,
+    DryPassProof, WitnessSourceProof, inspect_v3, parse_v4, sha256_hex, verify_further_v4_evidence,
+    verify_live_authorization,
 };
 use darkbot_bsc_record::schema::{
     PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, g06a, g07::contract,
@@ -58,9 +59,14 @@ fn matching_context() -> LiveGuardContext {
         spent_budget_wei: 0,
         reserved_attempt_wei: 0,
         attempt_number: 1,
-        dry_pass_all: true,
-        capture_prearmed: true,
-        producer_witness_contract_bound: true,
+        dry_pass: DryPassProof::check(&native_copy(
+            "dry_result.dbrec",
+            &g06a::dry::SCHEMA,
+            &g06a::dry::NATIVE,
+        ))
+        .unwrap(),
+        capture: None,
+        producer_witness: None,
         dry_evidence: snap.dry_evidence.clone(),
         preflight_evidence: snap.preflight_evidence.clone(),
         builder_policy_evidence: snap.builder_policy_evidence.clone(),
@@ -533,4 +539,31 @@ fn the_guard_itself_binds_local_simulation_economics_and_portal_upgrade() {
             .contains("plain relative")
     );
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn guard_proofs_come_only_from_their_checks() {
+    use g06a::dry as d;
+    at_repo_root();
+    let good = native_copy("dry_result.dbrec", &d::SCHEMA, &d::NATIVE);
+    assert!(DryPassProof::check(&good).is_ok());
+    // One failed DRY flag: no proof, so no guard context can be built.
+    let record = decode(&d::NATIVE, &good).unwrap();
+    let mut failed = Draft::new(&d::NATIVE);
+    for (t, v) in record.fields() {
+        failed.push(*t, v.clone());
+    }
+    failed.set(d::DRY_3, false);
+    assert!(DryPassProof::check(&failed.encode().unwrap()).is_err());
+    assert!(DryPassProof::check(b"not a record").is_err());
+    let witness = std::fs::read(WITNESS_SOURCE_RECORD).unwrap();
+    let attempt = decode(&darkbot_bsc_record::schema::g07::witness_source::SCHEMA, &witness)
+        .unwrap()
+        .text(darkbot_bsc_record::schema::g07::witness_source::ATTEMPT_ID)
+        .unwrap()
+        .to_string();
+    let schema = "bsc/config/producer_execution_witness_v1.schema.json";
+    assert!(WitnessSourceProof::check(&witness, &attempt, schema).is_ok());
+    assert!(WitnessSourceProof::check(&witness, "another-attempt", schema).is_err());
+    assert!(WitnessSourceProof::check(&witness, &attempt, "other.schema.json").is_err());
 }

@@ -16,7 +16,7 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// Re-pinned 2026-10-21 (E6-2): Cargo.lock gained the geth_ipc -> trading
 /// edge. The earlier pin a5ad014f… was already stale at 214d603e (plan
 /// 20c4cfd2… after the E4 source changes). Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "dca24cad125b0db5a01269d8460aad94843fbc12a81c48b99257331037f45cc6";
+const PINNED_PLAN_SHA256: &str = "170079416e5027525c73acf103091ecd9de262549f8db3b1907440d4f401acc6";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

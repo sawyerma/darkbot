@@ -73,6 +73,12 @@ fn main() {
     assert_repository_root();
     let (producer_witness_contract, producer_witness_hashes) =
         validate_producer_witness_source(&producer_witness_contract_path, &attempt_id);
+    let producer_witness_proof = darkbot_bsc_execution::acceptance_guard::WitnessSourceProof::check(
+        &fs::read(&producer_witness_contract_path).expect("re-read the producer witness source"),
+        &attempt_id,
+        PRODUCER_WITNESS_SCHEMA_PATH,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let producer_witness_source =
         field(producer_witness_contract.text(schema::g07::witness_source::SOURCE_DESCRIPTION))
             .to_string();
@@ -85,7 +91,11 @@ fn main() {
     let (baseline, baseline_hashes) =
         load_record(&baseline_path, &[&schema::g06a::preflight::SCHEMA]);
     assert_eq!(field(dry.text(d::STATUS)), "G0.6A_SELF_LAUNCH_BUNDLE_DRY");
-    darkbot_bsc_execution::acceptance_contract::require_dry_pass(&dry).expect("individual DRY checks failed");
+    // The guard's DRY-1..DRY-4 proof is made from the DRY bytes themselves.
+    let dry_pass = darkbot_bsc_execution::acceptance_guard::DryPassProof::check(
+        &fs::read(&dry_path).expect("re-read the DRY record"),
+    )
+    .expect("individual DRY checks failed");
 
     // SAFETY: standalone main is still single-threaded. Above are only local
     // environment/filesystem/record checks; no TLS, subprocess, capture worker
@@ -278,9 +288,9 @@ fn main() {
             spent_budget_wei,
             reserved_attempt_wei,
             attempt_number,
-            dry_pass_all: true,
-            capture_prearmed: true,
-            producer_witness_contract_bound: true,
+            dry_pass: dry_pass.clone(),
+            capture: capture.prearmed_proof().ok(),
+            producer_witness: Some(producer_witness_proof.clone()),
             dry_evidence: dry_hashes.clone(),
             preflight_evidence: baseline_hashes.clone(),
             builder_policy_evidence: builder_policy_hashes.clone(),

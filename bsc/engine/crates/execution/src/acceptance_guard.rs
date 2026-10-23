@@ -31,6 +31,90 @@ pub struct InputHashes {
     pub legacy_sha256: Option<String>,
 }
 
+/// Proof that one exact DRY record passed every DRY-1..DRY-4 check (and
+/// DRY_ALL and the structural zero egress). The field is private: only
+/// [`DryPassProof::check`] creates it, never a literal.
+///
+/// ```compile_fail
+/// let _ = darkbot_bsc_execution::acceptance_guard::DryPassProof { record_sha256: String::new() };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DryPassProof {
+    record_sha256: String,
+}
+
+impl DryPassProof {
+    /// Checks the DRY record bytes; the proof carries their SHA-256.
+    pub fn check(bytes: &[u8]) -> Result<Self, String> {
+        let record = decode(&dry::NATIVE, bytes).map_err(|e| format!("DRY: {e}"))?;
+        crate::acceptance_contract::require_dry_pass(&record)?;
+        Ok(Self {
+            record_sha256: sha256_hex(bytes),
+        })
+    }
+}
+
+/// Proof that the bounded capture of an attempt is pre-armed and healthy:
+/// only a live `CaptureSession` creates it.
+///
+/// ```compile_fail
+/// let _ = darkbot_bsc_execution::acceptance_guard::CapturePrearmedProof { attempt_id: String::new() };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturePrearmedProof {
+    attempt_id: String,
+}
+
+impl CapturePrearmedProof {
+    #[cfg_attr(not(feature = "g07-mainnet"), allow(dead_code))]
+    pub(crate) fn new(attempt_id: &str) -> Self {
+        Self {
+            attempt_id: attempt_id.to_string(),
+        }
+    }
+}
+
+/// Proof that the producer-witness source contract was validated for an
+/// attempt. A bound source contract is NOT a real producer-timing witness.
+///
+/// ```compile_fail
+/// let _ = darkbot_bsc_execution::acceptance_guard::WitnessSourceProof { record_sha256: String::new(), attempt_id: String::new() };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WitnessSourceProof {
+    record_sha256: String,
+    attempt_id: String,
+}
+
+impl WitnessSourceProof {
+    /// The checks of the G0.7 runner on the source contract bytes.
+    pub fn check(
+        bytes: &[u8],
+        attempt_id: &str,
+        required_witness_schema: &str,
+    ) -> Result<Self, String> {
+        use darkbot_bsc_record::schema::g07::witness_source as w;
+        let r = decode(&w::SCHEMA, bytes).map_err(|e| format!("producer witness source: {e}"))?;
+        let e = |e: RecordError| e.to_string();
+        let ok = r.text(w::LEGACY_SCHEMA).map_err(e)? == "darkbot.producer-witness-source.v1"
+            && r.text(w::ATTEMPT_ID).map_err(e)? == attempt_id
+            && !attempt_id.is_empty()
+            && r.bool(w::ORIGINAL_EXECUTION_ONLY).map_err(e)?
+            && r.text(w::REQUIRED_WITNESS_SCHEMA).map_err(e)? == required_witness_schema
+            && r.bool(w::DELIVERY_MAY_BE_ASYNCHRONOUS).map_err(e)?
+            && r.bool(w::CANONICAL_IDENTITY_BINDING_REQUIRED).map_err(e)?
+            && r.bool(w::CLOCK_METADATA_REQUIRED).map_err(e)?
+            && !r.text(w::SOURCE_DESCRIPTION).map_err(e)?.trim().is_empty();
+        if !ok {
+            return Err("producer witness source contract does not bind this attempt".into());
+        }
+        Ok(Self {
+            record_sha256: sha256_hex(bytes),
+            attempt_id: attempt_id.to_string(),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LiveGuardContext {
     pub attempt_id: String,
@@ -47,9 +131,10 @@ pub struct LiveGuardContext {
     pub spent_budget_wei: u128,
     pub reserved_attempt_wei: u128,
     pub attempt_number: u64,
-    pub dry_pass_all: bool,
-    pub capture_prearmed: bool,
-    pub producer_witness_contract_bound: bool,
+    /// Evidence-backed facts: a skipped check cannot create them.
+    pub dry_pass: DryPassProof,
+    pub capture: Option<CapturePrearmedProof>,
+    pub producer_witness: Option<WitnessSourceProof>,
     pub dry_evidence: InputHashes,
     pub preflight_evidence: InputHashes,
     pub builder_policy_evidence: InputHashes,
@@ -422,13 +507,28 @@ pub fn verify_live_authorization(
     if !snap.execution_ready {
         return Err("v4 authorization.execution_ready is not true".into());
     }
-    if !ctx.dry_pass_all {
-        return Err("DRY-1..DRY-4 are not all PASS".into());
+    if !ctx
+        .dry_pass
+        .record_sha256
+        .eq_ignore_ascii_case(&ctx.dry_evidence.record_sha256)
+    {
+        return Err("DRY-1..DRY-4 proof is not of the runtime DRY record".into());
     }
-    if snap.capture_required && !ctx.capture_prearmed {
+    if snap.capture_required
+        && ctx
+            .capture
+            .as_ref()
+            .is_none_or(|c| c.attempt_id != ctx.attempt_id)
+    {
         return Err("required bounded capture is not pre-armed".into());
     }
-    if snap.producer_witness_contract_required && !ctx.producer_witness_contract_bound {
+    if snap.producer_witness_contract_required
+        && !ctx.producer_witness.as_ref().is_some_and(|w| {
+            w.attempt_id == ctx.attempt_id
+                && w.record_sha256
+                    .eq_ignore_ascii_case(&ctx.producer_witness_source.record_sha256)
+        })
+    {
         return Err("producer-witness schema/source contract is not bound for this attempt; actual producer access may arrive asynchronously".into());
     }
 

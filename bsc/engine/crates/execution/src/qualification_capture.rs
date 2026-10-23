@@ -56,6 +56,7 @@ pub struct CaptureSummary {
 
 pub struct CaptureSession {
     path: PathBuf,
+    attempt_id: String,
     recorder: Option<Recorder>,
     writer: Option<JoinHandle<Result<JournalManifest, String>>>,
     clock: CaptureClock,
@@ -95,6 +96,17 @@ fn raw_tx_payload(label: &str, tx_hash: &str, raw: &[u8]) -> Vec<u8> {
 }
 
 impl CaptureSession {
+    /// The guard's proof that this attempt's capture is pre-armed; refused
+    /// once the writer failed.
+    pub fn prearmed_proof(&self) -> Result<crate::acceptance_guard::CapturePrearmedProof, String> {
+        if self.failed.load(Ordering::Acquire) {
+            return Err("capture writer failed after pre-arm".into());
+        }
+        Ok(crate::acceptance_guard::CapturePrearmedProof::new(
+            &self.attempt_id,
+        ))
+    }
+
     pub fn prearm(
         path: &Path,
         attempt_id: &str,
@@ -169,6 +181,7 @@ impl CaptureSession {
 
         let mut session = Self {
             path: path.to_path_buf(),
+            attempt_id: attempt_id.to_string(),
             recorder: Some(recorder),
             writer: Some(writer),
             clock: CaptureClock {
