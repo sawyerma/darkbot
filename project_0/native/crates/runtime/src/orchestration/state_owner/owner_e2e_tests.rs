@@ -13,13 +13,22 @@ struct Fixture {
     producer: darkbot_common::channel::Producer<IngressEvent>,
     program_data_account: AccountUpdate,
     dir: std::path::PathBuf,
-    /// A23-01: detached result queues — the projection result producer and its space doorbell.
-    results: Option<(
-        darkbot_common::channel::Producer<
-            crate::orchestration::remote_workers::ProjectionResultMessage,
-        >,
-        darkbot_common::channel::Wakeup,
-    )>,
+    /// A23-01/FE-04: detached result queues the test drives as the workers.
+    results: Option<crate::orchestration::remote_workers::Detached>,
+}
+
+fn e2e_limits() -> Limits {
+    Limits {
+        max_total_capital: 0,
+        max_outstanding_inventory: 0,
+        max_concurrent_positions: 1,
+        max_exposure_per_attempt: 0,
+        max_daily_loss: 0,
+        max_failed_attempts_per_day: 0,
+        max_tip: 0,
+        max_slippage_bps: 0,
+        max_outstanding_attempts: 1,
+    }
 }
 
 fn fixture(tag: &str) -> Fixture {
@@ -62,17 +71,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
     let producer = producer.with_wakeup(&wake);
     let unused_rpc = rpc.to_string();
     let mut results = None;
-    let limits = Limits {
-        max_total_capital: 0,
-        max_outstanding_inventory: 0,
-        max_concurrent_positions: 1,
-        max_exposure_per_attempt: 0,
-        max_daily_loss: 0,
-        max_failed_attempts_per_day: 0,
-        max_tip: 0,
-        max_slippage_bps: 0,
-        max_outstanding_attempts: 1,
-    };
+    let limits = e2e_limits();
     let ingress = IngressSessions {
         ws_url: "ws://127.0.0.1:9".into(),
         slot_watch: SlotWatch::new(),
@@ -100,6 +99,9 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         reservations: Default::default(),
         fe04_journal: None,
         fe04_refreshed: std::time::Instant::now(),
+        fe04_held: None,
+        fe04_settle_due: None,
+        fe04_reserved_capital: None,
         inventory_targets: Default::default(),
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             8,
@@ -211,8 +213,8 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
             execution_deadline_ns: 2_000_000_000,
         },
         remote: if detached {
-            let (remote, tx, space) = RemoteWorkers::detached(&shutdown, 16, &wake);
-            results = Some((tx, space));
+            let (remote, detached) = RemoteWorkers::detached(&shutdown, 16, &wake);
+            results = Some(detached);
             remote
         } else {
             RemoteWorkers::start(unused_rpc, program, &shutdown, 16, &wake).unwrap()
@@ -1057,7 +1059,7 @@ fn result_worker(
     let (tx, space) = f
         .results
         .as_ref()
-        .map(|(t, s)| (t.clone(), s.clone()))
+        .map(|d| (d.projection.clone(), d.space.clone()))
         .unwrap();
     let stop = f.owner.shutdown.clone();
     std::thread::spawn(move || {
@@ -1144,7 +1146,7 @@ fn a23_01_owner_wakeup_latency_is_measured() {
         let (tx, space) = f
             .results
             .as_ref()
-            .map(|(t, s)| (t.clone(), s.clone()))
+            .map(|d| (d.projection.clone(), d.space.clone()))
             .unwrap();
         let stop = f.owner.shutdown.clone();
         std::thread::spawn(move || {
@@ -1610,4 +1612,172 @@ fn s1_02_runtime_control_toggles_and_hands_canonical_authority_over() {
         "{lines:?}"
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// C3: the detached fixture started from an FE-04 journal in `phase` (`"unknown"`: handed off;
+/// `"finalized"`: proven not landed, not yet booked) through the production startup replay; the
+/// attempt's intent and the non-landing proof that fits it.
+fn fe04_fixture(
+    tag: &str,
+    phase: &str,
+) -> (
+    Fixture,
+    crate::execution::one_shot::Intent,
+    crate::execution::one_shot::settlement::NonLandingProof,
+) {
+    let mut f = fixture_with(tag, None);
+    let (wallet, dir) = (f.owner.liquidator.to_string(), f.dir.join("fe04"));
+    let intent = crate::execution::one_shot::test_unknown_attempt(&dir, &wallet);
+    let proof = crate::execution::one_shot::settlement::NonLandingProof {
+        finalized_block_height: intent.last_valid_block_height.unwrap() + 1,
+        history_from_slot: intent.state_slot,
+        absent_signatures: intent.signatures.iter().cloned().collect(),
+    };
+    if phase == "finalized" {
+        let mut j = crate::execution::one_shot::Journal::open(&dir, &wallet).unwrap();
+        j.reconcile_not_landed(&proof).unwrap();
+    }
+    let dir_s = dir.display().to_string();
+    let start = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &f.owner.liquidator,
+    )
+    .unwrap()
+    .start(&mut f.owner.safety, wall_unix_s().unwrap())
+    .unwrap();
+    f.owner.reservations = start.book;
+    f.owner.fe04_journal = start.dir;
+    f.owner.fe04_held = start.held;
+    f.owner.fe04_settle_due = start.settle_due;
+    f.owner.fe04_reserved_capital = start.reserved_capital;
+    (f, intent, proof)
+}
+
+/// The settlement work the owner handed to the (detached) worker.
+fn fe04_job(f: &Fixture) -> Option<crate::orchestration::remote_workers::Fe04SettlementWork> {
+    f.results.as_ref().unwrap().fe04_jobs.try_pop()
+}
+
+/// The worker's answer through the production result queue (it rings the owner's doorbell).
+fn fe04_answer(f: &Fixture, evidence: crate::execution::one_shot::settlement::SettlementEvidence) {
+    let d = f.results.as_ref().unwrap();
+    assert!(crate::orchestration::remote_workers::push_result(
+        &d.fe04_results,
+        crate::orchestration::remote_workers::Fe04SettlementResult { evidence },
+        &f.owner.shutdown,
+        &d.space
+    ));
+}
+
+fn fe04_settled(o: &ShadowOwner) -> bool {
+    o.fe04_held
+        .as_ref()
+        .and_then(|j| j.safety_replay())
+        .is_some_and(|r| r.settled.is_some())
+}
+
+/// C3 in the running owner: an UNKNOWN attempt from the journal holds its capital and book; the
+/// owner hands the read to the settlement worker, applies the proven non-landing, books it into
+/// Safety exactly once (capital released, one failed attempt, nothing realized), empties the book
+/// from the journal; a repeated answer and later passes book nothing again, no new read is sent;
+/// a restart replays the settled journal with nothing held and nothing to settle.
+#[test]
+fn c3_owner_settles_a_proven_non_landing_exactly_once() {
+    use crate::execution::one_shot::settlement::SettlementEvidence;
+    let (mut f, intent, proof) = fe04_fixture("fe04_once", "unknown");
+    assert_eq!(f.owner.safety.capital_in_use(), intent.capital_usd_micro);
+    assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    let job = fe04_job(&f).expect("the read is handed to the worker");
+    assert_eq!(job.intent.signatures, intent.signatures);
+    assert!(job.observed.is_empty());
+    let evidence = SettlementEvidence {
+        observations: vec![],
+        proof: Some(Ok(proof)),
+    };
+    fe04_answer(&f, evidence.clone());
+    run_until(&mut f, fe04_settled);
+    let day = f.owner.safety.day();
+    assert_eq!(f.owner.safety.capital_in_use(), 0, "released once");
+    assert_eq!((day.realized_pnl, day.failed_attempts), (0, 1));
+    assert!(
+        f.owner.reservations.is_empty(),
+        "the book follows the journal"
+    );
+    assert!(f.owner.safety.halted().is_some(), "the one-shot HALT stays");
+    // A repeated answer and a due step change nothing and send no read.
+    fe04_answer(&f, evidence);
+    run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+    f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_none());
+    assert_eq!(f.owner.safety.day(), day);
+    assert_eq!(f.owner.safety.capital_in_use(), 0);
+    // Restart: the settled journal holds nothing and needs no settlement.
+    f.owner.fe04_held = None;
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    let dir_s = f.dir.join("fe04").display().to_string();
+    let again = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &f.owner.liquidator,
+    )
+    .unwrap()
+    .start(&mut safety, wall_unix_s().unwrap())
+    .unwrap();
+    assert!(again.book.is_empty() && again.settle_due.is_none());
+    assert_eq!((again.reserved_capital, safety.capital_in_use()), (None, 0));
+    cleanup(f);
+}
+
+/// C3: evidence that proves nothing (an unexpired blockhash, a failed read) keeps the attempt
+/// UNKNOWN with every hold — capital, book, HALT — and the next read waits the backoff.
+#[test]
+fn c3_owner_keeps_unknown_holds_and_retries_after_the_backoff() {
+    use crate::execution::one_shot::settlement::SettlementEvidence;
+    let (mut f, intent, _) = fe04_fixture("fe04_unknown", "unknown");
+    for reason in [
+        "NON_LANDING_BLOCKHASH_NOT_EXPIRED",
+        "NON_LANDING_HEIGHT_UNAVAILABLE",
+    ] {
+        run_until(&mut f, |o| o.fe04_settle_due.is_none());
+        assert!(fe04_job(&f).is_some());
+        let sent = std::time::Instant::now();
+        fe04_answer(
+            &f,
+            SettlementEvidence {
+                observations: vec![],
+                proof: Some(Err(reason.into())),
+            },
+        );
+        run_until(&mut f, |o| o.fe04_settle_due.is_some());
+        assert!(f.owner.fe04_settle_due.unwrap() >= sent + super::fe04::FE04_SETTLE_RETRY);
+        assert!(!fe04_settled(&f.owner));
+        assert_eq!(f.owner.safety.capital_in_use(), intent.capital_usd_micro);
+        assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
+        assert_eq!(f.owner.safety.day().failed_attempts, 0, "nothing booked");
+        // Before the backoff ends no read is sent.
+        f.owner.remote_apply().unwrap();
+        assert!(fe04_job(&f).is_none());
+        f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    }
+    cleanup(f);
+}
+
+/// C3: an attempt finalized before the restart (proven not landed, not booked) reserved no
+/// capital; the owner settles it from the journal alone (no read is sent) and books it once.
+#[test]
+fn c3_owner_books_a_finalized_attempt_without_a_read() {
+    let (mut f, _, _) = fe04_fixture("fe04_final", "finalized");
+    assert_eq!(f.owner.safety.capital_in_use(), 0);
+    assert!(f.owner.reservations.is_empty() && f.owner.fe04_settle_due.is_some());
+    run_until(&mut f, fe04_settled);
+    assert!(
+        fe04_job(&f).is_none(),
+        "no RPC read for a finalized attempt"
+    );
+    assert_eq!(f.owner.safety.capital_in_use(), 0);
+    f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_settled(&f.owner) && fe04_job(&f).is_none());
+    cleanup(f);
 }

@@ -887,20 +887,14 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let mt0_order_rx: VecDeque<u64> = VecDeque::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
-    let fe04 = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?;
-    // B3: a durable attempt halts the safety layer and keeps its capital reserved.
-    if let Some(replay) = fe04.replay {
-        safety
-            .restore_attempt(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_secs()),
-                replay.held_capital_usd_micro,
-                replay.settled,
-            )
-            .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
-    }
-    let (reservations, fe04_journal) = (fe04.book, fe04.dir);
+    let Fe04Owner {
+        book: reservations,
+        dir: fe04_journal,
+        held: fe04_held,
+        settle_due: fe04_settle_due,
+        reserved_capital: fe04_reserved_capital,
+    } = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?
+        .start(&mut safety, wall_unix_s().unwrap_or(0))?;
     let inventory_targets = crate::execution::inventory::parse_targets(
         &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
@@ -974,6 +968,9 @@ pub(super) fn prepare(
         reservations,
         fe04_journal,
         fe04_refreshed: std::time::Instant::now(),
+        fe04_held,
+        fe04_settle_due,
+        fe04_reserved_capital,
         inventory_targets,
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             PREPARED_CANDIDATES,
@@ -1092,6 +1089,43 @@ pub(super) struct Fe04Start {
     pub(super) book: crate::execution::reservation::WalletReservations,
     pub(super) dir: Option<std::path::PathBuf>,
     pub(super) replay: Option<crate::execution::one_shot::SafetyReplay>,
+    /// FE-04/C3: the journal of an existing attempt, held for the run (no attempt: none).
+    pub(super) journal: Option<crate::execution::one_shot::Journal>,
+}
+
+/// What the owner holds of its FE-04 journal after the startup replay.
+pub(super) struct Fe04Owner {
+    pub(super) book: crate::execution::reservation::WalletReservations,
+    pub(super) dir: Option<std::path::PathBuf>,
+    pub(super) held: Option<crate::execution::one_shot::Journal>,
+    pub(super) settle_due: Option<std::time::Instant>,
+    pub(super) reserved_capital: Option<u64>,
+}
+
+impl Fe04Start {
+    /// B3/C3: a durable attempt halts the safety layer and keeps its capital reserved (released
+    /// once, by its settlement; a settled attempt books its day); an UNKNOWN or unbooked attempt
+    /// is settled at once.
+    pub(super) fn start(self, safety: &mut Safety, now_unix_s: u64) -> Result<Fe04Owner, String> {
+        let reserved_capital = self.replay.as_ref().and_then(|r| r.held_capital_usd_micro);
+        if let Some(replay) = self.replay {
+            safety
+                .restore_attempt(now_unix_s, replay.held_capital_usd_micro, replay.settled)
+                .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
+        }
+        let settle_due = self
+            .journal
+            .as_ref()
+            .filter(|j| j.settlement_job().is_some() || j.awaits_booking())
+            .map(|_| std::time::Instant::now());
+        Ok(Fe04Owner {
+            book: self.book,
+            dir: self.dir,
+            held: self.journal,
+            settle_due,
+            reserved_capital,
+        })
+    }
 }
 
 pub(super) fn reservation_book(
@@ -1103,18 +1137,29 @@ pub(super) fn reservation_book(
             book: Default::default(),
             dir: None,
             replay: None,
+            journal: None,
         });
     };
     let dir = std::path::PathBuf::from(dir);
-    let (book, replay) = crate::execution::reservation::WalletReservations::replay_fe04_journal(
-        &dir,
-        &liquidator.to_string(),
-    )
-    .map_err(|e| format!("RESERVATION_JOURNAL_UNREADABLE: {e}"))?;
+    let wallet = liquidator.to_string();
+    if !dir.join(format!("{wallet}.p0j")).exists() && !dir.join(format!("{wallet}.json")).exists() {
+        return Ok(Fe04Start {
+            book: Default::default(),
+            dir: Some(dir),
+            replay: None,
+            journal: None,
+        });
+    }
+    // One open for the run: the book, the safety replay and the settlement of its attempt.
+    let journal = crate::execution::one_shot::Journal::open(&dir, &wallet)
+        .map_err(|e| format!("RESERVATION_JOURNAL_UNREADABLE: {e}"))?;
+    let book = crate::execution::reservation::WalletReservations::rebuild(journal.active_hold())
+        .map_err(|e| format!("RESERVATION_JOURNAL_UNREADABLE: {e}"))?;
     Ok(Fe04Start {
         book,
         dir: Some(dir),
-        replay,
+        replay: journal.safety_replay(),
+        journal: Some(journal),
     })
 }
 

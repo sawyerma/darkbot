@@ -490,6 +490,19 @@ fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), 
     Ok((saved, imported))
 }
 
+/// Test seam: an attempt of `wallet` in `dir`, reserved and handed off (UNKNOWN) with one bound
+/// signature through the real journal, which is closed again; its intent.
+#[cfg(all(test, feature = "crate_health"))]
+pub(crate) fn test_unknown_attempt(dir: &Path, wallet: &str) -> Intent {
+    let (_, mut a, mut i, c) = tests::setup();
+    a.wallet = wallet.into();
+    i.wallet = wallet.into();
+    let mut j = Journal::open(dir, wallet).unwrap();
+    j.reserve(a, i.clone(), &c).unwrap();
+    j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+    i
+}
+
 impl Journal {
     /// The current attempt's intent (tests: what the admission bound).
     #[cfg(test)]

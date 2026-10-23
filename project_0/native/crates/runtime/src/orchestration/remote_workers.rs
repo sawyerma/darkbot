@@ -106,6 +106,26 @@ pub struct OraclePriceProjectionResultMessage {
     pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, String>,
 }
 
+/// FE-04/C3: the settlement reads of one UNKNOWN attempt (its intent and observed signatures).
+pub struct Fe04SettlementWork {
+    pub intent: crate::execution::one_shot::Intent,
+    pub observed: std::collections::BTreeSet<String>,
+}
+
+pub struct Fe04SettlementResult {
+    pub evidence: crate::execution::one_shot::settlement::SettlementEvidence,
+}
+
+/// Test seam of `RemoteWorkers::detached`: the producers a test drives as the workers, the
+/// FE-04 settlement job queue it serves, and the space doorbell.
+#[cfg(all(test, feature = "crate_health"))]
+pub(crate) struct Detached {
+    pub(crate) projection: Producer<ProjectionResultMessage>,
+    pub(crate) fe04_jobs: Consumer<Fe04SettlementWork>,
+    pub(crate) fe04_results: Producer<Fe04SettlementResult>,
+    pub(crate) space: Wakeup,
+}
+
 pub struct RemoteWorkers {
     threads: Vec<std::thread::JoinHandle<()>>,
     pub winner_jobs: Producer<WinnerWatch>,
@@ -116,6 +136,8 @@ pub struct RemoteWorkers {
     pub projection_results: Consumer<ProjectionResultMessage>,
     pub oracle_price_projection_jobs: Producer<OraclePriceProjectionWork>,
     pub oracle_price_projection_results: Consumer<OraclePriceProjectionResultMessage>,
+    pub fe04_settlement_jobs: Producer<Fe04SettlementWork>,
+    pub fe04_settlement_results: Consumer<Fe04SettlementResult>,
 }
 
 /// A23-08: liveness bound of one wait on a full result queue. Progress is event-driven: the
@@ -213,8 +235,50 @@ impl RemoteWorkers {
                 wake,
                 &space,
             );
+        // FE-04/C3: settlement reads (finalized receipts, non-landing proof), off the owner.
+        let (fe04_settlement_jobs, fe04_settlement_job_rx) =
+            bounded::<Fe04SettlementWork>("fe04-settlement-jobs", 1);
+        let (fe04_settlement_done_tx, fe04_settlement_results) =
+            result_queue::<Fe04SettlementResult>("fe04-settlement-results", 1, wake, &space);
 
         let mut threads = Vec::new();
+        let fe04_shutdown = shutdown.clone();
+        let fe04_space = space.clone();
+        let fe04_rpc_url = rpc_url.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("fe04-settlement-rpc".into())
+                .spawn(move || {
+                    let rpc = darkbot_solana::provider::rpc_client(
+                        fe04_rpc_url,
+                        Duration::from_secs(30),
+                        Default::default(),
+                        // C5: financial reconciliation, the prioritized workload.
+                        darkbot_solana::provider::Workload::Reconcile,
+                    );
+                    while !fe04_shutdown.is_requested() {
+                        let Some(work) =
+                            fe04_settlement_job_rx.pop_timeout(Duration::from_millis(250))
+                        else {
+                            continue;
+                        };
+                        let evidence =
+                            crate::execution::one_shot::settlement::fetch_settlement_evidence(
+                                &rpc,
+                                &work.intent,
+                                &work.observed,
+                            );
+                        if !push_result(
+                            &fe04_settlement_done_tx,
+                            Fe04SettlementResult { evidence },
+                            &fe04_shutdown,
+                            &fe04_space,
+                        ) {
+                            return;
+                        }
+                    }
+                })?,
+        );
         let winner_rpc_url = rpc_url.clone();
         let winner_shutdown = shutdown.clone();
         let winner_space = space.clone();
@@ -417,21 +481,26 @@ impl RemoteWorkers {
             projection_results,
             oracle_price_projection_jobs,
             oracle_price_projection_results,
+            fe04_settlement_jobs,
+            fe04_settlement_results,
         })
     }
 
-    /// Test seam (A23-01): the production result queues without worker threads; returns the
-    /// projection result producer (rings `wake`) and the space doorbell its pushes wait on.
+    /// Test seam (A23-01): the production result queues without worker threads; the test drives
+    /// them as the workers (`Detached`).
     #[cfg(all(test, feature = "crate_health"))]
     pub(crate) fn detached(
         shutdown: &Shutdown,
         capacity: usize,
         wake: &Wakeup,
-    ) -> (Self, Producer<ProjectionResultMessage>, Wakeup) {
+    ) -> (Self, Detached) {
         let space = Wakeup::default();
         shutdown.ring_on_request(&space);
         let (projection_done_tx, projection_results) =
             result_queue("projection-rpc-results", capacity, wake, &space);
+        let (fe04_settlement_jobs, fe04_jobs) = bounded("fe04-settlement-jobs", 1);
+        let (fe04_results, fe04_settlement_results) =
+            result_queue("fe04-settlement-results", 1, wake, &space);
         let workers = Self {
             threads: Vec::new(),
             winner_jobs: bounded("winner-rpc-jobs", capacity).0,
@@ -448,8 +517,18 @@ impl RemoteWorkers {
                 &space,
             )
             .1,
+            fe04_settlement_jobs,
+            fe04_settlement_results,
         };
-        (workers, projection_done_tx, space)
+        (
+            workers,
+            Detached {
+                projection: projection_done_tx,
+                fe04_jobs,
+                fe04_results,
+                space,
+            },
+        )
     }
 }
 

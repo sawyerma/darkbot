@@ -351,6 +351,10 @@ fn owner_thread_sources_have_no_json_io_env_or_blocking_logging() {
             include_str!("../orchestration/state_owner/events.rs"),
         ),
         (
+            "fe04.rs",
+            include_str!("../orchestration/state_owner/fe04.rs"),
+        ),
+        (
             "lifecycle.rs",
             include_str!("../orchestration/state_owner/lifecycle.rs"),
         ),

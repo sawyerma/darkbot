@@ -5,7 +5,8 @@ impl ShadowOwner {
     pub(super) fn lifecycle(&mut self) -> bool {
         // P8-RES-02: the book follows the durable FE-04 journal (a finalized reconciliation
         // releases, UNKNOWN keeps holding, an unreadable journal blocks every offer).
-        if let Some(dir) = &self.fe04_journal {
+        // FE-04/C3: a held journal changes only through this owner (the book is rebuilt there).
+        if let (Some(dir), None) = (&self.fe04_journal, &self.fe04_held) {
             if self.fe04_refreshed.elapsed() >= std::time::Duration::from_secs(5) {
                 self.reservations = crate::execution::reservation::WalletReservations::refreshed(
                     dir,

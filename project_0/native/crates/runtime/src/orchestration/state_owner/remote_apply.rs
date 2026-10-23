@@ -9,6 +9,7 @@ impl ShadowOwner {
             || self.remote.projection_results.pending()
             || self.remote.oracle_price_projection_results.pending()
             || self.c0_census.as_ref().is_some_and(|c| c.outcome_pending())
+            || self.remote.fe04_settlement_results.pending()
     }
 
     /// A23-01: a stop (shutdown or econ abort) waits for the loop's lifecycle check.
@@ -45,6 +46,7 @@ impl ShadowOwner {
     pub(super) fn remote_apply(&mut self) -> Result<u64, Box<dyn std::error::Error>> {
         #[cfg(feature = "crate_health")]
         self.poll_c0_census();
+        self.fe04_settlement();
         // [FIX-108][R4] Apply completed remote work on the state thread, but never perform RPC here.
         let worker_now_s = wall_unix_s()?;
 

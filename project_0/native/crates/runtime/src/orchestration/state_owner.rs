@@ -81,6 +81,7 @@ mod lifecycle;
 mod remote_apply;
 mod setup;
 use ingress::{IngressSession, IngressSessions, RetiredEvents};
+mod fe04;
 mod shutdown;
 mod sources;
 mod sweep;
@@ -109,6 +110,13 @@ pub(super) struct ShadowOwner {
     /// P8-RES-02: the FE-04 journal directory the book is rebuilt from, and when it last was.
     fe04_journal: Option<std::path::PathBuf>,
     fe04_refreshed: std::time::Instant,
+    /// FE-04/C3: the wallet journal of an existing attempt, held for the run (one runtime per
+    /// project): the reservation book follows it and its UNKNOWN attempt is settled here.
+    fe04_held: Option<crate::execution::one_shot::Journal>,
+    /// When the next settlement step is due (`None`: a read in flight, or nothing to settle).
+    fe04_settle_due: Option<std::time::Instant>,
+    /// The capital the startup replay reserved for that attempt; released once, by its settlement.
+    fe04_reserved_capital: Option<u64>,
     /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
     /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,

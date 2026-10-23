@@ -97,6 +97,51 @@ pub fn conservative_value(
     }
 }
 
+/// What the settlement worker read for one UNKNOWN attempt, off the owner: each not yet observed
+/// bound signature's finalized observation or why it is missing, and — only while nothing at all
+/// is observed — the non-landing proof attempt. Evidence only; the journal decides.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SettlementEvidence {
+    pub observations: Vec<(
+        String,
+        Result<super::receipts::FinalizedObservation, String>,
+    )>,
+    pub proof: Option<Result<NonLandingProof, String>>,
+}
+
+/// The settlement worker's reads for `intent` (signatures in `observed` are not read again).
+pub fn fetch_settlement_evidence(
+    rpc: &RpcClient,
+    intent: &Intent,
+    observed: &BTreeSet<String>,
+) -> SettlementEvidence {
+    let wallet = intent.wallet.parse();
+    let observations: Vec<_> = intent
+        .signatures
+        .iter()
+        .filter(|s| !observed.contains(*s))
+        .map(|signature| {
+            let read = match (&wallet, signature.parse()) {
+                (Ok(wallet), Ok(sig)) => super::receipts::fetch_finalized(
+                    rpc,
+                    &sig,
+                    wallet,
+                    intent.state_slot,
+                    &intent.expected_wallet_assets,
+                ),
+                (Err(_), _) => Err(err("WALLET_INVALID")),
+                (_, Err(_)) => Err(err("SIGNATURE_BINDING_INVALID")),
+            };
+            (signature.clone(), read)
+        })
+        .collect();
+    let none_observed = observed.is_empty() && observations.iter().all(|(_, r)| r.is_err());
+    SettlementEvidence {
+        proof: none_observed.then(|| non_landing_proof(rpc, intent)),
+        observations,
+    }
+}
+
 /// The outcome of one settlement step.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettleStep {
@@ -163,40 +208,90 @@ impl Journal {
         self.persist(s, Transition::NotLanded)
     }
 
-    /// FE-04/C3: one settlement step of the attempt. Every bound signature observed finalized
-    /// without unknown reasons ⇒ reconcile and book (`value`); nothing observed ⇒ a strict
-    /// non-landing proof finalizes it (booked with nothing paid); anything partial or unproven
-    /// stays UNKNOWN with its reasons (holds retained). Idempotent across steps and restarts.
+    /// The settlement worker's job: the intent and the already observed signatures of an
+    /// UNKNOWN attempt; `None` otherwise.
+    pub fn settlement_job(&self) -> Option<(Intent, BTreeSet<String>)> {
+        self.saved
+            .as_ref()
+            .filter(|s| s.phase == Phase::HandoffUnknown)
+            .map(|s| (s.intent.clone(), s.observations.keys().cloned().collect()))
+    }
+
+    /// Finalized but not yet booked (e.g. a valuation that was unknown, or a restart between the
+    /// two transitions): settled from the journal alone, no read needed.
+    pub fn awaits_booking(&self) -> bool {
+        self.saved
+            .as_ref()
+            .is_some_and(|s| s.phase == Phase::HaltFinalized)
+    }
+
+    /// FE-04/C3: one settlement step through the reconciliation RPC (worker read, then apply).
     pub fn settle_step(
         &mut self,
         rpc: &RpcClient,
         value: &dyn Fn(&str, i128) -> Option<i128>,
     ) -> Result<SettleStep, String> {
-        let phase = self
-            .saved
-            .as_ref()
-            .ok_or_else(|| err("NO_ATTEMPT"))?
-            .phase
-            .clone();
-        match phase {
-            Phase::Settled(done) => return Ok(SettleStep::Settled(done)),
+        let evidence = match self.settlement_job() {
+            Some((intent, observed)) => fetch_settlement_evidence(rpc, &intent, &observed),
+            None => SettlementEvidence {
+                observations: vec![],
+                proof: None,
+            },
+        };
+        self.apply_settlement_evidence(evidence, value)
+    }
+
+    /// FE-04/C3: applies the worker's evidence to the attempt. New observations are durable
+    /// (only when something changed); every bound signature observed finalized without unknown
+    /// reasons ⇒ reconcile and book (`value`); nothing observed and a strict non-landing proof
+    /// ⇒ finalized and booked with nothing paid; anything partial or unproven stays UNKNOWN with
+    /// its reasons (holds retained). Idempotent across steps and restarts.
+    pub fn apply_settlement_evidence(
+        &mut self,
+        evidence: SettlementEvidence,
+        value: &dyn Fn(&str, i128) -> Option<i128>,
+    ) -> Result<SettleStep, String> {
+        let mut saved = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
+        match &saved.phase {
+            Phase::Settled(done) => return Ok(SettleStep::Settled(done.clone())),
             Phase::HaltFinalized => return self.settle(value).map(SettleStep::Settled),
             Phase::Reserved => return Ok(SettleStep::Unknown(vec![err("NOT_HANDED_OFF")])),
             Phase::HandoffUnknown => {}
         }
-        let mut reasons = self.observe_finalized(rpc)?;
-        let saved = self.saved.as_ref().ok_or_else(|| err("NO_ATTEMPT"))?;
-        if reasons.is_empty() && saved.observations.len() == saved.intent.signatures.len() {
+        let before = saved.observations.clone();
+        let mut reasons = Vec::new();
+        for (signature, read) in evidence.observations {
+            if !saved.intent.signatures.contains(&signature) {
+                reasons.push(format!("{signature}:SETTLEMENT_SIGNATURE_FOREIGN"));
+                continue;
+            }
+            match read {
+                Ok(o) => {
+                    saved.observations.insert(signature, o);
+                }
+                Err(reason) => reasons.push(format!("{signature}:{reason}")),
+            }
+        }
+        for (signature, o) in &saved.observations {
+            reasons.extend(o.unknown_reasons.iter().map(|r| format!("{signature}:{r}")));
+        }
+        let complete = saved.observations.len() == saved.intent.signatures.len();
+        let none = saved.observations.is_empty();
+        if saved.observations != before {
+            self.persist(saved, Transition::Observe)?;
+        }
+        if complete && reasons.is_empty() {
             self.reconcile_observed()?;
             return self.settle(value).map(SettleStep::Settled);
         }
-        if saved.observations.is_empty() {
-            match non_landing_proof(rpc, &saved.intent) {
-                Ok(proof) => {
+        if none {
+            match evidence.proof {
+                Some(Ok(proof)) => {
                     self.reconcile_not_landed(&proof)?;
                     return self.settle(value).map(SettleStep::Settled);
                 }
-                Err(reason) => reasons.push(reason),
+                Some(Err(reason)) => reasons.push(reason),
+                None => reasons.push(err("NON_LANDING_NOT_ATTEMPTED")),
             }
         }
         Ok(SettleStep::Unknown(reasons))
