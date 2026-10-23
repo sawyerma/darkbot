@@ -1,10 +1,10 @@
 name: Project 0 status contract
 on:
   pull_request:
-    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', '.github/workflows/project0-status.yml']
+    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', 'project_0/scripts/**', 'project_0/tests/**', '.github/workflows/project0-status.yml']
   push:
     branches: [main]
-    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', '.github/workflows/project0-status.yml']
+    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', 'project_0/scripts/**', 'project_0/tests/**', '.github/workflows/project0-status.yml']
   workflow_dispatch:
 jobs:
   contract-and-ui:
@@ -46,3 +46,36 @@ jobs:
         working-directory: project_0/native
       - run: cargo test && DARKBOT_P0_REPORTER_FIXTURE="$GITHUB_WORKSPACE/project_0/native/target/debug/p0-reporter-fixture" cargo test --test p0_reporter_e2e -- --ignored
         working-directory: gateway
+  # A23-02: the binding Project_0 offline gate (project_0/scripts/gate.sh), split into parallel
+  # jobs by step; every step runs exactly as locally (--locked, -D warnings, pinned toolchain).
+  project0-gate:
+    name: project0-gate (${{ matrix.steps }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        steps:
+          - fmt clippy_all clippy_default clippy_runner_default clippy_runner_txv1
+          - test_all
+          - test_default
+          - test_runner_default test_runner_txv1
+          - release bash_n python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: project_0/native
+          key: ${{ matrix.steps }}
+      - name: gate.sh
+        env:
+          P6_GATE_STEPS: ${{ matrix.steps }}
+        run: |
+          logs="$RUNNER_TEMP/p6-gate"
+          bash project_0/scripts/gate.sh "$logs" || {
+            for f in "$logs"/*.log; do echo "== $f"; tail -n 120 "$f"; done
+            exit 1
+          }
