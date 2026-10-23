@@ -69,6 +69,54 @@ struct ChainCaptureSummary {
     launch_timestamp: u64,
     horizon_timestamp: u64,
     boundary_block_included: bool,
+    /// Earliest successful external BUY of the token among the captured
+    /// blocks, which are complete and contiguous from before the launch. A
+    /// scan error is kept here and does not abort the chain journal.
+    first_external_buy: Result<Option<ExternalBuy>, String>,
+}
+
+/// A successful external BUY of the token: a Portal `TokenBought` in a
+/// successful canonical receipt that is neither the launch nor our BUY.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExternalBuy {
+    tx: B256,
+    block: u64,
+    index: u64,
+    buyer: Address,
+    value: U256,
+    amount: U256,
+}
+
+/// The external BUYs of `token` in one block's receipts, in execution order.
+fn external_buys_in(
+    receipts: &[Receipt],
+    block: u64,
+    token: Address,
+    launch: B256,
+    ours: B256,
+) -> Result<Vec<ExternalBuy>, String> {
+    let mut found = Vec::new();
+    for receipt in receipts {
+        if receipt.status != 1
+            || receipt.transaction_hash == launch
+            || receipt.transaction_hash == ours
+        {
+            continue;
+        }
+        for event in portal_buys(receipt)? {
+            if event.token == token {
+                found.push(ExternalBuy {
+                    tx: receipt.transaction_hash,
+                    block,
+                    index: receipt.transaction_index,
+                    buyer: event.buyer,
+                    value: event.value,
+                    amount: event.amount,
+                });
+            }
+        }
+    }
+    Ok(found)
 }
 
 fn req_env(name: &str) -> String {
@@ -1058,6 +1106,7 @@ fn capture_chain_window(
     attempt_id: &str,
     launch_hash: B256,
     buy_hash: B256,
+    token: Address,
 ) -> Result<ChainCaptureSummary, String> {
     let file = OpenOptions::new()
         .create_new(true)
@@ -1106,6 +1155,7 @@ fn capture_chain_window(
     let mut number = first_block;
     let mut crossed_horizon = false;
     let mut captured = Vec::new();
+    let mut first_external_buy = Ok(None);
     let last_block;
     let capture_deadline = Instant::now() + Duration::from_secs(120);
     loop {
@@ -1157,6 +1207,11 @@ fn capture_chain_window(
         }
 
         let receipts = read_rpc(|| block_receipts(&block))?;
+        if matches!(first_external_buy, Ok(None)) {
+            first_external_buy = external_buys_in(&receipts, number, token, launch_hash, buy_hash)
+                .map(|buys| buys.into_iter().next())
+                .map_err(|e| format!("block {number}: {e}"));
+        }
         for receipt in &receipts {
             append_record(
                 &mut writer,
@@ -1202,6 +1257,7 @@ fn capture_chain_window(
         launch_timestamp,
         horizon_timestamp,
         boundary_block_included: last_block > launch_block,
+        first_external_buy,
     })
 }
 
@@ -1364,17 +1420,20 @@ fn main() {
         &attempt_id,
         launch_hash,
         buy_hash,
+        token,
     );
     let chain_capture_complete = chain_capture
         .as_ref()
         .is_ok_and(|capture| capture.leading_boundary_included && capture.boundary_block_included);
 
     // Revalidate receipts and blocks after the entire observation window.
+    let buy_block_now =
+        resolved!(read_rpc(|| wire::block(buy_block))).filter(|b| b.hash == buy_block_hash);
+    let buy_block_miner = buy_block_now.as_ref().map(|b| b.miner);
     canonical = canonical
         && resolved!(read_rpc(|| wire::block(launch_block)))
             .is_some_and(|b| b.hash == launch_block_hash)
-        && resolved!(read_rpc(|| wire::block(buy_block)))
-            .is_some_and(|b| b.hash == buy_block_hash)
+        && buy_block_now.is_some()
         && resolved!(read_rpc(|| wire::receipt(launch_hash))).as_ref() == Some(&launch_receipt)
         && resolved!(read_rpc(|| wire::receipt(buy_hash))).as_ref() == Some(&buy_receipt);
     let receipt_identity = launch_receipt.transaction_hash == launch_hash
@@ -1459,6 +1518,7 @@ fn main() {
         .set(result::CANONICAL, canonical)
         .set(result::LAUNCH_HASH_AT_INDEX, launch_at_index)
         .set(result::BUY_HASH_AT_INDEX, buy_at_index)
+        .set_opt(result::BUY_BLOCK_MINER, buy_block_miner.map(addr))
         .set_opt(
             result::EXTERNAL_BUYS_BETWEEN_COUNT,
             competitor_count.map(|n| n as u64),
@@ -1480,7 +1540,7 @@ fn main() {
         .set(result::CHAIN_RECORD_TIMESTAMP_IS_PRODUCER_TIME, false)
         .set(
             result::COMPETITION_SCAN,
-            "Complete canonical receipt sets; TokenBought events include router-internal Portal buys. Positive acquisition requires matching observed Transfer net and event amount in the exact BUY receipt; v5.25 tax semantics are not independently qualified. A mismatch is UNRESOLVED. Event fees are reported without adding them a second time to the transaction value.",
+            "Complete canonical receipt sets; TokenBought events include router-internal Portal buys. Positive acquisition requires matching observed Transfer net and event amount in the exact BUY receipt; for a direct swapExactInput of a TAX_V3 token this matches original v5.26.0 receipts (E2-4). A mismatch is UNRESOLVED. Event fees are reported without adding them a second time to the transaction value.",
         )
         .set(result::CURRENT_HEAD, head)
         .set(
@@ -1495,6 +1555,25 @@ fn main() {
         );
     for hash in competitor_hashes.iter().flatten() {
         r.push(result::EXTERNAL_BUYS_BETWEEN_HASHES, word(*hash));
+    }
+    let first_external = chain_capture.as_ref().map(|c| c.first_external_buy.clone());
+    r.set(
+        result::FIRST_EXTERNAL_BUY_SCAN,
+        match &first_external {
+            Ok(Ok(Some(_))) => "FOUND_IN_CAPTURED_WINDOW",
+            Ok(Ok(None)) if chain_capture_complete => "NONE_IN_CAPTURED_WINDOW",
+            Ok(Ok(None)) => "CAPTURE_INCOMPLETE",
+            Ok(Err(_)) => "SCAN_FAILED",
+            Err(_) => "CAPTURE_FAILED",
+        },
+    );
+    if let Ok(Ok(Some(b))) = first_external {
+        r.set(result::FIRST_EXTERNAL_BUY_TX, word(b.tx))
+            .set(result::FIRST_EXTERNAL_BUY_BLOCK, b.block)
+            .set(result::FIRST_EXTERNAL_BUY_INDEX, b.index)
+            .set(result::FIRST_EXTERNAL_BUY_BUYER, addr(b.buyer))
+            .set(result::FIRST_EXTERNAL_BUY_VALUE_WEI, wei(b.value))
+            .set(result::FIRST_EXTERNAL_BUY_TOKEN_AMOUNT, wei(b.amount));
     }
     if let Ok((amount, fee)) = acquisition {
         r.set(result::BUY_RECEIPT_TOKEN_NET, wei(amount))
@@ -1611,8 +1690,7 @@ mod tests {
     /// 0xda384629366456eec2ac97170c18fda0f8945af463503e766c844e9a0f4ea22c, transaction 0x9565641b62fa6ce4b1c3423a465a4e971834d3adc58ce6632b5f45cc241fa83d, index 21.
     /// Every log is copied as served, so the frozen attribution rules are
     /// checked against real v5.26.0 tax-token semantics, not a synthetic log.
-    #[test]
-    fn a_real_v5_26_tax_token_buy_receipt_is_attributable() {
+    fn real_v5_26_tax_token_buy_receipt() -> Receipt {
         const LOGS: &[(u64, &str, &[&str], &str)] = &[
             (73, "9c4582d385fdda2057f09020a03382f213c0423e", &["1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"], "000000000000000000000000000000000000000000000000632a2c03a1ee212400000000000000000000000000000000000000000312da6f36558c3bb65d7a20"),
             (74, "9c4582d385fdda2057f09020a03382f213c0423e", &["d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822", "000000000000000000000000e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", "0000000000000000000000003b56d9905983723a870e6af9c251241d37079daa"], "0000000000000000000000000000000000000000000000000025ef4ba64f4ace000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000124660f3382916655c095"),
@@ -1631,7 +1709,7 @@ mod tests {
             (87, "e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0", &["4c35e20d1e9bce377c7d9ec1572d934e46d62961f4da8af5beb8002d5906742d"], "000000000000000000000000ce988183ddd2083dfd58565cd5de77b2cdcc777700000000000000000000000000000000000000000000000000df4f007d8f9aa3"),
         ];
         let decode = |s: &str| hex::decode(s).unwrap();
-        let receipt = Receipt {
+        Receipt {
             block_number: 128999556,
             block_hash: B256::from_slice(&decode("da384629366456eec2ac97170c18fda0f8945af463503e766c844e9a0f4ea22c")),
             transaction_index: 21,
@@ -1652,7 +1730,59 @@ mod tests {
                     data: decode(data),
                 })
                 .collect(),
-        };
+        }
+    }
+
+    #[test]
+    fn the_first_external_buy_skips_the_launch_ours_and_failed_receipts() {
+        let real = real_v5_26_tax_token_buy_receipt();
+        let token =
+            Address::from_slice(&hex::decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777").unwrap());
+        let found = external_buys_in(
+            std::slice::from_ref(&real),
+            128_999_556,
+            token,
+            B256::ZERO,
+            B256::ZERO,
+        )
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        let first = &found[0];
+        assert_eq!(
+            (first.tx, first.block, first.index, first.buyer),
+            (real.transaction_hash, 128_999_556, 21, real.from)
+        );
+        assert_eq!(first.value, U256::from(10677682330094286u64));
+        // Our own BUY, the launch, a failed receipt and another token are no
+        // external BUY of this token.
+        for (launch, ours) in [
+            (real.transaction_hash, B256::ZERO),
+            (B256::ZERO, real.transaction_hash),
+        ] {
+            assert!(
+                external_buys_in(std::slice::from_ref(&real), 1, token, launch, ours)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let mut failed = real.clone();
+        failed.status = 0;
+        assert!(
+            external_buys_in(&[failed], 1, token, B256::ZERO, B256::ZERO)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            external_buys_in(&[real], 1, Address::repeat_byte(9), B256::ZERO, B256::ZERO)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_real_v5_26_tax_token_buy_receipt_is_attributable() {
+        let decode = |s: &str| hex::decode(s).unwrap();
+        let receipt = real_v5_26_tax_token_buy_receipt();
         let token = Address::from_slice(&decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777"));
         let buyer = receipt.from;
         let value = U256::from(10677682330094286u64);

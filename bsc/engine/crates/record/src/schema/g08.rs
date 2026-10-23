@@ -247,6 +247,19 @@ pub mod result {
     pub const T0_TO_BUY: u16 = 80;
     pub const CHAIN_DATA_IS_NOT_EXECUTION_TIMESTAMP: u16 = 81;
     pub const TIMING_NEXT: u16 = 82;
+    /// The validator (`miner`) of the BUY block: the observable end of the
+    /// inclusion path; which builder delivered the bundle is not on chain.
+    pub const BUY_BLOCK_MINER: u16 = 45;
+    /// The earliest successful external BUY of the token in the captured
+    /// canonical window (not ours, not the launch), for the entry-price
+    /// comparison with our BUY value / net token.
+    pub const FIRST_EXTERNAL_BUY_SCAN: u16 = 90;
+    pub const FIRST_EXTERNAL_BUY_TX: u16 = 91;
+    pub const FIRST_EXTERNAL_BUY_BLOCK: u16 = 92;
+    pub const FIRST_EXTERNAL_BUY_INDEX: u16 = 93;
+    pub const FIRST_EXTERNAL_BUY_BUYER: u16 = 94;
+    pub const FIRST_EXTERNAL_BUY_VALUE_WEI: u16 = 95;
+    pub const FIRST_EXTERNAL_BUY_TOKEN_AMOUNT: u16 = 96;
 
     /// The chain capture journal after it was closed; absent, with
     /// `capture.chain_journal_error` instead, when the capture failed.
@@ -288,9 +301,9 @@ pub mod result {
     }
 
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g08.mainnet-acquisition-ordering.v4",
+        name: "darkbot.g08.mainnet-acquisition-ordering.v5",
         record_type: 14,
-        schema_version: 4,
+        schema_version: 5,
         fields: &[
             Field::req(GATE, "gate", Text),
             Field::req(ATTEMPT_ID, "attempt_id", Text),
@@ -350,6 +363,7 @@ pub mod result {
                 "ordering.successful_external_buys_between_hashes",
                 B256,
             ),
+            Field::opt(BUY_BLOCK_MINER, "ordering.buy_block_miner", Address),
             Field::req(LAUNCH_GAS_COST_WEI, "costs.launch_gas_cost_wei", U256),
             Field::req(BUY_GAS_COST_WEI, "costs.buy_gas_cost_wei", U256),
             Field::req(BUY_VALUE_WEI, "costs.buy_value_wei", U256),
@@ -395,6 +409,37 @@ pub mod result {
                 Bool,
             ),
             Field::req(TIMING_NEXT, "timing.next", Text),
+            Field::req(
+                FIRST_EXTERNAL_BUY_SCAN,
+                "pricing.first_external_buy_scan",
+                Text,
+            ),
+            Field::opt(FIRST_EXTERNAL_BUY_TX, "pricing.first_external_buy_tx", B256),
+            Field::opt(
+                FIRST_EXTERNAL_BUY_BLOCK,
+                "pricing.first_external_buy_block",
+                U64,
+            ),
+            Field::opt(
+                FIRST_EXTERNAL_BUY_INDEX,
+                "pricing.first_external_buy_index",
+                U64,
+            ),
+            Field::opt(
+                FIRST_EXTERNAL_BUY_BUYER,
+                "pricing.first_external_buy_buyer",
+                Address,
+            ),
+            Field::opt(
+                FIRST_EXTERNAL_BUY_VALUE_WEI,
+                "pricing.first_external_buy_value_wei",
+                U256,
+            ),
+            Field::opt(
+                FIRST_EXTERNAL_BUY_TOKEN_AMOUNT,
+                "pricing.first_external_buy_token_amount",
+                U256,
+            ),
         ],
     };
 }
