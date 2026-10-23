@@ -82,12 +82,15 @@ struct ExternalBuy {
     tx: B256,
     block: u64,
     index: u64,
+    log_index: u64,
     buyer: Address,
     value: U256,
     amount: U256,
 }
 
-/// The external BUYs of `token` in one block's receipts, in execution order.
+/// The external BUYs of `token` in one block's validated receipt set, in
+/// canonical execution order (transaction index, then log index) whatever
+/// order the RPC answered in.
 fn external_buys_in(
     receipts: &[Receipt],
     block: u64,
@@ -109,6 +112,7 @@ fn external_buys_in(
                     tx: receipt.transaction_hash,
                     block,
                     index: receipt.transaction_index,
+                    log_index: event.log_index,
                     buyer: event.buyer,
                     value: event.value,
                     amount: event.amount,
@@ -116,7 +120,26 @@ fn external_buys_in(
             }
         }
     }
+    found.sort_by_key(|b| (b.index, b.log_index));
     Ok(found)
+}
+
+/// `pricing.first_external_buy_scan`: a BUY is reported only from a
+/// complete capture whose blocks and attempt receipts were still canonical
+/// after the window; `scan` is `None` when the capture itself failed.
+fn first_external_scan(
+    scan: Option<&Result<Option<ExternalBuy>, String>>,
+    complete: bool,
+    canonical: bool,
+) -> (&'static str, Option<&ExternalBuy>) {
+    match scan {
+        None => ("CAPTURE_FAILED", None),
+        Some(Err(_)) => ("SCAN_FAILED", None),
+        Some(Ok(_)) if !complete => ("CAPTURE_INCOMPLETE", None),
+        Some(Ok(_)) if !canonical => ("NOT_CANONICAL", None),
+        Some(Ok(Some(buy))) => ("FOUND_IN_CAPTURED_WINDOW", Some(buy)),
+        Some(Ok(None)) => ("NONE_IN_CAPTURED_WINDOW", None),
+    }
 }
 
 fn req_env(name: &str) -> String {
@@ -813,6 +836,7 @@ fn receipt_gas_cost(receipt: &Receipt, tx: &Tx) -> Result<U256, String> {
 
 #[derive(Debug)]
 struct BuyEvent {
+    log_index: u64,
     token: Address,
     buyer: Address,
     amount: U256,
@@ -841,6 +865,7 @@ fn portal_buys(receipt: &Receipt) -> Result<Vec<BuyEvent>, String> {
         }
         let amount = |n: usize| U256::from_be_slice(&log.data[n * 32..(n + 1) * 32]);
         events.push(BuyEvent {
+            log_index: log.log_index,
             token: Address::from_slice(&log.data[44..64]),
             buyer: Address::from_slice(&log.data[76..96]),
             amount: amount(3),
@@ -1556,18 +1581,13 @@ fn main() {
     for hash in competitor_hashes.iter().flatten() {
         r.push(result::EXTERNAL_BUYS_BETWEEN_HASHES, word(*hash));
     }
-    let first_external = chain_capture.as_ref().map(|c| c.first_external_buy.clone());
-    r.set(
-        result::FIRST_EXTERNAL_BUY_SCAN,
-        match &first_external {
-            Ok(Ok(Some(_))) => "FOUND_IN_CAPTURED_WINDOW",
-            Ok(Ok(None)) if chain_capture_complete => "NONE_IN_CAPTURED_WINDOW",
-            Ok(Ok(None)) => "CAPTURE_INCOMPLETE",
-            Ok(Err(_)) => "SCAN_FAILED",
-            Err(_) => "CAPTURE_FAILED",
-        },
+    let (scan, first_external) = first_external_scan(
+        chain_capture.as_ref().ok().map(|c| &c.first_external_buy),
+        chain_capture_complete,
+        canonical,
     );
-    if let Ok(Ok(Some(b))) = first_external {
+    r.set(result::FIRST_EXTERNAL_BUY_SCAN, scan);
+    if let Some(b) = first_external {
         r.set(result::FIRST_EXTERNAL_BUY_TX, word(b.tx))
             .set(result::FIRST_EXTERNAL_BUY_BLOCK, b.block)
             .set(result::FIRST_EXTERNAL_BUY_INDEX, b.index)
@@ -1776,6 +1796,82 @@ mod tests {
             external_buys_in(&[real], 1, Address::repeat_byte(9), B256::ZERO, B256::ZERO)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_first_external_buy_follows_the_canonical_index_not_the_rpc_order() {
+        let real = real_v5_26_tax_token_buy_receipt();
+        let token =
+            Address::from_slice(&hex::decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777").unwrap());
+        let mut earlier = real.clone();
+        earlier.transaction_index = 5;
+        earlier.transaction_hash = B256::repeat_byte(5);
+        for (i, log) in earlier.logs.iter_mut().enumerate() {
+            log.log_index = 10 + i as u64;
+        }
+        // The node answers index 21 before index 5.
+        let found =
+            external_buys_in(&[real.clone(), earlier], 1, token, B256::ZERO, B256::ZERO).unwrap();
+        assert_eq!(found.iter().map(|b| b.index).collect::<Vec<_>>(), [5, 21]);
+
+        // Within one transaction the lower log index is the earlier BUY,
+        // even when it is listed last.
+        let topic =
+            keccak256("TokenBought(uint256,address,address,uint256,uint256,uint256,uint256)");
+        let mut twice = real;
+        let mut first = twice
+            .logs
+            .iter()
+            .find(|l| l.address == PORTAL && l.topics.first() == Some(&topic))
+            .unwrap()
+            .clone();
+        first.log_index = 0;
+        first.data[96..128].copy_from_slice(&U256::from(1u64).to_be_bytes::<32>());
+        twice.logs.push(first);
+        let found = external_buys_in(&[twice], 1, token, B256::ZERO, B256::ZERO).unwrap();
+        assert_eq!(
+            (found.len(), found[0].log_index, found[0].amount),
+            (2, 0, U256::from(1u64))
+        );
+    }
+
+    #[test]
+    fn only_a_complete_canonical_capture_reports_a_first_external_buy() {
+        let real = real_v5_26_tax_token_buy_receipt();
+        let token =
+            Address::from_slice(&hex::decode("ce988183ddd2083dfd58565cd5de77b2cdcc7777").unwrap());
+        let buy = external_buys_in(&[real], 1, token, B256::ZERO, B256::ZERO)
+            .unwrap()
+            .remove(0);
+        let found = Ok(Some(buy.clone()));
+        assert_eq!(
+            first_external_scan(Some(&found), true, true),
+            ("FOUND_IN_CAPTURED_WINDOW", Some(&buy))
+        );
+        assert_eq!(
+            first_external_scan(Some(&found), false, true),
+            ("CAPTURE_INCOMPLETE", None)
+        );
+        assert_eq!(
+            first_external_scan(Some(&found), true, false),
+            ("NOT_CANONICAL", None)
+        );
+        assert_eq!(
+            first_external_scan(Some(&Err("malformed TokenBought".into())), true, true),
+            ("SCAN_FAILED", None)
+        );
+        assert_eq!(
+            first_external_scan(None, true, true),
+            ("CAPTURE_FAILED", None)
+        );
+        assert_eq!(
+            first_external_scan(Some(&Ok(None)), true, true),
+            ("NONE_IN_CAPTURED_WINDOW", None)
+        );
+        assert_eq!(
+            first_external_scan(Some(&Ok(None)), false, true),
+            ("CAPTURE_INCOMPLETE", None)
         );
     }
 

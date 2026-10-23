@@ -758,8 +758,9 @@ mod tests {
         .unwrap();
         let mut s = Draft::new(&up::SCHEMA);
         // (block offset, slot before, event target, slot after) per upgrade.
+        type Step = (u64, [u8; 20], [u8; 20], [u8; 20]);
         const MID: [u8; 20] = [0xd5; 20];
-        let steps: Vec<(u64, [u8; 20], [u8; 20], [u8; 20])> = match breaks {
+        let steps: Vec<Step> = match breaks {
             "zero" => vec![],
             "two" => vec![(1000, old_impl, NEW_IMPL, NEW_IMPL), (1001, old_impl, NEW_IMPL, NEW_IMPL)],
             "ten" => (0..10).map(|n| (1000 + n, old_impl, NEW_IMPL, NEW_IMPL)).collect(),

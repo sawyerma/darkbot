@@ -212,6 +212,12 @@ fn producer_timing_refuses_foreign_or_legacy_inputs_without_output() {
     let mut adapt = g08_pass();
     adapt.set(result::VERDICT, "ADAPT");
     let legacy = br#"{"schema":"darkbot.producer-execution-witness.v1","schema_version":1}"#;
+    // A G0.8 result in the earlier v4 layout is refused, never read as v5.
+    let mut v4 = g08.clone();
+    v4[12..16].copy_from_slice(&4u32.to_le_bytes());
+    let end = v4.len() - 32;
+    let digest = sha256(&v4[..end]);
+    v4[end..].copy_from_slice(&digest);
     for (tag, g08, witness, expected) in [
         (
             "attempt",
@@ -240,6 +246,12 @@ fn producer_timing_refuses_foreign_or_legacy_inputs_without_output() {
         ),
         // A G0.8 result is not a witness: the record type decides.
         ("swapped", g08.clone(), g08.clone(), "record type 14"),
+        (
+            "v4",
+            v4,
+            witness().encode().unwrap(),
+            "record type 14 version 4",
+        ),
     ] {
         let (out, written) = timing(tag, &g08, &witness);
         let stderr = String::from_utf8_lossy(&out.stderr);
