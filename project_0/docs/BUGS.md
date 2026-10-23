@@ -400,6 +400,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Tests:** mocked finalized landed-success/failure, never-landed mit Blockheight+historischer Abwesenheitsprüfung, MissingArchive/429 ⇒ UNKNOWN, teilweise bestätigtes Bundle, Gebühren ohne Token-Deltas, mehrfacher Replay und Restart, keine Doppelbuchung; `capital_in_use` sinkt erst nach dauerhaft verbuchtem, vollständig bewiesenem Outcome.
 - **Abnahme:** FE-04 und P8 teilen denselben Settlement-/Safety-Source-of-Truth; nicht `pnl_complete=false` als Abschluss verkaufen. **Commit/Evidence:** —.
 - **Triage 18.10.2026:** `DESIGN_GATE P8`. `realized_pnl=None` hält Safety korrekt fail-closed; aktuell kein freigegebener LIVE-Pfad. Nicht als jetzige Kapitalfreigabe oder LIVE-Fehlbuchung behaupten.
+- **Status 23.10. `d850d478`:** `Journal::settle_step` (beobachtet ⇒ reconcile+settle; nichts beobachtet ⇒ strikter Nonlanding-Beweis ⇒ settle; sonst UNKNOWN, Holds bleiben), `conservative_value` (Gewinn low, Verlust high), Observe nur bei Änderung persistiert. Rest: Owner-Laufzeitaufrufer, P8-RAM-Pfad.
 
 ### C4 — P8-Landing-Reconcile benutzt confirmed statt finalized
 - [x] **CRITICAL vor werttragender Reconciliation · CODE_CONFIRMED · G-E/G-F · P8/FE-04 · Cross-Ref C3.** · Fix `e08d3a7`+`07c3f09` · Test `c4_reconcile_settles_only_on_a_consistent_finalized_receipt` (über `reconcile()`) — confirmed ⇒ `LandedUnfinalized` (Telemetrie, ungelöst); Fee nur bei finalisiertem Status + finalisiertem Receipt desselben Slots mit übereinstimmendem Erfolg/Fehler; Outcome aus `meta.err` des Receipts; Widerspruch/fremder Slot/fehlendes Receipt ⇒ keine Fee. Token-/Rent-Deltas und Freigabe: C3.
@@ -461,6 +462,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Pfad:** `state_owner/remote_workers.rs`: `try_reconcile(..., 90)`.
 - **Soll:** Explizite versionierte Deadline-/Provider-/Blockhash-Validity-Policy; bloßer Wallclock-Timeout ist niemals Beweis für `NotLanded`. Timeout führt UNKNOWN, bis finalized Nonlanding/lastValidBlockHeight mit ausreichend vollständiger History nachgewiesen wird.
 - **Tests:** 89/90/91 s und langsamer finalized Slot, RPC-429/GAP, nicht bestätigte Bundle-Signaturen, realer lastValidBlockHeight-Cutoff als synthetisches Fixture, kein falsches `EXPOSURE_RELEASED`. **Commit/Evidence:** —.
+- **Status 23.10. `d850d478`:** Nonlanding-Beweis in Blockhöhe: Intent Schema 3 mit `last_valid_block_height` (Admission bindet den signierten Blockhash; Schema 2 lesbar, Ablauf `None` ⇒ nie beweisbar), finalisierte Blockhöhe > Ablauf, History-Floor ≤ Intent-Slot, alle Signaturen abwesend; RPC-Reihenfolge getBlockHeight → minimumLedgerSlot → getSignatureStatuses. Rest: versionierte Frist-Policy, Laufzeitaufrufer.
 
 ### C13 — aktualisierte Review-Abdeckung
 - [ ] **REVIEW_COVERAGE · kein eigener Produktionsbug · Cross-Ref E13.**

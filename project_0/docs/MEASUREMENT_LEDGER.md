@@ -5907,3 +5907,12 @@ Commits `106c11c2`, `4a2168f7`.
 - Gate on `4a2168f7` (exit 0 each): 771/0/10, 769/0/10, runner 358/0/3 ×2, release, Python OK.
 - Repay floor from the signed Jupiter v6 swap bytes (IDL `jupiter-cpi@12bc5f67`, SHA-256 `764ea6d7`); enforced slippage on the plan; floor rejections visible beside other plans; Token-2022 fee/hook/undecodable mints refused before quoting; surplus at the low-biased price; worst-case daily loss; derived admission evidence; `P0_ZERO_PREFUND_QUALIFIED=true` refused. 13 mutations fail-before.
 - Synthetic Jupiter responses only (no recorded `/build`); deployed Jupiter program parity, current candidate, positive net edge: NOT_RUN / NOT_PROVEN.
+
+## 2026-10-23 — FE-02 E2E and FE-04 C3/C12 settlement (LOCAL_PASS offline)
+
+Commits `263624a0`, `d850d478`.
+
+- Gate on the package (exit 0 each): 775/0/10, 773/0/10, runner 361/0/3 ×2, release, Python OK.
+- FE-02 end to end through the real Jupiter/RPC adapters on loopback (synthetic `/build`): ZERO_PREFUND selected and simulated PASS with a linked record; Known but negative when it pays the record rent.
+- C12/C3: Intent schema 3 (`last_valid_block_height`; pinned schema-2 bytes 1108 B still read, schema 3 1117 B), block-height non-landing proof, `settle_step`, conservative valuation; 10 mutations fail-before.
+- NOT_RUN: real RPC history/archive behaviour, Mainnet, LIVE.
