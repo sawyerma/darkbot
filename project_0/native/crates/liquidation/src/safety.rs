@@ -194,6 +194,18 @@ impl Safety {
 
     /// Q2: the day's realized loss reached the limit — `-pnl >= max` without negating the PnL,
     /// which overflows at `i128::MIN` (a release build would wrap it and never halt).
+    /// FE-02: the daily loss limit with this attempt's worst case: the UTC day's realized PnL
+    /// minus `max_loss` must not fall below `−max_daily_loss` (the attempt may use the remaining
+    /// budget exactly). FE-04 is single-flight, so no other in-flight worst case exists.
+    pub fn admit_loss(&mut self, now_unix_s: u64, max_loss: u64) -> Result<(), Deny> {
+        self.roll_day(now_unix_s);
+        let worst = self.day.realized_pnl.checked_sub(i128::from(max_loss));
+        if worst.is_none_or(|w| w < -i128::from(self.limits.max_daily_loss)) {
+            return Err(Deny::DailyLoss);
+        }
+        Ok(())
+    }
+
     fn daily_loss_reached(&self) -> bool {
         self.day.realized_pnl <= -i128::from(self.limits.max_daily_loss)
     }
@@ -770,6 +782,22 @@ mod tests {
             s.check(0, 50, 0, 1, 1, &[], "longtail"),
             Err(Deny::Halted(_))
         ));
+    }
+
+    /// FE-02: the daily loss limit admits an attempt only if its worst case fits the day's
+    /// remaining budget (exactly fitting is admitted); a realized loss shrinks it, a new UTC day
+    /// resets it, an overflowing worst case is refused.
+    #[test]
+    fn fe02_daily_loss_counts_the_attempts_worst_case() {
+        let mut s = Safety::new(lim(), allow(), true);
+        assert_eq!(s.admit_loss(0, 50), Ok(()));
+        assert_eq!(s.admit_loss(0, 51), Err(Deny::DailyLoss));
+        s.check(0, 50, 0, 1, 1, &[], "longtail").unwrap();
+        s.record_outcome(0, false, Some(-20), 50, 0, 0).unwrap();
+        assert_eq!(s.admit_loss(0, 30), Ok(()));
+        assert_eq!(s.admit_loss(0, 31), Err(Deny::DailyLoss));
+        assert_eq!(s.admit_loss(86_400, 50), Ok(()), "a new UTC day");
+        assert_eq!(s.admit_loss(86_400, u64::MAX), Err(Deny::DailyLoss));
     }
 
     /// Q2 (bugs_b): every ledger transition is checked. A double release, a release above the

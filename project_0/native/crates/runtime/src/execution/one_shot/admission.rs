@@ -29,6 +29,12 @@ pub struct Fe04Admission {
     pub valid_until_slot: u64,
 }
 
+/// FE-02: the economics an intent binds are complete — a realizable value and the rent/token
+/// cost (fee and max loss are checked separately) — never assumed by the admission.
+pub(crate) fn economics_known(input: &darkbot_project0::economics::CandidateInput) -> bool {
+    input.gross_seized_realizable_usd_micro.is_some() && input.rent_and_token_usd_micro.is_some()
+}
+
 /// Everything the pipeline hands over for one actionable, simulated candidate.
 pub struct Candidate<'a> {
     pub plan: &'a ReceivershipPlan,
@@ -139,7 +145,7 @@ impl Fe04Admission {
             balances: self.balances.clone(),
             reserved_elsewhere: self.reserved_elsewhere.clone(),
             policy_reserve: self.policy_reserve.clone(),
-            health_funding_route_fee_exit_known: true,
+            health_funding_route_fee_exit_known: economics_known(&c.plan.input),
             canonical_fresh_no_gap_or_fork: c.state_valid,
             exact_signed_payload_simulated: true,
             bundle_simulated: c.path == SubmissionPath::JitoBundle,

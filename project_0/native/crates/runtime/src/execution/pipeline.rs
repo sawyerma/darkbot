@@ -1109,6 +1109,24 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             ));
             return rec.with_timeline(&tl);
         };
+        let fee_lamports = rec
+            .selected_costs
+            .as_ref()
+            .and_then(|c| c.message_fee_quote.as_ref())
+            .map(|q| q.lamports);
+        let max_loss_usd_micro = plan
+            .sol_debit_lamports(fee_lamports)
+            .and_then(|l| self.builder.native_cost_usd_micro(l))
+            .and_then(|usd| usd.checked_add(plan.input.required_capital_usd_micro));
+        // FE-02: the day's loss limit holds with this attempt's worst case (an unknown worst case
+        // is refused by the admission).
+        if let Some(max_loss) = max_loss_usd_micro {
+            if let Err(d) = self.safety.admit_loss(now_unix_s, max_loss) {
+                rec.decision = Decision::DeniedBySafety;
+                rec.reason = Some(format!("{:?}", d));
+                return rec.with_timeline(&tl);
+            }
+        }
         // B1/B15: capital and the worst-case inventory are reserved before the durable admission.
         if let Err(d) = self.safety.check(
             now_unix_s,
@@ -1123,15 +1141,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(format!("{:?}", d));
             return rec.with_timeline(&tl);
         }
-        let fee_lamports = rec
-            .selected_costs
-            .as_ref()
-            .and_then(|c| c.message_fee_quote.as_ref())
-            .map(|q| q.lamports);
-        let max_loss_usd_micro = plan
-            .sol_debit_lamports(fee_lamports)
-            .and_then(|l| self.builder.native_cost_usd_micro(l))
-            .and_then(|usd| usd.checked_add(plan.input.required_capital_usd_micro));
         let (path, txs) = if use_bundle {
             (SubmissionPath::JitoBundle, bundle_txs)
         } else {

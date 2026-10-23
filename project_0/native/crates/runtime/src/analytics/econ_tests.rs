@@ -1277,6 +1277,58 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     assert!(again.reason.unwrap().contains("ONE_SHOT_ALREADY_CONSUMED"));
     assert_eq!(ok.submits.load(Ordering::Relaxed), 1);
 
+    // FE-02: the day's loss limit holds with this attempt's worst case (SOL debit 205 plus its
+    // capital): a budget below it is a Safety denial before any reservation or send.
+    let (tight_dir, tight) = (dir("tight"), adapter(false));
+    let mut fe04 = admission(&tight_dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    let mut limited = {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: 204,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let r = run(&tight, &mut limited, Some(&mut fe04));
+    assert_eq!(r.decision, Decision::DeniedBySafety, "{:?}", r.reason);
+    assert_eq!(r.reason.as_deref(), Some("DailyLoss"));
+    assert_eq!(tight.submits.load(Ordering::Relaxed), 0);
+    assert!(fe04.journal.active_hold().is_none());
+    assert_eq!(limited.capital_in_use(), 0, "nothing reserved");
+    // FE-02: the admission binds only complete economics (never assumed).
+    let mut plans = crate::execution::pipeline::ReceivershipBuilder::plans(
+        &AdmissionBuilder,
+        &target,
+        0,
+        0,
+        std::time::Instant::now(),
+    )
+    .unwrap();
+    let complete = &plans[0].input;
+    assert!(crate::execution::one_shot::admission::economics_known(
+        complete
+    ));
+    plans[0].input.gross_seized_realizable_usd_micro = None;
+    assert!(!crate::execution::one_shot::admission::economics_known(
+        &plans[0].input
+    ));
+    plans[0].input.gross_seized_realizable_usd_micro = Some(1);
+    plans[0].input.rent_and_token_usd_micro = None;
+    assert!(!crate::execution::one_shot::admission::economics_known(
+        &plans[0].input
+    ));
+
     // Refused before anything durable: nothing sent, no hold, Safety released.
     let (refused_dir, none) = (dir("refused"), adapter(false));
     let mut safety = open_safety();

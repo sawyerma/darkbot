@@ -1120,6 +1120,8 @@ pub(super) fn reservation_book(
 
 /// L4: both zero-prefund flags are parsed strictly (an invalid value is a start error, never a
 /// silent `false`; no short circuit hides one); the Shadow probe applies only in Shadow mode.
+/// FE-02: `P0_ZERO_PREFUND_QUALIFIED=true` is refused: a qualification is an FE-01/FE-02 record,
+/// never an operator boolean, and no such record exists (FE-01 is never PASS offline).
 pub(super) fn zero_prefund_enabled(
     mode: &str,
     get: &dyn Fn(&str) -> Option<String>,
@@ -1135,7 +1137,13 @@ pub(super) fn zero_prefund_enabled(
     };
     let qualified = flag("P0_ZERO_PREFUND_QUALIFIED")?;
     let probe = flag("P0_ZERO_PREFUND_SHADOW_PROBE")?;
-    Ok(qualified || (mode == "shadow" && probe))
+    if qualified {
+        return Err(config::ConfigError::Invalid {
+            key: "P0_ZERO_PREFUND_QUALIFIED".into(),
+            value: "true: ZERO_PREFUND_QUALIFICATION_EVIDENCE_REQUIRED".into(),
+        });
+    }
+    Ok(mode == "shadow" && probe)
 }
 
 /// BOOT-12 (cluster identity) before any subscription or further read: the endpoint must serve
@@ -1235,7 +1243,14 @@ mod cluster_tests {
         };
         assert!(!zero_prefund_enabled("shadow", &env(&[])).unwrap());
         let q = env(&[("P0_ZERO_PREFUND_QUALIFIED", "true")]);
-        assert!(zero_prefund_enabled("econ4h", &q).unwrap());
+        for mode in ["shadow", "econ4h"] {
+            assert!(zero_prefund_enabled(mode, &q)
+                .unwrap_err()
+                .to_string()
+                .contains("ZERO_PREFUND_QUALIFICATION_EVIDENCE_REQUIRED"));
+        }
+        let off = env(&[("P0_ZERO_PREFUND_QUALIFIED", "false")]);
+        assert!(!zero_prefund_enabled("econ4h", &off).unwrap());
         let probe = env(&[("P0_ZERO_PREFUND_SHADOW_PROBE", "true")]);
         assert!(zero_prefund_enabled("shadow", &probe).unwrap());
         assert!(!zero_prefund_enabled("econ4h", &probe).unwrap());
