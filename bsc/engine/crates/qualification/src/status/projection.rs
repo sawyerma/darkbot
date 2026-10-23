@@ -175,6 +175,164 @@ fn gate(id: &str, state: &str, evidence: Option<Evidence>, reasons: Vec<String>)
     }
 }
 
+/// The offline G0.7 A/B candidate state for the GUI: the public mirror of the
+/// snapshot (every ID recomputed from its public fields, never a salt) and
+/// the runtime selection requests. Absent mirror: no field (GUI shows
+/// BACKEND_UNAVAILABLE); any inconsistency: `candidate.backend = INVALID`.
+fn candidate_fields(
+    root: &Path,
+    rundir: &Path,
+    readiness: Option<&Record>,
+    warnings: &mut Vec<String>,
+) -> Vec<PublicField> {
+    use schema::g07_candidate as gc;
+    let dir = root.join("bsc/native/state/g07_candidates");
+    if !fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir()) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut put = |name: String, value: String| out.push(PublicField { name, value });
+    let invalid = |warnings: &mut Vec<String>, why: &str| {
+        warnings.push(format!("CANDIDATE_MIRROR_INVALID {why}"));
+        vec![PublicField {
+            name: "candidate.backend".into(),
+            value: "INVALID".into(),
+        }]
+    };
+    let salted = fs::read_dir(&dir).map_or(true, |entries| {
+        entries
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().ends_with(".salt.dbrec"))
+    });
+    if salted {
+        return invalid(warnings, "salt record or unreadable mirror");
+    }
+    let selection = match read(&dir.join("selection.dbrec")) {
+        None => None,
+        Some(bytes) => match record::decode(&gc::selection::SCHEMA, &bytes) {
+            Ok(r) => Some(r),
+            Err(_) => return invalid(warnings, "selection"),
+        },
+    };
+    let view = selection.as_ref().map(|r| gc::SelectionView {
+        generation: r.u64(gc::selection::GENERATION).unwrap_or(0),
+        profile: r.text(gc::selection::PROFILE).unwrap_or(""),
+        candidate_id: r.b256(gc::selection::CANDIDATE_ID).unwrap_or([0; 32]),
+        activated_unix_ms: r.u64(gc::selection::ACTIVATED_UNIX_MS).unwrap_or(u64::MAX),
+    });
+    put("candidate.backend".into(), "AVAILABLE".into());
+    put(
+        "candidate.selection.generation".into(),
+        view.as_ref().map_or(0, |v| v.generation).to_string(),
+    );
+    put(
+        "candidate.selection.profile".into(),
+        view.as_ref().map_or("NONE", |v| v.profile).into(),
+    );
+    if let Some(v) = &view {
+        put(
+            "candidate.selection.candidate_id".into(),
+            format!("0x{}", record::hex(&v.candidate_id)),
+        );
+        put(
+            "candidate.selection.activated_unix_ms".into(),
+            v.activated_unix_ms.to_string(),
+        );
+    }
+    let mut selected_present = view.is_none();
+    for (profile, file) in [
+        ("SELF_A", "a.candidate.dbrec"),
+        ("SELF_B", "b.candidate.dbrec"),
+    ] {
+        let Some(bytes) = read(&dir.join(file)) else {
+            put(format!("candidate.{profile}.state"), "ABSENT".into());
+            continue;
+        };
+        let Ok(r) = record::decode(&gc::candidate::SCHEMA, &bytes) else {
+            return invalid(warnings, profile);
+        };
+        let id = r.b256(gc::candidate::CANDIDATE_ID).ok();
+        if gc::candidate_id_of(&r).ok() != id
+            || r.text(gc::candidate::PROFILE).ok() != Some(profile)
+        {
+            return invalid(warnings, profile);
+        }
+        let id = id.unwrap_or_default();
+        if view.as_ref().is_some_and(|v| v.profile == profile) {
+            if view.as_ref().map(|v| v.candidate_id) != Some(id) {
+                return invalid(warnings, "selection names another candidate");
+            }
+            selected_present = true;
+        }
+        put(format!("candidate.{profile}.state"), "PRESENT".into());
+        for name in [
+            "candidate_id",
+            "token",
+            "launcher",
+            "deployment.portal_version",
+            "deployment.portal_implementation",
+            "deployment.record_sha256",
+            "launch_calldata_sha256",
+            "salt_origin",
+            "evidence.dry_record_sha256",
+            "evidence.launch_tx_hash",
+            "evidence.buy_tx_hash",
+            "qualification",
+            "provenance",
+        ] {
+            put(
+                format!("candidate.{profile}.{name}"),
+                field(&r, name).unwrap_or_else(|| "NONE".into()),
+            );
+        }
+        put(
+            format!("candidate.{profile}.readiness"),
+            readiness
+                .map_or("NONE", |rd| gc::readiness_for(rd, view.as_ref(), &id))
+                .into(),
+        );
+    }
+    if !selected_present {
+        return invalid(warnings, "selected candidate missing");
+    }
+    // The latest runtime request and, once the desktop sync decided it, its
+    // native result; requested is never shown as effective.
+    let requests = rundir.join("bsc-operational/g07_candidates/requests");
+    let latest_request = fs::read_dir(&requests)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".request.dbrec"))
+        .filter_map(|e| record::decode(&gc::request::SCHEMA, &read(&e.path())?).ok())
+        .max_by_key(|r| r.u64(gc::request::REQUESTED_UNIX_MS).unwrap_or(0));
+    match latest_request {
+        None => put("candidate.request.state".into(), "NONE".into()),
+        Some(r) => {
+            let id = field(&r, "request_id").unwrap_or_default();
+            let result = read(&requests.join(format!("{id}.result.dbrec")))
+                .and_then(|b| record::decode(&gc::request_result::SCHEMA, &b).ok());
+            put(
+                "candidate.request.state".into(),
+                result
+                    .as_ref()
+                    .and_then(|x| field(x, "outcome"))
+                    .unwrap_or_else(|| "PENDING_DESKTOP_SYNC".into()),
+            );
+            put("candidate.request.request_id".into(), id);
+            for name in ["profile", "expected_generation"] {
+                put(
+                    format!("candidate.request.{name}"),
+                    field(&r, name).unwrap_or_default(),
+                );
+            }
+            if let Some(detail) = result.as_ref().and_then(|x| field(x, "detail")) {
+                put("candidate.request.detail".into(), detail);
+            }
+        }
+    }
+    out
+}
+
 pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     let mut paths = Vec::new();
     for dir in [
@@ -512,6 +670,14 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             .into()
         });
     let g07_evidence = execution.map(|(p, r)| evidence(root, p, Some(r)));
+    let candidate_readiness =
+        latest(&records, &[schema::g07::readiness::SCHEMA.name]).map(|(_, r)| r);
+    launch.runtime_fields.extend(candidate_fields(
+        root,
+        rundir,
+        candidate_readiness,
+        &mut warnings,
+    ));
     let gates = vec![
         gate(
             "G0.6a",

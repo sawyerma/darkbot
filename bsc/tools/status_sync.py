@@ -2,6 +2,8 @@
 """Explicit desktop-to-runtime public snapshot. Never copy secrets or rewrite evidence.
 GUI results retain bsc/native/evidence/g07/gui_readiness_<UUID>/ paths on import.
 Their provenance declares READ_ONLY_OPERATIONAL, not gate qualification.
+GUI candidate requests are applied or rejected by the native store first; only the
+public candidate/selection records are mirrored, never a salt record.
 """
 import hashlib, json, os, pathlib, shutil, subprocess, sys, time, uuid
 
@@ -10,8 +12,22 @@ def regular(path):
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 16*1024*1024:
         raise ValueError('unsafe source: '+str(path))
     return path.read_bytes()
+CANDIDATE_STATE='bsc/.local/g07_candidates'
+CANDIDATE_MIRROR='bsc/native/state/g07_candidates'
+CANDIDATE_PUBLIC=['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec']
+def apply_candidate_requests(root, run):
+    requests=run/'bsc-operational/g07_candidates/requests'
+    pending=[p for p in sorted(requests.glob('*.request.dbrec')) if not p.with_name(p.name.replace('.request.','.result.')).exists()] if requests.is_dir() else []
+    if not pending: return
+    binary=root/'bsc/engine/target/release/g07_candidate'
+    if not binary.is_file(): raise ValueError('pending candidate request but g07_candidate is not built')
+    # The native store is the only authority; its decision is recorded per request.
+    done=subprocess.run([str(binary),'apply-requests','--rundir',str(run)],cwd=root,env={'PATH':'/usr/bin:/bin'},capture_output=True,text=True,timeout=60)
+    if done.returncode!=0: raise ValueError('candidate request apply failed: '+done.stderr.strip()[-300:])
+    for line in done.stdout.splitlines(): print(line)
 def sync(root, app, run):
     root=root.resolve(); base=app/'bsc-snapshots'; base.mkdir(parents=True,exist_ok=True)
+    apply_candidate_requests(root, run)
     # Import immutable operational results, preserving every relative path and byte.
     operational=run/'bsc-operational'
     for directory in sorted((operational/'bsc/native/evidence/g07').glob('gui_readiness_*')):
@@ -44,6 +60,12 @@ def sync(root, app, run):
         relative=path.relative_to(root); data=regular(path)
         target=dest/relative; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(data)
         manifest[str(relative)]=digest(data)
+    for name in CANDIDATE_PUBLIC:
+        path=root/CANDIDATE_STATE/name
+        if not path.exists(): continue
+        data=regular(path); target=dest/CANDIDATE_MIRROR/name
+        target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(data)
+        manifest[CANDIDATE_MIRROR+'/'+name]=digest(data)
     commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
     if subprocess.check_output(['git','-C',str(root),'status','--porcelain','--','bsc'],text=True).strip(): commit+='-dirty'
     (dest/'COMMIT').write_text(commit+'\n'); (dest/'SYNCED_AT').write_text(str(int(time.time())))

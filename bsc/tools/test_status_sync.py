@@ -27,4 +27,22 @@ class SyncTests(unittest.TestCase):
    self.assertIn('UNPROVISIONED',(snapshot/'bsc/config/wallet.public.env').read_text())
    (root/relative/'readiness.dbrec').write_bytes(b'conflict')
    with self.assertRaises(ValueError):mod.sync(root,app,run)
+ def test_candidate_mirror_is_public_and_requests_need_the_native_store(self):
+  with tempfile.TemporaryDirectory(prefix='darkbot-sync-') as folder:
+   base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
+   subprocess.run(['git','init','-q',str(root)],check=True)
+   (root/'bsc/tools').mkdir(parents=True);(root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
+   subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
+   state=root/'bsc/.local/g07_candidates';state.mkdir(parents=True)
+   for name in ['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec','b.salt.dbrec','a.salt.dbrec']:(state/name).write_bytes(name.encode())
+   mod.sync(root,app,run)
+   snapshot=(app/'bsc-source').resolve();mirror=snapshot/'bsc/native/state/g07_candidates'
+   self.assertEqual(sorted(p.name for p in mirror.iterdir()),['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec'])
+   self.assertFalse(any('salt' in p.name for p in snapshot.rglob('*')))
+   self.assertNotIn('salt',(snapshot/'sources.json').read_text())
+   # A pending GUI request is never skipped: without the native store build the sync stops.
+   requests=run/'bsc-operational/g07_candidates/requests';requests.mkdir(parents=True)
+   (requests/'1b4e28ba-2fa1-41d2-883f-0016d3cca427.request.dbrec').write_bytes(b'request')
+   with self.assertRaises(ValueError):mod.sync(root,app,run)
 if __name__=='__main__':unittest.main()

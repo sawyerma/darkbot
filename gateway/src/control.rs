@@ -3,8 +3,8 @@ use crate::{
     http::AppState,
     lifecycle::{classify, CaptureProcess},
     proto::{
-        CommandLookupResponse, CommandPhase, CommandRejectReason, CommandRequest, CommandResponse,
-        CommandStatus, ProjectId,
+        expected_version, CommandLookupResponse, CommandPhase, CommandRejectReason, CommandRequest,
+        CommandResponse, CommandStatus, ProjectId,
     },
     session,
 };
@@ -31,9 +31,27 @@ const START: &str = "project0.capture.start";
 const STOP: &str = "project0.capture.stop";
 const BSC_START: &str = "bsc.readiness.start";
 const BSC_STOP: &str = "bsc.readiness.stop";
+/// Offline G0.7 A/B candidate selection request; never arm, sign or send.
+const BSC_CANDIDATE: &str = "bsc.candidate.select";
 fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32 && [START, STOP].contains(&action))
-        || (project == ProjectId::Bsc as i32 && [BSC_START, BSC_STOP].contains(&action))
+        || (project == ProjectId::Bsc as i32
+            && [BSC_START, BSC_STOP, BSC_CANDIDATE].contains(&action))
+}
+/// The only accepted candidate request: a fixed profile as resource and the
+/// selection generation of the last applied status as `profile_version` CAS.
+fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
+    let profile = match req.resource_id.as_str() {
+        "SELF_A" => "SELF_A",
+        "SELF_B" => "SELF_B",
+        _ => return None,
+    };
+    match req.expected.as_ref()?.version? {
+        expected_version::Version::ProfileVersion(generation) if req.params.is_empty() => {
+            Some((profile, generation))
+        }
+        _ => None,
+    }
 }
 const MAX_RECORDS: usize = 1024;
 
@@ -318,15 +336,31 @@ impl Control {
                 id,
                 CommandStatus::NotImplemented,
                 CommandRejectReason::Forbidden,
-                "Only managed Project 0 capture and BSC read-only readiness start/stop are available",
+                "Only managed Project 0 capture, BSC read-only readiness start/stop and the offline BSC candidate request are available",
             );
         }
-        if (req.project != ProjectId::Bsc as i32 && !req.resource_id.is_empty())
-            || (req.project == ProjectId::Bsc as i32
-                && !req.resource_id.is_empty()
-                && !valid_id(&req.resource_id))
-            || req.expected.is_some()
-            || !req.params.is_empty()
+        let candidate = if req.action == BSC_CANDIDATE {
+            match candidate_request(req) {
+                Some(c) => Some(c),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Candidate request takes exactly SELF_A or SELF_B and the profile_version generation",
+                    )
+                }
+            }
+        } else {
+            None
+        };
+        if candidate.is_none()
+            && ((req.project != ProjectId::Bsc as i32 && !req.resource_id.is_empty())
+                || (req.project == ProjectId::Bsc as i32
+                    && !req.resource_id.is_empty()
+                    && !valid_id(&req.resource_id))
+                || req.expected.is_some()
+                || !req.params.is_empty())
         {
             return reply(
                 id,
@@ -374,7 +408,10 @@ impl Control {
             _ => {}
         }
         let before = self.observe_project(req.project).await;
-        if req.project == ProjectId::Bsc as i32 && req.resource_id != before.run_id {
+        if req.project == ProjectId::Bsc as i32
+            && candidate.is_none()
+            && req.resource_id != before.run_id
+        {
             return reply(
                 id,
                 CommandStatus::Rejected,
@@ -414,7 +451,10 @@ impl Control {
                 "Cannot durably record command (ledger full or unavailable)",
             );
         }
-        let args = if req.action == BSC_START {
+        let generation = candidate.map(|(_, g)| g.to_string()).unwrap_or_default();
+        let args = if let Some((profile, _)) = candidate {
+            vec!["bsc", "candidate", "request", profile, &generation, id]
+        } else if req.action == BSC_START {
             vec!["bsc", "readiness", "start", &req.resource_id]
         } else if req.action == BSC_STOP {
             vec!["bsc", "readiness", "stop", &req.resource_id]
@@ -435,6 +475,14 @@ impl Control {
         .await;
         let after = self.observe_project(req.project).await;
         match output {
+            Ok(Ok(out)) if out.status.success() && candidate.is_some() => {
+                record.phase = CommandPhase::Completed as i32;
+                record.detail = "Selection request recorded; the native store applies or rejects it at the next desktop bsc sync".into();
+            }
+            Ok(Ok(_)) if candidate.is_some() => {
+                record.phase = CommandPhase::Failed as i32;
+                record.detail = "Native candidate request refused (stale generation, unknown candidate, armed guard or a pending request)".into();
+            }
             Ok(Ok(out)) if out.status.success() => {
                 if [START, BSC_START].contains(&req.action.as_str()) {
                     record.launch_id = after.run_id;
@@ -771,7 +819,113 @@ mod tests {
         }
         assert!(allowed(ProjectId::Bsc as i32, BSC_START));
         assert!(allowed(ProjectId::Bsc as i32, BSC_STOP));
+        assert!(allowed(ProjectId::Bsc as i32, BSC_CANDIDATE));
+        assert!(!allowed(ProjectId::Project0 as i32, BSC_CANDIDATE));
         assert!(!allowed(ProjectId::Solana as i32, BSC_START));
+    }
+    #[test]
+    fn a_candidate_request_takes_only_a_fixed_profile_and_the_generation() {
+        let request = |resource: &str,
+                       expected: Option<expected_version::Version>,
+                       params: &[u8]| CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: "12345678-1234-1234-1234-123456789abc".into(),
+            action: BSC_CANDIDATE.into(),
+            resource_id: resource.into(),
+            expected: expected.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+            params: params.to_vec().into(),
+            issued_at_unix_ns: 0,
+        };
+        use expected_version::Version::*;
+        assert_eq!(
+            candidate_request(&request("SELF_B", Some(ProfileVersion(3)), b"")),
+            Some(("SELF_B", 3))
+        );
+        assert_eq!(
+            candidate_request(&request("SELF_A", Some(ProfileVersion(0)), b"")),
+            Some(("SELF_A", 0))
+        );
+        for bad in [
+            request("SELF_C", Some(ProfileVersion(3)), b""),
+            request("../SELF_A", Some(ProfileVersion(3)), b""),
+            request("", Some(ProfileVersion(3)), b""),
+            request("SELF_A", None, b""),
+            request("SELF_A", Some(ConfigVersion(3)), b""),
+            request("SELF_A", Some(ProfileVersion(3)), b"x"),
+        ] {
+            assert_eq!(candidate_request(&bad), None);
+        }
+    }
+    #[tokio::test]
+    async fn a_candidate_request_dispatches_one_fixed_native_command() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("gw-candidate-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("bsc-root")).unwrap();
+        fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
+        fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        fs::write(
+            &ctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$4\" = SELF_B ]\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let control = Control::new(Some(Paths {
+            ctl,
+            rundir: dir.join("run"),
+            logdir: dir.clone(),
+            label: "test.capture".into(),
+        }));
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let mut req = CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: "12345678-1234-1234-1234-123456789abc".into(),
+            action: BSC_CANDIDATE.into(),
+            resource_id: "SELF_B".into(),
+            expected: Some(crate::proto::ExpectedVersion {
+                version: Some(expected_version::Version::ProfileVersion(7)),
+            }),
+            params: Default::default(),
+            issued_at_unix_ns: 0,
+        };
+        let response = control.execute(&req).await;
+        assert_eq!(
+            response.status,
+            CommandStatus::Accepted as i32,
+            "{}",
+            response.detail
+        );
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "bsc\ncandidate\nrequest\nSELF_B\n7\n12345678-1234-1234-1234-123456789abc\n"
+        );
+        assert_eq!(
+            control
+                .lookup(&req.request_id, ProjectId::Bsc as i32)
+                .await
+                .phase,
+            CommandPhase::Completed as i32
+        );
+        // A native refusal is a failed receipt, never a completed switch.
+        req.request_id = "22345678-1234-1234-1234-123456789abc".into();
+        req.resource_id = "SELF_A".into();
+        assert_eq!(
+            control.execute(&req).await.status,
+            CommandStatus::Accepted as i32
+        );
+        assert_eq!(
+            control
+                .lookup(&req.request_id, ProjectId::Bsc as i32)
+                .await
+                .phase,
+            CommandPhase::Failed as i32
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn rejects_path_ids_and_redacts_provider_credentials() {

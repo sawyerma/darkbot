@@ -304,6 +304,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     // Readiness counts only for the selected candidate the v4 binds.
     let (status, detail) = candidate::contract_candidate_check(
         Path::new(candidate::CANDIDATE_STATE_ROOT),
+        Path::new(candidate::PUBLIC_MIRROR_ROOT),
         Address::from(field(dry.address(d::TOKEN))),
         launcher,
         B256::from(field(dry.b256(d::LAUNCH_TX_HASH))),

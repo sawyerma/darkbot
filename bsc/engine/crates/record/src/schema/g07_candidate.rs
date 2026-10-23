@@ -4,7 +4,7 @@
 //! deliberately absent from `schema::all()`, so generic decoders and views
 //! cannot render it.
 
-use crate::{Field, Kind::*, Schema};
+use crate::{Field, Kind::*, Record, RecordError, Schema};
 
 /// The public identity of one candidate.
 pub mod candidate {
@@ -137,8 +137,179 @@ pub mod selection {
     };
 }
 
+/// A selection request from the runtime (gateway command). Never
+/// authority: the native store applies or rejects it.
+pub mod request {
+    use super::*;
+
+    pub const REQUEST_ID: u16 = 1;
+    pub const PROFILE: u16 = 2;
+    pub const EXPECTED_GENERATION: u16 = 3;
+    pub const TARGET_CANDIDATE_ID: u16 = 4;
+    pub const REQUESTED_UNIX_MS: u16 = 5;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g07.self-launch-candidate.request",
+        record_type: 30,
+        schema_version: 1,
+        fields: &[
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(PROFILE, "profile", Text),
+            Field::req(EXPECTED_GENERATION, "expected_generation", U64),
+            Field::req(TARGET_CANDIDATE_ID, "target_candidate_id", B256),
+            Field::req(REQUESTED_UNIX_MS, "requested_unix_ms", U64),
+        ],
+    };
+}
+
+/// The native decision on one request.
+pub mod request_result {
+    use super::*;
+
+    pub const REQUEST_ID: u16 = 1;
+    /// `APPLIED` or `REJECTED`.
+    pub const OUTCOME: u16 = 2;
+    pub const DETAIL: u16 = 3;
+    pub const GENERATION: u16 = 4;
+    pub const DECIDED_UNIX_MS: u16 = 5;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g07.self-launch-candidate.request-result",
+        record_type: 31,
+        schema_version: 1,
+        fields: &[
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(OUTCOME, "outcome", Text),
+            Field::req(DETAIL, "detail", Text),
+            Field::opt(GENERATION, "generation", U64),
+            Field::req(DECIDED_UNIX_MS, "decided_unix_ms", U64),
+        ],
+    };
+}
+
 /// The decodable public schemas; the salt record is excluded on purpose.
-pub const ALL: &[&Schema] = &[&candidate::SCHEMA, &selection::SCHEMA];
+pub const ALL: &[&Schema] = &[
+    &candidate::SCHEMA,
+    &selection::SCHEMA,
+    &request::SCHEMA,
+    &request_result::SCHEMA,
+];
+
+const ID_DOMAIN: &[u8] = b"darkbot.g07.candidate.id.v1";
+
+/// The candidate ID over every public identity field, so it can be
+/// recomputed without the salt. `addresses` = portal, Portal
+/// implementation, Tax-V3 implementation, launcher, token; `words` = the
+/// implementation code hashes, deployment record hash, salt commitment,
+/// launch calldata hash, then any evidence binding.
+pub fn candidate_id(
+    profile: &str,
+    chain_id: u64,
+    addresses: [[u8; 20]; 5],
+    portal_version: &str,
+    words: &[[u8; 32]],
+) -> [u8; 32] {
+    let mut p = ID_DOMAIN.to_vec();
+    p.extend_from_slice(profile.as_bytes());
+    p.extend_from_slice(&chain_id.to_be_bytes());
+    for a in addresses {
+        p.extend_from_slice(&a);
+    }
+    p.extend_from_slice(portal_version.as_bytes());
+    for w in words {
+        p.extend_from_slice(w);
+    }
+    crate::sha256(&p)
+}
+
+/// [`candidate_id`] of a decoded public candidate record.
+pub fn candidate_id_of(r: &Record) -> Result<[u8; 32], RecordError> {
+    use candidate as c;
+    let mut words = vec![
+        r.b256(c::PORTAL_IMPLEMENTATION_CODE_SHA256)?,
+        r.b256(c::TAX_V3_IMPLEMENTATION_CODE_SHA256)?,
+        r.b256(c::DEPLOYMENT_RECORD_SHA256)?,
+        r.b256(c::SALT_COMMITMENT)?,
+        r.b256(c::LAUNCH_CALLDATA_SHA256)?,
+    ];
+    for tag in [
+        c::ECONOMICS_RECORD_SHA256,
+        c::DRY_RECORD_SHA256,
+        c::LAUNCH_TX_HASH,
+        c::BUY_TX_HASH,
+    ] {
+        words.extend(r.opt_b256(tag)?);
+    }
+    Ok(candidate_id(
+        r.text(c::PROFILE)?,
+        r.u64(c::CHAIN_ID)?,
+        [
+            r.address(c::PORTAL)?,
+            r.address(c::PORTAL_IMPLEMENTATION)?,
+            r.address(c::TAX_V3_IMPLEMENTATION)?,
+            r.address(c::LAUNCHER)?,
+            r.address(c::TOKEN)?,
+        ],
+        r.text(c::PORTAL_VERSION)?,
+        &words,
+    ))
+}
+
+/// The current selection, as the readiness binding needs it.
+pub struct SelectionView<'a> {
+    pub generation: u64,
+    pub profile: &'a str,
+    pub candidate_id: [u8; 32],
+    pub activated_unix_ms: u64,
+}
+
+/// The detail a PASSing readiness CANDIDATE_SELECTION check carries.
+pub fn readiness_binding(selection: &SelectionView<'_>) -> String {
+    format!(
+        "candidate=0x{} profile={} generation={}",
+        crate::hex(&selection.candidate_id),
+        selection.profile,
+        selection.generation
+    )
+}
+
+/// The readiness of one candidate: it counts only with a PASSing
+/// CANDIDATE_SELECTION for exactly the current selection of this candidate,
+/// observed after that switch; otherwise `STALE`, `NOT_SELECTED` or
+/// `UNKNOWN`.
+pub fn readiness_for(
+    readiness: &Record,
+    selection: Option<&SelectionView<'_>>,
+    candidate_id: &[u8; 32],
+) -> &'static str {
+    use super::g07::readiness as rr;
+    let Some(selection) = selection else {
+        return "UNKNOWN";
+    };
+    if &selection.candidate_id != candidate_id {
+        return "NOT_SELECTED";
+    }
+    let binding = readiness_binding(selection);
+    let bound = readiness
+        .u64(rr::OBSERVED_UNIX_MS)
+        .is_ok_and(|t| t >= selection.activated_unix_ms)
+        && readiness.nested_all(rr::CHECKS).is_ok_and(|checks| {
+            checks.iter().any(|row| {
+                row.text(rr::check::NAME).ok() == Some("CANDIDATE_SELECTION")
+                    && row.text(rr::check::STATUS).ok() == Some("PASS")
+                    && row.text(rr::check::DETAIL).ok() == Some(binding.as_str())
+            })
+        });
+    if !bound {
+        return "STALE";
+    }
+    match readiness.text(rr::STATUS) {
+        Ok("PASS_READ_ONLY") => "PASS_READ_ONLY",
+        Ok("BLOCKED") => "BLOCKED",
+        Ok("STOP") => "STOP",
+        _ => "UNKNOWN",
+    }
+}
 
 #[cfg(test)]
 mod tests {

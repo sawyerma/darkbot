@@ -22,11 +22,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &schema::g07::evidence::SCHEMA,
             &schema::g08::result::SCHEMA,
             &schema::g08::unresolved::SCHEMA,
+            &schema::g07_candidate::candidate::SCHEMA,
+            &schema::g07_candidate::selection::SCHEMA,
+            &schema::g07_candidate::request::SCHEMA,
+            &schema::g07_candidate::request_result::SCHEMA,
         ];
         let mut fields = Vec::new();
         for schema in schemas {
             let group = if schema.name.contains("g08") {
                 "g08"
+            } else if schema.name.contains("self-launch-candidate") {
+                "g07_candidate"
             } else if schema.name.contains("g07") || schema.name.contains("witness-source") {
                 "g07"
             } else {

@@ -71,8 +71,23 @@ bsc_wait_stopped() {
     sleep 1; i=$((i+1)); [ "$i" -lt 330 ] || die "BSC readiness stoppt noch; kein SIGKILL, Gateway bleibt aktiv"
   done
 }
+# GUI A/B selection, offline only: records a typed native request against the
+# public snapshot mirror. The desktop `bsc sync` lets the native store apply
+# or reject it; nothing here arms, signs or sends.
+bsc_candidate_request() {
+  [ "$#" -eq 3 ] || die "bsc candidate request SELF_A|SELF_B <generation> <request_id>"
+  case "$1" in SELF_A|SELF_B) ;; *) die "unknown candidate profile" ;; esac
+  case "$2" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
+  [ -x "$APP_HOME/current/g07_candidate" ] || die "BSC candidate manager nicht deployed"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/g07_candidate" request "$1" \
+    --expect-generation "$2" --request-id "$3" --rundir "$RUNDIR" --snapshot "$BSC_ROOT"
+}
 cmd_bsc() {
   case "${1:-}" in
+    candidate) case "${2:-}" in
+      request) locked bsc_candidate_request "${@:3}" ;;
+      *) die "bsc candidate request SELF_A|SELF_B <generation> <request_id>" ;;
+    esac ;;
     readiness) case "${2:-status}" in
       start) locked bsc_readiness_start "${@:3}" ;;
       stop) locked bsc_readiness_stop "${@:3}" ;;
@@ -82,7 +97,7 @@ cmd_bsc() {
     sync) [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc sync im Terminal aus dem Original-Repository ausführen"
       locked bsc_sync ;;
     reporter) locked bsc_reporter_up ;;
-    *) die "bsc readiness start | stop | status; bsc reporter" ;;
+    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request" ;;
   esac
 }
 

@@ -270,7 +270,7 @@ cmd_build() {
   (cd "$ROOT/frontend" && npm run lint && npm run lint:boundaries && npm run lint:css && npm run check:freeze && npm run build)
   (cd "$ROOT/gateway" && cargo build --release --locked --offline)
   (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported)
-  (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness)
+  (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness --bin g07_candidate)
   /usr/bin/python3 "$ROOT/ops/release_manifest.py" --write
   say "build ok – weiter mit: darkbotctl deploy"
 }
@@ -287,6 +287,7 @@ cmd_deploy() {
   [ -z "$(bsc_pid)" ] || die "Readiness läuft; Deploy erst nach Abschluss"
   [ -x "$ROOT/bsc/engine/target/release/bsc-status-reporter" ] || die "BSC Reporter nicht gebaut"
   [ -x "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" ] || die "BSC Readiness nicht gebaut"
+  [ -x "$ROOT/bsc/engine/target/release/g07_candidate" ] || die "BSC Kandidatenverwaltung nicht gebaut"
   bsc_sync
   local rel; rel="$APP_HOME/releases/$(date +%Y%m%dT%H%M%S)"
   mkdir -p "$rel"
@@ -294,7 +295,7 @@ cmd_deploy() {
   cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
   cp "$ROOT/ops/darkbotctl" "$rel/darkbotctl"
   cp "$ROOT/ops/bsc-control.sh" "$rel/bsc-control.sh"
-  cp "$ROOT/bsc/engine/target/release/bsc-status-reporter" "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" "$rel/"
+  cp "$ROOT/bsc/engine/target/release/bsc-status-reporter" "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" "$ROOT/bsc/engine/target/release/g07_candidate" "$rel/"
   cp "$ROOT/protocol/schema_id.txt" "$rel/SCHEMA_ID"
   ln -s "$APP_HOME/bsc-source" "$rel/bsc-root"
   chmod 755 "$rel/darkbotctl"

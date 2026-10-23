@@ -8,8 +8,10 @@
 
 use super::*;
 use darkbot_bsc_record::schema::g06a::{dry as d, economics, preflight as pf};
-use darkbot_bsc_record::schema::g07::readiness as rr;
-use darkbot_bsc_record::schema::g07_candidate::{candidate as c, secret as s, selection as sel};
+use darkbot_bsc_record::schema::g07_candidate::{
+    self as g07c, SelectionView, candidate as c, request as rq, request_result as rs, secret as s,
+    selection as sel,
+};
 use darkbot_bsc_record::{Value, decode};
 use darkbot_bsc_trading::venues::flap::{
     abi::decode_new_token_v6,
@@ -19,11 +21,15 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsE
 
 /// Private candidate state, git-ignored like the attempt state.
 pub(crate) const CANDIDATE_STATE_ROOT: &str = "bsc/.local/g07_candidates";
+/// The public mirror in a runtime snapshot: candidate and selection records,
+/// never a salt record.
+pub(crate) const PUBLIC_MIRROR_ROOT: &str = "bsc/native/state/g07_candidates";
+/// Selection requests of the runtime, below its run directory.
+pub(crate) const REQUESTS_ROOT: &str = "bsc-operational/g07_candidates/requests";
 pub(crate) const UNQUALIFIED: &str = "UNQUALIFIED";
 /// What a switch invalidates for the newly selected candidate.
 const INVALIDATED: &str = "READINESS,SIGNED_BYTE_AUTHORIZATION,ECONOMIC_APPROVAL";
 const SALT_DOMAIN: &[u8] = b"darkbot.g07.candidate.salt.v1";
-const ID_DOMAIN: &[u8] = b"darkbot.g07.candidate.id.v1";
 /// The 7777 suffix needs 65 536 draws on average.
 const MAX_SALT_DRAWS: u32 = 1 << 24;
 
@@ -192,38 +198,34 @@ fn candidate_id(
     calldata_sha256: B256,
     evidence: Option<&Evidence>,
 ) -> B256 {
-    let mut p = ID_DOMAIN.to_vec();
-    p.extend_from_slice(profile.name().as_bytes());
-    p.extend_from_slice(&deployment.chain_id.to_be_bytes());
-    for a in [
-        deployment.portal,
-        deployment.portal_implementation,
-        deployment.tax_v3,
-        launcher,
-        token,
-    ] {
-        p.extend_from_slice(a.as_slice());
-    }
     let mut words = vec![
-        deployment.portal_implementation_code_sha256,
-        deployment.tax_v3_code_sha256,
-        deployment.record_sha256,
-        commitment,
-        calldata_sha256,
+        deployment.portal_implementation_code_sha256.0,
+        deployment.tax_v3_code_sha256.0,
+        deployment.record_sha256.0,
+        commitment.0,
+        calldata_sha256.0,
     ];
     if let Some(e) = evidence {
         words.extend([
-            e.economics_sha256,
-            e.dry_sha256,
-            e.launch_tx_hash,
-            e.buy_tx_hash,
+            e.economics_sha256.0,
+            e.dry_sha256.0,
+            e.launch_tx_hash.0,
+            e.buy_tx_hash.0,
         ]);
     }
-    p.extend_from_slice(deployment.portal_version.as_bytes());
-    for w in words {
-        p.extend_from_slice(w.as_slice());
-    }
-    B256::from(darkbot_bsc_record::sha256(&p))
+    B256::from(g07c::candidate_id(
+        profile.name(),
+        deployment.chain_id,
+        [
+            deployment.portal.into_array(),
+            deployment.portal_implementation.into_array(),
+            deployment.tax_v3.into_array(),
+            launcher.into_array(),
+            token.into_array(),
+        ],
+        &deployment.portal_version,
+        &words,
+    ))
 }
 
 fn build(
@@ -532,15 +534,38 @@ pub(crate) struct Selection {
 }
 
 impl Selection {
+    pub(crate) fn view(&self) -> SelectionView<'static> {
+        SelectionView {
+            generation: self.generation,
+            profile: self.profile.name(),
+            candidate_id: self.candidate_id.0,
+            activated_unix_ms: self.activated_unix_ms,
+        }
+    }
+
     /// The binding a readiness verdict must carry to count for this
     /// selection.
     pub(crate) fn binding(&self) -> String {
-        format!(
-            "candidate={} profile={} generation={}",
-            self.candidate_id,
-            self.profile.name(),
-            self.generation
-        )
+        g07c::readiness_binding(&self.view())
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self, String> {
+        let r = decode(&sel::SCHEMA, bytes).map_err(|e| format!("selection: {e}"))?;
+        let e = |e: darkbot_bsc_record::RecordError| format!("selection: {e}");
+        let selection = Selection {
+            generation: r.u64(sel::GENERATION).map_err(e)?,
+            profile: Profile::parse(r.text(sel::PROFILE).map_err(e)?)?,
+            candidate_id: B256::from(r.b256(sel::CANDIDATE_ID).map_err(e)?),
+            previous: r
+                .opt_b256(sel::PREVIOUS_CANDIDATE_ID)
+                .map_err(e)?
+                .map(B256::from),
+            activated_unix_ms: r.u64(sel::ACTIVATED_UNIX_MS).map_err(e)?,
+        };
+        if selection.generation == 0 {
+            return Err("selection: generation 0 is never written".into());
+        }
+        Ok(selection)
     }
 }
 
@@ -744,25 +769,9 @@ impl Store {
     }
 
     pub(crate) fn selection(&self) -> Result<Option<Selection>, String> {
-        let Some(bytes) = self.read("selection.dbrec")? else {
-            return Ok(None);
-        };
-        let r = decode(&sel::SCHEMA, &bytes).map_err(|e| format!("selection: {e}"))?;
-        let e = |e: darkbot_bsc_record::RecordError| format!("selection: {e}");
-        let selection = Selection {
-            generation: r.u64(sel::GENERATION).map_err(e)?,
-            profile: Profile::parse(r.text(sel::PROFILE).map_err(e)?)?,
-            candidate_id: B256::from(r.b256(sel::CANDIDATE_ID).map_err(e)?),
-            previous: r
-                .opt_b256(sel::PREVIOUS_CANDIDATE_ID)
-                .map_err(e)?
-                .map(B256::from),
-            activated_unix_ms: r.u64(sel::ACTIVATED_UNIX_MS).map_err(e)?,
-        };
-        if selection.generation == 0 {
-            return Err("selection: generation 0 is never written".into());
-        }
-        Ok(Some(selection))
+        self.read("selection.dbrec")?
+            .map(|bytes| Selection::decode(&bytes))
+            .transpose()
     }
 
     /// Switches to `profile` under compare-and-swap on the generation. Never
@@ -841,76 +850,155 @@ pub(crate) fn attempt_state_present(root: &Path) -> Result<bool, String> {
     }
 }
 
-/// The readiness of `candidate` from a readiness record: it counts only when
-/// it carries a PASSing CANDIDATE_SELECTION for the current selection of
-/// exactly this candidate and was observed after that switch.
+/// The readiness of `candidate` from a readiness record (the shared rule of
+/// the reporter): only a PASSing CANDIDATE_SELECTION for exactly the current
+/// selection of this candidate, observed after that switch, counts.
 pub(crate) fn readiness_for(
     readiness: &Record,
     selection: Option<&Selection>,
     candidate: &Candidate,
 ) -> &'static str {
-    let Some(selection) = selection else {
-        return "UNKNOWN";
-    };
-    if selection.candidate_id != candidate.id {
-        return "NOT_SELECTED";
+    g07c::readiness_for(
+        readiness,
+        selection.map(Selection::view).as_ref(),
+        &candidate.id.0,
+    )
+}
+
+/// The public candidate state of a runtime snapshot, verified without the
+/// salt: every ID is recomputed from the public fields and the selection must
+/// name the present candidate of its profile.
+#[derive(Debug)]
+pub(crate) struct PublicState {
+    pub(crate) selection: Option<Selection>,
+    pub(crate) candidates: Vec<Candidate>,
+}
+
+impl PublicState {
+    pub(crate) fn candidate(&self, profile: Profile) -> Option<&Candidate> {
+        self.candidates.iter().find(|c| c.profile == profile)
     }
-    let bound = readiness
-        .u64(rr::OBSERVED_UNIX_MS)
-        .is_ok_and(|t| t >= selection.activated_unix_ms)
-        && readiness.nested_all(rr::CHECKS).is_ok_and(|checks| {
-            checks.iter().any(|row| {
-                row.text(rr::check::NAME).ok() == Some("CANDIDATE_SELECTION")
-                    && row.text(rr::check::STATUS).ok() == Some("PASS")
-                    && row.text(rr::check::DETAIL).ok() == Some(selection.binding().as_str())
-            })
-        });
-    if !bound {
-        return "STALE";
-    }
-    match readiness.text(rr::STATUS) {
-        Ok("PASS_READ_ONLY") => "PASS_READ_ONLY",
-        Ok("BLOCKED") => "BLOCKED",
-        Ok("STOP") => "STOP",
-        _ => "UNKNOWN",
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.selection.as_ref().map_or(0, |s| s.generation)
     }
 }
 
+fn public_file(dir: &Path, name: &str) -> Result<Option<Vec<u8>>, String> {
+    let path = dir.join(name);
+    match fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{name}: {e}")),
+        Ok(m) if !m.file_type().is_file() => Err(format!("{name} must be a regular file")),
+        Ok(_) => fs::read(&path)
+            .map(Some)
+            .map_err(|e| format!("{name}: {e}")),
+    }
+}
+
+/// `None` when the mirror directory does not exist.
+pub(crate) fn load_public(dir: &Path) -> Result<Option<PublicState>, String> {
+    match fs::symlink_metadata(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+        Ok(m) if !m.file_type().is_dir() => {
+            return Err("public candidate mirror is not a real directory".into());
+        }
+        Ok(_) => {}
+    }
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let name = entry.map_err(|e| e.to_string())?.file_name();
+        if name.to_string_lossy().ends_with(".salt.dbrec") {
+            return Err("a salt record must never be in the public mirror".into());
+        }
+    }
+    let mut candidates = Vec::new();
+    for profile in [Profile::A, Profile::B] {
+        let Some(bytes) = public_file(dir, &Store::names(profile).0)? else {
+            continue;
+        };
+        let record = decode(&c::SCHEMA, &bytes).map_err(|e| format!("public candidate: {e}"))?;
+        let candidate = Candidate::from_record(&record)?;
+        let id = g07c::candidate_id_of(&record).map_err(|e| e.to_string())?;
+        if candidate.profile != profile
+            || id != candidate.id.0
+            || candidate.qualification != UNQUALIFIED
+        {
+            return Err(format!(
+                "public candidate {} fails its identity",
+                profile.name()
+            ));
+        }
+        candidates.push(candidate);
+    }
+    let selection = public_file(dir, "selection.dbrec")?
+        .map(|bytes| Selection::decode(&bytes))
+        .transpose()?;
+    let state = PublicState {
+        selection,
+        candidates,
+    };
+    if let Some(s) = &state.selection
+        && state.candidate(s.profile).map(|c| c.id) != Some(s.candidate_id)
+    {
+        return Err("public selection names a missing or different candidate".into());
+    }
+    Ok(Some(state))
+}
+
 /// Readiness: the selected candidate must be exactly the one the v4 contract
-/// binds (its DRY token, launcher and signed hashes). B, or no selection, is
-/// a missing precondition; a contradiction or a failed re-derivation STOPs.
+/// binds (its DRY token, launcher and signed hashes). The private store is
+/// verified from the salt; in a runtime snapshot only its public mirror
+/// exists and is verified from its public identity. B, or no selection, is a
+/// missing precondition; a contradiction or a failed verification STOPs.
 pub(crate) fn contract_candidate_check(
-    dir: &Path,
+    private_dir: &Path,
+    mirror_dir: &Path,
     token: Address,
     launcher: Address,
     launch_tx_hash: B256,
     buy_tx_hash: B256,
 ) -> (&'static str, String) {
-    let store = match Store::existing(dir) {
-        Ok(Some(store)) => store,
-        Ok(None) => {
-            return (
-                "BLOCKED",
-                "No G0.7 candidate state; create and select candidate A or B (g07_candidate)"
-                    .into(),
-            );
+    let (selection, candidate) = match Store::existing(private_dir) {
+        Ok(Some(store)) => {
+            let selection = match store.selection() {
+                Ok(Some(s)) => s,
+                Ok(None) => return ("BLOCKED", "No G0.7 candidate selected".into()),
+                Err(e) => return ("STOP", e),
+            };
+            match store.load(selection.profile) {
+                Ok(Some((candidate, _))) => (selection, candidate),
+                Ok(None) => {
+                    return (
+                        "STOP",
+                        format!("selected {} does not exist", selection.profile.name()),
+                    );
+                }
+                Err(e) => return ("STOP", e),
+            }
         }
+        Ok(None) => match load_public(mirror_dir) {
+            Ok(Some(PublicState {
+                selection: Some(selection),
+                candidates,
+            })) => match candidates
+                .into_iter()
+                .find(|c| c.profile == selection.profile)
+            {
+                Some(candidate) => (selection, candidate),
+                None => return ("STOP", "public selection without its candidate".into()),
+            },
+            Ok(Some(_)) => return ("BLOCKED", "No G0.7 candidate selected".into()),
+            Ok(None) => {
+                return (
+                    "BLOCKED",
+                    "No G0.7 candidate state; create and select candidate A or B (g07_candidate)"
+                        .into(),
+                );
+            }
+            Err(e) => return ("STOP", format!("public candidate state unusable: {e}")),
+        },
         Err(e) => return ("STOP", format!("candidate state unusable: {e}")),
-    };
-    let selection = match store.selection() {
-        Ok(Some(s)) => s,
-        Ok(None) => return ("BLOCKED", "No G0.7 candidate selected".into()),
-        Err(e) => return ("STOP", e),
-    };
-    let candidate = match store.load(selection.profile) {
-        Ok(Some((candidate, _))) => candidate,
-        Ok(None) => {
-            return (
-                "STOP",
-                format!("selected {} does not exist", selection.profile.name()),
-            );
-        }
-        Err(e) => return ("STOP", e),
     };
     if candidate.id != selection.candidate_id {
         return (
@@ -938,4 +1026,160 @@ pub(crate) fn contract_candidate_check(
             "selected SELF_A differs from the v4-bound DRY token, launcher or signed hashes".into(),
         ),
     }
+}
+
+fn valid_request_id(id: &str) -> bool {
+    id.len() == 36
+        && id.bytes().enumerate().all(|(i, b)| {
+            if [8, 13, 18, 23].contains(&i) {
+                b == b'-'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        })
+}
+
+/// Request files without a decision, oldest first.
+fn pending_requests(dir: &Path) -> Result<Vec<(u64, String, Record)>, String> {
+    let mut pending = Vec::new();
+    let entries = match fs::read_dir(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(pending),
+        Err(e) => return Err(format!("requests: {e}")),
+        Ok(entries) => entries,
+    };
+    for entry in entries {
+        let name = entry
+            .map_err(|e| e.to_string())?
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let Some(id) = name.strip_suffix(".request.dbrec") else {
+            continue;
+        };
+        if dir.join(format!("{id}.result.dbrec")).exists() {
+            continue;
+        }
+        let bytes = public_file(dir, &name)?.ok_or("request vanished")?;
+        let r = decode(&rq::SCHEMA, &bytes).map_err(|e| format!("{name}: {e}"))?;
+        if r.text(rq::REQUEST_ID).ok() != Some(id) || !valid_request_id(id) {
+            return Err(format!("{name}: request identity mismatch"));
+        }
+        let at = r.u64(rq::REQUESTED_UNIX_MS).map_err(|e| e.to_string())?;
+        pending.push((at, id.to_string(), r));
+    }
+    pending.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    Ok(pending)
+}
+
+/// Runtime side of a GUI selection: records a typed request after checking it
+/// against the public mirror. It is never authority; only the native store
+/// applies it.
+pub(crate) fn write_request(
+    rundir: &Path,
+    mirror_dir: &Path,
+    profile: Profile,
+    expected_generation: u64,
+    request_id: &str,
+    guard: &str,
+    now_ms: u64,
+) -> Result<(), String> {
+    if !valid_request_id(request_id) {
+        return Err("request_id must be a UUID".into());
+    }
+    if guard != "UNARMED" {
+        return Err("the G0.7 guard is armed: candidate switching is forbidden".into());
+    }
+    let public = load_public(mirror_dir)?.ok_or("no candidate state in the runtime snapshot")?;
+    if public.generation() != expected_generation {
+        return Err(format!(
+            "stale selection: generation is {}, not {expected_generation}",
+            public.generation()
+        ));
+    }
+    if public
+        .selection
+        .as_ref()
+        .is_some_and(|s| s.profile == profile)
+    {
+        return Err(format!("{} is already selected", profile.name()));
+    }
+    let target = public
+        .candidate(profile)
+        .ok_or_else(|| format!("candidate {} does not exist", profile.name()))?;
+    let dir = rundir.join(REQUESTS_ROOT);
+    if !pending_requests(&dir)?.is_empty() {
+        return Err("a selection request is already pending".into());
+    }
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(rundir.join("bsc-operational"))
+        .map_err(|e| format!("create run state: {e}"))?;
+    let store = Store::create(&dir)?;
+    let mut r = Draft::new(&rq::SCHEMA);
+    r.set(rq::REQUEST_ID, request_id)
+        .set(rq::PROFILE, profile.name())
+        .set(rq::EXPECTED_GENERATION, expected_generation)
+        .set(rq::TARGET_CANDIDATE_ID, Value::B256(target.id.0))
+        .set(rq::REQUESTED_UNIX_MS, now_ms);
+    store.create_once(
+        &format!("{request_id}.request.dbrec"),
+        &r.encode().map_err(|e| e.to_string())?,
+    )
+}
+
+/// Repository side: applies every pending request through [`Store::select`]
+/// (CAS, guard, attempt state, verification) and records each decision.
+pub(crate) fn apply_requests(
+    store: &Store,
+    rundir: &Path,
+    guard: &str,
+    attempt_root: &Path,
+    now_ms: u64,
+) -> Result<Vec<(String, &'static str, String)>, String> {
+    let dir = rundir.join(REQUESTS_ROOT);
+    let pending = pending_requests(&dir)?;
+    let mut decided = Vec::new();
+    for (_, id, r) in pending {
+        let e = |e: darkbot_bsc_record::RecordError| e.to_string();
+        let profile = Profile::parse(r.text(rq::PROFILE).map_err(e)?)?;
+        let expected = r.u64(rq::EXPECTED_GENERATION).map_err(e)?;
+        let target = B256::from(r.b256(rq::TARGET_CANDIDATE_ID).map_err(e)?);
+        let outcome = match store.load(profile) {
+            Ok(Some((candidate, _))) if candidate.id != target => {
+                Err("the candidate changed since the request".to_string())
+            }
+            Ok(_) => store.select(profile, expected, guard, attempt_root, now_ms),
+            Err(e) => Err(e),
+        };
+        let mut result = Draft::new(&rs::SCHEMA);
+        result
+            .set(rs::REQUEST_ID, id.as_str())
+            .set(rs::DECIDED_UNIX_MS, now_ms);
+        let (state, detail) = match &outcome {
+            Ok(s) => {
+                result.set(rs::GENERATION, s.generation);
+                (
+                    "APPLIED",
+                    format!(
+                        "{} selected as generation {}",
+                        s.profile.name(),
+                        s.generation
+                    ),
+                )
+            }
+            Err(e) => ("REJECTED", e.clone()),
+        };
+        result
+            .set(rs::OUTCOME, state)
+            .set(rs::DETAIL, detail.as_str());
+        Store::existing(&dir)?
+            .ok_or("requests directory vanished")?
+            .create_once(
+                &format!("{id}.result.dbrec"),
+                &result.encode().map_err(|e| e.to_string())?,
+            )?;
+        decided.push((id, state, detail));
+    }
+    Ok(decided)
 }

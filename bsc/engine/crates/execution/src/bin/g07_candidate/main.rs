@@ -5,7 +5,13 @@
 //! g07_candidate create-b --dry <dbrec> --preflight <dbrec>
 //! g07_candidate select A|B --expect-generation <n>
 //! g07_candidate show [--readiness <dbrec>]
+//! g07_candidate apply-requests --rundir <dir>
+//! g07_candidate request A|B --expect-generation <n> --request-id <uuid> --rundir <dir> --snapshot <dir>
 //! ```
+//!
+//! `request` is the runtime side of a GUI selection (staged release, no
+//! repository): it only records a typed request; `apply-requests`, run from
+//! the desktop sync, lets the native store apply or reject it.
 //!
 //! Runs at the root of the main checkout; state in bsc/.local/g07_candidates.
 //! No RPC, no key, no signature, no send; the guard is only read. Prints the
@@ -89,7 +95,33 @@ fn print_candidate(candidate: &Candidate) {
     println!("{p}.provenance = {}", candidate.provenance);
 }
 
+fn generation(args: &[String]) -> Result<u64, String> {
+    flag(args, "--expect-generation")?
+        .parse::<u64>()
+        .map_err(|_| "--expect-generation must be an unsigned integer".into())
+}
+
 fn run(args: &[String]) -> Result<(), String> {
+    // Runtime side (staged release, no repository, no salt): only records a
+    // typed request against the public mirror of its snapshot.
+    if args.first().map(String::as_str) == Some("request") {
+        let profile = Profile::parse(args.get(1).ok_or("request needs A or B")?)?;
+        let expected = generation(args)?;
+        write_request(
+            Path::new(flag(args, "--rundir")?),
+            &Path::new(flag(args, "--snapshot")?).join(PUBLIC_MIRROR_ROOT),
+            profile,
+            expected,
+            flag(args, "--request-id")?,
+            FROZEN_APPROVED_V4_SHA256,
+            now_ms(),
+        )?;
+        println!(
+            "candidate.request = RECORDED profile={} expected_generation={expected}; effective only after the native apply at the next desktop sync",
+            profile.name()
+        );
+        return Ok(());
+    }
     repository_root_check(Path::new("."))?;
     let dir = Path::new(CANDIDATE_STATE_ROOT);
     match args.first().map(String::as_str) {
@@ -114,9 +146,7 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         Some("select") => {
             let profile = Profile::parse(args.get(1).ok_or("select needs A or B")?)?;
-            let expected = flag(args, "--expect-generation")?
-                .parse::<u64>()
-                .map_err(|_| "--expect-generation must be an unsigned integer")?;
+            let expected = generation(args)?;
             let store = Store::existing(dir)?.ok_or("no candidate state")?;
             let selection = store.select(
                 profile,
@@ -131,6 +161,18 @@ fn run(args: &[String]) -> Result<(), String> {
             println!(
                 "selection.invalidated = READINESS,SIGNED_BYTE_AUTHORIZATION,ECONOMIC_APPROVAL"
             );
+        }
+        Some("apply-requests") => {
+            let store = Store::existing(dir)?.ok_or("no candidate state")?;
+            for (id, state, detail) in apply_requests(
+                &store,
+                Path::new(flag(args, "--rundir")?),
+                FROZEN_APPROVED_V4_SHA256,
+                Path::new(ATTEMPT_STATE_ROOT),
+                now_ms(),
+            )? {
+                println!("candidate.request.{id} = {state}: {detail}");
+            }
         }
         Some("show") => {
             let readiness = match args.iter().position(|a| a == "--readiness") {
@@ -223,6 +265,10 @@ mod tests {
     }
 
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    fn no_mirror() -> &'static Path {
+        Path::new("/nonexistent/g07-candidate-mirror")
+    }
 
     fn word(hex: &str) -> B256 {
         hex.parse().unwrap()
@@ -367,7 +413,14 @@ mod tests {
         let b = store.create_b(b, b_salt).unwrap();
         let e = a.evidence.clone().unwrap();
         let check = |dir: &Path| {
-            contract_candidate_check(dir, a.token, a.launcher, e.launch_tx_hash, e.buy_tx_hash)
+            contract_candidate_check(
+                dir,
+                no_mirror(),
+                a.token,
+                a.launcher,
+                e.launch_tx_hash,
+                e.buy_tx_hash,
+            )
         };
 
         assert_eq!(check(&dir).0, "BLOCKED"); // nothing selected
@@ -439,11 +492,27 @@ mod tests {
         // Wrong address or deployment against the v4 DRY: contradiction.
         let other = Address::repeat_byte(7);
         assert_eq!(
-            contract_candidate_check(&dir, other, a.launcher, e.launch_tx_hash, e.buy_tx_hash).0,
+            contract_candidate_check(
+                &dir,
+                no_mirror(),
+                other,
+                a.launcher,
+                e.launch_tx_hash,
+                e.buy_tx_hash
+            )
+            .0,
             "STOP"
         );
         assert_eq!(
-            contract_candidate_check(&dir, a.token, a.launcher, B256::ZERO, e.buy_tx_hash).0,
+            contract_candidate_check(
+                &dir,
+                no_mirror(),
+                a.token,
+                a.launcher,
+                B256::ZERO,
+                e.buy_tx_hash
+            )
+            .0,
             "STOP"
         );
         // A changed public record (token, deployment) or salt never verifies.
@@ -458,6 +527,7 @@ mod tests {
             assert_eq!(
                 contract_candidate_check(
                     &dir,
+                    no_mirror(),
                     a.token,
                     a.launcher,
                     e.launch_tx_hash,
@@ -480,6 +550,162 @@ mod tests {
             );
         rewrite(&dir.join("a.salt.dbrec"), &secret.encode().unwrap());
         assert!(store.load(Profile::A).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_gui_request_is_only_applied_by_the_native_store() {
+        let root = private_dir("request");
+        let dir = root.join("state");
+        let run = root.join("run");
+        let attempts = root.join("attempts");
+        let mirror = root.join("snapshot/bsc/native/state/g07_candidates");
+        let store = Store::create(&dir).unwrap();
+        let (a, a_salt) = frozen();
+        let a = store.init_a(a, a_salt).unwrap();
+        let (b, b_salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            6,
+            &mut os_random,
+        )
+        .unwrap();
+        let b = store.create_b(b, b_salt).unwrap();
+        store
+            .select(Profile::A, 0, "UNARMED", &attempts, 10)
+            .unwrap();
+        let sync = || {
+            fs::create_dir_all(&mirror).unwrap();
+            for f in ["a.candidate.dbrec", "b.candidate.dbrec", "selection.dbrec"] {
+                fs::copy(dir.join(f), mirror.join(f)).unwrap();
+            }
+        };
+        sync();
+        let id = |n: u8| format!("{n:08x}-0000-4000-8000-000000000000");
+        let request = |p, g, rid: &str, guard| write_request(&run, &mirror, p, g, rid, guard, 20);
+        assert!(
+            request(Profile::B, 0, &id(1), "UNARMED")
+                .unwrap_err()
+                .contains("stale")
+        );
+        assert!(
+            request(Profile::A, 1, &id(1), "UNARMED")
+                .unwrap_err()
+                .contains("already selected")
+        );
+        assert!(
+            request(Profile::B, 1, "../x", "UNARMED")
+                .unwrap_err()
+                .contains("UUID")
+        );
+        assert!(
+            request(Profile::B, 1, &id(1), "6f877ae0")
+                .unwrap_err()
+                .contains("armed")
+        );
+        request(Profile::B, 1, &id(1), "UNARMED").unwrap();
+        assert!(
+            request(Profile::B, 1, &id(2), "UNARMED")
+                .unwrap_err()
+                .contains("pending")
+        );
+        // The request alone changes nothing; the native apply does.
+        assert_eq!(store.selection().unwrap().unwrap().profile, Profile::A);
+        let decided = apply_requests(&store, &run, "UNARMED", &attempts, 30).unwrap();
+        assert_eq!(
+            (decided[0].0.as_str(), decided[0].1),
+            (id(1).as_str(), "APPLIED")
+        );
+        let now = store.selection().unwrap().unwrap();
+        assert_eq!(
+            (now.profile, now.generation, now.candidate_id),
+            (Profile::B, 2, b.id)
+        );
+        assert!(
+            apply_requests(&store, &run, "UNARMED", &attempts, 31)
+                .unwrap()
+                .is_empty()
+        );
+
+        // A request made against a stale mirror is rejected natively.
+        request(Profile::B, 1, &id(3), "UNARMED").unwrap();
+        let decided = apply_requests(&store, &run, "UNARMED", &attempts, 40).unwrap();
+        assert_eq!(decided[0].1, "REJECTED");
+        assert!(decided[0].2.contains("stale"));
+        sync();
+        fs::create_dir_all(attempts.join("attempt-1")).unwrap();
+        request(Profile::A, 2, &id(4), "UNARMED").unwrap();
+        let decided = apply_requests(&store, &run, "UNARMED", &attempts, 50).unwrap();
+        assert!(decided[0].2.contains("switching is forbidden"));
+        assert_eq!(store.selection().unwrap().unwrap().generation, 2);
+
+        // Readiness in a snapshot sees only the public mirror.
+        let e = a.evidence.clone().unwrap();
+        let none = root.join("no-private");
+        let check = |m: &Path| {
+            contract_candidate_check(
+                &none,
+                m,
+                a.token,
+                a.launcher,
+                e.launch_tx_hash,
+                e.buy_tx_hash,
+            )
+        };
+        assert_eq!(check(&mirror).0, "BLOCKED"); // B selected
+        let public = load_public(&mirror).unwrap().unwrap();
+        assert_eq!((public.generation(), public.candidates.len()), (2, 2));
+        // A salt record or a changed identity in the mirror is refused.
+        fs::copy(dir.join("b.salt.dbrec"), mirror.join("b.salt.dbrec")).unwrap();
+        assert!(load_public(&mirror).unwrap_err().contains("salt"));
+        assert_eq!(check(&mirror).0, "STOP");
+        fs::remove_file(mirror.join("b.salt.dbrec")).unwrap();
+        rewrite(
+            &mirror.join("a.candidate.dbrec"),
+            &c_edit(&a, |x| x.token = Address::repeat_byte(3)),
+        );
+        assert!(load_public(&mirror).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_public_mirror_passes_readiness_only_for_the_v4_candidate() {
+        let root = private_dir("mirror");
+        let dir = root.join("state");
+        let mirror = root.join("mirror");
+        let store = Store::create(&dir).unwrap();
+        let (a, a_salt) = frozen();
+        let a = store.init_a(a, a_salt).unwrap();
+        let on_a = store
+            .select(Profile::A, 0, "UNARMED", &root.join("attempts"), 1)
+            .unwrap();
+        fs::create_dir_all(&mirror).unwrap();
+        for f in ["a.candidate.dbrec", "selection.dbrec"] {
+            fs::copy(dir.join(f), mirror.join(f)).unwrap();
+        }
+        let e = a.evidence.clone().unwrap();
+        let (status, detail) = contract_candidate_check(
+            &root.join("absent"),
+            &mirror,
+            a.token,
+            a.launcher,
+            e.launch_tx_hash,
+            e.buy_tx_hash,
+        );
+        assert_eq!((status, detail), ("PASS", on_a.binding()));
+        // The private store, when present, is authoritative over the mirror.
+        assert_eq!(
+            contract_candidate_check(
+                &dir,
+                &root.join("absent"),
+                a.token,
+                a.launcher,
+                e.launch_tx_hash,
+                e.buy_tx_hash
+            )
+            .0,
+            "PASS"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
