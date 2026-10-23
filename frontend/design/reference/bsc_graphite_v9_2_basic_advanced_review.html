@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DarkBot · BSC Graphite · Basic / Advanced · Design Review</title>
+<!-- Statische, eigenständige DESIGN-VORLAGE. Kein Zugriff auf Backend, Gateway, Signer oder Wallets.
+     Graphite-Tokenwerte aus frontend/src/shared/ui/graphite/tokens.css, geprüft bei 7b9abf11.
+     Keine finanziellen Beispieldaten. Nicht als App und nicht als fertiger Sicherheitsstatus verwenden. -->
+<style>
+:root{
+ color-scheme:dark;
+ --g-bg:#1b1b1b;--g-panel:#303030;--g-well:#262626;--g-well-deep:#222222;
+ --g-health:#292929;--g-tab-selected:#1d1d1d;--g-row-selected:#3c3c3c;
+ --g-status-running:#15803d;--g-status-failed:#b91c1c;--g-status-armed:#a16207;
+ --g-line:#464646;--g-line-panel:#424242;--g-line-row:#474747;--g-line-input:#565656;--g-line-badge:#595959;--g-line-secondary:#626262;
+ --g-text:#f0f0f0;--g-text-strong:#fff;--g-text-input:#f4f4f4;--g-text-label:#e2e2e2;--g-text-badge:#ddd;--g-text-row:#eee;
+ --g-muted:#b2b2b2;--g-tab:#b8b8b8;--g-subtab:#b5b5b5;--g-pill:#cbcbcb;--g-row-small:#aaa;--g-dim:#858585;--g-footer:#888;
+ --g-accent:#eaeaea;--g-accent-text:#202020;--g-accent-line:#ececec;--g-focus:#eee;--g-shadow-panel:0 10px 35px #0004;
+ --g-r-shell:16px;--g-r-panel:18px;--g-r-tabs:28px;--g-r-tab:24px;--g-r-badge:22px;--g-r-pill:22px;--g-r-button:18px;--g-r-input:9px;--g-r-code:9px;--g-r-health:10px;--g-r-row:8px;
+ --g-shell-pad:18px 12px;--g-panel-pad:24px 26px;--g-section-pad:22px 0;
+ --g-gap-xs:3px;--g-gap-sm:9px;--g-gap-md:12px;--g-gap-lg:16px;--g-gap-xl:23px;
+ --g-panel-max:800px;--g-fleet-aside:230px;--g-line-min-h:34px;--g-metric-min-h:53px;--g-input-min-h:38px;
+ --g-font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;
+ --g-font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+ --g-fs-base:14px;--g-lh-base:1.45;--g-fs-h1:20px;--g-lh-h1:1.25;--g-fs-h2:15px;--g-fs-body:13px;--g-fs-small:12px;--g-fs-tiny:11px;--g-fs-micro:10px;--g-fs-metric:21px;--g-fw-bold:700;--g-fw-semibold:650;--g-fw-metric:620;
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--g-bg);color:var(--g-text);font:var(--g-fs-base)/var(--g-lh-base) var(--g-font)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--g-focus);outline-offset:3px}
+.shell{max-width:1500px;margin:0 auto;padding:var(--g-shell-pad)}
+.panel{border:1px solid var(--g-line-panel);border-radius:var(--g-r-panel);padding:var(--g-panel-pad);background:var(--g-panel);box-shadow:var(--g-shadow-panel)}
+.review{border:1px solid var(--g-line-secondary);border-radius:var(--g-r-badge);padding:9px 13px;color:var(--g-text-badge);font-size:var(--g-fs-small);background:var(--g-well-deep);margin-bottom:var(--g-gap-lg)}
+.header{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--g-gap-lg);flex-wrap:wrap}
+h1{font-size:var(--g-fs-h1);line-height:var(--g-lh-h1);margin:0;font-weight:var(--g-fw-bold)}
+.subtitle{color:var(--g-muted);font-size:var(--g-fs-small);margin:6px 0 0}
+.headerRight{display:flex;align-items:center;gap:var(--g-gap-sm);flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--g-line-badge);border-radius:var(--g-r-badge);font-size:var(--g-fs-tiny);color:var(--g-text-badge);white-space:nowrap}
+.pill[data-state="block"]{border-color:var(--g-status-failed);color:var(--g-text-strong)}
+.pill[data-state="warn"]{border-color:var(--g-status-armed);color:var(--g-text-strong)}
+.pill[data-state="unknown"]{color:var(--g-muted)}
+.viewSwitch{display:flex;padding:var(--g-gap-xs);border-radius:var(--g-r-tabs);background:var(--g-well);gap:var(--g-gap-xs)}
+.viewSwitch button,.tabs button{border:none;background:transparent;color:var(--g-tab);border-radius:var(--g-r-tab);font-size:var(--g-fs-body);padding:9px 16px}
+.viewSwitch button[aria-pressed="true"],.tabs button[aria-selected="true"]{background:var(--g-tab-selected);color:var(--g-text-strong);font-weight:var(--g-fw-semibold)}
+.tabs{display:flex;gap:var(--g-gap-xs);padding:var(--g-gap-xs);background:var(--g-well);border-radius:var(--g-r-tabs);margin-top:var(--g-gap-xl);overflow-x:auto}
+.tabs button{flex:1;min-width:113px;white-space:nowrap}
+.context{margin-top:var(--g-gap-lg);display:flex;justify-content:space-between;gap:var(--g-gap-md);align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--g-line);padding-bottom:var(--g-gap-lg)}
+.context h2{margin:0;font-size:var(--g-fs-h2)}
+.context p{font-size:var(--g-fs-small);color:var(--g-muted);margin:4px 0 0}
+.contextPills{display:flex;flex-wrap:wrap;gap:var(--g-gap-sm)}
+.layout{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--g-gap-lg);margin-top:var(--g-gap-lg);align-items:start}
+.card{border:1px solid var(--g-line-row);border-radius:var(--g-r-row);background:var(--g-health);padding:var(--g-gap-xl);min-width:0}
+.card.wide{grid-column:1/-1}
+.card h3{font-size:var(--g-fs-h2);font-weight:var(--g-fw-semibold);margin:0 0 var(--g-gap-md)}
+.card .note{color:var(--g-muted);font-size:var(--g-fs-small);margin:0 0 var(--g-gap-md)}
+.kv{display:flex;justify-content:space-between;gap:var(--g-gap-lg);padding:10px 0;border-top:1px solid var(--g-line-row);font-size:var(--g-fs-body)}
+.kv span:first-child{color:var(--g-muted)}
+.kv strong{font-weight:var(--g-fw-semibold);text-align:right;overflow-wrap:anywhere}
+.flag{color:var(--g-text-strong)}
+.reason{font-size:var(--g-fs-small);color:var(--g-muted);padding:10px 0 0}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:var(--g-gap-md)}
+.metric{background:var(--g-well-deep);padding:var(--g-gap-lg);border-radius:var(--g-r-health);border:1px solid var(--g-line)}
+.metric label{display:block;color:var(--g-dim);font-size:var(--g-fs-tiny)}
+.metric strong{display:block;font-size:var(--g-fs-metric);margin-top:6px}
+.metric small{display:block;color:var(--g-muted)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:var(--g-fs-small)}
+th,td{text-align:left;padding:11px;border-bottom:1px solid var(--g-line-row);white-space:nowrap}
+th{color:var(--g-muted);font-weight:var(--g-fw-semibold)}
+td{color:var(--g-text-row)}
+.actions{display:flex;flex-wrap:wrap;gap:var(--g-gap-sm);margin-top:var(--g-gap-md)}
+.action{border:1px solid var(--g-line-secondary);border-radius:var(--g-r-button);padding:8px 14px;background:transparent;font-size:var(--g-fs-small)}
+.action:disabled{cursor:not-allowed;opacity:.55}
+.danger{border-left:4px solid var(--g-status-failed);padding:10px 12px;background:var(--g-well-deep);color:var(--g-text);font-size:var(--g-fs-small);border-radius:var(--g-r-row)}
+.callout{border:1px solid var(--g-line);border-radius:var(--g-r-health);padding:var(--g-gap-md);font-size:var(--g-fs-small);color:var(--g-muted)}
+details{border-top:1px solid var(--g-line);padding:10px 0}
+summary{cursor:pointer;color:var(--g-text-label);font-size:var(--g-fs-body);font-weight:var(--g-fw-semibold)}
+details p{color:var(--g-muted);font-size:var(--g-fs-small)}
+code{font-family:var(--g-font-mono);overflow-wrap:anywhere}
+[data-detail]{display:none}
+body[data-view="advanced"] [data-detail]{display:block}
+body[data-view="advanced"] [data-detail].card{display:block}
+.screen[hidden]{display:none!important}
+footer{margin-top:var(--g-gap-xl);color:var(--g-footer);font-size:var(--g-fs-tiny);text-align:center}
+@media(max-width:850px){.layout{grid-template-columns:1fr}.card.wide{grid-column:auto}.panel{padding:20px 17px}.tabs button{min-width:100px}.context{align-items:start}.shell{padding:9px 4px}}
+@media(max-width:480px){.card{padding:var(--g-gap-lg)}.headerRight{width:100%}.viewSwitch{width:100%}.viewSwitch button{flex:1}.tabs button{min-width:108px}.kv{align-items:flex-start}.kv strong{max-width:52%}.metric strong{font-size:19px}}
+</style>
+</head>
+<body data-view="basic">
+<main class="shell">
+<div class="review"><strong>DESIGN-VORSCHAU · KEINE LIVE-DATEN</strong> — ausschließlich statische Zustandsbeispiele. Keine Walletverbindung, keine Netzwerkabfragen, keine Commands, kein Trading. Nicht freigegeben oder eingefroren.</div>
+<div class="panel">
+<header class="header">
+ <div><h1>BSC Control</h1><p class="subtitle">DarkBot · Birth Entry · Native evidence dashboard</p></div>
+ <div class="headerRight"><span class="pill" data-state="unknown">SOURCE · UNKNOWN</span><span class="pill" data-state="block">GUARD · UNARMED</span>
+ <div class="viewSwitch" role="group" aria-label="Ansicht"><button type="button" id="basic" aria-pressed="true">Basic</button><button type="button" id="advanced" aria-pressed="false">Advanced</button></div></div>
+</header>
+<nav class="tabs" role="tablist" aria-label="BSC-Bereiche">
+<button type="button" role="tab" aria-selected="true" aria-controls="tab-overview" id="nav-overview" data-tab="overview">Overview</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="tab-launch" id="nav-launch" data-tab="launch" tabindex="-1">Launch / BUY</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="tab-monitoring" id="nav-monitoring" data-tab="monitoring" tabindex="-1">Monitoring</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="tab-analytics" id="nav-analytics" data-tab="analytics" tabindex="-1">Analytics</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="tab-wallets" id="nav-wallets" data-tab="wallets" tabindex="-1">Wallets</button>
+</nav>
+<section class="screen" role="tabpanel" id="tab-overview" aria-labelledby="nav-overview">
+ <div class="context"><div><h2>Overview</h2><p>Quelle, Prozess, Kandidat und wirtschaftliche Sperren getrennt beurteilen.</p></div><div class="contextPills"><span class="pill" data-state="unknown">TRANSPORT · UNKNOWN</span><span class="pill" data-state="block">READINESS · BLOCKED</span></div></div>
+ <div class="layout">
+  <article class="card"><h3>Systemzustand</h3><div class="kv"><span>Gateway / Datenquelle</span><strong>UNKNOWN</strong></div><div class="kv"><span>Readiness-Job</span><strong>STOPPED · Beispiel</strong></div><div class="kv"><span>Controller erreichbar</span><strong>UNKNOWN</strong></div><div class="kv"><span>Datenalter</span><strong>—</strong></div></article>
+  <article class="card"><h3>Safety & Freigabe</h3><div class="danger">Keine Handelsfreigabe. UNARMED bleibt gesperrt – unabhängig von Source-LIVE oder UI-Modus.</div><div class="kv"><span>V5 Guard</span><strong>UNARMED</strong></div><div class="kv"><span>Technische Readiness</span><strong>BLOCKED · Beispiel</strong></div><div class="kv"><span>Ökonomische Autorisierung</span><strong>NICHT ERTEILT</strong></div></article>
+  <article class="card"><h3>Candidate & Qualification</h3><div class="kv"><span>Gewähltes Profil</span><strong>SELF_A / SELF_B · UNKNOWN</strong></div><div class="kv"><span>Native Apply</span><strong>PENDING_DESKTOP_SYNC · Szenario</strong></div><div class="kv"><span>G0.7 / G0.8 gemeinsam gebunden</span><strong>UNVERIFIED</strong></div></article>
+  <article class="card"><h3>Gate-0-Kurzstatus</h3><div class="kv"><span>G0.7 Mainnet-Versuch</span><strong>NOT_EXECUTED</strong></div><div class="kv"><span>G0.8 Akquisition</span><strong>NOT_EXECUTED</strong></div><div class="kv"><span>Original Producer-Timing</span><strong>UNKNOWN</strong></div></article>
+  <article class="card wide" data-detail><h3>Erweiterte Belege & Diagnosen</h3><div class="metrics"><div class="metric"><label>Native Evidence SHA</label><strong>—</strong><small>Keine beispielhaft erfundene Identität</small></div><div class="metric"><label>Source commit</label><strong>—</strong><small>Nur aus realer Evidenz</small></div><div class="metric"><label>Candidate generation</label><strong>—</strong><small>CAS / Historie strikt getrennt</small></div></div><details><summary>Readiness-Checks & Herkunft</summary><p>Native Originalwerte einschließlich Mode/Clock/Result und Prozessstatus getrennt darstellen; noch kein Datenvertrag freigegeben.</p></details><details><summary>Drift, Builder und Witness</summary><p>Veraltete Snapshots kennzeichnen. Fehlende Witness-Evidence niemals positiv bewerten.</p></details></article>
+ </div>
+</section>
+<section class="screen" role="tabpanel" id="tab-launch" aria-labelledby="nav-launch" hidden>
+ <div class="context"><div><h2>Launch / BUY</h2><p>Candidate → PREPARE → SIGN/VERIFY → Attempt. Keine Live-Befehle.</p></div><div class="contextPills"><span class="pill" data-state="warn">A/B · OFFLINE ONLY</span><span class="pill" data-state="block">BUY · DISABLED</span></div></div>
+ <div class="layout">
+  <article class="card"><h3>Candidate</h3><div class="kv"><span>Verfügbar</span><strong>SELF_A / SELF_B</strong></div><div class="kv"><span>Auswahl aus Native-Store</span><strong>UNKNOWN</strong></div><div class="kv"><span>Auswahl-Request</span><strong>PENDING_DESKTOP_SYNC · Szenario</strong></div><div class="actions"><button class="action" disabled>SELF_A auswählen</button><button class="action" disabled>SELF_B auswählen</button></div><p class="reason">Designvorlage: Controls bleiben inaktiv. Ein Gateway-ACK ist kein Native APPLIED.</p></article>
+  <article class="card"><h3>Readiness</h3><div class="danger">BLOCKED · Beispiel: CLOCK_CONFIG oder fehlende Native-Evidence. Kein automatisches STOP oder PASS.</div><div class="kv"><span>Modus</span><strong>READ_ONLY_RPC / UNKNOWN</strong></div><div class="kv"><span>Prozess</span><strong>STOPPED · Beispiel</strong></div><div class="actions"><button class="action" disabled>Readiness starten</button><button class="action" disabled>Readiness stoppen</button></div><p class="reason">Einzige BSC-Fachsteuerung für Readiness; globale Supervisor-Aktionen sind separat.</p></article>
+  <article class="card"><h3>V5 / Guard</h3><div class="kv"><span>Guard</span><strong>UNARMED</strong></div><div class="kv"><span>Genehmigter Contract</span><strong>NICHT NACHGEWIESEN</strong></div><div class="kv"><span>Signing</span><strong>NICHT AUTORISIERT</strong></div><div class="kv"><span>Maximales Budget</span><strong>—</strong></div></article>
+  <article class="card"><h3>DRY & Attempt</h3><div class="kv"><span>PREPARE</span><strong>NOT_REQUALIFIED</strong></div><div class="kv"><span>G0.7 Attempt</span><strong>NOT_EXECUTED</strong></div><div class="kv"><span>Native Approval / Nonce</span><strong>UNKNOWN</strong></div></article>
+  <article class="card wide" data-detail><h3>Qualification – technische Details</h3><div class="tablewrap"><table><thead><tr><th>Feldgruppe</th><th>Native Gate</th><th>Aktuelle Evidenz</th></tr></thead><tbody><tr><td>R0 / Portal upgrade</td><td>G0.6a</td><td>SOLL_MISSING / ungebunden</td></tr><tr><td>Launch-Path / Quote</td><td>G0.6a</td><td>SOLL_MISSING / ungebunden</td></tr><tr><td>Gas / Economics</td><td>G0.6a</td><td>UNKNOWN, keine Web-Quote</td></tr><tr><td>DRY5 / DRY6</td><td>Profile A/B</td><td>NOT_REQUALIFIED</td></tr><tr><td>V5 Attempt latch</td><td>G0.7</td><td>UNARMED</td></tr></tbody></table></div><details><summary>Native Checks, Hashes & Nonce</summary><p>Nur originale qualifizierte DBREC-Recordfelder; keine Secrets, keine privaten Salts, keine signierten Rohbytes.</p></details></article>
+ </div>
+</section>
+<section class="screen" role="tabpanel" id="tab-monitoring" aria-labelledby="nav-monitoring" hidden>
+ <div class="context"><div><h2>Monitoring</h2><p>Ingress-Quellen, Venues und Inclusion sind unterschiedliche Dimensionen.</p></div><div class="contextPills"><span class="pill" data-state="unknown">SOURCE × VENUE · UNQUALIFIED</span><span class="pill" data-state="block">LIVE · BLOCKED</span></div></div>
+ <div class="layout">
+  <article class="card"><h3>Quellen & Venues</h3><div class="kv"><span>Qualifizierte Live-Quellen</span><strong>UNKNOWN (kein Nenner)</strong></div><div class="kv"><span>Venues / Berechtigung</span><strong>UNQUALIFIED</strong></div><div class="kv"><span>Quelle × Venue</span><strong>SOLL_MISSING</strong></div><p class="reason">Fünf künftige Sources und drei Venues werden nicht mit fiktiven Laufzeitzahlen befüllt.</p></article>
+  <article class="card"><h3>Inclusion / Verification</h3><div class="kv"><span>G0.7 Builder-Antwort</span><strong>UNKNOWN</strong></div><div class="kv"><span>G0.8 erster externer BUY</span><strong>NOT_EXECUTED</strong></div><div class="kv"><span>Chain canonical / reorg</span><strong>UNKNOWN</strong></div><div class="kv"><span>Acquisition / Receipt</span><strong>UNKNOWN</strong></div></article>
+  <article class="card wide"><h3>Verifikation – Übersicht</h3><div class="tablewrap"><table><thead><tr><th>Gate</th><th>Status</th><th>Identität / Fenster</th></tr></thead><tbody><tr><td>G0.7 Submission</td><td>NOT_EXECUTED</td><td>—</td></tr><tr><td>G0.8 Canonical Ordering</td><td>NOT_EXECUTED</td><td>—</td></tr><tr><td>Original Producer T0→BUY</td><td>UNKNOWN</td><td>Original-Witness erforderlich</td></tr></tbody></table></div></article>
+  <article class="card wide" data-detail><h3>Source-/Venue- und Builder-Diagnose</h3><details><summary>Native Sources (5) – requested / effective / capability</summary><p>FUTURE_PHASE_BLOCKED. Aktuell keine fiktiven Health-Werte, keine AUTO-LIVE-Controls.</p></details><details><summary>Venues (3) und Inclusion-Adapter</summary><p>Nur nach BSC-Gate freigegebene Identitäten und Adapter-Witnesses anzeigen; ACK ≠ Inclusion.</p></details><details><summary>Receipts, Miner, N/N+1 und Reorg</summary><p>Historische Original-Evidence streng attempt-/chain-gebunden anzeigen. Kein Zeitgewinn ohne Producer-Witness ableiten.</p></details></article>
+ </div>
+</section>
+<section class="screen" role="tabpanel" id="tab-analytics" aria-labelledby="nav-analytics" hidden>
+ <div class="context"><div><h2>Analytics</h2><p>Historische Evidence auswerten, nicht Monitoring kopieren.</p></div><div class="contextPills"><span class="pill" data-state="unknown">SAMPLES · UNKNOWN</span><span class="pill" data-state="unknown">PROFIT · NOT_VERIFIED</span></div></div>
+ <div class="layout">
+  <article class="card wide"><h3>Belegte Auswertungen</h3><div class="metrics"><div class="metric"><label>Beobachtungsfenster</label><strong>—</strong><small>Ohne Evidence keine Dauer</small></div><div class="metric"><label>Samples / Denominator</label><strong>—</strong><small>Keine künstliche Null</small></div><div class="metric"><label>Gebühren / Realized PnL</label><strong>—</strong><small>Nur originaler Abschlussbeleg</small></div><div class="metric"><label>Original Timing</label><strong>UNKNOWN</strong><small>Producer-Witness fehlt</small></div></div></article>
+  <article class="card"><h3>History-Filters</h3><div class="kv"><span>Fachfilter</span><strong>nur Bericht, kein Engine-Filter</strong></div><div class="kv"><span>Export</span><strong>NOT_AVAILABLE</strong></div><p class="reason">Kein Hintergrund-Download, solange Details geschlossen sind.</p></article>
+  <article class="card"><h3>Evidence-Qualität</h3><div class="kv"><span>Vollständigkeit</span><strong>UNKNOWN</strong></div><div class="kv"><span>Run / SHA</span><strong>—</strong></div><div class="kv"><span>Canonical Bound</span><strong>UNVERIFIED</strong></div></article>
+  <article class="card wide" data-detail><h3>Audit / Histogramme / Kosten</h3><details><summary>Native R0, Quote, Simulation und DRY-Historie</summary><p>Schemas erst vollständig inventarisieren. Fachliche Felder nicht als erfundene Diagramme darstellen.</p></details><details><summary>G0.8 historische Kosten und Konkurrenz</summary><p>Nur bei vorhandenem, tatsächlich ausgeführtem und gebundenem Versuch. Keine zweite Monitoring-Verifikationstabelle.</p></details><details><summary>Census / Coverage / p50–p99</summary><p>Nach nachgewiesenem Messfenster, Samplezahl, Clock-Qualität und Originalquelle.</p></details></article>
+ </div>
+</section>
+<section class="screen" role="tabpanel" id="tab-wallets" aria-labelledby="nav-wallets" hidden>
+ <div class="context"><div><h2>Wallets</h2><p>Nur öffentliche Launcher-/Buyer-Informationen, kein Signieren und kein SEND.</p></div><div class="contextPills"><span class="pill" data-state="warn">READ_ONLY</span><span class="pill" data-state="unknown">FUNDING · UNKNOWN</span></div></div>
+ <div class="layout">
+  <article class="card"><h3>Launcher</h3><div class="kv"><span>Öffentliche Adresse</span><strong>—</strong></div><div class="kv"><span>Aktueller Kontostand</span><strong>—</strong></div><div class="kv"><span>Snapshot / Chain Block</span><strong>—</strong></div><div class="kv"><span>Pending Nonce</span><strong>—</strong></div></article>
+  <article class="card"><h3>Buyer</h3><div class="kv"><span>Öffentliche Adresse</span><strong>—</strong></div><div class="kv"><span>Aktueller Kontostand</span><strong>—</strong></div><div class="kv"><span>Snapshot / Chain Block</span><strong>—</strong></div><div class="kv"><span>Pending Nonce</span><strong>—</strong></div></article>
+  <article class="card wide"><h3>Budget & Exposure</h3><div class="kv"><span>Native Budget / Reservierung</span><strong>UNKNOWN</strong></div><div class="kv"><span>Tatsächlich ausgegebene Mittel</span><strong>—</strong></div><div class="kv"><span>Finale Tokenakquisition</span><strong>NOT_EXECUTED</strong></div><div class="danger">UNARMED · kein Wallet-Key, kein Transfer, kein Sweep, keine handelbare Finanzzahl aus DRY-Evidence.</div></article>
+  <article class="card wide" data-detail><h3>Technische Wallet-Evidence</h3><details><summary>Historische vs. aktuelle Walletstände</summary><p>Historisches DRY-Funding darf nicht als aktueller Kontostand angezeigt werden; Block/Quelle/Alter getrennt.</p></details><details><summary>Nonce / Gebühren / Budget-Attribution</summary><p>Alle Werte aus native record und Chain-Belegen. Wei als kanonischer Decimalstring, nicht JS-Float.</p></details></article>
+ </div>
+</section>
+<footer>DESIGN REVIEW v9.2 · 5 Tabs × Basic/Advanced · reines HTML/CSS/JS · keine Live-Daten · keine BSC-Gate-Freigabe</footer>
+</div>
+</main>
+<script>
+(function(){
+ const tabs=Array.from(document.querySelectorAll('[data-tab]'));
+ const screens=Array.from(document.querySelectorAll('.screen'));
+ function selectTab(name){
+  for(const tab of tabs){const active=tab.dataset.tab===name;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
+  for(const panel of screens)panel.hidden=panel.id!=='tab-'+name;
+ }
+ for(const tab of tabs){
+  tab.addEventListener('click',()=>selectTab(tab.dataset.tab));
+  tab.addEventListener('keydown',ev=>{
+   if(!['ArrowRight','ArrowLeft','Home','End'].includes(ev.key))return;
+   ev.preventDefault();let i=tabs.indexOf(tab);
+   i=ev.key==='Home'?0:ev.key==='End'?tabs.length-1:(i+(ev.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+   selectTab(tabs[i].dataset.tab);tabs[i].focus();
+  });
+ }
+ for(const view of ['basic','advanced'])document.getElementById(view).addEventListener('click',()=>{
+  document.body.dataset.view=view;
+  for(const x of ['basic','advanced'])document.getElementById(x).setAttribute('aria-pressed',String(x===view));
+ });
+})();
+</script>
+</body>
+</html>
