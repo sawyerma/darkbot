@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${P0_ENV_FILE:-$ROOT/project_0/.env}"
 if [[ -f "$ENV_FILE" ]]; then
-  mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
+  mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
   [[ "$mode" == 600 ]] || { echo 'env must be owner-only 600' >&2; exit 2; }
   set -a
   source "$ENV_FILE"

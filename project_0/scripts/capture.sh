@@ -39,7 +39,7 @@ load_env() {
 # explicitly; exported values remain authoritative if no local file exists.
 ENV_FILE="${P0_ENV_FILE:-$PROJECT_DIR/.env}"
 if [[ -f "$ENV_FILE" ]]; then
-  MODE="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+  MODE="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE" 2>/dev/null || true)"
   if [[ "$MODE" != "600" ]]; then
     echo "insecure Project_0 env permissions: $ENV_FILE mode=$MODE (require 600)" >&2
     exit 2
@@ -95,7 +95,7 @@ if [[ ! -f "$KEYPAIR_REAL" ]]; then
   echo "Project_0 keypair file not found" >&2
   exit 2
 fi
-KEYPAIR_MODE="$(stat -f '%Lp' "$KEYPAIR_REAL" 2>/dev/null || stat -c '%a' "$KEYPAIR_REAL" 2>/dev/null || true)"
+KEYPAIR_MODE="$(stat -c '%a' "$KEYPAIR_REAL" 2>/dev/null || stat -f '%Lp' "$KEYPAIR_REAL" 2>/dev/null || true)"
 if [[ "$KEYPAIR_MODE" != "600" ]]; then
   echo "insecure Project_0 keypair permissions: mode=$KEYPAIR_MODE (require 600)" >&2
   exit 2

@@ -339,6 +339,8 @@ pub fn free_disk_bytes(path: &std::path::Path) -> Option<u64> {
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         return None;
     }
+    // `f_bavail` is u32 on macOS and u64 on Linux: the cast is needed on one of them.
+    #[allow(clippy::unnecessary_cast)]
     Some(st.f_bavail as u64 * st.f_frsize)
 }
 
