@@ -1,7 +1,26 @@
 # BSC PHASENPLAN — DarkBot Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-20 (G0.7 code-readiness clarification; existing freezes preserved)
+Updated: 2026-10-23 (v8 A/B-Salt/Frontend amendment; all earlier Gate-0 freezes preserved)
+
+## BINDING v8 AMENDMENT — 2026-10-23: two Salt profiles A/B and BSC frontend selector
+
+**User decision (binding):** Implement both alternative salt strategies for the **own G0.7 self-launch test** and allow an independent A/B selection in the BSC frontend and native control plane. Both use **the same existing Rust engine, qualification, quote, risk, build/sign and G0.8 verifier**, never duplicated trading engines.
+
+| Candidate | Source of Salt | Evidence and exact approval |
+|---|---|---|
+| **A / FROZEN_SALT** | Previously frozen, **publicly known** original salt; existing predicted token address | Preserve all immutable historical evidence; the previous Portal-v5.25.0 PASS is invalid for v5.26.0 and must be freshly requalified before any authorization. |
+| **B / FRESH_RANDOM_SALT** | Locally generated CSPRNG salt, checked against the official CREATE2 vanity rule (Tax-V3 suffix 7777), never reusing the public deterministic sequence | Separate token address, calldata, signed hashes, matching DRY/economics/evidence and separately approved V4-or-successor fingerprint. Candidate is fixed once qualified, not silently rerolled on each run. |
+
+**Comparison and timing:** A and B support real-code offline DRY/SHADOW evaluation with individually named binary records and equally controlled chain/Portal version, simulation parent state, gas, budget and timestamps. Compare predicted token identity, effective economics, gas, qualification verdict and measured local processing cost; neither variant intrinsically guarantees earlier acquisition. Do not invent builder acceptance, N/N+1, producer T0 or actual acquisition from offline runs.
+
+**Frontend/control-plane contract:** Show a switch **SELF-LAUNCH CANDIDATE: A / B**, separately from five provider OFF/SHADOW/LIVE switches and global REPLAY/PAPER/SHADOW/LIVE + economic arming. Display selected profile, derived address, binding hashes, DRY/readiness, and eligibility. Do not leak a previously undisclosed B salt/private key into web UI, logs, URLs, telemetry, or ordinary status responses. Persist typed binary, generation-bound configuration. Switching profile changes exact candidate identity and invalidates stale readiness, signed-byte authorization and approval for the newly selected candidate; never silently carry them over, change active nonce/exposure, or authorize live signing/send. Disable unsafe switching while an economic intent is armed or executing; fail closed, no automatic A-to-B fallback.
+
+**Narrow offline-scope exception to the prior no-GUI rule:** User expressly authorizes A/B candidate preparation and a frontend selector for **offline/shadow-only use** before G0.7. Do not implement unrelated GUI changes, C1/C2 source integration, hot-path callbacks, builder/live changes or a second runtime. If the selector cannot be isolated from live guard/nonce/signed bytes, retain the design as PLANNED and do not weaken Gate-0.
+
+**Economic limits unchanged:** Current G0.7 guard remains UNARMED; approved=false; execution_ready=false. One-attempt spend cap 481163500000000 wei, existing exact candidate freezes and the G0.7 -> G0.8 -> PASS/ADAPT/STOP order remain. A/B offline testing does not authorize two actual Mainnet attempts, dual concurrent BUYs, re-salting after approval or any broadcast. Each eventual live attempt requires independent fresh qualification, exact signed-byte/hash and one-off express economic authorization. Portal drift and missing producer witness remain unresolved.
+
+**WebSocket distinction for foreign launches:** A/B is **only our own self-launch testing choice**, not a provider/venue mode. For a foreign Flap/Four launch, a sufficiently early *complete pending launch transaction* may expose the launch calldata including the creator-chosen salt. A version-/deployment-pinned ABI decoder can extract it and calculate the eventual CREATE2 token address from correct Portal deployer, initcode and implementation; validate signed transaction identity and on-chain assumptions. If only a hash arrives, a private launch is hidden, the version is unknown or the observation is after T0, do not invent the address or claim pre-T0 discovery. No user-generated salt for foreign launches. The native trading path remains binary and the product goal successful producer execution T_buy - T0 < 1,000,000 ns remains unchanged.
 
 ## BINDING OFFLINE BUGFIX EXCEPTION — 2026-10-21
 

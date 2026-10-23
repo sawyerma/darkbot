@@ -1,6 +1,6 @@
 # BSC-Plan — Revisionen
 
-**Aktuelle Revision: v7 (2026-10-22).** Nächster produktiver Gate-Schritt bleibt G0.7; v6 ist eine zusätzliche spätere Ingress-Architektur-/Qualifikationsanforderung, keine Mainnet-LIVE-Freigabe.
+**Aktuelle Revision: v8 (2026-10-23).** Nächster produktiver Gate-Schritt bleibt G0.7; v6 ist eine zusätzliche spätere Ingress-Architektur-/Qualifikationsanforderung, keine Mainnet-LIVE-Freigabe.
 
 Es gibt **einen** BSC-Plan. Er besteht aus drei Dateien in diesem Ordner: PHASENPLAN.md (Rang 1, früher BSC_DUAL_VENUE_ROADMAP.md), Prüfliste (Rang 2) und technischen Bauplan (Rang 3). Jede datierte verbindliche Ergänzung in einer der drei Dateien ist eine neue Revision des ganzen Plans. Ab v7 bleiben die drei aktuellen Dateinamen stabil; historische Namen sind in der Revisionshistorie dokumentiert.
 
@@ -16,7 +16,14 @@ Es gibt **einen** BSC-Plan. Er besteht aus drei Dateien in diesem Ordner: PHASEN
 | **v4** | 2026-10-16/17 | JSON intern verboten, binärer Hot-Path; Bauplan Phase-F-Speicher-/Offline-Analyse-Vertrag; Strukturreform R1–R13 | `BSC_DUAL_VENUE_ROADMAP.md` ab Zeile 43 („BINARY HOT PATH … 2026-10-16"); `BSC_PRODUCTION_BUILD_MASTER_PLAN.md` ab Zeile 504 („binding Phase F extension (2026-10-17)"); `3_BEWEISE/EVIDENCE.md` | 16.–17.10.: Builder-Probe (Check 6), Builder-Refresh, Regression 479 PASS / 0 FAIL / 5 ignored |
 | **v5** | 2026-10-20/21 | G0.7-Klarstellung: Code bis zur Freigabegrenze fertigstellen, dann wirtschaftliche Freigabe; Offline-Bugfix-Ausnahme; Portal-Drift v5.26.0 festgestellt | `BSC_DUAL_VENUE_ROADMAP.md` Zeile 10 (2026-10-20) und Zeile 6 (2026-10-21); `STATUS.md` Checkpoint 2026-10-21 | 20.10.: Requalifikation gegen Portal v5.25.0 PASS (`3_BEWEISE/G07_REQUALIFICATION_RESULT_20261020.md`); 21.10.: Readiness `CURRENT_DEPLOYMENT_DRIFT=STOP`; 22.10.: WSS-Messungen (lauf1: 116 Launches, 41,4 % vorher sichtbar; Flap 52,4 %, Four.meme 14,7 %) = **Messung v5**, Werkzeuge in `../../tools/br0/` | 
 | **v6** | **2026-10-22** | **Fünf unabhängig OFF/SHADOW/LIVE schaltbare BSC-Ingressquellen; FIRST VERIFIED ACTIONABLE WINS; unverändertes T0 und physisches T_buy; WSS-Requalifikation nur je qualifizierter Quelle** | `BSC_DUAL_VENUE_ROADMAP.md` §5a, `GATE0_TESTPLAN_SHORT.md` datierter WSS-Zusatz, `BSC_PRODUCTION_BUILD_MASTER_PLAN.md` §12, `3_BEWEISE/WSS_INGRESS_BEOBACHTUNG_2026-10-22.md` | WSS-Tests vom 22.10. wurden unter **v5** ausgeführt, unter v6 nur neu eingeordnet; T0-Witness und realer Mainnet-G0.7-BUY weiterhin UNKNOWN/OPEN |
+| **v8** | **2026-10-23** | **G0.7 A/B-Salt-Profile (A eingefroren/öffentlich, B neu kryptografisch zufällig), gemeinsamer Rust-Codepfad, isolierte offline GUI-/Control-Plane-Wahl, getrennte Requalifikation und wirtschaftliche Einzelfreigabe. Fremde WSS-Launches: Salt aus vollständiger Pending-Calldata ableiten, nicht selbst wählen.** | PHASENPLAN.md: BINDING v8 AMENDMENT | Nur Planentscheidung: keine Freigabe, kein neuer LIVE-Versuch, keine neuen Messungen |
 | **v7** | **2026-10-22** | **Eindeutiger Dateiname PHASENPLAN.md für Rang 1 (inhaltlich die bisherige Roadmap); alter Link-Einstieg als PHASENPLAN_INDEX_ALT_2026-10-22.md archiviert; Links aktualisiert, fachliche Ziele, Phasen und v6-Quellenvertrag unverändert** | `1_PLAN/PHASENPLAN.md` (früher `BSC_DUAL_VENUE_ROADMAP.md`), `9_ALT/PHASENPLAN_INDEX_ALT_2026-10-22.md` | Reine Dokumentidentitäts-/Referenzkorrektur, **keine neue Messung und keine Gate-Freigabe** |
+
+## Was unter v8 gilt
+
+- A/B sind **getrennte Self-Launch-Testkandidaten**, keine zwei gleichzeitig freigegebenen wirtschaftlichen Versuche. Beide offline vergleichbar, ein gemeinsamer Rust-Tradepfad.
+- A/B-Frontend-Wahl bleibt unabhängig von OFF/SHADOW/LIVE-Quellen und globalem Guard; keine automatische Signatur- oder Freigabeübernahme.
+- Fremde Flap-Launch-Adressen aus vollständigen, vor T0 beobachteten Pending-Transaktionen nur nach gepinnter CREATE2-/ABI-Verifikation ableiten. Hash-only liefert keinen Salt.
 
 ## Was unter v6 gilt
 
