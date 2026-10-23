@@ -1118,6 +1118,12 @@ impl Fe04Start {
             safety
                 .restore_attempt(now_unix_s, replay.held_capital_usd_micro, replay.settled)
                 .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
+            // FE-04 exits: each settled exit in its own booking day.
+            for exit in replay.exits {
+                safety
+                    .restore_attempt(now_unix_s, None, Some(exit))
+                    .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
+            }
         }
         let settle_due = self
             .journal

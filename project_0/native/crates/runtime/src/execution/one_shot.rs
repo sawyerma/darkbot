@@ -1,6 +1,7 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
 pub mod admission;
+pub mod exit;
 pub mod receipts;
 pub mod settlement;
 pub mod transport;
@@ -152,11 +153,13 @@ pub struct Current {
 }
 
 /// B3: the safety state a durable FE-04 journal implies after a restart.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SafetyReplay {
     pub held_capital_usd_micro: Option<u64>,
     /// C3: the booked settlement of a settled attempt.
     pub settled: Option<darkbot_project0::safety::SettledAttempt>,
+    /// FE-04 exits: every settled exit, each in its own booking day.
+    pub exits: Vec<darkbot_project0::safety::SettledAttempt>,
 }
 
 /// A durable FE-04 hold that is not finalized (P8-RES-02).
@@ -191,6 +194,9 @@ struct Saved {
     finalized: Option<Vec<Receipt>>,
     #[serde(default)]
     observations: BTreeMap<String, receipts::FinalizedObservation>,
+    /// FE-04 exits of the settled attempt's open inventory (schema 5), in order.
+    #[serde(default)]
+    exits: Vec<exit::ExitAttempt>,
 }
 /// Schema ≤ 3 layout of `Phase` (its settlement before the realized/unrealized split).
 #[derive(Deserialize)]
@@ -231,6 +237,7 @@ impl TryFrom<SavedV2> for Saved {
             phase: v.phase.try_into()?,
             finalized: v.finalized,
             observations: v.observations,
+            exits: Vec::new(),
         })
     }
 }
@@ -253,7 +260,30 @@ impl TryFrom<SavedV3> for Saved {
             phase: v.phase.try_into()?,
             finalized: v.finalized,
             observations: v.observations,
+            exits: Vec::new(),
         })
+    }
+}
+/// Schema-4 layout of `Saved` (before exits).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV4 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+}
+impl From<SavedV4> for Saved {
+    fn from(v: SavedV4) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+            exits: Vec::new(),
+        }
     }
 }
 /// An earlier layout that no longer converts (an overflowing settlement) is damaged data.
@@ -301,6 +331,28 @@ enum Transition {
     /// C3 (appended): a proven non-landing finalizes without receipts; the settlement booking.
     NotLanded,
     Settle,
+    /// FE-04 exit (appended): the exit automaton of the settled attempt's open inventory.
+    ExitReserve,
+    ExitHandoff,
+    ExitReopenUnknown,
+    ExitObserve,
+    ExitFinalize,
+    ExitNotLanded,
+    ExitSettle,
+}
+impl Transition {
+    fn is_exit(self) -> bool {
+        matches!(
+            self,
+            Transition::ExitReserve
+                | Transition::ExitHandoff
+                | Transition::ExitReopenUnknown
+                | Transition::ExitObserve
+                | Transition::ExitFinalize
+                | Transition::ExitNotLanded
+                | Transition::ExitSettle
+        )
+    }
 }
 /// Historical schema-1 frame (JSON value tree) of a transition: written in tests only, to
 /// replay journals from before F2.
@@ -311,8 +363,8 @@ struct VersionRef<'a> {
     state: &'a Saved,
 }
 /// F2: one durable transition of the wallet automaton as a typed binary frame
-/// (`FE04_TRANSITION`, schema 4 since the realized/unrealized settlement, schema 3 since C12).
-/// Schema-3, schema-2 and schema-1 JSON frames of older journals stay readable.
+/// (`FE04_TRANSITION`, schema 5 since exits, 4 since the realized/unrealized settlement, 3 since
+/// C12). Schema-4, -3, -2 and schema-1 JSON frames of older journals stay readable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Version {
@@ -331,9 +383,15 @@ struct VersionV3 {
     transition: Transition,
     state: SavedV3,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV4 {
+    transition: Transition,
+    state: SavedV4,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    const SCHEMA: u16 = 4;
+    const SCHEMA: u16 = 5;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -348,6 +406,10 @@ impl crate::analytics::payload::Payload for Version {
                     transition: v.transition,
                     state: earlier(v.state.try_into())?,
                 })
+            })),
+            4 => Some(decode_wire::<VersionV4>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
             })),
             _ => None,
         }
@@ -371,9 +433,14 @@ struct LegacyImportV3 {
     legacy_sha256: String,
     state: SavedV3,
 }
+#[derive(Deserialize)]
+struct LegacyImportV4 {
+    legacy_sha256: String,
+    state: SavedV4,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 4;
+    const SCHEMA: u16 = 5;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -388,6 +455,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                     legacy_sha256: v.legacy_sha256,
                     state: earlier(v.state.try_into())?,
                 })
+            })),
+            4 => Some(decode_wire::<LegacyImportV4>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
             })),
             _ => None,
         }
@@ -463,6 +534,13 @@ fn read_legacy(path: &Path, wallet: &str) -> Result<(String, Saved), String> {
 }
 /// Only the transitions the automaton itself performs are accepted on replay.
 fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool {
+    if transition.is_exit() {
+        return previous.is_some_and(|p| exit::legal(p, transition, next));
+    }
+    // The attempt's own transitions happen before any exit.
+    if !next.exits.is_empty() || previous.is_some_and(|p| !p.exits.is_empty()) {
+        return false;
+    }
     let same = |p: &Saved| p.approval == next.approval && p.intent == next.intent;
     match (previous, transition) {
         (None, Transition::Reserve) => {
@@ -658,6 +736,7 @@ impl Journal {
                 this.persist(prior, Transition::ReopenUnknown)?;
             }
         }
+        this.reopen_exit()?;
         Ok(this)
     }
     /// Appends one typed frame and returns only after fsync confirmed exactly that frame.
@@ -703,6 +782,7 @@ impl Journal {
                 phase: Phase::Reserved,
                 finalized: None,
                 observations: BTreeMap::new(),
+                exits: Vec::new(),
             },
             Transition::Reserve,
         )
@@ -755,17 +835,19 @@ impl Journal {
         self.persist(s, Transition::Finalize)
     }
     /// P8-RES-02: the attempt this journal still holds — reserved, or handed off with an UNKNOWN
-    /// outcome — to rebuild the global reservation book after a restart; `None` once finalized.
+    /// outcome — or else its open exit, to rebuild the global reservation book after a restart;
+    /// `None` once finalized.
     pub fn active_hold(&self) -> Option<ActiveHold> {
-        self.saved
-            .as_ref()
-            .filter(|s| !s.phase.finalized())
-            .map(|s| ActiveHold {
-                attempt: s.approval.approval_id.clone(),
-                target: s.intent.target.clone(),
-                unknown_outcome: s.phase == Phase::HandoffUnknown,
-                holds: s.intent.holds.clone(),
-            })
+        let s = self.saved.as_ref()?;
+        if s.phase.finalized() {
+            return exit::exit_hold(s);
+        }
+        Some(ActiveHold {
+            attempt: s.approval.approval_id.clone(),
+            target: s.intent.target.clone(),
+            unknown_outcome: s.phase == Phase::HandoffUnknown,
+            holds: s.intent.holds.clone(),
+        })
     }
     /// B3: what the safety layer replays after a restart — `None` without any attempt; with one,
     /// the one-shot is consumed, so its HALT is sticky; until it is finalized it still binds its
@@ -786,14 +868,11 @@ impl Journal {
                 }),
                 _ => None,
             },
+            exits: exit::exit_bookings(s),
         })
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
-        self.saved
-            .as_ref()
-            .filter(|s| !s.phase.finalized())
-            .map(|s| s.intent.holds.clone())
-            .unwrap_or_default()
+        self.active_hold().map(|h| h.holds).unwrap_or_default()
     }
 }
 
@@ -980,6 +1059,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            exits: Vec::new(),
         };
         // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
         // read — with the expiry unknown (`None`), never a zero.
@@ -1070,11 +1150,20 @@ mod tests {
             (Transition::Finalize, state.clone())
         );
         // Schema 4: an unsettled phase encodes as in schema 3.
-        let version = Version {
-            transition: Transition::Finalize,
-            state: state.clone(),
+        let v4 = |transition, s: &Saved| VersionV4 {
+            transition,
+            state: SavedV4 {
+                approval: s.approval.clone(),
+                intent: s.intent.clone(),
+                phase: s.phase.clone(),
+                finalized: s.finalized.clone(),
+                observations: s.observations.clone(),
+            },
         };
-        assert_eq!(crate::analytics::payload::encode(&version).unwrap(), bytes);
+        assert_eq!(
+            crate::analytics::payload::encode_wire(&v4(Transition::Finalize, &state)).unwrap(),
+            bytes
+        );
         // A schema-3 settlement (one net incl. the token inflow) reads reclassified: realized the
         // SOL part, the inflow open inventory, no booking second; parts not summing to its net
         // are damaged data.
@@ -1116,20 +1205,15 @@ mod tests {
             &damaged
         )
         .is_err());
-        // Schema 4 settled layout (split net, open inventory, booking second) is pinned.
+        // Schema 4 settled layout (split net, open inventory, booking second): the mirror
+        // reproduces the pinned bytes, which read without exits.
         let mut booked = state.clone();
         booked.phase = Phase::Settled(settlement::Settlement {
             booked_unix_s: Some(1_760_000_100),
             ..settled
         });
-        let version = Version {
-            transition: Transition::Settle,
-            state: booked.clone(),
-        };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
-        let back: Version =
-            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 4, &bytes).unwrap();
-        assert_eq!((back.transition, back.state), (Transition::Settle, booked));
+        let bytes =
+            crate::analytics::payload::encode_wire(&v4(Transition::Settle, &booked)).unwrap();
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
             (
@@ -1138,9 +1222,82 @@ mod tests {
             ),
             "FE04_TRANSITION schema-4 layout changed"
         );
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 4, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::Settle, booked.clone())
+        );
+        // Schema 5 (exits) is pinned with one settled exit of the open position.
+        let mut exited = booked;
+        exited.exits.push(exit::ExitAttempt {
+            approval: exit::ExitApproval {
+                schema: 1,
+                authorized: true,
+                approval_id: "exit-1".into(),
+                attempt_approval_id: "approval-1".into(),
+                code_sha: "a".repeat(40),
+                binary_sha256: "b".repeat(64),
+                wallet: key(1),
+                mint: key(4),
+                route_program: key(5),
+                expires_unix_s: 1_760_000_900,
+                max_state_age_ms: 2_000,
+                min_out_lamports: 9_000_000,
+                max_slippage_bps: 50,
+                max_fee_lamports: 10_000,
+            },
+            intent: exit::ExitIntent {
+                code_sha: "a".repeat(40),
+                binary_sha256: "b".repeat(64),
+                wallet: key(1),
+                mint: key(4),
+                route_program: key(5),
+                amount_in: 1_000,
+                minimum_out_lamports: 9_500_000,
+                slippage_bps: 30,
+                transaction_fee_lamports: 5_000,
+                signatures: vec!["sig-2".into()],
+                signed_wire_sha256: "d".repeat(64),
+                state_slot: 900,
+                evaluated_unix_ms: 1_760_000_500_000,
+                last_valid_block_height: 1_200,
+            },
+            phase: exit::ExitPhase::Settled(exit::ExitSettlement {
+                landed: true,
+                landed_success: true,
+                fee_lamports: 5_000,
+                wallet_deltas: [("SOL".to_string(), 9_995_000), (key(4), -1_000)].into(),
+                sold_units: 1_000,
+                realized_usd_micro: 999_500,
+                released_mark_usd_micro: 900,
+                booked_unix_s: 1_760_000_600,
+            }),
+            observations: BTreeMap::new(),
+            finalized: Some(Vec::new()),
+        });
+        let version = Version {
+            transition: Transition::ExitSettle,
+            state: exited.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 5, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitSettle, exited)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2291,
+                "BEzUJj5D5txEFENAAc2cDa4rUn8TzWzdfn9wrcbAihgS".to_string()
+            ),
+            "FE04_TRANSITION schema-5 layout changed"
+        );
     }
 
-    /// F2: every new wallet-journal frame is a typed binary frame (schema 4, no JSON value
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 5, no JSON value
     /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
     /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
     #[test]
@@ -1156,10 +1313,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 4 since the realized/unrealized settlement; schemas 3 and 2 stay readable.
+        // Schema 5 since exits; schemas 4, 3 and 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 4)
+            (journal::kind::FE04_TRANSITION, 5)
         );
         assert!(frames[0].legacy_value().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -1197,7 +1354,7 @@ mod tests {
         let frames = frames_of(&file);
         assert_eq!(
             frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-            [1, 4],
+            [1, 5],
             "historical frame kept, the reopen transition is typed"
         );
         fs::remove_dir_all(dir).unwrap();
@@ -1550,6 +1707,7 @@ mod tests {
         let held = Some(SafetyReplay {
             held_capital_usd_micro: Some(i.capital_usd_micro),
             settled: None,
+            exits: Vec::new(),
         });
         assert_eq!(replay(), held);
         assert_eq!(
@@ -1995,6 +2153,7 @@ mod tests {
             phase: Phase::Reserved,
             finalized: None,
             observations: BTreeMap::new(),
+            exits: Vec::new(),
         }
     }
     pub(super) fn path_of(j: &Journal) -> PathBuf {

@@ -2008,3 +2008,31 @@ fn c3_settlement_day_is_the_same_in_the_run_and_after_a_restart_across_midnight(
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// FE-04 exit restart: a settled exit replays into Safety with its attempt — the day's realized
+/// net of both (fee −500, proceeds +500), the released mark leaving the inventory — and the
+/// journal holds nothing and needs no settlement.
+#[test]
+fn fe04_exit_restart_replays_the_attempt_and_its_exit() {
+    let dir = std::env::temp_dir().join(format!("p0_exit_restart_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let wallet = Pubkey::new_unique();
+    let now = wall_unix_s().unwrap();
+    crate::execution::one_shot::exit::tests::exited(&dir, &wallet.to_string(), now);
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    let dir_s = dir.display().to_string();
+    let start = setup::reservation_book(
+        &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+        &wallet,
+    )
+    .unwrap()
+    .start(&mut safety, now)
+    .unwrap();
+    assert!(start.book.is_empty() && start.unbooked.is_none() && start.settle_due.is_none());
+    assert_eq!(
+        (safety.day().realized_pnl, safety.inventory_outstanding()),
+        (0, 0)
+    );
+    drop(start);
+    let _ = std::fs::remove_dir_all(&dir);
+}
