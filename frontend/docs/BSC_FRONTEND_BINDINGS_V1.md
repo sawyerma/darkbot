@@ -189,11 +189,11 @@ D1–D6 des BSC-DRY und die V5-Requalifikation sind **BSC-Arbeit**, nicht Fronte
 
 ---
 
-# 9. Zweiter Quellcode-Abgleich: nachzutragende, bisher nicht vollständige Feldfamilien
+## 9. Zweiter Quellcode-Abgleich: nachzutragende, bisher nicht vollständige Feldfamilien
 
 **Prüfbasis:** BSC-/Frontend-Code und Contracts auf GitHub 2026-10-23; Ausgangsstand `18474739acfe` (D2). Nachprüfung der neuesten Commits bis `3aedde8153b2`: D3, D4 und D5 sind als Code-/Test-Commits vorhanden; D6 nicht pauschal als abgeschlossen gewertet. Zwischen `18474739` und `3aedde81` wurden keine Gateway-, Protobuf- oder React-Quelldateien geändert; `frontend/contracts/bsc-fields.json` und `bsc-native-fields.json` wurden mit unveränderten 84 bzw. 299 Einträgen geprüft. Der alte Vertrag hat 84 Protobuf-Felder in 13 Messages und das alte `bsc-native-fields.json` inventarisiert 299 selektierte native Felder aus 17 Schemagruppen. **Das ist kein vollständiger fachlicher Frontend-Feldcensus aller künftigen Produktionsphasen.** Die 299 Felder enthalten zahlreiche technische Vertragstexte, die nicht als separate UI-Zeile darzustellen sind. Zusätzliche Felder brauchen erst einen authentischen Native→Proto-Owner.
 
-## 9.1 Konkrete Fehler und Veraltung im vorhandenen IST
+### 9.1 Konkrete Fehler und Veraltung im vorhandenen IST
 
 | ID | Ist-Befund, exakt zu korrigieren | Code-Owner | Status |
 |---|---|---|---|
@@ -208,7 +208,7 @@ D1–D6 des BSC-DRY und die V5-Requalifikation sind **BSC-Arbeit**, nicht Fronte
 | COR-09 | Der alte E2-8-Eintrag in `bsc_bug_v1.md` betrifft Reporter-Socket/Label, **nicht** den neuen BLOCKED-vs-STOP-Bug. Neuer eigener Bug-/Testeintrag nötig. | `bsc/docs/5_OFFENE_FEHLER/bsc_bug_v1.md` | Ticketzuordnung korrigieren |
 | COR-10 | `BSC_FRONTEND_BINDINGS_V1.md` und `controlRegistry.ts` nicht im geprüften Git-Baum. Keine fiktiven Dateien referenzieren; Namensvergabe nach Commit. | Repository-Tree / F0 | Dokumentationslücke |
 
-## 9.2 Native G0.7-Sende-, Budget-, Capture- und Schutzfelder – bislang unvollständig
+### 9.2 Native G0.7-Sende-, Budget-, Capture- und Schutzfelder – bislang unvollständig
 
 Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende Unterfamilien sind eigenständig zu inventarisieren und dem passenden Reiter zuzuweisen. **Nicht alle sind heute in der `status.proto`-Projektion sichtbar**:
 
@@ -228,7 +228,7 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 
 **Sicherheitsregel:** Das G0.7-Schema enthält ein internes `SALT`-Feld. Dieses darf bei SELF_B unter keinen Umständen in eine generische `PublicField`-Liste gelangen. Auch signierte Raw-Transaktionen, private Journalpfade, Schlüssel und credentialed URLs nie in Protobuf/Browser/Logs übertragen.
 
-## 9.3 Native G0.8, bislang fehlende Felder
+### 9.3 Native G0.8, bislang fehlende Felder
 
 | Feldgruppe | Eigentümer / Ist | Reiter |
 |---|---|---|
@@ -241,7 +241,7 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 | `g08.unresolved.expiry_observation`: head, tx_known, sender/buyer latest/pending nonces, error | getrenntes UNRESOLVED mit Ursache; niemals zu STOP/PASS normalisieren | Monitoring |
 | `g08_producer_timing`: Clock-Source, raw resolution, hook overhead, normalization error, remaining uncertainty, lower/conservative upper ns, original producer/attempt identity | physisches T0–T_buy ausschließlich bei Originalwitness | Analytics/Monitoring |
 
-## 9.4 Nachgelagerte native Phasen: zusätzlicher Zukunftsbedarf (nicht jetzt ausführbare Controls)
+### 9.4 Nachgelagerte native Phasen: zusätzlicher Zukunftsbedarf (nicht jetzt ausführbare Controls)
 
 | Bedarf | Werte/Dimensionen | Reiter | Freigabephase |
 |---|---|---|---|
@@ -256,7 +256,7 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 | **Frontend F4** | `journal_epoch`, `durable_cursor`, catch-up barrier, `CATCHUP_COMPLETE/INCOMPLETE`, bounded history queries, redaction; keine Ereignisse aus WS-seq rekonstruieren | Monitoring/Analytics | F4/F7 |
 | **Wallets** | `launcher` und `buyer` pro Wallet: native chain/pending/latest nonce, safe reserved/spent budget, gas reserve, true balance read timestamp, funding deficit, economic-intent/UNKNOWN reconciliation, asset identity, receipts-driven token acquisition | Wallets | C2/G/J; aktuell historische Snapshots |
 
-## 9.5 Datenqualität, Filtergrenzen und UI-Testfälle
+### 9.5 Datenqualität, Filtergrenzen und UI-Testfälle
 
 - Zu **jeder Kennzahl**: `source_commit`, snapshot `data_as_of`, **eigene** evidence id/hash/producer time, `quality`, `run_id`, `chain/block/canonical/finality`, window, sample size, unit, scope (Chain/Venue/Version/Candidate/Source/Adapter) und Status `UNKNOWN/INCOMPLETE` falls nicht belegt. `source_commit`/`data_as_of` brauchen nur **einen sichtbaren Panel-Provenienzbalken**, nicht bei jeder Zeile denselben Text; Einzel-Evidence-Zeit bleibt zuordenbar.
 - View-only Filter nur auf **nachgewiesenen** historischen Records: Run-ID, Zeitpunkt/Zeitraum, Venue, Token/Candidate, Source, Source-Version, Source-Capability, requested/effective, Full/hash/actionable, Canonical/Reorg, First-External, Owner/Wallet, Probe/Adapter, Launch-/BUY-Status, Decision reason, Window completeness, Fee/Tax mode, Dedupe/First-only, Record integrity. Report-Scope und Nenner sichtbar, keine Änderung des Primary Raw Capture.
@@ -264,7 +264,7 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 - Keine Autoritätstransfers: UI-Button → CommandResponse ACCEPTED ist nur durables Intent, Desktop Native Apply entscheidet Kandidat; per-source `LIVE` ist keine wirtschaftliche Freigabe; Builder HTTP ACK ist keine Inclusion, N+1 ist nicht <1ms, DRY-Ertrag ist kein realisierter Profit.
 - Tests: `BLOCKED`/`STOP`/`NOT_RUN`/`PASS_READ_ONLY` unverändert bei Rust-Projektor→Proto→TS; V4-Label-Negativtest, alter Reporter/BSC Snapshot; Candidate-CAS, invalid/public mirror mit B salt, source/venue/global fail-closed, Full-TX vs Hash-only, conflicts, F4 Catch-up, G0.8 first-external/miner, unsigned wei u256 String, local provenance/UTC, Graphite desktop/compact/mobile, kein P0-CSS-Diff.
 
-## 9.6 Vier Reiter: definitive Aufteilung, keine Duplikate
+### 9.6 Vier Detailreiter plus BSC Overview: definitive Aufteilung, keine Duplikate
 
 1. **Launch / BUY** — *Preparation & Approval* (Self A/B und später AUTO); `PREPARE`, `SIGN/VERIFY`, `V5`, Bereitschaft, Budget/Attempt, sichere offline Readiness-Controls; **keine** Trading-Webbutton-API. Nicht zur Journal-/Source-Diagnose aufblähen.
 2. **Monitoring** — *Sources, Venues, Chain*; fünf Source-Modes/Health/Capability, drei Venue-Gates, Identität/Kollision, Inclusion-Adapter und G0.8-Reconciliation; alles auf einem read-only Überwachungsreiter mit Detailaufklappung.
@@ -275,18 +275,18 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 
 **Nicht implementiert oder getestet durch diese Matrix.** Vor Merge gegen neueste BSC-Commits und Protobuf-Goldens erneut prüfen; keine Änderungen an privaten Artefakten oder LIVE-Guard.
 
-## 9.7 Letzter GitHub-Abgleich während dieser Arbeit
+### 9.7 Letzter GitHub-Abgleich während dieser Arbeit
 
 `main = 3aedde8153b2` (23.10.2026, 21:11 UTC, Zeitpunkt der letzten Repository-Prüfung). Neu gegenüber der ursprünglichen v9.1-F0-Matrix sind die BSC-Implementierungscommits D3 `d7e81aca3b08`, D4 `1d443959da7c`, D5 `3aedde8153b2`. Sie betreffen DRY-Handoff, H2-Frische und A/B-Parität, **nicht** eine Frontend-Freigabe. Beide `frontend/contracts/*.json` tragen weiterhin 84 bzw. 299 Feldeinträge; die BSC-React-Panels und das Proto-Schema wurden zwischen D2 und D5 nicht geändert. **Aktueller Git-HEAD ist zeitabhängig und vor Code-Änderungen erneut zu prüfen.**
 
 
 ---
 
-# 10. Fable-G1–G23: Einzelfeld-Differenz V2→V3 (23.10.2026)
+## 10. Fable-G1–G23: Einzelfeld-Differenz V2→V3 (23.10.2026)
 
 **Charakter:** Ergänzung der ursprünglichen V2, keine bereits implementierte Proto-/React-Änderung. Verglichen wurden 23 vom zweiten Reviewer benannte Felder bzw. Feldgruppen mit dieser Auditmatrix und zusätzlich die nativen Quellen `g07_pre_live_readiness.rs`, `record/src/schema/{g06a,g07,g08,g07_candidate}.rs`, `g06a_requal_check.rs`, `g06a_final_dry.sh` und `qualification/src/status/projection.rs`. Die Verfügbarkeit eines nativen Record-Feldes bedeutet weder, dass dieser Record für den konkreten Versuch existiert, noch dass das Feld bereits zum Browser projiziert wird. Laufende D1–D6-Commits und ihre Testabnahme sind getrennt zu verfolgen.
 
-## 10.1 Einzelfeld-Audit und zugehörige Pflichtaktion
+### 10.1 Einzelfeld-Audit und zugehörige Pflichtaktion
 
 | ID | V2-Abdeckung | Ergänzungs-/Korrekturanforderung | Reiter; Exposition |
 |---|---|---|---|
@@ -314,7 +314,7 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 | G22 | JA, aber Fable-Regel korrigieren | `source_commit`, `evaluated_unix_s`, `data_as_of_unix_s` plus unabhängige pro-Evidence-Identität und `source quality`. Eine gemeinsame Provenienzzeile pro Reiter genügt, ausklappbare Details je Urteil. **Ein alter `data_as_of` ist kein `SOURCE_DETACHED`-Beweis**; Source-Detach nur aus tatsächlicher Feed-/Supervision-Liveness. | alle vier Reiter; A |
 | G23 | TEIL | V5 `authorization`, `scope`, `wallet_separation`, `attempts`, `bundle_bytes`, `economics_validation`, `budget_wei`, `pre_arm_checks`, `success`, `retention_observability`, `thresholds`, `coverage`, `send_guard`, `dry_pass`, `candidate` als versionsabhängige Kategorien statt einer flachen Liste. Das sind **15 aufgeführte** fachliche Kategorien (Fable nennt 14); genaue Felder je Kategorie automatisiert aus V5-Schema ableiten. | Launch / BUY; `contract_fields` A, strukturierte Anzeige SOLL |
 
-## 10.2 Prioritätsreihenfolge für eine echte Frontend-Abnahme
+### 10.2 Prioritätsreihenfolge für eine echte Frontend-Abnahme
 
 1. **Korrektheit vor Darstellungsarbeit:** `readiness.mode`, BLOCKED-vs-STOP, separater Feed-Quality-/Snapshot-Staleness-Vertrag, V5 statt V4, kein abweichendes Frontend-LIVE-Gate.
 2. **Native G0.6a/G0.7-Qualifikation:** R0-Scan, Launch-Path, Quote, Sim-Gas, private/öffentliche Crosschecks, DRY5/DRY6, Selection-Invalidierung, Witness und zeitlich gültige Builder-Proofs als explizite DTOs. Verbot: generische Exposition von `SALT`, signierten Raw Bytes, Credentials oder privaten Dateipfaden.
@@ -322,7 +322,7 @@ Die ursprüngliche Matrix nennt Budget und Journal nur zusammenfassend. Folgende
 4. **Produktion nach Gate 0:** Source × Venue × Global-Mode, Source Health/Capability/Races, per-adapter Inclusion, Phase-F-Langzeit-Census, Phase-G/H-Economics, J-Release – **erst nach jeweils zulässigem BSC-Gate**, vorher nur SOLL/DISABLED/UNKNOWN.
 5. **Visuelle Abnahme:** Graphite erhalten; fünf Reiter BSC inklusive Overview; kein neues sechstes Tab, keine doppelten Readiness-Bedienelemente, kein blindes Durchreichen aller ~123 V5-Kontraktstrings auf die Hauptfläche.
 
-## 10.3 Pflichtabnahme des erweiterten Datenvertrags
+### 10.3 Pflichtabnahme des erweiterten Datenvertrags
 
 Für jedes neu übertragene Feld eine maschinenlesbare Inventarzeile mit `source path + sha/symbol + schema/type/units + owner + provenance/evidence age + status/quality + sensitivity + presentation owner + scope/gate + negative/golden test`. Die Native→Proto→Gateway→TS-Abbildung muss exakte vorzeichenlose Wei-Strings, Optionals, canonical/reorg, stale/unknown und Guard-Fehler nachweislich erhalten. Bei fehlendem Backend-Datenowner gilt `SOLL_MISSING`, nicht ein erfundener Nullwert. Die neu vorgeschlagenen DTOs/Commands sind **nicht bereits implementiert**.
 
@@ -350,26 +350,8 @@ Die Feld-/Control-Inventur A/B/C/D und G1–G23 wird **nicht reduziert oder dupl
 
 **Tests:** fünf BSC-Reiter × beide Dichten × mindestens die Statusfälle LIVE-BLOCKED, Pre-Live-BLOCKED, STOP, PASS_READ_ONLY, Source DETACHED, Snapshot STALE, MISSING_EVIDENCE/UNKNOWN, Null/Optional/Wei-String, A/B-PENDING_DESKTOP_SYNC. Ein Header-Schalter, geteilte Datenreferenzen, keine zusätzlichen Actions/Protokoll-Aufrufe, Keyboard/Screenreader, responsive Graphite-Abgleich, Basic-vs-Advanced-Safety-Parität. Dashboard-Zahlen nur aus autoritativen Native-Projektionen; vollständige Field-F0-VAR-Tests gelten **für beide Modi**.
 
-## 13. Querschnittsfehler AU-01–AU-20 und F0-Bindungsstatus
+## 13. F0-Statusdelta und Fehlerreferenz
 
-**Statushinweis:** Diese Matrix ist ein quellennaher **SOLL-/IST-Inventarplan**, **kein fehlerfreies Native→React-End-to-End-Attestat**. Die am selben Tag zusätzlich identifizierten 20 Review-Positionen (bestätigte Defekte, noch nicht belegte Integration, Sicherheits-/Testbedarf, absichtliche Phase-Gates) stehen ausschließlich in [BSC_FRONTEND_QUERSCHNITT_AUDIT_2026-10-23.md](BSC_FRONTEND_QUERSCHNITT_AUDIT_2026-10-23.md). Sie werden nicht als zweite 123-Felder-Kopie geführt. Es gilt der bereits vorhandene Ausführungsauftrag [ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md §E](ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md).
+Die verbindlichen **Einzelfelder und Datenstufen** stehen in §§0–12 dieses Dokuments. Die bestätigten AU-01–AU-20 sowie N1/N3/N4/N5 sind ausschließlich im [Querschnitt-Audit](BSC_FRONTEND_QUERSCHNITT_AUDIT_2026-10-23.md) als Fehlerregister dokumentiert; N2 (`jobs` dauerhaft leer) wurde widerlegt: `publisher.rs` ergänzt `job()` vor dem STATE-Send. Die tatsächliche **Umsetzungsreihenfolge** steht ausschließlich in [ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md §E](ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md). Kein zusätzliches Feldinventar oder Bugfix-Parallelplan wird hier angelegt.
 
-**Konkrete F0-Nachträge:** `readiness.mode` und exakte native Verdict-Semantik inklusive Python-Wrapper, A/B-Selection-Identität/Generation/Observation, G0.7↔G0.8 gemeinsamer Attempt/Chain-Proof, Supervisor-`controller_available`/Run-ID, Command-Pending-/Recent-Receipts, Source-Liveness vs Evidence-Snapshot, `severity` aller nativen G0.7-Klassifikationen sowie Secret-Redaction/Transport/No-Polling-Negativtests. Jeder neue Proto-Tag braucht Native-Owner, Source-SHA, Typ/Einheit, Provenienz, Gate, Browser-Redaktion, Consumer und Golden. Fehlende Felder als `SOLL_MISSING` markieren.
-
-**Vertragskonsistenz:** Der historische Satz in §8 Nr. 5 („Old/stale Source-State wird mit SOURCE_DETACHED gezeigt“) wird hiermit ausdrücklich **korrigiert**: `STALE` = bestehende Quelle/Snapshot zu alt, `SOURCE_DETACHED` ausschließlich Gateway-/Publisher-Liveness-Nachweis. Das übergeordnete Wire V1.3 ist verbindlich und unverändert. UI darf periodische Browser-HTTP-GETs **nicht** als Teil einer F0-Abnahme akzeptieren, auch wenn sie heute im Code stehen. Kein vorzeitiger F0-VAR-`PASS`, sofern die AU-Positionen nicht tatsächlich behoben und getestet sind.
-
-## 14. F0-Feldmapping: konsolidierte bestätigte Befunde N1/N3/N4/N5 (2026-10-24)
-
-Dieser **untergeordnete** Feldnachtrag korrigiert die vorhandene §13-Referenz; §10 G1–G23 und die ursprünglichen 84/299-Census-Einträge bleiben Ausgangsbasis, **nicht automatisch vollständig**. Die kanonischen Inventare bleiben `frontend/contracts/bsc-fields.json` und `frontend/contracts/bsc-native-fields.json`. Für jedes neue/public Field zuerst Native-Source, Writer, Typ, Unit, Mode, Evidence, Candidate/Generation/Attempt/Chain, Source-SHA, Proto-Tag, Topic, TS-Decoder, Store, UI-Panel, Security/Golden feststellen. Erst danach aus fehlendem Projektionspfad `SOLL_MISSING` machen. F0-Status `IST_CONNECTED|IST_BUG|SOLL_MISSING|FUTURE_PHASE_BLOCKED`, keine zweite Registry oder Native-/Protobuf-Autorität.
-
-| Zusatz | Exakter IST aus Quellen | Minimaler F0/P1-Delta |
-|---|---|---|
-| **N1** | Protobuf-`GateStatus.state`/ `BscMonitoringState.state` sind Strings mit unvollständigen Kommentarvokabularen; G0.7 transportiert vollständige `classification`, G0.8 `PASS/ADAPT/STOP/UNRESOLVED` | Wire-Tags erhalten, realen Codekatalog dokumentieren, gültige Fach-Severity und TS/Golden-Erkennung ergänzen |
-| **N2 WIDERLEGT** | `projection.rs` startet `jobs=[]`, **aber `publisher.rs` hängt vor jedem StateFull `job(rundir,label)` an** | Vorhandenen Job-Push verwenden; nur fehlende Controller-Availability und Receipt-Source qualifiziert ergänzen |
-| **N3** | `publisher.rs::job` **und** `gateway/src/control.rs::observe_project` zählen `BLOCKED` nicht als regulären beendeten Run; Wrapper wirft Originalstatus weg | Getrennte `job.state`/ `readiness.verdict` und Launch-ID/Result-Evidence; negative Abschluss-/Failure-Tests |
-| **N4** | `candidateControl.ts::lookup` setzt `busy=false` auch bei `PENDING/PENDING_RECONCILE` | UI bis eindeutiger Source-Receipt-Entscheidung sperren; Native-CAS, `PENDING_DESKTOP_SYNC`, pending-request-Gate und Attempt-Lock erhalten |
-| **N5** | `readiness_job.py` gibt dem GUI-`--current-rpc`-Child den Public RPC, aber nicht die verpflichtenden `DARKBOT_G07_CLOCK_ID` / `DARKBOT_G07_BOOT_ID` | `CLOCK_CONFIG=BLOCKED` ehrlich darstellen, vertrauenswürdige Clock-/Boot-Kontextquelle prüfen; kein geerbtes Secret und keine erfundene Uhr |
-| **Receipt-Owner** | Aktuell persistiert Gateway `commands/<request_id>.json`, Wire V1.3 sieht dauerhafte fachliche Receipt-Autorität beim Native-Owner vor | IST-SOLL-Ownership/Idempotenz/Reconciliation vor zusätzlichem STATE/Proto festlegen, keine zweite Command-Plane |
-
-Beide UI-Dichten erhalten dieselben F0-Daten, identische Safety-Wahrheit und keinen zusätzlichen Subscribe- oder Command-Owner. `PASS_READ_ONLY` ist kein LIVE; Source-Transport-LIVE ist keine wirtschaftliche Freigabe. Für Pakete und Tests ausschließlich [ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md §E](ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md) verwenden.
-
+**Feldstatus:** `IST_CONNECTED | IST_BUG | SOLL_MISSING | FUTURE_PHASE_BLOCKED`. Bestehende `frontend/contracts/bsc-fields.json` und `frontend/contracts/bsc-native-fields.json` bleiben die Inventargrundlage; Source/Owner/Schema/Typ/Einheit/Evidence/Candidate/Attempt/Gate/Sensitivity/Proto-Tag/Topic/Store/UI/Test mit aktuellem SHA abgleichen. Nach Umsetzung von Paket 1 nur echte Proofs als VERIFIED kennzeichnen.
