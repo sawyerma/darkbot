@@ -108,6 +108,9 @@ pub mod p0 {
         pub seized_hold_value: u64,
         /// Actual economic value of the SPL amount transferred for repayment.
         pub repay_value: u64, // USD-Micro
+        /// FE-02: the same `repay_amount` at the low-biased liability price (rounded down);
+        /// `None` = price unknown. Values a ZERO_PREFUND swap surplus conservatively.
+        pub repay_low_value: Option<u64>,
         pub liability_needed_value: u64, // USD-Micro
         pub liability_inventory_value: u64,
         pub funding_bank: Option<Pubkey>,
@@ -228,6 +231,14 @@ pub mod p0 {
                     // [FIX-128] Economics/funding pay the actual SPL transfer. EndLiquidation
                     // premium/health parity is already encoded in premium_bps by ProtocolSizer.
                     repay_value: sz.repay_transfer_value_micro,
+                    repay_low_value: sizer
+                        .native_amount_conservative_value_usd_micro(
+                            &sz.liab_bank,
+                            sz.repay_amount,
+                            now_unix_s as i64,
+                            slot,
+                        )
+                        .ok(),
                     liability_needed_value: sz.repay_transfer_value_micro,
                     liability_inventory_value: inv_value,
                     // ExactOut/JIT is intentionally disabled until a documented provider path exists.
@@ -264,9 +275,12 @@ pub mod p0 {
         /// [P1-C] Router quote (expected output, native units). Diagnostics / route comparison
         /// only. Never a realizable value and never a feasibility proof.
         pub quoted_out: u64,
-        /// [P1-C] Minimum output the swap instruction enforces on-chain (Jupiter
-        /// `otherAmountThreshold` for ExactIn). `None` = unknown -> fail closed.
+        /// [P1-C] Minimum output the swap instruction enforces on-chain: FE-02 derives it from
+        /// the signed instruction bytes (Jupiter `otherAmountThreshold` only if lower).
+        /// `None` = unknown -> fail closed.
         pub minimum_executable_out: Option<u64>,
+        /// FE-02: the slippage the signed swap instruction enforces (`None`: unknown route).
+        pub enforced_slippage_bps: Option<u16>,
     }
 
     /// [P1-C] Classification of a fitted ZERO_PREFUND route by its executable floor.
@@ -299,6 +313,15 @@ pub mod p0 {
             },
             Some(floor) => ZeroPrefundFloor::Executable(floor),
         }
+    }
+
+    /// FE-02: a ZERO_PREFUND plan's slippage is the larger of the configured evaluation slippage
+    /// and what its signed swap instruction enforces (a route without decoded terms keeps the
+    /// configured value), so the safety and approval limits bind the real swap.
+    pub(crate) fn enforced_slippage(route: &Route, configured: u64) -> u64 {
+        route
+            .enforced_slippage_bps
+            .map_or(configured, |s| configured.max(u64::from(s)))
     }
 
     /// Reason string for a rejected classification; `None` for Executable/Unknown.
@@ -354,7 +377,7 @@ pub mod p0 {
             return Err(reason);
         }
         let realizable = match classify_zero_prefund_floor(route, sz.repay_amount) {
-            ZeroPrefundFloor::Executable(floor) => Some(realizable_value_usd_micro(sz, floor)?),
+            ZeroPrefundFloor::Executable(floor) => zero_prefund_realizable_usd_micro(sz, floor)?,
             _ => None,
         };
         Ok(candidate_input(
@@ -367,8 +390,35 @@ pub mod p0 {
         ))
     }
 
+    /// FE-02: what a ZERO_PREFUND swap realizes: the repay it funds at the repay's own value plus
+    /// the surplus `floor − repay` tokens at the low-biased liability price (rounded down).
+    /// `None` without a low price (economics stays UNKNOWN).
+    pub(crate) fn zero_prefund_realizable_usd_micro(
+        sz: &Sizing,
+        floor: u64,
+    ) -> Result<Option<u64>, String> {
+        let surplus = floor
+            .checked_sub(sz.repay_amount)
+            .ok_or("ZERO_PREFUND floor below repay")?;
+        let Some(low) = sz.repay_low_value else {
+            return Ok(None);
+        };
+        if sz.repay_amount == 0 {
+            return Err("repay_amount=0".into());
+        }
+        let surplus_value =
+            u64::try_from(u128::from(surplus) * u128::from(low) / u128::from(sz.repay_amount))
+                .map_err(|_| "realizable value > u64")?;
+        sz.repay_value
+            .checked_add(surplus_value)
+            .map(Some)
+            .ok_or_else(|| "realizable value overflow".into())
+    }
+
     /// Economic value of `liability_out` native units, normalised by the protocol-exact repay
-    /// value/amount ratio. [P1-C] Callers pass the executable floor, never the quote.
+    /// value/amount ratio (tests; production values a surplus with
+    /// `zero_prefund_realizable_usd_micro`).
+    #[cfg(test)]
     pub(crate) fn realizable_value_usd_micro(
         sz: &Sizing,
         liability_out: u64,
@@ -776,6 +826,35 @@ pub mod p0 {
             let b = darkbot_project0::protocol::decode_bank(data).map_err(|e| e.to_string())?;
             let (mint_owner, _, _) = self.state.account(&b.mint).ok_or("mint not in state")?;
             Ok((b.liquidity_vault, b.mint, mint_owner))
+        }
+
+        /// FE-02: both mints' transfers are modelled (SPL Token, or Token-2022 without fee or
+        /// hook); otherwise the stated cause joins the route errors and ZERO_PREFUND is not
+        /// quoted at all.
+        fn mints_modelled(
+            &self,
+            asset_mint: &Pubkey,
+            liab_mint: &Pubkey,
+            route_errors: &mut Vec<String>,
+        ) -> bool {
+            let unmodelled = [asset_mint, liab_mint].into_iter().find_map(|m| {
+                let reason = match self.state.account(m) {
+                    None => Some("MINT_STATE_UNKNOWN"),
+                    Some((owner, lamports, data)) => {
+                        darkbot_project0::sizing::mint_transfer_unmodeled(m, &owner, lamports, data)
+                    }
+                };
+                reason.map(|r| (r, m))
+            });
+            match unmodelled {
+                Some((reason, mint)) => {
+                    route_errors.push(format!(
+                        "exact-in {asset_mint}→{liab_mint}: {reason} mint={mint}"
+                    ));
+                    false
+                }
+                None => true,
+            }
         }
 
         fn bank_full(&self, k: &Pubkey) -> Result<Bank, String> {
@@ -1351,7 +1430,9 @@ pub mod p0 {
                 // ZERO_PREFUND has a real collateral→liability swap in the receivership TX,
                 // so this class alone requires ExactIn market evidence. A provider error or
                 // missing route must not invalidate already-built inventory/JIT candidates.
-                if self.zero_prefund_qualified {
+                if self.zero_prefund_qualified
+                    && self.mints_modelled(&asset_mint, &liab_mint, &mut route_errors)
+                {
                     let asset_bank = pair_try!('pairs, self.bank_full(&sz.asset_bank));
                     let route_input_amount =
                         pair_try!('pairs, darkbot_project0::integration::execution_amount_for_asset(
@@ -1456,7 +1537,7 @@ pub mod p0 {
                                                 &sz,
                                             ),
                                             tip: self.jito_tip_lamports,
-                                            slippage_bps: sz.slippage_bps,
+                                            slippage_bps: enforced_slippage(&mark, sz.slippage_bps),
                                             assets: vec![asset_mint, liab_mint],
                                             tx_version: BuildVersion::V1,
                                             lookup_tables: vec![].into(),
@@ -1486,7 +1567,9 @@ pub mod p0 {
                                             &sz,
                                         ),
                                         tip: self.jito_tip_lamports,
-                                        slippage_bps: sz.slippage_bps,
+                                        // FE-02: what the signed swap enforces, so the
+                                        // safety and approval slippage limits bind it.
+                                        slippage_bps: enforced_slippage(&mark, sz.slippage_bps),
                                         assets: vec![asset_mint, liab_mint],
                                         tx_version: BuildVersion::V0,
                                         lookup_tables: crate::execution::lookup_tables::merge(
@@ -1516,6 +1599,13 @@ pub mod p0 {
             }
             for error in &pair_errors {
                 route_diagnostic(format!("pair_skipped: {error}"));
+            }
+            // FE-02: a rejected class beside other plans keeps its stated cause (e.g.
+            // ROUTE_FLOOR_BELOW_REPAY, SWAP_*), never silently dropped.
+            if !out.is_empty() {
+                for error in &route_errors {
+                    route_diagnostic(format!("route_rejected: {error}"));
+                }
             }
             if out.is_empty() && !ata_errors.is_empty() {
                 ata_errors.sort();
@@ -1582,6 +1672,7 @@ pub mod p0 {
                 amount_in: 1_000,
                 quoted_out,
                 minimum_executable_out: floor,
+                enforced_slippage_bps: None,
                 ..Route::default()
             }
         }
@@ -1596,6 +1687,7 @@ pub mod p0 {
                 seized_equity_value: 0,
                 seized_hold_value: 0,
                 repay_value,
+                repay_low_value: Some(repay_value),
                 liability_needed_value: repay_value,
                 liability_inventory_value: 0,
                 funding_bank: None,
@@ -1743,6 +1835,7 @@ pub mod p0 {
                     amount_in,
                     quoted_out: out,
                     minimum_executable_out: self.floor_known.then_some(out * 99 / 100),
+                    enforced_slippage_bps: None,
                 }))
             }
             fn quote_exact_out(
@@ -1887,6 +1980,7 @@ pub mod p0 {
                         seized_equity_value: 1_050,
                         seized_hold_value: 1_100,
                         repay_value: 500,
+                        repay_low_value: Some(500),
                         liability_needed_value: 500,
                         liability_inventory_value: 10_000,
                         funding_bank: None,
@@ -2125,6 +2219,7 @@ pub mod p0 {
                 amount_in: 1_000,
                 quoted_out: 600,
                 minimum_executable_out: Some(550),
+                enforced_slippage_bps: None,
             };
             assert_eq!(run(&src, &TestRoutes(Some(route)), 1), (4, 2));
             assert_eq!(run(&src, &none, 2), (4, 4), "new generation");
@@ -2506,6 +2601,7 @@ pub mod p0 {
                 amount_in: 1_000,
                 quoted_out: 600,
                 minimum_executable_out: Some(550),
+                enforced_slippage_bps: None,
             };
             let price = |l: u64| Some(l);
             let plans = f.plans(
@@ -2525,6 +2621,129 @@ pub mod p0 {
                     (FundingClass::PreheldInventory, 1_100),
                     (FundingClass::ZeroPrefundSameTx, 1_100),
                 ]
+            );
+        }
+
+        /// FE-02: the ZERO_PREFUND plan carries the slippage its signed swap enforces (when
+        /// larger than the configured one); a floor below the repay builds no ZERO_PREFUND plan
+        /// and the cause stays a route diagnostic while the inventory plans remain.
+        #[test]
+        fn fe02_zero_prefund_slippage_and_floor_rejection_stay_visible() {
+            let f = PlansFixture::new();
+            let swap_program = Pubkey::new_unique();
+            let route = |floor: u64, slippage: Option<u16>| Route {
+                instructions: vec![Instruction {
+                    program_id: swap_program,
+                    accounts: vec![],
+                    data: vec![1],
+                }],
+                lookup_tables: vec![],
+                swap_program,
+                amount_in: 1_000,
+                quoted_out: 600,
+                minimum_executable_out: Some(floor),
+                enforced_slippage_bps: slippage,
+            };
+            let price = |l: u64| Some(l);
+            let state = f.state(Pubkey::default(), true);
+            let zp = |plans: &[ReceivershipPlan]| {
+                plans
+                    .iter()
+                    .filter(|p| p.input.funding == FundingClass::ZeroPrefundSameTx)
+                    .map(|p| p.slippage_bps)
+                    .collect::<Vec<_>>()
+            };
+            let _ = take_route_diagnostics();
+            let plans = f.plans(
+                &state,
+                &price,
+                &TestRoutes(Some(route(550, Some(9_000)))),
+                true,
+            );
+            assert_eq!(zp(&plans), [9_000], "the enforced slippage");
+            let plans = f.plans(&state, &price, &TestRoutes(Some(route(550, None))), true);
+            let configured = zp(&plans);
+            assert_eq!(configured.len(), 1);
+            assert!(configured[0] < 9_000);
+            let _ = take_route_diagnostics();
+            let plans = f.plans(&state, &price, &TestRoutes(Some(route(10, Some(50)))), true);
+            assert!(zp(&plans).is_empty(), "floor below the repay: no plan");
+            assert!(!plans.is_empty(), "the inventory plans remain");
+            let (lines, _) = take_route_diagnostics();
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.starts_with("route_rejected:")
+                        && l.contains("ROUTE_FLOOR_BELOW_REPAY")),
+                "{lines:?}"
+            );
+        }
+
+        /// FE-02: a liability mint whose transfer the economics do not model (here a Token-2022
+        /// mint that does not decode) refuses ZERO_PREFUND before any quote; the cause stays a
+        /// route diagnostic and the inventory plans remain.
+        #[test]
+        fn fe02_unmodelled_mint_transfer_refuses_zero_prefund_before_quoting() {
+            let f = PlansFixture::new();
+            let price = |l: u64| Some(l);
+            let mut state = f.state(Pubkey::default(), true);
+            let t22: Pubkey = darkbot_project0::protocol::TOKEN_2022_PROGRAM_ID
+                .parse()
+                .unwrap();
+            state.0.insert(f.banks[1].1, (t22, vec![0; 82]));
+            let route = Route {
+                instructions: vec![],
+                lookup_tables: vec![],
+                swap_program: Pubkey::new_unique(),
+                amount_in: 1_000,
+                quoted_out: 600,
+                minimum_executable_out: Some(550),
+                enforced_slippage_bps: None,
+            };
+            let _ = take_route_diagnostics();
+            let plans = f.plans(&state, &price, &TestRoutes(Some(route)), true);
+            assert!(plans
+                .iter()
+                .all(|p| p.input.funding != FundingClass::ZeroPrefundSameTx));
+            let (lines, _) = take_route_diagnostics();
+            assert!(
+                lines.iter().any(|l| l.contains("MINT_STATE_UNDECODABLE")),
+                "{lines:?}"
+            );
+        }
+
+        /// FE-02: a ZERO_PREFUND swap realizes the repay it funds plus the surplus tokens at the
+        /// low-biased price (rounded down); without a low price the plan's economics are UNKNOWN,
+        /// never valued at the unbiased price.
+        #[test]
+        fn fe02_zero_prefund_surplus_is_valued_at_the_low_price() {
+            let mut sz = sizing(1_000, 2_000);
+            sz.repay_low_value = Some(1_900);
+            // 500 surplus tokens at 1.9 USD-micro each, rounded down.
+            assert_eq!(
+                zero_prefund_realizable_usd_micro(&sz, 1_500),
+                Ok(Some(2_950))
+            );
+            assert_eq!(
+                zero_prefund_realizable_usd_micro(&sz, 1_000),
+                Ok(Some(2_000))
+            );
+            assert!(zero_prefund_realizable_usd_micro(&sz, 999).is_err());
+            sz.repay_low_value = None;
+            assert_eq!(zero_prefund_realizable_usd_micro(&sz, 1_500), Ok(None));
+            let route = Route {
+                instructions: vec![],
+                lookup_tables: vec![],
+                swap_program: Pubkey::new_unique(),
+                amount_in: 10,
+                quoted_out: 1_600,
+                minimum_executable_out: Some(1_500),
+                enforced_slippage_bps: None,
+            };
+            let input = zero_prefund_input(&sz, &route, 0, 0, Path::Rpc).unwrap();
+            assert_eq!(
+                input.gross_seized_realizable_usd_micro, None,
+                "UNKNOWN, not equity"
             );
         }
 
@@ -2567,6 +2786,7 @@ pub mod p0 {
                 amount_in: 1_000,
                 quoted_out: 640,
                 minimum_executable_out: Some(600),
+                enforced_slippage_bps: None,
             };
             let known = |mut c: CandidateInput| {
                 c.transaction_fee_usd_micro = Some(5);
@@ -2896,6 +3116,7 @@ pub mod p0 {
                 amount_in: 100,
                 quoted_out: cap as u64 * 100,
                 minimum_executable_out: Some(cap as u64 * 100),
+                enforced_slippage_bps: None,
                 ..Route::default()
             }
         }

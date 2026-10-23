@@ -62,6 +62,45 @@ pub struct ProtocolSizing {
     pub flat_sol_fee_lamports: u64,
 }
 
+/// FE-02: why moving `mint` is not modelled by the funding economics, if it is not. SPL Token is
+/// always modelled; a Token-2022 mint only without a non-zero transfer fee — the current one and
+/// any scheduled one (epochs 0 and `u64::MAX` cover both) — and without an active transfer hook,
+/// checked with the pinned marginfi functions its repay/withdraw use. Any other owner or an
+/// undecodable Token-2022 mint is unmodelled too (fail closed).
+pub fn mint_transfer_unmodeled(
+    mint: &Pubkey,
+    owner: &Pubkey,
+    lamports: u64,
+    data: &[u8],
+) -> Option<&'static str> {
+    if *owner == Pubkey::from_str_const(protocol::TOKEN_PROGRAM_ID) {
+        return None;
+    }
+    if *owner != Pubkey::from_str_const(protocol::TOKEN_2022_PROGRAM_ID) {
+        return Some("MINT_TOKEN_PROGRAM_UNKNOWN");
+    }
+    let key = *mint;
+    let mut account = Account {
+        lamports,
+        data: data.to_vec(),
+        owner: *owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    let ai = (&key, &mut account).into_account_info();
+    let fee = |epoch| marginfi::utils::nonzero_fee(ai.clone(), epoch);
+    match (
+        fee(0),
+        fee(u64::MAX),
+        marginfi::utils::has_transfer_hook(ai.clone()),
+    ) {
+        (Ok(false), Ok(false), Ok(false)) => None,
+        (Ok(true), _, _) | (_, Ok(true), _) => Some("MINT_TRANSFER_FEE_UNMODELED"),
+        (_, _, Ok(true)) => Some("MINT_TRANSFER_HOOK_UNMODELED"),
+        _ => Some("MINT_STATE_UNDECODABLE"),
+    }
+}
+
 /// Q5: the kind of a sizing failure, typed where it arises. The text is the former message, so
 /// reasons and journals read as before; classification never inspects it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -583,6 +622,58 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             value
                 .checked_mul(I80F48::from_num(USD_MICRO))
                 .ok_or("cost conversion overflow")?,
+        )
+    }
+
+    /// FE-02: the lower bound of `native_amount`'s value under the pinned oracle adapter — the
+    /// lower of the low-biased (`PriceBias::Low`, price minus its confidence) time-weighted and
+    /// real-time prices, rounded down. The proceeds counterpart of the conservative cost.
+    pub fn native_amount_conservative_value_usd_micro(
+        &self,
+        bank_key: &Pubkey,
+        native_amount: u64,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<u64, String> {
+        if native_amount == 0 {
+            return Ok(0);
+        }
+        let bank = self.bank(bank_key)?;
+        let clock = Clock {
+            slot,
+            epoch_start_timestamp: 0,
+            epoch: 0,
+            leader_schedule_epoch: 0,
+            unix_timestamp: now_unix_s,
+        };
+        let price = self.with_feed(&bank, &clock, |feed| {
+            let low = |price_type, what| {
+                feed.get_price_of_type(
+                    price_type,
+                    Some(PriceBias::Low),
+                    bank.config.oracle_max_confidence,
+                )
+                .map_err(|e| SizingError::crate_error(what, &e))
+            };
+            Ok(
+                low(OraclePriceType::TimeWeighted, "time-weighted low price")?
+                    .min(low(OraclePriceType::RealTime, "real-time low price")?),
+            )
+        })?;
+        if price <= I80F48::ZERO {
+            return Err("nonpositive value conversion price".into());
+        }
+        let value = calc_value(
+            I80F48::from_num(native_amount),
+            price,
+            bank.get_balance_decimals(),
+            None,
+        )
+        .map_err(|e| format!("native amount value: {e}"))?;
+        floor_u64(
+            value
+                .checked_mul(I80F48::from_num(USD_MICRO))
+                .ok_or("value conversion overflow")?,
         )
     }
 
@@ -1241,6 +1332,86 @@ mod tests {
         assert!(cost(&Source(HashMap::new()), 4_510_080).is_err());
         let no_oracle = state(bank_of(OracleSetup::PythPushOracle, I80F48::ZERO), None);
         assert!(cost(&no_oracle, 4_510_080).is_err());
+        // FE-02: the proceeds counterpart takes the lower low-biased price (EMA 150 − 2.12, spot
+        // 149 − 1.06 ⇒ 147.88, not exact in I80F48), rounded down; never above the equity value.
+        let value = |src: &Source, lamports: u64| {
+            sizer(src, program, group)
+                .native_amount_conservative_value_usd_micro(&sol, lamports, now, 10)
+        };
+        assert_eq!(value(&pyth, 1_000_000_000), Ok(147_879_999));
+        assert_eq!(value(&spot_high, 1_000_000_000), Ok(147_879_999));
+        assert!(
+            value(&pyth, 1_000_000_000).unwrap()
+                < s.native_amount_cost_usd_micro(&sol, 1_000_000_000, now, 10)
+                    .unwrap()
+        );
+        assert_eq!(value(&fixed(150.0), 3), Ok(0), "rounded down");
+        assert!(value(&no_oracle, 4_510_080).is_err());
+    }
+
+    /// A Token-2022 mint (initialized, 6 decimals) with the given TLV extensions.
+    pub(crate) fn token_2022_mint(extensions: &[(u16, Vec<u8>)]) -> Vec<u8> {
+        let mut d = vec![0u8; 82];
+        (d[44], d[45]) = (6, 1);
+        if !extensions.is_empty() {
+            d.resize(165, 0);
+            d.push(1); // AccountType::Mint
+            for (kind, value) in extensions {
+                d.extend(kind.to_le_bytes());
+                d.extend((value.len() as u16).to_le_bytes());
+                d.extend(value);
+            }
+        }
+        d
+    }
+
+    /// TransferFeeConfig: authorities, withheld amount, older and newer fee (epoch, max, bps).
+    pub(crate) fn transfer_fee(older_bps: u16, newer_epoch: u64, newer_bps: u16) -> (u16, Vec<u8>) {
+        let mut v = vec![0u8; 72];
+        for (epoch, bps) in [(0u64, older_bps), (newer_epoch, newer_bps)] {
+            v.extend(epoch.to_le_bytes());
+            v.extend(u64::MAX.to_le_bytes());
+            v.extend(bps.to_le_bytes());
+        }
+        (1, v)
+    }
+
+    /// FE-02: SPL Token and a plain or zero-fee Token-2022 mint are modelled; a current or a
+    /// scheduled transfer fee, an active transfer hook, an undecodable Token-2022 mint and an
+    /// unknown token program are each refused with their code.
+    #[test]
+    fn fe02_mint_transfers_are_modelled_only_without_fee_or_hook() {
+        let mint = Pubkey::new_unique();
+        let token = Pubkey::from_str_const(protocol::TOKEN_PROGRAM_ID);
+        let t22 = Pubkey::from_str_const(protocol::TOKEN_2022_PROGRAM_ID);
+        let check = |owner: &Pubkey, data: &[u8]| mint_transfer_unmodeled(&mint, owner, 1, data);
+        assert_eq!(check(&token, &[0; 82]), None);
+        assert_eq!(check(&t22, &token_2022_mint(&[])), None);
+        assert_eq!(
+            check(&t22, &token_2022_mint(&[transfer_fee(0, 10, 0)])),
+            None
+        );
+        for fee in [transfer_fee(5, 10, 5), transfer_fee(0, 1_000_000, 5)] {
+            assert_eq!(
+                check(&t22, &token_2022_mint(&[fee])),
+                Some("MINT_TRANSFER_FEE_UNMODELED")
+            );
+        }
+        let hook = |program: [u8; 32]| (14u16, [[0u8; 32], program].concat());
+        assert_eq!(
+            check(&t22, &token_2022_mint(&[hook([7; 32])])),
+            Some("MINT_TRANSFER_HOOK_UNMODELED")
+        );
+        assert_eq!(
+            check(&t22, &token_2022_mint(&[hook([0; 32])])),
+            None,
+            "inactive hook"
+        );
+        assert_eq!(check(&t22, &[0; 82]), Some("MINT_STATE_UNDECODABLE"));
+        assert_eq!(
+            check(&Pubkey::new_unique(), &[0; 82]),
+            Some("MINT_TOKEN_PROGRAM_UNKNOWN")
+        );
     }
 
     /// B12: sizing uses the maintenance EMODE configuration Health computes — including the

@@ -24,6 +24,121 @@ const REQUEST_TIMEOUT: Duration = Duration::from_millis(1500);
 const DEFAULT_BASE: &str = "https://api.jup.ag/swap/v2";
 const JUP_PROGRAM: &str = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
 
+/// FE-02/E2: Jupiter v6 swap instructions pinned from the public IDL `jup-ag/jupiter-cpi` commit
+/// `12bc5f67` (`idl.json` SHA-256 `764ea6d7…5c50`); parity with the deployed program is FE-01
+/// (NOT_RUN). Anchor discriminators = sha256("global:<name>")[..8]. Only the ExactIn routes are
+/// accepted; any other discriminator (token ledger, exact out, newer instructions) fails closed.
+const JUP_ROUTE: [u8; 8] = [229, 23, 203, 151, 122, 227, 173, 42];
+const JUP_SHARED_ACCOUNTS_ROUTE: [u8; 8] = [193, 32, 155, 51, 65, 214, 156, 129];
+const JUP_ROUTE_WITH_TOKEN_LEDGER: [u8; 8] = [150, 86, 71, 116, 167, 93, 14, 104];
+const JUP_SHARED_ROUTE_WITH_TOKEN_LEDGER: [u8; 8] = [230, 121, 143, 80, 119, 159, 106, 170];
+const JUP_SHARED_EXACT_OUT_ROUTE: [u8; 8] = [176, 209, 105, 168, 154, 125, 69, 62];
+
+/// What the signed swap instruction itself enforces (FE-02: the repay floor from its bytes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SwapTerms {
+    pub(crate) in_amount: u64,
+    pub(crate) quoted_out: u64,
+    pub(crate) slippage_bps: u16,
+    /// `quoted_out − ceil(quoted_out · slippage / 10⁴)`: the lowest output any rounding of the
+    /// program's slippage check accepts.
+    pub(crate) minimum_out: u64,
+}
+
+/// FE-02/E2: decodes the ExactIn route instruction. Its arguments end in the fixed-size
+/// `in_amount u64, quoted_out_amount u64, slippage_bps u16, platform_fee_bps u8` (Borsh is
+/// sequential, so this tail is exact without parsing the route plan). The route moves the taker's
+/// own `from_mint` account into its own `to_mint` account; a platform fee is refused.
+pub(crate) fn swap_terms(
+    ix: &Instruction,
+    taker: &Pubkey,
+    from_mint: &Pubkey,
+    to_mint: &Pubkey,
+) -> Result<SwapTerms, String> {
+    let jup = Pubkey::from_str(JUP_PROGRAM).map_err(|e| e.to_string())?;
+    if ix.program_id != jup {
+        return Err("SWAP_PROGRAM_MISMATCH".into());
+    }
+    let d = &ix.data;
+    let disc: [u8; 8] = d
+        .get(..8)
+        .and_then(|s| s.try_into().ok())
+        .ok_or("SWAP_DATA_SHORT")?;
+    // (bytes before the route plan, authority, source, destination, source mint, dest. mint)
+    let (prefix, authority, source, destination, source_mint, destination_mint) = match disc {
+        JUP_ROUTE => (8, 1, 2, 3, None, 5),
+        JUP_SHARED_ACCOUNTS_ROUTE => (9, 2, 3, 6, Some(7), 8),
+        JUP_ROUTE_WITH_TOKEN_LEDGER
+        | JUP_SHARED_ROUTE_WITH_TOKEN_LEDGER
+        | JUP_SHARED_EXACT_OUT_ROUTE => return Err("SWAP_INSTRUCTION_NOT_EXACT_IN".into()),
+        other => {
+            return Err(format!(
+                "SWAP_INSTRUCTION_UNPINNED: {}",
+                other.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            ))
+        }
+    };
+    if d.len() < prefix + 4 + 19 {
+        return Err("SWAP_DATA_SHORT".into());
+    }
+    let t = &d[d.len() - 19..];
+    let u64_at = |i: usize| u64::from_le_bytes(t[i..i + 8].try_into().expect("8 bytes"));
+    let (in_amount, quoted_out) = (u64_at(0), u64_at(8));
+    let slippage_bps = u16::from_le_bytes([t[16], t[17]]);
+    if t[18] != 0 {
+        return Err(format!("SWAP_PLATFORM_FEE_NONZERO: {} bps", t[18]));
+    }
+    if slippage_bps > 10_000 || quoted_out == 0 {
+        return Err(format!(
+            "SWAP_TERMS_INVALID: slippage_bps={slippage_bps} quoted_out={quoted_out}"
+        ));
+    }
+    let cut = (u128::from(quoted_out) * u128::from(slippage_bps)).div_ceil(10_000);
+    let minimum_out = quoted_out - u64::try_from(cut).map_err(|_| "SWAP_TERMS_INVALID")?;
+    let key = |i: usize| {
+        ix.accounts
+            .get(i)
+            .ok_or_else(|| "SWAP_ACCOUNTS_SHORT".to_string())
+    };
+    let token = Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID)
+        .map_err(|e| e.to_string())?;
+    let token_2022 = Pubkey::from_str(darkbot_project0::protocol::TOKEN_2022_PROGRAM_ID)
+        .map_err(|e| e.to_string())?;
+    let own_ata = |addr: &Pubkey, mint: &Pubkey| {
+        [token, token_2022]
+            .iter()
+            .any(|p| get_associated_token_address_with_program_id(taker, mint, p) == *addr)
+    };
+    let a = key(authority)?;
+    if a.pubkey != *taker || !a.is_signer {
+        return Err("SWAP_AUTHORITY_NOT_TAKER".into());
+    }
+    if !own_ata(&key(source)?.pubkey, from_mint) {
+        return Err("SWAP_SOURCE_NOT_OWN_ATA".into());
+    }
+    if !own_ata(&key(destination)?.pubkey, to_mint) {
+        return Err("SWAP_DESTINATION_NOT_OWN_ATA".into());
+    }
+    if disc == JUP_ROUTE {
+        // The optional final destination: absent (program id) or the taker's own account.
+        let out = key(4)?.pubkey;
+        if out != jup && !own_ata(&out, to_mint) {
+            return Err("SWAP_DESTINATION_NOT_OWN_ATA".into());
+        }
+    }
+    if source_mint.is_some_and(|i| key(i).map(|k| k.pubkey) != Ok(*from_mint))
+        || key(destination_mint)?.pubkey != *to_mint
+    {
+        return Err("SWAP_MINT_MISMATCH".into());
+    }
+    Ok(SwapTerms {
+        in_amount,
+        quoted_out,
+        slippage_bps,
+        minimum_out,
+    })
+}
+
 #[derive(Clone)]
 pub struct JupiterV2RouteProvider {
     client: reqwest::blocking::Client,
@@ -190,7 +305,27 @@ impl JupiterV2RouteProvider {
             }
             instructions.push(ix);
         }
-        instructions.push(to_instruction(&build.swap_instruction)?);
+        // FE-02/E2: the floor the signed swap instruction enforces, from its own bytes; the
+        // provider's `otherAmountThreshold` may only be lower (never an overstatement).
+        let swap = to_instruction(&build.swap_instruction)?;
+        let terms = swap_terms(&swap, &self.taker, from_mint, to_mint)?;
+        if terms.in_amount != in_amount || terms.quoted_out != quoted_out {
+            return Err(format!(
+                "SWAP_TERMS_MISMATCH: instruction in={} out={} response in={in_amount} out={quoted_out}",
+                terms.in_amount, terms.quoted_out
+            ));
+        }
+        let minimum_executable_out = match minimum_executable_out {
+            Some(json) if json > terms.minimum_out => {
+                return Err(format!(
+                    "SWAP_FLOOR_MISMATCH: response threshold {json} > instruction floor {}",
+                    terms.minimum_out
+                ))
+            }
+            Some(json) => Some(json),
+            None => Some(terms.minimum_out),
+        };
+        instructions.push(swap);
         if let Some(ix) = &build.cleanup_instruction {
             instructions.push(to_instruction(ix)?);
         }
@@ -221,6 +356,7 @@ impl JupiterV2RouteProvider {
             amount_in: in_amount,
             quoted_out,
             minimum_executable_out,
+            enforced_slippage_bps: Some(terms.slippage_bps),
         }))
     }
 }
@@ -564,6 +700,268 @@ mod tests {
         assert!(parse_build_amounts(10, "10", "1000", Some(&json!("0"))).is_err());
         // input mismatch still rejected
         assert!(parse_build_amounts(11, "10", "1000", Some(&json!("950"))).is_err());
+    }
+
+    /// A synthetic (not recorded) Jupiter ExactIn route instruction in the pinned layout.
+    fn swap_ix(
+        disc: [u8; 8],
+        taker: &Pubkey,
+        from: &Pubkey,
+        to: &Pubkey,
+        terms: (u64, u64, u16, u8),
+    ) -> Instruction {
+        let jup = Pubkey::from_str(JUP_PROGRAM).unwrap();
+        let token = Pubkey::from_str(darkbot_project0::protocol::TOKEN_PROGRAM_ID).unwrap();
+        let ata = |m: &Pubkey| get_associated_token_address_with_program_id(taker, m, &token);
+        let mut data = disc.to_vec();
+        let shared = disc == JUP_SHARED_ACCOUNTS_ROUTE;
+        if shared {
+            data.push(3);
+        }
+        // A one-step route plan (opaque to the decoder): length 1, a step body.
+        data.extend(1u32.to_le_bytes());
+        data.extend([7, 100, 0, 1]);
+        data.extend(terms.0.to_le_bytes());
+        data.extend(terms.1.to_le_bytes());
+        data.extend(terms.2.to_le_bytes());
+        data.push(terms.3);
+        let ro = AccountMeta::new_readonly;
+        let accounts = if shared {
+            vec![
+                ro(token, false),
+                ro(Pubkey::new_unique(), false),
+                ro(*taker, true),
+                AccountMeta::new(ata(from), false),
+                AccountMeta::new(Pubkey::new_unique(), false),
+                AccountMeta::new(Pubkey::new_unique(), false),
+                AccountMeta::new(ata(to), false),
+                ro(*from, false),
+                ro(*to, false),
+                ro(jup, false),
+                ro(jup, false),
+                ro(Pubkey::new_unique(), false),
+                ro(jup, false),
+            ]
+        } else {
+            vec![
+                ro(token, false),
+                ro(*taker, true),
+                AccountMeta::new(ata(from), false),
+                AccountMeta::new(ata(to), false),
+                ro(jup, false),
+                ro(*to, false),
+                ro(jup, false),
+                ro(Pubkey::new_unique(), false),
+                ro(jup, false),
+            ]
+        };
+        Instruction {
+            program_id: jup,
+            accounts,
+            data,
+        }
+    }
+
+    /// FE-02/E2: the floor and slippage come from the signed swap instruction's own bytes —
+    /// `quoted − ceil(quoted·slippage/10⁴)` — for both pinned ExactIn layouts; any other
+    /// instruction, a platform fee, a foreign authority/source/destination or a mint mismatch
+    /// fails closed with its code.
+    #[test]
+    fn fe02_swap_terms_come_from_the_signed_instruction() {
+        let (taker, from, to) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let terms = (500, 1_000_003, 50, 0);
+        let want = SwapTerms {
+            in_amount: 500,
+            quoted_out: 1_000_003,
+            slippage_bps: 50,
+            minimum_out: 995_002,
+        };
+        for disc in [JUP_ROUTE, JUP_SHARED_ACCOUNTS_ROUTE] {
+            let ix = swap_ix(disc, &taker, &from, &to, terms);
+            assert_eq!(swap_terms(&ix, &taker, &from, &to), Ok(want));
+            let err = |ix: &Instruction| swap_terms(ix, &taker, &from, &to).unwrap_err();
+            let mut fee = swap_ix(disc, &taker, &from, &to, (500, 1_000_003, 50, 10));
+            assert!(err(&fee).starts_with("SWAP_PLATFORM_FEE_NONZERO"));
+            fee.data.truncate(12);
+            assert_eq!(err(&fee), "SWAP_DATA_SHORT");
+            let other = Pubkey::new_unique();
+            assert_eq!(
+                swap_terms(&ix, &other, &from, &to).unwrap_err(),
+                "SWAP_AUTHORITY_NOT_TAKER"
+            );
+            assert_eq!(
+                swap_terms(&ix, &taker, &other, &to).unwrap_err(),
+                "SWAP_SOURCE_NOT_OWN_ATA"
+            );
+            assert_eq!(
+                swap_terms(&ix, &taker, &from, &other).unwrap_err(),
+                "SWAP_DESTINATION_NOT_OWN_ATA"
+            );
+            let mut unsigned = ix.clone();
+            unsigned
+                .accounts
+                .iter_mut()
+                .for_each(|a| a.is_signer = false);
+            assert_eq!(err(&unsigned), "SWAP_AUTHORITY_NOT_TAKER");
+            let mut foreign = ix.clone();
+            foreign.program_id = Pubkey::new_unique();
+            assert_eq!(err(&foreign), "SWAP_PROGRAM_MISMATCH");
+            let mint_at = if disc == JUP_ROUTE { 5 } else { 8 };
+            let mut mint = ix.clone();
+            mint.accounts[mint_at].pubkey = other;
+            assert_eq!(err(&mint), "SWAP_MINT_MISMATCH");
+        }
+        let mut redirected = swap_ix(JUP_ROUTE, &taker, &from, &to, terms);
+        redirected.accounts[4].pubkey = Pubkey::new_unique();
+        assert_eq!(
+            swap_terms(&redirected, &taker, &from, &to).unwrap_err(),
+            "SWAP_DESTINATION_NOT_OWN_ATA",
+            "the optional final destination is ours or absent"
+        );
+        for disc in [
+            JUP_ROUTE_WITH_TOKEN_LEDGER,
+            JUP_SHARED_ROUTE_WITH_TOKEN_LEDGER,
+            JUP_SHARED_EXACT_OUT_ROUTE,
+        ] {
+            let ix = swap_ix(disc, &taker, &from, &to, terms);
+            assert_eq!(
+                swap_terms(&ix, &taker, &from, &to).unwrap_err(),
+                "SWAP_INSTRUCTION_NOT_EXACT_IN"
+            );
+        }
+        let unknown = swap_ix([9; 8], &taker, &from, &to, terms);
+        assert_eq!(
+            swap_terms(&unknown, &taker, &from, &to).unwrap_err(),
+            "SWAP_INSTRUCTION_UNPINNED: 0909090909090909"
+        );
+        // The pinned discriminators are the Anchor hashes of the IDL names.
+        for (name, disc) in [
+            ("route", JUP_ROUTE),
+            ("shared_accounts_route", JUP_SHARED_ACCOUNTS_ROUTE),
+            ("route_with_token_ledger", JUP_ROUTE_WITH_TOKEN_LEDGER),
+            (
+                "shared_accounts_route_with_token_ledger",
+                JUP_SHARED_ROUTE_WITH_TOKEN_LEDGER,
+            ),
+            (
+                "shared_accounts_exact_out_route",
+                JUP_SHARED_EXACT_OUT_ROUTE,
+            ),
+        ] {
+            let h = solana_sdk::hash::hash(format!("global:{name}").as_bytes());
+            assert_eq!(h.to_bytes()[..8], disc, "{name}");
+        }
+    }
+
+    /// A loopback `/build` that answers every request with `body` (raw JSON, as Jupiter does).
+    fn serve_build(body: serde_json::Value) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let body = body.to_string();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) <= 2 {
+                        break;
+                    }
+                }
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        url
+    }
+
+    /// FE-02/E2 through the real adapter (loopback `/build`, synthetic response): the route's
+    /// floor is the instruction floor, or the provider threshold only when lower; a threshold
+    /// above the instruction floor and instruction amounts that differ from the response fail
+    /// closed; the enforced slippage is carried for the safety checks.
+    #[test]
+    fn fe02_build_floor_is_bound_to_the_swap_bytes() {
+        let (taker, from, to) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let api = |ix: &Instruction| ApiInstruction {
+            program_id: ix.program_id.to_string(),
+            accounts: ix
+                .accounts
+                .iter()
+                .map(|a| ApiAccount {
+                    pubkey: a.pubkey.to_string(),
+                    is_signer: a.is_signer,
+                    is_writable: a.is_writable,
+                })
+                .collect(),
+            data: base64::engine::general_purpose::STANDARD.encode(&ix.data),
+        };
+        let quote = |threshold: Option<&str>, ix: &Instruction| {
+            let a = api(ix);
+            let mut body = serde_json::json!({
+                "inAmount": "500", "outAmount": "1000003", "swapMode": "ExactIn",
+                "setupInstructions": [], "cleanupInstruction": null, "otherInstructions": [],
+                "addressesByLookupTableAddress": null,
+                "swapInstruction": {"programId": a.program_id, "data": a.data,
+                    "accounts": a.accounts.iter().map(|m| serde_json::json!({
+                        "pubkey": m.pubkey, "isSigner": m.is_signer, "isWritable": m.is_writable}))
+                        .collect::<Vec<_>>()},
+            });
+            if let Some(t) = threshold {
+                body["otherAmountThreshold"] = t.into();
+            }
+            let provider = JupiterV2RouteProvider::new(taker, None, 50, 64, false, false)
+                .unwrap()
+                .with_base_url(serve_build(body));
+            provider.exact_in(
+                &from,
+                &to,
+                500,
+                &[],
+                64,
+                Instant::now() + Duration::from_secs(5),
+            )
+        };
+        let ix = swap_ix(JUP_ROUTE, &taker, &from, &to, (500, 1_000_003, 50, 0));
+        let route = quote(None, &ix).unwrap().unwrap();
+        assert_eq!(
+            route.minimum_executable_out,
+            Some(995_002),
+            "from the bytes"
+        );
+        assert_eq!(route.enforced_slippage_bps, Some(50));
+        let route = quote(Some("990000"), &ix).unwrap().unwrap();
+        assert_eq!(
+            route.minimum_executable_out,
+            Some(990_000),
+            "a lower threshold"
+        );
+        assert!(quote(Some("995003"), &ix)
+            .unwrap_err()
+            .starts_with("SWAP_FLOOR_MISMATCH"));
+        let lying = swap_ix(JUP_ROUTE, &taker, &from, &to, (500, 2_000_000, 50, 0));
+        assert!(quote(Some("995002"), &lying)
+            .unwrap_err()
+            .starts_with("SWAP_TERMS_MISMATCH"));
+        let fake = Instruction {
+            data: vec![1],
+            ..ix.clone()
+        };
+        assert_eq!(quote(None, &fake).unwrap_err(), "SWAP_DATA_SHORT");
     }
 
     #[test]
