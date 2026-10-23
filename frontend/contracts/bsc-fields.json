@@ -125,7 +125,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -146,7 +146,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -167,7 +167,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -188,7 +188,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -209,7 +209,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -230,7 +230,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -251,7 +251,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -272,7 +272,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -293,7 +293,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "90260c6f63f748534bedb4c43063b779c210701be45801b6fa4e01e6b6f4a735",
+      "source_sha": "ab1e7ca9b7bdcf651dec76d07cec463ecdcdee9de77ff5029d8677d8058793be",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -1448,7 +1448,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "032a2248e7d1d1b17a0c42531f0a150e9a71d4607c0f6f9b40237a51f0a7e89d",
+      "source_sha": "5e3282c21cc3969aa216dd9f32c193d0a271efbc83921454ad32658ded013b6a",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -1469,7 +1469,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "032a2248e7d1d1b17a0c42531f0a150e9a71d4607c0f6f9b40237a51f0a7e89d",
+      "source_sha": "5e3282c21cc3969aa216dd9f32c193d0a271efbc83921454ad32658ded013b6a",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
@@ -1490,7 +1490,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "032a2248e7d1d1b17a0c42531f0a150e9a71d4607c0f6f9b40237a51f0a7e89d",
+      "source_sha": "5e3282c21cc3969aa216dd9f32c193d0a271efbc83921454ad32658ded013b6a",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts"
