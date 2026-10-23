@@ -150,6 +150,16 @@ fn git(project: &Path, args: &[&str]) -> Option<Vec<u8>> {
     out.status.success().then_some(out.stdout)
 }
 
+/// FE-04: the commit this project's binaries are built from — its HEAD, only while the project
+/// tree is clean (`status --porcelain -- .` empty); an approval's `code_sha` binds nothing else.
+pub fn clean_source_head(project: &Path) -> Option<String> {
+    let dirty = git(project, &["status", "--porcelain", "--", "."])?;
+    if !dirty.is_empty() {
+        return None;
+    }
+    git(project, &["rev-parse", "HEAD"]).map(|b| String::from_utf8_lossy(&b).trim().to_string())
+}
+
 /// Pinned discriminator table: six markers and four related instructions in fixed order.
 fn discriminator_table() -> Vec<u8> {
     let mut t = Vec::new();

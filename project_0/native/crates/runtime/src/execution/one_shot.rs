@@ -878,8 +878,22 @@ impl Journal {
     }
 }
 
-fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
-    if a.schema != 1
+impl Approval {
+    /// FE-04: the approval alone, before any intent — schema 1, authorized, its ids, keys,
+    /// funding class and bounds well formed, and not expired at `now_unix_s`.
+    pub fn check(&self, now_unix_s: u64) -> Result<(), String> {
+        if !well_formed(self) {
+            return Err(err("INVALID_OR_UNAUTHORIZED_APPROVAL"));
+        }
+        if now_unix_s >= self.expires_unix_s {
+            return Err(err("APPROVAL_EXPIRED"));
+        }
+        Ok(())
+    }
+}
+
+fn well_formed(a: &Approval) -> bool {
+    !(a.schema != 1
         || !a.authorized
         || a.approval_id.is_empty()
         || !hex(&a.code_sha, 40)
@@ -895,8 +909,11 @@ fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
         )
         || a.min_net_usd_micro == 0
         || a.max_state_age_ms == 0
-        || a.max_slippage_bps > 10_000
-    {
+        || a.max_slippage_bps > 10_000)
+}
+
+fn validate(a: &Approval, i: &Intent, c: &Current) -> Result<(), String> {
+    if !well_formed(a) {
         return Err(err("INVALID_OR_UNAUTHORIZED_APPROVAL"));
     }
     if (

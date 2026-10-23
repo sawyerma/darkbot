@@ -18,7 +18,16 @@
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
 //! p0ctl [--project DIR] source status
+//! p0ctl [--project DIR] approval show FILE
 //! ```
+//!
+//! `approval show` (FE-04) reads one versioned one-shot approval profile — an attempt
+//! (`Approval`) or an exit (`ExitApproval`), strict JSON authored by the operator — checks it
+//! alone (schema, authorization, ids, keys, bounds, expiry) and prints what it binds: wallet,
+//! program/deployment or mint/route, every maximum and the file's SHA-256, and whether its
+//! `code_sha` is this project's clean HEAD and its `binary_sha256` these binaries. It exits 0
+//! only when the profile is valid and both bindings MATCH. It changes nothing, reads no network
+//! and does not enable LIVE (FE-06 stays a separate explicit approval).
 //!
 //! `source set` (S1-02) records a typed source-control request and rings the running runtime;
 //! the state owner applies or refuses it (journal `source_control: applied|refused seq=N`). A
@@ -640,6 +649,124 @@ fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, Strin
     Err(format!("EXEC {script}: {e}"))
 }
 
+/// An approval profile is a small operator file; anything larger is not one.
+const APPROVAL_MAX_BYTES: u64 = 64 * 1024;
+
+/// FE-04 `approval show FILE`: see the module documentation.
+fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::execution::one_shot::{exit::ExitApproval, Approval};
+    let [show, file] = args else {
+        return Err("usage: p0ctl approval show FILE".into());
+    };
+    if show != "show" {
+        return Err("usage: p0ctl approval show FILE".into());
+    }
+    let path = Path::new(file);
+    if std::fs::metadata(path)
+        .map_err(|_| "APPROVAL_UNREADABLE")?
+        .len()
+        > APPROVAL_MAX_BYTES
+    {
+        return Err("APPROVAL_UNREADABLE: larger than 64 KiB".into());
+    }
+    let bytes = std::fs::read(path).map_err(|_| "APPROVAL_UNREADABLE")?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "WALL_CLOCK_UNAVAILABLE")?
+        .as_secs();
+    let attempt = serde_json::from_slice::<Approval>(&bytes);
+    let exit = serde_json::from_slice::<ExitApproval>(&bytes);
+    let mut lines: Vec<(String, String)> = Vec::new();
+    let mut put = |k: &str, v: String| lines.push((k.to_string(), v));
+    let (check, code_sha, binary_sha) = match (attempt, exit) {
+        (Ok(a), Err(_)) => {
+            put("approval", "attempt".into());
+            put("approval_id", a.approval_id.clone());
+            put("wallet", a.wallet.clone());
+            put("program", a.program.clone());
+            put("program_data_hash", a.program_data_hash.clone());
+            put("funding_class", a.funding_class.clone());
+            put(
+                "allowed_targets",
+                a.allowed_targets
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            put("max_capital_usd_micro", a.max_capital_usd_micro.to_string());
+            put(
+                "max_total_sol_debit_lamports",
+                a.max_total_sol_debit_lamports.to_string(),
+            );
+            put("max_tip_lamports", a.max_tip_lamports.to_string());
+            put("max_rent_lamports", a.max_rent_lamports.to_string());
+            put("max_loss_usd_micro", a.max_loss_usd_micro.to_string());
+            put("min_net_usd_micro", a.min_net_usd_micro.to_string());
+            put("max_slippage_bps", a.max_slippage_bps.to_string());
+            put("max_state_age_ms", a.max_state_age_ms.to_string());
+            put("expires_unix_s", a.expires_unix_s.to_string());
+            (a.check(now), a.code_sha, a.binary_sha256)
+        }
+        (Err(_), Ok(e)) => {
+            put("approval", "exit".into());
+            put("approval_id", e.approval_id.clone());
+            put("attempt_approval_id", e.attempt_approval_id.clone());
+            put("wallet", e.wallet.clone());
+            put("mint", e.mint.clone());
+            put("route_program", e.route_program.clone());
+            put("min_out_lamports", e.min_out_lamports.to_string());
+            put("max_fee_lamports", e.max_fee_lamports.to_string());
+            put("max_slippage_bps", e.max_slippage_bps.to_string());
+            put("max_state_age_ms", e.max_state_age_ms.to_string());
+            put("expires_unix_s", e.expires_unix_s.to_string());
+            (e.check(now), e.code_sha, e.binary_sha256)
+        }
+        _ => {
+            return Err(
+                "APPROVAL_UNREADABLE: neither an attempt nor an exit approval (schema 1)".into(),
+            )
+        }
+    };
+    let head = boot_audit::clean_source_head(project);
+    let binary = boot_audit::binary_identity().ok();
+    let binding = |approved: &str, this: Option<&str>, what: &str| match this {
+        Some(t) if t == approved => format!("{approved} MATCH"),
+        Some(t) => format!("{approved} MISMATCH (this {what}: {t})"),
+        None => format!("{approved} UNKNOWN (this {what}: not determinable)"),
+    };
+    put(
+        "code_sha",
+        binding(&code_sha, head.as_deref(), "project: clean HEAD"),
+    );
+    put(
+        "binary_sha256",
+        binding(&binary_sha, binary.as_deref(), "build: p0ctl+p0-longtail"),
+    );
+    put(
+        "file_sha256",
+        solana_sdk::hash::hash(&bytes)
+            .to_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    );
+    put(
+        "valid",
+        match &check {
+            Ok(()) => "yes".into(),
+            Err(code) => format!("no ({code})"),
+        },
+    );
+    put("live", "LOCKED (FE-06: separate explicit approval)".into());
+    for (k, v) in &lines {
+        println!("{k}: {v}");
+    }
+    Ok(check.is_ok()
+        && head.as_deref() == Some(&code_sha)
+        && binary.as_deref() == Some(&binary_sha))
+}
+
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let explicit = match args.iter().position(|a| a == "--project") {
@@ -664,7 +791,8 @@ fn main() -> ExitCode {
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture|source …".into()),
+            (Some("approval"), _) => approval_cmd(&project, &rest),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture|source|approval …".into()),
         }
     });
     match result {

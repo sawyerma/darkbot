@@ -228,20 +228,40 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
     }
 }
 
-/// The exit's approval, binding, position, freshness, evidence, budget and wallet checks.
-fn validate(s: &Saved, a: &ExitApproval, i: &ExitIntent, c: &Current) -> Result<(), String> {
-    if a.schema != 1
+impl ExitApproval {
+    /// FE-04: the exit approval alone, before any attempt or intent — schema 1, authorized, its
+    /// ids, keys and bounds well formed, and not expired at `now_unix_s`.
+    pub fn check(&self, now_unix_s: u64) -> Result<(), String> {
+        if !well_formed(self) {
+            return Err(err("INVALID_OR_UNAUTHORIZED_EXIT_APPROVAL"));
+        }
+        if now_unix_s >= self.expires_unix_s {
+            return Err(err("APPROVAL_EXPIRED"));
+        }
+        Ok(())
+    }
+}
+
+fn well_formed(a: &ExitApproval) -> bool {
+    !(a.schema != 1
         || !a.authorized
         || a.approval_id.is_empty()
-        || a.attempt_approval_id != s.approval.approval_id
-        || a.wallet != s.approval.wallet
+        || a.attempt_approval_id.is_empty()
+        || !key(&a.wallet)
         || !hex(&a.code_sha, 40)
         || !hex(&a.binary_sha256, 64)
         || !key(&a.mint)
         || !key(&a.route_program)
         || a.max_state_age_ms == 0
         || a.max_slippage_bps > 10_000
-        || a.min_out_lamports == 0
+        || a.min_out_lamports == 0)
+}
+
+/// The exit's approval, binding, position, freshness, evidence, budget and wallet checks.
+fn validate(s: &Saved, a: &ExitApproval, i: &ExitIntent, c: &Current) -> Result<(), String> {
+    if !well_formed(a)
+        || a.attempt_approval_id != s.approval.approval_id
+        || a.wallet != s.approval.wallet
     {
         return Err(err("INVALID_OR_UNAUTHORIZED_EXIT_APPROVAL"));
     }
