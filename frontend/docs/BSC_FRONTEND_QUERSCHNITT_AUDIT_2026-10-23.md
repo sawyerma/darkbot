@@ -59,7 +59,7 @@
 4. **Gate-Pairing + Statusfarben:** G0.7/G0.8 durchgängig auf identischen Attempt/Chain-Proof testen; exhaustive Status-Verditcs inklusive STOP_CAPTURE_INCOMPLETE/UNRESOLVED; fail-closed keine grünen Historical/Unknown.
 5. **Provenienz + Security:** alte Snapshots/Importe, auf keinen Fall Secret-/Salt-/Signed-TX-Bytes; Sanitizer-Negativtests, Cookie Secure bei TLS, non-loopback nur geprüft; F0-Source-SHA regenerieren und Abnahme belegen.
 6. **Verbindliche Regression:** Browser automatisch 10–30 s navigieren/Commands/BSC+P0 StartStop simulieren – null periodische Status-/Command-GETs, nur autorisierte POST/Session/GetById. Kein Polling, kein doppelter WebSocket, kein verlorenes Command-Outcomes, source detach/reconnect auch für neue Subscriber, Graphite alle Reiter.
-7. **Erst dann Basic/Advanced:** gleiche React-BSC-Panels und Graphite, nur Präsentationsstufe, kein zusätzlicher Gateway-Owner/Trading-Stack; BSC G0.7→G0.8 STOP-Regel unverändert.
+7. **Aktuelle Nutzerentscheidung ersetzt diesen historischen UI-Auftrag:** kein Basic/Advanced oder neuer Design-Freeze; nach sicherem Native→Wire-Push alle qualifizierten öffentlichen Felder gruppiert und zeilenweise in den bestehenden fünf Graphite-BSC-Panels anzeigen. Fachliche Abschnittsreihenfolge nur FRONTEND_PHASENPLAN §13. Kein zusätzlicher Gateway-Owner/Trading-Stack; BSC G0.7→G0.8 STOP-Regel unverändert.
 
 ## IV. Aussagegrenze
 
