@@ -4,6 +4,8 @@ Status: **ACTIVE AUTHORITATIVE ROADMAP**
 Updated: 2026-10-23 (v9.1 implementation/hardening addendum; v9 granular identity and v8 A/B preserved)
 
 
+**Permanent frontend-controls contract:** [BSC_FRONTEND_BINDINGS_V1.md](BSC_FRONTEND_BINDINGS_V1.md) binds the UI slots, planned backend fields, phases, modes, and reuse policy for v8/v9/v9.1 and later C1–KB. Build only one UI slot per function now; on phase activation connect real native status/commands to that slot, never redesign or duplicate. Current absent backend values remain UNKNOWN/disabled; no fake LIVE capability or economic send. This is an offline frontend-only implementation exception under the existing v8 approval.
+
 ## BINDING v9.1 IMPLEMENTATION/HARDENING AMENDMENT — 2026-10-23: verified findings and executable order
 
 **Authority and scope:** This narrow implementation addendum supplements v8/v9 and the original Gate-0 freezes. It is NOT the rejected Fable v10 replacement, and permits neither a second trading engine nor a second economic attempt. The previously authorized offline/shadow A/B frontend exception remains valid. No C1/C2, foreign AUTO LIVE, broader GUI work, arming, nonce burn, funding, signing or sending is authorized.

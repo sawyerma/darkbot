@@ -12,6 +12,7 @@ import { LaunchBuyPanel } from "./pages/LaunchBuyPanel";
 import { MonitoringPanel } from "./pages/MonitoringPanel";
 import { AnalyticsPanel } from "./pages/AnalyticsPanel";
 import { WalletsPanel } from "./pages/WalletsPanel";
+import { ControlsPanel } from "./pages/ControlsPanel";
 
 /**
  * BSC Birth Entry – Feature-Komposition.
@@ -20,7 +21,7 @@ import { WalletsPanel } from "./pages/WalletsPanel";
  * - bsc.status ist über die Route gebunden (projectRegistry); Panels binden ihre Topics selbst.
  */
 
-export type BscTab = "overview" | "launch" | "monitoring" | "analytics" | "wallets";
+export type BscTab = "overview" | "launch" | "monitoring" | "analytics" | "wallets" | "controls";
 
 const TABS: ReadonlyArray<{ key: BscTab; label: string }> = [
   { key: "overview", label: "Overview" },
@@ -28,6 +29,7 @@ const TABS: ReadonlyArray<{ key: BscTab; label: string }> = [
   { key: "monitoring", label: "Monitoring" },
   { key: "analytics", label: "Analytics" },
   { key: "wallets", label: "Wallets" },
+  { key: "controls", label: "Controls · geplant" },
 ];
 
 function toNotice(topicStatus: string): NoticeState {
@@ -72,6 +74,7 @@ export default function BscPage() {
       {tab === "monitoring" ? <MonitoringPanel /> : null}
       {tab === "analytics" ? <AnalyticsPanel /> : null}
       {tab === "wallets" ? <WalletsPanel /> : null}
+      {tab === "controls" ? <ControlsPanel /> : null}
     </GraphiteShell>
   );
 }
