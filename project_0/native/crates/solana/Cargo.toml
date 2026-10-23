@@ -49,6 +49,8 @@ serde_json = "1"
 base64 = "0.22"
 bs58 = "0.5"
 bincode = "1"   # VERIFY: Wire-Format-Serialisierung der VersionedTransaction
+# S1-02: native Yellowstone protobuf decoding (already in the graph; no gRPC/transport crate).
+prost = "=0.13.5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 # Canonical v1 wincode requires this compatible minor; SDK-3 accepts ^3.0.0.

@@ -4,6 +4,7 @@
 //! Beide Adapter-Klassen (WsRpcControlSource jetzt, GeyserSource später bei
 //! `S1-RACE`) liefern dasselbe Event-Modell. Businesslogik sieht nur `IngressEvent`.
 
+pub mod geyser;
 pub mod ws_rpc;
 
 use std::sync::atomic::{AtomicBool, Ordering};
