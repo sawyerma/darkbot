@@ -149,6 +149,15 @@ class World:
             out.append((lines[0], lines[1:], env))
         return out
 
+    def outputs_holding(self, needle):
+        """Every evidence or SIGN output file whose bytes contain `needle`."""
+        hits = []
+        for tree in [self.root / "bsc/native/evidence", self.root / "bsc/.local/g06a_sign"]:
+            for path in tree.rglob("*") if tree.exists() else []:
+                if path.is_file() and needle.encode() in path.read_bytes():
+                    hits.append(path)
+        return hits
+
     def close(self):
         if self.secrets.exists():
             self.secrets.chmod(0o600)
@@ -212,6 +221,7 @@ class Prepare(unittest.TestCase):
         self.assertNotIn(B_SALT[2:], out.stdout + out.stderr)
         handed = [c for c in w.calls() if c[0] == "g06a_dry_handoff" and c[1][0] == "exec-salt"]
         self.assertEqual(len(handed), 2)
+        self.assertEqual(w.outputs_holding(B_SALT[2:]), [])
 
     def test_prepare_b_stops_on_a_wrong_selection_commitment_or_token(self):
         for scenario, message in [
@@ -332,6 +342,7 @@ class Sign(unittest.TestCase):
         requal = [c for c in calls if c[0] == "g06a_requal_check"][0]
         self.assertEqual(requal[1][-2:], ["--candidate", requal[1][0] + "/candidate.dbrec"])
         self.assertNotIn(B_SALT[2:], out.stdout + out.stderr)
+        self.assertEqual(w.outputs_holding(B_SALT[2:]), [])
 
     def test_sign_stops_on_h2_drift_a_stale_head_a_bad_handoff_or_a_requal_stop(self):
         cases = [

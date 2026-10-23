@@ -24,6 +24,8 @@ Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Porta
 
 2026-10-23 D5 (code, offline-tested): A parity pinned (signing source `transactions.rs` 2da8c1dd…, every frozen A evidence file against its SHA256SUMS, A salt = public keccak label sequence, requal A hashes = frozen DRY); `g07_candidate qualify` gives B a qualification only from its own run (DRY6); B rejects A hashes, the native cross-check and a wrong commitment (requal/v5/guard tests).
 
+2026-10-23 D6 (offline regression PASS, not an operational E2E): no g06a schema has a bytes field and no g06a evidence record on disk holds raw-transaction-sized hex (planted control detected); B salt in no PREPARE/SIGN output file; full regression execution 373/0, qualification 85/0, record 9/0, trading 178/0, journal 20/0, node 4/0, python 40/0, vitest 7/0, gateway 26/0, F0-VAR PASS. D1–D6 code complete; real-key SIGN = AWAITING_USER_AUTHORIZATION.
+
 The 2026-10-20 checkpoint below is historical.
 
 ## Current checkpoint — 2026-10-20: requalification PASS; code readiness OPEN
