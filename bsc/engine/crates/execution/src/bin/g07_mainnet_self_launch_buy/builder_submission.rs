@@ -75,8 +75,10 @@ pub(crate) fn wire_string(text: &str) -> String {
 }
 
 /// The 48Club `eth_sendBundle` body of a G0.7 bundle: integer expiry block
-/// and Unix-second expiry time, no merging, at the top of the block. A
-/// fixed template (keys in the documented order) with the fields patched in.
+/// and Unix-second expiry time, `noMerge` and `positionFirst` (documented
+/// only as "strictly order by priorityFee", not as top-of-block; placement
+/// is UNQUALIFIED). A fixed template (keys in the documented order) with the
+/// fields patched in.
 pub(crate) fn club48_bundle_body(
     request_id: &str,
     txs: [&str; 2],
