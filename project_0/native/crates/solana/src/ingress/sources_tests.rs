@@ -206,7 +206,7 @@ fn account(
 }
 
 /// Several sources at once: one canonical unit (a second is refused), every other unit only
-/// observes, OFF units and sensors are rejected; two different copies of the same write are a
+/// observes, OFF units and sensors get no stamp; two different copies of the same write are a
 /// conflict — also against the canonical unit, never resolved by arrival order; the lead of an
 /// observed source over the canonical one is measured.
 #[test]
@@ -225,19 +225,24 @@ fn arbiter_keeps_one_canonical_source_and_reports_conflicts() {
         SourceArbiter::new(&[wss.clone(), a.clone()]).err(),
         Some("ARBITER_SECOND_CANONICAL_SOURCE")
     );
-    let mut arb = SourceArbiter::new(&[a.clone(), b.clone(), off.clone()]).unwrap();
+    assert_eq!(
+        SourceArbiter::new(&[b.clone(), b.clone()]).err(),
+        Some("ARBITER_DUPLICATE_UNIT")
+    );
+    let mut arb = SourceArbiter::new(&[a.clone(), b.clone(), off.clone(), sensor.clone()]).unwrap();
+    let (sa, sb) = (arb.stamp(&a.unit).unwrap(), arb.stamp(&b.unit).unwrap());
     let k = Pubkey::new_unique();
     // b sees the write first (100 ns), the canonical a later (150 ns): b led by 50 ns.
     assert!(matches!(
-        arb.route(&b, account(SourceKind::Geyser, k, 5, Some(1), 10, 100)),
+        arb.route(&sb, account(SourceKind::Geyser, k, 5, Some(1), 10, 100)),
         Route::Observed(_)
     ));
     assert!(matches!(
-        arb.route(&a, account(SourceKind::Geyser, k, 5, Some(1), 10, 150)),
+        arb.route(&sa, account(SourceKind::Geyser, k, 5, Some(1), 10, 150)),
         Route::Canonical(_)
     ));
     assert_eq!(
-        arb.leads,
+        arb.leads.recent().copied().collect::<Vec<_>>(),
         [Lead {
             pubkey: k,
             slot: 5,
@@ -246,9 +251,9 @@ fn arbiter_keeps_one_canonical_source_and_reports_conflicts() {
     );
     // The canonical unit contradicting an observed copy of the same write: conflict, not applied.
     let k2 = Pubkey::new_unique();
-    arb.route(&b, account(SourceKind::Geyser, k2, 6, Some(2), 10, 1));
+    arb.route(&sb, account(SourceKind::Geyser, k2, 6, Some(2), 10, 1));
     assert_eq!(
-        arb.route(&a, account(SourceKind::Geyser, k2, 6, Some(2), 11, 2)),
+        arb.route(&sa, account(SourceKind::Geyser, k2, 6, Some(2), 11, 2)),
         Route::Conflict {
             pubkey: k2,
             slot: 6,
@@ -256,13 +261,17 @@ fn arbiter_keeps_one_canonical_source_and_reports_conflicts() {
         }
     );
     assert_eq!(arb.conflicts, 1);
+    assert_eq!(arb.stamp(&off.unit), Err("SOURCE_OFF"));
+    assert_eq!(arb.stamp(&sensor.unit), Err("SENSOR_NEVER_FEEDS_STATE"));
+    assert_eq!(arb.stamp(&geyser("unlisted")), Err("SOURCE_UNKNOWN"));
+    // A forged stamp of an OFF unit is still refused.
+    let forged = Stamp {
+        unit: off.unit.clone(),
+        generation: 1,
+    };
     assert_eq!(
-        arb.route(&off, account(SourceKind::Geyser, k, 7, Some(1), 1, 1)),
+        arb.route(&forged, account(SourceKind::Geyser, k, 7, Some(1), 1, 1)),
         Route::Rejected("SOURCE_OFF")
-    );
-    assert_eq!(
-        arb.route(&sensor, account(SourceKind::Geyser, k, 7, Some(1), 1, 1)),
-        Route::Rejected("SENSOR_NEVER_FEEDS_STATE")
     );
     // Without a qualified unit nothing is canonical: OBSERVE never feeds state.
     let mut observing = SourceArbiter::new(std::slice::from_ref(&b)).unwrap();
@@ -273,7 +282,203 @@ fn arbiter_keeps_one_canonical_source_and_reports_conflicts() {
         source: SourceKind::Geyser,
         t_rx_ns: 1,
     });
-    assert!(matches!(observing.route(&b, slot), Route::Observed(_)));
+    let sb = observing.stamp(&b.unit).unwrap();
+    assert!(matches!(observing.route(&sb, slot), Route::Observed(_)));
+    assert_eq!(observing.canonical(), None);
+}
+
+fn slot_event(slot: u64) -> IngressEvent {
+    IngressEvent::Slot(SlotUpdate {
+        slot,
+        parent: None,
+        status: SlotStatus::Processed,
+        source: SourceKind::Geyser,
+        t_rx_ns: 1,
+    })
+}
+
+/// A23-03: ACTIVE→OBSERVE revokes canonical authority at once — events queued under the old
+/// stamp are refused (counted), a new session only observes; ACTIVE→OFF the same, and OFF gets
+/// no stamp. Promotion OBSERVE→ACTIVE needs a new stamp too: queued observe events never
+/// become canonical retroactively.
+#[test]
+fn a23_03_mode_change_revokes_canonical_and_refuses_queued_events() {
+    let a = SourceControl::new(geyser("a"), OperatingMode::Active, qualified()).unwrap();
+    let observe = |q| SourceControl::new(geyser("a"), OperatingMode::Observe, q).unwrap();
+    let mut arb = SourceArbiter::new(std::slice::from_ref(&a)).unwrap();
+    let active = arb.stamp(&a.unit).unwrap();
+    assert!(matches!(
+        arb.route(&active, slot_event(1)),
+        Route::Canonical(_)
+    ));
+    assert_eq!(
+        arb.change(observe(qualified())),
+        Ok(Handoff::CanonicalRevoked {
+            unit: a.unit.clone()
+        })
+    );
+    assert_eq!(arb.canonical(), None);
+    assert_eq!(
+        arb.route(&active, slot_event(2)),
+        Route::Rejected("SOURCE_GENERATION_STALE")
+    );
+    let observing = arb.stamp(&a.unit).unwrap();
+    assert!(matches!(
+        arb.route(&observing, slot_event(3)),
+        Route::Observed(_)
+    ));
+    assert_eq!(
+        arb.change(a.clone()),
+        Ok(Handoff::CanonicalGranted {
+            unit: a.unit.clone()
+        })
+    );
+    assert_eq!(
+        arb.route(&observing, slot_event(4)),
+        Route::Rejected("SOURCE_GENERATION_STALE"),
+        "an observe-session event never becomes canonical"
+    );
+    let active = arb.stamp(&a.unit).unwrap();
+    assert!(matches!(
+        arb.route(&active, slot_event(5)),
+        Route::Canonical(_)
+    ));
+    let off = SourceControl::new(geyser("a"), OperatingMode::Off, Qualification::NotRun).unwrap();
+    assert_eq!(
+        arb.change(off),
+        Ok(Handoff::CanonicalRevoked {
+            unit: a.unit.clone()
+        })
+    );
+    assert_eq!(arb.stamp(&a.unit), Err("SOURCE_OFF"));
+    assert_eq!(
+        arb.route(&active, slot_event(6)),
+        Route::Rejected("SOURCE_GENERATION_STALE")
+    );
+    assert_eq!(arb.stale, 3);
+}
+
+/// A23-03: a revoked qualification (even if a caller keeps the mode ACTIVE) ends canonical
+/// authority; while one unit is canonical a second promotion is refused without any change
+/// (its stamps stay valid); after the revocation the other unit can take over. A reconnect
+/// under an unchanged control keeps its stamp (the owner's recovery handles it); a
+/// re-qualification is a change and refuses the old session.
+#[test]
+fn a23_03_revocation_parallel_sources_and_reconnect() {
+    let a = SourceControl::new(geyser("a"), OperatingMode::Active, qualified()).unwrap();
+    let b = SourceControl::new(geyser("b"), OperatingMode::Observe, Qualification::NotRun).unwrap();
+    let mut arb = SourceArbiter::new(&[a.clone(), b.clone()]).unwrap();
+    let (sa, sb) = (arb.stamp(&a.unit).unwrap(), arb.stamp(&b.unit).unwrap());
+    let b_active = SourceControl::new(geyser("b"), OperatingMode::Active, qualified()).unwrap();
+    assert_eq!(
+        arb.change(b_active.clone()),
+        Err("ARBITER_SECOND_CANONICAL_SOURCE")
+    );
+    assert_eq!(arb.control(&b.unit), Some(&b));
+    assert!(matches!(arb.route(&sb, slot_event(1)), Route::Observed(_)));
+    let reconnected = IngressEvent::Reconnected {
+        source: SourceKind::Geyser,
+        attempt: 2,
+        t_rx_ns: 1,
+    };
+    assert!(matches!(arb.route(&sa, reconnected), Route::Canonical(_)));
+    let revoked = SourceControl {
+        unit: a.unit.clone(),
+        mode: OperatingMode::Active,
+        qualification: Qualification::Blocked("QUALIFICATION_REVOKED"),
+    };
+    assert_eq!(
+        arb.change(revoked),
+        Ok(Handoff::CanonicalRevoked {
+            unit: a.unit.clone()
+        })
+    );
+    assert_eq!(
+        arb.route(&sa, slot_event(2)),
+        Route::Rejected("SOURCE_GENERATION_STALE")
+    );
+    let sa = arb.stamp(&a.unit).unwrap();
+    assert!(matches!(arb.route(&sa, slot_event(3)), Route::Observed(_)));
+    assert_eq!(
+        arb.change(b_active),
+        Ok(Handoff::CanonicalGranted {
+            unit: b.unit.clone()
+        })
+    );
+    let sb2 = arb.stamp(&b.unit).unwrap();
+    assert!(matches!(
+        arb.route(&sb2, slot_event(4)),
+        Route::Canonical(_)
+    ));
+    assert_eq!(
+        arb.route(&sb, slot_event(5)),
+        Route::Rejected("SOURCE_GENERATION_STALE")
+    );
+    assert_eq!(
+        arb.change(SourceControl::new(geyser("b"), OperatingMode::Active, qualified()).unwrap()),
+        Ok(Handoff::None)
+    );
+    assert_eq!(
+        arb.route(&sb2, slot_event(6)),
+        Route::Rejected("SOURCE_GENERATION_STALE")
+    );
+    assert_eq!(
+        arb.change(
+            SourceControl::new(geyser("x"), OperatingMode::Off, Qualification::NotRun).unwrap()
+        ),
+        Err("SOURCE_UNKNOWN")
+    );
+}
+
+/// A23-04: lead telemetry stays bounded far above its retention — the newest samples kept,
+/// every evicted one counted, every lead in the histograms; the histogram quantiles bound the
+/// exact quantiles of all samples from above within one bucket (≤ 12.5 %).
+#[test]
+fn a23_04_lead_telemetry_is_bounded_with_evicted_evidence() {
+    let a = SourceControl::new(geyser("a"), OperatingMode::Active, qualified()).unwrap();
+    let b = SourceControl::new(geyser("b"), OperatingMode::Observe, Qualification::NotRun).unwrap();
+    let mut arb = SourceArbiter::new(&[a.clone(), b.clone()]).unwrap();
+    let (sa, sb) = (arb.stamp(&a.unit).unwrap(), arb.stamp(&b.unit).unwrap());
+    let n = 3 * LEAD_RETENTION as u64;
+    let mut exact = Vec::new();
+    for i in 0..n {
+        let k = Pubkey::new_unique();
+        let lead = 1_000 + (i * 7_919) % 2_000_000;
+        exact.push(lead);
+        arb.route(&sb, account(SourceKind::Geyser, k, 5, Some(1), 10, 0));
+        arb.route(&sa, account(SourceKind::Geyser, k, 5, Some(1), 10, lead));
+    }
+    // One write the canonical unit saw first: the observed one is behind.
+    let k = Pubkey::new_unique();
+    arb.route(&sa, account(SourceKind::Geyser, k, 6, Some(1), 10, 0));
+    arb.route(&sb, account(SourceKind::Geyser, k, 6, Some(1), 10, 40));
+    let s = arb.leads.snapshot();
+    assert_eq!(arb.leads.recent().count(), LEAD_RETENTION);
+    assert_eq!(
+        (s.samples, s.evicted),
+        (n + 1, n + 1 - LEAD_RETENTION as u64)
+    );
+    assert_eq!((s.ahead_ns.count, s.behind_ns.count), (n, 1));
+    assert_eq!(s.behind_ns.max, Some(40));
+    assert_eq!(
+        arb.leads.recent().last().map(|l| l.lead_ns),
+        Some(-40),
+        "the newest sample is retained"
+    );
+    exact.sort_unstable();
+    for (q, got) in [
+        (0.50, s.ahead_ns.p50),
+        (0.95, s.ahead_ns.p95),
+        (0.99, s.ahead_ns.p99),
+    ] {
+        let want = exact[((q * n as f64).ceil() as usize).clamp(1, exact.len()) - 1];
+        let got = got.unwrap();
+        assert!(
+            got >= want && got <= want + want / 8 + 1,
+            "q{q}: {got} vs {want}"
+        );
+    }
+    assert_eq!(s.ahead_ns.max, exact.last().copied());
 }
 
 /// Health never hides a gap: a gap or reconnect stays visible through later data until an

@@ -396,6 +396,60 @@ pub struct Lead {
     pub lead_ns: i128,
 }
 
+/// A23-04: newest leads kept as samples; older ones stay in the counters and histograms.
+pub const LEAD_RETENTION: usize = 4_096;
+
+/// A23-04: bounded lead telemetry — fixed memory whatever the run length: the newest
+/// `LEAD_RETENTION` samples, every lead in two histograms (observed ahead / behind, ns), and the
+/// samples no longer retained counted, never silently lost.
+#[derive(Default)]
+pub struct LeadTelemetry {
+    recent: VecDeque<Lead>,
+    pub samples: u64,
+    /// Samples evicted from `recent` (still in the histograms).
+    pub evicted: u64,
+    ahead: darkbot_common::mt0::Hist,
+    behind: darkbot_common::mt0::Hist,
+}
+
+/// A typed snapshot of `LeadTelemetry` (quantiles are histogram upper bounds).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeadSnapshot {
+    pub samples: u64,
+    pub evicted: u64,
+    pub ahead_ns: darkbot_common::mt0::HistSnapshot,
+    pub behind_ns: darkbot_common::mt0::HistSnapshot,
+}
+
+impl LeadTelemetry {
+    fn record(&mut self, lead: Lead) {
+        self.samples += 1;
+        let ns = u64::try_from(lead.lead_ns.unsigned_abs()).unwrap_or(u64::MAX);
+        if lead.lead_ns >= 0 {
+            self.ahead.record(ns);
+        } else {
+            self.behind.record(ns);
+        }
+        if self.recent.len() == LEAD_RETENTION {
+            self.recent.pop_front();
+            self.evicted += 1;
+        }
+        self.recent.push_back(lead);
+    }
+    /// The retained samples, oldest first.
+    pub fn recent(&self) -> impl Iterator<Item = &Lead> {
+        self.recent.iter()
+    }
+    pub fn snapshot(&self) -> LeadSnapshot {
+        LeadSnapshot {
+            samples: self.samples,
+            evicted: self.evicted,
+            ahead_ns: self.ahead.snapshot(),
+            behind_ns: self.behind.snapshot(),
+        }
+    }
+}
+
 const RECENT_WRITES: usize = 65_536;
 
 /// One account write: (pubkey, slot, write version).
@@ -403,40 +457,135 @@ type WriteId = (Pubkey, u64, u64);
 /// Its first copy: the unit, the content digest and its T_rx.
 type FirstCopy = (SourceUnit, [u8; 32], u64);
 
+/// A23-03: what a session of a unit was admitted under. Events carry it to the arbiter; a
+/// control change of the unit bumps its generation, so events stamped before (queued, in
+/// flight, of the replaced session) are refused, never routed under the new control.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stamp {
+    pub unit: SourceUnit,
+    pub generation: u64,
+}
+
+/// A23-03: the canonical consequence of a control change, for the owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Handoff {
+    /// The canonical unit is unchanged.
+    None,
+    /// `unit` lost canonical authority (ACTIVE→OBSERVE/OFF, qualification revoked): no unit is
+    /// canonical; the owner treats the state as a gap until a recovery from a canonical source.
+    CanonicalRevoked { unit: SourceUnit },
+    /// `unit` became canonical: its events count only under a new stamp, after a recovery.
+    CanonicalGranted { unit: SourceUnit },
+}
+
 /// Routes the events of several units: at most one canonical unit; every other unit observes.
+/// The arbiter holds the controls; a change is applied here atomically or not at all.
 pub struct SourceArbiter {
+    controls: HashMap<SourceUnit, (SourceControl, u64)>,
     canonical: Option<SourceUnit>,
     /// (pubkey, slot, write version) → (unit, digest, t_rx) of its first copy.
     writes: HashMap<WriteId, FirstCopy>,
     order: VecDeque<WriteId>,
     pub conflicts: u64,
-    pub leads: Vec<Lead>,
+    /// Events refused for a stale stamp or an unknown unit (A23-03).
+    pub stale: u64,
+    pub leads: LeadTelemetry,
 }
 
 impl SourceArbiter {
-    /// The arbiter of these controls: refuses a second canonical unit.
+    /// The arbiter of these controls (generation 1 each): refuses a second canonical unit and a
+    /// unit listed twice.
     pub fn new(controls: &[SourceControl]) -> Result<Self, &'static str> {
         let mut canonical = controls.iter().filter(|c| c.feeds_canonical_state());
         let first = canonical.next().map(|c| c.unit.clone());
         if canonical.next().is_some() {
             return Err("ARBITER_SECOND_CANONICAL_SOURCE");
         }
+        let mut map = HashMap::new();
+        for c in controls {
+            if map.insert(c.unit.clone(), (c.clone(), 1)).is_some() {
+                return Err("ARBITER_DUPLICATE_UNIT");
+            }
+        }
         Ok(Self {
+            controls: map,
             canonical: first,
             writes: HashMap::new(),
             order: VecDeque::new(),
             conflicts: 0,
-            leads: Vec::new(),
+            stale: 0,
+            leads: LeadTelemetry::default(),
         })
     }
 
-    pub fn route(&mut self, from: &SourceControl, ev: IngressEvent) -> Route {
-        if !from.may_connect() {
+    pub fn control(&self, unit: &SourceUnit) -> Option<&SourceControl> {
+        self.controls.get(unit).map(|(c, _)| c)
+    }
+
+    pub fn canonical(&self) -> Option<&SourceUnit> {
+        self.canonical.as_ref()
+    }
+
+    /// The stamp a new session of `unit` runs under; OFF, a sensor and an unknown unit get none.
+    pub fn stamp(&self, unit: &SourceUnit) -> Result<Stamp, &'static str> {
+        let (control, generation) = self.controls.get(unit).ok_or("SOURCE_UNKNOWN")?;
+        if !control.may_connect() {
+            return Err("SOURCE_OFF");
+        }
+        if control.unit.role() == SourceRole::PreExecutionSensor {
+            return Err("SENSOR_NEVER_FEEDS_STATE");
+        }
+        Ok(Stamp {
+            unit: unit.clone(),
+            generation: *generation,
+        })
+    }
+
+    /// Applies one unit's new control atomically: mode, qualification and generation change
+    /// together, or (second canonical unit, unknown unit) nothing changes.
+    pub fn change(&mut self, next: SourceControl) -> Result<Handoff, &'static str> {
+        let unit = next.unit.clone();
+        if !self.controls.contains_key(&unit) {
+            return Err("SOURCE_UNKNOWN");
+        }
+        let was = self.canonical.as_ref() == Some(&unit);
+        let feeds = next.feeds_canonical_state();
+        if feeds && self.canonical.as_ref().is_some_and(|c| *c != unit) {
+            return Err("ARBITER_SECOND_CANONICAL_SOURCE");
+        }
+        let entry = self.controls.get_mut(&unit).ok_or("SOURCE_UNKNOWN")?;
+        *entry = (next, entry.1 + 1);
+        Ok(match (was, feeds) {
+            (true, false) => {
+                self.canonical = None;
+                Handoff::CanonicalRevoked { unit }
+            }
+            (false, true) => {
+                self.canonical = Some(unit.clone());
+                Handoff::CanonicalGranted { unit }
+            }
+            _ => Handoff::None,
+        })
+    }
+
+    pub fn route(&mut self, stamp: &Stamp, ev: IngressEvent) -> Route {
+        let Some((control, generation)) = self.controls.get(&stamp.unit) else {
+            self.stale += 1;
+            return Route::Rejected("SOURCE_UNKNOWN");
+        };
+        if *generation != stamp.generation {
+            self.stale += 1;
+            return Route::Rejected("SOURCE_GENERATION_STALE");
+        }
+        if !control.may_connect() {
             return Route::Rejected("SOURCE_OFF");
         }
-        if from.unit.role() == SourceRole::PreExecutionSensor {
+        if control.unit.role() == SourceRole::PreExecutionSensor {
             return Route::Rejected("SENSOR_NEVER_FEEDS_STATE");
         }
+        // Canonical only while the unit's current control feeds canonical state.
+        let canonical =
+            self.canonical.as_ref() == Some(&stamp.unit) && control.feeds_canonical_state();
         if let IngressEvent::Account(a) = &ev {
             if let Some(wv) = a.write_version {
                 let digest = solana_sdk::hash::hashv(&[
@@ -447,7 +596,7 @@ impl SourceArbiter {
                 .to_bytes();
                 let id = (a.pubkey, a.slot, wv);
                 match self.writes.get(&id) {
-                    Some((unit, seen, _)) if *seen != digest && *unit != from.unit => {
+                    Some((unit, seen, _)) if *seen != digest && *unit != stamp.unit => {
                         self.conflicts += 1;
                         return Route::Conflict {
                             pubkey: a.pubkey,
@@ -455,11 +604,11 @@ impl SourceArbiter {
                             write_version: wv,
                         };
                     }
-                    Some((unit, _, t)) if *unit != from.unit => {
+                    Some((unit, _, t)) if *unit != stamp.unit => {
                         let canonical_first = Some(unit) == self.canonical.as_ref();
-                        if canonical_first || Some(&from.unit) == self.canonical.as_ref() {
+                        if canonical_first || canonical {
                             let lead = i128::from(a.t_rx_ns) - i128::from(*t);
-                            self.leads.push(Lead {
+                            self.leads.record(Lead {
                                 pubkey: a.pubkey,
                                 slot: a.slot,
                                 lead_ns: if canonical_first { -lead } else { lead },
@@ -469,7 +618,7 @@ impl SourceArbiter {
                     Some(_) => {}
                     None => {
                         self.writes
-                            .insert(id, (from.unit.clone(), digest, a.t_rx_ns));
+                            .insert(id, (stamp.unit.clone(), digest, a.t_rx_ns));
                         self.order.push_back(id);
                         if self.order.len() > RECENT_WRITES {
                             if let Some(old) = self.order.pop_front() {
@@ -480,7 +629,7 @@ impl SourceArbiter {
                 }
             }
         }
-        if Some(&from.unit) == self.canonical.as_ref() {
+        if canonical {
             Route::Canonical(ev)
         } else {
             Route::Observed(ev)
