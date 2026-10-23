@@ -794,6 +794,8 @@ If Gate 0 returns STOP for both Four.meme and Flap, the BSC Birth-Sniping produc
 If one venue passes, production work proceeds only for the proven venue first. The second venue may remain ADAPT/STOP until separately proven.
 
 
+**BSC-Frontend-Design-Schnittstelle (2026-10-24, keine wirtschaftliche Phasenänderung):** Die neue klickbare, noch **nicht freigegebene** Basic-/Advanced-Vorlage ist [`frontend/design/reference/bsc_graphite_v9_2_basic_advanced_review.html`](../../../frontend/design/reference/bsc_graphite_v9_2_basic_advanced_review.html). Sie zeigt fünf bestehende BSC-Reiter in einer gemeinsamen responsiven Graphite-Struktur, keine zusätzliche Engine, keinen zweiten Runtime-Owner und keine wirtschaftliche Autorisierung. F0-Native-/Protobuf-Inventur und technische Korrekturen bleiben von visueller Abnahme getrennt; die UI-Pakete 2–5 setzen einen explizit freigegebenen BSC-Design-Fixpunkt voraus. Der bisherige P0-Design-Freeze bleibt unangetastet. Gate 0 und Produktionsfolge unverändert.
+
 ## Verbindliche BSC-Frontend-Verdrahtung und Phasen-Handoff (2026-10-23)
 
 **Referenz:** `frontend/docs/BSC_FRONTEND_BINDINGS_V1.md` (A/B/C/D-Feldinventur, G1–G23, fünf Panels) und `frontend/docs/FRONTEND_PHASENPLAN.md`. **Keine zweite Architektur:** vorhandene React/Vite-App, `frontend/src/features/bsc/`, Graphite, Gateway, `control/v1` + `bsc/v1`-Protobuf, native `qualification/src/status/projection.rs` und bestehender BSC-Rust-Core sind die einzigen Owner. Frontend-Komponenten dürfen Native-Safety, Quotes, Signaturen und wirtschaftliche Admission nicht nachbilden. Fehlende Felder als `SOLL_MISSING` dokumentieren; keine simulierte LIVE-Bereitschaft.
