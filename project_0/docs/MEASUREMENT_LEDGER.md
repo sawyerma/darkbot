@@ -5916,3 +5916,11 @@ Commits `263624a0`, `d850d478`.
 - FE-02 end to end through the real Jupiter/RPC adapters on loopback (synthetic `/build`): ZERO_PREFUND selected and simulated PASS with a linked record; Known but negative when it pays the record rent.
 - C12/C3: Intent schema 3 (`last_valid_block_height`; pinned schema-2 bytes 1108 B still read, schema 3 1117 B), block-height non-landing proof, `settle_step`, conservative valuation; 10 mutations fail-before.
 - NOT_RUN: real RPC history/archive behaviour, Mainnet, LIVE.
+
+## 2026-10-23 — C3 FE-04 settlement in the running owner (LOCAL_PASS offline)
+
+Commit `122e7e9c`.
+
+- Gate on `122e7e9c` (exit 0 each): 778/0/10, 776/0/10, runner 361/0/3 ×2, release, Python OK. 6 mutations fail-before.
+- Owner holds the FE-04 journal; settlement worker reads off the owner; Safety booked once (reserved capital released once, pre-restart finalized attempt books its day, settled attempt not again); UNKNOWN keeps holds, 10-s backoff.
+- NOT_RUN: real RPC settlement read, landed attempt with real token deltas, Mainnet, LIVE.
