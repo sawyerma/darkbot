@@ -358,3 +358,18 @@ Die Feld-/Control-Inventur A/B/C/D und G1–G23 wird **nicht reduziert oder dupl
 
 **Vertragskonsistenz:** Der historische Satz in §8 Nr. 5 („Old/stale Source-State wird mit SOURCE_DETACHED gezeigt“) wird hiermit ausdrücklich **korrigiert**: `STALE` = bestehende Quelle/Snapshot zu alt, `SOURCE_DETACHED` ausschließlich Gateway-/Publisher-Liveness-Nachweis. Das übergeordnete Wire V1.3 ist verbindlich und unverändert. UI darf periodische Browser-HTTP-GETs **nicht** als Teil einer F0-Abnahme akzeptieren, auch wenn sie heute im Code stehen. Kein vorzeitiger F0-VAR-`PASS`, sofern die AU-Positionen nicht tatsächlich behoben und getestet sind.
 
+## 14. F0-Feldmapping: konsolidierte bestätigte Befunde N1/N3/N4/N5 (2026-10-24)
+
+Dieser **untergeordnete** Feldnachtrag korrigiert die vorhandene §13-Referenz; §10 G1–G23 und die ursprünglichen 84/299-Census-Einträge bleiben Ausgangsbasis, **nicht automatisch vollständig**. Die kanonischen Inventare bleiben `frontend/contracts/bsc-fields.json` und `frontend/contracts/bsc-native-fields.json`. Für jedes neue/public Field zuerst Native-Source, Writer, Typ, Unit, Mode, Evidence, Candidate/Generation/Attempt/Chain, Source-SHA, Proto-Tag, Topic, TS-Decoder, Store, UI-Panel, Security/Golden feststellen. Erst danach aus fehlendem Projektionspfad `SOLL_MISSING` machen. F0-Status `IST_CONNECTED|IST_BUG|SOLL_MISSING|FUTURE_PHASE_BLOCKED`, keine zweite Registry oder Native-/Protobuf-Autorität.
+
+| Zusatz | Exakter IST aus Quellen | Minimaler F0/P1-Delta |
+|---|---|---|
+| **N1** | Protobuf-`GateStatus.state`/ `BscMonitoringState.state` sind Strings mit unvollständigen Kommentarvokabularen; G0.7 transportiert vollständige `classification`, G0.8 `PASS/ADAPT/STOP/UNRESOLVED` | Wire-Tags erhalten, realen Codekatalog dokumentieren, gültige Fach-Severity und TS/Golden-Erkennung ergänzen |
+| **N2 WIDERLEGT** | `projection.rs` startet `jobs=[]`, **aber `publisher.rs` hängt vor jedem StateFull `job(rundir,label)` an** | Vorhandenen Job-Push verwenden; nur fehlende Controller-Availability und Receipt-Source qualifiziert ergänzen |
+| **N3** | `publisher.rs::job` **und** `gateway/src/control.rs::observe_project` zählen `BLOCKED` nicht als regulären beendeten Run; Wrapper wirft Originalstatus weg | Getrennte `job.state`/ `readiness.verdict` und Launch-ID/Result-Evidence; negative Abschluss-/Failure-Tests |
+| **N4** | `candidateControl.ts::lookup` setzt `busy=false` auch bei `PENDING/PENDING_RECONCILE` | UI bis eindeutiger Source-Receipt-Entscheidung sperren; Native-CAS, `PENDING_DESKTOP_SYNC`, pending-request-Gate und Attempt-Lock erhalten |
+| **N5** | `readiness_job.py` gibt dem GUI-`--current-rpc`-Child den Public RPC, aber nicht die verpflichtenden `DARKBOT_G07_CLOCK_ID` / `DARKBOT_G07_BOOT_ID` | `CLOCK_CONFIG=BLOCKED` ehrlich darstellen, vertrauenswürdige Clock-/Boot-Kontextquelle prüfen; kein geerbtes Secret und keine erfundene Uhr |
+| **Receipt-Owner** | Aktuell persistiert Gateway `commands/<request_id>.json`, Wire V1.3 sieht dauerhafte fachliche Receipt-Autorität beim Native-Owner vor | IST-SOLL-Ownership/Idempotenz/Reconciliation vor zusätzlichem STATE/Proto festlegen, keine zweite Command-Plane |
+
+Beide UI-Dichten erhalten dieselben F0-Daten, identische Safety-Wahrheit und keinen zusätzlichen Subscribe- oder Command-Owner. `PASS_READ_ONLY` ist kein LIVE; Source-Transport-LIVE ist keine wirtschaftliche Freigabe. Für Pakete und Tests ausschließlich [ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md §E](ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md) verwenden.
+
