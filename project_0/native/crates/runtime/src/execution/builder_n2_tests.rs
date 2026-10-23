@@ -21,6 +21,8 @@ struct Endpoint {
 enum Answer {
     /// `200` with this JSON-RPC `result`.
     Result(serde_json::Value),
+    /// `200` with this raw JSON body (a REST answer such as Jupiter `/build`).
+    Raw(serde_json::Value),
     /// `200` with this JSON-RPC `error` object.
     Error(serde_json::Value),
     /// A status code with an empty body.
@@ -81,8 +83,9 @@ impl Endpoint {
                             return;
                         }
                         let path = request_line.split(' ').nth(1).unwrap_or("").to_string();
+                        // A request without a JSON body (a REST GET) records its path and query.
                         let json = serde_json::from_slice::<serde_json::Value>(&body)
-                            .unwrap_or(serde_json::Value::Null);
+                            .unwrap_or_else(|_| serde_json::Value::String(path.clone()));
                         let kind = json["method"]
                             .as_str()
                             .map(str::to_string)
@@ -103,6 +106,17 @@ impl Endpoint {
                                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
                                     body.len(),
                                     body
+                                );
+                            }
+                            Answer::Raw(raw) => {
+                                let body = raw.to_string();
+                                let _ = stream.write_all(
+                                    format!(
+                                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                                        body.len(),
+                                        body
+                                    )
+                                    .as_bytes(),
                                 );
                             }
                             Answer::Error(error) => {
@@ -222,6 +236,19 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
     zero_prefund: bool,
     submitter: &S,
 ) -> (crate::analytics::record::OpportunityRecord, std::time::Duration) {
+    n2_evaluate_record(f, payer, routes, zero_prefund, submitter, Pubkey::default())
+}
+
+/// `n2_evaluate` of an account whose liquidation record is `record` (default: none, so the plan
+/// creates one and pays its rent).
+fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
+    f: &PlansFixture,
+    payer: &solana_sdk::signature::Keypair,
+    routes: &R,
+    zero_prefund: bool,
+    submitter: &S,
+    record: Pubkey,
+) -> (crate::analytics::record::OpportunityRecord, std::time::Duration) {
     use crate::execution::pipeline::{Mode, NetworkBudget, Pipeline};
     use darkbot_project0::{
         economics::FailedCostMatrix,
@@ -230,7 +257,7 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
         safety::{Allow, Limits, Safety},
     };
     use darkbot_solana::state::blockhash::{BlockhashCache, CachedBlockhash};
-    let src = f.state(Pubkey::default(), true);
+    let src = f.state(record, true);
     let clock = darkbot_common::timing::Clock::new();
     let bh = BlockhashCache::new();
     bh.set(CachedBlockhash {
@@ -250,7 +277,13 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
         max_outstanding_attempts: 0,
     };
     let mut safety = Safety::new(zero, Allow::default(), false);
-    let allow = Allowlist::default();
+    // As in the owner's setup: the pinned swap program is the one allowed swap program.
+    let mut allow = Allowlist::default();
+    allow.swap_programs.insert(
+        darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID
+            .parse()
+            .unwrap(),
+    );
     let failed = FailedCostMatrix::default();
     let slots = darkbot_solana::ingress::SlotWatch::new();
     let mut network = NetworkBudget::new(4, N2_DEADLINE.as_nanos() as u64);
@@ -293,6 +326,13 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
         state: &src,
         group: f.group,
     };
+    // The production top-level allowlist: the protocol and the pinned swap program.
+    let allowed = [
+        f.program,
+        darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID
+            .parse()
+            .unwrap(),
+    ];
     let mut p = Pipeline {
         mode: Mode::Shadow,
         clock: &clock,
@@ -318,7 +358,7 @@ fn n2_evaluate<R: RouteProvider, S: darkbot_solana::submit::SubmissionAdapter>(
             execution_deadline_ns: u64::MAX,
         },
         tip_account: None,
-        global_allowed: std::slice::from_ref(&f.program),
+        global_allowed: &allowed,
         prereq_allowed: &[],
         slot_watch: &slots,
         network: &mut network,
@@ -706,4 +746,93 @@ fn e9_projection_simulation_is_not_older_than_its_inputs() {
     for body in bodies {
         assert_eq!(body["params"][1]["minContextSlot"], 100, "{body}");
     }
+}
+
+/// FE-02 end to end on the production path: the fixture account's ZERO_PREFUND plan through the
+/// real Jupiter adapter (loopback `/build`, a synthetic response whose pinned ExactIn `route`
+/// instruction moves the liquidator's own accounts), the real builder and signed-message check,
+/// and fee quote plus simulation through the real RPC adapter (loopback), in Shadow. With a linked
+/// record (no rent) the selected class is ZERO_PREFUND, simulated PASS, its net realized at the
+/// instruction floor; the request carried the plan's exact mints, amount, taker and slippage.
+/// Without a record the same route pays the record rent and is Known but negative — no plan is
+/// actionable on a floor that does not cover every cost.
+#[test]
+fn fe02_zero_prefund_end_to_end_through_the_real_adapters() {
+    use base64::Engine;
+    let (f, payer) = n2_fixture();
+    let (asset_mint, liab_mint) = (f.banks[0].1, f.banks[1].1);
+    let jup: Pubkey = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID.parse().unwrap();
+    let ata = |m: &Pubkey| {
+        get_associated_token_address_with_program_id(&f.liquidator, m, &f.token_program)
+    };
+    // `route`: discriminator, a one-step plan, in 1 000, quoted 20 000, 50 bps, no platform fee.
+    let mut data = vec![229, 23, 203, 151, 122, 227, 173, 42];
+    data.extend(1u32.to_le_bytes());
+    data.extend([7, 100, 0, 1]);
+    data.extend(1_000u64.to_le_bytes());
+    data.extend(20_000u64.to_le_bytes());
+    data.extend(50u16.to_le_bytes());
+    data.push(0);
+    let acct = |k: &Pubkey, signer: bool, writable: bool| {
+        serde_json::json!({"pubkey": k.to_string(), "isSigner": signer, "isWritable": writable})
+    };
+    let build = serde_json::json!({
+        "inAmount": "1000", "outAmount": "20000", "otherAmountThreshold": "19900",
+        "swapMode": "ExactIn", "setupInstructions": [], "cleanupInstruction": null,
+        "otherInstructions": [], "addressesByLookupTableAddress": null,
+        "swapInstruction": {
+            "programId": jup.to_string(),
+            "data": base64::engine::general_purpose::STANDARD.encode(&data),
+            "accounts": [
+                acct(&f.token_program, false, false), acct(&f.liquidator, true, false),
+                acct(&ata(&asset_mint), false, true), acct(&ata(&liab_mint), false, true),
+                acct(&jup, false, false), acct(&liab_mint, false, false),
+                acct(&jup, false, false), acct(&Pubkey::new_unique(), false, false),
+                acct(&jup, false, false)]}});
+    let jupiter = Endpoint::start(move |_, _| Answer::Raw(build.clone()));
+    let rpc = Endpoint::start(|kind, _| match kind {
+        "getFeeForMessage" => fee_ok(),
+        "simulateTransaction" => simulation_ok(),
+        _ => Answer::Status(500),
+    });
+    let routes =
+        crate::execution::route::JupiterV2RouteProvider::new(f.liquidator, None, 50, 64, false, false)
+            .unwrap()
+            .with_base_url(jupiter.url.clone());
+    let submitter = rpc_submitter(&rpc.url, n2_budget(4));
+    let record = darkbot_project0::protocol::liquidation_record_pda(&f.program, &f.account);
+    let (rec, _) = n2_evaluate_record(&f, &payer, &routes, true, &submitter, record);
+    assert_eq!(rec.funding.as_deref(), Some("ZERO_PREFUND_SAME_TX"), "{:?}", rec.reason);
+    let zp = rec.selected_costs.as_ref().unwrap();
+    // The floor 19 900 realizes: 500 repaid at its value plus 19 400 surplus (low = equity here).
+    assert_eq!(zp.gross_seized_realizable_usd_micro, Some(19_900));
+    assert_eq!(rec.simulation_result.as_deref(), Some("PASS"), "{:?}", rec.reason);
+    assert!(rec.economics_known, "{:?}", rec.reason);
+    assert!(rec.serialized_bytes.is_some_and(|b| b <= 1232));
+    let requests = jupiter.bodies_of("/build");
+    assert_eq!(requests.len(), 1, "one quote");
+    let query = requests[0].as_str().unwrap();
+    for part in [
+        format!("inputMint={asset_mint}"),
+        format!("outputMint={liab_mint}"),
+        "amount=1000".to_string(),
+        format!("taker={}", f.liquidator),
+        "slippageBps=50".to_string(),
+    ] {
+        assert!(query.contains(&part), "{query} lacks {part}");
+    }
+    // One fee quote per distinct message (the two inventory plans share one, D2); only the
+    // selected candidate is simulated.
+    assert_eq!(rpc.arrivals_of("getFeeForMessage").len(), 2);
+    assert_eq!(rpc.arrivals_of("simulateTransaction").len(), 1);
+    // Without a linked record the plan creates one: the rent is bound, the floor does not cover
+    // it, the class is Known but negative and never the selected actionable candidate.
+    let (rec, _) = n2_evaluate(&f, &payer, &routes, true, &submitter);
+    let zp = rec
+        .candidate_costs
+        .iter()
+        .find(|c| c.funding == "ZERO_PREFUND_SAME_TX")
+        .expect("evaluated");
+    assert!(zp.net_profit_usd_micro.is_some_and(|n| n < 0), "{zp:?}");
+    assert_ne!(rec.funding.as_deref(), Some("ZERO_PREFUND_SAME_TX"));
 }
