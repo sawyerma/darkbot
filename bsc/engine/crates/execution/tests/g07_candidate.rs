@@ -257,7 +257,8 @@ fn the_candidate_sources_have_no_network_key_signing_or_send_path() {
             "SigningKey",
             "take_startup_keys",
             "_PRIVATE_KEY",
-            "DARKBOT_G07_SALT",
+            // The candidate code never reads the environment (no salt there).
+            "env::var(",
             "TcpStream",
             "Command::new",
             "submit_",

@@ -339,6 +339,9 @@ fn verify_input(label: &str, frozen: &InputHashes, runtime: &InputHashes) -> Res
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FurtherEvidence {
     pub local_simulation_sha256: String,
+    /// The bound local simulation's launch gas (intrinsic + execution): the
+    /// gas evidence for a secret-salt profile that never calls estimateGas.
+    pub local_launch_gas_used: u64,
     pub economics_sha256: String,
     pub portal_upgrade_sha256: String,
 }
@@ -467,8 +470,13 @@ pub fn verify_further_v4_evidence(
             "v4-bound Portal upgrade scan does not end at the preflight implementation".into(),
         );
     }
+    let local_launch_gas_used = match named(&sim, "launch_gas_used") {
+        Some(Value::U64(gas)) => *gas,
+        _ => return Err("v4-bound local simulation lacks launch_gas_used".into()),
+    };
     Ok(FurtherEvidence {
         local_simulation_sha256: sim_sha,
+        local_launch_gas_used,
         economics_sha256: econ_sha,
         portal_upgrade_sha256: up_sha,
     })

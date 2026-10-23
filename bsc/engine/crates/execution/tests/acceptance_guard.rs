@@ -463,6 +463,17 @@ fn the_guard_itself_binds_local_simulation_economics_and_portal_upgrade() {
         verified.local_simulation_sha256,
         sha256_hex(&std::fs::read(file("local_simulation.dbrec")).unwrap())
     );
+    let simulated = decode(
+        &g06a::local_simulation::NATIVE,
+        &std::fs::read(file("local_simulation.dbrec")).unwrap(),
+    )
+    .unwrap();
+    let gas = simulated
+        .fields()
+        .iter()
+        .find(|(t, _)| simulated.schema().field(*t).unwrap().name == "launch_gas_used")
+        .map(|(_, v)| v.clone());
+    assert_eq!(gas, Some(Value::U64(verified.local_launch_gas_used)));
     let cases: [(&str, u16, &'static Schema, &str, Value); 3] = [
         (
             "local_simulation.dbrec",

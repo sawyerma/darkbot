@@ -96,6 +96,11 @@ impl Salt {
         self.0
     }
 
+    /// The salt for the launch calldata the runner signs; never logged.
+    pub(crate) fn launch_word(&self) -> B256 {
+        self.0
+    }
+
     fn commitment(&self) -> B256 {
         let mut preimage = SALT_DOMAIN.to_vec();
         preimage.extend_from_slice(self.0.as_slice());
@@ -988,6 +993,40 @@ impl Store {
             "QUALIFIED_FOR {}",
             r.text(q::PORTAL_VERSION).map_err(|e| e.to_string())?
         )))
+    }
+}
+
+/// The runner's only salt source: the selected candidate, verified from the
+/// private store (salt re-derivation, ID, selection binding).
+pub(crate) fn selected_launch(dir: &Path) -> Result<(Candidate, Salt), String> {
+    let store = Store::existing(dir)?.ok_or("no G0.7 candidate state")?;
+    let selection = store.selection()?.ok_or("no G0.7 candidate selected")?;
+    let (candidate, salt) = store
+        .load(selection.profile)?
+        .ok_or("the selected candidate does not exist")?;
+    if candidate.id != selection.candidate_id {
+        return Err("the selection names another candidate".into());
+    }
+    Ok((candidate, salt))
+}
+
+/// `DARKBOT_G07_SALT` may only repeat A's public salt; B's salt never
+/// travels through the environment. Messages never contain a salt.
+pub(crate) fn check_env_salt(
+    candidate: &Candidate,
+    salt: &Salt,
+    env_salt: Option<&str>,
+) -> Result<(), String> {
+    match (candidate.profile, env_salt) {
+        (_, None) => Ok(()),
+        (Profile::B, Some(_)) => Err(
+            "DARKBOT_G07_SALT is refused for SELF_B: its salt never travels through the environment"
+                .into(),
+        ),
+        (Profile::A, Some(text)) => match text.trim().parse::<B256>() {
+            Ok(word) if word == salt.0 => Ok(()),
+            _ => Err("DARKBOT_G07_SALT differs from the selected SELF_A salt".into()),
+        },
     }
 }
 

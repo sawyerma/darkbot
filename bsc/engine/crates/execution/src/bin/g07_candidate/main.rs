@@ -825,6 +825,60 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn the_runner_takes_the_salt_only_from_the_selected_candidate() {
+        let root = private_dir("runner");
+        let dir = root.join("state");
+        let attempts = root.join("attempts");
+        assert!(
+            selected_launch(&dir)
+                .unwrap_err()
+                .contains("no G0.7 candidate state")
+        );
+        let store = Store::create(&dir).unwrap();
+        let (a, a_salt) = frozen();
+        let a_hex = format!("{}", a_salt.expose());
+        let a = store.init_a(a, a_salt).unwrap();
+        let (b, b_salt) = fresh_b(
+            &evidence("preflight.dbrec"),
+            &evidence("dry_result.dbrec"),
+            9,
+            &mut os_random,
+        )
+        .unwrap();
+        let b_hex = format!("{}", b_salt.expose());
+        store.create_b(b, b_salt).unwrap();
+        assert!(
+            selected_launch(&dir)
+                .unwrap_err()
+                .contains("no G0.7 candidate selected")
+        );
+        store
+            .select(Profile::A, 0, "UNARMED", &attempts, 1)
+            .unwrap();
+        let (on, salt) = selected_launch(&dir).unwrap();
+        assert_eq!((on.profile, on.id), (Profile::A, a.id));
+        // A's environment salt may only repeat it; B's is always refused.
+        assert!(check_env_salt(&on, &salt, None).is_ok());
+        assert!(check_env_salt(&on, &salt, Some(&a_hex)).is_ok());
+        assert!(
+            check_env_salt(&on, &salt, Some(&b_hex))
+                .unwrap_err()
+                .contains("differs")
+        );
+        store
+            .select(Profile::B, 1, "UNARMED", &attempts, 2)
+            .unwrap();
+        let (on_b, salt_b) = selected_launch(&dir).unwrap();
+        assert_eq!(on_b.profile, Profile::B);
+        for env in [Some(b_hex.as_str()), Some(a_hex.as_str())] {
+            let e = check_env_salt(&on_b, &salt_b, env).unwrap_err();
+            assert!(e.contains("refused") && !e.contains(&b_hex[2..]), "{e}");
+        }
+        assert!(check_env_salt(&on_b, &salt_b, None).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn c_edit(a: &Candidate, f: impl FnOnce(&mut Candidate)) -> Vec<u8> {
         let mut x = a.clone();
         f(&mut x);

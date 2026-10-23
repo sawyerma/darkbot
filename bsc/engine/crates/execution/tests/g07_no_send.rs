@@ -335,3 +335,24 @@ fn key_cleanup_precedes_every_external_or_concurrent_startup_boundary() {
         assert!(!prefix.replace("parse_rpc_endpoint", "parse_endpoint").replace("rpc_endpoint", "endpoint").contains(forbidden), "{forbidden}");
     }
 }
+
+#[test]
+fn a_secret_salt_profile_never_sends_launch_calldata_to_an_external_rpc() {
+    // v9.1 B2: the salt is the selected candidate's (never DARKBOT_G07_SALT
+    // as authority), and only SELF_A keeps the external estimateGas; SELF_B
+    // takes the v4-bound local simulation's gas instead.
+    assert!(!SOURCE.contains("req_env(\"DARKBOT_G07_SALT\")"));
+    assert!(SOURCE.contains("candidate::selected_launch("));
+    assert!(SOURCE.contains("candidate::check_env_salt("));
+    assert_eq!(SOURCE.matches("rpc_estimate_gas(").count(), 1);
+    let a_arm = pos("candidate::Profile::A => {");
+    let b_arm = pos("candidate::Profile::B =>");
+    let estimate = pos("rpc_estimate_gas(");
+    assert!(
+        a_arm < estimate && estimate < b_arm,
+        "estimateGas outside the SELF_A arm"
+    );
+    let b_end = SOURCE[b_arm..].find("};").unwrap() + b_arm;
+    assert!(SOURCE[b_arm..b_end].contains("verify_further_v4_evidence("));
+    assert!(!SOURCE[b_arm..b_end].contains("rpc_"));
+}

@@ -29,6 +29,11 @@ const MAX_BUILDER_IDLE: Duration = Duration::from_secs(5);
 const CAPTURE_APPEND_TIMEOUT: Duration = Duration::from_millis(50);
 
 mod builder_submission;
+// Shared with g07_candidate and readiness; the runner takes only the
+// selected, verified candidate and its salt from it.
+#[allow(dead_code)]
+#[path = "../g07_candidate/candidate.rs"]
+mod candidate;
 mod chain_reads;
 mod inputs;
 mod shared;
@@ -73,12 +78,14 @@ fn main() {
     assert_repository_root();
     let (producer_witness_contract, producer_witness_hashes) =
         validate_producer_witness_source(&producer_witness_contract_path, &attempt_id);
-    let producer_witness_proof = darkbot_bsc_execution::acceptance_guard::WitnessSourceProof::check(
-        &fs::read(&producer_witness_contract_path).expect("re-read the producer witness source"),
-        &attempt_id,
-        PRODUCER_WITNESS_SCHEMA_PATH,
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
+    let producer_witness_proof =
+        darkbot_bsc_execution::acceptance_guard::WitnessSourceProof::check(
+            &fs::read(&producer_witness_contract_path)
+                .expect("re-read the producer witness source"),
+            &attempt_id,
+            PRODUCER_WITNESS_SCHEMA_PATH,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
     let producer_witness_source =
         field(producer_witness_contract.text(schema::g07::witness_source::SOURCE_DESCRIPTION))
             .to_string();
@@ -126,8 +133,18 @@ fn main() {
         .expect("DRY BUY value exceeds u64");
     // G0.6a's frozen DRY harness uses the v2 maximum 100-bps policy.
     let slippage_bps = 100u64;
-    let salt = B256::from_str(&req_env("DARKBOT_G07_SALT"))
-        .expect("DARKBOT_G07_SALT must be the exact 32-byte DRY salt");
+    // The salt is the selected candidate's, verified from the private store;
+    // B's never comes from the environment, A's env value may only repeat it.
+    let (selected, selected_salt) =
+        candidate::selected_launch(Path::new(candidate::CANDIDATE_STATE_ROOT))
+            .unwrap_or_else(|e| panic!("G0.7 candidate: {e}"));
+    candidate::check_env_salt(
+        &selected,
+        &selected_salt,
+        env::var("DARKBOT_G07_SALT").ok().as_deref(),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let salt = selected_salt.launch_word();
     let local_expected_output = U256::from_be_bytes(field(dry.u256(d::LOCAL_EXPECTED_OUTPUT)));
     assert!(local_expected_output > U256::ZERO);
 
@@ -153,6 +170,10 @@ fn main() {
     let impl_addr = Address::from(field(current.address(pf::TAX_V3_IMPL)));
     let token = predicted_token(portal, impl_addr, salt);
     assert_eq!(Address::from(field(dry.address(d::TOKEN))), token);
+    assert_eq!(
+        selected.token, token,
+        "predicted token differs from the selected candidate"
+    );
 
     let min_output =
         local_expected_output * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
@@ -201,9 +222,23 @@ fn main() {
         "predicted token already exists"
     );
 
-    let launch_estimate =
-        rpc_estimate_gas(launcher, portal, U256::from(launch_value), &launch_data)
-            .expect("current launch gas estimate failed");
+    // SELF_B: no external call may carry its launch calldata before the
+    // release; the v4-bound local EVM simulation is the gas evidence and its
+    // absence or failure STOPs. SELF_A keeps the historical estimate.
+    let launch_estimate = match selected.profile {
+        candidate::Profile::A => {
+            rpc_estimate_gas(launcher, portal, U256::from(launch_value), &launch_data)
+                .expect("current launch gas estimate failed")
+        }
+        candidate::Profile::B => {
+            darkbot_bsc_execution::acceptance_guard::verify_further_v4_evidence(
+                Path::new("."),
+                &fs::read(V4_RELATIVE_PATH).expect("read the v4 contract"),
+            )
+            .map(|e| e.local_launch_gas_used)
+            .unwrap_or_else(|e| panic!("SELF_B local simulation evidence: {e}"))
+        }
+    };
     assert!(
         launch_estimate <= launch_gas_limit,
         "current launch gas estimate exceeds signed DRY limit"
