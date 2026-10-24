@@ -287,6 +287,8 @@ Project process state requires its OWN supervisor-owned, authenticated, timestam
 
 **Abnahme:** Bestehende UI-Slots, keine zweite Registry/Dispatcher/Engine, eindeutiger nativer Owner je Feld/Control, Typ/Unit/Gate/Qualität und bestehende Proto-Feldnummer oder ausdrücklich fehlendes Feld; Rust/TS-Goldens, Security/Idempotenz, Playwright und Design-Pixeldiff. Keine Änderung der anderen Domänen oder des eingefrorenen Wallet-Layouts.
 
+**Stand 2026-10-24:** Capture Check & start/Stop über den bestehenden captureControl verbunden, index/crosscheck gesperrt, CLI-Vorschau = `p0ctl run start`, Execution aus Topic 10 (`6d0cac99`); Abnahme `3f04bce2`; offene Felder je Reiter in [F0_VAR_01_MATRIX](../../project_0/docs/F0_VAR_01_MATRIX.md).
+
 
 ## 12. Binding F0-BSC-v9.1 — native Frontend-Feld-/Control-Verdrahtung (2026-10-23)
 
