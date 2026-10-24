@@ -1,6 +1,7 @@
 import {chromium} from '../../frontend/node_modules/playwright/index.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,chmodSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
 import {create,toBinary,fromBinary} from '../../frontend/node_modules/@bufbuild/protobuf/dist/esm/index.js';
 import {createRequire} from 'node:module';
 const require=createRequire(new URL('../../frontend/package.json',import.meta.url));
@@ -103,6 +104,12 @@ try{
  assert.equal(statusGets(mark,'/api/v1/command'),1);assert.notEqual((await state()).run_id,beforeLost);
  await p.getByTestId('bsc-readiness-control').click();await p.getByRole('alertdialog').getByRole('button',{name:'Prüfung stoppen',exact:true}).click();
  await until(async()=> (await state()).state==='STOPPED','stop after lost-ACK test');
+ // Source detach and reconnect: the reporter dies, the page shows DETACHED and locks the control; launchd restarts it.
+ execFileSync('launchctl',['kill','SIGKILL',`gui/${process.getuid()}/com.darkbot.test.${dir.split('.').pop()}.bsc.reporter`]);
+ await until(async()=> (await p.locator('.g-line',{hasText:'Plan source quality'}).first().innerText()).includes('DETACHED'),'reporter loss shows SOURCE_DETACHED');
+ assert.equal(await p.getByTestId('bsc-readiness-control').isDisabled(),true,'no control on a detached source');
+ await until(async()=> (await p.locator('.g-line',{hasText:'Plan source quality'}).first().innerText()).includes('LIVE'),'reporter restarted and reattached');
+ await until(async()=>!(await p.getByTestId('bsc-readiness-control').isDisabled()),'control back after reattach');
  await p.goto(base+'/');await until(async()=>!(await p.getByTestId('project-startstop-bsc').isDisabled()),'start button');
  await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','held job');
  const running=await state();const id=crypto.randomUUID();const data=encode('bsc.readiness.start',id,running.run_id);
@@ -122,7 +129,17 @@ try{
  writeFileSync(`${dir}/mode`,'hold');await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','run for Stop All');
  await p.getByTestId('overview-stop-all').click();await p.getByRole('alertdialog').getByRole('button',{name:'Aufzeichnungen stoppen',exact:true}).click();await until(async()=> (await state()).state==='STOPPED','Stop All BSC');
  assert.equal((await api.get(base+'/healthz')).status(),200);assert.deepEqual(errors,[]);
+ // Narrow screen: every tab fits the viewport, nothing widens the page.
+ await p.setViewportSize({width:390,height:844});await p.goto(base+'/');await p.getByTestId('project-link-bsc').click();
+ await until(async()=> (await body()).includes('isolated-fixture'),'mobile BSC feed');
+ assert.match(await p.locator('.g-line',{hasText:'Snapshot age'}).first().innerText(),/\d+ s/,'snapshot age shown');
+ for(const [tab,panel] of [['Overview','overview'],['Launch / BUY','launch'],['Monitoring','monitoring'],['Analytics','analytics'],['Wallets','wallets']]){
+  await p.getByRole('tab',{name:tab,exact:true}).click();await p.locator('h2.g-section-title').first().waitFor();await expectSections(panel);
+  const [scroll,width,wide]=await p.evaluate(()=>[document.documentElement.scrollWidth,window.innerWidth,[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>window.innerWidth+1&&![...e.children].some(c=>c.getBoundingClientRect().right>window.innerWidth+1)).slice(0,5).map(e=>`${e.tagName}.${e.className}: ${(e.textContent||'').slice(0,60)}`)]);
+  assert(scroll<=width+1,`${tab} overflows on mobile: ${scroll} > ${width} · ${wide.join(' | ')}`);
+  await p.screenshot({path:`${dir}/bsc-mobile-${panel}.png`,fullPage:true});
+ }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs, native records on screen without salt, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

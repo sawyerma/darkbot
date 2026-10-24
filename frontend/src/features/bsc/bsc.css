@@ -9,3 +9,7 @@
 .bsc-filter input, .bsc-filter select { min-width: 0; max-width: 100%; flex: 1 1 200px; background: var(--g-well); color: var(--g-text-input); border: 1px solid var(--g-line-input); border-radius: var(--g-r-input); min-height: var(--g-input-min-h); padding: var(--g-gap-sm); font: inherit; }
 .bsc-filter input:focus-visible, .bsc-filter select:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
 .bsc-report-fields .g-line { overflow-wrap: anywhere; }
+/* Hashes, addresses, evidence paths and long native states wrap instead of widening the page. */
+.bsc-page .g-line > span { min-width: 0; overflow-wrap: anywhere; }
+.bsc-page .g-line > span:first-child { min-width: min(9em, 40%); overflow-wrap: break-word; }
+.bsc-page .bsc-state { display: inline-block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }

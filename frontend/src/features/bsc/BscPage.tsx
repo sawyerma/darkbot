@@ -66,12 +66,14 @@ export default function BscPage() {
       }
       footer="BSC · Readiness control and evidence · BUY execution unavailable"
     >
-      <Tabs items={TABS} value={tab} onChange={setTab} ariaLabel="BSC areas" />
-      {tab === "overview" ? <OverviewPanel goto={setTab} /> : null}
-      {tab === "launch" ? <LaunchBuyPanel /> : null}
-      {tab === "monitoring" ? <MonitoringPanel /> : null}
-      {tab === "analytics" ? <AnalyticsPanel /> : null}
-      {tab === "wallets" ? <WalletsPanel /> : null}
+      <div className="bsc-page">
+        <Tabs items={TABS} value={tab} onChange={setTab} ariaLabel="BSC areas" />
+        {tab === "overview" ? <OverviewPanel goto={setTab} /> : null}
+        {tab === "launch" ? <LaunchBuyPanel /> : null}
+        {tab === "monitoring" ? <MonitoringPanel /> : null}
+        {tab === "analytics" ? <AnalyticsPanel /> : null}
+        {tab === "wallets" ? <WalletsPanel /> : null}
+      </div>
     </GraphiteShell>
   );
 }
