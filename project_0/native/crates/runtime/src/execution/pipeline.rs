@@ -181,14 +181,15 @@ pub struct ReceivershipPlan {
     pub tx_version: BuildVersion,
     /// B14: shared with every build of this plan.
     pub lookup_tables: std::sync::Arc<[AddressLookupTableAccount]>,
-    /// [FIX-3] Vorab-TXs im Bundle (JIT_SHORTFALL: Buy-TX). Dürfen weder Start noch End enthalten;
+    /// [FIX-3] Vorab-TXs im Bundle (JIT_SHORTFALL_EXACT_IN: Buy-TX). Dürfen weder Start noch End enthalten;
     /// Receivership bleibt eine eigene TX mit End als letzter Ix.
     pub prerequisite_txs: Vec<Vec<Instruction>>,
     /// FE-02/B4: the SOL this plan debits besides the network fee and the tip.
     pub sol_costs: SolCosts,
-    /// FE-04: the liability inventory an inventory-funded plan spends (mint, base units); the
-    /// intent holds it. `None`: the plan spends no held inventory.
-    pub liability_hold: Option<(Pubkey, u64)>,
+    /// FE-04: every inventory the plan spends, (mint, base units) — an inventory-funded plan its
+    /// liability; a JIT plan the liability inventory it uses and the funding its buy spends.
+    /// The intent holds all of them. Empty: the plan spends no held inventory.
+    pub inventory_holds: Vec<(Pubkey, u64)>,
 }
 
 /// FE-02/B4: SOL a plan's execution debits from the wallet beyond the network fee and the tip:

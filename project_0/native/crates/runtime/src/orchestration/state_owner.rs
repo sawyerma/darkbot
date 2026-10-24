@@ -121,6 +121,8 @@ pub(super) struct ShadowOwner {
     fe04_unbooked: Option<fe04::Fe04Unbooked>,
     /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
+    /// P5-JIT-01: the bank whose inventory funds a JIT buy (`P0_JIT_FUNDING_BANK`, empty: none).
+    jit_funding_bank: Option<Pubkey>,
     /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,
     /// a ProgramData change or a new ingress generation.
     prepared: std::cell::RefCell<crate::execution::prepared::PreparedCache>,

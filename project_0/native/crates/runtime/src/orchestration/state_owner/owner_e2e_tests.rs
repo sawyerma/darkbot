@@ -103,6 +103,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_settle_due: None,
         fe04_unbooked: None,
         inventory_targets: Default::default(),
+        jit_funding_bank: None,
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             8,
             vec![],

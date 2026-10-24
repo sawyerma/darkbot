@@ -878,7 +878,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             lookup_tables: vec![].into(),
             prerequisite_txs: vec![],
             sol_costs: Default::default(),
-            liability_hold: None,
+            inventory_holds: vec![],
         }])
     }
 }

@@ -185,6 +185,8 @@ pub mod p0 {
         pub sol_bank: Pubkey,
         pub inventory: &'a dyn Fn(&Pubkey) -> u64,
         pub slippage_bps: u64,
+        /// P5-JIT-01: the JIT funding bank (`P0_JIT_FUNDING_BANK`); `None`: no JIT plan.
+        pub funding_bank: Option<Pubkey>,
     }
 
     impl<'a, S: AccountSource + ?Sized> ProtocolSizingProvider<'a, S> {
@@ -225,6 +227,22 @@ pub mod p0 {
                     now_unix_s as i64,
                     slot,
                 )?;
+                // P5-JIT-01: the funding bank's free inventory at its conservative cost (the buy
+                // spends it). The liability's own bank or an unknown price: no JIT plan.
+                let funding = self
+                    .funding_bank
+                    .filter(|fb| *fb != sz.liab_bank)
+                    .and_then(|fb| {
+                        sizer
+                            .native_amount_conservative_cost_usd_micro(
+                                &fb,
+                                (self.inventory)(&fb),
+                                now_unix_s as i64,
+                                slot,
+                            )
+                            .ok()
+                            .map(|value| (fb, value))
+                    });
                 out.push(Sizing {
                     asset_bank: sz.asset_bank,
                     liab_bank: sz.liab_bank,
@@ -254,9 +272,8 @@ pub mod p0 {
                         .ok(),
                     liability_needed_value: sz.repay_transfer_value_micro,
                     liability_inventory_value: inv_value,
-                    // ExactOut/JIT is intentionally disabled until a documented provider path exists.
-                    funding_bank: None,
-                    funding_available_value: 0,
+                    funding_bank: funding.map(|f| f.0),
+                    funding_available_value: funding.map_or(0, |f| f.1),
                     // EndLiquidation premium is already represented by seized-vs-repaid value.
                     protocol_fees: 0,
                     flat_sol_fee,
@@ -399,6 +416,43 @@ pub mod p0 {
             path,
             funding,
         }
+    }
+
+    /// P4A-JIT-02: a JIT plan's economics input — `candidate_input` plus the buy's spread: the
+    /// funding the ExactIn buy spends above the value of the shortfall it buys is a swap cost
+    /// (`capital` is the spend, `shortfall_value` what it buys), never a free conversion.
+    pub(crate) fn jit_candidate_input(
+        sz: &Sizing,
+        realizable_value_usd_micro: Option<u64>,
+        capital_usd_micro: u64,
+        shortfall_value_usd_micro: u64,
+        jito_tip_usd_micro: u64,
+        path: Path,
+    ) -> CandidateInput {
+        CandidateInput {
+            swap_fees_and_impact_usd_micro: capital_usd_micro
+                .saturating_sub(shortfall_value_usd_micro),
+            ..candidate_input(
+                sz,
+                FundingClass::JitShortfall,
+                realizable_value_usd_micro,
+                capital_usd_micro,
+                jito_tip_usd_micro,
+                path,
+            )
+        }
+    }
+
+    /// V7/FE-04: the inventory a JIT plan spends — the liability inventory its repay uses and the
+    /// funding its buy spends (zero amounts carry no hold).
+    pub(crate) fn jit_inventory_holds(
+        liability: (Pubkey, u64),
+        funding: (Pubkey, u64),
+    ) -> Vec<(Pubkey, u64)> {
+        [liability, funding]
+            .into_iter()
+            .filter(|(_, units)| *units > 0)
+            .collect()
     }
 
     /// [P1-C] The production mapping from a fitted ZERO_PREFUND route to its economics input:
@@ -1510,7 +1564,7 @@ pub mod p0 {
                                 tx_version: BuildVersion::V0,
                                 lookup_tables: protocol_luts.clone(),
                                 prerequisite_txs: vec![],
-                                liability_hold: Some((liab_mint, sz.repay_amount)),
+                                inventory_holds: vec![(liab_mint, sz.repay_amount)],
                                 sol_costs: SolCosts {
                                     flat_fee_lamports: sz.flat_sol_fee_lamports,
                                     record_rent_lamports: Some(0),
@@ -1542,8 +1596,9 @@ pub mod p0 {
                                 }
                             };
                             // P5-JIT-01: the capital is the funding the buy actually spends.
+                            let shortfall_value = capital;
                             let Some(capital) = jit_capital_usd_micro(
-                                capital,
+                                shortfall_value,
                                 buy.amount_in,
                                 (self.inventory)(&fb),
                                 sz.funding_available_value,
@@ -1562,13 +1617,21 @@ pub mod p0 {
                                 ),
                                 instructions: ixs,
                                 route: RouteKind::NoSwap,
-                                input: self.input(&sz, class, None, capital),
+                                input: jit_candidate_input(
+                                    &sz,
+                                    None,
+                                    capital,
+                                    shortfall_value,
+                                    self.jito_tip_usd_micro,
+                                    self.path,
+                                ),
                                 premium_bps: sz.premium_bps,
                                 tag_growth: sz.tag_growth,
                                 exposure: capital,
                                 inventory_hold_usd_micro: inventory_hold_usd_micro(class, &sz),
                                 tip: self.jito_tip_lamports,
-                                slippage_bps: sz.slippage_bps,
+                                // FE-02: the buy's enforced slippage binds the approval limits.
+                                slippage_bps: enforced_slippage(&buy, sz.slippage_bps),
                                 assets: vec![asset_mint, liab_mint],
                                 tx_version: BuildVersion::V0,
                                 lookup_tables: crate::execution::lookup_tables::merge(
@@ -1576,7 +1639,12 @@ pub mod p0 {
                                     &buy.lookup_tables,
                                 ),
                                 prerequisite_txs: vec![buy.instructions],
-                                liability_hold: None,
+                                // V7/FE-04: the liability inventory the repay uses and the
+                                // funding the buy spends are both held.
+                                inventory_holds: jit_inventory_holds(
+                                    (liab_mint, inv.min(sz.repay_amount)),
+                                    (funding_mint, buy.amount_in),
+                                ),
                                 sol_costs: SolCosts {
                                     flat_fee_lamports: sz.flat_sol_fee_lamports,
                                     record_rent_lamports: Some(0),
@@ -1735,7 +1803,7 @@ pub mod p0 {
                                             tx_version: BuildVersion::V1,
                                             lookup_tables: vec![].into(),
                                             prerequisite_txs: vec![],
-                                            liability_hold: None,
+                                            inventory_holds: vec![],
                                             sol_costs: SolCosts {
                                                 flat_fee_lamports: sz.flat_sol_fee_lamports,
                                                 record_rent_lamports: Some(0),
@@ -1771,7 +1839,7 @@ pub mod p0 {
                                             &mark.lookup_tables,
                                         ),
                                         prerequisite_txs: vec![],
-                                        liability_hold: None,
+                                        inventory_holds: vec![],
                                         sol_costs: SolCosts {
                                             flat_fee_lamports: sz.flat_sol_fee_lamports,
                                             record_rent_lamports: Some(0),
@@ -1985,6 +2053,8 @@ pub mod p0 {
             sizing: OneSizing,
             /// The liquidator's ATAs, derived once like the owner's `LiquidatorAtas` (C11).
             atas: std::cell::RefCell<std::collections::HashMap<Pubkey, Pubkey>>,
+            /// Inventory of the liability bank (every other bank holds 10_000).
+            liability_inventory: u64,
         }
         struct FixtureSource(std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>);
         impl AccountSource for FixtureSource {
@@ -2241,6 +2311,7 @@ pub mod p0 {
                         tag_growth: None,
                     }),
                     atas: Default::default(),
+                    liability_inventory: 10_000,
                 }
             }
             fn state(&self, record: Pubkey, rent_sysvar: bool) -> FixtureSource {
@@ -2334,7 +2405,15 @@ pub mod p0 {
                 prepared: Option<(&std::cell::RefCell<PreparedCache>, u64)>,
                 route_cap: Option<&std::cell::RefCell<RouteCapCache>>,
             ) -> Vec<ReceivershipPlan> {
-                let inventory = |_: &Pubkey| 10_000u64;
+                let liab_bank = self.sizing.0.liab_bank;
+                let liability_inventory = self.liability_inventory;
+                let inventory = move |bank: &Pubkey| {
+                    if *bank == liab_bank {
+                        liability_inventory
+                    } else {
+                        10_000u64
+                    }
+                };
                 let ata = |mint: &Pubkey| {
                     Some(*self.atas.borrow_mut().entry(*mint).or_insert_with(|| {
                         get_associated_token_address_with_program_id(
@@ -2379,6 +2458,156 @@ pub mod p0 {
                     Instant::now() + std::time::Duration::from_secs(60),
                 )
                 .unwrap()
+            }
+        }
+
+        /// A router quoting ExactIn 1:1 with a 1 % enforced floor; like a real provider it returns
+        /// `amount_in` = the requested input.
+        struct ProportionalRoutes;
+        impl RouteProvider for ProportionalRoutes {
+            fn quote_exact_in(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                amount_in: u64,
+                _: &[PrewarmedAta],
+                _: Instant,
+            ) -> Result<Option<Route>, String> {
+                Ok(Some(Route {
+                    instructions: vec![],
+                    lookup_tables: vec![],
+                    swap_program: Pubkey::new_from_array([8; 32]),
+                    amount_in,
+                    quoted_out: amount_in,
+                    minimum_executable_out: Some(amount_in * 99 / 100),
+                    enforced_slippage_bps: Some(100),
+                }))
+            }
+            fn quote_exact_out(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                _: u64,
+                _: Instant,
+            ) -> Result<Option<Route>, String> {
+                Ok(None)
+            }
+        }
+
+        /// P5-JIT-01 / P4A-JIT-02 / V7 through the production `plans()` path: with 200 of 500
+        /// liability units in inventory and a funding bank, the JIT plan buys the shortfall with
+        /// a covering ExactIn route (its floor >= 300), holds both inventories it spends (the 200
+        /// liability units and the buy's funding input), binds the buy's enforced slippage,
+        /// charges the buy's spread as a swap cost and carries the plan's class name.
+        #[test]
+        fn p5_jit_01_plan_holds_both_inventories_and_charges_the_buy() {
+            let mut f = PlansFixture::new();
+            f.liability_inventory = 200;
+            let funding_bank = f.banks[0].0;
+            let s = &mut f.sizing.0;
+            (s.liability_needed_value, s.liability_inventory_value) = (500, 200);
+            (s.funding_bank, s.funding_available_value) = (Some(funding_bank), 10_000);
+            let src = f.state(Pubkey::default(), true);
+            let price = |l: u64| Some(l);
+            let plans = f.plans_with(&src, &price, &ProportionalRoutes, false, None, None);
+            let classes: Vec<_> = plans.iter().map(|p| p.input.funding).collect();
+            let jit: Vec<_> = plans
+                .iter()
+                .filter(|p| p.input.funding == FundingClass::JitShortfall)
+                .collect();
+            assert_eq!(jit.len(), 1, "{classes:?}");
+            let jit = jit[0];
+            assert_eq!(jit.input.funding.as_str(), "JIT_SHORTFALL_EXACT_IN");
+            assert_eq!(jit.prerequisite_txs.len(), 1, "the buy TX");
+            let (liab_mint, funding_mint) = (f.banks[1].1, f.banks[0].1);
+            let buy_in = jit
+                .inventory_holds
+                .iter()
+                .find(|(m, _)| *m == funding_mint)
+                .map(|h| h.1)
+                .expect("funding hold");
+            assert!(
+                buy_in * 99 / 100 >= 300,
+                "the buy's floor covers 300: {buy_in}"
+            );
+            assert_eq!(
+                jit.inventory_holds,
+                vec![(liab_mint, 200), (funding_mint, buy_in)]
+            );
+            assert_eq!(jit.slippage_bps, 100, "the buy's enforced slippage");
+            // Capital = the buy's spend at the funding inventory's own value per unit (10_000
+            // value / 10_000 units); the shortfall it buys is worth 300.
+            assert_eq!(jit.input.required_capital_usd_micro, buy_in);
+            assert_eq!(jit.input.swap_fees_and_impact_usd_micro, buy_in - 300);
+            assert!(
+                !classes.contains(&FundingClass::NoSwapInventory),
+                "200 < 500: no NO_SWAP plan"
+            );
+        }
+
+        /// P5-JIT-01: the production sizing names the configured funding bank and values its free
+        /// inventory at its conservative cost; no bank or the liability's own bank funds no JIT.
+        #[test]
+        fn p5_jit_01_protocol_sizing_names_the_configured_funding_bank() {
+            let f = PlansFixture::new();
+            let mut src = f.state(Pubkey::default(), true);
+            // The real sizer reads the protocol fee state (12.5 % liquidation fee cap).
+            let mut fee: marginfi_type_crate::types::FeeState = bytemuck::Zeroable::zeroed();
+            fee.liquidation_max_fee.value = ((1i128 << 48) >> 3).to_le_bytes();
+            src.0.insert(
+                darkbot_project0::protocol::fee_state_pda(&f.program),
+                (
+                    f.program,
+                    [
+                        darkbot_project0::protocol::DISC_FEE_STATE.as_slice(),
+                        bytemuck::bytes_of(&fee),
+                    ]
+                    .concat(),
+                ),
+            );
+            let (asset_bank, liab_bank) = (f.banks[0].0, f.banks[1].0);
+            // Asset weight 0.5 (b7 profile): a repay heals the account, so a pair sizes.
+            let data = &mut src.0.get_mut(&asset_bank).unwrap().1;
+            let mut bank: Bank = bytemuck::pod_read_unaligned(&data[8..]);
+            let half = ((1i128 << 48) >> 1).to_le_bytes();
+            bank.config.asset_weight_init.value = half;
+            bank.config.asset_weight_maint.value = half;
+            data[8..].copy_from_slice(bytemuck::bytes_of(&bank));
+            let inventory = |_: &Pubkey| 2_000_000u64;
+            let sized = |funding_bank| {
+                ProtocolSizingProvider {
+                    state: &src,
+                    program: f.program,
+                    group: f.group,
+                    sol_bank: asset_bank,
+                    inventory: &inventory,
+                    slippage_bps: 0,
+                    funding_bank,
+                }
+                .sizes(&f.account, 1_000, 10)
+                .unwrap()
+            };
+            let value = darkbot_project0::sizing::ProtocolSizer {
+                state: &src,
+                program: f.program,
+                group: f.group,
+                headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
+            }
+            .native_amount_conservative_cost_usd_micro(&asset_bank, 2_000_000, 1_000, 10)
+            .unwrap();
+            assert!(value >= 2_000_000, "{value}");
+            let with = sized(Some(asset_bank));
+            assert!(!with.is_empty());
+            for sz in &with {
+                assert_eq!(
+                    (sz.funding_bank, sz.funding_available_value),
+                    (Some(asset_bank), value)
+                );
+            }
+            for none in [None, Some(liab_bank)] {
+                for sz in sized(none) {
+                    assert_eq!((sz.funding_bank, sz.funding_available_value), (None, 0));
+                }
             }
         }
 
@@ -3092,20 +3321,23 @@ pub mod p0 {
                 let c = candidate_input(&sz, *class, None, *capital, 20, Path::JitoBundle);
                 assert_eq!(known(c), Evaluation::Unknown, "{class:?}: no proven exit");
             }
-            // A proven exit at the same value: same net, ranked by capital efficiency only.
-            let jit = known(candidate_input(
+            // A proven exit at the same value: the JIT buy spends 630 for a shortfall worth 600,
+            // so its net carries the 30 spread (158 - 30), never the ZERO_PREFUND net.
+            let shortfall_value = funding::capital_required(FundingClass::JitShortfall, &ctx);
+            assert_eq!(shortfall_value, 600);
+            let jit = known(jit_candidate_input(
                 &sz,
-                FundingClass::JitShortfall,
                 Some(1_200),
                 jit_capital,
+                shortfall_value,
                 20,
                 Path::JitoBundle,
             ));
             assert_eq!(
                 jit,
                 Evaluation::Known {
-                    net: 158,
-                    profit_per_capital_bps: 158 * 10_000 / 630
+                    net: 128,
+                    profit_per_capital_bps: 128 * 10_000 / 630
                 }
             );
             assert_eq!(

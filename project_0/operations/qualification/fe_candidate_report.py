@@ -41,7 +41,7 @@ def report(root=ROOT):
         'funding_comparison':{
             'NO_SWAP_INVENTORY':{'status':'BLOCKED','reason':'builder passes realizable value None: unsold collateral is not cash proceeds; no qualified exit instructions/costs, no current wallet inventory proof'},
             'ZERO_PREFUND_SAME_TX':{'status':'REQUALIFY_ONLY','reason':'Existing same-TX collateral-to-liability exit, floor checked >= repay, compiled full TX. Fresh route, actual fee, inventory/rent and positive conservative edge still required.'},
-            'JIT_SHORTFALL_EXACT_IN':{'status':'REQUIRED_IF_FIRST_TWO_FAIL_CURRENT_QUALIFICATION','reason':'Existing branch calls unsupported ExactOut and production sizing supplies funding_bank=None. Requires bounded ExactIn + reconciled funding bank + bundle simulation and collateral exit; do not pretend these exist.'}},
+            'JIT_SHORTFALL_EXACT_IN':{'status':'REQUIRED_IF_FIRST_TWO_FAIL_CURRENT_QUALIFICATION','reason':'Bounded ExactIn solve, funding/liability holds and P0_JIT_FUNDING_BANK sizing exist offline only. Requires a configured funding bank, current quotes, bundle simulation and collateral exit; do not pretend these exist.'}},
         'live_enabled':False,'submission_enabled':False,
         'next_mainnet_evidence':['CURRENT_PROGRAMDATA_SOURCE_PARITY','CURRENT_TARGET_HEALTH_BANK_ORACLE_STATE','EXACT_ROUTE_FLOOR_AND_TX_FIT','CURRENT_FEE_AND_WALLET_BALANCES','FULL_TX_SIMULATION_AND_POSITIVE_CONSERVATIVE_EDGE'],
         'five_hour_replay':'NOT_RUN_USER_OWNED'}

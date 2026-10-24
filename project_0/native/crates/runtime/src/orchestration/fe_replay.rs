@@ -372,6 +372,7 @@ mod tests {
         for name in [
             "UNKNOWN",
             "JIT_SHORTFALL",
+            "JIT_SHORTFALL_EXACT_IN",
             "FLASH_FUNDED",
             "",
             "ZERO_PREFUND_SAME_TX,NO_SWAP_INVENTORY",

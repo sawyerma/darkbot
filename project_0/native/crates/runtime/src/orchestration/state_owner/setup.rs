@@ -889,6 +889,9 @@ pub(super) fn prepare(
     let inventory_targets = crate::execution::inventory::parse_targets(
         &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
+    let jit_funding_bank = crate::execution::inventory::parse_funding_bank(
+        &std::env::var("P0_JIT_FUNDING_BANK").unwrap_or_default(),
+    )?;
     let mut owner = ShadowOwner {
         metrics: OwnerMetrics {
             oracle_dependency_updates,
@@ -970,6 +973,7 @@ pub(super) fn prepare(
         fe04_settle_due,
         fe04_unbooked,
         inventory_targets,
+        jit_funding_bank,
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             PREPARED_CANDIDATES,
             vec![program_data],

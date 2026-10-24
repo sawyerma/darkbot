@@ -963,6 +963,8 @@ pub(crate) mod tests {
             "p0-fe04-archive-{}",
             solana_sdk::pubkey::Pubkey::new_unique()
         ));
+        // `new_unique` counts per process: a run aborted mid-test leaves this name behind.
+        let _ = std::fs::remove_dir_all(&dir);
         let wallet = solana_sdk::pubkey::Pubkey::new_unique().to_string();
         assert_eq!(
             Ledger::load(&dir, &wallet).unwrap().verdict(),

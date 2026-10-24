@@ -404,6 +404,7 @@ impl ShadowOwner {
             sol_bank: self.sol_bank,
             inventory: &inventory,
             slippage_bps: self.eval_slippage_bps,
+            funding_bank: self.jit_funding_bank,
         };
         #[cfg(feature = "crate_health")]
         let sizer_for_cost = darkbot_project0::sizing::ProtocolSizer {

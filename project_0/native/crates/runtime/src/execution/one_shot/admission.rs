@@ -98,8 +98,9 @@ impl Fe04Admission {
             return refuse("FE04_MAX_LOSS_UNKNOWN");
         };
         let mut holds: BTreeMap<String, u64> = [("SOL".to_string(), sol_debit)].into();
-        if let Some((mint, units)) = c.plan.liability_hold {
-            holds.insert(mint.to_string(), units);
+        for (mint, units) in &c.plan.inventory_holds {
+            let held = holds.entry(mint.to_string()).or_insert(0);
+            *held = held.saturating_add(*units);
         }
         let payload = match SignedPayload::new(c.txs, c.path, c.payer) {
             Ok(p) => p,

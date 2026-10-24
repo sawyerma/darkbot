@@ -37,7 +37,8 @@ impl FundingClass {
             FundingClass::ZeroPrefundSameTx => "ZERO_PREFUND_SAME_TX",
             FundingClass::NoSwapInventory => "NO_SWAP_INVENTORY",
             FundingClass::FlashFunded => "FLASH_FUNDED",
-            FundingClass::JitShortfall => "JIT_SHORTFALL",
+            // PHASENPLAN P4A-JIT / FE-04 approvals name it with its ExactIn route.
+            FundingClass::JitShortfall => "JIT_SHORTFALL_EXACT_IN",
             FundingClass::PreheldInventory => "PREHELD_INVENTORY",
         }
     }

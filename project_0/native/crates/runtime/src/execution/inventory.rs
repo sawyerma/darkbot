@@ -41,6 +41,18 @@ pub enum Action {
     Blocked { asset: String, reason: &'static str },
 }
 
+/// P5-JIT-01: `P0_JIT_FUNDING_BANK`, the bank whose inventory funds a JIT buy. Empty is none (no
+/// JIT plan); anything but one bank key is an error.
+pub fn parse_funding_bank(text: &str) -> Result<Option<solana_sdk::pubkey::Pubkey>, String> {
+    match text.trim() {
+        "" => Ok(None),
+        key => key
+            .parse()
+            .map(Some)
+            .map_err(|_| format!("JIT_FUNDING_BANK_INVALID: {key}")),
+    }
+}
+
 /// `P0_INVENTORY_TARGETS`: `KEY=reserve:min:target:max:dust` entries separated by `;`, KEY `SOL`
 /// or a mint. Empty is no policy; any malformed, duplicate or inconsistent entry is an error.
 pub fn parse_targets(text: &str) -> Result<BTreeMap<String, Target>, String> {
@@ -297,6 +309,16 @@ mod tests {
     }
 
     /// P8-INV-01: the config is strict; its reserves are the LIVE gate floors.
+    #[test]
+    fn jit_funding_bank_parses_strictly() {
+        let bank = solana_sdk::pubkey::Pubkey::new_unique();
+        assert_eq!(parse_funding_bank(""), Ok(None));
+        assert_eq!(parse_funding_bank(&format!(" {bank} ")), Ok(Some(bank)));
+        for bad in ["SOL", "x", &format!("{bank};{bank}")] {
+            assert!(parse_funding_bank(bad).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn inventory_targets_parse_strictly() {
         let mint = solana_sdk::pubkey::Pubkey::new_unique().to_string();
