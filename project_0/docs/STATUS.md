@@ -14,6 +14,8 @@
 
 **Schema-/Deployment-Grenze:** Gemeinsame gepushte Protobuf-Schema-ID `68bae95c365d2e697b528d9f52aad60ec41ea4f3115de1e601f276dbf0189db1`. Der Project_0- und der BSC-Reporter müssen bei einer späteren Inbetriebnahme zum **selben Schema** wie Gateway/Frontend neu gebaut und ausschließlich über `darkbotctl build` → `deploy` aktiviert werden. **Zum Checkpoint nicht deployt.** Diese reine Dokumentationsentscheidung erteilt **keine** FE-01…FE-07-, LIVE-, Mainnet-, Funding-, Paid-Provider- oder Signaturfreigabe. **Keine Änderung** am Project_0-Liquidator/Hot-Path, BSC-Code, Gateway, Protobuf, Reporter oder an der GUI.
 
+**Project_0-Frontend-Integration (2026-10-24):** Paket 0 F0-VAR-Differenzanalyse abgeschlossen ([F0_VAR_01_MATRIX](F0_VAR_01_MATRIX.md): 268 Einträge, 176 IST_CONNECTED, 16 IST_BUG, 21 SOLL_MISSING, 52 FUTURE_PHASE_BLOCKED, 3 EXCLUDED); Paket 1 (belegte Frontend-Fehler) folgt.
+
 **Arbeitsreihenfolge für spätere Project_0-Frontend-Pakete:** Zuerst aktuelle P0-native Feldquellen und F0-VAR mit dem bestehenden Frontend abgleichen, danach nur konkret belegte Lücken phasentreu in den fünf vorhandenen Reitern schließen; bestehende P0-Polling-Aufgabe und native Receipts getrennt behandeln. Keine Wiederholung der bereits abgeschlossenen gemeinsamen Infrastrukturfixes ohne neuen reproduzierten Fehler. Parallelentwicklung ausschließlich über `main`, keine fremden BSC-Änderungen überschreiben.
 
 ---

@@ -1,10 +1,10 @@
 # Project_0: F0-VAR — verbindliche Bestandsaufnahme
 
-Basis-Commit: `6ed654f54a970990636cc12013b8cb03fa49ebb4`. **Stand: IN PROGRESS. Keine LIVE- oder GUI-Steuerungsfreigabe.**
+Basis-Commit: `6ed654f54a970990636cc12013b8cb03fa49ebb4` (Erstfassung). Rohinventar aktuell `9dbb6607` (`F0_VAR_MANIFEST.json`); semantische Differenzanalyse Paket 0 auf `30140710` in [F0_VAR_01_MATRIX](F0_VAR_01_MATRIX.md). **Stand: Paket 0 abgeschlossen, Folgepakete offen. Keine LIVE- oder GUI-Steuerungsfreigabe.**
 
 ## Warum
 
-Der Gateway/Reporter-Transport ist für `project0.status` nachgewiesen. Der fachliche Vertrag zwischen der umfangreichen Project_0-Runtime und den Graphite-V0-Ansichten wurde noch nicht vollständig erhoben. Insbesondere enthält `StatusProjection` nur neun Felder, während weitere bereits berechnete Werte, Audit-Identitäten, Writer-Diagnosen und Zustände an der GUI vorbei laufen.
+Der Gateway/Reporter-Transport ist für `project0.status` nachgewiesen. Der fachliche Vertrag zwischen der umfangreichen Project_0-Runtime und den Graphite-V0-Ansichten wurde noch nicht vollständig erhoben. Ursprünglich trug `StatusProjection` nur neun Felder; heute sind `SystemStatus` (10) und `CaptureState` (13) der Wire-Vertrag, weitere Owner-Werte laufen weiterhin an der GUI vorbei (siehe Matrix C).
 
 ## Scope
 
