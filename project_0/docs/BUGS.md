@@ -522,7 +522,7 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Triage 18.10.2026:** `CURRENTLY UNREACHABLE / DEFENSIVE_ONLY`. `market/decoding.rs` führt Receiver-Payloads separat in `events`. `market_truth.rs::provisional_event` akzeptiert nur `CLASSIC_EVENT`, `DELEVERAGE_EVENT`, `BANKRUPTCY_EVENT`; daraus kann `additional_events` aktuell kein Receivership enthalten. Existierendes `unreachable!` für künftige Decoderänderungen ersetzen/auf Enum-Typvertrag testen, aber keinen gegenwärtigen Crash behaupten.
 
 ### D6 — MarketStats pro Ingress-Event zweimal geklont und emittiert
-- [ ] **LOW / PERFORMANCE · CODE_CONFIRMED · G-C/G-D · MT0/Market-Observer.**
+- [x] **LOW / PERFORMANCE · CODE_CONFIRMED · G-C/G-D · MT0/Market-Observer.** **Geschlossen (24.10.):** Counter-Evidence nur bei Änderung, zugelassenen TX oder erstem Ereignis einer Stunde; Stundenwerte identisch zur Vollemission (Test `d6_counter_evidence_only_on_change_or_a_new_hour`, 2 Mutationen); Evidence [d6_counter_evidence.md](evidence/BUGS_20261024/d6_counter_evidence.md).
 - **Pfad:** `runtime/src/market/core.rs::on_ingress_event`.
 - **Ist:** Mit `econ` klont der Code `self.stats` vor dem Event und nachher erneut, erzeugt `Box<MarketStats>` und einen `MarketCounters`-Channel-Event auch bei unveränderten Countern (u. a. Slots). Slot-Evidence selbst muss weiterhin getrennt emittiert werden.
 - **Verbindlicher Fix:** Zuverlässige Differenz-/Delta-Erkennung mit stabiler Zeit-/Slot-Provenienz; nur bei Änderung der zu überwachenden Zähler Counter-Evidence erzeugen; notwendige Heartbeat-/Slot-/Cutoff-Evidence unverändert. Option: konkrete changed-bit/typed delta statt jedes Mal Vollkopie, soweit Analyzer-Vertrag es erlaubt.

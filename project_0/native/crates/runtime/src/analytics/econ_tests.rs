@@ -141,6 +141,30 @@ fn worker_in(layout: crate::run_layout::RunLayout) -> Worker {
     )
     .unwrap()
 }
+/// D6 (market tests): a handle with `worker()`'s plan and window — the same live hours.
+pub(crate) fn window_handle() -> (Handle, darkbot_common::channel::Consumer<Evidence>) {
+    let (tx, rx) = bounded("test-econ-window", 1024);
+    let mut cfg = config();
+    cfg.plan = MeasurementPlan::new(4).unwrap();
+    let h = Handle {
+        tx,
+        shared: Arc::new(Shared::default()),
+        clock: Clock::new(),
+        cfg,
+    };
+    h.start(1, 4_000_000_001);
+    (h, rx)
+}
+/// D6 (market tests): the four hourly capture counters a real worker reports for `events`.
+pub(crate) fn hourly_capture_counters(events: Vec<Evidence>) -> Vec<Value> {
+    let mut w = worker();
+    for e in events {
+        w.accept(e).unwrap();
+    }
+    (0..4)
+        .map(|i| view(&w.metrics(i, i + 1))["market"]["capture_counters"].clone())
+        .collect()
+}
 /// Render of a typed report document (assertions read the historical keys).
 pub(super) fn view<T: Serialize>(doc: &T) -> Value {
     serde_json::to_value(doc).unwrap()

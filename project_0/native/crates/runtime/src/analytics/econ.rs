@@ -305,6 +305,11 @@ impl Handle {
         let n = self.shared.cutoff_ns.load(Ordering::Acquire);
         (n > 0).then_some(n)
     }
+    /// The live hour of a receive time (`None` outside the started window).
+    pub fn hour(&self, ns: u64) -> Option<usize> {
+        let start = self.shared.start_ns.load(Ordering::Acquire);
+        live_hour(&self.cfg.plan, start, self.cutoff()?, ns)
+    }
     pub fn admission_closed(&self) -> bool {
         self.shared.abort.load(Ordering::Acquire)
             || self.cutoff().is_some_and(|c| self.clock.now_ns() >= c)
@@ -903,8 +908,7 @@ impl Worker {
             .is_some_and(|cutoff| ns >= start && ns <= cutoff)
     }
     fn hour(&self, ns: u64) -> Option<usize> {
-        let start = self.h.shared.start_ns.load(Ordering::Acquire);
-        live_hour(&self.h.cfg.plan, start, self.h.cutoff()?, ns)
+        self.h.hour(ns)
     }
     fn over_limit(&self) {
         self.h

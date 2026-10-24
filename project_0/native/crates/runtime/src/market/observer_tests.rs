@@ -597,6 +597,76 @@ fn verdicts_by_source_and_without_liquidations() {
     );
 }
 
+/// D6: counter evidence only for a change — an ingress event that changes no counter emits
+/// nothing, except the first event of a live hour (it carries the running stream-silence maximum
+/// into that hour); every hourly figure of the real worker equals full per-event emission. Hour 1
+/// here has unchanged events only.
+#[test]
+fn d6_counter_evidence_only_on_change_or_a_new_hour() {
+    use crate::analytics::econ::{tests as econ, Evidence};
+    use darkbot_solana::ingress::SourceHealth;
+    let (h, rx) = econ::window_handle();
+    let mut core = ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT);
+    core.start_observation(1, 4_000_000_001);
+    core.econ = Some(h);
+    let mut sink = VecSink::default();
+    let health = |t_rx_ns| {
+        IngressEvent::Health(SourceHealth {
+            source: SourceKind::WsRpcControl,
+            connected: true,
+            last_frame_age_ns: None,
+            frames: 1,
+            reconnects: 0,
+            last_slot: None,
+            t_rx_ns,
+        })
+    };
+    let slot = |t_rx_ns| {
+        IngressEvent::Slot(SlotUpdate {
+            slot: 1,
+            parent: None,
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns,
+        })
+    };
+    let script = [
+        slot(100_000_000),
+        health(200_000_000),
+        slot(400_000_000),
+        health(500_000_000),
+        health(1_200_000_000),
+        health(1_600_000_000),
+        slot(2_500_000_000),
+        health(2_600_000_000),
+    ];
+    let mut full = Vec::new();
+    for ev in script {
+        let (at_ns, before) = (ev.t_rx_ns(), core.stats.clone());
+        core.on_ingress_event(ev, 0, &mut sink).unwrap();
+        full.push(Evidence::MarketCounters {
+            at_ns,
+            before: Box::new(before),
+            after: Box::new(core.stats.clone()),
+            observed_slots: None,
+        });
+    }
+    let mut emitted = Vec::new();
+    while let Some(e) = rx.try_pop() {
+        if matches!(e, Evidence::MarketCounters { .. }) {
+            emitted.push(e);
+        }
+    }
+    // slot, slot, first of hour 1, slot (opens hour 2); four unchanged events add nothing.
+    assert_eq!(emitted.len(), 4);
+    let hourly = econ::hourly_capture_counters(emitted);
+    assert_eq!(hourly, econ::hourly_capture_counters(full));
+    assert_eq!(
+        hourly[1]["max_stream_silence_ms"], 300,
+        "hour 1 keeps its carry"
+    );
+}
+
 // [R2-8] Slot telemetry frames document stream liveness inside the window only.
 #[test]
 fn slot_telemetry_frames_measure_stream_silence() {

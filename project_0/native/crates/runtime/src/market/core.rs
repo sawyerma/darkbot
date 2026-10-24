@@ -232,6 +232,8 @@ pub struct ReceiverRank {
 
 pub struct ObserverCore {
     pub(super) econ: Option<crate::analytics::econ::Handle>,
+    /// D6: the live hour of the last emitted counter evidence (`None`: none emitted yet).
+    counters_hour: Option<usize>,
     pub status_tap: Option<crate::status_tap::StatusTap>,
     pub(super) program: Pubkey,
     pub(super) source: MarketSource,
@@ -316,6 +318,7 @@ impl ObserverCore {
     pub fn new(program: Pubkey, source: MarketSource, enrich_cfg: EnrichConfig) -> Self {
         Self {
             econ: None,
+            counters_hour: None,
             status_tap: None,
             program,
             source,
@@ -945,12 +948,23 @@ impl ObserverCore {
             _ => Ok(()),
         };
         if let (Some(h), Some(before)) = (&self.econ, before) {
-            h.emit(crate::analytics::econ::Evidence::MarketCounters {
-                at_ns: at,
-                before: Box::new(before),
-                after: Box::new(self.stats.clone()),
-                observed_slots: self.event_slots.take(),
-            });
+            let observed_slots = self.event_slots.take();
+            let hour = h.hour(at);
+            // D6: an event that changed no counter adds nothing to its hour; only the first one
+            // of a live hour is kept (it carries the running stream-silence maximum into that
+            // hour), so every hourly figure stays exactly what full emission gave.
+            let opens_hour = hour.is_some() && hour != self.counters_hour;
+            if before != self.stats || observed_slots.is_some() || opens_hour {
+                if hour.is_some() {
+                    self.counters_hour = hour;
+                }
+                h.emit(crate::analytics::econ::Evidence::MarketCounters {
+                    at_ns: at,
+                    before: Box::new(before),
+                    after: Box::new(self.stats.clone()),
+                    observed_slots,
+                });
+            }
         }
         result
     }
