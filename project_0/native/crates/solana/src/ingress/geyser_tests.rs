@@ -684,6 +684,8 @@ fn source(streams: Vec<Result<Vec<Vec<u8>>, StreamError>>, replay: bool) -> Scri
     let (requests, pongs) = (Rc::new(RefCell::new(vec![])), Rc::new(RefCell::new(vec![])));
     let mut config = GeyserConfig::publicnode();
     config.max_reconnects = 2;
+    config.reconnect_initial = std::time::Duration::from_millis(1);
+    config.reconnect_max = std::time::Duration::from_millis(2);
     config.replay_from_slot = replay;
     (
         BinaryGeyserSource {
@@ -777,8 +779,8 @@ fn source_reconnects_with_gap_answers_pings_and_fails_closed() {
     assert_eq!(*pongs.borrow(), [1]);
     assert_eq!(
         requests.borrow().len(),
-        3,
-        "two streams, one failed connect"
+        4,
+        "two healthy streams (each restarts the budget of 2), then two failed connects"
     );
     assert!(halt.is_raised());
     // With proven replay the reconnect resumes from the last slot instead of a gap.
@@ -793,6 +795,98 @@ fn source_reconnects_with_gap_answers_pings_and_fails_closed() {
         .any(|e| matches!(e, IngressEvent::Gap { .. })));
     let resumed = SubscribeRequest::decode(requests.borrow()[1].as_slice()).unwrap();
     assert_eq!(resumed.from_slot, Some(40));
+}
+
+/// P5 S1-08: every reconnect waits its backoff (doubling up to the maximum), a stop during the
+/// backoff ends the source at once, and only consecutive failed sessions count against the
+/// budget — a healthy stream restarts it (three healthy streams outlast `max_reconnects` 1).
+#[test]
+fn source_backs_off_and_a_healthy_stream_restarts_the_reconnect_budget() {
+    use std::time::{Duration, Instant};
+    let (mut src, requests, _) = source(vec![], false);
+    (src.config.reconnect_initial, src.config.reconnect_max) =
+        (Duration::from_millis(20), Duration::from_millis(40));
+    let started = Instant::now();
+    let (tx, _rx) = bounded("geyser", 64);
+    assert!(src
+        .run(tx, Shutdown::new(), IngressHalt::new(), SlotWatch::new())
+        .is_err());
+    assert_eq!(
+        requests.borrow().len(),
+        3,
+        "the first connect and two reconnects"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(60),
+        "backoffs 20+ and 40 ms: {:?}",
+        started.elapsed()
+    );
+    let (mut src, _, _) = source(vec![], false);
+    (src.config.reconnect_initial, src.config.reconnect_max) =
+        (Duration::from_secs(10), Duration::from_secs(10));
+    let shutdown = Shutdown::new();
+    let stop = shutdown.clone();
+    let stopper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        stop.request();
+    });
+    let started = Instant::now();
+    let (tx, _rx) = bounded("geyser", 64);
+    assert!(src
+        .run(tx, shutdown, IngressHalt::new(), SlotWatch::new())
+        .is_ok());
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    stopper.join().unwrap();
+    let k = Pubkey::new_unique();
+    let healthy = |v| Ok(vec![frame(&account(k, 40 + v, v, None))]);
+    let (mut src, requests, _) = source(vec![healthy(1), healthy(2), healthy(3)], false);
+    src.config.max_reconnects = 1;
+    let (tx, rx) = bounded("geyser", 64);
+    assert!(src
+        .run(tx, Shutdown::new(), IngressHalt::new(), SlotWatch::new())
+        .is_err());
+    let accounts = drain(&rx)
+        .iter()
+        .filter(|e| matches!(e, IngressEvent::Account(_)))
+        .count();
+    assert_eq!(
+        (accounts, requests.borrow().len()),
+        (3, 4),
+        "three healthy streams, then one failed connect beyond the budget"
+    );
+}
+
+/// Production and the offline config read the provider's one token variable and the one
+/// configured reconnect policy (`P0_WSS_RECONNECT_MS` / `_MAX_MS`), no literal of their own.
+#[test]
+fn publicnode_config_reads_the_providers_token_variable() {
+    let provider = super::super::sources::ProviderConfig::publicnode();
+    let config = GeyserConfig::publicnode();
+    assert_eq!(Some(config.token_env), provider.auth.map(|a| a.token_env));
+    let limits = &crate::runtime_config::active().limits;
+    assert_eq!(
+        (config.reconnect_initial, config.reconnect_max),
+        (
+            std::time::Duration::from_millis(limits.wss_reconnect_ms),
+            std::time::Duration::from_millis(limits.wss_reconnect_max_ms)
+        )
+    );
+    assert_eq!(
+        (
+            config.max_reconnects,
+            config.reconnect_initial,
+            config.reconnect_max
+        ),
+        (
+            provider.retry.max_reconnects,
+            provider.retry.reconnect_initial,
+            provider.retry.reconnect_max
+        )
+    );
 }
 
 /// Fail closed: an update kind the pinned proto does not know, a compressed frame and a full sink

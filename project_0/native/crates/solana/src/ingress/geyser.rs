@@ -956,20 +956,30 @@ pub struct GeyserConfig {
     pub token_env: &'static str,
     pub commitment: proto::CommitmentLevel,
     pub max_message_bytes: usize,
+    /// Consecutive failed sessions (no update delivered) before `GEYSER_RECONNECTS_EXHAUSTED`;
+    /// a session that delivered an update restarts the count.
     pub max_reconnects: u32,
+    /// Backoff before a reconnect (the configured WSS policy, `configured_reconnect_backoff`:
+    /// doubling per consecutive failure, jittered).
+    pub reconnect_initial: std::time::Duration,
+    pub reconnect_max: std::time::Duration,
     /// The source proved `from_slot` replay: a reconnect resumes instead of a gap.
     pub replay_from_slot: bool,
 }
 
 impl GeyserConfig {
-    /// The first FREE_ONLY candidate (S1-08); its capability is NOT_RUN.
+    /// The first FREE_ONLY candidate (S1-08); its capability is NOT_RUN. Production builds its
+    /// config from `ProviderConfig::publicnode` (`sources::geyser_source`); this is the same.
     pub fn publicnode() -> Self {
+        let (reconnect_initial, reconnect_max) = super::sources::configured_reconnect_backoff();
         Self {
             endpoint: "https://solana.publicnode.com".into(),
-            token_env: "P0_GEYSER_TOKEN",
+            token_env: "P0_GEYSER_PUBLICNODE_TOKEN",
             commitment: proto::CommitmentLevel::Processed,
             max_message_bytes: 16 << 20,
             max_reconnects: 5,
+            reconnect_initial,
+            reconnect_max,
             replay_from_slot: false,
         }
     }
@@ -1001,6 +1011,21 @@ pub struct BinaryGeyserSource<T: GeyserTransport> {
     pub subscription: Subscription,
     pub transport: T,
     pub clock: Clock,
+}
+
+/// Waits `delay` unless a stop comes first (`false`: stopped).
+fn sleep_unless_stopped(delay: std::time::Duration, shutdown: &Shutdown) -> bool {
+    let end = std::time::Instant::now() + delay;
+    loop {
+        if shutdown.is_requested() {
+            return false;
+        }
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        std::thread::sleep(left.min(std::time::Duration::from_millis(50)));
+    }
 }
 
 /// Delivers one event; a full sink halts out of band (never a silent drop), like the WSS source.
@@ -1056,15 +1081,30 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
             });
             IngressError::Protocol(detail.into())
         };
+        // Every connect (StreamReady `attempt`), and the consecutive sessions that ended without
+        // delivering an update: those bound the reconnects; a healthy session restarts the
+        // count and every reconnect first waits its backoff (the WSS source's policy).
         let mut attempt = 0u32;
+        let mut failures = 0u32;
         loop {
+            if attempt > 0 {
+                if failures > self.config.max_reconnects {
+                    return Err(fatal("GEYSER_RECONNECTS_EXHAUSTED", self.clock.now_ns()));
+                }
+                let delay = super::ws_rpc::reconnect_delay(
+                    self.config.reconnect_initial,
+                    self.config.reconnect_max,
+                    failures,
+                    self.clock.now_ns(),
+                );
+                if !sleep_unless_stopped(delay, &shutdown) {
+                    return Ok(());
+                }
+            }
             if shutdown.is_requested() {
                 return Ok(());
             }
             attempt += 1;
-            if attempt > self.config.max_reconnects.saturating_add(1) {
-                return Err(fatal("GEYSER_RECONNECTS_EXHAUSTED", self.clock.now_ns()));
-            }
             let resume = (self.config.replay_from_slot && attempt > 1)
                 .then_some(mapper.max_slot)
                 .flatten();
@@ -1072,7 +1112,10 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
             let mut stream = match self.transport.connect(&request) {
                 Ok(s) => s,
                 Err(StreamError::Rejected(code)) => return Err(fatal(code, self.clock.now_ns())),
-                Err(StreamError::Retryable(_)) => continue,
+                Err(StreamError::Retryable(_)) => {
+                    failures += 1;
+                    continue;
+                }
             };
             let t = self.clock.now_ns();
             // StreamReady after every connect (the WSS contract: the owner's recovery starts on
@@ -1099,6 +1142,7 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
             }
             let mut frames = FrameDecoder::new(self.config.max_message_bytes);
             let mut ping_id = 0i32;
+            let mut healthy = false;
             loop {
                 if shutdown.is_requested() {
                     return Ok(());
@@ -1135,9 +1179,11 @@ impl<T: GeyserTransport> IngressSource for BinaryGeyserSource<T> {
                         if !deliver(&sink, &halt, &slots, mapper.max_slot, ev, t_rx)? {
                             return Ok(());
                         }
+                        healthy = true;
                     }
                 }
             }
+            failures = if healthy { 1 } else { failures + 1 };
         }
     }
 }

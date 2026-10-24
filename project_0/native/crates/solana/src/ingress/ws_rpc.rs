@@ -946,7 +946,12 @@ async fn wait_shutdown(shutdown: &Shutdown) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
-fn reconnect_delay(initial: Duration, maximum: Duration, failures: u32, seed: u64) -> Duration {
+pub(crate) fn reconnect_delay(
+    initial: Duration,
+    maximum: Duration,
+    failures: u32,
+    seed: u64,
+) -> Duration {
     let base = initial
         .saturating_mul(1u32 << failures.saturating_sub(1).min(16))
         .min(maximum);

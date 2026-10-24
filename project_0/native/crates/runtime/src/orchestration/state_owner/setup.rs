@@ -59,24 +59,20 @@ fn configured_sources(
         });
     let controls = match std::env::var_os("P0_PROJECT_DIR") {
         Some(project) => {
+            let dir = source_control::request_dir(std::path::Path::new(&project));
             let (tx, rx) = bounded::<source_control::ControlMessage>("source-control", 8);
-            source_control::spawn(
-                source_control::request_dir(std::path::Path::new(&project)),
-                tx.with_wakeup(wake),
-                shutdown.clone(),
-            )?;
-            Some(rx)
+            source_control::spawn(dir.clone(), tx.with_wakeup(wake), shutdown.clone())?;
+            Some((rx, dir))
         }
         None => None,
     };
-    Ok(super::sources::OwnerSources::new(
-        arbiter,
-        Some(unit),
-        spawn,
-        4_096,
-        wake,
-        controls,
-    ))
+    let (controls, decisions) = controls.unzip();
+    let sources =
+        super::sources::OwnerSources::new(arbiter, Some(unit), spawn, 4_096, wake, controls);
+    Ok(match decisions {
+        Some(dir) => sources.record_decisions_in(dir),
+        None => sources,
+    })
 }
 
 pub(super) fn prepare(

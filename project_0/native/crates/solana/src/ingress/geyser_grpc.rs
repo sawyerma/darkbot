@@ -428,6 +428,8 @@ mod tests {
         let mut config = GeyserConfig::publicnode();
         config.endpoint = url.clone();
         config.max_reconnects = 2;
+        config.reconnect_initial = std::time::Duration::from_millis(1);
+        config.reconnect_max = std::time::Duration::from_millis(2);
         let source = |config: GeyserConfig| BinaryGeyserSource {
             config,
             subscription: Subscription::default(),

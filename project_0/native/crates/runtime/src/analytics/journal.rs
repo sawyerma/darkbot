@@ -120,6 +120,9 @@ pub mod kind {
     /// S1-02: one operator source-control request (`p0ctl source set`), a sealed single-value
     /// journal `data/source-control/request_<seq>.p0j`.
     pub const SOURCE_CONTROL_REQUEST: u16 = 1100;
+    /// S1-02: the state owner's decision on one request, a sealed single-value journal
+    /// `data/source-control/outcome_<seq>.p0j`.
+    pub const SOURCE_CONTROL_OUTCOME: u16 = 1101;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -171,6 +174,7 @@ pub mod kind {
         C0_CENSUS_RESULT,
         OWNER_RECOVERY,
         SOURCE_CONTROL_REQUEST,
+        SOURCE_CONTROL_OUTCOME,
         super::MANIFEST,
     ];
 }

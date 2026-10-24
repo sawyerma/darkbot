@@ -4,14 +4,16 @@
 //! * `p0ctl source set <unit> <mode>` writes `data/source-control/request_<seq>.p0j` (a sealed
 //!   single-value journal, never overwritten) and sends SIGUSR1 to the runtime owner (lock pid).
 //! * The handler only writes one byte to a non-blocking self-pipe (async-signal-safe). The
-//!   control thread blocks on the pipe, reads the newest request, validates it into a
+//!   control thread blocks on the pipe, validates every new request in sequence order into a
 //!   `SourceControl` or a stated refusal and hands it to the owner's bounded control queue, which
-//!   rings the owner doorbell. Only the owner applies a control (atomically, `SourceArbiter`).
+//!   rings the owner doorbell; a full queue delays the rest, never skips or drops one. Only the
+//!   owner applies a control (atomically, `SourceArbiter`) and records its decision
+//!   (`outcome_<seq>.p0j`), the applied state `p0ctl source status` shows.
 //! * The handler is installed at runtime start, before the owner lock exists, so a signal from
 //!   `p0ctl` never meets the default action (terminate).
 use crate::analytics::journal;
-use crate::analytics::payload::SourceControlRequest;
-use darkbot_common::channel::Producer;
+use crate::analytics::payload::{SourceControlOutcome, SourceControlRequest};
+use darkbot_common::channel::{ChannelError, Producer};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_solana::ingress::sources::{OperatingMode, Qualification, SourceControl, SourceUnit};
 use std::path::{Path, PathBuf};
@@ -28,8 +30,17 @@ fn request_path(dir: &Path, seq: u64) -> PathBuf {
     dir.join(format!("request_{seq:08}.p0j"))
 }
 
+fn outcome_path(dir: &Path, seq: u64) -> PathBuf {
+    dir.join(format!("outcome_{seq:08}.p0j"))
+}
+
 /// The request sequence numbers present, ascending (partial and foreign files are ignored).
 fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
+    numbered(dir, "request_")
+}
+
+/// The sequence numbers of `<prefix><8 digits>.p0j` files, ascending.
+fn numbered(dir: &Path, prefix: &str) -> Result<Vec<u64>, String> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
@@ -39,10 +50,7 @@ fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name();
-            let digits = name
-                .to_str()?
-                .strip_prefix("request_")?
-                .strip_suffix(".p0j")?;
+            let digits = name.to_str()?.strip_prefix(prefix)?.strip_suffix(".p0j")?;
             (digits.len() == 8).then(|| digits.parse().ok()).flatten()
         })
         .collect();
@@ -114,6 +122,37 @@ pub fn latest_request(dir: &Path) -> Result<Option<SourceControlRequest>, String
         Some(seq) => journal::read_typed_value(&request_path(dir, *seq))
             .map(Some)
             .map_err(|e| format!("SOURCE_CONTROL_REQUEST_INVALID: {e}")),
+    }
+}
+
+/// The owner: records its decision on request `outcome.seq` (immutable; the same decision
+/// again is a no-op, a different one an error).
+pub fn write_outcome(dir: &Path, outcome: &SourceControlOutcome) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("SOURCE_CONTROL_IO: {e}"))?;
+    journal::write_typed_value(
+        &outcome_path(dir, outcome.seq),
+        journal::source::SOURCE_CONTROL,
+        outcome,
+    )
+    .map_err(|e| format!("SOURCE_CONTROL_IO: {e}"))
+}
+
+/// The newest decision of an owner, if any.
+pub fn latest_outcome(dir: &Path) -> Result<Option<SourceControlOutcome>, String> {
+    match numbered(dir, "outcome_")?.last() {
+        None => Ok(None),
+        Some(seq) => journal::read_typed_value(&outcome_path(dir, *seq))
+            .map(Some)
+            .map_err(|e| format!("SOURCE_CONTROL_OUTCOME_INVALID: {e}")),
+    }
+}
+
+/// `off`, `observe` or `active` — the request spelling of `mode`.
+pub fn mode_name(mode: OperatingMode) -> &'static str {
+    match mode {
+        OperatingMode::Off => "off",
+        OperatingMode::Observe => "observe",
+        OperatingMode::Active => "active",
     }
 }
 
@@ -223,42 +262,62 @@ fn wait_signal(timeout_ms: i32) -> bool {
     true
 }
 
-/// The control thread: on every doorbell the newest request newer than the last one handed
-/// over goes to the owner. Requests written before the start are not applied (a new run starts
-/// from its configuration). The 250-ms bound only lets the thread see the shutdown.
+/// The control thread: on every doorbell every request after the last one handed over goes to
+/// the owner, in sequence order. Requests written before the start are not applied (a new run
+/// starts from its configuration). The 250-ms bound lets the thread see the shutdown and retry
+/// a full owner queue.
 pub fn spawn(
     dir: PathBuf,
     owner: Producer<ControlMessage>,
     shutdown: Shutdown,
 ) -> Result<std::thread::JoinHandle<()>, String> {
     install_signal()?;
-    let mut applied = sequences(&dir)?.last().copied().unwrap_or(0);
+    let mut handed = sequences(&dir)?.last().copied().unwrap_or(0);
     std::thread::Builder::new()
         .name("p0-source-control".into())
         .spawn(move || {
+            let mut behind = false;
             while !shutdown.is_requested() {
-                if !wait_signal(250) {
-                    continue;
-                }
-                let message = match latest_request(&dir) {
-                    Ok(Some(r)) => message_of(&r, applied),
-                    Ok(None) => None,
-                    Err(reason) => Some(ControlMessage::Refused {
-                        seq: applied,
-                        request: "unreadable".into(),
-                        reason,
-                    }),
-                };
-                if let Some(m) = message {
-                    let (ControlMessage::Apply { seq, .. } | ControlMessage::Refused { seq, .. }) =
-                        &m;
-                    applied = applied.max(*seq);
-                    // Bounded: a full queue refuses the request visibly (the owner is behind).
-                    let _ = owner.try_push(m);
+                if wait_signal(250) || behind {
+                    behind = hand_over(&dir, &mut handed, &owner);
                 }
             }
         })
         .map_err(|e| format!("SOURCE_CONTROL_THREAD: {e}"))
+}
+
+/// Hands every request after `handed` to the owner in sequence order, advancing `handed` past
+/// each one the queue took. `true`: the queue was full (or the directory unreadable) — the rest
+/// waits for the next tick; nothing is skipped or dropped.
+fn hand_over(dir: &Path, handed: &mut u64, owner: &Producer<ControlMessage>) -> bool {
+    let Ok(seqs) = sequences(dir) else {
+        return true;
+    };
+    let from = *handed;
+    for seq in seqs.into_iter().filter(|s| *s > from) {
+        match owner.try_push(message_at(dir, seq)) {
+            Ok(()) => *handed = seq,
+            Err(ChannelError::Full(_)) => return true,
+            // The owner is gone: nothing applies a control any more.
+            Err(ChannelError::Disconnected(_)) => return false,
+        }
+    }
+    false
+}
+
+/// The message of request `seq`: validated, or refused when unreadable or mislabelled.
+fn message_at(dir: &Path, seq: u64) -> ControlMessage {
+    let refused = |reason: String| ControlMessage::Refused {
+        seq,
+        request: "unreadable".into(),
+        reason,
+    };
+    match journal::read_typed_value::<SourceControlRequest>(&request_path(dir, seq)) {
+        Ok(r) if r.seq == seq => message_of(&r, seq.saturating_sub(1))
+            .unwrap_or_else(|| refused("SOURCE_CONTROL_REQUEST_SEQ".into())),
+        Ok(_) => refused("SOURCE_CONTROL_REQUEST_SEQ".into()),
+        Err(e) => refused(format!("SOURCE_CONTROL_REQUEST_INVALID: {e}")),
+    }
 }
 
 /// `p0ctl`: rings the running runtime's doorbell.
@@ -334,6 +393,66 @@ mod tests {
         ));
         assert_eq!(message_of(&r(3), 3), None, "handed over once");
         assert_eq!(latest_request(&d).unwrap().map(|r| r.seq), Some(3));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// P5 S1-02: with a full owner queue the hand-over stops at that request and resumes there:
+    /// every request reaches the owner exactly once, in sequence order (none skipped by a newer
+    /// one, none dropped); an unreadable request is handed over as a refusal of its own seq.
+    #[test]
+    fn hand_over_never_skips_or_drops_a_request() {
+        let d = dir("handover");
+        for mode in ["observe", "off", "observe"] {
+            write_request(&d, "geyser:publicnode", mode, 1).unwrap();
+        }
+        std::fs::write(request_path(&d, 4), b"torn").unwrap();
+        let (tx, rx) = bounded::<ControlMessage>("source-control", 1);
+        let mut handed = 0;
+        let mut got = vec![];
+        for _ in 0..8 {
+            let behind = hand_over(&d, &mut handed, &tx);
+            if let Some(m) = rx.try_pop() {
+                got.push(m);
+            }
+            if !behind && rx.try_pop().is_none() && handed == 4 {
+                break;
+            }
+        }
+        let seqs: Vec<_> = got
+            .iter()
+            .map(|m| match m {
+                ControlMessage::Apply { seq, .. } | ControlMessage::Refused { seq, .. } => *seq,
+            })
+            .collect();
+        assert_eq!(seqs, [1, 2, 3, 4]);
+        assert!(matches!(
+            &got[3],
+            ControlMessage::Refused { reason, .. } if reason.starts_with("SOURCE_CONTROL_REQUEST_INVALID")
+        ));
+        assert!(!hand_over(&d, &mut handed, &tx), "nothing left");
+        assert_eq!(rx.try_pop(), None);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// The owner's decisions are immutable typed journals; the newest one is the applied state.
+    #[test]
+    fn outcomes_are_immutable_and_the_newest_is_reported() {
+        let d = dir("outcomes");
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(latest_outcome(&d).unwrap(), None);
+        let outcome = |seq, applied| SourceControlOutcome {
+            seq,
+            request: "geyser:publicnode observe".into(),
+            applied,
+            detail: if applied { "none" } else { "SOURCE_UNKNOWN" }.into(),
+            owner_pid: 7,
+            decided_unix_s: Some(9),
+        };
+        write_outcome(&d, &outcome(2, false)).unwrap();
+        write_outcome(&d, &outcome(3, true)).unwrap();
+        write_outcome(&d, &outcome(3, true)).unwrap();
+        assert!(write_outcome(&d, &outcome(3, false)).is_err(), "immutable");
+        assert_eq!(latest_outcome(&d).unwrap(), Some(outcome(3, true)));
         std::fs::remove_dir_all(d).unwrap();
     }
 

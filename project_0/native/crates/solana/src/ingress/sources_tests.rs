@@ -430,6 +430,42 @@ fn a23_03_revocation_parallel_sources_and_reconnect() {
     );
 }
 
+/// P5 S1-RACE: the canonical WSS feed (no write version, its events never routed) is measured
+/// against an observing Geyser copy of the same content in the same slot, in both orders; a
+/// different content or slot is no copy, and two observed copies measure nothing.
+#[test]
+fn canonical_wss_copies_are_measured_against_observed_ones() {
+    let wss =
+        SourceControl::new(SourceUnit::WsRpcControl, OperatingMode::Active, qualified()).unwrap();
+    let b = SourceControl::new(geyser("b"), OperatingMode::Observe, Qualification::NotRun).unwrap();
+    let c = SourceControl::new(geyser("c"), OperatingMode::Observe, Qualification::NotRun).unwrap();
+    let mut arb = SourceArbiter::new(&[wss, b.clone(), c.clone()]).unwrap();
+    let (sb, sc) = (arb.stamp(&b.unit).unwrap(), arb.stamp(&c.unit).unwrap());
+    let (k1, k2) = (Pubkey::new_unique(), Pubkey::new_unique());
+    // WSS first (100), Geyser 30 ns later: the observed copy is behind.
+    arb.measure_canonical(&account(SourceKind::WsRpcControl, k1, 5, None, 10, 100));
+    arb.route(&sb, account(SourceKind::Geyser, k1, 5, Some(1), 10, 130));
+    // Geyser first (200), WSS 60 ns later: ahead.
+    arb.route(&sb, account(SourceKind::Geyser, k2, 6, Some(1), 10, 200));
+    arb.measure_canonical(&account(SourceKind::WsRpcControl, k2, 6, None, 10, 260));
+    // Other content, other slot, two observers: no lead.
+    arb.measure_canonical(&account(SourceKind::WsRpcControl, k1, 7, None, 10, 300));
+    arb.route(&sb, account(SourceKind::Geyser, k1, 7, Some(2), 11, 310));
+    arb.route(&sb, account(SourceKind::Geyser, k1, 8, Some(3), 10, 400));
+    arb.measure_canonical(&account(SourceKind::WsRpcControl, k1, 9, None, 10, 410));
+    arb.route(&sc, account(SourceKind::Geyser, k2, 10, Some(1), 10, 500));
+    arb.route(&sb, account(SourceKind::Geyser, k2, 10, Some(1), 10, 510));
+    assert_eq!(
+        arb.leads
+            .recent()
+            .map(|l| (l.pubkey, l.slot, l.lead_ns))
+            .collect::<Vec<_>>(),
+        [(k1, 5, -30), (k2, 6, 60)]
+    );
+    assert_eq!(arb.conflicts, 0);
+    assert_eq!(arb.canonical(), Some(&SourceUnit::WsRpcControl), "kept");
+}
+
 /// A23-04: lead telemetry stays bounded far above its retention — the newest samples kept,
 /// every evicted one counted, every lead in the histograms; the histogram quantiles bound the
 /// exact quantiles of all samples from above within one bucket (≤ 12.5 %).

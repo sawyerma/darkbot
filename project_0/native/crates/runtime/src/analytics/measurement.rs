@@ -6,12 +6,58 @@ use std::{fs, path::Path};
 
 pub const SNAPSHOT_COUNT: usize = 4;
 
-/// Run horizon (frontend STARTUP §3). Only `Fixed` exists: an open-ended capture
-/// (`UntilStopped` with rolling windows, re-preflight and segment policy) is FEUI follow-up
-/// scope and is refused by the parser instead of being emulated by a huge duration.
+/// Run horizon (frontend STARTUP §3): `Fixed`, or the typed open-ended `UntilStopped` (rolling
+/// windows, segment policy, runway) — never emulated by a huge duration; it is refused at
+/// admission until its gates are qualified.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunHorizon {
-    Fixed { duration_seconds: u64 },
+    Fixed {
+        duration_seconds: u64,
+    },
+    /// STARTUP §3: no planned stop — rolling windows of `checkpoint_seconds`, each with its own
+    /// checkpoint/segment/verifier scope, running only while the rolling runway holds. Never a
+    /// huge duration. Structural: `admit` refuses it until its gates are qualified.
+    UntilStopped {
+        checkpoint_seconds: u64,
+        segment_policy: SegmentPolicy,
+        minimum_runway_seconds: u64,
+    },
+}
+
+/// How an `UntilStopped` run seals its data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SegmentPolicy {
+    /// One sealed segment scope per rolling window.
+    PerWindow,
+}
+
+/// Why an `UntilStopped` run does not start yet (STARTUP §3/§7.4).
+pub const UNTIL_STOPPED_GATED: &str = "RUN_HORIZON_UNTIL_STOPPED_GATED: rolling SK-07 segments, the rolling runway re-preflight and provider budgets are not qualified";
+
+impl RunHorizon {
+    /// `--until-stopped` with its window and runway (`s/m/h/d`, both > 0, the window within the
+    /// runway).
+    pub fn until_stopped(checkpoint: &str, minimum_runway: &str) -> Result<Self, String> {
+        let duration = darkbot_solana::runtime_config::duration_seconds;
+        let (checkpoint_seconds, minimum_runway_seconds) =
+            (duration(checkpoint)?, duration(minimum_runway)?);
+        if checkpoint_seconds > minimum_runway_seconds {
+            return Err("RUN_HORIZON_CHECKPOINT_EXCEEDS_RUNWAY".into());
+        }
+        Ok(Self::UntilStopped {
+            checkpoint_seconds,
+            segment_policy: SegmentPolicy::PerWindow,
+            minimum_runway_seconds,
+        })
+    }
+
+    /// A run may start under this horizon; `UntilStopped` is refused with its open gates.
+    pub fn admit(&self) -> Result<(), String> {
+        match self {
+            Self::Fixed { .. } => Ok(()),
+            Self::UntilStopped { .. } => Err(UNTIL_STOPPED_GATED.into()),
+        }
+    }
 }
 pub const NS: u64 = 1_000_000_000;
 pub const MAX_SECONDS: u64 = u64::MAX / NS / SNAPSHOT_COUNT as u64;
@@ -697,6 +743,30 @@ pub fn persist_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// STARTUP §3: `UntilStopped` is typed (window, segment policy, runway), never a huge
+    /// duration; invalid windows are refused and admission refuses it with its open gates.
+    #[test]
+    fn until_stopped_is_typed_and_gated() {
+        let h = RunHorizon::until_stopped("1h", "6h").unwrap();
+        assert_eq!(
+            h,
+            RunHorizon::UntilStopped {
+                checkpoint_seconds: 3_600,
+                segment_policy: SegmentPolicy::PerWindow,
+                minimum_runway_seconds: 21_600,
+            }
+        );
+        assert_eq!(h.admit(), Err(UNTIL_STOPPED_GATED.into()));
+        for (c, r) in [
+            ("6h", "1h"),
+            ("0s", "1h"),
+            ("1h", "inf"),
+            ("1h", "until-stopped"),
+        ] {
+            assert!(RunHorizon::until_stopped(c, r).is_err(), "{c} {r}");
+        }
+    }
+
     #[test]
     fn durations_and_exact_quarters() {
         for (s, n) in [
@@ -718,6 +788,7 @@ mod tests {
                     duration_seconds: n
                 }
             );
+            assert_eq!(p.horizon().admit(), Ok(()));
             assert_eq!(p.duration_seconds, n);
             assert_eq!(p.offset_ns(SNAPSHOT_COUNT), n * NS);
             for i in 1..=SNAPSHOT_COUNT {

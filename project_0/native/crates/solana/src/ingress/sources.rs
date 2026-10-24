@@ -161,9 +161,23 @@ pub struct Quota {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetryBudget {
+    /// Consecutive failed sessions (no update delivered) before the source fails closed.
     pub max_reconnects: u32,
+    /// Backoff before a reconnect: doubles per consecutive failure up to `reconnect_max`.
+    pub reconnect_initial: Duration,
+    pub reconnect_max: Duration,
     pub connect_timeout: Duration,
     pub idle_timeout: Duration,
+}
+
+/// The reconnect backoff of every ingress feed: the configured WSS policy
+/// (`P0_WSS_RECONNECT_MS` / `P0_WSS_RECONNECT_MAX_MS`), one setting for WSS and Geyser.
+pub fn configured_reconnect_backoff() -> (Duration, Duration) {
+    let limits = &crate::runtime_config::active().limits;
+    (
+        Duration::from_millis(limits.wss_reconnect_ms),
+        Duration::from_millis(limits.wss_reconnect_max_ms),
+    )
 }
 
 /// The authentication a provider requires: a header whose value comes only from this
@@ -189,6 +203,7 @@ impl ProviderConfig {
     /// the provider; every capability is `Unknown` until a separately approved qualification.
     pub fn publicnode() -> Self {
         let unknown = Capability::Unknown;
+        let (reconnect_initial, reconnect_max) = configured_reconnect_backoff();
         Self {
             id: "publicnode".into(),
             endpoint: "https://solana.publicnode.com".into(),
@@ -204,6 +219,8 @@ impl ProviderConfig {
             },
             retry: RetryBudget {
                 max_reconnects: 5,
+                reconnect_initial,
+                reconnect_max,
                 connect_timeout: Duration::from_secs(10),
                 idle_timeout: Duration::from_secs(30),
             },
@@ -310,6 +327,8 @@ pub fn geyser_source(
             commitment: proto::CommitmentLevel::Processed,
             max_message_bytes: provider.quota.max_message_bytes,
             max_reconnects: provider.retry.max_reconnects,
+            reconnect_initial: provider.retry.reconnect_initial,
+            reconnect_max: provider.retry.reconnect_max,
             replay_from_slot: provider.capabilities.from_slot_replay == Capability::Proven,
         },
         subscription,
@@ -455,8 +474,15 @@ const RECENT_WRITES: usize = 65_536;
 
 /// One account write: (pubkey, slot, write version).
 type WriteId = (Pubkey, u64, u64);
-/// Its first copy: the unit, the content digest and its T_rx.
-type FirstCopy = (SourceUnit, [u8; 32], u64);
+/// Its first copy: the unit and the content digest.
+type FirstCopy = (SourceUnit, [u8; 32]);
+/// One account content in a slot: (pubkey, slot, content digest) — the lead key, as the WSS feed
+/// carries no write version.
+type CopyId = (Pubkey, u64, [u8; 32]);
+
+fn account_digest(a: &super::AccountUpdate) -> [u8; 32] {
+    solana_sdk::hash::hashv(&[a.owner.as_ref(), &a.lamports.to_le_bytes(), &a.data]).to_bytes()
+}
 
 /// A23-03: what a session of a unit was admitted under. Events carry it to the arbiter; a
 /// control change of the unit bumps its generation, so events stamped before (queued, in
@@ -484,9 +510,12 @@ pub enum Handoff {
 pub struct SourceArbiter {
     controls: HashMap<SourceUnit, (SourceControl, u64)>,
     canonical: Option<SourceUnit>,
-    /// (pubkey, slot, write version) → (unit, digest, t_rx) of its first copy.
+    /// (pubkey, slot, write version) → (unit, digest) of its first copy.
     writes: HashMap<WriteId, FirstCopy>,
     order: VecDeque<WriteId>,
+    /// (pubkey, slot, digest) → (unit, t_rx, canonical) of its first copy (leads).
+    copies: HashMap<CopyId, (SourceUnit, u64, bool)>,
+    copy_order: VecDeque<CopyId>,
     pub conflicts: u64,
     /// Events refused for a stale stamp or an unknown unit (A23-03).
     pub stale: u64,
@@ -513,6 +542,8 @@ impl SourceArbiter {
             canonical: first,
             writes: HashMap::new(),
             order: VecDeque::new(),
+            copies: HashMap::new(),
+            copy_order: VecDeque::new(),
             conflicts: 0,
             stale: 0,
             leads: LeadTelemetry::default(),
@@ -588,16 +619,11 @@ impl SourceArbiter {
         let canonical =
             self.canonical.as_ref() == Some(&stamp.unit) && control.feeds_canonical_state();
         if let IngressEvent::Account(a) = &ev {
+            let digest = account_digest(a);
             if let Some(wv) = a.write_version {
-                let digest = solana_sdk::hash::hashv(&[
-                    a.owner.as_ref(),
-                    &a.lamports.to_le_bytes(),
-                    &a.data,
-                ])
-                .to_bytes();
                 let id = (a.pubkey, a.slot, wv);
                 match self.writes.get(&id) {
-                    Some((unit, seen, _)) if *seen != digest && *unit != stamp.unit => {
+                    Some((unit, seen)) if *seen != digest && *unit != stamp.unit => {
                         self.conflicts += 1;
                         return Route::Conflict {
                             pubkey: a.pubkey,
@@ -605,21 +631,9 @@ impl SourceArbiter {
                             write_version: wv,
                         };
                     }
-                    Some((unit, _, t)) if *unit != stamp.unit => {
-                        let canonical_first = Some(unit) == self.canonical.as_ref();
-                        if canonical_first || canonical {
-                            let lead = i128::from(a.t_rx_ns) - i128::from(*t);
-                            self.leads.record(Lead {
-                                pubkey: a.pubkey,
-                                slot: a.slot,
-                                lead_ns: if canonical_first { -lead } else { lead },
-                            });
-                        }
-                    }
                     Some(_) => {}
                     None => {
-                        self.writes
-                            .insert(id, (stamp.unit.clone(), digest, a.t_rx_ns));
+                        self.writes.insert(id, (stamp.unit.clone(), digest));
                         self.order.push_back(id);
                         if self.order.len() > RECENT_WRITES {
                             if let Some(old) = self.order.pop_front() {
@@ -629,11 +643,57 @@ impl SourceArbiter {
                     }
                 }
             }
+            self.measure_copy(&stamp.unit, canonical, a, digest);
         }
         if canonical {
             Route::Canonical(ev)
         } else {
             Route::Observed(ev)
+        }
+    }
+
+    /// P5 S1-RACE: the canonical feed's copy of an account write. The canonical session's events
+    /// reach the owner directly (never `route`), so the owner hands each copy here while a
+    /// source observes: measurement only, nothing is routed or applied.
+    pub fn measure_canonical(&mut self, ev: &IngressEvent) {
+        let (IngressEvent::Account(a), Some(unit)) = (ev, self.canonical.take()) else {
+            return;
+        };
+        self.measure_copy(&unit, true, a, account_digest(a));
+        self.canonical = Some(unit);
+    }
+
+    /// The lead of an observed copy over the canonical copy of the same content in the same
+    /// slot (or the reverse, negative); the first copy of each content is kept, bounded.
+    fn measure_copy(
+        &mut self,
+        unit: &SourceUnit,
+        canonical: bool,
+        a: &super::AccountUpdate,
+        digest: [u8; 32],
+    ) {
+        let id = (a.pubkey, a.slot, digest);
+        match self.copies.get(&id) {
+            Some((first, t, first_canonical)) if first != unit => {
+                if *first_canonical != canonical {
+                    let lead = i128::from(a.t_rx_ns) - i128::from(*t);
+                    self.leads.record(Lead {
+                        pubkey: a.pubkey,
+                        slot: a.slot,
+                        lead_ns: if *first_canonical { -lead } else { lead },
+                    });
+                }
+            }
+            Some(_) => {}
+            None => {
+                self.copies.insert(id, (unit.clone(), a.t_rx_ns, canonical));
+                self.copy_order.push_back(id);
+                if self.copy_order.len() > RECENT_WRITES {
+                    if let Some(old) = self.copy_order.pop_front() {
+                        self.copies.remove(&old);
+                    }
+                }
+            }
         }
     }
 }

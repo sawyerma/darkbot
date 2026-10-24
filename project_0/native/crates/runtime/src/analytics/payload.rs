@@ -119,6 +119,25 @@ impl Payload for SourceControlRequest {
     const KIND: u16 = journal::kind::SOURCE_CONTROL_REQUEST;
 }
 
+/// S1-02: the state owner's decision on one source-control request — what `p0ctl source status`
+/// reports as applied (the request alone is only what the operator asked for).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceControlOutcome {
+    pub seq: u64,
+    /// `<unit> <mode>` as requested (`unreadable` when the request file was not readable).
+    pub request: String,
+    pub applied: bool,
+    /// The refusal reason, or the canonical handoff of an applied control.
+    pub detail: String,
+    /// The runtime owner process that decided it.
+    pub owner_pid: u32,
+    /// `None`: the wall clock was not readable.
+    pub decided_unix_s: Option<u64>,
+}
+impl Payload for SourceControlOutcome {
+    const KIND: u16 = journal::kind::SOURCE_CONTROL_OUTCOME;
+}
+
 /// C0 census row: one debtor (or undecodable member) of the configured group, evaluated against
 /// one canonical state view and chain clock; `class` under the result frame's model.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -602,6 +621,7 @@ macro_rules! typed_kinds {
             k::OWNER_SUMMARY => $f::<super::shadow_ledger::DaySummary>($kind, $schema, $bytes),
             k::OWNER_RECOVERY => $f::<super::evidence::OwnerRecovery>($kind, $schema, $bytes),
             k::SOURCE_CONTROL_REQUEST => $f::<SourceControlRequest>($kind, $schema, $bytes),
+            k::SOURCE_CONTROL_OUTCOME => $f::<SourceControlOutcome>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_ACCOUNT => $f::<C0CensusImportAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_GROUP_ACCOUNT => $f::<C0CensusImportGroupAccount>($kind, $schema, $bytes),

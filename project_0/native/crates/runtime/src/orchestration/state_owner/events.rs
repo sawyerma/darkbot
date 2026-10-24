@@ -89,6 +89,7 @@ impl ShadowOwner {
             {
                 self.ingress_since_detect = self.ingress_since_detect.saturating_add(1);
             }
+            self.sources.measure_canonical(&ev);
             // Trigger (a) Long-Tail: jedes MarginfiAccount-Update → Detection im Shadow-Modus.
             detect = match &ev {
                 IngressEvent::Account(a)

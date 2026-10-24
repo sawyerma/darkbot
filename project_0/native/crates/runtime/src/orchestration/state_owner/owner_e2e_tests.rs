@@ -1698,6 +1698,8 @@ fn with_loopback_geyser(
                     commitment: proto::CommitmentLevel::Processed,
                     max_message_bytes: 1 << 20,
                     max_reconnects: 0,
+                    reconnect_initial: Duration::from_millis(1),
+                    reconnect_max: Duration::from_millis(1),
                     replay_from_slot: false,
                 },
                 subscription: sub,
@@ -1726,7 +1728,8 @@ fn with_loopback_geyser(
         64,
         &f.owner.wake,
         Some(rx),
-    );
+    )
+    .record_decisions_in(f.dir.join("source-control"));
     f.owner.start_sources().unwrap();
     (tx, seen, k)
 }
@@ -1770,6 +1773,24 @@ fn s1_02_geyser_off_connects_nothing_and_observe_never_feeds_state() {
     assert_eq!(f.owner.sources.health.last_slot, Some(50));
     assert!(!f.owner.halt.is_raised());
     assert!(f.owner.sources.line().contains("observing=geyser:loopback"));
+    // P5 S1-RACE: the canonical WSS copy of the observed write is measured: Geyser led.
+    let t = f.owner.clock.now_ns();
+    f.producer
+        .try_push(IngressEvent::Account(AccountUpdate {
+            pubkey: k,
+            owner: f.owner.program,
+            lamports: 1,
+            data: vec![1; 8],
+            slot: 50,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: t,
+        }))
+        .unwrap();
+    run_until(&mut f, |o| o.sources.arbiter.leads.samples >= 1);
+    let leads = f.owner.sources.arbiter.leads.snapshot();
+    assert_eq!((leads.ahead_ns.count, leads.behind_ns.count), (1, 0));
+    assert!(f.owner.sources.line().contains("lead_samples=1"));
     let dir = f.dir.clone();
     f.owner.finish().unwrap();
     let _ = std::fs::remove_dir_all(dir);
@@ -1868,6 +1889,46 @@ fn s1_02_runtime_control_toggles_and_hands_canonical_authority_over() {
     assert!(!f.owner.st.run_state().is_tradable());
     assert!(f.owner.halt.is_raised());
     assert!(f.owner.sources.line().contains("canonical=none"));
+    // A request the control thread refused reaches the owner as such and is recorded too.
+    assert!(control
+        .try_push(ControlMessage::Refused {
+            seq: 6,
+            request: "wss on".into(),
+            reason: "SOURCE_MODE_INVALID".into(),
+        })
+        .is_ok());
+    run_until_with(&mut f, &mut fetch, |o| {
+        o.sources.stats.controls_refused == 2
+    });
+    // P5 S1-02: every decision is recorded; the newest one is the applied state.
+    let decisions = f.dir.join("source-control");
+    let decided = |seq: u64| {
+        crate::analytics::journal::read_typed_value::<
+            crate::analytics::payload::SourceControlOutcome,
+        >(&decisions.join(format!("outcome_{seq:08}.p0j")))
+        .unwrap()
+    };
+    assert_eq!(
+        (decided(1).applied, decided(1).request.as_str()),
+        (true, "geyser:loopback off")
+    );
+    assert_eq!(
+        (decided(2).applied, decided(2).detail.as_str()),
+        (false, "ARBITER_SECOND_CANONICAL_SOURCE")
+    );
+    assert_eq!(
+        (decided(5).applied, decided(5).detail.as_str()),
+        (true, "canonical_revoked")
+    );
+    let newest = crate::orchestration::source_control::latest_outcome(&decisions)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (newest.seq, newest.applied, newest.request.as_str()),
+        (6, false, "wss on")
+    );
+    assert_eq!(newest.detail, "SOURCE_MODE_INVALID");
+    assert_eq!(newest.owner_pid, std::process::id());
     // Journaled order: trading resumed after the grant only through a recovery.
     use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
     let dir = f.dir.clone();

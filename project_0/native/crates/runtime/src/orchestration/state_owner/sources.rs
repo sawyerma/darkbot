@@ -9,7 +9,7 @@
 //! under the new control; stopping the canonical session halts the state (FeedGap, gap) until a
 //! recovery, which only a canonical session's StreamReady starts.
 use super::*;
-use crate::orchestration::source_control::ControlMessage;
+use crate::orchestration::source_control::{self, ControlMessage};
 use darkbot_common::channel::{Consumer, Producer};
 use darkbot_solana::ingress::sources::{
     Handoff, Route, SourceArbiter, SourceControl, SourceHealth, SourceUnit, Stamp,
@@ -54,6 +54,8 @@ pub(super) struct OwnerSources {
     observe_tx: Producer<IngressEvent>,
     observe_rx: Consumer<IngressEvent>,
     controls: Option<Consumer<ControlMessage>>,
+    /// Where the owner records its decisions (`outcome_<seq>.p0j`); `None`: not recorded.
+    control_dir: Option<std::path::PathBuf>,
     pub(super) health: SourceHealth,
     pub(super) stats: SourceStats,
 }
@@ -77,8 +79,25 @@ impl OwnerSources {
             observe_tx: observe_tx.with_wakeup(wake),
             observe_rx,
             controls,
+            control_dir: None,
             health: SourceHealth::default(),
             stats: SourceStats::default(),
+        }
+    }
+
+    /// The owner records every control decision in `dir` (`p0ctl source status`).
+    pub(super) fn record_decisions_in(mut self, dir: std::path::PathBuf) -> Self {
+        self.control_dir = Some(dir);
+        self
+    }
+
+    /// P5 S1-RACE: a canonical account copy for the lead measurement, only while a source
+    /// observes (nothing to compare with otherwise); snapshot reads are no stream copies.
+    pub(super) fn measure_canonical(&mut self, ev: &IngressEvent) {
+        if self.observer.is_some()
+            && matches!(ev, IngressEvent::Account(a) if a.source != SourceKind::Snapshot)
+        {
+            self.arbiter.measure_canonical(ev);
         }
     }
 
@@ -159,6 +178,7 @@ impl ShadowOwner {
                         self,
                         "source_control: refused seq={seq} request={request} reason={reason}"
                     );
+                    self.record_source_decision(seq, request, false, reason);
                 }
             }
         }
@@ -203,6 +223,7 @@ impl ShadowOwner {
         let unit = next.unit.clone();
         let name = unit_name(&unit);
         let was_canonical = self.sources.arbiter.canonical() == Some(&unit);
+        let request = format!("{name} {}", source_control::mode_name(next.mode));
         let handoff = match self.sources.arbiter.change(next.clone()) {
             Ok(h) => h,
             Err(reason) => {
@@ -212,6 +233,7 @@ impl ShadowOwner {
                     "source_control: refused seq={seq} unit={name} mode={:?} reason={reason}",
                     next.mode
                 );
+                self.record_source_decision(seq, request, false, reason.into());
                 return Ok(());
             }
         };
@@ -232,18 +254,38 @@ impl ShadowOwner {
                 self.start_observer()?;
             }
         }
+        let handoff = match handoff {
+            Handoff::None => "none",
+            Handoff::CanonicalRevoked { .. } => "canonical_revoked",
+            Handoff::CanonicalGranted { .. } => "canonical_granted_recovery_required",
+        };
         owner_log!(
             self,
-            "source_control: applied seq={seq} unit={name} mode={:?} handoff={} canonical_generation={}",
+            "source_control: applied seq={seq} unit={name} mode={:?} handoff={handoff} canonical_generation={}",
             next.mode,
-            match handoff {
-                Handoff::None => "none",
-                Handoff::CanonicalRevoked { .. } => "canonical_revoked",
-                Handoff::CanonicalGranted { .. } => "canonical_granted_recovery_required",
-            },
             self.ingress_session.generation
         );
+        self.record_source_decision(seq, request, true, handoff.into());
         Ok(())
+    }
+
+    /// Records the owner's decision on request `seq` (the applied state of `p0ctl source
+    /// status`); a failed write is journaled, the decision itself stands.
+    fn record_source_decision(&mut self, seq: u64, request: String, applied: bool, detail: String) {
+        let Some(dir) = self.sources.control_dir.clone() else {
+            return;
+        };
+        let outcome = crate::analytics::payload::SourceControlOutcome {
+            seq,
+            request,
+            applied,
+            detail,
+            owner_pid: std::process::id(),
+            decided_unix_s: super::accounts::wall_unix_s().ok(),
+        };
+        if let Err(e) = source_control::write_outcome(&dir, &outcome) {
+            owner_log!(self, "source_control: decision seq={seq} not recorded: {e}");
+        }
     }
 
     /// Ends the canonical session: joined, its queued events dropped, the state halted with a

@@ -8,9 +8,12 @@
 //! p0ctl [--project DIR] doctor [--scope offline|network] [--network-approved TOKEN --genesis-hash HASH --provider-evidence FILE --output FILE --capture-source logs|transactions] [-- OPERATIONAL_ARGS]
 //! p0ctl [--project DIR] preflight --duration D [--capture-source logs|transactions]
 //!       [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
-//! p0ctl [--project DIR] run start --duration D [test.sh options…]
+//! p0ctl [--project DIR] run preflight …   (= preflight)
+//! p0ctl [--project DIR] run start --duration D [--profile NAME] [test.sh options…]
+//! p0ctl [--project DIR] run start --until-stopped --checkpoint D --minimum-runway D   (gated)
 //! p0ctl [--project DIR] run status [--run RUN_ID]
-//! p0ctl [--project DIR] run stop
+//! p0ctl [--project DIR] run stop [--run RUN_ID]
+//! p0ctl [--project DIR] runs list
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict|crosscheck [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
@@ -44,8 +47,10 @@
 //! enable LIVE (FE-06 stays a separate explicit approval).
 //!
 //! `source set` (S1-02) records a typed source-control request and rings the running runtime;
-//! the state owner applies or refuses it (journal `source_control: applied|refused seq=N`). A
-//! Geyser unit can be OFF or OBSERVE; ACTIVE is refused without a qualification record.
+//! the state owner applies or refuses every request in order and records its decision
+//! (`outcome_<seq>.p0j`, journal `source_control: applied|refused seq=N`); `source status` shows
+//! that decision as the applied state. A Geyser unit can be OFF or OBSERVE; ACTIVE is refused
+//! without a qualification record.
 //!
 //! `report` runs the native report (B7) for runs with native capture records (typed run
 //! manifest and market completion); index provenance, JSON output and historical runs use the
@@ -53,6 +58,7 @@
 //! verification (PHASENPLAN L.2): it binds the report's axes, the run's final technical record
 //! and the owners' end, persists an immutable result and exits 0 only for `C0_E1_MASTER_PASS`.
 use darkbot_runner::analytics::journal;
+use darkbot_runner::analytics::measurement::RunHorizon;
 use darkbot_runner::analytics::{qualification, renders, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
@@ -154,7 +160,7 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const RUN_START_USAGE: &str =
-    "p0ctl run start --duration 10m|1h|5h|24h [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
+    "p0ctl run start --duration 10m|1h|5h|24h [--profile NAME] [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
     [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
     [--verify-bytes N] [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N]
     [--verify-max-pages N] [--provider-evidence FILE.p0j] [--report-* VALUE ...] [--format table|csv]
@@ -176,10 +182,20 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
             run.to_string_lossy()
         ));
     }
+    let args = &profile_to_operational(args)?;
     let options = args.split(|a| a == "--").next().unwrap_or(&[]);
     if options.iter().any(|a| a == "--help" || a == "-h") {
         println!("{RUN_START_USAGE}");
         return Ok(true);
+    }
+    // STARTUP §3: an unbounded run is a typed horizon, never a huge duration; it starts only
+    // once its gates are qualified.
+    if options.iter().any(|a| a == "--until-stopped") {
+        if options.iter().any(|a| a == "--duration") {
+            return Err("--until-stopped and --duration are exclusive".into());
+        }
+        let need = |flag| value(options, flag).ok_or(format!("--until-stopped requires {flag} D"));
+        RunHorizon::until_stopped(&need("--checkpoint")?, &need("--minimum-runway")?)?.admit()?;
     }
     if options
         .iter()
@@ -482,8 +498,100 @@ fn run_status(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
-fn run_stop(project: &Path) -> Result<bool, String> {
-    match control::owner_state(&lock_path(project))? {
+/// `--profile NAME` before `--` (STARTUP §6) selects the operational profile: it moves to the
+/// operational arguments, which the start config and the launched runtime both read.
+fn profile_to_operational(args: &[String]) -> Result<Vec<String>, String> {
+    let split = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    let (options, operational) = args.split_at(split);
+    let (mut out, mut profile, mut it) = (Vec::new(), None, options.iter());
+    while let Some(a) = it.next() {
+        if a == "--profile" {
+            let name = it.next().ok_or("--profile requires a value")?;
+            if profile.replace(name.clone()).is_some() {
+                return Err("exactly one --profile".into());
+            }
+        } else {
+            out.push(a.clone());
+        }
+    }
+    let Some(name) = profile else {
+        return Ok(args.to_vec());
+    };
+    if operational.iter().any(|a| a == "--profile") {
+        return Err("--profile given before and after --".into());
+    }
+    out.extend(["--".into(), "--profile".into(), name]);
+    out.extend(operational.iter().skip(1).cloned());
+    Ok(out)
+}
+
+/// `runs list`: one line per run directory under the run roots (ordered by run id), with the
+/// typed records it holds and whether it is the running one.
+fn runs_list(project: &Path) -> Result<bool, String> {
+    let running = match control::owner_state(&lock_path(project))? {
+        OwnerState::Running { run_id, .. } => Some(run_id),
+        OwnerState::NotRunning { .. } => None,
+    };
+    let rows = run_rows(project, running.as_deref());
+    if rows.is_empty() {
+        println!("no runs under {RUN_ROOTS:?}");
+    }
+    for row in rows {
+        println!("{row}");
+    }
+    Ok(true)
+}
+
+fn run_rows(project: &Path, running: Option<&str>) -> Vec<String> {
+    let mut runs: Vec<(String, &str, PathBuf)> = RUN_ROOTS
+        .iter()
+        .filter_map(|root| Some((root, std::fs::read_dir(project.join(root)).ok()?)))
+        .flat_map(|(root, entries)| {
+            entries
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .map(move |e| {
+                    (
+                        e.file_name().to_string_lossy().into_owned(),
+                        *root,
+                        e.path(),
+                    )
+                })
+        })
+        .collect();
+    runs.sort();
+    runs.into_iter()
+        .map(|(id, root, run)| {
+            let has = |p: &str| if run.join(p).is_file() { "yes" } else { "no" };
+            format!(
+                "{id}\troot={root}\tmanifest={}\tcompletion={}\tpost_capture={}{}",
+                has("capture/run_manifest.p0j"),
+                has("capture/market/market_completion.p0j"),
+                has("reports/post_capture_result.json"),
+                if running == Some(id.as_str()) {
+                    "\tRUNNING"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect()
+}
+
+/// `run stop --run RUN_ID` stops only that run: another running one is refused.
+fn stop_target(state: &OwnerState, wanted: Option<&str>) -> Result<(), String> {
+    match (state, wanted) {
+        (OwnerState::Running { run_id, .. }, Some(w)) if w != run_id => Err(format!(
+            "STOP_RUN_MISMATCH: the running run is {run_id}, not {w}"
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn run_stop(project: &Path, args: &[String]) -> Result<bool, String> {
+    let state = control::owner_state(&lock_path(project))?;
+    stop_target(&state, value(args, "--run").as_deref())?;
+    match state {
         OwnerState::NotRunning { .. } => {
             println!("NOT_RUNNING: nothing to stop");
             Ok(true)
@@ -637,17 +745,37 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             Ok(true)
         }
         [status] if status == "status" => {
-            match source_control::latest_request(&dir)? {
+            let request = source_control::latest_request(&dir)?;
+            match &request {
                 Some(r) => println!(
                     "last source request: seq={} unit={} mode={} requested_unix_s={}",
                     r.seq, r.unit, r.mode, r.requested_unix_s
                 ),
                 None => println!("no source request"),
             }
+            // The applied state is the owner's decision, not the request.
+            let decision = source_control::latest_outcome(&dir)?;
+            match &decision {
+                Some(d) => println!(
+                    "last owner decision: seq={} {} request=\"{}\" detail={} owner_pid={} decided_unix_s={}",
+                    d.seq,
+                    if d.applied { "APPLIED" } else { "REFUSED" },
+                    d.request,
+                    d.detail,
+                    d.owner_pid,
+                    d.decided_unix_s.map_or("UNKNOWN".into(), |s| s.to_string())
+                ),
+                None => println!("no owner decision"),
+            }
+            let decided = decision.as_ref().map_or(0, |d| d.seq);
+            if let Some(r) = request.filter(|r| r.seq > decided) {
+                println!("undecided: requests after seq={decided} up to seq={} (no runtime has applied them yet)", r.seq);
+            }
             match control::owner_state(&lock_path(project))? {
-                OwnerState::Running { pid, run_id, .. } => {
-                    println!("runtime: running pid={pid} run_id={run_id} (applied state: its journal `source_control:` / `sources:` lines)")
-                }
+                OwnerState::Running { pid, run_id, .. } => println!(
+                    "runtime: running pid={pid} run_id={run_id}; last decision from this runtime: {}",
+                    decision.is_some_and(|d| d.owner_pid == pid)
+                ),
                 OwnerState::NotRunning { .. } => println!("runtime: not running"),
             }
             Ok(true)
@@ -886,7 +1014,9 @@ fn main() -> ExitCode {
             (Some("preflight"), _) => preflight_cmd(&project, &rest),
             (Some("run"), Some("start")) => run_start(&project, &rest[1..]),
             (Some("run"), Some("status")) => run_status(&project, &rest[1..]),
-            (Some("run"), Some("stop")) => run_stop(&project),
+            (Some("run"), Some("stop")) => run_stop(&project, &rest[1..]),
+            (Some("run"), Some("preflight")) => preflight_cmd(&project, &rest[1..]),
+            (Some("runs"), Some("list")) => runs_list(&project),
             (Some("verify"), _) => verify_cmd(&project, &rest),
             (Some("report"), _) => report_cmd(&project, &rest),
             (Some("export"), _) => export_cmd(&project, &rest),
@@ -895,7 +1025,7 @@ fn main() -> ExitCode {
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture|source|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|export|qualify|post-capture|source|approval|fe04 …".into()),
         }
     });
     match result {
@@ -905,5 +1035,81 @@ fn main() -> ExitCode {
             eprintln!("p0ctl: {e}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// STARTUP §6: `--profile` before `--` reaches the operational arguments (once).
+    #[test]
+    fn profile_moves_to_the_operational_arguments() {
+        assert_eq!(
+            profile_to_operational(&strings(&["--duration", "75m", "--profile", "standard"])),
+            Ok(strings(&[
+                "--duration",
+                "75m",
+                "--",
+                "--profile",
+                "standard"
+            ]))
+        );
+        assert_eq!(
+            profile_to_operational(&strings(&["--profile", "smoke", "--", "--rpc-rps", "2"])),
+            Ok(strings(&["--", "--profile", "smoke", "--rpc-rps", "2"]))
+        );
+        let same = strings(&["--duration", "1h", "--", "--profile", "smoke"]);
+        assert_eq!(profile_to_operational(&same), Ok(same.clone()));
+        for bad in [
+            &["--profile"][..],
+            &["--profile", "a", "--profile", "b"],
+            &["--profile", "a", "--", "--profile", "b"],
+        ] {
+            assert!(profile_to_operational(&strings(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    /// `run stop --run` never stops another run; without `--run` (or not running) it proceeds.
+    #[test]
+    fn stop_refuses_another_running_run() {
+        let running = OwnerState::Running {
+            pid: 1,
+            run_id: "a".into(),
+            mode: "econ".into(),
+            started_unix_s: 0,
+        };
+        assert!(stop_target(&running, Some("b"))
+            .unwrap_err()
+            .starts_with("STOP_RUN_MISMATCH"));
+        assert_eq!(stop_target(&running, Some("a")), Ok(()));
+        assert_eq!(stop_target(&running, None), Ok(()));
+        let idle = OwnerState::NotRunning { last: None };
+        assert_eq!(stop_target(&idle, Some("b")), Ok(()));
+    }
+
+    /// `runs list`: every run directory of the roots, ordered by id, with its typed records and
+    /// the running marker; files are no runs.
+    #[test]
+    fn runs_are_listed_with_their_records() {
+        let project = std::env::temp_dir().join(format!("p0ctl-runs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        for run in ["data/runs/b", "data/econ4h/a/capture/market"] {
+            std::fs::create_dir_all(project.join(run)).unwrap();
+        }
+        std::fs::write(project.join("data/econ4h/a/capture/run_manifest.p0j"), b"").unwrap();
+        std::fs::write(project.join("data/runs/file"), b"").unwrap();
+        assert_eq!(
+            run_rows(&project, Some("b")),
+            [
+                "a\troot=data/econ4h\tmanifest=yes\tcompletion=no\tpost_capture=no",
+                "b\troot=data/runs\tmanifest=no\tcompletion=no\tpost_capture=no\tRUNNING",
+            ]
+        );
+        std::fs::remove_dir_all(project).unwrap();
     }
 }

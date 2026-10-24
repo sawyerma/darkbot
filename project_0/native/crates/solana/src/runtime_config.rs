@@ -437,7 +437,8 @@ impl RuntimeConfig {
 /// The one duration parser of Project_0 (operational config, MeasurementPlan, `p0ctl`):
 /// a positive integer with `s`, `m`, `h` or `d`, at most what four exact nanosecond snapshot
 /// offsets can represent. Open-ended horizons are not durations: `until-stopped`/`inf` are
-/// refused (`RunHorizon::UntilStopped` is FEUI follow-up scope), never mapped to a huge number.
+/// refused here, never mapped to a huge number (`RunHorizon::UntilStopped`, `p0ctl run start
+/// --until-stopped`, is a typed horizon of its own).
 pub fn duration_seconds(s: &str) -> Result<u64, String> {
     if matches!(
         s,
