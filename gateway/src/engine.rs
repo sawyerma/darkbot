@@ -166,7 +166,7 @@ pub fn spawn_supervisor(
                 Ok(rx) => {
                     attach_failures = 0;
                     rx
-                },
+                }
                 Err(e) => {
                     attach_failures = attach_failures.saturating_add(1);
                     if attach_failures == 1 || attach_failures % 60 == 0 {
@@ -184,7 +184,10 @@ pub fn spawn_supervisor(
                         s.state = next;
                         changed
                     });
-                    tokio::time::sleep((backoff * attach_failures.min(5)).min(Duration::from_secs(10))).await;
+                    tokio::time::sleep(
+                        (backoff * attach_failures.min(5)).min(Duration::from_secs(10)),
+                    )
+                    .await;
                     continue;
                 }
             };

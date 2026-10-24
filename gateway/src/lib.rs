@@ -3,12 +3,12 @@
 //! Entscheidungs-, Signatur- oder Journal-Logik. Nur Transport, Cache, Liveness.
 
 pub mod config;
-pub mod lifecycle;
 pub mod control;
 pub mod engine;
 pub mod feeds;
 pub mod http;
 pub mod hub;
+pub mod lifecycle;
 pub mod overview;
 pub mod proto;
 pub mod session;
