@@ -17,7 +17,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | **HIGH, vor LIVE-Quellenumschaltung** | **A23-03 / A23-04** Arbiter-Autorisierung und Lead-Retention | CODE_FIXED `39d53f67`; Owner-Pfad `0db0a1f2` |
 | **S1-02 Owner** | Geyser im State-Owner | `0db0a1f2`: OFF/OBSERVE produktiv, `p0ctl source set/status` zur Laufzeit; ACTIVE nur mit Qualifikation (keine vorhanden ⇒ refused); Loopback-gRPC-E2E. Kein S1-RACE-/Provider-/Mainnet-Nachweis |
 | **LOW–MEDIUM, zusammen mit A23-01** | **A23-08** Worker-Sleep | CODE_FIXED `f1f90572` (Space-Doorbell) |
-| **REVIEW_REQUIRED** | **A23-05 / A23-09** (A23-06 `e6c93e93`, A23-07 `439b8b12` geschlossen) | geprüft, unverändert (BUGS §19): kein Release-Profil-Flag ohne Benchmark; Retry-After ungekürzt ohne Grund im Snapshot; FE-04-Runway ≈ 2.400 Versuche; 402 JSON-Vorkommen/40 Dateien, Kategorisierung OPEN |
+| **REVIEW_REQUIRED** | **A23-05 (PARTIAL `13f7c981`: Geldpfad geprüft, Profil-Flag offen) / A23-09** (A23-06 `e6c93e93`, A23-07 `439b8b12` geschlossen) | geprüft, unverändert (BUGS §19): kein Release-Profil-Flag ohne Benchmark; Retry-After ungekürzt ohne Grund im Snapshot; FE-04-Runway ≈ 2.400 Versuche; 402 JSON-Vorkommen/40 Dateien, Kategorisierung OPEN |
 
 **Offen:** Echtlauf-Messung owner_wakeup (P6-MT), S1-RACE-Qualifikation für Geyser ACTIVE, A23-05/06/07/09-Pakete. Das ändert keine FE-00…FE-07-, FREE_ONLY-, PERSIST-/JFI-, Provider-/Read-only- oder LIVE-Freigaben.
 
