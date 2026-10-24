@@ -8,9 +8,9 @@ Single code source of every value below: `native/crates/liquidation/src/protocol
 |---|---|---|
 | Program ID | `MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA` (= `marginfi_type_crate::ID`, feature `mainnet-beta`) | source-pinned, tested |
 | ProgramData address | `PDA([program], BPFLoaderUpgradeab1e…)` (`program_data_address`) | derived |
-| Deployed program hash | `H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f` (SHA-256 of the full ProgramData account, finalized reads 2026-10-08, run `c0e1_4h_20261008T222326Z`) | historical reference; **current value NOT_RUN** |
-| Deployment slot, upgrade authority | decoded by `decode_program_data` (slot u64, `Option<Pubkey>`) and logged at every Shadow start | **current value NOT_RUN** |
-| Source / release | `0dotxyz/marginfi-v2` tag `mrgn-0.1.11-rc1`, commit `33c67987a661f59c6683a65485ebb4f0ef030b77`; program crate 0.1.11, type crate 0.1.10 | tested against `Cargo.lock` |
+| Deployed program hash | reference `H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f` (0.1.11, reads 2026-10-08); **observed 2026-10-24 (FE-01 smoke `da8512ad`): SHA-256 `3e3626a9…00de` ≠ reference — upgraded** | observed value is evidence, **not qualified** |
+| Deployment slot, upgrade authority | observed slot 456 093 551 (after the reference observation); logged at every Shadow start | upgrade authority not yet recorded |
+| Source / release | pinned candidate `mrgn-0.1.12-rc2` (`9fcb729a`, `c9decd7f`, P1B-03); deployment ↔ source mapping **not proven** | historical pin `mrgn-0.1.11-rc1` (`33c67987`) |
 | IDL | the pin ships no marginfi IDL (only integration IDLs); layouts and discriminators come from the type crate directly; on-chain IDL account not read | IDL hash NOT_RUN |
 | Account discriminators | MarginfiAccount `43b2826d7e721c2a`, Bank `8e31a6f2324261bc`, MarginfiGroup `b617adf097ceb643`, FeeState `3fe01055c124ebdc`, LiquidationRecord `5f74178459d2f5a2` | = type crate, tested |
 | Bank layout | payload 1856 B (raw 1864 incl. discriminator) = `size_of::<Bank>()`; 3904 B is the 0.1.12 layout (P1B); any other length `UNKNOWN_LAYOUT` | tested |
@@ -29,7 +29,7 @@ Single code source of every value below: `native/crates/liquidation/src/protocol
 - Runtime: every ProgramData account write is hashed against the startup baseline; a change latches the same HALT.
 - No automatic resume: a new deployment needs a new source pin, layout/IDL/source requalification and parity (P1B promotion).
 
-## Gate P1A: BLOCKED
+## Gate P1A: BLOCKED (2026-10-24: upgrade observed, RC2 candidate pinned, deployment unqualified — runtime halted)
 
 The source-pinned side is complete. Whether the deployment *running today* is still `H57mqz…` needs one finalized read of
 the program and ProgramData accounts on Mainnet, which needs separate read-only permission. Unblock step: authorized bounded

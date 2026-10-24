@@ -57,7 +57,21 @@ RC2 semantics the promotion must implement (from the 0.1.12 patch notes in the t
 - Borrow/end-flashloan with premium-bearing debt need every premium-relevant collateral oracle (`PremiumSnapshotUnavailable` 6615).
 - `marginfi_account_close` needs the trailing `rebalance_fee_pool` PDA (not used by receivership).
 
-## Gate P1B: LOCAL_PASS (upgrade-ready offline); deployment BLOCKED
+## P1B-03 status (2026-10-24, `c9decd7f`)
+
+| Step | State |
+|---|---|
+| 1 HALT | done: the runtime starts `NotReference` (halted) on the observed deployment |
+| 2 ProgramData / hash | done: FE-01 smoke `da8512ad` — SHA-256 `3e3626a9…00de`, deployment slot 456 093 551 (≠ 0.1.11 reference) |
+| 3 Source | pins → `mrgn-0.1.12-rc2` (`9fcb729a`) as **candidate**; `PROGRAM_DATA_REFERENCE_HASH` stays the 0.1.11 reference bound to `PROGRAM_DATA_REFERENCE_SOURCE_TAG` (qualifies nothing for the RC2 pin); the observed hash is evidence only |
+| 4 Layout / IDL | done: tripwires fixed (3912 B decodes, 1864 B = `OtherVersion("0.1.11")`), discriminators/account lists/allowlist unchanged; real 0.1.11 fixtures kept, resized counterparts tested; premium semantics implemented (Health premium, threshold fallback, decay, repay premium-first/dust/`repay_all` horizon, solvency cap, cap below closeout, tag curve parity) |
+| 5 Bank resize | **BLOCKED** — needs an approved read of the group's banks |
+| 6 Parity | **BLOCKED** — FE-01 full observation on the new deployment (provider qualification evidence missing) |
+| 7 P1B → P1A | open: after 5/6; LIVE stays disabled |
+
+Correction to the RC2 notes above: a receivership repay is the ordinary `lending_account_repay` and settles premium first; only classic liquidation repays principal only.
+
+## Gate P1B: LOCAL_PASS (upgrade-ready offline, RC2 integrated `c9decd7f`); deployment BLOCKED
 
 Tickets P1B-01..03 done; DarkBot type-checks against RC2 with a known 4-call migration; an upgrade halts and no 0.1.12
 bank is misread by 0.1.11 code. Open until promotion: the premium-aware semantics above (Health `premium_scratch`,
