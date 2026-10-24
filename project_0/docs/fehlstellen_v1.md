@@ -191,3 +191,51 @@ E01 (`reporter/Cargo.toml:21-27` `required-features = ["test-fixture"]`), E02 (`
 - Nicht gelesen: `market/*` jenseits der zitierten Stellen, `storage/*`, `reporter/*` jenseits `lib.rs:973`, Python-Pins vollständig, `lookup_tables.rs`.
 - Uncommittete parallele Änderungen (22 Dateien) nicht erfasst; vor jedem Fix neu pinnen.
 - Keine Änderung an FREE_ONLY-, PERSIST-/JFI-, Provider-, LIVE- oder `ObserveOnly`-Freigaben durch dieses Dokument; P0-PROD-CTRL verschärft die Abnahme, lockert kein Gate.
+
+---
+
+## 11. Umsetzungsstand 25.10. — Einheit „nativer Backtest/Optimizer, Legacy-Entfernung, JFI-04“: UNFERTIG, NICHT KORREKT ABGESCHLOSSEN (CTRL-12: angehalten)
+
+**Einordnung:** Dies ist die begonnene Korrektur der Positionen **A02, A03, A04, A05, A08, A10/A11, A12/F-03, A13, B03, F-02, F-10, F-11** aus diesem Register. Sie gehört deshalb hierher, nicht nach `bug_v2.md`. **Stand (worktree `../DarkBot-project0`, HEAD `5f43fee8`): 19 geänderte, 1 gelöschte, 2 neue Dateien uncommittet (+675/−600 Zeilen), nichts gepusht; letzter gepushter Native-Code `15c34471`.** Nach CTRL-12 gilt: anhalten, Fundort und Ursache dokumentieren, im selben Ticket echte Lösung liefern, beide Vetoprüfer erneut, erst dann Commit/Push.
+
+### 11.1 Was im Worktree tatsächlich vorliegt (read-only geprüft)
+
+| Teil | Zustand | Prüfung |
+|---|---|---|
+| `analytics/backtest.rs` (neu, 1 466 Z.), `backtest_tests.rs` (neu) | vorhanden; liest `.p0j`, nutzt `report.rs::{select_result, verified_events, window_events}` (3 Referenzen) | ✔ vorhanden |
+| Journal-Kinds 350–355 (`BACKTEST_HEADER/ROW/SUMMARY`, `OPTIMIZE_RESULT`, `BACKTEST_PROFILE`, `BACKTEST_ATTEMPT`) in `journal.rs:77-85,639-644` | registriert | ✔; Ledger-/Schema-Evidence dazu **fehlt** |
+| `bin/p0-econ-replay.rs` | gelöscht; `capture.sh` baut es nicht mehr | ✔ |
+| `econ_canonical.rs::replay()`, `econ.rs::{replay_canonical, atomic_json, line}` | entfernt (laut Diff) | ✔ Diff |
+| `p0ctl`: `verify` verlangt `--mode strict|off` (`p0ctl.rs:713` `VERIFY_MODE_REQUIRED`), Python nur mit `--historical` (`:654-671`), `NATIVE_RUN_REFUSED` (`:661`), `export` verweigert native Runs (`export_cmd`: `EXPORT_REFUSED`), `post_capture_result.json` aus `status`/`runs list` entfernt, neue Befehle `backtest`/`optimize` (`:1165-1166`) | vorhanden | ✔ |
+| `run_store.py:65,208-209` `NATIVE_RUN_REFUSED`; `market_report.py:403` Replay = `NOT_RUN`; `report.sh`/`verify.sh` ohne Auto-Export | vorhanden | ✔ |
+| `test_jfi04_json_inventory.py`: `OPEN_INTERNAL == EXPECTED_OPEN_INTERNAL` (17 Zeilen „I“), Summe 346, Status **wieder offen** | ehrlich reopened | ✔; CTRL-02 verlangt die Migration jeder gelisteten Datei, nicht nur die Auflistung |
+
+### 11.2 Was nicht stimmt oder fehlt (Fundort, Ursache)
+
+| Nr. | Fehler | Beleg | Ursache / Regelverstoß |
+|---|---|---|---|
+| U-1 | **Tests kompilieren nicht.** `backtest_tests.rs:100/114` ruft `counterfactual(&refs, &params, "M")` (3 Arg.), Definition `backtest.rs:334` hat 4 (`rows, attempts, p, model`); `:166-172` `summarize(&rows, &p, "M")` vs `:820` 4 Arg.; `:199/220` `split(&rows, window, 4_000)` vs `:994` 5 Arg. (`rows, attempts, unix_window, monotonic_window, holdout_bps`). `report_tests.rs:845` `backtest::backtest(&f.run, None, &p, BUDGET)` ungeprüft. | statisch | Umbau nach den Review-Befunden ohne Test-Nachzug; **CTRL-11** (positive/negative Tests) und Gate verletzt. |
+| U-2 | **Reihenfolge falsch: Legacy gelöscht, bevor der native Ersatz grün war.** `p0-econ-replay`, `replay()`, `atomic_json` sind entfernt, während Backtest-Tests nicht bauen, Clippy ungeprüft und das Gate nicht gelaufen ist. | 11.1 + U-1 | **CTRL-03 „Full implementation then switch“ / CTRL-09 „im gleichen Ticket“** meint: nativer Pfad nachgewiesen **und dann** alter Pfad raus, nicht umgekehrt. Bis zum Nachweis existiert für Replay weder ein alter noch ein belegter neuer Pfad. |
+| U-3 | **`p0ctl export` verweigert native Runs, aber `tests/integration/test_measurement_plan.py:130-132` erwartet `export` mit Returncode 0 auf einem nativen Run.** | Grep | Test nicht mitgezogen; richtige Lösung nach CTRL-02/09: Test auf typisierte `.p0j`-Lesung umstellen (kein JSON-Export zurückbauen). |
+| U-4 | **`p0-journal renders --create` schreibt weiter JSON-Views in native Runs** (`p0-journal.rs:135-137,175` ohne `run_manifest.p0j`-Guard). | Grep | Review-Befund F4 offen; CTRL-02/09 verlangt denselben Native-Guard wie in `export_cmd`. |
+| U-5 | **Clippy-Fehler (Lifetime in `split`) ungeprüft; Gate nach dem Umbau nicht gelaufen.** | Bericht | CTRL-11; kein PASS ohne `cargo fmt --check`, Clippy `-D warnings`, Feature-Matrix, Release-Build, Python-Tests. |
+| U-6 | **Beide Vetoprüfer haben die vorige Fassung mit FAIL bewertet; die neue Fassung ist ungeprüft.** | Bericht | CTRL-10: kein Push ohne erneute Prüfung desselben SHA durch Agent A (Architektur/Legacy/JSON/Rundweg) und Agent B (Finanz/Fail-closed/Hardcoding/Negativtests). |
+| U-7 | **Offene Review-Punkte nicht geschlossen:** Routing-Tests der `p0ctl`-Sperren auf Binärebene; Python-Direktaufruf (`market_report.py`/`measurement_verify.py` ohne `run_store.exec`) ohne Native-Sperre; Test für Schema-1-/JSONL-Ablehnung in `join()`; veraltete Texte in `p0ctl`/`report.rs`. | Bericht + Grep (`run_store.py:208` guard nur im `exec`-Pfad) | CTRL-02/09/11. |
+| U-8 | **Neue Journal-Kinds 350–355 und Source 14 ohne Schema-/Ledger-Eintrag** (PERSIST-04 Reader-Kompatibilität, `MEASUREMENT_LEDGER`-Registrierung, Golden-Bytes). | 11.1 | PERSIST-01–05: jede Schema-Erweiterung versioniert, gepinnt, dokumentiert. |
+| U-9 | **Frontend-Rundweg fehlt vollständig:** `backtest`/`optimize` existieren nur als `p0ctl`-Befehle; kein Controller-Job (START/STOP/CANCEL/STATUS), kein `darkbot.project0.v1`-Payload, kein Publisher, kein Command-Handler, kein Analytics-Reiter. | Grep (keine Protobuf-/Reporter-Änderung im Diff) | **CTRL-03/04/05/11: CLI-only ist kein Abschluss.** B03 bleibt OPEN. |
+| U-10 | **Abnahme mit echten Daten NOT_RUN:** kein nativer Run mit strikter Verifikation und Shadow-Journal vorhanden. | Bericht | Ehrliches BLOCKED (CTRL-12), kein künstlicher PASS. |
+| U-11 | „Einheit 2“ (Paket-5-Fixes JIT/Geyser/Source-Control) liegt nur als Skripte im Scratchpad der anderen Session, nicht im Worktree. | Bericht, hier nicht prüfbar | Getrennte Einheit; nicht mit dieser vermischen. |
+
+### 11.3 Verbindliche Fertigstellung (Reihenfolge, je Schritt Nachweis)
+
+1. **STOP, kein Commit/Push** dieses Standes (CTRL-12). Keine weiteren Löschungen, bis 2–5 grün sind.
+2. **Tests nachziehen (U-1):** `backtest_tests.rs` und `report_tests.rs` auf die 4-/5-Parameter-Signaturen; Fail-before-Fälle erhalten (Fehlversuchskosten `NoChainEvent`/`LostRace`, `NOT_EVALUATED`-Safety, `BLOCKED` bei fehlender Capture-Uhr, Grid ≥ `P0_MIN_PROFIT`, gleiches Kapital Baseline/Grid, Flag-ohne-Wert, `--profile` exklusiv, atomare Ergebnisdatei + Wiederholungsvergleich).
+3. **U-3/U-4/U-7:** `test_measurement_plan.py` auf `.p0j`; Native-Guard in `p0-journal renders --create`; Native-Sperre auch bei Direktaufruf der Python-Leser; Schema-1-/JSONL-Ablehnungstest für `join()`; Routing-Tests für `verify`/`report`/`export`/`--historical` auf Binärebene; Texte aktualisieren.
+4. **U-8:** Kinds 350–355/Source 14 mit Schema-Version, Golden-Bytes, Ledger-Zeile; alte Reader unverändert lesbar.
+5. **Gate einmal vollständig (U-5):** `cargo fmt --check`, Clippy `-D warnings` (Feature-Matrix `crate_health`, `crate_health,txv1`), Workspace-Tests, Release-Build, Python-Tests; Ergebnis in `MEASUREMENT_LEDGER.md` (eine Zeile) und `BUGS.md`/`STATUS.md` (je eine Zeile).
+6. **U-6:** beide Vetoprüfer auf demselben SHA/Diff; CRITICAL/HIGH oder unklarer Pflichtpfad ⇒ kein Push.
+7. **Dann** ein Pathspec-Commit nur dieser Dateien (`git commit -- <Pfade>`), vorher `git show --name-status`; Push `HEAD:main` nach Fetch+Rebase. Einheit 2 getrennt.
+8. **U-9 als eigenes Folgeticket (B03, OPEN):** Controller-Job, Protobuf-Payload, Publisher, Command-Handler, Analytics-Reiter nach CTRL-04/05/06/07; erst damit gilt B03 als erledigt.
+9. **U-10 bleibt BLOCKED**, bis ein genehmigter nativer Run mit strikter Verifikation und Shadow-Journal existiert; Status ehrlich `NOT_RUN` ausweisen.
+
+**Register-Update nach Abschluss:** A02/A03/A05/A08/A12/A13/F-02/F-03/F-10/F-11 ⇒ erledigt mit SHA; A04 ⇒ nur, wenn `index`/`crosscheck` nativ oder explizit historisch; A10/A11 ⇒ erst mit Aufrufgraph-/Run-Dir-Assertion; B03 ⇒ erst mit U-9. Bis dahin **alle genannten Positionen OPEN**.
