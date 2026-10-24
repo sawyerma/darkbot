@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:project0": "playwright test -c playwright.project0.config.ts",
     "test:project0-backend": "playwright test -c playwright.backend.config.ts",
-    "check:bsc-fields": "node scripts/check-bsc-fields.mjs"
+    "check:bsc-fields": "node scripts/check-bsc-fields.mjs",
+    "gen:bsc-placement": "node scripts/check-bsc-fields.mjs --write-placement"
   },
   "bundlesize": [
     {

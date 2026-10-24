@@ -1,7 +1,8 @@
-use super::wire::bsc::*;
+use super::{census, wire::bsc::*};
 use darkbot_bsc_execution::acceptance_guard::{FROZEN_APPROVED_V5_SHA256, V5_RELATIVE_PATH};
-use darkbot_bsc_record::{self as record, Record, Value, schema};
+use darkbot_bsc_record::{self as record, Kind, Presence, Record, Schema, Value, schema};
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -113,6 +114,106 @@ fn time(r: &Record) -> u64 {
     time_ms(r) / 1000
 }
 
+fn native_kind(k: Kind) -> NativeKind {
+    match k {
+        Kind::Bool => NativeKind::Bool,
+        Kind::U64 => NativeKind::U64,
+        Kind::I64 => NativeKind::I64,
+        Kind::U256 => NativeKind::U256,
+        Kind::Address => NativeKind::Address,
+        Kind::B256 => NativeKind::B256,
+        Kind::Text => NativeKind::Text,
+        _ => NativeKind::Unspecified,
+    }
+}
+/// Public leaves in schema order with kind and census unit. A leaf the census classifies as
+/// secret, binary or private never leaves the reporter; text is redacted. Deliberately not
+/// projected either: external journal errors and the preflight copy embedded in G0.7 evidence.
+fn native_leaves(
+    top: &Schema,
+    s: &Schema,
+    values: &[(u16, Value)],
+    wire: &str,
+    prefix: &str,
+    out: &mut Vec<NativeField>,
+) {
+    let mut seen: HashMap<u16, usize> = HashMap::new();
+    for (tag, v) in values {
+        let Some(f) = s.field(*tag) else { continue };
+        let n = seen.entry(*tag).or_insert(0);
+        let i = *n;
+        *n += 1;
+        let name = format!("{prefix}{}", f.name);
+        if name.contains("journal_error") || name.starts_with("preflight[]") {
+            continue;
+        }
+        match (v, f.nested) {
+            (Value::Nested(inner), Some(nested)) => native_leaves(
+                top,
+                nested,
+                inner,
+                &format!("{wire}{}[{i}].", f.name),
+                &format!("{name}[]."),
+                out,
+            ),
+            _ => {
+                if !census::public(census::sensitivity(top, &name, f.kind)) {
+                    continue;
+                }
+                let Some(value) = value(v) else { continue };
+                out.push(NativeField {
+                    name: if f.presence == Presence::Repeated {
+                        format!("{wire}{}[{i}]", f.name)
+                    } else {
+                        format!("{wire}{}", f.name)
+                    },
+                    kind: native_kind(f.kind) as i32,
+                    value,
+                    unit: census::unit(&name, f.kind).into(),
+                });
+            }
+        }
+    }
+}
+/// All public leaves of a record, for a mirror that names them under its own prefix.
+fn public_leaves(r: &Record) -> Vec<NativeField> {
+    let mut fields = Vec::new();
+    native_leaves(r.schema(), r.schema(), r.fields(), "", "", &mut fields);
+    fields
+}
+fn native_record(root: &Path, path: &Path, r: &Record) -> NativeRecord {
+    let mut fields = Vec::new();
+    native_leaves(r.schema(), r.schema(), r.fields(), "", "", &mut fields);
+    NativeRecord {
+        schema: r.schema().name.into(),
+        evidence: Some(evidence(root, path, Some(r))),
+        provenance: if r.schema().name.contains(".import.")
+            || field(r, "_import.legacy_sha256").is_some()
+        {
+            "LEGACY_IMPORTED_AUDITED"
+        } else if field(r, "_provenance.tool").is_some() {
+            "NATIVE_CREATED"
+        } else {
+            "UNKNOWN"
+        }
+        .into(),
+        fields,
+    }
+}
+/// The latest record of each family (legacy import and native variants share one family).
+fn latest_records(
+    root: &Path,
+    records: &[(PathBuf, Record)],
+    families: &[&[&Schema]],
+) -> Vec<NativeRecord> {
+    families
+        .iter()
+        .filter_map(|family| {
+            let names: Vec<_> = family.iter().map(|s| s.name).collect();
+            latest(records, &names).map(|(p, r)| native_record(root, p, r))
+        })
+        .collect()
+}
 fn evidence(root: &Path, path: &Path, r: Option<&Record>) -> Evidence {
     Evidence {
         path: path
@@ -257,6 +358,14 @@ fn candidate_fields(
             v.activated_unix_ms.to_string(),
         );
     }
+    // The remaining public selection leaves: previous candidate, invalidations, guard at switch.
+    for f in selection.as_ref().map(public_leaves).unwrap_or_default() {
+        if !["generation", "profile", "candidate_id", "activated_unix_ms"]
+            .contains(&f.name.as_str())
+        {
+            put(format!("candidate.selection.{}", f.name), f.value);
+        }
+    }
     let mut selected_present = view.is_none();
     for (profile, file) in [
         ("SELF_A", "a.candidate.dbrec"),
@@ -286,33 +395,34 @@ fn candidate_fields(
         // A bound requalification replaces UNQUALIFIED by the deployment it
         // qualified; one bound to another ID makes the mirror invalid.
         let stem = if profile == "SELF_A" { "a" } else { "b" };
-        let qualified = match read(&dir.join(format!("{stem}.qualification.dbrec"))) {
+        let qualification = match read(&dir.join(format!("{stem}.qualification.dbrec"))) {
             None => None,
             Some(bytes) => match record::decode(&gc::qualification::SCHEMA, &bytes) {
-                Ok(q) if q.b256(gc::qualification::CANDIDATE_ID).ok() == Some(id) => Some(format!(
-                    "QUALIFIED_FOR {}",
-                    field(&q, "portal_version").unwrap_or_default()
-                )),
+                Ok(q) if q.b256(gc::qualification::CANDIDATE_ID).ok() == Some(id) => Some(q),
                 _ => return invalid(warnings, "qualification of another candidate"),
             },
         };
-        for name in [
-            "candidate_id",
-            "token",
-            "launcher",
-            "deployment.portal_version",
-            "deployment.portal_implementation",
-            "deployment.record_sha256",
-            "launch_calldata_sha256",
-            "salt_origin",
-            "evidence.dry_record_sha256",
-            "evidence.launch_tx_hash",
-            "evidence.buy_tx_hash",
-            "provenance",
-        ] {
+        let qualified = qualification.as_ref().map(|q| {
+            format!(
+                "QUALIFIED_FOR {}",
+                field(q, "portal_version").unwrap_or_default()
+            )
+        });
+        // Every public identity leaf of the candidate (never the salt, which lives in its own
+        // record); `qualification` is replaced by the bound requalification below.
+        for f in public_leaves(&r) {
+            if f.name != "qualification" {
+                put(format!("candidate.{profile}.{}", f.name), f.value);
+            }
+        }
+        for f in qualification
+            .as_ref()
+            .map(public_leaves)
+            .unwrap_or_default()
+        {
             put(
-                format!("candidate.{profile}.{name}"),
-                field(&r, name).unwrap_or_else(|| "NONE".into()),
+                format!("candidate.{profile}.qualification_record.{}", f.name),
+                f.value,
             );
         }
         put(
@@ -364,14 +474,18 @@ fn candidate_fields(
                     .unwrap_or_else(|| "PENDING_DESKTOP_SYNC".into()),
             );
             put("candidate.request.request_id".into(), id);
-            for name in ["profile", "expected_generation"] {
-                put(
-                    format!("candidate.request.{name}"),
-                    field(&r, name).unwrap_or_default(),
-                );
+            for f in public_leaves(&r) {
+                if f.name != "request_id" {
+                    put(format!("candidate.request.{}", f.name), f.value);
+                }
             }
             if let Some(detail) = result.as_ref().and_then(|x| field(x, "detail")) {
                 put("candidate.request.detail".into(), detail);
+            }
+            for f in result.as_ref().map(public_leaves).unwrap_or_default() {
+                if !["request_id", "outcome", "detail"].contains(&f.name.as_str()) {
+                    put(format!("candidate.request.result.{}", f.name), f.value);
+                }
             }
         }
     }
@@ -757,6 +871,47 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 "G07_EVIDENCE_UNBOUND"
             }
             .into(),
+        );
+    }
+    {
+        use schema::{g06a, g07, g08};
+        launch.records = latest_records(
+            root,
+            &records,
+            &[
+                &[&g06a::dry::SCHEMA, &g06a::dry::NATIVE],
+                &[&g06a::preflight::SCHEMA],
+                &[&g06a::quote::SCHEMA],
+                &[&g06a::economics::SCHEMA, &g06a::economics::NATIVE],
+                &[
+                    &g06a::local_simulation::SCHEMA,
+                    &g06a::local_simulation::NATIVE,
+                ],
+                &[&g06a::launch_path::SCHEMA],
+                &[&g06a::portal_upgrade::SCHEMA],
+                &[&g06a::requalification::SCHEMA],
+                &[&g06a::prepare_handoff::SCHEMA],
+            ],
+        );
+        if let Some(r) = contract
+            .as_ref()
+            .filter(|r| r.schema() == &g07::contract::V5)
+        {
+            launch.records.push(native_record(root, &contract_path, r));
+        }
+        monitoring.records = latest_records(
+            root,
+            &records,
+            &[
+                &[&g06a::builder_policy::SCHEMA, &g06a::builder_policy::NATIVE],
+                &[&g07::probe::SCHEMA],
+                &[&g07::witness_source::SCHEMA],
+                &[&g07::evidence::SCHEMA],
+                &[&g08::result::SCHEMA, &g08::unresolved::SCHEMA],
+                &[&g08::chain_session::SCHEMA],
+                &[&g08::producer_witness::SCHEMA],
+                &[&g08::timing_verdict::SCHEMA],
+            ],
         );
     }
     let gates = vec![

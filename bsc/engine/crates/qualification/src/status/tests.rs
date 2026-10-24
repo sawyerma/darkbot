@@ -238,6 +238,20 @@ fn candidate_state_is_projected_only_from_a_verified_public_mirror() {
     fs::write(mirror.join("selection.dbrec"), sel.encode().unwrap()).unwrap();
     let f = fields(&root);
     assert_eq!(get(&f, "candidate.backend").as_deref(), Some("AVAILABLE"));
+    // Every public leaf of the mirror records, never a salt value.
+    assert_eq!(
+        get(&f, "candidate.SELF_B.salt_commitment").as_deref(),
+        Some(format!("0x{}", "08".repeat(32)).as_str())
+    );
+    assert_eq!(
+        get(&f, "candidate.SELF_B.created_unix_ms").as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        get(&f, "candidate.selection.guard_at_switch").as_deref(),
+        Some("UNARMED")
+    );
+    assert!(f.iter().all(|(k, _)| !k.ends_with(".salt")));
     assert_eq!(
         get(&f, "candidate.selection.generation").as_deref(),
         Some("4")
@@ -490,5 +504,198 @@ fn a_g08_record_without_its_g07_evidence_is_unbound() {
     assert_eq!(g08.state, "UNRESOLVED");
     assert_eq!(g08.reason_codes, vec!["G07_EVIDENCE_UNBOUND".to_string()]);
     assert_eq!(s.monitoring.state, "UNRESOLVED");
+    fs::remove_dir_all(root).unwrap();
+}
+/// A record with every required leaf set to a fixed fixture value.
+fn filled(s: &'static darkbot_bsc_record::Schema) -> Draft {
+    use darkbot_bsc_record::{Kind, Presence, Value};
+    let mut d = Draft::new(s);
+    for f in s.fields.iter().filter(|f| f.presence == Presence::Required) {
+        let v = match f.kind {
+            Kind::Bool => Value::Bool(false),
+            Kind::U64 => Value::U64(1),
+            Kind::I64 => Value::I64(1),
+            Kind::U256 => Value::U256([0; 32]),
+            Kind::Address => Value::Address([1; 20]),
+            Kind::B256 => Value::B256([2; 32]),
+            Kind::Bytes => Value::Bytes(Vec::new()),
+            Kind::Text => Value::Text("fixture".into()),
+            Kind::Nested => match f.nested {
+                Some(n) => filled(n).into_nested(),
+                None => continue,
+            },
+        };
+        d.set(f.tag, v);
+    }
+    d
+}
+fn tag(s: &darkbot_bsc_record::Schema, name: &str) -> u16 {
+    s.fields.iter().find(|f| f.name == name).unwrap().tag
+}
+#[test]
+fn native_records_carry_public_leaves_with_kind_and_unit_but_never_a_salt() {
+    use darkbot_bsc_record::{Value, schema::g06a};
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-records-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let dir = root.join("bsc/native/evidence/g06a/fixture");
+    fs::create_dir_all(&dir).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    let mut e = filled(&g06a::economics::NATIVE);
+    e.set(
+        tag(&g06a::economics::NATIVE, "salt"),
+        Value::B256([0xab; 32]),
+    );
+    fs::write(dir.join("economics.dbrec"), e.encode().unwrap()).unwrap();
+    fs::write(
+        dir.join("quote.dbrec"),
+        filled(&g06a::quote::SCHEMA).encode().unwrap(),
+    )
+    .unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    let record = |name: &str| {
+        s.launch
+            .records
+            .iter()
+            .find(|r| r.schema == name)
+            .unwrap_or_else(|| panic!("{name} not projected"))
+    };
+    let economics = record(g06a::economics::NATIVE.name);
+    assert!(economics.fields.iter().all(|f| f.name != "salt"));
+    assert!(economics.fields.iter().any(|f| f.name == "salt_counter"));
+    assert!(!format!("{:?}", s.launch).contains(&"ab".repeat(32)));
+    let quote = record(g06a::quote::SCHEMA.name);
+    assert_eq!(quote.provenance, "NATIVE_CREATED");
+    let fee = quote
+        .fields
+        .iter()
+        .find(|f| f.name == "protocol_fee_bps")
+        .unwrap();
+    assert_eq!(
+        (fee.kind, fee.unit.as_str(), fee.value.as_str()),
+        (
+            super::wire::bsc::NativeKind::U64 as i32,
+            "basis_points",
+            "1"
+        )
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn a_frame_larger_than_the_socket_buffer_arrives_whole() {
+    use darkbot_bsc_record::{Value, schema::g06a::launch_path as lp};
+    use std::io::Read;
+    let root = std::env::temp_dir().join(format!("dbsc-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let dir = root.join("bsc/native/evidence/g06a/fixture");
+    fs::create_dir_all(&dir).unwrap();
+    let mut d = filled(&lp::SCHEMA);
+    for i in 0..250u8 {
+        d.push(lp::STORAGE_ADDRESS, Value::Address([i; 20]))
+            .push(lp::STORAGE_SLOT, Value::B256([i; 32]))
+            .push(lp::STORAGE_VALUE, Value::B256([i; 32]))
+            .push(lp::STORAGE_SELECTS, Value::Address([i; 20]));
+    }
+    fs::write(dir.join("launch_path.dbrec"), d.encode().unwrap()).unwrap();
+    let socket = root.join("s.sock");
+    let (r, s) = (root.clone(), socket.clone());
+    std::thread::spawn(move || {
+        let _ = publisher::serve(&r, &r.join("run"), &s, "com.darkbot.test.absent", None);
+    });
+    let mut stream = (0..100)
+        .find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::os::unix::net::UnixStream::connect(&socket).ok()
+        })
+        .unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    let mut frame = || {
+        let mut n = [0u8; 4];
+        stream.read_exact(&mut n).unwrap();
+        let mut bytes = vec![0u8; u32::from_be_bytes(n) as usize];
+        stream.read_exact(&mut bytes).unwrap();
+        EngineFrame::decode(bytes.as_slice()).unwrap()
+    };
+    frame(); // Hello
+    frame(); // bsc.status
+    let Some(engine_frame::Msg::State(launch)) = frame().msg else {
+        panic!("launch state expected")
+    };
+    assert_eq!(launch.topic, TopicId::BscLaunchState as i32);
+    assert!(launch.payload.len() > 32 * 1024, "{}", launch.payload.len());
+    let _ = fs::remove_dir_all(root);
+}
+#[test]
+fn every_projected_record_family_reaches_its_topic_with_all_public_required_leaves() {
+    use super::census;
+    use darkbot_bsc_execution::acceptance_guard::V5_RELATIVE_PATH;
+    use darkbot_bsc_record::schema::{g06a, g07, g08};
+    let launch: [&'static darkbot_bsc_record::Schema; 10] = [
+        &g06a::dry::NATIVE,
+        &g06a::preflight::SCHEMA,
+        &g06a::quote::SCHEMA,
+        &g06a::economics::NATIVE,
+        &g06a::local_simulation::NATIVE,
+        &g06a::launch_path::SCHEMA,
+        &g06a::portal_upgrade::SCHEMA,
+        &g06a::requalification::SCHEMA,
+        &g06a::prepare_handoff::SCHEMA,
+        &g07::contract::V5,
+    ];
+    let monitoring: [&'static darkbot_bsc_record::Schema; 8] = [
+        &g06a::builder_policy::NATIVE,
+        &g07::probe::SCHEMA,
+        &g07::witness_source::SCHEMA,
+        &g07::evidence::SCHEMA,
+        &g08::result::SCHEMA,
+        &g08::chain_session::SCHEMA,
+        &g08::producer_witness::SCHEMA,
+        &g08::timing_verdict::SCHEMA,
+    ];
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-families-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    fs::create_dir_all(root.join("run")).unwrap();
+    for (i, s) in launch.iter().chain(monitoring.iter()).enumerate() {
+        let bytes = filled(s).encode().unwrap();
+        let path = if *s == &g07::contract::V5 {
+            root.join(V5_RELATIVE_PATH)
+        } else {
+            root.join(format!("bsc/native/evidence/g07/family{i}/record.dbrec"))
+        };
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    let snapshot = projection::project(&root, &root.join("run"));
+    for (schemas, records) in [
+        (&launch[..], &snapshot.launch.records),
+        (&monitoring[..], &snapshot.monitoring.records),
+    ] {
+        for s in schemas {
+            let record = records
+                .iter()
+                .find(|r| r.schema == s.name)
+                .unwrap_or_else(|| panic!("{} not projected", s.name));
+            let mut leaves = Vec::new();
+            census::leaves(s, "", "", &mut leaves);
+            let expected = leaves
+                .iter()
+                .filter(|(name, presence, f)| {
+                    presence.split('>').all(|p| p == "Required")
+                        && census::public(census::sensitivity(s, name, f.kind))
+                        && !name.contains("journal_error")
+                        && !name.starts_with("preflight[]")
+                })
+                .count();
+            assert_eq!(record.fields.len(), expected, "{}", s.name);
+            assert!(record.evidence.is_some(), "{}", s.name);
+        }
+    }
     fs::remove_dir_all(root).unwrap();
 }

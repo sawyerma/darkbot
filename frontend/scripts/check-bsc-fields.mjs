@@ -46,4 +46,15 @@ for(const f of native){
 }
 manifest.native_bindings.forEach((r,i)=>{if(!used.has(i))throw Error("Dead native binding rule "+i+" "+JSON.stringify(r.match).slice(0,80))});
 const total=s=>Object.entries(count).filter(([k])=>k.endsWith("/"+s)).reduce((a,[,n])=>a+n,0);
+// The panels place native leaves from a generated copy of the rules, never a second list.
+const placementPath="frontend/src/features/bsc/model/placement.generated.ts";
+const compact=manifest.native_bindings.map(r=>({schemas:r.schemas,match:r.match,panel:r.panel,section:r.section,status:r.status,wire:r.wire,...(r.reason?{reason:r.reason}:{})}));
+const placement=`// GENERATED from frontend/contracts/bsc-fields.json by \`npm run gen:bsc-placement\`. Do not edit;
+// check:bsc-fields fails when this copy differs from the manifest.
+export const PANEL_SECTIONS = ${JSON.stringify(sections)} as const;
+export interface NativeBinding { schemas: readonly string[]; match: string | readonly string[]; panel: string; section: number; status: string; wire: string; reason?: string }
+export const NATIVE_BINDINGS: readonly NativeBinding[] = ${JSON.stringify(compact)};
+`;
+if(process.argv.includes("--write-placement"))fs.writeFileSync(path.join(root,placementPath),placement);
+else if(!fs.existsSync(path.join(root,placementPath))||fs.readFileSync(path.join(root,placementPath),"utf8")!==placement)throw Error("Stale "+placementPath+": run npm run gen:bsc-placement");
 console.log("BSC F0-VAR: PASS "+native.length+" native fields placed ("+[...STATUS].map(s=>s+" "+total(s)).join(", ")+"), "+manifest.fields.length+" proto fields placed");

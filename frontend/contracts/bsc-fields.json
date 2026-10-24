@@ -2,7 +2,7 @@
   "version": 1,
   "source_commit": "84eb791a84edd0a8745dd42853d78612ed7810c2",
   "schema": "protocol/schemas/darkbot/bsc/v1/status.proto",
-  "schema_sha256": "47a395fe20cb451ef7e1d1846347cbed24208b335d041fcb1b1d84a8e8d5d033",
+  "schema_sha256": "0c3db2ab30454f8a65d5165d3348e678a3c61616be3eab65793541fd14f029db",
   "fields": [
     {
       "project": "bsc",
@@ -20,7 +20,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -45,7 +45,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -70,7 +70,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -95,7 +95,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -120,7 +120,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -247,8 +247,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "launch",
       "section_order": 5,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -362,7 +361,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -386,7 +385,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -410,14 +409,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 5,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -435,7 +433,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -657,8 +655,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "launch",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -683,7 +680,7 @@
       "frontend_panel": "launch",
       "section_order": 8,
       "status": "SOLL_MISSING",
-      "status_reason": "never set by the projection"
+      "status_reason": "shown as — : never set by the native projection"
     },
     {
       "project": "bsc",
@@ -707,8 +704,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 4,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -726,7 +722,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts + readinessControl.test.ts",
@@ -751,7 +747,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts + readinessControl.test.ts",
@@ -848,7 +844,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1022,8 +1018,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "monitoring",
       "section_order": 7,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1071,8 +1066,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "launch",
       "section_order": 4,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1162,7 +1156,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1186,7 +1180,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1210,7 +1204,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1235,14 +1229,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1260,14 +1253,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1285,7 +1277,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1309,7 +1301,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "source_sha": "8c1dc0a977f8a399b7e637f73d2ad3541307bf96614022d3fd5c0af6699f7c97",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts + readinessControl.test.ts",
@@ -1317,6 +1309,206 @@
       "section_order": 2,
       "status": "IST_CONNECTED",
       "status_reason": "same controller test as the gateway; enables start/stop"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeField",
+      "field": "NativeField.name",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeField",
+      "field": "NativeField.kind",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "NativeKind",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeField",
+      "field": "NativeField.value",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeField",
+      "field": "NativeField.unit",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeRecord",
+      "field": "NativeRecord.schema",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeRecord",
+      "field": "NativeRecord.evidence",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "Evidence",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeRecord",
+      "field": "NativeRecord.provenance",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
+    },
+    {
+      "project": "bsc",
+      "feature": "NativeRecord",
+      "field": "NativeRecord.fields",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "NativeField",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
     },
     {
       "project": "bsc",
@@ -1334,7 +1526,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1358,14 +1550,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 6,
-      "status": "SOLL_MISSING",
-      "status_reason": "projected, not displayed"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1383,7 +1574,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1407,7 +1598,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1432,7 +1623,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1457,7 +1648,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1482,7 +1673,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1507,7 +1698,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1532,7 +1723,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1557,7 +1748,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1581,7 +1772,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1605,7 +1796,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1683,7 +1874,8 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "launch",
       "section_order": 5,
-      "status": "IST_CONNECTED"
+      "status": "IST_CONNECTED",
+      "status_reason": "legacy V5 PublicField list; the panels render the typed NativeRecord"
     },
     {
       "project": "bsc",
@@ -1733,6 +1925,31 @@
       "frontend_panel": "launch",
       "section_order": 5,
       "status": "IST_CONNECTED"
+    },
+    {
+      "project": "bsc",
+      "feature": "BscLaunchState",
+      "field": "BscLaunchState.records",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "NativeRecord",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
     },
     {
       "project": "bsc",
@@ -1804,8 +2021,33 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "monitoring",
       "section_order": 5,
-      "status": "IST_BUG",
-      "status_reason": "re-listed unfiltered in Analytics (bindings section 4)"
+      "status": "IST_CONNECTED",
+      "status_reason": "legacy G0.8 PublicField list; the panels render the typed NativeRecord"
+    },
+    {
+      "project": "bsc",
+      "feature": "BscMonitoringState",
+      "field": "BscMonitoringState.records",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "projection::native_record",
+      "type": "NativeRecord",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "57db423af73d6fe3a5b6f735609f6fa28f307a97451b62b9f064daf3106127d0",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests every_projected_record_family + native_records_carry_public_leaves",
+      "frontend_panel": "shared",
+      "section_order": 0,
+      "status": "IST_CONNECTED",
+      "status_reason": "typed record transport; every leaf is placed by native_bindings"
     },
     {
       "project": "bsc",
@@ -2288,10 +2530,9 @@
       "match": "*",
       "panel": "launch",
       "section": 4,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.status",
-      "reason": "not in DryStatus.parameters"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2313,8 +2554,8 @@
       "panel": "launch",
       "section": 4,
       "status": "IST_CONNECTED",
-      "wire": "DryStatus.parameters / DryStatus.state",
-      "topic": "bsc.status"
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2324,9 +2565,9 @@
       "match": "prefix:budget.",
       "panel": "launch",
       "section": 6,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.status"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2339,8 +2580,8 @@
       "panel": "launch",
       "section": 6,
       "status": "IST_CONNECTED",
-      "wire": "DryStatus.parameters",
-      "topic": "bsc.status"
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2353,8 +2594,8 @@
       "panel": "launch",
       "section": 4,
       "status": "IST_CONNECTED",
-      "wire": "DryStatus.evidence.observed_unix_s",
-      "topic": "bsc.status"
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2363,8 +2604,8 @@
       "match": "*",
       "panel": "launch",
       "section": 2,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "deployment/portal identity of the snapshot"
     },
@@ -2391,8 +2632,8 @@
       ],
       "panel": "launch",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2402,8 +2643,8 @@
       "match": "prefix:native_quote_configuration.",
       "panel": "launch",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2413,8 +2654,8 @@
       "match": "prefix:protocol_fee_bps.",
       "panel": "launch",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2464,9 +2705,9 @@
       "match": "prefix:wallet_qualification.",
       "panel": "wallets",
       "section": 4,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.wallets.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2492,9 +2733,9 @@
       ],
       "panel": "wallets",
       "section": 5,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.wallets.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2506,9 +2747,9 @@
       ],
       "panel": "wallets",
       "section": 6,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.wallets.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2540,9 +2781,9 @@
       ],
       "panel": "wallets",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.wallets.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2552,9 +2793,9 @@
       "match": "*",
       "panel": "monitoring",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.status"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2597,9 +2838,9 @@
       ],
       "panel": "monitoring",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.status",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state",
       "reason": "provider id only, never a URL"
     },
     {
@@ -2609,9 +2850,9 @@
       "match": "*",
       "panel": "monitoring",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.status"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2634,7 +2875,7 @@
       "panel": "launch",
       "section": 5,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2645,7 +2886,7 @@
       "panel": "launch",
       "section": 6,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2656,7 +2897,7 @@
       "panel": "launch",
       "section": 7,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2667,7 +2908,7 @@
       "panel": "launch",
       "section": 7,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state"
     },
     {
@@ -2677,10 +2918,9 @@
       "match": "prefix:dry_pass.criteria[].",
       "panel": "launch",
       "section": 5,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state",
-      "reason": "nested criteria are not projected"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
+      "topic": "bsc.launch.state"
     },
     {
       "schemas": [
@@ -2701,7 +2941,7 @@
       "panel": "launch",
       "section": 5,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.contract_fields (PublicField)",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "repo-relative paths only; absolute local paths are masked by safe_text"
     },
@@ -2725,10 +2965,9 @@
       "match": "*",
       "panel": "monitoring",
       "section": 4,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.monitoring.state",
-      "reason": "G4-G7: only classification is projected"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2757,9 +2996,9 @@
       ],
       "panel": "launch",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2768,9 +3007,9 @@
       "match": "prefix:attempt.",
       "panel": "launch",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state",
       "reason": "state_dir only as redacted status, never a local path (G7)"
     },
     {
@@ -2783,9 +3022,9 @@
       ],
       "panel": "wallets",
       "section": 5,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.wallets.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2794,9 +3033,9 @@
       "match": "prefix:wallets.",
       "panel": "launch",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2808,9 +3047,9 @@
       ],
       "panel": "wallets",
       "section": 6,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.wallets.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2819,9 +3058,9 @@
       "match": "prefix:transactions.",
       "panel": "launch",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2856,9 +3095,9 @@
       "match": "prefix:acceptance_contract.",
       "panel": "launch",
       "section": 5,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2867,9 +3106,9 @@
       "match": "prefix:evidence_inputs.",
       "panel": "launch",
       "section": 5,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.launch.state"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -2878,8 +3117,8 @@
       "match": "prefix:capture.",
       "panel": "analytics",
       "section": 2,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2889,8 +3128,8 @@
       "match": "prefix:timing.",
       "panel": "monitoring",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2901,7 +3140,7 @@
       "panel": "monitoring",
       "section": 5,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2914,7 +3153,7 @@
       "panel": "monitoring",
       "section": 6,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2925,7 +3164,7 @@
       "panel": "monitoring",
       "section": 6,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2936,7 +3175,7 @@
       "panel": "monitoring",
       "section": 7,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2950,7 +3189,7 @@
       "panel": "analytics",
       "section": 4,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2961,7 +3200,7 @@
       "panel": "analytics",
       "section": 5,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2972,7 +3211,7 @@
       "panel": "analytics",
       "section": 2,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -2982,10 +3221,9 @@
       "match": "prefix:capture.chain_journal[].",
       "panel": "analytics",
       "section": 2,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.monitoring.state",
-      "reason": "nested journal rows are not projected"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -3009,7 +3247,7 @@
       "panel": "monitoring",
       "section": 7,
       "status": "IST_CONNECTED",
-      "wire": "BscMonitoringState.results (PublicField)",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -3019,8 +3257,8 @@
       "match": "*",
       "panel": "monitoring",
       "section": 6,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -3072,10 +3310,9 @@
       "match": "*",
       "panel": "monitoring",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.monitoring.state",
-      "reason": "needs an original producer witness; verifier exists"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -3084,8 +3321,8 @@
       "match": "*",
       "panel": "monitoring",
       "section": 7,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state"
     },
     {
@@ -3095,10 +3332,9 @@
       "match": "*",
       "panel": "monitoring",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
-      "topic": "bsc.status",
-      "reason": "only the legacy probe.evidence.json time is read today"
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state"
     },
     {
       "schemas": [
@@ -3107,7 +3343,7 @@
       "match": "*",
       "panel": "launch",
       "section": 1,
-      "status": "SOLL_MISSING",
+      "status": "IST_CONNECTED",
       "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
@@ -3134,7 +3370,7 @@
       "panel": "launch",
       "section": 1,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.runtime_fields candidate.<profile>.* (PublicField)",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3144,8 +3380,8 @@
       "match": "*",
       "panel": "launch",
       "section": 1,
-      "status": "SOLL_MISSING",
-      "wire": "BscLaunchState.runtime_fields candidate.selection.* (PublicField)",
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state",
       "reason": "G15"
     },
@@ -3162,7 +3398,7 @@
       "panel": "launch",
       "section": 1,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.runtime_fields candidate.selection.*",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3172,8 +3408,8 @@
       "match": "*",
       "panel": "launch",
       "section": 1,
-      "status": "SOLL_MISSING",
-      "wire": "BscLaunchState.runtime_fields candidate.request.*",
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3188,7 +3424,7 @@
       "panel": "launch",
       "section": 1,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.runtime_fields candidate.request.*",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3198,8 +3434,8 @@
       "match": "*",
       "panel": "launch",
       "section": 1,
-      "status": "SOLL_MISSING",
-      "wire": "BscLaunchState.runtime_fields candidate.request.*",
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3213,7 +3449,7 @@
       "panel": "launch",
       "section": 1,
       "status": "IST_CONNECTED",
-      "wire": "BscLaunchState.runtime_fields candidate.request.state/detail",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3223,8 +3459,8 @@
       "match": "*",
       "panel": "launch",
       "section": 1,
-      "status": "SOLL_MISSING",
-      "wire": "BscLaunchState.runtime_fields candidate.<profile>.qualification",
+      "status": "IST_CONNECTED",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3237,7 +3473,7 @@
       "panel": "launch",
       "section": 1,
       "status": "IST_CONNECTED",
-      "wire": "candidate.<profile>.qualification = QUALIFIED_FOR <portal_version>",
+      "wire": "BscLaunchState.runtime_fields candidate.* (PublicField)",
       "topic": "bsc.launch.state"
     },
     {
@@ -3247,8 +3483,8 @@
       "match": "*",
       "panel": "launch",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "G10"
     },
@@ -3260,8 +3496,8 @@
       "match": "*",
       "panel": "launch",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "G12"
     },
@@ -3300,8 +3536,8 @@
       "match": "*",
       "panel": "launch",
       "section": 3,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "G11"
     },
@@ -3312,8 +3548,8 @@
       "match": "*",
       "panel": "launch",
       "section": 2,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "G9"
     },
@@ -3324,8 +3560,8 @@
       "match": "*",
       "panel": "launch",
       "section": 2,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "G8 R0; chain/archive source only as provider id"
     },
@@ -3336,8 +3572,8 @@
       "match": "*",
       "panel": "launch",
       "section": 4,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "G21 DRY5/DRY6 checks"
     },
@@ -3348,8 +3584,8 @@
       "match": "*",
       "panel": "launch",
       "section": 4,
-      "status": "SOLL_MISSING",
-      "wire": "target: PublicField leaf on the existing topic (diagnostic text/flag) or additive typed field (identity, amount, time, verdict)",
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.launch.state",
       "topic": "bsc.launch.state",
       "reason": "D2/D3 PREPARE handoff"
     }

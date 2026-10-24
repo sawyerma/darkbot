@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { EventMeta, StateMeta, TopicStatus } from "@/core/realtime";
-import type { BscLaunchView, BscMonitoringView, BscStatusView, BscWalletsView } from "../model/types";
+import type { BscLaunchView, BscMonitoringView, BscStatusView, BscWalletsView, NativeRecordView } from "../model/types";
 
 // Isolierter BSC-Store. Kein Import aus project0/*, keine Economics, keine Commands.
 // Jede STATE-Topic ist ein Slice mit Projektion (null = nicht decodiert/UNKNOWN) plus Transport-Meta.
@@ -86,3 +86,7 @@ export const selectWallets = (s: BscStore) => s.wallets;
 export const selectEvents = (s: BscStore) => s.executionEvents;
 export const selectGuardState = (s: BscStore) => s.status.projection?.guard?.guardState ?? "UNKNOWN";
 export const selectStatusQuality = (s: BscStore) => s.status.status;
+const NO_RECORDS: readonly NativeRecordView[] = [];
+// Stable references: a panel re-renders only when a records slice actually changed.
+export const selectLaunchRecords = (s: BscStore) => s.launch.projection?.records ?? NO_RECORDS;
+export const selectMonitoringRecords = (s: BscStore) => s.monitoring.projection?.records ?? NO_RECORDS;

@@ -17,6 +17,26 @@ export function formatWei(wei: string | null, decimals = 18, maxFraction = 6, un
   return `${fraction ? `${whole}.${fraction}` : whole.toString()} ${unit}`;
 }
 
+/** A native leaf by its unit; exact decimal text, never a JS float. */
+export function formatNative(value: string, unit: string): string {
+  if (value === "") return DASH;
+  const integer = /^-?(0|[1-9][0-9]*)$/.test(value);
+  if (!integer) return value;
+  switch (unit) {
+    case "wei": return `${formatWei(value, 18, 18)} · ${value} wei`;
+    case "unix_milliseconds": return value === "0" ? DASH : `${formatUnixNs(BigInt(value) * 1_000_000n)} · ${value} ms`;
+    case "unix_seconds": return value === "0" ? DASH : `${formatUnixNs(BigInt(value) * 1_000_000_000n)} · ${value} s`;
+    case "nanoseconds": return `${value} ns`;
+    case "milliseconds": return `${value} ms`;
+    case "seconds": return `${value} s`;
+    case "basis_points": return `${value} bps`;
+    case "gas_units": return `${value} gas`;
+    case "byte_count": return `${value} bytes`;
+    case "block_number": return `block ${value}`;
+    default: return value;
+  }
+}
+
 export function formatBps(bps: number | null): string {
   return bps === null || !Number.isSafeInteger(bps) || bps < 0 ? DASH : `${bps} bps`;
 }

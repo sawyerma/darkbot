@@ -144,6 +144,49 @@ message JobStatus {
   // Whether the supervisor can control the job (deployed readiness binary and snapshot).
   optional bool controller_available = 7;
 }
+// Kind of a native leaf; the value is its canonical text form.
+enum NativeKind {
+  // Not set; never displayed as a value.
+  NATIVE_KIND_UNSPECIFIED = 0;
+  // true or false.
+  NATIVE_KIND_BOOL = 1;
+  // Unsigned decimal.
+  NATIVE_KIND_U64 = 2;
+  // Signed decimal.
+  NATIVE_KIND_I64 = 3;
+  // Exact unsigned decimal (wei, token units); never a float.
+  NATIVE_KIND_U256 = 4;
+  // 0x followed by 40 hex digits.
+  NATIVE_KIND_ADDRESS = 5;
+  // 0x followed by 64 hex digits.
+  NATIVE_KIND_B256 = 6;
+  // Redacted public text.
+  NATIVE_KIND_TEXT = 7;
+}
+// One public leaf of a native record. Secrets, salts, raw bytes and private records never
+// appear; the census sensitivity of every leaf decides (bsc-native-fields.json).
+message NativeField {
+  // DBREC field name; nested rows as parent[index].name, repeated leaves as name[index].
+  string name = 1;
+  // DBREC kind of the leaf.
+  NativeKind kind = 2;
+  // Canonical text of the value for its kind.
+  string value = 3;
+  // Native unit such as wei, unix_milliseconds, nanoseconds or basis_points.
+  string unit = 4;
+}
+// The public leaves of one identified native record. The frontend places every field by
+// frontend/contracts/bsc-fields.json (panel, section, order); nothing is computed from it.
+message NativeRecord {
+  // DBREC schema name.
+  string schema = 1;
+  // Record identity: path, SHA-256 and native observation time.
+  Evidence evidence = 2;
+  // NATIVE_CREATED, LEGACY_IMPORTED_AUDITED or UNKNOWN.
+  string provenance = 3;
+  // Public leaves in native schema order.
+  repeated NativeField fields = 4;
+}
 // Read-only BSC evidence projection.
 message BscStatus {
   // Source revision deployed with this reporter.
@@ -183,6 +226,9 @@ message BscLaunchState {
   repeated PublicField runtime_fields = 4;
   // Missing/invalid contract explanation.
   string reason = 5;
+  // Latest public qualification records: DRY, preflight, quote, economics, simulation,
+  // launch path, R0 portal scan, requalification, PREPARE handoff and the V5 contract.
+  repeated NativeRecord records = 6;
 }
 // Read-only G0.8 results; submission acknowledgement is not acquisition.
 message BscMonitoringState {
@@ -192,6 +238,8 @@ message BscMonitoringState {
   Evidence evidence = 2;
   // Explicit public receipt, ordering, acquisition and cost fields.
   repeated PublicField results = 3;
+  // Latest public builder, witness, G0.7 attempt, G0.8 and chain-session records.
+  repeated NativeRecord records = 4;
 }
 // Public wallet identity and timestamped evidence balances, never keys.
 message BscWalletsState {

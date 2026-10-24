@@ -1,21 +1,58 @@
 import { Line, Section } from "@/shared/ui/graphite/Rows";
 import { Notice } from "@/shared/ui/graphite/Notice";
 import { selectStatus, useBscStore } from "../store/bscStore";
-import { EvidenceRows, PublicRows, timestamp, ValueState } from "./EvidenceRows";
+import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
+import { SECTIONS } from "../model/placement";
 import type { BscTab } from "../BscPage";
-export function OverviewPanel({goto}:{goto:(t:BscTab)=>void}) {
- const {projection:s,status}=useBscStore(selectStatus);
- const job=s?.jobs.find(j=>j.job==="readiness");
- return <>
- <Section title="Source snapshot"><Line label="Source quality" value={status}/><Line label="Data as of" value={timestamp(s?.dataAsOfUnixS)}/><Line label="Source commit" value={s?.sourceCommit||"—"}/><Line label="Update source" value="darkbotctl bsc sync" hint="Run in the original repository terminal; existing snapshots remain dated."/></Section>
- <Section title="Qualification gates">{s?.gates.map(g=><Line key={g.gateId} label={g.gateId} value={<ValueState state={g.state}/>} hint={g.reasonCodes.join(" · ")}/>)}</Section>
- <Section title="Pre-Live Readiness · read-only"><Line label="Runtime readiness" value="UNKNOWN" hint="No BSC execution engine is running"/><Line label="Pre-Live result" value={<ValueState state={s?.readiness?.verdict}/>}/><Line label="Mode" value={<ValueState state={s?.readiness?.mode||undefined}/>}/><Line label="Selected candidate binding" value={<ValueState state={s?.readiness?.candidateBinding||undefined}/>} hint="Only BOUND counts for the selected candidate; STALE is history"/><Line label="Readiness job" value={<ValueState state={job?.state}/>} hint={job?.resultCode?`Result ${job.resultCode} · start and stop in Launch / BUY`:"Start and stop in Launch / BUY"}/><Line label="Funding" value={s?.readiness?.fundingVerdict||"UNKNOWN"}/><EvidenceRows evidence={s?.readiness?.evidence}/><PublicRows rows={s?.readiness?.checks}/></Section>
- <Section title="Guard"><Line label="Guard" value={<ValueState state={s?.guard?.guardState}/>}/><Line label="Compiled hash" value={s?.guard?.frozenApprovedSha256||"—"}/><Line label="Current contract" value={s?.guard?.contractPresent? s.guard.contractPath : "No active V5 contract"}/><Line label="LIVE" value={<ValueState state={s?.liveState}/>}/></Section>
- <Section title="Portal"><Line label="Bound → observed" value={`${s?.readiness?.portalVersionBound||"—"} → ${s?.readiness?.portalVersionObserved||"—"}`}/><Line label="Implementation bound" value={s?.readiness?.portalImplBound||"—"}/><Line label="Implementation observed" value={s?.readiness?.portalImplObserved||"—"}/></Section>
- <Section title="Builder"><Line label="Documentation fetched" value={timestamp(s?.builder?.refreshObservedUnixS)}/><Line label="Expires" value={timestamp(s?.builder?.refreshExpiresUnixS)}/><PublicRows rows={s?.builder?.floors}/><EvidenceRows evidence={s?.builder?.probe}/>{(["price","noMerge","positionFirst","inclusion"] as const).map(k=><Line key={k} label={k} value={<ValueState state={s?.builder?.[k]}/>}/>)}</Section>
- <Section title="Witness"><Line label="Source ready" value={s?.witness?.sourceReady===undefined?"UNKNOWN":String(s.witness.sourceReady)}/><Line label="T0 → BUY" value={s?.witness?.t0ToBuyState||"UNKNOWN"}/></Section>
- {s?.warnings.map(w=><Notice key={w}>{w}</Notice>)}
- <div className="g-actions"><button className="g-secondary" onClick={()=>goto("launch")}>Bound plan</button><button className="g-secondary" onClick={()=>goto("monitoring")}>Monitoring</button></div>
- <Notice>Read-only observations. A connected reporter, successful readiness check or ARMED guard never grants LIVE permission.</Notice>
- </>;
+
+const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
+const age = (s: bigint | undefined) => s && s > 0n ? `${Math.max(0, Math.floor(Date.now() / 1000) - Number(s))} s` : "UNKNOWN";
+
+/** Read-only summary in the fixed §13 order; details live in the four detail tabs. */
+export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
+  const { projection: s, status } = useBscStore(selectStatus);
+  const job = s?.jobs.find(j => j.job === "readiness");
+  const r = s?.readiness;
+  const clock = r?.checks.find(c => c.name === "CLOCK_CONFIG");
+  return <>
+    <Section title={title(1)}>
+      <Line label="Source quality" value={<ValueState state={status} />} hint="Transport state of bsc.status, never a trading permission" />
+      <Line label="Data as of" value={timestamp(s?.dataAsOfUnixS)} hint="Explicit snapshot sync time" />
+      <Line label="Snapshot age" value={age(s?.dataAsOfUnixS)} hint="An old snapshot is STALE, not SOURCE_DETACHED" />
+      <Line label="Evaluated" value={timestamp(s?.evaluatedUnixS)} />
+      <Line label="Source commit" value={s?.sourceCommit || "—"} />
+      <Line label="Update source" value="darkbotctl bsc sync" hint="Run in the original repository terminal; existing snapshots remain dated." />
+    </Section>
+    <Section title={title(2)}>
+      <Line label="Readiness job" value={<ValueState state={job?.state} />} hint="Process lifecycle only, not the readiness verdict" />
+      <Line label="Job result" value={<ValueState state={job?.resultCode || undefined} />} />
+      <Line label="Launch ID" value={job?.launchId || "—"} />
+      <Line label="Started / ended" value={`${timestamp(job?.startedUnixS)} / ${timestamp(job?.endedUnixS)}`} />
+      <Line label="Controller available" value={job?.controllerAvailable === undefined ? "UNKNOWN" : String(job.controllerAvailable)} hint="Start and stop in Launch / BUY" />
+    </Section>
+    <Section title={title(3)}>
+      <Line label="Compiled guard" value={<ValueState state={s?.guard?.guardState} />} />
+      <Line label="Contract approval" value={s?.guard?.approved === undefined ? "UNKNOWN" : String(s.guard.approved)} />
+      <Line label="Execution ready" value={s?.guard?.executionReady === undefined ? "UNKNOWN" : String(s.guard.executionReady)} />
+      <Line label="Current contract" value={s?.guard?.contractPresent ? s.guard.contractPath : "No active V5 contract"} />
+      <Line label="LIVE" value={<ValueState state={s?.liveState} />} />
+    </Section>
+    <Section title={title(4)}>
+      <Line label="Runtime readiness" value="UNKNOWN" hint="No BSC execution engine is running" />
+      <Line label="Pre-Live verdict" value={<ValueState state={r?.verdict} />} />
+      <Line label="Mode" value={<ValueState state={r?.mode || undefined} />} />
+      <Line label="Selected candidate binding" value={<ValueState state={r?.candidateBinding || undefined} />} hint="Only BOUND counts for the selected candidate; STALE is history" />
+      <Line label="Clock (CLOCK_CONFIG)" value={<ValueState state={clock?.value.split(" · ")[0]} />} hint="Needs an attested clock/boot ID; the GUI job stays BLOCKED without one" />
+      <Line label="Blocking reasons" value={r?.reasons.length ? r.reasons.join(" · ") : "—"} />
+    </Section>
+    <Section title={title(5)}>
+      {s?.gates.map(g => <Line key={g.gateId} label={g.gateId} value={<ValueState state={g.state} />} hint={[...g.reasonCodes, g.evidence?.path].filter(Boolean).join(" · ")} />)}
+    </Section>
+    <Section title={title(6)}>
+      {s?.warnings.length ? s.warnings.map(w => <Notice key={w}>{w}</Notice>) : <Line label="Warnings" value="—" />}
+      <EvidenceRows evidence={r?.evidence} />
+    </Section>
+    <div className="g-actions"><button className="g-secondary" onClick={() => goto("launch")}>Launch / BUY</button><button className="g-secondary" onClick={() => goto("monitoring")}>Monitoring</button></div>
+    <Notice>Read-only observations. A connected reporter, successful readiness check or ARMED guard never grants LIVE permission.</Notice>
+  </>;
 }

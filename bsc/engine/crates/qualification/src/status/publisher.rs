@@ -167,6 +167,9 @@ pub fn serve(
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
+                // An accepted socket inherits the listener's non-blocking mode on macOS; a frame
+                // larger than the socket buffer must block (bounded by the write timeout).
+                stream.set_nonblocking(false)?;
                 stream.set_write_timeout(Some(Duration::from_secs(2)))?;
                 if send(
                     &mut stream,

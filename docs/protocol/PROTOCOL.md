@@ -14,9 +14,13 @@
     - [GateStatus](#darkbot-bsc-v1-GateStatus)
     - [GuardStatus](#darkbot-bsc-v1-GuardStatus)
     - [JobStatus](#darkbot-bsc-v1-JobStatus)
+    - [NativeField](#darkbot-bsc-v1-NativeField)
+    - [NativeRecord](#darkbot-bsc-v1-NativeRecord)
     - [PublicField](#darkbot-bsc-v1-PublicField)
     - [ReadinessStatus](#darkbot-bsc-v1-ReadinessStatus)
     - [WitnessStatus](#darkbot-bsc-v1-WitnessStatus)
+
+    - [NativeKind](#darkbot-bsc-v1-NativeKind)
 
 - [darkbot/control/v1/topics.proto](#darkbot_control_v1_topics-proto)
     - [TopicDescriptor](#darkbot-control-v1-TopicDescriptor)
@@ -132,6 +136,7 @@ Bound launch plan, without signatures, raw transactions or execution authority.
 | contract_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Public contract values, exact integer caps and binding hashes. |
 | runtime_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Observed runtime context; absent until such evidence actually exists. |
 | reason | [string](#string) |  | Missing/invalid contract explanation. |
+| records | [NativeRecord](#darkbot-bsc-v1-NativeRecord) | repeated | Latest public qualification records: DRY, preflight, quote, economics, simulation, launch path, R0 portal scan, requalification, PREPARE handoff and the V5 contract. |
 
 
 
@@ -149,6 +154,7 @@ Read-only G0.8 results; submission acknowledgement is not acquisition.
 | state | [string](#string) |  | G0.8 verdict unchanged: NOT_EXECUTED, PASS, ADAPT, STOP, UNRESOLVED or UNKNOWN. |
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | G0.8 result identity. |
 | results | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Explicit public receipt, ordering, acquisition and cost fields. |
+| records | [NativeRecord](#darkbot-bsc-v1-NativeRecord) | repeated | Latest public builder, witness, G0.7 attempt, G0.8 and chain-session records. |
 
 
 
@@ -328,6 +334,44 @@ Supervisor-owned read-only job lifecycle.
 
 
 
+<a name="darkbot-bsc-v1-NativeField"></a>
+
+### NativeField
+One public leaf of a native record. Secrets, salts, raw bytes and private records never
+appear; the census sensitivity of every leaf decides (bsc-native-fields.json).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | DBREC field name; nested rows as parent[index].name, repeated leaves as name[index]. |
+| kind | [NativeKind](#darkbot-bsc-v1-NativeKind) |  | DBREC kind of the leaf. |
+| value | [string](#string) |  | Canonical text of the value for its kind. |
+| unit | [string](#string) |  | Native unit such as wei, unix_milliseconds, nanoseconds or basis_points. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-NativeRecord"></a>
+
+### NativeRecord
+The public leaves of one identified native record. The frontend places every field by
+frontend/contracts/bsc-fields.json (panel, section, order); nothing is computed from it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| schema | [string](#string) |  | DBREC schema name. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Record identity: path, SHA-256 and native observation time. |
+| provenance | [string](#string) |  | NATIVE_CREATED, LEGACY_IMPORTED_AUDITED or UNKNOWN. |
+| fields | [NativeField](#darkbot-bsc-v1-NativeField) | repeated | Public leaves in native schema order. |
+
+
+
+
+
+
 <a name="darkbot-bsc-v1-PublicField"></a>
 
 ### PublicField
@@ -387,6 +431,24 @@ Original producer witness availability, not inferred timing.
 
 
 
+
+
+
+<a name="darkbot-bsc-v1-NativeKind"></a>
+
+### NativeKind
+Kind of a native leaf; the value is its canonical text form.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| NATIVE_KIND_UNSPECIFIED | 0 | Not set; never displayed as a value. |
+| NATIVE_KIND_BOOL | 1 | true or false. |
+| NATIVE_KIND_U64 | 2 | Unsigned decimal. |
+| NATIVE_KIND_I64 | 3 | Signed decimal. |
+| NATIVE_KIND_U256 | 4 | Exact unsigned decimal (wei, token units); never a float. |
+| NATIVE_KIND_ADDRESS | 5 | 0x followed by 40 hex digits. |
+| NATIVE_KIND_B256 | 6 | 0x followed by 64 hex digits. |
+| NATIVE_KIND_TEXT | 7 | Redacted public text. |
 
 
 

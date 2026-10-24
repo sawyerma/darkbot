@@ -12,6 +12,12 @@ const browser=await chromium.launch({headless:true});const p=await browser.newPa
 const pageRequests=[];p.on('request',r=>pageRequests.push({method:r.method(),path:new URL(r.url()).pathname}));
 const statusGets=(from,path)=>pageRequests.slice(from).filter(r=>r.method==='GET'&&r.path===path).length;
 const idle=ms=>new Promise(r=>setTimeout(r,ms));
+// FRONTEND_PHASENPLAN §13: every tab shows its numbered sections in exactly this order.
+const sections=JSON.parse(readFileSync(`${root}/frontend/contracts/bsc-fields.json`,'utf8')).panel_sections;
+const salt=readFileSync(`${dir}/salt.txt`,'utf8').trim();
+const headings=async()=>(await p.locator('h2.g-section-title').allInnerTexts()).map(t=>t.trim());
+const expectSections=async(panel)=>assert.deepEqual(await headings(),sections[panel].map((t,i)=>`${i+1}. ${t}`),panel+' section order');
+const body=async()=>await p.locator('body').innerText();
 p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>{errors.push('native dialog');void d.dismiss();});
 const until=async(fn,msg)=>{for(let i=0;i<150;i++){if(await fn())return;await new Promise(r=>setTimeout(r,200));}throw Error(msg);};
 const state=async()=>await(await api.get(base+'/api/v1/bsc/process')).json();
@@ -43,13 +49,20 @@ try{
  mark=pageRequests.length;await idle(8000);
  for(const path of ['/api/v1/bsc/process','/api/v1/project0/process','/api/v1/command'])assert.equal(statusGets(mark,path),0,'periodic GET on /bsc: '+path);
  assert((await p.locator('body').innerText()).includes('Data as of'));
+ await expectSections('overview');
  for(const name of ['BUY','Send','Arm','Probe','Run DRY'])assert.equal(await p.getByRole('button',{name,exact:true}).count(),0);
  await p.screenshot({path:`${dir}/bsc-overview.png`,fullPage:true});
  await p.getByRole('tab',{name:'Wallets',exact:true}).click();
  await until(async()=> (await p.locator('body').innerText()).includes('Wallet snapshots'),'wallet snapshots');
+ await expectSections('wallets');
+ await until(async()=> (await body()).includes('launcher_pending_nonce · g06a.preflight-readonly.v3'),'native preflight nonce in Wallets section 6');
  await p.screenshot({path:`${dir}/bsc-wallets.png`,fullPage:true});
  await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
- await p.getByRole('heading',{name:'Controlled BUY test · G0.7 → G0.8',exact:true}).waitFor();
+ await p.getByRole('heading',{name:'8. '+sections.launch[7],exact:true}).waitFor();
+ await expectSections('launch');
+ await until(async()=> (await body()).includes('protocol_fee_bps · g06a.native-bnb-quote.v2'),'native quote leaf in Launch section 3');
+ for(const record of ['g06a.native-bnb-quote.v2','g06a.economics-evm-crosscheck.v2','g06a.launch-path','g07.portal-upgrade-scan.v2','g06a.prepare-handoff','g06a.self-launch-bundle-dry.import.v1','g06a.local-simulation.import.v1'])assert((await body()).includes('Record · '+record),record);
+ const html=(await p.content()).toLowerCase();assert(!html.includes(salt.toLowerCase().replace(/^0x/,'')),'raw salt reached the browser');assert(!(await body()).includes('salt · g06a.economics'));
  const checks=p.getByLabel('Filter readiness checks');
  await checks.fill('no-such-native-field');
  const checkSection=checks.locator('xpath=ancestor::section[1]');
@@ -63,7 +76,13 @@ try{
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
  await p.getByLabel('Report',{exact:true}).selectOption('g08');
  await until(async()=> (await p.locator('body').innerText()).includes('NOT_EXECUTED'),'G0.8 native missing evidence state');
- assert((await p.locator('body').innerText()).includes('No native fields available.'));
+ await expectSections('analytics');
+ assert((await body()).includes('g06a.local-simulation.import.v1'),'evidence record list');
+ await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await until(async()=> (await body()).includes('BSC_INGRESS_GETH'),'monitoring future sources');
+ await expectSections('monitoring');
+ assert((await body()).includes('FUTURE_PHASE_BLOCKED'));assert((await body()).includes('Record · g06a.builder-floor-policy.v2'));
+ await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
  await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
 
  // A bounded fixture child is used for explicit cancellation and crash tests only.
@@ -105,5 +124,5 @@ try{
  assert.equal((await api.get(base+'/healthz')).status(),200);assert.deepEqual(errors,[]);
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs, native records on screen without salt, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

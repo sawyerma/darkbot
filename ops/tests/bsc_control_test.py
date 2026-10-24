@@ -16,6 +16,13 @@ try:
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
     evidence=source/'bsc/native/evidence/g07/fixture';evidence.mkdir(parents=True)
     shutil.copy2(h.ROOT/'protocol/golden/bsc/readiness.dbrec',evidence/'readiness.dbrec')
+    # Committed native qualification records, so every panel shows real public leaves end to end.
+    for name in ('g06a_prepare_20261023T211704Z','g07_binary_import_20261016'):
+        target=source/'bsc/native/evidence/g06a'/name;target.mkdir(parents=True)
+        for record in (h.ROOT/'bsc/native/evidence/g06a'/name).glob('*.dbrec'):shutil.copy2(record,target/record.name)
+    # The raw salt of the economics record must never reach the browser (census SECRET_NEVER_BROWSER).
+    shown=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/dbrec_show'),str(source/'bsc/native/evidence/g06a/g06a_prepare_20261023T211704Z/economics_crosscheck.dbrec')],capture_output=True,text=True,check=True).stdout
+    (h.WORK/'salt.txt').write_text(next(l.split('=',1)[1].strip() for l in shown.splitlines() if l.startswith('salt =')))
     (h.WORK/'app/bsc-source').symlink_to(source,target_is_directory=True)
     (release/'bsc-root').symlink_to(source,target_is_directory=True)
     (h.WORK/'app/current').symlink_to(release,target_is_directory=True)

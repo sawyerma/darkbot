@@ -2,15 +2,15 @@
 // @generated from file darkbot/bsc/v1/status.proto (package darkbot.bsc.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv1";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv1";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv1";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv1";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file darkbot/bsc/v1/status.proto.
  */
 export const file_darkbot_bsc_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiuQMKCUJzY1N0YXR1cxIVCg1zb3VyY2VfY29tbWl0GAEgASgJEhgKEGV2YWx1YXRlZF91bml4X3MYAiABKAQSEgoKbGl2ZV9zdGF0ZRgDIAEoCRIqCgVndWFyZBgEIAEoCzIbLmRhcmtib3QuYnNjLnYxLkd1YXJkU3RhdHVzEikKBWdhdGVzGAUgAygLMhouZGFya2JvdC5ic2MudjEuR2F0ZVN0YXR1cxIyCglyZWFkaW5lc3MYBiABKAsyHy5kYXJrYm90LmJzYy52MS5SZWFkaW5lc3NTdGF0dXMSLgoHYnVpbGRlchgHIAEoCzIdLmRhcmtib3QuYnNjLnYxLkJ1aWxkZXJTdGF0dXMSLgoHd2l0bmVzcxgIIAEoCzIdLmRhcmtib3QuYnNjLnYxLldpdG5lc3NTdGF0dXMSJgoDZHJ5GAkgASgLMhkuZGFya2JvdC5ic2MudjEuRHJ5U3RhdHVzEicKBGpvYnMYCiADKAsyGS5kYXJrYm90LmJzYy52MS5Kb2JTdGF0dXMSEAoId2FybmluZ3MYCyADKAkSGQoRZGF0YV9hc19vZl91bml4X3MYDCABKAQi0QEKDkJzY0xhdW5jaFN0YXRlEhgKEGNvbnRyYWN0X3ByZXNlbnQYASABKAgSKgoIZXZpZGVuY2UYAiABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRI0Cg9jb250cmFjdF9maWVsZHMYAyADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIzCg5ydW50aW1lX2ZpZWxkcxgEIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEg4KBnJlYXNvbhgFIAEoCSJ9ChJCc2NNb25pdG9yaW5nU3RhdGUSDQoFc3RhdGUYASABKAkSKgoIZXZpZGVuY2UYAiABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRIsCgdyZXN1bHRzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQihAQKD0JzY1dhbGxldHNTdGF0ZRIYChBleHBlY3RlZF9hZGRyZXNzGAEgASgJEhUKDXdhbGxldF9zdGF0dXMYAiABKAkSGAoQbGF1bmNoZXJfYWRkcmVzcxgDIAEoCRIVCg1idXllcl9hZGRyZXNzGAQgASgJEhUKCGNoYWluX2lkGAUgASgESACIAQESIQoUbGF1bmNoZXJfYmFsYW5jZV93ZWkYBiABKAlIAYgBARIeChFidXllcl9iYWxhbmNlX3dlaRgHIAEoCUgCiAEBEhsKDm9ic2VydmVkX2Jsb2NrGAggASgESAOIAQESFwoPb2JzZXJ2ZWRfdW5peF9zGAkgASgEEg4KBnNvdXJjZRgKIAEoCRIiChVyZXF1aXJlZF9sYXVuY2hlcl93ZWkYCyABKAlIBIgBARIfChJyZXF1aXJlZF9idXllcl93ZWkYDCABKAlIBYgBARIqCghldmlkZW5jZRgNIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlQgsKCV9jaGFpbl9pZEIXChVfbGF1bmNoZXJfYmFsYW5jZV93ZWlCFAoSX2J1eWVyX2JhbGFuY2Vfd2VpQhEKD19vYnNlcnZlZF9ibG9ja0IYChZfcmVxdWlyZWRfbGF1bmNoZXJfd2VpQhUKE19yZXF1aXJlZF9idXllcl93ZWlCewoSY29tLmRhcmtib3QuYnNjLnYxQgtTdGF0dXNQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z");
+  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiYgoLTmF0aXZlRmllbGQSDAoEbmFtZRgBIAEoCRIoCgRraW5kGAIgASgOMhouZGFya2JvdC5ic2MudjEuTmF0aXZlS2luZBINCgV2YWx1ZRgDIAEoCRIMCgR1bml0GAQgASgJIosBCgxOYXRpdmVSZWNvcmQSDgoGc2NoZW1hGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USEgoKcHJvdmVuYW5jZRgDIAEoCRIrCgZmaWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5OYXRpdmVGaWVsZCK5AwoJQnNjU3RhdHVzEhUKDXNvdXJjZV9jb21taXQYASABKAkSGAoQZXZhbHVhdGVkX3VuaXhfcxgCIAEoBBISCgpsaXZlX3N0YXRlGAMgASgJEioKBWd1YXJkGAQgASgLMhsuZGFya2JvdC5ic2MudjEuR3VhcmRTdGF0dXMSKQoFZ2F0ZXMYBSADKAsyGi5kYXJrYm90LmJzYy52MS5HYXRlU3RhdHVzEjIKCXJlYWRpbmVzcxgGIAEoCzIfLmRhcmtib3QuYnNjLnYxLlJlYWRpbmVzc1N0YXR1cxIuCgdidWlsZGVyGAcgASgLMh0uZGFya2JvdC5ic2MudjEuQnVpbGRlclN0YXR1cxIuCgd3aXRuZXNzGAggASgLMh0uZGFya2JvdC5ic2MudjEuV2l0bmVzc1N0YXR1cxImCgNkcnkYCSABKAsyGS5kYXJrYm90LmJzYy52MS5EcnlTdGF0dXMSJwoEam9icxgKIAMoCzIZLmRhcmtib3QuYnNjLnYxLkpvYlN0YXR1cxIQCgh3YXJuaW5ncxgLIAMoCRIZChFkYXRhX2FzX29mX3VuaXhfcxgMIAEoBCKAAgoOQnNjTGF1bmNoU3RhdGUSGAoQY29udHJhY3RfcHJlc2VudBgBIAEoCBIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEjQKD2NvbnRyYWN0X2ZpZWxkcxgDIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEjMKDnJ1bnRpbWVfZmllbGRzGAQgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSDgoGcmVhc29uGAUgASgJEi0KB3JlY29yZHMYBiADKAsyHC5kYXJrYm90LmJzYy52MS5OYXRpdmVSZWNvcmQirAEKEkJzY01vbml0b3JpbmdTdGF0ZRINCgVzdGF0ZRgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEiwKB3Jlc3VsdHMYAyADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBItCgdyZWNvcmRzGAQgAygLMhwuZGFya2JvdC5ic2MudjEuTmF0aXZlUmVjb3JkIoQECg9Cc2NXYWxsZXRzU3RhdGUSGAoQZXhwZWN0ZWRfYWRkcmVzcxgBIAEoCRIVCg13YWxsZXRfc3RhdHVzGAIgASgJEhgKEGxhdW5jaGVyX2FkZHJlc3MYAyABKAkSFQoNYnV5ZXJfYWRkcmVzcxgEIAEoCRIVCghjaGFpbl9pZBgFIAEoBEgAiAEBEiEKFGxhdW5jaGVyX2JhbGFuY2Vfd2VpGAYgASgJSAGIAQESHgoRYnV5ZXJfYmFsYW5jZV93ZWkYByABKAlIAogBARIbCg5vYnNlcnZlZF9ibG9jaxgIIAEoBEgDiAEBEhcKD29ic2VydmVkX3VuaXhfcxgJIAEoBBIOCgZzb3VyY2UYCiABKAkSIgoVcmVxdWlyZWRfbGF1bmNoZXJfd2VpGAsgASgJSASIAQESHwoScmVxdWlyZWRfYnV5ZXJfd2VpGAwgASgJSAWIAQESKgoIZXZpZGVuY2UYDSABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZUILCglfY2hhaW5faWRCFwoVX2xhdW5jaGVyX2JhbGFuY2Vfd2VpQhQKEl9idXllcl9iYWxhbmNlX3dlaUIRCg9fb2JzZXJ2ZWRfYmxvY2tCGAoWX3JlcXVpcmVkX2xhdW5jaGVyX3dlaUIVChNfcmVxdWlyZWRfYnV5ZXJfd2VpKsQBCgpOYXRpdmVLaW5kEhsKF05BVElWRV9LSU5EX1VOU1BFQ0lGSUVEEAASFAoQTkFUSVZFX0tJTkRfQk9PTBABEhMKD05BVElWRV9LSU5EX1U2NBACEhMKD05BVElWRV9LSU5EX0k2NBADEhQKEE5BVElWRV9LSU5EX1UyNTYQBBIXChNOQVRJVkVfS0lORF9BRERSRVNTEAUSFAoQTkFUSVZFX0tJTkRfQjI1NhAGEhQKEE5BVElWRV9LSU5EX1RFWFQQB0J7ChJjb20uZGFya2JvdC5ic2MudjFCC1N0YXR1c1Byb3RvUAGiAgNEQliqAg5EYXJrYm90LkJzYy5WMcoCDkRhcmtib3RcQnNjXFYx4gIaRGFya2JvdFxCc2NcVjFcR1BCTWV0YWRhdGHqAhBEYXJrYm90OjpCc2M6OlYxYgZwcm90bzM");
 
 /**
  * An explicitly selected public bound value, never a signed transaction or secret.
@@ -525,6 +525,92 @@ export const JobStatusSchema: GenMessage<JobStatus> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_status, 8);
 
 /**
+ * One public leaf of a native record. Secrets, salts, raw bytes and private records never
+ * appear; the census sensitivity of every leaf decides (bsc-native-fields.json).
+ *
+ * @generated from message darkbot.bsc.v1.NativeField
+ */
+export type NativeField = Message<"darkbot.bsc.v1.NativeField"> & {
+  /**
+   * DBREC field name; nested rows as parent[index].name, repeated leaves as name[index].
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * DBREC kind of the leaf.
+   *
+   * @generated from field: darkbot.bsc.v1.NativeKind kind = 2;
+   */
+  kind: NativeKind;
+
+  /**
+   * Canonical text of the value for its kind.
+   *
+   * @generated from field: string value = 3;
+   */
+  value: string;
+
+  /**
+   * Native unit such as wei, unix_milliseconds, nanoseconds or basis_points.
+   *
+   * @generated from field: string unit = 4;
+   */
+  unit: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.NativeField.
+ * Use `create(NativeFieldSchema)` to create a new message.
+ */
+export const NativeFieldSchema: GenMessage<NativeField> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 9);
+
+/**
+ * The public leaves of one identified native record. The frontend places every field by
+ * frontend/contracts/bsc-fields.json (panel, section, order); nothing is computed from it.
+ *
+ * @generated from message darkbot.bsc.v1.NativeRecord
+ */
+export type NativeRecord = Message<"darkbot.bsc.v1.NativeRecord"> & {
+  /**
+   * DBREC schema name.
+   *
+   * @generated from field: string schema = 1;
+   */
+  schema: string;
+
+  /**
+   * Record identity: path, SHA-256 and native observation time.
+   *
+   * @generated from field: darkbot.bsc.v1.Evidence evidence = 2;
+   */
+  evidence?: Evidence;
+
+  /**
+   * NATIVE_CREATED, LEGACY_IMPORTED_AUDITED or UNKNOWN.
+   *
+   * @generated from field: string provenance = 3;
+   */
+  provenance: string;
+
+  /**
+   * Public leaves in native schema order.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.NativeField fields = 4;
+   */
+  fields: NativeField[];
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.NativeRecord.
+ * Use `create(NativeRecordSchema)` to create a new message.
+ */
+export const NativeRecordSchema: GenMessage<NativeRecord> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_status, 10);
+
+/**
  * Read-only BSC evidence projection.
  *
  * @generated from message darkbot.bsc.v1.BscStatus
@@ -620,7 +706,7 @@ export type BscStatus = Message<"darkbot.bsc.v1.BscStatus"> & {
  * Use `create(BscStatusSchema)` to create a new message.
  */
 export const BscStatusSchema: GenMessage<BscStatus> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_status, 9);
+  messageDesc(file_darkbot_bsc_v1_status, 11);
 
 /**
  * Bound launch plan, without signatures, raw transactions or execution authority.
@@ -662,6 +748,14 @@ export type BscLaunchState = Message<"darkbot.bsc.v1.BscLaunchState"> & {
    * @generated from field: string reason = 5;
    */
   reason: string;
+
+  /**
+   * Latest public qualification records: DRY, preflight, quote, economics, simulation,
+   * launch path, R0 portal scan, requalification, PREPARE handoff and the V5 contract.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.NativeRecord records = 6;
+   */
+  records: NativeRecord[];
 };
 
 /**
@@ -669,7 +763,7 @@ export type BscLaunchState = Message<"darkbot.bsc.v1.BscLaunchState"> & {
  * Use `create(BscLaunchStateSchema)` to create a new message.
  */
 export const BscLaunchStateSchema: GenMessage<BscLaunchState> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_status, 10);
+  messageDesc(file_darkbot_bsc_v1_status, 12);
 
 /**
  * Read-only G0.8 results; submission acknowledgement is not acquisition.
@@ -697,6 +791,13 @@ export type BscMonitoringState = Message<"darkbot.bsc.v1.BscMonitoringState"> & 
    * @generated from field: repeated darkbot.bsc.v1.PublicField results = 3;
    */
   results: PublicField[];
+
+  /**
+   * Latest public builder, witness, G0.7 attempt, G0.8 and chain-session records.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.NativeRecord records = 4;
+   */
+  records: NativeRecord[];
 };
 
 /**
@@ -704,7 +805,7 @@ export type BscMonitoringState = Message<"darkbot.bsc.v1.BscMonitoringState"> & 
  * Use `create(BscMonitoringStateSchema)` to create a new message.
  */
 export const BscMonitoringStateSchema: GenMessage<BscMonitoringState> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_status, 11);
+  messageDesc(file_darkbot_bsc_v1_status, 13);
 
 /**
  * Public wallet identity and timestamped evidence balances, never keys.
@@ -809,4 +910,73 @@ export type BscWalletsState = Message<"darkbot.bsc.v1.BscWalletsState"> & {
  * Use `create(BscWalletsStateSchema)` to create a new message.
  */
 export const BscWalletsStateSchema: GenMessage<BscWalletsState> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_status, 12);
+  messageDesc(file_darkbot_bsc_v1_status, 14);
+
+/**
+ * Kind of a native leaf; the value is its canonical text form.
+ *
+ * @generated from enum darkbot.bsc.v1.NativeKind
+ */
+export enum NativeKind {
+  /**
+   * Not set; never displayed as a value.
+   *
+   * @generated from enum value: NATIVE_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * true or false.
+   *
+   * @generated from enum value: NATIVE_KIND_BOOL = 1;
+   */
+  BOOL = 1,
+
+  /**
+   * Unsigned decimal.
+   *
+   * @generated from enum value: NATIVE_KIND_U64 = 2;
+   */
+  U64 = 2,
+
+  /**
+   * Signed decimal.
+   *
+   * @generated from enum value: NATIVE_KIND_I64 = 3;
+   */
+  I64 = 3,
+
+  /**
+   * Exact unsigned decimal (wei, token units); never a float.
+   *
+   * @generated from enum value: NATIVE_KIND_U256 = 4;
+   */
+  U256 = 4,
+
+  /**
+   * 0x followed by 40 hex digits.
+   *
+   * @generated from enum value: NATIVE_KIND_ADDRESS = 5;
+   */
+  ADDRESS = 5,
+
+  /**
+   * 0x followed by 64 hex digits.
+   *
+   * @generated from enum value: NATIVE_KIND_B256 = 6;
+   */
+  B256 = 6,
+
+  /**
+   * Redacted public text.
+   *
+   * @generated from enum value: NATIVE_KIND_TEXT = 7;
+   */
+  TEXT = 7,
+}
+
+/**
+ * Describes the enum darkbot.bsc.v1.NativeKind.
+ */
+export const NativeKindSchema: GenEnum<NativeKind> = /*@__PURE__*/
+  enumDesc(file_darkbot_bsc_v1_status, 0);
