@@ -1106,13 +1106,79 @@ impl crate::execution::pipeline::ReceivershipBuilder for AdmissionBuilder {
     > {
         let mut plans = TestBuilder.plans(a, n, s, d)?;
         for p in &mut plans {
-            p.sol_costs.record_rent_lamports = Some(0);
+            p.sol_costs.record_rent_lamports = Some(ADMISSION_RENT.with(|r| r.get()));
             p.sol_costs.flat_fee_lamports = 5;
             p.exposure = 1_000;
         }
         Ok(plans)
     }
 }
+thread_local! {
+    /// B4: the record rent (lamports) `AdmissionBuilder` plans carry on this test thread.
+    static ADMISSION_RENT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// One LIVE evaluation of `target` through the production pipeline with the admission builder.
+fn live_evaluate(
+    adapter: &HandoffSubmitter,
+    safety: &mut darkbot_project0::safety::Safety,
+    fe04: Option<&mut crate::execution::one_shot::admission::Fe04Admission>,
+    payer: &solana_sdk::signature::Keypair,
+    target: Pubkey,
+) -> crate::analytics::record::OpportunityRecord {
+    use crate::execution::pipeline::{Mode, Pipeline};
+    use darkbot_project0::{execution::Freshness, planner::Allowlist};
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix::default();
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    slots.observe(10);
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let mut p = Pipeline {
+        mode: Mode::Live,
+        clock: &clock,
+        health: &TestHealth,
+        builder: &AdmissionBuilder,
+        submitter: adapter,
+        safety,
+        blockhash: &bh,
+        payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit: 0,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        tip_account: None,
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &[],
+        slot_watch: &slots,
+        network: &mut network,
+        simulation_failure: None,
+        fe04,
+    };
+    p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
+}
+
 fn admission(
     dir: &std::path::Path,
     payer: &solana_sdk::signature::Keypair,
@@ -1152,6 +1218,81 @@ fn admission(
         valid_until_slot: 160,
     }
 }
+/// B4: a plan that creates the liquidation record carries its rent into the admission: above
+/// the approval's `max_rent_lamports` it is refused before anything durable or sent (and the
+/// Safety reservation released); approved, the intent binds the rent and the SOL hold covers fee +
+/// tip + flat fee + rent.
+#[test]
+fn b4_admission_binds_a_nonzero_record_rent() {
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let safety = || {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let adapter = || HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails: false,
+    };
+    ADMISSION_RENT.with(|r| r.set(3_000));
+    let dir = |n: &str| {
+        let d = std::env::temp_dir().join(format!("p0-b4-rent-{n}-{}", Pubkey::new_unique()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    };
+    // Rent above the approval: refused, nothing durable, nothing sent, nothing reserved.
+    let (refused_dir, refused) = (dir("refused"), adapter());
+    let mut s = safety();
+    let mut fe04 = admission(&refused_dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    let r = live_evaluate(&refused, &mut s, Some(&mut fe04), &payer, target);
+    assert_eq!(r.decision, Decision::Unavailable, "{:?}", r.reason);
+    assert!(
+        r.reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("APPROVAL_BUDGET_EXCEEDED"),
+        "{:?}",
+        r.reason
+    );
+    assert_eq!(refused.submits.load(Ordering::Relaxed), 0);
+    assert!(fe04.journal.active_hold().is_none());
+    assert_eq!(s.capital_in_use(), 0, "the Safety reservation is released");
+    // Approved rent: bound into the intent and the SOL hold.
+    let (ok_dir, ok) = (dir("ok"), adapter());
+    let mut s = safety();
+    let mut fe04 = admission(&ok_dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    fe04.approval.max_rent_lamports = 3_000;
+    let r = live_evaluate(&ok, &mut s, Some(&mut fe04), &payer, target);
+    assert_eq!(r.decision, Decision::Submitted, "{:?}", r.reason);
+    assert_eq!(fe04.journal.intent().unwrap().rent_lamports, 3_000);
+    assert_eq!(
+        fe04.journal.active_hold().unwrap().holds["SOL"],
+        3_205,
+        "fee 200 + tip 0 + flat fee 5 + record rent 3000"
+    );
+    assert_eq!(ok.submits.load(Ordering::Relaxed), 1);
+    ADMISSION_RENT.with(|r| r.set(0));
+    let _ = std::fs::remove_dir_all(refused_dir);
+    let _ = std::fs::remove_dir_all(ok_dir);
+}
+
 /// B1/FE-04: the admission is the pipeline's only send. A LIVE candidate is reserved durably
 /// first (intent bound to the exact signed bytes, fee, tip, rent and the full SOL debit), then
 /// submitted exactly once; a second trigger never submits again; a refusal before anything
@@ -1159,67 +1300,14 @@ fn admission(
 /// handoff stays UNKNOWN with its hold and halts.
 #[test]
 fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
-    use crate::execution::pipeline::{Mode, Pipeline};
-    use darkbot_project0::{
-        execution::Freshness,
-        planner::Allowlist,
-        safety::{Allow, Limits, Safety},
-    };
-    use darkbot_solana::{
-        state::blockhash::{BlockhashCache, CachedBlockhash},
-        tx::{Resources, TxLimits},
-    };
+    use darkbot_project0::safety::{Allow, Limits, Safety};
     let target = Pubkey::new_unique();
     let payer = solana_sdk::signature::Keypair::new();
     let run =
         |adapter: &HandoffSubmitter,
          safety: &mut Safety,
          fe04: Option<&mut crate::execution::one_shot::admission::Fe04Admission>| {
-            let clock = Clock::new();
-            let bh = BlockhashCache::new();
-            bh.set(CachedBlockhash {
-                hash: solana_sdk::hash::Hash::new_unique(),
-                last_valid_block_height: 100,
-                refreshed_ns: clock.now_ns(),
-            });
-            let allow = Allowlist::default();
-            let failed = FailedCostMatrix::default();
-            let slots = darkbot_solana::ingress::SlotWatch::new();
-            slots.observe(10);
-            let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
-            let mut p = Pipeline {
-                mode: Mode::Live,
-                clock: &clock,
-                health: &TestHealth,
-                builder: &AdmissionBuilder,
-                submitter: adapter,
-                safety,
-                blockhash: &bh,
-                payer: &payer,
-                allowlist: &allow,
-                failed_costs: &failed,
-                limits: TxLimits::default(),
-                resources: Resources {
-                    compute_unit_limit: 100_000,
-                    priority_micro_lamports_per_cu: 0,
-                    loaded_accounts_data_size: None,
-                },
-                min_profit: 0,
-                blockhash_max_age_ns: u64::MAX,
-                p7_passed: false,
-                freshness: Freshness {
-                    max_opportunity_age_ns: u64::MAX,
-                    execution_deadline_ns: u64::MAX,
-                },
-                tip_account: None,
-                global_allowed: std::slice::from_ref(&test_table().program),
-                prereq_allowed: &[],
-                slot_watch: &slots,
-                network: &mut network,
-                simulation_failure: None,
-                fe04,
-            };
-            p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
+            live_evaluate(adapter, safety, fe04, &payer, target)
         };
     let open_safety = || {
         let mut allow = Allow::default();

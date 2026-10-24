@@ -15,3 +15,12 @@ all exit 0; GitHub Actions `project0-gate` 5/5 PASS. No Mainnet, no LIVE, no sub
 Remaining outside these tickets (not closed by this file): real chain reconciliation and exits
 on Mainnet (NOT_RUN), FE-06 production wiring of the admissions (B1), the in-run admission's
 `check()` reservation released through the journal settlement at that wiring.
+
+## B4 (record rent) — closed 2026-10-24
+
+Test `b4_admission_binds_a_nonzero_record_rent` (econ_tests, real `Pipeline::evaluate` LIVE path with
+the FE-04 admission and a counting submitter): rent 3000 lamports above `max_rent_lamports = 0` is
+refused before anything durable or sent, the Safety reservation released; approved, the intent binds
+`rent_lamports = 3000` and the SOL hold is 3205 (fee 200 + flat fee 5 + rent). Mutations fail-before:
+rent not bound into the intent, rent budget unchecked. Earlier closing commits: `119da22`, `91ed707a`,
+`8bfa63f2`.
