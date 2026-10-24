@@ -81,6 +81,24 @@ BSC Native Rust                                 Project_0 Native Rust
 
 **Dokumentenautorität unverändert:** [Frontend-Master](docs/FRONTEND_PHASENPLAN.md), [Wire V1.3](docs/GATEWAY_WIRE_PROTOCOL_V1_3.md), [Governance](docs/GOVERNANCE_UND_SICHERHEIT.md), die beiden nativen Phasenpläne und die bestehende F0-VAR-Struktur. Keine neuen Topic-IDs, Proto-Feldautoritäten, Reiter oder wirtschaftlichen LIVE-Gates.
 
+## 2c. Verbindlicher Übergabe-Checkpoint nach F3/F6/F7-Bugfix (2026-10-24)
+
+**Gemeinsamer Infrastrukturabschluss:** Die 15 Fast-Forward-Commits `f52e7c21..ac0b9da6` sind auf `origin/main` gepusht. `ac0b9da6` kennzeichnet den **Abschluss dieses Frontend-/Gateway-Bugfix-Pakets**, nicht den dauerhaft aktuellen Repo-HEAD (Project_0 kann parallel weiterlaufen). Lokale Regressionen gemeldet: Gateway **60/60**, BSC-Reporter **13/13**, Vitest **56/56**, Budget **7/7**, P0-IPC-E2E **1/1**, Stop-All-Teilausfall und Ops-Control-Tests **PASS**. Keine Aussage über eine vollständige Frontend-/Produktionsabnahme.
+
+| Phase / Paket | Nachgewiesener Teilumfang und verbleibender Status |
+| --- | --- |
+| **F3 – VERIFIED (Bugfix-Teilumfang)** | Engine-IPC-Frame-Obergrenze, `StateTooLarge`/`FRAME_TOO_LARGE` je Topic, Recovery, absolute Protokollgrenze. |
+| **F6 – PARTIAL** | Konfigurierbarer Gateway-Ledger, endliche Retention, zeitlich begrenzte Idempotenz **VERIFIED**. Native **Engine-Receipt-Autorität** (`pending_commands[]`, `recent_command_results[]`) weiter **OPEN**; separates F6-Paket. |
+| **F7 – VERIFIED (Teilabnahmen)** | Isolierter Stop-All-Teilausfall, Budget und Regressionen. Gesamt-F7 **nicht FINAL**; Visual-Pixeldiff **NOT_RUN**, fehlende Fachquellen/GUI-Abnahme offen. |
+| **F4 – BLOCKED/OPEN** | Durable EVENT-Reconciliation nicht durch F3/F6-Fixes ersetzt. |
+| **Project_0-Polling – OPEN** | Ausschließlich Project_0-Owner; kein BSC-Fix und kein stiller Umbau. |
+
+**Deploy-Grenze:** Protobuf-Schema-ID `68bae95c365d2e697b528d9f52aad60ec41ea4f3115de1e601f276dbf0189db1` ist gepusht, **nicht deployt**. P0- und BSC-Reporter müssen gemeinsam zum Schema gebaut werden; nur bestehender `darkbotctl build` → `deploy`-Prozess. Keine SIGN-/ARM-/LIVE-Freigabe.
+
+**Fortsetzungsentscheidung:** Das F3/F6/F7-Bugfix-Paket ist **geschlossen**; nicht ohne konkrete neue Fehler reproduktiv wieder öffnen. **Jetzt BSC Gate0 fortsetzen**, nicht das Frontend oder Project_0 damit vermischen. Der verbindliche BSC-Ist- und Übergabestand steht in [BSC STATUS – 2026-10-24](../bsc/docs/1_PLAN/STATUS.md): Flap v5.26.0 **PREPARE SELF_A** schlüsselfrei vorhanden; V5 weiterhin UNARMED, SIGN/VERIFY separat freigabepflichtig, G0.7/G0.8 NICHT ausgeführt. Zuerst verbliebene G0.7/G0.8-Code-/Qualifikationslücken prüfen; Reihenfolge G0.7 → G0.8 → PASS/ADAPT/STOP → erst danach C1/C2. Ursprüngliches BSC-Produktziel `T_buy - T0 < 1 ms` bleibt **NOT_PROVEN**. Dies ist keine neue Phase und keine wirtschaftliche Freigabe.
+
+---
+
 ## 3. F0-VAR als fortlaufende Backend-Übergabevorbereitung
 
 **Jedes Backend-Codepaket** erfasst relevante neue/geänderte/entfernte Rust-Felder, Konfigurationen, Status, Records, Events und CLI-Parameter für die spätere GUI. **Native Originalnamen und Originaltypen bleiben unverändert.** Projektzuordnung über den Projektpfad und die F0-VAR-Metadaten, nicht durch Umbenennen einzelner Rust-Felder.
