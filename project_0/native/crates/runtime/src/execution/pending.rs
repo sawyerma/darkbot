@@ -166,12 +166,9 @@ pub fn try_reconcile(
             } else {
                 ev.error.clone()
             },
-            // C12/C3: only capital Safety actually releases (a known PnL); UNKNOWN holds it.
-            exposure_released: if realized_pnl.is_some() {
-                p.exposure
-            } else {
-                0
-            },
+            // C3: capital actually released by this record — none: the RAM reconcile is landing
+            // telemetry; the FE-04 journal settlement alone books and releases (`fe04.rs`).
+            exposure_released: 0,
             pnl_complete: false,
         },
         landed_success,
