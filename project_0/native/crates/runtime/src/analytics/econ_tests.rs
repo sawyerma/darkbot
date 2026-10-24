@@ -762,6 +762,8 @@ impl darkbot_project0::health::HealthEngine for TestHealth {
     fn premium_decay_per_second(
         &self,
         _: &Pubkey,
+        _: i64,
+        _: u64,
     ) -> Result<u128, darkbot_project0::health::HealthError> {
         Ok(0)
     }

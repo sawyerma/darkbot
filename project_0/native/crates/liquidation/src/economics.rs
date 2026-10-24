@@ -143,21 +143,15 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
     }
 }
 
-/// Seize-Grenze aus `liquidate_end.rs` (BELEGT, 0.1.11): in **Equity-(EMA-)Werten**
-/// `seized ≤ repaid × (1 + max(FeeState.liquidation_max_fee, 0.05))`; außerdem Post-Health
-/// (Maintenance, Cached) ≥ Pre-Health. Bei Equity-Assets < 5 USD entfällt die Grenze (Closeout).
+/// Seize-Grenze aus `liquidate_end.rs` (BELEGT, 0.1.12-rc2): in **Equity-(EMA-)Werten**
+/// `seized ≤ repaid × (1 + max(FeeState.liquidation_max_fee, 0.05))` — auch unterhalb der
+/// Closeout-Schwelle (0.1.11 hob sie dort auf); ein getaggter Account kann mehr erlauben, die
+/// Basis ist die untere Schranke. Post-Health/Solvenz prüft das Sizing (`sizing.rs`).
 /// Rückgabe: maximal beschlagnahmbarer Equity-Wert für einen gegebenen Repay-Wert (gleiche Einheit);
 /// `None` bei ungültigem FeeState oder Überlauf (B5).
-pub fn max_seizable_for_repay(
-    repaid_equity: u128,
-    fee_state_max_bps: u64,
-    closeout: bool,
-) -> Option<u128> {
+pub fn max_seizable_for_repay(repaid_equity: u128, fee_state_max_bps: u64) -> Option<u128> {
     if !fee_state_valid(fee_state_max_bps) {
         return None;
-    }
-    if closeout {
-        return Some(u128::MAX);
     }
     let fee = fee_state_max_bps.max(crate::protocol::LIQUIDATION_BONUS_FEE_MINIMUM_BPS) as u128;
     Some(repaid_equity.checked_mul(BPS as u128 + fee)? / BPS as u128)
@@ -366,6 +360,33 @@ pub fn rank(
 
 #[cfg(test)]
 mod tests {
+    /// P1B: the tag premium curve equals the pinned program's `tag_adjusted_premium` (bps,
+    /// rounded down) over grace, ramp and cap, for FeeState caps below and above the minimum.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn p1b_tag_premium_curve_equals_the_pinned_program() {
+        use fixed::types::I80F48;
+        use marginfi::state::liquidation_record::tag_adjusted_premium;
+        let t0 = 1_700_000_000u64;
+        for fee_bps in [0u64, 500, 800, 2_500] {
+            let base = I80F48::from_num(fee_bps.max(PREMIUM_BASE_BPS)) / I80F48::from_num(BPS);
+            for dt in [
+                0u64, 3_599, 3_600, 3_601, 86_400, 300_000, 604_799, 604_800, 2_000_000,
+            ] {
+                let program = tag_adjusted_premium(base, t0 as i64, (t0 + dt) as i64);
+                let program_bps = (program * I80F48::from_num(BPS))
+                    .checked_floor()
+                    .unwrap()
+                    .to_num::<u64>();
+                let ours = premium_bps(t0 + dt, Some(t0), fee_bps, false).unwrap();
+                assert!(
+                    ours.abs_diff(program_bps) <= 1,
+                    "fee {fee_bps} dt {dt}: ours {ours} program {program_bps}"
+                );
+            }
+        }
+    }
+
     use super::*;
     use solana_sdk::pubkey::Pubkey;
 
@@ -444,7 +465,7 @@ mod tests {
         let late = t0 + PREMIUM_GRACE_S + PREMIUM_RAMP_S / 2;
         for fee in [0u64, 500, 9_999, 10_000] {
             assert!(premium_bps(late, Some(t0), fee, false).unwrap() <= PREMIUM_MAX_BPS);
-            assert!(max_seizable_for_repay(10_000, fee, false).is_some());
+            assert!(max_seizable_for_repay(10_000, fee).is_some());
         }
         assert_eq!(premium_bps(late, Some(t0), 10_000, false), Some(10_000));
         // 100 % already at base: any need above it is unreachable, not a division by zero.
@@ -457,7 +478,7 @@ mod tests {
                 assert_eq!(premium_bps(now, None, fee, true), None, "{fee}");
             }
             assert_eq!(time_for_premium(t0, fee, 20_000, false), None);
-            assert_eq!(max_seizable_for_repay(10_000, fee, false), None);
+            assert_eq!(max_seizable_for_repay(10_000, fee), None);
             assert_eq!(
                 t_profitable(
                     t0,
@@ -469,7 +490,7 @@ mod tests {
         }
         // Time overflow near u64::MAX and seize overflow near u128::MAX are UNKNOWN.
         assert_eq!(time_for_premium(u64::MAX - 10, 0, 2_000, false), None);
-        assert_eq!(max_seizable_for_repay(u128::MAX, 0, false), None);
+        assert_eq!(max_seizable_for_repay(u128::MAX, 0), None);
         // Negative MinProfit: requirement met by any premium, no u128 wrap.
         assert_eq!(
             t_profitable(
@@ -505,20 +526,16 @@ mod tests {
     #[test]
     fn seize_bound_from_source() {
         assert_eq!(
-            max_seizable_for_repay(10_000, 0, false),
+            max_seizable_for_repay(10_000, 0),
             Some(10_500),
             "Minimum 5 %"
         );
         assert_eq!(
-            max_seizable_for_repay(10_000, 800, false),
+            max_seizable_for_repay(10_000, 800),
             Some(10_800),
             "FeeState 8 % gewinnt"
         );
-        assert_eq!(
-            max_seizable_for_repay(10_000, 0, true),
-            Some(u128::MAX),
-            "Closeout < 5 USD"
-        );
+        // 0.1.12: no closeout exception — the cap holds below 5 USD of equity as well.
     }
 
     fn inputs(

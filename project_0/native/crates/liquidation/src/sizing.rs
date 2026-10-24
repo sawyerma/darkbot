@@ -9,7 +9,7 @@ use crate::health::{
         bank_observation_keys, crate_error_text, emode_liability_balances, integration_stale,
         maintenance_emode_config_of, CrateHealth,
     },
-    AccountSource, HealthEngine, HealthError,
+    AccountSource, HealthEngine, HealthError, HealthView,
 };
 use crate::protocol;
 use fixed::types::I80F48;
@@ -20,11 +20,11 @@ use marginfi::state::{
 };
 use marginfi_type_crate::constants::{
     ASSET_TAG_DEFAULT, ASSET_TAG_DRIFT, ASSET_TAG_JUPLEND, ASSET_TAG_KAMINO, ASSET_TAG_SOL,
-    ZERO_AMOUNT_THRESHOLD,
+    EMPTY_BALANCE_THRESHOLD, PREMIUM_ACTIVE, ZERO_AMOUNT_THRESHOLD,
 };
 use marginfi_type_crate::types::{
-    BalanceSide, Bank, BankOperationalState, MarginfiAccount, OraclePriceType, PriceBias,
-    RequirementType,
+    accrued_premium_total, premium_elapsed_seconds, Balance, BalanceSide, Bank,
+    BankOperationalState, MarginfiAccount, OraclePriceType, PriceBias, RequirementType,
 };
 use solana_sdk::account::Account;
 use solana_sdk::account_info::IntoAccountInfo;
@@ -249,6 +249,7 @@ struct Prices {
 struct Position {
     bank_pk: Pubkey,
     bank: Bank,
+    /// Asset amount, or the liability owed now: principal plus projected premium (0.1.12).
     amount: I80F48,
     /// Amount on the opposite side of the same balance slot. For a liability this is normally
     /// zero, but pinned Marginfi permits sub-threshold asset dust during repay_all.
@@ -257,6 +258,43 @@ struct Position {
     maintenance_unweighted_value: I80F48,
     /// B7: the bank's prices at this sizing's clock, computed once in `positions`.
     prices: Prices,
+    /// 0.1.12, liabilities only: what a repay settles and against what.
+    owed: Owed,
+}
+
+/// 0.1.12: horizon over which a planned `repay_all` may accrue more premium before it lands (the
+/// signed blockhash's lifetime with margin): its transfer must cover what the program then pulls.
+const PREMIUM_EXECUTION_HORIZON_S: u64 = 180;
+
+/// 0.1.12: what one liability balance owes for `repay`: the principal, the projected premium now
+/// and at the execution horizon, and opposite-side asset dust.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Owed {
+    principal: I80F48,
+    premium: I80F48,
+    premium_at_horizon: I80F48,
+    opposite: I80F48,
+}
+
+/// 0.1.12: the premium a liability owes at `now` as `repay` claims and settles it — materialized
+/// plus pending at the snapshot rate since the last claim (the crate's own projection); none on a
+/// premium-inactive bank, whose claim writes it off. An overflow is unknown, never zero.
+fn premium_owed(
+    bank: &Bank,
+    balance: &Balance,
+    principal: I80F48,
+    now: u64,
+) -> Result<I80F48, String> {
+    if bank.flags & PREMIUM_ACTIVE == 0 {
+        return Ok(I80F48::ZERO);
+    }
+    accrued_premium_total(
+        principal,
+        balance.premium_rate_snapshot,
+        balance.premium_outstanding.into(),
+        premium_elapsed_seconds(balance, bank.premium_activated_at, now),
+    )
+    .ok_or_else(|| "PREMIUM_UNKNOWN: projection overflow".to_string())
 }
 
 /// B2: strict pinned MarginfiAccount (discriminator, exact length), never a prefix decode.
@@ -289,6 +327,30 @@ fn healing_fee_factor(
         .then_some(reduced)
 }
 
+/// 0.1.12 EndLiquidation: an account solvent before (equity assets ≥ liabilities) must not end
+/// insolvent. Seizing `s` repays `s / fee_factor`, costing the account `s · (1 − 1/fee_factor)` of
+/// equity margin: the largest seizure it allows (`None`: insolvent before, or no premium).
+fn solvency_seize_cap(health: &HealthView, fee_factor: I80F48) -> Result<Option<I80F48>, String> {
+    let (assets, liabs) = (
+        I80F48::from_bits(health.equity_assets),
+        I80F48::from_bits(health.equity_liabilities),
+    );
+    if assets < liabs || fee_factor <= I80F48::ONE {
+        return Ok(None);
+    }
+    let margin = assets
+        .checked_sub(liabs)
+        .ok_or_else(|| "equity margin overflow".to_string())?;
+    let premium = fee_factor
+        .checked_sub(I80F48::ONE)
+        .ok_or_else(|| "premium overflow".to_string())?;
+    margin
+        .checked_mul(fee_factor)
+        .and_then(|x| x.checked_div(premium))
+        .map(Some)
+        .ok_or_else(|| "solvency cap overflow".to_string())
+}
+
 fn rounded_health_valid(
     pre: I80F48,
     seized: I80F48,
@@ -310,42 +372,68 @@ struct RepayChoice {
     repay_all: bool,
 }
 
-/// [FIX-128][R7/C2] Pinned Marginfi parity for the near-full-liability rounding edge.
+/// [FIX-128][R7/C2] Pinned Marginfi parity for the near-full-liability rounding edge, with the
+/// 0.1.12 premium (the receivership repay is the ordinary `lending_account_repay`).
 ///
-/// A normal repay receives an integer SPL amount and must not exceed the current liability.
-/// `repay_all` is different: Marginfi closes the balance and transfers ceil(exact liability).
-/// It is valid only when the requested rounded amount is exactly that full-close transfer amount
-/// and any opposite-side asset is below the protocol ZERO_AMOUNT_THRESHOLD. We never clamp a
-/// larger target to the liability silently; final health/premium are rechecked from
-/// `protocol_amount`, which is the exact liability removed by EndLiquidation.
+/// A normal repay receives an integer SPL amount: the premium settles first, the rest repays
+/// principal; it must not exceed principal plus premium and must not leave positive liability
+/// shares below `EMPTY_BALANCE_THRESHOLD` (`IllegalBalanceState`). `repay_all` closes the balance
+/// and transfers ceil(principal + premium) when it lands: valid only when the requested rounded
+/// amount is exactly that full-close transfer now and any opposite-side asset is below the
+/// protocol ZERO_AMOUNT_THRESHOLD; its transfer is bounded by the premium accrued until the
+/// execution horizon. We never clamp a larger target silently; final health/premium are rechecked
+/// from `protocol_amount`, the liability EndLiquidation sees removed (premium is a liability).
 fn choose_repay(
     target_exact: I80F48,
-    liability_amount: I80F48,
-    opposite_asset_amount: I80F48,
+    owed: &Owed,
+    bank: &Bank,
 ) -> Result<Option<RepayChoice>, String> {
+    let total = owed
+        .principal
+        .checked_add(owed.premium)
+        .ok_or_else(|| "owed liability overflow".to_string())?;
     let rounded = ceil_u64(target_exact)?;
     if rounded == 0 {
         return Ok(None);
     }
-    if I80F48::from_num(rounded) <= liability_amount {
+    let amount = I80F48::from_num(rounded);
+    if amount <= total {
+        let principal_paid = amount
+            .checked_sub(amount.min(owed.premium))
+            .ok_or_else(|| "premium settlement overflow".to_string())?;
+        let remaining_shares = bank
+            .get_liability_shares(
+                owed.principal
+                    .checked_sub(principal_paid)
+                    .ok_or_else(|| "principal repay overflow".to_string())?,
+            )
+            .map_err(|e| format!("remaining liability shares: {e}"))?;
+        if remaining_shares > I80F48::ZERO && remaining_shares < EMPTY_BALANCE_THRESHOLD {
+            return Ok(None);
+        }
         return Ok(Some(RepayChoice {
             transfer_amount: rounded,
-            protocol_amount: I80F48::from_num(rounded),
+            protocol_amount: amount,
             repay_all: false,
         }));
     }
 
-    let full_transfer = ceil_u64(liability_amount)?;
+    let full_transfer = ceil_u64(total)?;
     if rounded != full_transfer
-        || liability_amount <= ZERO_AMOUNT_THRESHOLD
-        || opposite_asset_amount.abs() >= ZERO_AMOUNT_THRESHOLD
+        || owed.principal <= ZERO_AMOUNT_THRESHOLD
+        || owed.opposite.abs() >= ZERO_AMOUNT_THRESHOLD
     {
         return Ok(None);
     }
+    let transfer_bound = ceil_u64(
+        owed.principal
+            .checked_add(owed.premium_at_horizon.max(owed.premium))
+            .ok_or_else(|| "owed liability overflow".to_string())?,
+    )?;
 
     Ok(Some(RepayChoice {
-        transfer_amount: full_transfer,
-        protocol_amount: liability_amount,
+        transfer_amount: transfer_bound,
+        protocol_amount: total,
         repay_all: true,
     }))
 }
@@ -791,7 +879,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .iter_mut()
             .map(|(key, account)| (&*key, account).into_account_info())
             .collect();
-        let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
+        // 0.1.12: PT emergency pricing is the risk admin's only (`false` for a liquidator).
+        let feed = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock, false)
             .map_err(|e| SizingError::crate_error("oracle adapter", &e))?;
         f(&feed)
     }
@@ -823,7 +912,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 continue;
             }
             let prices = self.prices(&bank, clock)?;
-            let (amount, opposite_amount, maint_price, is_asset) = match side {
+            let now = u64::try_from(clock.unix_timestamp).unwrap_or(0);
+            let (amount, opposite_amount, maint_price, is_asset, owed) = match side {
                 BalanceSide::Assets => (
                     bank.get_asset_amount(balance.asset_shares.into())
                         .map_err(|e| format!("asset amount: {e}"))?,
@@ -831,15 +921,36 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                         .map_err(|e| format!("opposite liability amount: {e}"))?,
                     prices.maint_asset,
                     true,
+                    Owed::default(),
                 ),
-                BalanceSide::Liabilities => (
-                    bank.get_liability_amount(balance.liability_shares.into())
-                        .map_err(|e| format!("liability amount: {e}"))?,
-                    bank.get_asset_amount(balance.asset_shares.into())
-                        .map_err(|e| format!("opposite asset amount: {e}"))?,
-                    prices.maint_liab,
-                    false,
-                ),
+                BalanceSide::Liabilities => {
+                    let principal = bank
+                        .get_liability_amount(balance.liability_shares.into())
+                        .map_err(|e| format!("liability amount: {e}"))?;
+                    let opposite = bank
+                        .get_asset_amount(balance.asset_shares.into())
+                        .map_err(|e| format!("opposite asset amount: {e}"))?;
+                    let owed = Owed {
+                        principal,
+                        premium: premium_owed(&bank, balance, principal, now)?,
+                        premium_at_horizon: premium_owed(
+                            &bank,
+                            balance,
+                            principal,
+                            now.saturating_add(PREMIUM_EXECUTION_HORIZON_S),
+                        )?,
+                        opposite,
+                    };
+                    (
+                        principal
+                            .checked_add(owed.premium)
+                            .ok_or_else(|| "owed liability overflow".to_string())?,
+                        opposite,
+                        prices.maint_liab,
+                        false,
+                        owed,
+                    )
+                }
             };
             if amount <= I80F48::ZERO {
                 continue;
@@ -857,6 +968,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 equity_value,
                 maintenance_unweighted_value,
                 prices,
+                owed,
             };
             if is_asset {
                 assets.push(p);
@@ -933,6 +1045,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let mut rej_repay_above_liability = 0u32;
         let mut rej_repay_value_nonpositive = 0u32;
         let mut rej_premium_bound = 0u32;
+        let mut rej_post_insolvent = 0u32;
         let mut pair_details = Vec::new();
         let mut rej_rounded_health = 0u32;
 
@@ -1003,6 +1116,11 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 } else {
                     asset.equity_value.min(liab_cap).min(health_cap)
                 };
+                // 0.1.12: a solvent account must not end insolvent — the premium it pays,
+                // seized − seized/fee_factor, stays within its equity margin.
+                if let Some(cap) = solvency_seize_cap(&health, fee_factor)? {
+                    seize_value = seize_value.min(cap);
+                }
                 seize_value = seize_value
                     .checked_mul(headroom)
                     .ok_or_else(|| "headroom multiplication".to_string())?;
@@ -1034,9 +1152,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .checked_div(fee_factor)
                     .ok_or_else(|| "repay target division".to_string())?;
                 let repay_exact = amount_from_equity(repay_target, liab_prices.equity, &liab.bank)?;
-                let Some(repay_choice) =
-                    choose_repay(repay_exact, liab.amount, liab.opposite_amount)?
-                else {
+                let Some(repay_choice) = choose_repay(repay_exact, &liab.owed, &liab.bank)? else {
                     if ceil_u64(repay_exact)? == 0 {
                         rej_repay_zero += 1;
                     } else {
@@ -1136,24 +1252,37 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     rej_rounded_health += 1;
                     continue;
                 }
-                // [FIX-93] Normal receivership must obey the exact EndLiquidation premium
-                // bound. Marginfi explicitly skips this check for closeout accounts
-                // (ignore_healthy=true), so applying it there would reject valid closeouts.
-                if !health.closeout_allowed {
-                    let max_seized = repay_protocol_actual
-                        .checked_mul(fee_factor)
-                        .ok_or_else(|| "rounded premium bound overflow".to_string())?;
-                    let protocol_seized = seized_actual
-                        .checked_add(repay_all_dust_equity)
-                        .ok_or("repay_all seized equity overflow")?;
-                    if protocol_seized > max_seized {
-                        rej_premium_bound += 1;
-                        continue;
-                    }
-                }
+                // EndLiquidation premium bound: 0.1.12 applies it below the closeout threshold
+                // as well (0.1.11 skipped it there). The base premium max(fee, minimum) is the
+                // lower bound of the program's (a tagged account may earn more).
                 let protocol_seized = seized_actual
                     .checked_add(repay_all_dust_equity)
                     .ok_or("repay_all seized equity overflow")?;
+                let max_seized = repay_protocol_actual
+                    .checked_mul(fee_factor)
+                    .ok_or_else(|| "rounded premium bound overflow".to_string())?;
+                if protocol_seized > max_seized {
+                    rej_premium_bound += 1;
+                    continue;
+                }
+                // 0.1.12: an account solvent before (equity assets ≥ liabilities) must not end
+                // insolvent; seized and repaid are its equity deltas.
+                let (pre_eq_assets, pre_eq_liabs) = (
+                    I80F48::from_bits(health.equity_assets),
+                    I80F48::from_bits(health.equity_liabilities),
+                );
+                if pre_eq_assets >= pre_eq_liabs {
+                    let post_assets = pre_eq_assets
+                        .checked_sub(protocol_seized)
+                        .ok_or("post equity assets overflow")?;
+                    let post_liabs = pre_eq_liabs
+                        .checked_sub(repay_protocol_actual)
+                        .ok_or("post equity liabilities overflow")?;
+                    if post_assets < post_liabs {
+                        rej_post_insolvent += 1;
+                        continue;
+                    }
+                }
                 let premium = protocol_seized
                     .checked_div(repay_protocol_actual)
                     .and_then(|x| x.checked_sub(I80F48::ONE))
@@ -1179,7 +1308,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             return Err(SizingError {
                 kind: SizingErrorKind::NoValidPair,
                 text: format!(
-                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={};rounded_health={};pair_details={}",
+                "SIZING:NO_VALID_PROTOCOL_PAIR:asset_eq_nonpositive={};liab_eq_nonpositive={};coeff_nonpositive={};seize_nonpositive={};withdraw_zero={};repay_zero={};repay_above_liability={};repay_value_nonpositive={};premium_bound={};post_insolvent={};rounded_health={};pair_details={}",
                 rej_asset_equity_nonpositive,
                 rej_liab_equity_nonpositive,
                 rej_coeff_nonpositive,
@@ -1189,6 +1318,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 rej_repay_above_liability,
                 rej_repay_value_nonpositive,
                 rej_premium_bound,
+                rej_post_insolvent,
                 rej_rounded_health,
                 pair_details.join(" | "),
             ),
@@ -1577,49 +1707,140 @@ mod tests {
         }
     }
 
+    /// A bank whose liability shares equal native units (share value 1).
+    fn unit_share_bank() -> Bank {
+        let mut b: Bank = bytemuck::Zeroable::zeroed();
+        b.liability_share_value = I80F48::ONE.into();
+        b.asset_share_value = I80F48::ONE.into();
+        b
+    }
+
+    fn owed(principal: f64, premium: f64, premium_at_horizon: f64, opposite: I80F48) -> Owed {
+        Owed {
+            principal: I80F48::from_num(principal),
+            premium: I80F48::from_num(premium),
+            premium_at_horizon: I80F48::from_num(premium_at_horizon),
+            opposite,
+        }
+    }
+
     #[test]
     fn near_full_rounding_uses_source_backed_repay_all() {
-        let debt = I80F48::from_num(9.2);
+        let debt = owed(9.2, 0.0, 0.0, I80F48::ZERO);
         let target = I80F48::from_num(9.8);
-        let c = choose_repay(target, debt, I80F48::ZERO)
+        let c = choose_repay(target, &debt, &unit_share_bank())
             .unwrap()
             .expect("repay_all");
         assert_eq!(c.transfer_amount, 10);
-        assert_eq!(c.protocol_amount, debt);
+        assert_eq!(c.protocol_amount, debt.principal);
         assert!(c.repay_all);
     }
 
     #[test]
     fn repay_all_never_clamps_a_target_above_full_transfer() {
-        let debt = I80F48::from_num(9.2);
-        assert!(choose_repay(I80F48::from_num(10.1), debt, I80F48::ZERO,)
-            .unwrap()
-            .is_none());
+        let debt = owed(9.2, 0.0, 0.0, I80F48::ZERO);
+        assert!(
+            choose_repay(I80F48::from_num(10.1), &debt, &unit_share_bank())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn repay_all_matches_protocol_opposite_dust_boundary() {
-        let debt = I80F48::from_num(9.2);
         let target = I80F48::from_num(9.8);
+        let bank = unit_share_bank();
+        let dust = owed(9.2, 0.0, 0.0, ZERO_AMOUNT_THRESHOLD - I80F48::DELTA);
         assert!(
-            choose_repay(target, debt, ZERO_AMOUNT_THRESHOLD - I80F48::DELTA,)
+            choose_repay(target, &dust, &bank)
                 .unwrap()
                 .unwrap()
                 .repay_all
         );
-        assert!(choose_repay(target, debt, ZERO_AMOUNT_THRESHOLD)
-            .unwrap()
-            .is_none());
+        let opposite = owed(9.2, 0.0, 0.0, ZERO_AMOUNT_THRESHOLD);
+        assert!(choose_repay(target, &opposite, &bank).unwrap().is_none());
     }
 
     #[test]
     fn ordinary_partial_repay_semantics_are_unchanged() {
-        let c = choose_repay(I80F48::from_num(4.1), I80F48::from_num(9.2), I80F48::ZERO)
-            .unwrap()
-            .unwrap();
+        let c = choose_repay(
+            I80F48::from_num(4.1),
+            &owed(9.2, 0.0, 0.0, I80F48::ZERO),
+            &unit_share_bank(),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(c.transfer_amount, 5);
         assert_eq!(c.protocol_amount, I80F48::from_num(5));
         assert!(!c.repay_all);
+    }
+
+    /// 0.1.12 (`lending_account_repay`, also inside receivership): premium settles before
+    /// principal, so a repay may reach principal + premium; the protocol-repaid liability is the
+    /// whole transfer (premium is a liability). `repay_all` closes principal + premium: its
+    /// transfer covers the premium accrued until the execution horizon, the repaid liability is
+    /// what is owed now.
+    #[test]
+    fn p1b_repay_settles_premium_first_and_repay_all_covers_it_until_landing() {
+        let bank = unit_share_bank();
+        // 11 > principal 9.2 is a valid partial repay: 1.8 premium first, then all principal.
+        let exact = owed(9.2, 1.8, 1.8, I80F48::ZERO);
+        let partial = choose_repay(I80F48::from_num(10.5), &exact, &bank)
+            .unwrap()
+            .expect("principal + premium covers 11");
+        assert_eq!(
+            (
+                partial.transfer_amount,
+                partial.protocol_amount,
+                partial.repay_all
+            ),
+            (11, I80F48::from_num(11), false)
+        );
+        let debt = owed(9.2, 1.5, 1.6, I80F48::ZERO);
+        let full = choose_repay(I80F48::from_num(10.71), &debt, &bank)
+            .unwrap()
+            .expect("ceil(9.2 + 1.5) = 11 is the full close");
+        assert!(full.repay_all);
+        assert_eq!(
+            full.protocol_amount,
+            I80F48::from_num(9.2) + I80F48::from_num(1.5)
+        );
+        assert_eq!(full.transfer_amount, 11, "ceil(9.2 + 1.6) at the horizon");
+        let grows = owed(9.2, 1.5, 1.9, I80F48::ZERO);
+        assert_eq!(
+            choose_repay(I80F48::from_num(10.71), &grows, &bank)
+                .unwrap()
+                .unwrap()
+                .transfer_amount,
+            12,
+            "the horizon premium raises the transfer the wallet must hold"
+        );
+        assert!(
+            choose_repay(I80F48::from_num(11.01), &debt, &bank)
+                .unwrap()
+                .is_none(),
+            "above the full-close transfer"
+        );
+    }
+
+    /// 0.1.12 `IllegalBalanceState`: a partial repay must not leave positive liability shares
+    /// below `EMPTY_BALANCE_THRESHOLD` (1 share); exactly zero or at least one share is fine.
+    #[test]
+    fn p1b_partial_repay_never_leaves_liability_dust() {
+        let bank = unit_share_bank();
+        let debt = owed(9.5, 0.0, 0.0, I80F48::ZERO);
+        // 9 repaid leaves 0.5 shares: refused; 8 leaves 1.5: fine.
+        assert!(choose_repay(I80F48::from_num(8.6), &debt, &bank)
+            .unwrap()
+            .is_none());
+        assert!(choose_repay(I80F48::from_num(7.6), &debt, &bank)
+            .unwrap()
+            .is_some());
+        // The premium is settled first: 9 repaid against 9.5 + 0.6 leaves 1.1 principal shares.
+        let with_premium = owed(9.5, 0.6, 0.6, I80F48::ZERO);
+        assert!(choose_repay(I80F48::from_num(8.6), &with_premium, &bank)
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -1831,6 +2052,227 @@ mod tests {
             group,
             account,
         }
+    }
+
+    /// 0.1.12: sets the premium state of the fixture's liability balance and bank.
+    fn with_premium(
+        tb: &mut TwoBank,
+        active: bool,
+        outstanding: f64,
+        rate_snapshot: u32,
+        last_update: u64,
+    ) {
+        use marginfi_type_crate::types::WrappedI80F48;
+        let (_, data) = tb.state.get_mut(&tb.account).unwrap();
+        let mut a: MarginfiAccount = *bytemuck::from_bytes(&data[8..]);
+        let bal = a
+            .lending_account
+            .balances
+            .iter_mut()
+            .find(|b| b.is_active() && I80F48::from(b.liability_shares) > I80F48::ZERO)
+            .unwrap();
+        bal.premium_outstanding = WrappedI80F48::from(I80F48::from_num(outstanding));
+        bal.premium_rate_snapshot = rate_snapshot;
+        bal.last_update = last_update;
+        let liab_bank = bal.bank_pk;
+        data[8..].copy_from_slice(bytemuck::bytes_of(&a));
+        let (_, bdata) = tb.state.get_mut(&liab_bank).unwrap();
+        let mut b: Bank = *bytemuck::from_bytes(&bdata[8..]);
+        if active {
+            b.flags |= PREMIUM_ACTIVE;
+        } else {
+            b.flags &= !PREMIUM_ACTIVE;
+        }
+        bdata[8..].copy_from_slice(bytemuck::bytes_of(&b));
+    }
+
+    fn health_of(tb: &TwoBank, now: i64) -> HealthView {
+        CrateHealth {
+            state: tb,
+            group: tb.group,
+        }
+        .health(&tb.account, now, 10)
+        .unwrap()
+    }
+
+    /// P1B (0.1.12): Health — and so sizing — carries the projected premium as a liability of a
+    /// premium-active bank: materialized at once, pending growing with time at the snapshot
+    /// rate; a premium-inactive bank's premium is written off by the program and not counted.
+    /// An account with premium has no price threshold (fallback, evaluated on price updates).
+    #[test]
+    fn p1b_health_includes_projected_premium_and_thresholds_fall_back() {
+        let usd = |v: f64| I80F48::from_num(v).to_bits();
+        let mut tb = two_bank(0.9, 100_000_000, 95_000_000);
+        let now = 1_700_000_000i64;
+        let base = health_of(&tb, now);
+        assert_eq!(
+            (base.maint_liabs, base.equity_liabilities),
+            (usd(95.0), usd(95.0))
+        );
+        let thresholds = |tb: &TwoBank| {
+            CrateHealth {
+                state: tb,
+                group: tb.group,
+            }
+            .thresholds_at(&tb.account, now, 10)
+        };
+        assert!(thresholds(&tb).is_ok());
+        with_premium(&mut tb, true, 2_000_000.0, 0, now as u64);
+        let h = health_of(&tb, now);
+        assert_eq!(
+            (h.maint_liabs, h.equity_liabilities),
+            (usd(97.0), usd(97.0))
+        );
+        assert!(h.maintenance_health < base.maintenance_health);
+        assert!(matches!(
+            thresholds(&tb),
+            Err(HealthError::Unsupported(e)) if e.contains("premium accrues")
+        ));
+        // Pending premium accrues with time at the snapshot rate (the crate's own projection).
+        let year = 31_536_000u64;
+        with_premium(&mut tb, true, 0.0, 50_000, now as u64 - year);
+        let pending =
+            accrued_premium_total(I80F48::from_num(95_000_000), 50_000, I80F48::ZERO, year)
+                .unwrap();
+        assert!(pending > I80F48::ZERO);
+        let h = health_of(&tb, now);
+        assert_eq!(
+            I80F48::from_bits(h.maint_liabs),
+            I80F48::from_num(95.0) + pending / I80F48::from_num(1_000_000)
+        );
+        assert!(
+            health_of(&tb, now + 86_400).maint_liabs > h.maint_liabs,
+            "grows with time"
+        );
+        // A premium-inactive bank: the receivable is written off, not a liability.
+        with_premium(&mut tb, false, 2_000_000.0, 50_000, now as u64 - year);
+        assert_eq!(health_of(&tb, now).maint_liabs, usd(95.0));
+        assert!(thresholds(&tb).is_ok());
+    }
+
+    /// P1B (0.1.12): the premium decay rate is exactly how fast the crate's Health liabilities
+    /// grow with time (pending premium at the snapshot rate); zero on a premium-inactive bank;
+    /// the census facts count premium-active liabilities.
+    #[test]
+    fn p1b_premium_decay_is_the_health_slope_and_census_sees_it() {
+        use crate::health::HealthEngine;
+        let mut tb = two_bank(0.9, 100_000_000, 95_000_000);
+        let now = 1_700_000_000i64;
+        with_premium(&mut tb, true, 0.0, 50_000, now as u64);
+        let engine = CrateHealth {
+            state: &tb,
+            group: tb.group,
+        };
+        let decay = I80F48::from_bits(
+            i128::try_from(
+                engine
+                    .premium_decay_per_second(&tb.account, now, 10)
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
+        assert!(decay > I80F48::ZERO);
+        let day = 86_400i64;
+        let grown = I80F48::from_bits(health_of(&tb, now + day).maint_liabs)
+            - I80F48::from_bits(health_of(&tb, now).maint_liabs);
+        let expected = decay * I80F48::from_num(day);
+        assert!(
+            (grown - expected).abs() < I80F48::from_num(0.000_001),
+            "slope {grown} vs decay×day {expected}"
+        );
+        let facts = crate::census::account_facts(&tb, &tb.program, &tb.account, 2).unwrap();
+        assert_eq!(
+            (facts.premium_active, facts.costly_positions),
+            (Some(true), Some(0))
+        );
+        with_premium(&mut tb, false, 0.0, 50_000, now as u64);
+        assert_eq!(engine_decay(&tb, now), 0);
+        let facts = crate::census::account_facts(&tb, &tb.program, &tb.account, 2).unwrap();
+        assert_eq!(facts.premium_active, Some(false));
+    }
+
+    fn engine_decay(tb: &TwoBank, now: i64) -> u128 {
+        use crate::health::HealthEngine;
+        CrateHealth {
+            state: tb,
+            group: tb.group,
+        }
+        .premium_decay_per_second(&tb.account, now, 10)
+        .unwrap()
+    }
+
+    /// P1B (0.1.12 EndLiquidation): an account solvent in equity before must not end insolvent:
+    /// the seizure is capped so the premium it pays stays within the equity margin (5 USD at a
+    /// 10 % premium: at most 55 USD seized), never sized to the program's rejection.
+    #[test]
+    fn p1b_solvent_account_is_sized_to_stay_solvent() {
+        let tb = two_bank(0.9, 100_000_000, 95_000_000);
+        let plans = tb.sizes().unwrap();
+        assert!(!plans.is_empty());
+        for p in &plans {
+            assert!(p.seized_equity_value_micro <= 55_000_000, "{p:?}");
+            let post_assets = 100_000_000i128 - i128::from(p.seized_equity_value_micro);
+            let post_liabs = 95_000_000i128 - i128::from(p.repay_equity_value_micro);
+            assert!(post_assets >= post_liabs, "{p:?}");
+        }
+    }
+
+    /// P1B (0.1.12): the owed liability is principal + premium — a premium-heavy debt (10 USD
+    /// principal, 87 USD premium) is sized to a repay above its principal, valid because the
+    /// premium settles first; the seizure stays within the solvency cap of the 3 USD margin.
+    #[test]
+    fn p1b_premium_heavy_liability_is_repaid_through_its_premium() {
+        let mut tb = two_bank(0.9, 100_000_000, 10_000_000);
+        with_premium(&mut tb, true, 87_000_000.0, 0, 1_700_000_000);
+        let plans = tb.sizes().unwrap();
+        assert!(!plans.is_empty());
+        for p in &plans {
+            assert!(p.repay_amount > 10_000_000 && !p.repay_all, "{p:?}");
+            assert!(p.seized_equity_value_micro <= 33_000_000, "{p:?}");
+        }
+    }
+
+    /// P1B (0.1.12 EndLiquidation): the premium cap seized ≤ repaid × (1 + premium) applies below
+    /// the closeout threshold as well (0.1.11 skipped it there).
+    #[test]
+    fn p1b_premium_cap_applies_below_the_closeout_threshold() {
+        let tb = two_bank(0.9, 3_000_000, 2_900_000);
+        assert!(tb.closeout());
+        let plans = tb.sizes().unwrap();
+        assert!(!plans.is_empty());
+        for p in &plans {
+            assert!(
+                u128::from(p.seized_equity_value_micro) * 10
+                    <= u128::from(p.repay_equity_value_micro) * 11,
+                "{p:?}"
+            );
+        }
+    }
+
+    /// P1B: a premium that cannot be projected (fixed-point overflow) is unknown — the liability
+    /// is not sized, never treated as zero premium.
+    #[test]
+    fn p1b_unknown_premium_fails_closed() {
+        let mut bank: Bank = bytemuck::Zeroable::zeroed();
+        bank.flags |= PREMIUM_ACTIVE;
+        let mut balance: Balance = bytemuck::Zeroable::zeroed();
+        balance.premium_outstanding = I80F48::MAX.into();
+        balance.premium_rate_snapshot = u32::MAX;
+        balance.last_update = 1;
+        let e = premium_owed(
+            &bank,
+            &balance,
+            I80F48::from_num(1_000_000_000u64),
+            1_000_000_000,
+        )
+        .unwrap_err();
+        assert!(e.starts_with("PREMIUM_UNKNOWN"), "{e}");
+        bank.flags &= !PREMIUM_ACTIVE;
+        assert_eq!(
+            premium_owed(&bank, &balance, I80F48::ONE, 1_000_000_000),
+            Ok(I80F48::ZERO),
+            "written off on an inactive bank"
+        );
     }
 
     /// Q5: sizing failures are typed where they arise — the pair census of a real `sizes()` run

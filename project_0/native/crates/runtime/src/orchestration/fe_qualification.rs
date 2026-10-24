@@ -769,17 +769,25 @@ pub(crate) mod tests {
             "FE_CONTEXT_SLOTS_NOT_COHERENT"
         );
     }
+    /// Only the pinned exact Bank layout (0.1.12: 8 + 3904 B) is collected: a non-resized
+    /// 0.1.11 bank (8 + 1856 B) or any compatibility padding is a layout mismatch.
     #[test]
     fn exact_bank_layout_rejects_compatibility_padding() {
-        let (c, mut all) = fixture();
-        let b = all
-            .values_mut()
-            .find(|a| a.data.get(..8) == Some(protocol::DISC_BANK.as_slice()))
-            .unwrap();
-        b.data.resize(3912, 0);
-        assert!(collect(&c, |keys, _| Ok((100, batch(&all, keys)?)))
-            .unwrap_err()
-            .contains("EXACT_LAYOUT_MISMATCH"));
+        for len in [8 + protocol::BANK_PAYLOAD_LEN_0_1_11, 3920] {
+            let (c, mut all) = fixture();
+            let b = all
+                .values_mut()
+                .find(|a| a.data.get(..8) == Some(protocol::DISC_BANK.as_slice()))
+                .unwrap();
+            assert_eq!(b.data.len(), 8 + protocol::BANK_PAYLOAD_LEN_0_1_12);
+            b.data.resize(len, 0);
+            assert!(
+                collect(&c, |keys, _| Ok((100, batch(&all, keys)?)))
+                    .unwrap_err()
+                    .contains("EXACT_LAYOUT_MISMATCH"),
+                "{len}"
+            );
+        }
     }
     #[test]
     fn wire_decoder_preserves_bytes_and_rejects_regressed_or_missing_context() {

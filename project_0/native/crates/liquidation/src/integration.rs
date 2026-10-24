@@ -1090,10 +1090,11 @@ mod tests {
             Source(m)
         };
         let exact_bank = raw(protocol::DISC_BANK, &bank, 0);
-        let resized_bank = raw(
+        // P1B-03: the pinned 0.1.12 layout decodes; a non-resized 0.1.11 bank is refused.
+        let unresized_bank = raw(
             protocol::DISC_BANK,
             &bank,
-            (protocol::BANK_PAYLOAD_LEN_0_1_12 - protocol::BANK_PAYLOAD_LEN_0_1_11) as isize,
+            -((protocol::BANK_PAYLOAD_LEN_0_1_12 - protocol::BANK_PAYLOAD_LEN_0_1_11) as isize),
         );
         let paths = |s: &Source| -> [Result<(), String>; 3] {
             [
@@ -1106,12 +1107,12 @@ mod tests {
         for r in paths(&state(0, exact_bank.clone(), 0, 0)) {
             assert_eq!(r, Ok(()));
         }
-        // Longer or shorter accounts and resized or longer banks are refused on every path.
+        // Longer or shorter accounts and non-resized or longer banks are refused on every path.
         for (account_extra, bank_bytes) in [
             (1, exact_bank.clone()),
             (8, exact_bank.clone()),
             (-2, exact_bank.clone()),
-            (0, resized_bank.clone()),
+            (0, unresized_bank.clone()),
             (0, raw(protocol::DISC_BANK, &bank, 1)),
         ] {
             for r in paths(&state(account_extra, bank_bytes.clone(), 0, 0)) {
@@ -1120,13 +1121,13 @@ mod tests {
             }
         }
         let e = kinds_for_account(
-            &state(0, resized_bank.clone(), 0, 0),
+            &state(0, unresized_bank.clone(), 0, 0),
             &program,
             &account_key,
         )
         .unwrap_err();
         assert!(
-            e.starts_with("INTEGRATION_BANK_LAYOUT") && e.contains("0.1.12"),
+            e.starts_with("INTEGRATION_BANK_LAYOUT") && e.contains("0.1.11"),
             "{e}"
         );
         // A foreign discriminator is refused before any layout read.
@@ -1144,7 +1145,7 @@ mod tests {
         for s in [
             state(8, exact_bank.clone(), 0, 0),
             state(0, exact_bank.clone(), 8, 0),
-            state(0, resized_bank.clone(), 0, 0),
+            state(0, unresized_bank.clone(), 0, 0),
         ] {
             assert!(
                 matches!(health(&s), Err(HealthError::UnknownLayout(ref e)) if e.contains("UNKNOWN_LAYOUT")),

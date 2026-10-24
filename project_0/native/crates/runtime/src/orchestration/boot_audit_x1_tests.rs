@@ -239,7 +239,7 @@ fn scope() -> Scope {
     let k = Pubkey::new_unique;
     let (program_data, group, oracle, mint, bank, vault, lending_target, liability_target) =
         (k(), k(), k(), k(), k(), k(), k(), k());
-    let bank_len = 8 + protocol::BANK_PAYLOAD_LEN_0_1_11;
+    let bank_len = 8 + protocol::BANK_PAYLOAD_LEN_PINNED;
     // (key, owner, data, executable, present in the runtime state)
     let accounts: Vec<(Pubkey, Pubkey, Vec<u8>, bool, bool)> = vec![
         (program, loader, vec![2; 36], true, false),

@@ -138,7 +138,18 @@ impl ShadowOwner {
                                 view.0.get(&account).map(|r| r.slot),
                                 darkbot_project0::census::CensusRow::new(
                                     health,
-                                    engine.premium_decay_per_second(&account),
+                                    match &clock {
+                                        Ok(c) => engine.premium_decay_per_second(
+                                            &account,
+                                            c.unix_timestamp,
+                                            c.slot,
+                                        ),
+                                        Err(e) => {
+                                            Err(darkbot_project0::health::HealthError::Stale(
+                                                e.to_string(),
+                                            ))
+                                        }
+                                    },
                                     facts,
                                 ),
                             )

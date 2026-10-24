@@ -1550,7 +1550,7 @@ impl NetworkAudit {
         state: &dyn darkbot_project0::health::AccountSource,
     ) -> Result<IdentityBinding, String> {
         use std::str::FromStr;
-        let bank_bytes = (8 + darkbot_project0::protocol::BANK_PAYLOAD_LEN_0_1_11) as u64;
+        let bank_bytes = (8 + darkbot_project0::protocol::BANK_PAYLOAD_LEN_PINNED) as u64;
         let mut binding = IdentityBinding::default();
         let mut drift = Vec::new();
         for proof in &self.accounts {

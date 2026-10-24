@@ -556,8 +556,16 @@ mod tests {
         (j["pubkey"].as_str().unwrap().parse().unwrap(), account)
     }
 
+    /// A real 0.1.11 bank as `lending_pool_resize_bank_account` (0.1.12) leaves it: grown to
+    /// `8 + Bank::LEN`, the new bytes zero-filled.
+    fn resized_bank(mut a: solana_sdk::account::Account) -> solana_sdk::account::Account {
+        a.data.resize(8 + std::mem::size_of::<Bank>(), 0);
+        a
+    }
+
     /// FE-01 against the pinned source's real accounts: each file is SHA-256 pinned; every real
-    /// bank decodes with the exact 0.1.11 layout and names its oracle; the historical real group
+    /// bank keeps its historical 0.1.11 bytes, which the pinned 0.1.12 crate refuses as that
+    /// version, and decodes once resized as the program resizes it, naming its oracle; the historical real group
     /// layout is refused; a scope of the real BONK bank and real Pyth bytes at its oracle key
     /// (owner set to the Mainnet program, the only transform) freezes with the bank's own oracle;
     /// with its original foreign owner the same bank is refused (identity drift, fail closed).
@@ -628,6 +636,12 @@ mod tests {
             ("pre_migration_bank1", O::PythPushOracle),
         ] {
             let (_, a) = real_account(text(name));
+            assert_eq!(
+                protocol::decode_bank(&a.data).err(),
+                Some(protocol::BankLayoutError::OtherVersion("0.1.11")),
+                "{name}: historical layout"
+            );
+            let a = resized_bank(a);
             let bank = protocol::decode_bank(&a.data).unwrap();
             assert_eq!(bank.config.oracle_setup, setup, "{name}");
             assert!(!bank_observation_keys(&bank).unwrap().is_empty(), "{name}");
@@ -656,6 +670,7 @@ mod tests {
         .unwrap_err()
         .starts_with("FE_OWNER_OR_EXACT_LAYOUT_MISMATCH"));
         let (bonk, foreign) = real_account(text("bonk_bank"));
+        let foreign = resized_bank(foreign);
         let real: Bank = bytemuck::pod_read_unaligned(&foreign.data[8..]);
         let synthetic = bank_key(&all);
         all.remove(&synthetic);

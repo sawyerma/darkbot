@@ -119,9 +119,10 @@ pub struct AccountFacts {
     pub emode_banks: u8,
     /// Health observation accounts (banks + oracle/integration keys) a receivership TX must load.
     pub observation_accounts: u16,
-    /// 0.1.12 `MAX_COSTLY_POSITIONS` accounting; `None` on 0.1.11.
+    /// 0.1.12 `MAX_COSTLY_POSITIONS` accounting (integration or staked balances); `None` for a
+    /// census of a 0.1.11 program (no such limit).
     pub costly_positions: Option<u8>,
-    /// 0.1.12 `PREMIUM_ACTIVE` on any liability bank; `None` on 0.1.11.
+    /// 0.1.12 `PREMIUM_ACTIVE` on any liability bank; `None` for a census of a 0.1.11 program.
     pub premium_active: Option<bool>,
 }
 
@@ -458,8 +459,8 @@ pub fn account_facts<S: crate::health::AccountSource + ?Sized>(
         emode_banks: 0,
         observation_accounts: u16::try_from(observation_accounts)
             .map_err(|_| "C0_FACTS_OBSERVATION_RANGE")?,
-        costly_positions: None,
-        premium_active: None,
+        costly_positions: Some(0),
+        premium_active: Some(false),
     };
     for b in acc
         .lending_account
@@ -481,6 +482,15 @@ pub fn account_facts<S: crate::health::AccountSource + ?Sized>(
         }
         f.oracle_setups |= 1 << setup;
         f.emode_banks += (bank.emode.emode_tag != 0) as u8;
+        // 0.1.12 (pinned): costly = an integration or staked balance (`MAX_COSTLY_POSITIONS`).
+        let costly = marginfi::utils::is_integration_asset_tag(b.bank_asset_tag)
+            || b.bank_asset_tag == marginfi_type_crate::constants::ASSET_TAG_STAKED;
+        f.costly_positions = f.costly_positions.map(|n| n + costly as u8);
+        if !b.is_empty(BalanceSide::Liabilities)
+            && bank.flags & marginfi_type_crate::constants::PREMIUM_ACTIVE != 0
+        {
+            f.premium_active = Some(true);
+        }
     }
     for kind in kinds_for_account(state, program, account)?
         .into_iter()

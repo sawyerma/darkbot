@@ -1,6 +1,7 @@
-//! P1A: Protokoll-Konstanten — **BELEGT aus `marginfi-v2` main (Programm-Version 0.1.11)**,
-//! gelesen in Sitzung 4. Mainnet-Program-ID aus `id-crate` (Feature mainnet-beta).
-//! On-chain ProgramData-Hash wird trotzdem in P1A-01 verifiziert (Upgrade-Watch).
+//! P1A/P1B: Protokoll-Konstanten — gepinnt auf `marginfi-v2` `mrgn-0.1.12-rc2` (Programm 0.1.12,
+//! P1B-Promotion; bis 23.10. `mrgn-0.1.11-rc1`), gegen das Type-Crate getestet. Mainnet-Program-ID
+//! aus `id-crate` (Feature mainnet-beta). Der deployte ProgramData-Stand ist für diese Quelle noch
+//! nicht qualifiziert (P1A BLOCKED): Upgrade-Watch und Startup bleiben gesperrt.
 
 use solana_sdk::hash::{hash, Hash};
 use solana_sdk::pubkey::Pubkey;
@@ -135,9 +136,12 @@ pub const DISC_MARGINFI_GROUP: [u8; 8] = [0xb6, 0x17, 0xad, 0xf0, 0x97, 0xce, 0x
 pub const DISC_FEE_STATE: [u8; 8] = [0x3f, 0xe0, 0x10, 0x55, 0xc1, 0x24, 0xeb, 0xdc];
 pub const DISC_LIQUIDATION_RECORD: [u8; 8] = [0x5f, 0x74, 0x17, 0x84, 0x59, 0xd2, 0xf5, 0xa2];
 
-/// Bank-Payload (ohne Discriminator): 1856 (0.1.11) / 3904 (0.1.12). Rohlänge = +8.
+/// Bank-Payload (ohne Discriminator): 1856 (0.1.11) / 3904 (0.1.12, pinned). Rohlänge = +8.
 pub const BANK_PAYLOAD_LEN_0_1_11: usize = 1856;
 pub const BANK_PAYLOAD_LEN_0_1_12: usize = 3904;
+/// The Bank payload of the pinned source (`size_of::<Bank>()`, tested by
+/// `source_pin_parity_with_type_crate`), for code without the type crate.
+pub const BANK_PAYLOAD_LEN_PINNED: usize = BANK_PAYLOAD_LEN_0_1_12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountType {
@@ -172,14 +176,14 @@ pub fn bank_layout(raw_len: usize) -> Option<&'static str> {
     }
 }
 
-/// P1B-02: why a Bank payload is not decodable by the pinned 0.1.11 crate.
+/// P1B-02: why a Bank payload is not decodable by the pinned crate (0.1.12 since the promotion).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BankLayoutError {
     Discriminator,
-    /// A known layout of another program version than the pinned crate. Pinned 0.1.11 + resized
-    /// 0.1.12 bank: the first 1856 B are a byte-identical prefix, but the premium state behind it
-    /// is invisible to 0.1.11 types, so a prefix decode would silently drop premium debt from
-    /// Health. Pinned 0.1.12 + non-resized bank: the program fails every TX touching it.
+    /// A known layout of another program version than the pinned crate. Pinned 0.1.12 (now) +
+    /// non-resized 0.1.11 bank: the program fails every TX touching it. (Pinned 0.1.11 + resized
+    /// bank: the 1856 B prefix is byte-identical, but its premium state would be invisible, so a
+    /// prefix decode would drop premium debt from Health.) Never a prefix decode either way.
     OtherVersion(&'static str),
     Length(usize),
 }
@@ -307,13 +311,19 @@ pub fn decode_fee_state(
 
 // ---- P1A-01/P1A-04: Loader-v3 deployment freeze and upgrade watch ----
 pub const BPF_LOADER_UPGRADEABLE_ID: &str = "BPFLoaderUpgradeab1e11111111111111111111111";
-/// Protocol source pin of the marginfi crates (`native/Cargo.toml`, `Cargo.lock`).
-pub const SOURCE_TAG: &str = "mrgn-0.1.11-rc1";
-pub const SOURCE_COMMIT: &str = "33c67987a661f59c6683a65485ebb4f0ef030b77";
+/// Protocol source pin of the marginfi crates (`native/Cargo.toml`, `Cargo.lock`). P1B promotion
+/// (UPCOMING_0_1_12.md P1B-03): the checked RC2 candidate of the upgraded Mainnet deployment.
+pub const SOURCE_TAG: &str = "mrgn-0.1.12-rc2";
+pub const SOURCE_COMMIT: &str = "9fcb729ae3a6de67544fe6f8147da8d86bdf3692";
 /// SHA-256 (base58) of the complete Mainnet ProgramData account recorded by the qualified 0.1.11
-/// Shadow upgrade watch (c0e1_4h_20261008T222326Z). Continuity evidence for the source pin, not a
-/// reproducible-build proof.
+/// Shadow upgrade watch (c0e1_4h_20261008T222326Z). Continuity evidence for its source
+/// (`PROGRAM_DATA_REFERENCE_SOURCE_TAG`), not a reproducible-build proof; historical captures of
+/// that deployment are still verified against it.
 pub const PROGRAM_DATA_REFERENCE_HASH: &str = "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f";
+/// The source the reference deployment was qualified for. It is not the current source pin, so
+/// no deployment is qualified for the pinned source until P1A passes: the observed upgraded
+/// ProgramData (FE-01 smoke 2026-10-24, SHA-256 `3e3626a9…`) is evidence only, never a pin.
+pub const PROGRAM_DATA_REFERENCE_SOURCE_TAG: &str = "mrgn-0.1.11-rc1";
 /// `UpgradeableLoaderState::ProgramData` metadata: tag u32, slot u64, Option<Pubkey> (always 33 bytes).
 pub const PROGRAM_DATA_METADATA_LEN: usize = 45;
 const PROGRAM_ACCOUNT_LEN: usize = 36;
@@ -398,11 +408,25 @@ pub fn decode_program_data(
     })
 }
 
-/// Startup half of the upgrade watch: only the qualified Mainnet deployment may run unhalted.
+/// Startup half of the upgrade watch: only the Mainnet deployment qualified for the pinned
+/// source may run unhalted.
 pub fn deployment_pin(program: &Pubkey, d: &ProgramDeployment) -> DeploymentPin {
+    pin_against(
+        program,
+        d,
+        (
+            PROGRAM_DATA_REFERENCE_HASH,
+            PROGRAM_DATA_REFERENCE_SOURCE_TAG,
+        ),
+    )
+}
+
+/// `qualified`: the reference deployment hash and the source it was qualified for; a reference
+/// of another source than `SOURCE_TAG` qualifies nothing.
+fn pin_against(program: &Pubkey, d: &ProgramDeployment, qualified: (&str, &str)) -> DeploymentPin {
     if program.to_string() != PROGRAM_ID_MAINNET {
         DeploymentPin::Unpinned
-    } else if d.hash.to_string() == PROGRAM_DATA_REFERENCE_HASH {
+    } else if qualified.1 == SOURCE_TAG && d.hash.to_string() == qualified.0 {
         DeploymentPin::Reference
     } else {
         DeploymentPin::NotReference
@@ -511,9 +535,32 @@ mod tests {
             hash: Hash::from_str(PROGRAM_DATA_REFERENCE_HASH).unwrap(),
             ..d
         };
+        // P1B promotion: the 0.1.11 reference qualifies nothing for the 0.1.12 source pin — the
+        // runtime stays halted on it as on any other deployment until P1A passes.
         assert_eq!(
             deployment_pin(&program, &reference),
+            DeploymentPin::NotReference
+        );
+        // A deployment qualified for the pinned source is the reference; of another source, not.
+        let qualified = (PROGRAM_DATA_REFERENCE_HASH, SOURCE_TAG);
+        assert_eq!(
+            pin_against(&program, &reference, qualified),
             DeploymentPin::Reference
+        );
+        assert_eq!(
+            pin_against(&program, &d, qualified),
+            DeploymentPin::NotReference
+        );
+        assert_eq!(
+            pin_against(
+                &program,
+                &reference,
+                (
+                    PROGRAM_DATA_REFERENCE_HASH,
+                    PROGRAM_DATA_REFERENCE_SOURCE_TAG
+                )
+            ),
+            DeploymentPin::NotReference
         );
 
         // Immutable program: authority tag 0, the 32 reserved bytes stay in the metadata.
@@ -546,7 +593,8 @@ mod tests {
         );
     }
 
-    /// P1B-02: only the pinned 0.1.11 size decodes; the 0.1.12 size is named, everything else unknown.
+    /// P1B-02/03: only the pinned 0.1.12 size decodes; a non-resized 0.1.11 bank is named (every
+    /// TX touching it fails on chain as well), everything else unknown.
     #[cfg(feature = "crate_health")]
     #[test]
     fn dual_size_bank_decoder_fails_closed() {
@@ -557,13 +605,13 @@ mod tests {
             8 + payload
         };
         let mut buf = Vec::new();
-        let n = raw(BANK_PAYLOAD_LEN_0_1_11, &mut buf);
-        assert!(decode_bank(&bytemuck::cast_slice(&buf)[..n]).is_ok());
         let n = raw(BANK_PAYLOAD_LEN_0_1_12, &mut buf);
-        assert_eq!(bank_layout(n), Some("0.1.12"));
+        assert!(decode_bank(&bytemuck::cast_slice(&buf)[..n]).is_ok());
+        let n = raw(BANK_PAYLOAD_LEN_0_1_11, &mut buf);
+        assert_eq!(bank_layout(n), Some("0.1.11"));
         assert_eq!(
             decode_bank(&bytemuck::cast_slice(&buf)[..n]).err(),
-            Some(BankLayoutError::OtherVersion("0.1.12"))
+            Some(BankLayoutError::OtherVersion("0.1.11"))
         );
         for payload in [
             0,
@@ -578,7 +626,7 @@ mod tests {
                 Some(BankLayoutError::Length(n))
             );
         }
-        let n = raw(BANK_PAYLOAD_LEN_0_1_11, &mut buf);
+        let n = raw(BANK_PAYLOAD_LEN_0_1_12, &mut buf);
         bytemuck::cast_slice_mut::<u64, u8>(&mut buf)[0] ^= 1;
         assert_eq!(
             decode_bank(&bytemuck::cast_slice(&buf)[..n]).err(),
@@ -691,7 +739,8 @@ mod tests {
                 i::JUPLEND_WITHDRAW,
             ]
         );
-        assert_eq!(std::mem::size_of::<Bank>(), BANK_PAYLOAD_LEN_0_1_11);
+        assert_eq!(std::mem::size_of::<Bank>(), BANK_PAYLOAD_LEN_0_1_12);
+        assert_eq!(BANK_PAYLOAD_LEN_PINNED, std::mem::size_of::<Bank>());
         assert_eq!(marginfi_type_crate::ID.to_string(), PROGRAM_ID_MAINNET);
         let lock = include_str!("../../../Cargo.lock");
         assert!(lock.contains(&format!("tag={SOURCE_TAG}#{SOURCE_COMMIT}")));

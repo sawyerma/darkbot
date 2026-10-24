@@ -104,7 +104,14 @@ pub trait HealthEngine {
         now_unix_s: i64,
         slot: u64,
     ) -> Result<AccountThresholds, HealthError>;
-    fn premium_decay_per_second(&self, account: &Pubkey) -> Result<u128, HealthError>;
+    /// 0.1.12: how fast pending premium lowers the maintenance health (I80F48 bits per second)
+    /// at the given clock's prices.
+    fn premium_decay_per_second(
+        &self,
+        account: &Pubkey,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<u128, HealthError>;
 }
 
 /// Zugriff auf den RAM-State (S2); der Runner implementiert das über `StateCore::get`.
@@ -425,6 +432,8 @@ pub mod crate_impl {
                 .collect();
             let mut out = [(0i128, 0i128); N];
             for (slot, req) in out.iter_mut().zip(reqs) {
+                // 0.1.12: projected premium debt is part of the liabilities at the clock; the
+                // premium scratch only collects snapshot updates (none off chain).
                 let (assets, liabs) = get_health_components(
                     acc,
                     group,
@@ -432,6 +441,7 @@ pub mod crate_impl {
                     req,
                     &mut None,
                     HealthPriceMode::Client(clock.clone()),
+                    &mut None,
                 )
                 .map_err(|e| {
                     if integration_stale(&e) {
@@ -483,7 +493,8 @@ pub mod crate_impl {
                 .iter_mut()
                 .map(|(key, account)| (&*key, account).into_account_info())
                 .collect();
-            let adapter = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock)
+            // 0.1.12: PT emergency pricing is the risk admin's only (`false` for a liquidator).
+            let adapter = OraclePriceFeedAdapter::try_from_bank(bank, &ais, clock, false)
                 .map_err(|e| HealthError::Crate(format!("threshold oracle: {e}")))?;
             let price_type = RequirementType::Maintenance.get_oracle_price_type();
             let low = adapter
@@ -649,6 +660,18 @@ pub mod crate_impl {
                                 })?,
                             bank.get_asset_weight(RequirementType::Maintenance, &reconciled),
                         )
+                    }
+                    // 0.1.12: projected premium is a liability that grows with time alone: such an
+                    // account has no price threshold, it is evaluated on every price update.
+                    BalanceSide::Liabilities
+                        if bank.flags & marginfi_type_crate::constants::PREMIUM_ACTIVE != 0
+                            && (balance.premium_rate_snapshot != 0
+                                || I80F48::from(balance.premium_outstanding) != I80F48::ZERO) =>
+                    {
+                        return Err(HealthError::Unsupported(format!(
+                            "threshold fallback required: premium accrues on bank={}",
+                            balance.bank_pk
+                        )));
                     }
                     BalanceSide::Liabilities => (
                         Side::Liability,
@@ -890,6 +913,7 @@ pub mod crate_impl {
                         &ais,
                         &clock,
                         OraclePriceType::RealTime,
+                        false,
                     )
                     .map_err(|e| {
                         HealthError::Crate(format!(
@@ -981,9 +1005,60 @@ pub mod crate_impl {
             self.thresholds_at(account, now_unix_s, slot)
         }
 
-        /// 0.1.11: keine Borrow-Premium → 0. Nach P1B: rate_snapshot × principal × weight / year.
-        fn premium_decay_per_second(&self, _account: &Pubkey) -> Result<u128, HealthError> {
-            Ok(0)
+        /// 0.1.12: every liability on a premium-active bank accrues `principal × rate / year`
+        /// of premium per second (the crate's simple-interest projection), a liability valued at
+        /// the bank's high maintenance price and liability weight like the principal; zero
+        /// without one. An unreadable bank or price is an error, never zero.
+        fn premium_decay_per_second(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<u128, HealthError> {
+            use marginfi_type_crate::constants::{PREMIUM_ACTIVE, SECONDS_PER_YEAR};
+            let (_, _, adata) = self.raw(account)?;
+            let acc = load_account(adata)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+            let overflow = || HealthError::Crate("premium decay overflow".into());
+            let mut decay = I80F48::ZERO;
+            for balance in acc
+                .lending_account
+                .balances
+                .iter()
+                .filter(|b| b.is_active() && b.premium_rate_snapshot != 0)
+            {
+                if !matches!(balance.get_side(), Some(BalanceSide::Liabilities)) {
+                    continue;
+                }
+                let (_, _, bdata) = self.raw(&balance.bank_pk)?;
+                let bank = load_bank(bdata)?;
+                if bank.flags & PREMIUM_ACTIVE == 0 {
+                    continue;
+                }
+                let principal = bank
+                    .get_liability_amount(balance.liability_shares.into())
+                    .map_err(|e| HealthError::Crate(format!("premium decay principal: {e}")))?;
+                let per_second = principal
+                    .checked_mul(marginfi_type_crate::types::u32_to_milli(
+                        balance.premium_rate_snapshot,
+                    ))
+                    .and_then(|v| v.checked_div(SECONDS_PER_YEAR))
+                    .ok_or_else(overflow)?;
+                let (_, high) = self.bank_maintenance_prices(&bank, &clock)?;
+                let weight = bank
+                    .config
+                    .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
+                let value = calc_value(per_second, high, bank.get_balance_decimals(), Some(weight))
+                    .map_err(|e| HealthError::Crate(format!("premium decay value: {e}")))?;
+                decay = decay.checked_add(value).ok_or_else(overflow)?;
+            }
+            Ok(u128::try_from(decay.to_bits()).unwrap_or(0))
         }
     }
 }
@@ -1012,9 +1087,10 @@ mod bank_layout_tests {
         (w, bytes.len())
     }
 
-    /// P1B-02: a 0.1.12-resized bank must not reach the 0.1.11 Health crate as a prefix decode.
+    /// P1B-02/03: a non-resized 0.1.11 bank must not reach the pinned 0.1.12 Health crate (the
+    /// program fails every transaction touching it as well).
     #[test]
-    fn resized_bank_fails_health_observation_closed() {
+    fn unresized_bank_fails_health_observation_closed() {
         let program = Pubkey::new_unique();
         let (account, bank) = (Pubkey::new_unique(), Pubkey::new_unique());
         let mut acc: MarginfiAccount = bytemuck::Zeroable::zeroed();
@@ -1024,7 +1100,7 @@ mod bank_layout_tests {
         adata.extend_from_slice(bytemuck::bytes_of(&acc));
         let (aw, an) = aligned(&adata);
         let mut bdata = protocol::DISC_BANK.to_vec();
-        bdata.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_12, 0);
+        bdata.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_11, 0);
         let (bw, bn) = aligned(&bdata);
         let state = Source(HashMap::from([
             (account, (program, aw, an)),
@@ -1036,9 +1112,9 @@ mod bank_layout_tests {
         };
         match engine.observation_accounts(&account) {
             Err(HealthError::UnknownLayout(e)) => {
-                assert!(e.starts_with("UNKNOWN_LAYOUT: bank layout 0.1.12"))
+                assert!(e.starts_with("UNKNOWN_LAYOUT: bank layout 0.1.11"))
             }
-            other => panic!("resized bank must fail closed, got {other:?}"),
+            other => panic!("non-resized bank must fail closed, got {other:?}"),
         }
         assert!(super::dependency_keys(&state, &program, &[bank]).is_empty());
     }
@@ -1051,13 +1127,13 @@ mod bank_layout_tests {
         use super::DependencyGap as G;
         use marginfi_type_crate::types::Bank;
         let program = Pubkey::new_unique();
-        let [valid, missing, foreign, other, resized] = [(); 5].map(|_| Pubkey::new_unique());
+        let [valid, missing, foreign, other, unresized] = [(); 5].map(|_| Pubkey::new_unique());
         let mut bank: Bank = bytemuck::Zeroable::zeroed();
         bank.mint = Pubkey::new_unique();
         let mut good = protocol::DISC_BANK.to_vec();
         good.extend_from_slice(bytemuck::bytes_of(&bank));
-        let mut big = protocol::DISC_BANK.to_vec();
-        big.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_12, 0);
+        let mut small = protocol::DISC_BANK.to_vec();
+        small.resize(8 + protocol::BANK_PAYLOAD_LEN_0_1_11, 0);
         let mut not_bank = protocol::DISC_MARGINFI_ACCOUNT.to_vec();
         not_bank.resize(64, 0);
         let entry = |owner: Pubkey, bytes: &[u8]| {
@@ -1068,10 +1144,13 @@ mod bank_layout_tests {
             (valid, entry(program, &good)),
             (foreign, entry(Pubkey::new_unique(), &good)),
             (other, entry(program, &not_bank)),
-            (resized, entry(program, &big)),
+            (unresized, entry(program, &small)),
         ]));
-        let scan =
-            super::dependency_scan(&state, &program, &[valid, missing, foreign, other, resized]);
+        let scan = super::dependency_scan(
+            &state,
+            &program,
+            &[valid, missing, foreign, other, unresized],
+        );
         assert_eq!(scan.keys, vec![bank.mint]);
         assert_eq!(
             scan.keys,
@@ -1084,10 +1163,10 @@ mod bank_layout_tests {
                 (missing, G::Missing.code()),
                 (foreign, G::ForeignOwner.code()),
                 (other, G::NotABank.code()),
-                (resized, "DEPENDENCY_BANK_UNKNOWN_LAYOUT"),
+                (unresized, "DEPENDENCY_BANK_UNKNOWN_LAYOUT"),
             ]
         );
-        assert!(matches!(&scan.gaps[3].1, G::UnknownLayout(e) if e.contains("0.1.12")));
+        assert!(matches!(&scan.gaps[3].1, G::UnknownLayout(e) if e.contains("0.1.11")));
     }
 }
 
