@@ -30,7 +30,6 @@ PINNED = {
     'runtime/src/analytics/econ.rs': (2, 'I'),  # opportunity_view: JSON view for the Python readers (F4)
     'runtime/src/analytics/econ_canonical.rs': (2, 'I'),  # joined_value view (F4); JSONL replay removed
     'runtime/src/analytics/econ_docs.rs': (12, 'I'),  # legacy_json views (F4)
-    'runtime/src/analytics/fixture.rs': (4, 'W'),  # dead production fixture (F17)
     'runtime/src/analytics/journal.rs': (24, 'HI'),  # legacy_value of historical frames; export_views (F4)
     'runtime/src/analytics/measurement.rs': (12, 'I'),  # legacy_json views (F4), JSON plan fallback (F9)
     'runtime/src/analytics/payload.rs': (1, 'I'),  # legacy_view (F4)
@@ -166,7 +165,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 346)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 342)
 
 
 if __name__ == '__main__':

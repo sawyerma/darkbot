@@ -17,9 +17,10 @@
 //! p0ctl [--project DIR] backtest --run RUN_ID (--profile FILE | --capital-usd LIST [--min-profit-usd X] [--funding all|A,B]) --max-seconds N --max-ram-bytes N [--verification-result ID]
 //! p0ctl [--project DIR] optimize --run RUN_ID --capital-usd LIST [--min-profit-usd X] [--funding …] --min-profit-usd-grid X,Y --funding-sets all;A,B --holdout-bps N --max-points N --max-seconds N --max-ram-bytes N [--save-profile]
 //! p0ctl [--project DIR] profiles compare --run RUN_ID --baseline FILE --candidate FILE --max-seconds N --max-ram-bytes N
-//! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict|crosscheck [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
+//! p0ctl [--project DIR] verify  --run RUN_ID --mode off|strict [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
+//! p0ctl [--project DIR] verify  --run RUN_ID --historical --mode index|crosscheck …   (pinned reader, runs without native records only)
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
-//! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
+//! p0ctl [--project DIR] report  --run RUN_ID --historical …   (pinned reader, runs without native records only)
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
@@ -61,9 +62,9 @@
 //! are never realized profit; a saved profile (`data/profiles/`) is an offline Shadow candidate,
 //! never a LIVE setting. No JSON, no Python, no network.
 //!
-//! `report` runs the native report (B7) for runs with native capture records (typed run
-//! manifest and market completion); index provenance, JSON output and historical runs use the
-//! pinned Python report. `qualify` is the separate C0-E1 master qualification after the
+//! `report` and `verify` read runs with native capture records natively (B7, strict/off); the
+//! pinned Python readers serve only runs without native records and only on `--historical`
+//! (JFI-01/03, P0-PROD-CTRL-02: never a fallback for a native run). `qualify` is the separate C0-E1 master qualification after the
 //! verification (PHASENPLAN L.2): it binds the report's axes, the run's final technical record
 //! and the owners' end, persists an immutable result and exits 0 only for `C0_E1_MASTER_PASS`.
 use darkbot_runner::analytics::journal;
@@ -481,6 +482,11 @@ fn run_status(project: &Path, args: &[String]) -> Result<bool, String> {
             );
         }
     }
+    for dir in [run.join("capture"), run.clone()] {
+        if let Ok(line) = manifest_line(&dir) {
+            println!("  manifest: {line}");
+        }
+    }
     for market in [
         run.join("capture/market/market.p0j"),
         run.join("market/market.p0j"),
@@ -645,6 +651,36 @@ fn run_stop(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
+/// The typed run manifest of `dir` as one status line: the plan the runtime ran, whether the plan
+/// journal beside it is exactly that plan, the LIVE/submission flags and the operational RPC rate
+/// with its source (JFI-01: read natively, no JSON view).
+fn manifest_line(dir: &Path) -> Result<String, String> {
+    use darkbot_runner::analytics::measurement::{
+        MeasurementPlan, RunManifest, PLAN_JOURNAL, RUN_MANIFEST_JOURNAL,
+    };
+    let m: RunManifest =
+        journal::read_typed_value(&dir.join(RUN_MANIFEST_JOURNAL)).map_err(|e| e.to_string())?;
+    let plan_bound = match journal::read_typed_value::<MeasurementPlan>(&dir.join(PLAN_JOURNAL)) {
+        Ok(p) if p == m.plan => "yes",
+        Ok(_) => "NO",
+        Err(_) => "PLAN_JOURNAL_MISSING",
+    };
+    let rpc = m.operational_config.as_ref().map_or_else(
+        || "rpc_rps=UNKNOWN".to_string(),
+        |c| {
+            format!(
+                "rpc_rps={} source={}",
+                c.limits.rpc_rps,
+                c.sources.get("rpc_rps").map_or("UNKNOWN", String::as_str)
+            )
+        },
+    );
+    Ok(format!(
+        "run_id={} plan_duration={}s plan_bound={plan_bound} live_enabled={} submission_enabled={} {rpc}",
+        m.run_id, m.plan.duration_seconds, m.live_enabled, m.submission_enabled
+    ))
+}
+
 /// A run with native records (a typed run manifest).
 fn native_run(run: &Path) -> bool {
     run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()
@@ -765,23 +801,6 @@ fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     print!("{}", qualification::render(&record));
     println!("record={}", path.display());
     Ok(record.verdict == qualification::MASTER_PASS)
-}
-
-/// Explicit offline export (JFI-03): the legacy views the pinned Python readers need, rendered
-/// from the journals of a run with native records (`manifest.json`, `config.json`, phase and
-/// market JSONL, `summary.json`, hourly/final economics). Existing views must match; nothing is
-/// overwritten. Runs without native records are left unchanged.
-fn export_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
-    let wanted = value(args, "--run").ok_or("export --run ID|PATH required")?;
-    let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
-    if native_run(&run) {
-        return Err("EXPORT_REFUSED: a native run is read natively (report, backtest); no JSON views of its journals are written (JFI-01/03)".into());
-    }
-    println!(
-        "EXPORT_NOT_NEEDED: {} has no native run manifest",
-        run.display()
-    );
-    Ok(true)
 }
 
 const SOURCE_USAGE: &str =
@@ -1158,7 +1177,6 @@ fn main() -> ExitCode {
             (Some("runs"), Some("list")) => runs_list(&project),
             (Some("verify"), _) => verify_cmd(&project, &rest),
             (Some("report"), _) => report_cmd(&project, &rest),
-            (Some("export"), _) => export_cmd(&project, &rest),
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
@@ -1167,7 +1185,7 @@ fn main() -> ExitCode {
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|export|qualify|post-capture|source|backtest|optimize|profiles|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|backtest|optimize|profiles|approval|fe04 …".into()),
         }
     });
     match result {
@@ -1214,6 +1232,45 @@ mod tests {
         ] {
             assert!(profile_to_operational(&strings(bad)).is_err(), "{bad:?}");
         }
+    }
+
+    /// JFI-01/03, P0-PROD-CTRL-02: a run with native records is never handed to a pinned Python
+    /// reader (report and verify stay native; `index`/`crosscheck` are refused for it), and a
+    /// historical run reaches the pinned reader only on the explicit `--historical` request.
+    #[test]
+    fn native_runs_never_reach_the_pinned_python_readers() {
+        let project = std::env::temp_dir().join(format!("p0ctl_route_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        let native = project.join("data/runs/n/capture");
+        std::fs::create_dir_all(&native).unwrap();
+        std::fs::write(native.join("run_manifest.p0j"), b"").unwrap();
+        std::fs::create_dir_all(project.join("data/runs/h")).unwrap();
+        let err = |r: Result<bool, String>| r.unwrap_err();
+        for script in ["report.sh", "verify.sh"] {
+            assert!(err(historical(
+                &project,
+                script,
+                &strings(&["--run", "n", "--historical"])
+            ))
+            .starts_with("NATIVE_RUN_REFUSED"));
+            assert!(err(historical(&project, script, &strings(&["--run", "h"])))
+                .starts_with("HISTORICAL_READER_REQUIRES_OPT_IN"));
+        }
+        assert!(err(report_cmd(
+            &project,
+            &strings(&["--run", "n", "--historical"])
+        ))
+        .starts_with("CAPTURE_NOT_FINALIZED"));
+        assert!(err(verify_cmd(&project, &strings(&["--run", "n"])))
+            .starts_with("VERIFY_MODE_REQUIRED"));
+        for mode in ["index", "crosscheck"] {
+            assert!(err(verify_cmd(
+                &project,
+                &strings(&["--run", "n", "--mode", mode])
+            ))
+            .starts_with("VERIFY_MODE_REFUSED"));
+        }
+        let _ = std::fs::remove_dir_all(project);
     }
 
     /// A flag given without its value is an error, never an absent flag (`run stop --run`).

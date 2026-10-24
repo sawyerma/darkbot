@@ -615,6 +615,21 @@ pub fn persist_manifest(
     plan: &MeasurementPlan,
     clock: Clock,
 ) -> Result<(), String> {
+    persist_manifest_with(paths, run_id, provider_class, plan, clock, &|k| {
+        std::env::var(k).ok()
+    })
+}
+
+/// `persist_manifest` with the risk limits read through `risk` (the process environment in
+/// production, the same contract as `runtime_config::Resolved::parse`).
+pub fn persist_manifest_with(
+    paths: &crate::run_layout::RunPaths,
+    run_id: &str,
+    provider_class: &str,
+    plan: &MeasurementPlan,
+    clock: Clock,
+    risk: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), String> {
     let repo = repo_root();
     let binary = std::env::current_exe().map_err(|e| e.to_string())?;
     let sha = |bytes: &[u8]| {
@@ -675,7 +690,7 @@ pub fn persist_manifest(
         // Only numeric risk configuration. Never persist arbitrary environment contents.
         risk_limits.insert(
             key.to_string(),
-            std::env::var(key).ok().and_then(|s| s.parse::<u64>().ok()),
+            risk(key).and_then(|s| s.parse::<u64>().ok()),
         );
     }
     let v2 = paths.layout == crate::run_layout::RunLayout::V2;

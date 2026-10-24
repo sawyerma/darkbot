@@ -7,7 +7,7 @@ mod report_e2e {
     use super::*;
     use crate::analytics::journal::{self, Provenance};
     use crate::analytics::measurement::{
-        journal as phase_journal, persist_manifest, MeasurementPlan, Phase,
+        journal as phase_journal, persist_manifest_with, MeasurementPlan, Phase,
     };
     use crate::analytics::record::{Decision, OpportunityRecord, TimingEvidence};
     use crate::analytics::report::{self, Format, ProvenanceView, ReportQuery, View};
@@ -148,7 +148,16 @@ mod report_e2e {
         paths.create().unwrap();
         let plan = MeasurementPlan::new(60).unwrap();
         let clock = darkbot_common::timing::Clock::new();
-        persist_manifest(&paths, "run_r", "test", &plan, clock).unwrap();
+        // The run records its minimum profit like every launcher run (capture.sh exports it).
+        persist_manifest_with(
+            &paths,
+            "run_r",
+            "test",
+            &plan,
+            clock,
+            &|k| (k == "P0_MIN_PROFIT").then(|| "0".into()),
+        )
+        .unwrap();
         let window = plan.capture_window(clock, 1_000 * NS).unwrap();
         let w_s = (window.capture_start_unix_ns / u128::from(NS)) as i64;
         phase_journal(&paths, clock, Phase::Capture(window.clone())).unwrap();

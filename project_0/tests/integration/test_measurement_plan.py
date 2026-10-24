@@ -124,21 +124,21 @@ class MeasurementCli(unittest.TestCase):
                 # network boot audit since e42162e, asserted above (BOOT_NETWORK_AUDIT_REQUIRED).
                 self.assertIn(f'Capture: {seconds}s', p.stdout)
                 run = tmp / 'runs' / run_id
-                # JFI-03/PERSIST-04: the productive run writes no JSON/JSONL; the legacy views exist only after the
-                # explicit offline export.
+                # JFI-01/03, P0-PROD-CTRL-02: the productive run writes no JSON/JSONL and has no JSON export; its
+                # typed records are read natively (`p0ctl run status`).
                 self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json', '.jsonl')], [])
                 export = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'export', '--run', str(run)],
                                         capture_output=True, text=True, timeout=60)
-                self.assertEqual(export.returncode, 0, export.stderr)
-                plan = json.loads((run / 'measurement_plan.json').read_text())
-                manifest = json.loads((run / 'measurement_manifest.json').read_text())  # typed record of the real p0-longtail
+                self.assertNotEqual(export.returncode, 0)
+                status = subprocess.run([str(ctl), '--project', str(ROOT / 'project_0'), 'run', 'status', '--run', str(run)],
+                                        env=env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(status.returncode, 0, status.stderr)
+                # The typed manifest of the real p0-longtail: the binary consumed exactly the persisted plan.
+                self.assertIn(f'plan_duration={seconds}s plan_bound=yes live_enabled=false submission_enabled=false', status.stdout)
                 if relative:
-                    operational = manifest['operational_config']
-                    self.assertEqual((operational['limits']['rpc_rps'], operational['sources']['rpc_rps']), (1, 'config_file'))
-                self.assertEqual(manifest['plan'], plan)  # the binary consumed exactly the persisted plan
-                self.assertEqual((manifest['live_enabled'], manifest['submission_enabled']), (False, False))
-                self.assertEqual(plan['duration_seconds'], seconds)
-                self.assertEqual(json.loads((run / 'storage_preflight.json').read_text())['duration_seconds'], seconds)
+                    self.assertIn('rpc_rps=1 source=config_file', status.stdout)
+                self.assertIn(f'duration={seconds}s', status.stdout)  # the typed capacity report
+                self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json', '.jsonl')], [])
                 log = (run / 'runtime.log').read_text()
                 self.assertIn('C0_E1_ADMISSION_REFUSED BOOT_NETWORK_AUDIT_MISSING', log)
                 self.assertNotIn('C0_E1_WARMUP_FAILED', log)

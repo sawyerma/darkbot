@@ -205,11 +205,20 @@ pub enum Outcome {
     FundingExcluded,
     BelowMinimum,
     /// Signed in a slot before the winner's: an admissible win (net, required budget).
-    Win { net: i128, budget: u64 },
+    Win {
+        net: i128,
+        budget: u64,
+    },
     /// Signed in or after the winner's slot: a lost race at its failed-attempt cost.
-    LostRace { budget: u64, cost: Option<u64> },
+    LostRace {
+        budget: u64,
+        cost: Option<u64>,
+    },
     /// No verified liquidation: a false positive at its failed-attempt cost.
-    NoChainEvent { budget: u64, cost: Option<u64> },
+    NoChainEvent {
+        budget: u64,
+        cost: Option<u64>,
+    },
 }
 
 /// The production admission of one executable evaluation (economics only: the record's
@@ -575,8 +584,7 @@ fn false_positives(
 ) -> Result<Vec<Attempt>, String> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
-    let mut r =
-        crate::storage::segments::ChainReader::open(shadow).map_err(|_| "SHADOW_INPUT")?;
+    let mut r = crate::storage::segments::ChainReader::open(shadow).map_err(|_| "SHADOW_INPUT")?;
     while let Some(frame) = r.next_frame().map_err(|_| "SHADOW_READ")? {
         meter.time()?;
         match frame.kind {
@@ -1091,7 +1099,9 @@ pub fn optimize(
 ) -> Result<(OptimizeResult, PathBuf), String> {
     baseline.validate()?;
     if space.capital_usd_micro != baseline.capital_usd_micro {
-        return Err("OPTIMIZE_CAPITAL_MISMATCH: grid and baseline compare on the same capital".into());
+        return Err(
+            "OPTIMIZE_CAPITAL_MISMATCH: grid and baseline compare on the same capital".into(),
+        );
     }
     let points = space.points();
     if points.is_empty() || points.len() as u64 > max_points {
@@ -1251,7 +1261,10 @@ pub fn parse_budget(args: &[String]) -> Result<Budget, String> {
 
 /// `--holdout-bps N --max-points N` of an optimization (both required).
 pub fn parse_search(args: &[String]) -> Result<(u64, u64), String> {
-    Ok((number(args, "--holdout-bps")?, number(args, "--max-points")?))
+    Ok((
+        number(args, "--holdout-bps")?,
+        number(args, "--max-points")?,
+    ))
 }
 
 /// USD capital list (`econ::parse_capital`, the run's own rule) in USD-micro.
@@ -1287,8 +1300,11 @@ pub fn parse_min_profit(v: &str) -> Result<i128, String> {
 
 /// The run's manifest (typed), for its recorded minimum profit.
 pub fn manifest_of(run: &Path) -> Result<RunManifest, String> {
-    journal::read_typed_value(&run.join("capture").join(super::measurement::RUN_MANIFEST_JOURNAL))
-        .map_err(|_| "NATIVE_MANIFEST_MISSING".into())
+    journal::read_typed_value(
+        &run.join("capture")
+            .join(super::measurement::RUN_MANIFEST_JOURNAL),
+    )
+    .map_err(|_| "NATIVE_MANIFEST_MISSING".into())
 }
 
 /// The parameters of an invocation: `--profile FILE` alone, or `--capital-usd LIST` with

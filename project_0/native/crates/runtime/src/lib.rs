@@ -26,7 +26,7 @@ pub mod storage;
 
 // Preserve the published Rust API for binaries, pinned verifier sources and consumers.
 // Re-exports refer to the single implementation in its owning domain.
-pub use analytics::{econ, fixture, measurement, record, shadow_ledger};
+pub use analytics::{econ, measurement, record, shadow_ledger};
 #[cfg(feature = "crate_health")]
 pub use execution::route;
 pub use execution::{builder, lookup_tables, one_shot, pending, pipeline};

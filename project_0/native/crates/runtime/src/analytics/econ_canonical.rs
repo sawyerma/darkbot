@@ -1236,6 +1236,7 @@ mod regression {
         };
         let c = crate::analytics::backtest::counterfactual(
             &refs,
+            &[],
             &params,
             crate::analytics::backtest::loss_model(joined.earlier_attribution_records),
         );

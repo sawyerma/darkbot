@@ -2,7 +2,6 @@
 
 pub mod backtest;
 pub mod econ;
-pub mod fixture;
 #[cfg(test)]
 pub mod golden;
 pub mod market_report;

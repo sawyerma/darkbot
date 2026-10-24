@@ -22,8 +22,7 @@ mod canonical;
 mod docs;
 pub use canonical::{
     canonical_legacy_view, executable_costs, join as canonical_join, joined_facts, race_margins,
-    record_digest,
-    CanonicalSummary, CanonicalSummaryV3, CaptureFilter, JoinContext, JoinOutcome,
+    record_digest, CanonicalSummary, CanonicalSummaryV3, CaptureFilter, JoinContext, JoinOutcome,
     Joined as CanonicalJoin, JoinedFacts, RaceMargins, RaceMarginsV3,
     LOSS_ATTRIBUTION_EARLIER_RECORDS, LOSS_ATTRIBUTION_MODEL,
 };
