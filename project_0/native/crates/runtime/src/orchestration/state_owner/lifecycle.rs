@@ -15,6 +15,9 @@ impl ShadowOwner {
                 self.fe04_refreshed = std::time::Instant::now();
             }
         }
+        // P6-MT.1 (MT5b): the per-account SUBMITTED ownership is the book's target hold —
+        // synchronized before this pass judges any result or evaluates any candidate.
+        self.sync_ownership();
         self.mt0_owner
             .enter(darkbot_common::mt0::OwnerCat::RemoteResults);
         #[cfg(feature = "crate_health")]

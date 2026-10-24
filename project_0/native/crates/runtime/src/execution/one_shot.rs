@@ -191,6 +191,10 @@ pub struct ActiveHold {
     pub target: String,
     pub unknown_outcome: bool,
     pub holds: BTreeMap<String, u64>,
+    /// MT5b: the intent's first bound signature and its `last_valid_block_height` — the
+    /// SUBMITTED(signature, last_valid_block_height) of the target's ownership (P6-MT.1).
+    pub signature: Option<String>,
+    pub last_valid_block_height: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -881,6 +885,8 @@ impl Journal {
             target: s.intent.target.clone(),
             unknown_outcome: s.phase == Phase::HandoffUnknown,
             holds: s.intent.holds.clone(),
+            signature: s.intent.signatures.first().cloned(),
+            last_valid_block_height: s.intent.last_valid_block_height,
         })
     }
     /// B3: what the safety layer replays after a restart — `None` without any attempt; with one,
@@ -1600,14 +1606,24 @@ mod tests {
         assert!(hold.unknown_outcome);
         let mut book = WalletReservations::rebuild([hold.clone()]).unwrap();
         assert_eq!(book.held("SOL"), 20);
+        // MT5b: the hold carries the bound signature and the blockhash lifetime.
         assert_eq!(
-            book.reserve_target("b", &hold.target, &i.holds, &c.balances),
+            (&hold.signature, hold.last_valid_block_height),
+            (&i.signatures.first().cloned(), i.last_valid_block_height)
+        );
+        let second = ActiveHold {
+            attempt: "b".into(),
+            ..hold.clone()
+        };
+        assert_eq!(
+            book.reserve_target(&second, &c.balances),
             Err("RESERVATION_TARGET_CONTENDED")
         );
-        assert_eq!(
-            book.reserve_target("b", "another target", &i.holds, &c.balances),
-            Ok(())
-        );
+        let another = ActiveHold {
+            target: "another target".into(),
+            ..second
+        };
+        assert_eq!(book.reserve_target(&another, &c.balances), Ok(()));
         assert_eq!(
             WalletReservations::rebuild([hold.clone(), hold]).unwrap_err(),
             "RESERVATION_EXISTS"

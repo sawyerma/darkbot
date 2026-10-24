@@ -154,15 +154,16 @@ impl ShadowOwner {
     }
 
     /// P6-MT.2/MT.13 (MT5a): the owner's generations, the candidate ids allocated, the readset
-    /// size histogram (quantiles are bucket upper bounds) with its overflows, and the result
-    /// policy's verdicts, on their own line (pinned parsers unchanged).
+    /// size histogram (quantiles are bucket upper bounds) with its overflows, the result
+    /// policy's verdicts and (MT5b) the ownership counts per state with the refused
+    /// transitions, on their own line (pinned parsers unchanged).
     #[cfg(feature = "crate_health")]
     pub(super) fn identity_line(&self) -> String {
         let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
         let g = self.generations();
         let r = self.metrics.readset_keys.snapshot();
         format!(
-            "identity_stats: recovery_generation={} program_generation={} policy_generation={} config_generation={} candidate_ids={} state_epoch={} readset_keys: n={} p50={} p95={} p99={} max={} overflows={} result_actions: {}",
+            "identity_stats: recovery_generation={} program_generation={} policy_generation={} config_generation={} candidate_ids={} state_epoch={} readset_keys: n={} p50={} p95={} p99={} max={} overflows={} result_actions: {} {}",
             g.recovery,
             g.program,
             g.policy,
@@ -176,6 +177,7 @@ impl ShadowOwner {
             q(r.max),
             self.metrics.readset_overflows,
             self.metrics.result_actions.line(),
+            self.ownership.line(),
         )
     }
 

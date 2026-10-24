@@ -695,6 +695,8 @@ pub(super) fn exit_hold(s: &Saved) -> Option<super::ActiveHold> {
             target: e.intent.mint.clone(),
             unknown_outcome: e.phase == ExitPhase::HandoffUnknown,
             holds: e.intent.holds(),
+            signature: e.intent.signatures.first().cloned(),
+            last_valid_block_height: Some(e.intent.last_valid_block_height),
         })
 }
 

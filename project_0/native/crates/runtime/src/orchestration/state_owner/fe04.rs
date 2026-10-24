@@ -171,7 +171,8 @@ impl ShadowOwner {
         }
     }
 
-    /// The reservation book from the held journal (after a successful booking only).
+    /// The reservation book from the held journal (after a successful booking only); the
+    /// per-account SUBMITTED ownership follows it (MT5b).
     fn fe04_rebuild_book(&mut self) {
         if let Some(j) = self.fe04_held.as_ref() {
             self.reservations =
@@ -179,6 +180,7 @@ impl ShadowOwner {
                     .unwrap_or_else(|_| {
                         crate::execution::reservation::WalletReservations::unreadable()
                     });
+            self.sync_ownership();
         }
     }
 

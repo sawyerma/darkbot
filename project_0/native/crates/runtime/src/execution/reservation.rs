@@ -3,13 +3,23 @@
 //! `"SOL"` or the mint key. A reservation is all-or-nothing against the reconciled balances minus
 //! the holds of every other attempt, so the same lamports or tokens are never allocated twice;
 //! an unknown balance is never available.
+use crate::execution::one_shot::ActiveHold;
 use std::collections::BTreeMap;
+
+/// P8-RES-02: the attempt holding a target, with the submission the hold is bound to (MT5b:
+/// the target's SUBMITTED(signature, last_valid_block_height) ownership is this entry).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetHold {
+    pub attempt: String,
+    pub signature: Option<String>,
+    pub last_valid_block_height: Option<u64>,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WalletReservations {
     attempts: BTreeMap<String, BTreeMap<String, u64>>,
     /// P8-RES-02: a target belongs to at most one attempt (contending targets).
-    targets: BTreeMap<String, String>,
+    targets: BTreeMap<String, TargetHold>,
     /// The durable journals could not be read: nothing is available until they are.
     unreadable: bool,
 }
@@ -126,53 +136,60 @@ impl WalletReservations {
         Ok(())
     }
 
-    /// Reserves `attempt` for `target`: refused while another attempt holds the same target.
+    fn target_hold(h: &ActiveHold) -> TargetHold {
+        TargetHold {
+            attempt: h.attempt.clone(),
+            signature: h.signature.clone(),
+            last_valid_block_height: h.last_valid_block_height,
+        }
+    }
+
+    /// Reserves the hold's attempt for its target: refused while another attempt holds the
+    /// same target.
     pub fn reserve_target(
         &mut self,
-        attempt: &str,
-        target: &str,
-        holds: &BTreeMap<String, u64>,
+        hold: &ActiveHold,
         balances: &BTreeMap<String, u64>,
     ) -> Result<(), &'static str> {
-        if self.targets.get(target).is_some_and(|a| a != attempt) {
+        if self
+            .targets
+            .get(&hold.target)
+            .is_some_and(|t| t.attempt != hold.attempt)
+        {
             return Err("RESERVATION_TARGET_CONTENDED");
         }
-        self.reserve(attempt, holds, balances)?;
-        self.targets.insert(target.into(), attempt.into());
+        self.reserve(&hold.attempt, &hold.holds, balances)?;
+        self.targets
+            .insert(hold.target.clone(), Self::target_hold(hold));
         Ok(())
     }
 
     /// P8-RES-02: restores a hold a durable journal still carries after a restart — as it was,
     /// without a balance check (its units were committed before the crash); a duplicate attempt
     /// or a contended target is corrupt evidence.
-    pub fn restore(
-        &mut self,
-        attempt: &str,
-        target: &str,
-        holds: &BTreeMap<String, u64>,
-    ) -> Result<(), &'static str> {
-        if attempt.is_empty() {
+    pub fn restore(&mut self, hold: &ActiveHold) -> Result<(), &'static str> {
+        if hold.attempt.is_empty() {
             return Err("RESERVATION_ATTEMPT_ID_MISSING");
         }
-        if self.attempts.contains_key(attempt) {
+        if self.attempts.contains_key(&hold.attempt) {
             return Err("RESERVATION_EXISTS");
         }
-        if self.targets.contains_key(target) {
+        if self.targets.contains_key(&hold.target) {
             return Err("RESERVATION_TARGET_CONTENDED");
         }
-        self.attempts.insert(attempt.into(), holds.clone());
-        self.targets.insert(target.into(), attempt.into());
+        self.attempts
+            .insert(hold.attempt.clone(), hold.holds.clone());
+        self.targets
+            .insert(hold.target.clone(), Self::target_hold(hold));
         Ok(())
     }
 
     /// P8-RES-02: the book after a restart, from every not finalized FE-04 hold (reserved or with
     /// an UNKNOWN outcome — both stay held until their finalized reconciliation).
-    pub fn rebuild(
-        holds: impl IntoIterator<Item = crate::execution::one_shot::ActiveHold>,
-    ) -> Result<Self, &'static str> {
+    pub fn rebuild(holds: impl IntoIterator<Item = ActiveHold>) -> Result<Self, &'static str> {
         let mut book = Self::default();
         for h in holds {
-            book.restore(&h.attempt, &h.target, &h.holds)?;
+            book.restore(&h)?;
         }
         Ok(book)
     }
@@ -180,12 +197,19 @@ impl WalletReservations {
     /// Releases `attempt` (after its finalized reconciliation) and returns what it held.
     pub fn release(&mut self, attempt: &str) -> Result<BTreeMap<String, u64>, &'static str> {
         let held = self.attempts.remove(attempt).ok_or("RESERVATION_UNKNOWN")?;
-        self.targets.retain(|_, a| a != attempt);
+        self.targets.retain(|_, t| t.attempt != attempt);
         Ok(held)
     }
 
     pub fn attempts(&self) -> impl Iterator<Item = (&str, &BTreeMap<String, u64>)> {
         self.attempts.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// P8-RES-02/MT5b: every held target with its attempt's submission — the one source of the
+    /// per-account SUBMITTED ownership (`execution::ownership`). Empty while unreadable (every
+    /// offer is refused then anyway).
+    pub fn targets(&self) -> impl Iterator<Item = (&str, &TargetHold)> {
+        self.targets.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
 

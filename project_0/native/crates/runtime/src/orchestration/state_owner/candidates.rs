@@ -681,6 +681,18 @@ impl CandidateLanes {
 
     /// Admits one trigger: a new entry, or the coalescing of the account's pending entry.
     pub(crate) fn admit(&mut self, account: Pubkey, a: LaneAdmission) -> CandidateQueueAdmission {
+        self.admit_from(account, a, a.t_rx_ns)
+    }
+
+    /// `admit` of a trigger whose first unserved receive time is `t_rx_first` (an ownership
+    /// re-arm keeps the deferred trigger's first time — P6-MT.5 coalescing keeps `t_rx_first`).
+    pub(crate) fn admit_from(
+        &mut self,
+        account: Pubkey,
+        a: LaneAdmission,
+        t_rx_first: u64,
+    ) -> CandidateQueueAdmission {
+        let first = t_rx_first.min(a.t_rx_ns);
         let work = (account, a.t_rx_ns, a.slot, a.trigger);
         if let Some(existing) = self.pending.get(&account).copied() {
             // [FIX-137] Single-flight latest-state semantics: the queue token already exists,
@@ -702,7 +714,7 @@ impl CandidateLanes {
             }
             self.link(PendingCandidate {
                 work,
-                t_rx_first: existing.t_rx_first.min(a.t_rx_ns),
+                t_rx_first: existing.t_rx_first.min(first),
                 lane,
                 revision: existing.revision.max(a.revision),
                 // The L2 key stays the earliest: an unserved entry is never pushed back by a
@@ -715,7 +727,7 @@ impl CandidateLanes {
             self.seq = self.seq.wrapping_add(1);
             self.link(PendingCandidate {
                 work,
-                t_rx_first: a.t_rx_ns,
+                t_rx_first: first,
                 lane: a.lane,
                 revision: a.revision,
                 last_forwarded_slot: a.last_forwarded_slot,
@@ -765,7 +777,28 @@ pub(crate) fn enqueue_or_coalesce_candidate(
     coalesced: &mut u64,
     max_pending: &mut usize,
 ) -> CandidateQueueAdmission {
-    let outcome = lanes.admit(account, admission);
+    let first = admission.t_rx_ns;
+    enqueue_or_coalesce_candidate_from(
+        account,
+        (admission, first),
+        lanes,
+        enqueued,
+        coalesced,
+        max_pending,
+    )
+}
+
+/// `enqueue_or_coalesce_candidate` with the trigger's first unserved receive time.
+#[cfg(feature = "crate_health")]
+pub(crate) fn enqueue_or_coalesce_candidate_from(
+    account: Pubkey,
+    (admission, t_rx_first): (LaneAdmission, u64),
+    lanes: &mut CandidateLanes,
+    enqueued: &mut u64,
+    coalesced: &mut u64,
+    max_pending: &mut usize,
+) -> CandidateQueueAdmission {
+    let outcome = lanes.admit_from(account, admission, t_rx_first);
     match outcome {
         CandidateQueueAdmission::Coalesced => *coalesced = coalesced.saturating_add(1),
         CandidateQueueAdmission::Enqueued => {

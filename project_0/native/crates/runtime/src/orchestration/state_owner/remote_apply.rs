@@ -307,21 +307,26 @@ impl ShadowOwner {
             let targeted_probe_result = self.integration_probe_expected.contains(&done.account);
             let mut targeted_status: Option<&'static str> = None;
             // P6-MT.2 (MT5a): the central policy judges the result first. An older generation
-            // (a recovery or program upgrade since the request) or an otherwise dropped result
-            // gets no cache entry and no follow-up work; a changed dependency readset is the E9
-            // stale case (re-requested from the current state, bounded); only an accepted
-            // result reaches the E9 identity checks below, which stay as they are.
+            // (a recovery or program upgrade since the request), a foreign in-flight entry
+            // (MT5b: the account is SUBMITTED by a durable attempt) or an otherwise dropped
+            // result gets no cache entry and no follow-up work; a result of an older revision
+            // than the account's newest yields to it (re-requested from the current state, the
+            // bounded E9 requeue); a changed dependency readset is the E9 stale case; only an
+            // accepted result reaches the E9 identity checks below, which stay as they are.
             let action = self.judge(&done.identity);
-            let dropped = action.is_drop()
-                || action == crate::execution::identity::ResultAction::RetryNewestPending;
+            let retry = action == crate::execution::identity::ResultAction::RetryNewestPending;
+            let dropped = action.is_drop();
             let recheck = action == crate::execution::identity::ResultAction::RecheckCurrent;
             match done.result {
-                _ if dropped => {
+                _ if dropped || retry => {
                     if targeted_probe_result {
                         targeted_status = Some("stale");
                     }
                     let removed = self.projection_cache.remove(&done.account);
                     self.projection_stats.dropped_if(removed);
+                    if retry {
+                        self.requeue_projection(done.account, done.t_rx_ns, None);
+                    }
                 }
                 Ok((projection_slot, projection_unix_s, accounts, units)) => {
                     let canonical = self.st.get(&done.account);

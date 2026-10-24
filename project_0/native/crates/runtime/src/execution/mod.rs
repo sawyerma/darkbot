@@ -7,6 +7,7 @@ pub mod inventory;
 pub mod lookup_tables;
 pub mod observe_only;
 pub mod one_shot;
+pub mod ownership;
 pub mod pending;
 pub mod pipeline;
 pub mod prepared;

@@ -143,10 +143,15 @@ impl ResultAction {
     }
 }
 
-/// The account's in-flight execution entry (MT5b owns its lifecycle; the policy only reads it).
+/// The account's in-flight execution entry (`execution::ownership` owns its lifecycle, MT5b;
+/// the policy only reads it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Inflight {
-    pub candidate_id: u64,
+pub enum Inflight {
+    /// EXECUTING/SIGNED by this candidate of the run.
+    Candidate(u64),
+    /// SUBMITTED by a durable FE-04 attempt (the reservation book's target hold, also one
+    /// reopened from the journal after a restart): foreign to every candidate of this run.
+    Attempt,
 }
 
 /// The owner's current view a result is judged against.
@@ -171,7 +176,7 @@ pub fn result_action(identity: &CandidateIdentity, current: &Current<'_>) -> Res
         return ResultAction::DropOldGeneration;
     }
     if let Some(inflight) = current.inflight {
-        if inflight.candidate_id != identity.candidate_id {
+        if inflight != Inflight::Candidate(identity.candidate_id) {
             return ResultAction::DropForeignInflight;
         }
     }
@@ -319,7 +324,7 @@ mod tests {
         let old = identity(&st, a, &[a], 1, 1);
         let newer = identity(&st, a, &[a], 2, 2);
         let mut cur = current(&st);
-        cur.inflight = Some(Inflight { candidate_id: 2 });
+        cur.inflight = Some(Inflight::Candidate(2));
         let action = result_action(&old, &cur);
         assert_eq!(action, ResultAction::DropForeignInflight);
         assert!(!action.commits() && action.is_drop());
@@ -327,6 +332,12 @@ mod tests {
         // Even a result that would otherwise be re-checked or retried is dropped foreign first.
         cur.newest_revision = Some(3);
         assert_eq!(result_action(&old, &cur), ResultAction::DropForeignInflight);
+        // A durable attempt (SUBMITTED from the book) is foreign to every candidate.
+        cur.inflight = Some(Inflight::Attempt);
+        assert_eq!(
+            result_action(&newer, &cur),
+            ResultAction::DropForeignInflight
+        );
     }
 
     /// #6/#7: a recovery (the Ready period ended by a gap) invalidates older work; a projection
@@ -469,7 +480,7 @@ mod tests {
         assert_eq!(c12, c21);
         assert!(a12.contains(&(1, ResultAction::RetryNewestPending)));
         assert!(a21.contains(&(1, ResultAction::RetryNewestPending)));
-        let own = Some(Inflight { candidate_id: 2 });
+        let own = Some(Inflight::Candidate(2));
         assert_eq!(run([&r1, &r2], own).0, vec![2]);
         assert_eq!(run([&r2, &r1], own).0, vec![2]);
         assert!(run([&r1, &r2], own)

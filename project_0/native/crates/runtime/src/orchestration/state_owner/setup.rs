@@ -982,6 +982,7 @@ pub(super) fn prepare(
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),
         detect_origin: None,
+        ownership: Default::default(),
         atas: LiquidatorAtas::new(liquidator),
         min_profit,
         integration_probe_enabled,

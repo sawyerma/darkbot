@@ -112,6 +112,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),
         detect_origin: None,
+        ownership: Default::default(),
         atas: accounts::LiquidatorAtas::new(liquidator),
         min_profit: 0,
         integration_probe_enabled: false,
@@ -2802,5 +2803,237 @@ fn p2_05_tag_wakeup_forwards_a_held_candidate_again() {
         .detect(Some((account, 0, 100, "oracle_health_ready")))
         .unwrap();
     assert!(f.owner.time_schedule.is_empty(), "no t_profitable: dropped");
+    cleanup(f);
+}
+
+/// P6-MT.1 (MT5b) on the wired path — restart and #34: an unresolved FE-04 attempt reopened
+/// from the journal (UNKNOWN) makes its target SUBMITTED(signature, last_valid_block_height)
+/// through the reservation book at the owner's first pass; a detection of that target is not
+/// evaluated (no Health call, the identity is allocated and the trigger deferred as the one
+/// newest pending revision, later triggers coalesced); the FE-04 settlement path — and only
+/// it — releases the target (book empty ⇒ RELEASED) and re-arms the newest pending revision
+/// through lane L0.
+#[test]
+fn mt5b_submitted_follows_the_fe04_journal_and_defers_the_targets_detection() {
+    use crate::execution::one_shot::settlement::SettlementEvidence;
+    use crate::execution::ownership::{State, Submission};
+    let (mut f, intent, proof) = fe04_fixture("mt5b_submitted", "unknown");
+    let target: Pubkey = intent.target.parse().unwrap();
+    assert_eq!(f.owner.ownership.state(&target), None, "nothing synced yet");
+    assert!(f.owner.lifecycle(), "the owner pass synchronizes the table");
+    let attempt = f
+        .owner
+        .reservations
+        .targets()
+        .map(|(_, h)| h.attempt.clone())
+        .next()
+        .unwrap();
+    let submitted = State::Submitted(Submission {
+        attempt,
+        signature: intent.signatures.first().cloned(),
+        last_valid_block_height: intent.last_valid_block_height,
+    });
+    assert_eq!(f.owner.ownership.state(&target), Some(submitted.clone()));
+    assert_eq!(f.owner.ownership.counts().submitted, 1);
+    // The target's detection is refused and deferred, never evaluated; a later trigger
+    // coalesces into the same pending revision (the newest work wins).
+    assert!(!f
+        .owner
+        .detect(Some((target, 5, 12, "oracle_health_ready")))
+        .unwrap());
+    assert!(!f
+        .owner
+        .detect(Some((target, 9, 13, "account_update")))
+        .unwrap());
+    assert_eq!(f.owner.metrics.detect_health_calls, 0);
+    assert_eq!(f.owner.candidate_revisions.get(&target), Some(&2));
+    let s = f.owner.ownership.stats;
+    assert_eq!(
+        (s.refused_acquire, s.deferred, s.coalesced, s.acquired),
+        (2, 1, 1, 0)
+    );
+    assert_eq!(
+        f.owner
+            .ownership
+            .pending(&target)
+            .map(|p| (p.t_rx_ns, p.slot, p.trigger)),
+        Some((9, 13, "account_update"))
+    );
+    assert!(f.owner.oracle_lanes.is_empty(), "not in a lane while owned");
+    assert_eq!(f.owner.ownership.state(&target), Some(submitted));
+    // The settlement path (C3): the proven non-landing settles the attempt, the book follows
+    // the journal and the ownership follows the book.
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    fe04_answer(
+        &f,
+        SettlementEvidence {
+            observations: vec![],
+            proof: Some(Ok(proof)),
+        },
+    );
+    f.owner.remote_apply().unwrap();
+    assert!(fe04_settled(&f.owner));
+    assert!(f.owner.reservations.is_empty());
+    assert_eq!(
+        f.owner.ownership.state(&target),
+        None,
+        "RELEASED with the book"
+    );
+    let s = f.owner.ownership.stats;
+    assert_eq!(
+        (s.submitted_synced, s.submitted_released, s.rearmed),
+        (1, 1, 1)
+    );
+    let entry = f
+        .owner
+        .oracle_lanes
+        .get(&target)
+        .copied()
+        .expect("re-armed");
+    assert_eq!(
+        (entry.lane, entry.work),
+        (
+            super::candidates::Lane::L0,
+            (target, 9, 13, "account_update")
+        )
+    );
+    // Idle passes change nothing.
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.ownership.stats, s);
+    let line = f.owner.identity_line();
+    assert!(
+        line.contains("ownership: executing=0 signed=0 submitted=0 pending=0 acquired=0"),
+        "{line}"
+    );
+    cleanup(f);
+}
+
+/// P6-MT.1 (MT5b) on the wired path — #2/#3/#5: while a candidate owns an account
+/// (EXECUTING), the account's triggers are deferred and coalesced (never evaluated twice, never
+/// lost); a release by a foreign candidate is refused and the ownership stays; the owner's
+/// release re-arms the newest pending revision at L0, and its detection acquires and releases
+/// the account again.
+#[test]
+fn mt5b_an_executing_account_defers_its_triggers_until_the_owner_releases() {
+    use crate::execution::ownership::State;
+    let mut f = fixture_with("mt5b_executing", None);
+    let a = Pubkey::new_unique();
+    f.owner.ownership.acquire(a, 99).unwrap();
+    assert!(!f
+        .owner
+        .detect(Some((a, 5, 12, "oracle_health_ready")))
+        .unwrap());
+    assert!(!f.owner.detect(Some((a, 9, 13, "account_update"))).unwrap());
+    assert_eq!(f.owner.metrics.detect_health_calls, 0);
+    assert_eq!(
+        f.owner.ownership.state(&a),
+        Some(State::Executing { candidate_id: 99 })
+    );
+    // #5: a foreign release never deletes the ownership (counted, logged, not applied).
+    f.owner.release_candidate(a, 98);
+    assert_eq!(
+        f.owner.ownership.state(&a),
+        Some(State::Executing { candidate_id: 99 })
+    );
+    assert_eq!(f.owner.ownership.stats.refused_release, 1);
+    assert!(f.owner.oracle_lanes.is_empty());
+    // The owner's release re-arms the newest pending revision.
+    f.owner.release_candidate(a, 99);
+    assert_eq!(f.owner.ownership.state(&a), None);
+    let entry = f.owner.oracle_lanes.get(&a).copied().expect("re-armed");
+    assert_eq!(entry.work, (a, 9, 13, "account_update"));
+    assert_eq!(
+        entry.t_rx_first, 5,
+        "the first deferred trigger's receive time is kept"
+    );
+    assert_eq!(entry.lane, super::candidates::Lane::L0);
+    // Its detection owns the account for the evaluation and releases it afterwards (the
+    // fixture has no state: the evaluation stops at the integration plan, after the acquire).
+    let work = f.owner.oracle_lanes.next().unwrap().work;
+    f.owner.detect(Some(work)).unwrap();
+    assert_eq!(f.owner.ownership.state(&a), None);
+    let s = f.owner.ownership.stats;
+    assert_eq!(
+        (s.acquired, s.released, s.deferred, s.coalesced, s.rearmed),
+        (2, 2, 1, 1, 1)
+    );
+    cleanup(f);
+}
+
+/// P6-MT.1/MT.2 (MT5b) on the wired path: the projection result's judge now sees the
+/// account's in-flight ownership and newest revision — a result for a target SUBMITTED by a
+/// durable attempt is dropped foreign (not cached, no requeue, the ownership untouched); a
+/// result of an older revision than the account's newest yields to it (not cached, re-requested
+/// once from the current state through the bounded E9 requeue); the current revision without
+/// an owner is accepted as before.
+#[test]
+fn mt5b_projection_results_are_judged_against_ownership_and_newest_revision() {
+    use crate::execution::identity::ResultAction;
+    use crate::execution::one_shot::ActiveHold;
+    use crate::execution::reservation::WalletReservations;
+    let mut f = fixture_with("mt5b_judge", None);
+    let candidate = Pubkey::new_unique();
+    let data = vec![1u8; 8];
+    let snapshot = vec![mt5_account(
+        &f,
+        candidate,
+        data.clone(),
+        SourceKind::Snapshot,
+    )];
+    mt5_ready(&mut f, &snapshot);
+    let real = solana_sdk::hash::hash(&data);
+    let fingerprint = dependency_fingerprint(&f.owner.st, &[]);
+    let message = |identity| mt5_result(candidate, real, vec![], fingerprint, identity);
+    let identity = test_identity(&f.owner, candidate, &[]);
+    // SUBMITTED by a durable attempt (the book's target hold): dropped foreign.
+    f.owner.reservations = WalletReservations::rebuild([ActiveHold {
+        attempt: "A1".into(),
+        target: candidate.to_string(),
+        unknown_outcome: true,
+        holds: Default::default(),
+        signature: Some("sig".into()),
+        last_valid_block_height: Some(900),
+    }])
+    .unwrap();
+    f.owner.sync_ownership();
+    assert_eq!(f.owner.ownership.counts().submitted, 1);
+    mt5_apply(&mut f, message(identity.clone()));
+    assert_eq!(
+        f.owner
+            .metrics
+            .result_actions
+            .get(ResultAction::DropForeignInflight),
+        1
+    );
+    assert!(!f.owner.projection_cache.contains_key(&candidate));
+    assert!(f.owner.detect_queue.is_empty());
+    assert_eq!(f.owner.projection_stats.requeued, 0);
+    assert_eq!(f.owner.ownership.counts().submitted, 1, "untouched");
+    // Released by the book: an older revision than the account's newest yields to it.
+    f.owner.reservations = WalletReservations::default();
+    f.owner.sync_ownership();
+    assert!(f.owner.ownership.is_empty());
+    f.owner.candidate_revisions.insert(candidate, 2);
+    mt5_apply(&mut f, message(identity.clone()));
+    assert_eq!(
+        f.owner
+            .metrics
+            .result_actions
+            .get(ResultAction::RetryNewestPending),
+        1
+    );
+    assert!(!f.owner.projection_cache.contains_key(&candidate));
+    assert_eq!(f.owner.projection_stats.requeued, 1);
+    assert_eq!(
+        f.owner.detect_queue.back().map(|w| (w.0, w.3)),
+        Some((candidate, TRIGGER_PROJECTION_REQUEUE))
+    );
+    // The newest revision, nobody owning the account: accepted and cached.
+    f.owner.detect_queue.clear();
+    f.owner.candidate_revisions.insert(candidate, 1);
+    mt5_apply(&mut f, message(identity));
+    assert_eq!(f.owner.metrics.result_actions.get(ResultAction::Accept), 1);
+    assert!(f.owner.projection_cache.contains_key(&candidate));
     cleanup(f);
 }

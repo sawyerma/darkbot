@@ -68,18 +68,19 @@ impl ShadowOwner {
         }
     }
 
-    /// The central policy's verdict on a result against the owner now, counted. The newest
-    /// revision and the in-flight entry are not consulted on any path yet: the projection
-    /// result is coalesced into the account's pending detection as before (MT5b owns the
-    /// in-flight lifecycle, MT7–MT9 the async results that need both).
+    /// The central policy's verdict on a result against the owner now, counted: the owner's
+    /// generations, clock and readset epochs, the account's newest revision
+    /// (`candidate_revisions`: an older revision's result yields to it) and its in-flight
+    /// ownership (MT5b: the owning candidate, or a durable FE-04 attempt — SUBMITTED from the
+    /// reservation book — which drops every candidate's result as foreign).
     pub(super) fn judge(&mut self, identity: &CandidateIdentity) -> ResultAction {
         let action = {
             let current = Current {
                 generations: self.generations(),
                 now_ns: self.clock.now_ns(),
                 epochs: &self.st,
-                newest_revision: None,
-                inflight: None,
+                newest_revision: self.candidate_revisions.get(&identity.account).copied(),
+                inflight: self.ownership.inflight(&identity.account),
             };
             result_action(identity, &current)
         };

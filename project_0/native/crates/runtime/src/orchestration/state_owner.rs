@@ -83,6 +83,7 @@ mod setup;
 use ingress::{IngressSession, IngressSessions, RetiredEvents};
 mod fe04;
 mod generations;
+mod ownership;
 mod shutdown;
 mod sources;
 mod sweep;
@@ -135,6 +136,9 @@ pub(super) struct ShadowOwner {
     /// P6-MT.2 (MT5a): lane and `t_rx_first` of the detection selected from the lanes, handed
     /// to the next `detect` step (`None` for an immediate detection).
     detect_origin: Option<generations::DetectOrigin>,
+    /// P6-MT.1 (MT5b): the per-account ownership table — EXECUTING/SIGNED by a candidate of
+    /// this run, SUBMITTED synchronized from the reservation book (`ownership.rs`).
+    ownership: crate::execution::ownership::AccountOwnership,
     /// C11: the liquidator's ATA addresses per mint, derived once.
     atas: accounts::LiquidatorAtas,
     min_profit: i128,
