@@ -6,19 +6,17 @@
 //! `p0-capacity --duration SECS --out DIR [--capture-source logs|transactions]
 //!   [--chain-verify off|index|strict|crosscheck] [--verify-rps N] [--verify-calls N]
 //!   [--verify-seconds N] [--verify-max-pages N] [--verify-bytes N] [--verify-disk-bytes N]
-//!   [--basis-root DIR [--exclude-run DIR]] [--basis-run DIR]... [--probe-mib N]
-//!   [--storage-preflight-render PATH]`
+//!   [--basis-root DIR [--exclude-run DIR]] [--basis-run DIR]... [--probe-mib N]`
 //!
 //! `--basis-root` takes the newest valid runs under DIR (the run store root); `--basis-run`
-//! names runs explicitly (newest first). `--storage-preflight-render` writes the configuration
-//! part the transitional pinned run store requires, derived from the native report.
+//! names runs explicitly (newest first). The typed report is the only record (no JSON render).
 use darkbot_runner::storage::preflight::{self, discover_runs, Request, VerifyMode};
 use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = (|| -> Result<bool, String> {
-        let (mut duration, mut out, mut probe_mib, mut render) = (None, None, 64u64, None);
+        let (mut duration, mut out, mut probe_mib) = (None, None, 64u64);
         let (mut source, mut mode) = ("logs".to_string(), VerifyMode::Off);
         let (mut basis_root, mut exclude, mut runs) = (None, None, Vec::new());
         let mut verify: Vec<(String, u64)> = Vec::new();
@@ -49,7 +47,6 @@ fn main() {
                 "--exclude-run" => exclude = Some(PathBuf::from(value()?)),
                 "--basis-run" => runs.push(PathBuf::from(value()?)),
                 "--probe-mib" => probe_mib = number(value()?)?,
-                "--storage-preflight-render" => render = Some(PathBuf::from(value()?)),
                 other => return Err(format!("UNKNOWN_ARGUMENT: {other}")),
             }
         }
@@ -74,13 +71,6 @@ fn main() {
         }
         let report = preflight::run(req, &runs, probe_mib * 1024 * 1024)?;
         print!("{}", report.terminal());
-        if let Some(path) = render {
-            darkbot_runner::analytics::renders::storage_preflight_view(
-                &out.join(preflight::REPORT_JOURNAL),
-                &path,
-            )
-            .map_err(|e| format!("STORAGE_PREFLIGHT_RENDER {}: {e}", path.display()))?;
-        }
         Ok(report.start_allowed)
     })();
     match result {

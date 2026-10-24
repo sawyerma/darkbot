@@ -38,16 +38,19 @@ def archived_specs(run,spec):
 
 
 def journal_views(run):
-    """PERSIST-04: the JSONL/JSON views the pinned readers consume are explicit exports of the
-    run's binary journals. Before the capture is hashed, render missing views (for example after
-    a killed capture) and require every existing view to equal its render byte for byte.
+    """PERSIST-04/JFI-03: the historical views the pinned readers consume must equal the run's binary
+    journals byte for byte (read-only check `p0-journal renders RUN`, text). Nothing is rendered into
+    a run (P0-PROD-CTRL-02): a journal-era run with a missing view is BLOCKED for this reader.
     Historical runs without journals are left exactly as they are."""
     if not any(p.suffix=='.p0j' for p in run.rglob('*.p0j') if 'verification' not in p.relative_to(run).parts):return None
     binary=run_store.PROJECT/'native/target/release/p0-journal'
     if not binary.exists():raise c.ContractError('JOURNAL_TOOL_MISSING: build p0-journal (capture.sh builds it)')
-    p=subprocess.run([str(binary),'renders',str(run),'--create'],capture_output=True,text=True,timeout=3600)
+    p=subprocess.run([str(binary),'renders',str(run)],capture_output=True,text=True,timeout=3600)
     if p.returncode:raise c.ContractError('JOURNAL_VIEWS_INVALID: '+(p.stderr.strip().splitlines() or ['?'])[-1][:500])
-    return json.loads(p.stdout)
+    views=[line[5:].rsplit(' ',1) for line in p.stdout.splitlines() if line.startswith('VIEW ')]
+    missing=[name for name,status in views if status=='MISSING']
+    if missing:raise c.ContractError('JOURNAL_VIEWS_MISSING: '+','.join(missing[:5]))
+    return views
 
 
 def verify(run,v,qualification=None,offline=False,resume=False):
@@ -104,23 +107,9 @@ def verify(run,v,qualification=None,offline=False,resume=False):
                         artifacts[name]={'path':str(dest.relative_to(run)),'sha256':c.file_hash(dest)}
                 finally:a.close()
             else:
-                binary=run_store.PROJECT/'native/target/release/p0-strict-verify'
-                if not binary.exists():raise audit.AuditError('STRICT_BINARY_NOT_BUILT')
-                job={**asdict(v),'verification_spec_id':sid,'output':str(out/'strict'),
-                     'program':audit.PROGRAM,'start_ns':spec['window']['start_ns'],'end_ns':spec['window']['end_ns'],
-                     'rps':v.rps,'offline':offline}
-                c.immutable(attemptdir/'job.json',job)
-                with (attemptdir/'worker_stderr.txt').open('x') as err:
-                    # The Rust verifier keeps native .p0j evidence; --compat additionally renders the
-                    # legacy checkpoint/views this transitional driver and the report read (until B7).
-                    proc=subprocess.run([str(binary),str(attemptdir/'job.json'),'--compat'],capture_output=False,
-                        stdout=subprocess.PIPE,stderr=err,timeout=v.max_seconds+20,text=True)
-                if proc.returncode:raise audit.AuditError('STRICT_WORKER_FAILED')
-                summary=json.loads(proc.stdout)
-                summary['binary_sha256']=c.file_hash(binary)
-                for batch in summary.get('batches',[]):
-                    path=out/'strict'/batch['checkpoint']
-                    artifacts[batch['checkpoint']]={'path':str(path.relative_to(run)),'sha256':c.file_hash(path)}
+                # JFI-01/P0-PROD-CTRL-02: no Python→Rust job handoff; strict verification is native
+                # (`p0ctl verify --mode strict`) and needs a run with native records.
+                raise audit.AuditError('HISTORICAL_STRICT_BLOCKED: strict verification is native (p0ctl verify --mode strict)')
             resource_guard(out,v,deadline)
             c.check_capture(run,evidence)
         except (audit.AuditError,c.ContractError) as exc:

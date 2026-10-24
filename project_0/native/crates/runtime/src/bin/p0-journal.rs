@@ -1,17 +1,17 @@
-//! Offline inspection of the one binary journal contract (PERSIST-01/04). Read only:
+//! Offline inspection of the one binary journal contract (PERSIST-01/04). Read only, text output
+//! (JFI-01/03, P0-PROD-CTRL-02: no JSON or JSONL is written or printed):
 //! `verify` checks magic, version, every CRC, the SHA256 chain and the manifest;
-//! `export` writes an explicit JSONL export to a fresh destination, never over existing bytes;
-//! `frames JOURNAL` prints every frame (kind, sequence, provenance, value) as JSONL to stdout;
+//! `frames JOURNAL` prints every frame (kind, sequence, provenance, typed value) as text;
 //! `import KIND JOURNAL` writes typed `key=value` rows from stdin into a new journal (census kinds
 //! only);
 //! `import-provider-evidence JSON JOURNAL` turns a measured provider evidence JSON into the typed
 //! `PROVIDER_EVIDENCE` record the network boot audit reads (X2);
-//! `renders RUN [--create]` checks every legacy view of a run byte for byte against its journal
-//! and, with `--create`, renders the missing ones (for example after a killed capture).
+//! `renders RUN` checks every existing historical view of a run byte for byte against its
+//! journal (read only; a missing view stays MISSING, nothing is rendered into the run).
 use darkbot_runner::analytics::journal::{self, Reader, MANIFEST};
 use darkbot_runner::analytics::renders;
 use std::{collections::BTreeMap, path::Path};
-fn verify(path: &Path) -> Result<serde_json::Value, String> {
+fn verify(path: &Path) -> Result<String, String> {
     // SK-07: the chain is verified first (links, successors, orphans); then every segment's
     // frames are counted. A single-segment journal is a chain of one.
     let chain = darkbot_runner::storage::segments::verify_chain(path)?;
@@ -29,14 +29,21 @@ fn verify(path: &Path) -> Result<serde_json::Value, String> {
         frames += reader.frames();
         root = reader.root();
     }
-    Ok(serde_json::json!({
-        "frames": frames,
-        "segments": chain.segments,
-        "root_sha256": journal::hex(&root),
-        "sealed": chain.sealed,
-        "status": if !chain.sealed { "OPEN" } else if chain.complete { "COMPLETE" } else { "INCOMPLETE" },
-        "kinds": kinds.into_iter().map(|(k, n)| (k.to_string(), serde_json::Value::from(n))).collect::<serde_json::Map<_, _>>(),
-    }))
+    let status = if !chain.sealed {
+        "OPEN"
+    } else if chain.complete {
+        "COMPLETE"
+    } else {
+        "INCOMPLETE"
+    };
+    let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{k}:{n}")).collect();
+    Ok(format!(
+        "JOURNAL status={status} frames={frames} segments={} sealed={} root_sha256={} kinds={}",
+        chain.segments,
+        chain.sealed,
+        journal::hex(&root),
+        kinds.join(",")
+    ))
 }
 /// Explicit offline import of one row stream (the C0 census). Only kinds listed as importable
 /// are accepted, so runtime or financial journals can never be forged here. JFI: each stdin line
@@ -132,15 +139,14 @@ fn frames(path: &Path) -> Result<(), String> {
     }
     out.flush().map_err(|e| e.to_string())
 }
-fn views(run: &Path, create: bool) -> Result<(), String> {
+fn views(run: &Path) -> Result<(), String> {
     let paths = renders::detect(run)?;
-    let rows: Vec<_> = renders::ensure(&paths, create)?
-        .into_iter()
-        .map(|(path, status)| {
-            serde_json::json!({"view": path.strip_prefix(run).unwrap_or(&path), "status": status})
-        })
-        .collect();
-    println!("{}", serde_json::Value::Array(rows));
+    for (path, status) in renders::check(&paths)? {
+        println!(
+            "VIEW {} {status}",
+            path.strip_prefix(run).unwrap_or(&path).display()
+        );
+    }
     Ok(())
 }
 fn main() {
@@ -152,17 +158,6 @@ fn main() {
         .as_slice()
     {
         ["verify", path] => verify(Path::new(path)).map(|v| println!("{v}")),
-        ["export", path, destination] => {
-            journal::export(Path::new(path), Path::new(destination), None, false)
-                .map_err(|e| e.to_string())
-        }
-        ["export", path, destination, "--kind", kind] => kind
-            .parse()
-            .map_err(|_| "KIND_INVALID".to_string())
-            .and_then(|k| {
-                journal::export(Path::new(path), Path::new(destination), Some(k), false)
-                    .map_err(|e| e.to_string())
-            }),
         ["frames", path] => frames(Path::new(path)),
         ["import", kind, path] => kind
             .parse()
@@ -171,12 +166,11 @@ fn main() {
         ["import-provider-evidence", json, out] => {
             import_provider_evidence(Path::new(json), Path::new(out))
         }
-        ["renders", run] => views(Path::new(run), false),
-        ["renders", run, "--create"] => views(Path::new(run), true),
+        ["renders", run] => views(Path::new(run)),
         _ => Err(
-            "usage: p0-journal verify JOURNAL | p0-journal export JOURNAL DESTINATION \
-                  [--kind N] | p0-journal frames JOURNAL | p0-journal import KIND JOURNAL | \
-                  p0-journal import-provider-evidence JSON JOURNAL | p0-journal renders RUN [--create]"
+            "usage: p0-journal verify JOURNAL | p0-journal frames JOURNAL | \
+                  p0-journal import KIND JOURNAL | p0-journal import-provider-evidence JSON JOURNAL | \
+                  p0-journal renders RUN"
                 .into(),
         ),
     };

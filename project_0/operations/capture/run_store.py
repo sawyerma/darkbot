@@ -198,14 +198,21 @@ def locate_run(value,project=PROJECT):
         found={(Path(project)/r/value).resolve() for r in ROOTS if (Path(project)/r/value).is_dir()}
         if len(found)!=1:raise RunStoreError('RUN_NOT_FOUND_OR_AMBIGUOUS')
         run=found.pop()
+    # The pinned readers serve historical runs only: a run with native records is refused before its
+    # layout is even classified (it is read natively, JFI-01/03).
+    if native_records(run):raise RunStoreError('NATIVE_RUN_REFUSED')
     detect_layout(run)
     return run
+
+def native_records(run):
+    """A run with native records (a typed run manifest)."""
+    return (Path(run)/'capture'/'run_manifest.p0j').exists() or (Path(run)/'run_manifest.p0j').exists()
 
 def refuse_native(args):
     """JFI-01/03: a pinned reader never runs on a run with native records (no fallback)."""
     for i,a in enumerate(args):
         run=args[i+1] if a=='--run' and i+1<len(args) else a[6:] if a.startswith('--run=') else None
-        if run and ((Path(run)/'capture'/'run_manifest.p0j').exists() or (Path(run)/'run_manifest.p0j').exists()):
+        if run and native_records(run):
             raise RunStoreError('NATIVE_RUN_REFUSED')
 
 def run_arguments(argv,project=PROJECT):

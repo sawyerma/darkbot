@@ -380,7 +380,7 @@ project_0/
 │   ├── capture/                      <- run_store.py (run storage/layout contract), c0_census.py
 │   ├── verification/                 <- audit_market_quick.py, measurement_verify.py
 │   ├── reporting/                    <- market_report.py
-│   └── qualification/                <- fe_candidate_report.py, run_r126/r127_qualify.py
+│   └── qualification/                <- fe_candidate_report.py
 │
 ├── scripts/                          <- stable shell entry points (iterations 21-25)
 │   ├── capture.sh                    <- econ4h typed measurement, econ4h-launcher, market, shadow
@@ -638,9 +638,9 @@ Directory: [scripts/](scripts/)
 | [preflight.sh](scripts/preflight.sh) | Read-only FE preflight and effective-config inspection. |
 | [test.sh](scripts/test.sh) | Required PHASENPLAN entrypoint for typed capture. Obsolete forwarding scripts and Python wrappers were removed (25.10., P0-PROD-CTRL-09); use the six active shell commands or `python3 -m operations.<area>.<module>`. |
 
-Python implementations live in [operations/](operations/): [c0_census.py](operations/capture/c0_census.py) (account census),
-[run_r126_qualify.py](operations/qualification/run_r126_qualify.py) and [run_r127_qualify.py](operations/qualification/run_r127_qualify.py)
-(historical Shadow qualification harnesses), and the measurement CLI, verifier and report modules listed above.
+Python implementations live in [operations/](operations/): [c0_census.py](operations/capture/c0_census.py) (account census)
+and the pinned historical verifier and report modules listed above (runs without native records only). The former R126/R127
+Python qualification harnesses were removed (25.10., P0-PROD-CTRL-02/09); qualification is native (`p0ctl qualify`).
 
 A qualification script must exercise production components; it must not silently implement a second version of business logic.
 
@@ -795,10 +795,10 @@ Mainnet Shadow entry:
 project_0/scripts/capture.sh shadow
 ```
 
-Qualification:
+Qualification (native, after the verification):
 
 ```bash
-python3 project_0/operations/qualification/run_r127_qualify.py ...
+project_0/native/target/release/p0ctl qualify --run RUN_ID
 ```
 
 Do not enable value-bearing LIVE solely because workspace tests are green. Follow the gates in `docs/STATUS.md` and the measurement ledger.

@@ -7,7 +7,7 @@ use super::payload::{self, Payload};
 use serde_json::{Map, Number, Value};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -1176,14 +1176,11 @@ pub fn file_sha256(path: &Path) -> io::Result<[u8; 32]> {
         h.hash(&b[..n]);
     }
 }
-/// Explicit offline export. A fresh destination is mandatory; primary bytes are never changed.
-pub fn export(path: &Path, destination: &Path, kind: Option<u16>, single: bool) -> io::Result<()> {
-    export_views(path, &[(kind, destination)], single).map(|_| ())
-}
-/// Explicit offline export of several views (JSONL, one value per line) in one verified
-/// pass. The views appear only complete and together: each is built beside its destination
-/// and linked into place without overwriting after the whole journal was read without
-/// error; a failed or damaged journal leaves no file behind. Returns the rows per view.
+/// Test-only builder of historical-style JSONL views (one value per line) for fixtures of the
+/// read-only historical view check; no production path writes a JSON view (JFI-01/03,
+/// P0-PROD-CTRL-02). The views appear only complete and together; a damaged journal leaves no
+/// file behind. Returns the rows per view.
+#[cfg(test)]
 pub fn export_views(
     path: &Path,
     views: &[(Option<u16>, &Path)],
@@ -1220,7 +1217,7 @@ pub fn export_views(
                     .create_new(true)
                     .write(true)
                     .open(p)
-                    .map(BufWriter::new)
+                    .map(std::io::BufWriter::new)
             })
             .collect::<io::Result<Vec<_>>>()?;
         let mut rows = vec![0u64; views.len()];

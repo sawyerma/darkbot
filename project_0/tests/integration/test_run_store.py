@@ -220,51 +220,46 @@ class Launchers(unittest.TestCase):
                                      capture_output=True,text=True,timeout=60)
                     self.assertNotEqual(x.returncode,0,x.stderr);self.assertIn('usage:',x.stderr)
                     self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
-                    # F4 (next unit): the remaining offline JSON renders of p0-journal; the views below come from it.
-                    p=subprocess.run([str(REPO/'project_0/native/target/release/p0-journal'),'renders',str(run),'--create'],
-                                     capture_output=True,text=True,timeout=60)
-                    self.assertEqual(p.returncode,0,p.stderr)
-                    self.assertEqual(s.detect_layout(run),layout);self.assertEqual(a.find_run(str(run)),run.resolve())
-                    manifest=json.loads(s.artifact(run,'manifest').read_text())  # written by the real Rust runtime
-                    self.assertEqual(manifest['plan'],s.config_part(run,'measurement_plan'))
-                    self.assertEqual((manifest['capture_run_id'],manifest['live_enabled'],manifest['submission_enabled']),(run_id,False,False))
-                    self.assertEqual(manifest['schema'],'C0-E1/MeasurementManifest/3' if layout=='v2' else 'C0-E1/MeasurementManifest/2')
-                    phases=[json.loads(x)['phase'] for x in s.artifact(run,'phases').read_text().splitlines()]
-                    self.assertEqual(phases[0],'BOOTSTRAP')
-                    for part in ('storage_preflight','candidate_manifest'):self.assertIsInstance(s.config_part(run,part),dict)
+                    # The layout and identity of a native run come from its typed records (the pinned Python run
+                    # store classifies historical runs only).
+                    ctl=REPO/'project_0/native/target/release/p0ctl';tool=REPO/'project_0/native/target/release/p0-journal'
+                    # The typed manifest of the real Rust runtime, read natively: the binary consumed exactly the
+                    # persisted plan journal; LIVE and submission are off.
+                    st=subprocess.run([str(ctl),'--project',str(project),'run','status','--run',str(run)],env=env,capture_output=True,text=True,timeout=60)
+                    self.assertEqual(st.returncode,0,st.stderr)
+                    self.assertIn(f'manifest: run_id={run_id} plan_duration=61s plan_bound=yes live_enabled=false submission_enabled=false',st.stdout)
+                    self.assertIn('duration=61s',st.stdout)  # typed capacity report
                     for name in ('build_log','console_summary','runtime_log'):
-                        self.assertTrue(s.artifact(run,name).is_file(),name)
-                    # PERSIST-01: binary journals are primary; the pinned readers' JSONL files are renders.
-                    evaluations=s.artifact(run,'shadow_evaluations').with_suffix('.p0j')
+                        self.assertTrue(s.artifact(run,name,layout).is_file(),name)
+                    # PERSIST-01: binary journals are the only records (no JSONL beside them).
+                    evaluations=s.artifact(run,'shadow_evaluations',layout).with_suffix('.p0j')
                     self.assertTrue(evaluations.is_file())
-                    for name in ('shadow_evaluations','shadow_offsets'):self.assertFalse(s.artifact(run,name).exists(),name)
-                    tool=REPO/'project_0/native/target/release/p0-journal'
+                    for name in ('shadow_evaluations','shadow_offsets'):self.assertFalse(s.artifact(run,name,layout).exists(),name)
                     # No evaluation was lost (stream COMPLETE); the run failed (phases INCOMPLETE); the market
-                    # capture never started (X1 refusal). Every journal verifies end to end.
-                    self.assertFalse((s.artifact(run,'market')/'market.p0j').exists())
-                    for journal,status in ((evaluations,'COMPLETE'),(s.artifact(run,'phases').with_suffix('.p0j'),'INCOMPLETE')):
+                    # capture never started (X1 refusal). Every journal verifies end to end (text report).
+                    self.assertFalse((s.artifact(run,'market',layout)/'market.p0j').exists())
+                    phases=s.artifact(run,'phases',layout).with_suffix('.p0j')
+                    for journal,status in ((evaluations,'COMPLETE'),(phases,'INCOMPLETE')):
                         p=subprocess.run([str(tool),'verify',str(journal)],capture_output=True,text=True,timeout=60)
-                        self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['status'],status,journal)
-                    # The capture writes no JSONL: views are MISSING until rendered explicitly, then they must be
-                    # created once and match byte for byte (rendered across segment chains).
+                        self.assertEqual(p.returncode,0,p.stderr);self.assertTrue(p.stdout.startswith(f'JOURNAL status={status} '),p.stdout)
+                    p=subprocess.run([str(tool),'frames',str(phases)],capture_output=True,text=True,timeout=60)
+                    self.assertEqual(p.returncode,0,p.stderr)
+                    first=next(x for x in p.stdout.splitlines() if ' kind=65535 ' not in x)
+                    self.assertIn('Bootstrap',first)
+                    # The read-only historical view check finds no view and renders none into the run.
                     p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
                     self.assertEqual(p.returncode,0,p.stderr)
-                    self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME','MISSING') for v in json.loads(p.stdout)),p.stdout)
-                    p=subprocess.run([str(tool),'renders',str(run),'--create'],capture_output=True,text=True,timeout=60)
-                    self.assertEqual(p.returncode,0,p.stderr)
-                    self.assertTrue(all(v['status'] in ('CREATED','MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
-                    p=subprocess.run([str(tool),'renders',str(run)],capture_output=True,text=True,timeout=60)
-                    self.assertTrue(all(v['status'] in ('MATCHES','NO_FRAME') for v in json.loads(p.stdout)),p.stdout)
-                    log=s.artifact(run,'runtime_log').read_text()
+                    self.assertTrue(all(x.split()[-1] in ('MISSING','NO_FRAME') for x in p.stdout.splitlines()),p.stdout)
+                    self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
+                    log=s.artifact(run,'runtime_log',layout).read_text()
                     self.assertIn('C0_E1_ADMISSION_REFUSED BOOT_NETWORK_AUDIT_MISSING',log);self.assertNotIn('C0_E1_WARMUP_FAILED',log)
-                    self.assertEqual(c.capture_identity(run)['capture_run_id'],run_id)
                     p=subprocess.run(['bash',str(project/'scripts/verify.sh'),'--run',run_id,'--offline','--mode','off'],
                                      env={**clean_env(),'P0_ENV_FILE':str(tmp/'absent.env')},capture_output=True,text=True,timeout=120,cwd=tmp)
                     # JFI-01/03: the pinned Python verifier never reads a native run (no fallback).
                     self.assertEqual(p.returncode,2);self.assertIn('NATIVE_RUN_REFUSED',p.stderr)
             new=project/'data/runs/new_run'
             self.assertTrue(set(x.name for x in new.iterdir())<=set(s.V2_ROOT))
-            self.assertEqual(json.loads((new/'config.json').read_text())['schema'],s.RUN_CONFIG_SCHEMA)
+            self.assertFalse((new/'config.json').exists())  # no JSON configuration document (P0-PROD-CTRL-02)
             self.assertFalse(list((tmp/'tmpdir').glob('p0-run-config.*')))  # staging directory removed on exit
             self.assertFalse(any((project/'data/econ4h/old_run'/n).exists() for n in s.V2_ONLY))
             p=launch({'P0_RUN_STORE':'runs','P0_ECON_RUN_ID':'old_run'})

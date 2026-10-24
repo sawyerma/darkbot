@@ -1446,12 +1446,6 @@ mod tests {
             journal::read_typed_value::<CapacityReport>(&kept).unwrap(),
             report
         );
-        let view = d.join("new/storage_preflight.json");
-        let render = crate::analytics::renders::storage_preflight_view;
-        assert_eq!(render(&kept, &view).unwrap(), "CREATED");
-        assert_eq!(render(&kept, &view).unwrap(), "MATCHES");
-        std::fs::write(&view, b"{}\n").unwrap();
-        assert!(render(&kept, &view).is_err());
         std::fs::remove_dir_all(d).unwrap();
     }
 }

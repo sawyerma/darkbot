@@ -51,7 +51,7 @@ class CensusImport(unittest.TestCase):
             self.assertEqual(p.returncode, 2)
             self.assertIn('IMPORT_ROW_FORMAT', p.stderr)
             verify = run('verify', str(path))
-            self.assertIn('"INCOMPLETE"', verify.stdout)
+            self.assertIn('status=INCOMPLETE ', verify.stdout)  # text report (no JSON)
 
     def test_runtime_kinds_are_not_importable(self):
         with tempfile.TemporaryDirectory() as d:

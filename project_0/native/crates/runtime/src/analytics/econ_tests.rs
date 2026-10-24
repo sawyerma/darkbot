@@ -2358,7 +2358,7 @@ fn runtime_worker_writes_layout_v2_capture_and_snapshots() {
     assert_no_json(&root);
 }
 #[test]
-fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
+fn historical_views_are_checked_read_only_against_the_journals() {
     use crate::analytics::renders;
     let root = four_snapshots_then_identical_final(crate::run_layout::RunLayout::V2);
     // A worker-only run has no manifest.json, which `detect` needs to recognize layout V2.
@@ -2367,16 +2367,15 @@ fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
         crate::run_layout::RunLayout::V1
     );
     let paths = crate::run_layout::RunPaths::new(&root, crate::run_layout::RunLayout::V2);
-    let status = |create| -> BTreeMap<String, &'static str> {
-        renders::ensure(&paths, create)
+    let status = || -> BTreeMap<String, &'static str> {
+        renders::check(&paths)
             .unwrap()
             .into_iter()
             .map(|(p, s)| (p.strip_prefix(&root).unwrap().display().to_string(), s))
             .collect()
     };
-    // The run wrote no view: every one is missing until the explicit export creates it, and
-    // each created view is the byte-exact render of its journal frame.
-    let before = status(false);
+    // The run wrote no view (P0-PROD-CTRL-02): every one is MISSING and none is rendered into it.
+    let before = status();
     for name in [
         "snapshots/hour_01.json",
         "snapshots/hour_04.json",
@@ -2391,8 +2390,16 @@ fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
             "{name} {before:?}"
         );
     }
-    assert!(status(true).values().all(|s| *s == "CREATED"));
-    assert!(status(false).values().all(|s| *s == "MATCHES"));
+    // A historical run carries the views written in its time: the read-only check accepts exactly
+    // the byte-exact render of its journal frames.
+    for v in renders::views(&paths).unwrap() {
+        if v.journal.exists() {
+            if let Some(bytes) = renders::render(&v).unwrap() {
+                fs::write(&v.output, bytes).unwrap();
+            }
+        }
+    }
+    assert!(status().values().all(|s| *s == "MATCHES"));
     let (frames, last) = report_frames(&root.join("snapshots").join(REPORT_JOURNAL));
     let pretty = |v: &Value| format!("{}\n", serde_json::to_string_pretty(v).unwrap());
     let hour4 = frames.iter().rev().find(|f| f.index == 4).unwrap();
@@ -2409,7 +2416,7 @@ fn legacy_views_are_checked_and_missing_ones_rendered_from_the_journals() {
     let mut bytes = fs::read(&hour).unwrap();
     bytes.insert(1, b' ');
     fs::write(&hour, &bytes).unwrap();
-    let err = renders::ensure(&paths, true).unwrap_err();
+    let err = renders::check(&paths).unwrap_err();
     assert!(err.starts_with("RENDER_MISMATCH"), "{err}");
     assert_eq!(fs::read(&hour).unwrap(), bytes);
 }

@@ -35,7 +35,7 @@ temporary files must not persist in the project tree.
 | `operations/cli/measurement_cli.py finish` | `post_capture_report.<format>`, `post_capture_result.json` | V2 `reports/`, V1 run root |
 | `operations/qualification/fe_candidate_report.py`, `fe_readonly_preflight.py` (`preflight.sh`), `p0-fe-qualify` | evidence candidates | explicit `--output` (required) |
 | `operations/capture/c0_census.py` | census snapshots | `data/c0` resolved from the script location (no longer from the working directory) |
-| `capture.sh shadow`, `operations/qualification/run_r126_qualify.py`, `run_r127_qualify.py` | shadow records and qualification logs | `data/shadow/` |
+| `capture.sh shadow` | shadow records | `data/shadow/` |
 
 ## 3. Ignore boundaries
 

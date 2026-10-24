@@ -1,7 +1,6 @@
-//! Legacy views of a run, rendered from its binary journals (PERSIST-04/JFI-03). Only the
-//! explicit offline export (`p0-journal renders RUN --create`) writes them, for the pinned
-//! readers; a run never does. A view is created only if missing and never overwritten; an
-//! existing view must be byte-identical to its render.
+//! Read-only check of the historical views of a run against its binary journals (PERSIST-04,
+//! JFI-03: an isolated offline decoder). An existing view must be byte-identical to its render;
+//! nothing is ever written (P0-PROD-CTRL-02: no JSON view of a journal is produced).
 use super::journal::{self, kind, MANIFEST};
 use crate::run_layout::{RunLayout, RunPaths};
 use std::io;
@@ -9,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// One compact JSON value per line (`journal::export`).
+    /// One compact JSON value per line.
     Lines,
     /// The newest matching frame as pretty JSON plus newline (`econ::atomic_json`).
     Pretty,
@@ -281,9 +280,9 @@ pub fn render(view: &View) -> io::Result<Option<Vec<u8>>> {
     })
 }
 
-/// Outcome per view: `MATCHES`, `CREATED`, `MISSING` (not created) or `NO_FRAME`.
-/// Any existing view that differs from its render is an error; nothing is ever overwritten.
-pub fn ensure(paths: &RunPaths, create: bool) -> Result<Vec<(PathBuf, &'static str)>, String> {
+/// Outcome per view: `MATCHES`, `MISSING` (no view file) or `NO_FRAME`. Any existing view that
+/// differs from its render is an error; nothing is written.
+pub fn check(paths: &RunPaths) -> Result<Vec<(PathBuf, &'static str)>, String> {
     let mut outcome = Vec::new();
     for view in views(paths)? {
         if !view.journal.exists() {
@@ -301,21 +300,15 @@ pub fn ensure(paths: &RunPaths, create: bool) -> Result<Vec<(PathBuf, &'static s
                 }
                 "MATCHES"
             }
-            (Some(_), false) if !create => "MISSING",
-            (Some(bytes), false) => {
-                write_new(&view.output, &bytes)
-                    .map_err(|e| format!("RENDER_WRITE {}: {e}", view.output.display()))?;
-                "CREATED"
-            }
+            (Some(_), false) => "MISSING",
         };
         outcome.push((view.output, status));
     }
     Ok(outcome)
 }
 
-/// `storage_preflight.json`: the run-configuration part the pinned run store requires
-/// (`CONFIG_REQUIRED`), derived from the native capacity report, which stays the record
-/// (JFI-FIX-04 transitional render; removed when the run store is re-pinned).
+/// `storage_preflight` part of a historical run configuration view, derived from the native
+/// capacity report (read-only check of historical views only).
 #[derive(serde::Serialize)]
 struct StoragePreflightView<'a> {
     schema: &'static str,
@@ -328,7 +321,7 @@ struct StoragePreflightView<'a> {
     required_bytes: Option<u64>,
 }
 
-/// The run store's `storage_preflight` document of a sealed capacity report.
+/// The `storage_preflight` part of a sealed capacity report.
 fn storage_preflight_render(report: &Path) -> io::Result<StoragePreflightView<'static>> {
     use crate::storage::preflight::CapacityReport;
     let r: CapacityReport = journal::read_typed_value(report)?;
@@ -342,44 +335,4 @@ fn storage_preflight_render(report: &Path) -> io::Result<StoragePreflightView<'s
         free_bytes: r.environment.free_disk_bytes,
         required_bytes: r.disk_need_bytes,
     })
-}
-
-/// Renders `output` from the sealed capacity report; an existing file must be byte-identical.
-pub fn storage_preflight_view(report: &Path, output: &Path) -> io::Result<&'static str> {
-    let view = storage_preflight_render(report)?;
-    let mut bytes = serde_json::to_vec_pretty(&view).map_err(io::Error::other)?;
-    bytes.push(b'\n');
-    if output.exists() {
-        return if std::fs::read(output)? == bytes {
-            Ok("MATCHES")
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "RENDER_MISMATCH",
-            ))
-        };
-    }
-    write_new(output, &bytes)?;
-    Ok("CREATED")
-}
-
-/// Fresh file only, complete or absent: written beside the target and linked into place.
-fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::io::Write;
-    let partial = path.with_file_name(format!(
-        ".{}.partial-{}",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("view"),
-        std::process::id()
-    ));
-    let written = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&partial)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        std::fs::hard_link(&partial, path)
-    })();
-    let _ = std::fs::remove_file(&partial);
-    written
 }

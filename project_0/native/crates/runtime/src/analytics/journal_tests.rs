@@ -142,9 +142,9 @@ fn explicit_export_matches_legacy_jsonl_and_never_overwrites() {
     let mut w = Writer::create(&path).unwrap();
     w.test_append_historical(kind::FE01_READ, &value).unwrap();
     w.seal(true).unwrap();
-    super::export(&path, &export, None, false).unwrap();
+    super::export_views(&path, &[(None, export.as_path())], false).unwrap();
     assert_eq!(fs::read_to_string(&export).unwrap(), format!("{value}\n"));
-    assert!(super::export(&path, &export, None, false).is_err());
+    assert!(super::export_views(&path, &[(None, export.as_path())], false).is_err());
     fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
 #[test]
@@ -182,7 +182,7 @@ fn export_of_a_damaged_journal_leaves_no_partial_file() {
     let mut bytes = fs::read(&path).unwrap();
     bytes.truncate(bytes.len() - 1);
     fs::write(&path, bytes).unwrap();
-    assert!(super::export(&path, &export, None, false).is_err());
+    assert!(super::export_views(&path, &[(None, export.as_path())], false).is_err());
     let names: Vec<_> = fs::read_dir(path.parent().unwrap())
         .unwrap()
         .map(|e| e.unwrap().file_name())

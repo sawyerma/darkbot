@@ -986,81 +986,6 @@ fn read_report_inner(
     r
 }
 
-// ------------------------------------------------------------------------------------------
-// Transitional compatibility render (explicit `--compat` of the pinned Python driver/report;
-// removed together with that driver by the native report chain, B7). Never the primary record.
-// ------------------------------------------------------------------------------------------
-
-fn compat_immutable(path: &Path, value: &Value) -> Result<(), String> {
-    if path.exists() {
-        let old: Value = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-            .map_err(|_| "COMPAT_RENDER_CORRUPT".to_string())?;
-        return if old == *value {
-            Ok(())
-        } else {
-            Err("COMPAT_RENDER_CONFLICT".into())
-        };
-    }
-    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
-    let mut f = File::create(&tmp).map_err(|e| e.to_string())?;
-    serde_json::to_writer(&mut f, value).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
-    fs::hard_link(&tmp, path).map_err(|e| e.to_string())?;
-    fs::remove_file(tmp).map_err(|e| e.to_string())
-}
-
-/// Legacy JSON checkpoint + batch views + summary for the pinned Python consumers, rendered
-/// from the verified native evidence. Existing renders must be identical.
-pub fn render_compat(job: &Job, result: &StrictResult) -> Result<Value, String> {
-    let file_hash = |p: &Path| -> Result<String, String> {
-        journal::file_sha256(p)
-            .map(|b| solana_sdk::hash::Hash::new_from_array(b).to_string())
-            .map_err(|e| e.to_string())
-    };
-    let mut batches = Vec::new();
-    for b in &result.batches {
-        let c: StrictCheckpoint = journal::read_typed_value(&job.output.join(&b.checkpoint))
-            .map_err(|e| e.to_string())?;
-        let dir = job.output.join(&c.journal.directory);
-        let missing: Vec<_> = MARKET_VIEWS
-            .iter()
-            .filter(|(_, n)| !dir.join(n).exists())
-            .map(|(k, n)| (Some(*k), dir.join(n)))
-            .collect();
-        if missing.len() == MARKET_VIEWS.len() {
-            let refs: Vec<(Option<u16>, &Path)> =
-                missing.iter().map(|(k, p)| (*k, p.as_path())).collect();
-            journal::export_views(&dir.join(MARKET_JOURNAL), &refs, false)
-                .map_err(|e| e.to_string())?;
-        } else if !missing.is_empty() {
-            return Err("COMPAT_VIEWS_PARTIAL".into());
-        }
-        let mut files = serde_json::Map::new();
-        for (_, name) in MARKET_VIEWS {
-            files.insert(name.into(), json!(file_hash(&dir.join(name))?));
-        }
-        let legacy = json!({"spec": c.spec, "start": c.start, "end": c.end,
-            "previous_anchor": c.previous_anchor, "anchor": c.anchor,
-            "directory": c.journal.directory, "files": files, "proof": c.proof});
-        let name = b.checkpoint.replace(".p0j", ".json");
-        compat_immutable(&job.output.join(&name), &legacy)?;
-        batches.push(json!({"checkpoint": name, "digest": digest(&legacy)}));
-    }
-    Ok(json!({
-        "status": result.status.as_str(),
-        "reason": result.reason,
-        "canonical_verified": result.status == StrictStatus::CanonicalVerified,
-        "scope": result.scope.as_ref().map(|s| json!({"verification_spec_id": s.verification_spec_id,
-            "start_ns": s.start_ns, "end_ns": s.end_ns, "lo": s.lo, "hi": s.hi})),
-        "batches": batches,
-        "verification_spec_id": result.verification_spec_id,
-        "rpc_calls": result.rpc_calls,
-        "successful_response_bytes": result.successful_response_bytes,
-        "network_bytes_on_failed_request": Value::Null,
-        "c0_e1_master_pass": false,
-    }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1194,18 +1119,12 @@ mod tests {
             (69, 2)
         );
         assert!(report.terminal().contains("status=CANONICAL_VERIFIED"));
-        // No JSON evidence exists unless the compatibility render is requested.
+        // No JSON evidence exists (JFI-01: the compatibility render was removed).
         assert!(fs::read_dir(&j.output).unwrap().all(|e| !e
             .unwrap()
             .file_name()
             .to_string_lossy()
             .ends_with(".json")));
-        let compat = render_compat(&reload(&j), &resumed).unwrap();
-        assert_eq!(compat["status"], "CANONICAL_VERIFIED");
-        let legacy: Value =
-            serde_json::from_slice(&fs::read(j.output.join("batch_10_41.json")).unwrap()).unwrap();
-        assert_eq!(legacy["proof"]["complete"], true);
-        assert_eq!(render_compat(&reload(&j), &resumed).unwrap(), compat);
         fs::write(&checkpoint, b"broken").unwrap();
         let bad = run(reload(&j)).unwrap();
         assert_eq!(bad.reason.as_deref(), Some("CHECKPOINT_CORRUPT"));

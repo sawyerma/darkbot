@@ -1054,27 +1054,28 @@ mod persistence_tests {
             assert!(sealed.sealed && sealed.complete);
             assert!(finalize_phases(&paths, true).is_err()); // sealed once
             assert!(!root.join(phases_name).exists());
-            // The explicit offline export renders the manifest and the phase rows.
-            crate::analytics::renders::ensure(&paths, true).unwrap();
-            let exported: Value =
-                serde_json::from_slice(&fs::read(root.join(manifest_name)).unwrap()).unwrap();
-            assert_eq!(exported, manifest);
-            let rows: Vec<Value> = fs::read_to_string(root.join(phases_name))
-                .unwrap()
-                .lines()
-                .map(|s| serde_json::from_str(s).unwrap())
-                .collect();
+            // The typed records are read natively (no JSON view is rendered into the run).
+            let mut reader = crate::analytics::journal::Reader::open(
+                &crate::analytics::journal::binary_path(&root.join(phases_name)),
+            )
+            .unwrap();
+            let mut rows = Vec::new();
+            while let Some(f) = reader.next_frame().unwrap() {
+                if f.kind != crate::analytics::journal::MANIFEST {
+                    rows.push(f.typed::<PhaseRecord>().unwrap().phase);
+                }
+            }
             assert_eq!(rows.len(), 3);
-            // The typed CAPTURE phase renders the same window object the JSON phase carried.
-            assert_eq!(rows[1]["details"], serde_json::to_value(&window).unwrap());
-            assert_eq!(rows[1]["phase"], "CAPTURE");
-            assert_eq!(rows[2]["details"]["stop_reason"], "TIMER");
-            assert!(rows[2]["details"]["actual_capture_elapsed_ns"].is_null());
-            assert_eq!(rows[1]["details"]["capture_cutoff_ns"], 661 * NS);
-            assert_eq!(
-                rows[1]["details"]["snapshot_monotonic_ns"][0],
-                615_250_000_000u64
-            );
+            let Phase::Capture(captured) = &rows[1] else {
+                panic!("CAPTURE expected: {rows:?}")
+            };
+            assert_eq!(captured, &window);
+            assert_eq!(captured.capture_cutoff_ns, 661 * NS);
+            assert_eq!(captured.snapshot_monotonic_ns[0], 615_250_000_000u64);
+            assert!(matches!(
+                &rows[2],
+                Phase::Drain { stop_reason, actual_capture_elapsed_ns: None, .. } if stop_reason == "TIMER"
+            ));
         }
         assert_eq!(utc_ns(15_250_000_001), "1970-01-01T00:00:15.250000001Z");
     }
