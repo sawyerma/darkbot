@@ -634,7 +634,7 @@ fn every_projected_record_family_reaches_its_topic_with_all_public_required_leav
     use super::census;
     use darkbot_bsc_execution::acceptance_guard::V5_RELATIVE_PATH;
     use darkbot_bsc_record::schema::{g06a, g07, g08};
-    let launch: [&'static darkbot_bsc_record::Schema; 10] = [
+    let launch: [&'static darkbot_bsc_record::Schema; 11] = [
         &g06a::dry::NATIVE,
         &g06a::preflight::SCHEMA,
         &g06a::quote::SCHEMA,
@@ -644,6 +644,7 @@ fn every_projected_record_family_reaches_its_topic_with_all_public_required_leav
         &g06a::portal_upgrade::SCHEMA,
         &g06a::requalification::SCHEMA,
         &g06a::prepare_handoff::SCHEMA,
+        &g07::readiness::SCHEMA,
         &g07::contract::V5,
     ];
     let monitoring: [&'static darkbot_bsc_record::Schema; 8] = [

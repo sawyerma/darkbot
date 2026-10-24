@@ -4,6 +4,7 @@ import {describe,it,expect} from "vitest";
 import {readFileSync} from "node:fs";
 import {decodeStatus,decodeLaunch,decodeMonitoring,decodeWallets} from "./bscAdapter";
 import {statusTone} from "../model/status";
+import {nativeRows,sectionRecords} from "../model/placement";
 const golden=(name:string)=>Uint8Array.from(Buffer.from(readFileSync(new URL(`../../../../../protocol/golden/bsc/${name}.hex`,import.meta.url),"utf8").trim(),"hex"));
 describe("native BSC reporter contract",()=>{
  it("decodes the Rust golden projections without granting readiness or live authority",()=>{
@@ -12,6 +13,12 @@ describe("native BSC reporter contract",()=>{
   expect(decodeLaunch(golden("launch")).contractPresent).toBe(false);
   expect(decodeMonitoring(golden("monitoring")).state).toBe("NOT_EXECUTED");
   expect(decodeWallets(golden("wallets")).launcherBalanceWei).toBeUndefined();
+ });
+ it("shows the readiness record leaves without a typed field once, in Launch / BUY section 8",()=>{
+  const records=decodeLaunch(golden("launch")).records;
+  expect(sectionRecords(records,"launch",8).map(r=>r.schema)).toEqual(["darkbot.g07.readiness"]);
+  // status, mode, observed time and checks keep their typed rows; only the remaining leaves are added.
+  expect(nativeRows(records,"launch",8)).toEqual([{name:"Live authorized",value:"false",hint:"live_authorized · g07.readiness"}]);
  });
  it("maps qualified pass/running green, failure red, open states amber and unknown neutral",()=>{
   for(const state of ["RUNNING","PASS","PASS_READ_ONLY"])expect(statusTone(state)).toBe("green");

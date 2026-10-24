@@ -891,6 +891,8 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 &[&g06a::portal_upgrade::SCHEMA],
                 &[&g06a::requalification::SCHEMA],
                 &[&g06a::prepare_handoff::SCHEMA],
+                // Typed in ReadinessStatus; the record carries the remaining leaves.
+                &[&g07::readiness::SCHEMA],
             ],
         );
         if let Some(r) = contract
