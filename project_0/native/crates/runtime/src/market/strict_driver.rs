@@ -585,8 +585,7 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
         || std::env::var_os("P0_PROFILE").is_some()
     {
         let resolved =
-            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?
-                .native_only()?;
+            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?;
         for (k, v) in resolved.config.environment() {
             std::env::set_var(k, v);
         }

@@ -576,8 +576,7 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
     };
     let operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]);
     let resolved =
-        darkbot_solana::runtime_config::Resolved::parse(operational, &|k| std::env::var(k).ok())?
-            .native_only()?;
+        darkbot_solana::runtime_config::Resolved::parse(operational, &|k| std::env::var(k).ok())?;
     resolved.activate()?;
     provider::enable_measurement_budget();
     let c = darkbot_solana::runtime_config::active();

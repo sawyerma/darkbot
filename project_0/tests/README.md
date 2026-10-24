@@ -24,9 +24,8 @@ Remaining test doubles (kept on purpose; the code under test is always the produ
 
 | Double | Where | Why it stays |
 |---|---|---|
-| `FakeRPC`, `opener=` transports | `fixtures/p0_market.py`, `test_audit_market_quick.py`, `test_operational_config.py`, `test_fe_preflight.py` | stand-in for the mainnet RPC (network input); retry, budget and allowlist logic of the real `RPC` class runs |
+| `FakeRPC`, `opener=` transports | `fixtures/p0_market.py`, `test_audit_market_quick.py`, `test_operational_config.py` | stand-in for the mainnet RPC (network input); retry, budget and allowlist logic of the real `RPC` class runs |
 | `patch.object(a.RPC,'call',side_effect=AssertionError)` | `test_measurement_contract.py`, `test_measurement_p6.py` | proves that no network call happens; not a replacement |
-| patched `operational_config.resolve`, `subprocess.run`, `probe` | `test_fe_preflight.py` | the real `p0-fe-qualify` needs mainnet RPC and measured provider evidence; only the Python dispatch contract is checked |
 | fault injection (`atomic_json`, `write_snapshots`, `disk_usage` = 0) | `test_audit_market_quick.py`, `test_market_report.py`, `test_measurement_contract.py` | interrupted writes and a full disk cannot be produced deterministically otherwise |
 
 ## Layout
@@ -46,7 +45,7 @@ Historical raw evidence (`docs/evidence/AUDIT_20261005`, `R122`/`R124` JSON) is 
 | Old | New |
 |---|---|
 | `scripts/test_audit_market_quick.py` | `tests/python/test_audit_market_quick.py`; helpers in `tests/fixtures/p0_market.py` |
-| `scripts/test_fe_preflight.py`, `scripts/test_measurement_contract.py`, `scripts/test_run_layout.py` | `tests/python/` |
+| `scripts/test_measurement_contract.py`, `scripts/test_run_layout.py` | `tests/python/` |
 | `scripts/test_measurement_plan.py`, `test_operational_config.py`, `test_run_store.py`, `test_market_report.py`, `test_measurement_p6.py` | `tests/integration/` |
 | `scripts/test_fe_candidates.py` | `tests/regression/test_fe_candidates.py` |
 | `test_run_store.Identity.test_historical_local_runs_still_resolve_by_id_read_only` | `tests/regression/test_historical_runs.py` |

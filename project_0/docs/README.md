@@ -125,7 +125,7 @@ Ledger and PHASENPLAN entries, evidence inventories and checksums keep the path 
 | `native/crates/darkbot-common`, `darkbot-solana`, `darkbot-project0`, `darkbot-runner` | `native/crates/common`, `solana`, `liquidation`, `runtime` (Cargo package names unchanged) |
 
 The forwarding wrappers kept during iterations 16–29 (old shell names, `scripts/<module>.py`, `scripts/test_suite.py`) and the unused
-`src/`, `tools/` placeholders were moved to [delete/](../delete/README.md) in iteration 30 (recoverable, not executed).
+`src/`, `tools/` placeholders were moved to `delete/` in iteration 30 and removed on 25.10. (P0-PROD-CTRL-09; recoverable from Git history).
 Run modules with `python3 -m operations.<area>.<module>` or by file path under `operations/`. `PHASENPLAN.json` still names
 `darkbot-solana/src/runtime_config.rs`, now `native/crates/solana/src/runtime_config.rs`.
 

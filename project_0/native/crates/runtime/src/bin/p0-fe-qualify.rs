@@ -2,12 +2,10 @@
 #[cfg(feature = "crate_health")]
 fn run() -> Result<(), String> {
     use darkbot_runner::analytics::journal::Writer;
-    use darkbot_runner::analytics::payload::{Fe01Config, Fe01Read, Fe01ReadOutcome};
+    use darkbot_runner::analytics::payload::{Fe01Config, Fe01ReadOutcome};
     use darkbot_runner::orchestration::fe_qualification::{self as fe, ObservedState};
     use darkbot_runner::orchestration::{fe_freeze, fe_replay};
     use darkbot_solana::{provider, runtime_config::Resolved};
-    use solana_client::rpc_request::RpcRequest;
-    use solana_commitment_config::CommitmentConfig;
     use solana_sdk::pubkey::Pubkey;
     use std::{
         fs,
@@ -46,13 +44,21 @@ fn run() -> Result<(), String> {
         }
     }
     if operational.iter().any(|s| s == "--help" || s == "-h") {
-        println!("p0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
+        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
         return Ok(());
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
     if resolved.print {
-        println!("{}", resolved.json());
+        print!("{}", resolved.text());
         return Ok(());
+    }
+    if resolved.config.fe_mode == "smoke" {
+        // The bounded deployment/target observation; explicit `--execute` only, no replay,
+        // freeze or provider qualification (it reads three times through the provider budget).
+        if !execute || replay.is_some() || against.is_some() || qualification.is_some() {
+            return Err("FE_SMOKE_TAKES_ONLY_EXECUTE_AND_OUTPUT".into());
+        }
+        return smoke(resolved, output.ok_or("FE_OUTPUT_REQUIRED")?);
     }
     let funding_class = fe_replay::first_class(&funding_class)?;
     if execute == replay.is_some() {
@@ -137,27 +143,12 @@ fn run() -> Result<(), String> {
                 return Err("FE_TIME_BUDGET".into());
             }
             calls += 1;
-            // The JSON-RPC wire edge (JFI-02): request params out, the typed answer in.
-            let params = serde_json::json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}]);
-            let rpc = provider::rpc_client(
-                url.clone(),
+            let read = multiple_accounts(
+                &url,
                 remaining.min(Duration::from_millis(config.limits.rpc_timeout_ms)),
-                CommitmentConfig::finalized(),
-                provider::Workload::Bootstrap,
+                keys,
+                floor,
             );
-            let outcome = match rpc
-                .send::<fe::WireMultipleAccounts>(RpcRequest::GetMultipleAccounts, params)
-            {
-                Ok(wire) => wire.outcome(),
-                Err(_) => Fe01ReadOutcome::Failed {
-                    reason: "FE_RPC_FAILURE".into(),
-                },
-            };
-            let read = Fe01Read {
-                keys: keys.to_vec(),
-                min_context_slot: floor,
-                outcome,
-            };
             let slot = match &read.outcome {
                 Fe01ReadOutcome::Accounts { context_slot, .. } => Some(*context_slot),
                 Fe01ReadOutcome::Failed { .. } => None,
@@ -198,6 +189,120 @@ fn run() -> Result<(), String> {
     }
     Ok(())
 }
+/// One `getMultipleAccounts` through the provider budget: the JSON-RPC wire edge (JFI-02),
+/// request params out, the typed answer in.
+#[cfg(feature = "crate_health")]
+fn multiple_accounts(
+    url: &str,
+    timeout: std::time::Duration,
+    keys: &[solana_sdk::pubkey::Pubkey],
+    floor: u64,
+) -> darkbot_runner::analytics::payload::Fe01Read {
+    use darkbot_runner::analytics::payload::{Fe01Read, Fe01ReadOutcome};
+    use darkbot_runner::orchestration::fe_qualification as fe;
+    use darkbot_solana::provider;
+    use solana_client::rpc_request::RpcRequest;
+    use solana_commitment_config::CommitmentConfig;
+    let params = serde_json::json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}]);
+    let rpc = provider::rpc_client(
+        url.to_string(),
+        timeout,
+        CommitmentConfig::finalized(),
+        provider::Workload::Bootstrap,
+    );
+    let outcome = match rpc.send::<fe::WireMultipleAccounts>(RpcRequest::GetMultipleAccounts, params)
+    {
+        Ok(wire) => wire.outcome(),
+        Err(_) => Fe01ReadOutcome::Failed {
+            reason: "FE_RPC_FAILURE".into(),
+        },
+    };
+    Fe01Read {
+        keys: keys.to_vec(),
+        min_context_slot: floor,
+        outcome,
+    }
+}
+
+/// `--fe-mode smoke --execute --output DIR`: the P1A deployment/target observation. Every read
+/// and the result are typed frames of `fe01_smoke.p0j` (each fsynced before it is used), the
+/// text report beside it; INCOMPLETE keeps the evidence and exits non-zero.
+#[cfg(feature = "crate_health")]
+fn smoke(
+    mut resolved: darkbot_solana::runtime_config::Resolved,
+    output: std::path::PathBuf,
+) -> Result<(), String> {
+    use darkbot_runner::analytics::journal::Writer;
+    use darkbot_runner::analytics::payload::Fe01Config;
+    use darkbot_runner::orchestration::fe_qualification as fe;
+    use darkbot_solana::provider;
+    use std::time::{Duration, Instant};
+    if output.exists() {
+        return Err("FE_OUTPUT_EXISTS_PRESERVE_EVIDENCE".into());
+    }
+    let url = resolved
+        .config
+        .rpc_url(&|k| std::env::var(k).ok())
+        .ok_or("RPC_URL_MISSING")?;
+    let requested = resolved.effective();
+    let l = &mut resolved.config.limits;
+    l.max_requests = l.max_requests.min(l.fe_calls);
+    l.max_total_mib = l.max_total_mib.min(l.fe_max_mib);
+    l.max_response_mib = l.max_response_mib.min(l.max_total_mib);
+    let config = resolved.config.clone();
+    std::fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
+    let mut evidence =
+        Writer::create(&output.join(fe::FE01_SMOKE_JOURNAL)).map_err(|_| "FE_EVIDENCE_IO")?;
+    let operational = Fe01Config {
+        requested,
+        effective: resolved.effective(),
+        qualification_sha256: None,
+        execution: "READ_ONLY_SMOKE_NO_SIGNER".into(),
+    };
+    record(&mut evidence, &operational, None)?;
+    resolved.activate()?;
+    provider::enable_measurement_budget();
+    let deadline = Instant::now() + Duration::from_secs(config.limits.fe_seconds);
+    let mut journal_error = None;
+    let mut result = fe::smoke(&config, |keys, floor| {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("FE_TIME_BUDGET".into());
+        }
+        let read = multiple_accounts(
+            &url,
+            remaining.min(Duration::from_millis(config.limits.rpc_timeout_ms)),
+            keys,
+            floor,
+        );
+        let slot = match &read.outcome {
+            darkbot_runner::analytics::payload::Fe01ReadOutcome::Accounts {
+                context_slot, ..
+            } => Some(*context_slot),
+            darkbot_runner::analytics::payload::Fe01ReadOutcome::Failed { .. } => None,
+        };
+        // A read is used only after its frame is durable.
+        if let Err(e) = record(&mut evidence, &read, slot) {
+            journal_error = Some(e.clone());
+            return Err(e);
+        }
+        Ok(read)
+    });
+    if let Some(e) = journal_error {
+        return Err(e);
+    }
+    result.provider_actual = Some(provider::shared().snapshot());
+    let complete = result.status == fe::SMOKE_OBSERVED;
+    record(&mut evidence, &result, None)?;
+    evidence.seal(complete).map_err(|_| "FE_EVIDENCE_JOURNAL")?;
+    persist(&output.join("result.txt"), &result.text())?;
+    print!("{}", result.text());
+    if !complete {
+        return Err("FE_SMOKE_INCOMPLETE_EVIDENCE_SAVED".into());
+    }
+    Ok(())
+}
+
 /// One typed FE-01 frame, fsynced before the caller goes on.
 #[cfg(feature = "crate_health")]
 fn record<P: darkbot_runner::analytics::payload::Payload>(

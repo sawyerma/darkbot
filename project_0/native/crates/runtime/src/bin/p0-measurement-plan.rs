@@ -16,9 +16,7 @@ fn main() {
         || std::env::var_os("P0_PROFILE").is_some()
     {
         let result =
-            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())
-                // The plan is productive: native text config only.
-                .and_then(|r| r.native_only());
+            darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok());
         match result {
             Ok(resolved) => {
                 for (k, v) in resolved.config.environment() {

@@ -572,6 +572,78 @@ impl Fe01Report {
     }
 }
 
+/// FE-01 smoke (kind 704, schema 1): the bounded deployment and target observation of
+/// `--fe-mode smoke` (P1A upgrade watch) through the budgeted typed reads — program, then
+/// ProgramData and its deployment, then the targets. Never a qualification: no health, sizing,
+/// simulation or source parity; LIVE and submission stay off.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Smoke {
+    /// `SMOKE_OBSERVED_NOT_QUALIFIED` or `INCOMPLETE` (with `reason`).
+    pub status: String,
+    pub reason: Option<String>,
+    pub program: solana_sdk::pubkey::Pubkey,
+    pub program_data: Option<solana_sdk::pubkey::Pubkey>,
+    pub program_data_sha256: Option<String>,
+    pub deployment_slot: Option<u64>,
+    /// `REFERENCE` only for the deployment qualified for the pinned source
+    /// (`protocol::deployment_pin`); else `NOT_REFERENCE` or `UNPINNED`.
+    pub deployment_pin: Option<String>,
+    /// The context slot of every read, in order (never regressing).
+    pub context_slots: Vec<u64>,
+    pub targets: Vec<Fe01SmokeTarget>,
+    pub logical_reads: u64,
+    pub provider_actual: Option<darkbot_solana::provider::ProviderSnapshot>,
+    pub pilot_ready: bool,
+    pub live_enabled: bool,
+    pub submission_enabled: bool,
+}
+impl Payload for Fe01Smoke {
+    const KIND: u16 = journal::kind::FE01_SMOKE;
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01SmokeTarget {
+    pub account: solana_sdk::pubkey::Pubkey,
+    /// `OBSERVED_NOT_HEALTH_QUALIFIED`, `MISSING` or `FOREIGN_OWNER`.
+    pub status: String,
+    pub bytes: Option<u64>,
+    pub sha256: Option<String>,
+}
+impl Fe01Smoke {
+    /// The terminal/text report (PERSIST-04: human-readable output is text, never JSON).
+    pub fn text(&self) -> String {
+        use std::fmt::Write;
+        let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "FE01_SMOKE status={} reason={} program={} program_data={} program_data_sha256={} deployment_slot={} deployment_pin={} context_slots={:?} logical_reads={} pilot_ready={} live_enabled={} submission_enabled={}",
+            self.status,
+            opt(&self.reason),
+            self.program,
+            self.program_data.map_or("-".into(), |k| k.to_string()),
+            opt(&self.program_data_sha256),
+            self.deployment_slot.map_or("-".into(), |s| s.to_string()),
+            opt(&self.deployment_pin),
+            self.context_slots,
+            self.logical_reads,
+            self.pilot_ready,
+            self.live_enabled,
+            self.submission_enabled
+        );
+        for t in &self.targets {
+            let _ = writeln!(
+                out,
+                "target account={} status={} bytes={} sha256={}",
+                t.account,
+                t.status,
+                t.bytes.map_or("-".into(), |b| b.to_string()),
+                opt(&t.sha256)
+            );
+        }
+        out
+    }
+}
+
 /// The registry: every typed kind and its payload type, listed once.
 macro_rules! typed_kinds {
     ($kind:expr, $schema:expr, $bytes:expr, $f:ident) => {{
@@ -586,6 +658,7 @@ macro_rules! typed_kinds {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }
             k::FE01_FREEZE => $f::<Fe01Freeze>($kind, $schema, $bytes),
+            k::FE01_SMOKE => $f::<Fe01Smoke>($kind, $schema, $bytes),
             k::FE01_CONFIG => $f::<Fe01Config>($kind, $schema, $bytes),
             k::FE01_READ => $f::<Fe01Read>($kind, $schema, $bytes),
             k::FE01_RESULT => $f::<Fe01Report>($kind, $schema, $bytes),

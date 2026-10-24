@@ -13,7 +13,6 @@ import uuid
 if __package__ in (None,''):sys.path.insert(0,str(Path(__file__).resolve().parents[2]))  # run as a file: make `operations` importable
 from operations.verification import audit_market_quick as audit
 from operations.cli import measurement_contract as c
-from operations.cli import operational_config
 from operations.capture import run_store
 
 
@@ -85,7 +84,7 @@ def verify(run,v,qualification=None,offline=False,resume=False):
                 # promote a single index or a same-provider duplicate into a crosscheck.
                 summary.update(status='HISTORICAL_INCOMPLETE',reason='INDEPENDENT_CROSSCHECK_QUALIFICATION_OPEN')
             elif v.mode=='index':
-                rpc=audit.RPC(url,v.rps,v.timeout,v.attempts,v.max_calls,v.max_seconds,v.max_bytes,**operational_config.transport_options()) if url and not offline else None
+                rpc=audit.RPC(url,v.rps,v.timeout,v.attempts,v.max_calls,v.max_seconds,v.max_bytes) if url and not offline else None
                 if rpc:
                     call=rpc.call
                     def bounded(method,params):
@@ -148,11 +147,9 @@ def verify(run,v,qualification=None,offline=False,resume=False):
 def main(argv=None):
     parser=c.parser('Read-only C0-E1 verifier. No capture, signer or submission.')
     parser.set_defaults(mode='index')
-    try:
-        with operational_config.parsed(parser,argv) as (args,effective,environment):
-            return execute(parser,args)
-    except (OSError,ValueError) as exc:
-        print('HISTORICAL_INCOMPLETE: OPERATIONAL_CONFIG_INVALID',file=sys.stderr);return 2
+    # JFI-01/P0-PROD-CTRL-02: no Python→Rust configuration handoff; the historical reader takes
+    # its transport bounds from its own explicit flags.
+    return execute(parser,parser.parse_args(argv))
 
 
 def execute(parser,args):

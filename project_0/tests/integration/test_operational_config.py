@@ -1,58 +1,21 @@
-"""Offline operational CLI/bridge regressions. Release binary required; no network."""
+"""Offline regressions of the historical Python verifier transport (provider quota preflight, RPC retry and
+budgets). No Rust bridge, no network. The operational config itself is native (runtime_config tests)."""
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'fixtures'))
 import p0_paths  # shared paths; puts project_0 on sys.path
 import io
 import json
-import os
 from pathlib import Path
-import subprocess
 import tempfile
 import time
 import hashlib
 import unittest
 import urllib.error
-from unittest.mock import patch
-from operations.cli import operational_config as o
 from operations.cli import measurement_contract as c
 from operations.verification import audit_market_quick as a
-from p0_paths import clean_env
 
 class OperationalTests(unittest.TestCase):
-    def test_compiled_profiles_inspection(self):
-        # The plan compiler takes only the native text config (no JSON plan output, P0-PROD-CTRL-02);
-        # plan quarters and budgets are covered by the Rust measurement tests.
-        for duration in ['10m','1h','5h','24h','61s','25h']:
-            with o.resolve(['--profile','custom','--duration',duration,'--rpc-rps','25','--bootstrap-seconds','20'],clean_env()) as (config,report,env):
-                self.assertEqual(report['values']['limits']['rpc_rps'],25)
-                self.assertEqual(config['limits']['bootstrap_seconds'],20)
-                self.assertFalse(report['submission_authorized'])
-                self.assertEqual(config['duration'],duration)
-
-    def test_cli_precedence_no_secret_logging_and_private_cleanup(self):
-        with o.resolve(['--rpc-rps','17','--rpc-endpoints','https://secret.invalid/PRIVATE'],{**clean_env(),'P0_RPC_RPS':'3'}) as (config,report,env):
-            self.assertEqual(config['limits']['rpc_rps'],17)
-            self.assertNotIn('PRIVATE',json.dumps(report))
-            private=Path(env['P0_OPERATIONAL_CONFIG_FILE'])
-            self.assertEqual(private.stat().st_mode & 0o777,0o600)
-        self.assertFalse(private.exists())
-
-    def test_wrapper_print_has_no_capture_or_verification_side_effect(self):
-        with patch.dict(os.environ,clean_env(),clear=True),patch('sys.stdout',new_callable=io.StringIO) as out:
-            with self.assertRaises(SystemExit) as exc:
-                with o.parsed(c.parser(),['--profile','smoke','--print-effective-config']):self.fail('started workflow')
-            self.assertEqual(exc.exception.code,0)
-            self.assertEqual(json.loads(out.getvalue())['values']['profile'],'smoke')
-
-    def test_shared_legacy_verification_flags_compile_to_same_contract(self):
-        with patch.dict(os.environ,clean_env(),clear=True):
-            with o.parsed(c.parser(),['--profile','custom','--duration','61s','--verify-rps','12','--verify','index']) as (args,effective,env):
-                self.assertEqual(args.rps,12);self.assertEqual(args.mode,'index')
-                self.assertEqual(effective['values']['limits']['verify_rps'],12)
-                self.assertEqual(c.config(args).run.duration,'61s')
-                self.assertEqual(o.transport_options()['rps_ceiling'],2)
-
     def test_actual_requested_quota_must_be_qualified(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);url='https://fixture.invalid'

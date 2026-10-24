@@ -213,12 +213,12 @@ class Launchers(unittest.TestCase):
                     # manifest, before either owner starts (no network contact).
                     self.assertEqual(p.returncode,2,p.stderr[-2000:])
                     run=project/root/run_id
-                    # JFI-01/03/PERSIST-04: the productive run wrote no JSON/JSONL, and p0ctl exports no JSON views
-                    # of a native run (no Rust→Python handoff).
+                    # JFI-01/03/PERSIST-04: the productive run wrote no JSON/JSONL, and p0ctl has no JSON export
+                    # (no Rust→Python handoff; the command was removed with P0-PROD-CTRL-09).
                     self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
                     x=subprocess.run([str(REPO/'project_0/native/target/release/p0ctl'),'--project',str(project),'export','--run',str(run)],
                                      capture_output=True,text=True,timeout=60)
-                    self.assertEqual(x.returncode,2,x.stderr);self.assertIn('EXPORT_REFUSED',x.stderr)
+                    self.assertNotEqual(x.returncode,0,x.stderr);self.assertIn('usage:',x.stderr)
                     self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
                     # F4 (next unit): the remaining offline JSON renders of p0-journal; the views below come from it.
                     p=subprocess.run([str(REPO/'project_0/native/target/release/p0-journal'),'renders',str(run),'--create'],
@@ -400,6 +400,9 @@ class ReaderCli(unittest.TestCase):
             (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
                 'configured_duration_seconds':100,'full_slot_reconciliation':{'market_slot_end':{'slot':11}}}))
             for name in ('transactions.jsonl','coverage.jsonl'):(run/'market'/name).write_text('')
+            # A historical run of the plan era carries its plan record (no JSON plan handoff from Rust).
+            (run/'measurement_plan.json').write_text(json.dumps({'schema_version':1,'duration_seconds':100,
+                'snapshot_offsets_ns':[100*a.NS*i//4 for i in range(1,5)],'budgets':{}}))
             first=self.call(project,'verify.sh','--run','run_v1','--offline','--mode','off')
             self.assertEqual(first.returncode,0,first.stderr);first=json.loads(first.stdout)
             second=self.call(project,'verify.sh','--run',str(run),'--offline','--mode','off','--resume-verification')

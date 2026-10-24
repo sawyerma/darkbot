@@ -115,6 +115,9 @@ pub mod kind {
     pub const FE01_RESULT: u16 = 702;
     /// FE-01 one-class offline freeze (`payload::Fe01Freeze`), its own journal `fe01_freeze.p0j`.
     pub const FE01_FREEZE: u16 = 703;
+    /// FE-01 smoke result (`payload::Fe01Smoke`), its own journal `fe01_smoke.p0j` beside the
+    /// typed reads (`--fe-mode smoke`, the P1A deployment/target observation).
+    pub const FE01_SMOKE: u16 = 704;
     /// C0 account census rows (`c0_census.py` via `p0-journal import`): program accounts and
     /// group indexer accounts of one context slot, typed (`payload::C0CensusImportAccount`,
     /// `C0CensusImportGroupAccount`); historical schema-1 value frames stay readable.
@@ -185,6 +188,7 @@ pub mod kind {
         FE01_READ,
         FE01_RESULT,
         FE01_FREEZE,
+        FE01_SMOKE,
         C0_CENSUS_ACCOUNT,
         C0_CENSUS_GROUP_ACCOUNT,
         C0_CENSUS_ROW,

@@ -26,8 +26,8 @@ types, zero budgets, arithmetic overflow and inconsistent limits are errors.
 Use `--config FILE`, `P0_OPERATIONAL_CONFIG_FILE`, `P0_PROFILE`, or the environment
 aliases printed by `--help`. Config files are native text (`key = value`, one per line, `#`
 comments, CLI names and values) and contain only overridden fields, e.g. `profile = custom`,
-`duration = 61s`, `rpc-rps = 12`; duplicate or unknown keys fail. JSON is accepted only as the
-private handoff of the pinned Python bridge `operational_config.py` (JFI-03 legacy edge)
+`duration = 61s`, `rpc-rps = 12`; duplicate or unknown keys fail. A JSON config is refused
+(`CONFIG_JSON_REFUSED`; the Python bridge was removed 25.10., P0-PROD-CTRL-02)
 ([`config/examples/`](../../config/examples/) holds parser-validated examples).
 Empty endpoint values inherit local endpoints. The first explicit endpoint has
 highest priority; fallbacks require `--fallback on` and explicit ordered URLs.
@@ -101,8 +101,9 @@ after the launcher's existing owner-only environment loader.
 
 A future authorized FE observation can pass `--profile`, `--fe-calls`,
 `--fe-seconds`, `--fe-max-mib`, endpoint and transport options to
-`fe_readonly_preflight.py --execute --output NEW_FILE`. The observation still
-performs the three existing dependent program/ProgramData/target reads; larger
+`scripts/preflight.sh --fe-mode smoke --execute --output NEW_DIRECTORY` (native
+`p0-fe-qualify`, typed `fe01_smoke.p0j` plus text report). The observation still
+performs the three dependent program/ProgramData/target reads; larger
 budgets do not manufacture additional evidence or a profitability claim.
 
 The network boot audit (`p0ctl doctor --scope network`, BOOT-03…08) has its own budget,

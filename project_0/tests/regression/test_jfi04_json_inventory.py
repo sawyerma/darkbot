@@ -34,7 +34,7 @@ PINNED = {
     'runtime/src/analytics/measurement.rs': (11, 'I'),  # legacy_json views (F4); JSON plan fallback removed (F9, 25.10.)
     'runtime/src/analytics/payload.rs': (1, 'I'),  # legacy_view (F4)
     'runtime/src/analytics/renders.rs': (14, 'I'),  # JSON renders of native journals (F4)
-    'runtime/src/bin/p0-fe-qualify.rs': (2, 'I'),  # JSON config / provider evidence input (F6, F13)
+    'runtime/src/bin/p0-fe-qualify.rs': (2, 'W'),  # getMultipleAccounts wire params only (JSON config input removed 25.10., F6)
     'runtime/src/bin/p0-journal.rs': (8, 'I'),  # renders stdout parsed by Python (F12)
     'runtime/src/bin/p0-parity.rs': (4, 'H'),
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
@@ -53,14 +53,12 @@ PINNED = {
     'runtime/src/orchestration/boot_network.rs': (12, 'W'),
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
     'runtime/src/orchestration/provider_evidence.rs': (1, 'C'),  # measured operator file (F13)
-    'runtime/src/orchestration/startup.rs': (1, 'I'),  # --export-environment JSON round trip (F6)
     'solana/examples/p0-gap-ws-proxy.rs': (10, 'W'),
     'solana/src/bin/p0-probe-v1.rs': (16, 'WR'),
     'solana/src/chain.rs': (40, 'WI'),  # encode_* re-creates JSON for the views (F4)
     'solana/src/ingress/mod.rs': (5, 'W'),
     'solana/src/ingress/ws_rpc.rs': (14, 'W'),
     'solana/src/provider.rs': (11, 'W'),
-    'solana/src/runtime_config.rs': (25, 'I'),  # JSON config export/decode round trip (F6)
     'solana/src/state/snapshot.rs': (4, 'W'),
     'solana/src/submit/jito.rs': (17, 'W'),
     'solana/src/submit/rpc.rs': (9, 'W'),
@@ -77,7 +75,6 @@ EXPECTED_OPEN_INTERNAL = [
     'runtime/src/analytics/measurement.rs',
     'runtime/src/analytics/payload.rs',
     'runtime/src/analytics/renders.rs',
-    'runtime/src/bin/p0-fe-qualify.rs',
     'runtime/src/bin/p0-journal.rs',
     'runtime/src/bin/p0-strict-verify.rs',
     'runtime/src/execution/one_shot.rs',
@@ -85,9 +82,7 @@ EXPECTED_OPEN_INTERNAL = [
     'runtime/src/market/summary.rs',
     'runtime/src/market_truth.rs',
     'runtime/src/market_verification.rs',
-    'runtime/src/orchestration/startup.rs',
     'solana/src/chain.rs',
-    'solana/src/runtime_config.rs',
 ]
 
 USE_VALUE = re.compile(r'^\s*use serde_json::(Value\b|\{[^}]*\bValue\b)')
@@ -163,7 +158,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 340)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 314)
 
 
 if __name__ == '__main__':

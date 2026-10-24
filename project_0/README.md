@@ -376,18 +376,18 @@ project_0/
 │       └── reporter/                 <- package darkbot-p0-reporter: reporter/capture tools
 │
 ├── operations/                       <- Python implementations (package `operations`, iterations 16-20)
-│   ├── cli/                          <- measurement_cli.py, measurement_contract.py, operational_config.py
+│   ├── cli/                          <- measurement_contract.py (historical reader support)
 │   ├── capture/                      <- run_store.py (run storage/layout contract), c0_census.py
 │   ├── verification/                 <- audit_market_quick.py, measurement_verify.py
 │   ├── reporting/                    <- market_report.py
-│   └── qualification/                <- fe_readonly_preflight.py, fe_candidate_report.py, run_r126/r127_qualify.py
+│   └── qualification/                <- fe_candidate_report.py, run_r126/r127_qualify.py
 │
 ├── scripts/                          <- stable shell entry points (iterations 21-25)
 │   ├── capture.sh                    <- econ4h typed measurement, econ4h-launcher, market, shadow
 │   ├── smoke.sh                      <- controlled gap/reconnect smoke
 │   ├── verify.sh / report.sh         <- read-only verification and reports
-│   ├── preflight.sh                  <- read-only FE preflight
-│   └── compatibility wrappers        <- test.sh, run_*.sh, fe_readonly_preflight.sh, old *.py paths, test_suite.py
+│   ├── preflight.sh                  <- read-only FE preflight (native p0-fe-qualify)
+│   └── test.sh                       <- operator CLI wrapper of capture.sh econ4h
 │
 ├── config/                           <- PUBLIC / NON-SECRET versioned config
 │   ├── profiles/                     <- typed runtime profiles (single source, embedded in Rust)
@@ -636,7 +636,7 @@ Directory: [scripts/](scripts/)
 | [smoke.sh](scripts/smoke.sh) | Controlled gap/reconnect smoke through a market-only loopback proxy. |
 | [verify.sh](scripts/verify.sh) / [report.sh](scripts/report.sh) | Read-only historical verification and offline reports for a run id or path. |
 | [preflight.sh](scripts/preflight.sh) | Read-only FE preflight and effective-config inspection. |
-| [test.sh](scripts/test.sh) | Required PHASENPLAN entrypoint for typed capture. Obsolete forwarding scripts and Python wrappers are inactive in [delete/](delete/README.md); use the six active shell commands or `python3 -m operations.<area>.<module>`. |
+| [test.sh](scripts/test.sh) | Required PHASENPLAN entrypoint for typed capture. Obsolete forwarding scripts and Python wrappers were removed (25.10., P0-PROD-CTRL-09); use the six active shell commands or `python3 -m operations.<area>.<module>`. |
 
 Python implementations live in [operations/](operations/): [c0_census.py](operations/capture/c0_census.py) (account census),
 [run_r126_qualify.py](operations/qualification/run_r126_qualify.py) and [run_r127_qualify.py](operations/qualification/run_r127_qualify.py)

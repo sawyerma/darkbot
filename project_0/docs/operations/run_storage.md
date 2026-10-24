@@ -10,7 +10,7 @@ in run layout V2 by default; historical runs stay where they are and remain read
 Implementation: [`operations/capture/run_store.py`](../../operations/capture/run_store.py), used by `scripts/capture.sh`
 (econ4h and market) and `scripts/smoke.sh` to create runs, and by `verify.sh`, `report.sh` and every pinned reader to find runs
 and resolve their files. `scripts/test.sh` (PHASENPLAN operator command) is `capture.sh econ4h`; the former launcher names
-are in [delete/](../../delete/README.md).
+were removed (25.10., P0-PROD-CTRL-09).
 
 | `P0_RUN_STORE` | econ4h / C0-E1 runs | C0-MO market runs |
 |---|---|---|

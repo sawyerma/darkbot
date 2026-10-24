@@ -1,6 +1,6 @@
 //! Shared typed operational configuration. It cannot authorize money or submission.
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+
 use std::{collections::BTreeMap, path::Path, sync::OnceLock};
 
 macro_rules! parameters {
@@ -121,17 +121,6 @@ impl Parameter {
             u64::from(u32::MAX)
         }
     }
-}
-/// Machine description of the numeric parameters (render of `PARAMETERS` for the pinned
-/// `--export-environment` contract).
-pub fn descriptors() -> Vec<Value> {
-    PARAMETERS
-        .iter()
-        .map(|p| {
-            json!({"name":p.name(),"field":p.field,"type":"u64","unit":p.unit,"default":p.default,
-                "minimum":1,"maximum":p.maximum(),"env":p.env,"change":"restart_required"})
-        })
-        .collect()
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -312,9 +301,6 @@ pub struct Resolved {
     pub sources: BTreeMap<String, String>,
     pub print: bool,
     pub help: bool,
-    pub export: Option<std::path::PathBuf>,
-    /// The config file was the pinned bridge's private JSON handoff (JFI-03 legacy edge).
-    pub legacy_json_config: bool,
 }
 impl RuntimeConfig {
     fn profile(profile: Profile) -> Self {
@@ -492,16 +478,14 @@ struct ConfigFile {
     fe_group: Option<String>,
 }
 impl ConfigFile {
-    /// A config file: the native text format, or (JFI-03 legacy edge) the private JSON handoff
-    /// the pinned Python bridge `operational_config.py` writes via `--export-environment` for
-    /// its offline tools. The native launcher never produces or passes a JSON config.
-    /// Returns the file and whether it was the legacy JSON handoff.
-    fn decode(bytes: &[u8]) -> Result<(Self, bool), String> {
+    /// A config file: only the native text format (`key = value`). A JSON config is refused
+    /// (JFI-01, P0-PROD-CTRL-02: no JSON configuration handoff exists).
+    fn decode(bytes: &[u8]) -> Result<Self, String> {
         if bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{') {
-            return Ok((Self::decode_legacy_json(bytes)?, true));
+            return Err("CONFIG_JSON_REFUSED: the operational config is the native text format (key = value)".into());
         }
         let text = std::str::from_utf8(bytes).map_err(|_| "config file is not text")?;
-        Ok((Self::decode_text(text)?, false))
+        Self::decode_text(text)
     }
     fn decode_text(text: &str) -> Result<Self, String> {
         let mut f = Self::default();
@@ -540,29 +524,12 @@ impl ConfigFile {
         }
         Ok(f)
     }
-    fn decode_legacy_json(bytes: &[u8]) -> Result<Self, String> {
-        serde_json::from_slice(bytes).map_err(|e| {
-            let text = e.to_string();
-            match text
-                .strip_prefix("unknown field `")
-                .and_then(|r| r.split('`').next())
-            {
-                Some(field) => format!("unknown config field {field}"),
-                None if e.is_syntax() || e.is_eof() => "invalid config JSON".into(),
-                None if text.starts_with("invalid type") && text.contains("expected struct") => {
-                    "config must be an object".into()
-                }
-                None => "configuration type mismatch".into(),
-            }
-        })
-    }
 }
 impl Resolved {
     /// Precedence: profile < environment < config file < CLI. Unknown keys fail.
     pub fn parse(args: &[String], env: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
         let mut cli = BTreeMap::new();
         let mut file = env("P0_OPERATIONAL_CONFIG_FILE");
-        let mut export = None;
         let mut profile_name = env("P0_PROFILE").unwrap_or_else(|| "standard".into());
         let mut help = false;
         let mut print = false;
@@ -580,9 +547,7 @@ impl Resolved {
                         .next()
                         .ok_or_else(|| format!("missing value for {arg}"))?
                         .clone();
-                    if name == "export_environment" {
-                        export = Some(std::path::PathBuf::from(value));
-                    } else if name == "config" {
+                    if name == "config" {
                         file = Some(value);
                     } else {
                         if name == "profile" {
@@ -595,7 +560,7 @@ impl Resolved {
                 }
             }
         }
-        let (file, legacy_json_config) = if let Some(path) = file {
+        let file = if let Some(path) = file {
             if std::fs::metadata(Path::new(&path))
                 .map_err(|_| "cannot stat config file")?
                 .len()
@@ -609,7 +574,7 @@ impl Resolved {
             }
             ConfigFile::decode(&bytes)?
         } else {
-            (ConfigFile::default(), false)
+            ConfigFile::default()
         };
         if !cli.contains_key("profile") {
             if let Some(p) = &file.profile {
@@ -768,17 +733,7 @@ impl Resolved {
             sources,
             print,
             help,
-            export,
-            legacy_json_config,
         })
-    }
-    /// Productive native entry points (runtime start, launcher plan, native strict verification)
-    /// take only the native text config; the JSON handoff stays inside the pinned bridge.
-    pub fn native_only(self) -> Result<Self, String> {
-        if self.legacy_json_config {
-            return Err("CONFIG_JSON_REFUSED: native runs take the text config (key = value); a JSON config is only the private handoff of the pinned Python bridge (JFI-03)".into());
-        }
-        Ok(self)
     }
     pub fn activate(self) -> Result<(), String> {
         let effective = self.effective();
@@ -810,98 +765,6 @@ impl Resolved {
             live_authorized: false,
             submission_authorized: false,
         }
-    }
-    pub fn json(&self) -> Value {
-        let mut values = serde_json::to_value(&self.config).unwrap();
-        for f in ["rpc_endpoints", "wss_endpoints"] {
-            values[f] = json!(vec![
-                "REDACTED";
-                if f == "rpc_endpoints" {
-                    self.config.rpc_endpoints.len()
-                } else {
-                    self.config.wss_endpoints.len()
-                }
-            ]);
-        }
-        let active = serde_json::to_value(&self.config.limits).unwrap();
-        let mut parameters = descriptors();
-        let defaults = serde_json::to_value(RuntimeConfig::default()).unwrap();
-        for (name, kind, allowed) in [
-            ("fe_mode", "enum", json!(["smoke", "full"])),
-            ("fe_group", "pubkey", json!("Solana pubkey")),
-            (
-                "fe_targets",
-                "array<pubkey>",
-                json!("unique nonempty target scope"),
-            ),
-        ] {
-            parameters.push(json!({"name":name.replace('_',"-"),"field":name,"type":kind,"unit":"scope","default":defaults[name],"allowed":allowed,"active":values[name],"source":self.sources.get(name),"change":"restart_required"}));
-        }
-        for d in &mut parameters {
-            let f = d["field"].as_str().unwrap().to_string();
-            if !active[&f].is_null() {
-                d["active"] = active[&f].clone();
-            }
-            d["source"] = json!(self.sources.get(&f));
-        }
-        // Defaults come from RuntimeConfig::default(), the single source; only type metadata lives here.
-        for (name, kind, unit, allowed) in [
-            (
-                "profile",
-                "enum",
-                "profile",
-                json!(["smoke", "standard", "performance", "custom"]),
-            ),
-            (
-                "rpc_endpoints",
-                "array<string>",
-                "priority ordered HTTP URLs",
-                json!(["http", "https"]),
-            ),
-            (
-                "wss_endpoints",
-                "array<string>",
-                "priority ordered WSS URLs",
-                json!(["ws", "wss"]),
-            ),
-            ("fallback", "bool", "enabled", json!([true, false])),
-            ("adaptive", "bool", "enabled", json!([true, false])),
-            (
-                "duration",
-                "duration",
-                "s/m/h",
-                json!({"min_seconds":1,"max_seconds":u64::MAX/4/1_000_000_000}),
-            ),
-        ] {
-            parameters.push(json!({"name":name.replace('_',"-"),"field":name,"type":kind,"unit":unit,"default":defaults[name],"allowed":allowed,"active":values[name],"source":self.sources.get(name),"change":"restart_required"}));
-        }
-        for (name, kind, allowed) in [
-            (
-                "verification",
-                "enum",
-                json!(["off", "index", "strict", "crosscheck"]),
-            ),
-            ("diagnostics", "bool", json!([true, false])),
-        ] {
-            parameters.push(json!({"name":name,"field":name,"type":kind,"unit":"mode","default":defaults[name],"allowed":allowed,"active":values[name],"source":self.sources.get(name).cloned().unwrap_or_else(||"profile".into()),"change":"restart_required"}));
-        }
-        json!({"schema":"Project0/OperationalConfig/1","values":values,"parameters":parameters,"sources":self.sources,"provider_capacity_qualified":false,"free_only":true,"live_authorized":false,"submission_authorized":false})
-    }
-    /// Explicit secret-bearing machine handoff; never stdout, never overwrite.
-    pub fn export_private(&self, path: &Path) -> Result<(), String> {
-        use std::io::Write;
-        #[cfg(unix)]
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut f = options
-            .open(path)
-            .map_err(|_| "config export exists or cannot be written")?;
-        f.write_all(&serde_json::to_vec_pretty(&self.config).map_err(|_| "config encode failed")?)
-            .and_then(|_| f.sync_all())
-            .map_err(|_| "config export failed".into())
     }
     pub fn help() -> String {
         let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off --verification off|index|strict|crosscheck --print-effective-config\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
@@ -1047,13 +910,8 @@ mod tests {
             assert_eq!(r.config.limits.rpc_rps, 50);
             assert_eq!(r.config.limits.rpc_concurrency, 8);
             assert_eq!(duration_seconds(&r.config.duration).unwrap(), 90000);
-            for key in [
-                "live_authorized",
-                "submission_authorized",
-                "provider_capacity_qualified",
-            ] {
-                assert_eq!(r.json()[key], false);
-            }
+            let e = r.effective();
+            assert!(!(e.live_authorized || e.submission_authorized || e.provider_capacity_qualified));
             assert!(!r.config.environment().contains_key("P0_MODE"));
         }
     }
@@ -1132,9 +990,8 @@ mod tests {
                 Resolved::parse(&["--config".into(), path.display().to_string()], &env).unwrap();
             assert_eq!(r.config.rpc_endpoints, ["https://rpc.invalid/"], "{name}");
             assert_eq!(r.sources["rpc_endpoints"], "environment", "{name}");
-            for key in ["live_authorized", "submission_authorized"] {
-                assert_eq!(r.json()[key], false);
-            }
+            let e = r.effective();
+            assert!(!(e.live_authorized || e.submission_authorized));
             seen += 1;
         }
         assert_eq!(seen, 2);
@@ -1186,36 +1043,15 @@ mod tests {
         assert_eq!(r.config.limits.rpc_concurrency, 4);
         assert_eq!(r.sources["rpc_concurrency"], "environment");
         assert_eq!(r.config.limits.rpc_attempts, 1);
-        let report = r.json();
-        let printed = report.to_string();
+        let printed = r.text();
         assert!(!printed.contains("SECRET"));
         assert!(!printed.contains("PRIVATE"));
-        for d in report["parameters"].as_array().unwrap() {
-            assert!(!d["active"].is_null());
-            assert!(!d["source"].is_null());
-            assert_eq!(d["change"], "restart_required");
-        }
-        let export = dir.join("private.json");
-        let _ = std::fs::remove_file(&export);
-        r.export_private(&export).unwrap();
-        assert!(r.export_private(&export).is_err());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&export).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
-        // The private JSON handoff of the pinned bridge (JFI-03 legacy edge) reads back exactly.
-        let reread = parse(&["--config", export.to_str().unwrap()]).unwrap();
-        assert_eq!(r.config, reread.config);
-        // ... but productive native entry points refuse it; the text config passes.
-        assert!(reread
-            .native_only()
+        // JFI-01/P0-PROD-CTRL-02: no JSON configuration handoff exists; a JSON file is refused.
+        std::fs::write(&path, br#"{"rpc_rps": 2}"#).unwrap();
+        assert!(parse(&["--config", path.to_str().unwrap()])
             .unwrap_err()
             .starts_with("CONFIG_JSON_REFUSED"));
-        assert!(r.native_only().is_ok());
+        assert!(parse(&["--export-environment", "x.json"]).is_err());
         for (text, err) in [
             ("rpc-rps = 2\nrpc_rps = 3", "duplicate config key rpc_rps"),
             ("live = on", "unknown config field live"),
@@ -1315,11 +1151,10 @@ mod tests {
         let r = parse(&[]).unwrap();
         let env = r.config.environment();
         let fields = serde_json::to_value(&r.config.limits).unwrap();
-        assert_eq!(descriptors().len(), fields.as_object().unwrap().len());
-        for d in descriptors() {
-            let f = d["field"].as_str().unwrap();
-            assert_eq!(env[d["env"].as_str().unwrap()], fields[f].to_string());
-            assert!(Resolved::help().contains(d["name"].as_str().unwrap()));
+        assert_eq!(PARAMETERS.len(), fields.as_object().unwrap().len());
+        for p in PARAMETERS {
+            assert_eq!(env[p.env], r.config.limits.get(p.field).unwrap().to_string());
+            assert!(Resolved::help().contains(&p.name()));
         }
     }
 }

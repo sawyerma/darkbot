@@ -2,7 +2,7 @@
 //! No signer, swap client or submission adapter. Observation is not source parity.
 use crate::analytics::payload::{
     Fe01Account, Fe01AccountDigest, Fe01Observation, Fe01Read, Fe01ReadOutcome, Fe01Report,
-    Fe01Size, Fe01Target,
+    Fe01Size, Fe01Smoke, Fe01SmokeTarget, Fe01Target,
 };
 use base64::Engine;
 use darkbot_project0::{
@@ -407,6 +407,136 @@ where
     Ok((report(&scope), freeze))
 }
 
+/// FE-01 smoke status (never a qualification) and its own journal beside the typed reads.
+pub const SMOKE_OBSERVED: &str = "SMOKE_OBSERVED_NOT_QUALIFIED";
+pub const FE01_SMOKE_JOURNAL: &str = "fe01_smoke.p0j";
+
+/// One read of the smoke: the typed answer, its context slot not below `floor` and one entry
+/// per key; counted in `s`.
+fn smoke_read<F>(
+    read: &mut F,
+    s: &mut Fe01Smoke,
+    keys: &[Pubkey],
+    floor: u64,
+) -> Result<(u64, Vec<Option<Fe01Account>>), String>
+where
+    F: FnMut(&[Pubkey], u64) -> Result<Fe01Read, String>,
+{
+    s.logical_reads += 1;
+    let r = read(keys, floor)?;
+    match r.outcome {
+        Fe01ReadOutcome::Accounts {
+            context_slot,
+            accounts,
+        } => {
+            if context_slot == 0 || context_slot < floor {
+                return Err("FE_CONTEXT_REGRESSION".into());
+            }
+            if accounts.len() != keys.len() {
+                return Err("FE_BATCH_LENGTH".into());
+            }
+            s.context_slots.push(context_slot);
+            Ok((context_slot, accounts))
+        }
+        Fe01ReadOutcome::Failed { reason } => Err(reason),
+    }
+}
+
+/// FE-01 smoke (`--fe-mode smoke`, the P1A deployment/target observation): the program, its
+/// ProgramData and deployment (hash, slot, pin against the qualified reference), then every
+/// configured target (present, owner, size, hash) — three typed reads whose context slots never
+/// regress. A missing program or ProgramData, a regression or a failed read makes it INCOMPLETE
+/// (never a partial pass); targets report MISSING/FOREIGN_OWNER as observed facts.
+pub fn smoke<F>(config: &RuntimeConfig, mut read: F) -> Fe01Smoke
+where
+    F: FnMut(&[Pubkey], u64) -> Result<Fe01Read, String>,
+{
+    let mut s = Fe01Smoke {
+        status: INCOMPLETE.into(),
+        reason: None,
+        program: Pubkey::default(),
+        program_data: None,
+        program_data_sha256: None,
+        deployment_slot: None,
+        deployment_pin: None,
+        context_slots: vec![],
+        targets: vec![],
+        logical_reads: 0,
+        provider_actual: None,
+        pilot_ready: false,
+        live_enabled: false,
+        submission_enabled: false,
+    };
+    let result = (|| -> Result<(), String> {
+        let program = key(protocol::PROGRAM_ID_MAINNET)?;
+        s.program = program;
+        let targets = config
+            .fe_targets
+            .iter()
+            .map(|t| key(t))
+            .collect::<Result<Vec<_>, _>>()?;
+        if targets.is_empty()
+            || targets.len() as u64 > config.limits.fe_batch_size
+            || targets.contains(&Pubkey::default())
+            || targets.iter().collect::<BTreeSet<_>>().len() != targets.len()
+        {
+            return Err("FE_TARGET_SCOPE_INVALID".into());
+        }
+        let (slot, accounts) = smoke_read(&mut read, &mut s, &[program], 0)?;
+        let a = accounts[0].as_ref().ok_or("FE_PROGRAM_MISSING")?;
+        let pd = protocol::decode_program(&program, &a.owner, a.executable, &a.data)
+            .map_err(|_| "FE_PROGRAM_LAYOUT")?;
+        s.program_data = Some(pd);
+        let (slot, accounts) = smoke_read(&mut read, &mut s, &[pd], slot)?;
+        let a = accounts[0].as_ref().ok_or("FE_PROGRAMDATA_MISSING")?;
+        let d = protocol::decode_program_data(&pd, &a.owner, a.executable, &a.data)
+            .map_err(|_| "FE_PROGRAMDATA_LAYOUT")?;
+        if d.deployment_slot > slot {
+            return Err("FE_DEPLOYMENT_FROM_FUTURE".into());
+        }
+        s.program_data_sha256 = Some(sha(&a.data));
+        s.deployment_slot = Some(d.deployment_slot);
+        s.deployment_pin = Some(
+            match protocol::deployment_pin(&program, &d) {
+                protocol::DeploymentPin::Reference => "REFERENCE",
+                protocol::DeploymentPin::NotReference => "NOT_REFERENCE",
+                protocol::DeploymentPin::Unpinned => "UNPINNED",
+            }
+            .into(),
+        );
+        let (_, accounts) = smoke_read(&mut read, &mut s, &targets, slot)?;
+        s.targets = targets
+            .iter()
+            .zip(accounts)
+            .map(|(account, a)| match a {
+                None => Fe01SmokeTarget {
+                    account: *account,
+                    status: "MISSING".into(),
+                    bytes: None,
+                    sha256: None,
+                },
+                Some(a) => Fe01SmokeTarget {
+                    account: *account,
+                    status: if a.owner == program {
+                        "OBSERVED_NOT_HEALTH_QUALIFIED"
+                    } else {
+                        "FOREIGN_OWNER"
+                    }
+                    .into(),
+                    bytes: Some(a.data.len() as u64),
+                    sha256: Some(sha(&a.data)),
+                },
+            })
+            .collect();
+        Ok(())
+    })();
+    match result {
+        Ok(()) => s.status = SMOKE_OBSERVED.into(),
+        Err(e) => s.reason = Some(e),
+    }
+    s
+}
+
 /// FE-01 report status of a closed, observed scope (never a qualification).
 pub const OBSERVED: &str = "STATE_SCOPE_OBSERVED_NOT_QUALIFIED";
 pub const INCOMPLETE: &str = "INCOMPLETE";
@@ -700,6 +830,72 @@ pub(crate) mod tests {
             ..Account::default()
         }
     }
+    /// FE-01 smoke (P1A): program, ProgramData and targets over three typed reads; the deployment
+    /// pin against the qualified reference; MISSING/FOREIGN_OWNER targets are observed facts; a
+    /// missing ProgramData or a regressing context slot is INCOMPLETE, never a partial pass.
+    #[test]
+    fn smoke_observes_deployment_and_targets_and_fails_closed() {
+        let (mut c, mut state) = fixture();
+        c.fe_mode = "smoke".into();
+        let foreign = Pubkey::new_unique();
+        state.insert(
+            foreign,
+            Account {
+                owner: Pubkey::new_unique(),
+                data: vec![1, 2, 3],
+                ..Account::default()
+            },
+        );
+        c.fe_targets.push(foreign.to_string());
+        let missing = key(&c.fe_targets[1]).unwrap();
+        state.remove(&missing);
+        let reads = |state: &BTreeMap<Pubkey, Account>, slots: Vec<u64>| {
+            let state = state.clone();
+            let mut slots = slots.into_iter();
+            move |keys: &[Pubkey], floor: u64| -> Result<Fe01Read, String> {
+                Ok(Fe01Read {
+                    keys: keys.to_vec(),
+                    min_context_slot: floor,
+                    outcome: Fe01ReadOutcome::Accounts {
+                        context_slot: slots.next().ok_or("NO_MORE_READS")?,
+                        accounts: keys
+                            .iter()
+                            .map(|k| {
+                                state.get(k).map(|a| Fe01Account {
+                                    owner: a.owner,
+                                    lamports: a.lamports,
+                                    executable: a.executable,
+                                    data: a.data.clone(),
+                                })
+                            })
+                            .collect(),
+                    },
+                })
+            }
+        };
+        let s = smoke(&c, reads(&state, vec![100, 101, 102]));
+        assert_eq!((s.status.as_str(), s.reason.as_deref()), (SMOKE_OBSERVED, None));
+        assert_eq!((s.deployment_slot, s.logical_reads), (Some(80), 3));
+        assert_eq!(s.context_slots, [100, 101, 102]);
+        assert_eq!(s.deployment_pin.as_deref(), Some("NOT_REFERENCE"));
+        let statuses: Vec<_> = s.targets.iter().map(|t| t.status.as_str()).collect();
+        assert_eq!(
+            statuses,
+            ["OBSERVED_NOT_HEALTH_QUALIFIED", "MISSING", "FOREIGN_OWNER"]
+        );
+        assert!(!(s.pilot_ready || s.live_enabled || s.submission_enabled));
+        let regressed = smoke(&c, reads(&state, vec![100, 99, 102]));
+        assert_eq!(
+            (regressed.status.as_str(), regressed.reason.as_deref()),
+            (INCOMPLETE, Some("FE_CONTEXT_REGRESSION"))
+        );
+        let pd = s.program_data.unwrap();
+        state.remove(&pd);
+        let no_pd = smoke(&c, reads(&state, vec![100, 101, 102]));
+        assert_eq!(no_pd.reason.as_deref(), Some("FE_PROGRAMDATA_MISSING"));
+        assert_eq!(no_pd.status, INCOMPLETE);
+    }
+
     pub(crate) fn fixture() -> (RuntimeConfig, BTreeMap<Pubkey, Account>) {
         let c = RuntimeConfig {
             fe_mode: "full".into(),

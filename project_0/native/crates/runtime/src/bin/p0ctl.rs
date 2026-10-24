@@ -121,7 +121,6 @@ fn doctor(project: &Path, args: &[String]) -> Result<bool, String> {
         args.split(|a| a == "--").nth(1).unwrap_or(&[]),
         &|k| std::env::var(k).ok(),
     )?
-    .native_only()?
     .activate()?;
     let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
     print!("{}", audit.terminal());

@@ -230,7 +230,7 @@ pub fn start_config(
 ) -> Result<darkbot_solana::runtime_config::Resolved, String> {
     let mut args = operational.to_vec();
     args.extend(["--duration".into(), duration.into()]);
-    darkbot_solana::runtime_config::Resolved::parse(&args, env)?.native_only()
+    darkbot_solana::runtime_config::Resolved::parse(&args, env)
 }
 
 /// X1: the identity of a runtime launched by `p0ctl run start` (`args` = its operational
