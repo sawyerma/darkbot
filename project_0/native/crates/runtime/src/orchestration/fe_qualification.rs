@@ -874,7 +874,10 @@ pub(crate) mod tests {
             }
         };
         let s = smoke(&c, reads(&state, vec![100, 101, 102]));
-        assert_eq!((s.status.as_str(), s.reason.as_deref()), (SMOKE_OBSERVED, None));
+        assert_eq!(
+            (s.status.as_str(), s.reason.as_deref()),
+            (SMOKE_OBSERVED, None)
+        );
         assert_eq!((s.deployment_slot, s.logical_reads), (Some(80), 3));
         assert_eq!(s.context_slots, [100, 101, 102]);
         assert_eq!(s.deployment_pin.as_deref(), Some("NOT_REFERENCE"));

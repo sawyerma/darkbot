@@ -210,13 +210,13 @@ fn multiple_accounts(
         CommitmentConfig::finalized(),
         provider::Workload::Bootstrap,
     );
-    let outcome = match rpc.send::<fe::WireMultipleAccounts>(RpcRequest::GetMultipleAccounts, params)
-    {
-        Ok(wire) => wire.outcome(),
-        Err(_) => Fe01ReadOutcome::Failed {
-            reason: "FE_RPC_FAILURE".into(),
-        },
-    };
+    let outcome =
+        match rpc.send::<fe::WireMultipleAccounts>(RpcRequest::GetMultipleAccounts, params) {
+            Ok(wire) => wire.outcome(),
+            Err(_) => Fe01ReadOutcome::Failed {
+                reason: "FE_RPC_FAILURE".into(),
+            },
+        };
     Fe01Read {
         keys: keys.to_vec(),
         min_context_slot: floor,

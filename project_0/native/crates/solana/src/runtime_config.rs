@@ -911,7 +911,9 @@ mod tests {
             assert_eq!(r.config.limits.rpc_concurrency, 8);
             assert_eq!(duration_seconds(&r.config.duration).unwrap(), 90000);
             let e = r.effective();
-            assert!(!(e.live_authorized || e.submission_authorized || e.provider_capacity_qualified));
+            assert!(
+                !(e.live_authorized || e.submission_authorized || e.provider_capacity_qualified)
+            );
             assert!(!r.config.environment().contains_key("P0_MODE"));
         }
     }
@@ -1153,7 +1155,10 @@ mod tests {
         let fields = serde_json::to_value(&r.config.limits).unwrap();
         assert_eq!(PARAMETERS.len(), fields.as_object().unwrap().len());
         for p in PARAMETERS {
-            assert_eq!(env[p.env], r.config.limits.get(p.field).unwrap().to_string());
+            assert_eq!(
+                env[p.env],
+                r.config.limits.get(p.field).unwrap().to_string()
+            );
             assert!(Resolved::help().contains(&p.name()));
         }
     }
