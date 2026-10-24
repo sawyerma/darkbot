@@ -167,6 +167,7 @@ dependencies = [
  "futures",
  "futures-util",
  "http",
+ "libc",
  "parking_lot",
  "prost",
  "prost-build",

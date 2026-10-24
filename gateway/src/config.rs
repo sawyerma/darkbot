@@ -68,11 +68,10 @@ impl GatewayConfig {
                 value: env_or("DARKBOT_GATEWAY_BIND", ""),
             })?;
 
-        let loopback = match bind.ip() {
-            IpAddr::V4(v4) => v4.is_loopback(),
-            IpAddr::V6(v6) => v6.is_loopback(),
-        };
-        if !loopback && env_or("DARKBOT_GATEWAY_ALLOW_NON_LOOPBACK", "0") != "1" {
+        if !bind_allowed(
+            bind.ip(),
+            env_or("DARKBOT_GATEWAY_ALLOW_NON_LOOPBACK", "0") == "1",
+        ) {
             return Err(ConfigError::NonLoopback(bind));
         }
 
@@ -116,6 +115,15 @@ impl GatewayConfig {
             .iter()
             .any(|h| h.eq_ignore_ascii_case(host))
     }
+}
+
+/// Loopback always; any other address only with the explicit opt-in.
+fn bind_allowed(ip: IpAddr, allow_non_loopback: bool) -> bool {
+    let loopback = match ip {
+        IpAddr::V4(v4) => v4.is_loopback(),
+        IpAddr::V6(v6) => v6.is_loopback(),
+    };
+    loopback || allow_non_loopback
 }
 
 fn only_https(origins: &[String]) -> bool {
@@ -190,7 +198,17 @@ pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
 
 #[cfg(test)]
 mod tests {
-    use super::only_https;
+    use super::{bind_allowed, only_https};
+    #[test]
+    fn a_non_loopback_bind_needs_the_explicit_opt_in() {
+        use std::net::IpAddr;
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        assert!(bind_allowed(ip("127.0.0.1"), false));
+        assert!(bind_allowed(ip("::1"), false));
+        assert!(!bind_allowed(ip("0.0.0.0"), false));
+        assert!(!bind_allowed(ip("192.168.1.20"), false));
+        assert!(bind_allowed(ip("192.168.1.20"), true));
+    }
     #[test]
     fn the_cookie_is_secure_only_behind_https_origins() {
         let o = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();

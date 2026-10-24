@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, watch};
 use tracing::{info, warn};
 
 use crate::config::GatewayConfig;
-use crate::hub::{PublishOutcome, StateHub, StateUpdate};
+use crate::hub::{PublishError, PublishOutcome, StateHub, StateUpdate};
 use crate::proto::ProjectId;
 use crate::topics;
 
@@ -232,6 +232,11 @@ pub fn spawn_supervisor(
                                 ?outcome,
                                 "ignored old state; liveness not promoted"
                             ),
+                            Err(e @ PublishError::TooLarge { .. }) => warn!(
+                                ?project,
+                                error = %e,
+                                "state too large; FRAME_TOO_LARGE for its topic, source stays attached"
+                            ),
                             Err(e) => {
                                 warn!(?project, error = %e, "state rejected; detaching");
                                 break;
@@ -367,5 +372,99 @@ mod trust_boundary_tests {
         assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::OverviewAggregates)).is_err());
         assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::Project0Status)).is_err());
         assert!(validate_feed_state(ProjectId::Bsc, &state(TopicId::BscStatus)).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod liveness_tests {
+    use super::test_feed::ChannelFeed;
+    use super::*;
+    use crate::config::Limits;
+    use crate::proto::{StateQuality, TopicId};
+    use bytes::Bytes;
+
+    fn cfg() -> GatewayConfig {
+        GatewayConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            static_dir: None,
+            allowed_origins: vec![],
+            allowed_hosts: vec![],
+            session_cookie: "s".into(),
+            limits: Limits::default(),
+            source_stale_after_ms: 100,
+            source_detach_after_ms: 400,
+            source_reattach_backoff_ms: 50,
+            overview_interval_ms: 60_000,
+            feeds: vec![],
+        }
+    }
+    fn state(seq: u64, bytes: usize) -> FeedMessage {
+        FeedMessage::State(StateUpdate {
+            topic: TopicId::BscStatus,
+            generation: 1,
+            seq,
+            source_timestamp_unix_ns: 1,
+            source_id: Arc::from("TEST_ONLY"),
+            payload: Bytes::from(vec![8u8; bytes]),
+        })
+    }
+    async fn until(what: &str, f: impl Fn() -> bool) {
+        for _ in 0..200 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("timeout: {what}");
+    }
+
+    #[tokio::test]
+    async fn silence_turns_stale_then_detached_and_heartbeats_alone_restore_nothing() {
+        let (hub, registry) = (Arc::new(StateHub::new(1024)), SourceRegistry::new());
+        let feed = ChannelFeed::new(ProjectId::Bsc, "bsc");
+        let tx = feed.connect(16).await;
+        let _sup = spawn_supervisor(feed.clone(), hub.clone(), registry.clone(), &cfg());
+        tx.send(state(1, 4)).await.unwrap();
+        let q = || hub.current(TopicId::BscStatus).map(|s| s.quality);
+        until("OK", || q() == Some(StateQuality::Ok)).await;
+        until("STALE after silence", || q() == Some(StateQuality::Stale)).await;
+        assert_eq!(
+            registry.status(ProjectId::Bsc).unwrap().state,
+            SourceState::Stale
+        );
+        // A heartbeat keeps the feed alive but never turns STALE back into OK.
+        tx.send(FeedMessage::Heartbeat).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(q(), Some(StateQuality::Stale));
+        until("DETACHED after the detach threshold", || {
+            q() == Some(StateQuality::SourceDetached)
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn an_oversized_state_is_a_topic_error_and_keeps_the_source_attached() {
+        let (hub, registry) = (Arc::new(StateHub::new(8)), SourceRegistry::new());
+        let feed = ChannelFeed::new(ProjectId::Bsc, "bsc");
+        let tx = feed.connect(16).await;
+        let attached = feed.attach_count();
+        let _sup = spawn_supervisor(feed.clone(), hub.clone(), registry.clone(), &cfg());
+        tx.send(state(1, 4)).await.unwrap();
+        until("connected", || {
+            registry.status(ProjectId::Bsc).map(|s| s.state) == Some(SourceState::Connected)
+        })
+        .await;
+        tx.send(state(2, 64)).await.unwrap();
+        until("marker", || {
+            hub.current(TopicId::BscStatus).is_some_and(|s| s.too_large)
+        })
+        .await;
+        tx.send(state(3, 4)).await.unwrap();
+        until("next state applied on the same attachment", || {
+            hub.current(TopicId::BscStatus)
+                .is_some_and(|s| s.seq == 3 && s.quality == StateQuality::Ok)
+        })
+        .await;
+        assert_eq!(*attached.borrow(), 1, "the source was never detached");
     }
 }

@@ -89,6 +89,16 @@ impl EngineFeed for UnixSocketFeed {
         let mut stream = UnixStream::connect(&self.path)
             .await
             .map_err(|e| FeedError::Unreachable(e.to_string()))?;
+        // Authenticated engine hop: only a publisher running as this user may feed the gateway.
+        let peer = stream
+            .peer_cred()
+            .map_err(|e| FeedError::Unreachable(format!("peer credentials: {e}")))?;
+        if !same_user(peer.uid(), current_uid()) {
+            return Err(FeedError::Mismatch(format!(
+                "engine feed peer uid {} is not the gateway user",
+                peer.uid()
+            )));
+        }
         let first = tokio::time::timeout(Duration::from_secs(5), next(&mut stream, self.max_frame))
             .await
             .map_err(|_| FeedError::Unreachable("hello timeout".into()))?
@@ -157,5 +167,24 @@ impl EngineFeed for UnixSocketFeed {
             }
         });
         Ok(rx)
+    }
+}
+
+fn current_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+fn same_user(peer: u32, own: u32) -> bool {
+    peer == own
+}
+
+#[cfg(test)]
+mod peer_tests {
+    use super::{current_uid, same_user};
+    #[test]
+    fn only_the_gateway_user_may_feed() {
+        assert!(same_user(current_uid(), current_uid()));
+        assert!(!same_user(current_uid().wrapping_add(1), current_uid()));
     }
 }

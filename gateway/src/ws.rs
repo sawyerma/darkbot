@@ -90,22 +90,32 @@ fn decode(m: &Message) -> Option<ClientMessage> {
     }
 }
 impl Client {
-    async fn send(&mut self, m: server_message::Msg) -> Result<(), ()> {
-        self.socket
-            .send(Message::Binary(
-                ServerMessage { msg: Some(m) }.encode_to_vec(),
-            ))
-            .await
-            .map_err(|_| ())
+    /// A client that stops reading must not hold a connection slot: a send that cannot complete
+    /// within the heartbeat liveness window closes the connection (Wire V1.3 §5).
+    fn send_timeout(&self) -> Duration {
+        let l = &self.app.cfg.limits;
+        Duration::from_millis(
+            u64::from(l.heartbeat_interval_ms) * u64::from(l.stale_after_missed_heartbeats.max(1)),
+        )
+        .max(Duration::from_secs(1))
     }
+    async fn send(&mut self, m: server_message::Msg) -> Result<(), ()> {
+        let frame = Message::Binary(ServerMessage { msg: Some(m) }.encode_to_vec());
+        match tokio::time::timeout(self.send_timeout(), self.socket.send(frame)).await {
+            Ok(r) => r.map_err(|_| ()),
+            Err(_) => {
+                tracing::warn!(connection = %self.id, "client stopped reading; connection closed");
+                Err(())
+            }
+        }
+    }
+    /// Bounded like every send: a client that stopped reading cannot hold the slot while closing.
     async fn close(&mut self, code: u16, why: &'static str) {
-        let _ = self
-            .socket
-            .send(Message::Close(Some(CloseFrame {
-                code,
-                reason: why.into(),
-            })))
-            .await;
+        let frame = Message::Close(Some(CloseFrame {
+            code,
+            reason: why.into(),
+        }));
+        let _ = tokio::time::timeout(self.send_timeout(), self.socket.send(frame)).await;
     }
     async fn ack(
         &mut self,
@@ -153,11 +163,14 @@ impl Client {
                 return Err(());
             }
         };
+        // Major decides compatibility; within a major only additive fields exist, so a different
+        // schema_id (minor fingerprint) is diagnostic and never blocks (stream.proto, README §3).
         let (status, reason) = if hello.protocol_major != PROTOCOL_MAJOR {
             (WelcomeStatus::RejectedMajor, "major mismatch")
-        } else if hello.schema_id != SCHEMA_ID {
-            (WelcomeStatus::RejectedSchema, "schema mismatch")
         } else {
+            if hello.schema_id != SCHEMA_ID {
+                tracing::info!(connection = %self.id, client_minor = hello.protocol_minor, client_schema = %hello.schema_id, "compatible minor schema skew");
+            }
             (WelcomeStatus::Accepted, "")
         };
         let l = &self.app.cfg.limits;
@@ -194,7 +207,7 @@ impl Client {
         loop {
             tokio::select! {
             m=self.socket.recv()=>{let m=m.ok_or(())?.map_err(|_|())?;if !self.on_msg(m).await?{return Ok(())}},
-            Some((topic,slot))=self.streams.next(),if !self.streams.is_empty()=>{if let Some(st)=slot{if st.payload.len()>self.app.cfg.limits.max_state_full_bytes as usize{self.streams.remove(&topic);self.sent.remove(&topic);self.error(Some(topic),ErrorCode::FrameTooLarge,"state too large").await?;}else{self.send(server_message::Msg::StateFull(st.to_frame())).await?;self.sent.insert(topic,(st.generation,st.seq));}}},
+            Some((topic,slot))=self.streams.next(),if !self.streams.is_empty()=>{if let Some(st)=slot{if st.too_large||st.payload.len()>self.app.cfg.limits.max_state_full_bytes as usize{self.streams.remove(&topic);self.sent.remove(&topic);self.error(Some(topic),ErrorCode::FrameTooLarge,"state too large").await?;}else{self.send(server_message::Msg::StateFull(st.to_frame())).await?;self.sent.insert(topic,(st.generation,st.seq));}}},
             _=timer.tick()=>{if self.pending.is_some(){self.missed+=1;if self.missed>=self.app.cfg.limits.stale_after_missed_heartbeats{self.close(1001,"pong timeout").await;return Err(())}}self.hb+=1;let id=self.hb;let watermark=self.sent.iter().map(|(t,(g,s))|StateWatermark{topic:*t as i32,generation:*g,highest_seq_sent:*s}).collect();self.send(server_message::Msg::Heartbeat(Heartbeat{heartbeat_id:id,server_time_unix_ns:unix_ns_now(),state_watermarks:watermark})).await?;self.pending=Some(id);}
             }
         }

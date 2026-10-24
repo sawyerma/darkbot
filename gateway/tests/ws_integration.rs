@@ -192,14 +192,15 @@ async fn accepted_handshake_and_topics() {
         .any(|x| x.topic == TopicId::SolanaStatus as i32 && !x.available));
 }
 #[tokio::test]
-async fn major_and_schema_mismatch_rejected() {
+async fn incompatible_major_rejected_and_compatible_minor_schema_accepted() {
     let s = spawn(Limits::default()).await;
+    // Same major, other schema fingerprint (newer/older minor): diagnostic only, never blocks.
     for (major, schema, expected) in [
         (PROTOCOL_MAJOR + 1, SCHEMA_ID, WelcomeStatus::RejectedMajor),
         (
             PROTOCOL_MAJOR,
-            "incorrect-schema",
-            WelcomeStatus::RejectedSchema,
+            "fingerprint-of-another-minor",
+            WelcomeStatus::Accepted,
         ),
     ] {
         let mut ws = connect(&s).await;
@@ -333,4 +334,171 @@ async fn reconnect_gets_latest() {
     handshake(&mut b).await;
     subscribe(&mut b).await;
     assert_eq!(state(&mut b).await.seq, 3);
+}
+#[tokio::test]
+async fn detached_is_pushed_to_an_existing_subscriber_with_the_same_generation_and_seq() {
+    let s = spawn(Limits::default()).await;
+    s.hub.publish(update(4, 9)).unwrap();
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    subscribe(&mut ws).await;
+    assert_eq!(state(&mut ws).await.quality, StateQuality::Ok as i32);
+    s.hub
+        .mark_detached(darkbot_gateway::proto::ProjectId::Unspecified);
+    let pushed = state(&mut ws).await;
+    assert_eq!(
+        (pushed.quality, pushed.generation, pushed.seq),
+        (StateQuality::SourceDetached as i32, 4, 9)
+    );
+}
+#[tokio::test]
+async fn an_oversized_frame_from_the_client_closes_the_connection() {
+    let s = spawn(Limits::default()).await;
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    let _ = ws.send(Message::Binary(vec![0u8; 5000])).await;
+    assert!(recv(&mut ws).await.is_none(), "connection must close");
+}
+#[tokio::test]
+async fn a_client_that_never_answers_heartbeats_is_closed() {
+    let s = spawn(Limits {
+        heartbeat_interval_ms: 100,
+        stale_after_missed_heartbeats: 2,
+        ..Limits::default()
+    })
+    .await;
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    let closed = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(frame))) => return frame.map(|f| u16::from(f.code)),
+                None | Some(Err(_)) => return None,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("pong timeout must close the connection");
+    assert_eq!(closed, Some(1001));
+}
+#[tokio::test]
+async fn event_topics_and_state_cursors_are_refused() {
+    let s = spawn(Limits::default()).await;
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    for (topic, cursor, reason) in [
+        (
+            TopicId::BscExecutionEvents,
+            None,
+            darkbot_gateway::proto::AckReason::TopicUnavailable,
+        ),
+        (
+            TopicId::OverviewAggregates,
+            Some(darkbot_gateway::proto::EventCursor {
+                journal_epoch: "e".into(),
+                durable_cursor: 1,
+            }),
+            darkbot_gateway::proto::AckReason::InvalidCursorForState,
+        ),
+    ] {
+        send(
+            &mut ws,
+            client_message::Msg::Subscribe(Subscribe {
+                request_id: 7,
+                topic: topic as i32,
+                cursor,
+                start_policy: 0,
+            }),
+        )
+        .await;
+        match recv(&mut ws).await {
+            Some(server_message::Msg::ControlAck(a)) => assert_eq!(
+                (a.status, a.reason),
+                (AckStatus::Rejected as i32, reason as i32)
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+#[tokio::test]
+async fn an_oversized_state_becomes_frame_too_large_for_its_topic() {
+    let s = spawn(Limits::default()).await;
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    subscribe(&mut ws).await;
+    let mut big = update(1, 1);
+    big.payload = Bytes::from(vec![8u8; 2048]);
+    assert!(s.hub.publish(big).is_err());
+    loop {
+        match recv(&mut ws).await {
+            Some(server_message::Msg::Error(e)) => {
+                assert_eq!(
+                    e.code,
+                    darkbot_gateway::proto::ErrorCode::FrameTooLarge as i32
+                );
+                assert_eq!(e.topic, TopicId::OverviewAggregates as i32);
+                break;
+            }
+            Some(server_message::Msg::Heartbeat(_)) => {}
+            other => panic!("expected FRAME_TOO_LARGE: {other:?}"),
+        }
+    }
+}
+#[tokio::test]
+async fn every_response_carries_the_content_security_policy() {
+    let s = spawn(Limits::default()).await;
+    let mut conn = TcpStream::connect(s.addr).await.unwrap();
+    conn.write_all(
+        format!(
+            "GET /healthz HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            s.host()
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut b = Vec::new();
+    conn.read_to_end(&mut b).await.unwrap();
+    let r = String::from_utf8_lossy(&b).to_ascii_lowercase();
+    assert!(r.contains("content-security-policy:"), "{r}");
+    assert!(r.contains("connect-src 'self'"), "{r}");
+    assert!(r.contains("frame-ancestors 'none'"), "{r}");
+}
+#[tokio::test]
+async fn a_client_that_stops_reading_is_evicted_and_never_blocks_publishing() {
+    let s = spawn(Limits {
+        heartbeat_interval_ms: 1500,
+        stale_after_missed_heartbeats: 2,
+        ..Limits::default()
+    })
+    .await;
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    subscribe(&mut ws).await;
+    // The client never reads again while the server keeps publishing until the kernel buffers
+    // are full: only a bounded send can then free the slot (the heartbeat branch is starved).
+    let hub = s.hub.clone();
+    let state = s.state.clone();
+    let publisher = tokio::spawn(async move {
+        let mut seq = 0u64;
+        while state.clients.load(std::sync::atomic::Ordering::Acquire) != 0 {
+            seq += 1;
+            let mut u = update(1, seq);
+            u.payload = Bytes::from(vec![(seq % 251) as u8; 1000]);
+            let _ = hub.publish(u);
+            if seq % 16 == 0 {
+                tokio::task::yield_now().await;
+            }
+        }
+    });
+    let evicted = tokio::time::timeout(Duration::from_secs(20), async {
+        while s.state.clients.load(std::sync::atomic::Ordering::Acquire) != 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    publisher.abort();
+    assert!(evicted.is_ok(), "stalled client still holds its slot");
+    drop(ws);
 }

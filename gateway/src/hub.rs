@@ -20,6 +20,9 @@ pub struct CachedState {
     pub source_timestamp_unix_ns: i64,
     pub source_id: Arc<str>,
     pub payload: Bytes,
+    /// The newest state exceeded the frame limit: subscribers get FRAME_TOO_LARGE for this
+    /// topic instead of an older value; the payload is not kept.
+    pub too_large: bool,
 }
 
 impl CachedState {
@@ -92,7 +95,9 @@ impl StateHub {
     }
 
     /// Publisher-Ordnung (Wire V1.3 §2): neue Generation gewinnt, gleiche Generation nur bei
-    /// höherer seq, ältere Generation wird verworfen. Größenlimit hart.
+    /// höherer seq, ältere Generation wird verworfen. Größenlimit hart: ein zu großer neuer
+    /// Zustand ersetzt den Cache durch eine Markierung ohne Payload (Topic-Fehler statt alter
+    /// Wert), die Quelle bleibt verbunden; Rückgabe `TooLarge`.
     pub fn publish(&self, u: StateUpdate) -> Result<PublishOutcome, PublishError> {
         let spec = topics::spec(u.topic).ok_or(PublishError::UnknownTopic)?;
         if !spec.is_state() {
@@ -101,12 +106,7 @@ impl StateHub {
         if !spec.available() {
             return Err(PublishError::Unavailable(u.topic));
         }
-        if u.payload.len() > self.max_state_bytes {
-            return Err(PublishError::TooLarge {
-                bytes: u.payload.len(),
-                max: self.max_state_bytes,
-            });
-        }
+        let too_large = u.payload.len() > self.max_state_bytes;
         let tx = self.slots.get(&u.topic).ok_or(PublishError::UnknownTopic)?;
 
         let mut outcome = PublishOutcome::Applied;
@@ -131,13 +131,29 @@ impl StateHub {
                 topic: u.topic,
                 generation: u.generation,
                 seq: u.seq,
-                quality: StateQuality::Ok,
+                quality: if too_large {
+                    StateQuality::Unknown
+                } else {
+                    StateQuality::Ok
+                },
                 source_timestamp_unix_ns: u.source_timestamp_unix_ns,
                 source_id: u.source_id.clone(),
-                payload: u.payload.clone(),
+                payload: if too_large {
+                    Bytes::new()
+                } else {
+                    u.payload.clone()
+                },
+                too_large,
             }));
             true
         });
+        // Only a stored marker is a topic error; an older or duplicate oversized update changed nothing.
+        if too_large && outcome == PublishOutcome::Applied {
+            return Err(PublishError::TooLarge {
+                bytes: u.payload.len(),
+                max: self.max_state_bytes,
+            });
+        }
         Ok(outcome)
     }
 
@@ -249,5 +265,22 @@ mod tests {
             hub.publish(big),
             Err(PublishError::TooLarge { .. })
         ));
+        // The oversized newest state replaces the value by a payload-free marker, never OK.
+        let cur = hub.current(TopicId::OverviewAggregates).unwrap();
+        assert!(cur.too_large && cur.payload.is_empty());
+        assert_eq!(cur.quality, StateQuality::Unknown);
+        // A later state that fits replaces the marker.
+        let mut small = upd(TopicId::OverviewAggregates, 1, 2);
+        small.payload = Bytes::from_static(b"ok");
+        assert_eq!(hub.publish(small).unwrap(), PublishOutcome::Applied);
+        assert!(!hub.current(TopicId::OverviewAggregates).unwrap().too_large);
+        // An older oversized update changes nothing and is no topic error.
+        let mut stale = upd(TopicId::OverviewAggregates, 1, 1);
+        stale.payload = Bytes::from(vec![0u8; 5]);
+        assert_eq!(hub.publish(stale).unwrap(), PublishOutcome::IgnoredOlderSeq);
+        assert_eq!(
+            hub.current(TopicId::OverviewAggregates).unwrap().payload,
+            &b"ok"[..]
+        );
     }
 }
