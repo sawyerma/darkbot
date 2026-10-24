@@ -71,7 +71,7 @@ pub fn admit_exit(
     };
     let mut built = match tx::build(&plan, c.blockhash, &c.limits) {
         Ok(b) => b,
-        Err(e) => return Admission::Refused(format!("EXIT_BUILD: {e:?}")),
+        Err(e) => return Admission::Refused(format!("EXIT_BUILD: {e}")),
     };
     if tx::message_matches_plan(&built.tx.message, &plan).is_err() {
         return refuse("EXIT_MESSAGE_MISMATCH");

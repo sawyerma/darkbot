@@ -39,6 +39,25 @@ impl HaltReason {
             HaltReason::LedgerInvariant => "LEDGER_INVARIANT",
         }
     }
+
+    /// Q3: the name inside a persisted Safety denial text (`Halted(<name>)`) — explicit, equal
+    /// to what the derived Debug wrote so far, never the Debug layout itself.
+    pub const fn record_name(self) -> &'static str {
+        match self {
+            HaltReason::FeedGap => "FeedGap",
+            HaltReason::StateGap => "StateGap",
+            HaltReason::ReconcileFailure => "ReconcileFailure",
+            HaltReason::ProgramUpgrade => "ProgramUpgrade",
+            HaltReason::UnknownLayout => "UnknownLayout",
+            HaltReason::UnknownOracle => "UnknownOracle",
+            HaltReason::UnknownIntegration => "UnknownIntegration",
+            HaltReason::UnknownEconomics => "UnknownEconomics",
+            HaltReason::UnknownVersion => "UnknownVersion",
+            HaltReason::LimitBreached => "LimitBreached",
+            HaltReason::Shutdown => "Shutdown",
+            HaltReason::LedgerInvariant => "LedgerInvariant",
+        }
+    }
 }
 
 impl fmt::Display for HaltReason {

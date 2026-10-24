@@ -1295,6 +1295,76 @@ fn b4_admission_binds_a_nonzero_record_rent() {
     let _ = std::fs::remove_dir_all(ok_dir);
 }
 
+/// V9 through the LIVE `Pipeline::evaluate`: a plan the economics would act on that a Safety
+/// limit refuses is attributed to SAFETY with decision DeniedBySafety and the explicit denial
+/// text — in the plan preview (before V9 an economic skip) and at the admission boundary
+/// (before V9 no loss at all) — and nothing is reserved, journaled or sent.
+#[test]
+fn v9_safety_denials_are_their_own_cause() {
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let safety = |max_total_capital: u64, max_daily_loss: u64| {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let adapter = HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails: false,
+    };
+    // Preview: no capital at all — the only plan is refused before the economics act.
+    let mut s = safety(0, u64::MAX);
+    let r = live_evaluate(&adapter, &mut s, None, &payer, target);
+    assert_eq!(
+        (r.decision, r.loss),
+        (Decision::DeniedBySafety, Some(LossReason::Safety)),
+        "{:?}",
+        r.reason
+    );
+    assert!(
+        r.reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("safety TotalCapital"),
+        "{:?}",
+        r.reason
+    );
+    // Admission boundary: the plan passes the preview, the day's loss limit refuses its worst case.
+    let dir = std::env::temp_dir().join(format!("p0-v9-safety-{}", Pubkey::new_unique()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    let mut s = safety(u64::MAX, 1);
+    let r = live_evaluate(&adapter, &mut s, Some(&mut fe04), &payer, target);
+    assert_eq!(
+        (r.decision, r.loss, r.reason.as_deref()),
+        (
+            Decision::DeniedBySafety,
+            Some(LossReason::Safety),
+            Some("DailyLoss")
+        )
+    );
+    assert_eq!(adapter.submits.load(Ordering::Relaxed), 0);
+    assert!(fe04.journal.active_hold().is_none());
+    assert_eq!(s.capital_in_use(), 0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// B1/FE-04: the admission is the pipeline's only send. A LIVE candidate is reserved durably
 /// first (intent bound to the exact signed bytes, fee, tip, rent and the full SOL debit), then
 /// submitted exactly once; a second trigger never submits again; a refusal before anything
@@ -2111,9 +2181,10 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
         if frame.kind == journal::MANIFEST {
             continue;
         }
+        // V9/V17: written under EXHAUSTIVE_V2 (schema 3).
         assert_eq!(
             (frame.kind, frame.schema),
-            (kind::ECON_SHADOW_EVALUATION, 2)
+            (kind::ECON_SHADOW_EVALUATION, 3)
         );
         count += 1;
     }
@@ -2902,6 +2973,19 @@ fn q5_evaluate_records_the_typed_plan_error() {
             "SIZING:UNSUPPORTED_INTEGRATION_ASSET",
             Decision::Skip,
             LossReason::UnsupportedIntegration,
+        ),
+        // V17: own persisted causes (before: ROUTING).
+        (
+            PlanErrorKind::Other,
+            "mint not in state",
+            Decision::Skip,
+            LossReason::Plan,
+        ),
+        (
+            PlanErrorKind::HealthUnavailable,
+            "HEALTH_UNAVAILABLE:no health engine",
+            Decision::Unavailable,
+            LossReason::Health,
         ),
     ] {
         let r = evaluate_once(&Failing(PlanError::new(kind, text)), 0);

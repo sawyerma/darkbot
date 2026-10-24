@@ -46,11 +46,17 @@ pub enum LossReason {
     RpcBudget,
     /// B6: the candidate's network deadline passed before its next provider call.
     RpcDeadline,
+    /// V17: a planning failure without a cause of its own (state, layout, instruction build
+    /// before the plan gate); attributed to `Routing` before V17.
+    Plan,
+    /// V9: a Safety limit refused the candidate (LIVE preview or admission); before V9 the
+    /// preview counted as an economic skip and the admission had no loss.
+    Safety,
 }
 
 impl LossReason {
     /// Every variant, in declaration order.
-    pub const ALL: [LossReason; 21] = [
+    pub const ALL: [LossReason; 23] = [
         LossReason::Ingress,
         LossReason::State,
         LossReason::Health,
@@ -72,7 +78,15 @@ impl LossReason {
         LossReason::Unknown,
         LossReason::RpcBudget,
         LossReason::RpcDeadline,
+        LossReason::Plan,
+        LossReason::Safety,
     ];
+
+    /// V9/V17: causes a record of the earlier attribution (ECON_SHADOW_EVALUATION schema 2 and
+    /// before) cannot carry; the variants were appended, so every earlier value keeps its index.
+    pub const fn since_exhaustive_v2(self) -> bool {
+        matches!(self, LossReason::Plan | LossReason::Safety)
+    }
 
     /// Q3: the persisted/report name (legacy bottleneck key, shadow-ledger day losses) —
     /// explicit, never the derived Debug layout; the names every report and journal so far carry.
@@ -99,6 +113,8 @@ impl LossReason {
             LossReason::Unknown => "Unknown",
             LossReason::RpcBudget => "RpcBudget",
             LossReason::RpcDeadline => "RpcDeadline",
+            LossReason::Plan => "Plan",
+            LossReason::Safety => "Safety",
         }
     }
 }
@@ -322,6 +338,8 @@ mod tests {
             L::Unknown => 18,
             L::RpcBudget => 19,
             L::RpcDeadline => 20,
+            L::Plan => 21,
+            L::Safety => 22,
         };
         for (i, l) in L::ALL.into_iter().enumerate() {
             assert_eq!(index(l), i);
@@ -349,7 +367,9 @@ mod tests {
                 "ThresholdTooHigh",
                 "Unknown",
                 "RpcBudget",
-                "RpcDeadline"
+                "RpcDeadline",
+                "Plan",
+                "Safety"
             ]
         );
         let names = L::ALL.map(L::record_name);
@@ -430,6 +450,108 @@ mod tests {
                 "ValueRange",
                 "AccountLayout",
             ]
+        );
+    }
+
+    /// V18 (Q3 review addendum): the own types inside the free-text `reason` — Safety denials
+    /// (with every halt reason), plan-gate refusals and economics evaluations — come from
+    /// explicit texts equal to what the derived Debug wrote so far, pinned here.
+    #[test]
+    fn q3_reason_texts_of_own_types_are_explicit_and_unchanged() {
+        use darkbot_common::error::HaltReason as H;
+        use darkbot_project0::economics::Evaluation;
+        use darkbot_project0::planner::PlanError as P;
+        use darkbot_project0::safety::Deny as D;
+        let denies = [
+            D::TotalCapital,
+            D::Inventory,
+            D::ConcurrentPositions,
+            D::AssetNotAllowed,
+            D::ExecutionClassNotAllowed,
+            D::Exposure,
+            D::DailyLoss,
+            D::FailedAttempts,
+            D::Tip,
+            D::Slippage,
+            D::Outstanding,
+            D::LiveDisabled,
+            D::Halted(H::FeedGap),
+            D::Halted(H::StateGap),
+            D::Halted(H::ReconcileFailure),
+            D::Halted(H::ProgramUpgrade),
+            D::Halted(H::UnknownLayout),
+            D::Halted(H::UnknownOracle),
+            D::Halted(H::UnknownIntegration),
+            D::Halted(H::UnknownEconomics),
+            D::Halted(H::UnknownVersion),
+            D::Halted(H::LimitBreached),
+            D::Halted(H::Shutdown),
+            D::Halted(H::LedgerInvariant),
+        ];
+        assert_eq!(
+            denies.map(D::record_text),
+            [
+                "TotalCapital",
+                "Inventory",
+                "ConcurrentPositions",
+                "AssetNotAllowed",
+                "ExecutionClassNotAllowed",
+                "Exposure",
+                "DailyLoss",
+                "FailedAttempts",
+                "Tip",
+                "Slippage",
+                "Outstanding",
+                "LiveDisabled",
+                "Halted(FeedGap)",
+                "Halted(StateGap)",
+                "Halted(ReconcileFailure)",
+                "Halted(ProgramUpgrade)",
+                "Halted(UnknownLayout)",
+                "Halted(UnknownOracle)",
+                "Halted(UnknownIntegration)",
+                "Halted(UnknownEconomics)",
+                "Halted(UnknownVersion)",
+                "Halted(LimitBreached)",
+                "Halted(Shutdown)",
+                "Halted(LedgerInvariant)",
+            ]
+        );
+        let plans = [
+            P::NoStart,
+            P::NoEnd,
+            P::EndNotLast,
+            P::StepBeforeStartNotAllowed(3),
+            P::ProgramNotAllowlisted(1),
+            P::OrderViolation(2, "repay before \"withdraw\""),
+            P::RepayMissing,
+            P::PaidRouteBeforeP7,
+            P::UnknownInstruction(4),
+        ];
+        assert_eq!(
+            plans.each_ref().map(P::record_text),
+            [
+                "NoStart",
+                "NoEnd",
+                "EndNotLast",
+                "StepBeforeStartNotAllowed(3)",
+                "ProgramNotAllowlisted(1)",
+                "OrderViolation(2, \"repay before \\\"withdraw\\\"\")",
+                "RepayMissing",
+                "PaidRouteBeforeP7",
+                "UnknownInstruction(4)",
+            ]
+        );
+        let evaluations = [
+            Evaluation::Known {
+                net: -5,
+                profit_per_capital_bps: 12,
+            },
+            Evaluation::Unknown,
+        ];
+        assert_eq!(
+            evaluations.map(Evaluation::record_text),
+            ["Known { net: -5, profit_per_capital_bps: 12 }", "Unknown"]
         );
     }
 

@@ -109,6 +109,132 @@ pub fn confirmation_status_name(
     }
 }
 
+/// Q3: the persisted text of a transaction error (simulation failure code, landing `err`) —
+/// explicit and exhaustive over the pinned SDK enums, never their derived Debug: an SDK rename
+/// fails to compile here instead of changing stored text. Equal to the Debug of
+/// `TransactionError` at the pin; the SDK 3.x simulation wrapper `UiTransactionError(…)` is not
+/// part of the text.
+pub fn transaction_error_text(e: &solana_sdk::transaction::TransactionError) -> String {
+    use solana_sdk::transaction::TransactionError as T;
+    let name = match e {
+        T::InstructionError(index, error) => {
+            return format!(
+                "InstructionError({index}, {})",
+                instruction_error_text(error)
+            )
+        }
+        T::DuplicateInstruction(index) => return format!("DuplicateInstruction({index})"),
+        T::InsufficientFundsForRent { account_index } => {
+            return format!("InsufficientFundsForRent {{ account_index: {account_index} }}")
+        }
+        T::ProgramExecutionTemporarilyRestricted { account_index } => {
+            return format!(
+                "ProgramExecutionTemporarilyRestricted {{ account_index: {account_index} }}"
+            )
+        }
+        T::AccountInUse => "AccountInUse",
+        T::AccountLoadedTwice => "AccountLoadedTwice",
+        T::AccountNotFound => "AccountNotFound",
+        T::ProgramAccountNotFound => "ProgramAccountNotFound",
+        T::InsufficientFundsForFee => "InsufficientFundsForFee",
+        T::InvalidAccountForFee => "InvalidAccountForFee",
+        T::AlreadyProcessed => "AlreadyProcessed",
+        T::BlockhashNotFound => "BlockhashNotFound",
+        T::CallChainTooDeep => "CallChainTooDeep",
+        T::MissingSignatureForFee => "MissingSignatureForFee",
+        T::InvalidAccountIndex => "InvalidAccountIndex",
+        T::SignatureFailure => "SignatureFailure",
+        T::InvalidProgramForExecution => "InvalidProgramForExecution",
+        T::SanitizeFailure => "SanitizeFailure",
+        T::ClusterMaintenance => "ClusterMaintenance",
+        T::AccountBorrowOutstanding => "AccountBorrowOutstanding",
+        T::WouldExceedMaxBlockCostLimit => "WouldExceedMaxBlockCostLimit",
+        T::UnsupportedVersion => "UnsupportedVersion",
+        T::InvalidWritableAccount => "InvalidWritableAccount",
+        T::WouldExceedMaxAccountCostLimit => "WouldExceedMaxAccountCostLimit",
+        T::WouldExceedAccountDataBlockLimit => "WouldExceedAccountDataBlockLimit",
+        T::TooManyAccountLocks => "TooManyAccountLocks",
+        T::AddressLookupTableNotFound => "AddressLookupTableNotFound",
+        T::InvalidAddressLookupTableOwner => "InvalidAddressLookupTableOwner",
+        T::InvalidAddressLookupTableData => "InvalidAddressLookupTableData",
+        T::InvalidAddressLookupTableIndex => "InvalidAddressLookupTableIndex",
+        T::InvalidRentPayingAccount => "InvalidRentPayingAccount",
+        T::WouldExceedMaxVoteCostLimit => "WouldExceedMaxVoteCostLimit",
+        T::WouldExceedAccountDataTotalLimit => "WouldExceedAccountDataTotalLimit",
+        T::MaxLoadedAccountsDataSizeExceeded => "MaxLoadedAccountsDataSizeExceeded",
+        T::InvalidLoadedAccountsDataSizeLimit => "InvalidLoadedAccountsDataSizeLimit",
+        T::ResanitizationNeeded => "ResanitizationNeeded",
+        T::UnbalancedTransaction => "UnbalancedTransaction",
+        T::ProgramCacheHitMaxLimit => "ProgramCacheHitMaxLimit",
+        T::CommitCancelled => "CommitCancelled",
+    };
+    name.into()
+}
+
+/// Q3: the text of an instruction error inside `transaction_error_text` (exhaustive).
+fn instruction_error_text(e: &solana_sdk::instruction::InstructionError) -> String {
+    use solana_sdk::instruction::InstructionError as I;
+    let name = match e {
+        I::Custom(code) => return format!("Custom({code})"),
+        I::GenericError => "GenericError",
+        I::InvalidArgument => "InvalidArgument",
+        I::InvalidInstructionData => "InvalidInstructionData",
+        I::InvalidAccountData => "InvalidAccountData",
+        I::AccountDataTooSmall => "AccountDataTooSmall",
+        I::InsufficientFunds => "InsufficientFunds",
+        I::IncorrectProgramId => "IncorrectProgramId",
+        I::MissingRequiredSignature => "MissingRequiredSignature",
+        I::AccountAlreadyInitialized => "AccountAlreadyInitialized",
+        I::UninitializedAccount => "UninitializedAccount",
+        I::UnbalancedInstruction => "UnbalancedInstruction",
+        I::ModifiedProgramId => "ModifiedProgramId",
+        I::ExternalAccountLamportSpend => "ExternalAccountLamportSpend",
+        I::ExternalAccountDataModified => "ExternalAccountDataModified",
+        I::ReadonlyLamportChange => "ReadonlyLamportChange",
+        I::ReadonlyDataModified => "ReadonlyDataModified",
+        I::DuplicateAccountIndex => "DuplicateAccountIndex",
+        I::ExecutableModified => "ExecutableModified",
+        I::RentEpochModified => "RentEpochModified",
+        // Deprecated in the pinned SDK, still a variant (and still written by older validators).
+        #[allow(deprecated)]
+        I::NotEnoughAccountKeys => "NotEnoughAccountKeys",
+        I::AccountDataSizeChanged => "AccountDataSizeChanged",
+        I::AccountNotExecutable => "AccountNotExecutable",
+        I::AccountBorrowFailed => "AccountBorrowFailed",
+        I::AccountBorrowOutstanding => "AccountBorrowOutstanding",
+        I::DuplicateAccountOutOfSync => "DuplicateAccountOutOfSync",
+        I::InvalidError => "InvalidError",
+        I::ExecutableDataModified => "ExecutableDataModified",
+        I::ExecutableLamportChange => "ExecutableLamportChange",
+        I::ExecutableAccountNotRentExempt => "ExecutableAccountNotRentExempt",
+        I::UnsupportedProgramId => "UnsupportedProgramId",
+        I::CallDepth => "CallDepth",
+        I::MissingAccount => "MissingAccount",
+        I::ReentrancyNotAllowed => "ReentrancyNotAllowed",
+        I::MaxSeedLengthExceeded => "MaxSeedLengthExceeded",
+        I::InvalidSeeds => "InvalidSeeds",
+        I::InvalidRealloc => "InvalidRealloc",
+        I::ComputationalBudgetExceeded => "ComputationalBudgetExceeded",
+        I::PrivilegeEscalation => "PrivilegeEscalation",
+        I::ProgramEnvironmentSetupFailure => "ProgramEnvironmentSetupFailure",
+        I::ProgramFailedToComplete => "ProgramFailedToComplete",
+        I::ProgramFailedToCompile => "ProgramFailedToCompile",
+        I::Immutable => "Immutable",
+        I::IncorrectAuthority => "IncorrectAuthority",
+        I::BorshIoError => "BorshIoError",
+        I::AccountNotRentExempt => "AccountNotRentExempt",
+        I::InvalidAccountOwner => "InvalidAccountOwner",
+        I::ArithmeticOverflow => "ArithmeticOverflow",
+        I::UnsupportedSysvar => "UnsupportedSysvar",
+        I::IllegalOwner => "IllegalOwner",
+        I::MaxAccountsDataAllocationsExceeded => "MaxAccountsDataAllocationsExceeded",
+        I::MaxAccountsExceeded => "MaxAccountsExceeded",
+        I::MaxInstructionTraceLengthExceeded => "MaxInstructionTraceLengthExceeded",
+        I::BuiltinProgramsMustConsumeComputeUnits => "BuiltinProgramsMustConsumeComputeUnits",
+    };
+    name.into()
+}
+
 /// N2: why there is no fee quote — a timeout or a refused call never looks like "no quote".
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FeeQuoteError {

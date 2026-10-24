@@ -253,6 +253,22 @@ pub enum Evaluation {
     Unknown,
 }
 
+impl Evaluation {
+    /// Q3: the persisted text of an evaluation (record `reason`) — explicit, equal to what the
+    /// derived Debug wrote so far, never the Debug layout itself.
+    pub fn record_text(self) -> String {
+        match self {
+            Evaluation::Known {
+                net,
+                profit_per_capital_bps,
+            } => {
+                format!("Known {{ net: {net}, profit_per_capital_bps: {profit_per_capital_bps} }}")
+            }
+            Evaluation::Unknown => "Unknown".into(),
+        }
+    }
+}
+
 pub fn evaluate(c: &CandidateInput, failed: &FailedCostMatrix) -> Evaluation {
     let Some(gross_seized_realizable_usd_micro) = c.gross_seized_realizable_usd_micro else {
         return Evaluation::Unknown;

@@ -294,9 +294,18 @@ fn slot_margin(row: &Joined) -> Option<i128> {
     )
 }
 /// N1: the loss-attribution model of a report: one bucket per `LossReason`, UNKNOWN only for an
-/// undetermined cause. Reports of ECON schema ≤ 3 carry `LOSS_ATTRIBUTION_PRE_N1`.
-pub const LOSS_ATTRIBUTION_MODEL: &str =
-    "EXHAUSTIVE_V1: one bucket per LossReason; UNKNOWN only for an undetermined cause";
+/// undetermined cause. Reports of ECON schema ≤ 3 carry `LOSS_ATTRIBUTION_PRE_N1`; a report
+/// keeps the model it was made under (before V9/V17: "EXHAUSTIVE_V1: one bucket per
+/// LossReason; UNKNOWN only for an undetermined cause").
+pub const LOSS_ATTRIBUTION_MODEL: &str = "EXHAUSTIVE_V2: one bucket per LossReason; PLAN and \
+     SAFETY are causes of their own; UNKNOWN only for an undetermined cause";
+/// V9/V17: an offline replay that joined shadow evaluations written before V9/V17 (schema ≤ 2
+/// or JSONL): their causes were recorded under the earlier attribution, which no replay can
+/// split afterwards.
+pub const LOSS_ATTRIBUTION_EARLIER_RECORDS: &str = "EXHAUSTIVE_V1_RECORDS: evaluations written \
+     before V9/V17 joined; their ROUTING includes planning failures without a cause of their own \
+     and a missing health engine, their ECONOMIC_SKIP/THRESHOLD_TOO_HIGH include LIVE Safety \
+     preview denials";
 pub const LOSS_ATTRIBUTION_PRE_N1: &str = "PRE_N1 (ECON schema <= 3): UNKNOWN includes the \
      LossReasons Ingress, State, CircuitBreaker, IntegrationRefresh, UnsupportedIntegration, \
      Sizing, Submission, Tip, RpcBudget and RpcDeadline; ECONOMICS includes EconomicSkip, \
@@ -304,7 +313,7 @@ pub const LOSS_ATTRIBUTION_PRE_N1: &str = "PRE_N1 (ECON schema <= 3): UNKNOWN in
 
 /// N1: every bucket the canonical loss attribution can report, pre-seeded with zero rows.
 /// (`ADMINISTRATIVE_SETTLEMENT` rows are not tradable and never attributed.)
-pub(crate) const LOSS_BUCKETS: [&str; 28] = [
+pub(crate) const LOSS_BUCKETS: [&str; 30] = [
     "NOT_DETECTED",
     "INGRESS",
     "STATE",
@@ -317,8 +326,10 @@ pub(crate) const LOSS_BUCKETS: [&str; 28] = [
     "SIZING",
     "MISSING_ATA",
     "ROUTING",
+    "PLAN",
     "FUNDING",
     "CAPITAL",
+    "SAFETY",
     "ECONOMICS",
     "ECONOMIC_SKIP",
     "THRESHOLD_TOO_HIGH",
@@ -360,6 +371,8 @@ pub(crate) fn loss_bucket(reason: LossReason) -> &'static str {
         LossReason::Unknown => "UNKNOWN",
         LossReason::RpcBudget => "RPC_BUDGET",
         LossReason::RpcDeadline => "RPC_DEADLINE",
+        LossReason::Plan => "PLAN",
+        LossReason::Safety => "SAFETY",
     }
 }
 
@@ -1139,6 +1152,106 @@ mod regression {
     include!("econ_a2_tests.rs");
     include!("econ_a3_tests.rs");
     include!("econ_a6_tests.rs");
+    /// V9/V17: shadow evaluations of the earlier writer stay readable and keep their
+    /// attribution. The pinned schema-2 journal (written by the writer before V9/V17) decodes
+    /// to its record; an offline replay over it labels its summaries `EXHAUSTIVE_V1_RECORDS`;
+    /// a schema-2 frame or a JSONL line with a cause added since (PLAN/SAFETY) is forged and
+    /// refused, while the same bytes are valid at schema 3.
+    #[test]
+    fn v17_earlier_writer_evaluations_keep_their_attribution() {
+        use crate::analytics::payload;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src/analytics/fixtures/shadow_evaluations_schema2.p0j");
+        assert_eq!(
+            journal::hex(&journal::file_sha256(&fixture).unwrap()),
+            "8cf15a2863346a9f51dff108a8726339d7b3c498b8e3591148df9e9110757b3d"
+        );
+        let chain = crate::storage::segments::verify_chain(&fixture).unwrap();
+        assert!(chain.sealed && chain.complete);
+        let mut reader = journal::Reader::open(&fixture).unwrap();
+        let mut records = Vec::new();
+        while let Some(f) = reader.next_frame().unwrap() {
+            if f.kind == journal::MANIFEST {
+                continue;
+            }
+            assert_eq!(
+                (f.kind, f.schema),
+                (journal::kind::ECON_SHADOW_EVALUATION, 2)
+            );
+            let v: super::super::ShadowEvaluation =
+                payload::decode(f.kind, f.schema, &f.payload).unwrap();
+            let mut forged = v.clone();
+            for cause in [LossReason::Plan, LossReason::Safety] {
+                forged.record.loss = Some(cause);
+                let bytes = payload::encode_wire(&forged).unwrap();
+                assert!(
+                    payload::decode::<super::super::ShadowEvaluation>(f.kind, 2, &bytes).is_err()
+                );
+                assert!(
+                    payload::decode::<super::super::ShadowEvaluation>(f.kind, 3, &bytes).is_ok()
+                );
+            }
+            records.push(v.record);
+        }
+        assert_eq!(records.len(), 1);
+        let r = records.remove(0);
+        assert_eq!(
+            (r.loss, r.reason.as_deref()),
+            (Some(LossReason::Routing), Some("mint not in state"))
+        );
+        let run = std::env::temp_dir().join(format!("p0-v17-earlier-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&run);
+        fs::create_dir_all(&run).unwrap();
+        let shadow = run.join("shadow_evaluations.p0j");
+        fs::copy(&fixture, &shadow).unwrap();
+        let mut event = row(&r, 10, 0).market;
+        event.block_time = Some(101);
+        let input = run.join("replay_market.jsonl");
+        fs::write(
+            &input,
+            format!("{}\n", serde_json::to_string(&event).unwrap()),
+        )
+        .unwrap();
+        let plan = MeasurementPlan::new(61).unwrap();
+        let scope = ReplayScope {
+            capture_start_ns: None,
+            capital: &CAPITAL_USD,
+        };
+        let out = run.join("out");
+        replay(&input, &shadow, &out, &plan, 100_000_000_000, 30, &scope).unwrap();
+        let fin: Value =
+            serde_json::from_slice(&fs::read(out.join("economics_final.json")).unwrap()).unwrap();
+        assert_eq!(
+            fin["cumulative"]["loss_attribution_model"],
+            LOSS_ATTRIBUTION_EARLIER_RECORDS
+        );
+        assert_eq!(fin["cumulative"]["loss_attribution"]["ROUTING"]["count"], 1);
+        assert_eq!(fin["cumulative"]["loss_attribution"]["PLAN"]["count"], 0);
+        // A JSONL line (before PERSIST-01) is of the earlier writer too: a newer cause is forged.
+        let mut forged = r.clone();
+        forged.loss = Some(LossReason::Safety);
+        let legacy = run.join("legacy.jsonl");
+        fs::write(
+            &legacy,
+            format!("{}\n", serde_json::to_string(&forged).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            replay(
+                &input,
+                &legacy,
+                &run.join("forged"),
+                &plan,
+                100_000_000_000,
+                30,
+                &scope
+            )
+            .err()
+            .as_deref(),
+            Some("SHADOW_DECODE")
+        );
+        let _ = fs::remove_dir_all(run);
+    }
     /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
     /// identical historical JSONL row; an identity status outside the closed set is refused.
     #[test]
@@ -1244,6 +1357,8 @@ mod regression {
             L::Unknown,
             L::RpcBudget,
             L::RpcDeadline,
+            L::Plan,
+            L::Safety,
         ];
         // Exhaustive like `loss_bucket`: a new variant must be added to `reasons` above.
         for r in reasons {
@@ -1253,6 +1368,7 @@ mod regression {
                 L::UnsupportedIntegration | L::Sizing | L::Economics | L::Routing => {}
                 L::Build | L::Submission | L::Tip | L::StateRace | L::EconomicSkip => {}
                 L::ThresholdTooHigh | L::Unknown | L::RpcBudget | L::RpcDeadline => {}
+                L::Plan | L::Safety => {}
             }
         }
         let mut buckets: Vec<_> = reasons.iter().map(|r| loss_bucket(*r)).collect();
@@ -1276,6 +1392,8 @@ mod regression {
             (L::Sizing, "SIZING"),
             (L::EconomicSkip, "ECONOMIC_SKIP"),
             (L::ThresholdTooHigh, "THRESHOLD_TOO_HIGH"),
+            (L::Plan, "PLAN"),
+            (L::Safety, "SAFETY"),
         ] {
             let mut r = identified();
             r.loss = Some(reason);
@@ -1409,13 +1527,28 @@ mod regression {
             },
         )
         .unwrap();
-        for name in ["canonical_market_shadow.jsonl", "economics_final.json"] {
+        assert_eq!(
+            fs::read(out.join("canonical_market_shadow.jsonl")).unwrap(),
+            fs::read(from_legacy.join("canonical_market_shadow.jsonl")).unwrap()
+        );
+        // V9/V17: the JSONL records were attributed by the earlier writer, and say so; every
+        // other figure is identical.
+        let fin = |dir: &std::path::Path| -> Value {
+            serde_json::from_slice(&fs::read(dir.join("economics_final.json")).unwrap()).unwrap()
+        };
+        let (current, mut earlier) = (fin(&out), fin(&from_legacy));
+        for section in ["cumulative", "window_delta"] {
             assert_eq!(
-                fs::read(out.join(name)).unwrap(),
-                fs::read(from_legacy.join(name)).unwrap(),
-                "{name}"
+                current[section]["loss_attribution_model"],
+                LOSS_ATTRIBUTION_MODEL
             );
+            assert_eq!(
+                earlier[section]["loss_attribution_model"],
+                LOSS_ATTRIBUTION_EARLIER_RECORDS
+            );
+            earlier[section]["loss_attribution_model"] = LOSS_ATTRIBUTION_MODEL.into();
         }
+        assert_eq!(current, earlier);
         // Both sources at once are ambiguous, never merged or guessed.
         fs::copy(
             journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl")),
@@ -1837,6 +1970,9 @@ pub struct JoinOutcome {
     pub rows: Vec<Joined>,
     /// Whether an evaluation journal existed (absence with events present is an error).
     pub shadow_available: bool,
+    /// V9/V17: joined evaluations written before V9/V17 (schema ≤ 2 frames or JSONL lines),
+    /// attributed under the earlier model.
+    pub earlier_attribution_records: u64,
 }
 
 /// The production episode/plan selector over finalized events and the run's evaluation stream:
@@ -1929,6 +2065,15 @@ pub fn join(
         return Err("AMBIGUOUS_SHADOW_SOURCE".into());
     }
     let available = binary.exists() || legacy;
+    // V9/V17: an earlier writer never wrote a cause added since; such a record is forged.
+    let earlier = |rec: &OpportunityRecord| {
+        if rec.loss.is_some_and(LossReason::since_exhaustive_v2) {
+            Err("SHADOW_DECODE".to_string())
+        } else {
+            Ok(())
+        }
+    };
+    let mut earlier_attribution_records = 0u64;
     if count > 0 && !available {
         return Err("SHADOW_JOURNAL_MISSING".into());
     }
@@ -1954,11 +2099,19 @@ pub fn join(
                             .map_err(|_| "SHADOW_DECODE")?
                             .record
                     };
+                    let from_earlier_writer = frame.schema
+                        < <super::ShadowEvaluation as crate::analytics::payload::Payload>::SCHEMA;
+                    if from_earlier_writer {
+                        earlier(&rec)?;
+                    }
                     if ctx.capture.is_some_and(|c| !c.admits(&rec)) {
                         continue;
                     }
                     if let Some(rows) = grouped.get_mut(&rec.account) {
                         assign_record(rows, &rec);
+                        if from_earlier_writer {
+                            earlier_attribution_records += 1;
+                        }
                     }
                 }
                 journal::MANIFEST => {}
@@ -1984,11 +2137,13 @@ pub fn join(
             }
             let rec: OpportunityRecord =
                 serde_json::from_slice(&line).map_err(|_| "SHADOW_DECODE")?;
+            earlier(&rec)?;
             if ctx.capture.is_some_and(|c| !c.admits(&rec)) {
                 continue;
             }
             if let Some(rows) = grouped.get_mut(&rec.account) {
                 assign_record(rows, &rec);
+                earlier_attribution_records += 1;
             }
         }
     }
@@ -2003,6 +2158,7 @@ pub fn join(
     Ok(JoinOutcome {
         rows,
         shadow_available: available,
+        earlier_attribution_records,
     })
 }
 
@@ -2069,6 +2225,7 @@ pub(super) fn replay(
     let JoinOutcome {
         rows,
         shadow_available: available,
+        earlier_attribution_records,
     } = join(
         events,
         shadow_path,
@@ -2098,6 +2255,14 @@ pub(super) fn replay(
             .and_then(|t| u64::try_from((t as i128) * 1_000_000_000 - start_ns as i128).ok())
             .and_then(|n| plan.chain_bucket(n))
     };
+    // V9/V17: a summary over evaluations of the earlier writer is labelled with their model.
+    let summary = |rows: &[&Joined], span: f64, unassigned: usize| {
+        let mut s = summarize(rows, span, unassigned, true, capital);
+        if earlier_attribution_records > 0 {
+            s.loss_attribution_model = LOSS_ATTRIBUTION_EARLIER_RECORDS.into();
+        }
+        s
+    };
     for i in 1..=SNAPSHOT_COUNT {
         let cumulative: Vec<_> = rows
             .iter()
@@ -2107,8 +2272,8 @@ pub(super) fn replay(
         let unassigned = rows.iter().filter(|r| bucket(r).is_none()).count();
         let value = json!({"schema":"C0-E1/OfflineCanonicalEconomics/1","scope":"EXPLICIT_FINALIZED_EVENT_INPUT; verification coverage is separate",
             "start_unix_ns":start_ns,"cutoff_unix_ns":start_ns+plan.offset_ns(i),"plan":plan,
-            "cumulative":summarize(&cumulative,plan.span_seconds(0,i),unassigned,true,capital),
-            "window_delta":summarize(&delta,plan.span_seconds(i-1,i),unassigned,true,capital),
+            "cumulative":summary(&cumulative,plan.span_seconds(0,i),unassigned),
+            "window_delta":summary(&delta,plan.span_seconds(i-1,i),unassigned),
             "capital_usd":capital,
             "race_margins":race_margins(&cumulative,"UNKNOWN",false),
             "evaluation_window":if capture.is_some() {"CAPTURE_WINDOW_MONOTONIC: only evaluations the live chain admits"} else {"NOT_APPLIED: no monotone capture start given; every evaluation frame joins"},

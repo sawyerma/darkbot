@@ -36,6 +36,29 @@ pub enum Deny {
     LiveDisabled,
 }
 
+impl Deny {
+    /// Q3: the persisted text of a denial (record `reason`) — explicit, equal to what the derived
+    /// Debug wrote so far, never the Debug layout itself.
+    pub fn record_text(self) -> String {
+        let name = match self {
+            Deny::Halted(h) => return format!("Halted({})", h.record_name()),
+            Deny::TotalCapital => "TotalCapital",
+            Deny::Inventory => "Inventory",
+            Deny::ConcurrentPositions => "ConcurrentPositions",
+            Deny::AssetNotAllowed => "AssetNotAllowed",
+            Deny::ExecutionClassNotAllowed => "ExecutionClassNotAllowed",
+            Deny::Exposure => "Exposure",
+            Deny::DailyLoss => "DailyLoss",
+            Deny::FailedAttempts => "FailedAttempts",
+            Deny::Tip => "Tip",
+            Deny::Slippage => "Slippage",
+            Deny::Outstanding => "Outstanding",
+            Deny::LiveDisabled => "LiveDisabled",
+        };
+        name.into()
+    }
+}
+
 /// Q2: a safety ledger transition that would break an invariant. It halts the safety layer
 /// (`HaltReason::LedgerInvariant`) and changes nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

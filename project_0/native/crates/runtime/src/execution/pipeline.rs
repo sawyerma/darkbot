@@ -224,11 +224,11 @@ pub enum PlanErrorKind {
     MissingAta,
     /// C10: a stale integration reserve, from the pinned program's error code.
     IntegrationStale,
-    /// No health engine built in.
+    /// No health engine built in (V17: loss `Health`).
     HealthUnavailable,
     /// No route for any pair (`ROUTING:`).
     Routing,
-    /// Any other planning failure (state, layout, build), attributed to routing as before Q5.
+    /// Any other planning failure (state, layout, build); V17: loss `Plan` of its own.
     Other,
 }
 
@@ -262,7 +262,9 @@ impl PlanError {
         }
     }
 
-    /// Loss attribution: [P5] an unreadable FeeState is UNKNOWN, never a routing loss.
+    /// Loss attribution: [P5] an unreadable FeeState is UNKNOWN, never a routing loss; V17:
+    /// every other kind has its own persisted cause (before V17 `HealthUnavailable` and `Other`
+    /// were ROUTING).
     pub fn loss(&self) -> LossReason {
         match self.kind {
             PlanErrorKind::FeeStateUnavailable => LossReason::Unknown,
@@ -270,9 +272,9 @@ impl PlanError {
             PlanErrorKind::UnsupportedIntegration => LossReason::UnsupportedIntegration,
             PlanErrorKind::MissingAta => LossReason::MissingAta,
             PlanErrorKind::IntegrationStale => LossReason::IntegrationRefresh,
-            PlanErrorKind::HealthUnavailable | PlanErrorKind::Routing | PlanErrorKind::Other => {
-                LossReason::Routing
-            }
+            PlanErrorKind::HealthUnavailable => LossReason::Health,
+            PlanErrorKind::Routing => LossReason::Routing,
+            PlanErrorKind::Other => LossReason::Plan,
         }
     }
 }
@@ -564,6 +566,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             crate::analytics::record::CandidateCostRecord,
         )> = None;
         let mut threshold_hits: u32 = 0;
+        // V9: plans the economics would act on that only the LIVE Safety preview refused.
+        let mut safety_hits: u32 = 0;
         let mut rejected = Vec::new();
         // V9: the furthest technical stage a rejected plan reached (and its loss cause), and
         // whether any plan reached the economics; the loss of a candidate without a plan names it.
@@ -584,7 +588,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 planner::validate_receivership(&steps, self.allowlist, plan.route, self.p7_passed)?;
                 Ok(steps)
             });
-            let checked = checked.map_err(|e| format!("{e:?}")).and_then(|steps| {
+            let checked = checked.map_err(|e| e.record_text()).and_then(|steps| {
                 if plan.prerequisite_txs.is_empty() {
                     return Ok(());
                 }
@@ -593,7 +597,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     .iter()
                     .map(|pre| planner::steps_of(pre, table))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| format!("prerequisite {e:?}"))?;
+                    .map_err(|e| format!("prerequisite {}", e.record_text()))?;
                 txs.push(steps);
                 planner::validate_bundle(&txs)
                     .map(drop)
@@ -658,9 +662,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     Ok(()) => true,
                     Err(deny) => {
                         rejected.push(format!(
-                            "{}: safety {:?}",
+                            "{}: safety {}",
                             plan.input.funding.as_str(),
-                            deny
+                            deny.record_text()
                         ));
                         false
                     }
@@ -806,6 +810,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 state_valid,
                 safety_valid,
             );
+            if !safety_valid
+                && economics::actionable(eval, self.min_profit, true, state_valid, true)
+            {
+                safety_hits += 1;
+            }
             // [MT0] avoidable remote work, classified only from decisions already made above.
             if fee_quote.is_some() && matches!(eval, Evaluation::Known { .. }) && !actionable {
                 darkbot_common::mt0::MT0
@@ -840,9 +849,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
                 reached_economics = true;
                 rejected.push(format!(
-                    "{}: economics {:?}",
+                    "{}: economics {}",
                     plan.input.funding.as_str(),
-                    eval
+                    eval.record_text()
                 ));
                 continue;
             }
@@ -877,8 +886,14 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         }
 
         let Some((plan, mut built, eval, selected_costs)) = best_actionable.or(best_probe) else {
+            // V9: a plan the economics would have acted on was refused by Safety: its own cause.
+            if safety_hits > 0 {
+                rec.decision = Decision::DeniedBySafety;
+            }
             // [FIX-43] ThresholdTooHigh nur, wenn mindestens ein Kandidat positiv, aber unter MIN_PROFIT lag.
-            rec.loss = Some(if threshold_hits > 0 {
+            rec.loss = Some(if safety_hits > 0 {
+                LossReason::Safety
+            } else if threshold_hits > 0 {
                 LossReason::ThresholdTooHigh
             } else if reached_economics {
                 LossReason::EconomicSkip
@@ -1096,7 +1111,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             "longtail",
         ) {
             rec.decision = Decision::DeniedBySafety;
-            rec.reason = Some(format!("{:?}", d));
+            rec.loss = Some(LossReason::Safety);
+            rec.reason = Some(d.record_text());
             return rec.with_timeline(&tl);
         }
         let Some(fe04) = self.fe04.as_deref_mut() else {
@@ -1123,7 +1139,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if let Some(max_loss) = max_loss_usd_micro {
             if let Err(d) = self.safety.admit_loss(now_unix_s, max_loss) {
                 rec.decision = Decision::DeniedBySafety;
-                rec.reason = Some(format!("{:?}", d));
+                rec.loss = Some(LossReason::Safety);
+                rec.reason = Some(d.record_text());
                 return rec.with_timeline(&tl);
             }
         }
@@ -1138,7 +1155,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             "longtail",
         ) {
             rec.decision = Decision::DeniedBySafety;
-            rec.reason = Some(format!("{:?}", d));
+            rec.loss = Some(LossReason::Safety);
+            rec.reason = Some(d.record_text());
             return rec.with_timeline(&tl);
         }
         let (path, txs) = if use_bundle {
@@ -1268,8 +1286,10 @@ mod plan_error_tests {
             K::UnsupportedIntegration => (Decision::Skip, LossReason::UnsupportedIntegration),
             K::MissingAta => (Decision::Skip, LossReason::MissingAta),
             K::IntegrationStale => (Decision::Skip, LossReason::IntegrationRefresh),
-            K::HealthUnavailable => (Decision::Unavailable, LossReason::Routing),
-            K::Routing | K::Other => (Decision::Skip, LossReason::Routing),
+            // V17: every kind has its own persisted cause (before: both ROUTING).
+            K::HealthUnavailable => (Decision::Unavailable, LossReason::Health),
+            K::Routing => (Decision::Skip, LossReason::Routing),
+            K::Other => (Decision::Skip, LossReason::Plan),
         };
         let texts = [
             "ROUTING:exact-in a→b: provider temporarily unavailable",
@@ -1295,13 +1315,10 @@ mod plan_error_tests {
                 assert_eq!(e.to_string(), text);
             }
         }
-        // An untyped string is an unclassified failure: a routing skip, as before Q5.
+        // An untyped string is an unclassified planning failure (V17: PLAN, never ROUTING).
         let e = PlanError::from("FEE_STATE_UNAVAILABLE:looks typed but is not");
         assert_eq!(e.kind, K::Other);
-        assert_eq!(
-            (e.decision(), e.loss()),
-            (Decision::Skip, LossReason::Routing)
-        );
+        assert_eq!((e.decision(), e.loss()), (Decision::Skip, LossReason::Plan));
     }
 }
 

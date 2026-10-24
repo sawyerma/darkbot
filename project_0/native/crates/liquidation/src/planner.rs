@@ -61,6 +61,24 @@ pub enum PlanError {
     UnknownInstruction(usize),
 }
 
+impl PlanError {
+    /// Q3: the persisted text of a plan-gate refusal (record `reason`) — explicit, equal to what
+    /// the derived Debug wrote so far, never the Debug layout itself.
+    pub fn record_text(&self) -> String {
+        match self {
+            PlanError::NoStart => "NoStart".into(),
+            PlanError::NoEnd => "NoEnd".into(),
+            PlanError::EndNotLast => "EndNotLast".into(),
+            PlanError::StepBeforeStartNotAllowed(i) => format!("StepBeforeStartNotAllowed({i})"),
+            PlanError::ProgramNotAllowlisted(i) => format!("ProgramNotAllowlisted({i})"),
+            PlanError::OrderViolation(i, rule) => format!("OrderViolation({i}, {rule:?})"),
+            PlanError::RepayMissing => "RepayMissing".into(),
+            PlanError::PaidRouteBeforeP7 => "PaidRouteBeforeP7".into(),
+            PlanError::UnknownInstruction(i) => format!("UnknownInstruction({i})"),
+        }
+    }
+}
+
 /// E2: how built instructions are recognized — the receivership program with its pinned
 /// instruction discriminators and every pinned integration program with its refresh
 /// discriminators (both from the pinned crates/IDLs, see `receivership::builders`).

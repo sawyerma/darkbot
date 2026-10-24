@@ -426,30 +426,7 @@ impl SubmissionAdapter for RpcSubmitter {
                 return SimResult::Unavailable(safe_rpc_error(&e))
             }
         };
-        let Ok(r) = serde_json::from_value::<
-            solana_client::rpc_response::Response<
-                solana_client::rpc_response::RpcSimulateTransactionResult,
-            >,
-        >(value) else {
-            return SimResult::Unavailable("RPC_SIMULATION_DECODE".into());
-        };
-        match r.value.err {
-            None => SimResult::Ok {
-                units_consumed: r.value.units_consumed,
-            },
-            Some(e) => {
-                // F1: bounded, redacted logs for the native journal only.
-                let (logs, log_lines, logs_truncated) =
-                    super::bounded_simulation_logs(r.value.logs.as_deref());
-                SimResult::Failed(super::SimulationFailure {
-                    code: format!("RPC_SIMULATION_FAILED {e:?}"),
-                    units_consumed: r.value.units_consumed,
-                    logs,
-                    log_lines,
-                    logs_truncated,
-                })
-            }
-        }
+        sim_result_of(value)
     }
 
     /// The RPC path has no bundle simulation (no network call).
@@ -586,10 +563,43 @@ pub fn reconcile(
             .as_ref()
             .map(|c| super::confirmation_status_name(c).to_string()),
         finalized,
-        status.err.as_ref().map(|e| format!("{:?}", e)),
+        status.err.as_ref().map(super::transaction_error_text),
         meta,
         now_ns,
     ))
+}
+
+/// The verdict of a `simulateTransaction` response (external JSON-RPC wire).
+fn sim_result_of(value: serde_json::Value) -> SimResult {
+    let Ok(r) = serde_json::from_value::<
+        solana_client::rpc_response::Response<
+            solana_client::rpc_response::RpcSimulateTransactionResult,
+        >,
+    >(value) else {
+        return SimResult::Unavailable("RPC_SIMULATION_DECODE".into());
+    };
+    match r.value.err {
+        None => SimResult::Ok {
+            units_consumed: r.value.units_consumed,
+        },
+        Some(e) => {
+            // F1: bounded, redacted logs for the native journal only.
+            let (logs, log_lines, logs_truncated) =
+                super::bounded_simulation_logs(r.value.logs.as_deref());
+            // Q3: the explicit error text, without the SDK's `UiTransactionError(…)` wrapper.
+            let error = solana_sdk::transaction::TransactionError::from(e);
+            SimResult::Failed(super::SimulationFailure {
+                code: format!(
+                    "RPC_SIMULATION_FAILED {}",
+                    super::transaction_error_text(&error)
+                ),
+                units_consumed: r.value.units_consumed,
+                logs,
+                log_lines,
+                logs_truncated,
+            })
+        }
+    }
 }
 
 /// The finalized receipt's settlement facts (`getTransaction` at finalized commitment).
@@ -705,6 +715,11 @@ mod landing_tests {
             (reverted.outcome, reverted.fee_lamports),
             (LandingOutcome::LandedFailed, Some(5_000))
         );
+        // Q3: the landing error is the explicit text, not a Debug layout.
+        assert_eq!(
+            reverted.error.as_deref(),
+            Some("InstructionError(0, Custom(1))")
+        );
         let confirmed = run(status(2, "confirmed", false), with(2, 5_000, false));
         assert_eq!(
             (confirmed.outcome, confirmed.fee_lamports),
@@ -718,6 +733,68 @@ mod landing_tests {
             (contradiction.outcome, contradiction.fee_lamports),
             (LandingOutcome::LandedFailed, None)
         );
+    }
+}
+
+#[cfg(test)]
+mod q3_error_text_tests {
+    use super::*;
+
+    /// Q3: a failed simulation, from the real JSON-RPC wire, is coded with the explicit error
+    /// text — under the SDK 3.x pin its Debug was `UiTransactionError(InstructionError(…))` —
+    /// and every shape of `TransactionError` has its pinned text (the pin's `TransactionError`
+    /// Debug; the encoder is exhaustive, an SDK rename fails to compile).
+    #[test]
+    fn q3_simulation_and_landing_errors_have_an_explicit_text() {
+        let wire = serde_json::json!({"context": {"slot": 5}, "value": {
+            "err": {"InstructionError": [3, {"Custom": 6009}]},
+            "logs": ["Program log: SENTINEL"], "unitsConsumed": 7}});
+        let SimResult::Failed(failure) = sim_result_of(wire) else {
+            panic!("a failed simulation")
+        };
+        assert_eq!(
+            failure.code,
+            "RPC_SIMULATION_FAILED InstructionError(3, Custom(6009))"
+        );
+        assert_eq!(failure.units_consumed, Some(7));
+        let ok =
+            serde_json::json!({"context": {"slot": 5}, "value": {"err": null, "unitsConsumed": 3}});
+        assert!(matches!(
+            sim_result_of(ok),
+            SimResult::Ok {
+                units_consumed: Some(3)
+            }
+        ));
+        use solana_sdk::instruction::InstructionError as I;
+        use solana_sdk::transaction::TransactionError as T;
+        for (error, text) in [
+            (
+                T::InstructionError(0, I::BorshIoError),
+                "InstructionError(0, BorshIoError)",
+            ),
+            (
+                T::InstructionError(2, I::Custom(1)),
+                "InstructionError(2, Custom(1))",
+            ),
+            (
+                T::InstructionError(1, I::BuiltinProgramsMustConsumeComputeUnits),
+                "InstructionError(1, BuiltinProgramsMustConsumeComputeUnits)",
+            ),
+            (
+                T::InsufficientFundsForRent { account_index: 2 },
+                "InsufficientFundsForRent { account_index: 2 }",
+            ),
+            (
+                T::ProgramExecutionTemporarilyRestricted { account_index: 1 },
+                "ProgramExecutionTemporarilyRestricted { account_index: 1 }",
+            ),
+            (T::DuplicateInstruction(4), "DuplicateInstruction(4)"),
+            (T::BlockhashNotFound, "BlockhashNotFound"),
+            (T::AccountInUse, "AccountInUse"),
+            (T::CommitCancelled, "CommitCancelled"),
+        ] {
+            assert_eq!(crate::submit::transaction_error_text(&error), text);
+        }
     }
 }
 
