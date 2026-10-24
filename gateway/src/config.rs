@@ -105,11 +105,24 @@ impl GatewayConfig {
             .any(|o| o.eq_ignore_ascii_case(origin))
     }
 
+    /// The browser reaches the gateway only through TLS (terminated in front of it) when every
+    /// allowed origin is HTTPS; the session cookie then carries `Secure`.
+    pub fn secure_cookie(&self) -> bool {
+        only_https(&self.allowed_origins)
+    }
+
     pub fn host_allowed(&self, host: &str) -> bool {
         self.allowed_hosts
             .iter()
             .any(|h| h.eq_ignore_ascii_case(host))
     }
+}
+
+fn only_https(origins: &[String]) -> bool {
+    !origins.is_empty()
+        && origins
+            .iter()
+            .all(|o| o.to_ascii_lowercase().starts_with("https://"))
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -173,4 +186,26 @@ pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::only_https;
+    #[test]
+    fn the_cookie_is_secure_only_behind_https_origins() {
+        let o = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(!only_https(&o(&[
+            "http://127.0.0.1:8787",
+            "http://localhost:8787"
+        ])));
+        assert!(!only_https(&o(&[
+            "https://darkbot.example",
+            "http://127.0.0.1:8787"
+        ])));
+        assert!(!only_https(&o(&[])));
+        assert!(only_https(&o(&[
+            "https://darkbot.example",
+            "HTTPS://ops.example"
+        ])));
+    }
 }

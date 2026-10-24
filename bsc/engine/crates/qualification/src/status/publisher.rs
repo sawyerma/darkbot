@@ -7,7 +7,7 @@ use std::{
     fs,
     io::{self, Write},
     os::unix::{
-        fs::{FileTypeExt, PermissionsExt},
+        fs::{FileTypeExt, MetadataExt, PermissionsExt},
         net::{UnixListener, UnixStream},
     },
     path::Path,
@@ -115,6 +115,18 @@ fn state<M: Message>(
         }),
     )
 }
+/// The socket directory must be a real directory of this user that neither group nor others
+/// can write; otherwise another local user could plant or replace the reporter socket (E2-8).
+fn trusted_socket_dir(dir: &Path, uid: u32) -> io::Result<()> {
+    let meta = fs::symlink_metadata(dir)?;
+    if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o022 != 0 {
+        return Err(io::Error::other(format!(
+            "reporter socket directory not trusted: {}",
+            dir.display()
+        )));
+    }
+    Ok(())
+}
 /// The same controller test as the gateway: a deployed readiness binary and a source snapshot.
 fn controller_available(root: &Path, readiness_bin: Option<&Path>) -> bool {
     readiness_bin.is_some_and(Path::is_file) && root.join("SNAPSHOT_SHA256").is_file()
@@ -128,8 +140,9 @@ pub fn serve(
 ) -> io::Result<()> {
     fs::create_dir_all(rundir)?;
     fs::set_permissions(rundir, fs::Permissions::from_mode(0o700))?;
-    if let Some(parent) = socket.parent() {
+    if let Some(parent) = socket.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
+        trusted_socket_dir(parent, fs::metadata(rundir)?.uid())?;
     }
     if let Ok(meta) = fs::symlink_metadata(socket) {
         if !meta.file_type().is_socket() || UnixStream::connect(socket).is_ok() {

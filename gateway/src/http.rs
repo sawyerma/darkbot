@@ -105,8 +105,10 @@ async fn session_bootstrap(State(app): State<Arc<AppState>>, headers: HeaderMap)
         .filter(|t| app.sessions.validate(t));
     let token = existing.unwrap_or_else(|| {
         let t = app.sessions.issue();
-        r.headers_mut()
-            .append(SET_COOKIE, session::set_cookie(&app.cfg.session_cookie, &t));
+        r.headers_mut().append(
+            SET_COOKIE,
+            session::set_cookie(&app.cfg.session_cookie, &t, app.cfg.secure_cookie()),
+        );
         t
     });
     if let Some(csrf) = app
@@ -134,8 +136,10 @@ async fn spa(State(app): State<Arc<AppState>>, headers: HeaderMap, req: Request)
         .insert(CACHE_CONTROL, HeaderValue::from_static(policy));
     if !session::has_valid_session(&headers, &app.cfg, &app.sessions) {
         let t = app.sessions.issue();
-        res.headers_mut()
-            .append(SET_COOKIE, session::set_cookie(&app.cfg.session_cookie, &t));
+        res.headers_mut().append(
+            SET_COOKIE,
+            session::set_cookie(&app.cfg.session_cookie, &t, app.cfg.secure_cookie()),
+        );
     }
     res
 }

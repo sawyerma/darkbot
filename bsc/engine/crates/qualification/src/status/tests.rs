@@ -699,3 +699,75 @@ fn every_projected_record_family_reaches_its_topic_with_all_public_required_leav
     }
     fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn g08_and_g07_belong_together_only_with_the_same_attempt_and_g07_hash() {
+    use darkbot_bsc_record::{Value, schema::g07, schema::g08};
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-pairing-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let g07_dir = root.join("bsc/native/evidence/g07/attempt");
+    let g08_dir = root.join("bsc/native/evidence/g08/attempt");
+    fs::create_dir_all(&g07_dir).unwrap();
+    fs::create_dir_all(&g08_dir).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    let g07_bytes = filled(&g07::evidence::SCHEMA).encode().unwrap();
+    fs::write(g07_dir.join("evidence.dbrec"), &g07_bytes).unwrap();
+    let g08_gate = |g07_sha: [u8; 32]| {
+        let mut d = filled(&g08::result::SCHEMA);
+        d.set(
+            tag(&g08::result::SCHEMA, "g07_evidence_sha256"),
+            Value::B256(g07_sha),
+        );
+        fs::write(g08_dir.join("result.dbrec"), d.encode().unwrap()).unwrap();
+        projection::project(&root, &root.join("run"))
+            .status
+            .gates
+            .into_iter()
+            .find(|g| g.gate_id == "G0.8")
+            .unwrap()
+            .reason_codes
+    };
+    // Same attempt ID (fixture) and exactly the SHA-256 of the G0.7 record.
+    assert_eq!(
+        g08_gate(darkbot_bsc_record::sha256(&g07_bytes)),
+        vec!["G07_EVIDENCE_BOUND".to_string()]
+    );
+    assert_eq!(
+        g08_gate([0x55; 32]),
+        vec!["G07_EVIDENCE_UNBOUND".to_string()]
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn the_reporter_refuses_a_socket_directory_another_user_could_write_or_redirect() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = std::env::temp_dir().join(format!("dbsc-trust-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let open = base.join("open");
+    fs::create_dir_all(&open).unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
+    let target = base.join("target");
+    fs::create_dir_all(&target).unwrap();
+    std::os::unix::fs::symlink(&target, base.join("link")).unwrap();
+    for dir in [open.clone(), base.join("link")] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (run, socket) = (base.join("run"), dir.join("s.sock"));
+        std::thread::spawn(move || {
+            let _ = tx.send(publisher::serve(
+                &run,
+                &run,
+                &socket,
+                "com.darkbot.test.absent",
+                None,
+            ));
+        });
+        let result = rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap_or_else(|_| panic!("reporter served from untrusted {}", dir.display()));
+        assert!(result.is_err(), "{}", dir.display());
+        assert!(!dir.join("s.sock").exists(), "{}", dir.display());
+    }
+    fs::remove_dir_all(base).unwrap();
+}

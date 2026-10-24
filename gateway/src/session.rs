@@ -100,9 +100,10 @@ pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
             (k == name).then(|| v.to_owned())
         })
 }
-pub fn set_cookie(name: &str, token: &str) -> HeaderValue {
+pub fn set_cookie(name: &str, token: &str, secure: bool) -> HeaderValue {
     HeaderValue::from_str(&format!(
-        "{name}={token}; Path=/; HttpOnly; SameSite=Strict"
+        "{name}={token}; Path=/; HttpOnly; SameSite=Strict{}",
+        if secure { "; Secure" } else { "" }
     ))
     .expect("ascii token")
 }
@@ -134,6 +135,19 @@ pub fn check_fetch_site(h: &HeaderMap) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_session_cookie_is_secure_exactly_when_requested() {
+        let plain = set_cookie("darkbot", "t", false);
+        let secure = set_cookie("darkbot", "t", true);
+        assert_eq!(
+            plain.to_str().unwrap(),
+            "darkbot=t; Path=/; HttpOnly; SameSite=Strict"
+        );
+        assert_eq!(
+            secure.to_str().unwrap(),
+            "darkbot=t; Path=/; HttpOnly; SameSite=Strict; Secure"
+        );
+    }
     #[test]
     fn bounded_session() {
         let s = SessionStore::new(2, Duration::from_secs(60));
