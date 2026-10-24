@@ -1,10 +1,11 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useEffect,useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { readinessCommand,useReadinessControl,watchReadinessControl } from "@/core/realtime/readinessControl";
+import { readinessCommand,recoverReadinessCommand,useReadinessControl } from "@/core/realtime/readinessControl";
 export function ReadinessActions(){
  const {process,busy,receipt}=useReadinessControl();const [confirm,setConfirm]=useState(false);
- useEffect(()=>watchReadinessControl(),[]);
+ // Process state is pushed with bsc.status; only an unresolved command is looked up once after reload.
+ useEffect(()=>recoverReadinessCommand(),[]);
  const running=process?.state==="RUNNING";const enabled=process?.controller_available&&!busy&&(running||process.state==="STOPPED"||process.state==="FAILED");
  useEffect(()=>{if(!running||busy)setConfirm(false);},[running,busy]);
  return <><p className="g-note">Readiness job · {process?.state||"UNKNOWN"}</p><AlertDialog.Root open={confirm&&running&&!busy} onOpenChange={setConfirm}>

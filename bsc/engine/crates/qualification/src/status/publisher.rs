@@ -21,6 +21,9 @@ fn kv(path: &Path, key: &str) -> String {
         .find_map(|l| l.strip_prefix(&format!("{key}=")).map(str::to_owned))
         .unwrap_or_default()
 }
+/// Result codes of a run that ended on its own or on request. The native verdict
+/// (PASS_READ_ONLY, BLOCKED, STOP) is the job result, never a process failure.
+const COMPLETED: [&str; 4] = ["PASS_READ_ONLY", "BLOCKED", "STOP", "STOPPED"];
 pub fn job(rundir: &Path, label: &str) -> JobStatus {
     let launch = kv(&rundir.join("bsc.readiness.launch"), "launch_id");
     let mut status = JobStatus {
@@ -42,8 +45,7 @@ pub fn job(rundir: &Path, label: &str) -> JobStatus {
         kv(&rundir.join("bsc.readiness.stopping"), "launch_id") == launch && !launch.is_empty();
     let result = rundir.join("bsc.readiness.result");
     let matched = !launch.is_empty() && kv(&result, "launch_id") == launch;
-    let completed = matched
-        && ["STOP", "STOPPED", "PASS_READ_ONLY"].contains(&kv(&result, "result_code").as_str());
+    let completed = matched && COMPLETED.contains(&kv(&result, "result_code").as_str());
     let text = String::from_utf8_lossy(&out.stdout);
     let pid = text.lines().any(|l| l.trim().starts_with("\"PID\" = "));
     if out.status.success() {
@@ -113,7 +115,17 @@ fn state<M: Message>(
         }),
     )
 }
-pub fn serve(root: &Path, rundir: &Path, socket: &Path, label: &str) -> io::Result<()> {
+/// The same controller test as the gateway: a deployed readiness binary and a source snapshot.
+fn controller_available(root: &Path, readiness_bin: Option<&Path>) -> bool {
+    readiness_bin.is_some_and(Path::is_file) && root.join("SNAPSHOT_SHA256").is_file()
+}
+pub fn serve(
+    root: &Path,
+    rundir: &Path,
+    socket: &Path,
+    label: &str,
+    readiness_bin: Option<&Path>,
+) -> io::Result<()> {
     fs::create_dir_all(rundir)?;
     fs::set_permissions(rundir, fs::Permissions::from_mode(0o700))?;
     if let Some(parent) = socket.parent() {
@@ -184,7 +196,9 @@ pub fn serve(root: &Path, rundir: &Path, socket: &Path, label: &str) -> io::Resu
         if let Some(stream) = client.as_mut() {
             let snapshot_root = root.canonicalize()?;
             let mut s = projection::project(&snapshot_root, rundir);
-            s.status.jobs.push(job(rundir, label));
+            let mut readiness_job = job(rundir, label);
+            readiness_job.controller_available = Some(controller_available(root, readiness_bin));
+            s.status.jobs.push(readiness_job);
             seq = seq
                 .checked_add(1)
                 .ok_or_else(|| io::Error::other("sequence exhausted"))?;

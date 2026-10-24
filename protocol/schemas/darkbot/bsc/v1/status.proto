@@ -23,7 +23,7 @@ message GuardStatus {
   string frozen_approved_sha256 = 1;
   // UNARMED, ARMED, ARMED_MISMATCH or UNKNOWN.
   string guard_state = 2;
-  // Only the current v4 contract path is authoritative.
+  // Only the current V5 contract path is authoritative.
   string contract_path = 3;
   // Whether the current contract exists.
   bool contract_present = 4;
@@ -42,7 +42,10 @@ message GuardStatus {
 message GateStatus {
   // G0.6a, G0.7, G0.8, C1.9 or C1.10.
   string gate_id = 1;
-  // PASS, FAIL, STOP, PARTIAL, NOT_EXECUTED or UNKNOWN.
+  // Native vocabulary, transported unchanged. G0.6a: PASS, FAIL or UNKNOWN. G0.7:
+  // NOT_EXECUTED, UNKNOWN or the attempt classification (PROVISIONAL_RELEASED__*,
+  // SUBMITTED_OR_SUBMISSION_UNKNOWN__*, STOP_CAPTURE_INCOMPLETE__*), none of which is a
+  // success. G0.8: NOT_EXECUTED, UNKNOWN, PASS, ADAPT, STOP or UNRESOLVED. C1.x: UNKNOWN.
   string state = 2;
   // Original evidence identity.
   Evidence evidence = 3;
@@ -51,7 +54,8 @@ message GateStatus {
 }
 // Native read-only readiness result and its original timestamp.
 message ReadinessStatus {
-  // PASS_READ_ONLY, STOP, NOT_RUN or UNKNOWN; never LIVE authority.
+  // PASS_READ_ONLY, BLOCKED (a required condition is missing), STOP (a contradiction),
+  // NOT_RUN or UNKNOWN, unchanged from the native record; never LIVE authority.
   string verdict = 1;
   // Source evidence, possibly historical.
   Evidence evidence = 2;
@@ -73,6 +77,12 @@ message ReadinessStatus {
   optional uint64 head_block = 10;
   // Reported reasons for blocking.
   repeated string reasons = 11;
+  // READ_ONLY_RPC or OFFLINE_ZERO_EGRESS as recorded natively; empty without a record.
+  string mode = 12;
+  // Binding to the current offline candidate selection: BOUND (observed after the switch,
+  // with a passing CANDIDATE_SELECTION check for it), STALE (older or another selection),
+  // NO_SELECTION, or UNKNOWN (no record or an invalid candidate mirror).
+  string candidate_binding = 13;
 }
 // Builder documentation and empirical qualification are separate observations.
 message BuilderStatus {
@@ -119,7 +129,8 @@ message DryStatus {
 message JobStatus {
   // Only readiness is currently controllable.
   string job = 1;
-  // RUNNING, STOPPED, STARTING, STOPPING, FAILED or UNKNOWN.
+  // Process lifecycle only: RUNNING, STOPPING, STOPPED (ended; see result_code), FAILED
+  // (runner or process failure) or UNKNOWN. Never a readiness verdict.
   string state = 2;
   // Unique launch identity; never reused across runs.
   string launch_id = 3;
@@ -127,8 +138,11 @@ message JobStatus {
   uint64 started_unix_s = 4;
   // Completion time recorded by the controller.
   uint64 ended_unix_s = 5;
-  // Result associated with this launch, not an earlier one.
+  // Result of this launch, not an earlier one: the native verdict PASS_READ_ONLY, BLOCKED
+  // or STOP, STOPPED when stopped on request, FAILED on a technical failure.
   string result_code = 6;
+  // Whether the supervisor can control the job (deployed readiness binary and snapshot).
+  optional bool controller_available = 7;
 }
 // Read-only BSC evidence projection.
 message BscStatus {
@@ -159,7 +173,7 @@ message BscStatus {
 }
 // Bound launch plan, without signatures, raw transactions or execution authority.
 message BscLaunchState {
-  // True only if the current v4 contract is present and valid.
+  // True only if the current V5 contract is present and valid.
   bool contract_present = 1;
   // Contract identity.
   Evidence evidence = 2;
@@ -172,7 +186,7 @@ message BscLaunchState {
 }
 // Read-only G0.8 results; submission acknowledgement is not acquisition.
 message BscMonitoringState {
-  // NOT_EXECUTED, PASS, FAIL or UNKNOWN.
+  // G0.8 verdict unchanged: NOT_EXECUTED, PASS, ADAPT, STOP, UNRESOLVED or UNKNOWN.
   string state = 1;
   // G0.8 result identity.
   Evidence evidence = 2;

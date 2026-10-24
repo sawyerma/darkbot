@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/status.proto.
  */
 export const file_darkbot_bsc_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIvsCCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJQhQKEl9jb2RlX2hhc2hfY2hhbmdlZEINCgtfaGVhZF9ibG9jayLyAQoNQnVpbGRlclN0YXR1cxIfChdyZWZyZXNoX29ic2VydmVkX3VuaXhfcxgBIAEoBBIeChZyZWZyZXNoX2V4cGlyZXNfdW5peF9zGAIgASgEEisKBmZsb29ycxgDIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEicKBXByb2JlGAQgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDQoFcHJpY2UYBSABKAkSEAoIbm9fbWVyZ2UYBiABKAkSFgoOcG9zaXRpb25fZmlyc3QYByABKAkSEQoJaW5jbHVzaW9uGAggASgJIoABCg1XaXRuZXNzU3RhdHVzEhkKDHNvdXJjZV9yZWFkeRgBIAEoCEgAiAEBEhcKD3QwX3RvX2J1eV9zdGF0ZRgCIAEoCRIqCghldmlkZW5jZRgDIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlQg8KDV9zb3VyY2VfcmVhZHkiywEKCURyeVN0YXR1cxIqCghldmlkZW5jZRgBIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEg4KBmRyeV9pZBgCIAEoCRINCgVzdGF0ZRgDIAEoCRIvCgpwYXJhbWV0ZXJzGAQgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJQoYdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsGAUgASgISACIAQFCGwoZX3ZhbGlkX2Zvcl9jdXJyZW50X3BvcnRhbCJ9CglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkiuQMKCUJzY1N0YXR1cxIVCg1zb3VyY2VfY29tbWl0GAEgASgJEhgKEGV2YWx1YXRlZF91bml4X3MYAiABKAQSEgoKbGl2ZV9zdGF0ZRgDIAEoCRIqCgVndWFyZBgEIAEoCzIbLmRhcmtib3QuYnNjLnYxLkd1YXJkU3RhdHVzEikKBWdhdGVzGAUgAygLMhouZGFya2JvdC5ic2MudjEuR2F0ZVN0YXR1cxIyCglyZWFkaW5lc3MYBiABKAsyHy5kYXJrYm90LmJzYy52MS5SZWFkaW5lc3NTdGF0dXMSLgoHYnVpbGRlchgHIAEoCzIdLmRhcmtib3QuYnNjLnYxLkJ1aWxkZXJTdGF0dXMSLgoHd2l0bmVzcxgIIAEoCzIdLmRhcmtib3QuYnNjLnYxLldpdG5lc3NTdGF0dXMSJgoDZHJ5GAkgASgLMhkuZGFya2JvdC5ic2MudjEuRHJ5U3RhdHVzEicKBGpvYnMYCiADKAsyGS5kYXJrYm90LmJzYy52MS5Kb2JTdGF0dXMSEAoId2FybmluZ3MYCyADKAkSGQoRZGF0YV9hc19vZl91bml4X3MYDCABKAQi0QEKDkJzY0xhdW5jaFN0YXRlEhgKEGNvbnRyYWN0X3ByZXNlbnQYASABKAgSKgoIZXZpZGVuY2UYAiABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRI0Cg9jb250cmFjdF9maWVsZHMYAyADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIzCg5ydW50aW1lX2ZpZWxkcxgEIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEg4KBnJlYXNvbhgFIAEoCSJ9ChJCc2NNb25pdG9yaW5nU3RhdGUSDQoFc3RhdGUYASABKAkSKgoIZXZpZGVuY2UYAiABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRIsCgdyZXN1bHRzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQihAQKD0JzY1dhbGxldHNTdGF0ZRIYChBleHBlY3RlZF9hZGRyZXNzGAEgASgJEhUKDXdhbGxldF9zdGF0dXMYAiABKAkSGAoQbGF1bmNoZXJfYWRkcmVzcxgDIAEoCRIVCg1idXllcl9hZGRyZXNzGAQgASgJEhUKCGNoYWluX2lkGAUgASgESACIAQESIQoUbGF1bmNoZXJfYmFsYW5jZV93ZWkYBiABKAlIAYgBARIeChFidXllcl9iYWxhbmNlX3dlaRgHIAEoCUgCiAEBEhsKDm9ic2VydmVkX2Jsb2NrGAggASgESAOIAQESFwoPb2JzZXJ2ZWRfdW5peF9zGAkgASgEEg4KBnNvdXJjZRgKIAEoCRIiChVyZXF1aXJlZF9sYXVuY2hlcl93ZWkYCyABKAlIBIgBARIfChJyZXF1aXJlZF9idXllcl93ZWkYDCABKAlIBYgBARIqCghldmlkZW5jZRgNIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlQgsKCV9jaGFpbl9pZEIXChVfbGF1bmNoZXJfYmFsYW5jZV93ZWlCFAoSX2J1eWVyX2JhbGFuY2Vfd2VpQhEKD19vYnNlcnZlZF9ibG9ja0IYChZfcmVxdWlyZWRfbGF1bmNoZXJfd2VpQhUKE19yZXF1aXJlZF9idXllcl93ZWlCewoSY29tLmRhcmtib3QuYnNjLnYxQgtTdGF0dXNQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z");
+  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiuQMKCUJzY1N0YXR1cxIVCg1zb3VyY2VfY29tbWl0GAEgASgJEhgKEGV2YWx1YXRlZF91bml4X3MYAiABKAQSEgoKbGl2ZV9zdGF0ZRgDIAEoCRIqCgVndWFyZBgEIAEoCzIbLmRhcmtib3QuYnNjLnYxLkd1YXJkU3RhdHVzEikKBWdhdGVzGAUgAygLMhouZGFya2JvdC5ic2MudjEuR2F0ZVN0YXR1cxIyCglyZWFkaW5lc3MYBiABKAsyHy5kYXJrYm90LmJzYy52MS5SZWFkaW5lc3NTdGF0dXMSLgoHYnVpbGRlchgHIAEoCzIdLmRhcmtib3QuYnNjLnYxLkJ1aWxkZXJTdGF0dXMSLgoHd2l0bmVzcxgIIAEoCzIdLmRhcmtib3QuYnNjLnYxLldpdG5lc3NTdGF0dXMSJgoDZHJ5GAkgASgLMhkuZGFya2JvdC5ic2MudjEuRHJ5U3RhdHVzEicKBGpvYnMYCiADKAsyGS5kYXJrYm90LmJzYy52MS5Kb2JTdGF0dXMSEAoId2FybmluZ3MYCyADKAkSGQoRZGF0YV9hc19vZl91bml4X3MYDCABKAQi0QEKDkJzY0xhdW5jaFN0YXRlEhgKEGNvbnRyYWN0X3ByZXNlbnQYASABKAgSKgoIZXZpZGVuY2UYAiABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRI0Cg9jb250cmFjdF9maWVsZHMYAyADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIzCg5ydW50aW1lX2ZpZWxkcxgEIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEg4KBnJlYXNvbhgFIAEoCSJ9ChJCc2NNb25pdG9yaW5nU3RhdGUSDQoFc3RhdGUYASABKAkSKgoIZXZpZGVuY2UYAiABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRIsCgdyZXN1bHRzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQihAQKD0JzY1dhbGxldHNTdGF0ZRIYChBleHBlY3RlZF9hZGRyZXNzGAEgASgJEhUKDXdhbGxldF9zdGF0dXMYAiABKAkSGAoQbGF1bmNoZXJfYWRkcmVzcxgDIAEoCRIVCg1idXllcl9hZGRyZXNzGAQgASgJEhUKCGNoYWluX2lkGAUgASgESACIAQESIQoUbGF1bmNoZXJfYmFsYW5jZV93ZWkYBiABKAlIAYgBARIeChFidXllcl9iYWxhbmNlX3dlaRgHIAEoCUgCiAEBEhsKDm9ic2VydmVkX2Jsb2NrGAggASgESAOIAQESFwoPb2JzZXJ2ZWRfdW5peF9zGAkgASgEEg4KBnNvdXJjZRgKIAEoCRIiChVyZXF1aXJlZF9sYXVuY2hlcl93ZWkYCyABKAlIBIgBARIfChJyZXF1aXJlZF9idXllcl93ZWkYDCABKAlIBYgBARIqCghldmlkZW5jZRgNIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlQgsKCV9jaGFpbl9pZEIXChVfbGF1bmNoZXJfYmFsYW5jZV93ZWlCFAoSX2J1eWVyX2JhbGFuY2Vfd2VpQhEKD19vYnNlcnZlZF9ibG9ja0IYChZfcmVxdWlyZWRfbGF1bmNoZXJfd2VpQhUKE19yZXF1aXJlZF9idXllcl93ZWlCewoSY29tLmRhcmtib3QuYnNjLnYxQgtTdGF0dXNQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z");
 
 /**
  * An explicitly selected public bound value, never a signed transaction or secret.
@@ -96,7 +96,7 @@ export type GuardStatus = Message<"darkbot.bsc.v1.GuardStatus"> & {
   guardState: string;
 
   /**
-   * Only the current v4 contract path is authoritative.
+   * Only the current V5 contract path is authoritative.
    *
    * @generated from field: string contract_path = 3;
    */
@@ -166,7 +166,10 @@ export type GateStatus = Message<"darkbot.bsc.v1.GateStatus"> & {
   gateId: string;
 
   /**
-   * PASS, FAIL, STOP, PARTIAL, NOT_EXECUTED or UNKNOWN.
+   * Native vocabulary, transported unchanged. G0.6a: PASS, FAIL or UNKNOWN. G0.7:
+   * NOT_EXECUTED, UNKNOWN or the attempt classification (PROVISIONAL_RELEASED__*,
+   * SUBMITTED_OR_SUBMISSION_UNKNOWN__*, STOP_CAPTURE_INCOMPLETE__*), none of which is a
+   * success. G0.8: NOT_EXECUTED, UNKNOWN, PASS, ADAPT, STOP or UNRESOLVED. C1.x: UNKNOWN.
    *
    * @generated from field: string state = 2;
    */
@@ -201,7 +204,8 @@ export const GateStatusSchema: GenMessage<GateStatus> = /*@__PURE__*/
  */
 export type ReadinessStatus = Message<"darkbot.bsc.v1.ReadinessStatus"> & {
   /**
-   * PASS_READ_ONLY, STOP, NOT_RUN or UNKNOWN; never LIVE authority.
+   * PASS_READ_ONLY, BLOCKED (a required condition is missing), STOP (a contradiction),
+   * NOT_RUN or UNKNOWN, unchanged from the native record; never LIVE authority.
    *
    * @generated from field: string verdict = 1;
    */
@@ -276,6 +280,22 @@ export type ReadinessStatus = Message<"darkbot.bsc.v1.ReadinessStatus"> & {
    * @generated from field: repeated string reasons = 11;
    */
   reasons: string[];
+
+  /**
+   * READ_ONLY_RPC or OFFLINE_ZERO_EGRESS as recorded natively; empty without a record.
+   *
+   * @generated from field: string mode = 12;
+   */
+  mode: string;
+
+  /**
+   * Binding to the current offline candidate selection: BOUND (observed after the switch,
+   * with a passing CANDIDATE_SELECTION check for it), STALE (older or another selection),
+   * NO_SELECTION, or UNKNOWN (no record or an invalid candidate mirror).
+   *
+   * @generated from field: string candidate_binding = 13;
+   */
+  candidateBinding: string;
 };
 
 /**
@@ -453,7 +473,8 @@ export type JobStatus = Message<"darkbot.bsc.v1.JobStatus"> & {
   job: string;
 
   /**
-   * RUNNING, STOPPED, STARTING, STOPPING, FAILED or UNKNOWN.
+   * Process lifecycle only: RUNNING, STOPPING, STOPPED (ended; see result_code), FAILED
+   * (runner or process failure) or UNKNOWN. Never a readiness verdict.
    *
    * @generated from field: string state = 2;
    */
@@ -481,11 +502,19 @@ export type JobStatus = Message<"darkbot.bsc.v1.JobStatus"> & {
   endedUnixS: bigint;
 
   /**
-   * Result associated with this launch, not an earlier one.
+   * Result of this launch, not an earlier one: the native verdict PASS_READ_ONLY, BLOCKED
+   * or STOP, STOPPED when stopped on request, FAILED on a technical failure.
    *
    * @generated from field: string result_code = 6;
    */
   resultCode: string;
+
+  /**
+   * Whether the supervisor can control the job (deployed readiness binary and snapshot).
+   *
+   * @generated from field: optional bool controller_available = 7;
+   */
+  controllerAvailable?: boolean;
 };
 
 /**
@@ -600,7 +629,7 @@ export const BscStatusSchema: GenMessage<BscStatus> = /*@__PURE__*/
  */
 export type BscLaunchState = Message<"darkbot.bsc.v1.BscLaunchState"> & {
   /**
-   * True only if the current v4 contract is present and valid.
+   * True only if the current V5 contract is present and valid.
    *
    * @generated from field: bool contract_present = 1;
    */
@@ -649,7 +678,7 @@ export const BscLaunchStateSchema: GenMessage<BscLaunchState> = /*@__PURE__*/
  */
 export type BscMonitoringState = Message<"darkbot.bsc.v1.BscMonitoringState"> & {
   /**
-   * NOT_EXECUTED, PASS, FAIL or UNKNOWN.
+   * G0.8 verdict unchanged: NOT_EXECUTED, PASS, ADAPT, STOP, UNRESOLVED or UNKNOWN.
    *
    * @generated from field: string state = 1;
    */

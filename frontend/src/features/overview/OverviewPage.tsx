@@ -1,4 +1,4 @@
-import {watchReadinessControl,useReadinessControl} from "@/core/realtime/readinessControl";
+import {recoverReadinessCommand,useReadinessControl} from "@/core/realtime/readinessControl";
 import { watchCaptureControl } from "@/core/realtime/captureControl";
 import { Fragment, useEffect, type ReactNode } from "react";
 import { PROJECT_REGISTRY } from "@/app/projectRegistry";
@@ -83,7 +83,8 @@ function FinanceTile() {
 export default function OverviewPage() {
   const gatewayStatus = useRealtimeStatus();
   const gatewayReason = useGatewayReason();
-  useEffect(() => { ensureOverviewAdapter(); const a=watchCaptureControl();const b=watchReadinessControl();return ()=>{a();b();}; }, []);
+  // BSC readiness state is pushed via overview.aggregates; Project 0 capture keeps its own watcher (separate owner gate).
+  useEffect(() => { ensureOverviewAdapter(); recoverReadinessCommand(); return watchCaptureControl(); }, []);
 
   return (
     <GraphiteShell

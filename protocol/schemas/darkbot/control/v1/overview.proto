@@ -66,6 +66,18 @@ message ProjectSummary {
   FinanceSummary finance = 12;
   int64 source_timestamp_unix_ns = 13;
   string source_id = 14;
+  // Supervised read-only jobs as the project source reports them (BSC: readiness job).
+  repeated ProjectJob jobs = 15;
+}
+// Copy of the project source's job lifecycle; the source stays the only authority.
+message ProjectJob {
+  string job = 1;
+  // Process lifecycle: RUNNING, STOPPING, STOPPED, FAILED or UNKNOWN.
+  string state = 2;
+  string launch_id = 3;
+  // Native verdict or STOPPED/FAILED of this launch; empty while running.
+  string result_code = 4;
+  optional bool controller_available = 5;
 }
 
 message GlobalFinance {

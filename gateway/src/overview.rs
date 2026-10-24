@@ -126,6 +126,7 @@ pub fn build(registry: &SourceRegistry) -> OverviewAggregates {
             rpc_latency: None,
             finance: None,
             source_timestamp_unix_ns: 0,
+            jobs: Vec::new(),
             source_id: st
                 .and_then(|s| s.source_id.map(|x| x.to_string()))
                 .unwrap_or_default(),
@@ -187,6 +188,17 @@ pub fn spawn_publisher(
                                     .count() as u32,
                             )
                         };
+                        p.jobs = status
+                            .jobs
+                            .iter()
+                            .map(|j| crate::proto::ProjectJob {
+                                job: j.job.clone(),
+                                state: j.state.clone(),
+                                launch_id: j.launch_id.clone(),
+                                result_code: j.result_code.clone(),
+                                controller_available: j.controller_available,
+                            })
+                            .collect();
                         p.source_timestamp_unix_ns = frame.source_timestamp_unix_ns;
                     }
                 }

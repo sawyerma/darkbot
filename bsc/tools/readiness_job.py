@@ -26,6 +26,7 @@ rundir.mkdir(parents=True, exist_ok=True)
 temporary = rundir / ('bsc.readiness.' + launch + '.tmp')
 result = 'FAILED'
 exit_code = 1
+verdict = None
 try:
     # Exact allowlist: never inherit a signing key, RPC token or builder authorization.
     env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -43,6 +44,12 @@ try:
             validator=pathlib.Path(binary).with_name('bsc-status-reporter')
             checked=subprocess.run([str(validator),'--validate-readiness',str(temporary)],env={'PATH':'/usr/bin:/bin','DARKBOT_BSC_ROOT':str(root),'DARKBOT_RUNDIR':str(rundir)},capture_output=True,timeout=10)
             valid=checked.returncode==0
+            if valid:
+                # The typed native verdict is the result; it must agree with the exit code
+                # (0 only for PASS_READ_ONLY, 2 for BLOCKED/STOP), otherwise the runner failed.
+                typed=dict(l.split('=',1) for l in checked.stdout.decode().splitlines() if '=' in l)
+                verdict=typed.get('status')
+                valid=verdict in ('PASS_READ_ONLY','BLOCKED','STOP') and exit_code==(0 if verdict=='PASS_READ_ONLY' else 2)
         if valid:
             final_directory = rundir / 'bsc-operational/bsc/native/evidence/g07' / ('gui_readiness_' + launch)
             directory = final_directory.with_name('.' + final_directory.name)
@@ -63,7 +70,7 @@ try:
             fd=os.open(final_directory.parent,os.O_RDONLY)
             try: os.fsync(fd)
             finally: os.close(fd)
-            result = 'PASS_READ_ONLY' if exit_code == 0 else 'STOP'
+            result = verdict
     if stopping: result = 'STOPPED'
 except Exception as error:
     # Exception type is diagnostic; never echo an environment or child payload.

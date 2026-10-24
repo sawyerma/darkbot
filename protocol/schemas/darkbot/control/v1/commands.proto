@@ -13,6 +13,8 @@ import "darkbot/control/v1/topics.proto";
 // ACCEPTED heißt "Intent durabel angenommen", nicht ausgeführt, nicht on-chain.
 // Fortschritt und Terminalstatus kommen über pending_commands[]/recent_command_results[]
 // in der projektspezifischen *.status-STATE-Projektion.
+// Bis diese Felder existieren, trägt CommandResponse.phase die Ledger-Phase zum
+// Antwortzeitpunkt; der weitere Prozessverlauf steht im Domain-STATE (z. B. bsc.status jobs).
 
 // Native Compare-and-Swap-Vorbedingung. Die Werte kommen aus der zuletzt applizierten
 // STATE-Projektion (config_version / profile_version / plan_version), NIE aus WS seq.
@@ -71,6 +73,10 @@ message CommandResponse {
   string detail = 5;
   // Version der Ressource nach Annahme (für die nächste CAS). Nur bei ACCEPTED.
   ExpectedVersion persisted = 6;
+  // Ledger-Phase bei Erzeugung dieser Antwort (PENDING_RECONCILE, solange die Ausführung
+  // unentschieden ist); eine Wiederholung liefert die aktuelle Phase. Nur bei ACCEPTED.
+  // Nie ein On-Chain- oder wirtschaftliches Ergebnis.
+  CommandPhase phase = 7;
 }
 
 // Einmalige gezielte Nachfrage bei verlorenem ACK:

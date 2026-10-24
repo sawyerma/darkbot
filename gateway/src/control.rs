@@ -219,8 +219,11 @@ impl Control {
         s.run_id = kv(&launch, "launch_id");
         let result = text_file(&p.rundir.join("bsc.readiness.result"));
         let matched = !s.run_id.is_empty() && kv(&result, "launch_id") == s.run_id;
+        // A run that ended with its native verdict (BLOCKED included) or on request is
+        // STOPPED; FAILED is reserved for a runner or process failure.
         let completed = matched
-            && ["STOP", "PASS_READ_ONLY", "STOPPED"].contains(&kv(&result, "result_code").as_str());
+            && ["PASS_READ_ONLY", "BLOCKED", "STOP", "STOPPED"]
+                .contains(&kv(&result, "result_code").as_str());
         let stopping = !s.run_id.is_empty()
             && kv(
                 &text_file(&p.rundir.join("bsc.readiness.stopping")),
@@ -380,14 +383,20 @@ impl Control {
         let encoded = req.encode_to_vec();
         match self.load(id) {
             Ok(Some(record)) if record.request == encoded => {
-                return CommandResponse::decode(record.response.as_slice()).unwrap_or_else(|_| {
-                    reply(
-                        id,
-                        CommandStatus::Rejected,
-                        CommandRejectReason::EngineUnavailable,
-                        "Command receipt unreadable",
-                    )
-                })
+                // A replay returns the stored receipt with the current ledger phase.
+                return CommandResponse::decode(record.response.as_slice())
+                    .map(|r| CommandResponse {
+                        phase: record.phase,
+                        ..r
+                    })
+                    .unwrap_or_else(|_| {
+                        reply(
+                            id,
+                            CommandStatus::Rejected,
+                            CommandRejectReason::EngineUnavailable,
+                            "Command receipt unreadable",
+                        )
+                    });
             }
             Ok(Some(_)) => {
                 return reply(
@@ -528,7 +537,11 @@ impl Control {
             tracing::error!(request_id=%id, "command outcome could not be persisted");
         }
         tracing::info!(request_id=%id, action=%req.action, phase=record.phase, "capture command");
-        accepted
+        // The ledger phase known now; later progress is visible in the domain STATE.
+        CommandResponse {
+            phase: record.phase,
+            ..accepted
+        }
     }
     async fn lookup(&self, id: &str, project: i32) -> CommandLookupResponse {
         let _guard = self.serial.lock().await;
@@ -599,6 +612,7 @@ fn reply(
         reject_reason: reject as i32,
         detail: detail.into(),
         persisted: None,
+        phase: CommandPhase::Unspecified as i32,
     }
 }
 fn authorized(app: &AppState, h: &HeaderMap, mutate: bool) -> Result<(), StatusCode> {
@@ -900,6 +914,12 @@ mod tests {
             "{}",
             response.detail
         );
+        // The response already carries the decided ledger phase; a replay returns it again.
+        assert_eq!(response.phase, CommandPhase::Completed as i32);
+        assert_eq!(
+            control.execute(&req).await.phase,
+            CommandPhase::Completed as i32
+        );
         assert_eq!(
             fs::read_to_string(&log).unwrap(),
             "bsc\ncandidate\nrequest\nSELF_B\n7\n12345678-1234-1234-1234-123456789abc\n"
@@ -914,9 +934,10 @@ mod tests {
         // A native refusal is a failed receipt, never a completed switch.
         req.request_id = "22345678-1234-1234-1234-123456789abc".into();
         req.resource_id = "SELF_A".into();
+        let refused = control.execute(&req).await;
         assert_eq!(
-            control.execute(&req).await.status,
-            CommandStatus::Accepted as i32
+            (refused.status, refused.phase),
+            (CommandStatus::Accepted as i32, CommandPhase::Failed as i32)
         );
         assert_eq!(
             control
@@ -925,6 +946,32 @@ mod tests {
                 .phase,
             CommandPhase::Failed as i32
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn a_completed_blocked_readiness_run_is_stopped_not_failed() {
+        let dir = std::env::temp_dir().join(format!("gw-blocked-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        fs::write(
+            dir.join("run/bsc.readiness.launch"),
+            "launch_id=job-1\nstarted_unix_s=1\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("run/bsc.readiness.result"),
+            "launch_id=job-1\nended_unix_s=2\nresult_code=BLOCKED\nexit_code=2\n",
+        )
+        .unwrap();
+        let control = Control::new(Some(Paths {
+            ctl: dir.join("darkbotctl"),
+            rundir: dir.join("run"),
+            logdir: dir.clone(),
+            label: "com.darkbot.test.absent.capture".into(),
+        }));
+        let s = control.observe_project(ProjectId::Bsc as i32).await;
+        assert_eq!((s.state.as_str(), s.run_id.as_str()), ("STOPPED", "job-1"));
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

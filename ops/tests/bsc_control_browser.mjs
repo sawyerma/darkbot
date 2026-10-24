@@ -8,6 +8,10 @@ const [port,dir,root]=process.argv.slice(2);const base=`http://127.0.0.1:${port}
 require('esbuild').buildSync({entryPoints:[`${root}/frontend/src/core/generated/darkbot/control/v1/commands_pb.ts`],bundle:true,platform:'node',format:'cjs',outfile:`${dir}/commands.cjs`});
 const proto=require(`${dir}/commands.cjs`);
 const browser=await chromium.launch({headless:true});const p=await browser.newPage();const api=p.request;const errors=[];
+// Every request the page itself makes; the harness API context below is not counted.
+const pageRequests=[];p.on('request',r=>pageRequests.push({method:r.method(),path:new URL(r.url()).pathname}));
+const statusGets=(from,path)=>pageRequests.slice(from).filter(r=>r.method==='GET'&&r.path===path).length;
+const idle=ms=>new Promise(r=>setTimeout(r,ms));
 p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>{errors.push('native dialog');void d.dismiss();});
 const until=async(fn,msg)=>{for(let i=0;i<150;i++){if(await fn())return;await new Promise(r=>setTimeout(r,200));}throw Error(msg);};
 const state=async()=>await(await api.get(base+'/api/v1/bsc/process')).json();
@@ -17,7 +21,7 @@ try{
  await until(async()=> (await p.getByTestId('project-process-bsc').innerText()).includes('STOPPED'),'BSC initial stopped');
  await until(async()=>!(await p.getByTestId('project-startstop-bsc').isDisabled()),'BSC controller available');
  const card=p.getByTestId('project-card-bsc');
- await until(async()=> (await card.innerText()).includes('Pre-Live: STOP'),'reporter → gateway overview');
+ await until(async()=> (await card.innerText()).includes('Pre-Live: BLOCKED'),'native BLOCKED reaches the overview unchanged');
  assert.equal(await card.locator('dd').first().innerText(),'UNKNOWN');
  assert.equal(await p.getByTestId('project-startstop-solana').isDisabled(),true);
  const boot=await api.get(base+'/api/v1/session');const headers={'Content-Type':'application/x-protobuf',Origin:base,'X-CSRF-Token':boot.headers()['x-csrf-token']};
@@ -28,9 +32,16 @@ try{
  }
  await p.getByTestId('project-startstop-bsc').click();
  await until(async()=>{const s=await state();return s.run_id&&s.state==='STOPPED';},'native readiness result');
- assert(readFileSync(`${dir}/run/bsc.readiness.result`,'utf8').includes('result_code=STOP'));
+ const verdict=readFileSync(`${dir}/run/bsc.readiness.result`,'utf8').match(/^result_code=(\w+)$/m)?.[1];
+ assert(['BLOCKED','STOP','PASS_READ_ONLY'].includes(verdict),'native verdict, not a wrapper exit-code mapping: '+verdict);
+ // No browser HTTP polling on the global page: BSC state is pushed (Project 0 capture keeps its own watcher, separate owner gate).
+ let mark=pageRequests.length;await idle(8000);
+ assert.equal(statusGets(mark,'/api/v1/bsc/process'),0);assert.equal(statusGets(mark,'/api/v1/command'),0);
+ const p0Polls=statusGets(mark,'/api/v1/project0/process');
  await p.getByTestId('project-link-bsc').click();
  await until(async()=> (await p.locator('body').innerText()).includes('isolated-fixture'),'BSC panel real feed');
+ mark=pageRequests.length;await idle(8000);
+ for(const path of ['/api/v1/bsc/process','/api/v1/project0/process','/api/v1/command'])assert.equal(statusGets(mark,path),0,'periodic GET on /bsc: '+path);
  assert((await p.locator('body').innerText()).includes('Data as of'));
  for(const name of ['BUY','Send','Arm','Probe','Run DRY'])assert.equal(await p.getByRole('button',{name,exact:true}).count(),0);
  await p.screenshot({path:`${dir}/bsc-overview.png`,fullPage:true});
@@ -46,6 +57,8 @@ try{
  await checkSection.getByRole('button',{name:'Clear filter',exact:true}).click();
  assert.equal(await checks.inputValue(),'');
  await until(async()=> (await checkSection.innerText()).includes('V5_CONTRACT'),'new readiness result reaches Launch panel');
+ await until(async()=> (await p.locator('.g-line',{hasText:'Pre-Live Readiness'}).first().innerText()).includes(verdict),'Launch panel shows the native verdict');
+ assert.equal(await p.getByTestId('bsc-readiness-control').count(),1);
  await p.screenshot({path:`${dir}/bsc-launch.png`,fullPage:true});
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
  await p.getByLabel('Report',{exact:true}).selectOption('g08');
@@ -56,6 +69,21 @@ try{
  // A bounded fixture child is used for explicit cancellation and crash tests only.
  const fixture=`#!/usr/bin/python3\nimport pathlib,signal,time,sys\nmode=pathlib.Path(${JSON.stringify(dir+'/mode')}).read_text().strip()\nif mode=='crash': sys.exit(19)\ndef stop(a,b):\n time.sleep(3);sys.exit(0)\nsignal.signal(signal.SIGTERM,stop)\nwhile True: time.sleep(.1)\n`;
  writeFileSync(`${dir}/app/releases/test/g07_pre_live_readiness`,fixture);chmodSync(`${dir}/app/releases/test/g07_pre_live_readiness`,0o755);writeFileSync(`${dir}/mode`,'hold');
+ // Lost acknowledgement: the gateway executes the start, the page never sees the answer.
+ await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await until(async()=>!(await p.getByTestId('bsc-readiness-control').isDisabled()),'BSC launch control');
+ const beforeLost=(await state()).run_id;let posts=0;
+ await p.route('**/api/v1/command',async route=>{if(route.request().method()!=='POST')return route.continue();posts++;await route.fetch();await route.abort('connectionreset');});
+ mark=pageRequests.length;
+ await p.getByTestId('bsc-readiness-control').click();
+ await until(async()=> (await state()).state==='RUNNING','lost-ACK start executed once');
+ await until(async()=>statusGets(mark,'/api/v1/command')===1,'one targeted lookup');
+ await until(async()=> (await p.getByTestId('bsc-readiness-control').innerText()).includes('Stop'),'control unlocked by the pushed job');
+ await idle(4000);await p.unroute('**/api/v1/command');
+ assert.equal(posts,1);assert.equal(pageRequests.slice(mark).filter(r=>r.method==='POST'&&r.path==='/api/v1/command').length,1);
+ assert.equal(statusGets(mark,'/api/v1/command'),1);assert.notEqual((await state()).run_id,beforeLost);
+ await p.getByTestId('bsc-readiness-control').click();await p.getByRole('alertdialog').getByRole('button',{name:'Prüfung stoppen',exact:true}).click();
+ await until(async()=> (await state()).state==='STOPPED','stop after lost-ACK test');
  await p.goto(base+'/');await until(async()=>!(await p.getByTestId('project-startstop-bsc').isDisabled()),'start button');
  await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','held job');
  const running=await state();const id=crypto.randomUUID();const data=encode('bsc.readiness.start',id,running.run_id);
@@ -75,5 +103,7 @@ try{
  writeFileSync(`${dir}/mode`,'hold');await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','run for Stop All');
  await p.getByTestId('overview-stop-all').click();await p.getByRole('alertdialog').getByRole('button',{name:'Aufzeichnungen stoppen',exact:true}).click();await until(async()=> (await state()).state==='STOPPED','Stop All BSC');
  assert.equal((await api.get(base+'/healthz')).status(),200);assert.deepEqual(errors,[]);
- writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));console.log('PASS native readiness, reporter→gateway→frontend, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All');
+ writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
+ writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
+ console.log(`PASS native verdict ${verdict}, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

@@ -5,11 +5,11 @@ export interface Guard { guardState:string; frozenApprovedSha256:string; contrac
 export interface BscStatusView {
  sourceCommit:string; evaluatedUnixS:bigint; dataAsOfUnixS:bigint; liveState:string;
  guard?:Guard; gates:{gateId:string;state:string;evidence?:Evidence;reasonCodes:string[]}[];
- readiness?:{verdict:string; evidence?:Evidence; fundingVerdict:string; checks:PublicField[]; portalVersionBound:string;portalVersionObserved:string;portalImplBound:string;portalImplObserved:string;codeHashChanged?:boolean;reasons:string[]};
+ readiness?:{verdict:string; mode:string; candidateBinding:string; evidence?:Evidence; fundingVerdict:string; checks:PublicField[]; portalVersionBound:string;portalVersionObserved:string;portalImplBound:string;portalImplObserved:string;codeHashChanged?:boolean;headBlock?:bigint;reasons:string[]};
  builder?:{refreshObservedUnixS:bigint;refreshExpiresUnixS:bigint;floors:PublicField[];probe?:Evidence;price:string;noMerge:string;positionFirst:string;inclusion:string};
  witness?:{sourceReady?:boolean;t0ToBuyState:string;evidence?:Evidence};
  dry?:{evidence?:Evidence;dryId:string;state:string;parameters:PublicField[];validForCurrentPortal?:boolean};
- jobs:{job:string;state:string;launchId:string;resultCode:string}[]; warnings:string[];
+ jobs:{job:string;state:string;launchId:string;resultCode:string;startedUnixS:bigint;endedUnixS:bigint;controllerAvailable?:boolean}[]; warnings:string[];
 }
 export interface BscLaunchView {contractPresent:boolean;evidence?:Evidence;contractFields:PublicField[];runtimeFields:PublicField[];reason:string}
 export interface BscMonitoringView {state:string;evidence?:Evidence;results:PublicField[]}

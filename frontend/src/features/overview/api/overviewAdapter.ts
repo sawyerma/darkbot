@@ -11,6 +11,7 @@ import {
 import { ProjectId, TopicId, topics, type StateMeta } from "@/core/realtime";
 import type { FinanceView, OverviewView, ProjectReadSummary } from "@/core/projects/readSummary";
 import { useOverviewStore } from "../overviewStore";
+import { applyReadinessJob } from "@/core/realtime/readinessControl";
 
 // Einzige Brücke Transport -> Overview-Store und einziger Ort mit generierten Overview-Typen.
 
@@ -73,6 +74,7 @@ function projectOf(p: ProjectSummary): ProjectReadSummary {
     finance: connected ? financeOf(p.finance) : null,
     sourceTimestampUnixNs: p.sourceTimestampUnixNs !== 0n ? p.sourceTimestampUnixNs : null,
     sourceId: p.sourceId,
+    jobs: connected ? p.jobs.map(j => ({ job: j.job, state: j.state, launchId: j.launchId, resultCode: j.resultCode, controllerAvailable: j.controllerAvailable })) : [],
   };
 }
 
@@ -108,13 +110,18 @@ export function ensureOverviewAdapter(): void {
   if (started) return;
   started = true;
 
-  topics.onTopicStatus(TopicId.OVERVIEW_AGGREGATES, (status, reason) =>
-    useOverviewStore.getState().setStatus(status, reason),
-  );
+  topics.onTopicStatus(TopicId.OVERVIEW_AGGREGATES, (status, reason) => {
+    useOverviewStore.getState().setStatus(status, reason);
+    // Process truth only from a live aggregate; no HTTP polling fallback.
+    if (status !== "LIVE") applyReadinessJob("overview", null);
+  });
   topics.onState(TopicId.OVERVIEW_AGGREGATES, (bytes: Uint8Array, meta: StateMeta) => {
     // Fail closed: any decode/validation error MUST propagate to TopicSubscriptions.
     // Otherwise its StateFull seq would be acknowledged as applied despite a bad payload.
     const decoded = fromBinary(OverviewAggregatesSchema, bytes);
-    useOverviewStore.getState().apply(toOverviewView(decoded), meta);
+    const view = toOverviewView(decoded);
+    useOverviewStore.getState().apply(view, meta);
+    const bsc = view.projects.find(p => p.project === ProjectId.BSC);
+    applyReadinessJob("overview", bsc?.source === "CONNECTED" ? bsc.jobs.find(j => j.job === "readiness") ?? null : null);
   });
 }

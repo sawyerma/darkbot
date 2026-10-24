@@ -41,7 +41,8 @@ fn value(v: &Value) -> Option<String> {
         _ => return None,
     })
 }
-/// Details may contain external errors. URLs and credential-bearing lines never leave the reporter.
+/// Details may contain external errors. URLs, credential-bearing lines and absolute local
+/// paths never leave the reporter.
 pub fn safe_text(text: &str) -> String {
     let lower = text.to_ascii_lowercase();
     if [
@@ -52,6 +53,9 @@ pub fn safe_text(text: &str) -> String {
         "bearer ",
         "password",
         "secret=",
+        "secret:",
+        "token=",
+        "token:",
     ]
     .iter()
     .any(|s| lower.contains(s))
@@ -59,7 +63,18 @@ pub fn safe_text(text: &str) -> String {
         return "[redacted]".into();
     }
     text.split_whitespace()
-        .map(|s| if s.contains("://") { "[endpoint]" } else { s })
+        .map(|s| {
+            if s.contains("://") {
+                "[endpoint]"
+            } else if ["/Users/", "/home/", "/private/", "/var/folders/"]
+                .iter()
+                .any(|p| s.trim_start_matches(['"', '\'', '(']).starts_with(p))
+            {
+                "[local-path]"
+            } else {
+                s
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
@@ -184,20 +199,23 @@ fn candidate_fields(
     rundir: &Path,
     readiness: Option<&Record>,
     warnings: &mut Vec<String>,
-) -> Vec<PublicField> {
+) -> (Vec<PublicField>, &'static str) {
     use schema::g07_candidate as gc;
     let dir = root.join("bsc/native/state/g07_candidates");
     if !fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir()) {
-        return Vec::new();
+        return (Vec::new(), "NO_SELECTION");
     }
     let mut out = Vec::new();
     let mut put = |name: String, value: String| out.push(PublicField { name, value });
     let invalid = |warnings: &mut Vec<String>, why: &str| {
         warnings.push(format!("CANDIDATE_MIRROR_INVALID {why}"));
-        vec![PublicField {
-            name: "candidate.backend".into(),
-            value: "INVALID".into(),
-        }]
+        (
+            vec![PublicField {
+                name: "candidate.backend".into(),
+                value: "INVALID".into(),
+            }],
+            "UNKNOWN",
+        )
     };
     let salted = fs::read_dir(&dir).map_or(true, |entries| {
         entries
@@ -322,6 +340,16 @@ fn candidate_fields(
         .filter(|e| e.file_name().to_string_lossy().ends_with(".request.dbrec"))
         .filter_map(|e| record::decode(&gc::request::SCHEMA, &read(&e.path())?).ok())
         .max_by_key(|r| r.u64(gc::request::REQUESTED_UNIX_MS).unwrap_or(0));
+    // The global readiness counts as current only for exactly this selection.
+    let binding = match (&view, readiness) {
+        (None, _) => "NO_SELECTION",
+        (Some(_), None) => "UNKNOWN",
+        (Some(v), Some(rd)) => match gc::readiness_for(rd, Some(v), &v.candidate_id) {
+            "PASS_READ_ONLY" | "BLOCKED" | "STOP" => "BOUND",
+            "STALE" => "STALE",
+            _ => "UNKNOWN",
+        },
+    };
     match latest_request {
         None => put("candidate.request.state".into(), "NONE".into()),
         Some(r) => {
@@ -347,7 +375,7 @@ fn candidate_fields(
             }
         }
     }
-    out
+    (out, binding)
 }
 
 pub fn project(root: &Path, rundir: &Path) -> Snapshot {
@@ -401,7 +429,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         ..Default::default()
     };
     let mut launch = BscLaunchState {
-        reason: "No active v5 contract".into(),
+        reason: "No active V5 contract".into(),
         ..Default::default()
     };
     if let Some(r) = contract
@@ -438,10 +466,15 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     };
     if let Some((p, r)) = latest(&records, &[schema::g07::readiness::SCHEMA.name]) {
         readiness.evidence = Some(evidence(root, p, Some(r)));
-        readiness.verdict = if field(r, "status").as_deref() == Some("PASS_READ_ONLY") {
-            "PASS_READ_ONLY"
-        } else {
-            "STOP"
+        // Native vocabulary unchanged; anything else is UNKNOWN, never a pass.
+        readiness.verdict = match field(r, "status").as_deref() {
+            Some(v @ ("PASS_READ_ONLY" | "BLOCKED" | "STOP")) => v,
+            _ => "UNKNOWN",
+        }
+        .into();
+        readiness.mode = match field(r, "mode").as_deref() {
+            Some(v @ ("READ_ONLY_RPC" | "OFFLINE_ZERO_EGRESS")) => v,
+            _ => "UNKNOWN",
         }
         .into();
         if let Ok(checks) = r.nested_all(schema::g07::readiness::CHECKS) {
@@ -656,13 +689,14 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         .into(),
         ..Default::default()
     };
-    if let Some((p, r)) = latest(
+    let g08 = latest(
         &records,
         &[
             schema::g08::result::SCHEMA.name,
             schema::g08::unresolved::SCHEMA.name,
         ],
-    ) {
+    );
+    if let Some((p, r)) = g08 {
         monitoring.state = field(r, "verdict").unwrap_or_else(|| "UNKNOWN".into());
         monitoring.evidence = Some(evidence(root, p, Some(r)));
         let names: Vec<_> = r
@@ -689,12 +723,42 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     let g07_evidence = execution.map(|(p, r)| evidence(root, p, Some(r)));
     let candidate_readiness =
         latest(&records, &[schema::g07::readiness::SCHEMA.name]).map(|(_, r)| r);
-    launch.runtime_fields.extend(candidate_fields(
-        root,
-        rundir,
-        candidate_readiness,
-        &mut warnings,
-    ));
+    let (candidate, binding) = candidate_fields(root, rundir, candidate_readiness, &mut warnings);
+    launch.runtime_fields.extend(candidate);
+    if candidate_readiness.is_some() {
+        readiness.candidate_binding = binding.into();
+    } else {
+        readiness.candidate_binding = "UNKNOWN".into();
+    }
+    // G0.7 and G0.8 only belong together with the same attempt and, for a result, the hash
+    // of exactly that G0.7 record; otherwise both stay independent observations.
+    let mut g07_reasons = Vec::new();
+    if let Some((_, g07)) = execution {
+        if !guard.attempt_id.is_empty()
+            && field(g07, "attempt_id").as_deref() != Some(&guard.attempt_id)
+        {
+            g07_reasons.push("ATTEMPT_ID_NOT_V5_BOUND".into());
+        }
+    }
+    let mut g08_reasons = Vec::new();
+    if let Some((_, r)) = g08 {
+        let bound = execution.is_some_and(|(_, g07)| {
+            field(g07, "attempt_id").is_some()
+                && field(g07, "attempt_id") == field(r, "attempt_id")
+                && (r.schema() == &schema::g08::unresolved::SCHEMA
+                    || g07_evidence.as_ref().is_some_and(|e| {
+                        field(r, "g07_evidence_sha256") == Some(format!("0x{}", e.sha256))
+                    }))
+        });
+        g08_reasons.push(
+            if bound {
+                "G07_EVIDENCE_BOUND"
+            } else {
+                "G07_EVIDENCE_UNBOUND"
+            }
+            .into(),
+        );
+    }
     let gates = vec![
         gate(
             "G0.6a",
@@ -706,12 +770,12 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 vec![]
             },
         ),
-        gate("G0.7", &g07_state, g07_evidence, vec![]),
+        gate("G0.7", &g07_state, g07_evidence, g07_reasons),
         gate(
             "G0.8",
             &monitoring.state,
             monitoring.evidence.clone(),
-            vec![],
+            g08_reasons,
         ),
         gate(
             "C1.9",

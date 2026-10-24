@@ -1,4 +1,4 @@
-use super::{projection, wire::control::*};
+use super::{projection, publisher, wire::control::*};
 use darkbot_bsc_record::{Draft, schema};
 use prost::Message;
 use std::{fs, path::PathBuf};
@@ -38,7 +38,10 @@ fn read_only_projection_and_golden_frames() {
     let mut s = projection::project(&root, &root.join("run"));
     s.status.evaluated_unix_s = 0;
     assert_eq!(s.status.guard.as_ref().unwrap().guard_state, "UNARMED");
-    assert_eq!(s.status.readiness.as_ref().unwrap().verdict, "STOP");
+    let readiness = s.status.readiness.as_ref().unwrap();
+    assert_eq!(readiness.verdict, "BLOCKED");
+    assert_eq!(readiness.mode, "OFFLINE_ZERO_EGRESS");
+    assert_eq!(readiness.candidate_binding, "NO_SELECTION");
     assert!(!s.launch.contract_present);
     assert!(s.wallets.launcher_balance_wei.is_none());
     assert!(!format!("{:?}", s.status).contains("NEVER_PUBLIC"));
@@ -135,6 +138,11 @@ fn public_text_never_exports_endpoints_or_credentials() {
         "private_key=SECRET",
         "https://example.invalid/SECRET",
         "authorization: SECRET",
+        "token=SECRET",
+        "access_token=SECRET",
+        "secret: SECRET",
+        "read /Users/someone/SECRET/state.dbrec",
+        "(\"/private/tmp/SECRET\")",
     ] {
         assert!(!projection::safe_text(s).contains("SECRET"));
     }
@@ -365,5 +373,122 @@ fn candidate_state_is_projected_only_from_a_verified_public_mirror() {
             .iter()
             .any(|w| w.contains("CANDIDATE_MIRROR_INVALID"))
     );
+    fs::remove_dir_all(root).unwrap();
+}
+#[cfg(target_os = "macos")]
+#[test]
+fn a_completed_blocked_readiness_run_is_a_stopped_process_not_a_failure() {
+    let run = std::env::temp_dir().join(format!(
+        "darkbot-bsc-job-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    fs::create_dir_all(&run).unwrap();
+    fs::write(
+        run.join("bsc.readiness.launch"),
+        "launch_id=job-1\nstarted_unix_s=1\n",
+    )
+    .unwrap();
+    fs::write(
+        run.join("bsc.readiness.result"),
+        "launch_id=job-1\nended_unix_s=2\nresult_code=BLOCKED\nexit_code=2\n",
+    )
+    .unwrap();
+    // No launchd service carries this label: the run has ended.
+    let job = publisher::job(&run, "com.darkbot.test.absent-readiness-label");
+    assert_eq!(job.state, "STOPPED");
+    assert_eq!(job.result_code, "BLOCKED");
+    fs::remove_dir_all(run).unwrap();
+}
+#[test]
+fn readiness_is_current_only_for_the_selected_candidate_and_unknown_status_never_passes() {
+    use darkbot_bsc_record::{Value, schema::g07::readiness as rr, schema::g07_candidate as gc};
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-binding-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let run = root.join("run");
+    let mirror = root.join("bsc/native/state/g07_candidates");
+    let evidence = root.join("bsc/native/evidence/g07/fixture");
+    fs::create_dir_all(&run).unwrap();
+    fs::create_dir_all(&mirror).unwrap();
+    fs::create_dir_all(&evidence).unwrap();
+    let (b, b_id) = candidate_record("SELF_B", [0x77; 20], None);
+    fs::write(mirror.join("b.candidate.dbrec"), &b).unwrap();
+    let mut sel = Draft::new(&gc::selection::SCHEMA);
+    sel.set(gc::selection::GENERATION, 4u64)
+        .set(gc::selection::PROFILE, "SELF_B")
+        .set(gc::selection::CANDIDATE_ID, Value::B256(b_id))
+        .set(gc::selection::ACTIVATED_UNIX_MS, 1000u64)
+        .set(gc::selection::INVALIDATED, "READINESS")
+        .set(gc::selection::GUARD_AT_SWITCH, "UNARMED");
+    fs::write(mirror.join("selection.dbrec"), sel.encode().unwrap()).unwrap();
+    let binding = gc::readiness_binding(&gc::SelectionView {
+        generation: 4,
+        profile: "SELF_B",
+        candidate_id: b_id,
+        activated_unix_ms: 1000,
+    });
+    let report = |status: &str, observed: u64| {
+        let mut d = Draft::new(&rr::SCHEMA);
+        d.set(rr::STATUS, status)
+            .set(rr::MODE, "READ_ONLY_RPC")
+            .set(rr::OBSERVED_UNIX_MS, observed)
+            .set(rr::LIVE_AUTHORIZED, false);
+        let mut c = Draft::new(&rr::check::SCHEMA);
+        c.set(rr::check::NAME, "CANDIDATE_SELECTION")
+            .set(rr::check::STATUS, "PASS")
+            .set(rr::check::DETAIL, binding.as_str());
+        d.push(rr::CHECKS, c.into_nested());
+        fs::write(evidence.join("readiness.dbrec"), d.encode().unwrap()).unwrap();
+        projection::project(&root, &run).status.readiness.unwrap()
+    };
+    // A readiness observed before the A/B switch is history, not the current candidate's.
+    let r = report("PASS_READ_ONLY", 500);
+    assert_eq!(
+        (r.verdict.as_str(), r.candidate_binding.as_str()),
+        ("PASS_READ_ONLY", "STALE")
+    );
+    let r = report("BLOCKED", 2000);
+    assert_eq!(
+        (r.verdict.as_str(), r.candidate_binding.as_str()),
+        ("BLOCKED", "BOUND")
+    );
+    assert_eq!(r.mode, "READ_ONLY_RPC");
+    // An unknown native status is never shown as a pass.
+    assert_eq!(report("LIVE", 3000).verdict, "UNKNOWN");
+    fs::remove_file(mirror.join("selection.dbrec")).unwrap();
+    assert_eq!(report("STOP", 4000).candidate_binding, "NO_SELECTION");
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn a_g08_record_without_its_g07_evidence_is_unbound() {
+    use darkbot_bsc_record::{Value, schema::g08::unresolved as u};
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-g08-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let dir = root.join("bsc/native/evidence/g08/fixture");
+    fs::create_dir_all(&dir).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    let mut d = Draft::new(&u::SCHEMA);
+    d.set(u::GATE, "G0.8")
+        .set(u::VERDICT, "UNRESOLVED")
+        .set(u::REASON, "fixture")
+        .set(u::ATTEMPT_ID, "attempt-1")
+        .set(u::LAUNCH_TX, Value::B256([1; 32]))
+        .set(u::BUY_TX, Value::B256([2; 32]))
+        .set(u::LAUNCH_RECEIPT_RESOLVED, false)
+        .set(u::BUY_RECEIPT_RESOLVED, false)
+        .set(u::AUTOMATIC_RETRY, false)
+        .set(u::T0_TO_BUY, "UNKNOWN");
+    fs::write(dir.join("unresolved.dbrec"), d.encode().unwrap()).unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    let g08 = s.status.gates.iter().find(|g| g.gate_id == "G0.8").unwrap();
+    assert_eq!(g08.state, "UNRESOLVED");
+    assert_eq!(g08.reason_codes, vec!["G07_EVIDENCE_UNBOUND".to_string()]);
+    assert_eq!(s.monitoring.state, "UNRESOLVED");
     fs::remove_dir_all(root).unwrap();
 }

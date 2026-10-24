@@ -47,7 +47,10 @@ function sameProject(a: ProjectReadSummary, b: ProjectReadSummary): boolean {
       a.activeCaptures !== b.activeCaptures || a.sourceId !== b.sourceId ||
       a.sourceTimestampUnixNs !== b.sourceTimestampUnixNs ||
       a.warnings.length !== b.warnings.length ||
-      a.warnings.some((v,i) => v !== b.warnings[i])) return false;
+      a.warnings.some((v,i) => v !== b.warnings[i]) ||
+      a.jobs.length !== b.jobs.length ||
+      a.jobs.some((j,i) => { const k = b.jobs[i]; return !k || j.job !== k.job || j.state !== k.state || j.launchId !== k.launchId ||
+        j.resultCode !== k.resultCode || j.controllerAvailable !== k.controllerAvailable; })) return false;
   const al=a.rpcLatency, bl=b.rpcLatency;
   if (!!al !== !!bl || (al && bl && (al.p95Ms !== bl.p95Ms || al.samples !== bl.samples || al.windowS !== bl.windowS))) return false;
   const af=a.finance, bf=b.finance;

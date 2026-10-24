@@ -2,7 +2,7 @@
   "version": 1,
   "source_commit": "84eb791a84edd0a8745dd42853d78612ed7810c2",
   "schema": "protocol/schemas/darkbot/bsc/v1/status.proto",
-  "schema_sha256": "2944f3e0529e1b9f89b2aea4cb26fe912736a534f65e234974ffd401acf2d305",
+  "schema_sha256": "47a395fe20cb451ef7e1d1846347cbed24208b335d041fcb1b1d84a8e8d5d033",
   "fields": [
     {
       "project": "bsc",
@@ -20,7 +20,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -45,7 +45,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -70,7 +70,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -95,7 +95,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -120,7 +120,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -223,8 +223,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 3,
-      "status": "IST_BUG",
-      "status_reason": "shown with a stale v4 label (AU-09)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -363,7 +362,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -387,14 +386,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 5,
-      "status": "IST_BUG",
-      "status_reason": "G0.7 classifications / G0.8 ADAPT, UNRESOLVED render neutral (AU-08)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -412,7 +410,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -437,7 +435,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -467,8 +465,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 4,
-      "status": "IST_BUG",
-      "status_reason": "BLOCKED arrives as STOP (AU-03/AU-04)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -715,6 +712,56 @@
     },
     {
       "project": "bsc",
+      "feature": "ReadinessStatus",
+      "field": "ReadinessStatus.mode",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "readiness::MODE",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests + bsc-golden.test.ts + readinessControl.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 4,
+      "status": "IST_CONNECTED",
+      "status_reason": "native READ_ONLY_RPC / OFFLINE_ZERO_EGRESS"
+    },
+    {
+      "project": "bsc",
+      "feature": "ReadinessStatus",
+      "field": "ReadinessStatus.candidate_binding",
+      "source_path": "bsc/engine/crates/qualification/src/status/projection.rs",
+      "symbol": "g07_candidate::readiness_for",
+      "type": "string",
+      "unit": "public_text_or_struct",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests + bsc-golden.test.ts + readinessControl.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 4,
+      "status": "IST_CONNECTED",
+      "status_reason": "BOUND only for the current A/B selection; STALE is history"
+    },
+    {
+      "project": "bsc",
       "feature": "BuilderStatus",
       "field": "BuilderStatus.refresh_observed_unix_s",
       "source_path": "bsc/engine/crates/record/src/schema/g06a.rs",
@@ -801,7 +848,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1115,14 +1162,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1140,14 +1186,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1165,14 +1210,14 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status": "IST_CONNECTED",
+      "status_reason": "start/stop CAS resource of the readiness control"
     },
     {
       "project": "bsc",
@@ -1190,14 +1235,14 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
       "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status_reason": "pushed, not displayed"
     },
     {
       "project": "bsc",
@@ -1215,14 +1260,14 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
       "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status_reason": "pushed, not displayed"
     },
     {
       "project": "bsc",
@@ -1240,14 +1285,38 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "c98e4ccc20b9c3067a4ac34f8fef33261af82edfc0a565cbea4460aa50f58c55",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status": "IST_CONNECTED"
+    },
+    {
+      "project": "bsc",
+      "feature": "JobStatus",
+      "field": "JobStatus.controller_available",
+      "source_path": "bsc/engine/crates/qualification/src/status/publisher.rs",
+      "symbol": "publisher::controller_available",
+      "type": "bool",
+      "unit": "boolean",
+      "scale": 0,
+      "default_min_max": "absent/UNKNOWN; zero timestamp means unknown",
+      "validator": "native DBREC checksum/schema + protobuf type; bounded public projection",
+      "config_or_read": "read",
+      "owner": "BSC",
+      "sensitivity": "public",
+      "provenance": "exact record path + SHA256; no mtime freshness",
+      "quality": "OBSERVATION_ONLY",
+      "source_sha": "d2ac89cd2ce71873ffd0e500be431bd9910b67b912de3f3c944ff91ba968bbb7",
+      "required_gate": "READ_ONLY_NO_TRADING",
+      "topic_or_command": "bsc.* state",
+      "test": "status::tests + bsc-golden.test.ts + readinessControl.test.ts",
+      "frontend_panel": "overview",
+      "section_order": 2,
+      "status": "IST_CONNECTED",
+      "status_reason": "same controller test as the gateway; enables start/stop"
     },
     {
       "project": "bsc",
@@ -1265,7 +1334,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1289,7 +1358,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1314,7 +1383,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1338,7 +1407,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1363,7 +1432,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1388,7 +1457,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1413,7 +1482,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1438,7 +1507,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1463,7 +1532,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1488,14 +1557,13 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "overview",
       "section_order": 2,
-      "status": "SOLL_MISSING",
-      "status_reason": "pushed by the publisher, not displayed (UI polls HTTP instead, AU-01)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1513,7 +1581,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1537,7 +1605,7 @@
       "sensitivity": "public",
       "provenance": "exact record path + SHA256; no mtime freshness",
       "quality": "OBSERVATION_ONLY",
-      "source_sha": "a40e72eaff13de79ebce49742d4a570db376bab527ba71a0a7463f2e7620eb7c",
+      "source_sha": "4ae7732618b29ea89f7e6bef4433404cbb8158dfdee2c87609be90aead0163f2",
       "required_gate": "READ_ONLY_NO_TRADING",
       "topic_or_command": "bsc.* state",
       "test": "status::tests + bsc-golden.test.ts",
@@ -1567,8 +1635,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "launch",
       "section_order": 5,
-      "status": "IST_BUG",
-      "status_reason": "shown with a stale v4 label (AU-09)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -1689,8 +1756,7 @@
       "test": "status::tests + bsc-golden.test.ts",
       "frontend_panel": "monitoring",
       "section_order": 5,
-      "status": "IST_BUG",
-      "status_reason": "ADAPT/UNRESOLVED render neutral (AU-08)"
+      "status": "IST_CONNECTED"
     },
     {
       "project": "bsc",
@@ -2083,7 +2149,7 @@
     },
     {
       "source_path": "bsc/tools/readiness_job.py",
-      "source_sha": "d3cad7acae6789986731329862afea99addbad86f049368baaddb6ef10076de9",
+      "source_sha": "cff956766f4fa45d42cd4bfe8bf2c04bd0bc7c12054d6cdb9cc9b67d634f4bc1",
       "owner": "BSC lifecycle",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },
@@ -2095,7 +2161,7 @@
     },
     {
       "source_path": "gateway/src/control.rs",
-      "source_sha": "b2ff5d0fb0379de20040a00b10f61e68eb14d1c5af7250af9c536162936ea68a",
+      "source_sha": "a8c001eb96edc5751b76ccd5fd27a8cd4789c7c95c8dfa0aefc06e651fa4d4a0",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     }
@@ -2159,10 +2225,9 @@
       ],
       "panel": "launch",
       "section": 8,
-      "status": "IST_BUG",
+      "status": "IST_CONNECTED",
       "wire": "ReadinessStatus.verdict",
-      "topic": "bsc.status",
-      "reason": "native BLOCKED projected as STOP (AU-03/AU-04)"
+      "topic": "bsc.status"
     },
     {
       "schemas": [
@@ -2173,10 +2238,9 @@
       ],
       "panel": "launch",
       "section": 8,
-      "status": "SOLL_MISSING",
-      "wire": "additive typed ReadinessStatus field",
-      "topic": "bsc.status",
-      "reason": "G1 READ_ONLY_RPC/OFFLINE_ZERO_EGRESS not transported"
+      "status": "IST_CONNECTED",
+      "wire": "ReadinessStatus.mode",
+      "topic": "bsc.status"
     },
     {
       "schemas": [
@@ -2636,10 +2700,10 @@
       ],
       "panel": "launch",
       "section": 5,
-      "status": "IST_BUG",
+      "status": "IST_CONNECTED",
       "wire": "BscLaunchState.contract_fields (PublicField)",
       "topic": "bsc.launch.state",
-      "reason": "path text is passed through without repo-relative enforcement"
+      "reason": "repo-relative paths only; absolute local paths are masked by safe_text"
     },
     {
       "schemas": [

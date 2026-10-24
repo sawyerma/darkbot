@@ -77,6 +77,7 @@
     - [GlobalFinance](#darkbot-control-v1-GlobalFinance)
     - [LatencySample](#darkbot-control-v1-LatencySample)
     - [OverviewAggregates](#darkbot-control-v1-OverviewAggregates)
+    - [ProjectJob](#darkbot-control-v1-ProjectJob)
     - [ProjectSummary](#darkbot-control-v1-ProjectSummary)
 
     - [FinanceQuality](#darkbot-control-v1-FinanceQuality)
@@ -126,7 +127,7 @@ Bound launch plan, without signatures, raw transactions or execution authority.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| contract_present | [bool](#bool) |  | True only if the current v4 contract is present and valid. |
+| contract_present | [bool](#bool) |  | True only if the current V5 contract is present and valid. |
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Contract identity. |
 | contract_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Public contract values, exact integer caps and binding hashes. |
 | runtime_fields | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Observed runtime context; absent until such evidence actually exists. |
@@ -145,7 +146,7 @@ Read-only G0.8 results; submission acknowledgement is not acquisition.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| state | [string](#string) |  | NOT_EXECUTED, PASS, FAIL or UNKNOWN. |
+| state | [string](#string) |  | G0.8 verdict unchanged: NOT_EXECUTED, PASS, ADAPT, STOP, UNRESOLVED or UNKNOWN. |
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | G0.8 result identity. |
 | results | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Explicit public receipt, ordering, acquisition and cost fields. |
 
@@ -274,7 +275,7 @@ Qualification status derived from identified evidence.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | gate_id | [string](#string) |  | G0.6a, G0.7, G0.8, C1.9 or C1.10. |
-| state | [string](#string) |  | PASS, FAIL, STOP, PARTIAL, NOT_EXECUTED or UNKNOWN. |
+| state | [string](#string) |  | Native vocabulary, transported unchanged. G0.6a: PASS, FAIL or UNKNOWN. G0.7: NOT_EXECUTED, UNKNOWN or the attempt classification (PROVISIONAL_RELEASED__*, SUBMITTED_OR_SUBMISSION_UNKNOWN__*, STOP_CAPTURE_INCOMPLETE__*), none of which is a success. G0.8: NOT_EXECUTED, UNKNOWN, PASS, ADAPT, STOP or UNRESOLVED. C1.x: UNKNOWN. |
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Original evidence identity. |
 | reason_codes | [string](#string) | repeated | Reasons explaining this observation. |
 
@@ -293,7 +294,7 @@ Public guard observation. This message cannot authorize execution.
 | ----- | ---- | ----- | ----------- |
 | frozen_approved_sha256 | [string](#string) |  | Compiled authority hash or UNARMED. |
 | guard_state | [string](#string) |  | UNARMED, ARMED, ARMED_MISMATCH or UNKNOWN. |
-| contract_path | [string](#string) |  | Only the current v4 contract path is authoritative. |
+| contract_path | [string](#string) |  | Only the current V5 contract path is authoritative. |
 | contract_present | [bool](#bool) |  | Whether the current contract exists. |
 | contract_sha256 | [string](#string) |  | Hash of the current contract bytes, if present. |
 | approved | [bool](#bool) | optional | Absent if no valid contract can be inspected. |
@@ -315,11 +316,12 @@ Supervisor-owned read-only job lifecycle.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | job | [string](#string) |  | Only readiness is currently controllable. |
-| state | [string](#string) |  | RUNNING, STOPPED, STARTING, STOPPING, FAILED or UNKNOWN. |
+| state | [string](#string) |  | Process lifecycle only: RUNNING, STOPPING, STOPPED (ended; see result_code), FAILED (runner or process failure) or UNKNOWN. Never a readiness verdict. |
 | launch_id | [string](#string) |  | Unique launch identity; never reused across runs. |
 | started_unix_s | [uint64](#uint64) |  | Start time recorded by the controller. |
 | ended_unix_s | [uint64](#uint64) |  | Completion time recorded by the controller. |
-| result_code | [string](#string) |  | Result associated with this launch, not an earlier one. |
+| result_code | [string](#string) |  | Result of this launch, not an earlier one: the native verdict PASS_READ_ONLY, BLOCKED or STOP, STOPPED when stopped on request, FAILED on a technical failure. |
+| controller_available | [bool](#bool) | optional | Whether the supervisor can control the job (deployed readiness binary and snapshot). |
 
 
 
@@ -350,7 +352,7 @@ Native read-only readiness result and its original timestamp.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| verdict | [string](#string) |  | PASS_READ_ONLY, STOP, NOT_RUN or UNKNOWN; never LIVE authority. |
+| verdict | [string](#string) |  | PASS_READ_ONLY, BLOCKED (a required condition is missing), STOP (a contradiction), NOT_RUN or UNKNOWN, unchanged from the native record; never LIVE authority. |
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Source evidence, possibly historical. |
 | funding_verdict | [string](#string) |  | Funding result, if reported. |
 | checks | [PublicField](#darkbot-bsc-v1-PublicField) | repeated | Individual native checks and their public details. |
@@ -361,6 +363,8 @@ Native read-only readiness result and its original timestamp.
 | code_hash_changed | [bool](#bool) | optional | Absent when no comparison was performed. |
 | head_block | [uint64](#uint64) | optional | Block for the readiness observation, when recorded. |
 | reasons | [string](#string) | repeated | Reported reasons for blocking. |
+| mode | [string](#string) |  | READ_ONLY_RPC or OFFLINE_ZERO_EGRESS as recorded natively; empty without a record. |
+| candidate_binding | [string](#string) |  | Binding to the current offline candidate selection: BOUND (observed after the switch, with a passing CANDIDATE_SELECTION check for it), STALE (older or another selection), NO_SELECTION, or UNKNOWN (no record or an invalid candidate mirror). |
 
 
 
@@ -548,6 +552,7 @@ verbindlich in der TopicDescriptor-Tabelle, die das Gateway im Welcome liefert.
 | reject_reason | [CommandRejectReason](#darkbot-control-v1-CommandRejectReason) |  |  |
 | detail | [string](#string) |  |  |
 | persisted | [ExpectedVersion](#darkbot-control-v1-ExpectedVersion) |  | Version der Ressource nach Annahme (für die nächste CAS). Nur bei ACCEPTED. |
+| phase | [CommandPhase](#darkbot-control-v1-CommandPhase) |  | Ledger-Phase bei Erzeugung dieser Antwort (PENDING_RECONCILE, solange die Ausführung unentschieden ist); eine Wiederholung liefert die aktuelle Phase. Nur bei ACCEPTED. Nie ein On-Chain- oder wirtschaftliches Ergebnis. |
 
 
 
@@ -1300,6 +1305,25 @@ Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
 
 
 
+<a name="darkbot-control-v1-ProjectJob"></a>
+
+### ProjectJob
+Copy of the project source&#39;s job lifecycle; the source stays the only authority.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| job | [string](#string) |  |  |
+| state | [string](#string) |  | Process lifecycle: RUNNING, STOPPING, STOPPED, FAILED or UNKNOWN. |
+| launch_id | [string](#string) |  |  |
+| result_code | [string](#string) |  | Native verdict or STOPPED/FAILED of this launch; empty while running. |
+| controller_available | [bool](#bool) | optional |  |
+
+
+
+
+
+
 <a name="darkbot-control-v1-ProjectSummary"></a>
 
 ### ProjectSummary
@@ -1322,6 +1346,7 @@ Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
 | finance | [FinanceSummary](#darkbot-control-v1-FinanceSummary) |  |  |
 | source_timestamp_unix_ns | [int64](#int64) |  |  |
 | source_id | [string](#string) |  |  |
+| jobs | [ProjectJob](#darkbot-control-v1-ProjectJob) | repeated | Supervised read-only jobs as the project source reports them (BSC: readiness job). |
 
 
 

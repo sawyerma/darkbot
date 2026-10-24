@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/control/v1/overview.proto.
  */
 export const file_darkbot_control_v1_overview: GenFile = /*@__PURE__*/
-  fileDesc("CiFkYXJrYm90L2NvbnRyb2wvdjEvb3ZlcnZpZXcucHJvdG8SEmRhcmtib3QuY29udHJvbC52MSJSCg1MYXRlbmN5U2FtcGxlEhMKBnA5NV9tcxgBIAEoDUgAiAEBEhAKCHdpbmRvd19zGAIgASgNEg8KB3NhbXBsZXMYAyABKA1CCQoHX3A5NV9tcyKJAgoORmluYW5jZVN1bW1hcnkSGwoTZmluYW5jZV9zbmFwc2hvdF9pZBgBIAEoCRIzCgdxdWFsaXR5GAIgASgOMiIuZGFya2JvdC5jb250cm9sLnYxLkZpbmFuY2VRdWFsaXR5EkwKIXJlYWxpemVkX25ldF9wbmxfdXNkX21pY3JvX3NpZ25lZBgDIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsEiQKF3RvdGFsX2NhcGl0YWxfdXNkX21pY3JvGAQgASgESACIAQESFQoNYXNfb2ZfdW5peF9ucxgFIAEoA0IaChhfdG90YWxfY2FwaXRhbF91c2RfbWljcm8irgQKDlByb2plY3RTdW1tYXJ5Ei4KB3Byb2plY3QYASABKA4yHS5kYXJrYm90LmNvbnRyb2wudjEuUHJvamVjdElkEg0KBWxhYmVsGAIgASgJEg4KBmRvbWFpbhgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5kYXJrYm90LmNvbnRyb2wudjEuU291cmNlU3RhdGUSMAoJcmVhZGluZXNzGAUgASgOMh0uZGFya2JvdC5jb250cm9sLnYxLlJlYWRpbmVzcxIcCg9saXZlX2F1dGhvcml6ZWQYBiABKAhIAIgBARIYCgthY3RpdmVfYm90cxgHIAEoDUgBiAEBEhgKC2FjdGl2ZV9qb2JzGAggASgNSAKIAQESHAoPYWN0aXZlX2NhcHR1cmVzGAkgASgNSAOIAQESEAoId2FybmluZ3MYCiADKAkSNgoLcnBjX2xhdGVuY3kYCyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuTGF0ZW5jeVNhbXBsZRIzCgdmaW5hbmNlGAwgASgLMiIuZGFya2JvdC5jb250cm9sLnYxLkZpbmFuY2VTdW1tYXJ5EiAKGHNvdXJjZV90aW1lc3RhbXBfdW5peF9ucxgNIAEoAxIRCglzb3VyY2VfaWQYDiABKAlCEgoQX2xpdmVfYXV0aG9yaXplZEIOCgxfYWN0aXZlX2JvdHNCDgoMX2FjdGl2ZV9qb2JzQhIKEF9hY3RpdmVfY2FwdHVyZXMixQEKDUdsb2JhbEZpbmFuY2USEQoJYXZhaWxhYmxlGAEgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRJDChhuZXRfcG5sX3VzZF9taWNyb19zaWduZWQYAyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIkChd0b3RhbF9jYXBpdGFsX3VzZF9taWNybxgEIAEoBEgAiAEBQhoKGF90b3RhbF9jYXBpdGFsX3VzZF9taWNybyK2AQoST3ZlcnZpZXdBZ2dyZWdhdGVzEjQKCHByb2plY3RzGAEgAygLMiIuZGFya2JvdC5jb250cm9sLnYxLlByb2plY3RTdW1tYXJ5EjEKBmdsb2JhbBgCIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5HbG9iYWxGaW5hbmNlEhoKEnByb2plY3RzX2Nvbm5lY3RlZBgDIAEoDRIbChNjb21wdXRlZF9hdF91bml4X25zGAQgASgDKpoBCgtTb3VyY2VTdGF0ZRIcChhTT1VSQ0VfU1RBVEVfVU5TUEVDSUZJRUQQABIeChpTT1VSQ0VfU1RBVEVfTk9UX0NPTk5FQ1RFRBABEhoKFlNPVVJDRV9TVEFURV9DT05ORUNURUQQAhIWChJTT1VSQ0VfU1RBVEVfU1RBTEUQAxIZChVTT1VSQ0VfU1RBVEVfREVUQUNIRUQQBCppCglSZWFkaW5lc3MSGQoVUkVBRElORVNTX1VOU1BFQ0lGSUVEEAASFQoRUkVBRElORVNTX1VOS05PV04QARIVChFSRUFESU5FU1NfQkxPQ0tFRBACEhMKD1JFQURJTkVTU19SRUFEWRADKooBCg5GaW5hbmNlUXVhbGl0eRIfChtGSU5BTkNFX1FVQUxJVFlfVU5TUEVDSUZJRUQQABIbChdGSU5BTkNFX1FVQUxJVFlfVU5LTk9XThABEhsKF0ZJTkFOQ0VfUVVBTElUWV9QQVJUSUFMEAISHQoZRklOQU5DRV9RVUFMSVRZX0ZJTkFMSVpFRBADQpEBChZjb20uZGFya2JvdC5jb250cm9sLnYxQg1PdmVydmlld1Byb3RvUAGiAgNEQ1iqAhJEYXJrYm90LkNvbnRyb2wuVjHKAhJEYXJrYm90XENvbnRyb2xcVjHiAh5EYXJrYm90XENvbnRyb2xcVjFcR1BCTWV0YWRhdGHqAhREYXJrYm90OjpDb250cm9sOjpWMWIGcHJvdG8z", [file_darkbot_control_v1_numeric, file_darkbot_control_v1_topics]);
+  fileDesc("CiFkYXJrYm90L2NvbnRyb2wvdjEvb3ZlcnZpZXcucHJvdG8SEmRhcmtib3QuY29udHJvbC52MSJSCg1MYXRlbmN5U2FtcGxlEhMKBnA5NV9tcxgBIAEoDUgAiAEBEhAKCHdpbmRvd19zGAIgASgNEg8KB3NhbXBsZXMYAyABKA1CCQoHX3A5NV9tcyKJAgoORmluYW5jZVN1bW1hcnkSGwoTZmluYW5jZV9zbmFwc2hvdF9pZBgBIAEoCRIzCgdxdWFsaXR5GAIgASgOMiIuZGFya2JvdC5jb250cm9sLnYxLkZpbmFuY2VRdWFsaXR5EkwKIXJlYWxpemVkX25ldF9wbmxfdXNkX21pY3JvX3NpZ25lZBgDIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsEiQKF3RvdGFsX2NhcGl0YWxfdXNkX21pY3JvGAQgASgESACIAQESFQoNYXNfb2ZfdW5peF9ucxgFIAEoA0IaChhfdG90YWxfY2FwaXRhbF91c2RfbWljcm8i3AQKDlByb2plY3RTdW1tYXJ5Ei4KB3Byb2plY3QYASABKA4yHS5kYXJrYm90LmNvbnRyb2wudjEuUHJvamVjdElkEg0KBWxhYmVsGAIgASgJEg4KBmRvbWFpbhgDIAEoCRIvCgZzb3VyY2UYBCABKA4yHy5kYXJrYm90LmNvbnRyb2wudjEuU291cmNlU3RhdGUSMAoJcmVhZGluZXNzGAUgASgOMh0uZGFya2JvdC5jb250cm9sLnYxLlJlYWRpbmVzcxIcCg9saXZlX2F1dGhvcml6ZWQYBiABKAhIAIgBARIYCgthY3RpdmVfYm90cxgHIAEoDUgBiAEBEhgKC2FjdGl2ZV9qb2JzGAggASgNSAKIAQESHAoPYWN0aXZlX2NhcHR1cmVzGAkgASgNSAOIAQESEAoId2FybmluZ3MYCiADKAkSNgoLcnBjX2xhdGVuY3kYCyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuTGF0ZW5jeVNhbXBsZRIzCgdmaW5hbmNlGAwgASgLMiIuZGFya2JvdC5jb250cm9sLnYxLkZpbmFuY2VTdW1tYXJ5EiAKGHNvdXJjZV90aW1lc3RhbXBfdW5peF9ucxgNIAEoAxIRCglzb3VyY2VfaWQYDiABKAkSLAoEam9icxgPIAMoCzIeLmRhcmtib3QuY29udHJvbC52MS5Qcm9qZWN0Sm9iQhIKEF9saXZlX2F1dGhvcml6ZWRCDgoMX2FjdGl2ZV9ib3RzQg4KDF9hY3RpdmVfam9ic0ISChBfYWN0aXZlX2NhcHR1cmVzIowBCgpQcm9qZWN0Sm9iEgsKA2pvYhgBIAEoCRINCgVzdGF0ZRgCIAEoCRIRCglsYXVuY2hfaWQYAyABKAkSEwoLcmVzdWx0X2NvZGUYBCABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYBSABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUixQEKDUdsb2JhbEZpbmFuY2USEQoJYXZhaWxhYmxlGAEgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRJDChhuZXRfcG5sX3VzZF9taWNyb19zaWduZWQYAyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIkChd0b3RhbF9jYXBpdGFsX3VzZF9taWNybxgEIAEoBEgAiAEBQhoKGF90b3RhbF9jYXBpdGFsX3VzZF9taWNybyK2AQoST3ZlcnZpZXdBZ2dyZWdhdGVzEjQKCHByb2plY3RzGAEgAygLMiIuZGFya2JvdC5jb250cm9sLnYxLlByb2plY3RTdW1tYXJ5EjEKBmdsb2JhbBgCIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5HbG9iYWxGaW5hbmNlEhoKEnByb2plY3RzX2Nvbm5lY3RlZBgDIAEoDRIbChNjb21wdXRlZF9hdF91bml4X25zGAQgASgDKpoBCgtTb3VyY2VTdGF0ZRIcChhTT1VSQ0VfU1RBVEVfVU5TUEVDSUZJRUQQABIeChpTT1VSQ0VfU1RBVEVfTk9UX0NPTk5FQ1RFRBABEhoKFlNPVVJDRV9TVEFURV9DT05ORUNURUQQAhIWChJTT1VSQ0VfU1RBVEVfU1RBTEUQAxIZChVTT1VSQ0VfU1RBVEVfREVUQUNIRUQQBCppCglSZWFkaW5lc3MSGQoVUkVBRElORVNTX1VOU1BFQ0lGSUVEEAASFQoRUkVBRElORVNTX1VOS05PV04QARIVChFSRUFESU5FU1NfQkxPQ0tFRBACEhMKD1JFQURJTkVTU19SRUFEWRADKooBCg5GaW5hbmNlUXVhbGl0eRIfChtGSU5BTkNFX1FVQUxJVFlfVU5TUEVDSUZJRUQQABIbChdGSU5BTkNFX1FVQUxJVFlfVU5LTk9XThABEhsKF0ZJTkFOQ0VfUVVBTElUWV9QQVJUSUFMEAISHQoZRklOQU5DRV9RVUFMSVRZX0ZJTkFMSVpFRBADQpEBChZjb20uZGFya2JvdC5jb250cm9sLnYxQg1PdmVydmlld1Byb3RvUAGiAgNEQ1iqAhJEYXJrYm90LkNvbnRyb2wuVjHKAhJEYXJrYm90XENvbnRyb2xcVjHiAh5EYXJrYm90XENvbnRyb2xcVjFcR1BCTWV0YWRhdGHqAhREYXJrYm90OjpDb250cm9sOjpWMWIGcHJvdG8z", [file_darkbot_control_v1_numeric, file_darkbot_control_v1_topics]);
 
 /**
  * @generated from message darkbot.control.v1.LatencySample
@@ -164,6 +164,13 @@ export type ProjectSummary = Message<"darkbot.control.v1.ProjectSummary"> & {
    * @generated from field: string source_id = 14;
    */
   sourceId: string;
+
+  /**
+   * Supervised read-only jobs as the project source reports them (BSC: readiness job).
+   *
+   * @generated from field: repeated darkbot.control.v1.ProjectJob jobs = 15;
+   */
+  jobs: ProjectJob[];
 };
 
 /**
@@ -172,6 +179,49 @@ export type ProjectSummary = Message<"darkbot.control.v1.ProjectSummary"> & {
  */
 export const ProjectSummarySchema: GenMessage<ProjectSummary> = /*@__PURE__*/
   messageDesc(file_darkbot_control_v1_overview, 2);
+
+/**
+ * Copy of the project source's job lifecycle; the source stays the only authority.
+ *
+ * @generated from message darkbot.control.v1.ProjectJob
+ */
+export type ProjectJob = Message<"darkbot.control.v1.ProjectJob"> & {
+  /**
+   * @generated from field: string job = 1;
+   */
+  job: string;
+
+  /**
+   * Process lifecycle: RUNNING, STOPPING, STOPPED, FAILED or UNKNOWN.
+   *
+   * @generated from field: string state = 2;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string launch_id = 3;
+   */
+  launchId: string;
+
+  /**
+   * Native verdict or STOPPED/FAILED of this launch; empty while running.
+   *
+   * @generated from field: string result_code = 4;
+   */
+  resultCode: string;
+
+  /**
+   * @generated from field: optional bool controller_available = 5;
+   */
+  controllerAvailable?: boolean;
+};
+
+/**
+ * Describes the message darkbot.control.v1.ProjectJob.
+ * Use `create(ProjectJobSchema)` to create a new message.
+ */
+export const ProjectJobSchema: GenMessage<ProjectJob> = /*@__PURE__*/
+  messageDesc(file_darkbot_control_v1_overview, 3);
 
 /**
  * @generated from message darkbot.control.v1.GlobalFinance
@@ -205,7 +255,7 @@ export type GlobalFinance = Message<"darkbot.control.v1.GlobalFinance"> & {
  * Use `create(GlobalFinanceSchema)` to create a new message.
  */
 export const GlobalFinanceSchema: GenMessage<GlobalFinance> = /*@__PURE__*/
-  messageDesc(file_darkbot_control_v1_overview, 3);
+  messageDesc(file_darkbot_control_v1_overview, 4);
 
 /**
  * @generated from message darkbot.control.v1.OverviewAggregates
@@ -237,7 +287,7 @@ export type OverviewAggregates = Message<"darkbot.control.v1.OverviewAggregates"
  * Use `create(OverviewAggregatesSchema)` to create a new message.
  */
 export const OverviewAggregatesSchema: GenMessage<OverviewAggregates> = /*@__PURE__*/
-  messageDesc(file_darkbot_control_v1_overview, 4);
+  messageDesc(file_darkbot_control_v1_overview, 5);
 
 /**
  * @generated from enum darkbot.control.v1.SourceState

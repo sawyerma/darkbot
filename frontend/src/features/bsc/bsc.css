@@ -1,6 +1,8 @@
 .bsc-state[data-tone="green"] { background: var(--g-status-running); color: var(--g-text-strong); }
 .bsc-state[data-tone="red"] { background: var(--g-status-failed); color: var(--g-text-strong); }
 .bsc-state[data-tone="amber"] { background: var(--g-status-armed); color: var(--g-text-strong); }
+/* Unknown/unclassified: deliberately not a status colour, but visibly not a pass. */
+.bsc-state[data-tone="neutral"] { border-style: dashed; color: var(--g-muted); }
 
 .bsc-filter { display: flex; align-items: center; flex-wrap: wrap; gap: var(--g-gap-sm); margin: var(--g-gap-md) 0; }
 .bsc-filter label { color: var(--g-text-label); font-size: var(--g-fs-small); }

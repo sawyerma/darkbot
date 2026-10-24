@@ -7,7 +7,7 @@ function project(id: ProjectId, label: string, over: Partial<ProjectReadSummary>
   return {
     project: id, label, domain: "", source: "CONNECTED", readiness: "UNKNOWN", liveAuthorized: null,
     activeBots: null, activeJobs: null, activeCaptures: null, warnings: [], rpcLatency: null,
-    finance: null, sourceTimestampUnixNs: null, sourceId: "source", ...over,
+    finance: null, sourceTimestampUnixNs: null, sourceId: "source", jobs: [], ...over,
   };
 }
 

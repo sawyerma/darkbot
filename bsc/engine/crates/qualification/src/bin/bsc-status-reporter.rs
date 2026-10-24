@@ -16,10 +16,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--validate-readiness") {
         let p = std::env::args().nth(2).ok_or("missing path")?;
         let bytes = std::fs::read(p)?;
+        use darkbot_bsc_record::schema::g07::readiness;
         let decoded = darkbot_bsc_record::schema::decode_any(&bytes)?;
-        if decoded.schema() != &darkbot_bsc_record::schema::g07::readiness::SCHEMA {
+        if decoded.schema() != &readiness::SCHEMA {
             return Err("not a readiness record".into());
         }
+        // The typed native verdict and mode, for the job wrapper's result.
+        let status = decoded.text(readiness::STATUS)?;
+        let mode = decoded.text(readiness::MODE)?;
+        if !["PASS_READ_ONLY", "BLOCKED", "STOP"].contains(&status)
+            || !["READ_ONLY_RPC", "OFFLINE_ZERO_EGRESS"].contains(&mode)
+        {
+            return Err("unknown readiness status or mode".into());
+        }
+        println!("status={status}\nmode={mode}");
         return Ok(());
     }
     if std::env::args().nth(1).as_deref() == Some("--snapshot") {
@@ -34,7 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let label = std::env::var("DARKBOT_BSC_READINESS_LABEL")
         .unwrap_or_else(|_| "com.darkbot.bsc.readiness".into());
-    publisher::serve(&root, &run, &socket, &label)?;
+    let readiness_bin = std::env::var_os("DARKBOT_BSC_READINESS_BIN").map(PathBuf::from);
+    publisher::serve(&root, &run, &socket, &label, readiness_bin.as_deref())?;
     Ok(())
 }
 

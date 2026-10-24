@@ -36,6 +36,16 @@ export interface ProjectReadSummary {
   finance: FinanceView | null;
   sourceTimestampUnixNs: bigint | null;
   sourceId: string;
+  /** Supervised jobs as the project source pushes them; empty without a connected source. */
+  jobs: ProjectJobView[];
+}
+
+export interface ProjectJobView {
+  job: string;
+  state: string;
+  launchId: string;
+  resultCode: string;
+  controllerAvailable?: boolean;
 }
 
 export interface GlobalFinanceView {
