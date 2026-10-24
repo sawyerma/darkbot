@@ -1,6 +1,7 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
 pub mod admission;
+pub mod archive;
 pub mod exit;
 #[cfg(feature = "crate_health")]
 pub mod exit_admission;
@@ -164,6 +165,25 @@ pub struct SafetyReplay {
     pub exits: Vec<darkbot_project0::safety::SettledAttempt>,
 }
 
+/// B3: what the safety layer replays of one attempt (active or archived).
+fn safety_replay_of(s: &Saved) -> SafetyReplay {
+    SafetyReplay {
+        held_capital_usd_micro: (!s.phase.finalized()).then_some(s.intent.capital_usd_micro),
+        settled: match &s.phase {
+            Phase::Settled(done) => Some(darkbot_project0::safety::SettledAttempt {
+                unix_s: done
+                    .booked_unix_s
+                    .unwrap_or(s.intent.evaluated_unix_ms / 1_000),
+                realized_net_usd_micro: done.realized_net_usd_micro,
+                landed_success: done.landed_success,
+                open_inventory_usd_micro: done.unrealized_inventory_usd_micro,
+            }),
+            _ => None,
+        },
+        exits: exit::exit_bookings(s),
+    }
+}
+
 /// A durable FE-04 hold that is not finalized (P8-RES-02).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveHold {
@@ -307,6 +327,8 @@ pub struct Receipt {
 /// is released, so a next owner never opens the journal while this one still holds its file.
 pub struct Journal {
     wallet: String,
+    /// FE-04 archive: the journal directory (its `attempts/` holds the finished attempts).
+    directory: std::path::PathBuf,
     saved: Option<Saved>,
     writer: journal::Writer,
     /// Last field: released after the journal file is closed.
@@ -622,6 +644,10 @@ fn replay(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), 
                 Ok(())
             }
         };
+        // FE-04 archive: an archived journal is sealed; its manifest closes it.
+        if frame.kind == journal::MANIFEST {
+            continue;
+        }
         let next = match frame.kind {
             journal::kind::FE04_LEGACY_IMPORT if frame.journal_seq == 0 => {
                 in_order(typed_seen)?;
@@ -722,6 +748,7 @@ impl Journal {
         };
         let mut this = Self {
             wallet: wallet.into(),
+            directory: directory.to_path_buf(),
             saved,
             writer,
             _lock: lock,
@@ -779,6 +806,8 @@ impl Journal {
         if approval.wallet != self.wallet {
             return Err(err("JOURNAL_WALLET_MISMATCH"));
         }
+        // FE-04 archive: an approval authorizes one attempt, never a second after archiving.
+        archive::single_use(&self.directory, &self.wallet, &approval.approval_id)?;
         validate(&approval, &intent, now)?;
         self.persist(
             Saved {
@@ -860,21 +889,7 @@ impl Journal {
     /// schema 4: the evaluation day), realized net, outcome and open inventory — is the same the
     /// running owner booked.
     pub fn safety_replay(&self) -> Option<SafetyReplay> {
-        self.saved.as_ref().map(|s| SafetyReplay {
-            held_capital_usd_micro: (!s.phase.finalized()).then_some(s.intent.capital_usd_micro),
-            settled: match &s.phase {
-                Phase::Settled(done) => Some(darkbot_project0::safety::SettledAttempt {
-                    unix_s: done
-                        .booked_unix_s
-                        .unwrap_or(s.intent.evaluated_unix_ms / 1_000),
-                    realized_net_usd_micro: done.realized_net_usd_micro,
-                    landed_success: done.landed_success,
-                    open_inventory_usd_micro: done.unrealized_inventory_usd_micro,
-                }),
-                _ => None,
-            },
-            exits: exit::exit_bookings(s),
-        })
+        self.saved.as_ref().map(safety_replay_of)
     }
     pub fn holds(&self) -> BTreeMap<String, u64> {
         self.active_hold().map(|h| h.holds).unwrap_or_default()
@@ -2332,9 +2347,10 @@ mod tests {
         }
         fs::write(&file, &good).unwrap();
         journal::Writer::resume(&file).unwrap().seal(true).unwrap();
+        // A sealed journal is an archived attempt, never the active one (e.g. copied back).
         assert_eq!(
             Journal::open(&dir, &a.wallet).err().as_deref(),
-            Some("JOURNAL_CORRUPT:KIND")
+            Some("JOURNAL_CORRUPT:JOURNAL_ALREADY_SEALED")
         );
         // Undamaged bytes still reopen into UNKNOWN with the hold.
         fs::write(&file, &good).unwrap();

@@ -2049,6 +2049,46 @@ fn fe04_exit_restart_replays_the_attempt_and_its_exit() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// FE-04 archive (B3): an archived attempt keeps its day booked after a restart — the owner start
+/// replays the archive also without an active journal (before, a finished attempt moved out of
+/// the active position would have been forgotten by the day's loss limit); a foreign archive
+/// file halts the start.
+#[test]
+fn fe04_archived_attempt_stays_booked_after_restart() {
+    let dir = std::env::temp_dir().join(format!("p0_archive_restart_{}", Pubkey::new_unique()));
+    let wallet = Pubkey::new_unique();
+    let now = wall_unix_s().unwrap();
+    crate::execution::one_shot::exit::tests::archived_fee_only_attempt(
+        &dir,
+        &wallet.to_string(),
+        now,
+    );
+    assert!(!dir.join(format!("{wallet}.p0j")).exists());
+    let dir_s = dir.display().to_string();
+    let get = |k: &str| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone());
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    let start = setup::reservation_book(&get, &wallet)
+        .unwrap()
+        .start(&mut safety, now)
+        .unwrap();
+    assert!(start.book.is_empty() && start.held.is_none());
+    assert_eq!(
+        safety.day().realized_pnl,
+        -500,
+        "the archived attempt is booked"
+    );
+    drop(start);
+    std::fs::write(
+        dir.join(format!("attempts/{wallet}/forged.p0j")),
+        b"not a journal",
+    )
+    .unwrap();
+    assert!(setup::reservation_book(&get, &wallet)
+        .err()
+        .is_some_and(|e| e.starts_with("RESERVATION_JOURNAL_UNREADABLE")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// FE-04 exit: the canonical state that prices SOL — the chain clock and the SOL bank with a
 /// fixed oracle price of 150 USD (9 decimals).
 fn install_sol_price(f: &mut Fixture) {

@@ -1,5 +1,6 @@
 //! Plan execution, transaction assembly and durable submission safety.
 
+pub mod accounting;
 pub mod builder;
 pub mod inventory;
 pub mod lookup_tables;

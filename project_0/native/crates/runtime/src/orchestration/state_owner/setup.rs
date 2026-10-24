@@ -1091,6 +1091,8 @@ pub(super) struct Fe04Start {
     pub(super) replay: Option<crate::execution::one_shot::SafetyReplay>,
     /// FE-04/C3: the journal of an existing attempt, held for the run (no attempt: none).
     pub(super) journal: Option<crate::execution::one_shot::Journal>,
+    /// FE-04 archive: the bookings of every archived attempt (B3: their day stays booked).
+    pub(super) archived: Vec<crate::execution::one_shot::SafetyReplay>,
 }
 
 /// What the owner holds of its FE-04 journal after the startup replay.
@@ -1114,6 +1116,14 @@ impl Fe04Start {
             .map(|r| super::fe04::Fe04Unbooked {
                 reserved_capital: r.held_capital_usd_micro,
             });
+        // FE-04 archive: archived attempts are settled — their bookings, never a hold.
+        for archived in self.archived {
+            for booking in archived.settled.into_iter().chain(archived.exits) {
+                safety
+                    .restore_attempt(now_unix_s, None, Some(booking))
+                    .map_err(|v| format!("SAFETY_REPLAY_INVALID: {}", v.code()))?;
+            }
+        }
         if let Some(replay) = self.replay {
             safety
                 .restore_attempt(now_unix_s, replay.held_capital_usd_micro, replay.settled)
@@ -1150,16 +1160,24 @@ pub(super) fn reservation_book(
             dir: None,
             replay: None,
             journal: None,
+            archived: Vec::new(),
         });
     };
     let dir = std::path::PathBuf::from(dir);
     let wallet = liquidator.to_string();
+    // FE-04 archive: every finished attempt is replayed; an unreadable archive halts the start.
+    let archived = crate::execution::one_shot::archive::archived(&dir, &wallet)
+        .map_err(|e| format!("RESERVATION_JOURNAL_UNREADABLE: {e}"))?
+        .iter()
+        .map(|a| a.safety_replay())
+        .collect();
     if !dir.join(format!("{wallet}.p0j")).exists() && !dir.join(format!("{wallet}.json")).exists() {
         return Ok(Fe04Start {
             book: Default::default(),
             dir: Some(dir),
             replay: None,
             journal: None,
+            archived,
         });
     }
     // One open for the run: the book, the safety replay and the settlement of its attempt.
@@ -1172,6 +1190,7 @@ pub(super) fn reservation_book(
         dir: Some(dir),
         replay: journal.safety_replay(),
         journal: Some(journal),
+        archived,
     })
 }
 

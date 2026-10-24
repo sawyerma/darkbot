@@ -19,7 +19,18 @@
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE
+//! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
+//! p0ctl [--project DIR] fe04 archive --journal-dir DIR --wallet PUBKEY
 //! ```
+//!
+//! `fe04 accounting` (FE-04/FE-07) prints the finalized accounting of every own attempt of the
+//! wallet from its FE-04 journals (archived and active, read-only): each attempt and exit, the
+//! cumulative realized net, fees, open inventory mark and the verdict
+//! (`FIRST_REALIZED_PROFIT_EVIDENCED` only with everything settled, no position left and a
+//! positive sum). It exits 0 only for a verdict other than UNKNOWN. `fe04 archive` seals a
+//! finished attempt (settled, no exit open, no position) and moves it to the archive so that a
+//! new, separately approved attempt can start; it takes the wallet lock, so it refuses while a
+//! runtime holds the journal. Both are offline: no network, no signer, no LIVE.
 //!
 //! `approval show` (FE-04) reads one versioned one-shot approval profile — an attempt
 //! (`Approval`) or an exit (`ExitApproval`), strict JSON authored by the operator — checks it
@@ -652,6 +663,40 @@ fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, Strin
 /// An approval profile is a small operator file; anything larger is not one.
 const APPROVAL_MAX_BYTES: u64 = 64 * 1024;
 
+/// FE-04 `fe04 accounting|archive`: see the module documentation.
+fn fe04_cmd(args: &[String]) -> Result<bool, String> {
+    const USAGE: &str = "usage: p0ctl fe04 accounting|archive --journal-dir DIR --wallet PUBKEY";
+    let dir = value(args, "--journal-dir").ok_or(USAGE)?;
+    let wallet = value(args, "--wallet").ok_or(USAGE)?;
+    let dir = Path::new(&dir);
+    match args.first().map(String::as_str) {
+        Some("accounting") => {
+            let ledger = darkbot_runner::execution::accounting::Ledger::load(dir, &wallet)?;
+            for line in ledger.report() {
+                println!("{line}");
+            }
+            println!(
+                "note=offline accounting of the FE-04 journals; real Mainnet attempts NOT_RUN"
+            );
+            Ok(!matches!(
+                ledger.verdict(),
+                darkbot_runner::execution::accounting::Verdict::Unknown(_)
+            ))
+        }
+        Some("archive") => {
+            // Opening creates a journal; without an attempt there is nothing to archive.
+            if !dir.join(format!("{wallet}.p0j")).exists() {
+                return Err("ARCHIVE_NO_ATTEMPT".into());
+            }
+            let journal = darkbot_runner::execution::one_shot::Journal::open(dir, &wallet)?;
+            let path = journal.archive()?;
+            println!("archived={}", path.display());
+            Ok(true)
+        }
+        _ => Err(USAGE.into()),
+    }
+}
+
 /// FE-04 `approval show FILE`: see the module documentation.
 fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::execution::one_shot::{exit::ExitApproval, Approval};
@@ -792,7 +837,8 @@ fn main() -> ExitCode {
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture|source|approval …".into()),
+            (Some("fe04"), _) => fe04_cmd(&rest),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run start|run status|run stop|verify|report|export|qualify|post-capture|source|approval|fe04 …".into()),
         }
     });
     match result {

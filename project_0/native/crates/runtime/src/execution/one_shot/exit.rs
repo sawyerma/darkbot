@@ -130,7 +130,7 @@ pub struct Position {
 }
 
 /// The exit not yet settled (at most one: single-flight).
-fn active(s: &Saved) -> Option<&ExitAttempt> {
+pub(super) fn active(s: &Saved) -> Option<&ExitAttempt> {
     s.exits
         .last()
         .filter(|e| !matches!(e.phase, ExitPhase::Settled(_)))
@@ -857,6 +857,37 @@ pub(crate) mod tests {
         settled_in(dir, wallet, booked).2
     }
 
+    /// Test seam: `wallet`'s journal in `dir` with a settled attempt that left nothing (only its
+    /// fee: −500 realized, booked at `booked`), archived; returns the archived path.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn archived_fee_only_attempt(
+        dir: &std::path::Path,
+        wallet: &str,
+        booked: u64,
+    ) -> std::path::PathBuf {
+        let (_, mut a, mut i, c) = setup();
+        a.wallet = wallet.into();
+        i.wallet = wallet.into();
+        let mut j = Journal::open(dir, wallet).unwrap();
+        j.reserve(a, i.clone(), &c).unwrap();
+        j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        let mut s = j.saved.clone().unwrap();
+        let sig = &i.signatures[0];
+        let assets: Vec<(String, i128)> = i
+            .expected_wallet_assets
+            .iter()
+            .filter(|k| k.as_str() != "SOL")
+            .map(|k| (k.clone(), 0))
+            .collect();
+        let refs: Vec<(&str, i128)> = assets.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+        s.observations
+            .insert(sig.clone(), observation(sig, true, -5_000, &refs));
+        j.persist(s, Transition::Observe).unwrap();
+        j.reconcile_observed().unwrap();
+        j.settle(&value, booked).unwrap();
+        j.archive().unwrap()
+    }
+
     /// Test seam: an exit approval of that attempt (`exit_for`'s limits: floor 9 000 lamports,
     /// fee 10 000, slippage 100 bps; no expiry within the tests) for `mint` via `route_program`.
     #[cfg(feature = "crate_health")]
@@ -914,6 +945,152 @@ pub(crate) mod tests {
             observations: vec![(sig.to_string(), Ok(o))],
             proof: None,
         }
+    }
+
+    /// FE-04 archive + FE-07 accounting over attempts. One journal holds one attempt; a finished
+    /// attempt (settled, exit settled, no position) is sealed into `attempts/`, a fresh journal
+    /// takes the next separately approved attempt and the same approval is refused; the
+    /// accounting reads the archive and the active journal: a profitable sale is
+    /// FIRST_REALIZED_PROFIT_EVIDENCED, a new unsettled attempt makes the verdict UNKNOWN again.
+    /// Unfinished attempts are never archived; a foreign archive file fails closed.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn fe04_archive_keeps_the_attempt_history_and_approvals_single_use() {
+        use crate::execution::accounting::{Ledger, Verdict};
+        let dir = std::env::temp_dir().join(format!(
+            "p0-fe04-archive-{}",
+            solana_sdk::pubkey::Pubkey::new_unique()
+        ));
+        let wallet = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        assert_eq!(
+            Ledger::load(&dir, &wallet).unwrap().verdict(),
+            Verdict::NoTrade
+        );
+        // Attempt 1: −500 realized (fee), its 1000 units sold for 20 000 lamports (+2 000).
+        let (mut j, ei, mint) = open_exit(&dir, &wallet, 1_000);
+        let sig = &ei.signatures[0];
+        let sold = evidence(sig, observation(sig, true, 20_000, &[(&mint, -1_000)]));
+        assert!(matches!(
+            j.apply_exit_evidence(sold, &value, 1_100).unwrap(),
+            ExitStep::Settled(_)
+        ));
+        drop(j);
+        let ledger = Ledger::load(&dir, &wallet).unwrap();
+        let t = ledger.totals();
+        assert_eq!(
+            (
+                t.attempts,
+                t.landed_attempts,
+                t.settled_exits,
+                t.realized_net_usd_micro
+            ),
+            (1, 1, 1, Some(1_500))
+        );
+        assert_eq!(ledger.verdict(), Verdict::FirstRealizedProfitEvidenced);
+        // Archive it: sealed, moved, the history unchanged.
+        let archived = Journal::open(&dir, &wallet).unwrap().archive().unwrap();
+        assert!(archived.ends_with(format!("attempts/{wallet}/UNIT_TEST_ONLY.p0j")));
+        assert!(!dir.join(format!("{wallet}.p0j")).exists());
+        let ledger = Ledger::load(&dir, &wallet).unwrap();
+        assert_eq!(ledger.totals().archived, 1);
+        assert_eq!(ledger.verdict(), Verdict::FirstRealizedProfitEvidenced);
+        // A fresh journal: the archived approval is spent, a new one starts attempt 2.
+        let (_, mut a, mut i, c) = setup();
+        a.wallet.clone_from(&wallet);
+        i.wallet.clone_from(&wallet);
+        let mut j = Journal::open(&dir, &wallet).unwrap();
+        assert_eq!(
+            j.reserve(a.clone(), i.clone(), &c).unwrap_err(),
+            "APPROVAL_ALREADY_CONSUMED"
+        );
+        a.approval_id = "approval 2".into();
+        assert_eq!(
+            j.reserve(a.clone(), i.clone(), &c).unwrap_err(),
+            "APPROVAL_ID_INVALID"
+        );
+        a.approval_id = "approval-2".into();
+        j.reserve(a, i, &c).unwrap();
+        assert_eq!(
+            Ledger::load(&dir, &wallet).unwrap().verdict(),
+            Verdict::Unknown(vec!["ATTEMPT_RESERVED:approval-2".into()])
+        );
+        assert_eq!(j.archive().unwrap_err(), "ARCHIVE_NOT_SETTLED");
+        // A foreign or unsealed file in the archive is never read as history.
+        std::fs::write(dir.join(format!("attempts/{wallet}/forged.p0j")), b"P0J").unwrap();
+        assert!(Ledger::load(&dir, &wallet).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+        // An open position or an open exit is not finished.
+        for (open_position, code) in [
+            (true, "ARCHIVE_POSITION_OPEN"),
+            (false, "ARCHIVE_EXIT_OPEN"),
+        ] {
+            let dir = std::env::temp_dir().join(format!(
+                "p0-fe04-unfinished-{}",
+                solana_sdk::pubkey::Pubkey::new_unique()
+            ));
+            let j = if open_position {
+                settled_in(&dir, &wallet, 1_000).0
+            } else {
+                open_exit(&dir, &wallet, 1_000).0
+            };
+            let verdict = Ledger::load(&dir, &wallet).unwrap().verdict();
+            assert!(
+                matches!(&verdict, Verdict::Unknown(r) if !r.is_empty()),
+                "{verdict:?}"
+            );
+            assert_eq!(j.archive().unwrap_err(), code);
+            // Copied by hand into the archive, an unsealed journal is no archived attempt.
+            let archive = dir.join(format!("attempts/{wallet}"));
+            std::fs::create_dir_all(&archive).unwrap();
+            std::fs::copy(
+                dir.join(format!("{wallet}.p0j")),
+                archive.join("UNIT_TEST_ONLY.p0j"),
+            )
+            .unwrap();
+            assert_eq!(
+                Ledger::load(&dir, &wallet).unwrap_err(),
+                "ARCHIVE_NOT_SEALED"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// FE-07 verdicts from settled attempts: a sale below the attempt's cost is a LOSS; an
+    /// attempt proven not landed paid nothing and is NO_TRADE.
+    #[cfg(feature = "crate_health")]
+    #[test]
+    fn fe07_verdict_is_loss_or_no_trade_from_settled_attempts() {
+        use crate::execution::accounting::{Ledger, Verdict};
+        let dir = std::env::temp_dir().join(format!(
+            "p0-fe07-loss-{}",
+            solana_sdk::pubkey::Pubkey::new_unique()
+        ));
+        let wallet = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        exited(&dir, &wallet, 1_000);
+        let ledger = Ledger::load(&dir, &wallet).unwrap();
+        assert_eq!(ledger.totals().realized_net_usd_micro, Some(0));
+        assert_eq!(ledger.verdict(), Verdict::Loss);
+        assert!(ledger.report().last().unwrap().starts_with("verdict=LOSS"));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Not landed: the non-landing proof settles the attempt with nothing paid.
+        let (path, a, i, c) = setup();
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        j.reserve(a.clone(), i.clone(), &c).unwrap();
+        j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        let proven = SettlementEvidence {
+            observations: vec![],
+            proof: Some(Ok(NonLandingProof {
+                finalized_block_height: i.last_valid_block_height.unwrap() + 1,
+                history_from_slot: i.state_slot,
+                absent_signatures: i.signatures.iter().cloned().collect(),
+            })),
+        };
+        j.apply_settlement_evidence(proven, &value, 1_000).unwrap();
+        drop(j);
+        let ledger = Ledger::load(&path, &a.wallet).unwrap();
+        assert_eq!(ledger.totals().landed_attempts, 0);
+        assert_eq!(ledger.verdict(), Verdict::NoTrade);
+        let _ = std::fs::remove_dir_all(&path);
     }
 
     /// FE-04 exit: the whole open position is sold once — durably reserved and held before its
