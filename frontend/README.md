@@ -33,11 +33,59 @@ Project_0 Rust / BSC Rust  (jeweils alleiniger fachlicher Owner)
 
 **Wire-Regeln:** vollständige STATE-Snapshots nach (generation, seq), Source-Qualität/Detach/Stale; journalgebundene EVENT-Cursor nach (journal_epoch, durable_cursor) mit Replay/Dedupe. Ein reserviertes Topic oder Protobuf-Feld bedeutet **nicht**, dass ein Producer/Adapter schon existiert. Keine zyklischen Browser-GETs als Ersatz für den gemeinsamen Push-Vertrag; vorhandene Polling-Reste sind ein dokumentierbarer IST-Fehler, keine neue Architektur. History/Reports dürfen gezielt on demand geladen werden.
 
+## 2a. Festgelegte Speicherformate und Protobuf-Grenze
+
+**Ein Dashboard, zwei unabhängige Rust-Backends, ein gemeinsamer Protobuf-/Gateway-/WebSocket-Transport.** Die selbst entwickelten internen Dateiformate bleiben intern; **Protobuf ist der Transport öffentlicher Projektionen und keine neue Journal- oder Speicherdatei.**
+
+| Format | Internes Projekt / Verwendung | Eigenentwicklung | Tatsächlich verwendete Standardverfahren |
+| --- | --- | --- | --- |
+| **DBREC001** (DBREC) | BSC: typisierte, versionierte Qualifikations-/Freigabe-/Evidenz-Records | **Ja** | Typisierte Feld-Tags; **SHA-256 im Record-Trailer** und SHA-256 der gesamten Datei zur Bindung; [Quelle](../bsc/engine/crates/record/src/lib.rs) |
+| **DBJNL001** (DBJNL) | BSC: binäres append-only Capture-/Transaktionsjournal | **Ja** | **IEEE-CRC32 je Frame**, **SHA-256 über exakte Journalbytes** und Manifestprüfung; [Quelle](../bsc/engine/crates/journal/src/format.rs) |
+| **P0J** (Magic: `P0JRNL01`) | Project_0: binäres append-only Runtime-/Evidence-/Analytics-Journal | **Ja** | **IEEE-CRC32 je Frame**, verkettete **SHA-256-Hashes**, **Bincode** für typisierte Payloads ab Schema 2; historische Schema-1-Value-Trees bleiben lesbar; [Journal](../project_0/native/crates/runtime/src/analytics/journal.rs) / [Payload](../project_0/native/crates/runtime/src/analytics/payload.rs) |
+| **Protocol Buffers (Protobuf)** | **Beide**: öffentliche Projektzustände, Commands und Wire-Protokoll | **Standardverfahren, mit eigenen DarkBot-Schemas** | Rust `prost`, TypeScript `protobuf-es`, `darkbot.control.v1` + getrennte Fachpakete `darkbot.project0.v1`/`darkbot.bsc.v1`; [protocol/](../protocol/README.md) |
+
+```text
+BSC Native Rust                                 Project_0 Native Rust
+   |                                                   |
+   +-- intern: DBREC001 / DBJNL001                     +-- intern: P0J
+   |                                                   |
+   +-- validierte öffentliche Rust-Projektion          +-- validierte öffentliche Rust-Projektion
+                      \                               /
+                       +--- Project-gebundenes Protobuf
+                                      |
+                            Reporter / Engine-Feed
+                                      |
+                             EIN gemeinsames Gateway
+                                      |
+                             Protobuf / EIN WebSocket
+                                      |
+                        getrennte Projektadapter und Stores
+                                      |
+                          EINE React-SPA / EIN Dashboard
+                            BSC-Tabs | Project_0-Tabs
+```
+
+**Feste Grenze:** DBREC, DBJNL und P0J sind keine Browser-/Gateway-Transportformate. Niemals gesamte Journale, rohe DBREC-/P0J-Records, Secrets, Salt, signierte Transaktionen oder private Freigabeverträge als UI-Payloads exportieren. Der native Owner erstellt nur explizit freigegebene, typisierte öffentliche Projektionen. Protobuf transportiert sie über das vorhandene gemeinsame Gateway. Native Ausführung, Wallet-Risiken, Signaturen und wirtschaftliche Gates verbleiben vollständig im jeweiligen Backend. **Keine Formatmigration, keine zweite Feldautorität und kein zweiter Gateway.**
+
+## 2b. Dauerhafte gemeinsame Konsistenzentscheidungen (2026-10-24)
+
+**Diese Entscheidungen präzisieren die bestehenden F3-/F6-/F7- und Wire-V1.3-Verträge; sie schaffen keine neue Architektur oder Phase.** Wo ein Detail technisch noch nicht entschieden oder implementiert ist, bleibt es **OFFEN**, nicht automatisch PASS.
+
+1. **FRAME_TOO_LARGE – beide Hops:** Der BSC-Reporter→Gateway-Hop und der Gateway→Browser-Hop müssen dieselbe Topic-spezifische STATE-Fehlersemantik erfüllen: übergroße Payload nicht abschneiden, nicht als OK anzeigen, kein unnötiger Verlust aller anderen Topics. **Die konkrete Engine-Frame-Obergrenze einschließlich Protobuf-Envelope-Overhead ist noch OFFEN**; im bestehenden Wire-Vertrag präzisieren, keine BSC-Sonderarchitektur.
+2. **Topic-Recovery:** `FRAME_TOO_LARGE` sperrt nur das betroffene Topic. Ein erneutes Abonnieren nach neuem gültigem State muss definiert möglich sein; kein falscher LIVE-Status, keine unbeschränkten Resubscribe- oder Reconnect-Schleifen. **Recovery-Implementierung und Test sind noch OFFEN.**
+3. **Idempotenz/Receipts:** **Ein gemeinsamer** Gateway-Ledger (`gateway/src/control.rs`), heute `MAX_RECORDS=1024`; ab dieser Grenze werden neue Commands blockiert. **Eine begrenzte, crashsichere Retention-/Archivierungsregel fehlt** und muss ohne Verlust offener Commands, Idempotenzbindung und gültiger Receipts festgelegt und getestet werden. `request_id` + identische vollständige Request-Bytes (inklusive `issued_at_unix_ns`) bleibt derselbe Intent; gleiche ID + andere Bytes bleibt Konflikt. **Keine willkürliche Löschfrist, kein zweiter Ledger.**
+4. **Stop All:** Ein gemeinsamer UI-Command-Verbund für **separat freigegebene** native Project_0-/BSC-Jobs; echte Ergebnisse pro Projekt `SUCCESS`/`FAILED`/`UNKNOWN`, niemals Teil-PASS als Gesamt-PASS. Gateway bleibt verfügbar. Negativtest für Teilausfall **NOT_RUN**; ausschließlich isolierte Testinstanzen, keine produktive P0-Capture unterbrechen.
+5. **Gateway-RTT:** Solange nicht tatsächlich gemessen, `—`. Später ausschließlich vorhandenen Gateway↔Browser-Heartbeat/Pong für Messung verwenden; **kein zweiter Browser-Heartbeat, keine P0-Reporter-/Engine-Heartbeat-Änderung allein hierfür**.
+6. **Gemeinsame Owner und Phasen:** BSC-Reporter: BSC-Owner; P0-Reporter und P0-Capture-Polling→Push: P0-Owner; Gateway/STATE/WS/Idempotenz: einmalige gemeinsame Infrastruktur. `F4 EVENT`, native Engine-Receipts und weitere fachliche P0-/BSC-Features bleiben in ihren bisherigen Phasen **OFFEN**. Kein BSC-spezifischer Ersatz für fehlende P0-Integration.
+7. **Abnahmen:** `npm run budget` ist ohne tatsächlich erfolgreichen Lauf **nicht PASS** (`iltorb`-Fehler offen). Visual-Pixeldiff ohne Baselines und Stop-All-Teilausfall ohne Negativtest **NOT_RUN**. Nur berührte Pfade gezielt prüfen; keine neue Gesamtarchitekturprüfung oder unnötige Volltestserie.
+
+**Dokumentenautorität unverändert:** [Frontend-Master](docs/FRONTEND_PHASENPLAN.md), [Wire V1.3](docs/GATEWAY_WIRE_PROTOCOL_V1_3.md), [Governance](docs/GOVERNANCE_UND_SICHERHEIT.md), die beiden nativen Phasenpläne und die bestehende F0-VAR-Struktur. Keine neuen Topic-IDs, Proto-Feldautoritäten, Reiter oder wirtschaftlichen LIVE-Gates.
+
 ## 3. F0-VAR als fortlaufende Backend-Übergabevorbereitung
 
 **Jedes Backend-Codepaket** erfasst relevante neue/geänderte/entfernte Rust-Felder, Konfigurationen, Status, Records, Events und CLI-Parameter für die spätere GUI. **Native Originalnamen und Originaltypen bleiben unverändert.** Projektzuordnung über den Projektpfad und die F0-VAR-Metadaten, nicht durch Umbenennen einzelner Rust-Felder.
 
-**Project_0**: Ausschließlich die vorhandenen [F0_VAR_00_SCOPE.md](../project_0/docs/F0_VAR_00_SCOPE.md), [F0_VAR_01_MATRIX.md](../project_0/docs/F0_VAR_01_MATRIX.md), `project_0/docs/F0_VAR_MANIFEST.json`, die vier existierenden `F0_VAR_*.tsv` und den Generator [f0_var_inventory.py](../project_0/operations/f0_var_inventory.py) verwenden. Das Manifest soll das eindeutige Metadatum `"project": "project_0"` tragen. Der Generator ist aktuell **nur lexikalischer Source-Census**; komplexe Rust-Felder/Makros und semantische Zuordnungen benötigen gezieltes Review. Er beweist weder Wire-Anbindung noch Laufzeitdatenqualität.
+**Project_0**: Ausschließlich die vorhandenen [F0_VAR_00_SCOPE.md](../project_0/docs/F0_VAR_00_SCOPE.md), [F0_VAR_01_MATRIX.md](../project_0/docs/F0_VAR_01_MATRIX.md), `project_0/docs/F0_VAR_MANIFEST.json`, die vier existierenden `F0_VAR_*.tsv` und den Generator [f0_var_inventory.py](../project_0/operations/f0_var_inventory.py) verwenden. Das vorhandene Manifest trägt bereits das eindeutige Metadatum `"project": "project_0"`. Der Generator ist aktuell **nur lexikalischer Source-Census**; komplexe Rust-Felder/Makros und semantische Zuordnungen benötigen gezieltes Review. Er beweist weder Wire-Anbindung noch Laufzeitdatenqualität.
 
 **BSC**: Bestehende [BSC_FRONTEND_BINDINGS_V1.md](docs/BSC_FRONTEND_BINDINGS_V1.md), [SOURCE_VARIABLE_MATRIX.md](docs/SOURCE_VARIABLE_MATRIX.md), `frontend/contracts/bsc-fields.json`, `bsc-native-fields.json` und die native Projektion `bsc/engine/crates/qualification/src/status/projection.rs` verwenden. Deren projektspezifische A/B/C/D-Feldklassen bleiben erhalten. Nicht versuchen, Project_0-Rust-Felder in BSC-DBREC oder umgekehrt zu kopieren.
 

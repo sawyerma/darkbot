@@ -5,6 +5,18 @@ Autorität: `frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md` (Transport) und
 einzige Quelle für Rust (`prost`) und TypeScript (`protobuf-es`). Handgeschriebene
 Codecs sind verboten.
 
+## Native Dateiformate sind **nicht** das Protobuf-Wire-Format
+
+**Project_0 und BSC verwenden Protobuf bereits als gemeinsame typisierte Transportfamilie** für ihre ausdrücklich freigegebenen öffentlichen Rust-Projektionen: native Engine → Reporter/Protobuf-Feed → **ein Gateway** → Protobuf/WebSocket → React-Projektadapter/Stores. Gleiche Wire-Mechanik, unterschiedliche Fach-Nachrichten (`darkbot.project0.v1` und `darkbot.bsc.v1`) und getrennte native Ausführung.
+
+| Interner, selbst entwickelter Speicher | Integrität und Payload |
+| --- | --- |
+| BSC `DBREC001` | typisierte, versionierte Feldtags und SHA-256 |
+| BSC `DBJNL001` | CRC32 je Journalframe, SHA-256 der Journalbytes |
+| Project_0 `P0J` / `P0JRNL01` | CRC32 je Frame, verkettetes SHA-256, Bincode für Schema-2+-Typ-Payloads; historisches Schema 1 bleibt lesbar |
+
+**Keine** Roh-DBREC-/DBJNL-/P0J-Journale zum Browser übertragen oder durch Protobuf ersetzen; keine Signer, privaten Contracts, Wallet-Secrets oder signierten Rohtransaktionen im UI. Ein nativer Owner erzeugt die öffentliche Projektion und bleibt die fachliche Autorität. Gemeinsamer Architektur-/F0-VAR-Vertrag: [frontend/README.md](../frontend/README.md). Diese Abgrenzung dokumentiert den bestehenden Aufbau und ist **keine** Speicherformatmigration.
+
 ## 1. Pakete
 
 | Paket                 | Inhalt                                                   | Status |
@@ -76,7 +88,7 @@ PASS nur nach realem Lauf mit Exit-Code; sonst NOT_RUN.
 ## 6. Was hier nicht hingehört
 
 Keine Secrets, keine RPC-URLs, keine Signer-Typen, keine Engine-internen Journalformate
-(`.p0j`, DBREC bleiben nativ). Keine Freigabe-Logik: ein Schema beweist keine Ausführbarkeit.
+(`.p0j`, DBREC und DBJNL bleiben nativ). Keine Freigabe-Logik: ein Schema beweist keine Ausführbarkeit.
 
 ## Project 0 status integration
 

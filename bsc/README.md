@@ -2,6 +2,8 @@
 
 **Verbindlicher Plan:** [PHASENPLAN.md (v9)](docs/1_PLAN/PHASENPLAN.md) · **Status:** G0.7/G0.8 vor Produktions-LIVE · **In Arbeit:** ein nativer Rust-BSC-Core, zusätzliche früheste Signaleingänge sind geplant.
 
+**Gemeinsamer Frontend-/Speichervertrag:** [frontend/README.md](../frontend/README.md). BSC speichert intern **DBREC001** (typisierte versionierte Felder, SHA-256) und **DBJNL001** (CRC32 pro Frame, SHA-256 über Journalbytes); zum gemeinsamen DarkBot-Gateway und Dashboard gelangen nur sanitierte öffentliche BSC-Projektionen über **Protobuf / Engine-Feed / WebSocket**, nicht die Rohrecords. Project_0 nutzt dieselbe technische Übergabe mit eigener P0J-Speicherung. Kein zweiter Gateway, keine zweite SPA und keine Änderung wirtschaftlicher BSC-Gates.
+
 DarkBot BSC soll fremde Flap- und Four.meme-Launches möglichst früh erkennen, einen validen BUY rechtzeitig vorbereiten und **als erster unabhängiger externer Käufer direkt auf der BSC ausführen**. Es gibt keinen Trading-Website-, Frontend- oder Browser-Schritt im BUY-Pfad.
 
 **Erfolg = BUY tatsächlich auf der Chain ausgeführt und Token im Wallet-Chain-State erhalten.** Weder das Abschicken noch ein Builder-ACK noch eine Wallet-Anzeige allein zählen als Kauf.

@@ -2,6 +2,19 @@
 
 Status: SOLL-Vertrag. IST 2026-10-24 (lokal `2bfc466b`/`e9e12b40`, nicht gepusht): §1 Handshake (Major entscheidet, Schema-ID-Abweichung nur Diagnose) und Goldens, §2 STATE inkl. Detach für neue Subscriber und FRAME_TOO_LARGE je Topic, §5 Pong-Timeout und begrenzter Send/Close (Slow Client), §6 `overview.aggregates` nur auf `/`, §7 Session/CSRF/Origin/Host/CSP/Engine-Peer-UID, §8 Numerik implementiert und getestet (`gateway/tests/{ws_integration,control_goldens}.rs`, `control-golden.test.ts`, `ops/tests/control_test.py`). Nicht implementiert: §3/§4 EVENT (F4), `pending_commands[]`/`recent_command_results[]`, festgelegtes Slow-Client-/Publisher-p95-SLO, Engine-IPC-Frame-Obergrenze über dem Browser-Limit. Geltung Browser↔Gateway UND Gateway↔Engine. Autorität für Transport; fachliche Freigaben ausschließlich GOVERNANCE_UND_SICHERHEIT.md.
 
+## Verbindliche Grenze zwischen nativer Speicherung und Wire (2026-10-24)
+
+Die internen Eigenformate **BSC DBREC001** (typisierte Felder/SHA-256), **BSC DBJNL001** (CRC32/SHA-256) und **Project_0 P0J** (Magic `P0JRNL01`; CRC32, verkettetes SHA-256, Bincode für typisierte Schema-2+-Payloads) bleiben nativ. **Protobuf ersetzt keine dieser Dateien** und transportiert ausschließlich fachlich freigegebene **öffentliche Projektionen** über denselben bestehenden Reporter→Gateway→Browser-Weg beider Projekte; keine Rohjournale/Secrets an React. Siehe [frontend/README.md](../README.md) und [protocol/README.md](../../protocol/README.md).
+
+**Bindende offene Ausführungsdetails innerhalb des bestehenden Wire-V1.3-Vertrags:**
+
+- `FRAME_TOO_LARGE` soll ausschließlich das betroffene STATE-Topic treffen; eine BSC-Reporter-Verbindungsunterbrechung wegen nur eines großen Frames ist kein gewünschtes Endverhalten. Engine-Frame-Limit **inklusive Protobuf-Envelope** gegenüber dem bestehenden Browser-Limit exakt bestimmen; kein stilles Trunkieren oder Umnummerieren.
+- Nach `FRAME_TOO_LARGE` eindeutiger Topic-Fehler, erneute Subscription bei frischem gültigem STATE zulassen; keine falsche LIVE-Anzeige, keine endlose Recovery-Schleife. Umsetzung/Test **OFFEN**.
+- **Ein** Gateway-Idempotenz-Ledger: `MAX_RECORDS=1024` ohne Lifecycle ist ein bekannter Kapazitätsblocker. Sichere Aufbewahrung/Archivierung **OFFEN**, aber unaufgelöste Commands, vollständige Request-Byte-Identität, Konflikterkennung und gültige Receipts dürfen nicht verloren gehen. Keine willkürliche Löschfrist oder zweite Implementation.
+- **Stop All** pro Ziel nachweisbarer Ergebnisstatus, Teilausfall niemals Gesamt-PASS; isolierter Teilausfalltest `NOT_RUN`. Gateway-RTT bis zur echten Messung `—`, später ausschließlich bestehender Gateway↔Browser-Heartbeat/Pong, kein neuer Engine-Heartbeat.
+
+Diese Punkte sind **Implementierungs-/Nachweis-Lücken**, kein neu eingeführter Protokolltyp, keine neue Architektur und keine vorweggenommene F4-/LIVE-Freigabe.
+
 ## 1. Proto/Transport
 Eine Browser-WebSocket-Verbindung same-origin; rust prost ↔ TypeScript protobuf-es aus EINER gepinnten protokolldefinierten Schemafamilie protocol/. Goldens, Version-Major/Minor-Handshake, Minor-Evolution, incompatible Major fail closed. Kein HTTP-Polling, keine zweite Browser-Engine. Clientframes: Hello, Subscribe(topic, EventCursor{journal_epoch,durable_cursor}?, start_policy?), Unsubscribe, Pong. Serverframes: Welcome, ControlAck, StateFull, Event, CatchupComplete, Heartbeat, Error. StatePart reserviert und NICHT aktiv. Kein StateDelta, StateDigest, separates Resume, Reject, ResetRequired, pro-Datenframe-ACK oder zusätzlicher CommandTerminal-WS-Frame. ControlAck.status trägt ACCEPTED/REJECTED/RESET_REQUIRED; Error trägt fatal/retryable codes.
 

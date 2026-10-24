@@ -35,6 +35,34 @@ Native Project_0 / BSC Source
 
 Commands gehen nur über autorisierte Gateway-/Native-Controller; der Browser ist weder Trading-Engine noch BUY-Hot-Path. Feldzuordnung, Source-Census, Statusklassen, Safety und Übergabe je Backend-Paket sind in [frontend/README.md](frontend/README.md) festgelegt.
 
+## Native Speicherformate vs. ein gemeinsamer Protobuf-Transport
+
+**Beide Programme liefern Daten an ein und dasselbe Dashboard.** BSC und Project_0 besitzen getrennte native Engines und interne Dateiformate; nur geprüfte öffentliche Projektionen werden über die **vorhandene** Protobuf-/Gateway-/WebSocket-Kette übertragen.
+
+| Format | Eigenentwicklung? | Interne Rolle / Standards |
+| --- | --- | --- |
+| BSC `DBREC001` | Ja | typisierte versionierte Felder, **SHA-256** |
+| BSC `DBJNL001` | Ja | append-only Journal, **CRC32 je Frame + SHA-256** |
+| Project_0 `P0J` (Magic `P0JRNL01`) | Ja | append-only Journal, **CRC32 + verkettetes SHA-256 + Bincode** für typisierte Payloads ab Schema 2; altes Schema 1 bleibt lesbar |
+| **Protobuf** | Standardformat mit DarkBot-eigenen Schemas | **Gemeinsame** öffentliche Rust→Gateway→React-Kommunikation via `prost`, `protobuf-es` |
+
+```text
+BSC Rust: DBREC / DBJNL (intern)       Project_0 Rust: P0J (intern)
+                     \                  /
+                    native öffentliche Projektion
+                               |
+                             Protobuf
+                               |
+                    EIN Gateway / WebSocket
+                               |
+                             Protobuf
+                               |
+                   EINE React-SPA / Dashboard
+                   BSC (5 Tabs) | P0 (5 Tabs)
+```
+
+Verbindlich: [frontend/README.md](frontend/README.md) (F0-VAR, Storage-/Wire-Grenze, Retention, FRAME_TOO_LARGE, Topic-Recovery, Stop All, RTT, phasengebundene Aufgaben). [Wire V1.3](frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md) bleibt Transportautorität; die beiden nativen Phasenpläne bleiben fachliche Autorität. **Keine neue Architektur oder Änderung der internen Dateiformate.**
+
 ## Project entry points
 
 - `bsc/README.md`

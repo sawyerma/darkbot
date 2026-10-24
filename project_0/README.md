@@ -2,6 +2,8 @@
 
 **Ein produktives System für Marginfi-Liquidationen auf Solana.** Diese README ist der zentrale Einstieg für Menschen und ausführende KI-Agenten: tatsächliche Dateien, Zuständigkeiten, verbindliche Produktphasen, Architekturziel und sichere Arbeitsreihenfolge.
 
+**Gemeinsame Frontend-Übergabe:** [frontend/README.md](../frontend/README.md) gilt auch für Project_0. Das native **P0J**-Journal (Magic `P0JRNL01`, CRC32, verkettetes SHA-256, Bincode für typisierte Schema-2+-Payloads) bleibt intern; nur geprüfte öffentliche Rust-Projektionen gelangen über **Protobuf → denselben Gateway → Protobuf/WebSocket → die fünf Project_0-Reiter**. BSC hat denselben Transport mit eigener DBREC-/DBJNL-Speicherung. Keine zweite fachliche Feldautorität, kein zusätzlicher Frontend-/Gateway-Stack, keine neue LIVE-Freigabe.
+
 **Stand: 2026-10-23 (GitHub `main`, geprüfter Code bis `2605556c`).** Der committete Rust-Workspace `native/` umfasst **fünf** Crates: `common`, `solana`, `liquidation`, `runtime`, `reporter`. Die Runtime-Domains `orchestration`, `execution`, `market`, `analytics` und `storage` existieren auf `main`. [Historischer Modularisierungsnachweis](docs/architecture/runtime_modularization_20261016.md); `native → engine` ist keine durchgeführte Migration. Der aktuelle Code- und Gate-Status steht in [STATUS](docs/STATUS.md), nicht im historischen Strukturbericht.
 
 **VERBINDLICHES NEUES DOKUMENT:** [Produktionsarchitektur und vollständiger Ausführungsauftrag](docs/architecture/production_architecture_refactor_contract.md). Der Produkt-[PHASENPLAN v4.5.2](docs/PHASENPLAN.md) und das [Measurement Ledger](docs/MEASUREMENT_LEDGER.md) bleiben fachlich autoritativ. Keine dieser Dokumentationsänderungen autorisiert LIVE, Submission, Paid-Provider oder Mainnet-Runs.
