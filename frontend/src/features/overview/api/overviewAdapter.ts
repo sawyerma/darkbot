@@ -106,6 +106,11 @@ export function toOverviewView(a: OverviewAggregates): OverviewView {
 
 let started = false;
 
+/** Bytes → view; any decode or validation error throws (fail closed). */
+export function decodeOverview(bytes: Uint8Array): OverviewView {
+  return toOverviewView(fromBinary(OverviewAggregatesSchema, bytes));
+}
+
 export function ensureOverviewAdapter(): void {
   if (started) return;
   started = true;
@@ -118,8 +123,7 @@ export function ensureOverviewAdapter(): void {
   topics.onState(TopicId.OVERVIEW_AGGREGATES, (bytes: Uint8Array, meta: StateMeta) => {
     // Fail closed: any decode/validation error MUST propagate to TopicSubscriptions.
     // Otherwise its StateFull seq would be acknowledged as applied despite a bad payload.
-    const decoded = fromBinary(OverviewAggregatesSchema, bytes);
-    const view = toOverviewView(decoded);
+    const view = decodeOverview(bytes);
     useOverviewStore.getState().apply(view, meta);
     const bsc = view.projects.find(p => p.project === ProjectId.BSC);
     applyReadinessJob("overview", bsc?.source === "CONNECTED" ? bsc.jobs.find(j => j.job === "readiness") ?? null : null);
