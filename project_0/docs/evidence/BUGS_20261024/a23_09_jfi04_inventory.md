@@ -51,7 +51,6 @@ explicit offline import · **C** operator config/approval file · **I** internal
 | runtime/src/market_reconcile.rs | 3 | W | `reconcile_range` (getBlock) |
 | runtime/src/market_truth.rs | 2 | H | human-readable branch of `NativeEvidence` (p0-econ-replay JSONL input) |
 | runtime/src/bin/p0ctl.rs | 2 | C | operator `Approval`/`ExitApproval` files |
-| runtime/src/analytics/mt0_journal.rs | 1 | I | **MT0 snapshot JSON text (`common::mt0::snapshot_json`) stored as schema-1 value frames** |
 | runtime/src/analytics/payload.rs | 1 | R | `legacy_view` (export) |
 | runtime/src/bin/p0-econ-replay.rs | 1 | C | measurement plan file |
 | runtime/src/bin/p0-measurement-plan.rs | 1 | R | stdout |
@@ -66,8 +65,10 @@ explicit offline import · **C** operator config/approval file · **I** internal
    `fe_freeze::record`): the qualification report is a `serde_json::Value` and `fe01.p0j` stores
    FE01_CONFIG/READ/RESULT as schema-1 value frames. Target: typed payloads (schema 2) with the
    historical schema-1 frames (FE-01 smoke `da8512ad`) kept readable — before the next FE-01 run.
-2. **MT0 snapshots** (`common::mt0::snapshot_json` → `mt0_journal`): telemetry persisted as JSON
-   value frames on the reporter thread (the owner itself stays JSON-free).
+2. ~~**MT0 snapshots**~~ — **done (JFI-04 MT0, 24.10.):** the reporter hands the typed `Snapshot`
+   to the sink, frames are typed `Mt0Telemetry` (schema 2); the offline row is the econ reports'
+   MT0 render; historical schema-1 frames stay readable (test
+   `jfi04_typed_mt0_frame_renders_the_historical_row`). Pin now 418 occurrences in 43 files.
 3. **`p0-journal import`**: offline import of external JSONL rows as schema-1 C0_CENSUS frames.
 
 Not violations, watched: `JsonlSink` is a public production type built only in tests;

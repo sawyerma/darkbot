@@ -196,14 +196,14 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     let mut w = Writer::create(&path).unwrap();
     w.append_value(kind::FE01_READ, &serde_json::json!({"a":1}))
         .unwrap();
-    w.append_value(kind::MT0_SNAPSHOT, &serde_json::json!({"b":2}))
+    w.append_value(kind::FE01_RESULT, &serde_json::json!({"b":2}))
         .unwrap();
     w.seal(true).unwrap();
     let (a, b) = (dir.join("a.jsonl"), dir.join("b.jsonl"));
     fs::write(&b, "keep").unwrap();
     assert!(super::export_views(
         &path,
-        &[(Some(kind::FE01_READ), &a), (Some(kind::MT0_SNAPSHOT), &b)],
+        &[(Some(kind::FE01_READ), &a), (Some(kind::FE01_RESULT), &b)],
         false
     )
     .is_err());
@@ -213,7 +213,7 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     assert_eq!(
         super::export_views(
             &path,
-            &[(Some(kind::FE01_READ), &a), (Some(kind::MT0_SNAPSHOT), &b)],
+            &[(Some(kind::FE01_READ), &a), (Some(kind::FE01_RESULT), &b)],
             false
         )
         .unwrap(),
@@ -403,8 +403,9 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
     let bytes = payload::encode(&diag).unwrap();
     for (k, schema, code) in [
         (kind::OWNER_DIAGNOSTIC, TYPED + 1, "PAYLOAD_SCHEMA"),
-        (kind::MT0_SNAPSHOT, TYPED, "PAYLOAD_KIND_UNTYPED"),
+        (kind::FE01_READ, TYPED, "PAYLOAD_KIND_UNTYPED"),
         // Migrated (JFI-04 / JFI-FIX-05): a schema-1 frame of these kinds is a refused rollback.
+        (kind::MT0_SNAPSHOT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         (kind::MEASUREMENT_PHASE, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         (kind::ECON_SNAPSHOT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         (kind::ECON_FINAL, 1, "LEGACY_WRITE_OF_TYPED_KIND"),

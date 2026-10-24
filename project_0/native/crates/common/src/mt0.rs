@@ -543,7 +543,7 @@ impl Registry {
 
     /// The registry at one instant as a typed value (`duty` = per-second owner duty-cycle
     /// permille). Consumers keep it typed; `Snapshot::json` is its text form.
-    pub fn snapshot(&self, unix_s: u64, now_ns: u64, duty: &HistSnapshot) -> Snapshot {
+    pub fn snapshot(&self, unix_s: u64, now_ns: u64, duty: &HistSnapshot) -> Snapshot<'static> {
         // owner (totals include the section in progress)
         let (busy, wait) = self.owner_totals_at(now_ns);
         let known = self.backlog_age_known.load(Relaxed) == 1;
@@ -641,9 +641,9 @@ impl Ratio {
 
 /// Requests of one remote class.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RemoteSnapshot {
-    pub class: &'static str,
-    pub provider: &'static str,
+pub struct RemoteSnapshot<'a> {
+    pub class: &'a str,
+    pub provider: &'a str,
     pub requests: u64,
     pub ok: u64,
     pub rate_limited_429: u64,
@@ -673,28 +673,29 @@ pub const NOT_MEASURED: [(&str, &str); 6] = [
     ),
 ];
 
-/// One MT0 registry snapshot (`mt0_version` 2), typed.
+/// One MT0 registry snapshot (`mt0_version` 2), typed. The names borrow from the registry (or,
+/// for a persisted record, from that record), so both render through the one `json`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Snapshot {
+pub struct Snapshot<'a> {
     pub unix_s: u64,
-    pub owner_busy_ns: Vec<(&'static str, u64)>,
+    pub owner_busy_ns: Vec<(&'a str, u64)>,
     pub owner_busy_total_ns: u64,
     pub owner_wait_total_ns: u64,
     pub owner_duty_cycle_total: Ratio,
     pub owner_duty_cycle_permille_1s: HistSnapshot,
-    pub queue_wait_latest_ns: Vec<(&'static str, HistSnapshot)>,
-    pub queue_wait_first_ns: Vec<(&'static str, HistSnapshot)>,
+    pub queue_wait_latest_ns: Vec<(&'a str, HistSnapshot)>,
+    pub queue_wait_first_ns: Vec<(&'a str, HistSnapshot)>,
     pub ingress_queue_wait_ns: HistSnapshot,
     pub pending_current: u64,
     pub pending_max: u64,
     pub backlog_age_ns: Option<u64>,
     pub backlog_age_max_ns: Option<u64>,
-    pub remote: Vec<RemoteSnapshot>,
+    pub remote: Vec<RemoteSnapshot<'a>>,
     pub health_calls_sweep: u64,
     pub health_calls_detect_consumer: u64,
     pub health_calls_pipeline: u64,
     pub health_calls_per_pipeline_evaluation: Ratio,
-    pub counters: Vec<(&'static str, u64)>,
+    pub counters: Vec<(&'a str, u64)>,
     pub jupiter_requests_per_routed_evaluation: Ratio,
     pub route_requotes: u64,
     pub fee_rpc_requests: u64,
@@ -704,7 +705,7 @@ pub struct Snapshot {
     pub reconcile_requests: u64,
 }
 
-impl Snapshot {
+impl Snapshot<'_> {
     /// The historical one-object text (key order and number formats unchanged).
     pub fn json(&self) -> String {
         let map = |items: &[(&str, String)]| {
@@ -714,7 +715,7 @@ impl Snapshot {
                 .collect::<Vec<_>>()
                 .join(",")
         };
-        let hists = |items: &[(&'static str, HistSnapshot)]| {
+        let hists = |items: &[(&str, HistSnapshot)]| {
             map(&items
                 .iter()
                 .map(|(k, h)| (*k, hist_json(h)))
@@ -904,7 +905,8 @@ impl Default for OwnerTimer {
 /// Destination of the periodic snapshots (the runtime's binary journal). Called only on the
 /// reporter thread. `store` returns `false` when the snapshot was not stored.
 pub trait SnapshotSink: Send + 'static {
-    fn store(&mut self, unix_ns: u64, mono_ns: u64, snapshot: &str) -> bool;
+    /// JFI-04: the typed snapshot; a sink persists it typed (the text is `Snapshot::json`).
+    fn store(&mut self, unix_ns: u64, mono_ns: u64, snapshot: &Snapshot<'_>) -> bool;
     /// Closes the sink after the final snapshot; `complete` is false once any snapshot was lost.
     fn finish(&mut self, complete: bool) -> bool;
 }
@@ -956,9 +958,9 @@ pub fn spawn_reporter(
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default();
                 let now = mono_ns();
-                let line = MT0.snapshot_json(unix.as_secs(), now, &duty.snapshot());
+                let snapshot = MT0.snapshot(unix.as_secs(), now, &duty.snapshot());
                 let unix_ns = u64::try_from(unix.as_nanos()).unwrap_or(u64::MAX);
-                complete &= sink.store(unix_ns, now, &line);
+                complete &= sink.store(unix_ns, now, &snapshot);
             };
             while !shutdown.is_requested() && !stopped.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_secs(1));

@@ -217,8 +217,8 @@ pub struct Mt0Telemetry {
     pub reconcile_requests: u64,
 }
 
-impl From<&darkbot_common::mt0::Snapshot> for Mt0Telemetry {
-    fn from(s: &darkbot_common::mt0::Snapshot) -> Self {
+impl From<&darkbot_common::mt0::Snapshot<'_>> for Mt0Telemetry {
+    fn from(s: &darkbot_common::mt0::Snapshot<'_>) -> Self {
         let named = |v: &[(&str, u64)]| v.iter().map(|(k, n)| (k.to_string(), *n)).collect();
         let hists = |v: &[(&str, darkbot_common::mt0::HistSnapshot)]| {
             v.iter().map(|(k, h)| (k.to_string(), h.into())).collect()
@@ -404,6 +404,10 @@ macro_rules! text_render {
     };
 }
 text_render!(Mt0Telemetry, "MT0_TELEMETRY_TEXT_NOT_SUPPORTED");
+/// JFI-04: the `MT0_SNAPSHOT` journal frame is this typed telemetry (reporter thread).
+impl crate::analytics::payload::Payload for Mt0Telemetry {
+    const KIND: u16 = kind::MT0_SNAPSHOT;
+}
 
 // ------------------------------------------------------------------------------------------
 // Technical qualification

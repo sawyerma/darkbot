@@ -281,6 +281,7 @@ macro_rules! typed_kinds {
             }
             k::SEGMENT_LINK => $f::<crate::storage::segments::SegmentLink>($kind, $schema, $bytes),
             k::SEGMENT_NEXT => $f::<crate::storage::segments::SegmentNext>($kind, $schema, $bytes),
+            k::MT0_SNAPSHOT => $f::<super::econ::Mt0Telemetry>($kind, $schema, $bytes),
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }
     }};
@@ -300,8 +301,7 @@ pub fn registered_schema(kind: u16) -> Option<u16> {
 pub const LEGACY_WRITABLE: &[u16] = {
     use journal::kind as k;
     &[
-        // remaining journal kinds (measurement, MT0, FE-01, C0 census import)
-        k::MT0_SNAPSHOT,
+        // remaining journal kinds (FE-01, C0 census import)
         k::FE01_CONFIG,
         k::FE01_READ,
         k::FE01_RESULT,
@@ -365,6 +365,11 @@ pub fn legacy_view(frame: &journal::Frame) -> io::Result<serde_json::Value> {
     if frame.kind == journal::kind::ECON_FINAL {
         return decode::<super::econ::SnapshotReport>(frame.kind, frame.schema, &frame.payload)
             .and_then(|r| super::econ::render(&r).map_err(io::Error::other));
+    }
+    if frame.kind == journal::kind::MT0_SNAPSHOT {
+        // JFI-04: the historical `mt0.jsonl` row (the econ reports' own MT0 render).
+        return decode::<super::econ::Mt0Telemetry>(frame.kind, frame.schema, &frame.payload)
+            .and_then(|t| t.legacy_json().map_err(io::Error::other));
     }
     if frame.kind == journal::kind::ECON_CANONICAL {
         return decode::<super::econ::CanonicalJoin>(frame.kind, frame.schema, &frame.payload)

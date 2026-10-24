@@ -30,7 +30,6 @@ PINNED = {
     'runtime/src/analytics/fixture.rs': (4, 'W'),
     'runtime/src/analytics/journal.rs': (29, 'HI'),
     'runtime/src/analytics/measurement.rs': (12, 'RH'),
-    'runtime/src/analytics/mt0_journal.rs': (1, 'I'),
     'runtime/src/analytics/payload.rs': (1, 'R'),
     'runtime/src/analytics/renders.rs': (14, 'R'),
     'runtime/src/bin/p0-econ-replay.rs': (1, 'C'),
@@ -144,14 +143,13 @@ class JsonInventory(unittest.TestCase):
         internal = sorted(f for f, (_, c) in PINNED.items() if 'I' in c)
         self.assertEqual(internal, [
             'runtime/src/analytics/journal.rs',
-            'runtime/src/analytics/mt0_journal.rs',
             'runtime/src/bin/p0-fe-qualify.rs',
             'runtime/src/bin/p0-journal.rs',
             'runtime/src/orchestration/fe_freeze.rs',
             'runtime/src/orchestration/fe_qualification.rs',
             'runtime/src/orchestration/fe_replay.rs',
         ])
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 419)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 418)
 
 
 if __name__ == '__main__':
