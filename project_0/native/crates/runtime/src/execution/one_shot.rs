@@ -468,6 +468,9 @@ impl crate::analytics::payload::Payload for LegacyImport {
 }
 /// A wallet journal holds a handful of state versions; anything larger is not ours.
 const MAX_JOURNAL_BYTES: u64 = 16 * 1024 * 1024;
+/// A23-07: versions one exit may still write after its reservation (handoff, reopen, observe
+/// per signature and change, finalize or non-landing, settle), with margin for observations.
+const EXIT_LIFECYCLE_VERSIONS: u64 = 16;
 const LEGACY_MAX_BYTES: u64 = 256 * 1024;
 fn err(s: &str) -> String {
     s.into()

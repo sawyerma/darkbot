@@ -11,7 +11,10 @@
 //! is refused at finalization: the exit stays UNKNOWN with every hold.
 use super::receipts::FinalizedObservation;
 use super::settlement::{NonLandingProof, SettlementEvidence};
-use super::{err, hex, key, Current, Journal, Phase, Receipt, Saved, Transition};
+use super::{
+    cause, err, hex, key, Current, Journal, Phase, Receipt, Saved, Transition, Version,
+    EXIT_LIFECYCLE_VERSIONS, MAX_JOURNAL_BYTES,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -451,6 +454,20 @@ impl Journal {
             observations: BTreeMap::new(),
             finalized: None,
         });
+        // A23-07: a new exit only while its whole lifecycle keeps the wallet journal reopenable
+        // (the open check refuses a larger file); beyond, it is refused and the position stays
+        // held — nothing truncated, nothing released.
+        let version = crate::analytics::payload::encoded_len(&Version {
+            transition: Transition::ExitReserve,
+            state: s.clone(),
+        })
+        .map_err(|e| cause("JOURNAL_WRITE", &e))?;
+        let lifecycle = (crate::analytics::journal::FRAME_WIRE as u64)
+            .saturating_add(version)
+            .saturating_mul(EXIT_LIFECYCLE_VERSIONS);
+        if self.writer.position().saturating_add(lifecycle) > MAX_JOURNAL_BYTES {
+            return Err(err("JOURNAL_RUNWAY_EXHAUSTED"));
+        }
         self.persist(s, Transition::ExitReserve)
     }
 
@@ -1046,6 +1063,61 @@ pub(crate) mod tests {
         assert_eq!((x.landed, x.realized_usd_micro), (false, 0));
         assert_eq!(j.open_inventory()[&mint].units, 1_000);
         assert_eq!(j.safety_replay().unwrap().exits.len(), 2);
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    /// A23-07: the wallet journal's real growth, measured with the production writer: one
+    /// attempt per journal (one-shot), then not-landed exits of its position until the runway
+    /// guard refuses the next one. Every version carries all exits, so the growth per exit rises;
+    /// the refusal comes before the file can outgrow what `Journal::open` reopens, keeps the
+    /// position held and leaves a journal that reopens with every exit.
+    #[test]
+    fn a23_07_wallet_journal_runway_is_measured_and_stays_reopenable() {
+        let (path, mut j, mint, a) = settled(1_000);
+        let attempt_bytes = j.writer.position();
+        let mut sizes = vec![attempt_bytes];
+        let refused = loop {
+            let id = format!("exit-{}", sizes.len());
+            let (ea, ei, c) = exit_for(&a, &mint, 1_000, &id);
+            if let Err(e) = j.reserve_exit(ea, ei.clone(), &c) {
+                break e;
+            }
+            j.handoff_exit(&ei.signed_wire_sha256, &c, || Ok(()))
+                .unwrap();
+            let proven = SettlementEvidence {
+                observations: vec![],
+                proof: Some(Ok(NonLandingProof {
+                    finalized_block_height: ei.last_valid_block_height + 1,
+                    history_from_slot: ei.state_slot,
+                    absent_signatures: ei.signatures.iter().cloned().collect(),
+                })),
+            };
+            assert!(matches!(
+                j.apply_exit_evidence(proven, &value, 2_200).unwrap(),
+                ExitStep::Settled(_)
+            ));
+            sizes.push(j.writer.position());
+        };
+        assert_eq!(refused, "JOURNAL_RUNWAY_EXHAUSTED");
+        let exits = sizes.len() - 1;
+        let (first, last) = (sizes[1] - sizes[0], sizes[exits] - sizes[exits - 1]);
+        eprintln!(
+            "A23_07_RUNWAY attempt_bytes={attempt_bytes} first_exit_bytes={first} \
+             last_exit_bytes={last} exits={exits} final_bytes={} limit={MAX_JOURNAL_BYTES}",
+            sizes[exits]
+        );
+        assert!(last > first, "every version carries all exits");
+        assert!(exits >= 50, "{exits} exits");
+        assert!(sizes[exits] <= MAX_JOURNAL_BYTES);
+        // The refusal changed nothing: the position stays held, every exit replays.
+        assert_eq!(j.open_inventory()[&mint].units, 1_000);
+        assert_eq!(j.safety_replay().unwrap().exits.len(), exits);
+        let wallet = a.wallet.clone();
+        drop(j);
+        let j = Journal::open(&path, &wallet).unwrap();
+        assert_eq!(j.safety_replay().unwrap().exits.len(), exits);
+        assert_eq!(j.open_inventory()[&mint].units, 1_000);
         drop(j);
         fs::remove_dir_all(path).unwrap();
     }
