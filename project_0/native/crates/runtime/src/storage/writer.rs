@@ -45,6 +45,9 @@ pub struct WriterConfig {
     /// Test-only I/O fault injection: the writer fails at this batch.
     #[cfg(test)]
     pub fail_at_batch: Option<u64>,
+    /// Test-only stall: the writer starts draining the queue only after this delay.
+    #[cfg(test)]
+    pub hold_first: Duration,
 }
 
 impl WriterConfig {
@@ -62,6 +65,8 @@ impl WriterConfig {
             segment_bytes: l.market_segment_mib * MIB,
             #[cfg(test)]
             fail_at_batch: None,
+            #[cfg(test)]
+            hold_first: Duration::ZERO,
         }
     }
 }
@@ -448,6 +453,8 @@ fn write_loop(
     let mut first_pending: Option<Instant> = None;
     let mut last_sync = Instant::now();
     let mut seal = None;
+    #[cfg(test)]
+    std::thread::sleep(cfg.hold_first);
     loop {
         let wait = first_pending
             .map(|t| cfg.flush_interval.saturating_sub(t.elapsed()))
@@ -565,6 +572,7 @@ mod tests {
             disk_reserve_bytes: 0,
             segment_bytes: 0,
             fail_at_batch: None,
+            hold_first: Duration::ZERO,
         }
     }
 
@@ -720,6 +728,41 @@ mod tests {
         assert_eq!(b.used_bytes, 0);
         assert!(sealed.metrics.memory.rss_bytes.is_some());
         assert_eq!(frames_in(&d.join("o.p0j")), (3, true, false));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// PERSIST-02 (SK-05): a writer that does not drain fills the count-bounded queue; the next
+    /// row waits at most the stall budget and is refused `MARKET_WRITER_QUEUE_STALLED`, never
+    /// dropped silently; every admitted row is written once the writer drains, and the journal
+    /// the capture then seals INCOMPLETE says so.
+    #[test]
+    fn stalled_writer_refuses_at_the_queue_bound_and_keeps_every_admitted_frame() {
+        let d = dir("stall");
+        let mut c = cfg(1 << 24);
+        c.hold_first = Duration::from_secs(1);
+        let slots = (c.batch_frames * 4) as u64;
+        let mut w = MarketJournalWorker::start(&d.join("s.p0j"), c).unwrap();
+        let started = Instant::now();
+        let mut admitted = 0u64;
+        let refusal = loop {
+            match w.submit(Provenance::default(), &row(admitted)) {
+                Ok(()) => admitted += 1,
+                Err(e) => break e.to_string(),
+            }
+            assert!(admitted <= slots, "admission beyond the queue bound");
+        };
+        let waited = started.elapsed();
+        assert_eq!(
+            (admitted, refusal.as_str()),
+            (slots, "MARKET_WRITER_QUEUE_STALLED")
+        );
+        assert!(
+            waited >= c.stall_budget && waited < c.hold_first,
+            "{waited:?}"
+        );
+        let sealed = w.seal(false).unwrap();
+        assert_eq!(sealed.frames, admitted);
+        assert_eq!(frames_in(&d.join("s.p0j")), (admitted, true, false));
         std::fs::remove_dir_all(d).unwrap();
     }
 

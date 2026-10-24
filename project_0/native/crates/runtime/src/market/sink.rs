@@ -38,13 +38,16 @@ pub struct MarketJournalBinding {
     pub storage: StorageMetrics,
 }
 
-/// Batch sink of the strict verifier: the batch journal plus the three legacy views the pinned
-/// report reader consumes, rendered once from the sealed batch journal at the batch boundary.
-/// Capture never renders; this compatibility output ends with the native report reader.
+/// Test sink: the batch journal plus the three legacy views the pinned report reader consumes,
+/// rendered once from the sealed batch journal at the batch boundary. JFI-01: no production
+/// path builds it (capture never renders; the strict verifier reads the native journal), so it
+/// exists only in tests.
+#[cfg(test)]
 pub struct JsonlSink {
     inner: JournalSink,
     exported: bool,
 }
+#[cfg(test)]
 impl JsonlSink {
     pub fn create(run_dir: &Path) -> Result<Self, String> {
         Ok(Self {
@@ -53,6 +56,7 @@ impl JsonlSink {
         })
     }
 }
+#[cfg(test)]
 impl MarketSink for JsonlSink {
     fn transaction(&mut self, row: &MarketTransaction) -> std::io::Result<()> {
         self.inner.transaction(row)
@@ -75,6 +79,7 @@ impl MarketSink for JsonlSink {
         self.seal_and_export(complete).map(|_| None)
     }
 }
+#[cfg(test)]
 impl JsonlSink {
     fn seal_and_export(&mut self, complete: bool) -> std::io::Result<()> {
         if !self.exported {
@@ -107,6 +112,8 @@ pub const MARKET_VIEWS: [(u16, &str); 3] = [
 /// them explicitly offline.
 pub struct JournalSink {
     writer: Option<MarketJournalWorker>,
+    /// Only the test sink renders views beside the journal.
+    #[cfg(test)]
     run_dir: PathBuf,
     rows: u64,
 }
@@ -126,6 +133,7 @@ impl JournalSink {
         let writer = MarketJournalWorker::start(&run_dir.join(MARKET_JOURNAL), cfg)?;
         Ok(Self {
             writer: Some(writer),
+            #[cfg(test)]
             run_dir: run_dir.into(),
             rows: 0,
         })

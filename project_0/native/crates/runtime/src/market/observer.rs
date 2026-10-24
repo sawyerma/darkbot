@@ -103,9 +103,9 @@ pub mod rows;
 mod sink;
 #[path = "strict_driver.rs"]
 pub mod strict_driver;
-pub use sink::{
-    JournalSink, JsonlSink, MarketJournalBinding, MarketSink, MARKET_JOURNAL, MARKET_VIEWS,
-};
+#[cfg(test)]
+pub use sink::JsonlSink;
+pub use sink::{JournalSink, MarketJournalBinding, MarketSink, MARKET_JOURNAL, MARKET_VIEWS};
 
 #[path = "core.rs"]
 mod core;

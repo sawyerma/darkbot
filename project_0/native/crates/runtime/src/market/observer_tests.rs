@@ -2529,6 +2529,7 @@ fn journal_sink_flush_reports_a_failed_writer_without_a_new_row() {
         disk_reserve_bytes: 0,
         segment_bytes: 0,
         fail_at_batch: Some(0),
+        hold_first: Duration::ZERO,
     };
     let mut sink = JournalSink::create_with(&dir, cfg).unwrap();
     assert!(sink.flush().is_ok(), "a healthy writer");
