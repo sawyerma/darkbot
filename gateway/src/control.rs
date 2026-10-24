@@ -59,8 +59,9 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
 /// conflict checks still read. When the archive is full, the receipt issued earliest leaves it,
 /// after `retired_through` durably took its `issued_at_unix_ns`. Expiry rule: a request_id the
 /// ledger does not know whose `issued_at_unix_ns` is at or before that mark may be a retired
-/// command and is refused, never executed; a request issued after the gateway's receive time is
-/// refused, so no request can move the mark ahead. A ledger of open intents refuses new ones.
+/// command and is refused, never executed; a request issued later than the gateway's receive
+/// time plus the liveness window is refused, so no request can move the mark ahead. A ledger of
+/// open intents refuses new ones.
 const MAX_RECORDS: usize = 1024;
 
 #[derive(Clone)]
@@ -429,12 +430,12 @@ impl Control {
             _ => {}
         }
         // Expiry rule (MAX_RECORDS): an unknown request must be newer than every retired receipt.
-        if req.issued_at_unix_ns > crate::overview::unix_ns_now() {
+        if req.issued_at_unix_ns > crate::overview::unix_ns_now().saturating_add(clock_lead_ns()) {
             return reply(
                 id,
                 CommandStatus::Rejected,
                 CommandRejectReason::InvalidParams,
-                "issued_at lies after the gateway receive time",
+                "issued_at lies after the gateway receive time beyond the liveness window",
             );
         }
         let ledger = self
@@ -657,6 +658,13 @@ fn issued_at(path: &Path) -> Option<i64> {
         .map(|r| r.issued_at_unix_ns)
 }
 const RETIRED_THROUGH: &str = "retired_through";
+/// Tolerated lead of a browser clock over the gateway for `issued_at_unix_ns`: the existing
+/// liveness window (heartbeat interval × missed heartbeats, Wire V1.3 §5). A later stamp is
+/// refused, so the expiry mark never runs ahead of real time by more than this window.
+fn clock_lead_ns() -> i64 {
+    let l = crate::config::Limits::default();
+    i64::from(l.heartbeat_interval_ms) * i64::from(l.stale_after_missed_heartbeats) * 1_000_000
+}
 /// The latest `issued_at_unix_ns` of every receipt removed from the archive; None before the first.
 fn retired_through(dir: &Path) -> Result<Option<i64>, ()> {
     match fs::read_to_string(dir.join("archive").join(RETIRED_THROUGH)) {
@@ -1033,6 +1041,251 @@ mod tests {
             CommandRejectReason::IdempotencyConflict as i32
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+    /// A dispatching ledger whose stub controller counts executions; `restart` reopens it the way
+    /// a new gateway process does (only the files carry over).
+    struct Env {
+        dir: PathBuf,
+        runs: PathBuf,
+    }
+    impl Env {
+        fn new(name: &str) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = std::env::temp_dir().join(format!("gw-ledger-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("bsc-root")).unwrap();
+            fs::create_dir_all(dir.join("run")).unwrap();
+            fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
+            fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
+            let runs = dir.join("runs");
+            fs::write(
+                dir.join("darkbotctl"),
+                format!("#!/bin/sh\nprintf '%s\\n' \"$6\" >> '{}'\n", runs.display()),
+            )
+            .unwrap();
+            fs::set_permissions(dir.join("darkbotctl"), fs::Permissions::from_mode(0o755)).unwrap();
+            Env { dir, runs }
+        }
+        fn restart(&self) -> Control {
+            Control {
+                capacity: CAPACITY,
+                ..Control::new(Some(Paths {
+                    ctl: self.dir.join("darkbotctl"),
+                    rundir: self.dir.join("run"),
+                    logdir: self.dir.clone(),
+                    label: "test.capture".into(),
+                }))
+            }
+        }
+        fn executions(&self) -> usize {
+            fs::read_to_string(&self.runs)
+                .unwrap_or_default()
+                .lines()
+                .count()
+        }
+        fn ledger(&self) -> PathBuf {
+            self.dir.join("run/commands")
+        }
+    }
+    impl Drop for Env {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+    fn candidate(n: usize, issued_at_unix_ns: i64) -> CommandRequest {
+        CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: uuid(n),
+            action: BSC_CANDIDATE.into(),
+            resource_id: "SELF_B".into(),
+            expected: Some(crate::proto::ExpectedVersion {
+                version: Some(expected_version::Version::ProfileVersion(7)),
+            }),
+            params: Default::default(),
+            issued_at_unix_ns,
+        }
+    }
+    fn age(control: &Control, id: &str, secs: u64) {
+        fs::File::options()
+            .write(true)
+            .open(control.record_path(id).unwrap())
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(secs))
+            .unwrap();
+    }
+    fn refused(r: &CommandResponse, reason: CommandRejectReason) -> bool {
+        r.status == CommandStatus::Rejected as i32 && r.reject_reason == reason as i32
+    }
+    #[tokio::test]
+    async fn an_archived_receipt_replays_after_a_restart_and_other_bytes_conflict() {
+        let env = Env::new("restart");
+        let control = env.restart();
+        let x = candidate(9_000, 500);
+        assert_eq!(
+            control.execute(&x).await.phase,
+            CommandPhase::Completed as i32
+        );
+        age(&control, &x.request_id, 1);
+        for n in 0..CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        assert!(env
+            .ledger()
+            .join(format!("archive/{}.json", x.request_id))
+            .exists());
+        let control = env.restart();
+        let replay = control.execute(&x).await;
+        assert_eq!(
+            (replay.status, replay.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            )
+        );
+        for other in [
+            CommandRequest {
+                issued_at_unix_ns: 501,
+                ..x.clone()
+            },
+            CommandRequest {
+                resource_id: "SELF_A".into(),
+                ..x.clone()
+            },
+        ] {
+            let r = control.execute(&other).await;
+            assert!(
+                refused(&r, CommandRejectReason::IdempotencyConflict),
+                "{}",
+                r.detail
+            );
+        }
+        assert_eq!(env.executions(), 1);
+    }
+    #[tokio::test]
+    async fn the_retired_through_mark_survives_restarts_and_crashes_fail_closed() {
+        let env = Env::new("mark");
+        let control = env.restart();
+        let x = candidate(9_000, 500);
+        control.execute(&x).await;
+        age(&control, &x.request_id, 1);
+        for n in 0..2 * CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        let archive = env.ledger().join("archive");
+        assert_eq!(retired_through(&env.ledger()), Ok(Some(500)));
+        // Crash before the atomic rename: a stray temporary file changes nothing.
+        fs::write(archive.join("retired_through.tmp-crashed"), "999999999999").unwrap();
+        let control = env.restart();
+        assert!(refused(
+            &control.execute(&x).await,
+            CommandRejectReason::IdempotencyConflict
+        ));
+        // Crash after raising the mark but before removing the receipt: it still replays.
+        let kept = stored(0); // the earliest receipt still archived
+        assert!(archive.join(format!("{}.json", kept.request_id)).exists());
+        fs::write(
+            archive.join(RETIRED_THROUGH),
+            kept.issued_at_unix_ns.to_string(),
+        )
+        .unwrap();
+        let replay = env.restart().execute(&kept).await;
+        assert_eq!(
+            replay.status,
+            CommandStatus::Accepted as i32,
+            "{}",
+            replay.detail
+        );
+        // An unreadable mark refuses every new command instead of guessing.
+        fs::write(archive.join(RETIRED_THROUGH), "not a number").unwrap();
+        let now = crate::overview::unix_ns_now();
+        assert!(refused(
+            &env.restart().execute(&candidate(9_001, now)).await,
+            CommandRejectReason::EngineUnavailable
+        ));
+        assert_eq!(env.executions(), 1);
+    }
+    #[tokio::test]
+    async fn new_commands_run_in_any_stamp_order_above_the_mark_and_within_the_clock_window() {
+        let env = Env::new("clock");
+        let control = env.restart();
+        control.execute(&candidate(9_000, 500)).await;
+        age(&control, &uuid(9_000), 1);
+        for n in 0..2 * CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        let now = crate::overview::unix_ns_now();
+        // Every new command retires one more receipt, so the mark rises with them; client stamps
+        // only have to be later than it: unordered, behind by an hour or ahead by 2 s.
+        for (n, issued) in [
+            (1, now - 5_000_000_000),
+            (2, now - 10_000_000_000),
+            (3, now - 3_600_000_000_000),
+            (4, now + 2_000_000_000),
+        ] {
+            let r = control.execute(&candidate(10_000 + n, issued)).await;
+            assert_eq!(r.phase, CommandPhase::Completed as i32, "{n}: {}", r.detail);
+        }
+        assert_eq!(env.executions(), 5);
+        // At or below the mark, or ahead of the gateway beyond the liveness window: refused.
+        let mark = retired_through(&env.ledger()).unwrap().unwrap();
+        let at_mark = control.execute(&candidate(10_010, mark)).await;
+        assert!(refused(&at_mark, CommandRejectReason::IdempotencyConflict));
+        let ahead = control
+            .execute(&candidate(10_011, now + 120_000_000_000))
+            .await;
+        assert!(refused(&ahead, CommandRejectReason::InvalidParams));
+        assert_eq!(env.executions(), 5);
+    }
+    /// Limit of a finite retention (Wire V1.3 §7): once a receipt is retired, its id is only known
+    /// through the mark. Bytes stamped at or before it stay refused; the same id stamped later is
+    /// a different payload and counts as a new intent — the retired one itself never runs again.
+    #[tokio::test]
+    async fn beyond_the_retention_only_a_later_stamped_reuse_of_an_id_is_a_new_intent() {
+        let env = Env::new("reuse");
+        let control = env.restart();
+        let x = candidate(9_000, 500);
+        control.execute(&x).await;
+        age(&control, &x.request_id, 1);
+        for n in 0..2 * CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        let earlier = CommandRequest {
+            issued_at_unix_ns: 499,
+            ..x.clone()
+        };
+        assert!(refused(
+            &control.execute(&earlier).await,
+            CommandRejectReason::IdempotencyConflict
+        ));
+        assert_eq!(env.executions(), 1);
+        let later = CommandRequest {
+            issued_at_unix_ns: crate::overview::unix_ns_now(),
+            ..x.clone()
+        };
+        assert_eq!(
+            control.execute(&later).await.phase,
+            CommandPhase::Completed as i32
+        );
+        assert_eq!(env.executions(), 2);
+    }
+    #[tokio::test]
+    async fn open_intents_survive_a_restart_and_are_never_dispatched_again() {
+        let env = Env::new("open");
+        let control = env.restart();
+        put(&control, 0, CommandPhase::PendingReconcile).unwrap();
+        for n in 1..CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        for n in CAPACITY..3 * CAPACITY {
+            put(&control, n, CommandPhase::Failed).unwrap();
+        }
+        let control = env.restart();
+        assert!(control.record_path(&uuid(0)).unwrap().exists());
+        let replay = control.execute(&stored(0)).await;
+        assert_eq!(replay.phase, CommandPhase::PendingReconcile as i32);
+        let lookup = control.lookup(&uuid(0), ProjectId::Project0 as i32).await;
+        assert!(lookup.found);
+        assert_eq!(env.executions(), 0);
     }
     /// The receipt of an executed command leaves the bounded archive; the exact same request
     /// arriving again must not run a second time, while a fresh command still runs.

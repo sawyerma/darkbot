@@ -2403,7 +2403,7 @@
     },
     {
       "source_path": "gateway/src/control.rs",
-      "source_sha": "00ef7cc6effdfb3733cd86cc7632b2caea790c82a19fb230f0a5efbc35a2e86c",
+      "source_sha": "a5315edb3ea79715139f0843823e798434cf5d4cc92a259ec4d977c9eab16277",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     }
