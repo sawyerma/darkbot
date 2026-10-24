@@ -2861,6 +2861,55 @@ fn d7_retained_transaction_keys_are_count_bounded_and_measured() {
     assert!(per_tx <= 512, "{per_tx}");
 }
 
+/// R24 (event branch): liquidation events are retained up to the same cap; beyond it the capture
+/// is INCOMPLETE (`MARKET_EVENT_RETENTION_OVERFLOW` market-only, `C0_E1_EVENT_RETENTION_OVERFLOW`
+/// counted with econ), the event is not aggregated and nothing retained is evicted.
+#[test]
+fn r24_event_retention_is_bounded_and_fail_closed() {
+    let event = |i: u32| ReceiverEvent {
+        event_index: i,
+        target: Pubkey::new_unique(),
+        receiver: Pubkey::new_unique(),
+        seized_equity_usd: 2.0,
+        repaid_equity_usd: 1.0,
+        protocol_flat_fee_lamports: 5,
+    };
+    for with_econ in [false, true] {
+        let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+        core.retention = 2;
+        let econ = with_econ.then(|| crate::analytics::econ::test_handle(2));
+        if let Some((h, _)) = &econ {
+            core.econ = Some(h.clone());
+        }
+        core.aggregate("tx-a", 10, Some(1), Some(0), &[event(0), event(1)]);
+        let reason = if with_econ {
+            "C0_E1_EVENT_RETENTION_OVERFLOW"
+        } else {
+            "MARKET_EVENT_RETENTION_OVERFLOW"
+        };
+        assert!(!core.incomplete_reasons.contains(reason));
+        core.aggregate("tx-b", 11, Some(2), Some(0), &[event(0)]);
+        assert!(core.incomplete_reasons.contains(reason), "{reason}");
+        assert_eq!(
+            (
+                core.edges.len(),
+                core.stats.liquidation_events,
+                core.targets.len()
+            ),
+            (2, 2, 2),
+            "bounded, nothing evicted"
+        );
+        if let Some((h, _)) = &econ {
+            assert_eq!(
+                h.shared
+                    .retention_overflow
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                1
+            );
+        }
+    }
+}
+
 /// R24: a market-only capture (no econ handle) is bounded by its configured retention
 /// (`P0_MARKET_RETENTION`, default the shared 262,144): at the cap a new transaction marks the
 /// capture INCOMPLETE and nothing retained is evicted; the setting is validated.
