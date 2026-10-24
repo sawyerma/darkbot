@@ -23,18 +23,17 @@ darkbot/
 
 ## Frontend rule
 
-The frontend is a control plane, not another trading engine.
+**Verbindliche gemeinsame Project_0/BSC-Backend↔Frontend-Regeln:** [frontend/README.md](frontend/README.md). Beide Projekte benutzen dieselbe F0-VAR-Inventurmethodik und **denselben Gateway-/Protobuf-Datenfluss**, aber getrennte native Fach-Owner und projektgebundene öffentliche Projektionen.
 
 ```text
-backend/core
-  -> REST snapshot
-  -> sequenced WebSocket events
-  -> React frontend
+Native Project_0 / BSC Source
+  -> projektspezifische öffentliche Projektion + Protobuf
+  -> nativer Reporter / Engine-Feed -> gemeinsames Gateway / Topic-WS
+  -> projektspezifischer Adapter / Store
+  -> fünf vorhandene Frontend-Reiter pro Projekt
 ```
 
-Protocol decoding, canonical state, health, economics, transaction construction, signing, submission and reconciliation remain in the backend/native code.
-
-The frontend technical base comes from the existing `ws_ai_front` React/Vite/Tailwind setup, but its old application structure is not carried forward.
+Commands gehen nur über autorisierte Gateway-/Native-Controller; der Browser ist weder Trading-Engine noch BUY-Hot-Path. Feldzuordnung, Source-Census, Statusklassen, Safety und Übergabe je Backend-Paket sind in [frontend/README.md](frontend/README.md) festgelegt.
 
 ## Project entry points
 
