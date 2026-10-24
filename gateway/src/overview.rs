@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::config::GatewayConfig;
 use crate::engine::{SourceRegistry, SourceState};
-use crate::hub::{StateHub, StateUpdate};
+use crate::hub::{CachedState, StateHub, StateUpdate};
 use crate::proto::{
     GlobalFinance, OverviewAggregates, ProjectId, ProjectSummary, Readiness,
     SourceState as WireSourceState, TopicId,
@@ -145,6 +145,14 @@ pub fn build(registry: &SourceRegistry) -> OverviewAggregates {
     }
 }
 
+/// LIVE-Freigabe von Project_0 genau so, wie der effektive Engine-Record sie meldet; abwesend,
+/// solange project0.status nicht aktuell ist oder der Prozess auf eingebauten Defaults läuft.
+fn project0_live_authorized(frame: Option<&CachedState>) -> Option<bool> {
+    let frame = frame.filter(|s| s.quality == crate::proto::StateQuality::Ok)?;
+    let status = crate::proto::project0::v1::SystemStatus::decode(frame.payload.clone()).ok()?;
+    status.operational?.effective.map(|e| e.live_authorized)
+}
+
 /// Publiziert bei jeder Quellenänderung und zusätzlich periodisch (Freshness-Zeitstempel).
 pub fn spawn_publisher(
     hub: Arc<StateHub>,
@@ -162,6 +170,13 @@ pub fn spawn_publisher(
         loop {
             seq += 1;
             let mut msg = build(&registry);
+            if let Some(p) = msg.projects.iter_mut().find(|p| {
+                p.project == ProjectId::Project0 as i32
+                    && p.source == WireSourceState::Connected as i32
+            }) {
+                p.live_authorized =
+                    project0_live_authorized(hub.current(TopicId::Project0Status).as_deref());
+            }
             if let Some(p) = msg.projects.iter_mut().find(|p| {
                 p.project == ProjectId::Bsc as i32 && p.source == WireSourceState::Connected as i32
             }) {
@@ -240,5 +255,59 @@ mod tests {
             assert!(p.finance.is_none());
             assert!(p.active_bots.is_none());
         }
+    }
+
+    #[test]
+    fn project0_live_authorization_comes_only_from_a_current_effective_record() {
+        use crate::proto::project0::v1::{EffectiveRecord, OperationalConfig, SystemStatus};
+        let frame = |quality, status: SystemStatus| CachedState {
+            topic: TopicId::Project0Status,
+            generation: 1,
+            seq: 1,
+            quality,
+            source_timestamp_unix_ns: 0,
+            source_id: Arc::from("p0"),
+            payload: Bytes::from(status.encode_to_vec()),
+            too_large: false,
+        };
+        let with = |live_authorized| SystemStatus {
+            operational: Some(OperationalConfig {
+                parameters: Vec::new(),
+                effective: Some(EffectiveRecord {
+                    live_authorized,
+                    ..Default::default()
+                }),
+            }),
+        };
+        let ok = crate::proto::StateQuality::Ok;
+        assert_eq!(
+            project0_live_authorized(Some(&frame(ok, with(false)))),
+            Some(false)
+        );
+        assert_eq!(
+            project0_live_authorized(Some(&frame(ok, with(true)))),
+            Some(true)
+        );
+        // Built-in defaults (no effective record), no status, a stale or detached source: unknown.
+        let defaults = SystemStatus {
+            operational: Some(OperationalConfig::default()),
+        };
+        assert_eq!(project0_live_authorized(Some(&frame(ok, defaults))), None);
+        assert_eq!(
+            project0_live_authorized(Some(&frame(ok, SystemStatus::default()))),
+            None
+        );
+        assert_eq!(project0_live_authorized(None), None);
+        for q in [
+            crate::proto::StateQuality::Stale,
+            crate::proto::StateQuality::SourceDetached,
+        ] {
+            assert_eq!(project0_live_authorized(Some(&frame(q, with(true)))), None);
+        }
+        let garbage = CachedState {
+            payload: Bytes::from_static(&[0xff, 0xff]),
+            ..frame(ok, with(true))
+        };
+        assert_eq!(project0_live_authorized(Some(&garbage)), None);
     }
 }
