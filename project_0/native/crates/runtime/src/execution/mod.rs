@@ -12,3 +12,5 @@ pub mod prepared;
 pub mod reservation;
 #[cfg(feature = "crate_health")]
 pub mod route;
+#[cfg(feature = "crate_health")]
+pub mod route_cap;

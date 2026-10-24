@@ -943,6 +943,7 @@ pub(super) fn prepare(
             owner_wakeup_ns: Default::default(),
             #[cfg(feature = "crate_health")]
             lane_wait_ns: Default::default(),
+            jupiter_requests_per_routed_revision: Default::default(),
         },
         eval_slippage_bps,
         zero_prefund_enabled: zero_prefund_enabled(&mode, &|k| std::env::var(k).ok())?,
@@ -968,6 +969,10 @@ pub(super) fn prepare(
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             PREPARED_CANDIDATES,
             vec![program_data],
+        )),
+        route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(
+            PREPARED_CANDIDATES,
+            crate::execution::builder::p0::RouteProvider::max_accounts(&routes),
         )),
         atas: LiquidatorAtas::new(liquidator),
         min_profit,

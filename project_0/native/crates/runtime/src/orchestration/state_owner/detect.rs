@@ -404,6 +404,7 @@ impl ShadowOwner {
                         darkbot_solana::tx::BuildVersion::V1,
                     ),
                 prepared: Some((&self.prepared, self.ingress_session.generation)),
+                route_cap: Some(&self.route_cap),
                 path: Path::Rpc,
                 resources: self.resources,
                 limits: TxLimits::default(),
@@ -492,6 +493,9 @@ impl ShadowOwner {
             // MT2: the one Health computation of this detection (above) is the pipeline's and
             // the sizer's Health; none is computed again on the same state and clock.
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::PipelineEvaluations, 1); // [MT0]
+            #[cfg(feature = "crate_health")]
+            let jupiter_before =
+                darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter);
             let mut rec = pipe.evaluate_prepared(
                 acct,
                 trigger,
@@ -502,6 +506,20 @@ impl ShadowOwner {
                 health_result.as_ref(),
             );
             let simulation_failure = pipe.simulation_failure.take();
+            // MT4: Jupiter requests of this revision's evaluation (route quotes are made on
+            // this thread, so the MT0 delta is this evaluation's); a revision without any is
+            // not routed and not a sample.
+            #[cfg(feature = "crate_health")]
+            {
+                let jupiter = darkbot_common::mt0::MT0
+                    .remote_requests(darkbot_common::mt0::RemoteClass::Jupiter)
+                    .saturating_sub(jupiter_before);
+                if jupiter > 0 {
+                    self.metrics
+                        .jupiter_requests_per_routed_revision
+                        .record(jupiter);
+                }
+            }
             rec.rx_slot = Some(slot); // trigger provenance differs from projected evaluation slot
                                       // P2-05: a tagged candidate is woken when its growing premium could make it
                                       // actionable; any other outcome drops the wake-up.

@@ -16,6 +16,9 @@ pub mod p0 {
         PlanError, PlanErrorKind, ReceivershipBuilder, ReceivershipPlan, SolCosts,
     };
     use crate::execution::prepared::{Context, PreparedCache, Skeleton};
+    use crate::execution::route_cap::{
+        FitTrace, Hint, RouteCapCache, RouteCapKey, RouteFootprintClass,
+    };
     use darkbot_project0::economics::{CandidateInput, Path};
     use darkbot_project0::funding::{self, FundingClass, FundingContext};
     use darkbot_project0::health::crate_impl::CrateHealth;
@@ -633,18 +636,42 @@ pub mod p0 {
         Ok(best.map(|(_, r)| r))
     }
 
+    /// [FIX-123][R7/R6] Remote quote requests of one route-fit search (the JIT solve shares the
+    /// bound, `JIT_MAX_QUOTES`); MT4 derives the hint re-probe period from it.
+    pub(crate) const ROUTE_FIT_MAX_ATTEMPTS: u8 = 6;
+
     /// [FIX-123][R7/R6] Router caps are hints; only the complete compiled TX proves fit.
-    /// Bound remote work to six requests. Every changed quote is revalidated and repriced.
+    /// Bound remote work to `ROUTE_FIT_MAX_ATTEMPTS` requests. Every changed quote is
+    /// revalidated and repriced. (The production path takes the traced search below.)
+    #[cfg(test)]
     fn quote_fitting_route<T>(
+        initial_cap: u8,
+        deadline: Instant,
+        quote: impl FnMut(u8) -> Result<Option<Route>, String>,
+        compile: impl FnMut(&Route) -> Result<T, BuildError>,
+    ) -> Result<Option<(Route, T)>, String> {
+        Ok(
+            quote_fitting_route_traced(initial_cap, deadline, quote, compile)?
+                .map(|(route, compiled, _)| (route, compiled)),
+        )
+    }
+
+    /// `quote_fitting_route` with what the search proved (MT4 route-cap hint): the cap the
+    /// real TX fit at and the smallest cap above it the compile rejected in this search. The
+    /// start cap is only where the search begins — a hinted cap that does not fit shrinks
+    /// exactly like any other (P6-MT.14 #31).
+    fn quote_fitting_route_traced<T>(
         initial_cap: u8,
         deadline: Instant,
         mut quote: impl FnMut(u8) -> Result<Option<Route>, String>,
         mut compile: impl FnMut(&Route) -> Result<T, BuildError>,
-    ) -> Result<Option<(Route, T)>, String> {
+    ) -> Result<Option<(Route, T, FitTrace)>, String> {
         let mut cap = initial_cap.clamp(1, 64);
         let mut rejected = Vec::new();
+        // Caps only decrease, so the last rejected cap is the smallest one above the fit.
+        let mut rejected_above = None;
         darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::RouteFitCalls, 1); // [MT0]
-        for attempt in 0..6 {
+        for attempt in 0..u32::from(ROUTE_FIT_MAX_ATTEMPTS) {
             // N2: no re-quote after the candidate deadline.
             if Instant::now() >= deadline {
                 return Err(format!("ROUTE_FIT_DEADLINE after {attempt} attempt(s)"));
@@ -654,7 +681,14 @@ pub mod p0 {
                 return Ok(None);
             };
             match compile(&route) {
-                Ok(compiled) => return Ok(Some((route, compiled))),
+                Ok(compiled) => {
+                    let trace = FitTrace {
+                        fit_cap: cap,
+                        rejected_above,
+                        attempts: attempt + 1,
+                    };
+                    return Ok(Some((route, compiled, trace)));
+                }
                 Err(error) => {
                     let reduction = match &error {
                         BuildError::TooLarge { bytes, max } => {
@@ -677,6 +711,7 @@ pub mod p0 {
                     route_diagnostic(format!("route_budget: attempt={} max_accounts={} route_accounts={} alts={} rejected={}",
                         attempt + 1, cap, route_accounts, route.lookup_tables.len(), error));
                     rejected.push(format!("maxAccounts={cap}: {error}"));
+                    rejected_above = Some(cap);
                     if cap == 1 {
                         break;
                     }
@@ -727,6 +762,10 @@ pub mod p0 {
         /// P2-07: the owner's prepared-candidate cache and its current generation; `None`
         /// prepares every template afresh (the former path).
         pub prepared: Option<(&'a std::cell::RefCell<PreparedCache>, u64)>,
+        /// P6-MT.8 (MT4): the owner's route-cap cache — the start cap of a route-fit search
+        /// per (input mint, output mint, footprint class), never a route or quote; `None`
+        /// searches from the configured maximum every time (the former path).
+        pub route_cap: Option<&'a std::cell::RefCell<RouteCapCache>>,
         pub path: Path,
         pub resources: Resources,
         pub limits: TxLimits,
@@ -1101,6 +1140,36 @@ pub mod p0 {
             };
 
             Ok((ix, exec.underlying_out))
+        }
+
+        /// MT4: the footprint class of the non-route part of this pair's receivership TX — the
+        /// TX compiled with an empty route at the same version, payer, resources and LUT plan
+        /// as the route-fit compile (no remote call). `None` when that TX does not compile:
+        /// then no route fits either and the search reports it as before, uncached.
+        fn route_footprint_class(
+            &self,
+            account: &Pubkey,
+            prep: &Skeleton,
+            sz: &Sizing,
+            protocol_luts: &std::sync::Arc<[AddressLookupTableAccount]>,
+        ) -> Option<RouteFootprintClass> {
+            let instructions = self.receivership(account, prep, sz, vec![]).ok()?;
+            let built = tx::build(
+                &TxPlan {
+                    version: BuildVersion::V0,
+                    payer: self.liquidator,
+                    instructions,
+                    lookup_tables: protocol_luts.clone(),
+                    resources: self.resources,
+                },
+                Hash::default(),
+                &self.limits,
+            )
+            .ok()?;
+            Some(RouteFootprintClass {
+                locked_accounts: u8::try_from(built.locked_accounts).ok()?,
+                serialized_len: u16::try_from(built.serialized_len).ok()?,
+            })
         }
 
         fn receivership(
@@ -1534,8 +1603,31 @@ pub mod p0 {
                         ))
                         .map(|x| x.underlying_out)
                         .unwrap_or(sz.withdraw_amount);
-                    let fitted = quote_fitting_route(
-                        self.routes.max_accounts(),
+                    // MT4: the route-cap hint — only where the search starts; every route
+                    // below is quoted afresh and proven by its own compile.
+                    let configured_cap = self.routes.max_accounts();
+                    let route_cap_key = self.route_cap.and_then(|_| {
+                        self.route_footprint_class(account, &prep, &sz, &protocol_luts)
+                            .map(|class| RouteCapKey {
+                                input_mint: asset_mint,
+                                output_mint: liab_mint,
+                                class,
+                            })
+                    });
+                    let hint = match (self.route_cap, &route_cap_key) {
+                        (Some(cache), Some(key)) => {
+                            Some(cache.borrow_mut().hint(key, configured_cap))
+                        }
+                        _ => None,
+                    };
+                    if let (Some(Hint::Hit { start_cap }), Some(key)) = (hint, &route_cap_key) {
+                        route_diagnostic(format!(
+                            "route_cap_hint: start={start_cap} configured={configured_cap} class={}/{} input={} output={}",
+                            key.class.locked_accounts, key.class.serialized_len, asset_mint, liab_mint
+                        ));
+                    }
+                    let fitted = quote_fitting_route_traced(
+                        hint.map_or(configured_cap, Hint::start_cap),
                         deadline,
                         |cap| {
                             let route = self.routes.quote_exact_in_with_budget(
@@ -1584,7 +1676,15 @@ pub mod p0 {
                         },
                     );
                     let fitted = match fitted {
-                        Ok(v) => v,
+                        Ok(Some((route, ixs, trace))) => {
+                            // Only a proven fit updates the cache; an error, a missing route
+                            // or an exhausted budget leaves the remembered cap as it was.
+                            if let (Some(cache), Some(key)) = (self.route_cap, route_cap_key) {
+                                cache.borrow_mut().record_fit(key, configured_cap, trace);
+                            }
+                            Some((route, ixs))
+                        }
+                        Ok(None) => None,
                         Err(e) => {
                             route_errors
                                 .push(format!("exact-in {}→{}: {}", asset_mint, liab_mint, e));
@@ -2223,15 +2323,16 @@ pub mod p0 {
                 routes: &TestRoutes,
                 zero_prefund: bool,
             ) -> Vec<ReceivershipPlan> {
-                self.plans_with(src, rent, routes, zero_prefund, None)
+                self.plans_with(src, rent, routes, zero_prefund, None, None)
             }
-            fn plans_with(
+            fn plans_with<R: RouteProvider>(
                 &self,
                 src: &FixtureSource,
                 rent: &dyn Fn(u64) -> Option<u64>,
-                routes: &TestRoutes,
+                routes: &R,
                 zero_prefund: bool,
                 prepared: Option<(&std::cell::RefCell<PreparedCache>, u64)>,
+                route_cap: Option<&std::cell::RefCell<RouteCapCache>>,
             ) -> Vec<ReceivershipPlan> {
                 let inventory = |_: &Pubkey| 10_000u64;
                 let ata = |mint: &Pubkey| {
@@ -2262,6 +2363,7 @@ pub mod p0 {
                     instructions: &self.table,
                     v1_plans: false,
                     prepared,
+                    route_cap,
                     path: Path::Rpc,
                     resources: Resources {
                         compute_unit_limit: 400_000,
@@ -2340,7 +2442,8 @@ pub mod p0 {
                     .collect::<Vec<_>>()
             };
             let run = |src: &FixtureSource, routes: &TestRoutes, generation| {
-                let cached = f.plans_with(src, &price, routes, true, Some((&cache, generation)));
+                let cached =
+                    f.plans_with(src, &price, routes, true, Some((&cache, generation)), None);
                 assert!(!cached.is_empty());
                 assert_eq!(shape(&cached), shape(&f.plans(src, &price, routes, true)));
                 let s = cache.borrow().stats;
@@ -2449,7 +2552,7 @@ pub mod p0 {
                 black_box(tx.unwrap());
             };
             let uncached = || f.plans(&src, &price, &routes, false);
-            let cached = || f.plans_with(&src, &price, &routes, false, Some((&cache, 0)));
+            let cached = || f.plans_with(&src, &price, &routes, false, Some((&cache, 0)), None);
             measure("prepare_uncached", &|| {
                 black_box(prepare_skeleton(&src, &f.program, &f.group, &f.account).unwrap());
             });
@@ -2548,6 +2651,7 @@ pub mod p0 {
                     instructions: &f.table,
                     v1_plans: false,
                     prepared: None,
+                    route_cap: None,
                     path: Path::Rpc,
                     resources: Resources {
                         compute_unit_limit: 400_000,
@@ -2625,6 +2729,7 @@ pub mod p0 {
                     instructions: &f.table,
                     v1_plans: false,
                     prepared: None,
+                    route_cap: None,
                     path: Path::Rpc,
                     resources: Resources {
                         compute_unit_limit: 400_000,
@@ -3365,6 +3470,188 @@ pub mod p0 {
             );
             assert!(result.unwrap_err().contains("bad account layout"));
             assert_eq!(calls, 1);
+        }
+
+        /// P6-MT.14 #31 / MT4 (b): a hinted start cap is only where the search begins. A hint
+        /// the real build rejects shrinks exactly like the uncached search and ends in the same
+        /// route; a hint at the proven fit cap ends in that route after one request. The trace
+        /// carries cap numbers only.
+        #[test]
+        fn mt4_hinted_cap_is_validated_by_the_real_build_and_equals_the_uncached_result() {
+            let limits = TxLimits {
+                max_bytes_v0: 500,
+                ..TxLimits::default()
+            };
+            let search = |start: u8| {
+                let mut caps = Vec::new();
+                let (route, built, trace) = quote_fitting_route_traced(
+                    start,
+                    Instant::now() + std::time::Duration::from_secs(60),
+                    |cap| {
+                        caps.push(cap);
+                        Ok(Some(route_for_budget(cap, cap as usize * 20, 0)))
+                    },
+                    |route| compile_route(route, limits),
+                )
+                .unwrap()
+                .unwrap();
+                (route.quoted_out, built.serialized_len, trace, caps)
+            };
+            let (out, len, trace, caps) = search(64);
+            assert!(caps.len() > 1, "{caps:?}");
+            assert_eq!(trace.fit_cap, *caps.last().unwrap());
+            assert_eq!(trace.rejected_above, Some(caps[caps.len() - 2]));
+            assert_eq!(trace.attempts as usize, caps.len());
+            // A hint the build rejects (the smallest rejected cap): shrinks on, same end.
+            let (out2, len2, trace2, caps2) = search(trace.rejected_above.unwrap());
+            assert_eq!((out2, len2, trace2.fit_cap), (out, len, trace.fit_cap));
+            assert_eq!(caps2, caps[caps.len() - 2..].to_vec());
+            // A hint at the proven fit: one request, the same route, nothing rejected above.
+            let (out3, len3, trace3, caps3) = search(trace.fit_cap);
+            assert_eq!((out3, len3, trace3.fit_cap), (out, len, trace.fit_cap));
+            assert_eq!(caps3, vec![trace.fit_cap]);
+            assert_eq!(trace3.rejected_above, None);
+        }
+
+        /// A router whose ExactIn route grows with the cap (one account and 20 data bytes per
+        /// cap unit, deterministic keys), counting every request; `fail` answers an error.
+        struct CapMarket {
+            calls: std::cell::Cell<u32>,
+            fail: std::cell::Cell<bool>,
+            swap_program: Pubkey,
+        }
+        impl RouteProvider for CapMarket {
+            fn quote_exact_in(
+                &self,
+                from: &Pubkey,
+                to: &Pubkey,
+                amount_in: u64,
+                atas: &[PrewarmedAta],
+                deadline: Instant,
+            ) -> Result<Option<Route>, String> {
+                self.quote_exact_in_with_budget(from, to, amount_in, atas, 64, deadline)
+            }
+            fn quote_exact_in_with_budget(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                amount_in: u64,
+                _: &[PrewarmedAta],
+                cap: u8,
+                _: Instant,
+            ) -> Result<Option<Route>, String> {
+                self.calls.set(self.calls.get() + 1);
+                if self.fail.get() {
+                    return Err("provider down".into());
+                }
+                Ok(Some(Route {
+                    instructions: vec![Instruction {
+                        program_id: self.swap_program,
+                        accounts: (1..=cap)
+                            .map(|i| AccountMeta::new(Pubkey::new_from_array([i; 32]), false))
+                            .collect(),
+                        data: vec![1; usize::from(cap) * 20],
+                    }],
+                    lookup_tables: vec![],
+                    swap_program: self.swap_program,
+                    amount_in,
+                    quoted_out: 600,
+                    minimum_executable_out: Some(550),
+                    enforced_slippage_bps: None,
+                }))
+            }
+            fn quote_exact_out(
+                &self,
+                _: &Pubkey,
+                _: &Pubkey,
+                _: u64,
+                _: Instant,
+            ) -> Result<Option<Route>, String> {
+                Ok(None)
+            }
+        }
+
+        /// MT4 (a)/(c) through the production `plans()` path: the first fit of a key is a miss
+        /// and the full search; the second starts at the proven cap and needs one request for
+        /// the same route (same instructions, same slippage) as the uncached search. A provider
+        /// error leaves the inventory plans and the remembered cap untouched; the cache hands
+        /// out a cap number only.
+        #[test]
+        fn mt4_second_route_fit_of_the_same_key_needs_fewer_quotes_and_the_same_route() {
+            use crate::execution::route_cap::Stats;
+            use std::cell::{Cell, RefCell};
+            let f = PlansFixture::new();
+            let price = |l: u64| Some(l);
+            let state = f.state(Pubkey::default(), true);
+            let cache = RefCell::new(RouteCapCache::new(16, 64));
+            let market = CapMarket {
+                calls: Cell::new(0),
+                fail: Cell::new(false),
+                swap_program: Pubkey::new_unique(),
+            };
+            let zp = |plans: &[ReceivershipPlan]| {
+                plans
+                    .iter()
+                    .filter(|p| p.input.funding == FundingClass::ZeroPrefundSameTx)
+                    .map(|p| (p.instructions.clone(), p.slippage_bps, p.tx_version))
+                    .collect::<Vec<_>>()
+            };
+            let uncached = f.plans_with(&state, &price, &market, true, None, None);
+            let full = market.calls.take();
+            assert!(!zp(&uncached).is_empty());
+            assert!(full > 1, "the fixture's route needs shrinking: {full}");
+
+            let _ = take_route_diagnostics();
+            let miss = f.plans_with(&state, &price, &market, true, None, Some(&cache));
+            assert_eq!(
+                market.calls.take(),
+                full,
+                "first use of the key: the full search"
+            );
+            assert_eq!(zp(&miss), zp(&uncached));
+            assert_eq!(cache.borrow().stats.misses, 1);
+            assert_eq!(cache.borrow().len(), 1);
+            assert!(!take_route_diagnostics()
+                .0
+                .iter()
+                .any(|l| l.starts_with("route_cap_hint:")));
+
+            let hit = f.plans_with(&state, &price, &market, true, None, Some(&cache));
+            assert_eq!(market.calls.take(), 1, "the proven cap fits at once");
+            assert_eq!(zp(&hit), zp(&uncached), "the same route as uncached");
+            let (lines, _) = take_route_diagnostics();
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.starts_with("route_cap_hint: start=")),
+                "{lines:?}"
+            );
+            assert_eq!(
+                cache.borrow().stats,
+                Stats {
+                    hits: 1,
+                    misses: 1,
+                    ..Stats::default()
+                }
+            );
+
+            // (c) a provider error: no ZERO_PREFUND plan, inventory plans remain, the
+            // remembered cap and the entry count are unchanged.
+            let remembered = |cache: &RefCell<RouteCapCache>| {
+                let c = cache.borrow();
+                (c.len(), c.stats.hits, c.stats.misses)
+            };
+            let before = cache.borrow().stats;
+            market.fail.set(true);
+            let failed = f.plans_with(&state, &price, &market, true, None, Some(&cache));
+            market.fail.set(false);
+            assert_eq!(market.calls.take(), 1);
+            assert!(zp(&failed).is_empty());
+            assert!(!failed.is_empty(), "the inventory plans remain");
+            assert_eq!(remembered(&cache), (1, before.hits + 1, before.misses));
+            let again = f.plans_with(&state, &price, &market, true, None, Some(&cache));
+            assert_eq!(market.calls.take(), 1, "the hint survived the error");
+            assert_eq!(zp(&again), zp(&uncached));
         }
 
         #[test]

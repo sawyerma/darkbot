@@ -59,4 +59,9 @@ pub(super) struct OwnerMetrics {
     /// count/p50/p95/p99/max per lane. Owner-side only; the persisted MT0 layout is unchanged.
     #[cfg(feature = "crate_health")]
     pub(super) lane_wait_ns: [darkbot_common::mt0::Hist; super::LANES],
+    /// P6-MT.13 `jupiter_requests_per_routed_revision` (MT4): Jupiter requests of one
+    /// candidate evaluation that made at least one, as count/p50/p95/p99/max. Owner-side only;
+    /// the persisted MT0 layout is unchanged.
+    #[cfg(feature = "crate_health")]
+    pub(super) jupiter_requests_per_routed_revision: darkbot_common::mt0::Hist,
 }

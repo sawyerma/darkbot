@@ -107,6 +107,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
             8,
             vec![],
         )),
+        route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(8, 64)),
         atas: accounts::LiquidatorAtas::new(liquidator),
         min_profit: 0,
         integration_probe_enabled: false,

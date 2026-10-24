@@ -122,6 +122,8 @@ pub(super) struct ShadowOwner {
     /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,
     /// a ProgramData change or a new ingress generation.
     prepared: std::cell::RefCell<crate::execution::prepared::PreparedCache>,
+    /// P6-MT.8 (MT4): the route-cap hint cache (in memory only; empty at every start).
+    route_cap: std::cell::RefCell<crate::execution::route_cap::RouteCapCache>,
     /// C11: the liquidator's ATA addresses per mint, derived once.
     atas: accounts::LiquidatorAtas,
     min_profit: i128,

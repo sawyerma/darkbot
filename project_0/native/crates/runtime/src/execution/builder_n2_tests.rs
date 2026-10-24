@@ -314,6 +314,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         instructions: &f.table,
         v1_plans: false,
         prepared: None,
+        route_cap: None,
         path: Path::Rpc,
         resources: Resources {
             compute_unit_limit: 400_000,

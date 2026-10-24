@@ -145,8 +145,36 @@ impl ShadowOwner {
             {
                 let line = self.lane_line();
                 owner_log!(self, "{line}");
+                let line = self.route_cap_line();
+                owner_log!(self, "{line}");
             }
         }
+    }
+
+    /// P6-MT.8/MT.13 (MT4): `route_cap_cache_hits/misses` of the route-cap hint cache and
+    /// `jupiter_requests_per_routed_revision` (quantiles are bucket upper bounds), on their own
+    /// line (pinned parsers unchanged).
+    #[cfg(feature = "crate_health")]
+    pub(super) fn route_cap_line(&self) -> String {
+        let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
+        let cache = self.route_cap.borrow();
+        let j = self.metrics.jupiter_requests_per_routed_revision.snapshot();
+        format!(
+            "route_cap_stats: entries={} max_accounts={} hits={} misses={} reprobes={} evictions={} invalidations={} jupiter_requests_per_routed_revision: n={} sum={} p50={} p95={} p99={} max={}",
+            cache.len(),
+            cache.max_accounts(),
+            cache.stats.hits,
+            cache.stats.misses,
+            cache.stats.reprobes,
+            cache.stats.evictions,
+            cache.stats.invalidations,
+            j.count,
+            j.sum,
+            q(j.p50),
+            q(j.p95),
+            q(j.p99),
+            q(j.max),
+        )
     }
 
     /// P6-MT.13 (MT3): `lane_wait_ns{L0,L1,L2}` (`t_rx_first` → dispatch; quantiles are bucket
