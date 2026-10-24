@@ -5982,3 +5982,12 @@ Commits `286f9cc8`, `366271b5`. Evidence `docs/evidence/FE04_ACCOUNTING_20261024
 - One journal = one attempt; a finished attempt (settled, exit settled, no position) is sealed into `attempts/<wallet>/<approval_id>.p0j`; approval ids single-use across the archive; owner start replays archived bookings into the Safety day; corrupt/unsealed archive files fail closed.
 - `execution::accounting::Ledger`: cumulative realized net over all own attempts and exits, fees, open-inventory mark, FE-07 verdict (`FIRST_REALIZED_PROFIT_EVIDENCED` only all-settled, no position, positive); `withdrawable` = min(realized profit in the asset, balance − holds − reserve), UNKNOWN for cross-asset profit or unknown balance. `p0ctl fe04 accounting|archive`, `approval show --journal-dir`.
 - NOT_RUN: real attempts/exits/chain finality (FE-06/07), production admission caller (FE-06), treasury transfer (no code, separate approval), Mainnet, LIVE.
+
+## 2026-10-24 — Paket 2: P2-04 premium scheduler, P3-03 tag-adjusted premium, P2-05 tag scheduler (LOCAL_PASS offline, rc2)
+
+Commits `4c2cd285`, `b231be36`.
+
+- Gates: `4c2cd285` 826/0/10, 824/0/10, runner 378/0/3 ×2, release, Python PASS; `b231be36` fmt, clippy ×4, 830/0/10, 828/0/10 PASS, runner 379/0/3 ×2, release, Python PASS before a clippy-only merge of one condition. 17 distinct mutations fail-before (P2-04 6, P3-03 4, P2-05 7; the `b231be36` message says 14 — wrong count); 1 equivalent at test resolution (per-second decay valuation).
+- P2-04: healthy premium-active accounts wake the R127 sweep at the first chain second pending premium alone makes them liquidatable; decay valued per day and rounded up (never late; the per-second I80F48 value was), boundary = first second with health < 0; scheduler heap compacted.
+- P3-03/P2-05: sizing uses the program's `tag_adjusted_premium` (base on bad debt / EMODE boost from the crate's health cache); a tagged plan below `min_profit` records `t_profitable_unix_s` (`tag_wakeup`, early side) and the owner re-evaluates and re-forwards it then.
+- NOT_RUN: P1A deployment parity (BLOCKED), Mainnet, real tagged accounts, wake-ups in the non-default threshold mode. Separate: CI-N1 (`native` job, gateway step).

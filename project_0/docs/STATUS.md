@@ -1,6 +1,6 @@
 # Project 0 — Current status
 
-**Current GitHub snapshot: 2026-10-23 · letzter Project_0-Code `c9decd7f` auf `main` (P1B: marginfi 0.1.12-rc2), Offline-Gate PASS `805/0/10`, `803/0/10`, Runner `368/0/3` ×2, Release, Python; GitHub-Actions `project0-gate` 5/5 PASS auf `c9decd7f` (`native` und `contract-and-ui` rot durch BSC/Frontend außerhalb Project_0); Runtime gesperrt bis P1A (Job `native`/Gateway rot seit BSC `9a43fb05`, außerhalb Project_0).** Vorheriger Stand `8246fcfb`. Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`, FE-04-Admission `8bfa63f2`, S1-02/S1-08 Binary-Geyser offline `94086af8`…`8246fcfb`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
+**Current GitHub snapshot: 2026-10-23 · letzter Project_0-Code `b231be36` auf `main` (Paket 2: P2-04/P2-05/P3-03 auf marginfi 0.1.12-rc2), Offline-Gate PASS `830/0/10`, `828/0/10`, Runner `379/0/3` ×2, Release, Python; GitHub-Actions `project0-gate` 5/5 PASS auf `c9decd7f` (`native` und `contract-and-ui` rot durch BSC/Frontend außerhalb Project_0); Runtime gesperrt bis P1A (Job `native`/Gateway rot seit BSC `9a43fb05`, außerhalb Project_0).** Vorheriger Stand `8246fcfb`. Tatsächlich committet: Rust-Workspace mit fünf Crates (`common`, `solana`, `liquidation`, `runtime`, `reporter`); FE-01-Offline-Freeze `6aac2e4f`, FE-02/B4-Kostenbindung `91ed707a`, C3/P8-05-Settlement-Code `2605556c`, FE-04-Admission `8bfa63f2`, S1-02/S1-08 Binary-Geyser offline `94086af8`…`8246fcfb`. Diese neuen Pakete sind **Codefortschritt, kein automatischer FE-01/FE-02/FE-04-/Mainnet-PASS**. Der frühere Snapshot vom 2026-10-17 sowie seine SK-/C0-Teilstände sind historische Evidence (siehe Ledger und Tracker). BSC-Commits auf `main` qualifizieren Project_0 nicht.
 
 Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASUREMENT_LEDGER.md), their JSON navigation indices, actual Rust code and [PERSIST evidence](evidence/PERSIST_BINARY_20261016/qualification.json). Previous October 14 code locations and test counts are historical; no gate is upgraded by this status page.
 
@@ -57,6 +57,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 | `bb26313` | Initial typed owner writer and binary journal WIP | Intermediate version; superseded by `4a27a1c` |
 | **`4a27a1c`** | Production binary journal integration, FE-04 transition journaling, capture/MT0/econ/census/FE-01 journal/replay, reader/export tooling | **PERSIST PARTIAL**, not Mainnet-qualified; Rust 415/417 PASS with 2 ignored each, Python 107 PASS, verifier 29 PASS per recorded local evidence. |
 | [Implementation report](development_history/persist_binary_completion_20261016.md) | Exact migration details and limits | Historical report written before commit; now checked in |
+| **`b231be36`** (2026-10-24) | Paket 2: P2-04 Premium-Grenze weckt den R127-Sweep (`4c2cd285`), P3-03 Tag-Prämie der 0.1.12-EndLiquidation im Sizing + P2-05 Tag-Scheduler (`b231be36`); CI-N1 getrennt erfasst | LOCAL_PASS offline (rc2) · Gate 830/0/10, 828/0/10, runner 379/0/3 ×2 · 17 Mutationen fail-before · P1A-Parität, Mainnet, Wake-ups im Threshold-Modus NOT_RUN |
 | **`6d0d9e8`** (2026-10-22) | BUGS-Durchgang: C11 `[x]` (`154a223`), B15 Rest Bewertung (`3e28b1a`), B3 Start-Replay PARTIAL (`4bb683d`), B14 `[x]` (`1a97a5b`, `8fe7ce0`), unverdrahteter P2-06-Entwurf entfernt (`b2f0f58`), B7 Profil PARTIAL (`6d0d9e8`) | LOCAL_PASS · gate.sh PASS 713/0/9, 711/0/9, runner 349/0/3 ×2 (`90252d3`) · 13 Mutationen fail-before · `plans()` p50 33,5 → 4,25 µs (Fixture) · Rest C3/B1 |
 | **`2774a5e`** (2026-10-22) | P8-RES-01 owner integration (`a79ec2a`), P8-RES-02 owner book from durable FE-04 journal (`a132618`), P8-INV-01 inventory bands + never-spent reserve as LIVE gate + minimal rebalance planner (`8390b8a`), P2-06 prepared candidate cache (`5825d47`), P2-07/P5-07 cache on builder/owner + byte-exact invalidation + offline bench (`2774a5e`) | LOCAL_PASS · gate.sh PASS 710/0/7, 708/0/7, runner 348/0/3 ×2 · 19 mutations fail-before · bench fixture only (plans p50 52.3→49.0 µs); rebalance executor, real-account hit rate, FE-04 runtime driver NOT_RUN |
 | **`e242639`** (2026-10-22) | P4A-JIT-01 ExactIn shortfall solver (`02b16cd`), P5-JIT-01 JIT capital = buy spend (`a82f1a7`), P4A-JIT-02 class comparison (`71287b3`/`bb7a3dc`), P8-RES-01 global reservation + FE-04 net holds (`1be59b3`), P8-RES-02 restart rebuild + target contention | LOCAL_PASS · gate.sh PASS 702/0/6, 700/0/6, runner 343/0/3 · JIT/LIVE real routes NOT_RUN |
@@ -289,26 +290,26 @@ Status vocabulary: **PASS** = every gate criterion evidenced · **LOCAL_PASS** =
 | C0E1-P3-M06 … C0E1-P6-GATE | `market_*`, `analytics/*`, `p0-strict-verify` | `C0E1_P3…P6` evidence | LOCAL_PASS (offline) | 4 h master NOT_QUALIFIED; native report B7 LOCAL_PASS (index provenance stays pinned Python); dead in-capture recovery removed 2026-10-17; `scripts/smoke.sh` stale since `2c62d13` (NOT_RUN) |
 | P2-01 RAM model / P2-02 reverse indices | `state`, `liquidation/index.rs` | R127d Shadow | LOCAL_PASS | requalification after FIX-134/135 not recorded |
 | P2-03 threshold index | `index.rs` | — | CODE | not the default since R127 |
-| P2-04 premium scheduler / P2-05 tag scheduler | `schedule.rs` | unit tests | CODE | 0.1.12 semantics |
+| P2-04 premium scheduler / P2-05 tag scheduler | `schedule.rs`, owner `time_schedule` (`sweep.rs`, `detect.rs`), `economics::tag_wakeup` | `4c2cd285`, `b231be36` | LOCAL_PASS | only in the default R127 sweep mode; Mainnet NOT_RUN |
 | P2-06 prepared candidate / TX template cache | `runtime/src/execution/prepared.rs` (unwired draft `liquidation/src/prepared.rs` removed) | `5825d47`, `2774a5e` | LOCAL_PASS | real-account hit rate NOT_RUN |
-| P2-07 invalidation + prebuild benchmark | — | — | OPEN | — |
+| P2-07 invalidation + prebuild benchmark | `execution/prepared.rs`, builder/owner | `2774a5e` | LOCAL_PASS | bench fixture only; real-account hit rate NOT_RUN |
 | P3-01 crate integration / exact fallback | `health.rs` | R127d 12.4 M checks | LOCAL_PASS | — |
-| P3-02 premium health | — | RC2 API identified | OPEN | 0.1.12 promotion (`premium_scratch`) |
-| P3-03 receivership rule | `sizing.rs` | unit tests | PARTIAL | 0.1.12 health-drop / bad-debt rules |
+| P3-02 premium health | `health.rs` (projected premium via the rc2 crate) | `c9decd7f` | LOCAL_PASS | rc2 pin; P1A deployment parity BLOCKED |
+| P3-03 receivership rule | `sizing.rs` (solvency cap, cap below closeout, `tag_adjusted_premium`, bad debt / EMODE boost) | `c9decd7f`, `b231be36` | LOCAL_PASS | rc2 pin; P1A deployment parity BLOCKED |
 | P3-04 integration parity | `integration.rs` | R110–R122 | PARTIAL | Drift qualification OPEN since 2026-10-07 |
-| P3-05 parity corpus | — | — | OPEN | — |
+| P3-05 parity corpus | — | — | BLOCKED | needs the P1A-pinned deployment and 0.1.12 captures (Mainnet read approval) |
 | P4A-01 realizable value | `economics.rs`, route floor | R124 historical | PARTIAL | current executable floor (FE-02) |
 | P4A-02 fee model | FIX-129, `MessageFeeQuote` | FIX129 doc | PARTIAL | Jito tip cost UNKNOWN |
 | P4A-03 failed-attempt matrix / P4A-04 `t_profitable` / P4A-06 ranking | `economics.rs` | unit tests | LOCAL_PASS | Mainnet calibration |
 | P4A-05 capital model | `funding.rs` | P6-MT T1 | LOCAL_PASS | — |
-| P4A-JIT-01/02 | `route.rs` (ExactIn build), `funding.rs` | P1-C PASS | PARTIAL | bounded shortfall solver vs. classes, current quotes |
+| P4A-JIT-01/02 | `route.rs` (ExactIn build), `funding.rs` | `e242639` | PARTIAL | offline done; current quotes NOT_RUN |
 | P5-01 allowlist / P5-03 NO_SWAP | `planner.rs` | unit tests | LOCAL_PASS | — |
 | P5-02 refresh planner | `integration.rs` | R116–R122 | PARTIAL | Drift |
-| P5-04 local/precomputed route | — | — | OPEN | — |
+| P5-04 local/precomputed route | `RouteKind::LocalPrecomputedAllowed` (class only) | — | NOT_AVAILABLE | PHASENPLAN P5: no local router evidenced; not built |
 | P5-05 free route | Jupiter `/swap/v2/build` adapter | R118/R119 | PARTIAL | adapter typing per JFI-02 exception (FIX-07) |
 | P5-06 receivership builder / P5-07 prepared plan | `receivership.rs`, `builder.rs` | simulation path; P5 fee-wallet fix ledger 2026-10-17 | PARTIAL | fee-wallet fallback **fixed fail-closed** (`FEE_STATE_UNAVAILABLE` blocks every plan → Unavailable/Unknown, LOCAL_PASS); full P5 acceptance OPEN |
 | P5-08 staging fixtures | — | `STAGING_MODEL.md` | OPEN | staging build + allowlist (permission for staging reads) |
-| P5-JIT-01 | `route.rs`, `builder.rs` | — | PARTIAL | — |
+| P5-JIT-01 | `route.rs`, `builder.rs` | `a82f1a7` | PARTIAL | offline done; current routes NOT_RUN |
 | T-01…03 tag TX / state / economics | economics curve only | — | OPEN · BLOCKED | 0.1.12 deployment |
 | P6-01 E2E telemetry | MT0, owner journal | MT0 evidence | LOCAL_PASS | Mainnet tails NOT_MEASURED |
 | P6-02 race shadow | — | — | OPEN · DEFERRED_PRIORITY | S1-RACE |

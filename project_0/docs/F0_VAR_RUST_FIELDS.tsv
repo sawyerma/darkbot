@@ -451,32 +451,35 @@ FIELD	project_0/native/crates/liquidation/src/economics.rs	88	struct	pub	ProfitI
 FIELD	project_0/native/crates/liquidation/src/economics.rs	89	struct	pub	ProfitInputs	realizable_bps	u64	89
 FIELD	project_0/native/crates/liquidation/src/economics.rs	90	struct	pub	ProfitInputs	fixed_costs	u64	90
 FIELD	project_0/native/crates/liquidation/src/economics.rs	91	struct	pub	ProfitInputs	min_profit	i128	91
-DECL	project_0/native/crates/liquidation/src/economics.rs	161	enum	pub	Path	-	-	-
-VARIANT	project_0/native/crates/liquidation/src/economics.rs	162	enum	pub	Path	Rpc	-	162
-VARIANT	project_0/native/crates/liquidation/src/economics.rs	163	enum	pub	Path	JitoSingle	-	163
-VARIANT	project_0/native/crates/liquidation/src/economics.rs	164	enum	pub	Path	JitoBundle	-	164
-DECL	project_0/native/crates/liquidation/src/economics.rs	183	struct	pub	FailedCostMatrix	-	-	-
-FIELD	project_0/native/crates/liquidation/src/economics.rs	184	struct	pub	FailedCostMatrix	rpc_not_landed	Option<u64>	184
-FIELD	project_0/native/crates/liquidation/src/economics.rs	185	struct	pub	FailedCostMatrix	rpc_landed_revert	Option<u64>	185
-FIELD	project_0/native/crates/liquidation/src/economics.rs	186	struct	pub	FailedCostMatrix	jito_single_not_landed	Option<u64>	186
-FIELD	project_0/native/crates/liquidation/src/economics.rs	187	struct	pub	FailedCostMatrix	jito_single_landed_revert	Option<u64>	187
-FIELD	project_0/native/crates/liquidation/src/economics.rs	188	struct	pub	FailedCostMatrix	jito_bundle_not_landed	Option<u64>	188
-FIELD	project_0/native/crates/liquidation/src/economics.rs	189	struct	pub	FailedCostMatrix	jito_bundle_failed	Option<u64>	189
-DECL	project_0/native/crates/liquidation/src/economics.rs	227	struct	pub	CandidateInput	-	-	-
-FIELD	project_0/native/crates/liquidation/src/economics.rs	231	struct	pub	CandidateInput	gross_seized_realizable_usd_micro	Option<u64>	231
-FIELD	project_0/native/crates/liquidation/src/economics.rs	232	struct	pub	CandidateInput	repay_usd_micro	u64	232
-FIELD	project_0/native/crates/liquidation/src/economics.rs	233	struct	pub	CandidateInput	protocol_fees_usd_micro	u64	233
-FIELD	project_0/native/crates/liquidation/src/economics.rs	234	struct	pub	CandidateInput	flat_sol_fee_usd_micro	u64	234
-FIELD	project_0/native/crates/liquidation/src/economics.rs	235	struct	pub	CandidateInput	swap_fees_and_impact_usd_micro	u64	235
-FIELD	project_0/native/crates/liquidation/src/economics.rs	237	struct	pub	CandidateInput	transaction_fee_usd_micro	Option<u64>	237
-FIELD	project_0/native/crates/liquidation/src/economics.rs	238	struct	pub	CandidateInput	jito_tip_usd_micro	u64	238
-FIELD	project_0/native/crates/liquidation/src/economics.rs	239	struct	pub	CandidateInput	rent_and_token_usd_micro	Option<u64>	239
-FIELD	project_0/native/crates/liquidation/src/economics.rs	240	struct	pub	CandidateInput	required_capital_usd_micro	u64	240
-FIELD	project_0/native/crates/liquidation/src/economics.rs	241	struct	pub	CandidateInput	path	Path	241
-FIELD	project_0/native/crates/liquidation/src/economics.rs	242	struct	pub	CandidateInput	funding	crate::funding::FundingClass	242
-DECL	project_0/native/crates/liquidation/src/economics.rs	246	enum	pub	Evaluation	-	-	-
-VARIANT	project_0/native/crates/liquidation/src/economics.rs	248	enum	pub	Evaluation	Known	-	248
-VARIANT	project_0/native/crates/liquidation/src/economics.rs	253	enum	pub	Evaluation	Unknown	-	253
+DECL	project_0/native/crates/liquidation/src/economics.rs	150	struct	pub	TagGrowth	-	-	-
+FIELD	project_0/native/crates/liquidation/src/economics.rs	151	struct	pub	TagGrowth	tagged_at	u64	151
+FIELD	project_0/native/crates/liquidation/src/economics.rs	152	struct	pub	TagGrowth	fee_state_max_bps	u64	152
+DECL	project_0/native/crates/liquidation/src/economics.rs	206	enum	pub	Path	-	-	-
+VARIANT	project_0/native/crates/liquidation/src/economics.rs	207	enum	pub	Path	Rpc	-	207
+VARIANT	project_0/native/crates/liquidation/src/economics.rs	208	enum	pub	Path	JitoSingle	-	208
+VARIANT	project_0/native/crates/liquidation/src/economics.rs	209	enum	pub	Path	JitoBundle	-	209
+DECL	project_0/native/crates/liquidation/src/economics.rs	228	struct	pub	FailedCostMatrix	-	-	-
+FIELD	project_0/native/crates/liquidation/src/economics.rs	229	struct	pub	FailedCostMatrix	rpc_not_landed	Option<u64>	229
+FIELD	project_0/native/crates/liquidation/src/economics.rs	230	struct	pub	FailedCostMatrix	rpc_landed_revert	Option<u64>	230
+FIELD	project_0/native/crates/liquidation/src/economics.rs	231	struct	pub	FailedCostMatrix	jito_single_not_landed	Option<u64>	231
+FIELD	project_0/native/crates/liquidation/src/economics.rs	232	struct	pub	FailedCostMatrix	jito_single_landed_revert	Option<u64>	232
+FIELD	project_0/native/crates/liquidation/src/economics.rs	233	struct	pub	FailedCostMatrix	jito_bundle_not_landed	Option<u64>	233
+FIELD	project_0/native/crates/liquidation/src/economics.rs	234	struct	pub	FailedCostMatrix	jito_bundle_failed	Option<u64>	234
+DECL	project_0/native/crates/liquidation/src/economics.rs	272	struct	pub	CandidateInput	-	-	-
+FIELD	project_0/native/crates/liquidation/src/economics.rs	276	struct	pub	CandidateInput	gross_seized_realizable_usd_micro	Option<u64>	276
+FIELD	project_0/native/crates/liquidation/src/economics.rs	277	struct	pub	CandidateInput	repay_usd_micro	u64	277
+FIELD	project_0/native/crates/liquidation/src/economics.rs	278	struct	pub	CandidateInput	protocol_fees_usd_micro	u64	278
+FIELD	project_0/native/crates/liquidation/src/economics.rs	279	struct	pub	CandidateInput	flat_sol_fee_usd_micro	u64	279
+FIELD	project_0/native/crates/liquidation/src/economics.rs	280	struct	pub	CandidateInput	swap_fees_and_impact_usd_micro	u64	280
+FIELD	project_0/native/crates/liquidation/src/economics.rs	282	struct	pub	CandidateInput	transaction_fee_usd_micro	Option<u64>	282
+FIELD	project_0/native/crates/liquidation/src/economics.rs	283	struct	pub	CandidateInput	jito_tip_usd_micro	u64	283
+FIELD	project_0/native/crates/liquidation/src/economics.rs	284	struct	pub	CandidateInput	rent_and_token_usd_micro	Option<u64>	284
+FIELD	project_0/native/crates/liquidation/src/economics.rs	285	struct	pub	CandidateInput	required_capital_usd_micro	u64	285
+FIELD	project_0/native/crates/liquidation/src/economics.rs	286	struct	pub	CandidateInput	path	Path	286
+FIELD	project_0/native/crates/liquidation/src/economics.rs	287	struct	pub	CandidateInput	funding	crate::funding::FundingClass	287
+DECL	project_0/native/crates/liquidation/src/economics.rs	291	enum	pub	Evaluation	-	-	-
+VARIANT	project_0/native/crates/liquidation/src/economics.rs	293	enum	pub	Evaluation	Known	-	293
+VARIANT	project_0/native/crates/liquidation/src/economics.rs	298	enum	pub	Evaluation	Unknown	-	298
 DECL	project_0/native/crates/liquidation/src/execution.rs	15	struct	pub	Freshness	-	-	-
 FIELD	project_0/native/crates/liquidation/src/execution.rs	17	struct	pub	Freshness	max_opportunity_age_ns	u64	17
 FIELD	project_0/native/crates/liquidation/src/execution.rs	19	struct	pub	Freshness	execution_deadline_ns	u64	19
@@ -546,27 +549,27 @@ VARIANT	project_0/native/crates/liquidation/src/health.rs	57	enum	pub	HealthErro
 DECL	project_0/native/crates/liquidation/src/health.rs	344	struct	pub	CrateHealth	-	-	-
 FIELD	project_0/native/crates/liquidation/src/health.rs	346	struct	pub	CrateHealth	state	&'s S	346
 FIELD	project_0/native/crates/liquidation/src/health.rs	347	struct	pub	CrateHealth	group	Pubkey	347
-DECL	project_0/native/crates/liquidation/src/health.rs	617	struct	private	Component	-	-	-
-FIELD	project_0/native/crates/liquidation/src/health.rs	618	struct	private	Component	amount	I80F48	618
-FIELD	project_0/native/crates/liquidation/src/health.rs	619	struct	private	Component	weight	I80F48	619
-FIELD	project_0/native/crates/liquidation/src/health.rs	620	struct	private	Component	decimals	u8	620
-DECL	project_0/native/crates/liquidation/src/health.rs	622	struct	private	Position	-	-	-
-FIELD	project_0/native/crates/liquidation/src/health.rs	623	struct	private	Position	bank	Pubkey	623
-FIELD	project_0/native/crates/liquidation/src/health.rs	624	struct	private	Position	side	Side	624
-FIELD	project_0/native/crates/liquidation/src/health.rs	625	struct	private	Position	current_price	I80F48	625
-FIELD	project_0/native/crates/liquidation/src/health.rs	626	struct	private	Position	components	Vec<Component>	626
-FIELD	project_0/native/crates/liquidation/src/health.rs	627	struct	private	Position	contribution	I80F48	627
-DECL	project_0/native/crates/liquidation/src/health.rs	1076	struct	private	Source	-	-	-
-DECL	project_0/native/crates/liquidation/src/health.rs	1179	struct	private	EmptySource	-	-	-
-DECL	project_0/native/crates/liquidation/src/health.rs	1221	enum	pub	DependencyGap	-	-	-
-VARIANT	project_0/native/crates/liquidation/src/health.rs	1223	enum	pub	DependencyGap	Missing	-	1223
-VARIANT	project_0/native/crates/liquidation/src/health.rs	1225	enum	pub	DependencyGap	ForeignOwner	-	1225
-VARIANT	project_0/native/crates/liquidation/src/health.rs	1227	enum	pub	DependencyGap	NotABank	-	1227
-VARIANT	project_0/native/crates/liquidation/src/health.rs	1229	enum	pub	DependencyGap	UnknownLayout	-	1229
-VARIANT	project_0/native/crates/liquidation/src/health.rs	1232	enum	pub	DependencyGap	UnsupportedOracle	-	1232
-DECL	project_0/native/crates/liquidation/src/health.rs	1248	struct	pub	DependencyScan	-	-	-
-FIELD	project_0/native/crates/liquidation/src/health.rs	1249	struct	pub	DependencyScan	keys	Vec<Pubkey>	1249
-FIELD	project_0/native/crates/liquidation/src/health.rs	1250	struct	pub	DependencyScan	gaps	Vec<(Pubkey, DependencyGap)>	1250
+DECL	project_0/native/crates/liquidation/src/health.rs	656	struct	private	Component	-	-	-
+FIELD	project_0/native/crates/liquidation/src/health.rs	657	struct	private	Component	amount	I80F48	657
+FIELD	project_0/native/crates/liquidation/src/health.rs	658	struct	private	Component	weight	I80F48	658
+FIELD	project_0/native/crates/liquidation/src/health.rs	659	struct	private	Component	decimals	u8	659
+DECL	project_0/native/crates/liquidation/src/health.rs	661	struct	private	Position	-	-	-
+FIELD	project_0/native/crates/liquidation/src/health.rs	662	struct	private	Position	bank	Pubkey	662
+FIELD	project_0/native/crates/liquidation/src/health.rs	663	struct	private	Position	side	Side	663
+FIELD	project_0/native/crates/liquidation/src/health.rs	664	struct	private	Position	current_price	I80F48	664
+FIELD	project_0/native/crates/liquidation/src/health.rs	665	struct	private	Position	components	Vec<Component>	665
+FIELD	project_0/native/crates/liquidation/src/health.rs	666	struct	private	Position	contribution	I80F48	666
+DECL	project_0/native/crates/liquidation/src/health.rs	1128	struct	private	Source	-	-	-
+DECL	project_0/native/crates/liquidation/src/health.rs	1231	struct	private	EmptySource	-	-	-
+DECL	project_0/native/crates/liquidation/src/health.rs	1273	enum	pub	DependencyGap	-	-	-
+VARIANT	project_0/native/crates/liquidation/src/health.rs	1275	enum	pub	DependencyGap	Missing	-	1275
+VARIANT	project_0/native/crates/liquidation/src/health.rs	1277	enum	pub	DependencyGap	ForeignOwner	-	1277
+VARIANT	project_0/native/crates/liquidation/src/health.rs	1279	enum	pub	DependencyGap	NotABank	-	1279
+VARIANT	project_0/native/crates/liquidation/src/health.rs	1281	enum	pub	DependencyGap	UnknownLayout	-	1281
+VARIANT	project_0/native/crates/liquidation/src/health.rs	1284	enum	pub	DependencyGap	UnsupportedOracle	-	1284
+DECL	project_0/native/crates/liquidation/src/health.rs	1300	struct	pub	DependencyScan	-	-	-
+FIELD	project_0/native/crates/liquidation/src/health.rs	1301	struct	pub	DependencyScan	keys	Vec<Pubkey>	1301
+FIELD	project_0/native/crates/liquidation/src/health.rs	1302	struct	pub	DependencyScan	gaps	Vec<(Pubkey, DependencyGap)>	1302
 DECL	project_0/native/crates/liquidation/src/index.rs	19	enum	pub	Side	-	-	-
 VARIANT	project_0/native/crates/liquidation/src/index.rs	21	enum	pub	Side	Asset	-	21
 VARIANT	project_0/native/crates/liquidation/src/index.rs	23	enum	pub	Side	Liability	-	23
@@ -770,74 +773,75 @@ FIELD	project_0/native/crates/liquidation/src/schedule.rs	33	struct	private	Time
 FIELD	project_0/native/crates/liquidation/src/schedule.rs	34	struct	private	TimeScheduler	by_seq	HashMap<u64, Due>	34
 FIELD	project_0/native/crates/liquidation/src/schedule.rs	35	struct	private	TimeScheduler	current	HashMap<(Pubkey, Trigger), u64>, // → seq (für Invalidation)	35
 FIELD	project_0/native/crates/liquidation/src/schedule.rs	36	struct	private	TimeScheduler	next_seq	u64	36
-DECL	project_0/native/crates/liquidation/src/sizing.rs	42	struct	pub	ProtocolSizing	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	43	struct	pub	ProtocolSizing	asset_bank	Pubkey	43
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	44	struct	pub	ProtocolSizing	liab_bank	Pubkey	44
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	46	struct	pub	ProtocolSizing	withdraw_amount	u64	46
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	48	struct	pub	ProtocolSizing	repay_amount	u64	48
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	51	struct	pub	ProtocolSizing	repay_all	bool	51
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	53	struct	pub	ProtocolSizing	seized_equity_value_micro	u64	53
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	54	struct	pub	ProtocolSizing	repay_equity_value_micro	u64	54
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	57	struct	pub	ProtocolSizing	repay_transfer_value_micro	u64	57
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	59	struct	pub	ProtocolSizing	premium_bps	u64	59
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	61	struct	pub	ProtocolSizing	fee_state_max_bps	u64	61
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	62	struct	pub	ProtocolSizing	flat_sol_fee_lamports	u64	62
-DECL	project_0/native/crates/liquidation/src/sizing.rs	107	enum	pub	SizingErrorKind	-	-	-
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	109	enum	pub	SizingErrorKind	NoValidPair	-	109
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	111	enum	pub	SizingErrorKind	IntegrationStale	-	111
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	113	enum	pub	SizingErrorKind	HealthUnavailable	-	113
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	115	enum	pub	SizingErrorKind	Other	-	115
-DECL	project_0/native/crates/liquidation/src/sizing.rs	119	struct	pub	SizingError	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	120	struct	pub	SizingError	kind	SizingErrorKind	120
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	121	struct	pub	SizingError	text	String	121
-DECL	project_0/native/crates/liquidation/src/sizing.rs	186	enum	pub	NoSizeReason	-	-	-
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	187	enum	pub	NoSizeReason	NotMarginfiAccount	-	187
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	188	enum	pub	NoSizeReason	NoAsset	-	188
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	189	enum	pub	NoSizeReason	NoLiability	-	189
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	190	enum	pub	NoSizeReason	UnsupportedIntegrationAsset	-	190
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	191	enum	pub	NoSizeReason	UnsupportedIntegrationLiability	-	191
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	192	enum	pub	NoSizeReason	NoSupportedAssetBank	-	192
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	193	enum	pub	NoSizeReason	NoSupportedLiabilityBank	-	193
-VARIANT	project_0/native/crates/liquidation/src/sizing.rs	194	enum	pub	NoSizeReason	NoValidProtocolPair	-	194
-DECL	project_0/native/crates/liquidation/src/sizing.rs	227	struct	pub	FeeSnapshot	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	228	struct	pub	FeeSnapshot	global_fee_wallet	Pubkey	228
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	229	struct	pub	FeeSnapshot	liquidation_max_bps	u64	229
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	230	struct	pub	FeeSnapshot	liquidation_flat_sol_fee_lamports	u64	230
-DECL	project_0/native/crates/liquidation/src/sizing.rs	233	struct	pub	ProtocolSizer	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	234	struct	pub	ProtocolSizer	state	&'a S	234
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	235	struct	pub	ProtocolSizer	program	Pubkey	235
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	236	struct	pub	ProtocolSizer	group	Pubkey	236
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	237	struct	pub	ProtocolSizer	headroom_bps	u64	237
-DECL	project_0/native/crates/liquidation/src/sizing.rs	241	struct	private	Prices	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	243	struct	private	Prices	equity	I80F48	243
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	244	struct	private	Prices	maint_asset	I80F48	244
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	245	struct	private	Prices	maint_liab	I80F48	245
-DECL	project_0/native/crates/liquidation/src/sizing.rs	249	struct	private	Position	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	250	struct	private	Position	bank_pk	Pubkey	250
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	251	struct	private	Position	bank	Bank	251
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	253	struct	private	Position	amount	I80F48	253
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	256	struct	private	Position	opposite_amount	I80F48	256
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	257	struct	private	Position	equity_value	I80F48	257
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	258	struct	private	Position	maintenance_unweighted_value	I80F48	258
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	260	struct	private	Position	prices	Prices	260
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	262	struct	private	Position	owed	Owed	262
-DECL	project_0/native/crates/liquidation/src/sizing.rs	272	struct	private	Owed	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	273	struct	private	Owed	principal	I80F48	273
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	274	struct	private	Owed	premium	I80F48	274
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	275	struct	private	Owed	premium_at_horizon	I80F48	275
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	276	struct	private	Owed	opposite	I80F48	276
-DECL	project_0/native/crates/liquidation/src/sizing.rs	369	struct	private	RepayChoice	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	370	struct	private	RepayChoice	transfer_amount	u64	370
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	371	struct	private	RepayChoice	protocol_amount	I80F48	371
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	372	struct	private	RepayChoice	repay_all	bool	372
-DECL	project_0/native/crates/liquidation/src/sizing.rs	1344	struct	private	Source	-	-	-
-DECL	project_0/native/crates/liquidation/src/sizing.rs	1558	struct	private	Source	-	-	-
-DECL	project_0/native/crates/liquidation/src/sizing.rs	1628	struct	private	Source	-	-	-
-DECL	project_0/native/crates/liquidation/src/sizing.rs	1948	struct	private	TwoBank	-	-	-
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	1949	struct	private	TwoBank	state	std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>	1949
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	1950	struct	private	TwoBank	program	Pubkey	1950
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	1951	struct	private	TwoBank	group	Pubkey	1951
-FIELD	project_0/native/crates/liquidation/src/sizing.rs	1952	struct	private	TwoBank	account	Pubkey	1952
+DECL	project_0/native/crates/liquidation/src/sizing.rs	43	struct	pub	ProtocolSizing	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	44	struct	pub	ProtocolSizing	asset_bank	Pubkey	44
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	45	struct	pub	ProtocolSizing	liab_bank	Pubkey	45
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	47	struct	pub	ProtocolSizing	withdraw_amount	u64	47
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	49	struct	pub	ProtocolSizing	repay_amount	u64	49
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	52	struct	pub	ProtocolSizing	repay_all	bool	52
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	54	struct	pub	ProtocolSizing	seized_equity_value_micro	u64	54
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	55	struct	pub	ProtocolSizing	repay_equity_value_micro	u64	55
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	58	struct	pub	ProtocolSizing	repay_transfer_value_micro	u64	58
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	60	struct	pub	ProtocolSizing	premium_bps	u64	60
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	62	struct	pub	ProtocolSizing	fee_state_max_bps	u64	62
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	63	struct	pub	ProtocolSizing	flat_sol_fee_lamports	u64	63
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	65	struct	pub	ProtocolSizing	tag_growth	Option<crate::economics::TagGrowth>	65
+DECL	project_0/native/crates/liquidation/src/sizing.rs	110	enum	pub	SizingErrorKind	-	-	-
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	112	enum	pub	SizingErrorKind	NoValidPair	-	112
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	114	enum	pub	SizingErrorKind	IntegrationStale	-	114
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	116	enum	pub	SizingErrorKind	HealthUnavailable	-	116
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	118	enum	pub	SizingErrorKind	Other	-	118
+DECL	project_0/native/crates/liquidation/src/sizing.rs	122	struct	pub	SizingError	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	123	struct	pub	SizingError	kind	SizingErrorKind	123
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	124	struct	pub	SizingError	text	String	124
+DECL	project_0/native/crates/liquidation/src/sizing.rs	189	enum	pub	NoSizeReason	-	-	-
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	190	enum	pub	NoSizeReason	NotMarginfiAccount	-	190
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	191	enum	pub	NoSizeReason	NoAsset	-	191
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	192	enum	pub	NoSizeReason	NoLiability	-	192
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	193	enum	pub	NoSizeReason	UnsupportedIntegrationAsset	-	193
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	194	enum	pub	NoSizeReason	UnsupportedIntegrationLiability	-	194
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	195	enum	pub	NoSizeReason	NoSupportedAssetBank	-	195
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	196	enum	pub	NoSizeReason	NoSupportedLiabilityBank	-	196
+VARIANT	project_0/native/crates/liquidation/src/sizing.rs	197	enum	pub	NoSizeReason	NoValidProtocolPair	-	197
+DECL	project_0/native/crates/liquidation/src/sizing.rs	230	struct	pub	FeeSnapshot	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	231	struct	pub	FeeSnapshot	global_fee_wallet	Pubkey	231
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	232	struct	pub	FeeSnapshot	liquidation_max_bps	u64	232
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	233	struct	pub	FeeSnapshot	liquidation_flat_sol_fee_lamports	u64	233
+DECL	project_0/native/crates/liquidation/src/sizing.rs	236	struct	pub	ProtocolSizer	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	237	struct	pub	ProtocolSizer	state	&'a S	237
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	238	struct	pub	ProtocolSizer	program	Pubkey	238
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	239	struct	pub	ProtocolSizer	group	Pubkey	239
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	240	struct	pub	ProtocolSizer	headroom_bps	u64	240
+DECL	project_0/native/crates/liquidation/src/sizing.rs	244	struct	private	Prices	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	246	struct	private	Prices	equity	I80F48	246
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	247	struct	private	Prices	maint_asset	I80F48	247
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	248	struct	private	Prices	maint_liab	I80F48	248
+DECL	project_0/native/crates/liquidation/src/sizing.rs	252	struct	private	Position	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	253	struct	private	Position	bank_pk	Pubkey	253
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	254	struct	private	Position	bank	Bank	254
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	256	struct	private	Position	amount	I80F48	256
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	259	struct	private	Position	opposite_amount	I80F48	259
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	260	struct	private	Position	equity_value	I80F48	260
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	261	struct	private	Position	maintenance_unweighted_value	I80F48	261
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	263	struct	private	Position	prices	Prices	263
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	265	struct	private	Position	owed	Owed	265
+DECL	project_0/native/crates/liquidation/src/sizing.rs	275	struct	private	Owed	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	276	struct	private	Owed	principal	I80F48	276
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	277	struct	private	Owed	premium	I80F48	277
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	278	struct	private	Owed	premium_at_horizon	I80F48	278
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	279	struct	private	Owed	opposite	I80F48	279
+DECL	project_0/native/crates/liquidation/src/sizing.rs	372	struct	private	RepayChoice	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	373	struct	private	RepayChoice	transfer_amount	u64	373
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	374	struct	private	RepayChoice	protocol_amount	I80F48	374
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	375	struct	private	RepayChoice	repay_all	bool	375
+DECL	project_0/native/crates/liquidation/src/sizing.rs	1369	struct	private	Source	-	-	-
+DECL	project_0/native/crates/liquidation/src/sizing.rs	1583	struct	private	Source	-	-	-
+DECL	project_0/native/crates/liquidation/src/sizing.rs	1653	struct	private	Source	-	-	-
+DECL	project_0/native/crates/liquidation/src/sizing.rs	1973	struct	private	TwoBank	-	-	-
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	1974	struct	private	TwoBank	state	std::collections::HashMap<Pubkey, (Pubkey, Vec<u8>)>	1974
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	1975	struct	private	TwoBank	program	Pubkey	1975
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	1976	struct	private	TwoBank	group	Pubkey	1976
+FIELD	project_0/native/crates/liquidation/src/sizing.rs	1977	struct	private	TwoBank	account	Pubkey	1977
 DECL	project_0/native/crates/liquidation/tests/b7_profile.rs	24	struct	private	Counting	-	-	-
 DECL	project_0/native/crates/liquidation/tests/b7_profile.rs	38	struct	private	Map	-	-	-
 DECL	project_0/native/crates/reporter/src/env_file.rs	3	struct	pub	Loaded	-	-	-
@@ -1562,24 +1566,25 @@ FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	712	struct	pri
 FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	713	struct	private	CountingSubmitter	sims	Arc<AtomicU64>	713
 DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	752	struct	private	TestHealth	-	-	-
 DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	819	struct	private	TestBuilder	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1065	struct	private	HandoffSubmitter	-	-	-
-FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1066	struct	private	HandoffSubmitter	submits	Arc<AtomicU64>	1066
-FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1067	struct	private	HandoffSubmitter	sims	Arc<AtomicU64>	1067
-FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1068	struct	private	HandoffSubmitter	transport_fails	bool	1068
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1115	struct	private	AdmissionBuilder	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1593	struct	private	TipBuilder	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1699	struct	private	Rewritten	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1826	struct	private	FeeCounting	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1862	struct	private	TwoClasses	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2597	struct	private	SlowSubmitter	-	-	-
-FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2598	struct	private	SlowSubmitter	delay	Duration	2598
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2804	enum	private	Shape	-	-	-
-VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2805	enum	private	Shape	Broken	-	2805
-VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2806	enum	private	Shape	Bundle	-	2806
-VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2807	enum	private	Shape	Valid	-	2807
-VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2808	enum	private	Shape	Losing	-	2808
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2810	struct	private	Shaped	-	-	-
-DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2961	struct	private	Failing	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	983	struct	private	Tagged	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1203	struct	private	HandoffSubmitter	-	-	-
+FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1204	struct	private	HandoffSubmitter	submits	Arc<AtomicU64>	1204
+FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1205	struct	private	HandoffSubmitter	sims	Arc<AtomicU64>	1205
+FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1206	struct	private	HandoffSubmitter	transport_fails	bool	1206
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1253	struct	private	AdmissionBuilder	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1731	struct	private	TipBuilder	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1837	struct	private	Rewritten	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	1964	struct	private	FeeCounting	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2000	struct	private	TwoClasses	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2735	struct	private	SlowSubmitter	-	-	-
+FIELD	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2736	struct	private	SlowSubmitter	delay	Duration	2736
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2942	enum	private	Shape	-	-	-
+VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2943	enum	private	Shape	Broken	-	2943
+VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2944	enum	private	Shape	Bundle	-	2944
+VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2945	enum	private	Shape	Valid	-	2945
+VARIANT	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2946	enum	private	Shape	Losing	-	2946
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	2948	struct	private	Shaped	-	-	-
+DECL	project_0/native/crates/runtime/src/analytics/econ_tests.rs	3099	struct	private	Failing	-	-	-
 DECL	project_0/native/crates/runtime/src/analytics/evidence.rs	26	enum	pub	HealthEvidence	-	-	-
 VARIANT	project_0/native/crates/runtime/src/analytics/evidence.rs	27	enum	pub	HealthEvidence	Known	-	27
 VARIANT	project_0/native/crates/runtime/src/analytics/evidence.rs	33	enum	pub	HealthEvidence	Unavailable	-	33
@@ -2288,74 +2293,75 @@ FIELD	project_0/native/crates/runtime/src/execution/builder.rs	121	struct	pub	Si
 FIELD	project_0/native/crates/runtime/src/execution/builder.rs	122	struct	pub	Sizing	rent_and_token	u64, // USD-Micro	122
 FIELD	project_0/native/crates/runtime/src/execution/builder.rs	123	struct	pub	Sizing	premium_bps	u64	123
 FIELD	project_0/native/crates/runtime/src/execution/builder.rs	124	struct	pub	Sizing	slippage_bps	u64	124
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	164	struct	pub	ProtocolSizingProvider	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	165	struct	pub	ProtocolSizingProvider	state	&'a S	165
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	166	struct	pub	ProtocolSizingProvider	program	Pubkey	166
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	167	struct	pub	ProtocolSizingProvider	group	Pubkey	167
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	168	struct	pub	ProtocolSizingProvider	sol_bank	Pubkey	168
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	169	struct	pub	ProtocolSizingProvider	inventory	&'a dyn Fn(&Pubkey) -> u64	169
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	170	struct	pub	ProtocolSizingProvider	slippage_bps	u64	170
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	268	struct	pub	Route	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	269	struct	pub	Route	instructions	Vec<Instruction>	269
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	270	struct	pub	Route	lookup_tables	Vec<AddressLookupTableAccount>	270
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	271	struct	pub	Route	swap_program	Pubkey	271
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	274	struct	pub	Route	amount_in	u64	274
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	277	struct	pub	Route	quoted_out	u64	277
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	281	struct	pub	Route	minimum_executable_out	Option<u64>	281
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	283	struct	pub	Route	enforced_slippage_bps	Option<u16>	283
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	289	enum	pub(crate)	ZeroPrefundFloor	-	-	-
-VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	291	enum	pub(crate)	ZeroPrefundFloor	Executable	-	291
-VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	293	enum	pub(crate)	ZeroPrefundFloor	Unknown	-	293
-VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	295	enum	pub(crate)	ZeroPrefundFloor	BelowRepay	-	295
-VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	297	enum	pub(crate)	ZeroPrefundFloor	Invalid	-	297
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	440	struct	pub	PrewarmedAta	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	441	struct	pub	PrewarmedAta	address	Pubkey	441
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	442	struct	pub	PrewarmedAta	mint	Pubkey	442
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	443	struct	pub	PrewarmedAta	token_program	Pubkey	443
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	660	struct	pub	P0ReceivershipBuilder	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	666	struct	pub	P0ReceivershipBuilder	state	&'a S	666
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	667	struct	pub	P0ReceivershipBuilder	program	Pubkey	667
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	668	struct	pub	P0ReceivershipBuilder	group	Pubkey	668
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	669	struct	pub	P0ReceivershipBuilder	liquidator	Pubkey	669
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	671	struct	pub	P0ReceivershipBuilder	global_fee_wallet	Result<Pubkey, String>	671
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	672	struct	pub	P0ReceivershipBuilder	sizing	&'a Z	672
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	673	struct	pub	P0ReceivershipBuilder	routes	&'a R	673
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	675	struct	pub	P0ReceivershipBuilder	inventory	&'a dyn Fn(&Pubkey) -> u64	675
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	677	struct	pub	P0ReceivershipBuilder	ata	&'a dyn Fn(&Pubkey) -> Option<Pubkey>	677
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	679	struct	pub	P0ReceivershipBuilder	lamports_to_usd_micro	&'a dyn Fn(u64) -> Option<u64>	679
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	681	struct	pub	P0ReceivershipBuilder	rent_lamports_to_usd_micro	&'a dyn Fn(u64) -> Option<u64>	681
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	682	struct	pub	P0ReceivershipBuilder	jito_tip_usd_micro	u64	682
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	684	struct	pub	P0ReceivershipBuilder	jito_tip_lamports	u64	684
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	685	struct	pub	P0ReceivershipBuilder	zero_prefund_qualified	bool	685
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	687	struct	pub	P0ReceivershipBuilder	instructions	&'a InstructionTable	687
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	690	struct	pub	P0ReceivershipBuilder	v1_plans	bool	690
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	693	struct	pub	P0ReceivershipBuilder	prepared	Option<(&'a std::cell::RefCell<PreparedCache>, u64)>	693
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	694	struct	pub	P0ReceivershipBuilder	path	Path	694
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	695	struct	pub	P0ReceivershipBuilder	resources	Resources	695
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	696	struct	pub	P0ReceivershipBuilder	limits	TxLimits	696
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1732	struct	private	Source	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1776	struct	private	Source	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1805	struct	private	PlansFixture	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1806	struct	private	PlansFixture	program	Pubkey	1806
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1807	struct	private	PlansFixture	group	Pubkey	1807
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1808	struct	private	PlansFixture	liquidator	Pubkey	1808
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1809	struct	private	PlansFixture	account	Pubkey	1809
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1810	struct	private	PlansFixture	banks	[(Pubkey, Pubkey); 2]	1810
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1811	struct	private	PlansFixture	token_program	Pubkey	1811
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1812	struct	private	PlansFixture	table	darkbot_project0::planner::InstructionTable	1812
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1813	struct	private	PlansFixture	sizing	OneSizing	1813
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1815	struct	private	PlansFixture	atas	std::cell::RefCell<std::collections::HashMap<Pubkey, Pubkey>>	1815
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1817	struct	private	FixtureSource	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1823	struct	private	OneSizing	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1832	struct	private	LinearMarket	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1833	struct	private	LinearMarket	num	u64	1833
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1834	struct	private	LinearMarket	den	u64	1834
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1835	struct	private	LinearMarket	floor_known	bool	1835
-FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1836	struct	private	LinearMarket	calls	std::cell::Cell<u32>	1836
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	1880	struct	private	TinyFloor	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	2006	struct	private	TestRoutes	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	2422	struct	private	TwoSizings	-	-	-
-DECL	project_0/native/crates/runtime/src/execution/builder.rs	2514	struct	private	Scripted	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	126	struct	pub	Sizing	tag_growth	Option<darkbot_project0::economics::TagGrowth>	126
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	166	struct	pub	ProtocolSizingProvider	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	167	struct	pub	ProtocolSizingProvider	state	&'a S	167
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	168	struct	pub	ProtocolSizingProvider	program	Pubkey	168
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	169	struct	pub	ProtocolSizingProvider	group	Pubkey	169
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	170	struct	pub	ProtocolSizingProvider	sol_bank	Pubkey	170
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	171	struct	pub	ProtocolSizingProvider	inventory	&'a dyn Fn(&Pubkey) -> u64	171
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	172	struct	pub	ProtocolSizingProvider	slippage_bps	u64	172
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	271	struct	pub	Route	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	272	struct	pub	Route	instructions	Vec<Instruction>	272
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	273	struct	pub	Route	lookup_tables	Vec<AddressLookupTableAccount>	273
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	274	struct	pub	Route	swap_program	Pubkey	274
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	277	struct	pub	Route	amount_in	u64	277
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	280	struct	pub	Route	quoted_out	u64	280
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	284	struct	pub	Route	minimum_executable_out	Option<u64>	284
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	286	struct	pub	Route	enforced_slippage_bps	Option<u16>	286
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	292	enum	pub(crate)	ZeroPrefundFloor	-	-	-
+VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	294	enum	pub(crate)	ZeroPrefundFloor	Executable	-	294
+VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	296	enum	pub(crate)	ZeroPrefundFloor	Unknown	-	296
+VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	298	enum	pub(crate)	ZeroPrefundFloor	BelowRepay	-	298
+VARIANT	project_0/native/crates/runtime/src/execution/builder.rs	300	enum	pub(crate)	ZeroPrefundFloor	Invalid	-	300
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	443	struct	pub	PrewarmedAta	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	444	struct	pub	PrewarmedAta	address	Pubkey	444
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	445	struct	pub	PrewarmedAta	mint	Pubkey	445
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	446	struct	pub	PrewarmedAta	token_program	Pubkey	446
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	663	struct	pub	P0ReceivershipBuilder	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	669	struct	pub	P0ReceivershipBuilder	state	&'a S	669
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	670	struct	pub	P0ReceivershipBuilder	program	Pubkey	670
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	671	struct	pub	P0ReceivershipBuilder	group	Pubkey	671
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	672	struct	pub	P0ReceivershipBuilder	liquidator	Pubkey	672
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	674	struct	pub	P0ReceivershipBuilder	global_fee_wallet	Result<Pubkey, String>	674
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	675	struct	pub	P0ReceivershipBuilder	sizing	&'a Z	675
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	676	struct	pub	P0ReceivershipBuilder	routes	&'a R	676
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	678	struct	pub	P0ReceivershipBuilder	inventory	&'a dyn Fn(&Pubkey) -> u64	678
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	680	struct	pub	P0ReceivershipBuilder	ata	&'a dyn Fn(&Pubkey) -> Option<Pubkey>	680
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	682	struct	pub	P0ReceivershipBuilder	lamports_to_usd_micro	&'a dyn Fn(u64) -> Option<u64>	682
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	684	struct	pub	P0ReceivershipBuilder	rent_lamports_to_usd_micro	&'a dyn Fn(u64) -> Option<u64>	684
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	685	struct	pub	P0ReceivershipBuilder	jito_tip_usd_micro	u64	685
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	687	struct	pub	P0ReceivershipBuilder	jito_tip_lamports	u64	687
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	688	struct	pub	P0ReceivershipBuilder	zero_prefund_qualified	bool	688
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	690	struct	pub	P0ReceivershipBuilder	instructions	&'a InstructionTable	690
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	693	struct	pub	P0ReceivershipBuilder	v1_plans	bool	693
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	696	struct	pub	P0ReceivershipBuilder	prepared	Option<(&'a std::cell::RefCell<PreparedCache>, u64)>	696
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	697	struct	pub	P0ReceivershipBuilder	path	Path	697
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	698	struct	pub	P0ReceivershipBuilder	resources	Resources	698
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	699	struct	pub	P0ReceivershipBuilder	limits	TxLimits	699
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1740	struct	private	Source	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1784	struct	private	Source	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1813	struct	private	PlansFixture	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1814	struct	private	PlansFixture	program	Pubkey	1814
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1815	struct	private	PlansFixture	group	Pubkey	1815
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1816	struct	private	PlansFixture	liquidator	Pubkey	1816
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1817	struct	private	PlansFixture	account	Pubkey	1817
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1818	struct	private	PlansFixture	banks	[(Pubkey, Pubkey); 2]	1818
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1819	struct	private	PlansFixture	token_program	Pubkey	1819
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1820	struct	private	PlansFixture	table	darkbot_project0::planner::InstructionTable	1820
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1821	struct	private	PlansFixture	sizing	OneSizing	1821
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1823	struct	private	PlansFixture	atas	std::cell::RefCell<std::collections::HashMap<Pubkey, Pubkey>>	1823
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1825	struct	private	FixtureSource	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1831	struct	private	OneSizing	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1840	struct	private	LinearMarket	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1841	struct	private	LinearMarket	num	u64	1841
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1842	struct	private	LinearMarket	den	u64	1842
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1843	struct	private	LinearMarket	floor_known	bool	1843
+FIELD	project_0/native/crates/runtime/src/execution/builder.rs	1844	struct	private	LinearMarket	calls	std::cell::Cell<u32>	1844
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	1888	struct	private	TinyFloor	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	2014	struct	private	TestRoutes	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	2431	struct	private	TwoSizings	-	-	-
+DECL	project_0/native/crates/runtime/src/execution/builder.rs	2523	struct	private	Scripted	-	-	-
 DECL	project_0/native/crates/runtime/src/execution/builder_n2_tests.rs	11	struct	private	Endpoint	-	-	-
 FIELD	project_0/native/crates/runtime/src/execution/builder_n2_tests.rs	12	struct	private	Endpoint	url	String	12
 FIELD	project_0/native/crates/runtime/src/execution/builder_n2_tests.rs	14	struct	private	Endpoint	arrivals	std::sync::Arc<	14
@@ -2775,59 +2781,60 @@ FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	165	struct	pub	R
 FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	166	struct	pub	ReceivershipPlan	route	RouteKind	166
 FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	167	struct	pub	ReceivershipPlan	input	CandidateInput	167
 FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	168	struct	pub	ReceivershipPlan	premium_bps	u64	168
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	169	struct	pub	ReceivershipPlan	exposure	u64	169
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	170	struct	pub	ReceivershipPlan	tip	u64	170
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	171	struct	pub	ReceivershipPlan	slippage_bps	u64	171
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	173	struct	pub	ReceivershipPlan	assets	Vec<Pubkey>	173
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	176	struct	pub	ReceivershipPlan	inventory_hold_usd_micro	u64	176
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	178	struct	pub	ReceivershipPlan	tx_version	BuildVersion	178
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	180	struct	pub	ReceivershipPlan	lookup_tables	std::sync::Arc<[AddressLookupTableAccount]>	180
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	183	struct	pub	ReceivershipPlan	prerequisite_txs	Vec<Vec<Instruction>>	183
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	185	struct	pub	ReceivershipPlan	sol_costs	SolCosts	185
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	188	struct	pub	ReceivershipPlan	liability_hold	Option<(Pubkey, u64)>	188
-DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	195	struct	pub	SolCosts	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	196	struct	pub	SolCosts	flat_fee_lamports	u64	196
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	197	struct	pub	SolCosts	record_rent_lamports	Option<u64>	197
-DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	216	enum	pub	PlanErrorKind	-	-	-
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	218	enum	pub	PlanErrorKind	FeeStateUnavailable	-	218
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	220	enum	pub	PlanErrorKind	Sizing	-	220
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	222	enum	pub	PlanErrorKind	UnsupportedIntegration	-	222
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	224	enum	pub	PlanErrorKind	MissingAta	-	224
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	226	enum	pub	PlanErrorKind	IntegrationStale	-	226
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	228	enum	pub	PlanErrorKind	HealthUnavailable	-	228
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	230	enum	pub	PlanErrorKind	Routing	-	230
-VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	232	enum	pub	PlanErrorKind	Other	-	232
-DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	236	struct	pub	PlanError	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	237	struct	pub	PlanError	kind	PlanErrorKind	237
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	238	struct	pub	PlanError	text	String	238
-DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	324	struct	pub	NetworkBudget	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	325	struct	pub	NetworkBudget	remaining	usize	325
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	326	struct	pub	NetworkBudget	per_drain	usize	326
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	327	struct	pub	NetworkBudget	deadline_ns	u64	327
-DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	347	struct	pub	Pipeline	-	-	-
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	348	struct	pub	Pipeline	mode	Mode	348
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	349	struct	pub	Pipeline	clock	&'a Clock	349
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	350	struct	pub	Pipeline	health	&'a H	350
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	351	struct	pub	Pipeline	builder	&'a B	351
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	352	struct	pub	Pipeline	submitter	&'a S	352
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	353	struct	pub	Pipeline	safety	&'a mut Safety	353
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	354	struct	pub	Pipeline	blockhash	&'a BlockhashCache	354
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	355	struct	pub	Pipeline	payer	&'a Keypair	355
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	356	struct	pub	Pipeline	allowlist	&'a Allowlist	356
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	357	struct	pub	Pipeline	failed_costs	&'a FailedCostMatrix	357
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	358	struct	pub	Pipeline	limits	TxLimits	358
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	359	struct	pub	Pipeline	resources	Resources	359
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	360	struct	pub	Pipeline	min_profit	i128	360
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	361	struct	pub	Pipeline	blockhash_max_age_ns	u64	361
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	362	struct	pub	Pipeline	p7_passed	bool	362
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	363	struct	pub	Pipeline	freshness	Freshness	363
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	365	struct	pub	Pipeline	tip_account	Option<Pubkey>	365
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	368	struct	pub	Pipeline	global_allowed	&'a [Pubkey]	368
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	370	struct	pub	Pipeline	prereq_allowed	&'a [Pubkey]	370
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	372	struct	pub	Pipeline	slot_watch	&'a darkbot_solana::ingress::SlotWatch	372
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	374	struct	pub	Pipeline	network	&'a mut NetworkBudget	374
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	376	struct	pub	Pipeline	simulation_failure	Option<darkbot_solana::submit::SimulationFailure>	376
-FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	379	struct	pub	Pipeline	fe04	Option<&'a mut crate::execution::one_shot::admission::Fe04Admission>	379
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	171	struct	pub	ReceivershipPlan	tag_growth	Option<darkbot_project0::economics::TagGrowth>	171
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	172	struct	pub	ReceivershipPlan	exposure	u64	172
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	173	struct	pub	ReceivershipPlan	tip	u64	173
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	174	struct	pub	ReceivershipPlan	slippage_bps	u64	174
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	176	struct	pub	ReceivershipPlan	assets	Vec<Pubkey>	176
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	179	struct	pub	ReceivershipPlan	inventory_hold_usd_micro	u64	179
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	181	struct	pub	ReceivershipPlan	tx_version	BuildVersion	181
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	183	struct	pub	ReceivershipPlan	lookup_tables	std::sync::Arc<[AddressLookupTableAccount]>	183
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	186	struct	pub	ReceivershipPlan	prerequisite_txs	Vec<Vec<Instruction>>	186
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	188	struct	pub	ReceivershipPlan	sol_costs	SolCosts	188
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	191	struct	pub	ReceivershipPlan	liability_hold	Option<(Pubkey, u64)>	191
+DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	198	struct	pub	SolCosts	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	199	struct	pub	SolCosts	flat_fee_lamports	u64	199
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	200	struct	pub	SolCosts	record_rent_lamports	Option<u64>	200
+DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	219	enum	pub	PlanErrorKind	-	-	-
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	221	enum	pub	PlanErrorKind	FeeStateUnavailable	-	221
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	223	enum	pub	PlanErrorKind	Sizing	-	223
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	225	enum	pub	PlanErrorKind	UnsupportedIntegration	-	225
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	227	enum	pub	PlanErrorKind	MissingAta	-	227
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	229	enum	pub	PlanErrorKind	IntegrationStale	-	229
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	231	enum	pub	PlanErrorKind	HealthUnavailable	-	231
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	233	enum	pub	PlanErrorKind	Routing	-	233
+VARIANT	project_0/native/crates/runtime/src/execution/pipeline.rs	235	enum	pub	PlanErrorKind	Other	-	235
+DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	239	struct	pub	PlanError	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	240	struct	pub	PlanError	kind	PlanErrorKind	240
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	241	struct	pub	PlanError	text	String	241
+DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	327	struct	pub	NetworkBudget	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	328	struct	pub	NetworkBudget	remaining	usize	328
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	329	struct	pub	NetworkBudget	per_drain	usize	329
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	330	struct	pub	NetworkBudget	deadline_ns	u64	330
+DECL	project_0/native/crates/runtime/src/execution/pipeline.rs	350	struct	pub	Pipeline	-	-	-
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	351	struct	pub	Pipeline	mode	Mode	351
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	352	struct	pub	Pipeline	clock	&'a Clock	352
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	353	struct	pub	Pipeline	health	&'a H	353
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	354	struct	pub	Pipeline	builder	&'a B	354
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	355	struct	pub	Pipeline	submitter	&'a S	355
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	356	struct	pub	Pipeline	safety	&'a mut Safety	356
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	357	struct	pub	Pipeline	blockhash	&'a BlockhashCache	357
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	358	struct	pub	Pipeline	payer	&'a Keypair	358
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	359	struct	pub	Pipeline	allowlist	&'a Allowlist	359
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	360	struct	pub	Pipeline	failed_costs	&'a FailedCostMatrix	360
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	361	struct	pub	Pipeline	limits	TxLimits	361
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	362	struct	pub	Pipeline	resources	Resources	362
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	363	struct	pub	Pipeline	min_profit	i128	363
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	364	struct	pub	Pipeline	blockhash_max_age_ns	u64	364
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	365	struct	pub	Pipeline	p7_passed	bool	365
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	366	struct	pub	Pipeline	freshness	Freshness	366
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	368	struct	pub	Pipeline	tip_account	Option<Pubkey>	368
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	371	struct	pub	Pipeline	global_allowed	&'a [Pubkey]	371
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	373	struct	pub	Pipeline	prereq_allowed	&'a [Pubkey]	373
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	375	struct	pub	Pipeline	slot_watch	&'a darkbot_solana::ingress::SlotWatch	375
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	377	struct	pub	Pipeline	network	&'a mut NetworkBudget	377
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	379	struct	pub	Pipeline	simulation_failure	Option<darkbot_solana::submit::SimulationFailure>	379
+FIELD	project_0/native/crates/runtime/src/execution/pipeline.rs	382	struct	pub	Pipeline	fe04	Option<&'a mut crate::execution::one_shot::admission::Fe04Admission>	382
 DECL	project_0/native/crates/runtime/src/execution/prepared.rs	21	struct	pub	Context	-	-	-
 FIELD	project_0/native/crates/runtime/src/execution/prepared.rs	23	struct	pub	Context	generation	u64	23
 FIELD	project_0/native/crates/runtime/src/execution/prepared.rs	24	struct	pub	Context	program	Pubkey	24
@@ -4134,18 +4141,18 @@ FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/owner_e2e_te
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/owner_e2e_tests.rs	14	struct	private	Fixture	program_data_account	AccountUpdate	14
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/owner_e2e_tests.rs	15	struct	private	Fixture	dir	std::path::PathBuf	15
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/owner_e2e_tests.rs	17	struct	private	Fixture	results	Option<crate::orchestration::remote_workers::Detached>	17
-DECL	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1088	struct	pub(super)	Fe04Start	-	-	-
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1089	struct	pub(super)	Fe04Start	book	crate::execution::reservation::WalletReservations	1089
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1090	struct	pub(super)	Fe04Start	dir	Option<std::path::PathBuf>	1090
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1091	struct	pub(super)	Fe04Start	replay	Option<crate::execution::one_shot::SafetyReplay>	1091
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1093	struct	pub(super)	Fe04Start	journal	Option<crate::execution::one_shot::Journal>	1093
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1095	struct	pub(super)	Fe04Start	archived	Vec<crate::execution::one_shot::SafetyReplay>	1095
-DECL	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1099	struct	pub(super)	Fe04Owner	-	-	-
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1100	struct	pub(super)	Fe04Owner	book	crate::execution::reservation::WalletReservations	1100
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1101	struct	pub(super)	Fe04Owner	dir	Option<std::path::PathBuf>	1101
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1102	struct	pub(super)	Fe04Owner	held	Option<crate::execution::one_shot::Journal>	1102
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1103	struct	pub(super)	Fe04Owner	settle_due	Option<std::time::Instant>	1103
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1104	struct	pub(super)	Fe04Owner	unbooked	Option<super::fe04::Fe04Unbooked>	1104
+DECL	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1089	struct	pub(super)	Fe04Start	-	-	-
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1090	struct	pub(super)	Fe04Start	book	crate::execution::reservation::WalletReservations	1090
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1091	struct	pub(super)	Fe04Start	dir	Option<std::path::PathBuf>	1091
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1092	struct	pub(super)	Fe04Start	replay	Option<crate::execution::one_shot::SafetyReplay>	1092
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1094	struct	pub(super)	Fe04Start	journal	Option<crate::execution::one_shot::Journal>	1094
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1096	struct	pub(super)	Fe04Start	archived	Vec<crate::execution::one_shot::SafetyReplay>	1096
+DECL	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1100	struct	pub(super)	Fe04Owner	-	-	-
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1101	struct	pub(super)	Fe04Owner	book	crate::execution::reservation::WalletReservations	1101
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1102	struct	pub(super)	Fe04Owner	dir	Option<std::path::PathBuf>	1102
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1103	struct	pub(super)	Fe04Owner	held	Option<crate::execution::one_shot::Journal>	1103
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1104	struct	pub(super)	Fe04Owner	settle_due	Option<std::time::Instant>	1104
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	1105	struct	pub(super)	Fe04Owner	unbooked	Option<super::fe04::Fe04Unbooked>	1105
 DECL	project_0/native/crates/runtime/src/orchestration/state_owner/sources.rs	37	struct	pub(super)	SourceStats	-	-	-
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/sources.rs	38	struct	pub(super)	SourceStats	observed	u64	38
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner/sources.rs	40	struct	pub(super)	SourceStats	rejected	u64	40
@@ -4211,78 +4218,79 @@ FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	154	struc
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	155	struct	private	ShadowOwner	sweep_batch_max_events	usize	155
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	156	struct	private	ShadowOwner	sweep_batch_max_age_ns	u64	156
 FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	157	struct	private	ShadowOwner	sweep_dirty_banks	HashMap<Pubkey, (u64, u64)>	157
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	158	struct	private	ShadowOwner	sweep_batch_events	usize	158
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	159	struct	private	ShadowOwner	sweep_batch_started_ns	Option<u64>	159
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	160	struct	private	ShadowOwner	candidate_recheck_slots	u64	160
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	161	struct	private	ShadowOwner	candidate_error_recheck_slots	u64	161
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	162	struct	private	ShadowOwner	candidate_repeat_soft_cap	usize	162
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	163	struct	private	ShadowOwner	candidate_cache	HashMap<Pubkey, CandidateCacheEntry>	163
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	164	struct	private	ShadowOwner	candidate_force_rearm	HashSet<Pubkey>	164
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	165	struct	private	ShadowOwner	candidate_input_epoch	u64	165
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	166	struct	private	ShadowOwner	bank_input_revision	HashMap<Pubkey, u64>	166
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	167	struct	private	ShadowOwner	ingress_burst_before_detect	usize	167
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	168	struct	private	ShadowOwner	ingress_since_detect	usize	168
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	170	struct	private	ShadowOwner	network	NetworkBudget	170
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	171	struct	private	ShadowOwner	mt0_order_rx	VecDeque<u64>	171
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	172	struct	private	ShadowOwner	clock	Clock	172
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	173	struct	private	ShadowOwner	econ	Option<crate::analytics::econ::Handle>	173
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	174	struct	private	ShadowOwner	operational_start	u64	174
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	175	struct	private	ShadowOwner	operational_window	Option<crate::analytics::measurement::ReadyWindow>	175
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	176	struct	private	ShadowOwner	operational_failure	Option<&'static str>	176
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	177	struct	private	ShadowOwner	program	Pubkey	177
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	178	struct	private	ShadowOwner	group	Pubkey	178
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	179	struct	private	ShadowOwner	payer	solana_sdk::signature::Keypair	179
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	180	struct	private	ShadowOwner	liquidator	Pubkey	180
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	181	struct	private	ShadowOwner	shutdown	Shutdown	181
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	182	struct	private	ShadowOwner	halt	IngressHalt	182
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	183	struct	private	ShadowOwner	slot_watch	SlotWatch	183
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	184	struct	private	ShadowOwner	producer	darkbot_common::channel::Producer<IngressEvent>	184
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	185	struct	private	ShadowOwner	consumer	darkbot_common::channel::Consumer<IngressEvent>	185
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	187	struct	private	ShadowOwner	wake	darkbot_common::channel::Wakeup	187
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	189	struct	private	ShadowOwner	sources	sources::OwnerSources	189
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	190	struct	private	ShadowOwner	program_data	Pubkey	190
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	191	struct	private	ShadowOwner	program_data_baseline_hash	Hash	191
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	193	struct	private	ShadowOwner	program_data_executable	bool	193
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	196	struct	private	ShadowOwner	admission	Option<Box<super::boot_audit::NetworkAudit>>	196
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	197	struct	private	ShadowOwner	sol_bank	Pubkey	197
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	198	struct	private	ShadowOwner	ingress_session	IngressSession	198
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	200	struct	private	ShadowOwner	retired_events	RetiredEvents	200
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	201	struct	private	ShadowOwner	st	StateCore	201
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	202	struct	private	ShadowOwner	drv	RecoveryDriver	202
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	203	struct	private	ShadowOwner	dep_shared	std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>	203
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	204	struct	private	ShadowOwner	opt_shared	std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>	204
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	205	struct	private	ShadowOwner	blockhash	BlockhashCache	205
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	207	struct	private	ShadowOwner	blockhash_thread	Option<std::thread::JoinHandle<()>>	207
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	208	struct	private	ShadowOwner	safety	Safety	208
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	209	struct	private	ShadowOwner	allowlist	Allowlist	209
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	212	struct	private	ShadowOwner	instruction_table	darkbot_project0::planner::InstructionTable	212
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	215	struct	private	ShadowOwner	dependency_gaps	HashMap<Pubkey, darkbot_project0::health::DependencyGap>	215
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	216	struct	private	ShadowOwner	global_allowed	Vec<Pubkey>	216
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	217	struct	private	ShadowOwner	submitter	crate::execution::observe_only::ObserveOnly<RpcSubmitter>	217
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	218	struct	private	ShadowOwner	failed_costs	FailedCostMatrix	218
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	219	struct	private	ShadowOwner	routes	JupiterV2RouteProvider	219
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	220	struct	private	ShadowOwner	resources	Resources	220
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	221	struct	private	ShadowOwner	freshness	Freshness	221
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	222	struct	private	ShadowOwner	remote	RemoteWorkers	222
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	223	struct	private	ShadowOwner	integration_probe_projection_ready	usize	223
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	224	struct	private	ShadowOwner	integration_probe_projection_failed	usize	224
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	225	struct	private	ShadowOwner	integration_probe_projection_stale	usize	225
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	226	struct	private	ShadowOwner	integration_probe_completion_reported	bool	226
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	227	struct	private	ShadowOwner	ledger	ShadowLedger	227
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	228	struct	private	ShadowOwner	winner_tracker	WinnerTracker	228
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	229	struct	private	ShadowOwner	evidence	OwnerEvidenceWriter	229
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	230	struct	private	ShadowOwner	counts	[u64; 6]	230
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	231	struct	private	ShadowOwner	last_reported_update_total	u64	231
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	232	struct	private	ShadowOwner	bootstrap_probe_done	bool	232
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	233	struct	private	ShadowOwner	program_upgrade_latched	bool	233
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	234	struct	private	ShadowOwner	reverse_index	ReverseIndex	234
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	235	struct	private	ShadowOwner	threshold_index	ThresholdIndex	235
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	236	struct	private	ShadowOwner	threshold_ready	bool	236
-FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	237	struct	private	ShadowOwner	mt0_owner	darkbot_common::mt0::OwnerTimer	237
-DECL	project_0/native/crates/runtime/src/orchestration/state_owner.rs	248	enum	private	OwnerStep	-	-	-
-VARIANT	project_0/native/crates/runtime/src/orchestration/state_owner.rs	249	enum	private	OwnerStep	Next	-	249
-VARIANT	project_0/native/crates/runtime/src/orchestration/state_owner.rs	250	enum	private	OwnerStep	Continue	-	250
-DECL	project_0/native/crates/runtime/src/orchestration/state_owner.rs	256	struct	pub(crate)	OwnerTerminal	-	-	-
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	161	struct	private	ShadowOwner	time_schedule	darkbot_project0::schedule::TimeScheduler	161
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	162	struct	private	ShadowOwner	sweep_batch_events	usize	162
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	163	struct	private	ShadowOwner	sweep_batch_started_ns	Option<u64>	163
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	164	struct	private	ShadowOwner	candidate_recheck_slots	u64	164
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	165	struct	private	ShadowOwner	candidate_error_recheck_slots	u64	165
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	166	struct	private	ShadowOwner	candidate_repeat_soft_cap	usize	166
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	167	struct	private	ShadowOwner	candidate_cache	HashMap<Pubkey, CandidateCacheEntry>	167
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	168	struct	private	ShadowOwner	candidate_force_rearm	HashSet<Pubkey>	168
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	169	struct	private	ShadowOwner	candidate_input_epoch	u64	169
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	170	struct	private	ShadowOwner	bank_input_revision	HashMap<Pubkey, u64>	170
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	171	struct	private	ShadowOwner	ingress_burst_before_detect	usize	171
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	172	struct	private	ShadowOwner	ingress_since_detect	usize	172
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	174	struct	private	ShadowOwner	network	NetworkBudget	174
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	175	struct	private	ShadowOwner	mt0_order_rx	VecDeque<u64>	175
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	176	struct	private	ShadowOwner	clock	Clock	176
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	177	struct	private	ShadowOwner	econ	Option<crate::analytics::econ::Handle>	177
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	178	struct	private	ShadowOwner	operational_start	u64	178
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	179	struct	private	ShadowOwner	operational_window	Option<crate::analytics::measurement::ReadyWindow>	179
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	180	struct	private	ShadowOwner	operational_failure	Option<&'static str>	180
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	181	struct	private	ShadowOwner	program	Pubkey	181
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	182	struct	private	ShadowOwner	group	Pubkey	182
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	183	struct	private	ShadowOwner	payer	solana_sdk::signature::Keypair	183
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	184	struct	private	ShadowOwner	liquidator	Pubkey	184
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	185	struct	private	ShadowOwner	shutdown	Shutdown	185
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	186	struct	private	ShadowOwner	halt	IngressHalt	186
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	187	struct	private	ShadowOwner	slot_watch	SlotWatch	187
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	188	struct	private	ShadowOwner	producer	darkbot_common::channel::Producer<IngressEvent>	188
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	189	struct	private	ShadowOwner	consumer	darkbot_common::channel::Consumer<IngressEvent>	189
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	191	struct	private	ShadowOwner	wake	darkbot_common::channel::Wakeup	191
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	193	struct	private	ShadowOwner	sources	sources::OwnerSources	193
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	194	struct	private	ShadowOwner	program_data	Pubkey	194
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	195	struct	private	ShadowOwner	program_data_baseline_hash	Hash	195
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	197	struct	private	ShadowOwner	program_data_executable	bool	197
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	200	struct	private	ShadowOwner	admission	Option<Box<super::boot_audit::NetworkAudit>>	200
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	201	struct	private	ShadowOwner	sol_bank	Pubkey	201
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	202	struct	private	ShadowOwner	ingress_session	IngressSession	202
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	204	struct	private	ShadowOwner	retired_events	RetiredEvents	204
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	205	struct	private	ShadowOwner	st	StateCore	205
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	206	struct	private	ShadowOwner	drv	RecoveryDriver	206
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	207	struct	private	ShadowOwner	dep_shared	std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>	207
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	208	struct	private	ShadowOwner	opt_shared	std::sync::Arc<std::sync::Mutex<Vec<Pubkey>>>	208
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	209	struct	private	ShadowOwner	blockhash	BlockhashCache	209
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	211	struct	private	ShadowOwner	blockhash_thread	Option<std::thread::JoinHandle<()>>	211
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	212	struct	private	ShadowOwner	safety	Safety	212
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	213	struct	private	ShadowOwner	allowlist	Allowlist	213
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	216	struct	private	ShadowOwner	instruction_table	darkbot_project0::planner::InstructionTable	216
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	219	struct	private	ShadowOwner	dependency_gaps	HashMap<Pubkey, darkbot_project0::health::DependencyGap>	219
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	220	struct	private	ShadowOwner	global_allowed	Vec<Pubkey>	220
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	221	struct	private	ShadowOwner	submitter	crate::execution::observe_only::ObserveOnly<RpcSubmitter>	221
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	222	struct	private	ShadowOwner	failed_costs	FailedCostMatrix	222
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	223	struct	private	ShadowOwner	routes	JupiterV2RouteProvider	223
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	224	struct	private	ShadowOwner	resources	Resources	224
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	225	struct	private	ShadowOwner	freshness	Freshness	225
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	226	struct	private	ShadowOwner	remote	RemoteWorkers	226
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	227	struct	private	ShadowOwner	integration_probe_projection_ready	usize	227
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	228	struct	private	ShadowOwner	integration_probe_projection_failed	usize	228
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	229	struct	private	ShadowOwner	integration_probe_projection_stale	usize	229
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	230	struct	private	ShadowOwner	integration_probe_completion_reported	bool	230
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	231	struct	private	ShadowOwner	ledger	ShadowLedger	231
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	232	struct	private	ShadowOwner	winner_tracker	WinnerTracker	232
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	233	struct	private	ShadowOwner	evidence	OwnerEvidenceWriter	233
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	234	struct	private	ShadowOwner	counts	[u64; 6]	234
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	235	struct	private	ShadowOwner	last_reported_update_total	u64	235
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	236	struct	private	ShadowOwner	bootstrap_probe_done	bool	236
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	237	struct	private	ShadowOwner	program_upgrade_latched	bool	237
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	238	struct	private	ShadowOwner	reverse_index	ReverseIndex	238
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	239	struct	private	ShadowOwner	threshold_index	ThresholdIndex	239
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	240	struct	private	ShadowOwner	threshold_ready	bool	240
+FIELD	project_0/native/crates/runtime/src/orchestration/state_owner.rs	241	struct	private	ShadowOwner	mt0_owner	darkbot_common::mt0::OwnerTimer	241
+DECL	project_0/native/crates/runtime/src/orchestration/state_owner.rs	252	enum	private	OwnerStep	-	-	-
+VARIANT	project_0/native/crates/runtime/src/orchestration/state_owner.rs	253	enum	private	OwnerStep	Next	-	253
+VARIANT	project_0/native/crates/runtime/src/orchestration/state_owner.rs	254	enum	private	OwnerStep	Continue	-	254
+DECL	project_0/native/crates/runtime/src/orchestration/state_owner.rs	260	struct	pub(crate)	OwnerTerminal	-	-	-
 DECL	project_0/native/crates/runtime/src/orchestration/winner_tracker.rs	37	struct	pub	WinnerTrackerConfig	-	-	-
 FIELD	project_0/native/crates/runtime/src/orchestration/winner_tracker.rs	39	struct	pub	WinnerTrackerConfig	capacity	usize	39
 FIELD	project_0/native/crates/runtime/src/orchestration/winner_tracker.rs	41	struct	pub	WinnerTrackerConfig	ttl_s	u64	41
