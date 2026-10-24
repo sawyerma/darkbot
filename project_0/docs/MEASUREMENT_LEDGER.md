@@ -5991,3 +5991,13 @@ Commits `4c2cd285`, `b231be36`.
 - P2-04: healthy premium-active accounts wake the R127 sweep at the first chain second pending premium alone makes them liquidatable; decay valued per day and rounded up (never late; the per-second I80F48 value was), boundary = first second with health < 0; scheduler heap compacted.
 - P3-03/P2-05: sizing uses the program's `tag_adjusted_premium` (base on bad debt / EMODE boost from the crate's health cache); a tagged plan below `min_profit` records `t_profitable_unix_s` (`tag_wakeup`, early side) and the owner re-evaluates and re-forwards it then.
 - NOT_RUN: P1A deployment parity (BLOCKED), Mainnet, real tagged accounts, wake-ups in the non-default threshold mode. Separate: CI-N1 (`native` job, gateway step).
+
+## 2026-10-24 — Paket 3: JFI-04 closed, no schema-1 writer, PERSIST-05 negative matrix (LOCAL_PASS offline)
+
+Commits `1d62596b`, `a5609301`. Evidence `docs/evidence/BUGS_20261024/a23_09_jfi04_inventory.md`.
+
+- Gates: `1d62596b` fmt, clippy ×4, 835/0/10, 833/0/10, runner 384/0/3 ×2, release, Python PASS; `a5609301` 836/0/10, 834/0/10, runner 385/0/3 ×2, release, Python PASS. 8 mutations fail-before, 1 equivalent (redundant symlink check).
+- JFI: FE01_CONFIG/READ/RESULT typed (schema 2), RPC answer decoded into `WireMultipleAccounts` at the edge, report as text; C0 census import typed from a `key=value` handoff; Jupiter `otherAmountThreshold` typed (JFI-FIX-07); `LEGACY_WRITABLE` empty, schema-1 writer API removed (encoder test-only), `JsonlSink` test-only. Inventory 354 occurrences in 40 files, no internal category.
+- Historical schema-1 FE-01 journals and `read_*.json` replay through `fe_replay::historical_read` — fixture-proven only: no real FE-01 journal exists (the 24.10. smoke used the Python probe).
+- PERSIST-05 negatives added: chain break behind valid CRC/SHA, forged manifest (manifest only by `seal`), segment link missing / unsealed intermediate / symlinked successor, fsync failure at segment rotation and seal, econ report-journal write failure, market queue stall.
+- Open: Mainnet volume/tails (NOT_MEASURED), physical fault test, Python FE-01 smoke probe still writes JSON evidence, journal-level reorg (by design: finalized-only settlement), SK-08 SQLite deferred.
