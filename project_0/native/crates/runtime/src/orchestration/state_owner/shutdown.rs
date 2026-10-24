@@ -60,6 +60,12 @@ impl ShadowOwner {
             q(w.p99),
             q(w.max)
         );
+        // P6-MT.13 (MT3): the lane waits and lane changes once at shutdown.
+        #[cfg(feature = "crate_health")]
+        {
+            let line = self.lane_line();
+            owner_log!(self, "{line}");
+        }
         if let Some(line) = self.bootstrap_probe_line() {
             owner_log!(self, "{line}");
         }

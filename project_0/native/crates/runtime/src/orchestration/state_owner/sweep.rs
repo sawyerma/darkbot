@@ -327,7 +327,7 @@ impl ShadowOwner {
                                 }
                             }
                             let repeat_capacity =
-                                self.oracle_detect_pending.len() < self.candidate_repeat_soft_cap;
+                                self.oracle_lanes.len() < self.candidate_repeat_soft_cap;
                             let should_forward = candidate_should_forward(
                                 previous,
                                 CandidateHealthState::Liquidatable,
@@ -360,19 +360,31 @@ impl ShadowOwner {
                                         .candidate_cache_periodic_forwards
                                         .saturating_add(1);
                                 }
-                                let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
+                                // P6-MT.5 lane: forced re-arm (incl. a due P2-04/P2-05 wake-up)
+                                // or class transition → L0; a changed canonical revision of an
+                                // already relevant candidate → L1; a periodic repeat → L2.
+                                let lane = if forced || transition {
+                                    Lane::L0
+                                } else if revision_changed {
+                                    Lane::L1
+                                } else {
+                                    Lane::L2
+                                };
                                 let queue_admission = enqueue_or_coalesce_candidate(
                                     account,
-                                    (t_rx_ns, event_slot, "oracle_health_ready"),
-                                    &mut self.oracle_detect_order,
-                                    &mut self.oracle_detect_pending,
+                                    LaneAdmission {
+                                        t_rx_ns,
+                                        slot: event_slot,
+                                        trigger: "oracle_health_ready",
+                                        lane,
+                                        revision: input_revision,
+                                        last_forwarded_slot: last_forwarded,
+                                    },
+                                    &mut self.oracle_lanes,
                                     &mut self.metrics.oracle_enqueued,
                                     &mut self.metrics.oracle_coalesced,
                                     &mut self.metrics.oracle_max_pending,
                                 );
-                                for _ in mt0_len_before..self.oracle_detect_order.len() {
-                                    self.mt0_order_rx.push_back(t_rx_ns);
-                                }
                                 match queue_admission {
                                     CandidateQueueAdmission::Enqueued => {
                                         self.metrics.candidate_physical_enqueues = self
@@ -484,7 +496,7 @@ impl ShadowOwner {
                                 }
                             }
                             let repeat_capacity =
-                                self.oracle_detect_pending.len() < self.candidate_repeat_soft_cap;
+                                self.oracle_lanes.len() < self.candidate_repeat_soft_cap;
                             let should_forward = candidate_should_forward(
                                 previous,
                                 CandidateHealthState::Error,
@@ -517,19 +529,25 @@ impl ShadowOwner {
                                         .candidate_cache_periodic_forwards
                                         .saturating_add(1);
                                 }
-                                let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
+                                // P6-MT.5 lane: an errored evaluation is Error/maintenance work
+                                // → L2 (also when forced or a transition into Error: the sweep
+                                // has no verified state to prioritise; the detect evaluates
+                                // exactly, and L2 is starvation-free).
                                 let queue_admission = enqueue_or_coalesce_candidate(
                                     account,
-                                    (t_rx_ns, event_slot, "oracle_health_error"),
-                                    &mut self.oracle_detect_order,
-                                    &mut self.oracle_detect_pending,
+                                    LaneAdmission {
+                                        t_rx_ns,
+                                        slot: event_slot,
+                                        trigger: "oracle_health_error",
+                                        lane: Lane::L2,
+                                        revision: input_revision,
+                                        last_forwarded_slot: last_forwarded,
+                                    },
+                                    &mut self.oracle_lanes,
                                     &mut self.metrics.oracle_enqueued,
                                     &mut self.metrics.oracle_coalesced,
                                     &mut self.metrics.oracle_max_pending,
                                 );
-                                for _ in mt0_len_before..self.oracle_detect_order.len() {
-                                    self.mt0_order_rx.push_back(t_rx_ns);
-                                }
                                 match queue_admission {
                                     CandidateQueueAdmission::Enqueued => {
                                         self.metrics.candidate_physical_enqueues = self

@@ -570,10 +570,6 @@ pub(super) fn prepare(
     #[cfg(feature = "crate_health")]
     let detect_queue: VecDeque<DetectWork> = VecDeque::new();
     #[cfg(feature = "crate_health")]
-    let oracle_detect_order: VecDeque<Pubkey> = VecDeque::new();
-    #[cfg(feature = "crate_health")]
-    let oracle_detect_pending: HashMap<Pubkey, DetectWork> = HashMap::new();
-    #[cfg(feature = "crate_health")]
     let oracle_dependency_updates: u64 = 0;
     #[cfg(feature = "crate_health")]
     let oracle_candidate_hits: u64 = 0;
@@ -881,11 +877,6 @@ pub(super) fn prepare(
         crate::analytics::mt0_journal::Mt0Journal::create(&mt0_path)?,
     )?;
     let mt0_owner = darkbot_common::mt0::OwnerTimer::new();
-    // [MT0] First-trigger receive time (`t_rx` of the enqueue that created the token) of every
-    // token in `oracle_detect_order`: same length, same order. Pushed in lockstep at the physical
-    // enqueue; coalescing never touches it, so the first unserved trigger is kept.
-    #[cfg(feature = "crate_health")]
-    let mt0_order_rx: VecDeque<u64> = VecDeque::new();
     // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
     let Fe04Owner {
         book: reservations,
@@ -950,6 +941,8 @@ pub(super) fn prepare(
             sweep_batch_ns_max_accounts: 0,
             bootstrap_probes_queued: 0,
             owner_wakeup_ns: Default::default(),
+            #[cfg(feature = "crate_health")]
+            lane_wait_ns: Default::default(),
         },
         eval_slippage_bps,
         zero_prefund_enabled: zero_prefund_enabled(&mode, &|k| std::env::var(k).ok())?,
@@ -989,8 +982,7 @@ pub(super) fn prepare(
         projection_stats: ProjectionStats::default(),
         detect_queue,
         bootstrap_probe_queue: VecDeque::new(),
-        oracle_detect_order,
-        oracle_detect_pending,
+        oracle_lanes: CandidateLanes::default(),
         oracle_bank_projection_pending,
         integration_probe_expected,
         integration_probe_queue,
@@ -1015,7 +1007,6 @@ pub(super) fn prepare(
         ingress_burst_before_detect,
         ingress_since_detect,
         network,
-        mt0_order_rx,
         clock,
         econ,
         operational_start,

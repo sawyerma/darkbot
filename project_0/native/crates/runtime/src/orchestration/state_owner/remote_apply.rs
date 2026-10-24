@@ -135,24 +135,23 @@ impl ShadowOwner {
                  oracle_enqueued: &mut u64,
                  oracle_coalesced: &mut u64,
                  oracle_max_pending: &mut usize,
-                 oracle_detect_order: &mut VecDeque<Pubkey>,
-                 oracle_detect_pending: &mut HashMap<Pubkey, DetectWork>,
-                 mt0_order_rx: &mut VecDeque<u64>| {
+                 oracle_lanes: &mut CandidateLanes| {
                     *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
                     let (t_rx_ns, event_slot) = latest.unwrap_or((self.clock.now_ns(), base_slot));
-                    let mt0_len_before = oracle_detect_order.len(); // [MT0]
+                    // P6-MT.5 lane: a bank-wide re-check without a per-account signal (the
+                    // projection failed or was stale) is maintenance work → L2.
                     let count = enqueue_oracle_accounts(
                         all_accounts.iter().copied(),
                         (t_rx_ns, event_slot, "oracle_threshold"),
-                        oracle_detect_order,
-                        oracle_detect_pending,
-                        oracle_enqueued,
-                        oracle_coalesced,
-                        oracle_max_pending,
+                        Lane::L2,
+                        |a| {
+                            self.candidate_cache
+                                .get(a)
+                                .map_or(0, |e| e.last_forwarded_slot)
+                        },
+                        oracle_lanes,
+                        (oracle_enqueued, oracle_coalesced, oracle_max_pending),
                     );
-                    for _ in mt0_len_before..oracle_detect_order.len() {
-                        mt0_order_rx.push_back(t_rx_ns);
-                    }
                     *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
                     owner_log!(
                         self,
@@ -185,9 +184,7 @@ impl ShadowOwner {
                             &mut self.metrics.oracle_enqueued,
                             &mut self.metrics.oracle_coalesced,
                             &mut self.metrics.oracle_max_pending,
-                            &mut self.oracle_detect_order,
-                            &mut self.oracle_detect_pending,
-                            &mut self.mt0_order_rx,
+                            &mut self.oracle_lanes,
                         );
                         continue;
                     }
@@ -210,31 +207,44 @@ impl ShadowOwner {
                                 projection_slot,
                             ) {
                                 Ok((asset_price, liability_price)) => {
-                                    let mut candidates: HashSet<Pubkey> = self
+                                    // P6-MT.5 lanes: threshold-index hits from the projected
+                                    // price (potential transition) → L0; accounts with unknown
+                                    // thresholds re-checked bank-wide → L2 (hits stay hits).
+                                    let candidates: HashSet<Pubkey> = self
                                         .threshold_index
                                         .candidates(&bank, asset_price, liability_price, 0)
                                         .into_iter()
                                         .collect();
-                                    candidates.extend(
-                                        all_accounts
-                                            .iter()
-                                            .copied()
-                                            .filter(|a| self.threshold_fallback.contains(a)),
-                                    );
+                                    let fallback: HashSet<Pubkey> = all_accounts
+                                        .iter()
+                                        .copied()
+                                        .filter(|a| {
+                                            self.threshold_fallback.contains(a)
+                                                && !candidates.contains(a)
+                                        })
+                                        .collect();
                                     let (t_rx_ns, event_slot) =
                                         latest.unwrap_or((self.clock.now_ns(), projection_slot));
-                                    let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
-                                    let count = enqueue_oracle_accounts(
-                                        candidates,
-                                        (t_rx_ns, event_slot, "oracle_threshold"),
-                                        &mut self.oracle_detect_order,
-                                        &mut self.oracle_detect_pending,
-                                        &mut self.metrics.oracle_enqueued,
-                                        &mut self.metrics.oracle_coalesced,
-                                        &mut self.metrics.oracle_max_pending,
-                                    );
-                                    for _ in mt0_len_before..self.oracle_detect_order.len() {
-                                        self.mt0_order_rx.push_back(t_rx_ns);
+                                    let mut count = 0usize;
+                                    for (accounts, lane) in
+                                        [(candidates, Lane::L0), (fallback, Lane::L2)]
+                                    {
+                                        count += enqueue_oracle_accounts(
+                                            accounts,
+                                            (t_rx_ns, event_slot, "oracle_threshold"),
+                                            lane,
+                                            |a| {
+                                                self.candidate_cache
+                                                    .get(a)
+                                                    .map_or(0, |e| e.last_forwarded_slot)
+                                            },
+                                            &mut self.oracle_lanes,
+                                            (
+                                                &mut self.metrics.oracle_enqueued,
+                                                &mut self.metrics.oracle_coalesced,
+                                                &mut self.metrics.oracle_max_pending,
+                                            ),
+                                        );
                                     }
                                     self.metrics.oracle_candidate_hits = self
                                         .metrics
@@ -255,9 +265,7 @@ impl ShadowOwner {
                                         &mut self.metrics.oracle_enqueued,
                                         &mut self.metrics.oracle_coalesced,
                                         &mut self.metrics.oracle_max_pending,
-                                        &mut self.oracle_detect_order,
-                                        &mut self.oracle_detect_pending,
-                                        &mut self.mt0_order_rx,
+                                        &mut self.oracle_lanes,
                                     );
                                 }
                             }
@@ -272,9 +280,7 @@ impl ShadowOwner {
                                 &mut self.metrics.oracle_enqueued,
                                 &mut self.metrics.oracle_coalesced,
                                 &mut self.metrics.oracle_max_pending,
-                                &mut self.oracle_detect_order,
-                                &mut self.oracle_detect_pending,
-                                &mut self.mt0_order_rx,
+                                &mut self.oracle_lanes,
                             );
                         }
                     }
@@ -289,9 +295,7 @@ impl ShadowOwner {
                         &mut self.metrics.oracle_enqueued,
                         &mut self.metrics.oracle_coalesced,
                         &mut self.metrics.oracle_max_pending,
-                        &mut self.oracle_detect_order,
-                        &mut self.oracle_detect_pending,
-                        &mut self.mt0_order_rx,
+                        &mut self.oracle_lanes,
                     );
                 }
             }

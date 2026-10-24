@@ -67,7 +67,7 @@ impl ShadowOwner {
                 self.metrics.oracle_enqueued,
                 self.metrics.oracle_coalesced,
                 self.metrics.oracle_price_fallbacks,
-                self.oracle_detect_pending.len(),
+                self.oracle_lanes.len(),
                 self.metrics.oracle_max_pending,
                 self.detect_queue.len(),
                 self.oracle_bank_projection_pending.len(),
@@ -140,6 +140,41 @@ impl ShadowOwner {
                 self.metrics.sweep_max_unique_batch,
                 self.consumer.stats().capacity
             );
+            // P6-MT.5/MT.13 (MT3): the lane telemetry on its own line (pinned parsers unchanged).
+            #[cfg(feature = "crate_health")]
+            {
+                let line = self.lane_line();
+                owner_log!(self, "{line}");
+            }
         }
+    }
+
+    /// P6-MT.13 (MT3): `lane_wait_ns{L0,L1,L2}` (`t_rx_first` → dispatch; quantiles are bucket
+    /// upper bounds) and the lane promotions/demotions/cancellations.
+    #[cfg(feature = "crate_health")]
+    pub(super) fn lane_line(&self) -> String {
+        let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
+        let mut line = format!(
+            "lane_stats: weights={}:{}:{} promotions={} demotions={} cancellations={}",
+            LANE_WDRR_START_WEIGHTS[0],
+            LANE_WDRR_START_WEIGHTS[1],
+            LANE_WDRR_START_WEIGHTS[2],
+            self.oracle_lanes.stats.promotions,
+            self.oracle_lanes.stats.demotions,
+            self.oracle_lanes.stats.cancellations,
+        );
+        for lane in LANE_LIST {
+            let w = self.metrics.lane_wait_ns[lane as usize].snapshot();
+            line.push_str(&format!(
+                " {name}_wait_ns: n={} p50={} p95={} p99={} max={}",
+                w.count,
+                q(w.p50),
+                q(w.p95),
+                q(w.p99),
+                q(w.max),
+                name = lane.name(),
+            ));
+        }
+        line
     }
 }

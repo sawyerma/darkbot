@@ -55,4 +55,8 @@ pub(super) struct OwnerMetrics {
     pub(super) bootstrap_probes_queued: usize,
     /// A23-01: doorbell → owner running again, per wakeup by a notification (not by the tick).
     pub(super) owner_wakeup_ns: darkbot_common::mt0::Hist,
+    /// P6-MT.13 `lane_wait_ns{L0,L1,L2}` (MT3): `t_rx_first` → dispatch of a lane entry, as
+    /// count/p50/p95/p99/max per lane. Owner-side only; the persisted MT0 layout is unchanged.
+    #[cfg(feature = "crate_health")]
+    pub(super) lane_wait_ns: [darkbot_common::mt0::Hist; super::LANES],
 }

@@ -532,61 +532,267 @@ pub(crate) fn next_integration_probe(
 }
 
 #[cfg(feature = "crate_health")]
-pub(crate) fn next_oracle_detect(
-    order: &mut VecDeque<Pubkey>,
-    pending: &mut HashMap<Pubkey, DetectWork>,
-) -> Option<DetectWork> {
-    while let Some(account) = order.pop_front() {
-        if let Some(work) = pending.remove(&account) {
-            return Some(work);
-        }
-    }
-    None
-}
-
-#[cfg(feature = "crate_health")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CandidateQueueAdmission {
     Enqueued,
     Coalesced,
 }
 
+/// P6-MT.5 (MT3): trigger-priority lane of a candidate before its preparation.
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Lane {
+    /// Transition / forced re-arm (incl. a due P2-04/P2-05 premium or t_profitable wake-up).
+    L0 = 0,
+    /// Material canonical revision of an already relevant candidate.
+    L1 = 1,
+    /// Periodic repeat / Error / maintenance.
+    L2 = 2,
+}
+#[cfg(feature = "crate_health")]
+pub(crate) const LANES: usize = 3;
+#[cfg(feature = "crate_health")]
+pub(crate) const LANE_LIST: [Lane; LANES] = [Lane::L0, Lane::L1, Lane::L2];
+
+/// P6-MT.5: "Startgewicht WDRR 8:3:1; erst nach MT0 festschreiben" — the start weights of the
+/// weighted deficit round robin across the lanes (dispatches per round while a lane has work).
+/// Provisional until MT0 evidence fixes them.
+#[cfg(feature = "crate_health")]
+pub(crate) const LANE_WDRR_START_WEIGHTS: [u64; LANES] = [8, 3, 1];
+
+#[cfg(feature = "crate_health")]
+impl Lane {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Lane::L0 => "L0",
+            Lane::L1 => "L1",
+            Lane::L2 => "L2",
+        }
+    }
+    fn idx(self) -> usize {
+        self as usize
+    }
+}
+
+/// One trigger admitted to the lanes (what the enqueue site knows).
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LaneAdmission {
+    pub(crate) t_rx_ns: u64,
+    pub(crate) slot: u64,
+    pub(crate) trigger: &'static str,
+    pub(crate) lane: Lane,
+    /// Newest canonical input revision the site saw ([FIX-134] `input_revision`); 0 = unknown.
+    /// Only a strictly newer revision may demote a pending entry (P6-MT.5: never by age alone).
+    pub(crate) revision: u64,
+    /// L2 order key: the candidate's last forwarded slot (0 = never forwarded, served first —
+    /// the FIX-135 fairness of the sweep).
+    pub(crate) last_forwarded_slot: u64,
+}
+
+/// A candidate's single pending entry (one per account, as before MT3).
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PendingCandidate {
+    /// The newest coalesced trigger `(account, t_rx_latest, slot, trigger)`. Its `t_rx` is the
+    /// FIX-21 freshness origin handed to the detect/pipeline — unchanged by MT3 (P6-MT.6).
+    pub(crate) work: DetectWork,
+    /// Receive time of the first still-unserved trigger; lane order and `lane_wait_ns` only.
+    pub(crate) t_rx_first: u64,
+    pub(crate) lane: Lane,
+    pub(crate) revision: u64,
+    pub(crate) last_forwarded_slot: u64,
+    /// Admission sequence: the deterministic tie-breaker inside a lane.
+    seq: u64,
+}
+
+#[cfg(feature = "crate_health")]
+impl PendingCandidate {
+    /// Order inside the lane: L0 earliest `t_rx_first` (deadline proxy; no economics yet), L1
+    /// oldest `t_rx_first`, L2 oldest last forwarded slot (FIX-135 fairness); then admission
+    /// order, then the pubkey.
+    fn key(&self) -> (u64, u64, Pubkey) {
+        let primary = match self.lane {
+            Lane::L0 | Lane::L1 => self.t_rx_first,
+            Lane::L2 => self.last_forwarded_slot,
+        };
+        (primary, self.seq, self.work.0)
+    }
+}
+
+/// Lane changes of pending entries by a later trigger (P6-MT.13 `lane_promotions/demotions/
+/// cancellations`).
+#[cfg(feature = "crate_health")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LaneStats {
+    pub(crate) promotions: u64,
+    pub(crate) demotions: u64,
+    /// No cancellation rule exists today: a candidate re-evaluated Healthy by the sweep is not
+    /// forwarded again but its pending entry stays for the detect's own exact evaluation (as
+    /// before MT3). P6-MT.5 allows a newer revision to cancel; measured, never incremented.
+    pub(crate) cancellations: u64,
+}
+
+/// P6-MT.5 (MT3): the one oracle/sweep candidate queue — three trigger-priority lanes served by
+/// a weighted deficit round robin, one pending entry per account.
+///
+/// - Coalescing keeps `t_rx_first`, takes the newest `t_rx`/slot/trigger and the newest
+///   revision; a stronger trigger promotes, only a strictly newer canonical revision may
+///   demote (never age alone).
+/// - Work-conserving: an empty lane yields its turn at once; L2 is starvation-free (a pending
+///   L2 entry is served within one WDRR round once it is first in its lane).
+/// - Bounded by the account population (one entry per account); nothing is ever dropped.
+#[cfg(feature = "crate_health")]
+#[derive(Default)]
+pub(crate) struct CandidateLanes {
+    pending: HashMap<Pubkey, PendingCandidate>,
+    order: [std::collections::BTreeSet<(u64, u64, Pubkey)>; LANES],
+    /// Every pending entry by `t_rx_first`: the age of the oldest unserved trigger (MT0 backlog).
+    by_first: std::collections::BTreeSet<(u64, Pubkey)>,
+    seq: u64,
+    credit: [u64; LANES],
+    turn: usize,
+    pub(crate) stats: LaneStats,
+}
+
+#[cfg(feature = "crate_health")]
+impl CandidateLanes {
+    pub(crate) fn len(&self) -> usize {
+        self.pending.len()
+    }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+    /// `t_rx_first` of the oldest unserved trigger (MT0 backlog age).
+    pub(crate) fn oldest_t_rx_first(&self) -> Option<u64> {
+        self.by_first.first().map(|(t, _)| *t)
+    }
+    #[cfg(test)]
+    pub(crate) fn lane_len(&self, lane: Lane) -> usize {
+        self.order[lane.idx()].len()
+    }
+    #[cfg(test)]
+    pub(crate) fn get(&self, account: &Pubkey) -> Option<&PendingCandidate> {
+        self.pending.get(account)
+    }
+
+    fn unlink(&mut self, entry: &PendingCandidate) {
+        self.order[entry.lane.idx()].remove(&entry.key());
+        self.by_first.remove(&(entry.t_rx_first, entry.work.0));
+    }
+    fn link(&mut self, entry: PendingCandidate) {
+        self.order[entry.lane.idx()].insert(entry.key());
+        self.by_first.insert((entry.t_rx_first, entry.work.0));
+        self.pending.insert(entry.work.0, entry);
+    }
+
+    /// Admits one trigger: a new entry, or the coalescing of the account's pending entry.
+    pub(crate) fn admit(&mut self, account: Pubkey, a: LaneAdmission) -> CandidateQueueAdmission {
+        let work = (account, a.t_rx_ns, a.slot, a.trigger);
+        if let Some(existing) = self.pending.get(&account).copied() {
+            // [FIX-137] Single-flight latest-state semantics: the queue token already exists,
+            // so carry the newest causal work into that token instead of allocating/deduping
+            // another one. Downstream reads canonical state again.
+            self.unlink(&existing);
+            let newer_revision = a.revision > existing.revision;
+            // P6-MT.5: a newer canonical revision may promote or demote; the same (or an
+            // unknown) revision may only promote — never a demotion by age alone.
+            let lane = if newer_revision {
+                a.lane
+            } else {
+                existing.lane.min(a.lane)
+            };
+            if lane < existing.lane {
+                self.stats.promotions = self.stats.promotions.saturating_add(1);
+            } else if lane > existing.lane {
+                self.stats.demotions = self.stats.demotions.saturating_add(1);
+            }
+            self.link(PendingCandidate {
+                work,
+                t_rx_first: existing.t_rx_first.min(a.t_rx_ns),
+                lane,
+                revision: existing.revision.max(a.revision),
+                // The L2 key stays the earliest: an unserved entry is never pushed back by a
+                // later repeat (FIX-135 "oldest last forwarded first", as the FIFO never did).
+                last_forwarded_slot: existing.last_forwarded_slot.min(a.last_forwarded_slot),
+                seq: existing.seq,
+            });
+            CandidateQueueAdmission::Coalesced
+        } else {
+            self.seq = self.seq.wrapping_add(1);
+            self.link(PendingCandidate {
+                work,
+                t_rx_first: a.t_rx_ns,
+                lane: a.lane,
+                revision: a.revision,
+                last_forwarded_slot: a.last_forwarded_slot,
+                seq: self.seq,
+            });
+            CandidateQueueAdmission::Enqueued
+        }
+    }
+
+    /// The next entry by weighted deficit round robin (`LANE_WDRR_START_WEIGHTS`): a lane with
+    /// work is served up to its weight per round, an empty lane yields its turn (and its unused
+    /// credit) at once, so every non-empty lane is reached within one round.
+    pub(crate) fn next(&mut self) -> Option<PendingCandidate> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        // At most one full rotation finds a non-empty lane: every lane is visited once.
+        for _ in 0..=LANES {
+            let lane = self.turn;
+            let Some(key) = self.order[lane].first().copied() else {
+                self.credit[lane] = 0;
+                self.turn = (lane + 1) % LANES;
+                continue;
+            };
+            if self.credit[lane] == 0 {
+                self.credit[lane] = LANE_WDRR_START_WEIGHTS[lane];
+            }
+            self.credit[lane] -= 1;
+            if self.credit[lane] == 0 {
+                self.turn = (lane + 1) % LANES;
+            }
+            let entry = self.pending.remove(&key.2)?;
+            self.unlink(&entry);
+            return Some(entry);
+        }
+        None
+    }
+}
+
+/// Admits one sweep candidate; counts the physical enqueue / coalescing and the peak backlog.
 #[cfg(feature = "crate_health")]
 pub(crate) fn enqueue_or_coalesce_candidate(
     account: Pubkey,
-    (t_rx_ns, event_slot, trigger): (u64, u64, &'static str),
-    order: &mut VecDeque<Pubkey>,
-    pending: &mut HashMap<Pubkey, DetectWork>,
+    admission: LaneAdmission,
+    lanes: &mut CandidateLanes,
     enqueued: &mut u64,
     coalesced: &mut u64,
     max_pending: &mut usize,
 ) -> CandidateQueueAdmission {
-    let work = (account, t_rx_ns, event_slot, trigger);
-    if let Some(existing) = pending.get_mut(&account) {
-        // [FIX-137] Single-flight latest-state semantics: the queue token already
-        // exists, so carry the newest causal work into that token instead of
-        // allocating/deduping another one. Downstream reads canonical state again.
-        *existing = work;
-        *coalesced = coalesced.saturating_add(1);
-        CandidateQueueAdmission::Coalesced
-    } else {
-        order.push_back(account);
-        pending.insert(account, work);
-        *enqueued = enqueued.saturating_add(1);
-        *max_pending = (*max_pending).max(pending.len());
-        CandidateQueueAdmission::Enqueued
+    let outcome = lanes.admit(account, admission);
+    match outcome {
+        CandidateQueueAdmission::Coalesced => *coalesced = coalesced.saturating_add(1),
+        CandidateQueueAdmission::Enqueued => {
+            *enqueued = enqueued.saturating_add(1);
+            *max_pending = (*max_pending).max(lanes.len());
+        }
     }
+    outcome
 }
 
+/// Admits every distinct account of an oracle trigger (deterministic pubkey order) to `lane`;
+/// `last_forwarded_slot` gives each account's L2 order key. Returns the distinct count.
 #[cfg(feature = "crate_health")]
 pub(crate) fn enqueue_oracle_accounts(
     accounts: impl IntoIterator<Item = Pubkey>,
     (t_rx_ns, event_slot, trigger): (u64, u64, &'static str),
-    order: &mut VecDeque<Pubkey>,
-    pending: &mut HashMap<Pubkey, DetectWork>,
-    enqueued: &mut u64,
-    coalesced: &mut u64,
-    max_pending: &mut usize,
+    lane: Lane,
+    last_forwarded_slot: impl Fn(&Pubkey) -> u64,
+    lanes: &mut CandidateLanes,
+    (enqueued, coalesced, max_pending): (&mut u64, &mut u64, &mut usize),
 ) -> usize {
     let mut unique = HashSet::new();
     unique.extend(accounts);
@@ -594,18 +800,236 @@ pub(crate) fn enqueue_oracle_accounts(
     let mut accounts: Vec<Pubkey> = unique.into_iter().collect();
     accounts.sort_unstable_by_key(|pk| pk.to_bytes());
     for account in accounts {
-        let work = (account, t_rx_ns, event_slot, trigger);
-        if let Some(existing) = pending.get_mut(&account) {
-            *existing = work;
-            *coalesced = coalesced.saturating_add(1);
-        } else {
-            order.push_back(account);
-            pending.insert(account, work);
-            *enqueued = enqueued.saturating_add(1);
+        let admission = LaneAdmission {
+            t_rx_ns,
+            slot: event_slot,
+            trigger,
+            lane,
+            revision: 0,
+            last_forwarded_slot: last_forwarded_slot(&account),
+        };
+        match lanes.admit(account, admission) {
+            CandidateQueueAdmission::Coalesced => *coalesced = coalesced.saturating_add(1),
+            CandidateQueueAdmission::Enqueued => *enqueued = enqueued.saturating_add(1),
         }
     }
-    *max_pending = (*max_pending).max(pending.len());
+    *max_pending = (*max_pending).max(lanes.len());
     count
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod mt3_lane_tests {
+    use super::*;
+
+    fn adm(t_rx_ns: u64, lane: Lane, revision: u64, last_forwarded_slot: u64) -> LaneAdmission {
+        LaneAdmission {
+            t_rx_ns,
+            slot: 1,
+            trigger: "oracle_health_ready",
+            lane,
+            revision,
+            last_forwarded_slot,
+        }
+    }
+
+    /// P6-MT.14 #10: a backlog far beyond the repeat soft-cap and the ingress capacity is never
+    /// dropped — every admitted account is dispatched exactly once (one entry per account,
+    /// coalesced), and the peak is the distinct population.
+    #[test]
+    fn mt3_10_queue_full_loses_no_candidate() {
+        let mut lanes = CandidateLanes::default();
+        let (mut enqueued, mut coalesced, mut max_pending) = (0u64, 0u64, 0usize);
+        let accounts: Vec<Pubkey> = (0..5_000).map(|_| Pubkey::new_unique()).collect();
+        for (i, account) in accounts.iter().enumerate() {
+            let lane = LANE_LIST[i % LANES];
+            enqueue_or_coalesce_candidate(
+                *account,
+                adm(i as u64, lane, 1, i as u64),
+                &mut lanes,
+                &mut enqueued,
+                &mut coalesced,
+                &mut max_pending,
+            );
+        }
+        // A second wave over the same population coalesces, never duplicates or drops.
+        let second = enqueue_oracle_accounts(
+            accounts.iter().copied(),
+            (10_000, 2, "oracle_threshold"),
+            Lane::L2,
+            |_| 0,
+            &mut lanes,
+            (&mut enqueued, &mut coalesced, &mut max_pending),
+        );
+        assert_eq!((second, enqueued, coalesced), (5_000, 5_000, 5_000));
+        assert_eq!((lanes.len(), max_pending), (5_000, 5_000));
+        let mut served = HashSet::new();
+        while let Some(entry) = lanes.next() {
+            assert!(served.insert(entry.work.0), "served twice");
+            assert_eq!(entry.work.1, 10_000, "newest t_rx");
+        }
+        assert_eq!(served.len(), 5_000);
+        assert!(served.iter().all(|a| accounts.contains(a)));
+        assert!(lanes.is_empty() && lanes.oldest_t_rx_first().is_none());
+    }
+
+    /// P6-MT.14 #21: one L0 admission behind a large L2 backlog is the next dispatch (and after
+    /// an L2 dispatch was served, still within one WDRR round: L2's weight is 1).
+    #[test]
+    fn mt3_21_l0_overtakes_a_large_l2_backlog() {
+        let mut lanes = CandidateLanes::default();
+        for i in 0..1_000u64 {
+            lanes.admit(Pubkey::new_unique(), adm(i, Lane::L2, 1, i));
+        }
+        let urgent = Pubkey::new_unique();
+        lanes.admit(urgent, adm(5_000, Lane::L0, 7, 0));
+        let first = lanes.next().unwrap();
+        assert_eq!((first.work.0, first.lane), (urgent, Lane::L0));
+        // L2 is being served; a new L0 entry waits for at most L2's single dispatch.
+        let served = lanes.next().unwrap();
+        assert_eq!(served.lane, Lane::L2);
+        let urgent2 = Pubkey::new_unique();
+        lanes.admit(urgent2, adm(6_000, Lane::L0, 7, 0));
+        let dispatches: Vec<Pubkey> = (0..2)
+            .filter_map(|_| lanes.next())
+            .map(|e| e.work.0)
+            .collect();
+        assert!(dispatches.contains(&urgent2));
+        // Within L0: the earliest `t_rx_first` first, whatever the admission order.
+        let (late, early) = (Pubkey::new_unique(), Pubkey::new_unique());
+        lanes.admit(late, adm(9_000, Lane::L0, 7, 0));
+        lanes.admit(early, adm(8_000, Lane::L0, 7, 0));
+        while lanes.next().is_some_and(|e| e.lane != Lane::L0) {}
+        assert_eq!(lanes.next().unwrap().work.0, late);
+    }
+
+    /// P6-MT.14 #22: under sustained L0 and L1 load (refilled after every dispatch) an L2 entry
+    /// is served within one WDRR round (8 + 3 + 1 dispatches), and the long-run share follows
+    /// the 8:3:1 start weights; an empty lane yields its turn (work-conserving).
+    #[test]
+    fn mt3_22_l2_stays_starvation_free_under_sustained_l0_l1_load() {
+        let mut lanes = CandidateLanes::default();
+        let refill = |lanes: &mut CandidateLanes, t: u64| {
+            while lanes.lane_len(Lane::L0) < 4 {
+                lanes.admit(Pubkey::new_unique(), adm(t, Lane::L0, 1, 0));
+            }
+            while lanes.lane_len(Lane::L1) < 4 {
+                lanes.admit(Pubkey::new_unique(), adm(t, Lane::L1, 1, 0));
+            }
+        };
+        let round: u64 = LANE_WDRR_START_WEIGHTS.iter().sum();
+        let mut worst_wait = 0u64;
+        let mut served = [0u64; LANES];
+        let mut t = 0u64;
+        for _ in 0..200 {
+            refill(&mut lanes, t);
+            let waiting = Pubkey::new_unique();
+            lanes.admit(waiting, adm(t, Lane::L2, 1, 0));
+            let mut dispatches = 0u64;
+            loop {
+                refill(&mut lanes, t);
+                let entry = lanes.next().expect("work pending");
+                served[entry.lane as usize] += 1;
+                dispatches += 1;
+                t += 1;
+                if entry.work.0 == waiting {
+                    break;
+                }
+                assert!(
+                    dispatches <= round,
+                    "L2 starved for {dispatches} dispatches"
+                );
+            }
+            worst_wait = worst_wait.max(dispatches);
+        }
+        assert!(
+            worst_wait <= round,
+            "worst wait {worst_wait} > one round {round}"
+        );
+        assert!(served[0] > served[1] && served[1] > served[2]);
+        assert_eq!(served[2], 200);
+        // Work-conserving: with L0 and L1 empty, L2 is served back to back.
+        while lanes.next().is_some() {}
+        for i in 0..20u64 {
+            lanes.admit(Pubkey::new_unique(), adm(i, Lane::L2, 1, i));
+        }
+        let only_l2 = (0..20)
+            .map(|_| lanes.next().unwrap().lane)
+            .all(|l| l == Lane::L2);
+        assert!(only_l2 && lanes.is_empty());
+    }
+
+    /// P6-MT.14 #23: coalescing keeps `t_rx_first` (and the earliest L2 key), takes the newest
+    /// `t_rx`/slot/trigger and the newest revision.
+    #[test]
+    fn mt3_23_coalescing_keeps_t_rx_first_and_takes_the_newest_work() {
+        let a = Pubkey::new_unique();
+        let mut lanes = CandidateLanes::default();
+        lanes.admit(a, adm(100, Lane::L1, 3, 10));
+        assert_eq!(
+            lanes.admit(
+                a,
+                LaneAdmission {
+                    t_rx_ns: 250,
+                    slot: 12,
+                    trigger: "oracle_health_error",
+                    lane: Lane::L1,
+                    revision: 4,
+                    last_forwarded_slot: 11,
+                },
+            ),
+            CandidateQueueAdmission::Coalesced
+        );
+        let e = *lanes.get(&a).unwrap();
+        assert_eq!(e.work, (a, 250, 12, "oracle_health_error"));
+        assert_eq!(
+            (e.t_rx_first, e.revision, e.last_forwarded_slot),
+            (100, 4, 10)
+        );
+        assert_eq!(lanes.oldest_t_rx_first(), Some(100));
+        assert_eq!((lanes.len(), lanes.lane_len(Lane::L1)), (1, 1));
+        assert_eq!(
+            lanes.next().unwrap().work.1,
+            250,
+            "FIX-21: newest t_rx to the detect"
+        );
+    }
+
+    /// P6-MT.14 #39: only a strictly newer canonical revision may demote (L0 → L1 here); the
+    /// same or an unknown revision never demotes (no age-based demotion) but may promote.
+    #[test]
+    fn mt3_39_a_newer_revision_may_demote_the_same_revision_never() {
+        let a = Pubkey::new_unique();
+        let mut lanes = CandidateLanes::default();
+        lanes.admit(a, adm(100, Lane::L0, 5, 0));
+        // Same revision, weaker class: stays L0.
+        lanes.admit(a, adm(200, Lane::L2, 5, 0));
+        assert_eq!(lanes.get(&a).unwrap().lane, Lane::L0);
+        // Unknown revision (threshold trigger), weaker class: stays L0.
+        lanes.admit(a, adm(300, Lane::L2, 0, 0));
+        assert_eq!(lanes.get(&a).unwrap().lane, Lane::L0);
+        assert_eq!(lanes.stats, LaneStats::default());
+        // Strictly newer revision, weaker class: demoted to L1, `t_rx_first` kept.
+        lanes.admit(a, adm(400, Lane::L1, 6, 0));
+        let e = *lanes.get(&a).unwrap();
+        assert_eq!((e.lane, e.t_rx_first, e.revision), (Lane::L1, 100, 6));
+        assert_eq!((lanes.lane_len(Lane::L0), lanes.lane_len(Lane::L1)), (0, 1));
+        // Newer revision, same class: no lane change counted.
+        lanes.admit(a, adm(450, Lane::L1, 7, 0));
+        // A stronger class with an unknown revision promotes back to L0.
+        lanes.admit(a, adm(500, Lane::L0, 0, 0));
+        let e = *lanes.get(&a).unwrap();
+        assert_eq!((e.lane, e.revision), (Lane::L0, 7));
+        assert_eq!(
+            lanes.stats,
+            LaneStats {
+                promotions: 1,
+                demotions: 1,
+                cancellations: 0
+            }
+        );
+        assert_eq!(lanes.next().unwrap().lane, Lane::L0);
+        assert!(lanes.is_empty());
+    }
 }
 
 #[cfg(all(test, feature = "crate_health"))]

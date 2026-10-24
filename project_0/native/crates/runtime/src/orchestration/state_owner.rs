@@ -142,8 +142,9 @@ pub(super) struct ShadowOwner {
     /// own detection work, served after the detect and oracle queues, never via the ingress
     /// channel the WSS session writes to.
     bootstrap_probe_queue: VecDeque<DetectWork>,
-    oracle_detect_order: VecDeque<Pubkey>,
-    oracle_detect_pending: HashMap<Pubkey, DetectWork>,
+    /// P6-MT.5 (MT3): the one oracle/sweep candidate queue — trigger-priority lanes L0/L1/L2
+    /// under a weighted deficit round robin, one pending entry per account (coalesced).
+    oracle_lanes: CandidateLanes,
     oracle_bank_projection_pending: HashMap<Pubkey, (u64, u64)>,
     integration_probe_expected: HashSet<Pubkey>,
     integration_probe_queue: VecDeque<(Pubkey, u64)>,
@@ -172,7 +173,6 @@ pub(super) struct ShadowOwner {
     ingress_since_detect: usize,
     /// B6: bound on the synchronous network work of candidates while ingress is behind.
     network: NetworkBudget,
-    mt0_order_rx: VecDeque<u64>,
     clock: Clock,
     econ: Option<crate::analytics::econ::Handle>,
     operational_start: u64,

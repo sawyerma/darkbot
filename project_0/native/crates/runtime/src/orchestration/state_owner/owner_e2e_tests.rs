@@ -120,8 +120,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         projection_stats: ProjectionStats::default(),
         detect_queue: VecDeque::new(),
         bootstrap_probe_queue: VecDeque::new(),
-        oracle_detect_order: VecDeque::new(),
-        oracle_detect_pending: HashMap::new(),
+        oracle_lanes: CandidateLanes::default(),
         oracle_bank_projection_pending: HashMap::new(),
         integration_probe_expected: HashSet::new(),
         integration_probe_queue: VecDeque::new(),
@@ -146,7 +145,6 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         ingress_burst_before_detect: 64,
         ingress_since_detect: 0,
         network: NetworkBudget::unbounded(),
-        mt0_order_rx: VecDeque::new(),
         clock,
         econ: None,
         operational_start: 0,
@@ -587,10 +585,17 @@ fn z14_bootstrap_probes_never_occupy_the_ingress_channel() {
         .all(|w| w.3 == "bootstrap_snapshot_probe"));
     // An oracle-triggered candidate waiting meanwhile is served before the probes.
     let oracle = Pubkey::new_unique();
-    f.owner.oracle_detect_order.push_back(oracle);
-    f.owner
-        .oracle_detect_pending
-        .insert(oracle, (oracle, 0, 10, "oracle_price"));
+    f.owner.oracle_lanes.admit(
+        oracle,
+        LaneAdmission {
+            t_rx_ns: 0,
+            slot: 10,
+            trigger: "oracle_price",
+            lane: Lane::L2,
+            revision: 0,
+            last_forwarded_slot: 0,
+        },
+    );
     let next = |f: &mut Fixture| match f.owner.events(&mut || unreachable!(), &f.ingress) {
         Ok(OwnerStep::Next(Some(w))) => w,
         _ => panic!("detection work expected"),
@@ -2506,7 +2511,11 @@ fn p2_05_tag_wakeup_forwards_a_held_candidate_again() {
             "{trigger:?}"
         );
     }
-    assert!(f.owner.oracle_detect_pending.contains_key(&account));
+    // MT3 (P6-MT.5): a due t_profitable wake-up is a forced re-arm and waits in lane L0.
+    assert_eq!(
+        f.owner.oracle_lanes.get(&account).map(|p| p.lane),
+        Some(super::candidates::Lane::L0)
+    );
     assert!(!f.owner.candidate_force_rearm.contains(&account));
     assert!(f.owner.time_schedule.is_empty());
     // The detection's record decides the tag wake-up: this fixture has no plan (no FeeState),

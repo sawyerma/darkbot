@@ -91,11 +91,23 @@ fn target_waits_unsigned_until_worker_is_idle() {
     assert!(queue.is_empty());
 }
 
+fn admission(t_rx_ns: u64, slot: u64, trigger: &'static str, lane: Lane) -> LaneAdmission {
+    LaneAdmission {
+        t_rx_ns,
+        slot,
+        trigger,
+        lane,
+        revision: 0,
+        last_forwarded_slot: 0,
+    }
+}
+
+/// [FIX-137] One queue token per account; the token carries the newest causal work (MT3: and
+/// keeps `t_rx_first`).
 #[test]
 fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() {
     let account = Pubkey::new_unique();
-    let mut order = VecDeque::new();
-    let mut pending = HashMap::new();
+    let mut lanes = CandidateLanes::default();
     let mut enqueued = 0u64;
     let mut coalesced = 0u64;
     let mut max_pending = 0usize;
@@ -103,9 +115,8 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
     assert_eq!(
         enqueue_or_coalesce_candidate(
             account,
-            (100, 7, "oracle_health_ready"),
-            &mut order,
-            &mut pending,
+            admission(100, 7, "oracle_health_ready", Lane::L2),
+            &mut lanes,
             &mut enqueued,
             &mut coalesced,
             &mut max_pending,
@@ -115,9 +126,8 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
     assert_eq!(
         enqueue_or_coalesce_candidate(
             account,
-            (200, 7, "oracle_health_ready"),
-            &mut order,
-            &mut pending,
+            admission(200, 7, "oracle_health_ready", Lane::L2),
+            &mut lanes,
             &mut enqueued,
             &mut coalesced,
             &mut max_pending,
@@ -127,9 +137,8 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
     assert_eq!(
         enqueue_or_coalesce_candidate(
             account,
-            (300, 8, "oracle_health_error"),
-            &mut order,
-            &mut pending,
+            admission(300, 8, "oracle_health_error", Lane::L2),
+            &mut lanes,
             &mut enqueued,
             &mut coalesced,
             &mut max_pending,
@@ -137,43 +146,43 @@ fn candidate_singleflight_coalesces_latest_work_without_duplicate_queue_token() 
         CandidateQueueAdmission::Coalesced
     );
 
-    assert_eq!(order.len(), 1);
-    assert_eq!(pending.len(), 1);
+    assert_eq!(lanes.len(), 1);
     assert_eq!(enqueued, 1);
     assert_eq!(coalesced, 2);
     assert_eq!(max_pending, 1);
-    assert_eq!(
-        next_oracle_detect(&mut order, &mut pending),
-        Some((account, 300, 8, "oracle_health_error"))
-    );
-    assert!(pending.is_empty());
-    assert!(order.is_empty());
+    let entry = lanes.next().unwrap();
+    assert_eq!(entry.work, (account, 300, 8, "oracle_health_error"));
+    assert_eq!(entry.t_rx_first, 100);
+    assert!(lanes.is_empty());
 }
 
 #[test]
 fn oracle_detect_returns_latest_coalesced_work_once() {
     let a = Pubkey::new_unique();
-    let mut order = VecDeque::from([a]);
-    let mut pending = HashMap::from([(a, (a, 200, 9, "oracle_threshold"))]);
+    let mut lanes = CandidateLanes::default();
+    lanes.admit(a, admission(200, 9, "oracle_threshold", Lane::L0));
     assert_eq!(
-        next_oracle_detect(&mut order, &mut pending),
+        lanes.next().map(|e| e.work),
         Some((a, 200, 9, "oracle_threshold"))
     );
-    assert!(pending.is_empty());
-    assert!(next_oracle_detect(&mut order, &mut pending).is_none());
+    assert!(lanes.is_empty());
+    assert!(lanes.next().is_none());
 }
 
+/// A served account is gone from every lane index; a later admission is a fresh token.
 #[test]
-fn oracle_detect_skips_stale_order_entries() {
-    let stale = Pubkey::new_unique();
-    let live = Pubkey::new_unique();
-    let mut order = VecDeque::from([stale, live]);
-    let mut pending = HashMap::from([(live, (live, 300, 10, "oracle_threshold"))]);
+fn oracle_detect_served_account_is_readmitted_as_a_fresh_token() {
+    let a = Pubkey::new_unique();
+    let mut lanes = CandidateLanes::default();
+    lanes.admit(a, admission(300, 10, "oracle_threshold", Lane::L0));
+    assert_eq!(lanes.next().unwrap().work.0, a);
+    assert!(lanes.oldest_t_rx_first().is_none());
     assert_eq!(
-        next_oracle_detect(&mut order, &mut pending).unwrap().0,
-        live
+        lanes.admit(a, admission(400, 11, "oracle_threshold", Lane::L2)),
+        CandidateQueueAdmission::Enqueued
     );
-    assert!(order.is_empty());
+    let entry = lanes.next().unwrap();
+    assert_eq!((entry.t_rx_first, entry.lane), (400, Lane::L2));
 }
 
 #[test]

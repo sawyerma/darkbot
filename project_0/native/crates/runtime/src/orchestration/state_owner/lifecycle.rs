@@ -19,18 +19,17 @@ impl ShadowOwner {
             .enter(darkbot_common::mt0::OwnerCat::RemoteResults);
         #[cfg(feature = "crate_health")]
         {
-            // Backlog age covers both queues counted in `pending_current`: head-of-line token of the
-            // oracle queue (FIFO) and the oldest entry of `detect_queue`.
+            // Backlog age covers both queues counted in `pending_current`: the oldest
+            // `t_rx_first` across the oracle lanes and the oldest entry of `detect_queue`.
             let oldest_rx = self
-                .mt0_order_rx
-                .front()
-                .copied()
+                .oracle_lanes
+                .oldest_t_rx_first()
                 .into_iter()
                 .chain(self.detect_queue.iter().map(|w| w.1))
                 .min();
             let oldest = oldest_rx.map(|t| self.clock.now_ns().saturating_sub(t));
             darkbot_common::mt0::MT0.set_backlog(
-                (self.oracle_detect_pending.len() + self.detect_queue.len()) as u64,
+                (self.oracle_lanes.len() + self.detect_queue.len()) as u64,
                 oldest,
             );
         }

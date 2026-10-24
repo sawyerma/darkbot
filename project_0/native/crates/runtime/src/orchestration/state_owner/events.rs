@@ -46,7 +46,7 @@ impl ShadowOwner {
         self.mt0_owner.enter(darkbot_common::mt0::OwnerCat::Wait);
         #[cfg(feature = "crate_health")]
         let queued_detection_available = !self.detect_queue.is_empty()
-            || !self.oracle_detect_pending.is_empty()
+            || !self.oracle_lanes.is_empty()
             || !self.bootstrap_probe_queue.is_empty()
             || (!self.integration_probe_queue.is_empty() && self.projection_pending.is_empty());
         #[cfg(feature = "crate_health")]
@@ -878,7 +878,12 @@ impl ShadowOwner {
                             .sweep_max_dirty_banks
                             .max(self.sweep_dirty_banks.len());
                     } else {
+                        // P6-MT.5 lanes of the threshold trigger: `candidates` are threshold-index
+                        // hits (the price crossed the account's maintenance threshold: a potential
+                        // transition → L0, P6-MT.14 #29); `fallback` are bank-wide or
+                        // threshold-unknown re-checks without a per-account signal → L2.
                         let mut candidates: HashSet<Pubkey> = HashSet::new();
+                        let mut fallback: HashSet<Pubkey> = HashSet::new();
                         for bank in banks {
                             let all_accounts: Vec<Pubkey> = self
                                 .reverse_index
@@ -904,7 +909,7 @@ impl ShadowOwner {
                                             liability_price,
                                             0,
                                         ));
-                                        candidates.extend(
+                                        fallback.extend(
                                             all_accounts
                                                 .iter()
                                                 .copied()
@@ -930,7 +935,7 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             };
                                             let Some(bank_state) =
@@ -940,7 +945,7 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             };
                                             let refreshes =
@@ -952,7 +957,7 @@ impl ShadowOwner {
                                             Ok(_) => {
                                                 self.metrics.oracle_price_fallbacks =
                                                     self.metrics.oracle_price_fallbacks.saturating_add(1);
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             }
                                             Err(refresh_error) => {
@@ -962,7 +967,7 @@ impl ShadowOwner {
                                                     "oracle_bank_projection_plan_fallback: dependency={} bank={} price_error={} refresh_error={}",
                                                     dependency, bank, e, refresh_error
                                                 );
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             }
                                         };
@@ -975,7 +980,7 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             }
                                             let Some(bh) = self
@@ -986,7 +991,7 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             };
                                             let projection_plan = tx::TxPlan {
@@ -1011,7 +1016,7 @@ impl ShadowOwner {
                                                 "oracle_bank_projection_build_fallback: dependency={} bank={} error={}",
                                                 dependency, bank, build_error
                                             );
-                                                    candidates.extend(all_accounts);
+                                                    fallback.extend(all_accounts);
                                                     continue;
                                                 }
                                             };
@@ -1026,7 +1031,7 @@ impl ShadowOwner {
                                             "oracle_bank_projection_sign_fallback: dependency={} bank={} error={}",
                                             dependency, bank, sign_error
                                         );
-                                                candidates.extend(all_accounts);
+                                                fallback.extend(all_accounts);
                                                 continue;
                                             }
                                             let work = OraclePriceProjectionWork {
@@ -1061,7 +1066,7 @@ impl ShadowOwner {
                                                         .metrics
                                                         .oracle_price_fallbacks
                                                         .saturating_add(1);
-                                                    candidates.extend(all_accounts);
+                                                    fallback.extend(all_accounts);
                                                 }
                                                 Err(ChannelError::Disconnected(_)) => {
                                                     return Err(
@@ -1074,22 +1079,30 @@ impl ShadowOwner {
                                     }
                                 }
                             } else {
-                                candidates.extend(all_accounts);
+                                fallback.extend(all_accounts);
                             }
                         }
 
-                        let mt0_len_before = self.oracle_detect_order.len(); // [MT0]
-                        let count = enqueue_oracle_accounts(
-                            candidates,
-                            (t_rx_ns, event_slot, "oracle_threshold"),
-                            &mut self.oracle_detect_order,
-                            &mut self.oracle_detect_pending,
-                            &mut self.metrics.oracle_enqueued,
-                            &mut self.metrics.oracle_coalesced,
-                            &mut self.metrics.oracle_max_pending,
-                        );
-                        for _ in mt0_len_before..self.oracle_detect_order.len() {
-                            self.mt0_order_rx.push_back(t_rx_ns);
+                        // Hits first (L0); a fallback account that is also a hit stays a hit.
+                        fallback.retain(|a| !candidates.contains(a));
+                        let mut count = 0usize;
+                        for (accounts, lane) in [(candidates, Lane::L0), (fallback, Lane::L2)] {
+                            count += enqueue_oracle_accounts(
+                                accounts,
+                                (t_rx_ns, event_slot, "oracle_threshold"),
+                                lane,
+                                |a| {
+                                    self.candidate_cache
+                                        .get(a)
+                                        .map_or(0, |e| e.last_forwarded_slot)
+                                },
+                                &mut self.oracle_lanes,
+                                (
+                                    &mut self.metrics.oracle_enqueued,
+                                    &mut self.metrics.oracle_coalesced,
+                                    &mut self.metrics.oracle_max_pending,
+                                ),
+                            );
                         }
                         self.metrics.oracle_candidate_hits = self
                             .metrics
@@ -1113,22 +1126,17 @@ impl ShadowOwner {
                     .detect_queue
                     .pop_front()
                     .or_else(|| {
-                        let mt0_len_before = self.oracle_detect_order.len();
-                        let work = next_oracle_detect(
-                            &mut self.oracle_detect_order,
-                            &mut self.oracle_detect_pending,
+                        // P6-MT.5: the lanes' weighted deficit round robin picks the entry; its
+                        // `work` carries the newest coalesced `t_rx` (FIX-21 freshness origin,
+                        // unchanged by MT3); `t_rx_first` feeds only the wait telemetry.
+                        let entry = self.oracle_lanes.next()?;
+                        let wait_first = self.clock.now_ns().saturating_sub(entry.t_rx_first);
+                        darkbot_common::mt0::MT0.record_queue_wait_first(
+                            darkbot_common::mt0::TriggerClass::from_trigger(entry.work.3),
+                            wait_first,
                         );
-                        let mut mt0_first = None;
-                        for _ in 0..mt0_len_before.saturating_sub(self.oracle_detect_order.len()) {
-                            mt0_first = self.mt0_order_rx.pop_front();
-                        }
-                        if let (Some(w), Some(first)) = (&work, mt0_first) {
-                            darkbot_common::mt0::MT0.record_queue_wait_first(
-                                darkbot_common::mt0::TriggerClass::from_trigger(w.3),
-                                self.clock.now_ns().saturating_sub(first),
-                            );
-                        }
-                        work
+                        self.metrics.lane_wait_ns[entry.lane as usize].record(wait_first);
+                        Some(entry.work)
                     })
                     // Z14: bootstrap probes after the oracle-triggered candidates.
                     .or_else(|| self.bootstrap_probe_queue.pop_front())
