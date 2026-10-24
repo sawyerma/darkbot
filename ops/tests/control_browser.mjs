@@ -11,8 +11,19 @@ const [port,dir,root]=process.argv.slice(2);const base=`http://127.0.0.1:${port}
 const bundle=`${dir}/protocol.cjs`;
 buildSync({entryPoints:[`${root}/frontend/src/core/generated/darkbot/control/v1/commands_pb.ts`],bundle:true,platform:'node',format:'cjs',outfile:bundle});
 const proto=require(bundle);
+const streamBundle=`${dir}/stream.cjs`;
+buildSync({stdin:{contents:'export * from "./stream_pb.ts"; export * from "./topics_pb.ts";',resolveDir:`${root}/frontend/src/core/generated/darkbot/control/v1`,loader:'ts'},bundle:true,platform:'node',format:'cjs',outfile:streamBundle});
+const stream=require(streamBundle);
 const browser=await chromium.launch({headless:true});
 const p=await browser.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));
+// Every WebSocket of the page with its decoded client and server frames.
+const sockets=[];
+p.on('websocket',ws=>{const s={sent:[],got:[],closed:false};sockets.push(s);
+ const bytes=f=>typeof f.payload==='string'?null:new Uint8Array(f.payload);
+ ws.on('framesent',f=>{const b=bytes(f);if(b)s.sent.push(fromBinary(stream.ClientMessageSchema,b));});
+ ws.on('framereceived',f=>{const b=bytes(f);if(b)s.got.push(fromBinary(stream.ServerMessageSchema,b));});
+ ws.on('close',()=>{s.closed=true;});});
+const active=s=>{const set=new Set();for(const m of s.sent){if(m.msg.case==='subscribe')set.add(m.msg.value.topic);if(m.msg.case==='unsubscribe')set.delete(m.msg.value.topic);}return set;};
 const api=p.request;
 const encode=(id,action,project=1)=>toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project,requestId:id,action,issuedAtUnixNs:1n}));
 const getProcess=async()=>await (await api.get(base+'/api/v1/project0/process')).json();
@@ -97,7 +108,29 @@ try{
  const replay=await api.post(base+'/api/v1/command',{headers,data});
  assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await replay.body())).commandId,receipts[0].commandId);
  assert.equal((await getProcess()).state,'STOPPED');
+ // One shared WebSocket across routes; overview.aggregates only while the overview is shown.
+ const OV=stream.TopicId.OVERVIEW_AGGREGATES, BSC=stream.TopicId.BSC_STATUS;
+ await p.goto(base+'/');
+ await until(async()=>{const s=sockets.at(-1);return !!s&&!s.closed&&active(s).has(OV);},'overview subscribed on /');
+ const opened=sockets.length, live=sockets.at(-1);
+ await p.getByTestId('project-link-project0').click();await p.waitForURL(base+'/project-0');
+ await until(async()=>!active(live).has(OV),'overview released on /project-0');
+ await p.goBack();await p.waitForURL(base+'/');
+ await until(async()=>active(live).has(OV),'overview subscribed again on /');
+ await p.getByTestId('project-link-bsc').click();await p.waitForURL(base+'/bsc');
+ await until(async()=>!active(live).has(OV)&&active(live).has(BSC),'BSC topics without overview on /bsc');
+ assert.equal(sockets.length,opened,'route changes reuse the one WebSocket');assert.equal(live.closed,false);
+ // Gateway crash: launchd restarts it; the page reconnects by itself and resubscribes this route only.
+ const gatewayLabel=`com.darkbot.test.${dir.split('.').at(-1)}.gateway`;
+ assert(gatewayLabel.startsWith('com.darkbot.test.'));
+ execFileSync('/bin/launchctl',['kill','SIGKILL',`gui/${process.getuid()}/${gatewayLabel}`]);
+ await until(async()=>live.closed,'socket closed by the gateway crash');
+ const acked=(s,topic)=>s.sent.some(m=>m.msg.case==='subscribe'&&m.msg.value.topic===topic&&s.got.some(a=>a.msg.case==='controlAck'&&a.msg.value.requestId===m.msg.value.requestId&&a.msg.value.status===stream.AckStatus.ACCEPTED));
+ await until(async()=>{const s=sockets.at(-1);return s!==live&&!s.closed&&s.got.some(m=>m.msg.case==='welcome'&&m.msg.value.status===stream.WelcomeStatus.ACCEPTED)&&acked(s,BSC);},'reconnected and resubscribed');
+ const again=sockets.at(-1);
+ assert.equal(active(again).has(OV),false);
+ assert.equal(sockets.filter(s=>!s.closed).length,1,'exactly one open WebSocket after reconnect');
  assert.deepEqual(errors,[]);
  writeFileSync(`${dir}/control-test.json`,JSON.stringify({passed:true,sawStopping,run:first.run_id,errors},null,2));
- console.log('PASS UI Start / Stop / Stop All / logs / crash FAILED / sealed journals / restored receipt, real launchd state, session/CSRF/origin/body limits, BSC+Solana disabled, concurrent and durable idempotency; STOPPING observed:',sawStopping);
+ console.log('PASS UI Start / Stop / Stop All / logs / crash FAILED / sealed journals / restored receipt, real launchd state, session/CSRF/origin/body limits, BSC+Solana disabled, concurrent and durable idempotency, one WebSocket across routes, route-scoped overview topic, reconnect after gateway crash; STOPPING observed:',sawStopping);
 }finally{await browser.close();}
