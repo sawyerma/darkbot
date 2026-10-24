@@ -67,6 +67,53 @@ struct State {
     rate_limits: u32,
     requests: u64,
     retry_after_overflow: bool,
+    /// A23-06: what set the current `cooldown`, the latest 429's header, the longest server wait.
+    cooldown_cause: CooldownCause,
+    last_retry_after: RetryAfterHeader,
+    max_retry_after_secs: u64,
+}
+/// A23-06: a server's `Retry-After` as read — never clamped, never guessed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RetryAfterHeader {
+    /// No header (or no 429 yet).
+    Absent,
+    /// A delay in whole seconds (delta-seconds, or an HTTP-date minus now, at least 0). A
+    /// delta-seconds value beyond `u64` is `u64::MAX` — a longer wait, never a shorter one.
+    Delay { secs: u64 },
+    /// Present but neither form: no server delay, only the local backoff.
+    Invalid,
+}
+impl RetryAfterHeader {
+    pub fn delay(self) -> Duration {
+        match self {
+            RetryAfterHeader::Delay { secs } => Duration::from_secs(secs),
+            RetryAfterHeader::Absent | RetryAfterHeader::Invalid => Duration::ZERO,
+        }
+    }
+}
+/// A23-06: why the provider account currently waits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CooldownCause {
+    None,
+    /// The local exponential backoff of a 429 (no, an invalid or a shorter server delay).
+    LocalBackoff,
+    /// A server `Retry-After` longer than the local backoff, honoured unshortened.
+    ServerRetryAfter,
+    /// A server delay beyond any representable instant: every admission is refused
+    /// (`RPC_RATE_LIMIT`, fail-closed) until the process restarts.
+    RetryAfterUnrepresentable,
+}
+/// A23-06: the typed cooldown status of the provider account at one instant.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CooldownStatus {
+    pub cause: CooldownCause,
+    /// Remaining wait in ms, rounded up (0: none); `None` when unrepresentable.
+    pub remaining_ms: Option<u64>,
+    /// The `Retry-After` of the latest 429.
+    pub last_retry_after: RetryAfterHeader,
+    /// The longest server delay honoured so far (seconds).
+    pub max_retry_after_secs: u64,
+    pub http_429_count: u64,
 }
 pub struct Budget {
     limits: crate::runtime_config::Limits,
@@ -178,6 +225,9 @@ impl Budget {
                 rate_limits: 0,
                 requests: 0,
                 retry_after_overflow: false,
+                cooldown_cause: CooldownCause::None,
+                last_retry_after: RetryAfterHeader::Absent,
+                max_retry_after_secs: 0,
             }),
             changed: Condvar::new(),
         }
@@ -378,7 +428,23 @@ impl Budget {
             };
         }
     }
+    /// A 429 with a known delay (`ZERO`: none); see `rate_limited_header`.
     pub fn rate_limited(&self, retry: Duration) {
+        let header = if retry.is_zero() {
+            RetryAfterHeader::Absent
+        } else {
+            RetryAfterHeader::Delay {
+                secs: retry.as_secs(),
+            }
+        };
+        self.limit(header, retry);
+    }
+    /// A 429: the wait is the longer of the server's `Retry-After` (never clamped) and the local
+    /// backoff; a server delay beyond any representable instant refuses every admission.
+    pub fn rate_limited_header(&self, header: RetryAfterHeader) {
+        self.limit(header, header.delay());
+    }
+    fn limit(&self, header: RetryAfterHeader, retry: Duration) {
         let mut s = self.lock_state();
         s.rate_limits = s.rate_limits.saturating_add(1);
         if self.adaptive {
@@ -393,13 +459,66 @@ impl Budget {
                 .min(self.limits.rpc_backoff_max_ms),
         );
         let jitter = Duration::from_millis((s.requests.wrapping_mul(137)) % 251);
+        let local = circuit + jitter;
         // Never clamp a server's longer Retry-After to our local maximum.
-        if let Some(until) = Instant::now().checked_add(retry.max(circuit + jitter)) {
-            s.cooldown = s.cooldown.max(until);
+        let server_imposed = if let Some(until) = Instant::now().checked_add(retry.max(local)) {
+            let extends = until > s.cooldown;
+            if extends {
+                s.cooldown = until;
+                s.cooldown_cause = if retry > local {
+                    CooldownCause::ServerRetryAfter
+                } else {
+                    CooldownCause::LocalBackoff
+                };
+            }
+            extends && retry > local
         } else {
+            let first = !s.retry_after_overflow;
             s.retry_after_overflow = true;
+            first
+        };
+        if server_imposed {
+            // A23-06: a server-imposed wait is announced once per start/extension (no URL).
+            eprintln!(
+                "[PROVIDER] cooldown cause={} retry_after_secs={} http_429={}",
+                if s.retry_after_overflow {
+                    "RETRY_AFTER_UNREPRESENTABLE"
+                } else {
+                    "SERVER_RETRY_AFTER"
+                },
+                retry.as_secs(),
+                s.rate_limits
+            );
+        }
+        s.last_retry_after = header;
+        if let RetryAfterHeader::Delay { secs } = header {
+            s.max_retry_after_secs = s.max_retry_after_secs.max(secs);
         }
         self.changed.notify_all();
+    }
+    /// A23-06: the typed cooldown status now.
+    pub fn cooldown(&self) -> CooldownStatus {
+        let s = self.lock_state();
+        let now = Instant::now();
+        let (cause, remaining_ms) = if s.retry_after_overflow {
+            (CooldownCause::RetryAfterUnrepresentable, None)
+        } else if s.cooldown > now {
+            let left = s.cooldown - now;
+            let ms = left.as_millis() + u128::from(!left.subsec_nanos().is_multiple_of(1_000_000));
+            (
+                s.cooldown_cause,
+                Some(u64::try_from(ms).unwrap_or(u64::MAX)),
+            )
+        } else {
+            (CooldownCause::None, Some(0))
+        };
+        CooldownStatus {
+            cause,
+            remaining_ms,
+            last_retry_after: s.last_retry_after,
+            max_retry_after_secs: s.max_retry_after_secs,
+            http_429_count: u64::from(s.rate_limits),
+        }
     }
     pub fn account_bytes(&self, bytes: usize) -> Result<(), &'static str> {
         let mut s = self.lock_state();
@@ -492,11 +611,21 @@ pub fn read_body(
     }
 }
 pub fn retry_after(raw: Option<&str>, now: SystemTime) -> Duration {
+    retry_after_header(raw, now).delay()
+}
+/// A23-06: the typed `Retry-After` of a 429 (delta-seconds or HTTP-date).
+pub fn retry_after_header(raw: Option<&str>, now: SystemTime) -> RetryAfterHeader {
     let Some(raw) = raw else {
-        return Duration::ZERO;
+        return RetryAfterHeader::Absent;
     };
-    if let Ok(s) = raw.trim().parse::<u64>() {
-        return Duration::from_secs(s);
+    let trimmed = raw.trim();
+    if let Ok(secs) = trimmed.parse::<u64>() {
+        return RetryAfterHeader::Delay { secs };
+    }
+    let digits = trimmed.strip_prefix('+').unwrap_or(trimmed);
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        // Beyond u64: a longer wait than any u64, never an invalid (shorter) one.
+        return RetryAfterHeader::Delay { secs: u64::MAX };
     }
     if let Ok(date) =
         time::OffsetDateTime::parse(raw, &time::format_description::well_known::Rfc2822)
@@ -505,9 +634,11 @@ pub fn retry_after(raw: Option<&str>, now: SystemTime) -> Duration {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        return Duration::from_secs(date.unix_timestamp().saturating_sub(now).max(0) as u64);
+        return RetryAfterHeader::Delay {
+            secs: date.unix_timestamp().saturating_sub(now).max(0) as u64,
+        };
     }
-    Duration::ZERO
+    RetryAfterHeader::Invalid
 }
 pub fn observe_response(
     response: &reqwest::blocking::Response,
@@ -524,7 +655,7 @@ pub fn observe_response(
         );
     }
     if response.status().as_u16() == 429 {
-        shared().rate_limited(retry_after(
+        shared().rate_limited_header(retry_after_header(
             response
                 .headers()
                 .get("retry-after")
@@ -734,7 +865,7 @@ impl BudgetedSender {
             }
             if response.status().as_u16() == 429 {
                 if self.admission {
-                    self.budget.rate_limited(retry_after(
+                    self.budget.rate_limited_header(retry_after_header(
                         response
                             .headers()
                             .get("retry-after")
@@ -1019,6 +1150,120 @@ mod tests {
         );
         assert_eq!(retry_after(Some("bogus"), now), Duration::ZERO);
         assert_eq!(retry_after(None, now), Duration::ZERO);
+    }
+    /// A23-06: the typed Retry-After and cooldown status. Long, extreme (beyond `u64` too —
+    /// before: an invalid header, i.e. only the short local backoff), invalid and absent
+    /// headers; a server wait is never shortened or relabelled by a later local backoff; an
+    /// unrepresentable wait refuses every admission (fail-closed); a local backoff recovers; a
+    /// shutdown cancels a wait.
+    #[test]
+    fn a23_06_cooldown_status_is_typed_and_never_shortened() {
+        use RetryAfterHeader as H;
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(784111777);
+        assert_eq!(retry_after_header(None, now), H::Absent);
+        assert_eq!(
+            retry_after_header(Some(" 120 "), now),
+            H::Delay { secs: 120 }
+        );
+        assert_eq!(retry_after_header(Some("+7"), now), H::Delay { secs: 7 });
+        for huge in ["18446744073709551615", "99999999999999999999999"] {
+            assert_eq!(
+                retry_after_header(Some(huge), now),
+                H::Delay { secs: u64::MAX },
+                "{huge}"
+            );
+        }
+        assert_eq!(
+            retry_after_header(Some("Sun, 06 Nov 1994 08:49:47 GMT"), now),
+            H::Delay { secs: 10 }
+        );
+        assert_eq!(
+            retry_after_header(Some("Sun, 06 Nov 1994 08:49:00 GMT"), now),
+            H::Delay { secs: 0 }
+        );
+        for bad in ["bogus", "-5", "1.5", ""] {
+            assert_eq!(retry_after_header(Some(bad), now), H::Invalid, "{bad}");
+        }
+        // Long server wait: typed, unshortened, kept through a later shorter backoff.
+        let b = Arc::new(Budget::default());
+        assert_eq!(b.cooldown().cause, CooldownCause::None);
+        b.rate_limited_header(H::Delay { secs: 86_400 });
+        let c = b.cooldown();
+        assert_eq!(c.cause, CooldownCause::ServerRetryAfter);
+        assert!(c.remaining_ms.unwrap() > 86_000_000, "{c:?}");
+        assert_eq!(
+            (c.last_retry_after, c.max_retry_after_secs, c.http_429_count),
+            (H::Delay { secs: 86_400 }, 86_400, 1)
+        );
+        b.rate_limited_header(H::Invalid);
+        let c = b.cooldown();
+        assert_eq!(
+            (c.cause, c.last_retry_after, c.max_retry_after_secs),
+            (CooldownCause::ServerRetryAfter, H::Invalid, 86_400)
+        );
+        assert!(c.remaining_ms.unwrap() > 86_000_000, "{c:?}");
+        assert!(matches!(
+            b.acquire(
+                Workload::History,
+                Instant::now() + Duration::from_millis(50)
+            ),
+            Err("RPC_RATE_LIMIT")
+        ));
+        // Extreme: beyond any instant — refused at once even with a far deadline, sticky.
+        let b = Arc::new(Budget::default());
+        b.rate_limited_header(retry_after_header(Some("99999999999999999999999"), now));
+        let c = b.cooldown();
+        assert_eq!(
+            (c.cause, c.remaining_ms),
+            (CooldownCause::RetryAfterUnrepresentable, None)
+        );
+        let t = Instant::now();
+        assert!(matches!(
+            b.acquire(Workload::History, t + Duration::from_secs(86_400)),
+            Err("RPC_RATE_LIMIT")
+        ));
+        assert!(t.elapsed() < Duration::from_secs(1));
+        // Local backoff (no header): waits, then recovers to no cooldown.
+        let mut cfg = crate::runtime_config::RuntimeConfig::default();
+        cfg.limits.rpc_backoff_ms = 200;
+        cfg.limits.rpc_backoff_max_ms = 300;
+        let b = Arc::new(Budget::configured(&cfg));
+        b.rate_limited_header(H::Absent);
+        assert_eq!(b.cooldown().cause, CooldownCause::LocalBackoff);
+        drop(
+            b.acquire(Workload::History, Instant::now() + Duration::from_secs(5))
+                .unwrap(),
+        );
+        assert_eq!(
+            b.cooldown(),
+            CooldownStatus {
+                cause: CooldownCause::None,
+                remaining_ms: Some(0),
+                last_retry_after: H::Absent,
+                max_retry_after_secs: 0,
+                http_429_count: 1,
+            }
+        );
+        // Shutdown cancels a wait on a server cooldown well before it ends.
+        let b = Arc::new(Budget::default());
+        b.rate_limited_header(H::Delay { secs: 3_600 });
+        let shutdown = Arc::new(darkbot_common::lifecycle::Shutdown::new());
+        let stop = shutdown.clone();
+        let t = Instant::now();
+        let requester = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            stop.request();
+        });
+        assert!(matches!(
+            b.acquire_cancellable(
+                Workload::History,
+                t + Duration::from_secs(7_200),
+                Some(&shutdown)
+            ),
+            Err("RPC_ADMISSION_CANCELLED")
+        ));
+        assert!(t.elapsed() < Duration::from_secs(2));
+        requester.join().unwrap();
     }
     #[test]
     fn shared_429_circuit_prevents_requests_across_workloads() {

@@ -212,6 +212,7 @@ fn run() -> Result<(), String> {
     result["freeze"] = summary;
     result["logical_reads"] = json!(calls);
     result["provider_actual"] = json!(provider::shared().snapshot());
+    result["provider_cooldown"] = json!(provider::shared().cooldown());
     record(&mut evidence, kind::FE01_RESULT, &result, None)?;
     evidence
         .seal(result["status"] != "INCOMPLETE")

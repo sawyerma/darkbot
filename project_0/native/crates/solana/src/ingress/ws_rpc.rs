@@ -637,13 +637,13 @@ impl WsRpcControlSource {
         .map_err(|e| {
             if let tokio_tungstenite::tungstenite::Error::Http(r) = &e {
                 if r.status().as_u16() == 429 {
-                    *retry_after = crate::provider::retry_after(
+                    let header = crate::provider::retry_after_header(
                         r.headers().get("retry-after").and_then(|h| h.to_str().ok()),
                         std::time::SystemTime::now(),
-                    )
-                    .max(Duration::from_millis(1));
+                    );
+                    *retry_after = header.delay().max(Duration::from_millis(1));
                     if self.cfg.recovery_budget.is_some() {
-                        self.provider_budget.rate_limited(*retry_after);
+                        self.provider_budget.rate_limited_header(header);
                     }
                 }
             }
