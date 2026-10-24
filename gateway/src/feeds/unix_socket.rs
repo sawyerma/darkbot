@@ -82,27 +82,46 @@ impl UnixSocketFeed {
         Ok(ids)
     }
 }
-async fn next(s: &mut UnixStream, max: usize) -> Result<Option<EngineFrame>, String> {
+/// Why reading an engine frame failed. `Limit` is a protocol violation of the engine: a frame
+/// beyond the absolute IPC bound of this source (not a too-large STATE, which is a topic error).
+enum FrameError {
+    Limit { size: usize, max: usize },
+    Transport(String),
+}
+impl std::fmt::Display for FrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Limit { size, max } => {
+                write!(
+                    f,
+                    "protocol violation: engine frame of {size} bytes, limit {max}"
+                )
+            }
+            Self::Transport(e) => f.write_str(e),
+        }
+    }
+}
+async fn next(s: &mut UnixStream, max: usize) -> Result<Option<EngineFrame>, FrameError> {
     let mut prefix = [0u8; 4];
     match s.read(&mut prefix[..1]).await {
         Ok(0) => return Ok(None),
         Ok(_) => (),
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(FrameError::Transport(e.to_string())),
     }
     s.read_exact(&mut prefix[1..])
         .await
-        .map_err(|e| format!("partial prefix: {e}"))?;
+        .map_err(|e| FrameError::Transport(format!("partial prefix: {e}")))?;
     let n = u32::from_be_bytes(prefix) as usize;
     if n == 0 || n > max {
-        return Err(format!("invalid frame size: {n}"));
+        return Err(FrameError::Limit { size: n, max });
     }
     let mut buf = vec![0; n];
     s.read_exact(&mut buf)
         .await
-        .map_err(|e| format!("partial frame: {e}"))?;
+        .map_err(|e| FrameError::Transport(format!("partial frame: {e}")))?;
     EngineFrame::decode(&buf[..])
         .map(Some)
-        .map_err(|e| e.to_string())
+        .map_err(|e| FrameError::Transport(e.to_string()))
 }
 #[async_trait]
 impl EngineFeed for UnixSocketFeed {
@@ -129,7 +148,7 @@ impl EngineFeed for UnixSocketFeed {
         let first = tokio::time::timeout(Duration::from_secs(5), next(&mut stream, self.max_frame))
             .await
             .map_err(|_| FeedError::Unreachable("hello timeout".into()))?
-            .map_err(FeedError::Mismatch)?;
+            .map_err(|e| FeedError::Mismatch(e.to_string()))?;
         let hello = match first {
             Some(EngineFrame {
                 msg: Some(engine_frame::Msg::Hello(h)),
@@ -229,6 +248,10 @@ impl EngineFeed for UnixSocketFeed {
                     Ok(None) => break,
                     Ok(_) => {
                         warn!("invalid engine IPC message");
+                        break;
+                    }
+                    Err(e @ FrameError::Limit { .. }) => {
+                        let _ = tx.send(FeedMessage::ProtocolViolation(e.to_string())).await;
                         break;
                     }
                     Err(e) => {

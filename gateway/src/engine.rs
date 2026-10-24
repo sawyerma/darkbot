@@ -25,6 +25,9 @@ pub enum FeedMessage {
         update: StateUpdate,
         bytes: u64,
     },
+    /// A frame beyond the absolute IPC bound of the source: a protocol error of the engine, never a
+    /// topic error; the source is detached and reattached with backoff.
+    ProtocolViolation(String),
     /// Liveness ohne Zustandsänderung.
     Heartbeat,
 }
@@ -62,6 +65,8 @@ pub struct SourceStatus {
     pub last_message_at: Option<Instant>,
     pub attach_count: u32,
     pub detach_count: u32,
+    /// Feeds ended by an engine protocol violation (e.g. a frame beyond the IPC bound).
+    pub protocol_violations: u32,
 }
 
 impl SourceStatus {
@@ -73,6 +78,7 @@ impl SourceStatus {
             last_message_at: None,
             attach_count: 0,
             detach_count: 0,
+            protocol_violations: 0,
         }
     }
 }
@@ -275,13 +281,21 @@ pub fn spawn_supervisor(
                             FeedMessage::State(u) => {
                                 deliver(&hub, &registry, project, u, None, last_msg)
                             }
-                            FeedMessage::Heartbeat => Ok(false),
+                            FeedMessage::Heartbeat | FeedMessage::ProtocolViolation(_) => Ok(false),
                         };
                         match delivered {
                             Ok(true) => stale_marked = false,
                             Ok(false) => {}
                             Err(()) => break,
                         }
+                    }
+                    Ok(Some(FeedMessage::ProtocolViolation(why))) => {
+                        tracing::error!(?project, %why, "engine IPC protocol violation; detaching");
+                        registry.update(project, |s| {
+                            s.protocol_violations += 1;
+                            true
+                        });
+                        break;
                     }
                     Ok(Some(FeedMessage::Heartbeat)) => {
                         last_msg = Instant::now();
@@ -545,7 +559,12 @@ mod liveness_tests {
         })
         .await;
         assert!(rx.has_changed().unwrap());
-        assert_eq!(registry.status(ProjectId::Bsc).unwrap().attach_count, 1);
+        let status = registry.status(ProjectId::Bsc).unwrap();
+        assert_eq!(status.attach_count, 1);
+        assert_eq!(
+            status.protocol_violations, 0,
+            "a too-large STATE is a topic error only"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -629,11 +648,20 @@ mod liveness_tests {
             q() == Some((StateQuality::Ok, false))
         })
         .await;
+        assert_eq!(
+            registry.status(ProjectId::Bsc).unwrap().protocol_violations,
+            0
+        );
         engine.write_all(&frame(largest(1025))).await.unwrap();
         until("one byte more detaches", || {
             q() == Some((StateQuality::SourceDetached, false))
         })
         .await;
+        // Classified as an engine protocol violation, not as a too-large topic.
+        assert_eq!(
+            registry.status(ProjectId::Bsc).unwrap().protocol_violations,
+            1
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
