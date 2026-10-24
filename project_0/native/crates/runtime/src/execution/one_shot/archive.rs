@@ -88,7 +88,7 @@ impl Journal {
             .map_err(|e| cause("JOURNAL_WRITE", &e))?;
         let active = self.directory.join(format!("{}.p0j", self.wallet));
         fs::rename(&active, &target).map_err(|e| cause("ARCHIVE_IO", &e))?;
-        let legacy = self.directory.join(format!("{}.json", self.wallet));
+        let legacy = super::migrated_legacy(&self.directory, &self.wallet);
         if legacy.exists() {
             fs::rename(&legacy, dir.join(format!("{id}.json")))
                 .map_err(|e| cause("ARCHIVE_IO", &e))?;

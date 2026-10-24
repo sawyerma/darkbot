@@ -539,7 +539,45 @@ fn hex(s: &str, n: usize) -> bool {
 fn key(s: &str) -> bool {
     s.parse::<solana_sdk::pubkey::Pubkey>().is_ok()
 }
-/// Pre-binary wallet journal (`<wallet>.json`, digest-wrapped). Read only, never rewritten.
+/// The wallet lock (flock) of a journal directory; only one holder (runtime, CLI) at a time.
+fn lock_wallet(directory: &Path, wallet: &str) -> Result<WalletLock, String> {
+    if !key(wallet) {
+        return Err(err("WALLET_INVALID"));
+    }
+    fs::create_dir_all(directory).map_err(|e| cause("JOURNAL_IO", &e))?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join(format!("{wallet}.lock")))
+        .map_err(|e| cause("JOURNAL_LOCK_IO", &e))?;
+    lock.try_lock().map_err(|_| err("WALLET_ALREADY_LOCKED"))?;
+    Ok(WalletLock(lock))
+}
+/// The migrated pre-binary journal: kept unchanged as evidence, bound by its bytes' hash.
+pub fn migrated_legacy(directory: &Path, wallet: &str) -> std::path::PathBuf {
+    directory.join(format!("{wallet}.legacy.json"))
+}
+/// SHA-256 (hex) of a file's bytes (the legacy binding; the file is never parsed here).
+fn file_hex(path: &Path) -> Result<String, String> {
+    journal::file_sha256(path)
+        .map(|h| journal::hex(&h))
+        .map_err(|e| cause("JOURNAL_READ", &e))
+}
+/// The size limit, then the replay of an active wallet journal.
+fn replay_checked(path: &Path, wallet: &str) -> Result<(Option<Saved>, Option<String>), String> {
+    if fs::metadata(path)
+        .map_err(|e| cause("JOURNAL_READ", &e))?
+        .len()
+        > MAX_JOURNAL_BYTES
+    {
+        return Err(err("JOURNAL_SIZE_LIMIT"));
+    }
+    replay(path, wallet)
+}
+/// Pre-binary wallet journal (`<wallet>.json`, digest-wrapped). Read only by the explicit
+/// migration (`Journal::migrate_legacy`), never rewritten.
 fn read_legacy(path: &Path, wallet: &str) -> Result<(String, Saved), String> {
     if fs::metadata(path)
         .map_err(|e| cause("JOURNAL_READ", &e))?
@@ -702,49 +740,35 @@ impl Journal {
     }
 
     pub fn open(directory: &Path, wallet: &str) -> Result<Self, String> {
-        if !key(wallet) {
-            return Err(err("WALLET_INVALID"));
-        }
-        fs::create_dir_all(directory).map_err(|e| cause("JOURNAL_IO", &e))?;
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(directory.join(format!("{wallet}.lock")))
-            .map_err(|e| cause("JOURNAL_LOCK_IO", &e))?;
-        lock.try_lock().map_err(|_| err("WALLET_ALREADY_LOCKED"))?;
-        let lock = WalletLock(lock);
+        let lock = lock_wallet(directory, wallet)?;
         let legacy = directory.join(format!("{wallet}.json"));
         // An interrupted pre-binary write blocks further actions; never silently truncate it.
         if legacy.with_extension("pending").exists() {
             return Err(err("JOURNAL_INTERRUPTED_WRITE_HALT"));
         }
-        let legacy = if legacy.exists() {
-            Some(read_legacy(&legacy, wallet)?)
-        } else {
-            None
-        };
+        // F8, P0-PROD-CTRL-02: the productive open never parses a pre-binary JSON journal; it is
+        // imported only by the explicit migration (`p0ctl fe04 migrate`, `migrate_legacy`).
+        if legacy.exists() {
+            return Err(err("JOURNAL_LEGACY_REQUIRES_MIGRATION"));
+        }
+        let migrated = migrated_legacy(directory, wallet);
         let path = directory.join(format!("{wallet}.p0j"));
         let (saved, writer) = if path.exists() {
-            if fs::metadata(&path)
-                .map_err(|e| cause("JOURNAL_READ", &e))?
-                .len()
-                > MAX_JOURNAL_BYTES
-            {
-                return Err(err("JOURNAL_SIZE_LIMIT"));
-            }
-            let (saved, imported) = replay(&path, wallet)?;
-            // The import binds the unchanged JSON bytes; a missing or edited JSON file is a halt.
-            match (&legacy, imported, &saved) {
-                (Some((sha, _)), Some(imported), _) if *sha == imported => {}
-                (None, None, _) | (Some(_), None, None) => {}
+            let (saved, imported) = replay_checked(&path, wallet)?;
+            // The import binds the migrated JSON bytes (checked by hash, never parsed again); a
+            // missing or edited file, or one without an import, is a halt.
+            match imported {
+                Some(sha) if migrated.exists() && file_hex(&migrated)? == sha => {}
+                None if !migrated.exists() => {}
                 _ => return Err(err("JOURNAL_LEGACY_MISMATCH")),
             }
             let writer =
                 journal::Writer::resume(&path).map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
             (saved, writer)
         } else {
+            if migrated.exists() {
+                return Err(err("JOURNAL_LEGACY_MISMATCH"));
+            }
             (
                 None,
                 journal::Writer::create(&path).map_err(|e| cause("JOURNAL_IO", &e))?,
@@ -757,15 +781,6 @@ impl Journal {
             writer,
             _lock: lock,
         };
-        if this.saved.is_none() {
-            if let Some((legacy_sha256, state)) = legacy {
-                this.append(&LegacyImport {
-                    legacy_sha256,
-                    state: state.clone(),
-                })?;
-                this.saved = Some(state);
-            }
-        }
         if let Some(mut prior) = this.saved.clone() {
             if prior.phase == Phase::Reserved {
                 prior.phase = Phase::HandoffUnknown;
@@ -774,6 +789,62 @@ impl Journal {
         }
         this.reopen_exit()?;
         Ok(this)
+    }
+    /// F8 explicit migration (`p0ctl fe04 migrate`) of a pre-binary `<wallet>.json` journal,
+    /// offline and under the wallet lock: the JSON is decoded once into the typed import frame
+    /// (fsynced), then kept unchanged as hash-bound evidence `<wallet>.legacy.json`. A crash after
+    /// the durable import only leaves the rename, which a second migration completes (no second
+    /// import). Returns the bound SHA-256 of the JSON bytes.
+    pub fn migrate_legacy(directory: &Path, wallet: &str) -> Result<String, String> {
+        let lock = lock_wallet(directory, wallet)?;
+        let legacy = directory.join(format!("{wallet}.json"));
+        if legacy.with_extension("pending").exists() {
+            return Err(err("JOURNAL_INTERRUPTED_WRITE_HALT"));
+        }
+        if !legacy.exists() {
+            return Err(err("JOURNAL_LEGACY_ABSENT"));
+        }
+        let migrated = migrated_legacy(directory, wallet);
+        if migrated.exists() {
+            return Err(err("JOURNAL_LEGACY_MISMATCH"));
+        }
+        let (sha, state) = read_legacy(&legacy, wallet)?;
+        let path = directory.join(format!("{wallet}.p0j"));
+        let (saved, imported, writer) = if path.exists() {
+            let (saved, imported) = replay_checked(&path, wallet)?;
+            let writer =
+                journal::Writer::resume(&path).map_err(|e| cause("JOURNAL_CORRUPT", &e))?;
+            (saved, imported, writer)
+        } else {
+            (
+                None,
+                None,
+                journal::Writer::create(&path).map_err(|e| cause("JOURNAL_IO", &e))?,
+            )
+        };
+        let mut this = Self {
+            wallet: wallet.into(),
+            directory: directory.to_path_buf(),
+            saved,
+            writer,
+            _lock: lock,
+        };
+        match imported {
+            Some(done) if done == sha => {}
+            None if this.saved.is_none() => {
+                this.append(&LegacyImport {
+                    legacy_sha256: sha.clone(),
+                    state: state.clone(),
+                })?;
+                this.saved = Some(state);
+            }
+            _ => return Err(err("JOURNAL_LEGACY_MISMATCH")),
+        }
+        fs::rename(&legacy, &migrated).map_err(|e| cause("JOURNAL_LEGACY_RENAME", &e))?;
+        fs::File::open(directory)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| cause("JOURNAL_LEGACY_SYNC", &e))?;
+        Ok(sha)
     }
     /// Appends one typed frame and returns only after fsync confirmed exactly that frame.
     fn append<P: crate::analytics::payload::Payload>(&mut self, value: &P) -> Result<(), String> {
@@ -2214,11 +2285,32 @@ mod tests {
             .map(|f| f.kind)
             .collect()
     }
+    /// F8 / P0-PROD-CTRL-02: the productive open never parses a pre-binary `<wallet>.json`; the
+    /// import is the explicit migration (`p0ctl fe04 migrate`), crash-safe and idempotent. The
+    /// migrated JSON stays as hash-bound evidence (`<wallet>.legacy.json`), checked by its bytes.
     #[test]
-    fn legacy_journal_without_observations_reopens_with_hold() {
+    fn legacy_json_is_migrated_explicitly_never_parsed_on_open() {
         let (dir, a, i, _) = setup();
         let legacy = write_legacy(&dir, &reserved(&a, &i), true);
         let bytes = fs::read(&legacy).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_LEGACY_REQUIRES_MIGRATION")
+        );
+        let binary = dir.join(format!("{}.p0j", a.wallet));
+        assert!(!binary.exists(), "a refused open writes nothing");
+        let sha = Journal::migrate_legacy(&dir, &a.wallet).unwrap();
+        assert_eq!(
+            sha,
+            journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes())
+        );
+        let migrated = dir.join(format!("{}.legacy.json", a.wallet));
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read(&migrated).unwrap(),
+            bytes,
+            "historical evidence, never rewritten"
+        );
         let reopened = Journal::open(&dir, &a.wallet).unwrap();
         assert_eq!(reopened.holds(), i.holds);
         assert!(reopened.saved.as_ref().unwrap().observations.is_empty());
@@ -2226,10 +2318,7 @@ mod tests {
             reopened.saved.as_ref().unwrap().phase,
             Phase::HandoffUnknown
         );
-        let binary = dir.join(format!("{}.p0j", a.wallet));
         drop(reopened);
-        // The JSON journal is historical evidence: never rewritten, its bytes are bound once.
-        assert_eq!(fs::read(&legacy).unwrap(), bytes);
         assert_eq!(
             kinds(&binary),
             [
@@ -2237,15 +2326,30 @@ mod tests {
                 journal::kind::FE04_TRANSITION
             ]
         );
+        assert_eq!(
+            Journal::migrate_legacy(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_LEGACY_ABSENT")
+        );
+        // A crash after the durable import but before the rename: open still refuses, a second
+        // migration only completes the rename (no second import frame).
+        fs::copy(&migrated, &legacy).unwrap();
+        fs::remove_file(&migrated).unwrap();
+        assert_eq!(
+            Journal::open(&dir, &a.wallet).err().as_deref(),
+            Some("JOURNAL_LEGACY_REQUIRES_MIGRATION")
+        );
+        Journal::migrate_legacy(&dir, &a.wallet).unwrap();
+        assert_eq!(kinds(&binary).len(), 2);
         assert_eq!(Journal::open(&dir, &a.wallet).unwrap().holds(), i.holds);
+        // The binding holds: an edited or missing migrated JSON is a halt.
         let mut edited = bytes.clone();
         edited.push(b' ');
-        fs::write(&legacy, edited).unwrap();
+        fs::write(&migrated, edited).unwrap();
         assert_eq!(
             Journal::open(&dir, &a.wallet).err().as_deref(),
             Some("JOURNAL_LEGACY_MISMATCH")
         );
-        fs::remove_file(&legacy).unwrap();
+        fs::remove_file(&migrated).unwrap();
         assert_eq!(
             Journal::open(&dir, &a.wallet).err().as_deref(),
             Some("JOURNAL_LEGACY_MISMATCH")

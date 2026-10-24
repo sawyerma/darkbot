@@ -38,7 +38,7 @@ PINNED = {
     'runtime/src/bin/p0-parity.rs': (4, 'H'),
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
     'runtime/src/bin/p0ctl.rs': (2, 'C'),  # operator approval file (JSON format: F14)
-    'runtime/src/execution/one_shot.rs': (7, 'I'),  # automatic <wallet>.json import in the money path (F8)
+    'runtime/src/execution/one_shot.rs': (7, 'H'),  # <wallet>.json decoded only by the explicit migration (p0ctl fe04 migrate); open refuses it (F8, 25.10.)
     'runtime/src/market/deployment.rs': (1, 'W'),
     'runtime/src/market/observer.rs': (1, 'W'),
     'runtime/src/market/rows.rs': (34, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
@@ -66,7 +66,6 @@ PINNED = {
 # removes its file here; the list may only shrink. Never re-label a file to empty it.
 OPEN_INTERNAL = sorted(f for f, (_, c) in PINNED.items() if 'I' in c)
 EXPECTED_OPEN_INTERNAL = [
-    'runtime/src/execution/one_shot.rs',
     'runtime/src/market_verification.rs',
 ]
 

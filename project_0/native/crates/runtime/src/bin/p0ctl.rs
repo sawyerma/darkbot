@@ -28,6 +28,7 @@
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
 //! p0ctl [--project DIR] fe04 archive --journal-dir DIR --wallet PUBKEY
+//! p0ctl [--project DIR] fe04 migrate --journal-dir DIR --wallet PUBKEY
 //! ```
 //!
 //! `fe04 accounting` (FE-04/FE-07) prints the finalized accounting of every own attempt of the
@@ -37,7 +38,9 @@
 //! positive sum). It exits 0 only for a verdict other than UNKNOWN. `fe04 archive` seals a
 //! finished attempt (settled, no exit open, no position) and moves it to the archive so that a
 //! new, separately approved attempt can start; it takes the wallet lock, so it refuses while a
-//! runtime holds the journal. Both are offline: no network, no signer, no LIVE.
+//! runtime holds the journal. `fe04 migrate` imports a pre-binary `<wallet>.json` journal once
+//! into the binary journal and keeps the JSON as hash-bound evidence (`<wallet>.legacy.json`);
+//! the runtime refuses an unmigrated one (F8). All are offline: no network, no signer, no LIVE.
 //!
 //! `approval show` (FE-04) reads one versioned one-shot approval profile — an attempt
 //! (`Approval`) or an exit (`ExitApproval`), strict JSON authored by the operator — checks it
@@ -953,7 +956,8 @@ const APPROVAL_MAX_BYTES: u64 = 64 * 1024;
 
 /// FE-04 `fe04 accounting|archive`: see the module documentation.
 fn fe04_cmd(args: &[String]) -> Result<bool, String> {
-    const USAGE: &str = "usage: p0ctl fe04 accounting|archive --journal-dir DIR --wallet PUBKEY";
+    const USAGE: &str =
+        "usage: p0ctl fe04 accounting|archive|migrate --journal-dir DIR --wallet PUBKEY";
     let dir = value(args, "--journal-dir").ok_or(USAGE)?;
     let wallet = value(args, "--wallet").ok_or(USAGE)?;
     let dir = Path::new(&dir);
@@ -979,6 +983,15 @@ fn fe04_cmd(args: &[String]) -> Result<bool, String> {
             let journal = darkbot_runner::execution::one_shot::Journal::open(dir, &wallet)?;
             let path = journal.archive()?;
             println!("archived={}", path.display());
+            Ok(true)
+        }
+        Some("migrate") => {
+            use darkbot_runner::execution::one_shot::{migrated_legacy, Journal};
+            let sha = Journal::migrate_legacy(dir, &wallet)?;
+            println!(
+                "migrated legacy_sha256={sha} evidence={}",
+                migrated_legacy(dir, &wallet).display()
+            );
             Ok(true)
         }
         _ => Err(USAGE.into()),
