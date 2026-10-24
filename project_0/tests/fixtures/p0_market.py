@@ -83,11 +83,6 @@ class TempRunBase:
             'configured_duration_seconds':100,'full_slot_reconciliation':{'market_slot_end':{'slot':11}}}))
         self.write('market/transactions.jsonl',[])
         self.write('market/coverage.jsonl',[])
-        # A historical run of the plan era carries its plan record; a run without one is BLOCKED for the
-        # snapshot quarters (no JSON plan handoff from Rust, P0-PROD-CTRL-02).
-        seconds=(END-START)//a.NS
-        (self.run/'measurement_plan.json').write_text(json.dumps({'schema_version':1,'duration_seconds':seconds,
-            'snapshot_offsets_ns':[seconds*a.NS*i//4 for i in range(1,5)],'budgets':{}}))
     def tearDown(self):
         self.tmp.cleanup()
     def write(self,name,rows):

@@ -97,6 +97,50 @@ impl Default for PhaseBudgets {
         }
     }
 }
+impl MeasurementPlan {
+    /// The plan as text for the pinned historical readers (JFI-03 isolated offline path,
+    /// `p0-measurement-plan --historical-plan`): one `key=value` line per field in declaration
+    /// order, nested fields dotted, lists in brackets. Never JSON and never a runtime input; the
+    /// destructuring binds the lines to the struct (a new field does not compile until rendered).
+    pub fn historical_text(&self) -> String {
+        let Self {
+            schema_version,
+            duration_seconds,
+            snapshot_offsets_ns,
+            budgets,
+        } = self;
+        let PhaseBudgets {
+            bootstrap_seconds,
+            stream_ready_seconds,
+            shadow_drain_seconds,
+            market_drain_seconds,
+            quiescence_grace_seconds,
+            strict_seconds,
+            gap_seconds,
+            enrichment_seconds,
+            shutdown_grace_seconds,
+        } = budgets;
+        let offsets: Vec<String> = snapshot_offsets_ns.iter().map(u64::to_string).collect();
+        let mut out = format!(
+            "schema_version={schema_version}\nduration_seconds={duration_seconds}\nsnapshot_offsets_ns=[{}]\n",
+            offsets.join(",")
+        );
+        for (name, value) in [
+            ("bootstrap_seconds", bootstrap_seconds),
+            ("stream_ready_seconds", stream_ready_seconds),
+            ("shadow_drain_seconds", shadow_drain_seconds),
+            ("market_drain_seconds", market_drain_seconds),
+            ("quiescence_grace_seconds", quiescence_grace_seconds),
+            ("strict_seconds", strict_seconds),
+            ("gap_seconds", gap_seconds),
+            ("enrichment_seconds", enrichment_seconds),
+            ("shutdown_grace_seconds", shutdown_grace_seconds),
+        ] {
+            out += &format!("budgets.{name}={value}\n");
+        }
+        out
+    }
+}
 impl super::payload::Payload for MeasurementPlan {
     const KIND: u16 = super::journal::kind::MEASUREMENT_PLAN;
 }
@@ -892,6 +936,16 @@ mod tests {
                 .starts_with("MEASUREMENT_PLAN_NOT_TYPED")
         );
         fs::remove_dir_all(d).unwrap();
+    }
+    /// The historical text form carries every field of the plan exactly (no JSON).
+    #[test]
+    fn historical_text_renders_every_plan_field() {
+        let text = MeasurementPlan::new(100).unwrap().historical_text();
+        assert!(text.starts_with(
+            "schema_version=1\nduration_seconds=100\nsnapshot_offsets_ns=[25000000000,50000000000,75000000000,100000000000]\nbudgets.bootstrap_seconds=600\n"
+        ));
+        assert_eq!(text.lines().count(), 3 + 9);
+        assert!(text.ends_with("budgets.shutdown_grace_seconds=180\n"));
     }
     #[test]
     fn bootstrap_does_not_consume_capture_budget() {

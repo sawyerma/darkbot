@@ -400,9 +400,6 @@ class ReaderCli(unittest.TestCase):
             (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
                 'configured_duration_seconds':100,'full_slot_reconciliation':{'market_slot_end':{'slot':11}}}))
             for name in ('transactions.jsonl','coverage.jsonl'):(run/'market'/name).write_text('')
-            # A historical run of the plan era carries its plan record (no JSON plan handoff from Rust).
-            (run/'measurement_plan.json').write_text(json.dumps({'schema_version':1,'duration_seconds':100,
-                'snapshot_offsets_ns':[100*a.NS*i//4 for i in range(1,5)],'budgets':{}}))
             first=self.call(project,'verify.sh','--run','run_v1','--offline','--mode','off')
             self.assertEqual(first.returncode,0,first.stderr);first=json.loads(first.stdout)
             second=self.call(project,'verify.sh','--run',str(run),'--offline','--mode','off','--resume-verification')

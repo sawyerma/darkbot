@@ -33,19 +33,43 @@ class ArchivedParity(unittest.TestCase):
             p=subprocess.run(['git','-C',str(REPO),'show',f'{ARCHIVED}:project_0/scripts/{name}'],capture_output=True)
             if p.returncode:self.skipTest(f'archived commit {ARCHIVED} unavailable')
             (scripts/name).write_bytes(p.stdout)
-        (project/'native').symlink_to(REPO/'project_0/native')
+        native=REPO/'project_0/native';(project/'native').mkdir()
+        for entry in native.iterdir():
+            if entry.name!='target':(project/'native'/entry.name).symlink_to(entry)
+        # Isolated test-local adapter (never production): the archived pinned reader of ARCHIVED expects the
+        # plan as JSON on stdout; it gets exactly the plan the current Rust authority prints as text
+        # (`--historical-plan`), parsed by the current reader's own text parser.
+        release=project/'native/target/release';release.mkdir(parents=True)
+        adapter=release/'p0-measurement-plan'
+        adapter.write_text('#!'+sys.executable+'\n'
+            'import json,subprocess,sys\n'
+            f'sys.path.insert(0,{str(REPO/"project_0")!r})\n'
+            'from operations.reporting.market_report import plan_text\n'
+            f'p=subprocess.run([{str(native/"target/release/p0-measurement-plan")!r},"--historical-plan"],capture_output=True,text=True)\n'
+            'sys.stderr.write(p.stderr)\n'
+            'print(json.dumps(plan_text(p.stdout)) if p.returncode==0 else "")\n'
+            'sys.exit(p.returncode)\n')
+        adapter.chmod(0o755)
         return scripts
 
     def test_v1_evidence_window_records_and_snapshots_are_unchanged(self):
         if not shutil.which('git'):self.skipTest('git unavailable')
+        legacy_plan=REPO/'project_0/native/target/release/p0-measurement-plan'
         with tempfile.TemporaryDirectory() as folder, offline():
             tmp=Path(folder);scripts=self.archived_project(tmp)
             probe=('import json,sys;from pathlib import Path;import measurement_contract as c,audit_market_quick as a,market_report as r\n'
                    'run=Path(sys.argv[1]);e=c.finalize_capture(run);d,m=r.normalize(run)\n'
                    'print(json.dumps({"window":a.read_window(run),"key":m["version"]}))')
-            # The former `legacy_identity` variant (a run without any plan record, planned through the JSON
-            # output of p0-measurement-plan) is BLOCKED since that JSON handoff was removed (P0-PROD-CTRL-02).
             variants=[('manifest',lambda root:manifest_run(root,'r1','v1'))]
+            if legacy_plan.exists():
+                # A run without any plan record: the current reader takes the plan from the Rust authority's
+                # isolated offline text path, the archived reader from it through the test-local adapter.
+                def legacy(root):
+                    run=manifest_run(root,'r1','v1');(run/'measurement_manifest.json').unlink();(run/'measurement_phases.jsonl').unlink()
+                    (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
+                        'configured_duration_seconds':100,'capture_clock_complete':True}))
+                    return run
+                variants.append(('legacy_identity',legacy))
             for name,make in variants:
                 with self.subTest(variant=name):
                     old,new=make(tmp/name/'old'),make(tmp/name/'new')

@@ -386,9 +386,29 @@ def measurement_plan(run,window):
         p=run/name
         if p.exists():
             v=json.loads(p.read_text());return v.get('plan',v)
-    # JFI-01/P0-PROD-CTRL-02: no JSON plan handoff from Rust and no second quarter formula here;
-    # a historical run without its own plan record cannot be snapshotted (BLOCKED).
-    raise c.ContractError('MEASUREMENT_PLAN_MISSING: historical run without a plan record')
+    # A historical run without its own plan record (JFI-03 isolated offline path): the Rust plan
+    # authority prints the plan as text (`--historical-plan`; never JSON, never a runtime input).
+    # No second quarter formula here.
+    binary=run_store.PROJECT/'native/target/release/p0-measurement-plan'
+    if not binary.exists():raise c.ContractError('MEASUREMENT_PLAN_BINARY_MISSING')
+    duration=(window['end_ns']-window['start_ns'])//a.NS
+    env={k:v for k,v in os.environ.items() if not k.startswith('P0_')}
+    env['P0_MEASUREMENT_DURATION']=str(duration)+'s'
+    p=subprocess.run([str(binary),'--historical-plan'],env=env,capture_output=True,text=True,timeout=10)
+    if p.returncode:raise c.ContractError('LEGACY_PLAN_INVALID')
+    return plan_text(p.stdout)
+
+
+def plan_text(text):
+    """The Rust plan authority's text form (`key=value` per field in declaration order, nested fields
+    dotted, lists in brackets) as the plan; the structure comes from Rust, not from a Python schema."""
+    plan={}
+    for line in text.splitlines():
+        key,value=line.split('=',1)
+        *parents,leaf=key.split('.');node=plan
+        for k in parents:node=node.setdefault(k,{})
+        node[leaf]=[int(x) for x in value[1:-1].split(',')] if value.startswith('[') else int(value)
+    return plan
 
 
 def production_replay(run,result,work,ds,clock_origin):
