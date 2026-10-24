@@ -53,6 +53,11 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
         _ => None,
     }
 }
+/// Ledger retention (Wire V1.3 §7, idempotency for the intent/receipt lifetime): every open
+/// record (PENDING / PENDING_RECONCILE) stays in `commands/`. At MAX_RECORDS the oldest terminal
+/// receipt (COMPLETED / FAILED, by last update) moves to `commands/archive/`, which replay and
+/// conflict checks still read. The archive keeps the newest MAX_RECORDS terminal receipts; only
+/// its oldest one is ever removed. A ledger holding nothing but open intents refuses new ones.
 const MAX_RECORDS: usize = 1024;
 
 #[derive(Clone)]
@@ -65,6 +70,8 @@ pub struct Paths {
 pub struct Control {
     paths: Option<Paths>,
     serial: Mutex<()>,
+    /// MAX_RECORDS; smaller only in tests.
+    capacity: usize,
 }
 #[derive(Clone, Serialize)]
 pub struct ProcessSnapshot {
@@ -118,6 +125,7 @@ impl Control {
         Self {
             paths,
             serial: Mutex::new(()),
+            capacity: MAX_RECORDS,
         }
     }
     pub async fn observe(&self) -> ProcessSnapshot {
@@ -281,26 +289,27 @@ impl Control {
     }
     fn load(&self, id: &str) -> Result<Option<Record>, ()> {
         let path = self.record_path(id).ok_or(())?;
-        match fs::read(path) {
-            Ok(b) => serde_json::from_slice(&b).map(Some).map_err(|_| ()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            _ => Err(()),
+        let archived = path
+            .parent()
+            .ok_or(())?
+            .join("archive")
+            .join(format!("{id}.json"));
+        for p in [path, archived] {
+            match fs::read(p) {
+                Ok(b) => return serde_json::from_slice(&b).map(Some).map_err(|_| ()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                _ => return Err(()),
+            }
         }
+        Ok(None)
     }
     fn persist(&self, id: &str, record: &Record) -> Result<(), ()> {
         let path = self.record_path(id).ok_or(())?;
         let dir = path.parent().ok_or(())?;
         fs::create_dir_all(dir).map_err(|_| ())?;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|_| ())?;
-        if !path.exists()
-            && fs::read_dir(dir)
-                .map_err(|_| ())?
-                .filter_map(Result::ok)
-                .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
-                .count()
-                >= MAX_RECORDS
-        {
-            return Err(());
+        if !path.exists() && records(dir)?.len() >= self.capacity {
+            archive_oldest_terminal(dir, self.capacity)?;
         }
         let tmp = path.with_extension(format!("tmp-{}", session::random_token(8)));
         let written = (|| {
@@ -585,6 +594,45 @@ impl Control {
         }
     }
 }
+/// The ledger records of one directory with their last update time.
+fn records(dir: &Path) -> Result<Vec<(SystemTime, PathBuf)>, ()> {
+    Ok(fs::read_dir(dir)
+        .map_err(|_| ())?
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect())
+}
+fn terminal(path: &Path) -> bool {
+    fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Record>(&b).ok())
+        .is_some_and(|r| {
+            r.phase == CommandPhase::Completed as i32 || r.phase == CommandPhase::Failed as i32
+        })
+}
+fn oldest_terminal(dir: &Path) -> Result<Option<PathBuf>, ()> {
+    let mut all = records(dir)?;
+    all.sort();
+    Ok(all.into_iter().map(|(_, p)| p).find(|p| terminal(p)))
+}
+/// Frees one ledger slot without touching an open intent; see MAX_RECORDS.
+fn archive_oldest_terminal(dir: &Path, capacity: usize) -> Result<(), ()> {
+    let source = oldest_terminal(dir)?.ok_or(())?;
+    let archive = dir.join("archive");
+    fs::create_dir_all(&archive).map_err(|_| ())?;
+    fs::set_permissions(&archive, fs::Permissions::from_mode(0o700)).map_err(|_| ())?;
+    if records(&archive)?.len() >= capacity {
+        fs::remove_file(oldest_terminal(&archive)?.ok_or(())?).map_err(|_| ())?;
+    }
+    fs::rename(&source, archive.join(source.file_name().ok_or(())?)).map_err(|_| ())?;
+    for d in [&archive, &dir.to_path_buf()] {
+        fs::File::open(d)
+            .and_then(|f| f.sync_all())
+            .map_err(|_| ())?;
+    }
+    Ok(())
+}
 fn valid_id(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(i, b)| {
@@ -815,6 +863,116 @@ pub async fn logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn ledger(name: &str) -> (Control, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("gw-ledger-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let paths = Paths {
+            ctl: dir.join("ctl"),
+            rundir: dir.clone(),
+            logdir: dir.clone(),
+            label: "test".into(),
+        };
+        let control = Control {
+            capacity: CAPACITY,
+            ..Control::new(Some(paths))
+        };
+        (control, dir)
+    }
+    /// Same retention logic as MAX_RECORDS, small enough for fsync-bound tests.
+    const CAPACITY: usize = 16;
+    fn uuid(n: usize) -> String {
+        format!("00000000-0000-4000-8000-{n:012x}")
+    }
+    fn capture_start(id: &str) -> CommandRequest {
+        CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: id.into(),
+            action: START.into(),
+            issued_at_unix_ns: 1,
+            ..Default::default()
+        }
+    }
+    /// One recorded command with a strictly increasing last-update time.
+    fn put(control: &Control, n: usize, phase: CommandPhase) -> Result<(), ()> {
+        let id = uuid(n);
+        let record = Record {
+            request: capture_start(&id).encode_to_vec(),
+            response: reply(
+                &id,
+                CommandStatus::Accepted,
+                CommandRejectReason::Unspecified,
+                "recorded",
+            )
+            .encode_to_vec(),
+            phase: phase as i32,
+            detail: String::new(),
+            launch_id: String::new(),
+        };
+        control.persist(&id, &record)?;
+        fs::File::options()
+            .write(true)
+            .open(control.record_path(&id).unwrap())
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000 + n as u64))
+            .unwrap();
+        Ok(())
+    }
+    #[tokio::test]
+    async fn a_full_ledger_archives_the_oldest_receipt_which_still_replays_and_conflicts() {
+        let (control, dir) = ledger("full");
+        // The oldest record is an open intent; the oldest receipt is the second one.
+        put(&control, 0, CommandPhase::PendingReconcile).unwrap();
+        for n in 1..CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        put(&control, CAPACITY, CommandPhase::Completed).unwrap();
+        assert_eq!(records(&dir.join("commands")).unwrap().len(), CAPACITY);
+        assert!(control.record_path(&uuid(0)).unwrap().exists());
+        assert!(dir
+            .join(format!("commands/archive/{}.json", uuid(1)))
+            .exists());
+        let replay = control.execute(&capture_start(&uuid(1))).await;
+        assert_eq!(replay.status, CommandStatus::Accepted as i32);
+        assert_eq!(replay.phase, CommandPhase::Completed as i32);
+        let other = CommandRequest {
+            action: STOP.into(),
+            ..capture_start(&uuid(1))
+        };
+        let conflict = control.execute(&other).await;
+        assert_eq!(
+            conflict.reject_reason,
+            CommandRejectReason::IdempotencyConflict as i32
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_ledger_of_open_intents_refuses_a_new_one_and_drops_nothing() {
+        let (control, dir) = ledger("open");
+        for n in 0..CAPACITY {
+            put(&control, n, CommandPhase::Pending).unwrap();
+        }
+        assert!(put(&control, CAPACITY, CommandPhase::Completed).is_err());
+        assert_eq!(records(&dir.join("commands")).unwrap().len(), CAPACITY);
+        assert!(!dir.join("commands/archive").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn the_archive_keeps_the_newest_receipts_and_drops_only_its_oldest() {
+        let (control, dir) = ledger("archive");
+        for n in 0..=2 * CAPACITY {
+            put(&control, n, CommandPhase::Failed).unwrap();
+        }
+        assert_eq!(records(&dir.join("commands")).unwrap().len(), CAPACITY);
+        assert_eq!(
+            records(&dir.join("commands/archive")).unwrap().len(),
+            CAPACITY
+        );
+        assert!(control.load(&uuid(0)).unwrap().is_none());
+        assert!(control.load(&uuid(1)).unwrap().is_some());
+        assert!(control.load(&uuid(2 * CAPACITY)).unwrap().is_some());
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn bsc_commands_are_strictly_read_only() {
         for action in [
