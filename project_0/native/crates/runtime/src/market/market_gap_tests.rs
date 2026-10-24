@@ -194,6 +194,22 @@ fn p2_failure_after_ack_invalidates_pending_restoration() {
     assert_eq!(v["gaps"][0]["raw_failures"], 2);
 }
 
+/// P1B-T1: an RPC endpoint of this test alone — "no verification RPC" is proven by it receiving
+/// no connection, not by the process-wide provider counter that parallel tests also advance.
+fn idle_rpc() -> (std::net::TcpListener, String) {
+    let rpc = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    rpc.set_nonblocking(true).unwrap();
+    let url = format!("http://{}", rpc.local_addr().unwrap());
+    (rpc, url)
+}
+fn assert_no_rpc(rpc: &std::net::TcpListener) {
+    assert_eq!(
+        rpc.accept().map(drop).map_err(|e| e.kind()),
+        Err(std::io::ErrorKind::WouldBlock),
+        "a request reached the RPC endpoint"
+    );
+}
+
 #[test]
 fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
     let root = std::env::temp_dir().join(format!(
@@ -201,10 +217,11 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
         std::process::id(),
         Clock::new().unix_ns(0)
     ));
+    let (rpc, rpc_url) = idle_rpc();
     let cfg = MarketConfig::from_lookup(
         &env_of(&[
             ("P0_WS_URL", "ws://127.0.0.1:1"),
-            ("P0_RPC_URL", "http://127.0.0.1:1"),
+            ("P0_RPC_URL", rpc_url.as_str()),
             (
                 "P0_PROGRAM_ID",
                 darkbot_project0::protocol::PROGRAM_ID_MAINNET,
@@ -231,7 +248,6 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
         drain_complete: true,
         write_error: None,
     };
-    let before = darkbot_solana::provider::shared().snapshot().requests;
     let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
     let summary = view(&summary);
     assert!(error.is_none());
@@ -241,10 +257,7 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
         summary["full_slot_reconciliation"]["error"],
         "VERIFICATION_DEFERRED_AFTER_ABORT"
     );
-    assert_eq!(
-        darkbot_solana::provider::shared().snapshot().requests,
-        before
-    );
+    assert_no_rpc(&rpc);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -255,10 +268,11 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
         std::process::id(),
         Clock::new().unix_ns(0)
     ));
+    let (rpc, rpc_url) = idle_rpc();
     let cfg = MarketConfig::from_lookup(
         &env_of(&[
             ("P0_WS_URL", "ws://127.0.0.1:1"),
-            ("P0_RPC_URL", "http://127.0.0.1:1"),
+            ("P0_RPC_URL", rpc_url.as_str()),
             (
                 "P0_PROGRAM_ID",
                 darkbot_project0::protocol::PROGRAM_ID_MAINNET,
@@ -285,7 +299,6 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
         drain_complete: true,
         write_error: None,
     };
-    let before = darkbot_solana::provider::shared().snapshot().requests;
     let (summary, _, error) = finish_capture(&cfg, &mut core, &mut sink, outcome).unwrap();
     let summary = view(&summary);
     assert!(error.is_none());
@@ -295,9 +308,6 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
         summary["full_slot_reconciliation"]["error"],
         "VERIFICATION_NOT_RUN"
     );
-    assert_eq!(
-        darkbot_solana::provider::shared().snapshot().requests,
-        before
-    );
+    assert_no_rpc(&rpc);
     fs::remove_dir_all(root).unwrap();
 }
