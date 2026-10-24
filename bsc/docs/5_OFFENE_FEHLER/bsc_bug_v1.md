@@ -4,6 +4,11 @@
 
 **Zweck:** Verbindlicher, quellcodegestuetzter Korrekturauftrag. Dieses Dokument ist **kein neuer Phasenplan**, kein Test-PASS und keine Live-Freigabe. Die acht Fable-Etappen wurden in mehreren quellcodegebundenen Pruefschritten abgeglichen; pro Abschnitt stehen der jeweilige gepruefte Commit und die offenen Grenzen. REVIEWED bedeutet nicht, dass alle Dateien des gesamten Repositories gelesen, Codefixes implementiert oder Tests ausgefuehrt wurden. Bei einem neuen HEAD muss der Implementierer die relevanten Stellen neu vergleichen, bevor er aendert.
 
+## Fortsetzung 2026-10-24 — E2-8 und Statusabgleich
+
+- **E2-8 FIXED / TESTED (lokal, nicht gepusht):** Readiness-Projektion behält `BLOCKED`/Mode (BSC-Frontend-Paket 1); `publisher::serve` verweigert ein Socket-Verzeichnis, das nicht dem Reporter-Nutzer gehört, ein Symlink ist oder group/other-schreibbar ist (`the_reporter_refuses_a_socket_directory_another_user_could_write_or_redirect`, fail-before: diente aus 0777-Verzeichnis). Zusätzlich gefunden: angenommene Reporter-Sockets erbten unter macOS Non-Blocking und verwarfen Frames > 8 KiB (`a_frame_larger_than_the_socket_buffer_arrives_whole`).
+- **Offen und phasengebunden (unverändert, kein Patch):** E1-9 (sichere Artefaktablage), E1-OPTION (nur nach ausdrücklicher Freigabe; G0.7-Quellen eingefroren), E2-1 Schritt 2, E3-1/E4-2 (A/B-Salt seit D1–D6 implementiert, Profilwahl = Nutzerentscheidung), E3-7, E4-1/E4b-1/2, E5-6, E6-1 Population B, E7-1, formale Speicherordnungs-Beweise E6-3/E7-7 — alle C1/C2/Produktion bzw. extern blockiert bis G0.7 → G0.8.
+
 ## Fortsetzung 2026-10-23 — C1/R1
 
 - **C1/R1 FIXED / TESTED (offline):** launch-path snapshot record (type 33) bound in contract v5; guard/readiness/runner/requal refuse missing, manipulated, stale, foreign or contradictory snapshots and candidates (negative tests); real frozen-A snapshot `native/evidence/g06a/launch_path_frozen_a_20261023/`. v5.26 requal run still open.
@@ -1133,10 +1138,10 @@ Weitere durch den Nutzer gelieferte Fable-Etappen werden in **dieselbe Datei** a
 | Etappe | Geplanter Gegenstand | Stand |
 | --- | --- | --- |
 | 1 | G0.7 Guard/Vertrag/Readiness/Requal | **FIXED/TESTED laut Paketstatus; verbleibende BLOCKED/DEFERRED siehe oben** |
-| 2 | G0.8 Verifikation/Witness/Evidence | **FIXED/TESTED laut Paketstatus; verbleibende BLOCKED/DEFERRED siehe oben** |
+| 2 | G0.8 Verifikation/Witness/Evidence | **FIXED/TESTED laut Paketstatus inkl. E2-8 (2026-10-24); verbleibende BLOCKED/DEFERRED siehe oben** |
 | 3 | G0.6a DRY-/Requal-Werkzeuge | **E3-2..6 FIXED/TESTED; E3-1 BLOCKED (A/B); E3-7 DEFERRED** |
 | 4 | Trading/Signer/RLP/Intent | **E4-3/E4-4 FIXED/TESTED; Salt BLOCKED; Produktionsqualifikation DEFERRED** |
 | 5 | Execution/Submission/TLS | **E5-2..E5-4 FIXED/TESTED; E5-1/5/6 DEFERRED bis C2** |
-| 6 | geth_ipc Rust | **PARTIAL REVIEWED / E6-1/E6-2 C1/C2 INTEGRATION OPEN; E6-3 MEMORY PROOF OPEN** |
-| 7 | Go-geth Overlay/Rust-Paritaet | **PARTS 1+2 REVIEWED / E7-5 SECURITY FIX & E7-6 PERFORMANCE OPEN; E7-7/E6-3 MEMORY PROOF OPEN; E7-3 NO BUG** |
-| 8 | Journal/Records/Legacy | **REVIEWED / E8-1/E8-4 ORDER+GAP OPEN; E8-2 WRITER OPEN; E8-3 FIXED/TESTED; LEGACY_IMPORT FOUND/REVIEWED** |
+| 6 | geth_ipc Rust | **E6-1 (Population A)/E6-2/E6-3 FIXED/TESTED; E6-1 Population B BLOCKED; formaler Memory-Proof OPEN** |
+| 7 | Go-geth Overlay/Rust-Paritaet | **E7-2/E7-4/E7-5/E7-6/E7-7 FIXED/TESTED; E7-1 C1-Design DEFERRED; Performance nicht gemessen; E7-3 NO BUG** |
+| 8 | Journal/Records/Legacy | **E8-1/E8-2/E8-3/E8-4 FIXED/TESTED; LEGACY_IMPORT FOUND/REVIEWED** |
