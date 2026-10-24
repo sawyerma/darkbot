@@ -6,7 +6,7 @@ import { usdMicroDisplay } from "../model/format";
 import { fmtAgeNs, orDash } from "../model/statusFormat";
 import { counterOf, phaseLabel } from "../model/statusSelectors";
 
-export function OverviewPanel({ monitor, capture, topicStatus, goto }: { monitor: MonitorSnapshot; capture: CaptureView | null; topicStatus: TopicStatus; goto: (tab: Project0Tab) => void }) {
+export function OverviewPanel({ monitor, capture, topicStatus, authorization, goto }: { monitor: MonitorSnapshot; capture: CaptureView | null; topicStatus: TopicStatus; authorization: string; goto: (tab: Project0Tab) => void }) {
   const t = capture?.transport ?? null;
   const stream = t?.connected == null ? "Unknown"
     : t.connected ? `Connected · ${capture?.run?.wsHost ?? "—"}` : "Disconnected";
@@ -19,7 +19,7 @@ export function OverviewPanel({ monitor, capture, topicStatus, goto }: { monitor
   </div><DetailRow title="Total capital · USD" value={usdMicroDisplay(monitor.finance?.totalCapitalUsdMicro)}/>
   <p className="p0-note">{capture ? `Last reported stream values · ${topicStatus}. Latency and finance are not collected yet.` : "No measured values. Click Health for detailed diagnostics."}</p></Section>
   <Section title="Liquidator" aside={<span className="p0-badge">Locked</span>}>
-    <DetailRow title="Execution" value="Disabled · Not authorized"/><DetailRow title="Available capital" value="Not connected"/>
+    <DetailRow title="Execution" value={`Disabled · ${authorization}`}/><DetailRow title="Available capital" value="Not connected"/>
     <button className="p0-secondary" onClick={() => goto("liquidator")}>Open Liquidator →</button></Section>
   <Section className="p0-live-section" title="Capture" aside={<span className="p0-badge">{phaseLabel(capture)}</span>}>
     <DetailRow title="Market stream" value={stream}/>

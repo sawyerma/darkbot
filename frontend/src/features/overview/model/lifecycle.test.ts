@@ -18,4 +18,13 @@ describe("supervised capture controls", () => {
       }
     }
   });
+  it("names every effect of darkbotctl capture stop: autostart suspended, BSC readiness also stopped", () => {
+    const running = { state: "RUNNING", label: "RUNNING", reason: "launchd" } as const;
+    for (const control of [projectControls("project0", running).startStop, stopAllControl(running)]) {
+      const confirm = control.enabled ? control.confirm : undefined;
+      expect(confirm).toMatch(/BSC-Readiness/);
+      expect(confirm).toMatch(/Autostart/);
+      expect(confirm).not.toMatch(/ausschließlich Project 0/);
+    }
+  });
 });

@@ -5,13 +5,13 @@ import { DetailRow, Section, Notice } from "../components/PanelPrimitives";
 type Fleet={drafts:LiquidatorDraft[];selected:LiquidatorDraft|null;selectedId:string|null;
  select:(id:string|null)=>void;update:(id:string,patch:Partial<LiquidatorDraft>)=>void;
  create:()=>void;duplicate:()=>void;remove:()=>void};
-export function LiquidatorPanel({fleet,goto}:{fleet:Fleet;goto:(t:Project0Tab)=>void}) {
+export function LiquidatorPanel({fleet,authorization,goto}:{fleet:Fleet;authorization:string;goto:(t:Project0Tab)=>void}) {
  const [message,setMessage]=useState("");const d=fleet.selected;
  const patch=(p:Partial<LiquidatorDraft>)=>{if(d)fleet.update(d.id,p)};
  const toggle=(k:StrategyKind,v:boolean)=>{if(d)patch({enabledStrategies:v?Array.from(new Set([...d.enabledStrategies,k])):d.enabledStrategies.filter(x=>x!==k)})};
  return <><Section title="Liquidator fleet" aside={<span className="p0-badge">Execution locked · V0</span>}>
  <p className="p0-quiet">Shared market state · Independent bot drafts · No live instances.</p>
- <DetailRow title="Running liquidators" value="0 · LIVE not authorized"/>
+ <DetailRow title="Running liquidators" value={`— · ${authorization}`}/>
  <DetailRow title="Available working capital" value="— USD · Not connected"/>
  <DetailRow title="Realized net PnL" value="— USD · Not proven"/></Section>
  <Section title="Bots & strategies" aside={<button className="p0-secondary" onClick={()=>fleet.create()}>+ Add bot</button>}>
@@ -33,7 +33,7 @@ export function LiquidatorPanel({fleet,goto}:{fleet:Fleet;goto:(t:Project0Tab)=>
  <label>Minimum net profit · USD<input type="number" min="0" value={d.minimumNetUsd} onChange={e=>patch({minimumNetUsd:e.target.value})}/></label>
  <label>Fee limit · USD<input type="number" min="0" value={d.maximumFeeUsd} onChange={e=>patch({maximumFeeUsd:e.target.value})}/></label>
  <label>Maximum in-flight<input type="number" min="1" value={d.maximumInFlight} onChange={e=>patch({maximumInFlight:e.target.value})}/></label></div>
- <DetailRow title="Execution status" value="Not authorized"/>
+ <DetailRow title="Execution status" value={authorization}/>
  <div className="p0-actions"><button className="p0-secondary" onClick={()=>setMessage(validateDraft(d)??"Valid UI draft. Not saved to backend.")}>Validate draft</button><button disabled className="p0-primary">Start selected bot</button></div></>:<p className="p0-quiet">Add a bot to configure its strategy.</p>}</div></div>
  {message?<Notice>{message}</Notice>:null}
  <p className="p0-note">Drafts exist in memory only. Rust fleet scheduling, admission, wallet reservations and durable profile storage are not implemented.</p></Section>

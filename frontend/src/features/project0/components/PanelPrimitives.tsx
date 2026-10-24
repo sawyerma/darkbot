@@ -12,12 +12,13 @@ export function DetailRow({ title, value }: { title: string; value: ReactNode })
   return <div className="p0-line"><span>{title}</span><span className="p0-right">{value}</span></div>;
 }
 export function TabStrip<T extends string>({ options, value, onChange, label, minor = false }: {
-  options: ReadonlyArray<{ value: T; label: string }>;
+  options: ReadonlyArray<{ value: T; label: string; disabled?: boolean; title?: string }>;
   value: T; onChange: (value: T) => void; label: string; minor?: boolean;
 }) {
   return <div className={minor ? "p0-subtabs" : "p0-tabs"} role="tablist" aria-label={label}>
     {options.map(option => <button key={option.value} type="button" role="tab"
       aria-selected={value === option.value} className={value === option.value ? "p0-selected" : ""}
+      disabled={option.disabled} title={option.title}
       onClick={() => onChange(option.value)}>{option.label}</button>)}
   </div>;
 }

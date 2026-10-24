@@ -33,7 +33,19 @@ async function lookup(id: string): Promise<void> {
   const phase = c.found ? CommandPhase[c.phase] ?? "UNKNOWN" : "UNKNOWN";
   useCaptureControl.setState({ receipt: { id, phase, detail: c.detail }, busy: c.found && c.phase === CommandPhase.PENDING });
 }
-/** One watcher per mounted Overview; process truth comes from authenticated launchd observation. */
+export interface CaptureButton { enabled: boolean; reason: string }
+/** Start/Stop availability from the observed launchd process only; a command is never optimistic. */
+export function captureButtons(p: CaptureProcess | null, busy: boolean): { start: CaptureButton; stop: CaptureButton } {
+  const off = (reason: string): CaptureButton => ({ enabled: false, reason });
+  const on: CaptureButton = { enabled: true, reason: "" };
+  if (busy) return { start: off("Command in progress"), stop: off("Command in progress") };
+  if (!p || p.state === "UNKNOWN") return { start: off("Process state unknown"), stop: off("Process state unknown") };
+  if (!p.controller_available) return { start: off("No available controller"), stop: off("No available controller") };
+  if (p.state === "STOPPING") return { start: off("Journal drain and seal in progress"), stop: off("Journal drain and seal in progress") };
+  if (p.state === "RUNNING") return { start: off("Capture already running"), stop: on };
+  return { start: on, stop: off("No managed capture running") };
+}
+/** One watcher per mounted view (global Overview or Project 0 Capture); process truth comes from authenticated launchd observation. */
 export function watchCaptureControl(): () => void {
   let done = false; let timer: ReturnType<typeof setTimeout> | undefined;
   useCaptureControl.setState({ process: null });

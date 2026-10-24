@@ -121,9 +121,18 @@ export function toSystemView(m: SystemMessage): SystemView {
   };
 }
 
+/** An absolute run directory names the operator's local filesystem; only its run segment is shown. */
+function maskedRunDir(dir: string): string {
+  if (!dir.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(dir)) return dir;
+  return "…/" + (dir.split(/[\\/]/).filter(Boolean).pop() ?? "");
+}
+
 /** Every reported value with its contract field name (the names carry the units). */
 export function captureJsonOf(m: CaptureMessage): JsonObject {
-  return toJson(CaptureStateSchema, m, JSON_OPTIONS) as JsonObject;
+  const json = toJson(CaptureStateSchema, m, JSON_OPTIONS) as JsonObject;
+  const run = json.run as JsonObject | undefined;
+  if (run && typeof run.run_dir === "string") run.run_dir = maskedRunDir(run.run_dir);
+  return json;
 }
 
 export function systemJsonOf(m: SystemMessage): JsonObject {

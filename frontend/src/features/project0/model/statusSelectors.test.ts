@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { CaptureView, CapturePhaseName, TransportView } from "./status";
-import { healthLabel } from "./statusSelectors";
+import type { CaptureView, CapturePhaseName, SystemView, TransportView } from "./status";
+import { executionAuthorization, healthLabel } from "./statusSelectors";
 import { STREAM_STALE_AFTER_MS } from "./streamFreshness";
 
 function view(phase: CapturePhaseName, transport: Partial<TransportView> = {}, counters: Record<string, bigint> = {}, endResult = ""): CaptureView {
@@ -35,5 +35,21 @@ describe("healthLabel", () => {
     expect(healthLabel("DETACHED", view("CAPTURE"))).toBe("Capture process gone · last known");
     expect(healthLabel("DETACHED", view("ENDED", {}, {}, "CAPTURE_COMPLETE"))).toBe("Last run · Completed · no capture running");
     expect(healthLabel("SUBSCRIBING" as never, null)).toBe("No capture data");
+  });
+});
+
+describe("execution authorization is the engine's statement, never a fixed GUI claim", () => {
+  const system = (liveAuthorized: boolean | null, submissionAuthorized: boolean | null): SystemView =>
+    ({ activated: liveAuthorized != null, profile: null, parameterCount: 1, liveAuthorized, submissionAuthorized });
+  it("is unknown without a live effective record", () => {
+    expect(executionAuthorization(null, "LIVE")).toBe("Authorization unknown");
+    expect(executionAuthorization(system(null, null), "LIVE")).toBe("Authorization unknown");
+    for (const status of ["STALE", "DETACHED", "UNAVAILABLE", "ERROR", "IDLE"] as const)
+      expect(executionAuthorization(system(false, false), status)).toBe("Authorization unknown");
+  });
+  it("needs both LIVE and submission authorization", () => {
+    expect(executionAuthorization(system(false, false), "LIVE")).toBe("Not authorized");
+    expect(executionAuthorization(system(true, false), "LIVE")).toBe("Not authorized");
+    expect(executionAuthorization(system(true, true), "LIVE")).toBe("Authorized by engine");
   });
 });

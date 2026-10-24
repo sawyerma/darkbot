@@ -14,7 +14,8 @@ export interface DisabledControl { readonly enabled: false; readonly reason: str
 export interface EnabledControl { readonly enabled: true; readonly label: string; readonly action: CaptureAction | "bsc.readiness.start" | "bsc.readiness.stop"; readonly confirm?: string }
 export type Control = DisabledControl | EnabledControl;
 const NO_OWNER = "No qualified process controller for this project";
-const STOP_CONFIRM = "Die laufende Aufzeichnung wird geordnet beendet und das Journal versiegelt. Das Cockpit bleibt geöffnet.";
+// darkbotctl capture stop (_capture_stop_request): suspends autostart, signals the capture, and stops BSC readiness.
+const STOP_CONFIRM = "Die laufende Aufzeichnung wird geordnet beendet und das Journal versiegelt; der Autostart bleibt bis zum nächsten Start ausgesetzt. Eine laufende BSC-Readiness-Prüfung wird ebenfalls beendet. Das Cockpit bleibt geöffnet.";
 export function projectControls(key: ProjectKey, process: ProcessIndicator = processIndicator(null)): { startStop: Control; logs: { enabled: boolean; reason: string } } {
   const logs = { enabled: key === "project0" || key === "bsc", reason: NO_OWNER };
   if(key==="bsc") {
@@ -28,5 +29,5 @@ export function projectControls(key: ProjectKey, process: ProcessIndicator = pro
   return { startStop: { enabled: false, reason: process.state === "STOPPING" ? "Journal drain and seal in progress" : "Process state unknown" }, logs };
 }
 export function stopAllControl(process: ProcessIndicator): Control {
-  return process.state === "RUNNING" ? { enabled: true, label: "Stop All · Project 0", action: "project0.capture.stop", confirm: STOP_CONFIRM + " Dies betrifft ausschließlich Project 0. Das Gateway läuft unabhängig weiter." } : { enabled: false, reason: "No managed capture running" };
+  return process.state === "RUNNING" ? { enabled: true, label: "Stop All · Project 0", action: "project0.capture.stop", confirm: STOP_CONFIRM + " Das Gateway läuft unabhängig weiter." } : { enabled: false, reason: "No managed capture running" };
 }

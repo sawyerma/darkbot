@@ -1,5 +1,5 @@
 import type { TopicStatus } from "@/core/realtime";
-import type { CaptureView, CounterName } from "./status";
+import type { CaptureView, CounterName, SystemView } from "./status";
 import { streamFreshness, type StreamClock } from "./streamFreshness";
 
 export function counterOf(c: CaptureView | null, name: CounterName): bigint | null {
@@ -76,4 +76,13 @@ export function healthLabel(topicStatus: TopicStatus, c: CaptureView | null, clo
   const a = c.assessment;
   if (a && !(a.coverageComplete && a.decodeComplete)) return "Degraded";
   return "Live · unverified";
+}
+
+/** Execution needs the engine's LIVE and submission authorization (system.proto 16/17). Without a
+ *  current effective record it is unknown: never a fixed GUI claim either way. */
+export function executionAuthorization(s: SystemView | null, topicStatus: TopicStatus): string {
+  if (topicStatus !== "LIVE" || !s) return "Authorization unknown";
+  if (s.liveAuthorized === false || s.submissionAuthorized === false) return "Not authorized";
+  if (s.liveAuthorized && s.submissionAuthorized) return "Authorized by engine";
+  return "Authorization unknown";
 }

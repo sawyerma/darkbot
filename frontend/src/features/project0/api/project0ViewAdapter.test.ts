@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import captureHex from "../../../../../protocol/golden/project0/capture_state.hex?raw";
 import systemHex from "../../../../../protocol/golden/project0/system_status.hex?raw";
 import { USED_COUNTERS } from "../model/status";
-import { decodeCaptureState, decodeSystemStatus, toCaptureView, toSystemView } from "./project0ViewAdapter";
+import { captureJsonOf, decodeCaptureState, decodeSystemStatus, toCaptureView, toSystemView } from "./project0ViewAdapter";
 
 function bytes(hex: string): Uint8Array {
   const t = hex.trim();
@@ -38,5 +38,19 @@ describe("Project 0 wire contract (golden frames written by the Rust reporter)",
   it("decodes the operational parameter registry", () => {
     expect(system.parameterCount).toBeGreaterThan(0);
     expect(system.activated).toBe(false);
+  });
+});
+
+describe("All values never shows a local filesystem path", () => {
+  const json = (runDir: string) => {
+    const m = decodeCaptureState(bytes(captureHex));
+    m.run!.runDir = runDir;
+    return captureJsonOf(m);
+  };
+  it("keeps only the last segment of an absolute run directory", () => {
+    expect((json("/Users/someone/DarkBot/project_0/data/runs/r1").run as Record<string, unknown>).run_dir).toBe("…/r1");
+    expect((json("C:\\Users\\someone\\runs\\r1").run as Record<string, unknown>).run_dir).toBe("…/r1");
+    expect((json("").run as Record<string, unknown>).run_dir).toBe("");
+    expect((json("runs/r1").run as Record<string, unknown>).run_dir).toBe("runs/r1");
   });
 });

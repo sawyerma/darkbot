@@ -5,6 +5,7 @@ import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/
 import { SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
+import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, type CommandRequest } from "../src/core/generated/darkbot/control/v1/commands_pb";
 
 const golden = (name: string) => Buffer.from(readFileSync(new URL(`../../protocol/golden/project0/${name}.hex`, import.meta.url), "utf8").trim(), "hex");
 const schemaId = readFileSync(new URL("../../protocol/schema_id.txt", import.meta.url), "utf8").trim();
@@ -162,4 +163,65 @@ test("schema rejection reloads once and stays blocked without subscribing", asyn
   await page.waitForTimeout(500);
   expect(hellos).toBe(2);
   expect(subscriptions).toBe(0);
+});
+
+test("Check & start drives the one existing capture command; drafts are never sent as parameters", async ({ page }) => {
+  await feed(page);
+  let process = { state: "STOPPED", run_id: "", pid: null as number | null, reason: "", observed_unix_ms: Date.now(), controller_available: true };
+  const sent: CommandRequest[] = [];
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/project0/process", (r) => r.fulfill({ json: process }));
+  await page.route("**/api/v1/command**", async (r) => {
+    if (r.request().method() === "POST") {
+      const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+      sent.push(req);
+      process = { ...process, state: req.action.endsWith(".start") ? "RUNNING" : "STOPPED", run_id: "run-1" };
+      return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema,
+        { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
+    }
+    const id = new URL(r.request().url()).searchParams.get("request_id") ?? "";
+    return r.fulfill(proto(toBinary(CommandLookupResponseSchema, create(CommandLookupResponseSchema,
+      { found: true, commandId: id, phase: CommandPhase.COMPLETED, detail: "Managed process started" }))));
+  });
+  await tab(page, "Capture");
+  await page.getByRole("button", { name: "10m", exact: true }).click();
+  await page.getByLabel("Source").selectOption("transactions");
+  const verify = page.getByRole("tablist", { name: "Verification mode" });
+  await expect(verify.getByRole("tab", { name: "Index" })).toBeDisabled();
+  await expect(verify.getByRole("tab", { name: "Crosscheck" })).toBeDisabled();
+  const preview = page.locator(".p0-code");
+  await expect(preview).toHaveText("p0ctl run start --duration 10m --network-audit <FILE> --mainnet-approved <TOKEN> --capture-source transactions --chain-verify off --report-markers all");
+  await page.getByLabel("Observation").selectOption("market");
+  await expect(preview).toContainText("no mode option");
+  await page.getByLabel("Observation").selectOption("econ4h");
+  const start = page.getByRole("button", { name: "Check & start" });
+  await expect(start).toBeEnabled();
+  await start.click();
+  await expect(page.getByTestId("p0-capture-command-receipt")).toContainText("COMPLETED");
+  expect(sent.map((r) => [r.action, r.resourceId, r.params.length, r.expected])).toEqual([["project0.capture.start", "", 0, undefined]]);
+  // Stop asks in a separate control: a double-click on Stop never sends. An arm expires with its run.
+  const stop = page.getByRole("button", { name: "Stop", exact: true });
+  const confirm = page.getByRole("button", { name: "Confirm stop", exact: true });
+  await expect(stop).toBeEnabled({ timeout: 6000 });
+  await stop.dblclick();
+  await expect(confirm).toBeVisible();
+  await expect(page.getByText(/BSC readiness/)).toBeVisible();
+  process = { ...process, run_id: "run-2", pid: 2 };
+  await expect(confirm).toBeHidden({ timeout: 6000 });
+  await stop.click();
+  await confirm.click();
+  await expect(page.getByTestId("p0-capture-command-receipt")).toContainText("STOPPED", { timeout: 6000 });
+  expect(sent.map((r) => r.action)).toEqual(["project0.capture.start", "project0.capture.stop"]);
+});
+
+test("execution authorization and running liquidators are never fixed claims", async ({ page }) => {
+  await feed(page);
+  // The golden status runs on built-in defaults: no effective record, so authorization is unknown.
+  await expect(page.getByText("Disabled · Authorization unknown", { exact: true })).toBeVisible();
+  await tab(page, "Liquidator");
+  await expect(page.getByText("— · Authorization unknown", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 · LIVE not authorized")).toHaveCount(0);
+  await page.getByRole("button", { name: "+ Add bot" }).click();
+  await expect(page.locator(".p0-line", { hasText: "Execution status" })).toHaveText("Execution statusAuthorization unknown");
 });

@@ -6,8 +6,8 @@ import { TabStrip } from "./components/PanelPrimitives";
 import { HealthSection } from "./components/HealthSection";
 import { ensureProject0Adapter } from "./api/project0Adapter";
 import { useNowMs } from "./hooks/useStatusClock";
-import { healthLabel } from "./model/statusSelectors";
-import { selectCapture, useProject0Store } from "./store/project0Store";
+import { executionAuthorization, healthLabel } from "./model/statusSelectors";
+import { selectCapture, selectSystem, useProject0Store } from "./store/project0Store";
 import { OverviewPanel } from "./pages/OverviewPanel";
 import { LiquidatorPanel } from "./pages/LiquidatorPanel";
 import { CapturePanel } from "./pages/CapturePanel";
@@ -20,7 +20,7 @@ import "./styles/status.css";
  * Feature composition only:
  * - UI tabs and ephemeral draft edits stay here.
  * - Rust owns real runs, economic decisions, wallets, authorizations and jobs.
- * - Read-only status arrives via the gateway; control commands are not wired.
+ * - Read-only status arrives via the gateway; Capture reuses the one capture control client.
  * Never turn this page into a second runtime / fake market data provider.
  */
 const TABS: ReadonlyArray<{ value: Project0Tab; label: string }> = [
@@ -45,6 +45,8 @@ export default function Project0Page() {
   const [healthOpen, setHealthOpen] = useState(false);
   const fleet = useFleetDrafts();
   const capture = useProject0Store(selectCapture);
+  const system = useProject0Store(selectSystem);
+  const authorization = executionAuthorization(system.value, system.topicStatus);
   useEffect(() => { ensureProject0Adapter(); }, []);
   return <div className="p0-graphite"><div className="p0-panel">
     <div className="p0-heading">
@@ -53,8 +55,8 @@ export default function Project0Page() {
     </div>
     <TabStrip label="Project 0 areas" options={TABS} value={tab} onChange={setTab}/>
     {healthOpen ? <HealthSection/> : null}
-    {tab === "overview" ? <OverviewPanel monitor={UNCONNECTED_MONITOR} capture={capture.value} topicStatus={capture.topicStatus} goto={setTab}/> : null}
-    {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} goto={setTab}/> : null}
+    {tab === "overview" ? <OverviewPanel monitor={UNCONNECTED_MONITOR} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} goto={setTab}/> : null}
+    {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab}/> : null}
     {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus}/> : null}
     {tab === "analytics" ? <AnalyticsPanel createDraft={fleet.create} goto={setTab}/> : null}
     {tab === "wallets" ? <WalletsPanel finance={UNCONNECTED_MONITOR.finance}/> : null}
