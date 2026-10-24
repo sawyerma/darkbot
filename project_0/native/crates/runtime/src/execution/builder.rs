@@ -576,11 +576,12 @@ pub mod p0 {
                         // Proportional to the observed floor (+1/64), else double.
                         None => {
                             let step = match floor {
-                                Some(f) if f > 0 => {
-                                    u128::from(input) * u128::from(amount_out) * 65
-                                        / (64 * u128::from(f))
-                                        + 1
-                                }
+                                // A23-05: checked — a product beyond u128 saturates to
+                                // the inventory bound below, never wraps to a small step.
+                                Some(f) if f > 0 => u128::from(input)
+                                    .checked_mul(u128::from(amount_out))
+                                    .and_then(|v| v.checked_mul(65))
+                                    .map_or(u128::MAX, |v| v / (64 * u128::from(f)) + 1),
                                 _ => u128::from(input) * 2,
                             };
                             step.clamp(u128::from(input) + 1, u128::from(max_input)) as u64
@@ -1869,6 +1870,58 @@ pub mod p0 {
             ) -> Result<Option<Route>, String> {
                 Ok(None)
             }
+        }
+
+        /// A23-05: a reverse quote and a shortfall near `u64::MAX` with a tiny forward floor: the
+        /// proportional step saturates to the inventory bound (before: `input × out × 65`
+        /// overflowed u128 — a debug panic, a release wrap to a small step); no covering buy.
+        #[test]
+        fn a23_05_jit_step_saturates_instead_of_overflowing() {
+            struct TinyFloor(std::cell::Cell<u32>);
+            impl RouteProvider for TinyFloor {
+                fn quote_exact_in(
+                    &self,
+                    from: &Pubkey,
+                    _: &Pubkey,
+                    amount_in: u64,
+                    _: &[PrewarmedAta],
+                    _: Instant,
+                ) -> Result<Option<Route>, String> {
+                    self.0.set(self.0.get() + 1);
+                    let out = if *from == Pubkey::default() {
+                        1 << 62
+                    } else {
+                        1
+                    };
+                    Ok(Some(Route {
+                        instructions: vec![],
+                        lookup_tables: vec![],
+                        swap_program: Pubkey::new_unique(),
+                        amount_in,
+                        quoted_out: out,
+                        minimum_executable_out: Some(out),
+                        enforced_slippage_bps: None,
+                    }))
+                }
+                fn quote_exact_out(
+                    &self,
+                    _: &Pubkey,
+                    _: &Pubkey,
+                    _: u64,
+                    _: Instant,
+                ) -> Result<Option<Route>, String> {
+                    Ok(None)
+                }
+            }
+            let m = TinyFloor(std::cell::Cell::new(0));
+            let later = Instant::now() + std::time::Duration::from_secs(5);
+            let (liab, funding) = (Pubkey::default(), Pubkey::new_unique());
+            assert!(
+                shortfall_exact_in(&m, &funding, &liab, 1 << 62, u64::MAX, &[], later)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(m.0.get() <= JIT_MAX_QUOTES, "{}", m.0.get());
         }
 
         /// P4A-JIT-01: the bounded ExactIn shortfall solve finds a covering buy near the smallest

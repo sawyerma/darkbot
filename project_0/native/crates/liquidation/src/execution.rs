@@ -75,7 +75,9 @@ pub struct NoRouteQuarantine {
 
 impl NoRouteQuarantine {
     pub fn quarantine(&mut self, mint: Pubkey, now: u64, policy: &ExecPolicy) {
-        self.until.insert(mint, now + policy.quarantine_s);
+        // A23-05: saturating — an end beyond u64 is "quarantined", never a wrap into the past.
+        self.until
+            .insert(mint, now.saturating_add(policy.quarantine_s));
     }
     pub fn is_quarantined(&mut self, mint: &Pubkey, now: u64) -> bool {
         match self.until.get(mint) {
@@ -114,7 +116,8 @@ impl TargetBackoff {
             .backoff_base_s
             .saturating_mul(1u64 << (t.failures.min(16) - 1))
             .min(policy.backoff_max_s);
-        t.next_allowed = now + delay;
+        t.next_allowed = now.saturating_add(delay); // A23-05: never wraps into the past
+
         t.failures < policy.max_failures_before_drop
     }
     pub fn record_success(&mut self, account: &Pubkey) {
@@ -180,6 +183,21 @@ mod tests {
         q.quarantine(m, 1000, &pol());
         assert!(q.is_quarantined(&m, 1500));
         assert!(!q.is_quarantined(&m, 1700));
+    }
+
+    /// A23-05: quarantine and backoff ends beyond `u64` saturate (still blocked) instead of
+    /// overflowing — a debug panic, a release wrap into the past that would unblock at once.
+    #[test]
+    fn a23_05_quarantine_and_backoff_ends_saturate() {
+        let now = u64::MAX - 10;
+        let mut q = NoRouteQuarantine::default();
+        let m = Pubkey::new_unique();
+        q.quarantine(m, now, &pol());
+        assert!(q.is_quarantined(&m, now + 5));
+        let (mut b, late) = (TargetBackoff::default(), u64::MAX - 2);
+        let a = Pubkey::new_unique();
+        assert!(b.record_failure(a, late, &pol())); // 5 s past u64::MAX
+        assert!(!b.allowed(&a, u64::MAX - 1));
     }
 
     #[test]
