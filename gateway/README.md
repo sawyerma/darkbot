@@ -7,8 +7,8 @@ F3 transport layer for the browser. Protocol contract: `frontend/docs/GATEWAY_WI
 - `/api/v1/session` bootstrap, `/ws/v1/gateway` Protobuf websocket, `/healthz`, optional SPA static-serving.
 - Hello/Welcome, bounded subscriptions and connections, latest-value state via Tokio watch, ordered generation/sequence, heartbeat/Pong and watermark.
 - Overview source statuses; unavailable engine projections are not synthesized.
-- Engine feeds: Project_0 and BSC reporters over unix sockets, same-user peer check, exact per-source frame bound, `StateTooLarge` as a per-topic FRAME_TOO_LARGE with recovery on the next valid state.
-- Commands: same-origin protobuf POST with session/CSRF/Origin/Host and one idempotency ledger (bounded archive, expiry rule; Wire V1.3 §7).
+- Engine feeds: Project_0 and BSC reporters over unix sockets, same-user peer check, exact per-source frame bound (a larger frame is a counted engine protocol violation), `StateTooLarge` as a per-topic FRAME_TOO_LARGE with recovery on the next valid state.
+- Commands: same-origin protobuf POST with session/CSRF/Origin/Host and one idempotency ledger with time-bounded idempotency (Wire V1.3 §7) configured by `DARKBOT_GATEWAY_COMMAND_CLOCK_WINDOW_MS`, `_RETENTION_MS` (at least twice the window) and `_LEDGER_RECORDS`.
 
 ## Boundaries
 EVENT catch-up (F4) and native engine receipts are future phases. Trading and LIVE are not authorized. Gateway-owned overview data cannot be written through external EngineFeed.
@@ -45,7 +45,7 @@ All work goes directly to `main`. No development branches. Preserve `project_0/`
 ## macOS Cockpit service (manual start)
 From repository root: `ops/darkbotctl build && ops/darkbotctl deploy && ops/darkbotctl install-apps`.
 
-**Deployment dependency (binding):** every schema change (since `01344e53`: engine `StateTooLarge`, schema id `d727a5c9…`) needs the Project_0 reporter `p0-market-capture-reported` and the BSC reporter rebuilt from the same tree; the engine hop refuses a reporter with another schema id. Deploy only via `build` → `deploy`: the release manifest binds schema id and binary hashes, and deploy refuses while a capture runs on another schema.
+**Deployment dependency (binding):** every schema change (latest `b42c5b98`, schema id `68bae95c…`) needs the Project_0 reporter `p0-market-capture-reported` and the BSC reporter rebuilt from the same tree; the engine hop refuses a reporter with another schema id. Deploy only via `build` → `deploy`: the release manifest binds schema id and binary hashes, and deploy refuses while a capture runs on another schema.
 Use the desktop **DarkBot** app or `ops/darkbotctl up` to launch only the
 read-only gateway and browser; the market capture is never started automatically.
 The gateway serves `frontend/dist` at `http://127.0.0.1:8787` over same-origin,
