@@ -102,5 +102,10 @@
     "typescript": "~5.6.2",
     "vite": "^5.4.10",
     "vitest": "^2.1.9"
+  },
+  "overrides": {
+    "bundlesize": {
+      "brotli-size": "4.0.0"
+    }
   }
 }
