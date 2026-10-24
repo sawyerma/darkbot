@@ -1009,6 +1009,11 @@ pub mod crate_impl {
         /// of premium per second (the crate's simple-interest projection), a liability valued at
         /// the bank's high maintenance price and liability weight like the principal; zero
         /// without one. An unreadable bank or price is an error, never zero.
+        ///
+        /// P2-04: valued per day and rounded up to whole bits per second (+1 for the day
+        /// value's truncation): a per-second value truncated to I80F48 is too coarse for a
+        /// boundary far away, and a boundary from an upper bound is never later than the
+        /// crate's own crossing.
         fn premium_decay_per_second(
             &self,
             account: &Pubkey,
@@ -1016,6 +1021,8 @@ pub mod crate_impl {
             slot: u64,
         ) -> Result<u128, HealthError> {
             use marginfi_type_crate::constants::{PREMIUM_ACTIVE, SECONDS_PER_YEAR};
+            const DAY_S: u128 = 86_400;
+            let days_per_year = SECONDS_PER_YEAR / I80F48::from_num(DAY_S);
             let (_, _, adata) = self.raw(account)?;
             let acc = load_account(adata)?;
             let clock = Clock {
@@ -1026,7 +1033,7 @@ pub mod crate_impl {
                 unix_timestamp: now_unix_s,
             };
             let overflow = || HealthError::Crate("premium decay overflow".into());
-            let mut decay = I80F48::ZERO;
+            let mut per_day = I80F48::ZERO;
             for balance in acc
                 .lending_account
                 .balances
@@ -1044,21 +1051,26 @@ pub mod crate_impl {
                 let principal = bank
                     .get_liability_amount(balance.liability_shares.into())
                     .map_err(|e| HealthError::Crate(format!("premium decay principal: {e}")))?;
-                let per_second = principal
+                let daily = principal
                     .checked_mul(marginfi_type_crate::types::u32_to_milli(
                         balance.premium_rate_snapshot,
                     ))
-                    .and_then(|v| v.checked_div(SECONDS_PER_YEAR))
+                    .and_then(|v| v.checked_div(days_per_year))
                     .ok_or_else(overflow)?;
                 let (_, high) = self.bank_maintenance_prices(&bank, &clock)?;
                 let weight = bank
                     .config
                     .get_weight(RequirementType::Maintenance, BalanceSide::Liabilities);
-                let value = calc_value(per_second, high, bank.get_balance_decimals(), Some(weight))
+                let value = calc_value(daily, high, bank.get_balance_decimals(), Some(weight))
                     .map_err(|e| HealthError::Crate(format!("premium decay value: {e}")))?;
-                decay = decay.checked_add(value).ok_or_else(overflow)?;
+                per_day = per_day.checked_add(value).ok_or_else(overflow)?;
             }
-            Ok(u128::try_from(decay.to_bits()).unwrap_or(0))
+            let bits = u128::try_from(per_day.to_bits()).unwrap_or(0);
+            Ok(if bits == 0 {
+                0
+            } else {
+                bits.div_ceil(DAY_S) + 1
+            })
         }
     }
 }

@@ -649,6 +649,7 @@ impl ShadowOwner {
                     }
                     None => {
                         self.reverse_index.remove_account(&account_pk);
+                        self.premium_schedule.remove_account(&account_pk);
                         if self.use_threshold_trigger {
                             self.threshold_index.remove_account(&account_pk);
                             self.threshold_fallback.remove(&account_pk);

@@ -2191,6 +2191,43 @@ mod tests {
         assert_eq!(facts.premium_active, Some(false));
     }
 
+    /// P2-04 (0.1.12): premium wake-ups of a healthy account (prices constant) are never later
+    /// than the crate's own crossing and, each re-evaluated, reach the first liquidatable second
+    /// within a few wake-ups — at a usual rate and at a tiny one whose boundary is centuries
+    /// away; a premium-inactive bank schedules nothing.
+    #[test]
+    fn p2_04_premium_wakeups_reach_the_first_liquidatable_second() {
+        use crate::schedule::premium_boundary_unix_s;
+        let now = 1_700_000_000i64;
+        let mut tb = two_bank(0.9, 100_000_000, 85_000_000);
+        // ≈ 10 %/year and 50_000 (≈ 0.012 %/year).
+        for rate in [u32::MAX / 100, 50_000] {
+            with_premium(&mut tb, true, 0.0, rate, now as u64);
+            let (mut t, mut wakes) = (now, 0);
+            while !health_of(&tb, t).liquidatable {
+                let h = health_of(&tb, t);
+                assert!(h.maintenance_health >= 0, "{h:?}");
+                let at =
+                    premium_boundary_unix_s(t as u64, h.maintenance_health, engine_decay(&tb, t))
+                        .unwrap();
+                assert!(at > t as u64, "rate {rate}: progress");
+                (t, wakes) = (at as i64, wakes + 1);
+                assert!(wakes <= 4, "rate {rate}: converges, t={t}");
+            }
+            assert!(t > now + 86_400, "rate {rate}: a margin of 5 USD lasts");
+            assert!(
+                !health_of(&tb, t - 1).liquidatable,
+                "rate {rate}: woken {wakes}× and never late"
+            );
+        }
+        with_premium(&mut tb, false, 0.0, 50_000, now as u64);
+        let h = health_of(&tb, now);
+        assert_eq!(
+            premium_boundary_unix_s(now as u64, h.maintenance_health, engine_decay(&tb, now)),
+            None
+        );
+    }
+
     fn engine_decay(tb: &TwoBank, now: i64) -> u128 {
         use crate::health::HealthEngine;
         CrateHealth {

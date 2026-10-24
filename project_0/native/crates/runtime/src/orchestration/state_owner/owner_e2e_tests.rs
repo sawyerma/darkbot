@@ -133,6 +133,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         sweep_batch_max_events: 64,
         sweep_batch_max_age_ns: 5_000_000,
         sweep_dirty_banks: HashMap::new(),
+        premium_schedule: Default::default(),
         sweep_batch_events: 0,
         sweep_batch_started_ns: None,
         candidate_recheck_slots: 1,
@@ -2322,5 +2323,152 @@ fn fe04_exit_owner_books_a_finalized_exit_once_sol_is_priced() {
     assert!(fe04_job(&f).is_none(), "settled from the journal alone");
     assert_eq!(f.owner.safety.inventory_outstanding(), 0);
     assert!(f.owner.reservations.is_empty());
+    cleanup(f);
+}
+
+/// P2-04 (0.1.12): a healthy account with premium-active debt is re-evaluated when its premium
+/// boundary passes on the chain clock, with no bank or account event: the due wake-up alone opens
+/// and flushes the sweep batch (one second earlier nothing is due), a healthy evaluation renews
+/// the wake-up from the account's own health and premium, and once pending premium made it
+/// liquidatable it is counted liquidatable and has no wake-up left.
+#[test]
+fn p2_04_premium_boundary_wakes_the_sweep_without_an_event() {
+    use bytemuck::Zeroable;
+    use darkbot_project0::schedule::Trigger;
+    use marginfi_type_crate::constants::PREMIUM_ACTIVE;
+    use marginfi_type_crate::types::{
+        Bank, BankOperationalState, MarginfiAccount, MarginfiGroup, OracleSetup, WrappedI80F48,
+    };
+    let mut f = fixture("p2_04");
+    let num = |v: f64| WrappedI80F48 {
+        value: ((v * (1u64 << 48) as f64) as i128).to_le_bytes(),
+    };
+    let update = |pubkey, owner, data, slot| AccountUpdate {
+        pubkey,
+        owner,
+        lamports: 1,
+        data,
+        slot,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    };
+    let clock = |slot: u64, unix: u64| {
+        let mut c = slot.to_le_bytes().to_vec();
+        c.extend_from_slice(&[0u8; 24]);
+        c.extend_from_slice(&(unix as i64).to_le_bytes());
+        update(
+            solana_sdk::sysvar::clock::id(),
+            solana_sdk::sysvar::id(),
+            c,
+            slot,
+        )
+    };
+    let (program, group) = (f.owner.program, f.owner.group);
+    let bank = |asset_weight: f64, flags: u64| {
+        let mut b = Bank::zeroed();
+        b.group = group;
+        b.mint = Pubkey::new_unique();
+        b.mint_decimals = 6;
+        b.asset_share_value = num(1.0);
+        b.liability_share_value = num(1.0);
+        b.config.asset_weight_init = num(asset_weight);
+        b.config.asset_weight_maint = num(asset_weight);
+        b.config.liability_weight_init = num(1.0);
+        b.config.liability_weight_maint = num(1.0);
+        b.config.operational_state = BankOperationalState::Operational;
+        b.config.oracle_setup = OracleSetup::Fixed;
+        b.config.fixed_price = num(1.0);
+        b.flags = flags;
+        [protocol::DISC_BANK.as_slice(), bytemuck::bytes_of(&b)].concat()
+    };
+    let t0 = 1_700_000_000u64;
+    let (asset_bank, liab_bank, account) = (
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    );
+    let mut a = MarginfiAccount::zeroed();
+    a.group = group;
+    // Pinned Marginfi keeps the balances sorted by bank key, descending.
+    let (i, j) = if asset_bank > liab_bank {
+        (0, 1)
+    } else {
+        (1, 0)
+    };
+    let bal = &mut a.lending_account.balances;
+    (bal[i].active, bal[i].bank_pk, bal[i].asset_shares) = (1, asset_bank, num(100e6));
+    (bal[j].active, bal[j].bank_pk, bal[j].liability_shares) = (1, liab_bank, num(85e6));
+    // ≈ 10 %/year on 85 USD against a 5 USD maintenance margin: liquidatable in about 7 months.
+    (bal[j].premium_rate_snapshot, bal[j].last_update) = (u32::MAX / 100, t0);
+    let state = vec![
+        clock(100, t0),
+        update(
+            group,
+            program,
+            [
+                protocol::DISC_MARGINFI_GROUP.as_slice(),
+                bytemuck::bytes_of(&MarginfiGroup::zeroed()),
+            ]
+            .concat(),
+            100,
+        ),
+        update(asset_bank, program, bank(0.9, 0), 100),
+        update(liab_bank, program, bank(1.0, PREMIUM_ACTIVE), 100),
+        update(
+            account,
+            program,
+            [
+                protocol::DISC_MARGINFI_ACCOUNT.as_slice(),
+                bytemuck::bytes_of(&a),
+            ]
+            .concat(),
+            100,
+        ),
+    ];
+    f.owner.st.install_snapshot(100, state.clone());
+    f.owner.st.reconcile(100, &state);
+    f.owner.st.confirm_ready();
+    assert!(f.owner.st.run_state().is_tradable());
+    assert!(!f.owner.sweep_batch_open(), "nothing dirty, nothing due");
+
+    f.owner
+        .premium_schedule
+        .upsert(account, Trigger::PremiumBoundary, Some(t0));
+    assert!(
+        f.owner.sweep_batch_open(),
+        "a due wake-up alone opens the batch"
+    );
+    f.owner.sweep();
+    assert_eq!(f.owner.metrics.health_sweep_healthy, 1);
+    let mut slot = 100;
+    let mut set_clock = |f: &mut Fixture, unix: u64| {
+        slot += 1;
+        f.owner
+            .st
+            .on_event(IngressEvent::Account(clock(slot, unix)));
+    };
+    let mut wakes = 0;
+    while f.owner.metrics.health_sweep_liquidatable == 0 {
+        let at = f
+            .owner
+            .premium_schedule
+            .next_due()
+            .expect("healthy ⇒ woken");
+        assert!(at > t0 + 30 * 86_400, "months away: {at}");
+        set_clock(&mut f, at - 1);
+        assert!(!f.owner.sweep_batch_open(), "not due a second earlier");
+        set_clock(&mut f, at);
+        assert!(f.owner.sweep_batch_open(), "due on the chain clock alone");
+        f.owner.sweep();
+        wakes += 1;
+        assert!(wakes <= 3, "converges");
+    }
+    assert_eq!(f.owner.metrics.health_sweep_checks, 1 + wakes);
+    assert!(
+        f.owner.premium_schedule.is_empty(),
+        "liquidatable: no wake-up"
+    );
+    assert!(!f.owner.sweep_batch_open());
     cleanup(f);
 }

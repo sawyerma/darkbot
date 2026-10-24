@@ -8,7 +8,18 @@ impl ShadowOwner {
         !self.use_threshold_trigger
             && self.st.run_state().is_tradable()
             && (!self.sweep_dirty_banks.is_empty()
-                || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some()))
+                || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some())
+                || self.premium_due())
+    }
+
+    /// P2-04: a premium boundary has passed on the chain clock.
+    #[cfg(feature = "crate_health")]
+    fn premium_due(&self) -> bool {
+        chain_clock(&self.st).is_ok_and(|c| {
+            self.premium_schedule
+                .earliest()
+                .is_some_and(|at| at <= u64::try_from(c.unix_timestamp).unwrap_or(0))
+        })
     }
 
     pub(super) fn sweep(&mut self) {
@@ -24,6 +35,7 @@ impl ShadowOwner {
                 .unwrap_or(0);
             if self.sweep_batch_events >= self.sweep_batch_max_events
                 || batch_age_ns >= self.sweep_batch_max_age_ns
+                || self.premium_due()
             {
                 let dirty = std::mem::take(&mut self.sweep_dirty_banks);
                 let owner_block_started = std::time::Instant::now();
@@ -62,6 +74,18 @@ impl ShadowOwner {
                     }
                 }
 
+                // P2-04 (0.1.12): an account whose premium boundary passed is re-evaluated
+                // exactly even without any bank or account event (time alone moved its health).
+                if let Ok(c) = chain_clock(&self.st) {
+                    let (t_rx_ns, slot) = (self.clock.now_ns(), self.slot_watch.get());
+                    let now = u64::try_from(c.unix_timestamp).unwrap_or(0);
+                    for due in self.premium_schedule.pop_due(now) {
+                        account_work
+                            .entry(due.account)
+                            .or_insert((t_rx_ns, slot, 0));
+                    }
+                }
+
                 let unique = account_work.len();
                 self.metrics.sweep_account_refs =
                     self.metrics.sweep_account_refs.saturating_add(refs as u64);
@@ -96,67 +120,99 @@ impl ShadowOwner {
                 let view = StateView(&self.st);
 
                 // CPU-only and independent per account. No RPC, no state mutation.
-                type Evaluated = Vec<(Pubkey, u64, u64, u64, CandidateHealthState)>;
-                let (mut evaluated, census_rows): (
-                    Evaluated,
-                    Vec<Option<super::census::CensusRowOf>>,
-                ) = account_work
-                    .into_par_iter()
-                    .map(|(account, (t_rx_ns, event_slot, input_revision))| {
-                        let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                            state: &view,
-                            group: self.group,
-                        };
-                        darkbot_common::mt0::MT0
-                            .count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
-                        let health = match &clock {
-                            Ok(c) => engine.health(&account, c.unix_timestamp, c.slot),
-                            Err(e) => {
-                                Err(darkbot_project0::health::HealthError::Stale(e.to_string()))
-                            }
-                        };
-                        let status = match &health {
-                            Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
-                            Ok(_) => CandidateHealthState::Liquidatable,
-                            Err(_) => CandidateHealthState::Error,
-                        };
-                        let member = census_debtors.is_some_and(|d| d.contains(&account));
-                        let row = member.then(|| {
-                            let facts = engine
-                                .observation_accounts(&account)
-                                .map_err(|e| e.to_string())
-                                .and_then(|o| {
-                                    darkbot_project0::census::account_facts(
-                                        &view,
-                                        &program,
-                                        &account,
-                                        o.len(),
-                                    )
-                                });
-                            (
-                                account,
-                                view.0.get(&account).map(|r| r.slot),
-                                darkbot_project0::census::CensusRow::new(
-                                    health,
-                                    match &clock {
-                                        Ok(c) => engine.premium_decay_per_second(
+                // P2-04: each evaluation also yields the account's premium boundary.
+                type Evaluated = Vec<((Pubkey, u64, u64, u64, CandidateHealthState), Option<u64>)>;
+                let (evaluated, census_rows): (Evaluated, Vec<Option<super::census::CensusRowOf>>) =
+                    account_work
+                        .into_par_iter()
+                        .map(|(account, (t_rx_ns, event_slot, input_revision))| {
+                            let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                                state: &view,
+                                group: self.group,
+                            };
+                            darkbot_common::mt0::MT0
+                                .count_health(darkbot_common::mt0::HealthSite::Sweep); // [MT0]
+                            let health = match &clock {
+                                Ok(c) => engine.health(&account, c.unix_timestamp, c.slot),
+                                Err(e) => {
+                                    Err(darkbot_project0::health::HealthError::Stale(e.to_string()))
+                                }
+                            };
+                            let status = match &health {
+                                Ok(h) if !h.liquidatable => CandidateHealthState::Healthy,
+                                Ok(_) => CandidateHealthState::Liquidatable,
+                                Err(_) => CandidateHealthState::Error,
+                            };
+                            // P2-04 (0.1.12): a healthy account with premium-active debt is woken
+                            // when pending premium alone reaches its maintenance margin.
+                            let premium_boundary = match (&health, &clock) {
+                                (Ok(h), Ok(c)) if !h.liquidatable => engine
+                                    .premium_decay_per_second(&account, c.unix_timestamp, c.slot)
+                                    .ok()
+                                    .and_then(|decay| {
+                                        darkbot_project0::schedule::premium_boundary_unix_s(
+                                            u64::try_from(c.unix_timestamp).unwrap_or(0),
+                                            h.maintenance_health,
+                                            decay,
+                                        )
+                                    }),
+                                _ => None,
+                            };
+                            let member = census_debtors.is_some_and(|d| d.contains(&account));
+                            let row = member.then(|| {
+                                let facts = engine
+                                    .observation_accounts(&account)
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|o| {
+                                        darkbot_project0::census::account_facts(
+                                            &view,
+                                            &program,
                                             &account,
-                                            c.unix_timestamp,
-                                            c.slot,
-                                        ),
-                                        Err(e) => {
-                                            Err(darkbot_project0::health::HealthError::Stale(
-                                                e.to_string(),
-                                            ))
-                                        }
-                                    },
-                                    facts,
+                                            o.len(),
+                                        )
+                                    });
+                                (
+                                    account,
+                                    view.0.get(&account).map(|r| r.slot),
+                                    darkbot_project0::census::CensusRow::new(
+                                        health,
+                                        match &clock {
+                                            Ok(c) => engine.premium_decay_per_second(
+                                                &account,
+                                                c.unix_timestamp,
+                                                c.slot,
+                                            ),
+                                            Err(e) => {
+                                                Err(darkbot_project0::health::HealthError::Stale(
+                                                    e.to_string(),
+                                                ))
+                                            }
+                                        },
+                                        facts,
+                                    ),
+                                )
+                            });
+                            (
+                                (
+                                    (account, t_rx_ns, event_slot, input_revision, status),
+                                    premium_boundary,
                                 ),
+                                row,
                             )
-                        });
-                        ((account, t_rx_ns, event_slot, input_revision, status), row)
+                        })
+                        .unzip();
+                // P2-04: every evaluation renews or removes the account's premium wake-up.
+                let mut evaluated: Vec<_> = evaluated
+                    .into_iter()
+                    .map(|(work, boundary)| {
+                        self.premium_schedule.upsert(
+                            work.0,
+                            darkbot_project0::schedule::Trigger::PremiumBoundary,
+                            boundary,
+                        );
+                        work
                     })
-                    .unzip();
+                    .collect();
                 if census_batch {
                     let rows = census_rows.into_iter().flatten().collect();
                     self.submit_c0_census(clock, rows, batch_started.elapsed());

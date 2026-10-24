@@ -1176,3 +1176,8 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 ### P1B-T1 — Test teilt globalen Provider-Zähler (Isolation)
 - [x] **LOW · OPEN.** **Geschlossen `88f45b19` (24.10.):** beide Capture-Tests prüfen per eigenem lokalen RPC-Endpunkt (vorher 3/3 FAIL bei 8 Threads, jetzt 3/3 PASS); Evidence [a23_05_p1b_t1.md](evidence/BUGS_20261024/a23_05_p1b_t1.md). `market::observer::tests::p4_timer_finalizes_locally_without_verification_rpc` vergleicht `provider::shared().snapshot().requests` vor/nach; bei >2 Test-Threads zählen parallele Tests mit (24.10. mit `--test-threads=4` FAIL, allein und im Gate mit 2 Threads PASS). Kein Produktionsfehler; Soll: Zähler je Test isolieren.
 
+
+## 21. Paket 2 (P2–P5) — Befunde 2026-10-24
+
+### CI-N1 — GitHub-Job `native` (Workflow „Project 0 status contract“) dauerhaft rot im Gateway-Schritt
+- [ ] **MEDIUM · OPEN · getrennt erfasst (kein P0-Fix).** Schritt 7 (`working-directory: gateway`: `cargo test` + `p0_reporter_e2e --ignored`) scheitert auf `ubuntu-latest` in allen 100 letzten `main`-Läufen (ältester geprüfter `a132618f`, 22.10.; zuletzt `366271b5`); Schritte 5–6 (P0 `market`/`status_tap`/`darkbot-p0-reporter`, Fixture-Build) und alle `project0-gate`-Jobs grün; lokal (macOS) gateway 140/0/1 + `p0_reporter_e2e` 7/0 grün. Job-Logs ohne Auth nicht lesbar (403) → Ursache UNKNOWN. `gateway/` ist nicht Project_0 → Soll: Gateway-Eigentümer prüft Linux-Lauf; keine Testschleife im P0-Paket.

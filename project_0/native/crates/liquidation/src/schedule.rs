@@ -60,6 +60,20 @@ impl TimeScheduler {
             );
             self.current.insert((account, trigger), seq);
         }
+        self.compact();
+    }
+
+    /// Replaced entries stay in the heap until popped; once they outnumber the live ones the
+    /// heap is rebuilt from the live entries, so repeated re-scheduling (every evaluation of a
+    /// premium account) keeps memory bounded at amortized O(1) per `upsert`.
+    fn compact(&mut self) {
+        if self.heap.len() > 2 * self.by_seq.len() + 64 {
+            self.heap = self
+                .by_seq
+                .iter()
+                .map(|(seq, d)| Reverse((d.at_unix_s, *seq)))
+                .collect();
+        }
     }
 
     pub fn remove_account(&mut self, account: &Pubkey) {
@@ -95,6 +109,11 @@ impl TimeScheduler {
         None
     }
 
+    /// The earliest scheduled time without consuming anything; may name a replaced entry
+    /// (then `pop_due` returns nothing) — never later than the true next due time.
+    pub fn earliest(&self) -> Option<u64> {
+        self.heap.peek().map(|Reverse((at, _))| *at)
+    }
     pub fn len(&self) -> usize {
         self.by_seq.len()
     }
@@ -104,7 +123,7 @@ impl TimeScheduler {
     }
 }
 
-/// Premium-Grenze: frühester Zeitpunkt, an dem Health (Maintenance) 0 erreicht,
+/// Premium-Grenze: erste Sekunde, in der Health (Maintenance) unter 0 fällt (liquidierbar),
 /// wenn sich nur die Premium-Schuld ändert (Preise konstant).
 ///
 /// Modell aus Release 0.1.12: debt(t) = principal + premium_outstanding
@@ -114,18 +133,20 @@ impl TimeScheduler {
 /// Rückgabe None, wenn kein Premium wirkt (Flag aus) oder Rate 0 → kein Eintrag.
 ///
 /// Alle Größen Fixed-Point mit gemeinsamer Skalierung `scale` (aus P3), kein f64.
+/// P2-04: `per_second_decay` ist eine obere Schranke (`premium_decay_per_second`) → die Grenze
+/// liegt nie nach dem echten Übergang; Health 0 ist noch nicht liquidierbar → frühestens +1 s.
 pub fn premium_boundary_unix_s(
     now_unix_s: u64,
     health_value: i128,
     per_second_decay: u128,
 ) -> Option<u64> {
-    if health_value <= 0 {
-        return Some(now_unix_s); // schon unter/auf 0: sofort prüfen
+    if health_value < 0 {
+        return Some(now_unix_s); // schon unter 0: sofort prüfen
     }
     if per_second_decay == 0 {
         return None;
     }
-    let secs = (health_value as u128).div_ceil(per_second_decay); // ceil
+    let secs = (health_value as u128) / per_second_decay + 1; // erste Sekunde mit Health < 0
     Some(now_unix_s.saturating_add(secs.min(u64::MAX as u128) as u64))
 }
 
@@ -150,10 +171,29 @@ mod tests {
         assert!(s.is_empty());
     }
 
+    /// P2-04: re-scheduling the same account on every evaluation keeps the heap bounded and
+    /// the due order exact.
+    #[test]
+    fn rescheduling_keeps_the_heap_bounded() {
+        let mut s = TimeScheduler::new();
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        s.upsert(b, Trigger::PremiumBoundary, Some(5_000));
+        for at in (1_000..101_000).rev() {
+            s.upsert(a, Trigger::PremiumBoundary, Some(at));
+            assert!(s.heap.len() <= 2 * s.len() + 65, "{}", s.heap.len());
+        }
+        assert_eq!((s.len(), s.next_due()), (2, Some(1_000)));
+        let due: Vec<_> = s.pop_due(10_000).iter().map(|d| d.account).collect();
+        assert_eq!(due, vec![a, b]);
+        assert!(s.is_empty());
+    }
+
     #[test]
     fn premium_boundary_math() {
-        assert_eq!(premium_boundary_unix_s(1000, 0, 5), Some(1000));
+        assert_eq!(premium_boundary_unix_s(1000, -1, 5), Some(1000));
+        assert_eq!(premium_boundary_unix_s(1000, 0, 5), Some(1001)); // 0 ist nicht liquidierbar
         assert_eq!(premium_boundary_unix_s(1000, 100, 0), None);
-        assert_eq!(premium_boundary_unix_s(1000, 100, 7), Some(1015)); // ceil(100/7)=15
+        assert_eq!(premium_boundary_unix_s(1000, 100, 7), Some(1015)); // 100−7×15 < 0
+        assert_eq!(premium_boundary_unix_s(1000, 98, 7), Some(1015)); // 98−7×14 = 0
     }
 }

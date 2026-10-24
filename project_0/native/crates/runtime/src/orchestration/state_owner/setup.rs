@@ -1002,6 +1002,7 @@ pub(super) fn prepare(
         sweep_batch_max_events,
         sweep_batch_max_age_ns,
         sweep_dirty_banks,
+        premium_schedule: Default::default(),
         sweep_batch_events,
         sweep_batch_started_ns,
         candidate_recheck_slots,
