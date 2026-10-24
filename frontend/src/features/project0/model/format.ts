@@ -1,7 +1,8 @@
 import type { FinanceSnapshot } from "./contracts";
 /** A missing/UNKNOWN monetary value must never become 0 USD. */
 export function usdMicroDisplay(value: string | null | undefined): string {
-  if (value == null || !/^-?\d+$/.test(value)) return "— USD";
+  // Canonical signed decimal only (Wire V1.3 §8): no "-0", no leading zeros, else unknown.
+  if (value == null || !/^(?:0|-?[1-9][0-9]*)$/.test(value)) return "— USD";
   const n = BigInt(value);
   const sign = n < 0n ? "-" : "";
   const a = n < 0n ? -n : n;
