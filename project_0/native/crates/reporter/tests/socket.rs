@@ -396,6 +396,8 @@ fn r23_heartbeat_watermarks_follow_the_sent_state_frames() {
                 assert!(w.highest_seq_sent >= last_capture_seq, "{w:?}");
                 break w.generation;
             }
+            // Protocol 0495fd04: a P0 capture state never exceeds the frame bound here.
+            engine_frame::Msg::StateTooLarge(t) => panic!("unexpected StateTooLarge {t:?}"),
         }
     };
     assert_eq!(generation, handle.generation);
