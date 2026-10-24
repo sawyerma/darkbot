@@ -9,14 +9,14 @@ impl ShadowOwner {
             && self.st.run_state().is_tradable()
             && (!self.sweep_dirty_banks.is_empty()
                 || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some())
-                || self.premium_due())
+                || self.wake_due())
     }
 
-    /// P2-04: a premium boundary has passed on the chain clock.
+    /// P2-04/P2-05: a wake-up has passed on the chain clock.
     #[cfg(feature = "crate_health")]
-    fn premium_due(&self) -> bool {
+    fn wake_due(&self) -> bool {
         chain_clock(&self.st).is_ok_and(|c| {
-            self.premium_schedule
+            self.time_schedule
                 .earliest()
                 .is_some_and(|at| at <= u64::try_from(c.unix_timestamp).unwrap_or(0))
         })
@@ -35,7 +35,7 @@ impl ShadowOwner {
                 .unwrap_or(0);
             if self.sweep_batch_events >= self.sweep_batch_max_events
                 || batch_age_ns >= self.sweep_batch_max_age_ns
-                || self.premium_due()
+                || self.wake_due()
             {
                 let dirty = std::mem::take(&mut self.sweep_dirty_banks);
                 let owner_block_started = std::time::Instant::now();
@@ -74,12 +74,16 @@ impl ShadowOwner {
                     }
                 }
 
-                // P2-04 (0.1.12): an account whose premium boundary passed is re-evaluated
-                // exactly even without any bank or account event (time alone moved its health).
+                // P2-04/P2-05 (0.1.12): an account whose wake-up passed is re-evaluated exactly
+                // even without any bank or account event (time alone moved its health or its tag
+                // premium); a tagged candidate is forwarded again, not held by its repeat interval.
                 if let Ok(c) = chain_clock(&self.st) {
                     let (t_rx_ns, slot) = (self.clock.now_ns(), self.slot_watch.get());
                     let now = u64::try_from(c.unix_timestamp).unwrap_or(0);
-                    for due in self.premium_schedule.pop_due(now) {
+                    for due in self.time_schedule.pop_due(now) {
+                        if due.trigger == darkbot_project0::schedule::Trigger::TagProfitable {
+                            self.candidate_force_rearm.insert(due.account);
+                        }
                         account_work
                             .entry(due.account)
                             .or_insert((t_rx_ns, slot, 0));
@@ -205,7 +209,7 @@ impl ShadowOwner {
                 let mut evaluated: Vec<_> = evaluated
                     .into_iter()
                     .map(|(work, boundary)| {
-                        self.premium_schedule.upsert(
+                        self.time_schedule.upsert(
                             work.0,
                             darkbot_project0::schedule::Trigger::PremiumBoundary,
                             boundary,

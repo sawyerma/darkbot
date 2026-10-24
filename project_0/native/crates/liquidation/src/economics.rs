@@ -143,6 +143,51 @@ pub fn t_profitable(now_unix_s: u64, tagged_at: Option<u64>, inputs: &ProfitInpu
     }
 }
 
+/// 0.1.12: a sized pair whose premium is the program's tag-adjusted cap, growing with the time
+/// since `tagged_at` (tagged, not in bad debt, not EMODE-boosted, not reduced by the healing
+/// rule).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TagGrowth {
+    pub tagged_at: u64,
+    pub fee_state_max_bps: u64,
+}
+
+/// P2-05 Tag Scheduler: the first chain second at which the growing tag premium alone could
+/// lift a known, not yet actionable plan above `min_profit` — its realization ratio (rounded
+/// up) and other costs held. A re-evaluation time, never a decision: the exact pipeline decides
+/// again then. `None`: never within the curve, overflow, or not after `now`.
+pub fn tag_wakeup(
+    now_unix_s: u64,
+    growth: TagGrowth,
+    premium_bps: u64,
+    repay_value: u64,
+    gross_realizable: u64,
+    net: i128,
+    min_profit: i128,
+) -> Option<u64> {
+    let face = (repay_value as u128)
+        .checked_mul((BPS as u128).checked_add(premium_bps as u128)?)?
+        / BPS as u128;
+    if face == 0 {
+        return None;
+    }
+    let realizable_bps =
+        u64::try_from((gross_realizable as u128 * BPS as u128).div_ceil(face)).ok()?;
+    let fixed_costs = (gross_realizable as i128)
+        .checked_sub(net)?
+        .checked_sub(repay_value as i128)?;
+    let inputs = ProfitInputs {
+        fee_state_max_bps: growth.fee_state_max_bps,
+        growth_blocked: false,
+        premium_cap_bps: PREMIUM_MAX_BPS,
+        repay_value,
+        realizable_bps,
+        fixed_costs: u64::try_from(fixed_costs.max(0)).ok()?,
+        min_profit,
+    };
+    t_profitable(now_unix_s, Some(growth.tagged_at), &inputs).filter(|t| *t > now_unix_s)
+}
+
 /// Seize-Grenze aus `liquidate_end.rs` (BELEGT, 0.1.12-rc2): in **Equity-(EMA-)Werten**
 /// `seized ≤ repaid × (1 + max(FeeState.liquidation_max_fee, 0.05))` — auch unterhalb der
 /// Closeout-Schwelle (0.1.11 hob sie dort auf); ein getaggter Account kann mehr erlauben, die
@@ -596,6 +641,42 @@ mod tests {
         assert_eq!(
             t_profitable(t0, None, &inputs(0, false, 10_000, 1_000, 10_000, 0, 0)),
             Some(t0)
+        );
+    }
+
+    /// P2-05: a tagged plan 1.55 USD net against a 5 USD minimum (repay 100 USD at the 5 %
+    /// base, 97 % realized, 0.3 USD other costs) wakes at the first second whose tag premium
+    /// clears the minimum under the plan's own ratio; never when no premium up to 100 % does,
+    /// and not for a plan already above it.
+    #[test]
+    fn p2_05_tag_wakeup_is_the_first_second_the_curve_clears_the_minimum() {
+        let now = 1_700_000_000u64;
+        let growth = TagGrowth {
+            tagged_at: now - 1_800,
+            fee_state_max_bps: 0,
+        };
+        // 101.850001 USD: the ratio is not whole bps (rounded up to 9 701, the early side).
+        let (repay, gross, min) = (100_000_000u64, 101_850_001u64, 5_000_000i128);
+        let net = gross as i128 - repay as i128 - 300_000;
+        let wake = tag_wakeup(now, growth, 500, repay, gross, net, min).unwrap();
+        assert!(wake > growth.tagged_at + PREMIUM_GRACE_S, "{wake}");
+        // The plan's ratio, rounded up as the solver takes it.
+        let r = (gross as u128 * BPS as u128).div_ceil(repay as u128 * 10_500 / BPS as u128);
+        let clears = |t: u64| {
+            let p = premium_bps(t, Some(growth.tagged_at), 0, false).unwrap() as u128;
+            repay as u128 * r * (BPS as u128 + p)
+                > (min + 300_000 + repay as i128) as u128 * (BPS as u128 * BPS as u128)
+        };
+        assert!(clears(wake) && !clears(wake - 1));
+        assert_eq!(
+            tag_wakeup(now, growth, 500, repay, gross, net, 100_000_000),
+            None,
+            "beyond a 100 % premium"
+        );
+        assert_eq!(
+            tag_wakeup(now, growth, 500, repay, gross, net, 1_000_000),
+            None,
+            "already above the minimum"
         );
     }
 

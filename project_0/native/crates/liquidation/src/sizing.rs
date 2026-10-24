@@ -15,6 +15,7 @@ use crate::protocol;
 use fixed::types::I80F48;
 use marginfi::state::{
     bank::BankImpl,
+    liquidation_record::tag_adjusted_premium,
     marginfi_account::{calc_amount, calc_value},
     price::{OraclePriceFeedAdapter, PriceAdapter},
 };
@@ -60,6 +61,8 @@ pub struct ProtocolSizing {
     /// On-chain FeeState cap used by the sizing calculation.
     pub fee_state_max_bps: u64,
     pub flat_sol_fee_lamports: u64,
+    /// P2-05: set when this pair's premium is the program's tag-adjusted cap and grows with time.
+    pub tag_growth: Option<crate::economics::TagGrowth>,
 }
 
 /// FE-02: why moving `mint` is not modelled by the funding economics, if it is not. SPL Token is
@@ -996,12 +999,13 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         }
         let account = load_account(data)?;
         let account: &MarginfiAccount = &account;
-        let health = CrateHealth {
+        let engine = CrateHealth {
             state: self.state,
             group: self.group,
-        }
-        .health(account_key, now_unix_s, slot)
-        .map_err(SizingError::from)?;
+        };
+        let health = engine
+            .health(account_key, now_unix_s, slot)
+            .map_err(SizingError::from)?;
         if !health.liquidatable || health.maintenance_health >= 0 {
             return Ok(Vec::new());
         }
@@ -1017,8 +1021,22 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 minimum
             }
         };
+        // 0.1.12 EndLiquidation: the premium cap grows with the time since the account's tag
+        // (`tag_adjusted_premium`, the pinned program's own function) unless the account is in
+        // bad debt or EMODE-boosted as StartLiquidation records it. At `now` it is a lower bound
+        // of the cap at landing (the curve never falls with time).
+        let grows = account.liquidation_tagged_at != 0
+            && !health.is_bad_debt
+            && !engine
+                .emode_boosted(account_key, now_unix_s, slot)
+                .map_err(SizingError::from)?;
+        let tagged_at = grows.then_some(account.liquidation_tagged_at);
+        let premium_rate = match tagged_at {
+            Some(t0) => tag_adjusted_premium(fee_rate, t0, now_unix_s),
+            None => fee_rate,
+        };
         let max_fee_factor = I80F48::ONE
-            .checked_add(fee_rate)
+            .checked_add(premium_rate)
             .ok_or_else(|| "fee factor overflow".to_string())?;
         let clock = Clock {
             slot,
@@ -1253,8 +1271,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     continue;
                 }
                 // EndLiquidation premium bound: 0.1.12 applies it below the closeout threshold
-                // as well (0.1.11 skipped it there). The base premium max(fee, minimum) is the
-                // lower bound of the program's (a tagged account may earn more).
+                // as well (0.1.11 skipped it there), with the tag-adjusted cap above.
                 let protocol_seized = seized_actual
                     .checked_add(repay_all_dust_equity)
                     .ok_or("repay_all seized equity overflow")?;
@@ -1300,6 +1317,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     premium_bps: fee_bps(premium)?,
                     fee_state_max_bps: fee.liquidation_max_bps,
                     flat_sol_fee_lamports: fee.liquidation_flat_sol_fee_lamports,
+                    // A fee factor the healing rule reduced does not grow with the tag.
+                    tag_growth: tagged_at
+                        .filter(|_| fee_factor == max_fee_factor)
+                        .and_then(|t0| u64::try_from(t0).ok())
+                        .map(|tagged_at| crate::economics::TagGrowth {
+                            tagged_at,
+                            fee_state_max_bps: fee.liquidation_max_bps,
+                        }),
                 });
             }
         }
@@ -2236,6 +2261,126 @@ mod tests {
         }
         .premium_decay_per_second(&tb.account, now, 10)
         .unwrap()
+    }
+
+    /// 0.1.12: sets the fixture account's `liquidation_tagged_at`.
+    fn with_tag(tb: &mut TwoBank, tagged_at: i64) {
+        let (_, data) = tb.state.get_mut(&tb.account).unwrap();
+        let mut a: MarginfiAccount = *bytemuck::from_bytes(&data[8..]);
+        a.liquidation_tagged_at = tagged_at;
+        data[8..].copy_from_slice(bytemuck::bytes_of(&a));
+    }
+
+    /// The liability bank grants the asset bank's EMODE tag `asset_weight` (both weights).
+    fn with_emode(tb: &mut TwoBank, asset_weight: f64) {
+        use marginfi_type_crate::types::{WrappedI80F48, EMODE_ON};
+        let a: MarginfiAccount = *bytemuck::from_bytes(&tb.state[&tb.account].1[8..]);
+        let bank_of = |liability: bool| {
+            a.lending_account
+                .balances
+                .iter()
+                .find(|b| {
+                    b.is_active() && (I80F48::from(b.liability_shares) > I80F48::ZERO) == liability
+                })
+                .unwrap()
+                .bank_pk
+        };
+        let mut edit = |key: Pubkey, f: &dyn Fn(&mut Bank)| {
+            let (_, data) = tb.state.get_mut(&key).unwrap();
+            let mut b: Bank = *bytemuck::from_bytes(&data[8..]);
+            f(&mut b);
+            data[8..].copy_from_slice(bytemuck::bytes_of(&b));
+        };
+        edit(bank_of(false), &|b| b.emode.emode_tag = 7);
+        edit(bank_of(true), &|b| {
+            let w = WrappedI80F48::from(I80F48::from_num(asset_weight));
+            b.emode.flags |= EMODE_ON;
+            let e = &mut b.emode.emode_config.entries[0];
+            (
+                e.collateral_bank_emode_tag,
+                e.asset_weight_init,
+                e.asset_weight_maint,
+            ) = (7, w, w);
+        });
+    }
+
+    /// P3-03 (0.1.12 EndLiquidation): a tagged account is sized with the pinned program's own
+    /// `tag_adjusted_premium` at the clock — the base within the tag delay, grown after it — and
+    /// with the base when it is in bad debt or EMODE-boosted; no seizure exceeds the cap.
+    /// P2-05: a pair reports its tag growth only while its premium is that growing cap.
+    #[test]
+    fn p3_03_tagged_account_is_sized_with_the_programs_tag_premium() {
+        use crate::economics::TagGrowth;
+        let growth_of = |tb: &TwoBank| {
+            let plans = tb.sizes().unwrap();
+            assert!(!plans.is_empty());
+            let first = plans[0].tag_growth;
+            assert!(plans.iter().all(|p| p.tag_growth == first));
+            first
+        };
+        use marginfi::state::liquidation_record::tag_adjusted_premium;
+        let now = 1_700_000_000i64;
+        let max_bps = |tb: &TwoBank| {
+            let plans = tb.sizes().unwrap();
+            assert!(!plans.is_empty());
+            plans.iter().map(|p| p.premium_bps).max().unwrap()
+        };
+        // Fixture FeeState 10 %, above the program minimum.
+        let base = I80F48::from_num(0.1);
+        let base_bps = fee_bps(base).unwrap();
+        let tagged_at = now - 3 * 86_400;
+        let cap_bps = fee_bps(tag_adjusted_premium(base, tagged_at, now)).unwrap();
+        assert!(cap_bps > 4 * base_bps);
+
+        let mut tb = two_bank(0.6, 150_000_000, 95_000_000);
+        assert!(max_bps(&tb) <= base_bps, "untagged");
+        assert_eq!(growth_of(&tb), None);
+        with_tag(&mut tb, now - 1_800);
+        assert!(max_bps(&tb) <= base_bps, "within the tag delay");
+        let growth = |t0: i64| {
+            Some(TagGrowth {
+                tagged_at: t0 as u64,
+                fee_state_max_bps: base_bps,
+            })
+        };
+        assert_eq!(growth_of(&tb), growth(now - 1_800), "the cap will grow");
+        with_tag(&mut tb, tagged_at);
+        let grown = max_bps(&tb);
+        assert!(
+            grown > 2 * base_bps && grown <= cap_bps,
+            "{grown} ≤ {cap_bps}"
+        );
+        assert_eq!(growth_of(&tb), growth(tagged_at));
+        // The healing rule caps this pair's premium (weight 0.9: at most ≈ 11 %): no growth.
+        let mut healing = two_bank(0.9, 100_000_000, 95_000_000);
+        with_tag(&mut healing, tagged_at);
+        assert_eq!(growth_of(&healing), None);
+
+        // Bad debt (equity assets below liabilities): the base, however long tagged.
+        let mut bad = two_bank(0.6, 90_000_000, 95_000_000);
+        with_tag(&mut bad, tagged_at);
+        assert!(health_of(&bad, now).is_bad_debt);
+        assert!(max_bps(&bad) <= base_bps, "bad debt");
+        assert_eq!(growth_of(&bad), None);
+
+        // EMODE-boosted collateral (0.8 instead of 0.6): the base; unboosted it grows.
+        let mut plain = two_bank(0.6, 110_000_000, 95_000_000);
+        with_tag(&mut plain, tagged_at);
+        let engine = |tb: &TwoBank| {
+            CrateHealth {
+                state: tb,
+                group: tb.group,
+            }
+            .emode_boosted(&tb.account, now, 10)
+            .unwrap()
+        };
+        assert!(!engine(&plain));
+        assert!(max_bps(&plain) > 2 * base_bps);
+        with_emode(&mut plain, 0.8);
+        assert!(engine(&plain), "every collateral leg boosted");
+        assert!(health_of(&plain, now).liquidatable);
+        assert!(max_bps(&plain) <= base_bps, "EMODE-boosted");
+        assert_eq!(growth_of(&plain), None);
     }
 
     /// P1B (0.1.12 EndLiquidation): an account solvent in equity before must not end insolvent:

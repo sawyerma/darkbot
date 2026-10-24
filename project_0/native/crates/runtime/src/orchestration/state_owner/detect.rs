@@ -500,6 +500,13 @@ impl ShadowOwner {
             );
             let simulation_failure = pipe.simulation_failure.take();
             rec.rx_slot = Some(slot); // trigger provenance differs from projected evaluation slot
+                                      // P2-05: a tagged candidate is woken when its growing premium could make it
+                                      // actionable; any other outcome drops the wake-up.
+            self.time_schedule.upsert(
+                acct,
+                darkbot_project0::schedule::Trigger::TagProfitable,
+                rec.t_profitable_unix_s,
+            );
             #[cfg(feature = "crate_health")]
             {
                 let (lines, beyond) = crate::execution::builder::p0::take_route_diagnostics();

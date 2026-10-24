@@ -122,6 +122,8 @@ pub mod p0 {
         pub rent_and_token: u64, // USD-Micro
         pub premium_bps: u64,
         pub slippage_bps: u64,
+        /// P2-05: the pair's growing tag premium cap (`ProtocolSizing::tag_growth`).
+        pub tag_growth: Option<darkbot_project0::economics::TagGrowth>,
     }
 
     pub trait SizingProvider {
@@ -252,6 +254,7 @@ pub mod p0 {
                     // transaction. Historical ATA rent is not charged to every opportunity.
                     rent_and_token: 0,
                     premium_bps: sz.premium_bps,
+                    tag_growth: sz.tag_growth,
                     slippage_bps: self.slippage_bps,
                 });
             }
@@ -1365,6 +1368,7 @@ pub mod p0 {
                                 route: RouteKind::NoSwap,
                                 input: self.input(&sz, class, None, capital),
                                 premium_bps: sz.premium_bps,
+                                tag_growth: sz.tag_growth,
                                 exposure: capital,
                                 inventory_hold_usd_micro: inventory_hold_usd_micro(class, &sz),
                                 tip: self.jito_tip_lamports,
@@ -1427,6 +1431,7 @@ pub mod p0 {
                                 route: RouteKind::NoSwap,
                                 input: self.input(&sz, class, None, capital),
                                 premium_bps: sz.premium_bps,
+                                tag_growth: sz.tag_growth,
                                 exposure: capital,
                                 inventory_hold_usd_micro: inventory_hold_usd_micro(class, &sz),
                                 tip: self.jito_tip_lamports,
@@ -1554,6 +1559,7 @@ pub mod p0 {
                                             route: RouteKind::FreePublicAllowed,
                                             input: zp_input,
                                             premium_bps: sz.premium_bps,
+                                            tag_growth: sz.tag_growth,
                                             exposure: capital,
                                             inventory_hold_usd_micro: inventory_hold_usd_micro(
                                                 FundingClass::ZeroPrefundSameTx,
@@ -1584,6 +1590,7 @@ pub mod p0 {
                                         route: RouteKind::FreePublicAllowed,
                                         input: zp_input,
                                         premium_bps: sz.premium_bps,
+                                        tag_growth: sz.tag_growth,
                                         exposure: capital,
                                         inventory_hold_usd_micro: inventory_hold_usd_micro(
                                             FundingClass::ZeroPrefundSameTx,
@@ -1721,6 +1728,7 @@ pub mod p0 {
                 rent_and_token: 0,
                 premium_bps: 0,
                 slippage_bps: 50,
+                tag_growth: None,
             }
         }
 
@@ -2066,6 +2074,7 @@ pub mod p0 {
                         rent_and_token: 7,
                         premium_bps: 500,
                         slippage_bps: 0,
+                        tag_growth: None,
                     }),
                     atas: Default::default(),
                 }

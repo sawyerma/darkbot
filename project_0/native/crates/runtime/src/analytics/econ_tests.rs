@@ -847,6 +847,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for TestBuilder {
             route: RouteKind::NoSwap,
             input: input(0),
             premium_bps: 500,
+            tag_growth: None,
             exposure: 0,
             inventory_hold_usd_micro: 0,
             tip: 0,
@@ -961,6 +962,143 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
     assert!(adapter.submit_bundle(&[tx], 0).is_err());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert_eq!(adapter.attempts.load(Ordering::Relaxed), 2);
+}
+/// P2-05: a known plan below `min_profit` whose premium is the growing tag cap records the
+/// second the curve could make it actionable (`tag_wakeup` of its own numbers); without tag
+/// growth, or once a plan is actionable, there is none.
+#[test]
+fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
+    use crate::execution::pipeline::{Mode, Pipeline, ReceivershipBuilder};
+    use darkbot_project0::economics::TagGrowth;
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    /// Tag growth of every plan; optionally a second plan realizing only the given USD micro.
+    struct Tagged(Option<TagGrowth>, Option<u64>);
+    impl ReceivershipBuilder for Tagged {
+        fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+            TestBuilder.native_cost_usd_micro(n)
+        }
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
+        }
+        fn plans(
+            &self,
+            a: &Pubkey,
+            now: u64,
+            slot: u64,
+            t: std::time::Instant,
+        ) -> Result<
+            Vec<crate::execution::pipeline::ReceivershipPlan>,
+            crate::execution::pipeline::PlanError,
+        > {
+            let mut plans = TestBuilder.plans(a, now, slot, t)?;
+            if let Some(gross) = self.1 {
+                let mut low = TestBuilder.plans(a, now, slot, t)?;
+                low[0].input.gross_seized_realizable_usd_micro = Some(gross);
+                plans.extend(low);
+            }
+            for p in &mut plans {
+                p.tag_growth = self.0;
+            }
+            Ok(plans)
+        }
+    }
+    let run = |builder: &Tagged, min_profit: i128| {
+        let adapter = ObserveOnly::new(CountingSubmitter {
+            calls: Arc::new(AtomicU64::new(0)),
+            sims: Arc::new(AtomicU64::new(0)),
+        });
+        let clock = Clock::new();
+        let bh = BlockhashCache::new();
+        bh.set(CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 100,
+            refreshed_ns: clock.now_ns(),
+        });
+        let mut safety = Safety::new(
+            Limits {
+                max_total_capital: 0,
+                max_outstanding_inventory: 0,
+                max_concurrent_positions: 0,
+                max_exposure_per_attempt: 0,
+                max_daily_loss: 0,
+                max_failed_attempts_per_day: 0,
+                max_tip: 0,
+                max_slippage_bps: 0,
+                max_outstanding_attempts: 0,
+            },
+            Allow::default(),
+            false,
+        );
+        let payer = solana_sdk::signature::Keypair::new();
+        let allow = Allowlist::default();
+        let failed = FailedCostMatrix::default();
+        let slots = darkbot_solana::ingress::SlotWatch::new();
+        slots.observe(10);
+        let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+        let mut p = Pipeline {
+            mode: Mode::Shadow,
+            clock: &clock,
+            health: &TestHealth,
+            builder,
+            submitter: &adapter,
+            safety: &mut safety,
+            blockhash: &bh,
+            payer: &payer,
+            allowlist: &allow,
+            failed_costs: &failed,
+            limits: TxLimits::default(),
+            resources: Resources {
+                compute_unit_limit: 100_000,
+                priority_micro_lamports_per_cu: 0,
+                loaded_accounts_data_size: None,
+            },
+            min_profit,
+            blockhash_max_age_ns: u64::MAX,
+            p7_passed: false,
+            freshness: Freshness {
+                max_opportunity_age_ns: u64::MAX,
+                execution_deadline_ns: u64::MAX,
+            },
+            tip_account: None,
+            global_allowed: std::slice::from_ref(&test_table().program),
+            prereq_allowed: &[],
+            slot_watch: &slots,
+            network: &mut network,
+            simulation_failure: None,
+            fe04: None,
+        };
+        p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
+    };
+    let growth = TagGrowth {
+        tagged_at: 50,
+        fee_state_max_bps: 0,
+    };
+    // 300 USD realizable for a 100 USD repay at 5 %: ≈ 200 USD net, 250 USD required.
+    let r = run(&Tagged(Some(growth), None), 250_000_000);
+    assert_eq!(r.decision, Decision::Skip);
+    let net = r.net_profit.unwrap();
+    let wake = economics::tag_wakeup(100, growth, 500, 100_000_000, 300_000_000, net, 250_000_000);
+    assert!(wake.is_some_and(|t| t > 100));
+    assert_eq!(r.t_profitable_unix_s, wake);
+    assert_eq!(
+        run(&Tagged(None, None), 250_000_000).t_profitable_unix_s,
+        None
+    );
+    let ready = run(&Tagged(Some(growth), None), 0);
+    assert_eq!(ready.decision, Decision::ShadowReady);
+    assert_eq!(ready.t_profitable_unix_s, None, "actionable: no wake-up");
+    // An actionable plan beside a lower tagged one (≈ 100 USD net against 150 USD): none.
+    let both = run(&Tagged(Some(growth), Some(200_000_000)), 150_000_000);
+    assert_eq!(both.decision, Decision::ShadowReady);
+    assert_eq!(both.t_profitable_unix_s, None, "an actionable plan exists");
 }
 /// B1: a LIVE pipeline with every limit open and an enabled Safety stops at the send boundary
 /// after build/sign/simulation; it never calls `submit`/`submit_bundle` (the submitter panics)

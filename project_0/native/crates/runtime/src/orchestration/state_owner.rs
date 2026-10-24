@@ -155,9 +155,10 @@ pub(super) struct ShadowOwner {
     sweep_batch_max_events: usize,
     sweep_batch_max_age_ns: u64,
     sweep_dirty_banks: HashMap<Pubkey, (u64, u64)>,
-    /// P2-04 (0.1.12): per healthy account with premium-active debt, the chain second at which
-    /// pending premium alone makes it liquidatable (prices constant); due ⇒ exact re-evaluation.
-    premium_schedule: darkbot_project0::schedule::TimeScheduler,
+    /// P2-04/P2-05 (0.1.12) chain-second wake-ups: a healthy account with premium-active debt
+    /// when pending premium alone makes it liquidatable (prices constant); a tagged candidate
+    /// when its growing tag premium could make it actionable. Due ⇒ exact re-evaluation.
+    time_schedule: darkbot_project0::schedule::TimeScheduler,
     sweep_batch_events: usize,
     sweep_batch_started_ns: Option<u64>,
     candidate_recheck_slots: u64,

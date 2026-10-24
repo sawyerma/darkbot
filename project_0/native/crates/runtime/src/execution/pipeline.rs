@@ -166,6 +166,9 @@ pub struct ReceivershipPlan {
     pub route: RouteKind,
     pub input: CandidateInput,
     pub premium_bps: u64,
+    /// P2-05: the plan's growing tag premium cap; a known, not actionable plan wakes the
+    /// account again at its `t_profitable`.
+    pub tag_growth: Option<darkbot_project0::economics::TagGrowth>,
     pub exposure: u64,
     pub tip: u64,
     pub slippage_bps: u64,
@@ -838,6 +841,26 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     if net > 0 && net <= self.min_profit {
                         threshold_hits += 1;
                     }
+                    // P2-05: the earliest second a growing tag premium could make a plan
+                    // actionable; the owner re-evaluates the account then.
+                    if let (Some(growth), Some(gross)) = (
+                        plan.tag_growth,
+                        plan.input.gross_seized_realizable_usd_micro,
+                    ) {
+                        let wake = economics::tag_wakeup(
+                            now_unix_s,
+                            growth,
+                            plan.premium_bps,
+                            plan.input.repay_usd_micro,
+                            gross,
+                            net,
+                            self.min_profit,
+                        );
+                        rec.t_profitable_unix_s = match (rec.t_profitable_unix_s, wake) {
+                            (Some(a), Some(b)) => Some(a.min(b)),
+                            (a, b) => a.or(b),
+                        };
+                    }
                     if rec.net_profit.is_none_or(|current| net > current) {
                         rec.net_profit = Some(net);
                         rec.market_plan_identity = plan.market_identity.clone();
@@ -885,6 +908,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
         }
 
+        if best_actionable.is_some() {
+            rec.t_profitable_unix_s = None;
+        }
         let Some((plan, mut built, eval, selected_costs)) = best_actionable.or(best_probe) else {
             // V9: a plan the economics would have acted on was refused by Safety: its own cause.
             if safety_hits > 0 {

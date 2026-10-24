@@ -161,8 +161,8 @@ pub mod crate_impl {
     use marginfi_type_crate::constants::{BANK_SAME_ASSET_EMODE_ELIGIBLE, CIRCUIT_BREAKER_ENABLED};
     use marginfi_type_crate::types::{
         compute_same_asset_emode_weight, reconcile_emode_configs, u32_to_basis, BalanceSide, Bank,
-        BankOperationalState, HealthPriceMode, MarginfiAccount, MarginfiGroup, OraclePriceType,
-        OracleSetup, PriceBias, ReconciledEmodeConfig, RequirementType, RiskTier,
+        BankOperationalState, HealthCache, HealthPriceMode, MarginfiAccount, MarginfiGroup,
+        OraclePriceType, OracleSetup, PriceBias, ReconciledEmodeConfig, RequirementType, RiskTier,
     };
     use solana_sdk::account::Account;
     use solana_sdk::account_info::IntoAccountInfo;
@@ -398,12 +398,46 @@ pub mod crate_impl {
             req: RequirementType,
             clock: &Clock,
         ) -> Result<(i128, i128), HealthError> {
-            let [c] = self.components_of(acc, group, obs, [req], clock)?;
+            let [c] = self.components_of(acc, group, obs, [req], clock, None)?;
             Ok(c)
         }
 
+        /// 0.1.12 EndLiquidation: the EMODE boost StartLiquidation records in the account's
+        /// health cache (its maintenance pass at the clock: every collateral leg weighted above
+        /// its base by EMODE); a boosted account earns no tag premium growth.
+        pub fn emode_boosted(
+            &self,
+            account: &Pubkey,
+            now_unix_s: i64,
+            slot: u64,
+        ) -> Result<bool, HealthError> {
+            let (_, _, adata) = self.raw(account)?;
+            let acc = load_account(adata)?;
+            let (_, _, gdata) = self.raw(&self.group)?;
+            let group = load_group(gdata)?;
+            let obs = self.observation(&acc)?;
+            let clock = Clock {
+                slot,
+                epoch_start_timestamp: 0,
+                epoch: 0,
+                leader_schedule_epoch: 0,
+                unix_timestamp: now_unix_s,
+            };
+            let mut cache = <HealthCache as bytemuck::Zeroable>::zeroed();
+            self.components_of(
+                &acc,
+                &group,
+                &obs,
+                [RequirementType::Maintenance],
+                &clock,
+                Some(&mut cache),
+            )?;
+            Ok(cache.is_emode_boosted())
+        }
+
         /// The health components of every requested requirement type over one copy of the
-        /// observation accounts (the pinned crate reads them through `AccountInfo`).
+        /// observation accounts (the pinned crate reads them through `AccountInfo`); the
+        /// maintenance pass fills `maintenance_cache` like the program's own pass.
         fn components_of<const N: usize>(
             &self,
             acc: &MarginfiAccount,
@@ -411,6 +445,7 @@ pub mod crate_impl {
             obs: &[Pubkey],
             reqs: [RequirementType; N],
             clock: &Clock,
+            mut maintenance_cache: Option<&mut HealthCache>,
         ) -> Result<[(i128, i128); N], HealthError> {
             let mut owned: Vec<(Pubkey, Account)> = Vec::with_capacity(obs.len());
             for k in obs {
@@ -434,12 +469,16 @@ pub mod crate_impl {
             for (slot, req) in out.iter_mut().zip(reqs) {
                 // 0.1.12: projected premium debt is part of the liabilities at the clock; the
                 // premium scratch only collects snapshot updates (none off chain).
+                let mut cache = match req {
+                    RequirementType::Maintenance => maintenance_cache.as_deref_mut(),
+                    _ => None,
+                };
                 let (assets, liabs) = get_health_components(
                     acc,
                     group,
                     &ais,
                     req,
-                    &mut None,
+                    &mut cache,
                     HealthPriceMode::Client(clock.clone()),
                     &mut None,
                 )
@@ -966,6 +1005,7 @@ pub mod crate_impl {
                 &obs,
                 [RequirementType::Maintenance, RequirementType::Equity],
                 &clock,
+                None,
             )?;
             let five_usd_bits: i128 =
                 (protocol::LIQUIDATION_CLOSEOUT_DOLLAR_THRESHOLD as i128) << 48;
