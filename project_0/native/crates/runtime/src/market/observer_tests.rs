@@ -2742,6 +2742,55 @@ fn r12_live_retention_cap_is_exact_and_fail_closed() {
     }
 }
 
+/// D7: the per-transaction keys (`seen`, `live_receipts`) are bounded by the retention count and
+/// measured at the default cap with real 88-character signatures: exact table + heap bytes per
+/// retained transaction; one transaction from a second slot/receipt stays one entry with its first
+/// receipt; beyond the cap INCOMPLETE, nothing evicted.
+#[test]
+fn d7_retained_transaction_keys_are_count_bounded_and_measured() {
+    use std::mem::size_of;
+    let cap = crate::analytics::econ::DEFAULT_RETENTION;
+    let mut core = open_core(MarketSource::Transactions, EnrichConfig::DEFAULT);
+    core.retention = cap;
+    let sig = |i: usize| {
+        let mut b = [0xA5u8; 64];
+        b[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        solana_sdk::signature::Signature::from(b).to_string()
+    };
+    assert!(core.admit(&sig(0), 10, Some(true), 1));
+    assert!(!core.admit(&sig(0), 11, Some(false), 2), "same transaction");
+    assert_eq!(
+        core.truth.live_receipts[&sig(0)],
+        (10, 1),
+        "first receipt kept"
+    );
+    for i in 1..cap {
+        assert!(core.admit(&sig(i), 10, Some(true), 1), "{i}");
+    }
+    assert!(!core.admit(&sig(cap), 10, Some(true), 1));
+    assert!(core
+        .incomplete_reasons
+        .contains("MARKET_RETENTION_OVERFLOW"));
+    assert_eq!(core.seen.len(), cap, "nothing evicted");
+    // hashbrown: buckets = next power of two of capacity × 8/7, one control byte per bucket.
+    let table =
+        |capacity: usize, entry: usize| (capacity * 8 / 7).next_power_of_two() * (entry + 1);
+    let heap = |keys: &mut dyn Iterator<Item = &String>| keys.map(String::capacity).sum::<usize>();
+    let seen = table(core.seen.capacity(), size_of::<String>()) + heap(&mut core.seen.iter());
+    let receipts = table(
+        core.truth.live_receipts.capacity(),
+        size_of::<(String, (u64, u64))>(),
+    ) + heap(&mut core.truth.live_receipts.keys());
+    let per_tx = (seen + receipts) / cap;
+    eprintln!(
+        "D7_RETENTION cap={cap} signature_chars={} seen_bytes={seen} receipts_bytes={receipts} \
+         per_tx_bytes={per_tx} total_mib={}",
+        sig(1).len(),
+        (seen + receipts) / (1024 * 1024)
+    );
+    assert!(per_tx <= 512, "{per_tx}");
+}
+
 /// R24: a market-only capture (no econ handle) is bounded by its configured retention
 /// (`P0_MARKET_RETENTION`, default the shared 262,144): at the cap a new transaction marks the
 /// capture INCOMPLETE and nothing retained is evicted; the setting is validated.
