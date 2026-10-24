@@ -57,6 +57,59 @@ pub mod builders {
     }
 
     /// E2: the instruction table of the receivership TX these builders produce: the pinned
+    /// E2: the amounts a built receivership transaction carries, decoded from its signed bytes:
+    /// `(amount, all)` of its one withdraw (plain or Kamino/Drift/JupLend; Kamino's `flags = 1`
+    /// is withdraw-all) and of its one repay.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct BuiltAmounts {
+        pub withdraw: (u64, bool),
+        pub repay: (u64, bool),
+    }
+
+    /// E2: decodes the receivership program's withdraw and repay instructions of `ixs` (anchor
+    /// argument encoding of the pinned crate); anything but exactly one of each, an undecodable
+    /// argument list or trailing bytes is an error.
+    pub fn built_amounts(ixs: &[Instruction], program: &Pubkey) -> Result<BuiltAmounts, String> {
+        use anchor_lang::AnchorDeserialize;
+        use marginfi::instruction as mi;
+        fn args<T: AnchorDeserialize>(data: &[u8]) -> Result<T, String> {
+            T::try_from_slice(&data[8..]).map_err(|_| "E2_AMOUNTS_UNDECODABLE".to_string())
+        }
+        let (mut withdraws, mut repays) = (Vec::new(), Vec::new());
+        for ix in ixs.iter().filter(|ix| ix.program_id == *program) {
+            let Some(d) = ix.data.get(..8).and_then(|d| <[u8; 8]>::try_from(d).ok()) else {
+                continue;
+            };
+            if d == disc8::<mi::LendingAccountWithdraw>() {
+                let a: mi::LendingAccountWithdraw = args(&ix.data)?;
+                withdraws.push((a.amount, a.withdraw_all == Some(true)));
+            } else if d == disc8::<mi::KaminoWithdraw>() {
+                let a: mi::KaminoWithdraw = args(&ix.data)?;
+                withdraws.push((a.amount, a.flags == Some(1)));
+            } else if d == disc8::<mi::DriftWithdraw>() {
+                let a: mi::DriftWithdraw = args(&ix.data)?;
+                withdraws.push((a.amount, a.withdraw_all == Some(true)));
+            } else if d == disc8::<mi::JuplendWithdraw>() {
+                let a: mi::JuplendWithdraw = args(&ix.data)?;
+                withdraws.push((a.amount, a.withdraw_all == Some(true)));
+            } else if d == disc8::<mi::LendingAccountRepay>() {
+                let a: mi::LendingAccountRepay = args(&ix.data)?;
+                repays.push((a.amount, a.repay_all == Some(true)));
+            }
+        }
+        match (withdraws.as_slice(), repays.as_slice()) {
+            ([withdraw], [repay]) => Ok(BuiltAmounts {
+                withdraw: *withdraw,
+                repay: *repay,
+            }),
+            _ => Err(format!(
+                "E2_AMOUNTS_SHAPE: {} withdraw(s), {} repay(s)",
+                withdraws.len(),
+                repays.len()
+            )),
+        }
+    }
+
     /// marginfi instruction discriminators (crate IDL) of exactly the instructions built here,
     /// the pinned integration refreshes and the swap programs of the receivership allowlist.
     pub fn instruction_table(program: &Pubkey) -> Result<crate::planner::InstructionTable, String> {
@@ -703,5 +756,112 @@ pub mod builders {
             assert!(mint_index < obs_index);
             assert!(!ix.accounts[mint_index].is_writable);
         }
+    }
+}
+
+#[cfg(all(test, feature = "crate_health"))]
+mod built_amounts_tests {
+    use super::builders::{built_amounts, BuiltAmounts};
+    use anchor_lang::InstructionData;
+    use marginfi::instruction as mi;
+    use solana_sdk::instruction::Instruction;
+    use solana_sdk::pubkey::Pubkey;
+
+    fn ix(program: Pubkey, data: Vec<u8>) -> Instruction {
+        Instruction {
+            program_id: program,
+            accounts: vec![],
+            data,
+        }
+    }
+
+    /// E2: the withdraw (plain, Kamino, Drift, JupLend) and repay amounts and all-flags are read
+    /// back from the built bytes; anything but one withdraw and one repay of the program, or an
+    /// undecodable argument list, is refused.
+    #[test]
+    fn e2_built_amounts_are_decoded_from_the_signed_bytes() {
+        let program = Pubkey::new_unique();
+        let repay = |amount, all: bool| {
+            ix(
+                program,
+                mi::LendingAccountRepay {
+                    amount,
+                    repay_all: all.then_some(true),
+                }
+                .data(),
+            )
+        };
+        let withdraws = [
+            (
+                mi::LendingAccountWithdraw {
+                    amount: 7,
+                    withdraw_all: None,
+                }
+                .data(),
+                (7, false),
+            ),
+            (
+                mi::KaminoWithdraw {
+                    amount: 8,
+                    flags: Some(1),
+                }
+                .data(),
+                (8, true),
+            ),
+            (
+                mi::DriftWithdraw {
+                    amount: 9,
+                    withdraw_all: Some(false),
+                }
+                .data(),
+                (9, false),
+            ),
+            (
+                mi::JuplendWithdraw {
+                    amount: 10,
+                    withdraw_all: Some(true),
+                }
+                .data(),
+                (10, true),
+            ),
+        ];
+        for (data, expected) in withdraws {
+            let other = ix(Pubkey::new_unique(), vec![9; 16]);
+            assert_eq!(
+                built_amounts(&[ix(program, data), other, repay(5, true)], &program),
+                Ok(BuiltAmounts {
+                    withdraw: expected,
+                    repay: (5, true)
+                })
+            );
+        }
+        let w = ix(
+            program,
+            mi::LendingAccountWithdraw {
+                amount: 1,
+                withdraw_all: None,
+            }
+            .data(),
+        );
+        assert!(built_amounts(std::slice::from_ref(&w), &program)
+            .unwrap_err()
+            .starts_with("E2_AMOUNTS_SHAPE"));
+        assert!(
+            built_amounts(&[w.clone(), w.clone(), repay(1, false)], &program)
+                .unwrap_err()
+                .starts_with("E2_AMOUNTS_SHAPE")
+        );
+        let mut truncated = repay(1, false);
+        truncated.data.truncate(12);
+        assert_eq!(
+            built_amounts(&[w.clone(), truncated], &program).unwrap_err(),
+            "E2_AMOUNTS_UNDECODABLE"
+        );
+        let mut trailing = repay(1, false);
+        trailing.data.push(0);
+        assert_eq!(
+            built_amounts(&[w, trailing], &program).unwrap_err(),
+            "E2_AMOUNTS_UNDECODABLE"
+        );
     }
 }

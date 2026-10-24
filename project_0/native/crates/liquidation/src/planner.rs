@@ -198,6 +198,9 @@ pub fn validate_receivership(
 }
 
 /// Bundle-Regel: genau eine TX enthält Start und End; alle anderen TXs sind Prerequisites ohne beides.
+/// E2: a prerequisite transaction (no Start/End) carries only pinned swap steps — the JIT buy;
+/// any other instruction (System/Token/ATA, a receivership step outside the receivership) needs
+/// its own classification first and is refused, never allowed as a generic `Other`.
 pub fn validate_bundle(txs: &[Vec<Step>]) -> Result<usize, &'static str> {
     if txs.is_empty() || txs.len() > 5 {
         return Err("bundle size must be 1..=5");
@@ -213,7 +216,11 @@ pub fn validate_bundle(txs: &[Vec<Step>]) -> Result<usize, &'static str> {
                 }
                 receivership_idx = Some(i);
             }
-            (false, false) => {}
+            (false, false) => {
+                if tx.iter().any(|s| !matches!(s, Step::Swap(_))) {
+                    return Err("prerequisite step is not a pinned swap");
+                }
+            }
             _ => return Err("start/end split across transactions"),
         }
     }
@@ -431,7 +438,24 @@ mod tests {
 
     #[test]
     fn bundle_rules() {
-        let pre = vec![Step::Other(Pubkey::new_unique())];
+        let pre = vec![Step::Swap(Pubkey::new_unique())];
+        // E2: a prerequisite is swaps only — no generic `Other`, no receivership step outside.
+        for bad in [
+            Step::Other(Pubkey::new_unique()),
+            Step::Withdraw,
+            Step::Repay,
+        ] {
+            let recv = vec![
+                Step::StartLiquidation,
+                Step::Withdraw,
+                Step::Repay,
+                Step::EndLiquidation,
+            ];
+            assert_eq!(
+                validate_bundle(&[vec![Step::Swap(Pubkey::new_unique()), bad], recv]),
+                Err("prerequisite step is not a pinned swap")
+            );
+        }
         let recv = vec![
             Step::StartLiquidation,
             Step::Withdraw,

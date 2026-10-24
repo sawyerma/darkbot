@@ -1162,6 +1162,28 @@ pub mod p0 {
                 swaps,
                 repays: vec![repay],
             });
+            // E2: the signed amounts are the sizing's — the withdraw its units (an integration
+            // bank's converted instruction amount, recomputed here), never withdraw-all; the
+            // repay its amount and `repay_all` — decoded back from the built bytes.
+            let expected_withdraw = {
+                let bank = self.bank_full(&sz.asset_bank)?;
+                darkbot_project0::integration::execution_amount_for_asset(
+                    self.state,
+                    &bank,
+                    sz.withdraw_amount,
+                )?
+                .map_or(sz.withdraw_amount, |e| e.instruction_amount)
+            };
+            let built = builders::built_amounts(&ixs, &self.program)?;
+            let sized = builders::BuiltAmounts {
+                withdraw: (expected_withdraw, false),
+                repay: (sz.repay_amount, sz.repay_all),
+            };
+            if built != sized {
+                return Err(format!(
+                    "E2_AMOUNTS_NOT_SIZED: built {built:?} sized {sized:?}"
+                ));
+            }
             // E2: the planner gate derives its steps from exactly these instructions.
             Ok(ixs)
         }

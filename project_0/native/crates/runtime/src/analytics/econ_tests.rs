@@ -780,6 +780,8 @@ fn test_table() -> &'static darkbot_project0::planner::InstructionTable {
         withdraw: vec![[3; 8]],
         repay: [5; 8],
         init_record: [6; 8],
+        // The swap program of test prerequisites (E2: a prerequisite carries swaps only).
+        swap_programs: [Pubkey::new_from_array([8; 32])].into(),
         ..Default::default()
     })
 }
