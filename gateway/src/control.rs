@@ -1,5 +1,6 @@
 //! Authenticated local capture control. No trading, wallet, arbitrary paths or shell commands.
 use crate::{
+    config::Limits,
     http::AppState,
     lifecycle::{classify, CaptureProcess},
     proto::{
@@ -53,16 +54,6 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
         _ => None,
     }
 }
-/// Ledger retention (Wire V1.3 §7, idempotency for the intent/receipt lifetime): every open
-/// record (PENDING / PENDING_RECONCILE) stays in `commands/`. At MAX_RECORDS the oldest terminal
-/// receipt (COMPLETED / FAILED, by last update) moves to `commands/archive/`, which replay and
-/// conflict checks still read. When the archive is full, the receipt issued earliest leaves it,
-/// after `retired_through` durably took its `issued_at_unix_ns`. Expiry rule: a request_id the
-/// ledger does not know whose `issued_at_unix_ns` is at or before that mark may be a retired
-/// command and is refused, never executed; a request issued later than the gateway's receive
-/// time plus the liveness window is refused, so no request can move the mark ahead. A ledger of
-/// open intents refuses new ones.
-const MAX_RECORDS: usize = 1024;
 
 #[derive(Clone)]
 pub struct Paths {
@@ -71,11 +62,21 @@ pub struct Paths {
     pub logdir: PathBuf,
     pub label: String,
 }
+/// Time-bounded idempotency (Wire V1.3 §7), all bounds from `Limits` (`command_*`). Every open
+/// record (PENDING / PENDING_RECONCILE) stays in `commands/`. At `command_ledger_records` the
+/// oldest terminal receipt (COMPLETED / FAILED, by last update) moves to `commands/archive/`, which
+/// replay and conflict checks still read. A receipt leaves the full archive only once its last
+/// update is at least `command_retention_ms` old, the one issued earliest first, after
+/// `retired_through` durably took its `issued_at_unix_ns`; with none that old, new commands are
+/// refused instead of forgetting a younger receipt. A new request is accepted only with
+/// `issued_at_unix_ns` within `command_clock_window_ms` of the gateway receive time, so a
+/// forgotten request is always outside the window and never runs again; the mark refuses it too.
 pub struct Control {
     paths: Option<Paths>,
     serial: Mutex<()>,
-    /// MAX_RECORDS; smaller only in tests.
     capacity: usize,
+    window_ns: u64,
+    retention: Duration,
 }
 #[derive(Clone, Serialize)]
 pub struct ProcessSnapshot {
@@ -114,7 +115,7 @@ fn field(text: &str, name: &str) -> Option<i32> {
     })
 }
 impl Control {
-    pub fn from_env() -> Self {
+    pub fn from_env(limits: &Limits) -> Self {
         let paths = (|| {
             Some(Paths {
                 ctl: std::env::var_os("DARKBOT_CTL")?.into(),
@@ -123,13 +124,15 @@ impl Control {
                 label: std::env::var("DARKBOT_CAPTURE_LABEL").ok()?,
             })
         })();
-        Self::new(paths)
+        Self::new(paths, limits)
     }
-    pub fn new(paths: Option<Paths>) -> Self {
+    pub fn new(paths: Option<Paths>, limits: &Limits) -> Self {
         Self {
             paths,
             serial: Mutex::new(()),
-            capacity: MAX_RECORDS,
+            capacity: limits.command_ledger_records,
+            window_ns: limits.command_clock_window_ms.saturating_mul(1_000_000),
+            retention: Duration::from_millis(limits.command_retention_ms),
         }
     }
     pub async fn observe(&self) -> ProcessSnapshot {
@@ -313,7 +316,7 @@ impl Control {
         fs::create_dir_all(dir).map_err(|_| ())?;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|_| ())?;
         if !path.exists() && records(dir)?.len() >= self.capacity {
-            archive_oldest_terminal(dir, self.capacity)?;
+            archive_oldest_terminal(dir, self.capacity, self.retention)?;
         }
         let tmp = path.with_extension(format!("tmp-{}", session::random_token(8)));
         let written = (|| {
@@ -429,13 +432,19 @@ impl Control {
             }
             _ => {}
         }
-        // Expiry rule (MAX_RECORDS): an unknown request must be newer than every retired receipt.
-        if req.issued_at_unix_ns > crate::overview::unix_ns_now().saturating_add(clock_lead_ns()) {
+        // Replay rule (see Control): a new request must be issued within the clock window and after
+        // every forgotten receipt.
+        let now = crate::overview::unix_ns_now();
+        if req.issued_at_unix_ns.abs_diff(now) > self.window_ns {
+            let detail = format!(
+                "issued_at differs from the gateway clock by more than {} ms (clock skew or a stale request); issue a new command",
+                self.window_ns / 1_000_000
+            );
             return reply(
                 id,
                 CommandStatus::Rejected,
                 CommandRejectReason::InvalidParams,
-                "issued_at lies after the gateway receive time beyond the liveness window",
+                &detail,
             );
         }
         let ledger = self
@@ -501,7 +510,7 @@ impl Control {
                 id,
                 CommandStatus::Rejected,
                 CommandRejectReason::EngineUnavailable,
-                "Cannot durably record command (ledger full or unavailable)",
+                "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
             );
         }
         let generation = candidate.map(|(_, g)| g.to_string()).unwrap_or_default();
@@ -658,13 +667,6 @@ fn issued_at(path: &Path) -> Option<i64> {
         .map(|r| r.issued_at_unix_ns)
 }
 const RETIRED_THROUGH: &str = "retired_through";
-/// Tolerated lead of a browser clock over the gateway for `issued_at_unix_ns`: the existing
-/// liveness window (heartbeat interval × missed heartbeats, Wire V1.3 §5). A later stamp is
-/// refused, so the expiry mark never runs ahead of real time by more than this window.
-fn clock_lead_ns() -> i64 {
-    let l = crate::config::Limits::default();
-    i64::from(l.heartbeat_interval_ms) * i64::from(l.stale_after_missed_heartbeats) * 1_000_000
-}
 /// The latest `issued_at_unix_ns` of every receipt removed from the archive; None before the first.
 fn retired_through(dir: &Path) -> Result<Option<i64>, ()> {
     match fs::read_to_string(dir.join("archive").join(RETIRED_THROUGH)) {
@@ -673,11 +675,13 @@ fn retired_through(dir: &Path) -> Result<Option<i64>, ()> {
         Err(_) => Err(()),
     }
 }
-/// Removes the archived receipt issued earliest; the mark is durable before the receipt is gone.
-fn retire_earliest(dir: &Path, archive: &Path) -> Result<(), ()> {
+/// Removes the archived receipt issued earliest among those last updated at least `window` ago;
+/// the mark is durable before the receipt is gone. None that old: refuse (Err), never forget early.
+fn retire_earliest(dir: &Path, archive: &Path, window: Duration) -> Result<(), ()> {
+    let cutoff = SystemTime::now().checked_sub(window).ok_or(())?;
     let (issued, victim) = records(archive)?
         .into_iter()
-        .filter(|(_, p)| terminal(p))
+        .filter(|(t, p)| *t <= cutoff && terminal(p))
         .filter_map(|(t, p)| Some((issued_at(&p)?, t, p)))
         .min()
         .map(|(i, _, p)| (i, p))
@@ -705,14 +709,14 @@ fn retire_earliest(dir: &Path, archive: &Path) -> Result<(), ()> {
     }
     fs::remove_file(victim).map_err(|_| ())
 }
-/// Frees one ledger slot without touching an open intent; see MAX_RECORDS.
-fn archive_oldest_terminal(dir: &Path, capacity: usize) -> Result<(), ()> {
+/// Frees one ledger slot without touching an open intent; see Control.
+fn archive_oldest_terminal(dir: &Path, capacity: usize, window: Duration) -> Result<(), ()> {
     let source = oldest_terminal(dir)?.ok_or(())?;
     let archive = dir.join("archive");
     fs::create_dir_all(&archive).map_err(|_| ())?;
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o700)).map_err(|_| ())?;
     if records(&archive)?.len() >= capacity {
-        retire_earliest(dir, &archive)?;
+        retire_earliest(dir, &archive, window)?;
     }
     fs::rename(&source, archive.join(source.file_name().ok_or(())?)).map_err(|_| ())?;
     for d in [&archive, &dir.to_path_buf()] {
@@ -952,6 +956,30 @@ pub async fn logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Ledger bounds come from `Limits` exactly as in production; only the capacity is small so
+    /// that fsync-bound tests stay fast, and real-time tests shrink the clock window.
+    const CAPACITY: usize = 16;
+    fn limits() -> Limits {
+        Limits {
+            command_ledger_records: CAPACITY,
+            ..Limits::default()
+        }
+    }
+    /// Real-time ledger: a short clock window and a ledger small enough to flood well within it.
+    fn short(window_ms: u64) -> Limits {
+        Limits {
+            command_clock_window_ms: window_ms,
+            command_retention_ms: crate::config::min_command_retention_ms(window_ms),
+            command_ledger_records: 4,
+            ..Limits::default()
+        }
+    }
+    fn window_ns(l: &Limits) -> i64 {
+        l.command_clock_window_ms as i64 * 1_000_000
+    }
+    fn now() -> i64 {
+        crate::overview::unix_ns_now()
+    }
     fn ledger(name: &str) -> (Control, PathBuf) {
         let dir = std::env::temp_dir().join(format!("gw-ledger-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -962,14 +990,8 @@ mod tests {
             logdir: dir.clone(),
             label: "test".into(),
         };
-        let control = Control {
-            capacity: CAPACITY,
-            ..Control::new(Some(paths))
-        };
-        (control, dir)
+        (Control::new(Some(paths), &limits()), dir)
     }
-    /// Same retention logic as MAX_RECORDS, small enough for fsync-bound tests.
-    const CAPACITY: usize = 16;
     fn uuid(n: usize) -> String {
         format!("00000000-0000-4000-8000-{n:012x}")
     }
@@ -982,20 +1004,32 @@ mod tests {
             ..Default::default()
         }
     }
-    /// The request `put(n)` records: issued in the order of n.
+    /// The request `put(n)` records: long ago, issued in the order of n.
     fn stored(n: usize) -> CommandRequest {
         CommandRequest {
             issued_at_unix_ns: 1_000 + n as i64,
             ..capture_start(&uuid(n))
         }
     }
-    /// One recorded command with a strictly increasing last-update time.
-    fn put(control: &Control, n: usize, phase: CommandPhase) -> Result<(), ()> {
-        let id = uuid(n);
+    /// A recorded receipt issued right after `x`, so that `x` is the one issued earliest.
+    fn after(x: &CommandRequest, n: usize) -> CommandRequest {
+        CommandRequest {
+            issued_at_unix_ns: x.issued_at_unix_ns + 1 + n as i64,
+            ..capture_start(&uuid(n))
+        }
+    }
+    /// One recorded command for `request`, last updated long ago (strictly increasing with n).
+    fn put_req(
+        control: &Control,
+        request: &CommandRequest,
+        n: usize,
+        phase: CommandPhase,
+    ) -> Result<(), ()> {
+        let id = &request.request_id;
         let record = Record {
-            request: stored(n).encode_to_vec(),
+            request: request.encode_to_vec(),
             response: reply(
-                &id,
+                id,
                 CommandStatus::Accepted,
                 CommandRejectReason::Unspecified,
                 "recorded",
@@ -1005,14 +1039,12 @@ mod tests {
             detail: String::new(),
             launch_id: String::new(),
         };
-        control.persist(&id, &record)?;
-        fs::File::options()
-            .write(true)
-            .open(control.record_path(&id).unwrap())
-            .unwrap()
-            .set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000 + n as u64))
-            .unwrap();
+        control.persist(id, &record)?;
+        age(control, id, 1_000_000 + n as u64);
         Ok(())
+    }
+    fn put(control: &Control, n: usize, phase: CommandPhase) -> Result<(), ()> {
+        put_req(control, &stored(n), n, phase)
     }
     #[tokio::test]
     async fn a_full_ledger_archives_the_oldest_receipt_which_still_replays_and_conflicts() {
@@ -1047,9 +1079,13 @@ mod tests {
     struct Env {
         dir: PathBuf,
         runs: PathBuf,
+        limits: Limits,
     }
     impl Env {
         fn new(name: &str) -> Self {
+            Self::with(name, limits())
+        }
+        fn with(name: &str, limits: Limits) -> Self {
             use std::os::unix::fs::PermissionsExt;
             let dir = std::env::temp_dir().join(format!("gw-ledger-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
@@ -1064,18 +1100,16 @@ mod tests {
             )
             .unwrap();
             fs::set_permissions(dir.join("darkbotctl"), fs::Permissions::from_mode(0o755)).unwrap();
-            Env { dir, runs }
+            Env { dir, runs, limits }
         }
         fn restart(&self) -> Control {
-            Control {
-                capacity: CAPACITY,
-                ..Control::new(Some(Paths {
-                    ctl: self.dir.join("darkbotctl"),
-                    rundir: self.dir.join("run"),
-                    logdir: self.dir.clone(),
-                    label: "test.capture".into(),
-                }))
-            }
+            let paths = Paths {
+                ctl: self.dir.join("darkbotctl"),
+                rundir: self.dir.join("run"),
+                logdir: self.dir.clone(),
+                label: "test.capture".into(),
+            };
+            Control::new(Some(paths), &self.limits)
         }
         fn executions(&self) -> usize {
             fs::read_to_string(&self.runs)
@@ -1085,6 +1119,13 @@ mod tests {
         }
         fn ledger(&self) -> PathBuf {
             self.dir.join("run/commands")
+        }
+        /// Waits until every receipt recorded so far is past the retention window.
+        async fn outlast_retention(&self) {
+            tokio::time::sleep(Duration::from_millis(
+                self.limits.command_retention_ms + 100,
+            ))
+            .await;
         }
     }
     impl Drop for Env {
@@ -1116,15 +1157,15 @@ mod tests {
     fn refused(r: &CommandResponse, reason: CommandRejectReason) -> bool {
         r.status == CommandStatus::Rejected as i32 && r.reject_reason == reason as i32
     }
+    fn completed(r: &CommandResponse) -> bool {
+        r.status == CommandStatus::Accepted as i32 && r.phase == CommandPhase::Completed as i32
+    }
     #[tokio::test]
     async fn an_archived_receipt_replays_after_a_restart_and_other_bytes_conflict() {
         let env = Env::new("restart");
         let control = env.restart();
-        let x = candidate(9_000, 500);
-        assert_eq!(
-            control.execute(&x).await.phase,
-            CommandPhase::Completed as i32
-        );
+        let x = candidate(9_000, now());
+        assert!(completed(&control.execute(&x).await));
         age(&control, &x.request_id, 1);
         for n in 0..CAPACITY {
             put(&control, n, CommandPhase::Completed).unwrap();
@@ -1134,17 +1175,10 @@ mod tests {
             .join(format!("archive/{}.json", x.request_id))
             .exists());
         let control = env.restart();
-        let replay = control.execute(&x).await;
-        assert_eq!(
-            (replay.status, replay.phase),
-            (
-                CommandStatus::Accepted as i32,
-                CommandPhase::Completed as i32
-            )
-        );
+        assert!(completed(&control.execute(&x).await));
         for other in [
             CommandRequest {
-                issued_at_unix_ns: 501,
+                issued_at_unix_ns: x.issued_at_unix_ns + 1,
                 ..x.clone()
             },
             CommandRequest {
@@ -1165,14 +1199,17 @@ mod tests {
     async fn the_retired_through_mark_survives_restarts_and_crashes_fail_closed() {
         let env = Env::new("mark");
         let control = env.restart();
-        let x = candidate(9_000, 500);
+        let x = candidate(9_000, now());
         control.execute(&x).await;
         age(&control, &x.request_id, 1);
         for n in 0..2 * CAPACITY {
-            put(&control, n, CommandPhase::Completed).unwrap();
+            put_req(&control, &after(&x, n), n, CommandPhase::Completed).unwrap();
         }
         let archive = env.ledger().join("archive");
-        assert_eq!(retired_through(&env.ledger()), Ok(Some(500)));
+        assert_eq!(
+            retired_through(&env.ledger()),
+            Ok(Some(x.issued_at_unix_ns))
+        );
         // Crash before the atomic rename: a stray temporary file changes nothing.
         fs::write(archive.join("retired_through.tmp-crashed"), "999999999999").unwrap();
         let control = env.restart();
@@ -1181,7 +1218,7 @@ mod tests {
             CommandRejectReason::IdempotencyConflict
         ));
         // Crash after raising the mark but before removing the receipt: it still replays.
-        let kept = stored(0); // the earliest receipt still archived
+        let kept = after(&x, 0); // the earliest receipt still archived
         assert!(archive.join(format!("{}.json", kept.request_id)).exists());
         fs::write(
             archive.join(RETIRED_THROUGH),
@@ -1197,60 +1234,59 @@ mod tests {
         );
         // An unreadable mark refuses every new command instead of guessing.
         fs::write(archive.join(RETIRED_THROUGH), "not a number").unwrap();
-        let now = crate::overview::unix_ns_now();
         assert!(refused(
-            &env.restart().execute(&candidate(9_001, now)).await,
+            &env.restart().execute(&candidate(9_001, now())).await,
             CommandRejectReason::EngineUnavailable
         ));
         assert_eq!(env.executions(), 1);
     }
     #[tokio::test]
-    async fn new_commands_run_in_any_stamp_order_above_the_mark_and_within_the_clock_window() {
+    async fn new_commands_run_in_any_stamp_order_within_the_clock_window_and_never_outside() {
         let env = Env::new("clock");
         let control = env.restart();
-        control.execute(&candidate(9_000, 500)).await;
-        age(&control, &uuid(9_000), 1);
-        for n in 0..2 * CAPACITY {
+        for n in 0..=2 * CAPACITY {
             put(&control, n, CommandPhase::Completed).unwrap();
         }
-        let now = crate::overview::unix_ns_now();
-        // Every new command retires one more receipt, so the mark rises with them; client stamps
-        // only have to be later than it: unordered, behind by an hour or ahead by 2 s.
+        let w = window_ns(&env.limits);
+        let t = now();
+        // Unordered stamps and a browser clock ahead or behind, all within the window.
         for (n, issued) in [
-            (1, now - 5_000_000_000),
-            (2, now - 10_000_000_000),
-            (3, now - 3_600_000_000_000),
-            (4, now + 2_000_000_000),
+            (1, t - w / 6),
+            (2, t - w / 3),
+            (3, t + w / 15),
+            (4, t - w / 2),
         ] {
             let r = control.execute(&candidate(10_000 + n, issued)).await;
-            assert_eq!(r.phase, CommandPhase::Completed as i32, "{n}: {}", r.detail);
+            assert!(completed(&r), "{n}: {}", r.detail);
         }
-        assert_eq!(env.executions(), 5);
-        // At or below the mark, or ahead of the gateway beyond the liveness window: refused.
-        let mark = retired_through(&env.ledger()).unwrap().unwrap();
-        let at_mark = control.execute(&candidate(10_010, mark)).await;
-        assert!(refused(&at_mark, CommandRejectReason::IdempotencyConflict));
-        let ahead = control
-            .execute(&candidate(10_011, now + 120_000_000_000))
-            .await;
-        assert!(refused(&ahead, CommandRejectReason::InvalidParams));
-        assert_eq!(env.executions(), 5);
+        assert_eq!(env.executions(), 4);
+        // Outside the window in either direction: refused, whatever the ledger holds.
+        for (n, issued) in [
+            (5, now() - w - 1_000_000_000),
+            (6, now() + w + 1_000_000_000),
+        ] {
+            let r = control.execute(&candidate(10_000 + n, issued)).await;
+            assert!(refused(&r, CommandRejectReason::InvalidParams), "{n}");
+            assert!(r
+                .detail
+                .contains(&format!("{} ms", env.limits.command_clock_window_ms)));
+        }
+        assert_eq!(env.executions(), 4);
     }
-    /// Limit of a finite retention (Wire V1.3 §7): once a receipt is retired, its id is only known
-    /// through the mark. Bytes stamped at or before it stay refused; the same id stamped later is
-    /// a different payload and counts as a new intent — the retired one itself never runs again.
+    /// Contract limit (Wire V1.3 §7): once a receipt is forgotten its id is no longer known; the
+    /// same id with a new time is other bytes and counts as a new intent, the forgotten one never.
     #[tokio::test]
-    async fn beyond_the_retention_only_a_later_stamped_reuse_of_an_id_is_a_new_intent() {
+    async fn after_its_retention_a_reused_id_with_a_new_time_is_a_new_intent() {
         let env = Env::new("reuse");
         let control = env.restart();
-        let x = candidate(9_000, 500);
+        let x = candidate(9_000, now());
         control.execute(&x).await;
         age(&control, &x.request_id, 1);
         for n in 0..2 * CAPACITY {
-            put(&control, n, CommandPhase::Completed).unwrap();
+            put_req(&control, &after(&x, n), n, CommandPhase::Completed).unwrap();
         }
         let earlier = CommandRequest {
-            issued_at_unix_ns: 499,
+            issued_at_unix_ns: x.issued_at_unix_ns - 1,
             ..x.clone()
         };
         assert!(refused(
@@ -1259,13 +1295,10 @@ mod tests {
         ));
         assert_eq!(env.executions(), 1);
         let later = CommandRequest {
-            issued_at_unix_ns: crate::overview::unix_ns_now(),
+            issued_at_unix_ns: now(),
             ..x.clone()
         };
-        assert_eq!(
-            control.execute(&later).await.phase,
-            CommandPhase::Completed as i32
-        );
+        assert!(completed(&control.execute(&later).await));
         assert_eq!(env.executions(), 2);
     }
     #[tokio::test]
@@ -1291,60 +1324,14 @@ mod tests {
     /// arriving again must not run a second time, while a fresh command still runs.
     #[tokio::test]
     async fn a_command_whose_receipt_left_the_archive_is_never_executed_again() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("gw-ledger-retired-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(dir.join("bsc-root")).unwrap();
-        fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
-        fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
-        let (ctl, runs) = (dir.join("darkbotctl"), dir.join("runs"));
-        fs::write(
-            &ctl,
-            format!("#!/bin/sh\nprintf '%s\\n' \"$6\" >> '{}'\n", runs.display()),
-        )
-        .unwrap();
-        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::create_dir_all(dir.join("run")).unwrap();
-        let control = Control {
-            capacity: CAPACITY,
-            ..Control::new(Some(Paths {
-                ctl,
-                rundir: dir.join("run"),
-                logdir: dir.clone(),
-                label: "test.capture".into(),
-            }))
-        };
-        let candidate = |n: usize, issued_at_unix_ns| CommandRequest {
-            project: ProjectId::Bsc as i32,
-            request_id: uuid(n),
-            action: BSC_CANDIDATE.into(),
-            resource_id: "SELF_B".into(),
-            expected: Some(crate::proto::ExpectedVersion {
-                version: Some(expected_version::Version::ProfileVersion(7)),
-            }),
-            params: Default::default(),
-            issued_at_unix_ns,
-        };
-        let executions = || {
-            fs::read_to_string(&runs)
-                .unwrap_or_default()
-                .lines()
-                .count()
-        };
-        let first = candidate(9_999, 500);
-        assert_eq!(
-            control.execute(&first).await.phase,
-            CommandPhase::Completed as i32
-        );
-        assert_eq!(executions(), 1);
-        fs::File::options()
-            .write(true)
-            .open(control.record_path(&first.request_id).unwrap())
-            .unwrap()
-            .set_modified(UNIX_EPOCH + Duration::from_secs(1))
-            .unwrap();
+        let env = Env::new("retired");
+        let control = env.restart();
+        let first = candidate(9_999, now());
+        assert!(completed(&control.execute(&first).await));
+        assert_eq!(env.executions(), 1);
+        age(&control, &first.request_id, 1);
         for n in 0..2 * CAPACITY {
-            put(&control, n, CommandPhase::Completed).unwrap();
+            put_req(&control, &after(&first, n), n, CommandPhase::Completed).unwrap();
         }
         assert!(
             control.load(&first.request_id).unwrap().is_none(),
@@ -1360,19 +1347,119 @@ mod tests {
             "{}",
             replay.detail
         );
-        assert_eq!(executions(), 1, "a retired command never runs twice");
-        // No permanent refusal: a fresh command runs; a future-dated one cannot move the mark.
-        let now = crate::overview::unix_ns_now();
-        assert_eq!(
-            control.execute(&candidate(10_000, now)).await.phase,
-            CommandPhase::Completed as i32
-        );
-        let future = control
-            .execute(&candidate(10_001, now + 60_000_000_000))
-            .await;
+        assert_eq!(env.executions(), 1, "a retired command never runs twice");
+        // No permanent refusal: a fresh command runs; a future-dated one is refused.
+        assert!(completed(&control.execute(&candidate(10_000, now())).await));
+        let w = window_ns(&env.limits);
+        let future = control.execute(&candidate(10_001, now() + 2 * w)).await;
         assert_eq!(future.status, CommandStatus::Rejected as i32);
-        assert_eq!(executions(), 2);
-        fs::remove_dir_all(dir).unwrap();
+        assert_eq!(env.executions(), 2);
+    }
+    /// Counter-case 1, real time: within its retention the same id never runs twice, not even with
+    /// a new time and the same action; a flood is refused instead of forgetting it early. After the
+    /// retention its exact bytes are outside the clock window and the mark: never again. Only the
+    /// same id with a new time is then a new intent (the documented contract limit).
+    #[tokio::test]
+    async fn within_its_retention_a_request_id_never_runs_twice() {
+        let env = Env::with("case1", short(1_000));
+        let cap = env.limits.command_ledger_records;
+        let control = env.restart();
+        let x = candidate(9_000, now());
+        assert!(completed(&control.execute(&x).await));
+        for n in 0..2 * cap {
+            control.execute(&candidate(20_000 + n, now())).await;
+        }
+        assert_eq!(
+            env.executions(),
+            2 * cap,
+            "the last one was refused, nothing forgotten"
+        );
+        let same_action_new_time = CommandRequest {
+            issued_at_unix_ns: now(),
+            ..x.clone()
+        };
+        assert!(refused(
+            &control.execute(&same_action_new_time).await,
+            CommandRejectReason::IdempotencyConflict
+        ));
+        assert!(
+            completed(&control.execute(&x).await),
+            "replay = original receipt"
+        );
+        assert_eq!(env.executions(), 2 * cap);
+        env.outlast_retention().await;
+        assert!(completed(&control.execute(&candidate(30_000, now())).await));
+        assert!(
+            control.load(&x.request_id).unwrap().is_none(),
+            "x forgotten only now"
+        );
+        assert!(refused(
+            &control.execute(&x).await,
+            CommandRejectReason::InvalidParams
+        ));
+        let reused = CommandRequest {
+            issued_at_unix_ns: now(),
+            ..x.clone()
+        };
+        assert!(completed(&control.execute(&reused).await));
+        assert_eq!(env.executions(), 2 * cap + 2);
+    }
+    /// Counter-case 2, real time: requests stamped right below the upper clock bound fill the
+    /// ledger; new commands are refused only while every receipt is younger than the retention,
+    /// and afterwards the mark never blocks a current stamp.
+    #[tokio::test]
+    async fn stamps_at_the_upper_clock_bound_never_block_current_commands() {
+        let l = short(1_000);
+        let env = Env::with("case2", l.clone());
+        let cap = l.command_ledger_records;
+        let control = env.restart();
+        let upper = || now() + window_ns(&l) * 9 / 10;
+        let mut accepted = 0;
+        for n in 0..=2 * cap {
+            let r = control.execute(&candidate(20_000 + n, upper())).await;
+            accepted += usize::from(completed(&r));
+        }
+        assert_eq!(
+            accepted,
+            2 * cap,
+            "the ledger is full of receipts inside the retention"
+        );
+        assert_eq!(retired_through(&env.ledger()), Ok(None));
+        assert!(refused(
+            &control.execute(&candidate(30_000, now())).await,
+            CommandRejectReason::EngineUnavailable
+        ));
+        env.outlast_retention().await;
+        assert!(completed(&control.execute(&candidate(30_001, now())).await));
+        let mark = retired_through(&env.ledger()).unwrap().unwrap();
+        assert!(
+            mark < now() - window_ns(&l),
+            "the mark stays behind every current stamp"
+        );
+        assert!(completed(&control.execute(&candidate(30_002, now())).await));
+    }
+    /// Counter-case 3, real time: a browser clock beyond the window is refused with the same
+    /// reason before and after archiving (no ledger effect) and runs once its clock is corrected.
+    #[tokio::test]
+    async fn a_browser_clock_beyond_the_window_is_refused_regardless_of_archiving() {
+        let env = Env::with("case3", short(1_000));
+        let control = env.restart();
+        let hour = 3_600_000_000_000;
+        let behind = control.execute(&candidate(40_000, now() - hour)).await;
+        assert!(refused(&behind, CommandRejectReason::InvalidParams));
+        for n in 0..2 * env.limits.command_ledger_records {
+            control.execute(&candidate(40_001 + n, now())).await;
+        }
+        env.outlast_retention().await;
+        assert!(completed(&control.execute(&candidate(41_000, now())).await));
+        assert!(
+            retired_through(&env.ledger()).unwrap().is_some(),
+            "archiving happened"
+        );
+        let again = control.execute(&candidate(41_001, now() - hour)).await;
+        assert!(refused(&again, CommandRejectReason::InvalidParams));
+        assert_eq!(again.detail, behind.detail);
+        assert!(completed(&control.execute(&candidate(41_002, now())).await));
     }
     #[test]
     fn a_ledger_of_open_intents_refuses_a_new_one_and_drops_nothing() {
@@ -1477,12 +1564,15 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
-        let control = Control::new(Some(Paths {
-            ctl,
-            rundir: dir.join("run"),
-            logdir: dir.clone(),
-            label: "test.capture".into(),
-        }));
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+            }),
+            &Limits::default(),
+        );
         fs::create_dir_all(dir.join("run")).unwrap();
         let mut req = CommandRequest {
             project: ProjectId::Bsc as i32,
@@ -1493,7 +1583,7 @@ mod tests {
                 version: Some(expected_version::Version::ProfileVersion(7)),
             }),
             params: Default::default(),
-            issued_at_unix_ns: 0,
+            issued_at_unix_ns: crate::overview::unix_ns_now(),
         };
         let response = control.execute(&req).await;
         assert_eq!(
@@ -1552,12 +1642,15 @@ mod tests {
             "launch_id=job-1\nended_unix_s=2\nresult_code=BLOCKED\nexit_code=2\n",
         )
         .unwrap();
-        let control = Control::new(Some(Paths {
-            ctl: dir.join("darkbotctl"),
-            rundir: dir.join("run"),
-            logdir: dir.clone(),
-            label: "com.darkbot.test.absent.capture".into(),
-        }));
+        let control = Control::new(
+            Some(Paths {
+                ctl: dir.join("darkbotctl"),
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "com.darkbot.test.absent.capture".into(),
+            }),
+            &Limits::default(),
+        );
         let s = control.observe_project(ProjectId::Bsc as i32).await;
         assert_eq!((s.state.as_str(), s.run_id.as_str()), ("STOPPED", "job-1"));
         fs::remove_dir_all(dir).unwrap();

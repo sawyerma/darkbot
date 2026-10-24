@@ -32,7 +32,7 @@ try{
  assert.equal(await card.locator('dd').first().innerText(),'UNKNOWN');
  assert.equal(await p.getByTestId('project-startstop-solana').isDisabled(),true);
  const boot=await api.get(base+'/api/v1/session');const headers={'Content-Type':'application/x-protobuf',Origin:base,'X-CSRF-Token':boot.headers()['x-csrf-token']};
- const encode=(action,id=crypto.randomUUID(),resourceId='')=>Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:id,action,resourceId})));
+ const encode=(action,id=crypto.randomUUID(),resourceId='')=>Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:id,action,resourceId,issuedAtUnixNs:BigInt(Date.now())*1_000_000n})));
  assert.equal((await api.post(base+'/api/v1/command',{headers:{'Content-Type':'application/x-protobuf',Origin:base},data:encode('bsc.readiness.start')})).status(),403);
  for(const action of ['g07','arm','probe','send','bsc.dry.start','bsc.arm','bsc.probe','bsc.send']){
   const res=await api.post(base+'/api/v1/command',{headers,data:encode(action)});assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await res.body())).status,3);

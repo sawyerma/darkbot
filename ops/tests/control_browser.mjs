@@ -25,7 +25,7 @@ p.on('websocket',ws=>{const s={sent:[],got:[],closed:false};sockets.push(s);
  ws.on('close',()=>{s.closed=true;});});
 const active=s=>{const set=new Set();for(const m of s.sent){if(m.msg.case==='subscribe')set.add(m.msg.value.topic);if(m.msg.case==='unsubscribe')set.delete(m.msg.value.topic);}return set;};
 const api=p.request;
-const encode=(id,action,project=1)=>toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project,requestId:id,action,issuedAtUnixNs:1n}));
+const encode=(id,action,project=1)=>toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project,requestId:id,action,issuedAtUnixNs:BigInt(Date.now())*1_000_000n}));
 const getProcess=async()=>await (await api.get(base+'/api/v1/project0/process')).json();
 const until=async(fn,msg)=>{for(let i=0;i<100;i++){if(await fn())return;await new Promise(r=>setTimeout(r,200));}throw Error(msg);};
 try{

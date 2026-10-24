@@ -44,9 +44,10 @@ pub struct AppState {
 }
 impl AppState {
     pub fn new(cfg: GatewayConfig, hub: Arc<StateHub>, registry: Arc<SourceRegistry>) -> Arc<Self> {
+        let control = crate::control::Control::from_env(&cfg.limits);
         Arc::new(Self {
             cfg,
-            control: crate::control::Control::from_env(),
+            control,
             hub,
             registry,
             sessions: SessionStore::new(64, Duration::from_secs(12 * 3600)),

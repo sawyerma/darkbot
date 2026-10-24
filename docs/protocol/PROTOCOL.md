@@ -589,12 +589,12 @@ verbindlich in der TopicDescriptor-Tabelle, die das Gateway im Welcome liefert.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | project | [ProjectId](#darkbot-control-v1-ProjectId) |  |  |
-| request_id | [string](#string) |  | Idempotency-Key, vom Client erzeugt (UUIDv4), pro Nutzeraktion genau einer. Gleicher Key &#43; gleiche Payload =&gt; derselbe Intent; gleicher Key &#43; andere Payload =&gt; REJECTED. |
+| request_id | [string](#string) |  | Idempotency-Key, vom Client erzeugt (UUIDv4), pro Nutzeraktion genau einer; nie wiederverwendet. Zeitlich begrenzte Idempotenz (Wire V1.3 §7), solange das Gateway den Key kennt – mindestens command_retention_ms nach der letzten Aktualisierung seines Receipts, darüber hinaus bis zu 2 × command_ledger_records neuere Receipts: gleicher Key &#43; gleiche Payload =&gt; derselbe Intent (Original-Receipt, keine zweite Ausführung); gleicher Key &#43; andere Payload =&gt; REJECTED. Danach ist der Key vergessen: die Original-Payload ist nie mehr annehmbar (issued_at_unix_ns außerhalb des Fensters); derselbe Key mit anderer Payload gilt dann als neuer Intent. |
 | action | [string](#string) |  | Domänenaktion, z. B. &#34;project0.capture.start&#34; – serverseitiger strikter Allowlist-Katalog nach F0-VAR; keine freie RPC-/Shell-/Signer-Durchleitung. |
 | resource_id | [string](#string) |  | Zielressource (Bot-ID, Job-ID, Wallet-Alias). Leer, wenn die Aktion keine hat. |
 | expected | [ExpectedVersion](#darkbot-control-v1-ExpectedVersion) |  |  |
 | params | [bytes](#bytes) |  | Serialisierte typisierte Parameter; Messagetyp ist durch action festgelegt. |
-| issued_at_unix_ns | [int64](#int64) |  | Zeit der Nutzeraktion im Browser; nur Diagnose, keine fachliche Bedeutung. |
+| issued_at_unix_ns | [int64](#int64) |  | Zeit der Nutzeraktion im Browser (Unix-ns), ohne fachliche Bedeutung. Das Gateway nimmt einen neuen Command nur an, wenn der Wert höchstens command_clock_window_ms von seiner Empfangszeit abweicht (Uhrabweichung &#43; Zustelldauer), sonst INVALID_PARAMS ohne Ledger-Wirkung. Damit begrenzt das Feld das Idempotenzfenster; es kann nur ablehnen, nie eine Ausführung bewirken. |
 
 
 

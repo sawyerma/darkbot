@@ -68,8 +68,13 @@ export type CommandRequest = Message<"darkbot.control.v1.CommandRequest"> & {
   project: ProjectId;
 
   /**
-   * Idempotency-Key, vom Client erzeugt (UUIDv4), pro Nutzeraktion genau einer.
-   * Gleicher Key + gleiche Payload => derselbe Intent; gleicher Key + andere Payload => REJECTED.
+   * Idempotency-Key, vom Client erzeugt (UUIDv4), pro Nutzeraktion genau einer; nie wiederverwendet.
+   * Zeitlich begrenzte Idempotenz (Wire V1.3 §7), solange das Gateway den Key kennt – mindestens
+   * command_retention_ms nach der letzten Aktualisierung seines Receipts, darüber hinaus bis zu
+   * 2 × command_ledger_records neuere Receipts: gleicher Key + gleiche Payload => derselbe Intent
+   * (Original-Receipt, keine zweite Ausführung); gleicher Key + andere Payload => REJECTED.
+   * Danach ist der Key vergessen: die Original-Payload ist nie mehr annehmbar (issued_at_unix_ns
+   * außerhalb des Fensters); derselbe Key mit anderer Payload gilt dann als neuer Intent.
    *
    * @generated from field: string request_id = 2;
    */
@@ -103,7 +108,10 @@ export type CommandRequest = Message<"darkbot.control.v1.CommandRequest"> & {
   params: Uint8Array;
 
   /**
-   * Zeit der Nutzeraktion im Browser; nur Diagnose, keine fachliche Bedeutung.
+   * Zeit der Nutzeraktion im Browser (Unix-ns), ohne fachliche Bedeutung. Das Gateway nimmt einen
+   * neuen Command nur an, wenn der Wert höchstens command_clock_window_ms von seiner Empfangszeit
+   * abweicht (Uhrabweichung + Zustelldauer), sonst INVALID_PARAMS ohne Ledger-Wirkung. Damit
+   * begrenzt das Feld das Idempotenzfenster; es kann nur ablehnen, nie eine Ausführung bewirken.
    *
    * @generated from field: int64 issued_at_unix_ns = 7;
    */
