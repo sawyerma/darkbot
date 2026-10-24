@@ -386,15 +386,9 @@ def measurement_plan(run,window):
         p=run/name
         if p.exists():
             v=json.loads(p.read_text());return v.get('plan',v)
-    # Legacy import invokes the same Rust authority, never a second quarter formula.
-    binary=run_store.PROJECT/'native/target/release/p0-measurement-plan'
-    if not binary.exists():raise c.ContractError('MEASUREMENT_PLAN_BINARY_MISSING')
-    duration=(window['end_ns']-window['start_ns'])//a.NS
-    env={k:v for k,v in os.environ.items() if not k.startswith('P0_')}
-    env['P0_MEASUREMENT_DURATION']=str(duration)+'s'
-    p=subprocess.run([str(binary)],env=env,capture_output=True,text=True,timeout=10)
-    if p.returncode:raise c.ContractError('LEGACY_PLAN_INVALID')
-    return json.loads(p.stdout)
+    # JFI-01/P0-PROD-CTRL-02: no JSON plan handoff from Rust and no second quarter formula here;
+    # a historical run without its own plan record cannot be snapshotted (BLOCKED).
+    raise c.ContractError('MEASUREMENT_PLAN_MISSING: historical run without a plan record')
 
 
 def production_replay(run,result,work,ds,clock_origin):

@@ -20,15 +20,13 @@ from operations.verification import audit_market_quick as a
 from p0_paths import clean_env
 
 class OperationalTests(unittest.TestCase):
-    def test_compiled_profiles_inspection_and_plan_share_boundaries(self):
-        plan=p0_paths.RELEASE/'p0-measurement-plan'
+    def test_compiled_profiles_inspection(self):
+        # The plan compiler takes only the native text config (no JSON plan output, P0-PROD-CTRL-02);
+        # plan quarters and budgets are covered by the Rust measurement tests.
         for duration in ['10m','1h','5h','24h','61s','25h']:
             with o.resolve(['--profile','custom','--duration',duration,'--rpc-rps','25','--bootstrap-seconds','20'],clean_env()) as (config,report,env):
-                proc=subprocess.run([str(plan)],env=env,capture_output=True,text=True,check=True)
-                p=json.loads(proc.stdout)
-                self.assertEqual(p['snapshot_offsets_ns'],[p['duration_seconds']*10**9*i//4 for i in range(1,5)])
-                self.assertEqual(p['budgets']['bootstrap_seconds'],20)
                 self.assertEqual(report['values']['limits']['rpc_rps'],25)
+                self.assertEqual(config['limits']['bootstrap_seconds'],20)
                 self.assertFalse(report['submission_authorized'])
                 self.assertEqual(config['duration'],duration)
 

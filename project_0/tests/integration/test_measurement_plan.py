@@ -23,33 +23,44 @@ PLAN = Path(os.environ.get('P0_TEST_PLAN_BINARY', ROOT / 'project_0/native/targe
 clean_env = p0_paths.clean_env
 
 
-def call_plan(**values):
-    return subprocess.run([str(PLAN)], env={**clean_env(), **values}, capture_output=True, text=True, check=False)
+def call_plan(out, **values):
+    """The typed plan journal at `out`; stdout carries only the duration in seconds (no JSON)."""
+    return subprocess.run([str(PLAN), '--out', str(out)], env={**clean_env(), **values}, capture_output=True, text=True, check=False)
 
 
 class MeasurementCli(unittest.TestCase):
     def test_release_duration_matrix(self):
         for duration, seconds in [('10m', 600), ('1h', 3600), ('5h', 18000), ('24h', 86400), ('25h',90000), ('61s', 61), ('1s', 1), ('2d', 172800)]:
-            with self.subTest(duration=duration):
-                p = call_plan(P0_MEASUREMENT_DURATION=duration)
+            with self.subTest(duration=duration), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / 'plan.p0j'
+                p = call_plan(path, P0_MEASUREMENT_DURATION=duration)
                 self.assertEqual(p.returncode, 0, p.stderr)
-                plan = json.loads(p.stdout)
-                self.assertEqual(plan['duration_seconds'], seconds)
-                self.assertEqual(plan['snapshot_offsets_ns'], [seconds * 10**9 * i // 4 for i in range(1, 5)])
-                with tempfile.TemporaryDirectory() as folder:
-                    path = Path(folder) / 'plan.json'
-                    path.write_text(p.stdout)
-                    loaded = call_plan(P0_MEASUREMENT_PLAN=str(path))
-                    self.assertEqual(loaded.returncode, 0, loaded.stderr)
-                    self.assertEqual(json.loads(loaded.stdout), plan)
+                self.assertEqual(p.stdout.strip(), str(seconds))
+                # The typed plan journal is the runtime input: loading it gives the same plan.
+                loaded = call_plan(Path(folder) / 'again.p0j', P0_MEASUREMENT_PLAN=str(path))
+                self.assertEqual(loaded.returncode, 0, loaded.stderr)
+                self.assertEqual(loaded.stdout.strip(), str(seconds))
+        with tempfile.TemporaryDirectory() as folder:
+            # JFI-01/P0-PROD-CTRL-02: no JSON output and no JSON plan input.
+            self.assertEqual(subprocess.run([str(PLAN)], env={**clean_env(), 'P0_MEASUREMENT_DURATION': '10m'},
+                                            capture_output=True).returncode, 2)
+            json_plan = Path(folder) / 'plan.json'
+            json_plan.write_text('{}')
+            refused = call_plan(Path(folder) / 'x.p0j', P0_MEASUREMENT_PLAN=str(json_plan))
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn('MEASUREMENT_PLAN_NOT_TYPED', refused.stderr)
 
     def test_invalid_and_conflicting_input(self):
-        for duration in ['0s', '18446744073709551615h', '1.5h', '1', 'é', '1🦀', 'inf', 'until-stopped', '0d']:
-            self.assertNotEqual(call_plan(P0_MEASUREMENT_DURATION=duration).returncode, 0)
-        self.assertNotEqual(call_plan(P0_MEASUREMENT_DURATION='10m', P0_ECON_SNAPSHOT_SECS='3600').returncode, 0)
-        self.assertNotEqual(call_plan(P0_MEASUREMENT_DURATION='10m', P0_MARKET_DURATION_SECS='300').returncode, 0)
-        old = call_plan(P0_ECON_DURATION_SECS='14400', P0_ECON_SNAPSHOT_SECS='3600')
-        self.assertEqual(old.returncode, 0, old.stderr)
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder) / 'plan.p0j'
+            for duration in ['0s', '18446744073709551615h', '1.5h', '1', 'é', '1🦀', 'inf', 'until-stopped', '0d']:
+                self.assertNotEqual(call_plan(out, P0_MEASUREMENT_DURATION=duration).returncode, 0)
+                self.assertFalse(out.exists())
+            self.assertNotEqual(call_plan(out, P0_MEASUREMENT_DURATION='10m', P0_ECON_SNAPSHOT_SECS='3600').returncode, 0)
+            self.assertNotEqual(call_plan(out, P0_MEASUREMENT_DURATION='10m', P0_MARKET_DURATION_SECS='300').returncode, 0)
+            old = call_plan(out, P0_ECON_DURATION_SECS='14400', P0_ECON_SNAPSHOT_SECS='3600')
+            self.assertEqual(old.returncode, 0, old.stderr)
+            self.assertEqual(old.stdout.strip(), '14400')
 
     def test_help_and_required_argument_do_not_start_run(self):
         for args, expected in [(['--help'], 0), ([], 2), (['--duration'], 2), (['--duration', '10m', '--duration', '1h'], 2)]:

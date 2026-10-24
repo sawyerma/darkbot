@@ -38,20 +38,14 @@ class ArchivedParity(unittest.TestCase):
 
     def test_v1_evidence_window_records_and_snapshots_are_unchanged(self):
         if not shutil.which('git'):self.skipTest('git unavailable')
-        legacy_plan=REPO/'project_0/native/target/release/p0-measurement-plan'
         with tempfile.TemporaryDirectory() as folder, offline():
             tmp=Path(folder);scripts=self.archived_project(tmp)
             probe=('import json,sys;from pathlib import Path;import measurement_contract as c,audit_market_quick as a,market_report as r\n'
                    'run=Path(sys.argv[1]);e=c.finalize_capture(run);d,m=r.normalize(run)\n'
                    'print(json.dumps({"window":a.read_window(run),"key":m["version"]}))')
+            # The former `legacy_identity` variant (a run without any plan record, planned through the JSON
+            # output of p0-measurement-plan) is BLOCKED since that JSON handoff was removed (P0-PROD-CTRL-02).
             variants=[('manifest',lambda root:manifest_run(root,'r1','v1'))]
-            if legacy_plan.exists():
-                def legacy(root):
-                    run=manifest_run(root,'r1','v1');(run/'measurement_manifest.json').unlink();(run/'measurement_phases.jsonl').unlink()
-                    (run/'market/summary.json').write_text(json.dumps({'observation_started_at':a.iso_ns(100*a.NS),'observation_ended_at':a.iso_ns(200*a.NS),
-                        'configured_duration_seconds':100,'capture_clock_complete':True}))
-                    return run
-                variants.append(('legacy_identity',legacy))
             for name,make in variants:
                 with self.subTest(variant=name):
                     old,new=make(tmp/name/'old'),make(tmp/name/'new')

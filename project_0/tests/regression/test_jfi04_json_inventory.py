@@ -31,12 +31,11 @@ PINNED = {
     'runtime/src/analytics/econ_canonical.rs': (2, 'I'),  # joined_value view (F4); JSONL replay removed
     'runtime/src/analytics/econ_docs.rs': (12, 'I'),  # legacy_json views (F4)
     'runtime/src/analytics/journal.rs': (24, 'HI'),  # legacy_value of historical frames; export_views (F4)
-    'runtime/src/analytics/measurement.rs': (12, 'I'),  # legacy_json views (F4), JSON plan fallback (F9)
+    'runtime/src/analytics/measurement.rs': (11, 'I'),  # legacy_json views (F4); JSON plan fallback removed (F9, 25.10.)
     'runtime/src/analytics/payload.rs': (1, 'I'),  # legacy_view (F4)
     'runtime/src/analytics/renders.rs': (14, 'I'),  # JSON renders of native journals (F4)
     'runtime/src/bin/p0-fe-qualify.rs': (2, 'I'),  # JSON config / provider evidence input (F6, F13)
     'runtime/src/bin/p0-journal.rs': (8, 'I'),  # renders stdout parsed by Python (F12)
-    'runtime/src/bin/p0-measurement-plan.rs': (1, 'I'),  # stdout JSON read by market_report (F11)
     'runtime/src/bin/p0-parity.rs': (4, 'H'),
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
     'runtime/src/bin/p0-strict-verify.rs': (1, 'I'),  # --compat job.json from Python (F5)
@@ -80,7 +79,6 @@ EXPECTED_OPEN_INTERNAL = [
     'runtime/src/analytics/renders.rs',
     'runtime/src/bin/p0-fe-qualify.rs',
     'runtime/src/bin/p0-journal.rs',
-    'runtime/src/bin/p0-measurement-plan.rs',
     'runtime/src/bin/p0-strict-verify.rs',
     'runtime/src/execution/one_shot.rs',
     'runtime/src/market/rows.rs',
@@ -165,7 +163,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 342)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 340)
 
 
 if __name__ == '__main__':

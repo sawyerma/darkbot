@@ -128,14 +128,15 @@ impl MeasurementPlan {
     }
     pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> Result<Self, String> {
         if let Some(path) = get("P0_MEASUREMENT_PLAN") {
-            // JFI-04: the launcher hands over the typed plan journal; a JSON plan file is only
-            // read for historical/manual invocations.
-            let plan: Self = if path.ends_with(".p0j") {
-                super::journal::read_typed_value(Path::new(&path)).map_err(|e| e.to_string())?
-            } else {
-                serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?
-            };
+            // JFI-01/04, P0-PROD-CTRL-02: the launcher hands over the typed plan journal; no
+            // JSON plan file is a runtime input.
+            if !path.ends_with(".p0j") {
+                return Err(format!(
+                    "MEASUREMENT_PLAN_NOT_TYPED: {path} is no typed plan journal (.p0j)"
+                ));
+            }
+            let plan: Self = super::journal::read_typed_value(Path::new(&path))
+                .map_err(|e| format!("MEASUREMENT_PLAN_NOT_TYPED: {e}"))?;
             plan.validate()?;
             // A persisted plan is authoritative. Reject conflicting legacy overrides.
             plan.check_legacy(get)?;
@@ -881,6 +882,15 @@ mod tests {
         bytes[n / 2] ^= 1;
         fs::write(&path, bytes).unwrap();
         assert!(MeasurementPlan::from_lookup(&get).is_err());
+        // JFI-01/P0-PROD-CTRL-02: a JSON plan file is never a runtime input.
+        let json = d.join("measurement_plan.json");
+        fs::write(&json, serde_json::to_vec(&plan).unwrap()).unwrap();
+        let j = json.to_string_lossy().into_owned();
+        assert!(
+            MeasurementPlan::from_lookup(&|k| (k == "P0_MEASUREMENT_PLAN").then(|| j.clone()))
+                .unwrap_err()
+                .starts_with("MEASUREMENT_PLAN_NOT_TYPED")
+        );
         fs::remove_dir_all(d).unwrap();
     }
     #[test]
