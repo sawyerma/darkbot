@@ -56,8 +56,11 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
 /// Ledger retention (Wire V1.3 §7, idempotency for the intent/receipt lifetime): every open
 /// record (PENDING / PENDING_RECONCILE) stays in `commands/`. At MAX_RECORDS the oldest terminal
 /// receipt (COMPLETED / FAILED, by last update) moves to `commands/archive/`, which replay and
-/// conflict checks still read. The archive keeps the newest MAX_RECORDS terminal receipts; only
-/// its oldest one is ever removed. A ledger holding nothing but open intents refuses new ones.
+/// conflict checks still read. When the archive is full, the receipt issued earliest leaves it,
+/// after `retired_through` durably took its `issued_at_unix_ns`. Expiry rule: a request_id the
+/// ledger does not know whose `issued_at_unix_ns` is at or before that mark may be a retired
+/// command and is refused, never executed; a request issued after the gateway's receive time is
+/// refused, so no request can move the mark ahead. A ledger of open intents refuses new ones.
 const MAX_RECORDS: usize = 1024;
 
 #[derive(Clone)]
@@ -425,6 +428,37 @@ impl Control {
             }
             _ => {}
         }
+        // Expiry rule (MAX_RECORDS): an unknown request must be newer than every retired receipt.
+        if req.issued_at_unix_ns > crate::overview::unix_ns_now() {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::InvalidParams,
+                "issued_at lies after the gateway receive time",
+            );
+        }
+        let ledger = self
+            .record_path(id)
+            .and_then(|p| p.parent().map(Path::to_path_buf));
+        match ledger.map(|d| retired_through(&d)) {
+            Some(Ok(Some(mark))) if req.issued_at_unix_ns <= mark => {
+                return reply(
+                    id,
+                    CommandStatus::Rejected,
+                    CommandRejectReason::IdempotencyConflict,
+                    "Expired: issued no later than a retired receipt; never executed again, issue a new command",
+                )
+            }
+            Some(Err(())) | None => {
+                return reply(
+                    id,
+                    CommandStatus::Rejected,
+                    CommandRejectReason::EngineUnavailable,
+                    "Command ledger unreadable",
+                )
+            }
+            _ => {}
+        }
         let before = self.observe_project(req.project).await;
         if req.project == ProjectId::Bsc as i32
             && candidate.is_none()
@@ -616,6 +650,53 @@ fn oldest_terminal(dir: &Path) -> Result<Option<PathBuf>, ()> {
     all.sort();
     Ok(all.into_iter().map(|(_, p)| p).find(|p| terminal(p)))
 }
+fn issued_at(path: &Path) -> Option<i64> {
+    let record: Record = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    CommandRequest::decode(record.request.as_slice())
+        .ok()
+        .map(|r| r.issued_at_unix_ns)
+}
+const RETIRED_THROUGH: &str = "retired_through";
+/// The latest `issued_at_unix_ns` of every receipt removed from the archive; None before the first.
+fn retired_through(dir: &Path) -> Result<Option<i64>, ()> {
+    match fs::read_to_string(dir.join("archive").join(RETIRED_THROUGH)) {
+        Ok(t) => t.trim().parse().map(Some).map_err(|_| ()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+/// Removes the archived receipt issued earliest; the mark is durable before the receipt is gone.
+fn retire_earliest(dir: &Path, archive: &Path) -> Result<(), ()> {
+    let (issued, victim) = records(archive)?
+        .into_iter()
+        .filter(|(_, p)| terminal(p))
+        .filter_map(|(t, p)| Some((issued_at(&p)?, t, p)))
+        .min()
+        .map(|(i, _, p)| (i, p))
+        .ok_or(())?;
+    let mark = retired_through(dir)?.map_or(issued, |m| m.max(issued));
+    let path = archive.join(RETIRED_THROUGH);
+    let tmp = path.with_extension(format!("tmp-{}", session::random_token(8)));
+    let written = (|| {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+            .map_err(|_| ())?;
+        f.write_all(mark.to_string().as_bytes()).map_err(|_| ())?;
+        f.sync_all().map_err(|_| ())?;
+        fs::rename(&tmp, &path).map_err(|_| ())?;
+        fs::File::open(archive)
+            .and_then(|f| f.sync_all())
+            .map_err(|_| ())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+        return written;
+    }
+    fs::remove_file(victim).map_err(|_| ())
+}
 /// Frees one ledger slot without touching an open intent; see MAX_RECORDS.
 fn archive_oldest_terminal(dir: &Path, capacity: usize) -> Result<(), ()> {
     let source = oldest_terminal(dir)?.ok_or(())?;
@@ -623,7 +704,7 @@ fn archive_oldest_terminal(dir: &Path, capacity: usize) -> Result<(), ()> {
     fs::create_dir_all(&archive).map_err(|_| ())?;
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o700)).map_err(|_| ())?;
     if records(&archive)?.len() >= capacity {
-        fs::remove_file(oldest_terminal(&archive)?.ok_or(())?).map_err(|_| ())?;
+        retire_earliest(dir, &archive)?;
     }
     fs::rename(&source, archive.join(source.file_name().ok_or(())?)).map_err(|_| ())?;
     for d in [&archive, &dir.to_path_buf()] {
@@ -893,11 +974,18 @@ mod tests {
             ..Default::default()
         }
     }
+    /// The request `put(n)` records: issued in the order of n.
+    fn stored(n: usize) -> CommandRequest {
+        CommandRequest {
+            issued_at_unix_ns: 1_000 + n as i64,
+            ..capture_start(&uuid(n))
+        }
+    }
     /// One recorded command with a strictly increasing last-update time.
     fn put(control: &Control, n: usize, phase: CommandPhase) -> Result<(), ()> {
         let id = uuid(n);
         let record = Record {
-            request: capture_start(&id).encode_to_vec(),
+            request: stored(n).encode_to_vec(),
             response: reply(
                 &id,
                 CommandStatus::Accepted,
@@ -932,18 +1020,105 @@ mod tests {
         assert!(dir
             .join(format!("commands/archive/{}.json", uuid(1)))
             .exists());
-        let replay = control.execute(&capture_start(&uuid(1))).await;
+        let replay = control.execute(&stored(1)).await;
         assert_eq!(replay.status, CommandStatus::Accepted as i32);
         assert_eq!(replay.phase, CommandPhase::Completed as i32);
         let other = CommandRequest {
             action: STOP.into(),
-            ..capture_start(&uuid(1))
+            ..stored(1)
         };
         let conflict = control.execute(&other).await;
         assert_eq!(
             conflict.reject_reason,
             CommandRejectReason::IdempotencyConflict as i32
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    /// The receipt of an executed command leaves the bounded archive; the exact same request
+    /// arriving again must not run a second time, while a fresh command still runs.
+    #[tokio::test]
+    async fn a_command_whose_receipt_left_the_archive_is_never_executed_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("gw-ledger-retired-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("bsc-root")).unwrap();
+        fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
+        fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
+        let (ctl, runs) = (dir.join("darkbotctl"), dir.join("runs"));
+        fs::write(
+            &ctl,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$6\" >> '{}'\n", runs.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let control = Control {
+            capacity: CAPACITY,
+            ..Control::new(Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+            }))
+        };
+        let candidate = |n: usize, issued_at_unix_ns| CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: uuid(n),
+            action: BSC_CANDIDATE.into(),
+            resource_id: "SELF_B".into(),
+            expected: Some(crate::proto::ExpectedVersion {
+                version: Some(expected_version::Version::ProfileVersion(7)),
+            }),
+            params: Default::default(),
+            issued_at_unix_ns,
+        };
+        let executions = || {
+            fs::read_to_string(&runs)
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        let first = candidate(9_999, 500);
+        assert_eq!(
+            control.execute(&first).await.phase,
+            CommandPhase::Completed as i32
+        );
+        assert_eq!(executions(), 1);
+        fs::File::options()
+            .write(true)
+            .open(control.record_path(&first.request_id).unwrap())
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1))
+            .unwrap();
+        for n in 0..2 * CAPACITY {
+            put(&control, n, CommandPhase::Completed).unwrap();
+        }
+        assert!(
+            control.load(&first.request_id).unwrap().is_none(),
+            "receipt left the archive"
+        );
+        let replay = control.execute(&first).await;
+        assert_eq!(
+            (replay.status, replay.reject_reason),
+            (
+                CommandStatus::Rejected as i32,
+                CommandRejectReason::IdempotencyConflict as i32
+            ),
+            "{}",
+            replay.detail
+        );
+        assert_eq!(executions(), 1, "a retired command never runs twice");
+        // No permanent refusal: a fresh command runs; a future-dated one cannot move the mark.
+        let now = crate::overview::unix_ns_now();
+        assert_eq!(
+            control.execute(&candidate(10_000, now)).await.phase,
+            CommandPhase::Completed as i32
+        );
+        let future = control
+            .execute(&candidate(10_001, now + 60_000_000_000))
+            .await;
+        assert_eq!(future.status, CommandStatus::Rejected as i32);
+        assert_eq!(executions(), 2);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
@@ -970,6 +1145,8 @@ mod tests {
         );
         assert!(control.load(&uuid(0)).unwrap().is_none());
         assert!(control.load(&uuid(1)).unwrap().is_some());
+        // The mark of the removed receipt is durable; its exact replay is refused, never run.
+        assert_eq!(retired_through(&dir.join("commands")), Ok(Some(1_000)));
         assert!(control.load(&uuid(2 * CAPACITY)).unwrap().is_some());
         fs::remove_dir_all(dir).unwrap();
     }
