@@ -213,8 +213,7 @@ pub fn joined_facts(row: &Joined) -> JoinedFacts {
         simulation_result: our.and_then(|r| r.simulation_result.clone()),
         economics_known: our.map(|r| r.economics_known),
         executable_net_usd_micro: our
-            .filter(|r| technical(r) && r.economics_known)
-            .and(costs)
+            .and_then(executable_costs)
             .and_then(|c| c.net_profit_usd_micro),
         required_working_capital_usd_micro: costs
             .and_then(|c| c.required_working_capital_usd_micro),
@@ -237,6 +236,13 @@ fn identity_matches(event: &TruthEvent, rec: &OpportunityRecord) -> bool {
         && id.liquidation_type == event.liquidation_type.as_str()
         && event.asset_bank.as_deref() == Some(id.asset_bank.as_str())
         && event.liability_bank.as_deref() == Some(id.liability_bank.as_str())
+}
+/// The selected candidate's costs of an executable evaluation: technically executable (signed,
+/// simulation PASS, Shadow ready, not handed off) with known economics; else `None`.
+pub fn executable_costs(rec: &OpportunityRecord) -> Option<&CandidateCostRecord> {
+    rec.selected_costs
+        .as_ref()
+        .filter(|_| technical(rec) && rec.economics_known)
 }
 fn technical(rec: &OpportunityRecord) -> bool {
     rec.timing.t_sign_ns.is_some()
@@ -1149,6 +1155,7 @@ mod regression {
     use super::*;
     use crate::analytics::record::MarketPlanIdentity;
     use crate::market_observer::truth::LiquidationType;
+    use std::fs;
     include!("econ_a2_tests.rs");
     include!("econ_a3_tests.rs");
     include!("econ_a6_tests.rs");
@@ -1206,49 +1213,43 @@ mod regression {
         fs::copy(&fixture, &shadow).unwrap();
         let mut event = row(&r, 10, 0).market;
         event.block_time = Some(101);
-        let input = run.join("replay_market.jsonl");
-        fs::write(
-            &input,
-            format!("{}\n", serde_json::to_string(&event).unwrap()),
-        )
-        .unwrap();
-        let plan = MeasurementPlan::new(61).unwrap();
-        let scope = ReplayScope {
-            capture_start_ns: None,
+        let ctx = JoinContext {
+            market_commitment: "UNKNOWN",
+            slot_first_seen: None,
+            capture: None,
             capital: &CAPITAL_USD,
         };
-        let out = run.join("out");
-        replay(&input, &shadow, &out, &plan, 100_000_000_000, 30, &scope).unwrap();
-        let fin: Value =
-            serde_json::from_slice(&fs::read(out.join("economics_final.json")).unwrap()).unwrap();
-        assert_eq!(
-            fin["cumulative"]["loss_attribution_model"],
-            LOSS_ATTRIBUTION_EARLIER_RECORDS
+        let deadline = || std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let joined = join(vec![event.clone()], &shadow, deadline(), &ctx).unwrap();
+        assert_eq!(joined.earlier_attribution_records, 1);
+        // The native backtest labels the summary with the earlier model.
+        let rows: Vec<_> = joined
+            .rows
+            .iter()
+            .map(crate::analytics::backtest::row_of)
+            .collect();
+        let refs: Vec<_> = rows.iter().collect();
+        let params = crate::analytics::backtest::Params {
+            min_profit_usd_micro: 0,
+            capital_usd_micro: vec![1_000_000],
+            funding: vec![],
+        };
+        let c = crate::analytics::backtest::counterfactual(
+            &refs,
+            &params,
+            crate::analytics::backtest::loss_model(joined.earlier_attribution_records),
         );
-        assert_eq!(fin["cumulative"]["loss_attribution"]["ROUTING"]["count"], 1);
-        assert_eq!(fin["cumulative"]["loss_attribution"]["PLAN"]["count"], 0);
-        // A JSONL line (before PERSIST-01) is of the earlier writer too: a newer cause is forged.
-        let mut forged = r.clone();
-        forged.loss = Some(LossReason::Safety);
+        assert_eq!(c.loss_attribution_model, LOSS_ATTRIBUTION_EARLIER_RECORDS);
+        assert_eq!(c.loss_attribution.get("ROUTING"), Some(&1));
+        assert_eq!(c.loss_attribution.get("PLAN"), None);
+        // A JSONL evaluation file (before PERSIST-01) is historical evidence: never a join input.
         let legacy = run.join("legacy.jsonl");
-        fs::write(
-            &legacy,
-            format!("{}\n", serde_json::to_string(&forged).unwrap()),
-        )
-        .unwrap();
+        fs::write(&legacy, b"{}\n").unwrap();
         assert_eq!(
-            replay(
-                &input,
-                &legacy,
-                &run.join("forged"),
-                &plan,
-                100_000_000_000,
-                30,
-                &scope
-            )
-            .err()
-            .as_deref(),
-            Some("SHADOW_DECODE")
+            join(vec![event], &legacy, deadline(), &ctx)
+                .err()
+                .as_deref(),
+            Some("SHADOW_HISTORICAL_JSONL_INPUT")
         );
         let _ = fs::remove_dir_all(run);
     }
@@ -1442,135 +1443,60 @@ mod regression {
         assert_eq!(earlier.technical_status, TECHNICAL_NOT_RECORDED);
     }
 
+    /// The native join over the live writer's typed evaluation journal selects exactly what the
+    /// live selector selected (identical row facts); a JSONL evaluation file — alone or beside a
+    /// binary journal — is refused, never merged, guessed or read; events without any
+    /// evaluation journal fail closed.
     #[test]
-    fn offline_replay_uses_same_selector_and_exact_odd_plan_boundaries() {
+    fn native_join_uses_the_live_selector_and_refuses_jsonl() {
         let mut w = worker();
         let r = identified();
         w.accept(Evidence::Shadow(Box::new(r.clone()))).unwrap();
         let mut event = row(&r, 10, 0).market;
         event.block_time = Some(101);
-        let input = w.h.cfg.run_dir.join("replay_market.jsonl");
-        fs::write(
-            &input,
-            format!("{}\n", serde_json::to_string(&event).unwrap()),
-        )
-        .unwrap();
-        let out = w.h.cfg.run_dir.join("offline_replay");
-        let plan = MeasurementPlan::new(61).unwrap();
-        replay(
-            &input,
-            &w.h.cfg.run_dir.join("shadow_evaluations.jsonl"),
-            &out,
-            &plan,
-            100_000_000_000,
-            30,
-            &ReplayScope {
-                capture_start_ns: None,
-                capital: &CAPITAL_USD,
-            },
-        )
-        .unwrap();
-        let got: Value = serde_json::from_str(
-            fs::read_to_string(out.join("canonical_market_shadow.jsonl"))
-                .unwrap()
-                .trim(),
-        )
-        .unwrap();
+        let shadow = journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl"));
+        let commitment = row(&r, 10, 0).market_commitment;
+        let ctx = JoinContext {
+            market_commitment: &commitment,
+            slot_first_seen: None,
+            capture: None,
+            capital: &CAPITAL_USD,
+        };
+        let deadline = || std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let joined = join(vec![event.clone()], &shadow, deadline(), &ctx).unwrap();
         let mut expected = vec![row(&r, 10, 0)];
-        expected[0].market = event;
+        expected[0].market = event.clone();
         assign_record(&mut expected, &r);
+        assert_eq!(joined_facts(&joined.rows[0]), joined_facts(&expected[0]));
         assert_eq!(
-            got["economic_net_usd"],
-            joined_value(&expected[0])["economic_net_usd"]
-        );
-        assert_eq!(
-            got["join"]["identity_status"],
+            joined.rows[0].identity_status,
             "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT"
         );
-        for i in 1..=4 {
-            let v: Value =
-                serde_json::from_reader(File::open(out.join(format!("hour_{i:02}.json"))).unwrap())
-                    .unwrap();
-            assert_eq!(v["cutoff_unix_ns"], 100_000_000_000u64 + plan.offset_ns(i));
-            assert_eq!(v["cumulative"]["market"]["ALL"]["events"], 1);
-            assert_eq!(v["master_pass"], false);
-        }
-        assert!(replay(
-            &input,
-            &w.h.cfg.run_dir.join("shadow_evaluations.jsonl"),
-            &out,
-            &plan,
-            100_000_000_000,
-            30,
-            &ReplayScope {
-                capture_start_ns: None,
-                capital: &CAPITAL_USD,
-            },
-        )
-        .is_err());
-        // Runs before PERSIST-01 keep their JSONL stream: same replay, byte-identical renders.
+        assert_eq!(joined.earlier_attribution_records, 0);
         let legacy_dir = w.h.cfg.run_dir.join("legacy");
         fs::create_dir(&legacy_dir).unwrap();
         let legacy = legacy_dir.join("shadow_evaluations.jsonl");
-        fs::write(&legacy, format!("{}\n", serde_json::to_string(&r).unwrap())).unwrap();
-        let from_legacy = w.h.cfg.run_dir.join("offline_replay_legacy");
-        replay(
-            &input,
-            &legacy,
-            &from_legacy,
-            &plan,
-            100_000_000_000,
-            30,
-            &ReplayScope {
-                capture_start_ns: None,
-                capital: &CAPITAL_USD,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            fs::read(out.join("canonical_market_shadow.jsonl")).unwrap(),
-            fs::read(from_legacy.join("canonical_market_shadow.jsonl")).unwrap()
-        );
-        // V9/V17: the JSONL records were attributed by the earlier writer, and say so; every
-        // other figure is identical.
-        let fin = |dir: &std::path::Path| -> Value {
-            serde_json::from_slice(&fs::read(dir.join("economics_final.json")).unwrap()).unwrap()
-        };
-        let (current, mut earlier) = (fin(&out), fin(&from_legacy));
-        for section in ["cumulative", "window_delta"] {
+        fs::write(&legacy, b"{}\n").unwrap();
+        for _ in 0..2 {
             assert_eq!(
-                current[section]["loss_attribution_model"],
-                LOSS_ATTRIBUTION_MODEL
+                join(vec![event.clone()], &legacy, deadline(), &ctx)
+                    .err()
+                    .as_deref(),
+                Some("SHADOW_HISTORICAL_JSONL_INPUT")
             );
-            assert_eq!(
-                earlier[section]["loss_attribution_model"],
-                LOSS_ATTRIBUTION_EARLIER_RECORDS
-            );
-            earlier[section]["loss_attribution_model"] = LOSS_ATTRIBUTION_MODEL.into();
+            // Beside a binary journal it is refused as well.
+            let _ = fs::copy(&shadow, journal::binary_path(&legacy));
         }
-        assert_eq!(current, earlier);
-        // Both sources at once are ambiguous, never merged or guessed.
-        fs::copy(
-            journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl")),
-            journal::binary_path(&legacy),
-        )
-        .unwrap();
         assert_eq!(
-            replay(
-                &input,
-                &legacy,
-                &w.h.cfg.run_dir.join("ambiguous"),
-                &plan,
-                100_000_000_000,
-                30,
-                &ReplayScope {
-                    capture_start_ns: None,
-                    capital: &CAPITAL_USD,
-                },
+            join(
+                vec![event],
+                &legacy_dir.join("absent.p0j"),
+                deadline(),
+                &ctx
             )
             .err()
             .as_deref(),
-            Some("AMBIGUOUS_SHADOW_SOURCE")
+            Some("SHADOW_JOURNAL_MISSING")
         );
     }
     #[test]
@@ -1970,16 +1896,16 @@ pub struct JoinOutcome {
     pub rows: Vec<Joined>,
     /// Whether an evaluation journal existed (absence with events present is an error).
     pub shadow_available: bool,
-    /// V9/V17: joined evaluations written before V9/V17 (schema ≤ 2 frames or JSONL lines),
-    /// attributed under the earlier model.
+    /// V9/V17: joined evaluations of an earlier typed writer (schema 2 frames), attributed
+    /// under the earlier model.
     pub earlier_attribution_records: u64,
 }
 
 /// The production episode/plan selector over finalized events and the run's evaluation stream:
-/// the binary journal (`shadow_evaluations.p0j` and its linked segments) or, for runs before
-/// PERSIST-01, their JSONL file. One bounded streaming pass; no RPC repricing/re-simulation and
-/// no synthetic evaluation when the original capture lost data. Used by the offline replay and
-/// the native report (B7).
+/// the typed binary journal (`shadow_evaluations.p0j` and its linked segments) only — a JSONL
+/// evaluation file or a schema-1 value frame is refused (JFI-01/03), never read. One bounded
+/// streaming pass; no RPC repricing/re-simulation and no synthetic evaluation when the original
+/// capture lost data. Used by the native report (B7) and the native backtest.
 /// A3: the capture window an evaluation must lie in to join, the rule of the live chain
 /// (`Worker::hour`): monotone `capture_start_ns`/`capture_cutoff_ns` and the plan.
 #[derive(Clone, Copy)]
@@ -1989,7 +1915,7 @@ pub struct CaptureFilter<'a> {
     pub cutoff_ns: u64,
 }
 impl CaptureFilter<'_> {
-    fn admits(&self, rec: &OpportunityRecord) -> bool {
+    pub(crate) fn admits(&self, rec: &OpportunityRecord) -> bool {
         rec.timing
             .t_rx_ns
             .and_then(|t| live_hour(self.plan, self.start_ns, self.cutoff_ns, t))
@@ -2014,7 +1940,6 @@ pub fn join(
     deadline: std::time::Instant,
     ctx: &JoinContext,
 ) -> Result<JoinOutcome, String> {
-    use std::io::BufRead;
     let mut grouped: BTreeMap<String, Vec<Joined>> = BTreeMap::new();
     let mut seen = BTreeSet::new();
     let count = events.len();
@@ -2060,11 +1985,11 @@ pub fn join(
     } else {
         journal::binary_path(shadow_path)
     };
-    let legacy = binary != shadow_path && shadow_path.exists();
-    if binary.exists() && legacy {
-        return Err("AMBIGUOUS_SHADOW_SOURCE".into());
+    if binary != shadow_path && shadow_path.exists() {
+        // A pre-PERSIST-01 JSONL evaluation file is historical evidence, never a join input.
+        return Err("SHADOW_HISTORICAL_JSONL_INPUT".into());
     }
-    let available = binary.exists() || legacy;
+    let available = binary.exists();
     // V9/V17: an earlier writer never wrote a cause added since; such a record is forged.
     let earlier = |rec: &OpportunityRecord| {
         if rec.loss.is_some_and(LossReason::since_exhaustive_v2) {
@@ -2087,18 +2012,14 @@ pub fn join(
             }
             match frame.kind {
                 journal::kind::ECON_SHADOW_EVALUATION => {
-                    // Typed frames (JFI-FIX-05); historical schema-1 value trees stay readable.
-                    let rec: OpportunityRecord = if frame.schema == 1 {
-                        serde_json::from_value(
-                            frame.legacy_value().map_err(|_| "SHADOW_DECODE")?["record"].take(),
-                        )
+                    // Typed frames only (JFI-FIX-05); a schema-1 value tree is historical.
+                    if frame.schema == 1 {
+                        return Err("SHADOW_HISTORICAL_SCHEMA_1".into());
+                    }
+                    let rec: OpportunityRecord = frame
+                        .typed::<super::ShadowEvaluation>()
                         .map_err(|_| "SHADOW_DECODE")?
-                    } else {
-                        frame
-                            .typed::<super::ShadowEvaluation>()
-                            .map_err(|_| "SHADOW_DECODE")?
-                            .record
-                    };
+                        .record;
                     let from_earlier_writer = frame.schema
                         < <super::ShadowEvaluation as crate::analytics::payload::Payload>::SCHEMA;
                     if from_earlier_writer {
@@ -2118,34 +2039,6 @@ pub fn join(
                 _ => return Err("SHADOW_DECODE".into()),
             }
         }
-    } else if count > 0 {
-        let mut reader = BufReader::new(File::open(shadow_path).map_err(|_| "SHADOW_INPUT")?);
-        loop {
-            if std::time::Instant::now() >= deadline {
-                return Err("REPLAY_TIME_BUDGET".into());
-            }
-            let mut line = Vec::new();
-            let len = (&mut reader)
-                .take(16 * 1024 * 1024 + 1)
-                .read_until(b'\n', &mut line)
-                .map_err(|_| "SHADOW_READ")?;
-            if len == 0 {
-                break;
-            }
-            if len > 16 * 1024 * 1024 || line.last() != Some(&b'\n') {
-                return Err("REPLAY_ROW_BUDGET".into());
-            }
-            let rec: OpportunityRecord =
-                serde_json::from_slice(&line).map_err(|_| "SHADOW_DECODE")?;
-            earlier(&rec)?;
-            if ctx.capture.is_some_and(|c| !c.admits(&rec)) {
-                continue;
-            }
-            if let Some(rows) = grouped.get_mut(&rec.account) {
-                assign_record(rows, &rec);
-                earlier_attribution_records += 1;
-            }
-        }
     }
     let mut rows: Vec<_> = grouped.into_values().flatten().collect();
     rows.sort_by_key(|r| {
@@ -2160,128 +2053,4 @@ pub fn join(
         shadow_available: available,
         earlier_attribution_records,
     })
-}
-
-/// Run inputs of the offline replay beyond its event and evaluation files: A3 the monotone
-/// capture start (`None`: no evaluation window), A6 the run's capital scenarios.
-pub struct ReplayScope<'a> {
-    pub capture_start_ns: Option<u64>,
-    pub capital: &'a [u64],
-}
-
-/// Offline replay uses the identical production episode/plan selector and
-/// economics/attribution functions. It cannot call a provider or submit a TX.
-pub(super) fn replay(
-    market_path: &Path,
-    shadow_path: &Path,
-    out: &Path,
-    plan: &MeasurementPlan,
-    start_ns: u64,
-    max_seconds: u64,
-    scope: &ReplayScope,
-) -> Result<(), String> {
-    use std::io::BufRead;
-    plan.validate()?;
-    let capital = scope.capital;
-    let capture = scope
-        .capture_start_ns
-        .map(|start| {
-            plan.cutoff(start).map(|cutoff_ns| CaptureFilter {
-                plan,
-                start_ns: start,
-                cutoff_ns,
-            })
-        })
-        .transpose()?;
-    if max_seconds == 0 || max_seconds > 7200 {
-        return Err("REPLAY_TIME_BUDGET".into());
-    }
-    let deadline = std::time::Instant::now() + Duration::from_secs(max_seconds);
-    let mut events = Vec::new();
-    let mut reader = BufReader::new(File::open(market_path).map_err(|_| "MARKET_INPUT")?);
-    loop {
-        if std::time::Instant::now() >= deadline {
-            return Err("REPLAY_TIME_BUDGET".into());
-        }
-        let mut line = Vec::new();
-        let len = (&mut reader)
-            .take(16 * 1024 * 1024 + 1)
-            .read_until(b'\n', &mut line)
-            .map_err(|_| "MARKET_READ")?;
-        if len == 0 {
-            break;
-        }
-        if len > 16 * 1024 * 1024 || line.last() != Some(&b'\n') {
-            return Err("REPLAY_ROW_BUDGET".into());
-        }
-        let mut market: TruthEvent = serde_json::from_slice(&line).map_err(|_| "MARKET_DECODE")?;
-        market.discovery_source = "OFFLINE_FINALIZED_EVIDENCE".into();
-        market.economic_provenance = "PERSISTED_PROTOCOL_EVENT_AND_ACTUAL_TX_META".into();
-        events.push(market);
-        if events.len() > 100_000 {
-            return Err("REPLAY_MARKET_CAPACITY".into());
-        }
-    }
-    let JoinOutcome {
-        rows,
-        shadow_available: available,
-        earlier_attribution_records,
-    } = join(
-        events,
-        shadow_path,
-        deadline,
-        // An explicit event file has neither a capture start record nor slot receipts.
-        &JoinContext {
-            market_commitment: "UNKNOWN",
-            slot_first_seen: None,
-            capture,
-            capital,
-        },
-    )?;
-    fs::create_dir_all(out).map_err(|_| "REPLAY_OUTPUT")?;
-    let file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(out.join("canonical_market_shadow.jsonl"))
-        .map_err(|_| "REPLAY_OUTPUT_EXISTS")?;
-    let mut writer = BufWriter::new(file);
-    for row in &rows {
-        line(&mut writer, &joined_value(row))?;
-    }
-    writer.flush().map_err(|_| "REPLAY_WRITE")?;
-    let bucket = |r: &Joined| {
-        r.market
-            .block_time
-            .and_then(|t| u64::try_from((t as i128) * 1_000_000_000 - start_ns as i128).ok())
-            .and_then(|n| plan.chain_bucket(n))
-    };
-    // V9/V17: a summary over evaluations of the earlier writer is labelled with their model.
-    let summary = |rows: &[&Joined], span: f64, unassigned: usize| {
-        let mut s = summarize(rows, span, unassigned, true, capital);
-        if earlier_attribution_records > 0 {
-            s.loss_attribution_model = LOSS_ATTRIBUTION_EARLIER_RECORDS.into();
-        }
-        s
-    };
-    for i in 1..=SNAPSHOT_COUNT {
-        let cumulative: Vec<_> = rows
-            .iter()
-            .filter(|r| bucket(r).is_some_and(|b| b < i))
-            .collect();
-        let delta: Vec<_> = rows.iter().filter(|r| bucket(r) == Some(i - 1)).collect();
-        let unassigned = rows.iter().filter(|r| bucket(r).is_none()).count();
-        let value = json!({"schema":"C0-E1/OfflineCanonicalEconomics/1","scope":"EXPLICIT_FINALIZED_EVENT_INPUT; verification coverage is separate",
-            "start_unix_ns":start_ns,"cutoff_unix_ns":start_ns+plan.offset_ns(i),"plan":plan,
-            "cumulative":summary(&cumulative,plan.span_seconds(0,i),unassigned),
-            "window_delta":summary(&delta,plan.span_seconds(i-1,i),unassigned),
-            "capital_usd":capital,
-            "race_margins":race_margins(&cumulative,"UNKNOWN",false),
-            "evaluation_window":if capture.is_some() {"CAPTURE_WINDOW_MONOTONIC: only evaluations the live chain admits"} else {"NOT_APPLIED: no monotone capture start given; every evaluation frame joins"},
-            "raw_shadow_available":available,"live_enabled":false,"master_pass":false});
-        atomic_json(&out.join(format!("hour_{i:02}.json")), &value)?;
-        if i == SNAPSHOT_COUNT {
-            atomic_json(&out.join("economics_final.json"), &value)?;
-        }
-    }
-    Ok(())
 }

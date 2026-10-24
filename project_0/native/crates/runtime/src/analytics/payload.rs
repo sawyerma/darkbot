@@ -636,6 +636,12 @@ macro_rules! typed_kinds {
             k::MARKET_SUMMARY => $f::<crate::market::observer::MarketFinal>($kind, $schema, $bytes),
             k::REPORT_DATASET => $f::<super::report::DatasetRecord>($kind, $schema, $bytes),
             k::REPORT_QUERY => $f::<super::report::QueryRecord>($kind, $schema, $bytes),
+            k::BACKTEST_HEADER => $f::<super::backtest::BacktestHeader>($kind, $schema, $bytes),
+            k::BACKTEST_ROW => $f::<super::backtest::BacktestRow>($kind, $schema, $bytes),
+            k::BACKTEST_SUMMARY => $f::<super::backtest::BacktestSummary>($kind, $schema, $bytes),
+            k::OPTIMIZE_RESULT => $f::<super::backtest::OptimizeResult>($kind, $schema, $bytes),
+            k::BACKTEST_PROFILE => $f::<super::backtest::Profile>($kind, $schema, $bytes),
+            k::BACKTEST_ATTEMPT => $f::<super::backtest::Attempt>($kind, $schema, $bytes),
             k::C0E1_QUALIFICATION => {
                 $f::<super::qualification::QualificationRecord>($kind, $schema, $bytes)
             }

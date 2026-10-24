@@ -62,7 +62,8 @@ ARTIFACTS={  # logical name: (V1 path, V2 path); None = not part of that layout,
 }
 CONFIG_PARTS=('measurement_plan','measurement_config','operational_config','verification_preflight','storage_preflight','candidate_manifest')
 CONFIG_REQUIRED=('measurement_plan','storage_preflight','candidate_manifest')
-MESSAGES={'RUN_STORE_INVALID':'P0_RUN_STORE must be legacy or runs; run kind must be econ4h or market; layout must be v1 or v2',
+MESSAGES={'NATIVE_RUN_REFUSED':'a run with native records (run_manifest.p0j) is read natively (p0ctl report/verify/backtest); the pinned readers serve historical runs only',
+          'RUN_STORE_INVALID':'P0_RUN_STORE must be legacy or runs; run kind must be econ4h or market; layout must be v1 or v2',
           'RUN_ROOT_CONFLICT':'explicit output directory contradicts P0_RUN_STORE=runs',
           'RUN_ID_INVALID':'run id must be 1-128 characters of A-Z a-z 0-9 _ -',
           'RUN_ID_COLLISION':'run id already exists; runs are never reused or overwritten',
@@ -200,6 +201,13 @@ def locate_run(value,project=PROJECT):
     detect_layout(run)
     return run
 
+def refuse_native(args):
+    """JFI-01/03: a pinned reader never runs on a run with native records (no fallback)."""
+    for i,a in enumerate(args):
+        run=args[i+1] if a=='--run' and i+1<len(args) else a[6:] if a.startswith('--run=') else None
+        if run and ((Path(run)/'capture'/'run_manifest.p0j').exists() or (Path(run)/'run_manifest.p0j').exists()):
+            raise RunStoreError('NATIVE_RUN_REFUSED')
+
 def run_arguments(argv,project=PROJECT):
     """Replace `--run ID|PATH` and `--run=ID|PATH` by the located run directory."""
     if '--help' in argv or '-h' in argv:return list(argv)
@@ -217,7 +225,7 @@ def main(argv):
     """Prints absolute paths (or the layout); exec TARGET.py ARGS... runs a reader with --run located."""
     try:
         if len(argv)>=2 and argv[0]=='exec':
-            args=run_arguments(argv[2:]);os.execv(sys.executable,[sys.executable,argv[1],*args])
+            args=run_arguments(argv[2:]);refuse_native(args);os.execv(sys.executable,[sys.executable,argv[1],*args])
         n=len(argv);cmd=argv[0] if argv else None
         if n in (2,3) and cmd=='root':print(run_root(argv[1],argv[2] if n==3 else None))
         elif n in (2,3) and cmd=='layout':print(run_layout(argv[1],argv[2] if n==3 else None))

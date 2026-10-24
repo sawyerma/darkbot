@@ -141,13 +141,16 @@ class Qualification(unittest.TestCase):
                  'artifacts':{'batch':{'path':str(checkpoint.relative_to(self.run)),'sha256':c.file_hash(checkpoint)}}}
         result={**payload,'verification_result_id':c.digest(payload)}
         out,manifest=r.normalize(self.run,result)
-        self.assertEqual(manifest['economics_replay']['status'],'PASS',manifest['economics_replay'])
+        # JFI-01/03: no Python→Rust JSONL replay; the economics replay is native only.
+        self.assertEqual(manifest['economics_replay']['status'],'NOT_RUN',manifest['economics_replay'])
+        self.assertTrue(manifest['economics_replay']['reason'].startswith('NATIVE_ONLY'))
         self.assertEqual(manifest['live_coverage_status'],'LIVE_COVERAGE_INCOMPLETE')
         final=json.loads((out/'economics_final.json').read_text())
         self.assertEqual(final['market_total_liquidations'],1)
-        self.assertEqual(final['economics']['cumulative']['market']['ALL']['events'],1)
+        self.assertEqual(final['economics']['status'],'UNKNOWN')
         self.assertFalse(final['master_pass']);self.assertFalse(final['live_enabled'])
-        self.assertEqual(len(final['economics']['cumulative']['capital']),6)
+        self.assertFalse(any((self.run/'reports').rglob('canonical_events.jsonl')))
+        self.assertFalse(any((self.run/'reports').rglob('plan.json')))
         # A checkpoint with raw liquidation TXs but no canonical event cannot produce zero economics.
         (batchdir/'liquidations.jsonl').write_text('')
         batch['files']['liquidations.jsonl']=a.base58_encode(bytes.fromhex(c.file_hash(batchdir/'liquidations.jsonl')))
@@ -155,7 +158,7 @@ class Qualification(unittest.TestCase):
         partial={**payload,'artifacts':{'batch':{'path':str(second.relative_to(self.run)),'sha256':c.file_hash(second)}}}
         partial={**partial,'verification_result_id':c.digest(partial)}
         partial_out,partial_manifest=r.normalize(self.run,partial)
-        self.assertEqual(partial_manifest['economics_replay']['reason'],'CANONICAL_EVENT_INPUT_MISMATCH')
+        self.assertEqual(partial_manifest['economics_replay']['status'],'NOT_RUN')
         self.assertEqual(json.loads((partial_out/'economics_final.json').read_text())['economics']['status'],'UNKNOWN')
         (batchdir/'transactions.jsonl').write_text('{}\n')
         with self.assertRaisesRegex(c.ContractError,'STRICT_BATCH_EVIDENCE_CHANGED'):r.normalize(self.run,result)

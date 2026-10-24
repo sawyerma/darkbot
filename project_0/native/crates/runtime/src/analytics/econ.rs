@@ -10,8 +10,7 @@ use darkbot_common::timing::Clock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -22,9 +21,11 @@ mod canonical;
 #[path = "econ_docs.rs"]
 mod docs;
 pub use canonical::{
-    canonical_legacy_view, join as canonical_join, joined_facts, race_margins, record_digest,
+    canonical_legacy_view, executable_costs, join as canonical_join, joined_facts, race_margins,
+    record_digest,
     CanonicalSummary, CanonicalSummaryV3, CaptureFilter, JoinContext, JoinOutcome,
-    Joined as CanonicalJoin, JoinedFacts, RaceMargins, RaceMarginsV3, ReplayScope,
+    Joined as CanonicalJoin, JoinedFacts, RaceMargins, RaceMarginsV3,
+    LOSS_ATTRIBUTION_EARLIER_RECORDS, LOSS_ATTRIBUTION_MODEL,
 };
 pub use docs::*;
 
@@ -735,27 +736,6 @@ fn executable(rec: &OpportunityRecord) -> bool {
         && rec.simulation_result.as_deref() == Some("PASS")
         && rec.timing.t_sign_ns.is_some()
         && rec.timing.t_handoff_ns.is_none()
-}
-
-/// Only the offline replay (`p0-econ-replay`, input of the pinned `market_report.py`, JFI-03)
-/// writes JSON documents; the productive run writes typed journal frames only.
-pub fn atomic_json(path: &Path, value: &Value) -> Result<(), String> {
-    let tmp = path.with_extension("json.tmp");
-    let mut f = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&tmp)
-        .map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut f, value).map_err(|e| e.to_string())?;
-    f.write_all(b"\n")
-        .and_then(|_| f.sync_all())
-        .map_err(|e| e.to_string())?;
-    fs::rename(tmp, path).map_err(|e| e.to_string())
-}
-fn line(file: &mut BufWriter<File>, value: &impl Serialize) -> Result<(), String> {
-    serde_json::to_writer(&mut *file, value).map_err(|e| e.to_string())?;
-    file.write_all(b"\n").map_err(|e| e.to_string())
 }
 
 // The arrival sequence makes the original forward selected() reduction reproducible
@@ -2285,16 +2265,3 @@ impl Capital {
 #[cfg(test)]
 #[path = "econ_tests.rs"]
 pub(crate) mod tests;
-
-/// Exposes the existing canonical selector/economics to offline reporting only.
-pub fn replay_canonical(
-    market: &Path,
-    shadow: &Path,
-    out: &Path,
-    plan: &MeasurementPlan,
-    start_ns: u64,
-    max_seconds: u64,
-    scope: &ReplayScope,
-) -> Result<(), String> {
-    canonical::replay(market, shadow, out, plan, start_ns, max_seconds, scope)
-}

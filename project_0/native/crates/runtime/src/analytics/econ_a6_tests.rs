@@ -1,9 +1,9 @@
 // A6 (included in the canonical `regression` tests): the canonical capital report uses the run's
 // configured capital list live and offline.
 
-/// A6: with a custom capital list the canonical summary, the joined row view and the offline
-/// replay use exactly that list (identical fundable/blocked/unknown live and offline); the
-/// default stays the standard list and an invalid list is refused.
+/// A6: with a custom capital list the canonical summary, the joined row view and the native
+/// join use exactly that list; the backtest reads the same list (USD-micro); the default stays
+/// the standard list and an invalid list is refused.
 #[test]
 fn a6_canonical_capital_uses_the_configured_list_live_and_offline() {
     let custom = vec![150, 300];
@@ -27,30 +27,24 @@ fn a6_canonical_capital_uses_the_configured_list_live_and_offline() {
         .collect();
     assert_eq!(listed, custom);
 
-    let input = w.h.cfg.run_dir.join("a6_market.jsonl");
-    fs::write(&input, format!("{}\n", serde_json::to_string(&event).unwrap())).unwrap();
-    let out = w.h.cfg.run_dir.join("a6_replay");
-    let plan = MeasurementPlan::new(61).unwrap();
-    replay(
-        &input,
-        &w.h.cfg.run_dir.join("shadow_evaluations.jsonl"),
-        &out,
-        &plan,
-        100_000_000_000,
-        30,
-        &ReplayScope {
-                capture_start_ns: None,
-                capital: &custom,
-            },
+    // The native join carries the configured list; the backtest takes it in USD-micro.
+    let joined = join(
+        vec![event],
+        &journal::binary_path(&w.h.cfg.run_dir.join("shadow_evaluations.jsonl")),
+        std::time::Instant::now() + std::time::Duration::from_secs(10),
+        &JoinContext {
+            market_commitment: "UNKNOWN",
+            slot_first_seen: None,
+            capture: None,
+            capital: &custom,
+        },
     )
     .unwrap();
-    let v: Value =
-        serde_json::from_reader(File::open(out.join("economics_final.json")).unwrap()).unwrap();
-    assert_eq!(v["capital_usd"], json!(custom));
-    let offline: Vec<CanonicalCapital> =
-        serde_json::from_value(v["cumulative"]["capital"].clone()).unwrap();
-    assert_eq!(offline, live.capital, "fundable/blocked/unknown identical");
-
+    assert_eq!(joined.rows[0].capital, custom);
+    assert_eq!(
+        crate::analytics::backtest::parse_capital_usd("300,150").unwrap(),
+        vec![150_000_000, 300_000_000]
+    );
     assert_eq!(
         summarize(&[], 1., 0, true, &CAPITAL_USD)
             .capital

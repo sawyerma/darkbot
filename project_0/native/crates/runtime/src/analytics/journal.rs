@@ -72,6 +72,17 @@ pub mod kind {
     /// C0E1-P4-VC: the separate C0-E1 master qualification after the verification (PHASENPLAN
     /// L.2), a sealed single-value journal under `qualification/`.
     pub const C0E1_QUALIFICATION: u16 = 342;
+    /// Native backtest (STARTUP §4 C): one sealed journal per job under `reports/backtests/` —
+    /// its header (inputs, parameters, engine), one row per verified liquidation, the summary.
+    pub const BACKTEST_HEADER: u16 = 350;
+    pub const BACKTEST_ROW: u16 = 351;
+    pub const BACKTEST_SUMMARY: u16 = 352;
+    /// Native optimizer (STARTUP §4 E): one sealed single-value journal under `reports/optimize/`.
+    pub const OPTIMIZE_RESULT: u16 = 353;
+    /// Offline Shadow candidate profile (STARTUP §4 F), a sealed single-value journal.
+    pub const BACKTEST_PROFILE: u16 = 354;
+    /// A backtest's false positive: an executable evaluation without a verified liquidation.
+    pub const BACKTEST_ATTEMPT: u16 = 355;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -152,6 +163,12 @@ pub mod kind {
         REPORT_DATASET,
         REPORT_QUERY,
         C0E1_QUALIFICATION,
+        BACKTEST_HEADER,
+        BACKTEST_ROW,
+        BACKTEST_SUMMARY,
+        OPTIMIZE_RESULT,
+        BACKTEST_PROFILE,
+        BACKTEST_ATTEMPT,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,
@@ -198,6 +215,8 @@ pub mod source {
     pub const REPORT: u32 = 12;
     /// S1-02 operator source control (`p0ctl source set`).
     pub const SOURCE_CONTROL: u32 = 13;
+    /// Native backtest, optimizer and their profiles.
+    pub const BACKTEST: u32 = 14;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never

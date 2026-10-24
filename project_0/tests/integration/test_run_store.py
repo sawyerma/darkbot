@@ -213,12 +213,17 @@ class Launchers(unittest.TestCase):
                     # manifest, before either owner starts (no network contact).
                     self.assertEqual(p.returncode,2,p.stderr[-2000:])
                     run=project/root/run_id
-                    # JFI-03/PERSIST-04: the productive run wrote no JSON/JSONL. The pinned readers below (V2 detection
-                    # via manifest.json included) read the views of the explicit offline export.
+                    # JFI-01/03/PERSIST-04: the productive run wrote no JSON/JSONL, and p0ctl exports no JSON views
+                    # of a native run (no Rust→Python handoff).
                     self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
                     x=subprocess.run([str(REPO/'project_0/native/target/release/p0ctl'),'--project',str(project),'export','--run',str(run)],
                                      capture_output=True,text=True,timeout=60)
-                    self.assertEqual(x.returncode,0,x.stderr)
+                    self.assertEqual(x.returncode,2,x.stderr);self.assertIn('EXPORT_REFUSED',x.stderr)
+                    self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json','.jsonl')],[])
+                    # F4 (next unit): the remaining offline JSON renders of p0-journal; the views below come from it.
+                    p=subprocess.run([str(REPO/'project_0/native/target/release/p0-journal'),'renders',str(run),'--create'],
+                                     capture_output=True,text=True,timeout=60)
+                    self.assertEqual(p.returncode,0,p.stderr)
                     self.assertEqual(s.detect_layout(run),layout);self.assertEqual(a.find_run(str(run)),run.resolve())
                     manifest=json.loads(s.artifact(run,'manifest').read_text())  # written by the real Rust runtime
                     self.assertEqual(manifest['plan'],s.config_part(run,'measurement_plan'))
@@ -255,7 +260,8 @@ class Launchers(unittest.TestCase):
                     self.assertEqual(c.capture_identity(run)['capture_run_id'],run_id)
                     p=subprocess.run(['bash',str(project/'scripts/verify.sh'),'--run',run_id,'--offline','--mode','off'],
                                      env={**clean_env(),'P0_ENV_FILE':str(tmp/'absent.env')},capture_output=True,text=True,timeout=120,cwd=tmp)
-                    self.assertEqual(p.returncode,2);self.assertIn('CAPTURE_NOT_FINALIZED',p.stderr)  # real reader, incomplete capture
+                    # JFI-01/03: the pinned Python verifier never reads a native run (no fallback).
+                    self.assertEqual(p.returncode,2);self.assertIn('NATIVE_RUN_REFUSED',p.stderr)
             new=project/'data/runs/new_run'
             self.assertTrue(set(x.name for x in new.iterdir())<=set(s.V2_ROOT))
             self.assertEqual(json.loads((new/'config.json').read_text())['schema'],s.RUN_CONFIG_SCHEMA)

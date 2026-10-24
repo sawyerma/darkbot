@@ -797,4 +797,183 @@ mod report_e2e {
                 .starts_with("REPORT_FORMAT_JSON_REFUSED")
         );
     }
+
+    fn backtest_params() -> crate::analytics::backtest::Params {
+        crate::analytics::backtest::Params {
+            min_profit_usd_micro: 0,
+            capital_usd_micro: vec![1_000_000_000],
+            funding: vec![],
+        }
+    }
+
+    const BACKTEST_BUDGET: crate::analytics::backtest::Budget =
+        crate::analytics::backtest::Budget {
+            max_seconds: 60,
+            max_ram_bytes: 1 << 20,
+        };
+
+    /// Every file under `dir` (relative path) — for the no-JSON and unchanged-evidence checks.
+    fn files(dir: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push(p.strip_prefix(dir).unwrap().display().to_string());
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// The native backtest end to end over the V2 run: the typed capture, the strict result and
+    /// the Shadow chain in, one sealed typed result journal out (header, one row per verified
+    /// liquidation, summary). No JSON, JSONL or SQLite file exists before or after; capture and
+    /// verification stay byte-identical; a rerun is the same job with the same hash; another
+    /// parameter set is another job. The optimizer over the same rows is deterministic, bounded
+    /// and, without an actionable row, chooses nothing (NO_SAMPLE).
+    #[test]
+    fn native_backtest_reads_only_typed_evidence_and_is_reproducible() {
+        use crate::analytics::backtest;
+        let f = canonical_run(line!(), true);
+        let before = hashes(&f.run);
+        let p = backtest_params();
+        let a = backtest::backtest(&f.run, None, &p, BACKTEST_BUDGET).unwrap();
+        assert_eq!(a.summary.rows, 1);
+        assert_eq!(a.summary.observed.liquidations, 1);
+        assert_eq!(a.rows[0].signature, "liq-sig");
+        assert_eq!(a.rows[0].target, f.target);
+        assert_eq!(a.header.verification_status, "CANONICAL_VERIFIED");
+        assert_eq!(
+            Some(a.header.verification_result_id.clone()),
+            f.second.verification_result_id
+        );
+        // The receivership names no bank pair: the evaluation is a diagnostic, never a match.
+        assert_eq!(a.summary.counterfactual.matched, 0);
+        assert_eq!(a.rows[0].facts.loss_provenance, "TARGET_EPISODE_DIAGNOSTIC; executable identity unproven");
+        assert_eq!(a.summary.realized, backtest::REALIZED_NOT_RUN);
+        let again = backtest::backtest(&f.run, None, &p, BACKTEST_BUDGET).unwrap();
+        assert_eq!(again.summary, a.summary);
+        assert_eq!(again.path, a.path);
+        let mut r = journal::Reader::open(&a.path).unwrap();
+        let mut kinds = Vec::new();
+        while let Some(frame) = r.next_frame().unwrap() {
+            kinds.push(frame.kind);
+        }
+        assert!(r.sealed && r.complete);
+        use crate::analytics::journal::kind;
+        assert_eq!(
+            kinds,
+            [
+                kind::BACKTEST_HEADER,
+                kind::BACKTEST_ROW,
+                kind::BACKTEST_SUMMARY,
+                journal::MANIFEST
+            ]
+        );
+        let other = backtest::Params {
+            min_profit_usd_micro: 1,
+            ..p.clone()
+        };
+        let b = backtest::backtest(&f.run, None, &other, BACKTEST_BUDGET).unwrap();
+        assert_ne!(b.path, a.path);
+        assert_ne!(b.summary.result_sha256, a.summary.result_sha256);
+        let space = backtest::Space {
+            min_profit_usd_micro: vec![0, 1],
+            funding: vec![vec![]],
+            capital_usd_micro: vec![1_000_000_000],
+        };
+        let (o1, p1) =
+            backtest::optimize(&f.run, None, &p, &space, 5_000, 2, BACKTEST_BUDGET).unwrap();
+        let (o2, p2) =
+            backtest::optimize(&f.run, None, &p, &space, 5_000, 2, BACKTEST_BUDGET).unwrap();
+        assert_eq!((o1.result_sha256, &p1), (o2.result_sha256, &p2));
+        assert_eq!(o1.chosen, None, "no actionable training row: NO_SAMPLE");
+        assert_eq!(o1.train_rows + o1.holdout_rows, 1);
+        assert_eq!(
+            backtest::optimize(&f.run, None, &p, &space, 5_000, 1, BACKTEST_BUDGET)
+                .err()
+                .as_deref(),
+            Some("OPTIMIZE_GRID_OUT_OF_BOUNDS")
+        );
+        assert_eq!(hashes(&f.run), before, "capture and verification unchanged");
+        for file in files(&f.run) {
+            assert!(
+                !(file.ends_with(".json") || file.ends_with(".jsonl") || file.contains(".sqlite")),
+                "{file}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(f.d);
+    }
+
+    /// The backtest fails closed and writes nothing: an invalid or exceeded budget, an unknown
+    /// verification result, a changed verified batch, a changed capture (a legacy JSONL file
+    /// beside the Shadow journal) and a run without a verified result (BLOCKED).
+    #[test]
+    fn native_backtest_fails_closed_on_missing_or_changed_evidence() {
+        use crate::analytics::backtest::{self, Budget};
+        let p = backtest_params();
+        let f = canonical_run(line!(), true);
+        let refused = |run: &Path, wanted: Option<&str>, budget| {
+            backtest::backtest(run, wanted, &p, budget).err().unwrap()
+        };
+        let none = Budget {
+            max_seconds: 0,
+            ..BACKTEST_BUDGET
+        };
+        assert_eq!(refused(&f.run, None, none), "BACKTEST_BUDGET_INVALID");
+        let tiny = Budget {
+            max_ram_bytes: 1,
+            ..BACKTEST_BUDGET
+        };
+        assert_eq!(refused(&f.run, None, tiny), "BACKTEST_RAM_BUDGET");
+        assert_eq!(
+            refused(&f.run, Some("0000"), BACKTEST_BUDGET),
+            "RESULT_NOT_FOUND_OR_AMBIGUOUS"
+        );
+        let strict = f
+            .run
+            .join("verification")
+            .join(format!("{NATIVE_PREFIX}{}", f.second.verification_spec_id))
+            .join("strict");
+        let batch = std::fs::read_dir(&strict)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.is_file()
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("batch_") && n.ends_with(".p0j"))
+            })
+            .unwrap();
+        let mut bytes = std::fs::read(&batch).unwrap();
+        bytes.push(0);
+        std::fs::write(&batch, bytes).unwrap();
+        assert_eq!(refused(&f.run, None, BACKTEST_BUDGET), "RESULT_EVIDENCE_CHANGED");
+
+        let g = canonical_run(line!(), true);
+        std::fs::write(g.run.join("capture/shadow_evaluations.jsonl"), b"{}\n").unwrap();
+        assert_eq!(
+            refused(&g.run, None, BACKTEST_BUDGET),
+            "CAPTURE_EVIDENCE_CHANGED"
+        );
+
+        let h = canonical_run(line!(), true);
+        std::fs::remove_dir_all(h.run.join("verification")).unwrap();
+        assert_eq!(
+            refused(&h.run, None, BACKTEST_BUDGET),
+            "BACKTEST_BLOCKED: NO_VERIFIED_RESULT"
+        );
+        for run in [&f.run, &g.run, &h.run] {
+            assert!(!run.join(backtest::BACKTEST_DIR).exists(), "nothing written");
+        }
+        for d in [f.d, g.d, h.d] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
 }

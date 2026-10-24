@@ -245,7 +245,7 @@ fi
 cd "$REPO_ROOT"
 echo "C0-E1: build; capture starts after bootstrap and StreamReady; submission disabled"
 cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
-  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify --bin p0-econ-replay \
+  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0-strict-verify \
   --bin p0-journal --bin p0-capacity --bin p0ctl 2>&1 | tee "$LOG_DIR/build.log" || {
   echo "Build failed: $LOG_DIR/build.log" >&2; exit 2;
 }

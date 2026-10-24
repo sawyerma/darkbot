@@ -14,6 +14,9 @@
 //! p0ctl [--project DIR] run status [--run RUN_ID]
 //! p0ctl [--project DIR] run stop [--run RUN_ID]
 //! p0ctl [--project DIR] runs list
+//! p0ctl [--project DIR] backtest --run RUN_ID (--profile FILE | --capital-usd LIST [--min-profit-usd X] [--funding all|A,B]) --max-seconds N --max-ram-bytes N [--verification-result ID]
+//! p0ctl [--project DIR] optimize --run RUN_ID --capital-usd LIST [--min-profit-usd X] [--funding …] --min-profit-usd-grid X,Y --funding-sets all;A,B --holdout-bps N --max-points N --max-seconds N --max-ram-bytes N [--save-profile]
+//! p0ctl [--project DIR] profiles compare --run RUN_ID --baseline FILE --candidate FILE --max-seconds N --max-ram-bytes N
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|index|strict|crosscheck [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
 //! p0ctl [--project DIR] export  --run RUN_ID   (explicit offline legacy views for the pinned readers)
@@ -52,6 +55,12 @@
 //! that decision as the applied state. A Geyser unit can be OFF or OBSERVE; ACTIVE is refused
 //! without a qualification record.
 //!
+//! `backtest`, `optimize` and `profiles compare` (STARTUP §4 C–F) read a finalized V2 run's own
+//! `.p0j` evidence through the production join and admission (`analytics::backtest`): the job's
+//! sealed typed result lands under `reports/backtests|optimize/`; counterfactual Shadow results
+//! are never realized profit; a saved profile (`data/profiles/`) is an offline Shadow candidate,
+//! never a LIVE setting. No JSON, no Python, no network.
+//!
 //! `report` runs the native report (B7) for runs with native capture records (typed run
 //! manifest and market completion); index provenance, JSON output and historical runs use the
 //! pinned Python report. `qualify` is the separate C0-E1 master qualification after the
@@ -59,7 +68,7 @@
 //! and the owners' end, persists an immutable result and exits 0 only for `C0_E1_MASTER_PASS`.
 use darkbot_runner::analytics::journal;
 use darkbot_runner::analytics::measurement::RunHorizon;
-use darkbot_runner::analytics::{qualification, renders, report};
+use darkbot_runner::analytics::{backtest, qualification, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::orchestration::source_control;
@@ -481,14 +490,10 @@ fn run_status(project: &Path, args: &[String]) -> Result<bool, String> {
             println!("  market journal: {}", journal_line(&market));
         }
     }
-    let results = run.join("reports/post_capture_result.json");
     println!(
-        "  post-capture result: {}",
-        if results.exists() {
-            "present (reports/)"
-        } else {
-            "not yet written"
-        }
+        "  native report: {} · qualification: {}",
+        has_p0j(&run.join(report::REPORT_DIR)),
+        has_p0j(&run.join(qualification::QUALIFICATION_DIR))
     );
     for logs in [run.join("logs/runtime.log"), run.join("runtime.log")] {
         for line in log_tail(&logs) {
@@ -542,6 +547,20 @@ fn runs_list(project: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+/// `yes` when `dir` holds a typed `.p0j` record (the native post-capture outputs).
+fn has_p0j(dir: &Path) -> &'static str {
+    let any = std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| e.path().extension().is_some_and(|x| x == "p0j"))
+    });
+    if any {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
 fn run_rows(project: &Path, running: Option<&str>) -> Vec<String> {
     let mut runs: Vec<(String, &str, PathBuf)> = RUN_ROOTS
         .iter()
@@ -564,10 +583,11 @@ fn run_rows(project: &Path, running: Option<&str>) -> Vec<String> {
         .map(|(id, root, run)| {
             let has = |p: &str| if run.join(p).is_file() { "yes" } else { "no" };
             format!(
-                "{id}\troot={root}\tmanifest={}\tcompletion={}\tpost_capture={}{}",
+                "{id}\troot={root}\tmanifest={}\tcompletion={}\treport={}\tqualification={}{}",
                 has("capture/run_manifest.p0j"),
                 has("capture/market/market_completion.p0j"),
-                has("reports/post_capture_result.json"),
+                has_p0j(&run.join(report::REPORT_DIR)),
+                has_p0j(&run.join(qualification::QUALIFICATION_DIR)),
                 if running == Some(id.as_str()) {
                     "\tRUNNING"
                 } else {
@@ -588,9 +608,22 @@ fn stop_target(state: &OwnerState, wanted: Option<&str>) -> Result<(), String> {
     }
 }
 
+/// `flag VALUE`; a flag given without its value is an error, never ignored.
+fn given(args: &[String], flag: &str) -> Result<Option<String>, String> {
+    match args.iter().position(|a| a == flag) {
+        None => Ok(None),
+        Some(i) => args
+            .get(i + 1)
+            .filter(|v| !v.starts_with("--"))
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| format!("{flag} requires a value")),
+    }
+}
+
 fn run_stop(project: &Path, args: &[String]) -> Result<bool, String> {
     let state = control::owner_state(&lock_path(project))?;
-    stop_target(&state, value(args, "--run").as_deref())?;
+    stop_target(&state, given(args, "--run")?.as_deref())?;
     match state {
         OwnerState::NotRunning { .. } => {
             println!("NOT_RUNNING: nothing to stop");
@@ -612,18 +645,47 @@ fn run_stop(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
-    let native = value(args, "--run")
+/// A run with native records (a typed run manifest).
+fn native_run(run: &Path) -> bool {
+    run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()
+}
+
+/// JFI-01/03: the pinned Python readers serve historical runs (no native records) only, and only
+/// on the explicit `--historical` request — never a fallback for a native run.
+fn historical(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
+    if value(args, "--run")
         .and_then(|r| find_run(project, &r))
-        .filter(|run| {
-            run.join("capture/run_manifest.p0j").is_file()
-                && run.join("capture/market/market_completion.p0j").is_file()
-        });
-    let pinned_only = value(args, "--report-provenance").as_deref() == Some("index")
-        || value(args, "--format").as_deref() == Some("json");
-    let Some(run) = native.filter(|_| !pinned_only) else {
-        return delegate(project, "report.sh", args);
+        .is_some_and(|run| native_run(&run))
+    {
+        return Err(format!(
+            "NATIVE_RUN_REFUSED: {script} is the pinned reader of historical runs; a native run is read natively"
+        ));
+    }
+    if !args.iter().any(|a| a == "--historical") {
+        return Err(format!(
+            "HISTORICAL_READER_REQUIRES_OPT_IN: {script} reads historical runs only; add --historical"
+        ));
+    }
+    let rest: Vec<String> = args
+        .iter()
+        .filter(|a| *a != "--historical")
+        .cloned()
+        .collect();
+    delegate(project, script, &rest)
+}
+
+fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let Some(run) = value(args, "--run")
+        .and_then(|r| find_run(project, &r))
+        .filter(|run| native_run(run))
+    else {
+        return historical(project, "report.sh", args);
     };
+    if !run.join("capture/market/market_completion.p0j").is_file() {
+        return Err(
+            "CAPTURE_NOT_FINALIZED: a native run without MARKET_COMPLETION has no report".into(),
+        );
+    }
     let inv = report::parse_args(args)?;
     let out = report::report(&run, &inv.options, &inv.query)?;
     match inv.query.format {
@@ -636,19 +698,24 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
-/// C0E1-P5-CLI: one verify contract. A run with native records verifies `strict` and `off`
-/// through the typed native driver (the request `p0-strict-verify --run` takes: online strict
-/// only with `--provider-evidence`); `index`, `crosscheck` and historical runs use the pinned
-/// Python verifier.
+/// C0E1-P5-CLI: one verify contract. A run with native records verifies `strict` or `off` (an
+/// explicit `--mode`) through the typed native driver (the request `p0-strict-verify --run`
+/// takes: online strict only with `--provider-evidence`); `index`/`crosscheck` are refused for
+/// it. Only a historical run reaches the pinned Python verifier, on `--historical`.
 fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::market_observer::strict_driver;
-    let mode = value(args, "--mode").unwrap_or_else(|| "index".into());
-    let native = value(args, "--run")
+    let Some(run) = value(args, "--run")
         .and_then(|r| find_run(project, &r))
-        .filter(|run| run.join("capture/run_manifest.p0j").is_file());
-    let Some(run) = native.filter(|_| matches!(mode.as_str(), "strict" | "off")) else {
-        return delegate(project, "verify.sh", args);
+        .filter(|run| native_run(run))
+    else {
+        return historical(project, "verify.sh", args);
     };
+    let mode = value(args, "--mode").ok_or("VERIFY_MODE_REQUIRED: --mode strict|off")?;
+    if !matches!(mode.as_str(), "strict" | "off") {
+        return Err(format!(
+            "VERIFY_MODE_REFUSED: {mode} exists only as the pinned historical reader; a native run verifies strict or off"
+        ));
+    }
     let mut request = vec!["--run".to_string(), run.display().to_string()];
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -707,17 +774,13 @@ fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 fn export_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     let wanted = value(args, "--run").ok_or("export --run ID|PATH required")?;
     let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
-    if !(run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()) {
-        println!(
-            "EXPORT_NOT_NEEDED: {} has no native run manifest",
-            run.display()
-        );
-        return Ok(true);
+    if native_run(&run) {
+        return Err("EXPORT_REFUSED: a native run is read natively (report, backtest); no JSON views of its journals are written (JFI-01/03)".into());
     }
-    let paths = renders::detect(&run)?;
-    for (path, status) in renders::ensure(&paths, true)? {
-        println!("{status} {}", path.display());
-    }
+    println!(
+        "EXPORT_NOT_NEEDED: {} has no native run manifest",
+        run.display()
+    );
     Ok(true)
 }
 
@@ -782,6 +845,82 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         }
         _ => Err(SOURCE_USAGE.into()),
     }
+}
+
+fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {
+    let wanted = given(args, "--run")?.ok_or("--run ID|PATH required")?;
+    find_run(project, &wanted).ok_or_else(|| "RUN_NOT_FOUND_OR_AMBIGUOUS".into())
+}
+
+fn backtest_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let run = run_of(project, args)?;
+    let params = backtest::parse_params(&run, args)?;
+    let b = backtest::backtest(
+        &run,
+        given(args, "--verification-result")?.as_deref(),
+        &params,
+        backtest::parse_budget(args)?,
+    )?;
+    print!("{}", backtest::render_backtest(&b));
+    Ok(true)
+}
+
+fn optimize_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let run = run_of(project, args)?;
+    let baseline = backtest::parse_params(&run, args)?;
+    let space = backtest::parse_space(args, &baseline)?;
+    let (holdout_bps, max_points) = backtest::parse_search(args)?;
+    let (result, path) = backtest::optimize(
+        &run,
+        given(args, "--verification-result")?.as_deref(),
+        &baseline,
+        &space,
+        holdout_bps,
+        max_points,
+        backtest::parse_budget(args)?,
+    )?;
+    print!("{}", backtest::render_optimize(&result, &path));
+    if args.iter().any(|a| a == "--save-profile") {
+        match result.chosen {
+            Some(i) => {
+                let profile = backtest::Profile {
+                    params: space.points()[i as usize].clone(),
+                    origin: backtest::ORIGIN_OPTIMIZER.into(),
+                    optimize_job_id: Some(result.job_id.clone()),
+                };
+                let saved = profile.save(&project.join(backtest::PROFILE_DIR))?;
+                println!(
+                    "offline Shadow candidate profile (never a LIVE setting): {}",
+                    saved.display()
+                );
+            }
+            None => println!("no profile saved: no point chosen (NO_SAMPLE)"),
+        }
+    }
+    Ok(true)
+}
+
+/// `profiles compare`: both profiles backtested on the same run (same inputs, same engine).
+fn profiles_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    if args.first().map(String::as_str) != Some("compare") {
+        return Err("usage: p0ctl profiles compare --run RUN_ID --baseline FILE --candidate FILE --max-seconds N --max-ram-bytes N".into());
+    }
+    let run = run_of(project, args)?;
+    let budget = backtest::parse_budget(args)?;
+    let wanted = given(args, "--verification-result")?;
+    for side in ["--baseline", "--candidate"] {
+        let file = given(args, side)?.ok_or_else(|| format!("{side} FILE required"))?;
+        let profile = backtest::Profile::load(Path::new(&file))?;
+        let b = backtest::backtest(&run, wanted.as_deref(), &profile.params, budget)?;
+        println!(
+            "{} profile {} (origin {}):",
+            &side[2..],
+            profile.id()?,
+            profile.origin
+        );
+        print!("{}", backtest::render_backtest(&b));
+    }
+    Ok(true)
 }
 
 fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
@@ -1023,9 +1162,12 @@ fn main() -> ExitCode {
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
+            (Some("backtest"), _) => backtest_cmd(&project, &rest),
+            (Some("optimize"), _) => optimize_cmd(&project, &rest),
+            (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|export|qualify|post-capture|source|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|export|qualify|post-capture|source|backtest|optimize|profiles|approval|fe04 …".into()),
         }
     });
     match result {
@@ -1074,6 +1216,19 @@ mod tests {
         }
     }
 
+    /// A flag given without its value is an error, never an absent flag (`run stop --run`).
+    #[test]
+    fn a_flag_without_its_value_fails_closed() {
+        assert_eq!(
+            given(&strings(&["--run", "a"]), "--run"),
+            Ok(Some("a".into()))
+        );
+        assert_eq!(given(&strings(&["x"]), "--run"), Ok(None));
+        for bad in [&["--run"][..], &["--run", "--force"]] {
+            assert!(given(&strings(bad), "--run").is_err(), "{bad:?}");
+        }
+    }
+
     /// `run stop --run` never stops another run; without `--run` (or not running) it proceeds.
     #[test]
     fn stop_refuses_another_running_run() {
@@ -1102,12 +1257,14 @@ mod tests {
             std::fs::create_dir_all(project.join(run)).unwrap();
         }
         std::fs::write(project.join("data/econ4h/a/capture/run_manifest.p0j"), b"").unwrap();
+        std::fs::create_dir_all(project.join("data/econ4h/a/qualification")).unwrap();
+        std::fs::write(project.join("data/econ4h/a/qualification/q.p0j"), b"").unwrap();
         std::fs::write(project.join("data/runs/file"), b"").unwrap();
         assert_eq!(
             run_rows(&project, Some("b")),
             [
-                "a\troot=data/econ4h\tmanifest=yes\tcompletion=no\tpost_capture=no",
-                "b\troot=data/runs\tmanifest=no\tcompletion=no\tpost_capture=no\tRUNNING",
+                "a\troot=data/econ4h\tmanifest=yes\tcompletion=no\treport=no\tqualification=yes",
+                "b\troot=data/runs\tmanifest=no\tcompletion=no\treport=no\tqualification=no\tRUNNING",
             ]
         );
         std::fs::remove_dir_all(project).unwrap();

@@ -196,7 +196,7 @@ E01 (`reporter/Cargo.toml:21-27` `required-features = ["test-fixture"]`), E02 (`
 
 ## 11. Umsetzungsstand 25.10. — Einheit „nativer Backtest/Optimizer, Legacy-Entfernung, JFI-04“: UNFERTIG, NICHT KORREKT ABGESCHLOSSEN (CTRL-12: angehalten)
 
-**Einordnung:** Dies ist die begonnene Korrektur der Positionen **A02, A03, A04, A05, A08, A10/A11, A12/F-03, A13, B03, F-02, F-10, F-11** aus diesem Register. Sie gehört deshalb hierher, nicht nach `bug_v2.md`. **Stand (worktree `../DarkBot-project0`, HEAD `5f43fee8`): 19 geänderte, 1 gelöschte, 2 neue Dateien uncommittet (+675/−600 Zeilen), nichts gepusht; letzter gepushter Native-Code `15c34471`.** Nach CTRL-12 gilt: anhalten, Fundort und Ursache dokumentieren, im selben Ticket echte Lösung liefern, beide Vetoprüfer erneut, erst dann Commit/Push.
+**Einordnung:** Dies ist die begonnene Korrektur der Positionen **A02, A03, A04, A05, A08, A10/A11, A12/F-03, A13, B03, F-02, F-10, F-11** aus diesem Register. Sie gehört deshalb hierher, nicht nach `bug_v2.md`. **Stand (worktree `../DarkBot-project0`, HEAD `5f43fee8`): 19 geänderte, 1 gelöschte, 2 neue Dateien uncommittet (+675/−600 Zeilen), auf Nutzeranweisung 25.10. unverändert als WIP-Commit `wip(project0): backtest/optimizer …` auf `main` gepusht (Tests kompilieren nicht, Gate nicht gelaufen, Review offen); alle betroffenen Positionen bleiben OPEN bis §11.3 Schritte 2–9 erfüllt sind.** Nach CTRL-12 gilt: anhalten, Fundort und Ursache dokumentieren, im selben Ticket echte Lösung liefern, beide Vetoprüfer erneut, erst dann Commit/Push.
 
 ### 11.1 Was im Worktree tatsächlich vorliegt (read-only geprüft)
 
@@ -228,7 +228,7 @@ E01 (`reporter/Cargo.toml:21-27` `required-features = ["test-fixture"]`), E02 (`
 
 ### 11.3 Verbindliche Fertigstellung (Reihenfolge, je Schritt Nachweis)
 
-1. **STOP, kein Commit/Push** dieses Standes (CTRL-12). Keine weiteren Löschungen, bis 2–5 grün sind.
+1. ~~STOP, kein Commit/Push dieses Standes~~ — per Nutzer-Override 25.10. als WIP gepusht; ab jetzt nur Folgecommits, die 2–9 abarbeiten (CTRL-12). Keine weiteren Löschungen, bis 2–5 grün sind.
 2. **Tests nachziehen (U-1):** `backtest_tests.rs` und `report_tests.rs` auf die 4-/5-Parameter-Signaturen; Fail-before-Fälle erhalten (Fehlversuchskosten `NoChainEvent`/`LostRace`, `NOT_EVALUATED`-Safety, `BLOCKED` bei fehlender Capture-Uhr, Grid ≥ `P0_MIN_PROFIT`, gleiches Kapital Baseline/Grid, Flag-ohne-Wert, `--profile` exklusiv, atomare Ergebnisdatei + Wiederholungsvergleich).
 3. **U-3/U-4/U-7:** `test_measurement_plan.py` auf `.p0j`; Native-Guard in `p0-journal renders --create`; Native-Sperre auch bei Direktaufruf der Python-Leser; Schema-1-/JSONL-Ablehnungstest für `join()`; Routing-Tests für `verify`/`report`/`export`/`--historical` auf Binärebene; Texte aktualisieren.
 4. **U-8:** Kinds 350–355/Source 14 mit Schema-Version, Golden-Bytes, Ledger-Zeile; alte Reader unverändert lesbar.

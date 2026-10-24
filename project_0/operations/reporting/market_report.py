@@ -292,7 +292,6 @@ def normalize_locked(run,result=None):
         'normalizer_sha256':c.file_hash(Path(__file__)),
         'capture_run_id':evidence['capture_run_id'],'capture_digest':evidence['evidence_digest'],
         'decoder_sha256':c.file_hash(Path(a.__file__)),'contract_sha256':c.file_hash(Path(c.__file__)),
-        'replay_binary_sha256':c.file_hash(run_store.PROJECT/'native/target/release/p0-econ-replay') if (run_store.PROJECT/'native/target/release/p0-econ-replay').exists() else None,
         'verification_result_id':result['verification_result_id'] if result else None}
     key=c.digest(identity);out=run/'reports'/('dataset_'+key)
     final=out/'dataset.json'
@@ -315,7 +314,6 @@ def normalize_locked(run,result=None):
         for name in ('canonical_market_shadow','opportunity_economics'):
             for row in values(run_store.artifact(run,name,layout)):load_shadow(ds,row)
         replay=production_replay(run,result,work,ds,clock_origin)
-        for row in values(work/'economics/canonical_market_shadow.jsonl'):load_shadow(ds,row,replace_existing=True)
         ds.db.commit();count=0
         with (work/'all_records.jsonl').open('x') as f:
             cursor=ds.db.execute('SELECT entity,data FROM evidence ORDER BY entity,source,digest')
@@ -400,40 +398,9 @@ def measurement_plan(run,window):
 
 
 def production_replay(run,result,work,ds,clock_origin):
-    """Use original Rust canonical join/capital/loss functions on saved evidence."""
-    if not result or result['mode']!='strict':
-        return {'status':'NOT_RUN','reason':'FINALIZED_CANONICAL_EVENT_INPUT_UNAVAILABLE'}
-    window=a.read_window(run);plan=measurement_plan(run,window)
-    c.immutable(work/'plan.json',plan)
-    seen=set();included=set();count=0
-    with (work/'canonical_events.jsonl').open('x') as out:
-        for item in result['artifacts'].values():
-            checkpoint=run/item['path'];batch=json.loads(checkpoint.read_text())
-            for row in values(checkpoint.parent/batch['directory']/'liquidations.jsonl'):
-                if row.get('source')!='canonical_market_truth':continue
-                ev=row['event'];key=(ev['signature'],ev['slot'],ev['event_index'])
-                if key in seen:continue
-                seen.add(key)
-                bt=ev.get('block_time')
-                if type(bt) is not int or not window['start_ns']<=bt*a.NS<window['end_ns']:continue
-                receipt=ds.db.execute('SELECT ns FROM receipts WHERE sig=? AND slot=?',(ev['signature'],ev['slot'])).fetchone()
-                ev['live_t_rx_ns']=receipt[0] if receipt and type(clock_origin) is int else None
-                included.add(key);count+=1;out.write(json.dumps(ev)+'\n')
-    expected=set()
-    for (data,) in ds.db.execute("SELECT data FROM evidence WHERE source='strict' AND json_extract(data,'$.record_kind')='LIQUIDATION'"):
-        row=json.loads(data);bt=row.get('block_time')
-        if type(bt) is int and window['start_ns']<=bt*a.NS<window['end_ns']:
-            expected.add((row['signature'],row['slot'],row['event_index']))
-    if included!=expected:return {'status':'INCOMPLETE','reason':'CANONICAL_EVENT_INPUT_MISMATCH'}
-    binary=run_store.PROJECT/'native/target/release/p0-econ-replay'
-    if not binary.exists():return {'status':'NOT_RUN','reason':'ECON_REPLAY_BINARY_MISSING'}
-    with (work/'replay_stderr.txt').open('x') as err:
-        try:
-            p=subprocess.run([str(binary),str(work/'canonical_events.jsonl'),str(run_store.artifact(run,'shadow_evaluations')),
-                str(work/'economics'),str(work/'plan.json'),str(window['start_ns']),'300'],stderr=err,stdout=subprocess.DEVNULL,timeout=305)
-        except subprocess.TimeoutExpired:return {'status':'INCOMPLETE','reason':'REPLAY_TIME_BUDGET'}
-    return {'status':'PASS' if p.returncode==0 else 'INCOMPLETE','events':count,'binary_sha256':c.file_hash(binary),
-            'scope':'existing production canonical selector and economics; not coverage or LIVE qualification'}
+    """JFI-01/03: the economics replay is native only (`p0ctl backtest` over typed .p0j evidence);
+    a historical run has none, and no JSON/JSONL handoff to Rust is built."""
+    return {'status':'NOT_RUN','reason':'NATIVE_ONLY: p0ctl backtest reads typed .p0j evidence; historical runs have none'}
 
 
 def write_snapshots(run,out,manifest,economics):

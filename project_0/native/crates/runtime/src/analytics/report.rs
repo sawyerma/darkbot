@@ -1115,16 +1115,21 @@ fn completion_marker(hits: &[MarkerHit], kind: LiquidationType, target: &str) ->
 }
 
 /// A verification result of this capture, bound by an attempt to the current capture evidence.
-struct Selected {
-    spec_id: String,
-    result_id: String,
-    result: StrictResult,
-    dir: PathBuf,
+/// The strict verification result a report or backtest reads, bound to its capture.
+pub(crate) struct Selected {
+    pub(crate) spec_id: String,
+    pub(crate) result_id: String,
+    pub(crate) result: StrictResult,
+    pub(crate) dir: PathBuf,
     /// Last slot of the result's verified batches (later batches belong to other results).
-    last_slot: Option<u64>,
+    pub(crate) last_slot: Option<u64>,
 }
 
-fn select_result(c: &CaptureBinding, wanted: Option<&str>) -> Result<Option<Selected>, String> {
+/// `wanted`, else the latest result bound to the capture's evidence (`None`: no result).
+pub(crate) fn select_result(
+    c: &CaptureBinding,
+    wanted: Option<&str>,
+) -> Result<Option<Selected>, String> {
     let root = c.run.join("verification");
     let mut found: Vec<(u64, Selected)> = Vec::new();
     let Ok(entries) = std::fs::read_dir(&root) else {
@@ -1342,33 +1347,20 @@ fn load_live(b: &mut Builder, market: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Facts of the selected result's verified batches; returns its canonical events.
-fn load_strict(b: &mut Builder, sel: &Selected) -> Result<Vec<TruthEvent>, String> {
+/// The selected result's verified canonical events and related rows up to its last verified
+/// batch, fail closed on changed or (for a CANONICAL_VERIFIED result) incomplete evidence;
+/// `on_tx` sees each verified transaction row first.
+pub(crate) fn verified_events(
+    sel: &Selected,
+    on_tx: &mut dyn FnMut(&MarketTransaction) -> Result<(), String>,
+) -> Result<(Vec<TruthEvent>, Vec<MarketRelated>), String> {
     let Some(limit) = sel.last_slot else {
-        return Ok(vec![]);
+        return Ok((vec![], vec![]));
     };
     let mut failure: Option<String> = None;
     let report = strict::read_report_with(&sel.dir, &mut |row: &MarketTransaction| {
-        if failure.is_some() || row.slot > limit {
-            return;
-        }
-        if let TxOrigin::FullSlot {
-            transaction_index,
-            block_time,
-            tx,
-            ..
-        } = &row.origin
-        {
-            if let Err(e) = b.chain_tx(
-                Source::Strict,
-                &row.signature,
-                row.slot,
-                tx,
-                Some(*transaction_index),
-                *block_time,
-            ) {
-                failure = Some(e);
-            }
+        if failure.is_none() && row.slot <= limit {
+            failure = on_tx(row).err();
         }
     });
     if let Some(e) = failure {
@@ -1382,15 +1374,54 @@ fn load_strict(b: &mut Builder, sel: &Selected) -> Result<Vec<TruthEvent>, Strin
     if sel.result.status == StrictStatus::CanonicalVerified && !report.complete() {
         return Err("STRICT_EVIDENCE_INCOMPLETE".into());
     }
-    let events: Vec<TruthEvent> = report
+    let events = report
         .canonical
         .into_iter()
         .filter(|e| e.slot <= limit)
         .collect();
+    let related = report
+        .related
+        .into_iter()
+        .filter(|r| r.slot <= limit)
+        .collect();
+    Ok((events, related))
+}
+
+/// The events whose chain block time lies in the capture window `[start, end)` (unix ns).
+pub(crate) fn window_events(events: Vec<TruthEvent>, (start, end): (u64, u64)) -> Vec<TruthEvent> {
+    events
+        .into_iter()
+        .filter(|e| {
+            e.block_time.is_some_and(|t| {
+                let ns = i128::from(t) * NS;
+                ns >= i128::from(start) && ns < i128::from(end)
+            })
+        })
+        .collect()
+}
+
+/// Facts of the selected result's verified batches; returns its canonical events.
+fn load_strict(b: &mut Builder, sel: &Selected) -> Result<Vec<TruthEvent>, String> {
+    let (events, related) = verified_events(sel, &mut |row| match &row.origin {
+        TxOrigin::FullSlot {
+            transaction_index,
+            block_time,
+            tx,
+            ..
+        } => b.chain_tx(
+            Source::Strict,
+            &row.signature,
+            row.slot,
+            tx,
+            Some(*transaction_index),
+            *block_time,
+        ),
+        _ => Ok(()),
+    })?;
     for e in &events {
         b.canonical(e)?;
     }
-    for r in report.related.iter().filter(|r| r.slot <= limit) {
+    for r in &related {
         b.related(Source::Strict, r)?;
     }
     Ok(events)
@@ -1484,17 +1515,7 @@ pub fn normalize(run: &Path, opts: &Options) -> Result<Dataset, String> {
     let reports = capture.run.join("snapshots").join(ECON_REPORT_JOURNAL);
     let (economics_replay, economics) = match &selected {
         Some(sel) => {
-            let events = load_strict(&mut b, sel)?;
-            let (start, end) = capture.window;
-            let window: Vec<TruthEvent> = events
-                .into_iter()
-                .filter(|e| {
-                    e.block_time.is_some_and(|t| {
-                        let ns = i128::from(t) * NS;
-                        ns >= i128::from(start) && ns < i128::from(end)
-                    })
-                })
-                .collect();
+            let window = window_events(load_strict(&mut b, sel)?, capture.window);
             let n = window.len();
             let shadow = capture.run.join("capture/shadow_evaluations.p0j");
             let commitment = b

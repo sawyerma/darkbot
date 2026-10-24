@@ -16,7 +16,7 @@ python3 -m unittest discover -s project_0/tests/python -t project_0   # one laye
 project_0/scripts/verify.sh --self-test                               # decoder unit tests (tests/python/test_audit_market_quick.py)
 ```
 
-Integration tests need the release binaries `p0-measurement-plan`, `p0-econ-replay` and `p0-longtail` under
+Integration tests need the release binaries `p0-measurement-plan` and `p0-longtail` under
 `native/target/release/` (`cargo build --release --locked --workspace --features crate_health,txv1`); without them the
 real-binary tests report `NOT_RUN` (skip). The launcher tests also need 8 GiB free (storage preflight of the real launcher).
 

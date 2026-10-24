@@ -3,6 +3,7 @@ use darkbot_solana::submit::{
     MessageFeeQuote, SimResult, SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError,
 };
 use solana_sdk::transaction::VersionedTransaction;
+use std::fs;
 
 use crate::analytics::record::{LossReason, TimingEvidence};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix};
@@ -629,23 +630,6 @@ fn four_boundaries_delta_cumulative_and_final_reconcile() {
         false
     );
     assert_no_json(&w.h.cfg.run_dir);
-}
-#[test]
-fn atomic_writer_only_exposes_whole_json() {
-    let w = worker();
-    let path = w.h.cfg.run_dir.join("atomic.json");
-    atomic_json(&path, &json!({"v":1})).unwrap();
-    // A partial staging file cannot alter the committed snapshot.
-    fs::write(path.with_extension("json.tmp"), "{broken").unwrap();
-    assert_eq!(
-        serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["v"],
-        1
-    );
-    atomic_json(&path, &json!({"v":2})).unwrap();
-    assert_eq!(
-        serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["v"],
-        2
-    );
 }
 #[test]
 fn counters_use_event_receive_hour_even_if_processed_after_boundary() {
