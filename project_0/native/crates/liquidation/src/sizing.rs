@@ -984,12 +984,45 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 
     /// Returns every protocol-valid generic Asset×Liability sizing candidate. The caller must
     /// separately establish executable routing and realizable market value.
+    ///
+    /// Computes the exact crate Health of `account_key` at (`now_unix_s`, `slot`) itself; a
+    /// caller that already holds that Health (MT2: the detect consumer) passes it through
+    /// `sizes_with_health` and this computation does not happen a second time.
     pub fn sizes(
         &self,
         account_key: &Pubkey,
         now_unix_s: i64,
         slot: u64,
     ) -> Result<Vec<ProtocolSizing>, SizingError> {
+        let account = self.sizable_account(account_key)?;
+        let health = CrateHealth {
+            state: self.state,
+            group: self.group,
+        }
+        .health(account_key, now_unix_s, slot)
+        .map_err(SizingError::from)?;
+        self.sizes_of(account_key, &account, &health, now_unix_s, slot)
+    }
+
+    /// `sizes` with the account's exact Health already computed on this state at exactly
+    /// (`now_unix_s`, `slot`) — the one computation of a detection, carried as a value (MT2).
+    /// Everything else (positions, prices, fee state, EMODE, tag premium) is read as in `sizes`.
+    pub fn sizes_with_health(
+        &self,
+        account_key: &Pubkey,
+        health: &HealthView,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<Vec<ProtocolSizing>, SizingError> {
+        let account = self.sizable_account(account_key)?;
+        self.sizes_of(account_key, &account, health, now_unix_s, slot)
+    }
+
+    /// The pre-Health checks of `sizes`, in their order: headroom, account presence, layout.
+    fn sizable_account(
+        &self,
+        account_key: &Pubkey,
+    ) -> Result<std::borrow::Cow<'a, MarginfiAccount>, SizingError> {
         if self.headroom_bps == 0 || self.headroom_bps > BPS {
             return Err(format!("headroom_bps must be 1..={BPS}").into());
         }
@@ -997,15 +1030,21 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         if protocol::classify(data) != protocol::AccountType::MarginfiAccount {
             return Err("not a MarginfiAccount".into());
         }
-        let account = load_account(data)?;
-        let account: &MarginfiAccount = &account;
+        Ok(load_account(data)?)
+    }
+
+    fn sizes_of(
+        &self,
+        account_key: &Pubkey,
+        account: &MarginfiAccount,
+        health: &HealthView,
+        now_unix_s: i64,
+        slot: u64,
+    ) -> Result<Vec<ProtocolSizing>, SizingError> {
         let engine = CrateHealth {
             state: self.state,
             group: self.group,
         };
-        let health = engine
-            .health(account_key, now_unix_s, slot)
-            .map_err(SizingError::from)?;
         if !health.liquidatable || health.maintenance_health >= 0 {
             return Ok(Vec::new());
         }
@@ -1136,7 +1175,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 };
                 // 0.1.12: a solvent account must not end insolvent — the premium it pays,
                 // seized − seized/fee_factor, stays within its equity margin.
-                if let Some(cap) = solvency_seize_cap(&health, fee_factor)? {
+                if let Some(cap) = solvency_seize_cap(health, fee_factor)? {
                     seize_value = seize_value.min(cap);
                 }
                 seize_value = seize_value
@@ -2381,6 +2420,76 @@ mod tests {
         assert!(health_of(&plain, now).liquidatable);
         assert!(max_bps(&plain) <= base_bps, "EMODE-boosted");
         assert_eq!(growth_of(&plain), None);
+    }
+
+    /// MT2: sizing on a carried Health (the detection's one computation on the same state and
+    /// clock) is field-identical to sizing that computes the Health itself — liquidatable,
+    /// tagged, premium-active, bad-debt and healthy accounts alike; a Health that is not
+    /// liquidatable (or not negative) sizes nothing, as `sizes` does for a healthy account; the
+    /// pre-Health checks of `sizes` apply unchanged.
+    #[test]
+    fn mt2_sizes_with_carried_health_equals_sizes() {
+        let now = 1_700_000_000i64;
+        let with = |tb: &TwoBank, health: &HealthView| {
+            ProtocolSizer {
+                state: tb,
+                program: tb.program,
+                group: tb.group,
+                headroom_bps: 9_990,
+            }
+            .sizes_with_health(&tb.account, health, now, 10)
+        };
+        let liquidatable = two_bank(0.9, 100_000_000, 95_000_000);
+        let mut tagged = two_bank(0.6, 150_000_000, 95_000_000);
+        with_tag(&mut tagged, now - 3 * 86_400);
+        let mut premium = two_bank(0.9, 100_000_000, 10_000_000);
+        with_premium(&mut premium, true, 87_000_000.0, 0, 1_700_000_000);
+        let mut bad = two_bank(0.6, 90_000_000, 95_000_000);
+        with_tag(&mut bad, now - 3 * 86_400);
+        let healthy = two_bank(0.9, 100_000_000, 50_000_000);
+        assert!(health_of(&bad, now).is_bad_debt);
+        assert!(!health_of(&healthy, now).liquidatable);
+        for (name, tb) in [
+            ("liquidatable", &liquidatable),
+            ("tagged", &tagged),
+            ("premium", &premium),
+            ("bad debt", &bad),
+            ("healthy", &healthy),
+        ] {
+            let own = tb.sizes();
+            let carried = with(tb, &health_of(tb, now));
+            assert_eq!(carried, own, "{name}");
+            assert_eq!(
+                own.as_ref().map(Vec::is_empty),
+                Ok(name == "healthy"),
+                "{name}"
+            );
+        }
+        // A Health that is not liquidatable, or not negative, sizes nothing.
+        let liq = health_of(&liquidatable, now);
+        let not_liquidatable = HealthView {
+            liquidatable: false,
+            ..liq
+        };
+        assert_eq!(with(&liquidatable, &not_liquidatable), Ok(Vec::new()));
+        let not_negative = HealthView {
+            maintenance_health: 0,
+            ..liq
+        };
+        assert_eq!(with(&liquidatable, &not_negative), Ok(Vec::new()));
+        // The pre-Health checks: a missing account fails exactly as in `sizes`.
+        let missing = Pubkey::new_unique();
+        let sizer = ProtocolSizer {
+            state: &liquidatable,
+            program: liquidatable.program,
+            group: liquidatable.group,
+            headroom_bps: 9_990,
+        };
+        assert_eq!(
+            sizer.sizes_with_health(&missing, &liq, now, 10),
+            sizer.sizes(&missing, now, 10)
+        );
+        assert!(sizer.sizes(&missing, now, 10).is_err());
     }
 
     /// P1B (0.1.12 EndLiquidation): an account solvent in equity before must not end insolvent:

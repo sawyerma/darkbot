@@ -4,7 +4,7 @@ use crate::analytics::record::{Decision, LossReason, OpportunityRecord};
 use darkbot_common::timing::{Clock, Stage, Timeline};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
-use darkbot_project0::health::{HealthEngine, HealthError};
+use darkbot_project0::health::{HealthEngine, HealthError, HealthView};
 use darkbot_project0::planner::{self, Allowlist, InstructionTable, RouteKind};
 use darkbot_project0::safety::Safety;
 use darkbot_solana::state::blockhash::BlockhashCache;
@@ -316,7 +316,24 @@ pub trait ReceivershipBuilder {
         slot: u64,
         deadline: Instant,
     ) -> Result<Vec<ReceivershipPlan>, PlanError>;
+    /// MT2: `plans` with the account's exact Health already computed on the builder's state at
+    /// exactly (`now_unix_s`, `slot`) — the detection's one computation, carried as a value.
+    /// Default: a builder that computes no Health of its own (test fixtures) plans as before.
+    fn plans_with_health(
+        &self,
+        account: &Pubkey,
+        _health: &HealthView,
+        now_unix_s: u64,
+        slot: u64,
+        deadline: Instant,
+    ) -> Result<Vec<ReceivershipPlan>, PlanError> {
+        self.plans(account, now_unix_s, slot, deadline)
+    }
 }
+
+/// MT2: the exact Health of a candidate as the detect consumer computed it on the evaluated
+/// state at the protocol clock — the pipeline evaluates on this value and computes none.
+pub type PreparedHealth<'h> = Result<&'h HealthView, &'h HealthError>;
 
 /// B6: the Shadow owner's bound on synchronous network work (routes, fee quotes, simulation)
 /// while its ingress queue is behind. At most `per_drain` candidates use the network until the
@@ -384,6 +401,10 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
 
 impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline<'a, H, B, S> {
     /// Ein Kandidat, ein Trigger → ein Record. T_rx wird vom Aufrufer gesetzt.
+    ///
+    /// Computes the candidate's Health itself (one computation, the `Pipeline` site): for
+    /// callers without a detect consumer. The state owner's detection holds that Health
+    /// already and evaluates through `evaluate_prepared` (MT2).
     pub fn evaluate(
         &mut self,
         account: Pubkey,
@@ -392,6 +413,47 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         now_unix_s: u64,
         slot: u64,
         state_valid: bool,
+    ) -> OpportunityRecord {
+        if !state_valid {
+            // Refused before Health, as before; the value is never read.
+            let unavailable = HealthError::Unavailable;
+            return self.evaluate_prepared(
+                account,
+                trigger,
+                t_rx_ns,
+                now_unix_s,
+                slot,
+                false,
+                Err(&unavailable),
+            );
+        }
+        // Health (P3)
+        darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::Pipeline); // [MT0]
+        let health = self.health.health(&account, now_unix_s as i64, slot);
+        self.evaluate_prepared(
+            account,
+            trigger,
+            t_rx_ns,
+            now_unix_s,
+            slot,
+            true,
+            health.as_ref(),
+        )
+    }
+
+    /// `evaluate` on the candidate's exact Health as the caller computed it on the pipeline's
+    /// state at exactly (`now_unix_s`, `slot`): no Health is computed here or below (sizing);
+    /// a Health error is recorded exactly as `evaluate` records its own.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_prepared(
+        &mut self,
+        account: Pubkey,
+        trigger: &str,
+        t_rx_ns: u64,
+        now_unix_s: u64,
+        slot: u64,
+        state_valid: bool,
+        health: PreparedHealth<'_>,
     ) -> OpportunityRecord {
         let _trigger_slot = slot; // [FIX-40] Trigger-Slot ist nur Provenienz des Updates, nicht T_sign
         let mut tl = Timeline::new();
@@ -435,9 +497,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         }
 
-        // Health (P3)
-        darkbot_common::mt0::MT0.count_health(darkbot_common::mt0::HealthSite::Pipeline); // [MT0]
-        let hv = match self.health.health(&account, now_unix_s as i64, slot) {
+        // Health (P3): the caller's one computation (MT2).
+        let hv = match health {
             Ok(h) => h,
             Err(HealthError::Unavailable) => {
                 rec.decision = Decision::Unavailable;
@@ -501,7 +562,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         let planning_started = Instant::now();
         let mt0_jupiter_before =
             darkbot_common::mt0::MT0.remote_requests(darkbot_common::mt0::RemoteClass::Jupiter); // [MT0]
-        let planning_result = self.builder.plans(&account, now_unix_s, slot, deadline);
+        let planning_result = self
+            .builder
+            .plans_with_health(&account, hv, now_unix_s, slot, deadline);
         let mt0_jupiter = darkbot_common::mt0::MT0
             .remote_requests(darkbot_common::mt0::RemoteClass::Jupiter)
             .saturating_sub(mt0_jupiter_before);

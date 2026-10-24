@@ -984,6 +984,212 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert_eq!(adapter.attempts.load(Ordering::Relaxed), 2);
 }
+/// MT2: a detection's exact Health is computed once and carried as a value — the pipeline
+/// evaluates `evaluate_prepared` on it without calling the engine, with the same record as
+/// `evaluate` (which computes its own, once), and records a carried Health error exactly as
+/// its own.
+struct CountingHealth {
+    calls: AtomicU64,
+}
+impl darkbot_project0::health::HealthEngine for CountingHealth {
+    fn health(
+        &self,
+        a: &Pubkey,
+        now: i64,
+        slot: u64,
+    ) -> Result<darkbot_project0::health::HealthView, darkbot_project0::health::HealthError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        TestHealth.health(a, now, slot)
+    }
+    fn observation_accounts(
+        &self,
+        a: &Pubkey,
+    ) -> Result<Vec<Pubkey>, darkbot_project0::health::HealthError> {
+        TestHealth.observation_accounts(a)
+    }
+    fn thresholds(
+        &self,
+        a: &Pubkey,
+        now: i64,
+        slot: u64,
+    ) -> Result<darkbot_project0::health::AccountThresholds, darkbot_project0::health::HealthError>
+    {
+        TestHealth.thresholds(a, now, slot)
+    }
+    fn premium_decay_per_second(
+        &self,
+        a: &Pubkey,
+        now: i64,
+        slot: u64,
+    ) -> Result<u128, darkbot_project0::health::HealthError> {
+        TestHealth.premium_decay_per_second(a, now, slot)
+    }
+}
+#[test]
+fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
+    use crate::execution::pipeline::{Mode, Pipeline};
+    use darkbot_project0::health::{HealthEngine, HealthError, HealthView};
+    use darkbot_project0::{
+        execution::Freshness,
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let adapter = ObserveOnly::new(CountingSubmitter {
+        calls: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+    });
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let mut safety = Safety::new(
+        Limits {
+            max_total_capital: 0,
+            max_outstanding_inventory: 0,
+            max_concurrent_positions: 0,
+            max_exposure_per_attempt: 0,
+            max_daily_loss: 0,
+            max_failed_attempts_per_day: 0,
+            max_tip: 0,
+            max_slippage_bps: 0,
+            max_outstanding_attempts: 0,
+        },
+        Allow::default(),
+        false,
+    );
+    let payer = solana_sdk::signature::Keypair::new();
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix::default();
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    slots.observe(10);
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let health = CountingHealth {
+        calls: AtomicU64::new(0),
+    };
+    let mut p = Pipeline {
+        mode: Mode::Shadow,
+        clock: &clock,
+        health: &health,
+        builder: &TestBuilder,
+        submitter: &adapter,
+        safety: &mut safety,
+        blockhash: &bh,
+        payer: &payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit: 0,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        tip_account: None,
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &[],
+        slot_watch: &slots,
+        network: &mut network,
+        simulation_failure: None,
+        fe04: None,
+    };
+    let account = Pubkey::new_unique();
+    let key = |r: &OpportunityRecord| {
+        (
+            r.decision,
+            r.loss,
+            r.reason.clone(),
+            r.progress.health_liquidatable,
+            r.progress.candidates_created,
+            r.simulation_result.clone(),
+            r.net_profit,
+            r.premium_bps,
+            r.sign_slot,
+            r.economics_known,
+        )
+    };
+    // `evaluate`: the pipeline computes its own Health, once.
+    let own = p.evaluate(account, "test", clock.now_ns(), 100, 10, true);
+    assert_eq!(own.decision, Decision::ShadowReady);
+    assert_eq!(health.calls.load(Ordering::Relaxed), 1);
+    // `evaluate_prepared`: the carried value, no engine call; the same record.
+    let carried = health.health(&account, 100, 10);
+    assert_eq!(health.calls.load(Ordering::Relaxed), 2);
+    let prepared = p.evaluate_prepared(
+        account,
+        "test",
+        clock.now_ns(),
+        100,
+        10,
+        true,
+        carried.as_ref(),
+    );
+    assert_eq!(
+        health.calls.load(Ordering::Relaxed),
+        2,
+        "no Health computed by the pipeline"
+    );
+    assert_eq!(key(&prepared), key(&own));
+    // A carried Health error is recorded as the pipeline's own; a non-liquidatable view ends
+    // at the Health stage. Neither computes Health.
+    let unavailable: Result<HealthView, HealthError> = Err(HealthError::Unavailable);
+    let r = p.evaluate_prepared(
+        account,
+        "test",
+        clock.now_ns(),
+        100,
+        10,
+        true,
+        unavailable.as_ref(),
+    );
+    assert_eq!(
+        (r.decision, r.loss, r.reason.as_deref()),
+        (
+            Decision::Unavailable,
+            Some(LossReason::Health),
+            Some("health engine unavailable")
+        )
+    );
+    let stale: Result<HealthView, HealthError> = Err(HealthError::IntegrationStale("k".into()));
+    let r = p.evaluate_prepared(
+        account,
+        "test",
+        clock.now_ns(),
+        100,
+        10,
+        true,
+        stale.as_ref(),
+    );
+    assert_eq!(r.loss, Some(LossReason::IntegrationRefresh));
+    let healthy = HealthView {
+        liquidatable: false,
+        ..carried.unwrap()
+    };
+    let r = p.evaluate_prepared(account, "test", clock.now_ns(), 100, 10, true, Ok(&healthy));
+    assert_eq!(
+        (r.progress.health_liquidatable, r.reason.as_deref()),
+        (Some(false), Some("not liquidatable"))
+    );
+    // An untradable state is refused before Health on both paths.
+    let r = p.evaluate(account, "test", clock.now_ns(), 100, 10, false);
+    assert_eq!(
+        (r.loss, r.reason.as_deref()),
+        (Some(LossReason::State), Some("state not tradable"))
+    );
+    assert_eq!(health.calls.load(Ordering::Relaxed), 2);
+}
 /// P2-05: a known plan below `min_profit` whose premium is the growing tag cap records the
 /// second the curve could make it actionable (`tag_wakeup` of its own numbers); without tag
 /// growth, or once a plan is actionable, there is none.

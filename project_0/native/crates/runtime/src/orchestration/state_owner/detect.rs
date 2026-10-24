@@ -489,14 +489,17 @@ impl ShadowOwner {
             };
             #[cfg(feature = "crate_health")]
             let pipeline_started_ns = self.clock.now_ns();
+            // MT2: the one Health computation of this detection (above) is the pipeline's and
+            // the sizer's Health; none is computed again on the same state and clock.
             darkbot_common::mt0::MT0.add(darkbot_common::mt0::Counter::PipelineEvaluations, 1); // [MT0]
-            let mut rec = pipe.evaluate(
+            let mut rec = pipe.evaluate_prepared(
                 acct,
                 trigger,
                 t_rx,
                 protocol_now,
                 protocol_slot,
                 self.st.run_state().is_tradable(),
+                health_result.as_ref(),
             );
             let simulation_failure = pipe.simulation_failure.take();
             rec.rx_slot = Some(slot); // trigger provenance differs from projected evaluation slot

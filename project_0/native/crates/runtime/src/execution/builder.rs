@@ -19,7 +19,7 @@ pub mod p0 {
     use darkbot_project0::economics::{CandidateInput, Path};
     use darkbot_project0::funding::{self, FundingClass, FundingContext};
     use darkbot_project0::health::crate_impl::CrateHealth;
-    use darkbot_project0::health::{AccountSource, HealthEngine};
+    use darkbot_project0::health::{AccountSource, HealthEngine, HealthView};
     use darkbot_project0::planner::{InstructionTable, RouteKind};
     use darkbot_project0::receivership::{builders, ReceivershipParams};
     use darkbot_project0::sizing::{NoSizeReason, SizingError, SizingErrorKind};
@@ -133,6 +133,18 @@ pub mod p0 {
             now_unix_s: u64,
             slot: u64,
         ) -> Result<Vec<Sizing>, PlanError>;
+        /// MT2: `sizes` with the account's exact Health already computed on this state at
+        /// exactly (`now_unix_s`, `slot`). Default: a provider that computes no Health of its
+        /// own (test fixtures) sizes as before.
+        fn sizes_with_health(
+            &self,
+            account: &Pubkey,
+            _health: &HealthView,
+            now_unix_s: u64,
+            slot: u64,
+        ) -> Result<Vec<Sizing>, PlanError> {
+            self.sizes(account, now_unix_s, slot)
+        }
         fn no_size_reason(&self, _account: &Pubkey) -> Result<NoSizeReason, String> {
             Ok(NoSizeReason::NoValidProtocolPair)
         }
@@ -174,30 +186,26 @@ pub mod p0 {
 
     impl<'a, S: AccountSource + ?Sized> ProtocolSizingProvider<'a, S> {
         pub fn no_size_reason(&self, account: &Pubkey) -> Result<NoSizeReason, String> {
+            self.sizer().no_size_reason(account)
+        }
+
+        fn sizer(&self) -> darkbot_project0::sizing::ProtocolSizer<'a, S> {
             darkbot_project0::sizing::ProtocolSizer {
                 state: self.state,
                 program: self.program,
                 group: self.group,
                 headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
             }
-            .no_size_reason(account)
         }
-    }
 
-    impl<'a, S: AccountSource + ?Sized> SizingProvider for ProtocolSizingProvider<'a, S> {
-        fn sizes(
+        /// The runner-economics view of the protocol-exact sizings, at the same clock.
+        fn sizings(
             &self,
-            account: &Pubkey,
+            sizer: &darkbot_project0::sizing::ProtocolSizer<'a, S>,
+            raw: Vec<darkbot_project0::sizing::ProtocolSizing>,
             now_unix_s: u64,
             slot: u64,
         ) -> Result<Vec<Sizing>, PlanError> {
-            let sizer = darkbot_project0::sizing::ProtocolSizer {
-                state: self.state,
-                program: self.program,
-                group: self.group,
-                headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
-            };
-            let raw = sizer.sizes(account, now_unix_s as i64, slot)?;
             let mut out = Vec::with_capacity(raw.len());
             for sz in raw {
                 let inv_native = (self.inventory)(&sz.liab_bank).min(sz.repay_amount);
@@ -259,6 +267,31 @@ pub mod p0 {
                 });
             }
             Ok(out)
+        }
+    }
+
+    impl<'a, S: AccountSource + ?Sized> SizingProvider for ProtocolSizingProvider<'a, S> {
+        fn sizes(
+            &self,
+            account: &Pubkey,
+            now_unix_s: u64,
+            slot: u64,
+        ) -> Result<Vec<Sizing>, PlanError> {
+            let sizer = self.sizer();
+            let raw = sizer.sizes(account, now_unix_s as i64, slot)?;
+            self.sizings(&sizer, raw, now_unix_s, slot)
+        }
+
+        fn sizes_with_health(
+            &self,
+            account: &Pubkey,
+            health: &HealthView,
+            now_unix_s: u64,
+            slot: u64,
+        ) -> Result<Vec<Sizing>, PlanError> {
+            let sizer = self.sizer();
+            let raw = sizer.sizes_with_health(account, health, now_unix_s as i64, slot)?;
+            self.sizings(&sizer, raw, now_unix_s, slot)
         }
 
         fn no_size_reason(&self, account: &Pubkey) -> Result<NoSizeReason, String> {
@@ -1230,6 +1263,37 @@ pub mod p0 {
         ) -> Result<Vec<ReceivershipPlan>, PlanError> {
             required_fee_wallet(&self.global_fee_wallet)?;
             let sizings = self.sizing.sizes(account, now_unix_s, slot)?;
+            self.plans_of(account, sizings, slot, deadline)
+        }
+
+        fn plans_with_health(
+            &self,
+            account: &Pubkey,
+            health: &HealthView,
+            now_unix_s: u64,
+            slot: u64,
+            deadline: Instant,
+        ) -> Result<Vec<ReceivershipPlan>, PlanError> {
+            required_fee_wallet(&self.global_fee_wallet)?;
+            let sizings = self
+                .sizing
+                .sizes_with_health(account, health, now_unix_s, slot)?;
+            self.plans_of(account, sizings, slot, deadline)
+        }
+    }
+
+    impl<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider>
+        P0ReceivershipBuilder<'a, S, Z, R>
+    {
+        /// Every plan of the account's sizings (`plans` / `plans_with_health` differ only in
+        /// where the Health behind the sizings came from).
+        fn plans_of(
+            &self,
+            account: &Pubkey,
+            sizings: Vec<Sizing>,
+            slot: u64,
+            deadline: Instant,
+        ) -> Result<Vec<ReceivershipPlan>, PlanError> {
             if sizings.is_empty() {
                 return Err(no_size_error(self.sizing.no_size_reason(account)?));
             }
