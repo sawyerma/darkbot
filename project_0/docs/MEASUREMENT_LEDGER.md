@@ -6010,3 +6010,14 @@ Commits `1a05bd78` (MT2a), `f52e7c21` (MT3), `3e745129` (MT4), `d73f5ae5` (repor
 - MT2a: exact Health once per detection (3 → 1), carried through pipeline, builder and sizer. MT3: lanes L0/L1/L2, WDRR 8:3:1, `t_rx_first` kept, FIX-21 freshness unchanged. MT4: route-cap cache (hint only, real build validates, re-probe every 6th hit). MT5a: `state_epoch`, readsets (bound 199), candidate identity, central result policy on projection results. MT5b: per-account ownership IDLE→EXECUTING→SIGNED→SUBMITTED→RELEASED, SUBMITTED from the P8-RES-02 book.
 - CI: `3e745129` project0-gate red (reporter test vs protocol `0495fd04` from the frontend session), green again from `d73f5ae5`.
 - NOT_RUN / open: P6-MT.15 gate values (duty cycle, wake-up p99, L0 waits, NO_SWAP T_state→T_sign) NOT_MEASURED; C0-MO, MT11/MT12 (Mainnet, user); MT6–MT10 after C0-MO per P6-MT.16; local fee model (≥10k qualified messages); UB prioritization of remote order (MT8 queue); P6MT-J1 (route/fee/simulation on the owner) and P6MT-R1 (retry wait in the caller).
+
+## 2026-10-24 — Paket 5: JIT, source control, Geyser, lead, p0ctl (LOCAL_PASS offline, PARTIAL)
+
+Commits `26f6194b` (JIT), `98254f75` (source control, Geyser, lead, p0ctl/UntilStopped).
+
+- Gates PASS: fmt, clippy ×4, `888/0/10`, `886/0/10`, runner `407/0/3` ×2, release, Python. 27 mutations fail-before (JIT 10, source control 5, Geyser 4, lead 4, p0ctl/horizon 4).
+- JIT: buy spread charged as swap cost, holds liability and funding inventory, enforced buy slippage, class name matches the FE-04 approval, production funding bank `P0_JIT_FUNDING_BANK` (empty = no JIT).
+- Source control: every request in sequence order, a full owner queue delays instead of dropping; the owner's decision is a typed record (`SOURCE_CONTROL_OUTCOME` 1101) shown by `p0ctl source status`.
+- Geyser: WSS backoff policy, the budget counts only consecutive failed sessions, stop during backoff; one token variable. Lead: canonical WSS copy measured against the observed Geyser copy (content + slot), only while an observer runs.
+- p0ctl: `run preflight`, `runs list`, `run stop --run`, `--profile`; `RunHorizon::UntilStopped` typed, start refused `RUN_HORIZON_UNTIL_STOPPED_GATED`.
+- Open: JIT admission (bundle fees unquoted), current quotes/simulation NOT_RUN, cross-class quote budget; backtest/optimizer (native typed jobs; the existing replay is the legacy JSONL path); inventory planner has no caller (live balances + quotes); UntilStopped activation (rolling SK-07, runway preflight); gateway capture path without BOOT/lock (outside Project_0); Geyser `created_at`; provider NOT_RUN.

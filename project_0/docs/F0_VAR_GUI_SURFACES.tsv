@@ -45,7 +45,8 @@ TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	6	CaptureProcess
 TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	7	CaptureAction
 TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	8	Receipt
 TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	9	ControlState
-TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	82	LogPart
+TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	36	CaptureButton
+TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	94	LogPart
 TS_DECLARATION	frontend/src/core/realtime/codec.ts	5	ClientMessage
 TS_DECLARATION	frontend/src/core/realtime/codec.ts	6	ServerMessage
 TS_DECLARATION	frontend/src/core/realtime/protocol.ts	1	RealtimeEnvelope
@@ -80,8 +81,8 @@ TS_DECLARATION	frontend/src/features/overview/model/overviewRows.ts	13	WorstRpcP
 TS_DECLARATION	frontend/src/features/overview/model/overviewRows.ts	45	SystemInput
 TS_DECLARATION	frontend/src/features/overview/model/overviewRows.ts	74	FinanceInput
 TS_DECLARATION	frontend/src/features/overview/overviewStore.ts	6	OverviewStore
-CONTROL_OR_TEXT	frontend/src/features/project0/Project0Page.tsx	51	Project 0 Control
-DISPLAY	frontend/src/features/project0/Project0Page.tsx	54	Project 0 areas
+CONTROL_OR_TEXT	frontend/src/features/project0/Project0Page.tsx	53	Project 0 Control
+DISPLAY	frontend/src/features/project0/Project0Page.tsx	56	Project 0 areas
 TS_DECLARATION	frontend/src/features/project0/api/project0Adapter.ts	11	CaptureMessage
 TS_DECLARATION	frontend/src/features/project0/api/project0Adapter.ts	12	SystemMessage
 TS_DECLARATION	frontend/src/features/project0/api/project0Adapter.ts	15	Update
@@ -109,6 +110,7 @@ DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	51	Transacti
 DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	52	Gaps / reconnects / liquidation events
 DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	53	Gross edge · total / p50 / p90
 DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	54	Gateway topics
+TS_DECLARATION	frontend/src/features/project0/model/capturePreview.ts	13	RunStartDraft
 TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	6	Project0Tab
 TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	7	StrategyKind
 TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	8	CaptureMode
@@ -150,38 +152,37 @@ CONTROL_OR_TEXT	frontend/src/features/project0/pages/AnalyticsPanel.tsx	19	Minim
 DISPLAY	frontend/src/features/project0/pages/AnalyticsPanel.tsx	20	Funding and fee scenarios
 DISPLAY	frontend/src/features/project0/pages/AnalyticsPanel.tsx	20	Holdout / uncertainty
 CONTROL_OR_TEXT	frontend/src/features/project0/pages/AnalyticsPanel.tsx	21	Optimize
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	17	Running capture
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	19	Status feed
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	20	Run
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	21	Configured duration
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	22	Stream
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	23	Transactions / liquidation events
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	24	Verdict (live)
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	25	Result
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	39	Raw data capture
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	39	Duration
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	42	Until stopped · desktop control
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	44	Duration
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	45	Unit
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	45	Seconds
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	45	Minutes
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	45	Hours
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	45	Days
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	46	Source
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	46	Logs
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	46	Transactions
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	47	Observation
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	47	Market + Shadow
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	47	Raw data only
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	47	Shadow only
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	48	"setMessage(""Boot/preflight backend not connected. No capture was started."")}>Check & start"
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	49	"setMessage(""Stop command not connected. Stop via ops/darkbotctl capture stop."")}>Stop"
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	51	Chain verification
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	54	Report markers
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	54	setMarkers(REPORT_MARKERS.map(x => x.id))}>All
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	54	setMarkers([])}>None
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	57	CLI preview
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	58	Selected report markers
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	20	Running capture
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	22	Status feed
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	23	Run
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	24	Configured duration
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	25	Stream
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	26	Transactions / liquidation events
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	27	Verdict (live)
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	28	Result
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	47	Raw data capture
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	47	Duration
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	50	Until stopped · desktop control
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	52	Duration
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	53	Unit
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	53	Seconds
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	53	Minutes
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	53	Hours
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	53	Days
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	54	Source
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	54	Logs
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	54	Transactions
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	55	Observation
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	55	Market + Shadow
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	55	Raw data only
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	55	Shadow only
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	62	setArmedFor(null)}>Cancel
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	66	Chain verification
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	69	Report markers
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	69	setMarkers(REPORT_MARKERS.map(x => x.id))}>All
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	69	setMarkers([])}>None
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	72	CLI preview
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	73	Selected report markers
 TS_DECLARATION	frontend/src/features/project0/pages/LiquidatorPanel.tsx	5	Fleet
 DISPLAY	frontend/src/features/project0/pages/LiquidatorPanel.tsx	12	Liquidator fleet
 DISPLAY	frontend/src/features/project0/pages/LiquidatorPanel.tsx	14	Running liquidators

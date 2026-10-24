@@ -23,7 +23,7 @@ project_0/native/crates/reporter/tests/socket.rs	201	tap.publish_market(MarketSn
 project_0/native/crates/reporter/tests/socket.rs	377	tap.publish_market(MarketSnapshot::default());
 project_0/native/crates/reporter/tests/socket.rs	387	tap.publish_market(MarketSnapshot::default());
 project_0/native/crates/runtime/src/analytics/econ_a2_tests.rs	45	core.on_ingress_event(ev, 0, &mut sink).unwrap();
-project_0/native/crates/runtime/src/bin/p0ctl.rs	313	if control::stop_requested() && !forwarded {
+project_0/native/crates/runtime/src/bin/p0ctl.rs	329	if control::stop_requested() && !forwarded {
 project_0/native/crates/runtime/src/market/capture.rs	213	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
 project_0/native/crates/runtime/src/market/capture.rs	220	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
 project_0/native/crates/runtime/src/market/capture.rs	314	run_from_env_with(None, |_, _| Ok(()))
