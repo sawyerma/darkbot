@@ -64,4 +64,12 @@ pub(super) struct OwnerMetrics {
     /// the persisted MT0 layout is unchanged.
     #[cfg(feature = "crate_health")]
     pub(super) jupiter_requests_per_routed_revision: darkbot_common::mt0::Hist,
+    /// P6-MT.2/MT.13 (MT5a): distinct keys of a detection's readset, as count/p50/p95/p99/max;
+    /// detections whose readset exceeded its bound (no identity: fail closed), reported once.
+    /// Owner-side only; the persisted MT0 layout is unchanged.
+    pub(super) readset_keys: darkbot_common::mt0::Hist,
+    pub(super) readset_overflows: u64,
+    pub(super) readset_overflow_reported: bool,
+    /// P6-MT.2/MT.13 (MT5a): the central result policy's verdicts (every judged result).
+    pub(super) result_actions: crate::execution::identity::ResultActionCounts,
 }

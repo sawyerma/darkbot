@@ -68,6 +68,10 @@ pub struct ProjectionWork {
     /// E9: the newest canonical slot of the candidate and its dependencies; the simulation must
     /// not be older.
     pub min_context_slot: u64,
+    /// P6-MT.2 (MT5a): the candidate identity this projection prepares for — its generations
+    /// and the dependency readset at request time — passed back unchanged for the owner's
+    /// central result policy.
+    pub identity: crate::execution::identity::CandidateIdentity,
 }
 
 pub struct ProjectionResultMessage {
@@ -77,6 +81,7 @@ pub struct ProjectionResultMessage {
     pub t_rx_ns: u64,
     pub dependencies: Vec<Pubkey>,
     pub dependency_fingerprint: Hash,
+    pub identity: crate::execution::identity::CandidateIdentity,
     pub result: Result<darkbot_solana::submit::rpc::PostAccountsSimulation, ProjectionFailure>,
 }
 
@@ -388,6 +393,7 @@ impl RemoteWorkers {
                         let t_rx_ns = work.t_rx_ns;
                         let dependencies = work.dependencies.clone();
                         let dependency_fingerprint = work.dependency_fingerprint;
+                        let identity = work.identity.clone();
                         let mt0_start = std::time::Instant::now(); // [MT0]
                         let result = submitter
                             .simulate_with_post_accounts(
@@ -420,6 +426,7 @@ impl RemoteWorkers {
                                 t_rx_ns,
                                 dependencies,
                                 dependency_fingerprint,
+                                identity,
                                 result,
                             },
                             &projection_shutdown,

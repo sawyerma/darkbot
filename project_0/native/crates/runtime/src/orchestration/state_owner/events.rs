@@ -167,7 +167,7 @@ impl ShadowOwner {
                         a.slot, self.program_data, new
                     );
                     }
-                    self.program_upgrade_latched = true;
+                    self.latch_program_upgrade();
                 }
                 let i = match classify_account(&a.data) {
                     AccountType::MarginfiAccount => 0,
@@ -259,7 +259,7 @@ impl ShadowOwner {
                         .map(|r| hash(&r.data) != self.program_data_baseline_hash)
                         .unwrap_or(true)
                     {
-                        self.program_upgrade_latched = true;
+                        self.latch_program_upgrade();
                     }
                     if self.program_upgrade_latched {
                         self.st
@@ -292,6 +292,7 @@ impl ShadowOwner {
                         self.sweep_batch_events = 0;
                         self.sweep_batch_started_ns = None;
                         self.candidate_cache.clear();
+                        self.candidate_revisions.clear();
                         self.candidate_force_rearm.clear();
                         self.candidate_input_epoch = 0;
                         self.bank_input_revision.clear();
@@ -1122,13 +1123,15 @@ impl ShadowOwner {
             {
                 // E9: parked projection work whose slot is now processed.
                 self.release_parked_projections();
+                self.detect_origin = None;
                 detect = self
                     .detect_queue
                     .pop_front()
                     .or_else(|| {
                         // P6-MT.5: the lanes' weighted deficit round robin picks the entry; its
                         // `work` carries the newest coalesced `t_rx` (FIX-21 freshness origin,
-                        // unchanged by MT3); `t_rx_first` feeds only the wait telemetry.
+                        // unchanged by MT3); `t_rx_first` feeds the wait telemetry and, with
+                        // the lane, the candidate identity (MT5a).
                         let entry = self.oracle_lanes.next()?;
                         let wait_first = self.clock.now_ns().saturating_sub(entry.t_rx_first);
                         darkbot_common::mt0::MT0.record_queue_wait_first(
@@ -1136,6 +1139,10 @@ impl ShadowOwner {
                             wait_first,
                         );
                         self.metrics.lane_wait_ns[entry.lane as usize].record(wait_first);
+                        self.detect_origin = Some(generations::DetectOrigin {
+                            lane: entry.lane,
+                            t_rx_first_ns: entry.t_rx_first,
+                        });
                         Some(entry.work)
                     })
                     // Z14: bootstrap probes after the oracle-triggered candidates.

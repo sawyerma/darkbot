@@ -47,6 +47,28 @@ pub struct AccountRecord {
     pub status: SlotStatus,
     pub source: SourceKind,
     pub t_rx_ns: u64,
+    /// P6-MT.2: the `state_epoch` at which this record was created or last written (every
+    /// applied write, also a snapshot install, assigns a fresh epoch).
+    pub last_changed_epoch: u64,
+}
+
+/// P6-MT.2: what the state knows about a key's change history, for readset validation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyEpoch {
+    /// A record exists; its `last_changed_epoch`.
+    Present(u64),
+    /// No record. `removed_bound`: the key was removed at exactly this epoch when the removal
+    /// is still recorded, else the compaction floor (it may have been removed at that epoch or
+    /// earlier); `0` = never removed since the state's start.
+    Absent { removed_bound: u64 },
+}
+
+/// P6-MT.2: the epoch view every readset is recorded against and validated against. The
+/// canonical `StateCore` is the one production implementation.
+pub trait EpochSource {
+    fn key_epoch(&self, key: &Pubkey) -> KeyEpoch;
+    /// The current monotone state epoch (the epoch an `ABSENT` observation is made at).
+    fn state_epoch(&self) -> u64;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -121,6 +143,25 @@ pub struct StateCore {
     /// C1: a `Gap` arrived after the last `Reconnected` (StreamReady): the stream has no valid
     /// generation until the next `Reconnected`, so no recovery may become Ready.
     gap_open: bool,
+    /// P6-MT.2: monotone epoch of record mutations; `1` on a fresh state, incremented by every
+    /// applied record write and every removal (snapshot install, fork invalidation). Never
+    /// decreases.
+    state_epoch: u64,
+    /// P6-MT.2: removal epochs of keys removed since the last compaction (`removed_floor`), so a
+    /// readset `ABSENT` observation is invalidated by a creation-and-removal in between. Bounded
+    /// by `removed_cap` (= `buffer_cap`, the one record bound this state already has outside its
+    /// account map): at the bound the map is compacted into the floor — conservative, every
+    /// `ABSENT` observed before the floor then counts as changed (fail closed), never a
+    /// missed removal. Removals come from fork orphaning (rare) and snapshot installs (a
+    /// recovery, which invalidates every older work by `recovery_generation` anyway).
+    removed: HashMap<Pubkey, u64>,
+    removed_floor: u64,
+    removed_cap: usize,
+    /// P6-MT.2: the number of ended Ready periods. Every transition out of the tradable state
+    /// (any halt — gap, reconnect, fork orphan, reconcile failure, program upgrade — or a
+    /// snapshot install from Ready) increments it, so every recovery starts a new generation
+    /// and work tagged with an older one can never commit.
+    recovery_generation: u64,
 }
 
 impl StateCore {
@@ -141,6 +182,42 @@ impl StateCore {
             reconnects_applied: 0,
             fatal_detail: None,
             gap_open: false,
+            state_epoch: 1,
+            removed: HashMap::new(),
+            removed_floor: 0,
+            removed_cap: buffer_cap.max(1),
+            recovery_generation: 0,
+        }
+    }
+    /// P6-MT.2: the ended Ready periods (see the field).
+    pub fn recovery_generation(&self) -> u64 {
+        self.recovery_generation
+    }
+    /// P6-MT.2: the compaction floor of the removal epochs (see the field); `0` = none yet.
+    pub fn removed_floor(&self) -> u64 {
+        self.removed_floor
+    }
+    fn next_epoch(&mut self) -> u64 {
+        self.state_epoch = self.state_epoch.saturating_add(1);
+        self.state_epoch
+    }
+    fn note_removed(&mut self, key: Pubkey) {
+        let epoch = self.next_epoch();
+        if self.removed.len() >= self.removed_cap && !self.removed.contains_key(&key) {
+            self.removed.clear();
+            self.removed_floor = epoch;
+            return;
+        }
+        self.removed.insert(key, epoch);
+    }
+    /// A record is (re)written: fresh epoch, its removal (if recorded) is superseded.
+    fn written(&mut self) -> u64 {
+        self.next_epoch()
+    }
+    /// Every transition out of the tradable state ends the current recovery generation.
+    fn leaving_tradable(&mut self) {
+        if self.run_state.is_tradable() {
+            self.recovery_generation = self.recovery_generation.saturating_add(1);
         }
     }
     /// A `Gap` since the last `Reconnected` (C1).
@@ -160,8 +237,19 @@ impl StateCore {
     /// Einträge werden entfernt und der State hält bis zur Reconciliation.
     pub fn invalidate_slots(&mut self, orphaned: &[u64]) {
         let before = self.accounts.len();
-        self.accounts.retain(|_, r| !orphaned.contains(&r.slot));
+        let mut removed: Vec<Pubkey> = Vec::new();
+        self.accounts.retain(|k, r| {
+            let keep = !orphaned.contains(&r.slot);
+            if !keep {
+                removed.push(*k);
+            }
+            keep
+        });
         if self.accounts.len() != before {
+            removed.sort_unstable();
+            for key in removed {
+                self.note_removed(key);
+            }
             self.counters.orphaned_writes += (before - self.accounts.len()) as u64;
             self.halt(HaltReason::StateGap);
         }
@@ -223,6 +311,7 @@ impl StateCore {
 
     /// Fail-closed Halt (Feed-Gap, Program-Upgrade, …). Erster Grund bleibt.
     pub fn halt(&mut self, reason: HaltReason) {
+        self.leaving_tradable();
         self.run_state = self.run_state.halt(reason);
     }
 
@@ -314,6 +403,7 @@ impl StateCore {
                 }
             }
         }
+        let last_changed_epoch = self.written();
         self.accounts.insert(
             a.pubkey,
             AccountRecord {
@@ -325,6 +415,7 @@ impl StateCore {
                 status,
                 source: a.source,
                 t_rx_ns: a.t_rx_ns,
+                last_changed_epoch,
             },
         );
         self.counters.applied += 1;
@@ -343,8 +434,13 @@ impl StateCore {
         snapshot_lower_bound_slot: u64,
         accounts: Vec<AccountUpdate>,
     ) {
+        self.leaving_tradable();
         self.run_state = self.run_state.begin_reconcile();
         self.reconciled_clean = false;
+        // P6-MT.2: every key of the replaced state that the snapshot does not write again is a
+        // removal (observable by a readset); every written record gets a fresh epoch.
+        let mut previous: Vec<Pubkey> = self.accounts.keys().copied().collect();
+        previous.sort_unstable();
         self.accounts.clear();
         // E9: the snapshot state covers every account update up to its lower bound.
         self.covered_slot = self.covered_slot.max(snapshot_lower_bound_slot);
@@ -352,6 +448,7 @@ impl StateCore {
         for a in accounts {
             min_slot = min_slot.min(a.slot);
             self.highest_slot = self.highest_slot.max(a.slot);
+            let last_changed_epoch = self.written();
             let rec = AccountRecord {
                 owner: a.owner,
                 lamports: a.lamports,
@@ -361,8 +458,14 @@ impl StateCore {
                 status: STATE_SLOT_STATUS,
                 source: SourceKind::Snapshot,
                 t_rx_ns: a.t_rx_ns,
+                last_changed_epoch,
             };
             self.accounts.insert(a.pubkey, rec);
+        }
+        for key in previous {
+            if !self.accounts.contains_key(&key) {
+                self.note_removed(key);
+            }
         }
         self.snapshot_slot = Some(min_slot);
         let buffered: Vec<AccountUpdate> = self.buffer.drain(..).collect();
@@ -437,6 +540,232 @@ impl StateCore {
 
     pub fn is_reconciled(&self) -> bool {
         self.reconciled_clean
+    }
+}
+
+impl EpochSource for StateCore {
+    fn key_epoch(&self, key: &Pubkey) -> KeyEpoch {
+        match self.accounts.get(key) {
+            Some(r) => KeyEpoch::Present(r.last_changed_epoch),
+            None => KeyEpoch::Absent {
+                removed_bound: self.removed.get(key).copied().unwrap_or(self.removed_floor),
+            },
+        }
+    }
+    fn state_epoch(&self) -> u64 {
+        self.state_epoch
+    }
+}
+
+#[cfg(test)]
+mod epoch_tests {
+    use super::*;
+
+    fn upd(pk: Pubkey, slot: u64, data: u8) -> AccountUpdate {
+        AccountUpdate {
+            pubkey: pk,
+            owner: Pubkey::new_from_array([0xA5; 32]),
+            lamports: 1,
+            data: vec![data],
+            slot,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }
+    }
+
+    fn ready(st: &mut StateCore, slot: u64, accounts: Vec<AccountUpdate>) {
+        st.install_snapshot(slot, accounts.clone());
+        assert!(st.reconcile(slot, &accounts).is_clean());
+        assert!(st.confirm_ready().is_tradable());
+    }
+
+    /// P6-MT.2: `state_epoch` starts at 1 and only ever grows — through writes, a snapshot
+    /// install (every record re-epoched), a clean reconcile (no record write: unchanged) and a
+    /// fork invalidation (a removal); stale and buffered updates do not move it.
+    #[test]
+    fn state_epoch_is_monotone_across_writes_snapshot_reconcile_and_fork() {
+        let mut st = StateCore::new(8);
+        assert_eq!(st.state_epoch(), 1);
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        st.on_event(IngressEvent::Account(upd(a, 10, 1))); // buffered: no record write
+        assert_eq!(st.state_epoch(), 1);
+        ready(&mut st, 5, vec![upd(a, 5, 1), upd(b, 5, 1)]);
+        let after_install = st.state_epoch();
+        assert!(after_install > 1);
+        let (ea, eb) = (
+            st.get(&a).unwrap().last_changed_epoch,
+            st.get(&b).unwrap().last_changed_epoch,
+        );
+        assert!(ea > 1 && eb > 1 && ea != eb);
+        assert_eq!(st.key_epoch(&a), KeyEpoch::Present(ea));
+        // Reconcile writes no record.
+        let before = st.state_epoch();
+        assert!(st.reconcile(5, &[upd(a, 5, 1), upd(b, 5, 1)]).is_clean());
+        assert_eq!(st.state_epoch(), before);
+        // A stale update leaves everything unchanged.
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(a, 4, 9))),
+            Some(ApplyOutcome::StaleSlot)
+        );
+        assert_eq!(st.state_epoch(), before);
+        assert_eq!(st.get(&a).unwrap().last_changed_epoch, ea);
+        // An applied write moves the record's epoch and the state epoch; `b` keeps its own.
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(a, 12, 2))),
+            Some(ApplyOutcome::Applied)
+        );
+        let ea2 = st.get(&a).unwrap().last_changed_epoch;
+        assert!(ea2 > ea && st.state_epoch() == ea2);
+        assert_eq!(st.get(&b).unwrap().last_changed_epoch, eb);
+        // Fork invalidation removes `a` (slot 12 orphaned): a removal epoch, state halts.
+        st.on_event(IngressEvent::Slot(crate::ingress::SlotUpdate {
+            slot: 12,
+            parent: Some(11),
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
+        st.on_event(IngressEvent::Slot(crate::ingress::SlotUpdate {
+            slot: 13,
+            parent: Some(11),
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }));
+        let before_root = st.state_epoch();
+        st.on_event(IngressEvent::Root {
+            slot: 13,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        });
+        assert!(
+            st.get(&a).is_none(),
+            "slot 12 is orphaned by root 13 (parent 11)"
+        );
+        let removed = st.state_epoch();
+        assert!(removed > before_root);
+        assert_eq!(
+            st.key_epoch(&a),
+            KeyEpoch::Absent {
+                removed_bound: removed
+            }
+        );
+        assert!(!st.run_state().is_tradable());
+        assert_eq!(
+            st.get(&b).unwrap().last_changed_epoch,
+            eb,
+            "unrelated record untouched"
+        );
+        // A re-install re-epochs every record above everything before.
+        let top = st.state_epoch();
+        st.install_snapshot(20, vec![upd(a, 20, 1), upd(b, 20, 1)]);
+        assert!(st.get(&a).unwrap().last_changed_epoch > top);
+        assert!(st.get(&b).unwrap().last_changed_epoch > top);
+        assert!(st.state_epoch() >= st.get(&b).unwrap().last_changed_epoch);
+    }
+
+    /// P6-MT.2 (#9 substrate): an absent key is `Absent{0}` on a fresh state; a creation makes
+    /// it `Present`; a snapshot that drops it records the removal epoch (> the state epoch any
+    /// earlier ABSENT observation was made at); a creation after a removal is `Present` again
+    /// with a newer epoch.
+    #[test]
+    fn removal_and_creation_are_observable_through_key_epoch() {
+        let mut st = StateCore::new(8);
+        let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+        ready(&mut st, 5, vec![upd(b, 5, 1)]);
+        let observed_absent_at = st.state_epoch();
+        assert_eq!(st.key_epoch(&a), KeyEpoch::Absent { removed_bound: 0 });
+        st.on_event(IngressEvent::Account(upd(a, 6, 1)));
+        let KeyEpoch::Present(created) = st.key_epoch(&a) else {
+            panic!("created")
+        };
+        assert!(created > observed_absent_at);
+        // Snapshot without `a`: removed at an epoch above the earlier ABSENT observation.
+        st.install_snapshot(7, vec![upd(b, 7, 1)]);
+        let KeyEpoch::Absent { removed_bound } = st.key_epoch(&a) else {
+            panic!("removed")
+        };
+        assert!(removed_bound > observed_absent_at);
+        assert_eq!(st.removed_floor(), 0, "no compaction at this size");
+        st.install_snapshot(8, vec![upd(a, 8, 1), upd(b, 8, 1)]);
+        let KeyEpoch::Present(again) = st.key_epoch(&a) else {
+            panic!("re-created")
+        };
+        assert!(again > removed_bound);
+    }
+
+    /// P6-MT.2: the removal map is bounded by `buffer_cap`; at the bound it compacts into the
+    /// floor, which then answers every unknown absent key conservatively (the floor epoch, so
+    /// an ABSENT observed before it counts as changed); nothing grows without bound.
+    #[test]
+    fn removal_epochs_are_bounded_and_compact_into_a_conservative_floor() {
+        let mut st = StateCore::new(2);
+        let keys: Vec<Pubkey> = (0..4).map(|_| Pubkey::new_unique()).collect();
+        ready(&mut st, 5, keys.iter().map(|k| upd(*k, 5, 1)).collect());
+        let observed_absent_at = st.state_epoch();
+        let unknown = Pubkey::new_unique();
+        assert_eq!(
+            st.key_epoch(&unknown),
+            KeyEpoch::Absent { removed_bound: 0 }
+        );
+        // Four removals through a bound of two: compaction happened.
+        st.install_snapshot(6, vec![]);
+        assert!(st.removed.len() <= 2);
+        assert!(st.removed_floor() > observed_absent_at);
+        for k in &keys {
+            let KeyEpoch::Absent { removed_bound } = st.key_epoch(k) else {
+                panic!("removed")
+            };
+            assert!(
+                removed_bound > observed_absent_at,
+                "exact or floor, never below"
+            );
+        }
+        // A key never written is answered with the floor as well: conservative.
+        assert_eq!(
+            st.key_epoch(&unknown),
+            KeyEpoch::Absent {
+                removed_bound: st.removed_floor()
+            }
+        );
+    }
+
+    /// P6-MT.2: `recovery_generation` counts ended Ready periods: 0 through bootstrap, +1 at
+    /// the first halt out of Ready (a later halt while already halted or a re-install while
+    /// halted adds nothing), +1 again for the next Ready period's end; a snapshot install
+    /// directly from Ready (periodic reconcile) ends the period too.
+    #[test]
+    fn recovery_generation_increments_once_per_ended_ready_period() {
+        let mut st = StateCore::new(8);
+        let a = Pubkey::new_unique();
+        assert_eq!(st.recovery_generation(), 0);
+        st.halt(HaltReason::FeedGap); // bootstrapping: no Ready period ended
+        assert_eq!(st.recovery_generation(), 0);
+        ready(&mut st, 5, vec![upd(a, 5, 1)]);
+        assert_eq!(st.recovery_generation(), 0);
+        st.on_event(IngressEvent::Gap {
+            source: SourceKind::WsRpcControl,
+            from_slot: Some(5),
+            to_slot: None,
+            t_rx_ns: 0,
+        });
+        assert_eq!(st.recovery_generation(), 1);
+        st.on_event(IngressEvent::Reconnected {
+            source: SourceKind::WsRpcControl,
+            attempt: 1,
+            t_rx_ns: 0,
+        });
+        assert_eq!(st.recovery_generation(), 1, "halt while halted");
+        st.install_snapshot(6, vec![upd(a, 6, 1)]);
+        assert_eq!(st.recovery_generation(), 1, "install while halted");
+        assert!(st.reconcile(6, &[upd(a, 6, 1)]).is_clean());
+        assert!(st.confirm_ready().is_tradable());
+        assert_eq!(st.recovery_generation(), 1);
+        ready(&mut st, 7, vec![upd(a, 7, 1)]); // periodic reconcile from Ready
+        assert_eq!(st.recovery_generation(), 2);
+        st.halt(HaltReason::ProgramUpgrade);
+        assert_eq!(st.recovery_generation(), 3);
     }
 }
 

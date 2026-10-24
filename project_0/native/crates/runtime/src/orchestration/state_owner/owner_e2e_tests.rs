@@ -108,6 +108,10 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
             vec![],
         )),
         route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(8, 64)),
+        program_generation: 0,
+        next_candidate_id: 1,
+        candidate_revisions: HashMap::new(),
+        detect_origin: None,
         atas: accounts::LiquidatorAtas::new(liquidator),
         min_profit: 0,
         integration_probe_enabled: false,
@@ -828,6 +832,7 @@ fn e9_projection_results_drive_the_bounded_requeue() {
     .unwrap();
     darkbot_solana::tx::sign(&mut built, &[&payer]).unwrap();
     let empty_fingerprint = dependency_fingerprint(&f.owner.st, &[]);
+    let identity = test_identity(&f.owner, candidate, &[]);
     let work = |base_account_hash: solana_sdk::hash::Hash| {
         crate::orchestration::remote_workers::ProjectionWork {
             account: candidate,
@@ -839,6 +844,7 @@ fn e9_projection_results_drive_the_bounded_requeue() {
             dependencies: vec![],
             dependency_fingerprint: empty_fingerprint,
             min_context_slot: 12,
+            identity: identity.clone(),
         }
     };
     let run = |f: &mut Fixture, w| {
@@ -1026,6 +1032,7 @@ fn a23_fixture(
     darkbot_solana::tx::sign(&mut built, &[&payer]).unwrap();
     let fingerprint = dependency_fingerprint(&f.owner.st, &[]);
     let candidate = Pubkey::new_unique();
+    let identity = test_identity(&f.owner, candidate, &[]);
     let work = move || crate::orchestration::remote_workers::ProjectionWork {
         account: candidate,
         base_slot: 12,
@@ -1036,19 +1043,286 @@ fn a23_fixture(
         dependencies: vec![],
         dependency_fingerprint: fingerprint,
         min_context_slot: 12,
+        identity: identity.clone(),
     };
     (f, Box::new(work))
 }
 
+/// MT5a: a projection's candidate identity as `detect` would request it now — the owner's
+/// current generations and the readset of `keys` (the dependency set) at this moment.
+fn test_identity(
+    owner: &ShadowOwner,
+    account: Pubkey,
+    keys: &[Pubkey],
+) -> crate::execution::identity::CandidateIdentity {
+    use crate::execution::identity::{CandidateIdentity, READ_SET_MAX_KEYS};
+    CandidateIdentity {
+        candidate_id: owner.next_candidate_id,
+        account,
+        trigger: darkbot_common::mt0::TriggerClass::AccountUpdate,
+        lane: None,
+        generations: owner.generations(),
+        candidate_revision: 1,
+        t_rx_first_ns: 0,
+        t_rx_latest_ns: 0,
+        trigger_slot: 12,
+        evaluation: None,
+        valid_until_ns: None,
+        read_set: darkbot_project0::readset::ReadSet::observe_keys(
+            keys.iter().copied().chain([account]),
+            &owner.st,
+            READ_SET_MAX_KEYS,
+        ),
+    }
+}
+
+/// MT5a: a Ready state of `accounts` on the fixture's owner (snapshot, clean reconcile, ready).
+fn mt5_ready(f: &mut Fixture, accounts: &[AccountUpdate]) {
+    f.owner.st.install_snapshot(12, accounts.to_vec());
+    assert!(f.owner.st.reconcile(12, accounts).is_clean());
+    assert!(f.owner.st.confirm_ready().is_tradable());
+}
+
+fn mt5_account(f: &Fixture, pubkey: Pubkey, data: Vec<u8>, source: SourceKind) -> AccountUpdate {
+    AccountUpdate {
+        pubkey,
+        owner: f.owner.program,
+        lamports: 1,
+        data,
+        slot: 12,
+        write_version: None,
+        source,
+        t_rx_ns: 0,
+    }
+}
+
+/// MT5a: a successful projection result of `candidate` (base slot 12, `base_hash`) bound to
+/// `identity`, as the worker reports it.
+fn mt5_result(
+    candidate: Pubkey,
+    base_hash: solana_sdk::hash::Hash,
+    dependencies: Vec<Pubkey>,
+    fingerprint: solana_sdk::hash::Hash,
+    identity: crate::execution::identity::CandidateIdentity,
+) -> crate::orchestration::remote_workers::ProjectionResultMessage {
+    crate::orchestration::remote_workers::ProjectionResultMessage {
+        account: candidate,
+        base_slot: 12,
+        base_account_hash: base_hash,
+        t_rx_ns: 7,
+        dependencies,
+        dependency_fingerprint: fingerprint,
+        identity,
+        result: Ok((
+            12,
+            1_700_000_000,
+            vec![(Pubkey::new_unique(), Account::default())],
+            Some(5),
+        )),
+    }
+}
+
+/// MT5a: hands a result to the owner as the projection worker would and applies it.
+fn mt5_apply(
+    f: &mut Fixture,
+    message: crate::orchestration::remote_workers::ProjectionResultMessage,
+) {
+    let account = message.account;
+    {
+        let d = f.results.as_ref().unwrap();
+        assert!(crate::orchestration::remote_workers::push_result(
+            &d.projection,
+            message,
+            &f.owner.shutdown,
+            &d.space
+        ));
+    }
+    f.owner.projection_pending.insert(account);
+    f.owner.remote_apply().unwrap();
+    assert!(!f.owner.projection_pending.contains(&account));
+}
+
+/// P6-MT.14 #6/#7 on the wired path (MT5a): a projection result bound to an older recovery
+/// generation (a gap ended its Ready period; the recovered state is byte-identical) or to an
+/// older program generation cannot commit — not cached, not requeued, no follow-up work,
+/// counted `drop_old_generation` — while the same result at the current generation is
+/// accepted and cached. The E9 identity checks it would have passed are not consulted.
+#[test]
+fn mt5_projection_result_of_an_older_generation_cannot_commit() {
+    use crate::execution::identity::ResultAction;
+    let mut f = fixture_with("mt5_generation", None);
+    let candidate = Pubkey::new_unique();
+    let data = vec![1u8; 8];
+    let snapshot = vec![mt5_account(
+        &f,
+        candidate,
+        data.clone(),
+        SourceKind::Snapshot,
+    )];
+    mt5_ready(&mut f, &snapshot);
+    let real = solana_sdk::hash::hash(&data);
+    let fingerprint = dependency_fingerprint(&f.owner.st, &[]);
+    let message = |identity| mt5_result(candidate, real, vec![], fingerprint, identity);
+    let older = test_identity(&f.owner, candidate, &[]);
+    assert_eq!(older.generations.recovery, 0);
+    mt5_apply(&mut f, message(older.clone()));
+    assert_eq!(f.owner.projection_stats.accepted, 1);
+    assert!(f.owner.projection_cache.contains_key(&candidate));
+    assert_eq!(f.owner.metrics.result_actions.get(ResultAction::Accept), 1);
+    f.owner.projection_cache.clear();
+    f.owner.detect_queue.clear();
+
+    // The gap ends the Ready period; the recovery installs the identical state.
+    f.owner.st.on_event(IngressEvent::Gap {
+        source: SourceKind::WsRpcControl,
+        from_slot: Some(12),
+        to_slot: None,
+        t_rx_ns: 0,
+    });
+    mt5_ready(&mut f, &snapshot);
+    assert_eq!(f.owner.generations().recovery, 1);
+    mt5_apply(&mut f, message(older.clone()));
+    assert_eq!(
+        f.owner
+            .metrics
+            .result_actions
+            .get(ResultAction::DropOldGeneration),
+        1
+    );
+    assert!(!f.owner.projection_cache.contains_key(&candidate));
+    assert!(
+        f.owner.detect_queue.is_empty(),
+        "no requeue, no consumption"
+    );
+    assert!(!f.owner.projection_requeues.contains_key(&candidate));
+    assert_eq!(f.owner.projection_stats.accepted, 1, "E9 never reached");
+    assert_eq!(f.owner.projection_stats.requeued, 0);
+
+    // The current generation commits again; a latched program upgrade drops it afterwards.
+    let current = test_identity(&f.owner, candidate, &[]);
+    assert_eq!(current.generations.recovery, 1);
+    mt5_apply(&mut f, message(current.clone()));
+    assert_eq!(f.owner.projection_stats.accepted, 2);
+    f.owner.projection_cache.clear();
+    f.owner.detect_queue.clear();
+    f.owner.latch_program_upgrade();
+    f.owner.latch_program_upgrade();
+    assert_eq!(f.owner.generations().program, 1, "one latch per run");
+    mt5_apply(&mut f, message(current));
+    assert_eq!(
+        f.owner
+            .metrics
+            .result_actions
+            .get(ResultAction::DropOldGeneration),
+        2
+    );
+    assert!(!f.owner.projection_cache.contains_key(&candidate));
+    assert!(f.owner.detect_queue.is_empty());
+    assert_eq!(f.owner.projection_stats.accepted, 2);
+    let line = f.owner.identity_line();
+    assert!(
+        line.contains("recovery_generation=1 program_generation=1")
+            && line.contains("accept=2 drop_old_generation=2"),
+        "{line}"
+    );
+    cleanup(f);
+}
+
+/// P6-MT.14 #8 on the wired path (MT5a): a re-write of a key of the projection's readset that
+/// the E9 fingerprint cannot see (same slot and bytes, no write_version) still cannot commit —
+/// the key's epoch changed: counted `recheck_current`, the result takes the E9 stale path (not
+/// cached, re-requested once from the current state), and a write to a key outside the readset
+/// changes nothing.
+#[test]
+fn mt5_projection_result_with_a_rewritten_readset_key_is_rechecked() {
+    use crate::execution::identity::ResultAction;
+    use darkbot_solana::state::ApplyOutcome;
+    let mut f = fixture_with("mt5_readset", None);
+    let (candidate, dep, other) = (
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    );
+    let data = vec![1u8; 8];
+    let snapshot = vec![
+        mt5_account(&f, candidate, data.clone(), SourceKind::Snapshot),
+        mt5_account(&f, dep, vec![2; 8], SourceKind::Snapshot),
+        mt5_account(&f, other, vec![3; 8], SourceKind::Snapshot),
+    ];
+    mt5_ready(&mut f, &snapshot);
+    let real = solana_sdk::hash::hash(&data);
+    let fingerprint = dependency_fingerprint(&f.owner.st, &[dep]);
+    let identity = test_identity(&f.owner, candidate, &[dep]);
+    let message = |identity| mt5_result(candidate, real, vec![dep], fingerprint, identity);
+    // A key outside the readset: no effect.
+    let mut rewrite = mt5_account(&f, other, vec![4; 8], SourceKind::WsRpcControl);
+    rewrite.slot = 13;
+    assert_eq!(
+        f.owner.st.on_event(IngressEvent::Account(rewrite)),
+        Some(ApplyOutcome::Applied)
+    );
+    mt5_apply(&mut f, message(identity.clone()));
+    assert_eq!(f.owner.projection_stats.accepted, 1);
+    assert_eq!(f.owner.metrics.result_actions.get(ResultAction::Accept), 1);
+    f.owner.projection_cache.clear();
+    f.owner.detect_queue.clear();
+    // The identical re-write of `dep`: E9 sees nothing, the readset epoch changed.
+    assert_eq!(
+        f.owner.st.on_event(IngressEvent::Account(mt5_account(
+            &f,
+            dep,
+            vec![2; 8],
+            SourceKind::WsRpcControl
+        ))),
+        Some(ApplyOutcome::Applied)
+    );
+    assert_eq!(
+        dependency_fingerprint(&f.owner.st, &[dep]),
+        fingerprint,
+        "E9 alone sees no change"
+    );
+    mt5_apply(&mut f, message(identity));
+    assert_eq!(
+        f.owner
+            .metrics
+            .result_actions
+            .get(ResultAction::RecheckCurrent),
+        1
+    );
+    assert_eq!(f.owner.projection_stats.accepted, 1);
+    assert!(!f.owner.projection_cache.contains_key(&candidate));
+    assert_eq!(f.owner.projection_stats.requeued, 1);
+    assert_eq!(
+        f.owner.detect_queue.back(),
+        Some(&(candidate, 7, 12, "integration_projection_requeue"))
+    );
+    cleanup(f);
+}
+
 /// A failed projection as the projection worker reports it.
 fn projection_failure() -> crate::orchestration::remote_workers::ProjectionResultMessage {
+    let account = Pubkey::new_unique();
     crate::orchestration::remote_workers::ProjectionResultMessage {
-        account: Pubkey::new_unique(),
+        account,
         base_slot: 12,
         base_account_hash: solana_sdk::hash::Hash::default(),
         t_rx_ns: 0,
         dependencies: vec![],
         dependency_fingerprint: solana_sdk::hash::Hash::default(),
+        identity: crate::execution::identity::CandidateIdentity {
+            candidate_id: 0,
+            account,
+            trigger: darkbot_common::mt0::TriggerClass::AccountUpdate,
+            lane: None,
+            generations: Default::default(),
+            candidate_revision: 1,
+            t_rx_first_ns: 0,
+            t_rx_latest_ns: 0,
+            trigger_slot: 12,
+            evaluation: None,
+            valid_until_ns: None,
+            read_set: Ok(Default::default()),
+        },
         result: Err(crate::orchestration::remote_workers::ProjectionFailure {
             context_behind: false,
             error: "A23".into(),

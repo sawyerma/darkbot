@@ -538,17 +538,10 @@ pub(crate) enum CandidateQueueAdmission {
     Coalesced,
 }
 
-/// P6-MT.5 (MT3): trigger-priority lane of a candidate before its preparation.
+/// P6-MT.5 (MT3): trigger-priority lane of a candidate before its preparation (the type lives
+/// with the candidate identity since MT5a; the lanes' behaviour is here).
 #[cfg(feature = "crate_health")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum Lane {
-    /// Transition / forced re-arm (incl. a due P2-04/P2-05 premium or t_profitable wake-up).
-    L0 = 0,
-    /// Material canonical revision of an already relevant candidate.
-    L1 = 1,
-    /// Periodic repeat / Error / maintenance.
-    L2 = 2,
-}
+pub(crate) use crate::execution::identity::Lane;
 #[cfg(feature = "crate_health")]
 pub(crate) const LANES: usize = 3;
 #[cfg(feature = "crate_health")]

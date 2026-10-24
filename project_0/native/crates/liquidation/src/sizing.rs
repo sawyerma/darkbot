@@ -2682,4 +2682,96 @@ mod tests {
             assert!(s.seized_equity_value_micro <= liab * 11 / 10, "{s:?}");
         }
     }
+
+    /// P6-MT.14 #32 (MT5a): the `ReadSetRecorder` is complete for a real Health + sizing
+    /// evaluation — every key the engine and the sizer read through the one evaluation source
+    /// (observed by an independent spy underneath) is in the readset, nothing else is, each
+    /// with the classification the state gives (present/absent); the known inputs (account,
+    /// group, both banks, FeeState) are among them, and a second identical evaluation yields the
+    /// identical readset.
+    #[test]
+    fn mt5_readset_recorder_is_complete_for_health_and_sizing() {
+        use crate::readset::{EpochSource, KeyEpoch, Observed, ReadSetRecorder};
+        use std::cell::RefCell;
+        use std::collections::BTreeSet;
+        struct Spy<'a>(&'a TwoBank, RefCell<BTreeSet<Pubkey>>);
+        impl AccountSource for Spy<'_> {
+            fn account(&self, k: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                self.1.borrow_mut().insert(*k);
+                self.0.account(k)
+            }
+        }
+        /// Present keys of the fixture at epoch 7; everything else absent, never removed.
+        struct Epochs<'a>(&'a TwoBank);
+        impl EpochSource for Epochs<'_> {
+            fn key_epoch(&self, key: &Pubkey) -> KeyEpoch {
+                if self.0.state.contains_key(key) {
+                    KeyEpoch::Present(7)
+                } else {
+                    KeyEpoch::Absent { removed_bound: 0 }
+                }
+            }
+            fn state_epoch(&self) -> u64 {
+                9
+            }
+        }
+        let tb = two_bank(0.5, 1_000_000, 900_000);
+        let banks: Vec<Pubkey> = {
+            let (_, data) = &tb.state[&tb.account];
+            let a: MarginfiAccount = *bytemuck::from_bytes(&data[8..]);
+            a.lending_account
+                .balances
+                .iter()
+                .filter(|b| b.active == 1)
+                .map(|b| b.bank_pk)
+                .collect()
+        };
+        assert_eq!(banks.len(), 2);
+        let evaluate = || {
+            let spy = Spy(&tb, RefCell::new(BTreeSet::new()));
+            let epochs = Epochs(&tb);
+            let rec = ReadSetRecorder::new(&spy, &epochs, 64);
+            let engine = CrateHealth {
+                state: &rec,
+                group: tb.group,
+            };
+            let health = engine.health(&tb.account, 1_700_000_000, 10).unwrap();
+            let sizer = ProtocolSizer {
+                state: &rec,
+                program: tb.program,
+                group: tb.group,
+                headroom_bps: 9_990,
+            };
+            let _ = sizer
+                .sizes_with_health(&tb.account, &health, 1_700_000_000, 10)
+                .unwrap();
+            let _ = sizer.native_amount_cost_usd_micro(&banks[0], 1, 1_700_000_000, 10);
+            let set = rec.finish().unwrap();
+            let seen = spy.1.into_inner();
+            (set, seen)
+        };
+        let (set, seen) = evaluate();
+        let recorded: BTreeSet<Pubkey> = set.iter().map(|(k, _)| *k).collect();
+        assert_eq!(recorded, seen, "every read key, and only read keys");
+        assert!(seen.len() >= 5);
+        for key in [
+            tb.account,
+            tb.group,
+            banks[0],
+            banks[1],
+            protocol::fee_state_pda(&tb.program),
+        ] {
+            assert_eq!(set.get(&key), Some(Observed::Present(7)), "{key}");
+        }
+        for (k, o) in set.iter() {
+            let expect = if tb.state.contains_key(k) {
+                Observed::Present(7)
+            } else {
+                Observed::Absent { at_state_epoch: 9 }
+            };
+            assert_eq!(*o, expect, "{k}");
+        }
+        let (again, _) = evaluate();
+        assert_eq!(set, again, "deterministic");
+    }
 }

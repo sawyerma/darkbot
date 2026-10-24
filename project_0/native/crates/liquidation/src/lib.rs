@@ -26,6 +26,7 @@ pub mod planner;
 #[cfg(feature = "crate_health")]
 pub mod projection;
 pub mod protocol;
+pub mod readset;
 pub mod receivership;
 pub mod safety;
 pub mod schedule;

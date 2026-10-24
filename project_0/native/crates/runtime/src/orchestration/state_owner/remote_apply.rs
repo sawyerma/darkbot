@@ -306,7 +306,23 @@ impl ShadowOwner {
             self.projection_pending.remove(&done.account);
             let targeted_probe_result = self.integration_probe_expected.contains(&done.account);
             let mut targeted_status: Option<&'static str> = None;
+            // P6-MT.2 (MT5a): the central policy judges the result first. An older generation
+            // (a recovery or program upgrade since the request) or an otherwise dropped result
+            // gets no cache entry and no follow-up work; a changed dependency readset is the E9
+            // stale case (re-requested from the current state, bounded); only an accepted
+            // result reaches the E9 identity checks below, which stay as they are.
+            let action = self.judge(&done.identity);
+            let dropped = action.is_drop()
+                || action == crate::execution::identity::ResultAction::RetryNewestPending;
+            let recheck = action == crate::execution::identity::ResultAction::RecheckCurrent;
             match done.result {
+                _ if dropped => {
+                    if targeted_probe_result {
+                        targeted_status = Some("stale");
+                    }
+                    let removed = self.projection_cache.remove(&done.account);
+                    self.projection_stats.dropped_if(removed);
+                }
                 Ok((projection_slot, projection_unix_s, accounts, units)) => {
                     let canonical = self.st.get(&done.account);
                     let base_matches = canonical
@@ -315,9 +331,11 @@ impl ShadowOwner {
                         })
                         .unwrap_or(false);
                     // E9: a dependency revised while the worker projected makes it stale too
-                    // (N4: counted, no line per discard).
+                    // (N4: counted, no line per discard); MT5a: so does any re-write of a key
+                    // of the request's readset.
                     let dependencies_match = dependency_fingerprint(&self.st, &done.dependencies)
-                        == done.dependency_fingerprint;
+                        == done.dependency_fingerprint
+                        && !recheck;
                     let canonical_matches = self
                         .projection_stats
                         .result(base_matches, dependencies_match);

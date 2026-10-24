@@ -147,8 +147,36 @@ impl ShadowOwner {
                 owner_log!(self, "{line}");
                 let line = self.route_cap_line();
                 owner_log!(self, "{line}");
+                let line = self.identity_line();
+                owner_log!(self, "{line}");
             }
         }
+    }
+
+    /// P6-MT.2/MT.13 (MT5a): the owner's generations, the candidate ids allocated, the readset
+    /// size histogram (quantiles are bucket upper bounds) with its overflows, and the result
+    /// policy's verdicts, on their own line (pinned parsers unchanged).
+    #[cfg(feature = "crate_health")]
+    pub(super) fn identity_line(&self) -> String {
+        let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
+        let g = self.generations();
+        let r = self.metrics.readset_keys.snapshot();
+        format!(
+            "identity_stats: recovery_generation={} program_generation={} policy_generation={} config_generation={} candidate_ids={} state_epoch={} readset_keys: n={} p50={} p95={} p99={} max={} overflows={} result_actions: {}",
+            g.recovery,
+            g.program,
+            g.policy,
+            g.config,
+            self.next_candidate_id,
+            darkbot_project0::readset::EpochSource::state_epoch(&self.st),
+            r.count,
+            q(r.p50),
+            q(r.p95),
+            q(r.p99),
+            q(r.max),
+            self.metrics.readset_overflows,
+            self.metrics.result_actions.line(),
+        )
     }
 
     /// P6-MT.8/MT.13 (MT4): `route_cap_cache_hits/misses` of the route-cap hint cache and

@@ -16,6 +16,11 @@ impl ShadowOwner {
             // Health über das marginfi-Crate (Feature crate_health ist für dieses Binary Pflicht).
             // Bookkeeping time only; protocol evaluation uses the canonical chain clock below.
             let now = wall_unix_s()?;
+            // P6-MT.2 (MT5a): the identity of this detection — candidate id, the account's
+            // revision, trigger class, lane/t_rx_first and the owner's generations now; the
+            // evaluation point, validity and readset are completed below.
+            let origin = self.detect_origin.take();
+            let mut identity = self.begin_candidate(acct, trigger, origin, t_rx, slot);
             let view = StateView(&self.st);
 
             // [FIX-111][R6] Integration refreshes are projected by an isolated RPC worker first.
@@ -217,6 +222,18 @@ impl ShadowOwner {
                                 return Ok(false);
                             }
 
+                            // MT5a: the projection is bound to this candidate's identity with
+                            // the dependency set (and the candidate) as its readset at request
+                            // time; the result is judged by the central policy first.
+                            let projection_identity = {
+                                let mut id = identity.clone();
+                                id.read_set = darkbot_project0::readset::ReadSet::observe_keys(
+                                    dependencies.iter().copied().chain([acct]),
+                                    &self.st,
+                                    crate::execution::identity::READ_SET_MAX_KEYS,
+                                );
+                                id
+                            };
                             let work = ProjectionWork {
                                 account: acct,
                                 base_slot: base_record.slot,
@@ -227,6 +244,7 @@ impl ShadowOwner {
                                 dependencies,
                                 dependency_fingerprint: fingerprint,
                                 min_context_slot,
+                                identity: projection_identity,
                             };
                             match self.remote.projection_jobs.try_push(work) {
                                 Ok(()) => {
@@ -288,10 +306,21 @@ impl ShadowOwner {
             };
 
             #[cfg(feature = "crate_health")]
-            let eval_state: &dyn AccountSource = projected_owned
+            let evaluated: &dyn AccountSource = projected_owned
                 .as_ref()
                 .map(|p| p as &dyn AccountSource)
                 .unwrap_or(&view as &dyn AccountSource);
+            // P6-MT.2 (MT5a): the one evaluation source of this detection records every key
+            // Health, eligibility, sizing, the inventory/ATA checks and the plan builder read
+            // (with its canonical epoch), bounded by the protocol-derived readset bound.
+            #[cfg(feature = "crate_health")]
+            let recorder = darkbot_project0::readset::ReadSetRecorder::new(
+                evaluated,
+                &self.st,
+                crate::execution::identity::READ_SET_MAX_KEYS,
+            );
+            #[cfg(feature = "crate_health")]
+            let eval_state: &dyn AccountSource = &recorder;
 
             // [FIX-119][R6] Use both coordinates of the exact simulation Clock for every
             // projected protocol calculation. The original slot remains trigger provenance.
@@ -506,6 +535,23 @@ impl ShadowOwner {
                 health_result.as_ref(),
             );
             let simulation_failure = pipe.simulation_failure.take();
+            // MT5a: the complete identity of this evaluation — exact protocol clock, FIX-21
+            // validity (`t_rx + max_opportunity_age`, unchanged) and the readset — and the
+            // central policy's verdict. The business commit below happened in this same owner
+            // step (synchronous pipeline), so the verdict is telemetry here; it is the gate of
+            // the async results (MT7–MT9).
+            #[cfg(feature = "crate_health")]
+            {
+                identity.evaluation = Some(crate::execution::identity::Evaluation {
+                    slot: protocol_slot,
+                    unix_s: protocol_now,
+                });
+                identity.valid_until_ns =
+                    Some(t_rx.saturating_add(self.freshness.max_opportunity_age_ns));
+                identity.read_set = recorder.finish();
+                self.note_readset(&identity);
+                let _ = self.judge(&identity);
+            }
             // MT4: Jupiter requests of this revision's evaluation (route quotes are made on
             // this thread, so the MT0 delta is this evaluation's); a revision without any is
             // not routed and not a sample.

@@ -16,6 +16,9 @@ const PUBLISHED: [Pubkey; 5] = [
     Pubkey::from_str_const("GYEJ3BcgwHfNSL2BAuDcth3KKKt9eiK14EHwLCjU9Eoo"),
 ];
 
+/// P6-MT.2: the most protocol tables one plan reads from state (the readset bound).
+pub const PUBLISHED_COUNT: usize = PUBLISHED.len();
+
 pub fn published_keys(group: &Pubkey) -> Vec<Pubkey> {
     if *group != GROUP {
         return vec![];

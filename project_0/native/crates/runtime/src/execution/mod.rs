@@ -2,6 +2,7 @@
 
 pub mod accounting;
 pub mod builder;
+pub mod identity;
 pub mod inventory;
 pub mod lookup_tables;
 pub mod observe_only;
