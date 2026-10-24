@@ -6,16 +6,16 @@ Commitstand: Code `9dbb6607` (Repo-HEAD `30140710`, Rohinventar `F0_VAR_MANIFEST
 
 **Zählregel:** (A) jedes Schemablatt der real publizierten Topic-Payloads (Topic 10/13; jeder benannte Market-Counter als eigenes Feld); (B) jede datentragende GUI-Zeile und jedes Control der fünf Reiter, des Health-Drawers und der P0-Karte der globalen Übersicht (reine statische Überschriften/Hinweise nicht gezählt); (C) jede GUI-relevante native Owner-Gruppe ohne Projektion.
 
-## Ergebnis Paket 0
+## Ergebnis (Paket 0, fortgeschrieben nach Paket 1)
 
 | Gruppe | Anzahl | IST_CONNECTED | IST_BUG | SOLL_MISSING | FUTURE_PHASE_BLOCKED | EXCLUDED |
 |---|---|---|---|---|---|---|
 | A Wire-Felder Topic 10/13 | 147 (+ 71 Betriebsparameter) | 141 (+71) | 6 | 0 | 0 | 0 |
-| B GUI-Zeilen/Controls | 88 | 35 | 10 | 10 | 33 | 0 |
+| B GUI-Zeilen/Controls | 88 | 43 | 1 | 10 | 34 | 0 |
 | C Native-Owner ohne Projektion | 33 | 0 | 0 | 11 | 19 | 3 |
-| **Summe** | **268** (+71) | **176** (+71) | **16** | **21** | **52** | **3** |
+| **Summe** | **268** (+71) | **184** (+71) | **7** | **21** | **53** | **3** |
 
-**Fertig verbundene Pfade:** ausschließlich `runtime/src/status_tap.rs` (gefüllt nur vom Market-Capture-Prozess `reporter/src/bin/p0_market_capture_reported.rs:45-59`) → `reporter/src/lib.rs` → `project0.status` (10, `SystemStatus`) und `project0.capture.state` (13, `CaptureState`) → Gateway (`gateway/src/topics.rs`, `available`) → `features/project0/api/project0Adapter.ts` / `project0ViewAdapter.ts` → Store → Overview/Capture/Health/„All values“. Dazu die vorhandene Capture-Prozesssteuerung (`project0.capture.start/stop` → `darkbotctl capture start-configured` / `stop --signal-only`) mit Idempotenz-Ledger, heute nur auf der globalen Übersicht `/` bedient, und `overview.aggregates` `ProjectSummary.live_authorized` (`gateway/src/overview.rs`).
+**Fertig verbundene Pfade:** ausschließlich `runtime/src/status_tap.rs` (gefüllt nur vom Market-Capture-Prozess `reporter/src/bin/p0_market_capture_reported.rs:45-59`) → `reporter/src/lib.rs` → `project0.status` (10, `SystemStatus`) und `project0.capture.state` (13, `CaptureState`) → Gateway (`gateway/src/topics.rs`, `available`) → `features/project0/api/project0Adapter.ts` / `project0ViewAdapter.ts` → Store → Overview/Capture/Health/„All values“. Dazu die vorhandene Capture-Prozesssteuerung (`project0.capture.start/stop` → `darkbotctl capture start-configured` / `stop --signal-only`) mit Idempotenz-Ledger, auf der globalen Übersicht `/` und seit Paket 1 im Capture-Reiter bedient, und `overview.aggregates` `ProjectSummary.live_authorized` (`gateway/src/overview.rs`).
 
 ## A. Wire-Felder (Topic 10 und 13)
 
@@ -39,30 +39,30 @@ Commitstand: Code `9dbb6607` (Repo-HEAD `30140710`, Rohinventar `F0_VAR_MANIFEST
 | OV-01 | Stream freshness, Note (OverviewPanel) | Topic 13 `transport.last_frame_age_ns` + Topic-Status | 2 IST_CONNECTED | stale/detached im Hinweis benannt |
 | OV-02 | RPC p95, Decision p95 | `UnknownMetric` „— ms“ | 2 FUTURE_PHASE_BLOCKED | P6-MT: keine reale Verteilung (C-OV-4) |
 | OV-03 | Realized net PnL, Total capital | `UNCONNECTED_MONITOR` „— USD“ | 2 FUTURE_PHASE_BLOCKED | FE-04/07/P8, `finance_snapshot_id` (C-OV-5) |
-| OV-04 | Execution „Disabled · Not authorized“ | statisch, ignoriert `EffectiveRecord.live_authorized` | **1 IST_BUG** | an Topic-10-Wert binden; GUI-Start bleibt gesperrt |
+| OV-04 | Execution „Disabled · <Autorisierung>“ | Topic 10 `live_authorized` + `submission_authorized` (`executionAuthorization`; ohne LIVE-Topic/Effective Record „unknown“) | 1 IST_CONNECTED | Paket 1; GUI-Start bleibt gesperrt |
 | OV-04b | Available capital | statisch „Not connected“ | 1 FUTURE_PHASE_BLOCKED | C-WL-1 |
 | OV-05 | Capture-Badge, Market stream, Unique tx/gaps | Topic 13 | 3 IST_CONNECTED | — |
 | OV-06 | Analytics „No stored run loaded“, Replay „Not connected“ | statisch | 1 SOLL_MISSING | kein Run-/Job-Owner für Topic 15 (C-AN-1) |
 | OV-NAV | Open Liquidator/Capture/Analytics | lokale Navigation | 3 IST_CONNECTED | — |
 | OVG-01 | Globale P0-Karte: Execution authorization | `overview.rs` aus `live_authorized` | 1 IST_CONNECTED | — |
 | OVG-02 | Globale P0-Karte: Readiness | `UNKNOWN` | 1 SOLL_MISSING | BootAudit ohne Publisher (C-OV-1) |
-| OVG-03 | Globale P0-Karte: Captures, Start/Stop, Logs, Stop All | `captureControl.ts` (HTTP-Polling 2 s) + Command-Ledger | 2 IST_CONNECTED | Polling→Push nur P0-Owner (OPEN) |
+| OVG-03 | Globale P0-Karte: Captures, Start/Stop, Logs, Stop All | `captureControl.ts` (HTTP-Polling 2 s) + Command-Ledger | 2 IST_CONNECTED | Polling→Push nur P0-Owner (OPEN); Stop-Texte nennen seit Paket 1 Autostart-Suspend + BSC-Readiness-Stopp |
 | OVG-04 | Globale P0-Karte: RPC p95, Finance | `None` | 1 FUTURE_PHASE_BLOCKED | P6-MT, FE-04/07/P8 |
-| LIQ-00 | Running liquidators „0“ | fest kodiert | **1 IST_BUG** | keine native Quelle → „—“ |
+| LIQ-00 | Running liquidators „— · <Autorisierung>“ | keine native Quelle (vor Paket 1 fest „0“) | 1 FUTURE_PHASE_BLOCKED | Fleet-Owner F8/FE |
 | LIQ-00b | Available working capital, Realized net PnL | statisch „—“ | 2 FUTURE_PHASE_BLOCKED | C-WL-1, C-OV-5 |
 | LIQ-01…05 | Add/Duplicate/Remove/Select, Name/Origin, Classic/Receivership, vier Limits, Validate draft | `useFleetDrafts` (Browser) | 5 FUTURE_PHASE_BLOCKED | F8-Profile/CAS; Entwurf ≠ Bot |
 | LIQ-06 | Start selected bot, Start fleet | disabled | 1 FUTURE_PHASE_BLOCKED | FE-01…06, F8 |
-| LIQ-07 | Execution status „Not authorized“ | statisch, ignoriert `live_authorized` | **1 IST_BUG** | an Topic-10-Wert binden |
+| LIQ-07 | Execution status | Topic 10 wie OV-04 | 1 IST_CONNECTED | Paket 1 |
 | LIQ-08 | Parallel operation (4 Zeilen) | statisch „Planned/Unmeasured…“ | 1 FUTURE_PHASE_BLOCKED | P6-MT/F8 |
 | LIQ-NAV | Capture → / Analytics → | Navigation | 1 IST_CONNECTED | — |
 | CAP-01 | Running-Badge, Feed, Run, Configured duration, Stream, Tx/Liq-Events, Verdict, Result | Topic 13 | 8 IST_CONNECTED | Live-Verdict ≠ Strict-Verifikation |
-| CAP-02…04 | Dauer-Presets/Custom, Source, Observation | Browser-State | 3 FUTURE_PHASE_BLOCKED | Gateway-Start nimmt keine Parameter (`start-configured`); typisierter Command + Engine-Bestätigung nötig |
-| CAP-05 | Check & start, Stop | nur lokale Notice | **2 IST_BUG** | vorhandenen `captureControl` wiederverwenden (F0-P0UI-2) |
-| CAP-06 | Verify Off/Index/Strict/Crosscheck | Index/Crosscheck wählbar | **1 IST_BUG** | `p0ctl run start` verweigert `CHAIN_VERIFY_*_BLOCKED` |
+| CAP-02…04 | Dauer-Presets/Custom, Source, Observation | Browser-State, nur CLI-Vorschau (`run start` = Market + Shadow, andere Observation → Vorschau verweigert); Desktop-Start ist Market-only | 3 FUTURE_PHASE_BLOCKED | Gateway-Start nimmt keine Parameter (`start-configured`); typisierter Command + Engine-Bestätigung nötig |
+| CAP-05 | Check & start, Stop | bestehender `captureControl` (`project0.capture.start/stop`), nur nach launchd-Prozesszustand freigegeben, Stop-Bestätigung je Run (nennt Autostart-Suspend + BSC-Readiness-Stopp von `darkbotctl capture stop`), Receipt + Prozesszustand | 2 IST_CONNECTED | Paket 1 (F0-P0UI-2); Panel-Auswahl wird nicht gesendet |
+| CAP-06 | Verify Off/Index/Strict/Crosscheck | Entwurf für CLI-Vorschau; Index/Crosscheck DISABLED (`CHAIN_VERIFY_*_BLOCKED`) | 1 IST_CONNECTED | Paket 1 |
 | CAP-07 | Sechs Report-Marker, All/None | Browser-State | 1 SOLL_MISSING | Report-Job-Pfad fehlt (C-AN-1); nur Reportfilter |
-| CAP-07b | CLI-Vorschau | `--mode`, index/crosscheck, ohne Marker | **1 IST_BUG** | echte Syntax `--duration`, `--chain-verify off|strict`, `--report-markers` |
+| CAP-07b | CLI-Vorschau | `p0ctl run start --duration --capture-source --chain-verify off|strict --report-markers` (`model/capturePreview.ts`) | 1 IST_CONNECTED | Paket 1; Mainnet-Freigabeoptionen nur als Hinweis |
 | CAP-07c | „Selected report markers N / 6“ | lokal | 1 IST_CONNECTED | — |
-| CAP-07d | Hinweis „control binary is not implemented“ | statisch, falsch (`p0ctl run start` existiert) | **1 IST_BUG** | Wahrheitstext |
+| CAP-07d | Hinweise Start/Vorschau | Wahrheitstext (`start-configured`, Entwürfe nicht gesendet) | 1 IST_CONNECTED | Paket 1 |
 | CAP-08 | Vier Klassen, vier Related-Types, Provenance/Cost/Time-Filter | fehlt | 1 SOLL_MISSING | `LiquidationType`/`RelatedKind`/`ReportQuery` (C-AN-2) |
 | CAP-09 | Boot doctor, Preflight, Capacity, Quota | teils „Not collected“ | 1 SOLL_MISSING | C-OV-1, C-OV-2, C-CP-3 |
 | CAP-10 | Quellenmodi OFF/OBSERVE/ACTIVE | fehlt | 1 FUTURE_PHASE_BLOCKED | F0-P0UI-4, S1-02, A23; ACTIVE ≠ LIVE |
@@ -79,7 +79,7 @@ Commitstand: Code `9dbb6607` (Repo-HEAD `30140710`, Rohinventar `F0_VAR_MANIFEST
 | HLTH-02 | Gross edge total/p50/p90 | `double` mit `toFixed(2)` | **1 IST_BUG** | A: `double`-USD; Schemakorrektur P0-Owner |
 | HLTH-03 | Wallet/Provider/Capacity | „Not collected“ | 1 SOLL_MISSING | C-CP-3, C-OV-2 |
 | HLTH-04 | RPC p50/95/99, Ingress→Decision p50/95/99 | „Not collected“ | 2 FUTURE_PHASE_BLOCKED | P6-MT |
-| HLTH-05 | All values | `toJson` beider Messages | **1 IST_BUG** | zeigt absoluten `run_dir` |
+| HLTH-05 | All values | `toJson` beider Messages; absoluter `run_dir` als „…/<run>“ maskiert | 1 IST_CONNECTED | Paket 1; Wire-Defekt A bleibt P0-Owner |
 
 ## C. GUI-relevante Native-Owner ohne Projektion
 
@@ -131,6 +131,7 @@ Commitstand: Code `9dbb6607` (Repo-HEAD `30140710`, Rohinventar `F0_VAR_MANIFEST
 
 ## Folgepakete (Fortschritt)
 
-- **Paket 1 (belegte Integrationsfehler, Frontend):** B-Zeilen mit `IST_BUG` außerhalb des Schemas (OV-04, LIQ-00, LIQ-07, CAP-05, CAP-06, CAP-07b, CAP-07d, HLTH-05 Anzeige). Stand: offen.
-- **Pakete 2–5:** keine weiteren qualifizierten Native-Werte ohne Publisher; `SOLL_MISSING`-/`FUTURE_PHASE_BLOCKED`-Zeilen bleiben mit Owner und Gate offen.
+- **Paket 1 (belegte Integrationsfehler, Frontend):** erledigt `6d0cac99` — OV-04, LIQ-07, CAP-05 (2), CAP-06, CAP-07b, CAP-07d, HLTH-05 → IST_CONNECTED, LIQ-00 → FUTURE_PHASE_BLOCKED; offen bleibt HLTH-02 (Schema A, P0-Owner).
+- **Pakete 2–5 (Overview, Liquidator, Capture/Analytics, Wallets):** geprüft 24.10.: jeder Topic-10/13-Wert ist gebunden; jede verbleibende „—“/„Not collected“-Zeile (OV-02/03/04b/06, LIQ-00/00b/08, CAP-07…10, AN-02…04, WAL-01…03, HLTH-03/04) braucht einen neuen nativen Publisher (C-*, P0-Owner) — keine weitere Bindung; Wallets-Layout und sieben Finanzzeilen unverändert, kein SEND/SWEEP.
+- **Paket 6 (Abnahme):** `3f04bce2` negative Command-Tests; vitest 70, Playwright project0 7 / overview 3 / Backend-E2E (realer Reporter→Gateway→Browser) 1, ops control/stop_all/lifecycle/bsc_control PASS; Pixeldiff NOT_RUN (keine Baselines). Befund an Ops: `darkbotctl capture stop` beendet auch BSC-Readiness (UI benennt es).
 - **P0-Owner-Abhängigkeiten:** C-*-SOLL_MISSING-Projektionen, Schema-Defekte (A), Reporter-`StateTooLarge`, Capture-Polling→Push, native Receipts (F6).
