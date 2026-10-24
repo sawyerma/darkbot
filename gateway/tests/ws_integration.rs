@@ -422,7 +422,8 @@ async fn event_topics_and_state_cursors_are_refused() {
     }
 }
 #[tokio::test]
-async fn an_oversized_state_becomes_frame_too_large_for_its_topic() {
+async fn an_oversized_state_is_frame_too_large_until_the_next_valid_state_on_the_same_subscription()
+{
     let s = spawn(Limits::default()).await;
     let mut ws = connect(&s).await;
     handshake(&mut ws).await;
@@ -442,6 +443,26 @@ async fn an_oversized_state_becomes_frame_too_large_for_its_topic() {
             }
             Some(server_message::Msg::Heartbeat(_)) => {}
             other => panic!("expected FRAME_TOO_LARGE: {other:?}"),
+        }
+    }
+    // Still too large at the next seq: no repeated error. The next valid state arrives on the
+    // same subscription, without a new Subscribe (Wire V1.3 §2 recovery).
+    let mut still = update(1, 2);
+    still.payload = Bytes::from(vec![8u8; 2048]);
+    assert!(s.hub.publish(still).is_ok());
+    s.hub.publish(update(1, 3)).unwrap();
+    loop {
+        match recv(&mut ws).await {
+            Some(server_message::Msg::StateFull(f)) => {
+                assert_eq!(
+                    (f.topic, f.generation, f.seq),
+                    (TopicId::OverviewAggregates as i32, 1, 3)
+                );
+                assert_eq!(f.quality, darkbot_gateway::proto::StateQuality::Ok as i32);
+                break;
+            }
+            Some(server_message::Msg::Heartbeat(_)) => {}
+            other => panic!("expected the recovered state, not {other:?}"),
         }
     }
 }

@@ -53,7 +53,8 @@ export interface CursorPair {
 
 export type StateDecision = "APPLY" | "DISCARD_OLD_GENERATION" | "DISCARD_OLD_SEQ";
 export type EventDecision = "APPLY" | "DUPLICATE" | "EPOCH_MISMATCH" | "PROOF_CONFLICT";
-export type ErrorDecision = "RETRY" | "GIVE_UP" | "FATAL" | "CONNECTION";
+// HOLD: topic value unavailable, subscription kept; the next valid STATE restores it.
+export type ErrorDecision = "RETRY" | "GIVE_UP" | "FATAL" | "CONNECTION" | "HOLD";
 
 export class TopicTracker {
   status: TopicStatus = "IDLE";
@@ -108,6 +109,18 @@ export class TopicTracker {
   markUnavailable(reason: string): void {
     this.status = "UNAVAILABLE";
     this.statusReason = reason;
+  }
+
+  /** FRAME_TOO_LARGE (Wire V1.3 §2): no current value, never LIVE; the subscription stays and the
+   *  next valid state of the same publisher restores the topic. No retry, no resubscribe loop. */
+  markTooLarge(detail = ""): void {
+    this.status = "UNAVAILABLE";
+    this.statusReason = `FRAME_TOO_LARGE${detail ? ` ${detail}` : ""}`;
+  }
+
+  /** UNAVAILABLE only until the publisher sends a state that fits again. */
+  get awaitsValidState(): boolean {
+    return this.status === "UNAVAILABLE" && this.statusReason.startsWith("FRAME_TOO_LARGE");
   }
 
   manualRetry(): void {
@@ -280,8 +293,10 @@ export class TopicTracker {
       case ErrorCode.SESSION_EXPIRED:
       case ErrorCode.INTERNAL:
         return "CONNECTION";
-      case ErrorCode.SCHEMA_INVALID:
       case ErrorCode.FRAME_TOO_LARGE:
+        this.markTooLarge(err.message);
+        return "HOLD";
+      case ErrorCode.SCHEMA_INVALID:
       case ErrorCode.TOPIC_UNAVAILABLE:
         this.markUnavailable(`${code}${err.message ? ` ${err.message}` : ""}`);
         return "FATAL";

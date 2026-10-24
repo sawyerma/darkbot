@@ -113,8 +113,8 @@ export class TopicSubscriptions {
   // ---------------------------------------------------------------- subscribe lifecycle
 
   private ensureSubscribed(e: Entry): void {
-    if (e.subscribed || !this.conn.isOpen || e.tracker.status === "UNAVAILABLE" ||
-        e.tracker.status === "ERROR") return;
+    if (e.subscribed || !this.conn.isOpen || e.tracker.status === "ERROR" ||
+        (e.tracker.status === "UNAVAILABLE" && !e.tracker.awaitsValidState)) return;
     if (e.descriptorOk !== true) {
       e.tracker.markUnavailable(e.descriptorReason);
       this.emitStatus(e);
@@ -245,9 +245,10 @@ export class TopicSubscriptions {
         const f = v.value;
         const e = this.entries.get(f.topic);
         if (!e || e.refs === 0 || !e.subscribed || e.descriptorOk !== true ||
-            e.tracker.cls !== TopicClass.STATE || e.tracker.status === "UNAVAILABLE") return;
+            e.tracker.cls !== TopicClass.STATE ||
+            (e.tracker.status === "UNAVAILABLE" && !e.tracker.awaitsValidState)) return;
         if (f.payload.byteLength > this.conn.limits.maxStateFullBytes) {
-          e.tracker.markUnavailable("FRAME_TOO_LARGE");
+          e.tracker.markTooLarge();
           this.emitStatus(e);
           return;
         }
@@ -330,6 +331,10 @@ export class TopicSubscriptions {
         const d = e.tracker.onError(err, this.conn.limits.maxCatchupRetries);
         if (d === "CONNECTION") {
           this.conn.blockProtocol(`ERROR:${err.message || err.code}`);
+          return;
+        }
+        if (d === "HOLD") {
+          this.emitStatus(e);
           return;
         }
         e.subscribed = false;

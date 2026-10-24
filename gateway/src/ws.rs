@@ -207,7 +207,7 @@ impl Client {
         loop {
             tokio::select! {
             m=self.socket.recv()=>{let m=m.ok_or(())?.map_err(|_|())?;if !self.on_msg(m).await?{return Ok(())}},
-            Some((topic,slot))=self.streams.next(),if !self.streams.is_empty()=>{if let Some(st)=slot{if st.too_large||st.payload.len()>self.app.cfg.limits.max_state_full_bytes as usize{self.streams.remove(&topic);self.sent.remove(&topic);self.error(Some(topic),ErrorCode::FrameTooLarge,"state too large").await?;}else{self.send(server_message::Msg::StateFull(st.to_frame())).await?;self.sent.insert(topic,(st.generation,st.seq));}}},
+            Some((topic,slot))=self.streams.next(),if !self.streams.is_empty()=>{if let Some(st)=slot{if st.too_large||st.payload.len()>self.app.cfg.limits.max_state_full_bytes as usize{self.error(Some(topic),ErrorCode::FrameTooLarge,"state too large; the subscription stays and the next valid state restores the topic").await?;}else{self.send(server_message::Msg::StateFull(st.to_frame())).await?;self.sent.insert(topic,(st.generation,st.seq));}}},
             _=timer.tick()=>{if self.pending.is_some(){self.missed+=1;if self.missed>=self.app.cfg.limits.stale_after_missed_heartbeats{self.close(1001,"pong timeout").await;return Err(())}}self.hb+=1;let id=self.hb;let watermark=self.sent.iter().map(|(t,(g,s))|StateWatermark{topic:*t as i32,generation:*g,highest_seq_sent:*s}).collect();self.send(server_message::Msg::Heartbeat(Heartbeat{heartbeat_id:id,server_time_unix_ns:unix_ns_now(),state_watermarks:watermark})).await?;self.pending=Some(id);}
             }
         }
