@@ -28,7 +28,8 @@ TS_DECLARATION	frontend/src/core/realtime/TopicState.ts	40	EventMeta
 TS_DECLARATION	frontend/src/core/realtime/TopicState.ts	49	CursorPair
 TS_DECLARATION	frontend/src/core/realtime/TopicState.ts	54	StateDecision
 TS_DECLARATION	frontend/src/core/realtime/TopicState.ts	55	EventDecision
-TS_DECLARATION	frontend/src/core/realtime/TopicState.ts	56	ErrorDecision
+TS_DECLARATION	frontend/src/core/realtime/TopicState.ts	57	ErrorDecision
+TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.test.ts	5	ClientMessage
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	3	ServerMessage
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	4	Welcome
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	15	StateListener

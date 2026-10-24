@@ -1,5 +1,7 @@
 file	line	source_excerpt
 frontend/src/app/RouteTopics.tsx	6	gateway.connect(); // idempotent; BLOCKED bleibt BLOCKED
+frontend/src/core/realtime/TopicSubscriptions.test.ts	56	h.topics.onState(TOPIC, (bytes) => applied.push(bytes[0]!));
+frontend/src/core/realtime/TopicSubscriptions.test.ts	75	h.topics.onState(TOPIC, () => {});
 frontend/src/core/realtime/TopicSubscriptions.ts	49	"if (info.status !== ""OPEN"") this.onConnectionDown();"
 frontend/src/core/realtime/TopicSubscriptions.ts	190	private onConnectionDown(): void {
 frontend/src/core/realtime/index.ts	5	// aufgebaut; F3 ruft gateway.connect() in app/providers.tsx auf, wenn das Gateway existiert.

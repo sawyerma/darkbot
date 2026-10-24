@@ -6001,3 +6001,12 @@ Commits `1d62596b`, `a5609301`. Evidence `docs/evidence/BUGS_20261024/a23_09_jfi
 - Historical schema-1 FE-01 journals and `read_*.json` replay through `fe_replay::historical_read` — fixture-proven only: no real FE-01 journal exists (the 24.10. smoke used the Python probe).
 - PERSIST-05 negatives added: chain break behind valid CRC/SHA, forged manifest (manifest only by `seal`), segment link missing / unsealed intermediate / symlinked successor, fsync failure at segment rotation and seal, econ report-journal write failure, market queue stall.
 - Open: Mainnet volume/tails (NOT_MEASURED), physical fault test, Python FE-01 smoke probe still writes JSON evidence, journal-level reorg (by design: finalized-only settlement), SK-08 SQLite deferred.
+
+## 2026-10-24 — Paket 4: P6-MT MT2a, MT3, MT4, MT5a, MT5b (LOCAL_PASS offline)
+
+Commits `1a05bd78` (MT2a), `f52e7c21` (MT3), `3e745129` (MT4), `d73f5ae5` (reporter test for protocol `0495fd04`), `fe755331` (MT5a), `9dbb6607` (MT5b). Implemented under the Fable rule (P6-MT.17); reviewed, extended, mutation-proven and gated by the integrator.
+
+- Gates PASS each; latest `9dbb6607`: fmt, clippy ×4, 876/0/10, 874/0/10, runner 400/0/3 ×2, release, Python. 13 mutations fail-before.
+- MT2a: exact Health once per detection (3 → 1), carried through pipeline, builder and sizer. MT3: lanes L0/L1/L2, WDRR 8:3:1, `t_rx_first` kept, FIX-21 freshness unchanged. MT4: route-cap cache (hint only, real build validates, re-probe every 6th hit). MT5a: `state_epoch`, readsets (bound 199), candidate identity, central result policy on projection results. MT5b: per-account ownership IDLE→EXECUTING→SIGNED→SUBMITTED→RELEASED, SUBMITTED from the P8-RES-02 book.
+- CI: `3e745129` project0-gate red (reporter test vs protocol `0495fd04` from the frontend session), green again from `d73f5ae5`.
+- NOT_RUN / open: P6-MT.15 gate values (duty cycle, wake-up p99, L0 waits, NO_SWAP T_state→T_sign) NOT_MEASURED; C0-MO, MT11/MT12 (Mainnet, user); MT6–MT10 after C0-MO per P6-MT.16; local fee model (≥10k qualified messages); UB prioritization of remote order (MT8 queue); P6MT-J1 (route/fee/simulation on the owner) and P6MT-R1 (retry wait in the caller).
