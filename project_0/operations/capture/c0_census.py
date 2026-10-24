@@ -212,19 +212,31 @@ JOURNAL_TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.p
                             "native", "target", "release", "p0-journal")
 
 
+def import_line(row):
+    """One typed import row for `p0-journal import`: `key=value` fields, `space=-` when unknown
+    (JFI: the handoff is no JSON; the Rust side decodes each field once into the typed row)."""
+    return " ".join(f"{k}={'-' if v is None else v}" for k, v in row.items()) + "\n"
+
+
 def journal_import(kind, path, rows):
-    """Writes `rows` (dicts) as a new sealed journal; returns {journal, frames, root_sha256, status}."""
+    """Writes `rows` (dicts in field order) as a new sealed journal; returns {journal, frames,
+    root_sha256, status} parsed from the tool's text summary."""
     import subprocess
 
     if not os.path.exists(JOURNAL_TOOL):
         raise RuntimeError("p0-journal missing: cargo build --release --manifest-path project_0/native/Cargo.toml "
                            "--features 'crate_health txv1' --bin p0-journal")
-    lines = "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows)
+    lines = "".join(import_line(row) for row in rows)
     proc = subprocess.run([JOURNAL_TOOL, "import", str(kind), path], input=lines, capture_output=True,
                           text=True, check=False)
     if proc.returncode:
         raise RuntimeError(f"census journal not written: {proc.stderr.strip()[-300:]}")
-    return json.loads(proc.stdout)
+    head, _, fields = proc.stdout.strip().partition(" ")
+    if head != "C0_CENSUS_IMPORT":
+        raise RuntimeError(f"census journal summary unreadable: {proc.stdout.strip()[-300:]}")
+    summary = dict(field.split("=", 1) for field in fields.split(" "))
+    summary["frames"] = int(summary["frames"])
+    return summary
 
 
 def write_group_outputs(out_dir, accounts, slot):
@@ -232,7 +244,7 @@ def write_group_outputs(out_dir, accounts, slot):
     rows = [
         {
             "pubkey": acc["pubkey"],
-            "indexer_flags_b64": acc["account"]["data"][0],
+            "indexer_flags": acc["account"]["data"][0],
             "space": acc["account"].get("space"),
             "slot": slot,
         }
@@ -250,7 +262,7 @@ def write_outputs(out_dir, accounts, report):
             "pubkey": acc["pubkey"],
             "lamports": acc["account"]["lamports"],
             "owner": acc["account"]["owner"],
-            "discriminator_b64": acc["account"]["data"][0],
+            "discriminator": acc["account"]["data"][0],
             "space": acc["account"].get("space"),
             "slot": report["context_slot"],
         }
@@ -274,9 +286,11 @@ def selftest():
     # Fixture: zwei Accounts, einer bekannt, einer unbekannt.
     known = anchor_discriminator("Bank") + b"\x00" * 1856  # Rohlänge = 8 + 1856 (Payload ohne Discriminator)
     unknown = b"\xff" * 8 + b"\x00" * 100
+    # Valid base58 keys: the import decodes every field into the typed row.
+    a, b, p = "11111111111111111111111111111112", "11111111111111111111111111111113", DEFAULT_PROGRAM_ID
     fixture = [
-        {"pubkey": "A", "account": {"lamports": 1, "owner": "P", "space": len(known), "data": [base64.b64encode(known[:8]).decode(), "base64"]}},
-        {"pubkey": "B", "account": {"lamports": 2, "owner": "P", "space": len(unknown), "data": [base64.b64encode(unknown[:8]).decode(), "base64"]}},
+        {"pubkey": a, "account": {"lamports": 1, "owner": p, "space": len(known), "data": [base64.b64encode(known[:8]).decode(), "base64"]}},
+        {"pubkey": b, "account": {"lamports": 2, "owner": p, "space": len(unknown), "data": [base64.b64encode(unknown[:8]).decode(), "base64"]}},
     ]
     rep = census(fixture, 123, DEFAULT_PROGRAM_ID, DEFAULT_GROUP_ID, "selftest", "fixture")
     assert rep["accounts_total"] == 2

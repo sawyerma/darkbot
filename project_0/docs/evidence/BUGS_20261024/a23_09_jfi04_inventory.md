@@ -18,17 +18,16 @@ explicit offline import · **C** operator config/approval file · **I** internal
 |---|---|---|---|
 | solana/src/chain.rs | 40 | W R | decoders of getTransaction/getBlock/WSS notifications (winner.rs, market_reconcile.rs, market/core.rs, ws_rpc.rs); `encode_*` only inside `MarketTransaction::legacy_json` |
 | runtime/src/market/rows.rs | 34 | R | `legacy_json` views only via payload/journal export: `p0-journal export/renders`, `p0ctl export`, `p0-strict-verify --compat`, test `JsonlSink` |
-| runtime/src/analytics/journal.rs | 29 | H I | schema-1 value-tree codec: `legacy_value`/`decode` (historical frames) and the schema-1 writer (`append_legacy`/`append_value`/`write_value`) used by the I paths below |
+| runtime/src/analytics/journal.rs | 24 | H | schema-1 value-tree reader (`legacy_value`/`decode`) for historical frames; no schema-1 writer since JFI-04 (24.10.; the encoder is test-only) |
 | solana/src/runtime_config.rs | 25 | R H | config export/`--export-environment` stdout, FE-01 `operational_config.json`; `decode_legacy_json` for historical config |
 | runtime/src/market_verification.rs | 19 | W R | strict verifier RPC params/responses (getSlot/getBlocks/getBlock); `render_compat` only for `--compat` |
-| runtime/src/bin/p0-fe-qualify.rs | 18 | W R I | getMultipleAccounts body; result.json/stdout; **FE01_CONFIG/READ/RESULT written as schema-1 value frames** |
-| runtime/src/orchestration/fe_replay.rs | 17 | W R I | request rebuild for comparison; `--replay` report; **`bind_scope` mutates the FE-01 report Value journaled as FE01_RESULT** |
+| runtime/src/bin/p0-fe-qualify.rs | 2 | W | getMultipleAccounts request params; the answer decodes into `WireMultipleAccounts`; FE01_CONFIG/READ/RESULT typed (schema 2), report as text |
+| runtime/src/orchestration/fe_replay.rs | 3 | H | `historical_read`: schema-1 FE01_READ frames and pre-PERSIST `read_NNNNNN.json` → typed `Fe01Read` |
 | solana/src/submit/jito.rs | 17 | W | Jito block-engine JSON-RPC (transport, pipeline, observe-only) |
 | solana/src/bin/p0-probe-v1.rs | 16 | W R | simulateTransaction probe, stdout |
 | runtime/src/analytics/renders.rs | 14 | R | `render_config`/`render` for `p0ctl export`, `p0-journal renders` |
-| runtime/src/orchestration/fe_qualification.rs | 14 | W I | `decode_batch` (wire); **`report` is a Value data model persisted as FE01_RESULT** |
 | solana/src/ingress/ws_rpc.rs | 14 | W | subscribe requests, notification frames |
-| runtime/src/bin/p0-journal.rs | 13 | R I | verify/renders/import stdout; **`import` writes stdin JSONL as new schema-1 C0_CENSUS frames** ("open JFI item" in code) |
+| runtime/src/bin/p0-journal.rs | 8 | R | `verify`/`renders` JSON stdout; `import` decodes typed `key=value` census rows (schema 2) |
 | runtime/src/analytics/econ_docs.rs | 12 | R | `legacy_json`/text renders (human-readable Serialize only) |
 | runtime/src/analytics/measurement.rs | 12 | R H | `PhaseRecord::legacy_json` view; JSON plan file only for historical/manual runs (launcher hands a `.p0j`) |
 | runtime/src/bin/p0-probe-costs.rs | 12 | W R | getTransaction/getSignaturesForAddress probe, stdout |
@@ -39,8 +38,6 @@ explicit offline import · **C** operator config/approval file · **I** internal
 | runtime/src/execution/one_shot.rs | 7 | H | `read_legacy` of a pre-binary `<wallet>.json` (once, bound by hash) |
 | runtime/src/analytics/econ_canonical.rs | 6 | R H | `joined_value` view; `p0-econ-replay` reads JSONL market events / legacy shadow JSONL and writes hour_NN.json |
 | runtime/src/analytics/econ.rs | 5 | R | `opportunity_view`, `atomic_json` for replay outputs |
-| runtime/src/orchestration/fe_freeze.rs | 5 | I | **freeze typed, its JSON summary merged into FE01_RESULT** |
-| runtime/src/execution/route.rs | 5 | W | Jupiter `/build` response |
 | solana/src/ingress/mod.rs | 5 | W | programSubscribe / getProgramAccounts filters |
 | runtime/src/market/summary.rs | 4 | R | `MarketFinal::legacy_json` (summary.json render) |
 | runtime/src/bin/p0-parity.rs | 4 | H | offline parity over historical getTransaction JSON |
@@ -61,7 +58,11 @@ explicit offline import · **C** operator config/approval file · **I** internal
 | runtime/src/orchestration/startup.rs | 1 | R | `--export-environment` stdout |
 
 ## Internal candidates (I) — the targeted JFI follow-ups (no historical evidence rewritten)
-1. **FE-01 evidence model** (`p0-fe-qualify`, `fe_qualification::report`, `fe_replay::bind_scope`,
+**All closed (24.10., Paket 3): pin 354 occurrences in 40 files, no I category left.** JFI-FIX-07: the Jupiter `/build` response is fully typed (`otherAmountThreshold` as `WireAmount` string|u64), `route.rs` has no production JSON use left.
+1. ~~**FE-01 evidence model**~~ — **done:** typed `Fe01Config/Fe01Read/Fe01Report` (schema 2), RPC
+   answer decoded into `WireMultipleAccounts` at the edge, text report; schema-1 journals and
+   `read_*.json` replay through `fe_replay::historical_read` (test
+   `saved_full_observation_replays_identically_but_stays_historical_and_incomplete`). Was: (`p0-fe-qualify`, `fe_qualification::report`, `fe_replay::bind_scope`,
    `fe_freeze::record`): the qualification report is a `serde_json::Value` and `fe01.p0j` stores
    FE01_CONFIG/READ/RESULT as schema-1 value frames. Target: typed payloads (schema 2) with the
    historical schema-1 frames (FE-01 smoke `da8512ad`) kept readable — before the next FE-01 run.
@@ -69,7 +70,9 @@ explicit offline import · **C** operator config/approval file · **I** internal
    to the sink, frames are typed `Mt0Telemetry` (schema 2); the offline row is the econ reports'
    MT0 render; historical schema-1 frames stay readable (test
    `jfi04_typed_mt0_frame_renders_the_historical_row`). Pin now 418 occurrences in 43 files.
-3. **`p0-journal import`**: offline import of external JSONL rows as schema-1 C0_CENSUS frames.
+3. ~~**`p0-journal import`**~~ — **done:** typed `C0CensusImportAccount/GroupAccount` rows from a
+   `key=value` text handoff (`c0_census.py`), schema-1 writes refused
+   (`jfi04_census_import_rows_are_typed_and_fail_closed`, `test_census_import.py`).
 
 Not violations, watched: `JsonlSink` is a public production type built only in tests;
 `p0-strict-verify --compat` renders legacy JSON after a live verify (opt-in, transitional).

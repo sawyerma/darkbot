@@ -1,5 +1,9 @@
 //! FE-01 scope expansion over the existing pinned decoders, Health and Sizing.
 //! No signer, swap client or submission adapter. Observation is not source parity.
+use crate::analytics::payload::{
+    Fe01Account, Fe01AccountDigest, Fe01Observation, Fe01Read, Fe01ReadOutcome, Fe01Report,
+    Fe01Size, Fe01Target,
+};
 use base64::Engine;
 use darkbot_project0::{
     health::{
@@ -11,7 +15,6 @@ use darkbot_project0::{
 };
 use darkbot_solana::runtime_config::RuntimeConfig;
 use marginfi_type_crate::types::{Bank, FeeState, MarginfiAccount, MarginfiGroup};
-use serde_json::{json, Value};
 use solana_sdk::{account::Account, clock::Clock, pubkey::Pubkey};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -29,7 +32,7 @@ pub fn sha(bytes: &[u8]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ObservedState(pub BTreeMap<Pubkey, Account>);
 impl AccountSource for ObservedState {
     fn account(&self, key: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
@@ -63,39 +66,87 @@ pub(crate) fn typed<T: bytemuck::Pod>(
     }
     bytemuck::try_pod_read_unaligned(&a.data[8..]).map_err(|_| "FE_POD_LAYOUT".into())
 }
-/// Decode RPC encoding only; protocol layouts remain owned by the pinned Rust crates.
-pub fn decode_batch(
-    value: Value,
-    keys: &[Pubkey],
-    floor: u64,
-) -> Result<(u64, ObservedState), String> {
-    let slot = value["context"]["slot"]
-        .as_u64()
-        .filter(|s| *s > 0 && *s >= floor)
-        .ok_or("FE_CONTEXT_REGRESSION")?;
-    let values = value["value"]
-        .as_array()
-        .filter(|v| v.len() == keys.len())
-        .ok_or("FE_BATCH_LENGTH")?;
+/// The `getMultipleAccounts` answer (base64 encoding) as the concrete wire type (JFI-02): the
+/// JSON-RPC edge decodes into it directly, nothing behind it sees JSON. Protocol layouts stay
+/// owned by the pinned Rust crates.
+#[derive(serde::Deserialize)]
+pub struct WireMultipleAccounts {
+    context: WireContext,
+    value: Vec<Option<WireAccount>>,
+}
+#[derive(serde::Deserialize)]
+struct WireContext {
+    slot: u64,
+}
+#[derive(serde::Deserialize)]
+struct WireAccount {
+    owner: String,
+    lamports: u64,
+    executable: bool,
+    data: (String, String),
+}
+impl WireMultipleAccounts {
+    /// The typed outcome saved as the FE01_READ frame; an owner or encoding the wire type
+    /// cannot carry is a failed read, never a guessed account.
+    pub fn outcome(self) -> Fe01ReadOutcome {
+        let accounts = self
+            .value
+            .into_iter()
+            .map(|a| {
+                a.map(|a| {
+                    if a.data.1 != "base64" {
+                        return Err("FE_ACCOUNT_ENCODING".to_string());
+                    }
+                    Ok(Fe01Account {
+                        owner: key(&a.owner)?,
+                        lamports: a.lamports,
+                        executable: a.executable,
+                        data: base64::engine::general_purpose::STANDARD
+                            .decode(a.data.0)
+                            .map_err(|_| "FE_ACCOUNT_ENCODING".to_string())?,
+                    })
+                })
+                .transpose()
+            })
+            .collect::<Result<Vec<_>, String>>();
+        match accounts {
+            Ok(accounts) => Fe01ReadOutcome::Accounts {
+                context_slot: self.context.slot,
+                accounts,
+            },
+            Err(reason) => Fe01ReadOutcome::Failed { reason },
+        }
+    }
+}
+/// The observed state of one saved read: its context must not regress below the requested
+/// floor, and every requested key has exactly one account.
+pub fn observed(read: &Fe01Read) -> Result<(u64, ObservedState), String> {
+    let (slot, accounts) = match &read.outcome {
+        Fe01ReadOutcome::Accounts {
+            context_slot,
+            accounts,
+        } => (*context_slot, accounts),
+        Fe01ReadOutcome::Failed { reason } => return Err(reason.clone()),
+    };
+    if slot == 0 || slot < read.min_context_slot {
+        return Err("FE_CONTEXT_REGRESSION".into());
+    }
+    if accounts.len() != read.keys.len() {
+        return Err("FE_BATCH_LENGTH".into());
+    }
     let mut state = ObservedState::default();
-    for (k, v) in keys.iter().zip(values) {
-        if v.is_null() {
-            return Err(format!("FE_ACCOUNT_MISSING:{k}"));
-        }
-        if v["data"][1] != "base64" {
-            return Err("FE_ACCOUNT_ENCODING".into());
-        }
-        let data = base64::engine::general_purpose::STANDARD
-            .decode(v["data"][0].as_str().ok_or("FE_ACCOUNT_ENCODING")?)
-            .map_err(|_| "FE_ACCOUNT_ENCODING")?;
-        let a = Account {
-            owner: key(v["owner"].as_str().ok_or("FE_OWNER")?)?,
-            lamports: v["lamports"].as_u64().ok_or("FE_LAMPORTS")?,
-            data,
-            executable: v["executable"].as_bool().ok_or("FE_EXECUTABLE")?,
+    for (k, a) in read.keys.iter().zip(accounts) {
+        let a = a
+            .as_ref()
+            .ok_or_else(|| format!("FE_ACCOUNT_MISSING:{k}"))?;
+        let account = Account {
+            owner: a.owner,
+            lamports: a.lamports,
+            data: a.data.clone(),
+            executable: a.executable,
             rent_epoch: 0,
         };
-        if state.0.insert(*k, a).is_some() {
+        if state.0.insert(*k, account).is_some() {
             return Err("FE_DUPLICATE_ACCOUNT".into());
         }
     }
@@ -327,7 +378,7 @@ where
     }
     Err(last_reason.into())
 }
-pub fn collect<F>(config: &RuntimeConfig, read: F) -> Result<Value, String>
+pub fn collect<F>(config: &RuntimeConfig, read: F) -> Result<Fe01Report, String>
 where
     F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
 {
@@ -341,7 +392,13 @@ pub fn collect_frozen<F>(
     read: F,
     class: darkbot_project0::funding::FundingClass,
     historical: bool,
-) -> Result<(Value, Result<crate::analytics::payload::Fe01Freeze, String>), String>
+) -> Result<
+    (
+        Fe01Report,
+        Result<crate::analytics::payload::Fe01Freeze, String>,
+    ),
+    String,
+>
 where
     F: FnMut(&[Pubkey], u64) -> Result<(u64, ObservedState), String>,
 {
@@ -350,7 +407,32 @@ where
     Ok((report(&scope), freeze))
 }
 
-fn report(scope: &CollectedScope) -> Value {
+/// FE-01 report status of a closed, observed scope (never a qualification).
+pub const OBSERVED: &str = "STATE_SCOPE_OBSERVED_NOT_QUALIFIED";
+pub const INCOMPLETE: &str = "INCOMPLETE";
+
+/// The report of an observation that ended before a scope closed (or ran out of time).
+pub fn incomplete(reason: String) -> Fe01Report {
+    Fe01Report {
+        status: INCOMPLETE.into(),
+        reason: Some(reason),
+        observation: None,
+        scope: None,
+        freeze: None,
+        logical_reads: None,
+        provider_actual: None,
+        provider_cooldown: None,
+        replay: None,
+        source_parity: "UNKNOWN".into(),
+        fe01: "INCOMPLETE".into(),
+        fe02: "NOT_RUN".into(),
+        pilot_ready: false,
+        live_enabled: false,
+        submission_enabled: false,
+    }
+}
+
+fn report(scope: &CollectedScope) -> Fe01Report {
     let CollectedScope {
         state,
         clock,
@@ -373,25 +455,84 @@ fn report(scope: &CollectedScope) -> Value {
     for target in targets {
         let h = health.health(target, clock.unix_timestamp, clock.slot);
         let eligibility = health.receivership_eligibility(target, clock.unix_timestamp, clock.slot);
-        let mut row = json!({"account":target.to_string(),"health":"UNKNOWN","liquidatable":null,"receivership_eligibility":eligibility.as_ref().map(|_|"PASS").unwrap_or("FAIL"),"eligibility_reason":eligibility.err().map(|e|e.to_string()),"funding":"UNKNOWN","net_edge_usd_micro":null,"simulation":"NOT_RUN","collateral_exit":"UNKNOWN","source_parity":"UNKNOWN"});
+        let mut row = Fe01Target {
+            account: *target,
+            health: "UNKNOWN".into(),
+            liquidatable: None,
+            maintenance_health_bits: None,
+            receivership_eligibility: if eligibility.is_ok() { "PASS" } else { "FAIL" }.into(),
+            eligibility_reason: eligibility.as_ref().err().map(|e| e.to_string()),
+            funding: "UNKNOWN".into(),
+            net_edge_usd_micro: None,
+            simulation: "NOT_RUN".into(),
+            collateral_exit: "UNKNOWN".into(),
+            source_parity: "UNKNOWN".into(),
+            protocol_sizes: None,
+            sizing_error: None,
+            health_error: None,
+        };
         match h {
             Ok(h) => {
-                row["health"] = json!("EVALUATED_WITH_PINNED_CORE");
-                row["liquidatable"] = json!(h.liquidatable);
-                row["maintenance_health_bits"] = json!(h.maintenance_health.to_string());
-                if h.liquidatable && row["receivership_eligibility"] == "PASS" {
-                    match sizer.sizes(target,clock.unix_timestamp,clock.slot){
-                            Ok(sizes)=>row["protocol_sizes"]=json!(sizes.into_iter().map(|s|json!({"asset_bank":s.asset_bank.to_string(),"liability_bank":s.liab_bank.to_string(),"withdraw_native":s.withdraw_amount,"repay_native":s.repay_amount,"repay_all":s.repay_all,"flat_sol_fee_lamports":s.flat_sol_fee_lamports,"executable_value":"UNKNOWN"})).collect::<Vec<_>>()),
-                            Err(e)=>row["sizing_error"]=json!(e.text),
+                row.health = "EVALUATED_WITH_PINNED_CORE".into();
+                row.liquidatable = Some(h.liquidatable);
+                row.maintenance_health_bits = Some(h.maintenance_health);
+                if h.liquidatable && eligibility.is_ok() {
+                    match sizer.sizes(target, clock.unix_timestamp, clock.slot) {
+                        Ok(sizes) => {
+                            row.protocol_sizes = Some(
+                                sizes
+                                    .into_iter()
+                                    .map(|s| Fe01Size {
+                                        asset_bank: s.asset_bank,
+                                        liability_bank: s.liab_bank,
+                                        withdraw_native: s.withdraw_amount,
+                                        repay_native: s.repay_amount,
+                                        repay_all: s.repay_all,
+                                        flat_sol_fee_lamports: s.flat_sol_fee_lamports,
+                                        executable_value: "UNKNOWN".into(),
+                                    })
+                                    .collect(),
+                            )
                         }
+                        Err(e) => row.sizing_error = Some(e.text),
+                    }
                 }
             }
-            Err(e) => row["health_error"] = json!(e.to_string()),
+            Err(e) => row.health_error = Some(e.to_string()),
         }
         rows.push(row);
     }
-    let accounts:Vec<_>=state.0.iter().map(|(key,a)|json!({"pubkey":key.to_string(),"owner":a.owner.to_string(),"lamports":a.lamports,"bytes":a.data.len(),"sha256":sha(&a.data)})).collect();
-    json!({"schema":"Project0/FE01FullObservation/1","status":"STATE_SCOPE_OBSERVED_NOT_QUALIFIED","scope_closed":true,"rounds":round,"slot":clock.slot,"unix_timestamp":clock.unix_timestamp,"clock":"CHAIN_SYSVAR_SAME_CONTEXT","program_data":pd.to_string(),"program_data_sha256":baseline.1,"deployment_slot":baseline.0,"source_pin":SOURCE_PIN,"source_parity":"UNKNOWN","source_parity_reason":"CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF","transaction_version":TRANSACTION_VERSION_PIN,"accounts":accounts,"targets":rows,"fe01":"INCOMPLETE","fe02":"NOT_RUN","pilot_ready":false,"live_enabled":false,"submission_enabled":false})
+    let accounts = state
+        .0
+        .iter()
+        .map(|(key, a)| Fe01AccountDigest {
+            pubkey: *key,
+            owner: a.owner,
+            lamports: a.lamports,
+            bytes: a.data.len() as u64,
+            sha256: sha(&a.data),
+        })
+        .collect();
+    Fe01Report {
+        status: OBSERVED.into(),
+        reason: None,
+        observation: Some(Fe01Observation {
+            rounds: *round,
+            slot: clock.slot,
+            unix_timestamp: clock.unix_timestamp,
+            clock: "CHAIN_SYSVAR_SAME_CONTEXT".into(),
+            program_data: *pd,
+            program_data_sha256: baseline.1.clone(),
+            deployment_slot: baseline.0,
+            source_pin: SOURCE_PIN.into(),
+            source_parity_reason: "CURRENT_PROGRAM_BYTES_NOT_A_REPRODUCIBLE_SOURCE_BUILD_PROOF"
+                .into(),
+            transaction_version: TRANSACTION_VERSION_PIN.into(),
+            accounts,
+            targets: rows,
+        }),
+        ..incomplete(String::new())
+    }
 }
 
 #[cfg(test)]
@@ -673,15 +814,16 @@ pub(crate) mod tests {
         })
         .unwrap();
         assert!(calls > 3);
-        assert_eq!(report["scope_closed"], true);
+        assert_eq!(report.status, OBSERVED);
         assert_eq!(seen.len(), all.len());
-        assert_eq!(report["source_parity"], "UNKNOWN");
-        assert_eq!(report["fe01"], "INCOMPLETE");
-        assert_eq!(report["pilot_ready"], false);
+        assert_eq!(report.source_parity, "UNKNOWN");
+        assert_eq!(report.fe01, "INCOMPLETE");
+        assert!(!report.pilot_ready && !report.live_enabled && !report.submission_enabled);
         // Zero-share balances may evaluate to zero health even with unused oracles.
         // That does not establish an executable economic candidate.
-        assert_eq!(report["targets"][0]["liquidatable"], false);
-        assert!(report["targets"][0]["net_edge_usd_micro"].is_null());
+        let observation = report.observation.unwrap();
+        assert_eq!(observation.targets[0].liquidatable, Some(false));
+        assert_eq!(observation.targets[0].net_edge_usd_micro, None);
     }
     #[test]
     fn integration_accounts_of_target_banks_are_observed_in_the_same_scope() {
@@ -716,12 +858,9 @@ pub(crate) mod tests {
         })
         .unwrap();
         assert!(seen.contains(&reserve));
-        assert!(report["accounts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|a| a["pubkey"] == reserve.to_string()));
-        assert_eq!(report["transaction_version"], TRANSACTION_VERSION_PIN);
+        let observation = report.observation.unwrap();
+        assert!(observation.accounts.iter().any(|a| a.pubkey == reserve));
+        assert_eq!(observation.transaction_version, TRANSACTION_VERSION_PIN);
         // Without the integration account the scope never closes: fail closed, never skipped.
         all.remove(&reserve);
         assert!(collect(&c, |keys, _| Ok((100, batch(&all, keys)?))).is_err());
@@ -789,18 +928,51 @@ pub(crate) mod tests {
             );
         }
     }
+    /// JFI-02: the `getMultipleAccounts` answer decodes into the wire type at the edge; the typed
+    /// read keeps the exact bytes and fails closed on a regressed context, a missing or
+    /// non-base64 account, an invalid owner and a length mismatch.
     #[test]
     fn wire_decoder_preserves_bytes_and_rejects_regressed_or_missing_context() {
         let k = Pubkey::new_unique();
         let owner = Pubkey::new_unique();
         let raw = vec![1, 2, 3];
-        let v = json!({"context":{"slot":12},"value":[{"owner":owner.to_string(),"lamports":45,"executable":false,"data":[base64::engine::general_purpose::STANDARD.encode(&raw),"base64"]}]});
-        let (slot, state) = decode_batch(v.clone(), &[k], 11).unwrap();
+        let wire = |text: String| -> WireMultipleAccounts { serde_json::from_str(&text).unwrap() };
+        let answer = |owner: &str, encoding: &str| {
+            format!(
+                r#"{{"context":{{"slot":12}},"value":[{{"owner":"{owner}","lamports":45,"executable":false,"rentEpoch":0,"data":["{}","{encoding}"]}}]}}"#,
+                base64::engine::general_purpose::STANDARD.encode(&raw)
+            )
+        };
+        let read = |floor, outcome| Fe01Read {
+            keys: vec![k],
+            min_context_slot: floor,
+            outcome,
+        };
+        let outcome = wire(answer(&owner.to_string(), "base64")).outcome();
+        let (slot, state) = observed(&read(11, outcome.clone())).unwrap();
         assert_eq!(slot, 12);
         assert_eq!(state.0[&k].data, raw);
         assert_eq!(state.0[&k].owner, owner);
-        assert!(decode_batch(v, &[k], 13).is_err());
-        assert!(decode_batch(json!({"value":[]}), &[], 0).is_err());
+        assert_eq!(
+            observed(&read(13, outcome)).unwrap_err(),
+            "FE_CONTEXT_REGRESSION"
+        );
+        for (answer, code) in [
+            (answer(&owner.to_string(), "base58"), "FE_ACCOUNT_ENCODING"),
+            (answer("not-a-key", "base64"), "FE_PUBKEY_INVALID"),
+            (
+                r#"{"context":{"slot":12},"value":[null]}"#.to_string(),
+                "FE_ACCOUNT_MISSING",
+            ),
+            (
+                r#"{"context":{"slot":12},"value":[]}"#.to_string(),
+                "FE_BATCH_LENGTH",
+            ),
+        ] {
+            let e = observed(&read(11, wire(answer).outcome())).unwrap_err();
+            assert!(e.starts_with(code), "{e}");
+        }
+        assert!(serde_json::from_str::<WireMultipleAccounts>(r#"{"value":[]}"#).is_err());
     }
     #[test]
     fn invalid_scope_and_callback_context_fail_closed_before_qualification() {
@@ -823,73 +995,133 @@ pub(crate) mod tests {
             "FE_BATCH_SCOPE_MISMATCH"
         );
     }
+    /// FE-01 replay of one saved observation from each source — legacy `read_NNNNNN.json` files,
+    /// a historical schema-1 journal (FE-01 smoke era) and the typed journal (JFI-04) — yields
+    /// the identical observation, stays historical, unqualified and bound to its exact reads.
     #[test]
     fn saved_full_observation_replays_identically_but_stays_historical_and_incomplete() {
         use super::super::fe_replay;
+        use crate::analytics::journal::{kind, Writer};
+        use crate::analytics::payload::Fe01Config;
         let (mut c, all) = fixture();
         c.limits.fe_calls = 100;
         c.limits.max_requests = 100;
         let dir = std::env::temp_dir().join(format!("p0-fe-replay-{}", Pubkey::new_unique()));
         std::fs::create_dir(&dir).unwrap();
-        let mut calls = 0;
-        let original=collect(&c,|keys,floor| {
-            calls+=1;let state=batch(&all,keys)?;
-            let values:Vec<_>=keys.iter().map(|k| {let a=&state.0[k];json!({"owner":a.owner.to_string(),"lamports":a.lamports,"executable":a.executable,"data":[base64::engine::general_purpose::STANDARD.encode(&a.data),"base64"]})}).collect();
-            let entry=json!({"method":"getMultipleAccounts","params":[keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}],"result":{"context":{"slot":100},"value":values}});
-            std::fs::write(dir.join(format!("read_{calls:06}.json")),serde_json::to_vec(&entry).unwrap()).unwrap();
-            Ok((100,state))
-        }).unwrap();
+        // Historical format of a saved read, as the pre-JFI-04 writer saved it.
+        let mut saved = Vec::new();
+        let original = collect(&c, |keys, floor| {
+            let state = batch(&all, keys)?;
+            let values: Vec<_> = keys
+                .iter()
+                .map(|k| {
+                    let a = &state.0[k];
+                    serde_json::json!({"owner":a.owner.to_string(),"lamports":a.lamports,"executable":a.executable,"data":[base64::engine::general_purpose::STANDARD.encode(&a.data),"base64"]})
+                })
+                .collect();
+            let entry = serde_json::json!({"method":"getMultipleAccounts","params":[keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}],"result":{"context":{"slot":100},"value":values}});
+            saved.push((entry, keys.to_vec(), floor, state.0.clone()));
+            let n = saved.len();
+            std::fs::write(dir.join(format!("read_{n:06}.json")), serde_json::to_vec(&saved[n - 1].0).unwrap()).unwrap();
+            Ok((100, state))
+        })
+        .unwrap();
+        let calls = saved.len();
         let class = fe_replay::first_class("ZERO_PREFUND_SAME_TX").unwrap();
         let replayed = fe_replay::replay(&c, &dir, class).unwrap();
-        for (key, value) in original.as_object().unwrap() {
-            assert_eq!(&replayed[key], value, "{key}");
-        }
-        assert_eq!(replayed["replay"]["freshness"], "HISTORICAL_NOT_CURRENT");
-        assert_eq!(replayed["replay"]["source"], "LEGACY_READ_FILES");
-        assert_eq!(replayed["pilot_ready"], false);
-        // The same observation saved as the binary journal (PERSIST-01) replays identically.
-        use crate::analytics::journal::{kind, Writer};
-        let binary = dir.with_extension("journal");
-        std::fs::create_dir(&binary).unwrap();
-        let mut w = Writer::create(&binary.join(fe_replay::FE01_JOURNAL)).unwrap();
-        w.append_value(
-            kind::FE01_CONFIG,
-            &json!({"execution":"READ_ONLY_NO_SIGNER"}),
-        )
-        .unwrap();
-        for n in 1..=calls {
-            let entry: Value = serde_json::from_slice(
-                &std::fs::read(dir.join(format!("read_{n:06}.json"))).unwrap(),
-            )
-            .unwrap();
-            w.append_value(kind::FE01_READ, &entry).unwrap();
-        }
-        w.sync().unwrap();
+        assert_eq!(replayed.observation, original.observation);
+        let replay = replayed.replay.as_ref().unwrap();
         assert_eq!(
-            fe_replay::replay(&c, &binary, class).unwrap_err(),
-            "FE_REPLAY_INCOMPLETE"
+            (replay.freshness.as_str(), replay.source.as_str()),
+            ("HISTORICAL_NOT_CURRENT", "LEGACY_READ_FILES")
         );
-        let mut result = original.clone();
-        result["logical_reads"] = json!(calls);
-        w.append_value(kind::FE01_RESULT, &result).unwrap();
-        w.seal(true).unwrap();
-        let from_journal = fe_replay::replay(&c, &binary, class).unwrap();
-        for (key, value) in original.as_object().unwrap() {
-            assert_eq!(&from_journal[key], value, "{key}");
+        assert!(!replayed.pilot_ready);
+        assert_eq!(
+            replayed.scope.as_ref().unwrap().funding_class,
+            "ZERO_PREFUND_SAME_TX"
+        );
+        let effective = darkbot_solana::runtime_config::Resolved::parse(&[], &|_| None)
+            .unwrap()
+            .effective();
+        // The same observation as a historical schema-1 journal and as the typed journal.
+        for typed in [false, true] {
+            let binary = dir.with_extension(if typed { "typed" } else { "historical" });
+            std::fs::create_dir(&binary).unwrap();
+            let mut w = Writer::create(&binary.join(fe_replay::FE01_JOURNAL)).unwrap();
+            if typed {
+                let config = Fe01Config {
+                    requested: effective.clone(),
+                    effective: effective.clone(),
+                    qualification_sha256: Some("q".into()),
+                    execution: "READ_ONLY_NO_SIGNER".into(),
+                };
+                w.append_typed(Default::default(), &config).unwrap();
+                for (_, keys, floor, state) in &saved {
+                    let read = Fe01Read {
+                        keys: keys.clone(),
+                        min_context_slot: *floor,
+                        outcome: Fe01ReadOutcome::Accounts {
+                            context_slot: 100,
+                            accounts: keys
+                                .iter()
+                                .map(|k| {
+                                    let a = &state[k];
+                                    Some(Fe01Account {
+                                        owner: a.owner,
+                                        lamports: a.lamports,
+                                        executable: a.executable,
+                                        data: a.data.clone(),
+                                    })
+                                })
+                                .collect(),
+                        },
+                    };
+                    w.append_typed(Default::default(), &read).unwrap();
+                }
+            } else {
+                w.test_append_historical(
+                    kind::FE01_CONFIG,
+                    &serde_json::json!({"execution":"READ_ONLY_NO_SIGNER"}),
+                )
+                .unwrap();
+                for (entry, ..) in &saved {
+                    w.test_append_historical(kind::FE01_READ, entry).unwrap();
+                }
+            }
+            w.sync().unwrap();
+            assert_eq!(
+                fe_replay::replay(&c, &binary, class).unwrap_err(),
+                "FE_REPLAY_INCOMPLETE"
+            );
+            if typed {
+                let mut result = original.clone();
+                result.logical_reads = Some(calls as u64);
+                w.append_typed(Default::default(), &result).unwrap();
+            } else {
+                w.test_append_historical(
+                    kind::FE01_RESULT,
+                    &serde_json::json!({"status":OBSERVED,"logical_reads":calls}),
+                )
+                .unwrap();
+            }
+            w.seal(true).unwrap();
+            let from_journal = fe_replay::replay(&c, &binary, class).unwrap();
+            assert_eq!(
+                from_journal.observation, original.observation,
+                "typed={typed}"
+            );
+            let replay = from_journal.replay.unwrap();
+            assert_eq!(replay.source, "BINARY_JOURNAL");
+            assert_eq!(replay.reads.len(), calls);
+            // A second primary source is refused, never merged into the sealed archive.
+            std::fs::write(binary.join("read_000001.json"), b"{}").unwrap();
+            assert_eq!(
+                fe_replay::replay(&c, &binary, class).unwrap_err(),
+                "FE_REPLAY_AMBIGUOUS_SOURCE"
+            );
+            drop(w);
+            std::fs::remove_dir_all(binary).unwrap();
         }
-        assert_eq!(from_journal["replay"]["source"], "BINARY_JOURNAL");
-        assert_eq!(
-            from_journal["replay"]["reads"].as_array().unwrap().len(),
-            calls
-        );
-        // A second primary source is refused, never merged into the sealed archive.
-        std::fs::write(binary.join("read_000001.json"), b"{}").unwrap();
-        assert_eq!(
-            fe_replay::replay(&c, &binary, class).unwrap_err(),
-            "FE_REPLAY_AMBIGUOUS_SOURCE"
-        );
-        drop(w);
-        std::fs::remove_dir_all(binary).unwrap();
         c.limits.fe_calls = 1;
         assert_eq!(
             fe_replay::replay(&c, &dir, class).unwrap_err(),

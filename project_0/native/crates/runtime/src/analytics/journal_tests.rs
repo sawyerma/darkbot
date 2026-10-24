@@ -32,7 +32,7 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
         unix_ns: None,
     };
     let f = w
-        .append_legacy(
+        .test_append_historical_at(
             kind::FE01_READ,
             p.clone(),
             &serde_json::json!({"amount":i128::MIN}),
@@ -59,7 +59,7 @@ fn ordered_frames_preserve_provenance_manifest_and_durable_boundary() {
 fn unsupported_version_corruption_checksum_and_every_truncation_fail_closed() {
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE01_READ, &serde_json::json!({"a":123}))
+    w.test_append_historical(kind::FE01_READ, &serde_json::json!({"a":123}))
         .unwrap();
     w.seal(true).unwrap();
     drop(w);
@@ -92,13 +92,13 @@ fn unsupported_version_corruption_checksum_and_every_truncation_fail_closed() {
 fn restart_never_truncates_or_accepts_partial_tail() {
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE01_READ, &serde_json::json!({"intent":"RESERVED"}))
+    w.test_append_historical(kind::FE01_READ, &serde_json::json!({"intent":"RESERVED"}))
         .unwrap();
     w.sync().unwrap();
     drop(w);
     let mut w = Writer::resume(&path).unwrap();
     assert_eq!(w.next_seq(), 1);
-    w.append_value(kind::FE01_READ, &serde_json::json!({"intent":"UNKNOWN"}))
+    w.test_append_historical(kind::FE01_READ, &serde_json::json!({"intent":"UNKNOWN"}))
         .unwrap();
     w.sync().unwrap();
     drop(w);
@@ -125,7 +125,8 @@ fn malformed_length_payload_tags_and_depth_are_rejected() {
     assert!(encode(&v).is_err());
     let path = path();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE01_READ, &Value::Null).unwrap();
+    w.test_append_historical(kind::FE01_READ, &Value::Null)
+        .unwrap();
     drop(w);
     let mut f = OpenOptions::new().write(true).open(&path).unwrap();
     f.seek(SeekFrom::Start(HEADER_LEN)).unwrap();
@@ -139,7 +140,7 @@ fn explicit_export_matches_legacy_jsonl_and_never_overwrites() {
     let export = path.with_extension("jsonl");
     let value = serde_json::json!({"integer":i128::MIN,"unknown":null});
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE01_READ, &value).unwrap();
+    w.test_append_historical(kind::FE01_READ, &value).unwrap();
     w.seal(true).unwrap();
     super::export(&path, &export, None, false).unwrap();
     assert_eq!(fs::read_to_string(&export).unwrap(), format!("{value}\n"));
@@ -173,7 +174,7 @@ fn export_of_a_damaged_journal_leaves_no_partial_file() {
     let export = path.with_extension("jsonl");
     let mut w = Writer::create(&path).unwrap();
     for n in 0..3 {
-        w.append_value(kind::FE01_READ, &serde_json::json!({"n":n}))
+        w.test_append_historical(kind::FE01_READ, &serde_json::json!({"n":n}))
             .unwrap();
     }
     w.sync().unwrap();
@@ -194,9 +195,9 @@ fn multi_view_export_is_all_or_nothing_and_never_overwrites() {
     let path = path();
     let dir = path.parent().unwrap().to_path_buf();
     let mut w = Writer::create(&path).unwrap();
-    w.append_value(kind::FE01_READ, &serde_json::json!({"a":1}))
+    w.test_append_historical(kind::FE01_READ, &serde_json::json!({"a":1}))
         .unwrap();
-    w.append_value(kind::FE01_RESULT, &serde_json::json!({"b":2}))
+    w.test_append_historical(kind::FE01_RESULT, &serde_json::json!({"b":2}))
         .unwrap();
     w.seal(true).unwrap();
     let (a, b) = (dir.join("a.jsonl"), dir.join("b.jsonl"));
@@ -265,7 +266,7 @@ fn persist05_local_writer_benchmark() {
         let started = Instant::now();
         for _ in 0..frames {
             let t = Instant::now();
-            w.append_value(kind::FE01_READ, value).unwrap();
+            w.test_append_historical(kind::FE01_READ, value).unwrap();
             lat.push(t.elapsed().as_nanos() as u64);
         }
         let write_s = started.elapsed().as_secs_f64();
@@ -296,7 +297,8 @@ fn persist05_local_writer_benchmark() {
     let mut lat = Vec::new();
     for _ in 0..500 {
         let t = Instant::now();
-        w.append_value(kind::FE01_READ, &opportunity).unwrap();
+        w.test_append_historical(kind::FE01_READ, &opportunity)
+            .unwrap();
         w.sync().unwrap();
         lat.push(t.elapsed().as_nanos() as u64);
     }
@@ -315,7 +317,7 @@ fn fsync_error_never_returns_durable_ack_and_poisoning_is_sticky() {
         let path = path();
         let mut writer = Writer::create(&path).unwrap();
         writer
-            .append_value(
+            .test_append_historical(
                 kind::FE01_READ,
                 &serde_json::json!({"reservation":"RESERVED"}),
             )
@@ -323,7 +325,9 @@ fn fsync_error_never_returns_durable_ack_and_poisoning_is_sticky() {
         writer.test_fail_next_sync(kind);
         assert_eq!(writer.sync().unwrap_err().kind(), kind);
         assert!(writer.sync().is_err());
-        assert!(writer.append_value(kind::FE01_READ, &Value::Null).is_err());
+        assert!(writer
+            .test_append_historical(kind::FE01_READ, &Value::Null)
+            .is_err());
         assert!(writer.seal(true).is_err());
         let mut reader = Reader::open(&path).unwrap();
         assert!(reader.next_frame().unwrap().is_some());
@@ -381,34 +385,35 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
     let mut w = Writer::create(&path).unwrap();
     let diag = OwnerDiagnostic { line: "x".into() };
     w.append_typed(Provenance::default(), &diag).unwrap();
-    let rollback = w.append_legacy(
-        kind::OWNER_DIAGNOSTIC,
-        Provenance::default(),
-        &serde_json::json!({"line":"x"}),
-    );
-    assert_eq!(
-        rollback.unwrap_err().to_string(),
-        "LEGACY_WRITE_OF_TYPED_KIND"
-    );
-    assert_eq!(
-        w.append_value(MANIFEST, &Value::Null)
-            .unwrap_err()
-            .to_string(),
-        "LEGACY_WRITE_OF_TYPED_KIND"
-    );
-    assert_eq!(
-        w.append_value(20, &Value::Null).unwrap_err().to_string(),
-        "LEGACY_WRITE_UNREGISTERED_KIND"
-    );
+    // JFI-04: no kind is a migration path any more; a schema-1 frame is never written.
+    assert!(LEGACY_WRITABLE.is_empty());
+    let legacy = encode(&serde_json::json!({"line":"x"})).unwrap();
+    for (k, code) in [
+        (kind::OWNER_DIAGNOSTIC, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (MANIFEST, "MANIFEST_ONLY_BY_SEAL"),
+        (20, "LEGACY_WRITE_UNREGISTERED_KIND"),
+    ] {
+        let e = w.append(k, 1, Provenance::default(), &legacy).unwrap_err();
+        assert_eq!(e.to_string(), code);
+    }
     let bytes = payload::encode(&diag).unwrap();
     for (k, schema, code) in [
         (kind::OWNER_DIAGNOSTIC, TYPED + 1, "PAYLOAD_SCHEMA"),
-        (kind::FE01_READ, TYPED, "PAYLOAD_KIND_UNTYPED"),
+        (20, TYPED, "PAYLOAD_KIND_UNTYPED"),
+        (kind::FE01_CONFIG, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (kind::FE01_READ, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (kind::FE01_RESULT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         // Migrated (JFI-04 / JFI-FIX-05): a schema-1 frame of these kinds is a refused rollback.
         (kind::MT0_SNAPSHOT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         (kind::MEASUREMENT_PHASE, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         (kind::ECON_SNAPSHOT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
         (kind::ECON_FINAL, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (kind::C0_CENSUS_ACCOUNT, 1, "LEGACY_WRITE_OF_TYPED_KIND"),
+        (
+            kind::C0_CENSUS_GROUP_ACCOUNT,
+            1,
+            "LEGACY_WRITE_OF_TYPED_KIND",
+        ),
     ] {
         let e = w
             .append(k, schema, Provenance::default(), &bytes)
@@ -416,8 +421,7 @@ fn write_admission_forbids_legacy_rollback_and_unregistered_kinds() {
         assert_eq!(e.to_string(), code);
     }
     // A refused write leaves the journal usable: sequence and chain continue unchanged.
-    w.append_legacy(kind::FE01_READ, Provenance::default(), &Value::Null)
-        .unwrap();
+    w.append_typed(Provenance::default(), &diag).unwrap();
     w.seal(true).unwrap();
     let mut r = Reader::open(&path).unwrap();
     let mut frames = 0;
@@ -451,5 +455,131 @@ fn historical_schema_one_frames_of_migrated_kinds_stay_readable() {
         .typed::<crate::analytics::evidence::OwnerRecord>()
         .is_err());
     assert!(r.next_frame().unwrap().is_some() && r.complete);
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+/// JFI-04 census import: a `key=value` row decodes once into the typed row (base58 keys, base64
+/// slices, `space=-` unknown) and round-trips through a typed frame; a JSON row, a missing,
+/// duplicate or unknown field and an invalid key are refused, never stored.
+#[test]
+fn jfi04_census_import_rows_are_typed_and_fail_closed() {
+    use super::super::payload::{C0CensusImportAccount, C0CensusImportGroupAccount};
+    use solana_sdk::pubkey::Pubkey;
+    let (k, o) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let line = format!("pubkey={k} lamports=7 owner={o} discriminator=AQIDBAUGBwg= space=- slot=9");
+    let row = C0CensusImportAccount::from_import_line(&line).unwrap();
+    assert_eq!(
+        row,
+        C0CensusImportAccount {
+            pubkey: k,
+            lamports: 7,
+            owner: o,
+            discriminator: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            space: None,
+            slot: 9,
+        }
+    );
+    let path = path();
+    let mut w = Writer::create(&path).unwrap();
+    w.append_typed(Provenance::default(), &row).unwrap();
+    let group = C0CensusImportGroupAccount::from_import_line(&format!(
+        "space=48 pubkey={k} slot=9 indexer_flags=AAE="
+    ))
+    .unwrap();
+    assert_eq!(
+        (group.space, group.indexer_flags.clone()),
+        (Some(48), vec![0, 1])
+    );
+    w.append_typed(Provenance::default(), &group).unwrap();
+    w.seal(true).unwrap();
+    let mut r = Reader::open(&path).unwrap();
+    let f = r.next_frame().unwrap().unwrap();
+    assert_eq!(
+        (f.kind, f.schema),
+        (kind::C0_CENSUS_ACCOUNT, super::super::payload::TYPED)
+    );
+    assert_eq!(f.typed::<C0CensusImportAccount>().unwrap(), row);
+    let f = r.next_frame().unwrap().unwrap();
+    assert_eq!(f.typed::<C0CensusImportGroupAccount>().unwrap(), group);
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    for bad in [
+        format!("{{\"pubkey\":\"{k}\",\"lamports\":7}}"),
+        format!("pubkey={k} lamports=7 owner={o} discriminator=AQ== space=- slot=9 extra=1"),
+        format!("pubkey={k} lamports=7 owner={o} discriminator=AQ== space=-"),
+        format!("pubkey={k} pubkey={k} lamports=7 owner={o} discriminator=AQ== space=- slot=9"),
+        format!("pubkey=x lamports=7 owner={o} discriminator=AQ== space=- slot=9"),
+        format!("pubkey={k} lamports=-1 owner={o} discriminator=AQ== space=- slot=9"),
+        format!("pubkey={k} lamports=7 owner={o} discriminator=!! space=- slot=9"),
+        format!("pubkey={k}  lamports=7 owner={o} discriminator=AQ== space=- slot=9"),
+    ] {
+        assert!(
+            C0CensusImportAccount::from_import_line(&bad).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+/// PERSIST-05 (chain, manifest): frames that each pass CRC and SHA but out of sequence (a dropped
+/// middle frame) break the chain; the manifest is written only by `seal`, and a forged one on
+/// disk (wrong count and root) fails the reader and the seal screen.
+#[test]
+fn chain_break_and_forged_manifest_fail_closed() {
+    use super::super::payload::{self, Manifest, OwnerDiagnostic};
+    let path = path();
+    let mut w = Writer::create(&path).unwrap();
+    let frames: Vec<Appended> = (0..3)
+        .map(|n| {
+            w.append_typed(
+                Provenance::default(),
+                &OwnerDiagnostic {
+                    line: n.to_string(),
+                },
+            )
+            .unwrap()
+        })
+        .collect();
+    w.seal(true).unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let (from, to) = (
+        frames[1].offset as usize,
+        (frames[1].offset + frames[1].bytes) as usize,
+    );
+    fs::write(&path, [&bytes[..from], &bytes[to..]].concat()).unwrap();
+    let mut r = Reader::open(&path).unwrap();
+    assert!(r.next_frame().unwrap().is_some());
+    assert_eq!(
+        code_of(&r.next_frame().unwrap_err()),
+        Some("JOURNAL_SEQUENCE_OR_CHAIN")
+    );
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+
+    let path = self::path();
+    let mut w = Writer::create(&path).unwrap();
+    w.append_typed(Provenance::default(), &OwnerDiagnostic { line: "x".into() })
+        .unwrap();
+    let forged = Manifest {
+        frames: 99,
+        root_sha256: [0; 32],
+        complete: true,
+    };
+    assert_eq!(
+        w.append_typed(Provenance::default(), &forged)
+            .unwrap_err()
+            .to_string(),
+        "MANIFEST_ONLY_BY_SEAL"
+    );
+    w.test_append_raw(MANIFEST, payload::TYPED, &payload::encode(&forged).unwrap())
+        .unwrap();
+    w.sync().unwrap();
+    let mut r = Reader::open(&path).unwrap();
+    assert!(r.next_frame().unwrap().is_some());
+    assert_eq!(
+        code_of(&r.next_frame().unwrap_err()),
+        Some("MANIFEST_MISMATCH")
+    );
+    assert!(matches!(
+        screen_seal(&path),
+        SealScreen::Undecodable("MANIFEST_MISMATCH")
+    ));
     fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

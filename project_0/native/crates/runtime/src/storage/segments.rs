@@ -519,6 +519,103 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
+    /// PERSIST-05 (SK-04/SK-07): an fsync failure while rotating or sealing a market segment is
+    /// an error of the lane and sticky for every later write; never a durable acknowledgement. A
+    /// failed rotation leaves a chain that ends in a missing successor: INCOMPLETE, every
+    /// admitted event still readable.
+    #[test]
+    fn segment_sync_failure_at_rotation_and_seal_is_sticky() {
+        for at_seal in [false, true] {
+            let d = dir("sync");
+            let p = d.join("market.p0j");
+            let mut w = SegmentedWriter::create(&p, 4096).unwrap();
+            let r = rows(40);
+            let batch = |w: &mut SegmentedWriter, rows: &[(Provenance, Vec<u8>)]| {
+                w.append_batch(rows.iter().map(|(p, b)| {
+                    (
+                        MarketCoverage::KIND,
+                        MarketCoverage::SCHEMA,
+                        p,
+                        b.as_slice(),
+                    )
+                }))
+            };
+            batch(&mut w, &r[..24]).unwrap();
+            assert!(w.position() >= 4096, "rotation due");
+            w.writer.test_fail_next_sync(io::ErrorKind::Other);
+            if at_seal {
+                assert!(w.seal(true).is_err());
+            } else {
+                assert!(w.rotate_if_due().is_err());
+            }
+            assert!(batch(&mut w, &r[24..28]).is_err(), "sticky");
+            assert!(w.sync().is_err() && w.seal(true).is_err());
+            assert_eq!(w.segments(), 1, "no successor after a failed rotation");
+            if !at_seal {
+                let chain = verify_chain(&p).unwrap();
+                assert!(!(chain.sealed && chain.complete), "{chain:?}");
+                assert_eq!(chain.events, 24);
+            }
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    /// PERSIST-05 (SK-07): a successor whose link frame never reached disk (header only), an
+    /// intermediate segment cut before its manifest and a successor that is a symlink are hard
+    /// errors of the chain, never an INCOMPLETE pass.
+    #[test]
+    fn missing_link_unsealed_intermediate_and_symlinked_successor_fail_closed() {
+        let d = dir("codes");
+        let base = d.join("base");
+        std::fs::create_dir_all(&base).unwrap();
+        let first = base.join("market.p0j");
+        let n = write(&first, 4096, &rows(40), true);
+        assert!(n >= 3, "{n}");
+        let case = |name: &str, f: &dyn Fn(&Path)| {
+            let c = d.join(name).join("market.p0j");
+            std::fs::create_dir_all(c.parent().unwrap()).unwrap();
+            for i in 1..=n {
+                std::fs::copy(segment_path(&first, i), segment_path(&c, i)).unwrap();
+            }
+            f(&c);
+            verify_chain(&c).unwrap_err()
+        };
+        let link_missing = case("link", &|p| {
+            std::fs::remove_file(segment_path(p, 2)).unwrap();
+            journal::Writer::create(&segment_path(p, 2)).unwrap();
+        });
+        assert!(
+            link_missing.contains("SEGMENT_LINK_MISSING"),
+            "{link_missing}"
+        );
+        let unsealed = case("unsealed", &|p| {
+            let s1 = segment_path(p, 1);
+            let mut r = journal::Reader::open(&s1).unwrap();
+            let mut manifest = None;
+            while let Some(f) = r.next_frame().unwrap() {
+                if f.kind == journal::MANIFEST {
+                    manifest = Some(f.offset);
+                }
+            }
+            let file = std::fs::OpenOptions::new().write(true).open(&s1).unwrap();
+            file.set_len(manifest.unwrap()).unwrap();
+        });
+        assert!(
+            unsealed.contains("SEGMENT_INTERMEDIATE_UNSEALED"),
+            "{unsealed}"
+        );
+        let symlink = case("symlink", &|p| {
+            std::fs::remove_file(segment_path(p, 2)).unwrap();
+            std::os::unix::fs::symlink(segment_path(&first, 2), segment_path(p, 2)).unwrap();
+        });
+        assert!(symlink.contains("SEGMENT_NOT_REGULAR"), "{symlink}");
+        assert!(
+            verify_chain(&first).is_ok(),
+            "the source chain is untouched"
+        );
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
     /// Crash in the last segment is INCOMPLETE; a missing, corrupt or swapped intermediate
     /// segment and an orphan beyond the chain end fail closed with their reason.
     #[test]

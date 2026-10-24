@@ -28,20 +28,19 @@ PINNED = {
     'runtime/src/analytics/econ_canonical.rs': (6, 'RH'),
     'runtime/src/analytics/econ_docs.rs': (12, 'R'),
     'runtime/src/analytics/fixture.rs': (4, 'W'),
-    'runtime/src/analytics/journal.rs': (29, 'HI'),
+    'runtime/src/analytics/journal.rs': (24, 'H'),
     'runtime/src/analytics/measurement.rs': (12, 'RH'),
     'runtime/src/analytics/payload.rs': (1, 'R'),
     'runtime/src/analytics/renders.rs': (14, 'R'),
     'runtime/src/bin/p0-econ-replay.rs': (1, 'C'),
-    'runtime/src/bin/p0-fe-qualify.rs': (18, 'WRI'),
-    'runtime/src/bin/p0-journal.rs': (13, 'RI'),
+    'runtime/src/bin/p0-fe-qualify.rs': (2, 'W'),
+    'runtime/src/bin/p0-journal.rs': (8, 'R'),
     'runtime/src/bin/p0-measurement-plan.rs': (1, 'R'),
     'runtime/src/bin/p0-parity.rs': (4, 'H'),
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
     'runtime/src/bin/p0-strict-verify.rs': (1, 'C'),
     'runtime/src/bin/p0ctl.rs': (2, 'C'),
     'runtime/src/execution/one_shot.rs': (7, 'H'),
-    'runtime/src/execution/route.rs': (5, 'W'),
     'runtime/src/market/deployment.rs': (1, 'W'),
     'runtime/src/market/observer.rs': (1, 'W'),
     'runtime/src/market/rows.rs': (34, 'R'),
@@ -52,9 +51,7 @@ PINNED = {
     'runtime/src/market_truth.rs': (2, 'H'),
     'runtime/src/market_verification.rs': (19, 'WR'),
     'runtime/src/orchestration/boot_network.rs': (12, 'W'),
-    'runtime/src/orchestration/fe_freeze.rs': (5, 'I'),
-    'runtime/src/orchestration/fe_qualification.rs': (14, 'WI'),
-    'runtime/src/orchestration/fe_replay.rs': (17, 'WRI'),
+    'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
     'runtime/src/orchestration/provider_evidence.rs': (1, 'H'),
     'runtime/src/orchestration/startup.rs': (1, 'R'),
     'solana/examples/p0-gap-ws-proxy.rs': (10, 'W'),
@@ -141,15 +138,9 @@ class JsonInventory(unittest.TestCase):
         for f, (_, cats) in PINNED.items():
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         internal = sorted(f for f, (_, c) in PINNED.items() if 'I' in c)
-        self.assertEqual(internal, [
-            'runtime/src/analytics/journal.rs',
-            'runtime/src/bin/p0-fe-qualify.rs',
-            'runtime/src/bin/p0-journal.rs',
-            'runtime/src/orchestration/fe_freeze.rs',
-            'runtime/src/orchestration/fe_qualification.rs',
-            'runtime/src/orchestration/fe_replay.rs',
-        ])
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 418)
+        # JFI-04 closed the last internal candidates (FE-01 evidence, census import, 24.10.).
+        self.assertEqual(internal, [])
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 354)
 
 
 if __name__ == '__main__':

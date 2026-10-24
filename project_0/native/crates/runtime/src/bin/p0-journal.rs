@@ -2,7 +2,8 @@
 //! `verify` checks magic, version, every CRC, the SHA256 chain and the manifest;
 //! `export` writes an explicit JSONL export to a fresh destination, never over existing bytes;
 //! `frames JOURNAL` prints every frame (kind, sequence, provenance, value) as JSONL to stdout;
-//! `import KIND JOURNAL` writes JSONL from stdin into a new journal (census kinds only);
+//! `import KIND JOURNAL` writes typed `key=value` rows from stdin into a new journal (census kinds
+//! only);
 //! `import-provider-evidence JSON JOURNAL` turns a measured provider evidence JSON into the typed
 //! `PROVIDER_EVIDENCE` record the network boot audit reads (X2);
 //! `renders RUN [--create]` checks every legacy view of a run byte for byte against its journal
@@ -37,9 +38,12 @@ fn verify(path: &Path) -> Result<serde_json::Value, String> {
         "kinds": kinds.into_iter().map(|(k, n)| (k.to_string(), serde_json::Value::from(n))).collect::<serde_json::Map<_, _>>(),
     }))
 }
-/// Explicit offline import of one row stream (for example the C0 census). Only kinds listed
-/// as importable are accepted, so runtime or financial journals can never be forged here.
+/// Explicit offline import of one row stream (the C0 census). Only kinds listed as importable
+/// are accepted, so runtime or financial journals can never be forged here. JFI: each stdin line
+/// is decoded once into the kind's typed row (`key=value` text, no JSON); a malformed row
+/// fails the import and seals the journal INCOMPLETE.
 fn import(kind: u16, path: &Path) -> Result<(), String> {
+    use darkbot_runner::analytics::payload::{C0CensusImportAccount, C0CensusImportGroupAccount};
     use std::io::BufRead;
     if !journal::kind::IMPORTABLE.contains(&kind) {
         return Err("KIND_NOT_IMPORTABLE".into());
@@ -52,18 +56,23 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
             if line.is_empty() {
                 continue;
             }
-            let value: serde_json::Value =
-                serde_json::from_str(&line).map_err(|_| "IMPORT_ROW_JSON")?;
-            let provenance = journal::Provenance {
+            let provenance = |slot| journal::Provenance {
                 source: journal::source::C0_CENSUS,
                 source_seq: rows,
-                slot: value.get("slot").and_then(serde_json::Value::as_u64),
+                slot: Some(slot),
                 ..Default::default()
             };
-            // Offline import of externally captured RPC rows stays a value-tree kind (open JFI item).
-            writer
-                .append_legacy(kind, provenance, &value)
-                .map_err(|e| e.to_string())?;
+            match kind {
+                journal::kind::C0_CENSUS_ACCOUNT => {
+                    let row = C0CensusImportAccount::from_import_line(&line)?;
+                    writer.append_typed(provenance(row.slot), &row)
+                }
+                _ => {
+                    let row = C0CensusImportGroupAccount::from_import_line(&line)?;
+                    writer.append_typed(provenance(row.slot), &row)
+                }
+            }
+            .map_err(|e| e.to_string())?;
             rows += 1;
         }
         Ok(())
@@ -71,8 +80,9 @@ fn import(kind: u16, path: &Path) -> Result<(), String> {
     let durable = writer.seal(appended.is_ok()).map_err(|e| e.to_string())?;
     appended?;
     println!(
-        "{}",
-        serde_json::json!({"journal":path,"frames":rows,"root_sha256":journal::hex(&durable.hash),"status":"COMPLETE"})
+        "C0_CENSUS_IMPORT journal={} frames={rows} root_sha256={} status=COMPLETE",
+        path.display(),
+        journal::hex(&durable.hash)
     );
     Ok(())
 }

@@ -8,7 +8,7 @@
 //! Mainnet deployment/state parity needs an authorized read (NOT_RUN) and the source build parity
 //! stays unproven.
 use super::fe_qualification::{sha, typed, CollectedScope, SOURCE_PIN, TRANSACTION_VERSION_PIN};
-use crate::analytics::payload::{Fe01Freeze, FrozenBank};
+use crate::analytics::payload::{Fe01Freeze, Fe01FreezeSummary, FrozenBank};
 use darkbot_project0::funding::FundingClass;
 use darkbot_project0::health::{crate_impl::bank_observation_keys, dependency_scan};
 use darkbot_project0::protocol;
@@ -283,14 +283,24 @@ pub fn record(
     dir: &std::path::Path,
     freeze: Option<Result<Fe01Freeze, String>>,
     against: Option<&std::path::Path>,
-) -> Result<(serde_json::Value, bool), String> {
-    use serde_json::json;
+) -> Result<(Fe01FreezeSummary, bool), String> {
+    let summary = |status: &str, reason: Option<String>| Fe01FreezeSummary {
+        status: status.into(),
+        reason,
+        funding_class: None,
+        banks: None,
+        class_pins: None,
+        historical: None,
+        drift: vec![],
+        gaps: vec![],
+        journal: None,
+    };
     Ok(match freeze {
         None => (
-            json!({"status":"NOT_RUN","reason":"OBSERVATION_INCOMPLETE"}),
+            summary("NOT_RUN", Some("OBSERVATION_INCOMPLETE".into())),
             false,
         ),
-        Some(Err(reason)) => (json!({"status":"BLOCKED","reason":reason}), false),
+        Some(Err(reason)) => (summary("BLOCKED", Some(reason)), false),
         Some(Ok(f)) => {
             let drift = match against {
                 Some(earlier) => drift(&load(earlier)?, &f),
@@ -298,8 +308,20 @@ pub fn record(
             };
             let v = verdict(&f, &drift);
             write(dir, &f)?;
-            let summary = json!({"status":v.status,"funding_class":f.funding_class,"banks":f.banks.len(),"class_pins":f.class_pins.len(),"historical":f.historical,"drift":drift,"gaps":v.gaps,"journal":FE01_FREEZE_JOURNAL,"fe01":"INCOMPLETE"});
-            (summary, drift.is_empty())
+            let unblocked = drift.is_empty();
+            (
+                Fe01FreezeSummary {
+                    funding_class: Some(f.funding_class.clone()),
+                    banks: Some(f.banks.len() as u64),
+                    class_pins: Some(f.class_pins.len() as u64),
+                    historical: Some(f.historical),
+                    drift: drift.into_iter().map(String::from).collect(),
+                    gaps: v.gaps.into_iter().map(String::from).collect(),
+                    journal: Some(FE01_FREEZE_JOURNAL.into()),
+                    ..summary(v.status, None)
+                },
+                unblocked,
+            )
         }
     })
 }
@@ -458,19 +480,19 @@ mod tests {
         let (first, second, third) = (dir("a"), dir("b"), dir("c"));
         let (summary, ok) = record(&first, Some(Ok(f.clone())), None).unwrap();
         assert!(ok);
-        assert_eq!(summary["status"], "FROZEN_FROM_HISTORICAL_OBSERVATION");
-        assert_eq!(summary["fe01"], "INCOMPLETE");
+        assert_eq!(summary.status, "FROZEN_FROM_HISTORICAL_OBSERVATION");
+        assert_eq!(summary.journal.as_deref(), Some(FE01_FREEZE_JOURNAL));
         assert_eq!(load(&first).unwrap(), f);
         let mut moved = f.clone();
         moved.program_data_sha256 = "upgraded".into();
         let (summary, ok) = record(&second, Some(Ok(moved.clone())), Some(&first)).unwrap();
         assert!(!ok);
-        assert_eq!(summary["status"], "BLOCKED_DRIFT");
-        assert_eq!(summary["drift"][0], "FE_DRIFT_PROGRAM_DEPLOYMENT");
+        assert_eq!(summary.status, "BLOCKED_DRIFT");
+        assert_eq!(summary.drift[0], "FE_DRIFT_PROGRAM_DEPLOYMENT");
         assert_eq!(load(&second).unwrap(), moved, "drifted evidence is kept");
         let (summary, ok) =
             record(&third, Some(Err("FE_FREEZE_ORACLE_MISSING:x".into())), None).unwrap();
-        assert_eq!((summary["status"].as_str(), ok), (Some("BLOCKED"), false));
+        assert_eq!((summary.status.as_str(), ok), ("BLOCKED", false));
         assert!(!record(&third, None, None).unwrap().1);
         assert_eq!(load(&third).unwrap_err(), "FE_FREEZE_UNREADABLE");
         assert!(record(&third, Some(Ok(f)), Some(&third)).is_err());

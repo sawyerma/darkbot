@@ -242,7 +242,14 @@ impl Reads for NetworkReads {
                 {"encoding": "base64", "commitment": "finalized", "minContextSlot": min_context_slot}
             ]),
         )?;
-        fe::decode_batch(response, keys, min_context_slot)
+        // JFI-02: decoded at this wire edge into the typed answer, then the FE-01 check.
+        let wire = <fe::WireMultipleAccounts as serde::Deserialize>::deserialize(&response)
+            .map_err(|_| "FE_RPC_RESULT_DECODE")?;
+        fe::observed(&crate::analytics::payload::Fe01Read {
+            keys: keys.to_vec(),
+            min_context_slot,
+            outcome: wire.outcome(),
+        })
     }
     fn wss(&mut self, program: Pubkey, transactions: bool) -> Result<(u64, u64), String> {
         let remaining = self

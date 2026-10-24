@@ -159,6 +159,104 @@ impl Payload for C0CensusResult {
     const KIND: u16 = journal::kind::C0_CENSUS_RESULT;
 }
 
+/// C0 census import (`c0_census.py` → `p0-journal import 900`): one program account of the
+/// scanned context slot — its 8-byte discriminator slice only, never the account data.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct C0CensusImportAccount {
+    pub pubkey: solana_sdk::pubkey::Pubkey,
+    pub lamports: u64,
+    pub owner: solana_sdk::pubkey::Pubkey,
+    pub discriminator: Vec<u8>,
+    pub space: Option<u64>,
+    pub slot: u64,
+}
+impl Payload for C0CensusImportAccount {
+    const KIND: u16 = journal::kind::C0_CENSUS_ACCOUNT;
+}
+
+/// C0 census import (`p0-journal import 901`): one group indexer account slice.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct C0CensusImportGroupAccount {
+    pub pubkey: solana_sdk::pubkey::Pubkey,
+    pub indexer_flags: Vec<u8>,
+    pub space: Option<u64>,
+    pub slot: u64,
+}
+impl Payload for C0CensusImportGroupAccount {
+    const KIND: u16 = journal::kind::C0_CENSUS_GROUP_ACCOUNT;
+}
+
+/// One import row of the census handoff: `key=value` fields separated by single spaces, exactly
+/// the given keys, each once (pubkeys base58, byte slices base64, `space=-` when unknown).
+fn import_fields<'a>(line: &'a str, keys: &[&str]) -> Result<Vec<&'a str>, String> {
+    let malformed = || {
+        format!(
+            "IMPORT_ROW_FORMAT:{}",
+            line.chars().take(120).collect::<String>()
+        )
+    };
+    let mut values = vec![None; keys.len()];
+    for field in line.split(' ') {
+        let (k, v) = field.split_once('=').ok_or_else(malformed)?;
+        let i = keys.iter().position(|x| *x == k).ok_or_else(malformed)?;
+        if v.is_empty() || values[i].replace(v).is_some() {
+            return Err(malformed());
+        }
+    }
+    values
+        .into_iter()
+        .map(|v| v.ok_or_else(malformed))
+        .collect()
+}
+fn import_key(v: &str) -> Result<solana_sdk::pubkey::Pubkey, String> {
+    v.parse().map_err(|_| format!("IMPORT_ROW_PUBKEY:{v}"))
+}
+fn import_u64(v: &str) -> Result<u64, String> {
+    v.parse().map_err(|_| format!("IMPORT_ROW_NUMBER:{v}"))
+}
+fn import_bytes(v: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(v)
+        .map_err(|_| format!("IMPORT_ROW_BASE64:{v}"))
+}
+fn import_space(v: &str) -> Result<Option<u64>, String> {
+    (v != "-").then(|| import_u64(v)).transpose()
+}
+impl C0CensusImportAccount {
+    pub fn from_import_line(line: &str) -> Result<Self, String> {
+        let keys = [
+            "pubkey",
+            "lamports",
+            "owner",
+            "discriminator",
+            "space",
+            "slot",
+        ];
+        let v = import_fields(line, &keys)?;
+        Ok(Self {
+            pubkey: import_key(v[0])?,
+            lamports: import_u64(v[1])?,
+            owner: import_key(v[2])?,
+            discriminator: import_bytes(v[3])?,
+            space: import_space(v[4])?,
+            slot: import_u64(v[5])?,
+        })
+    }
+}
+impl C0CensusImportGroupAccount {
+    pub fn from_import_line(line: &str) -> Result<Self, String> {
+        let keys = ["pubkey", "indexer_flags", "space", "slot"];
+        let v = import_fields(line, &keys)?;
+        Ok(Self {
+            pubkey: import_key(v[0])?,
+            indexer_flags: import_bytes(v[1])?,
+            space: import_space(v[2])?,
+            slot: import_u64(v[3])?,
+        })
+    }
+}
+
 /// FE-01 (PHASENPLAN §13): one bank of a frozen one-class scope — its identity, its oracle setup
 /// and observation keys, every dependency (mint, oracles, integration accounts) and a hash of its
 /// governance configuration.
@@ -199,6 +297,262 @@ impl Payload for Fe01Freeze {
     const KIND: u16 = journal::kind::FE01_FREEZE;
 }
 
+/// FE-01 (kind 700, JFI-04 schema 2): the configuration of one observation — requested and
+/// effective (budget-clamped) typed config, the provider qualification it was admitted on
+/// (`None` offline) and its execution class. Schema-1 value frames stay readable.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Config {
+    pub requested: darkbot_solana::runtime_config::EffectiveConfig,
+    pub effective: darkbot_solana::runtime_config::EffectiveConfig,
+    pub qualification_sha256: Option<String>,
+    pub execution: String,
+}
+impl Payload for Fe01Config {
+    const KIND: u16 = journal::kind::FE01_CONFIG;
+}
+
+/// FE-01 (kind 701, schema 2): one saved `getMultipleAccounts` read (base64, finalized): the
+/// requested keys and context floor and the answer as decoded at the wire edge, fsynced before
+/// the read is used, so a replay validates exactly these values again.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Read {
+    pub keys: Vec<solana_sdk::pubkey::Pubkey>,
+    pub min_context_slot: u64,
+    pub outcome: Fe01ReadOutcome,
+}
+impl Payload for Fe01Read {
+    const KIND: u16 = journal::kind::FE01_READ;
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Fe01ReadOutcome {
+    /// The provider's answer: its context slot and one entry per requested key (`None`: absent).
+    Accounts {
+        context_slot: u64,
+        accounts: Vec<Option<Fe01Account>>,
+    },
+    /// No decodable answer: the call failed or the result did not match the wire type.
+    Failed { reason: String },
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Account {
+    pub owner: solana_sdk::pubkey::Pubkey,
+    pub lamports: u64,
+    pub executable: bool,
+    pub data: Vec<u8>,
+}
+
+/// FE-01 (kind 702, schema 2): the observation report. Never a qualification: funding,
+/// simulation, exits and source parity stay UNKNOWN/NOT_RUN and LIVE/submission stay off.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Report {
+    pub status: String,
+    pub reason: Option<String>,
+    /// The closed scope; `None` when the observation ended before one closed.
+    pub observation: Option<Fe01Observation>,
+    pub scope: Option<Fe01Scope>,
+    pub freeze: Option<Fe01FreezeSummary>,
+    pub logical_reads: Option<u64>,
+    pub provider_actual: Option<darkbot_solana::provider::ProviderSnapshot>,
+    pub provider_cooldown: Option<darkbot_solana::provider::CooldownStatus>,
+    pub replay: Option<Fe01Replay>,
+    pub source_parity: String,
+    pub fe01: String,
+    pub fe02: String,
+    pub pilot_ready: bool,
+    pub live_enabled: bool,
+    pub submission_enabled: bool,
+}
+impl Payload for Fe01Report {
+    const KIND: u16 = journal::kind::FE01_RESULT;
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Observation {
+    pub rounds: u64,
+    pub slot: u64,
+    pub unix_timestamp: i64,
+    pub clock: String,
+    pub program_data: solana_sdk::pubkey::Pubkey,
+    pub program_data_sha256: String,
+    pub deployment_slot: u64,
+    pub source_pin: String,
+    pub source_parity_reason: String,
+    pub transaction_version: String,
+    pub accounts: Vec<Fe01AccountDigest>,
+    pub targets: Vec<Fe01Target>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01AccountDigest {
+    pub pubkey: solana_sdk::pubkey::Pubkey,
+    pub owner: solana_sdk::pubkey::Pubkey,
+    pub lamports: u64,
+    pub bytes: u64,
+    pub sha256: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Target {
+    pub account: solana_sdk::pubkey::Pubkey,
+    pub health: String,
+    pub liquidatable: Option<bool>,
+    pub maintenance_health_bits: Option<i128>,
+    pub receivership_eligibility: String,
+    pub eligibility_reason: Option<String>,
+    pub funding: String,
+    pub net_edge_usd_micro: Option<i128>,
+    pub simulation: String,
+    pub collateral_exit: String,
+    pub source_parity: String,
+    pub protocol_sizes: Option<Vec<Fe01Size>>,
+    pub sizing_error: Option<String>,
+    pub health_error: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Size {
+    pub asset_bank: solana_sdk::pubkey::Pubkey,
+    pub liability_bank: solana_sdk::pubkey::Pubkey,
+    pub withdraw_native: u64,
+    pub repay_native: u64,
+    pub repay_all: bool,
+    pub flat_sol_fee_lamports: u64,
+    pub executable_value: String,
+}
+/// The explicitly selected qualification scope (one funding class), never a trading preference.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Scope {
+    pub funding_class: String,
+    pub selection_is_execution_qualification: bool,
+    pub funding: String,
+    pub source_pin: String,
+    pub gaps: Vec<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01FreezeSummary {
+    pub status: String,
+    pub reason: Option<String>,
+    pub funding_class: Option<String>,
+    pub banks: Option<u64>,
+    pub class_pins: Option<u64>,
+    pub historical: Option<bool>,
+    pub drift: Vec<String>,
+    pub gaps: Vec<String>,
+    pub journal: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01Replay {
+    pub mode: String,
+    pub source: String,
+    pub reads: Vec<Fe01ReplayRead>,
+    pub total_bytes: u64,
+    pub freshness: String,
+    pub integrity: String,
+}
+/// One consumed saved read: its origin (`journal_seq=N` or the legacy file name), hash, size.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Fe01ReplayRead {
+    pub origin: String,
+    pub sha256: String,
+    pub bytes: u64,
+}
+impl Fe01Report {
+    /// The terminal/text report (PERSIST-04: human-readable output is text, never JSON).
+    pub fn text(&self) -> String {
+        use std::fmt::Write;
+        let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "FE01 status={} reason={} source_parity={} fe01={} fe02={} pilot_ready={} live_enabled={} submission_enabled={}",
+            self.status, opt(&self.reason), self.source_parity, self.fe01, self.fe02,
+            self.pilot_ready, self.live_enabled, self.submission_enabled
+        );
+        if let Some(o) = &self.observation {
+            let _ = writeln!(
+                out,
+                "observation scope_closed=true rounds={} slot={} unix_timestamp={} clock={} program_data={} program_data_sha256={} deployment_slot={} accounts={}",
+                o.rounds, o.slot, o.unix_timestamp, o.clock, o.program_data, o.program_data_sha256,
+                o.deployment_slot, o.accounts.len()
+            );
+            let _ = writeln!(
+                out,
+                "source_pin={} source_parity_reason={} transaction_version={}",
+                o.source_pin, o.source_parity_reason, o.transaction_version
+            );
+            for t in &o.targets {
+                let _ = writeln!(
+                    out,
+                    "target account={} health={} liquidatable={} maintenance_health_bits={} receivership_eligibility={} eligibility_reason={} funding={} net_edge_usd_micro={} simulation={} collateral_exit={} source_parity={} sizing_error={} health_error={}",
+                    t.account, t.health,
+                    t.liquidatable.map_or("-".into(), |v| v.to_string()),
+                    t.maintenance_health_bits.map_or("-".into(), |v| v.to_string()),
+                    t.receivership_eligibility, opt(&t.eligibility_reason), t.funding,
+                    t.net_edge_usd_micro.map_or("-".into(), |v| v.to_string()), t.simulation,
+                    t.collateral_exit, t.source_parity, opt(&t.sizing_error), opt(&t.health_error)
+                );
+                for s in t.protocol_sizes.iter().flatten() {
+                    let _ = writeln!(
+                        out,
+                        "  size asset_bank={} liability_bank={} withdraw_native={} repay_native={} repay_all={} flat_sol_fee_lamports={} executable_value={}",
+                        s.asset_bank, s.liability_bank, s.withdraw_native, s.repay_native,
+                        s.repay_all, s.flat_sol_fee_lamports, s.executable_value
+                    );
+                }
+            }
+        }
+        if let Some(s) = &self.scope {
+            let _ = writeln!(
+                out,
+                "scope funding_class={} selection_is_execution_qualification={} funding={} source_pin={}",
+                s.funding_class, s.selection_is_execution_qualification, s.funding, s.source_pin
+            );
+            for gap in &s.gaps {
+                let _ = writeln!(out, "gap {gap}");
+            }
+        }
+        if let Some(f) = &self.freeze {
+            let _ = writeln!(
+                out,
+                "freeze status={} reason={} funding_class={} banks={} class_pins={} historical={} drift={} gaps={} journal={}",
+                f.status, opt(&f.reason), opt(&f.funding_class),
+                f.banks.map_or("-".into(), |v| v.to_string()),
+                f.class_pins.map_or("-".into(), |v| v.to_string()),
+                f.historical.map_or("-".into(), |v| v.to_string()),
+                f.drift.join(","), f.gaps.join(","), opt(&f.journal)
+            );
+        }
+        if let Some(r) = &self.replay {
+            let _ = writeln!(
+                out,
+                "replay mode={} source={} reads={} total_bytes={} freshness={} integrity={}",
+                r.mode,
+                r.source,
+                r.reads.len(),
+                r.total_bytes,
+                r.freshness,
+                r.integrity
+            );
+        }
+        if let Some(n) = self.logical_reads {
+            let _ = writeln!(out, "logical_reads={n}");
+        }
+        if let Some(p) = &self.provider_actual {
+            let _ = writeln!(
+                out,
+                "provider requests={} http_429_count={} bytes={} effective_rps={} quota_qualified={}",
+                p.requests, p.http_429_count, p.bytes, p.effective_rps, p.quota_qualified
+            );
+        }
+        if let Some(c) = &self.provider_cooldown {
+            let _ = writeln!(
+                out,
+                "provider_cooldown cause={:?} remaining_ms={} http_429_count={}",
+                c.cause,
+                c.remaining_ms.map_or("-".into(), |v| v.to_string()),
+                c.http_429_count
+            );
+        }
+        out
+    }
+}
+
 /// The registry: every typed kind and its payload type, listed once.
 macro_rules! typed_kinds {
     ($kind:expr, $schema:expr, $bytes:expr, $f:ident) => {{
@@ -213,6 +567,9 @@ macro_rules! typed_kinds {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }
             k::FE01_FREEZE => $f::<Fe01Freeze>($kind, $schema, $bytes),
+            k::FE01_CONFIG => $f::<Fe01Config>($kind, $schema, $bytes),
+            k::FE01_READ => $f::<Fe01Read>($kind, $schema, $bytes),
+            k::FE01_RESULT => $f::<Fe01Report>($kind, $schema, $bytes),
             journal::MANIFEST => $f::<Manifest>($kind, $schema, $bytes),
             k::OWNER_DIAGNOSTIC => $f::<OwnerDiagnostic>($kind, $schema, $bytes),
             k::OWNER_RECORD => $f::<super::evidence::OwnerRecord>($kind, $schema, $bytes),
@@ -246,6 +603,8 @@ macro_rules! typed_kinds {
             k::OWNER_RECOVERY => $f::<super::evidence::OwnerRecovery>($kind, $schema, $bytes),
             k::SOURCE_CONTROL_REQUEST => $f::<SourceControlRequest>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
+            k::C0_CENSUS_ACCOUNT => $f::<C0CensusImportAccount>($kind, $schema, $bytes),
+            k::C0_CENSUS_GROUP_ACCOUNT => $f::<C0CensusImportGroupAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_RESULT => $f::<C0CensusResult>($kind, $schema, $bytes),
             k::MARKET_TRANSACTION => $f::<market::MarketTransaction>($kind, $schema, $bytes),
             k::MARKET_LIQUIDATION => $f::<market::MarketLiquidation>($kind, $schema, $bytes),
@@ -296,19 +655,9 @@ pub fn registered_schema(kind: u16) -> Option<u16> {
 }
 
 /// Temporary migration paths: kinds that still write the historical value tree (schema 1).
-/// Each entry is an open JFI item; a kind leaves this list when it gets a payload type, and
-/// no kind is ever added to it. Typed kinds and unregistered kinds can never write schema 1.
-pub const LEGACY_WRITABLE: &[u16] = {
-    use journal::kind as k;
-    &[
-        // remaining journal kinds (FE-01, C0 census import)
-        k::FE01_CONFIG,
-        k::FE01_READ,
-        k::FE01_RESULT,
-        k::C0_CENSUS_ACCOUNT,
-        k::C0_CENSUS_GROUP_ACCOUNT,
-    ]
-};
+/// JFI-04 closed the last one (FE-01, C0 census import, 24.10.): no kind writes schema 1, and
+/// no kind is ever added. Historical schema-1 frames stay readable.
+pub const LEGACY_WRITABLE: &[u16] = &[];
 
 /// Write admission of the one journal contract (Ticket 1): a typed kind only in its registered
 /// version, schema 1 only for a registered migration path, everything else fails closed.

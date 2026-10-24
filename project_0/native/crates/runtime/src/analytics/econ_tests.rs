@@ -574,6 +574,27 @@ fn early_end_missing_snapshot_upgrade_and_writer_failures_are_incomplete() {
     w.h.shared.writer_errors.store(1, Ordering::Relaxed);
     assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
 }
+/// PERSIST-05: a real write failure of the report journal (injected at the I/O boundary) is
+/// counted, fails the technical verdict INCOMPLETE and is sticky; the snapshots written before
+/// it stay readable and no later one is written.
+#[test]
+fn report_journal_write_failure_is_counted_sticky_and_incomplete() {
+    let mut w = worker();
+    complete(&mut w);
+    w.final_technical = Some(w.technical(false));
+    w.write_snapshot(1, true).unwrap();
+    assert_eq!(view(&w.technical(false))["snapshot_write_failures"], 0);
+    w.reports.test_read_only();
+    assert!(w.write_snapshot(2, true).is_err());
+    assert_eq!(view(&w.technical(false))["snapshot_write_failures"], 1);
+    w.final_technical = None;
+    assert_eq!(view(&w.technical(true))["verdict"], "INCOMPLETE");
+    assert!(w.write_snapshot(3, true).is_err(), "sticky");
+    assert_eq!(view(&w.technical(false))["snapshot_write_failures"], 2);
+    let (frames, last) = report_frames(&w.reports.path);
+    assert_eq!(frames.iter().map(|f| f.index).collect::<Vec<_>>(), [1]);
+    assert!(last.is_none());
+}
 #[test]
 fn four_boundaries_delta_cumulative_and_final_reconcile() {
     let mut w = worker();

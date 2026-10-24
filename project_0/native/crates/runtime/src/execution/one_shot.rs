@@ -1371,11 +1371,7 @@ mod tests {
         })
         .unwrap();
         assert!(w
-            .append_legacy(
-                journal::kind::FE04_TRANSITION,
-                Default::default(),
-                &historical
-            )
+            .append(journal::kind::FE04_TRANSITION, 1, Default::default(), b"x")
             .is_err());
         w.test_append_historical(journal::kind::FE04_TRANSITION, &historical)
             .unwrap();

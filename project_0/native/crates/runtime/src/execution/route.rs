@@ -546,10 +546,10 @@ struct ApiInstruction {
 struct BuildResponse {
     in_amount: String,
     out_amount: String,
-    /// [P1-C] ExactIn: minimum output enforced on-chain (slippage floor). Accepted as JSON
-    /// string or number; absent = unknown (fail closed downstream).
+    /// [P1-C] ExactIn: minimum output enforced on-chain (slippage floor); absent or null =
+    /// unknown (fail closed downstream).
     #[serde(default)]
-    other_amount_threshold: Option<serde_json::Value>,
+    other_amount_threshold: Option<WireAmount>,
     swap_mode: String,
     setup_instructions: Vec<ApiInstruction>,
     swap_instruction: ApiInstruction,
@@ -559,6 +559,16 @@ struct BuildResponse {
     addresses_by_lookup_table_address: Option<HashMap<String, Vec<String>>>,
 }
 
+/// [JFI-FIX-07] An atomic amount as this wire carries it: a decimal string or an unsigned
+/// integer. Any other JSON type (negative, fractional, array, object) fails the response decode
+/// at the wire edge; no generic JSON value reaches the router.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum WireAmount {
+    Text(String),
+    Integer(u64),
+}
+
 /// [P1-C] Parse and validate `/build` amounts for ExactIn.
 /// `outAmount` is the quote. `otherAmountThreshold` is the minimum output the swap instruction
 /// enforces on-chain. No local `quote - slippage` arithmetic: the provider floor is the truth.
@@ -566,7 +576,7 @@ fn parse_build_amounts(
     requested_in: u64,
     in_amount: &str,
     out_amount: &str,
-    other_amount_threshold: Option<&serde_json::Value>,
+    other_amount_threshold: Option<&WireAmount>,
 ) -> Result<(u64, u64, Option<u64>), String> {
     let in_amount = in_amount
         .parse::<u64>()
@@ -581,20 +591,12 @@ fn parse_build_amounts(
         ));
     }
     let floor = match other_amount_threshold {
-        None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::String(raw)) => Some(
+        None => None,
+        Some(WireAmount::Text(raw)) => Some(
             raw.parse::<u64>()
                 .map_err(|e| format!("jupiter otherAmountThreshold malformed: {e}"))?,
         ),
-        Some(serde_json::Value::Number(n)) => Some(
-            n.as_u64()
-                .ok_or_else(|| format!("jupiter otherAmountThreshold malformed: {n}"))?,
-        ),
-        Some(other) => {
-            return Err(format!(
-                "jupiter otherAmountThreshold malformed type: {other}"
-            ));
-        }
+        Some(WireAmount::Integer(n)) => Some(*n),
     };
     if let Some(floor) = floor {
         if floor == 0 {
@@ -774,41 +776,46 @@ mod tests {
     #[test]
     fn p1c_parses_quote_and_executable_floor_separately() {
         use serde_json::json;
+        let text = |s: &str| Some(WireAmount::Text(s.into()));
         // quote > floor
         assert_eq!(
-            parse_build_amounts(10, "10", "1000", Some(&json!("950"))),
+            parse_build_amounts(10, "10", "1000", text("950").as_ref()),
             Ok((10, 1000, Some(950)))
         );
         // quote == floor
         assert_eq!(
-            parse_build_amounts(10, "10", "1000", Some(&json!("1000"))),
+            parse_build_amounts(10, "10", "1000", text("1000").as_ref()),
             Ok((10, 1000, Some(1000)))
         );
         // numeric threshold accepted
         assert_eq!(
-            parse_build_amounts(10, "10", "1000", Some(&json!(900))),
+            parse_build_amounts(10, "10", "1000", Some(&WireAmount::Integer(900))),
             Ok((10, 1000, Some(900)))
         );
-        // missing / null floor -> unknown, never the quote
+        // missing floor -> unknown, never the quote
         assert_eq!(
             parse_build_amounts(10, "10", "1000", None),
             Ok((10, 1000, None))
         );
-        assert_eq!(
-            parse_build_amounts(10, "10", "1000", Some(&json!(null))),
-            Ok((10, 1000, None))
-        );
-        // malformed floor -> fail closed
-        assert!(parse_build_amounts(10, "10", "1000", Some(&json!("abc"))).is_err());
-        assert!(parse_build_amounts(10, "10", "1000", Some(&json!(""))).is_err());
-        assert!(parse_build_amounts(10, "10", "1000", Some(&json!(-5))).is_err());
-        assert!(parse_build_amounts(10, "10", "1000", Some(&json!(["1"]))).is_err());
+        // JFI-FIX-07: the wire decode itself: string or integer; null = absent; any other JSON
+        // type fails the response (fail closed before the router).
+        let wire = |v: serde_json::Value| serde_json::from_value::<Option<WireAmount>>(v);
+        assert_eq!(wire(json!("950")).unwrap(), text("950"));
+        assert_eq!(wire(json!(900)).unwrap(), Some(WireAmount::Integer(900)));
+        assert_eq!(wire(json!(null)).unwrap(), None);
+        for bad in [json!(-5), json!(1.5), json!(["1"]), json!({"v": 1})] {
+            assert!(wire(bad.clone()).is_err(), "{bad}");
+        }
+        // malformed floor text -> fail closed
+        assert!(parse_build_amounts(10, "10", "1000", text("abc").as_ref()).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", text("").as_ref()).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", text("-5").as_ref()).is_err());
         // floor > quote -> schema invalid -> fail closed
-        assert!(parse_build_amounts(10, "10", "1000", Some(&json!("1001"))).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", text("1001").as_ref()).is_err());
         // zero floor -> no protection -> fail closed
-        assert!(parse_build_amounts(10, "10", "1000", Some(&json!("0"))).is_err());
+        assert!(parse_build_amounts(10, "10", "1000", text("0").as_ref()).is_err());
         // input mismatch still rejected
-        assert!(parse_build_amounts(11, "10", "1000", Some(&json!("950"))).is_err());
+        assert!(parse_build_amounts(11, "10", "1000", text("950").as_ref()).is_err());
     }
 
     /// A synthetic (not recorded) Jupiter ExactIn route instruction in the pinned layout.

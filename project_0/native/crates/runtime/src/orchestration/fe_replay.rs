@@ -1,19 +1,65 @@
 //! Re-evaluate saved FE-01 observations using the same production collector.
 //! No RPC, signer or execution path is constructed by this module.
-use super::fe_qualification::{self as fe, ObservedState};
+use super::fe_qualification::{self as fe, ObservedState, WireMultipleAccounts};
 use crate::analytics::journal::{self, kind, Reader, MANIFEST};
+use crate::analytics::payload::{
+    Fe01Read, Fe01ReadOutcome, Fe01Replay, Fe01ReplayRead, Fe01Report, Fe01Scope,
+};
 use darkbot_project0::funding::FundingClass;
 use darkbot_solana::runtime_config::RuntimeConfig;
-use serde_json::{json, Value};
+use serde_json::Value;
 use solana_sdk::pubkey::Pubkey;
 use std::{fs, io::Read, path::Path};
 
 /// Binary journal of one FE-01 observation (PERSIST-01) inside its output directory.
 pub const FE01_JOURNAL: &str = "fe01.p0j";
+/// Binary journal of one offline replay (configuration and report), beside its freeze.
+pub const FE01_REPLAY_JOURNAL: &str = "fe01_replay.p0j";
+
+/// Historical reader (JFI-03): one read saved before JFI-04 — a schema-1 FE01_READ frame or a
+/// `read_NNNNNN.json` file `{method, params, result|error}` — as the typed read. The request must
+/// be exactly a base64/finalized `getMultipleAccounts`; an error or an undecodable result is a
+/// failed read. Nothing else in this module reads JSON.
+pub fn historical_read(entry: &Value) -> Result<Fe01Read, String> {
+    let mismatch = || "FE_REPLAY_REQUEST_OR_ERROR_MISMATCH".to_string();
+    let options = &entry["params"][1];
+    if entry["method"] != "getMultipleAccounts"
+        || entry["params"].as_array().map(Vec::len) != Some(2)
+        || options.as_object().map(|o| o.len()) != Some(3)
+        || options["encoding"] != "base64"
+        || options["commitment"] != "finalized"
+    {
+        return Err(mismatch());
+    }
+    let keys = entry["params"][0]
+        .as_array()
+        .ok_or_else(mismatch)?
+        .iter()
+        .map(|k| k.as_str().and_then(|k| k.parse().ok()).ok_or_else(mismatch))
+        .collect::<Result<Vec<Pubkey>, _>>()?;
+    let min_context_slot = options["minContextSlot"].as_u64().ok_or_else(mismatch)?;
+    let outcome = match (entry.get("error"), entry.get("result")) {
+        (None, Some(result)) => {
+            match <WireMultipleAccounts as serde::Deserialize>::deserialize(result) {
+                Ok(wire) => wire.outcome(),
+                Err(_) => Fe01ReadOutcome::Failed {
+                    reason: "FE_REPLAY_RESULT_DECODE".into(),
+                },
+            }
+        }
+        (None, None) => return Err("FE_REPLAY_RESULT_MISSING".into()),
+        (Some(_), _) => Fe01ReadOutcome::Failed { reason: mismatch() },
+    };
+    Ok(Fe01Read {
+        keys,
+        min_context_slot,
+        outcome,
+    })
+}
 
 /// Saved reads in order with their integrity record, from `fe01.p0j`; `None` for an
 /// observation saved before PERSIST-01 (`read_NNNNNN.json`). Both at once are refused.
-type SavedReads = Vec<(Value, Value)>;
+type SavedReads = Vec<(Fe01Read, Fe01ReplayRead)>;
 fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<SavedReads>, String> {
     let path = directory.join(FE01_JOURNAL);
     match fs::symlink_metadata(&path) {
@@ -47,6 +93,7 @@ fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<Sa
             .checked_add(frame.bytes)
             .filter(|n| *n <= limit)
             .ok_or("FE_REPLAY_BYTE_LIMIT")?;
+        let historical = frame.schema == 1;
         match frame.kind {
             kind::FE01_CONFIG if !configured => {
                 configured = true;
@@ -55,15 +102,33 @@ fn saved_reads(directory: &Path, limit: u64, max_reads: u64) -> Result<Option<Sa
                 if reads.len() as u64 >= max_reads {
                     return Err("FE_REPLAY_CALL_LIMIT".into());
                 }
-                let integrity = json!({"journal_seq":frame.journal_seq,"frame_sha256":journal::hex(&frame.hash),"bytes":frame.bytes});
-                reads.push((frame.legacy_value().map_err(|e| e.to_string())?, integrity));
+                let read = if historical {
+                    historical_read(&frame.legacy_value().map_err(|e| e.to_string())?)?
+                } else {
+                    frame.typed::<Fe01Read>().map_err(|e| e.to_string())?
+                };
+                let integrity = Fe01ReplayRead {
+                    origin: format!("journal_seq={}", frame.journal_seq),
+                    sha256: journal::hex(&frame.hash),
+                    bytes: frame.bytes,
+                };
+                reads.push((read, integrity));
             }
             kind::FE01_RESULT if configured && !result && !reads.is_empty() => {
-                let value = frame.legacy_value().map_err(|e| e.to_string())?;
-                if value["status"] == "INCOMPLETE" {
+                let (status, logical_reads) = if historical {
+                    let value = frame.legacy_value().map_err(|e| e.to_string())?;
+                    (
+                        value["status"].as_str().unwrap_or_default().to_string(),
+                        value["logical_reads"].as_u64(),
+                    )
+                } else {
+                    let report = frame.typed::<Fe01Report>().map_err(|e| e.to_string())?;
+                    (report.status, report.logical_reads)
+                };
+                if status == fe::INCOMPLETE {
                     return Err("FE_REPLAY_INCOMPLETE".into());
                 }
-                if value["logical_reads"].as_u64() != Some(reads.len() as u64) {
+                if logical_reads != Some(reads.len() as u64) {
                     return Err("FE_REPLAY_READ_COUNT".into());
                 }
                 result = true;
@@ -90,56 +155,55 @@ pub fn first_class(name: &str) -> Result<FundingClass, String> {
 }
 /// Bind an explicitly selected *qualification scope*, never a trading preference
 /// or proof that the funding path is executable. Other product classes stay intact.
-pub fn bind_scope(report: &mut Value, class: FundingClass) -> Result<(), String> {
+pub fn bind_scope(report: &mut Fe01Report, class: FundingClass) -> Result<(), String> {
     first_class(class.as_str())?;
     let funding_gap = match class {
         FundingClass::ZeroPrefundSameTx => "ZERO_PREFUND_EXECUTABLE_SAME_TX_FLOOR_NOT_PROVEN",
         _ => "NO_SWAP_CURRENT_INVENTORY_AND_REALIZABLE_EXIT_NOT_PROVEN",
     };
-    report["qualification_scope"] = json!({"funding_class":class.as_str(),"selection_is_execution_qualification":false,"funding":"UNKNOWN","source_pin":fe::SOURCE_PIN});
-    report["qualification_gaps"] = json!([
-        "CURRENT_DEPLOYMENT_REPRODUCIBLE_SOURCE_PARITY_NOT_PROVEN",
-        "CURRENT_CANDIDATE_STATE_FRESHNESS_NOT_QUALIFIED",
-        funding_gap,
-        "COMPLETE_CURRENT_TRANSACTION_SIMULATION_NOT_RUN",
-        "CURRENT_CLUSTER_TRANSACTION_VERSION_SUPPORT_NOT_OBSERVED",
-        "ALL_COSTS_AND_REALIZABLE_EXIT_NOT_PROVEN"
-    ]);
-    report["fe01"] = json!("INCOMPLETE");
-    report["pilot_ready"] = json!(false);
-    report["live_enabled"] = json!(false);
-    report["submission_enabled"] = json!(false);
+    report.scope = Some(Fe01Scope {
+        funding_class: class.as_str().into(),
+        selection_is_execution_qualification: false,
+        funding: "UNKNOWN".into(),
+        source_pin: fe::SOURCE_PIN.into(),
+        gaps: [
+            "CURRENT_DEPLOYMENT_REPRODUCIBLE_SOURCE_PARITY_NOT_PROVEN",
+            "CURRENT_CANDIDATE_STATE_FRESHNESS_NOT_QUALIFIED",
+            funding_gap,
+            "COMPLETE_CURRENT_TRANSACTION_SIMULATION_NOT_RUN",
+            "CURRENT_CLUSTER_TRANSACTION_VERSION_SUPPORT_NOT_OBSERVED",
+            "ALL_COSTS_AND_REALIZABLE_EXIT_NOT_PROVEN",
+        ]
+        .map(String::from)
+        .into(),
+    });
+    report.fe01 = "INCOMPLETE".into();
+    report.pilot_ready = false;
+    report.live_enabled = false;
+    report.submission_enabled = false;
     Ok(())
 }
 
-/// Exactly match the saved request before decoding bytes with the existing decoder.
+/// Exactly match the saved request before validating its accounts with the production check.
 pub fn decode_saved(
-    entry: Value,
+    read: &Fe01Read,
     keys: &[Pubkey],
     floor: u64,
 ) -> Result<(u64, ObservedState), String> {
-    let expected = json!([keys.iter().map(ToString::to_string).collect::<Vec<_>>(),{"encoding":"base64","commitment":"finalized","minContextSlot":floor}]);
-    if entry["method"] != "getMultipleAccounts"
-        || entry["params"] != expected
-        || entry.get("error").is_some()
-    {
+    if read.keys != keys || read.min_context_slot != floor {
         return Err("FE_REPLAY_REQUEST_OR_ERROR_MISMATCH".into());
     }
-    fe::decode_batch(
-        entry
-            .get("result")
-            .cloned()
-            .ok_or("FE_REPLAY_RESULT_MISSING")?,
-        keys,
-        floor,
-    )
+    if let Fe01ReadOutcome::Failed { .. } = read.outcome {
+        return Err("FE_REPLAY_REQUEST_OR_ERROR_MISMATCH".into());
+    }
+    fe::observed(read)
 }
 
 pub fn replay(
     config: &RuntimeConfig,
     directory: &Path,
     class: FundingClass,
-) -> Result<Value, String> {
+) -> Result<Fe01Report, String> {
     replay_frozen(config, directory, class).map(|(report, _)| report)
 }
 
@@ -148,7 +212,13 @@ pub fn replay_frozen(
     config: &RuntimeConfig,
     directory: &Path,
     class: FundingClass,
-) -> Result<(Value, Result<crate::analytics::payload::Fe01Freeze, String>), String> {
+) -> Result<
+    (
+        Fe01Report,
+        Result<crate::analytics::payload::Fe01Freeze, String>,
+    ),
+    String,
+> {
     first_class(class.as_str())?;
     if config.fe_mode != "full" {
         return Err("FE_REPLAY_REQUIRES_FULL_MODE".into());
@@ -173,9 +243,9 @@ pub fn replay_frozen(
                 return Err("FE_REPLAY_CALL_LIMIT".into());
             }
             if let Some(frames) = &saved {
-                let (entry, integrity) = frames.get(reads.len()).ok_or("FE_REPLAY_READ_MISSING")?;
-                let decoded = decode_saved(entry.clone(), keys, floor)?;
-                total += integrity["bytes"].as_u64().unwrap_or(0);
+                let (read, integrity) = frames.get(reads.len()).ok_or("FE_REPLAY_READ_MISSING")?;
+                let decoded = decode_saved(read, keys, floor)?;
+                total += integrity.bytes;
                 reads.push(integrity.clone());
                 return Ok(decoded);
             }
@@ -200,9 +270,13 @@ pub fn replay_frozen(
             if total > limit {
                 return Err("FE_REPLAY_BYTE_LIMIT".into());
             }
-            let entry = serde_json::from_slice(&bytes).map_err(|_| "FE_REPLAY_JSON")?;
-            let decoded = decode_saved(entry, keys, floor)?;
-            reads.push(json!({"file":name,"sha256":fe::sha(&bytes),"bytes":bytes.len()}));
+            let entry: Value = serde_json::from_slice(&bytes).map_err(|_| "FE_REPLAY_JSON")?;
+            let decoded = decode_saved(&historical_read(&entry)?, keys, floor)?;
+            reads.push(Fe01ReplayRead {
+                origin: name,
+                sha256: fe::sha(&bytes),
+                bytes: bytes.len() as u64,
+            });
             Ok(decoded)
         },
         class,
@@ -235,7 +309,14 @@ pub fn replay_frozen(
             "SHA256_OF_CONSUMED_BYTES_NOT_EXTERNAL_ATTESTATION",
         ),
     };
-    report["replay"] = json!({"mode":"OFFLINE_SAVED_OBSERVATIONS","source":source,"reads":reads,"total_bytes":total,"freshness":"HISTORICAL_NOT_CURRENT","integrity":integrity});
+    report.replay = Some(Fe01Replay {
+        mode: "OFFLINE_SAVED_OBSERVATIONS".into(),
+        source: source.into(),
+        reads,
+        total_bytes: total,
+        freshness: "HISTORICAL_NOT_CURRENT".into(),
+        integrity: integrity.into(),
+    });
     Ok((report, freeze))
 }
 
@@ -243,35 +324,50 @@ pub fn replay_frozen(
 mod tests {
     use super::*;
     use base64::Engine;
+    use serde_json::json;
+    /// A saved read is bound to its exact request (keys, floor, base64, finalized) and to a
+    /// decodable answer, from a historical frame as from a typed one.
     #[test]
     fn saved_request_binding_rejects_wrong_target_context_encoding_and_errors() {
         let k = Pubkey::new_unique();
         let entry = json!({"method":"getMultipleAccounts","params":[[k.to_string()],{"encoding":"base64","commitment":"finalized","minContextSlot":5}],"result":{"context":{"slot":6},"value":[{"owner":k.to_string(),"lamports":1,"executable":false,"data":[base64::engine::general_purpose::STANDARD.encode([1,2,3]),"base64"]}]}});
-        let (slot, state) = decode_saved(entry.clone(), &[k], 5).unwrap();
+        let read = historical_read(&entry).unwrap();
+        let (slot, state) = decode_saved(&read, &[k], 5).unwrap();
         assert_eq!(slot, 6);
         assert_eq!(state.0[&k].data, [1, 2, 3]);
-        assert!(decode_saved(entry.clone(), &[Pubkey::new_unique()], 5).is_err());
-        assert!(decode_saved(entry.clone(), &[k], 4).is_err());
+        assert!(decode_saved(&read, &[Pubkey::new_unique()], 5).is_err());
+        assert!(decode_saved(&read, &[k], 4).is_err());
         for field in ["encoding", "commitment"] {
             let mut bad = entry.clone();
             bad["params"][1][field] = json!("wrong");
-            assert!(decode_saved(bad, &[k], 5).is_err());
+            assert!(historical_read(&bad).is_err());
         }
-        let mut bad = entry;
+        let mut bad = entry.clone();
         bad["error"] = json!("rpc failure");
-        assert!(decode_saved(bad, &[k], 5).is_err());
+        assert!(decode_saved(&historical_read(&bad).unwrap(), &[k], 5).is_err());
+        let mut bad = entry;
+        bad["result"] = json!({"context":{"slot":6}});
+        let undecodable = historical_read(&bad).unwrap();
+        assert!(matches!(
+            undecodable.outcome,
+            Fe01ReadOutcome::Failed { .. }
+        ));
+        assert!(decode_saved(&undecodable, &[k], 5).is_err());
     }
     #[test]
     fn one_class_scope_never_promotes_observation_or_unknown_funding() {
         for name in ["ZERO_PREFUND_SAME_TX", "NO_SWAP_INVENTORY"] {
             let class = first_class(name).unwrap();
-            let mut v = json!({"source_parity":"UNKNOWN","targets":[{"funding":"UNKNOWN"}]});
+            let mut v = fe::incomplete("x".into());
+            v.pilot_ready = true;
             bind_scope(&mut v, class).unwrap();
-            assert_eq!(v["qualification_scope"]["funding_class"], name);
-            assert_eq!(v["qualification_scope"]["funding"], "UNKNOWN");
-            assert_eq!(v["fe01"], "INCOMPLETE");
-            assert_eq!(v["pilot_ready"], false);
-            assert_eq!(v["targets"][0]["funding"], "UNKNOWN");
+            let scope = v.scope.unwrap();
+            assert_eq!(scope.funding_class, name);
+            assert_eq!(scope.funding, "UNKNOWN");
+            assert!(!scope.selection_is_execution_qualification);
+            assert_eq!(scope.gaps.len(), 6);
+            assert_eq!(v.fe01, "INCOMPLETE");
+            assert!(!v.pilot_ready && !v.live_enabled && !v.submission_enabled);
         }
         for name in [
             "UNKNOWN",
@@ -290,17 +386,60 @@ mod tests {
 mod archive_tests {
     use super::*;
     use crate::analytics::journal::Writer;
-    fn archive(events: &[(u16, Value)], seal: Option<bool>) -> std::path::PathBuf {
+    use crate::analytics::payload::Fe01Account;
+    #[derive(Clone)]
+    enum Event {
+        Config,
+        /// A read whose one account carries `data_len` bytes.
+        Read(usize),
+        Result(&'static str, u64),
+        Foreign,
+    }
+    fn archive(events: &[Event], seal: Option<bool>) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("p0-fe-archive-{}", Pubkey::new_unique()));
         fs::create_dir(&dir).unwrap();
         let mut w = Writer::create(&dir.join(FE01_JOURNAL)).unwrap();
-        for (k, v) in events {
-            if crate::analytics::payload::LEGACY_WRITABLE.contains(k) {
-                w.append_value(*k, v).unwrap();
-            } else {
+        let effective = darkbot_solana::runtime_config::Resolved::parse(&[], &|_| None)
+            .unwrap()
+            .effective();
+        for e in events {
+            match e {
+                Event::Config => w.append_typed(
+                    Default::default(),
+                    &crate::analytics::payload::Fe01Config {
+                        requested: effective.clone(),
+                        effective: effective.clone(),
+                        qualification_sha256: None,
+                        execution: "READ_ONLY_NO_SIGNER".into(),
+                    },
+                ),
+                Event::Read(n) => w.append_typed(
+                    Default::default(),
+                    &Fe01Read {
+                        keys: vec![Pubkey::default()],
+                        min_context_slot: 0,
+                        outcome: Fe01ReadOutcome::Accounts {
+                            context_slot: 1,
+                            accounts: vec![Some(Fe01Account {
+                                owner: Pubkey::default(),
+                                lamports: 1,
+                                executable: false,
+                                data: vec![0; *n],
+                            })],
+                        },
+                    },
+                ),
+                Event::Result(status, reads) => {
+                    let mut report = fe::incomplete("x".into());
+                    (report.status, report.logical_reads) = (status.to_string(), Some(*reads));
+                    w.append_typed(Default::default(), &report)
+                }
                 // A foreign frame as found on disk; the writer itself refuses foreign kinds.
-                w.test_append_historical(*k, v).unwrap();
+                Event::Foreign => {
+                    w.test_append_historical(kind::OWNER_RECORD, &serde_json::json!({}))
+                }
             }
+            .unwrap();
         }
         if let Some(complete) = seal {
             w.seal(complete).unwrap();
@@ -309,23 +448,20 @@ mod archive_tests {
         }
         dir
     }
-    fn events() -> Vec<(u16, Value)> {
+    fn events() -> Vec<Event> {
         vec![
-            (kind::FE01_CONFIG, json!({})),
-            (kind::FE01_READ, json!({"result":{}})),
-            (
-                kind::FE01_RESULT,
-                json!({"status":"OBSERVED","logical_reads":1}),
-            ),
+            Event::Config,
+            Event::Read(3),
+            Event::Result(fe::OBSERVED, 1),
         ]
     }
     #[test]
     fn fe_replay_requires_complete_ordered_archive_and_exact_read_count() {
         let good = events();
         let mut wrong_count = good.clone();
-        wrong_count[2].1["logical_reads"] = json!(2);
+        wrong_count[2] = Event::Result(fe::OBSERVED, 2);
         let mut failed = good.clone();
-        failed[2].1["status"] = json!("INCOMPLETE");
+        failed[2] = Event::Result(fe::INCOMPLETE, 1);
         let cases = vec![
             (good.clone(), None, "FE_REPLAY_INCOMPLETE"),
             (good.clone(), Some(false), "FE_REPLAY_INCOMPLETE"),
@@ -354,11 +490,7 @@ mod archive_tests {
             ),
             (wrong_count, Some(true), "FE_REPLAY_READ_COUNT"),
             (failed, Some(true), "FE_REPLAY_INCOMPLETE"),
-            (
-                vec![(kind::OWNER_RECORD, json!({}))],
-                Some(true),
-                "FE_REPLAY_JOURNAL_KIND",
-            ),
+            (vec![Event::Foreign], Some(true), "FE_REPLAY_JOURNAL_KIND"),
         ];
         for (events, seal, error) in cases {
             let dir = archive(&events, seal);
@@ -372,7 +504,7 @@ mod archive_tests {
     #[test]
     fn fe_replay_bounds_all_frames_and_reads_and_rejects_corruption() {
         let mut e = events();
-        e[0].1 = json!({"padding":"x".repeat(8192)});
+        e[1] = Event::Read(8192);
         let dir = archive(&e, Some(true));
         assert_eq!(
             saved_reads(&dir, 4096, 10).unwrap_err(),

@@ -1941,10 +1941,11 @@ fn typed_market_frames_render_offline_to_their_legacy_rows() {
     // Schema-1 market rows are refused (no legacy rollback of a typed kind).
     let mut w = crate::analytics::journal::Writer::create(&dir.join("legacy.p0j")).unwrap();
     assert!(w
-        .append_legacy(
+        .append(
             crate::analytics::journal::kind::MARKET_COVERAGE,
+            1,
             Default::default(),
-            &json!({"event": "GAP"})
+            b"x"
         )
         .is_err());
     // One finish only; an existing journal is never overwritten.

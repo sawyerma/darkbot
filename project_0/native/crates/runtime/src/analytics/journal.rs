@@ -1,8 +1,8 @@
 //! PERSIST-01: one binary append-only contract for runtime and durable financial events.
 //! LE integers, bounded frames, CRC32 + chained SHA256.
 //! JFI-01: frames of schema ≥ 2 carry typed native payloads (`payload::Payload`). Schema 1, the
-//! generic value tree, is historical: readable via `Frame::legacy_value` and still written only
-//! by kinds that have not been migrated yet (`append_legacy`).
+//! generic value tree, is historical: readable via `Frame::legacy_value`, never written (JFI-04
+//! migrated the last kinds; the value encoder exists only for test fixtures of old journals).
 use super::payload::{self, Payload};
 use serde_json::{Map, Number, Value};
 use std::{
@@ -105,7 +105,8 @@ pub mod kind {
     /// FE-01 one-class offline freeze (`payload::Fe01Freeze`), its own journal `fe01_freeze.p0j`.
     pub const FE01_FREEZE: u16 = 703;
     /// C0 account census rows (`c0_census.py` via `p0-journal import`): program accounts and
-    /// group indexer accounts of one context slot.
+    /// group indexer accounts of one context slot, typed (`payload::C0CensusImportAccount`,
+    /// `C0CensusImportGroupAccount`); historical schema-1 value frames stay readable.
     pub const C0_CENSUS_ACCOUNT: u16 = 900;
     pub const C0_CENSUS_GROUP_ACCOUNT: u16 = 901;
     /// C0 census (Shadow READY): one typed row per debtor of the group, then one result frame
@@ -340,9 +341,11 @@ pub struct Durable {
     pub hash: [u8; 32],
 }
 
-/// Numbers are tagged LE i128/u128, or exact decimal text for nonintegral / wider
-/// external JSON numbers. No f64 coercion, including values outside IEEE precision.
-pub fn encode(value: &Value) -> io::Result<Vec<u8>> {
+/// The historical schema-1 value encoder, kept for test fixtures of journals written before
+/// JFI-04 (production writes typed frames only). Numbers are tagged LE i128/u128, or exact
+/// decimal text for nonintegral / wider external JSON numbers; no f64 coercion.
+#[cfg(test)]
+pub(crate) fn encode(value: &Value) -> io::Result<Vec<u8>> {
     fn sized(out: &mut Vec<u8>, bytes: &[u8]) -> io::Result<()> {
         let n = u32::try_from(bytes.len()).map_err(|_| bad("PAYLOAD_LIMIT"))?;
         out.extend(n.to_le_bytes());
@@ -588,16 +591,6 @@ impl Writer {
         let payload = payload::encode(value)?;
         self.append(P::KIND, P::SCHEMA, p, &payload)
     }
-    /// Historical value-tree frame (schema 1) for kinds not yet migrated to a payload type.
-    pub fn append_legacy(
-        &mut self,
-        kind: u16,
-        p: Provenance,
-        value: &Value,
-    ) -> io::Result<Appended> {
-        let payload = encode(value)?;
-        self.append(kind, 1, p, &payload)
-    }
     /// Raw frame: `payload` comes from `payload::encode` (schema ≥ 2) or the legacy value
     /// encoder (schema 1). Readers validate every frame against its registered type.
     pub(crate) fn append(
@@ -610,6 +603,11 @@ impl Writer {
         if kind == 0 || schema == 0 {
             return Err(bad("EVENT_SCHEMA_UNSUPPORTED"));
         }
+        // PERSIST-05: the manifest seals the chain; only `seal` writes it (a hand-made one would
+        // end the journal for readers while this writer goes on).
+        if kind == MANIFEST {
+            return Err(bad("MANIFEST_ONLY_BY_SEAL"));
+        }
         payload::check_write(kind, schema)?;
         self.write_frame(kind, schema, p, payload)
     }
@@ -621,8 +619,18 @@ impl Writer {
         kind: u16,
         value: &Value,
     ) -> io::Result<Appended> {
+        self.test_append_historical_at(kind, Provenance::default(), value)
+    }
+    /// [`Self::test_append_historical`] with the frame's provenance.
+    #[cfg(test)]
+    pub(crate) fn test_append_historical_at(
+        &mut self,
+        kind: u16,
+        p: Provenance,
+        value: &Value,
+    ) -> io::Result<Appended> {
         let payload = encode(value)?;
-        self.write_frame(kind, 1, Provenance::default(), &payload)
+        self.write_frame(kind, 1, p, &payload)
     }
     /// A frame bypassing write admission: only for tests proving that readers reject what the
     /// writer would refuse.
@@ -746,16 +754,6 @@ impl Writer {
         self.last = digest;
         Ok(f)
     }
-    pub fn append_value(&mut self, kind: u16, value: &Value) -> io::Result<Appended> {
-        self.append_legacy(
-            kind,
-            Provenance {
-                source_seq: self.next,
-                ..Default::default()
-            },
-            value,
-        )
-    }
     pub fn sync(&mut self) -> io::Result<Durable> {
         if self.poisoned {
             return Err(bad("JOURNAL_BLOCKED"));
@@ -780,7 +778,13 @@ impl Writer {
             source_seq: self.next,
             ..Default::default()
         };
-        self.append_typed(p, &manifest)?;
+        let encoded = payload::encode(&manifest)?;
+        self.write_frame(
+            MANIFEST,
+            <payload::Manifest as Payload>::SCHEMA,
+            p,
+            &encoded,
+        )?;
         let durable = self.sync()?;
         self.sealed = true;
         Ok(durable)
@@ -1076,34 +1080,6 @@ pub fn read_at(file: &mut File, offset: u64) -> io::Result<Frame> {
     read_frame(file, offset)?
         .map(|x| x.0)
         .ok_or_else(|| bad("FRAME_MISSING"))
-}
-pub fn values(path: &Path) -> io::Result<Vec<Value>> {
-    let mut r = Reader::open(path)?;
-    let mut values = Vec::new();
-    while let Some(f) = r.next_frame()? {
-        if f.kind != MANIFEST {
-            values.push(f.legacy_value()?);
-        }
-    }
-    Ok(values)
-}
-pub fn write_value(path: &Path, kind: u16, value: &Value) -> io::Result<()> {
-    let mut w = Writer::create(&binary_path(path))?;
-    w.append_value(kind, value)?;
-    w.seal(true)?;
-    Ok(())
-}
-pub fn read_value(path: &Path) -> io::Result<Value> {
-    let binary = binary_path(path);
-    if binary.exists() {
-        let mut rows = values(&binary)?;
-        if rows.len() != 1 {
-            return Err(bad("VALUE_COUNT"));
-        }
-        Ok(rows.remove(0))
-    } else {
-        serde_json::from_reader(File::open(path)?).map_err(io::Error::other)
-    }
 }
 /// One typed value as a sealed single-frame journal. Immutable: an existing file must hold an
 /// equal value (accepted) or the write is a conflict; a new file appears atomically (built
