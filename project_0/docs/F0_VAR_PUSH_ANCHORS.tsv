@@ -3,7 +3,7 @@ frontend/src/app/RouteTopics.tsx	6	gateway.connect(); // idempotent; BLOCKED ble
 frontend/src/core/realtime/TopicSubscriptions.ts	49	"if (info.status !== ""OPEN"") this.onConnectionDown();"
 frontend/src/core/realtime/TopicSubscriptions.ts	190	private onConnectionDown(): void {
 frontend/src/core/realtime/index.ts	5	// aufgebaut; F3 ruft gateway.connect() in app/providers.tsx auf, wenn das Gateway existiert.
-frontend/src/features/overview/api/overviewAdapter.ts	114	topics.onState(TopicId.OVERVIEW_AGGREGATES, (bytes: Uint8Array, meta: StateMeta) => {
+frontend/src/features/overview/api/overviewAdapter.ts	123	topics.onState(TopicId.OVERVIEW_AGGREGATES, (bytes: Uint8Array, meta: StateMeta) => {
 frontend/src/features/project0/api/project0Adapter.ts	58	topics.onState(TopicId.PROJECT0_STATUS, (bytes: Uint8Array, meta: StateMeta) => {
 frontend/src/features/project0/api/project0Adapter.ts	62	topics.onState(TopicId.PROJECT0_CAPTURE_STATE, (bytes: Uint8Array, meta: StateMeta) => {
 project_0/native/crates/reporter/src/bin/p0_market_capture_reported.rs	3	use darkbot_runner::market::observer::{run_from_env, run_from_env_with};
@@ -21,7 +21,7 @@ project_0/native/crates/reporter/tests/socket.rs	201	tap.publish_market(MarketSn
 project_0/native/crates/reporter/tests/socket.rs	377	tap.publish_market(MarketSnapshot::default());
 project_0/native/crates/reporter/tests/socket.rs	387	tap.publish_market(MarketSnapshot::default());
 project_0/native/crates/runtime/src/analytics/econ_a2_tests.rs	45	core.on_ingress_event(ev, 0, &mut sink).unwrap();
-project_0/native/crates/runtime/src/bin/p0ctl.rs	299	if control::stop_requested() && !forwarded {
+project_0/native/crates/runtime/src/bin/p0ctl.rs	313	if control::stop_requested() && !forwarded {
 project_0/native/crates/runtime/src/market/capture.rs	213	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
 project_0/native/crates/runtime/src/market/capture.rs	220	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
 project_0/native/crates/runtime/src/market/capture.rs	314	run_from_env_with(None, |_, _| Ok(()))

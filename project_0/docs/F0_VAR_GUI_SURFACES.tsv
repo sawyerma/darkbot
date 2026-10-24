@@ -38,7 +38,7 @@ TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	19	AcquireOption
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	24	Entry
 TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	8	CandidateProfile
 TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	9	Receipt
-TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	10	CandidateControlState
+TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	11	CandidateControlState
 TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	5	ProcessState
 TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	6	CaptureProcess
 TS_DECLARATION	frontend/src/core/realtime/captureControl.ts	7	CaptureAction
@@ -52,8 +52,11 @@ TS_DECLARATION	frontend/src/core/realtime/protocol.ts	9	RealtimeStatus
 TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	5	ProcessState
 TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	6	ReadinessProcess
 TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	7	ReadinessAction
-TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	8	Receipt
-TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	9	ControlState
+TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	9	PushedJob
+TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	10	JobSource
+TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	11	Receipt
+TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	13	Awaiting
+TS_DECLARATION	frontend/src/core/realtime/readinessControl.ts	14	ControlState
 TS_DECLARATION	frontend/src/core/realtime/topicTable.ts	7	TopicBinding
 TS_DECLARATION	frontend/src/core/realtime/topicTable.ts	55	DescriptorCheck
 CONTROL_OR_TEXT	frontend/src/features/overview/OverviewControls.tsx	55	Abbrechen
@@ -62,7 +65,7 @@ CONTROL_OR_TEXT	frontend/src/features/overview/OverviewControls.tsx	87	void refr
 CONTROL_OR_TEXT	frontend/src/features/overview/OverviewControls.tsx	99	Stop All · P0 + BSC readiness
 CONTROL_OR_TEXT	frontend/src/features/overview/OverviewControls.tsx	99	Abbrechen
 CONTROL_OR_TEXT	frontend/src/features/overview/OverviewControls.tsx	99	void stop()}>Aufzeichnungen stoppen
-DISPLAY	frontend/src/features/overview/OverviewPage.tsx	95	Projects
+DISPLAY	frontend/src/features/overview/OverviewPage.tsx	96	Projects
 TS_DECLARATION	frontend/src/features/overview/api/overviewAdapter.ts	7	FinanceSummary
 TS_DECLARATION	frontend/src/features/overview/api/overviewAdapter.ts	8	OverviewAggregates
 TS_DECLARATION	frontend/src/features/overview/api/overviewAdapter.ts	9	ProjectSummary

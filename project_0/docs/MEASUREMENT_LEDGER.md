@@ -5973,3 +5973,12 @@ Commit `c9decd7f`.
 - Gate on `c9decd7f` (exit 0 each): 805/0/10, 803/0/10, runner 368/0/3 ×2, release, Python OK; GitHub Actions `project0-gate` 5/5 PASS (`contract-and-ui` red from BSC frontend TS errors, outside Project_0). 9 mutations fail-before.
 - Pins `mrgn-0.1.12-rc2` (`9fcb729a`); 3912 B banks decode, 1864 B fail closed; RC2 premium semantics in Health/sizing/economics; deployment unqualified (reference bound to its 0.1.11 source) → runtime halted.
 - NOT_RUN: bank resize per bank, FE-01 parity on the new deployment (P1B-03 steps 5–6), Mainnet, LIVE.
+
+## 2026-10-24 — FE-04 attempt archive, cumulative FE-07 accounting, read-only treasury view (LOCAL_PASS offline)
+
+Commits `286f9cc8`, `366271b5`. Evidence `docs/evidence/FE04_ACCOUNTING_20261024/README.md`.
+
+- Gates (exit 0 each): `286f9cc8` 822/0/10, 820/0/10, runner 377/0/3 ×2; `366271b5` 823/0/10, 821/0/10, runner 378/0/3 ×2; release, Python OK. 6 + 2 mutations fail-before.
+- One journal = one attempt; a finished attempt (settled, exit settled, no position) is sealed into `attempts/<wallet>/<approval_id>.p0j`; approval ids single-use across the archive; owner start replays archived bookings into the Safety day; corrupt/unsealed archive files fail closed.
+- `execution::accounting::Ledger`: cumulative realized net over all own attempts and exits, fees, open-inventory mark, FE-07 verdict (`FIRST_REALIZED_PROFIT_EVIDENCED` only all-settled, no position, positive); `withdrawable` = min(realized profit in the asset, balance − holds − reserve), UNKNOWN for cross-asset profit or unknown balance. `p0ctl fe04 accounting|archive`, `approval show --journal-dir`.
+- NOT_RUN: real attempts/exits/chain finality (FE-06/07), production admission caller (FE-06), treasury transfer (no code, separate approval), Mainnet, LIVE.
