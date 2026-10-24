@@ -20,6 +20,11 @@ use crate::topics;
 #[derive(Debug)]
 pub enum FeedMessage {
     State(StateUpdate),
+    /// A state the engine could not send within the frame limit (`StateTooLarge`); empty payload.
+    StateTooLarge {
+        update: StateUpdate,
+        bytes: u64,
+    },
     /// Liveness ohne Zustandsänderung.
     Heartbeat,
 }
@@ -147,6 +152,59 @@ fn validate_feed_state(project: ProjectId, u: &StateUpdate) -> Result<(), FeedEr
     Ok(())
 }
 
+/// One validated engine state into the hub (`declared`: size of a state the engine reported as
+/// too large instead of sending it). A stored state or FRAME_TOO_LARGE marker shows a live,
+/// connected source (`Ok(true)`); an older or duplicate one changes nothing (`Ok(false)`); an
+/// identity or topic violation detaches the source (`Err`).
+fn deliver(
+    hub: &StateHub,
+    registry: &SourceRegistry,
+    project: ProjectId,
+    u: StateUpdate,
+    declared: Option<u64>,
+    at: Instant,
+) -> Result<bool, ()> {
+    let sid = u.source_id.clone();
+    if let Err(e) = validate_feed_state(project, &u) {
+        warn!(?project, error = %e, "invalid engine feed identity or topic; detaching");
+        return Err(());
+    }
+    let topic = u.topic;
+    let published = match declared {
+        Some(bytes) => hub.publish_too_large(u, bytes),
+        None => hub.publish(u),
+    };
+    match published {
+        Ok(PublishOutcome::Applied | PublishOutcome::RefreshedTooLarge) => {}
+        Err(e @ PublishError::TooLarge { .. }) => warn!(
+            ?project,
+            ?topic,
+            error = %e,
+            "FRAME_TOO_LARGE for this topic until its next valid state; source stays attached"
+        ),
+        Ok(outcome) => {
+            tracing::trace!(
+                ?project,
+                ?outcome,
+                "ignored old state; liveness not promoted"
+            );
+            return Ok(false);
+        }
+        Err(e) => {
+            warn!(?project, error = %e, "state rejected; detaching");
+            return Err(());
+        }
+    }
+    registry.update(project, |s| {
+        let changed = s.state != SourceState::Connected || s.source_id.as_deref() != Some(&*sid);
+        s.state = SourceState::Connected;
+        s.source_id = Some(sid.clone());
+        s.last_message_at = Some(at);
+        changed
+    });
+    Ok(true)
+}
+
 /// Überwacht einen Feed: Attach, Liveness, STALE/DETACHED-Overlay im Hub, Reattach mit Backoff.
 pub fn spawn_supervisor(
     feed: Arc<dyn EngineFeed>,
@@ -208,39 +266,21 @@ pub fn spawn_supervisor(
 
             loop {
                 match tokio::time::timeout(stale_after, rx.recv()).await {
-                    Ok(Some(FeedMessage::State(u))) => {
+                    Ok(Some(m @ (FeedMessage::State(_) | FeedMessage::StateTooLarge { .. }))) => {
                         last_msg = Instant::now();
-                        let sid = u.source_id.clone();
-                        if let Err(e) = validate_feed_state(project, &u) {
-                            warn!(?project, error = %e, "invalid engine feed identity or topic; detaching");
-                            break;
-                        }
-                        match hub.publish(u) {
-                            Ok(PublishOutcome::Applied) => {
-                                registry.update(project, |s| {
-                                    let changed = s.state != SourceState::Connected
-                                        || s.source_id.as_deref() != Some(&*sid);
-                                    s.state = SourceState::Connected;
-                                    s.source_id = Some(sid.clone());
-                                    s.last_message_at = Some(last_msg);
-                                    changed
-                                });
-                                stale_marked = false;
+                        let delivered = match m {
+                            FeedMessage::StateTooLarge { update, bytes } => {
+                                deliver(&hub, &registry, project, update, Some(bytes), last_msg)
                             }
-                            Ok(outcome) => tracing::trace!(
-                                ?project,
-                                ?outcome,
-                                "ignored old state; liveness not promoted"
-                            ),
-                            Err(e @ PublishError::TooLarge { .. }) => warn!(
-                                ?project,
-                                error = %e,
-                                "state too large; FRAME_TOO_LARGE for its topic, source stays attached"
-                            ),
-                            Err(e) => {
-                                warn!(?project, error = %e, "state rejected; detaching");
-                                break;
+                            FeedMessage::State(u) => {
+                                deliver(&hub, &registry, project, u, None, last_msg)
                             }
+                            FeedMessage::Heartbeat => Ok(false),
+                        };
+                        match delivered {
+                            Ok(true) => stale_marked = false,
+                            Ok(false) => {}
+                            Err(()) => break,
                         }
                     }
                     Ok(Some(FeedMessage::Heartbeat)) => {
@@ -416,6 +456,97 @@ mod liveness_tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("timeout: {what}");
+    }
+
+    /// A real engine socket: the reporter declares one topic too large instead of sending it.
+    #[tokio::test]
+    async fn a_too_large_notice_marks_only_its_topic_and_the_next_state_restores_it() {
+        use crate::feeds::unix_socket::UnixSocketFeed;
+        use crate::proto::{engine_frame, EngineFrame, EngineHello, StateFull, StateTooLarge};
+        use prost::Message;
+        use tokio::io::AsyncWriteExt;
+        let dir = std::env::temp_dir().join(format!("gw-too-large-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("engine.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let (hub, registry) = (Arc::new(StateHub::new(1024)), SourceRegistry::new());
+        let feed = UnixSocketFeed::new(ProjectId::Bsc, "bsc", sock.clone(), 1024);
+        let slow = GatewayConfig {
+            source_stale_after_ms: 10_000,
+            source_detach_after_ms: 20_000,
+            ..cfg()
+        };
+        let _sup = spawn_supervisor(feed, hub.clone(), registry.clone(), &slow);
+        let (mut engine, _) = listener.accept().await.unwrap();
+        let frame = |msg| {
+            let b = EngineFrame { msg: Some(msg) }.encode_to_vec();
+            [(b.len() as u32).to_be_bytes().to_vec(), b].concat()
+        };
+        let full = |topic: TopicId, seq| {
+            engine_frame::Msg::State(StateFull {
+                topic: topic as i32,
+                generation: 7,
+                seq,
+                source_timestamp_unix_ns: 1,
+                quality: StateQuality::Ok as i32,
+                source_id: "TEST_ONLY".into(),
+                payload: Bytes::from_static(&[8u8; 4]),
+            })
+        };
+        let too_large = |seq| {
+            engine_frame::Msg::StateTooLarge(StateTooLarge {
+                topic: TopicId::BscLaunchState as i32,
+                generation: 7,
+                seq,
+                source_timestamp_unix_ns: 1,
+                source_id: "TEST_ONLY".into(),
+                payload_bytes: 300_000,
+            })
+        };
+        let hello = engine_frame::Msg::Hello(EngineHello {
+            project: ProjectId::Bsc as i32,
+            schema_id: crate::SCHEMA_ID.into(),
+            source_id: "TEST_ONLY".into(),
+            generation: 7,
+            topics: vec![TopicId::BscStatus as i32, TopicId::BscLaunchState as i32],
+        });
+        for m in [hello, full(TopicId::BscStatus, 1), too_large(1)] {
+            engine.write_all(&frame(m)).await.unwrap();
+        }
+        let launch = || hub.current(TopicId::BscLaunchState);
+        until("marker", || {
+            launch().is_some_and(|s| s.too_large && s.seq == 1)
+        })
+        .await;
+        assert_eq!(launch().unwrap().quality, StateQuality::Unknown);
+        assert!(launch().unwrap().payload.is_empty());
+        assert_eq!(
+            hub.current(TopicId::BscStatus).unwrap().quality,
+            StateQuality::Ok
+        );
+        let status = registry.status(ProjectId::Bsc).unwrap();
+        assert_eq!(
+            (status.state, status.attach_count),
+            (SourceState::Connected, 1)
+        );
+        // Still too large at the next seq: identity follows, subscribers are not notified again.
+        let mut rx = hub.subscribe(TopicId::BscLaunchState).unwrap();
+        rx.borrow_and_update();
+        engine.write_all(&frame(too_large(2))).await.unwrap();
+        until("refreshed marker", || launch().is_some_and(|s| s.seq == 2)).await;
+        assert!(!rx.has_changed().unwrap());
+        engine
+            .write_all(&frame(full(TopicId::BscLaunchState, 3)))
+            .await
+            .unwrap();
+        until("restored", || {
+            launch().is_some_and(|s| !s.too_large && s.seq == 3)
+        })
+        .await;
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(registry.status(ProjectId::Bsc).unwrap().attach_count, 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

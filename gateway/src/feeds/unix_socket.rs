@@ -5,6 +5,7 @@ use crate::{
     topics, SCHEMA_ID,
 };
 use async_trait::async_trait;
+use bytes::Bytes;
 use prost::Message;
 use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{io::AsyncReadExt, net::UnixStream, sync::mpsc};
@@ -144,6 +145,45 @@ impl EngineFeed for UnixSocketFeed {
                             payload: s.payload,
                         };
                         if tx.send(FeedMessage::State(u)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(Some(EngineFrame {
+                        msg: Some(engine_frame::Msg::StateTooLarge(s)),
+                    })) => {
+                        // Same envelope rules as a StateFull; the payload was never sent.
+                        let topic = match TopicId::try_from(s.topic) {
+                            Ok(v) if allowed.contains(&v) => v,
+                            _ => {
+                                warn!(topic = s.topic, "engine state topic not announced in hello");
+                                break;
+                            }
+                        };
+                        if s.source_id != source.as_ref()
+                            || s.generation != generation
+                            || s.seq == 0
+                            || s.payload_bytes == 0
+                        {
+                            warn!(
+                                topic = s.topic,
+                                seq = s.seq,
+                                "engine too-large notice rejected: envelope mismatch"
+                            );
+                            break;
+                        }
+                        let update = StateUpdate {
+                            topic,
+                            generation,
+                            seq: s.seq,
+                            source_timestamp_unix_ns: s.source_timestamp_unix_ns,
+                            source_id: source.clone(),
+                            payload: Bytes::new(),
+                        };
+                        let m = FeedMessage::StateTooLarge {
+                            update,
+                            bytes: s.payload_bytes,
+                        };
+                        if tx.send(m).await.is_err() {
                             break;
                         }
                     }

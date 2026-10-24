@@ -772,3 +772,40 @@ fn the_reporter_refuses_a_socket_directory_another_user_could_write_or_redirect(
     }
     fs::remove_dir_all(base).unwrap();
 }
+#[test]
+fn an_oversized_topic_is_declared_too_large_and_the_next_topic_still_arrives() {
+    use super::wire::bsc::{BscLaunchState, BscStatus};
+    use std::io::Read;
+    let (mut reporter, mut gateway) = std::os::unix::net::UnixStream::pair().unwrap();
+    let big = BscLaunchState {
+        reason: "x".repeat(300_000),
+        ..Default::default()
+    };
+    let small = BscStatus {
+        source_commit: "fixture-source".into(),
+        ..Default::default()
+    };
+    publisher::state(&mut reporter, TopicId::BscLaunchState, 9, 4, &big).unwrap();
+    publisher::state(&mut reporter, TopicId::BscStatus, 9, 4, &small).unwrap();
+    let mut frame = || {
+        let mut n = [0u8; 4];
+        gateway.read_exact(&mut n).unwrap();
+        let mut b = vec![0; u32::from_be_bytes(n) as usize];
+        gateway.read_exact(&mut b).unwrap();
+        assert!(b.len() <= 262_144 + 4096);
+        EngineFrame::decode(b.as_slice()).unwrap().msg.unwrap()
+    };
+    let engine_frame::Msg::StateTooLarge(t) = frame() else {
+        panic!("too-large notice expected")
+    };
+    assert_eq!(
+        (t.topic, t.generation, t.seq),
+        (TopicId::BscLaunchState as i32, 9, 4)
+    );
+    assert_eq!(t.payload_bytes as usize, big.encoded_len());
+    let engine_frame::Msg::State(s) = frame() else {
+        panic!("next topic expected")
+    };
+    assert_eq!((s.topic, s.seq), (TopicId::BscStatus as i32, 4));
+    assert_eq!(BscStatus::decode(s.payload.as_slice()).unwrap(), small);
+}

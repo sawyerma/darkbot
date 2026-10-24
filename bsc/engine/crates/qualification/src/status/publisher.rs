@@ -83,37 +83,55 @@ pub fn job(rundir: &Path, label: &str) -> JobStatus {
     }
     status
 }
+/// Shared engine-feed limit (engine_feed.proto): a STATE payload of at most the gateway's
+/// ServerLimits.max_state_full_bytes, a frame of at most that plus the envelope reserve.
+const MAX_STATE_BYTES: usize = 262_144;
+const ENVELOPE_RESERVE: usize = 4096;
 fn send(stream: &mut UnixStream, msg: engine_frame::Msg) -> io::Result<()> {
     let bytes = EngineFrame { msg: Some(msg) }.encode_to_vec();
-    if bytes.len() > 262144 {
+    if bytes.len() > MAX_STATE_BYTES + ENVELOPE_RESERVE {
         return Err(io::Error::other("bounded feed frame exceeded"));
     }
     stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
     stream.write_all(&bytes)
 }
-fn state<M: Message>(
+/// One topic state. A payload over MAX_STATE_BYTES is never cut: it is declared too large with
+/// the same identity, the gateway shows FRAME_TOO_LARGE for this topic only and the connection
+/// and the other topics carry on (no reconnect loop).
+pub(super) fn state<M: Message>(
     stream: &mut UnixStream,
     topic: TopicId,
     generation: u64,
     seq: u64,
     message: &M,
 ) -> io::Result<()> {
-    send(
-        stream,
+    let source_timestamp_unix_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .min(i64::MAX as u128) as i64;
+    let payload = message.encode_to_vec();
+    let msg = if payload.len() > MAX_STATE_BYTES {
+        engine_frame::Msg::StateTooLarge(StateTooLarge {
+            topic: topic as i32,
+            generation,
+            seq,
+            source_timestamp_unix_ns,
+            source_id: "bsc-status-reporter".into(),
+            payload_bytes: payload.len() as u64,
+        })
+    } else {
         engine_frame::Msg::State(StateFull {
             topic: topic as i32,
             generation,
             seq,
-            source_timestamp_unix_ns: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-                .min(i64::MAX as u128) as i64,
+            source_timestamp_unix_ns,
             quality: StateQuality::Ok as i32,
             source_id: "bsc-status-reporter".into(),
-            payload: message.encode_to_vec(),
-        }),
-    )
+            payload,
+        })
+    };
+    send(stream, msg)
 }
 /// The socket directory must be a real directory of this user that neither group nor others
 /// can write; otherwise another local user could plant or replace the reporter socket (E2-8).

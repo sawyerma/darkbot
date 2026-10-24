@@ -54,6 +54,9 @@ pub struct StateUpdate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublishOutcome {
     Applied,
+    /// A newer seq of a topic that is still too large: the marker takes the new identity
+    /// without notifying subscribers again (no repeated FRAME_TOO_LARGE per publish).
+    RefreshedTooLarge,
     IgnoredOlderGeneration,
     IgnoredOlderSeq,
     IgnoredDuplicate,
@@ -99,6 +102,20 @@ impl StateHub {
     /// Zustand ersetzt den Cache durch eine Markierung ohne Payload (Topic-Fehler statt alter
     /// Wert), die Quelle bleibt verbunden; Rückgabe `TooLarge`.
     pub fn publish(&self, u: StateUpdate) -> Result<PublishOutcome, PublishError> {
+        self.store(u, None)
+    }
+
+    /// Engine-declared oversized state (`StateTooLarge`): exactly the rule above for a payload
+    /// of `bytes` that was never sent; one implementation for every engine.
+    pub fn publish_too_large(
+        &self,
+        u: StateUpdate,
+        bytes: u64,
+    ) -> Result<PublishOutcome, PublishError> {
+        self.store(u, Some(bytes))
+    }
+
+    fn store(&self, u: StateUpdate, declared: Option<u64>) -> Result<PublishOutcome, PublishError> {
         let spec = topics::spec(u.topic).ok_or(PublishError::UnknownTopic)?;
         if !spec.is_state() {
             return Err(PublishError::NotState(u.topic));
@@ -106,7 +123,10 @@ impl StateHub {
         if !spec.available() {
             return Err(PublishError::Unavailable(u.topic));
         }
-        let too_large = u.payload.len() > self.max_state_bytes;
+        let too_large = declared.is_some() || u.payload.len() > self.max_state_bytes;
+        let bytes = declared.map_or(u.payload.len(), |b| {
+            usize::try_from(b).unwrap_or(usize::MAX)
+        });
         let tx = self.slots.get(&u.topic).ok_or(PublishError::UnknownTopic)?;
 
         let mut outcome = PublishOutcome::Applied;
@@ -127,6 +147,10 @@ impl StateHub {
                     }
                 }
             }
+            let refresh = too_large
+                && slot
+                    .as_ref()
+                    .is_some_and(|cur| cur.too_large && cur.generation == u.generation);
             *slot = Some(Arc::new(CachedState {
                 topic: u.topic,
                 generation: u.generation,
@@ -145,12 +169,15 @@ impl StateHub {
                 },
                 too_large,
             }));
-            true
+            if refresh {
+                outcome = PublishOutcome::RefreshedTooLarge;
+            }
+            !refresh
         });
-        // Only a stored marker is a topic error; an older or duplicate oversized update changed nothing.
+        // Only a newly stored marker is a topic error; an older, duplicate or refreshed one is not.
         if too_large && outcome == PublishOutcome::Applied {
             return Err(PublishError::TooLarge {
-                bytes: u.payload.len(),
+                bytes,
                 max: self.max_state_bytes,
             });
         }

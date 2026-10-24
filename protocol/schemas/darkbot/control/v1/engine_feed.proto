@@ -9,12 +9,27 @@ message EngineHello {
   uint64 generation = 4;
   repeated TopicId topics = 5;
 }
+// Ein STATE, dessen Payload ServerLimits.max_state_full_bytes (262144) übersteigt: die Engine
+// sendet statt des Payloads nur diese Meldung mit derselben Identität (source_id, generation,
+// seq > 0) – nie abgeschnitten. Das Gateway behandelt sie wie einen zu großen StateFull: nur
+// dieses Topic wird FRAME_TOO_LARGE, die Quelle und alle anderen Topics bleiben verbunden.
+message StateTooLarge {
+  TopicId topic = 1;
+  uint64 generation = 2;
+  uint64 seq = 3;
+  int64 source_timestamp_unix_ns = 4;
+  string source_id = 5;
+  // Größe des nicht gesendeten Payloads in Byte.
+  uint64 payload_bytes = 6;
+}
 // Engine StateFull must carry the Hello source_id and EXACT generation, seq > 0.
 // Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
+// Ein EngineFrame ist höchstens max_state_full_bytes + 4096 Byte Envelope-Reserve groß.
 message EngineFrame {
   oneof msg {
     EngineHello hello = 1;
     StateFull state = 2;
     Heartbeat heartbeat = 3;
+    StateTooLarge state_too_large = 4;
   }
 }

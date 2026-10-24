@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/control/v1/engine_feed.proto.
  */
 export const file_darkbot_control_v1_engine_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiRkYXJrYm90L2NvbnRyb2wvdjEvZW5naW5lX2ZlZWQucHJvdG8SEmRhcmtib3QuY29udHJvbC52MSKkAQoLRW5naW5lSGVsbG8SLgoHcHJvamVjdBgBIAEoDjIdLmRhcmtib3QuY29udHJvbC52MS5Qcm9qZWN0SWQSEQoJc2NoZW1hX2lkGAIgASgJEhEKCXNvdXJjZV9pZBgDIAEoCRISCgpnZW5lcmF0aW9uGAQgASgEEisKBnRvcGljcxgFIAMoDjIbLmRhcmtib3QuY29udHJvbC52MS5Ub3BpY0lkIqoBCgtFbmdpbmVGcmFtZRIwCgVoZWxsbxgBIAEoCzIfLmRhcmtib3QuY29udHJvbC52MS5FbmdpbmVIZWxsb0gAEi4KBXN0YXRlGAIgASgLMh0uZGFya2JvdC5jb250cm9sLnYxLlN0YXRlRnVsbEgAEjIKCWhlYXJ0YmVhdBgDIAEoCzIdLmRhcmtib3QuY29udHJvbC52MS5IZWFydGJlYXRIAEIFCgNtc2dCkwEKFmNvbS5kYXJrYm90LmNvbnRyb2wudjFCD0VuZ2luZUZlZWRQcm90b1ABogIDRENYqgISRGFya2JvdC5Db250cm9sLlYxygISRGFya2JvdFxDb250cm9sXFYx4gIeRGFya2JvdFxDb250cm9sXFYxXEdQQk1ldGFkYXRh6gIURGFya2JvdDo6Q29udHJvbDo6VjFiBnByb3RvMw", [file_darkbot_control_v1_stream, file_darkbot_control_v1_topics]);
+  fileDesc("CiRkYXJrYm90L2NvbnRyb2wvdjEvZW5naW5lX2ZlZWQucHJvdG8SEmRhcmtib3QuY29udHJvbC52MSKkAQoLRW5naW5lSGVsbG8SLgoHcHJvamVjdBgBIAEoDjIdLmRhcmtib3QuY29udHJvbC52MS5Qcm9qZWN0SWQSEQoJc2NoZW1hX2lkGAIgASgJEhEKCXNvdXJjZV9pZBgDIAEoCRISCgpnZW5lcmF0aW9uGAQgASgEEisKBnRvcGljcxgFIAMoDjIbLmRhcmtib3QuY29udHJvbC52MS5Ub3BpY0lkIqgBCg1TdGF0ZVRvb0xhcmdlEioKBXRvcGljGAEgASgOMhsuZGFya2JvdC5jb250cm9sLnYxLlRvcGljSWQSEgoKZ2VuZXJhdGlvbhgCIAEoBBILCgNzZXEYAyABKAQSIAoYc291cmNlX3RpbWVzdGFtcF91bml4X25zGAQgASgDEhEKCXNvdXJjZV9pZBgFIAEoCRIVCg1wYXlsb2FkX2J5dGVzGAYgASgEIugBCgtFbmdpbmVGcmFtZRIwCgVoZWxsbxgBIAEoCzIfLmRhcmtib3QuY29udHJvbC52MS5FbmdpbmVIZWxsb0gAEi4KBXN0YXRlGAIgASgLMh0uZGFya2JvdC5jb250cm9sLnYxLlN0YXRlRnVsbEgAEjIKCWhlYXJ0YmVhdBgDIAEoCzIdLmRhcmtib3QuY29udHJvbC52MS5IZWFydGJlYXRIABI8Cg9zdGF0ZV90b29fbGFyZ2UYBCABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU3RhdGVUb29MYXJnZUgAQgUKA21zZ0KTAQoWY29tLmRhcmtib3QuY29udHJvbC52MUIPRW5naW5lRmVlZFByb3RvUAGiAgNEQ1iqAhJEYXJrYm90LkNvbnRyb2wuVjHKAhJEYXJrYm90XENvbnRyb2xcVjHiAh5EYXJrYm90XENvbnRyb2xcVjFcR1BCTWV0YWRhdGHqAhREYXJrYm90OjpDb250cm9sOjpWMWIGcHJvdG8z", [file_darkbot_control_v1_stream, file_darkbot_control_v1_topics]);
 
 /**
  * @generated from message darkbot.control.v1.EngineHello
@@ -54,8 +54,58 @@ export const EngineHelloSchema: GenMessage<EngineHello> = /*@__PURE__*/
   messageDesc(file_darkbot_control_v1_engine_feed, 0);
 
 /**
+ * Ein STATE, dessen Payload ServerLimits.max_state_full_bytes (262144) übersteigt: die Engine
+ * sendet statt des Payloads nur diese Meldung mit derselben Identität (source_id, generation,
+ * seq > 0) – nie abgeschnitten. Das Gateway behandelt sie wie einen zu großen StateFull: nur
+ * dieses Topic wird FRAME_TOO_LARGE, die Quelle und alle anderen Topics bleiben verbunden.
+ *
+ * @generated from message darkbot.control.v1.StateTooLarge
+ */
+export type StateTooLarge = Message<"darkbot.control.v1.StateTooLarge"> & {
+  /**
+   * @generated from field: darkbot.control.v1.TopicId topic = 1;
+   */
+  topic: TopicId;
+
+  /**
+   * @generated from field: uint64 generation = 2;
+   */
+  generation: bigint;
+
+  /**
+   * @generated from field: uint64 seq = 3;
+   */
+  seq: bigint;
+
+  /**
+   * @generated from field: int64 source_timestamp_unix_ns = 4;
+   */
+  sourceTimestampUnixNs: bigint;
+
+  /**
+   * @generated from field: string source_id = 5;
+   */
+  sourceId: string;
+
+  /**
+   * Größe des nicht gesendeten Payloads in Byte.
+   *
+   * @generated from field: uint64 payload_bytes = 6;
+   */
+  payloadBytes: bigint;
+};
+
+/**
+ * Describes the message darkbot.control.v1.StateTooLarge.
+ * Use `create(StateTooLargeSchema)` to create a new message.
+ */
+export const StateTooLargeSchema: GenMessage<StateTooLarge> = /*@__PURE__*/
+  messageDesc(file_darkbot_control_v1_engine_feed, 1);
+
+/**
  * Engine StateFull must carry the Hello source_id and EXACT generation, seq > 0.
  * Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
+ * Ein EngineFrame ist höchstens max_state_full_bytes + 4096 Byte Envelope-Reserve groß.
  *
  * @generated from message darkbot.control.v1.EngineFrame
  */
@@ -81,6 +131,12 @@ export type EngineFrame = Message<"darkbot.control.v1.EngineFrame"> & {
      */
     value: Heartbeat;
     case: "heartbeat";
+  } | {
+    /**
+     * @generated from field: darkbot.control.v1.StateTooLarge state_too_large = 4;
+     */
+    value: StateTooLarge;
+    case: "stateTooLarge";
   } | { case: undefined; value?: undefined };
 };
 
@@ -89,4 +145,4 @@ export type EngineFrame = Message<"darkbot.control.v1.EngineFrame"> & {
  * Use `create(EngineFrameSchema)` to create a new message.
  */
 export const EngineFrameSchema: GenMessage<EngineFrame> = /*@__PURE__*/
-  messageDesc(file_darkbot_control_v1_engine_feed, 1);
+  messageDesc(file_darkbot_control_v1_engine_feed, 2);

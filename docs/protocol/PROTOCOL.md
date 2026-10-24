@@ -71,6 +71,7 @@
 - [darkbot/control/v1/engine_feed.proto](#darkbot_control_v1_engine_feed-proto)
     - [EngineFrame](#darkbot-control-v1-EngineFrame)
     - [EngineHello](#darkbot-control-v1-EngineHello)
+    - [StateTooLarge](#darkbot-control-v1-StateTooLarge)
 
 - [darkbot/control/v1/numeric.proto](#darkbot_control_v1_numeric-proto)
     - [SignedDecimal](#darkbot-control-v1-SignedDecimal)
@@ -1201,6 +1202,7 @@ maximal begrenzte Recovery, kein heißer Resubscribe-Loop.
 ### EngineFrame
 Engine StateFull must carry the Hello source_id and EXACT generation, seq &gt; 0.
 Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
+Ein EngineFrame ist höchstens max_state_full_bytes &#43; 4096 Byte Envelope-Reserve groß.
 
 
 | Field | Type | Label | Description |
@@ -1208,6 +1210,7 @@ Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
 | hello | [EngineHello](#darkbot-control-v1-EngineHello) |  |  |
 | state | [StateFull](#darkbot-control-v1-StateFull) |  |  |
 | heartbeat | [Heartbeat](#darkbot-control-v1-Heartbeat) |  |  |
+| state_too_large | [StateTooLarge](#darkbot-control-v1-StateTooLarge) |  |  |
 
 
 
@@ -1227,6 +1230,29 @@ Engine reports StateQuality OK; Gateway owns STALE/DETACHED overlays.
 | source_id | [string](#string) |  |  |
 | generation | [uint64](#uint64) |  |  |
 | topics | [TopicId](#darkbot-control-v1-TopicId) | repeated |  |
+
+
+
+
+
+
+<a name="darkbot-control-v1-StateTooLarge"></a>
+
+### StateTooLarge
+Ein STATE, dessen Payload ServerLimits.max_state_full_bytes (262144) übersteigt: die Engine
+sendet statt des Payloads nur diese Meldung mit derselben Identität (source_id, generation,
+seq &gt; 0) – nie abgeschnitten. Das Gateway behandelt sie wie einen zu großen StateFull: nur
+dieses Topic wird FRAME_TOO_LARGE, die Quelle und alle anderen Topics bleiben verbunden.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| topic | [TopicId](#darkbot-control-v1-TopicId) |  |  |
+| generation | [uint64](#uint64) |  |  |
+| seq | [uint64](#uint64) |  |  |
+| source_timestamp_unix_ns | [int64](#int64) |  |  |
+| source_id | [string](#string) |  |  |
+| payload_bytes | [uint64](#uint64) |  | Größe des nicht gesendeten Payloads in Byte. |
 
 
 
