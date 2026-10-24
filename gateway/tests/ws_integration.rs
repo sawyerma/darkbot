@@ -523,3 +523,104 @@ async fn a_client_that_stops_reading_is_evicted_and_never_blocks_publishing() {
     assert!(evicted.is_ok(), "stalled client still holds its slot");
     drop(ws);
 }
+#[tokio::test]
+async fn a_reconnecting_browser_gets_frame_too_large_never_the_older_value_then_the_recovery() {
+    let s = spawn(Limits::default()).await;
+    s.hub.publish(update(1, 1)).unwrap();
+    let mut big = update(1, 2);
+    big.payload = Bytes::from(vec![8u8; 2048]);
+    assert!(s.hub.publish(big).is_err());
+    let mut ws = connect(&s).await;
+    handshake(&mut ws).await;
+    subscribe(&mut ws).await;
+    match recv(&mut ws).await {
+        Some(server_message::Msg::Error(e)) => assert_eq!(
+            e.code,
+            darkbot_gateway::proto::ErrorCode::FrameTooLarge as i32
+        ),
+        other => panic!("expected FRAME_TOO_LARGE, never the older value: {other:?}"),
+    }
+    s.hub.publish(update(1, 3)).unwrap();
+    let f = state(&mut ws).await;
+    assert_eq!(
+        (f.seq, f.quality),
+        (3, darkbot_gateway::proto::StateQuality::Ok as i32)
+    );
+}
+#[tokio::test]
+async fn a_stalled_client_on_a_flapping_too_large_topic_is_evicted_while_a_reader_recovers() {
+    use std::sync::atomic::Ordering::Acquire;
+    let s = spawn(Limits {
+        heartbeat_interval_ms: 1500,
+        stale_after_missed_heartbeats: 2,
+        ..Limits::default()
+    })
+    .await;
+    let mut stalled = connect(&s).await;
+    handshake(&mut stalled).await;
+    subscribe(&mut stalled).await;
+    let mut reader = connect(&s).await;
+    handshake(&mut reader).await;
+    subscribe(&mut reader).await;
+    // Oversized and valid states alternate until the stalled client is gone.
+    let hub = s.hub.clone();
+    let state_ = s.state.clone();
+    let publisher = tokio::spawn(async move {
+        let mut seq = 0u64;
+        while state_.clients.load(Acquire) > 1 {
+            seq += 1;
+            let mut u = update(1, seq);
+            u.payload = Bytes::from(vec![
+                (seq % 251) as u8;
+                if seq % 2 == 0 { 2048 } else { 1000 }
+            ]);
+            let _ = hub.publish(u);
+            // Yield after a marker and after a valid state alike: on this single-threaded
+            // runtime a reader only ever sees the value published right before a yield.
+            if seq % 16 == 0 || seq % 16 == 9 {
+                tokio::task::yield_now().await;
+            }
+        }
+    });
+    let (mut errors, mut states) = (0, 0);
+    let evicted = tokio::time::timeout(Duration::from_secs(20), async {
+        while s.state.clients.load(Acquire) > 1 {
+            match recv(&mut reader).await {
+                Some(server_message::Msg::Error(e)) => {
+                    assert_eq!(
+                        e.code,
+                        darkbot_gateway::proto::ErrorCode::FrameTooLarge as i32
+                    );
+                    errors += 1;
+                }
+                Some(server_message::Msg::StateFull(f)) => {
+                    assert!(f.payload.len() <= 1024, "never an oversized frame");
+                    states += 1;
+                }
+                Some(server_message::Msg::Heartbeat(h)) => {
+                    send(
+                        &mut reader,
+                        client_message::Msg::Pong(darkbot_gateway::proto::Pong {
+                            heartbeat_id: h.heartbeat_id,
+                        }),
+                    )
+                    .await
+                }
+                other => panic!("reader must stay connected: {other:?}"),
+            }
+        }
+    })
+    .await;
+    publisher.abort();
+    assert!(evicted.is_ok(), "stalled client still holds its slot");
+    assert!(errors > 0 && states > 0, "errors {errors}, states {states}");
+    // The reader keeps its subscription: a new publisher generation still arrives.
+    s.hub.publish(update(2, 1)).unwrap();
+    loop {
+        let f = state(&mut reader).await;
+        if f.generation == 2 {
+            break;
+        }
+    }
+    drop(stalled);
+}

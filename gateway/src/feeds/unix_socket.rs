@@ -11,11 +11,36 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{io::AsyncReadExt, net::UnixStream, sync::mpsc};
 use tracing::warn;
 
+/// Envelope reserve of the engine-feed contract (engine_feed.proto): no frame exceeds
+/// max_state_full_bytes + ENVELOPE_RESERVE bytes.
+pub const ENVELOPE_RESERVE: usize = 4096;
 pub struct UnixSocketFeed {
     project: ProjectId,
     label: &'static str,
     path: PathBuf,
+    max_payload: usize,
     max_frame: usize,
+}
+/// Exact largest valid STATE frame of one source: a StateFull carrying `max_payload` bytes with
+/// every other field at its longest encoding (u64::MAX, i64::MIN, the highest topic id) and the
+/// source_id announced in its Hello. Any larger frame is a protocol violation of the engine.
+pub fn max_state_frame(max_payload: usize, source_id: &str) -> usize {
+    EngineFrame {
+        msg: Some(engine_frame::Msg::State(crate::proto::StateFull {
+            topic: topics::TOPICS
+                .iter()
+                .map(|t| t.id as i32)
+                .max()
+                .unwrap_or(0),
+            generation: u64::MAX,
+            seq: u64::MAX,
+            source_timestamp_unix_ns: i64::MIN,
+            quality: StateQuality::Ok as i32,
+            source_id: source_id.into(),
+            payload: Bytes::from(vec![0u8; max_payload]),
+        })),
+    }
+    .encoded_len()
 }
 impl UnixSocketFeed {
     pub fn new(project: ProjectId, label: &'static str, path: PathBuf, max: usize) -> Arc<Self> {
@@ -23,7 +48,8 @@ impl UnixSocketFeed {
             project,
             label,
             path,
-            max_frame: max.saturating_add(4096),
+            max_payload: max,
+            max_frame: max.saturating_add(ENVELOPE_RESERVE),
         })
     }
     fn validate(&self, h: &EngineHello) -> Result<HashSet<TopicId>, FeedError> {
@@ -111,9 +137,15 @@ impl EngineFeed for UnixSocketFeed {
             _ => return Err(FeedError::Mismatch("expected first hello".into())),
         };
         let allowed = self.validate(&hello)?;
+        // From the Hello on, the exact bound of this source replaces the contract maximum.
+        let max = max_state_frame(self.max_payload, &hello.source_id);
+        if max > self.max_frame {
+            return Err(FeedError::Mismatch(
+                "engine source_id too long for the engine frame limit".into(),
+            ));
+        }
         let source: Arc<str> = Arc::from(hello.source_id);
         let generation = hello.generation;
-        let max = self.max_frame;
         let (tx, rx) = mpsc::channel(16);
         tokio::spawn(async move {
             loop {

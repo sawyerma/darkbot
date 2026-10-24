@@ -549,6 +549,129 @@ mod liveness_tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The exact engine frame bound of one source: the largest valid frame passes, one byte more
+    /// is a protocol violation of the engine, an over-long source_id is refused at the Hello.
+    #[tokio::test]
+    async fn the_exact_engine_frame_bound_admits_the_largest_frame_and_refuses_one_byte_more() {
+        use crate::feeds::unix_socket::{max_state_frame, UnixSocketFeed, ENVELOPE_RESERVE};
+        use crate::proto::{engine_frame, EngineFrame, EngineHello, StateFull};
+        use prost::Message;
+        use tokio::io::AsyncWriteExt;
+        // The deployed BSC reporter at the real limit stays inside the contract maximum.
+        let bsc = max_state_frame(262_144, "bsc-status-reporter");
+        assert!(bsc <= 262_144 + ENVELOPE_RESERVE, "{bsc}");
+        let dir = std::env::temp_dir().join(format!("gw-frame-bound-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("engine.sock");
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let frame = |msg| {
+            let b = EngineFrame { msg: Some(msg) }.encode_to_vec();
+            [(b.len() as u32).to_be_bytes().to_vec(), b].concat()
+        };
+        let hello = |source: &str| {
+            engine_frame::Msg::Hello(EngineHello {
+                project: ProjectId::Bsc as i32,
+                schema_id: crate::SCHEMA_ID.into(),
+                source_id: source.into(),
+                generation: u64::MAX,
+                topics: vec![TopicId::BscStatus as i32],
+            })
+        };
+        let largest = |payload: usize| {
+            engine_frame::Msg::State(StateFull {
+                topic: TopicId::BscStatus as i32,
+                generation: u64::MAX,
+                seq: u64::MAX,
+                source_timestamp_unix_ns: i64::MIN,
+                quality: StateQuality::Ok as i32,
+                source_id: "TEST_ONLY".into(),
+                payload: Bytes::from(vec![8u8; payload]),
+            })
+        };
+        // An over-long source_id would need a frame beyond the contract maximum: refused.
+        let feed = UnixSocketFeed::new(ProjectId::Bsc, "bsc", sock.clone(), 1024);
+        let attach = tokio::spawn({
+            let feed = feed.clone();
+            async move { feed.attach().await.map(|_| ()) }
+        });
+        let (mut engine, _) = listener.accept().await.unwrap();
+        engine
+            .write_all(&frame(hello(&"s".repeat(5_000))))
+            .await
+            .unwrap();
+        assert!(matches!(attach.await.unwrap(), Err(FeedError::Mismatch(_))));
+        drop(engine);
+        let (hub, registry) = (Arc::new(StateHub::new(1024)), SourceRegistry::new());
+        let slow = GatewayConfig {
+            source_stale_after_ms: 10_000,
+            source_detach_after_ms: 20_000,
+            ..cfg()
+        };
+        let _sup = spawn_supervisor(feed, hub.clone(), registry.clone(), &slow);
+        let (mut engine, _) = listener.accept().await.unwrap();
+        let exact = max_state_frame(1024, "TEST_ONLY");
+        assert_eq!(
+            EngineFrame {
+                msg: Some(largest(1024))
+            }
+            .encoded_len(),
+            exact
+        );
+        for m in [hello("TEST_ONLY"), largest(1024)] {
+            engine.write_all(&frame(m)).await.unwrap();
+        }
+        let q = || {
+            hub.current(TopicId::BscStatus)
+                .map(|s| (s.quality, s.too_large))
+        };
+        until("largest frame applied", || {
+            q() == Some((StateQuality::Ok, false))
+        })
+        .await;
+        engine.write_all(&frame(largest(1025))).await.unwrap();
+        until("one byte more detaches", || {
+            q() == Some((StateQuality::SourceDetached, false))
+        })
+        .await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A topic marked too large stays without value through a source detach and recovers with
+    /// the first valid state of the reattached publisher.
+    #[tokio::test]
+    async fn a_too_large_topic_is_never_ok_across_detach_and_recovers_after_reattach() {
+        let (hub, registry) = (Arc::new(StateHub::new(1024)), SourceRegistry::new());
+        let feed = ChannelFeed::new(ProjectId::Bsc, "bsc");
+        let tx = feed.connect(16).await;
+        let _sup = spawn_supervisor(feed.clone(), hub.clone(), registry.clone(), &cfg());
+        tx.send(state(1, 2_000)).await.unwrap();
+        let cur = || hub.current(TopicId::BscStatus);
+        until("marker", || cur().is_some_and(|s| s.too_large)).await;
+        drop(tx); // engine killed
+        until("detached marker", || {
+            cur().is_some_and(|s| s.quality == StateQuality::SourceDetached)
+        })
+        .await;
+        let s = cur().unwrap();
+        assert!(s.too_large && s.payload.is_empty());
+        let tx = feed.connect(16).await;
+        tx.send(FeedMessage::State(StateUpdate {
+            generation: 2,
+            ..match state(1, 4) {
+                FeedMessage::State(u) => u,
+                _ => unreachable!(),
+            }
+        }))
+        .await
+        .unwrap();
+        until("recovered", || {
+            cur()
+                .is_some_and(|s| !s.too_large && s.quality == StateQuality::Ok && s.generation == 2)
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn silence_turns_stale_then_detached_and_heartbeats_alone_restore_nothing() {
         let (hub, registry) = (Arc::new(StateHub::new(1024)), SourceRegistry::new());
