@@ -136,6 +136,7 @@ def main() -> None:
     table("F0_VAR_PUSH_ANCHORS.tsv", ["file", "line", "source_excerpt"], anchors)
     manifest = {
         "schema": "F0_VAR_STATIC_CENSUS_V1",
+        "project": "project_0",
         "source_head": git("rev-parse", "HEAD"),
         "file_count": len(files),
         **dict(counts),
