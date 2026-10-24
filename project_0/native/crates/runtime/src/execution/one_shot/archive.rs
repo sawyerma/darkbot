@@ -41,6 +41,14 @@ pub(super) fn single_use(directory: &Path, wallet: &str, approval_id: &str) -> R
     Ok(())
 }
 
+/// Whether an archived attempt already used `approval_id` (the approval is spent).
+pub fn is_consumed(directory: &Path, wallet: &str, approval_id: &str) -> bool {
+    approval_id_valid(approval_id)
+        && wallet_archive(directory, wallet)
+            .join(format!("{approval_id}.p0j"))
+            .exists()
+}
+
 fn sync_dir(dir: &Path) -> Result<(), String> {
     File::open(dir)
         .and_then(|d| d.sync_all())

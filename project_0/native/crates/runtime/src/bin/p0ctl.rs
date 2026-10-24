@@ -18,7 +18,7 @@
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
 //! p0ctl [--project DIR] source status
-//! p0ctl [--project DIR] approval show FILE
+//! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
 //! p0ctl [--project DIR] fe04 archive --journal-dir DIR --wallet PUBKEY
 //! ```
@@ -37,8 +37,11 @@
 //! alone (schema, authorization, ids, keys, bounds, expiry) and prints what it binds: wallet,
 //! program/deployment or mint/route, every maximum and the file's SHA-256, and whether its
 //! `code_sha` is this project's clean HEAD and its `binary_sha256` these binaries. It exits 0
-//! only when the profile is valid and both bindings MATCH. It changes nothing, reads no network
-//! and does not enable LIVE (FE-06 stays a separate explicit approval).
+//! only when the profile is valid and both bindings MATCH. With `--journal-dir` an attempt
+//! approval is shown against the wallet's FE-04 history: whether the approval is already spent
+//! (archived), an unfinished active attempt, the cumulative realized net and the verdict — and it
+//! exits 0 only if a new attempt could start. It changes nothing, reads no network and does not
+//! enable LIVE (FE-06 stays a separate explicit approval).
 //!
 //! `source set` (S1-02) records a typed source-control request and rings the running runtime;
 //! the state owner applies or refuses it (journal `source_control: applied|refused seq=N`). A
@@ -700,11 +703,14 @@ fn fe04_cmd(args: &[String]) -> Result<bool, String> {
 /// FE-04 `approval show FILE`: see the module documentation.
 fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::execution::one_shot::{exit::ExitApproval, Approval};
-    let [show, file] = args else {
-        return Err("usage: p0ctl approval show FILE".into());
+    const USAGE: &str = "usage: p0ctl approval show FILE [--journal-dir DIR]";
+    let (show, file, journal_dir) = match args {
+        [show, file] => (show, file, None),
+        [show, file, flag, dir] if flag == "--journal-dir" => (show, file, Some(Path::new(dir))),
+        _ => return Err(USAGE.into()),
     };
     if show != "show" {
-        return Err("usage: p0ctl approval show FILE".into());
+        return Err(USAGE.into());
     }
     let path = Path::new(file);
     if std::fs::metadata(path)
@@ -723,6 +729,8 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     let exit = serde_json::from_slice::<ExitApproval>(&bytes);
     let mut lines: Vec<(String, String)> = Vec::new();
     let mut put = |k: &str, v: String| lines.push((k.to_string(), v));
+    // FE-04: without `--journal-dir` the history is not checked (and not claimed).
+    let mut history_ok = true;
     let (check, code_sha, binary_sha) = match (attempt, exit) {
         (Ok(a), Err(_)) => {
             put("approval", "attempt".into());
@@ -751,6 +759,9 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             put("max_slippage_bps", a.max_slippage_bps.to_string());
             put("max_state_age_ms", a.max_state_age_ms.to_string());
             put("expires_unix_s", a.expires_unix_s.to_string());
+            if let Some(dir) = journal_dir {
+                history_ok = attempt_history(dir, &a, &mut put);
+            }
             (a.check(now), a.code_sha, a.binary_sha256)
         }
         (Err(_), Ok(e)) => {
@@ -808,8 +819,54 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         println!("{k}: {v}");
     }
     Ok(check.is_ok()
+        && history_ok
         && head.as_deref() == Some(&code_sha)
         && binary.as_deref() == Some(&binary_sha))
+}
+
+/// FE-04: an attempt approval against the wallet's journal history; `true` only if a new attempt
+/// could start (approval not spent, no unfinished active attempt, history readable).
+fn attempt_history(
+    dir: &Path,
+    a: &darkbot_runner::execution::one_shot::Approval,
+    put: &mut dyn FnMut(&str, String),
+) -> bool {
+    use darkbot_runner::execution::accounting::{Ledger, Verdict};
+    let consumed =
+        darkbot_runner::execution::one_shot::archive::is_consumed(dir, &a.wallet, &a.approval_id);
+    put("approval_consumed", consumed.to_string());
+    let ledger = match Ledger::load(dir, &a.wallet) {
+        Ok(l) => l,
+        Err(e) => {
+            put("history", format!("UNREADABLE ({e})"));
+            return false;
+        }
+    };
+    let active = ledger.attempts.iter().find(|r| !r.archived);
+    put(
+        "active_attempt",
+        active.map_or("none".into(), |r| {
+            format!("{} {}", r.approval_id, r.state.name())
+        }),
+    );
+    let t = ledger.totals();
+    put(
+        "history_attempts",
+        format!("{} (archived {})", t.attempts, t.archived),
+    );
+    put(
+        "history_cumulative_realized_net_usd_micro",
+        t.realized_net_usd_micro
+            .map_or("UNKNOWN".into(), |v| v.to_string()),
+    );
+    put(
+        "history_verdict",
+        match ledger.verdict() {
+            Verdict::Unknown(r) => format!("UNKNOWN ({})", r.join(",")),
+            v => v.name().into(),
+        },
+    );
+    !consumed && active.is_none()
 }
 
 fn main() -> ExitCode {

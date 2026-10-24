@@ -3,7 +3,7 @@
 //! financial authority. Realized is the attempt's SOL delta and token outflows plus its exits'
 //! proceeds; open inventory is a mark, never realized; anything not settled is UNKNOWN. No
 //! profit is claimed without every attempt and exit settled, no position left and a positive
-//! cumulative sum.
+//! cumulative sum. The treasury view (FEUI-10A, W-G02/W-G03) is read-only: no transfer exists.
 use crate::execution::one_shot::{exit::ExitSettlement, exit::Position, settlement::Settlement};
 use std::collections::BTreeMap;
 
@@ -216,11 +216,169 @@ impl Ledger {
             t.fee_lamports.map_or("UNKNOWN".into(), |f| f.to_string()),
             opt(t.open_inventory_mark_usd_micro),
         ));
+        out.push(match self.realized_deltas() {
+            Some(d) => format!(
+                "realized_deltas={}",
+                d.iter()
+                    .map(|(k, v)| format!("{k}:{v}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            None => "realized_deltas=UNKNOWN".into(),
+        });
         let verdict = self.verdict();
         out.push(match &verdict {
             Verdict::Unknown(reasons) => format!("verdict=UNKNOWN reasons={}", reasons.join(",")),
             v => format!("verdict={}", v.name()),
         });
         out
+    }
+}
+
+/// FEUI-10A/W-G02 (read-only, no transfer exists): what of one asset could at most leave the
+/// wallet as realized profit — `min(realized profit in this asset, spendable after holds and
+/// the never-spent reserve)`. No sweep ledger exists, so nothing was swept yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Withdrawable {
+    Known(u64),
+    Unknown(String),
+}
+
+impl Ledger {
+    /// Per asset key (`"SOL"` or the mint): the net realized delta of every settled attempt and
+    /// exit, `None` when a step is not settled or a sum overflows.
+    pub fn realized_deltas(&self) -> Option<BTreeMap<String, i128>> {
+        if matches!(self.verdict(), Verdict::Unknown(_)) {
+            return None;
+        }
+        let mut out: BTreeMap<String, i128> = BTreeMap::new();
+        for a in &self.attempts {
+            let steps = a.settlement.iter().map(|s| &s.wallet_deltas).chain(
+                a.exits
+                    .iter()
+                    .filter_map(|e| e.settlement.as_ref())
+                    .map(|x| &x.wallet_deltas),
+            );
+            for deltas in steps {
+                for (asset, d) in deltas {
+                    let v = out.entry(asset.clone()).or_default();
+                    *v = v.checked_add(*d)?;
+                }
+            }
+        }
+        Some(out)
+    }
+
+    /// `asset`'s withdrawable realized profit given the reconciled `balances`, the holds of
+    /// every attempt (`held`) and the policy `reserve`. UNKNOWN unless the accounting is
+    /// settled with a positive verdict, the balance is known and no other asset was consumed
+    /// (a cross-asset profit needs a qualified price, which this ledger does not have).
+    pub fn withdrawable(
+        &self,
+        asset: &str,
+        balances: &BTreeMap<String, u64>,
+        held: &BTreeMap<String, u64>,
+        reserve: &BTreeMap<String, u64>,
+    ) -> Withdrawable {
+        let unknown = |r: &str| Withdrawable::Unknown(r.into());
+        if self.verdict() != Verdict::FirstRealizedProfitEvidenced {
+            return unknown("NO_SETTLED_REALIZED_PROFIT");
+        }
+        let Some(deltas) = self.realized_deltas() else {
+            return unknown("ACCOUNTING_UNKNOWN");
+        };
+        if deltas.iter().any(|(k, d)| k != asset && *d < 0) {
+            return unknown("CROSS_ASSET_PROFIT_NEEDS_PRICE");
+        }
+        let profit = deltas.get(asset).copied().unwrap_or(0).max(0);
+        let Some(balance) = balances.get(asset) else {
+            return unknown("BALANCE_UNKNOWN");
+        };
+        let spendable = balance
+            .saturating_sub(held.get(asset).copied().unwrap_or(0))
+            .saturating_sub(reserve.get(asset).copied().unwrap_or(0));
+        Withdrawable::Known(u64::try_from(profit).unwrap_or(u64::MAX).min(spendable))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settled(deltas: &[(&str, i128)], realized: i128) -> AttemptRecord {
+        AttemptRecord {
+            approval_id: "a-1".into(),
+            target: "t".into(),
+            funding_class: "NO_SWAP_INVENTORY".into(),
+            archived: true,
+            state: StepState::Settled,
+            settlement: Some(Settlement {
+                landed: true,
+                landed_success: true,
+                fee_lamports: 5_000,
+                wallet_deltas: deltas.iter().map(|(k, d)| (k.to_string(), *d)).collect(),
+                valuation: BTreeMap::new(),
+                realized_net_usd_micro: realized,
+                open_inventory: BTreeMap::new(),
+                unrealized_inventory_usd_micro: 0,
+                booked_unix_s: Some(1),
+            }),
+            exits: vec![],
+            open_positions: BTreeMap::new(),
+        }
+    }
+
+    /// W-G02/W-G03 (read-only): withdrawable = min(realized profit in the asset, balance minus
+    /// every hold and the never-spent reserve); UNKNOWN without a settled positive verdict, a
+    /// known balance, or when another asset was consumed (that profit needs a price).
+    #[test]
+    fn withdrawable_is_the_settled_profit_in_the_asset_after_holds_and_reserve() {
+        let m = |v: &[(&str, u64)]| -> BTreeMap<String, u64> {
+            v.iter().map(|(k, n)| (k.to_string(), *n)).collect()
+        };
+        let sol_only = Ledger {
+            attempts: vec![settled(&[("SOL", 15_000), ("MINT", 0)], 1_500)],
+        };
+        assert_eq!(sol_only.realized_deltas().unwrap()["SOL"], 15_000);
+        assert_eq!(
+            sol_only.withdrawable("SOL", &m(&[("SOL", 100_000)]), &m(&[]), &m(&[])),
+            Withdrawable::Known(15_000)
+        );
+        assert_eq!(
+            sol_only.withdrawable(
+                "SOL",
+                &m(&[("SOL", 100_000)]),
+                &m(&[("SOL", 40_000)]),
+                &m(&[("SOL", 50_000)])
+            ),
+            Withdrawable::Known(10_000),
+            "holds and the reserve are never withdrawable"
+        );
+        assert_eq!(
+            sol_only.withdrawable("SOL", &m(&[]), &m(&[]), &m(&[])),
+            Withdrawable::Unknown("BALANCE_UNKNOWN".into())
+        );
+        assert_eq!(
+            sol_only.withdrawable("MINT", &m(&[("MINT", 7)]), &m(&[]), &m(&[])),
+            Withdrawable::Known(0),
+            "no realized profit in this asset"
+        );
+        let cross = Ledger {
+            attempts: vec![settled(&[("SOL", 15_000), ("USDC", -5_000)], 1)],
+        };
+        assert_eq!(
+            cross.withdrawable("SOL", &m(&[("SOL", 100_000)]), &m(&[]), &m(&[])),
+            Withdrawable::Unknown("CROSS_ASSET_PROFIT_NEEDS_PRICE".into())
+        );
+        let loss = Ledger {
+            attempts: vec![settled(&[("SOL", -5_000)], -500)],
+        };
+        assert_eq!(
+            loss.withdrawable("SOL", &m(&[("SOL", 100_000)]), &m(&[]), &m(&[])),
+            Withdrawable::Unknown("NO_SETTLED_REALIZED_PROFIT".into())
+        );
+        let mut unsettled = sol_only.clone();
+        unsettled.attempts[0].state = StepState::Unknown;
+        assert!(unsettled.realized_deltas().is_none());
     }
 }
