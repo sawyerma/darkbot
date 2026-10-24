@@ -1,5 +1,24 @@
 # BSC Status — Code, Nachweise und LIVE getrennt
 
+## Aktueller Übergabestand — 2026-10-24 (BSC Gate-0, nach Frontend-Abschluss)
+
+**Reproduzierbarer Repository-Checkpoint:** Der gemeinsame Frontend-/Gateway-Bugfix wurde mit **15 Fast-Forward-Commits** `f52e7c21..ac0b9da6` auf `origin/main` übernommen. `ac0b9da6` ist der **Frontend-Paketabschluss**, kein dauerhaft festgeschriebener HEAD des parallelen Project_0-Entwicklungszweigs. Den jeweils aktuellen `main` vor neuer Arbeit abrufen. Keine Änderungen an `project_0/` oder am BSC-BUY-Core im genannten Push. Vollständige fachliche Frontend-Details: [frontend/README.md §2b/§2c](../../../frontend/README.md) und [Frontend-Master §8](../../../frontend/docs/FRONTEND_PHASENPLAN.md).
+
+**Abgeschlossener gemeinsamer Infrastrukturumfang (gemeldete lokale Regressionen, mit Commits im Remote verankert):**
+- **F3 Teilumfang VERIFIED:** Engine-IPC-Frame-Grenze, `StateTooLarge`/`FRAME_TOO_LARGE` je betroffenem STATE-Topic, Topic-Recovery, gezählte absolute Protokollgrenzen.
+- **F6 Teilumfang VERIFIED, Gesamtphase PARTIAL:** Gateway-Ledger, konfigurierbare endliche Retention, zeitlich begrenzte Idempotenz, Restart-/Crash-Tests. **Native Engine-Receipt-Autorität** (`pending_commands[]`/`recent_command_results[]`) weiterhin **OPEN** und eigenes F6-Arbeitspaket.
+- **F7 Teilabnahmen VERIFIED:** isolierter Stop-All-Teilausfall, `npm run budget` 7/7, gezielte Regressionen. **Visual-Pixeldiff NOT_RUN**; **F4 EVENT BLOCKED/OPEN**. Project_0-Capture-Polling bleibt separat beim Project_0-Owner.
+
+**BSC-Gate0-Fortsetzungsstand (unabhängig vom Frontend):** v9.1 D1–D6 sind laut dokumentierten Offline-Tests umgesetzt. Für **Flap Portal v5.26.0** liegt ein **schlüsselfreies PREPARE für SELF_A** bei H1 **129392405** einschließlich R0/Quote/Launch-Path und Handoff vor (Details und Evidenzpfad unten, datiert 2026-10-23). Das ist **PREPARE_ONLY / NOT_REQUALIFIED**: kein freigegebener SIGN/VERIFY-Lauf mit echten Wallet-Keys, kein neuer genehmigter V5-Vertrag, **`FROZEN_APPROVED_V5_SHA256="UNARMED"`**, `approved=false`, `execution_ready=false`, kein Mainnet-BUY und **G0.7/G0.8 NOT_EXECUTED**. Alte v5.25-Ergebnisse gelten nicht als v5.26-Freigabe.
+
+**Nächster BSC-Auftrag:** ausschließlich die verbliebenen **G0.7/G0.8-Code-/Qualifikationslücken** am aktuellen HEAD gegen [PHASENPLAN](PHASENPLAN.md), [Gate-0-Testplan](GATE0_TESTPLAN_SHORT.md) und V5-Safety-Gates nachweisen/gezielt schließen. Separat autorisierungspflichtiges SIGN/VERIFY, wirtschaftliche Freigabe und Mainnet-BUY **nicht automatisch ausführen**. Verbindliche Folge: **G0.7 kontrollierter BUY → G0.8 Erwerb/Reihenfolge/Kosten → PASS/ADAPT/STOP → erst dann C1/C2-Produktion**. Physisches **`T_buy - T0 < 1 ms` bleibt UNKNOWN/NOT_PROVEN** (Original-Producer-Witness fehlt); Builder-Inclusion bleibt UNQUALIFIED. Keine C1/C2-Optimierung, keine zweite Architektur, keine Vermischung mit Project_0.
+
+**Deployment separat:** Die gemeinsame Protobuf-Schema-ID `68bae95c365d2e697b528d9f52aad60ec41ea4f3115de1e601f276dbf0189db1` erfordert **beide Reporter** (Project_0 und BSC) aus demselben Schema neu zu bauen; ausschließlich der bestehende `darkbotctl build` → `deploy`-Pfad. **Zum Paketabschluss kein Deployment, SIGN, ARM oder LIVE.** Die lokalen BSC-Evidence-/Secrets-Dateien bleiben unveröffentlicht. 
+
+**Hinweis zur Historie:** Die folgenden datierten Checkpoints beschreiben damalige Befunde, keine aktuelle Freigabe; insbesondere „Current checkpoint — 2026-10-21“ ist ein historischer Portal-Drift-Befund.
+
+---
+
 ## Current checkpoint — 2026-10-21: Portal v5.26.0 drift — readiness STOP; G0.7 not armable on the v5.25 DRY
 
 Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Portal v5.25.0 → **v5.26.0**, implementation `0x7a94f37b61a82c395f9812cf266b444783cc5e8c`, upgrade block 128914179). The requalified DRY of 2026-10-20 and its signed bytes are bound to v5.25.0 and are not valid for current Mainnet. Evidence: `native/evidence/g07/readiness_20261021T201733Z/`; ledger entry 2026-10-21. A requalification against v5.26.0 needs a separate decision (salt choice A/B from E3-1 first, because B changes the candidate anyway; DRY-1 signing by the user). Guard **UNARMED**; G0.7/G0.8 **NOT_EXECUTED**. Offline bugfix packages of 2026-10-21 (E7-6…E2-4) are listed in `bsc_bug_v1.md`.
