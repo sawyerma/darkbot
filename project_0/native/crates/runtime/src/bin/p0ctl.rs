@@ -83,7 +83,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 
-const RUN_ROOTS: [&str; 3] = ["data/runs", "data/econ4h", "data/market"];
+const RUN_ROOTS: [&str; 4] = ["data/runs", "data/econ4h", "data/market", "data/shadow"];
 
 fn project_dir(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
     let dir = explicit
@@ -172,7 +172,7 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const RUN_START_USAGE: &str =
-    "p0ctl run start --duration 10m|1h|5h|24h [--profile NAME] [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
+    "p0ctl run start [--mode econ4h|shadow] --duration 10m|1h|5h|24h [--profile NAME] [--network-audit FILE --mainnet-approved TOKEN] [--capture-source logs|transactions]
     [--chain-verify off|strict] [--verify-rps N] [--verify-calls N] [--verify-seconds N]
     [--verify-bytes N] [--verify-disk-bytes N] [--verify-ram-bytes N] [--verify-min-free-bytes N]
     [--verify-max-pages N] [--provider-evidence FILE.p0j] [--report-* VALUE ...] [--format table|csv]
@@ -180,8 +180,100 @@ const RUN_START_USAGE: &str =
 Typed C0-E1 measurement: offline boot audit, owner lock, capture, then the post-capture chain
 (verification off|strict — online strict only with provider evidence —, native report, master
 qualification). LIVE and submission stay disabled.
+--mode shadow: a bounded Mainnet Shadow run (P6-MT MT11/MT12) through the same audit, approval
+and owner lock; only --duration, --profile, the approval and OPERATIONAL_ARGS apply.
 OFFLINE_READY_NETWORK_NOT_RUN is no Mainnet release. A sealed, fresh READY network audit
 and the operator's explicit --mainnet-approved TOKEN for it are required.";
+
+/// What `run start` launches (CTRL-01/03, F-01): the C0-E1 measurement or a bounded Mainnet
+/// Shadow run — both only through this controller (audit, approval, owner lock, stop).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunMode {
+    Econ4h,
+    Shadow,
+}
+
+impl RunMode {
+    fn launcher(self) -> &'static str {
+        match self {
+            RunMode::Econ4h => "econ4h-launcher",
+            RunMode::Shadow => "shadow-launcher",
+        }
+    }
+    /// The run id variable the launcher and the runtime read.
+    fn run_id_env(self) -> &'static str {
+        match self {
+            RunMode::Econ4h => "P0_ECON_RUN_ID",
+            RunMode::Shadow => "P0_SHADOW_RUN_ID",
+        }
+    }
+    fn prefix(self) -> &'static str {
+        match self {
+            RunMode::Econ4h => "econ4h",
+            RunMode::Shadow => "shadow",
+        }
+    }
+}
+
+/// Options of the C0-E1 capture and its post-capture chain; a Shadow run has neither.
+const ECON4H_ONLY: [&str; 15] = [
+    "--capture-source",
+    "--chain-verify",
+    "--verify",
+    "--verify-rps",
+    "--verify-calls",
+    "--verify-seconds",
+    "--verify-bytes",
+    "--verify-disk-bytes",
+    "--verify-ram-bytes",
+    "--verify-min-free-bytes",
+    "--verify-max-pages",
+    "--provider-evidence",
+    "--format",
+    "--verification-result",
+    "--until-stopped",
+];
+
+/// The run mode and the launcher's arguments: p0ctl's own options (`--mode`, the approval) are
+/// consumed here and never reach the launcher; a Shadow run refuses every C0-E1 option.
+fn launch_plan(args: &[String]) -> Result<(RunMode, Vec<String>), String> {
+    let options = args.split(|a| a == "--").next().unwrap_or(&[]);
+    if options.iter().filter(|a| *a == "--mode").count() > 1 {
+        return Err("exactly one --mode".into());
+    }
+    let mode = match given(options, "--mode")?.as_deref() {
+        None | Some("econ4h") => RunMode::Econ4h,
+        Some("shadow") => RunMode::Shadow,
+        Some(other) => return Err(format!("--mode {other}: econ4h|shadow")),
+    };
+    if mode == RunMode::Shadow {
+        if let Some(bad) = options
+            .iter()
+            .find(|a| ECON4H_ONLY.contains(&a.as_str()) || a.starts_with("--report-"))
+        {
+            return Err(format!(
+                "RUN_MODE_OPTION_REFUSED: {bad} is no option of a Shadow run"
+            ));
+        }
+    }
+    let mut launcher_args = Vec::new();
+    let mut rest = args.iter();
+    let mut in_options = true;
+    while let Some(arg) = rest.next() {
+        if in_options
+            && matches!(
+                arg.as_str(),
+                "--mainnet-approved" | "--network-audit" | "--mode"
+            )
+        {
+            rest.next();
+            continue;
+        }
+        in_options &= arg != "--";
+        launcher_args.push(arg.clone());
+    }
+    Ok((mode, launcher_args))
+}
 
 /// Set by `run start` for its launcher child only: `run start` and `capture.sh econ4h` refuse to
 /// run inside a launcher, so `run start` -> `capture.sh econ4h-launcher` can never recurse.
@@ -200,6 +292,7 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         println!("{RUN_START_USAGE}");
         return Ok(true);
     }
+    let (mode, launcher_args) = launch_plan(args)?;
     // STARTUP §3: an unbounded run is a typed horizon, never a huge duration; it starts only
     // once its gates are qualified.
     if options.iter().any(|a| a == "--until-stopped") {
@@ -272,29 +365,19 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
                 .into(),
         );
     }
-    // The approval is p0ctl's own option; the launcher gets the remaining arguments.
-    let mut launcher_args = Vec::new();
-    let mut rest = args.iter();
-    let mut in_options = true;
-    while let Some(arg) = rest.next() {
-        if in_options && matches!(arg.as_str(), "--mainnet-approved" | "--network-audit") {
-            rest.next();
-            continue;
-        }
-        in_options &= arg != "--";
-        launcher_args.push(arg.clone());
-    }
-    let run_id = std::env::var("P0_ECON_RUN_ID").unwrap_or_else(|_| {
-        format!(
-            "econ4h_{}",
+    let run_id = match std::env::var(mode.run_id_env()) {
+        Ok(id) => id,
+        Err(_) => format!(
+            "{}_{}",
+            mode.prefix(),
             darkbot_runner::market_observer::utc_compact(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0)
+                    .map_err(|_| "BOOT_CLOCK")?
+                    .as_secs()
             )
-        )
-    });
+        ),
+    };
     // BOOT-12: the audited identity must still hold right before the start.
     boot_audit::recheck(&audit, project, flags)?;
     let approved_at = std::time::SystemTime::now()
@@ -312,10 +395,10 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
         std::fs::canonicalize(&network_path).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
     control::install_stop_handler()?;
     let mut child = Command::new(project.join("scripts/capture.sh"))
-        .arg("econ4h-launcher")
+        .arg(mode.launcher())
         .args(&launcher_args)
         .env("P0_RUNTIME_LOCK", &lock)
-        .env("P0_ECON_RUN_ID", &run_id)
+        .env(mode.run_id_env(), &run_id)
         .env(LAUNCH_MARKER, &run_id)
         .env(boot_audit::ENV_NETWORK_AUDIT, &network_record)
         .env(boot_audit::ENV_NETWORK_AUDIT_TOKEN, token)
@@ -1283,6 +1366,59 @@ mod tests {
             .starts_with("VERIFY_MODE_REFUSED"));
         }
         let _ = std::fs::remove_dir_all(project);
+    }
+
+    /// F-01 (CTRL-01/03): a Shadow run starts only through `run start --mode shadow` — the
+    /// shadow launcher, p0ctl's own options consumed, every C0-E1 option refused; econ4h stays
+    /// the default; an unknown, repeated or value-less `--mode` fails closed.
+    #[test]
+    fn run_mode_selects_the_launcher_and_refuses_foreign_options() {
+        let plan = |a: &[&str]| launch_plan(&strings(a));
+        let (mode, args) = plan(&[
+            "--mode",
+            "shadow",
+            "--duration",
+            "3m",
+            "--network-audit",
+            "n.p0j",
+            "--mainnet-approved",
+            "t",
+            "--",
+            "--mode",
+            "x",
+        ])
+        .unwrap();
+        assert_eq!(
+            (mode, mode.launcher()),
+            (RunMode::Shadow, "shadow-launcher")
+        );
+        assert_eq!(args, strings(&["--duration", "3m", "--", "--mode", "x"]));
+        let (mode, args) = plan(&["--duration", "10m", "--chain-verify", "strict"]).unwrap();
+        assert_eq!(
+            (mode, mode.launcher()),
+            (RunMode::Econ4h, "econ4h-launcher")
+        );
+        assert_eq!(
+            args,
+            strings(&["--duration", "10m", "--chain-verify", "strict"])
+        );
+        for bad in [
+            &[
+                "--mode",
+                "shadow",
+                "--duration",
+                "3m",
+                "--chain-verify",
+                "off",
+            ][..],
+            &["--mode", "shadow", "--report-top", "5"],
+            &["--mode", "shadow", "--until-stopped"],
+            &["--mode", "live", "--duration", "3m"],
+            &["--mode"],
+            &["--mode", "shadow", "--mode", "shadow"],
+        ] {
+            assert!(plan(bad).is_err(), "{bad:?}");
+        }
     }
 
     /// A flag given without its value is an error, never an absent flag (`run stop --run`).

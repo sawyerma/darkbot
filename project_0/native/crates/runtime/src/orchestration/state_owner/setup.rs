@@ -81,6 +81,11 @@ pub(super) fn prepare(
     admission: Option<crate::orchestration::boot_audit::NetworkAudit>,
 ) -> Prepared<impl FnMut() -> Result<SnapshotData, String>> {
     let operational_start = clock.now_ns();
+    let stop_poll: fn() -> bool = if econ.is_none() {
+        crate::orchestration::control::stop_requested
+    } else {
+        || false
+    };
     let operational_window = if econ.is_none() && darkbot_solana::runtime_config::configured() {
         Some(crate::analytics::measurement::ReadyWindow::new(
             crate::analytics::measurement::MeasurementPlan::from_lookup(&|k| {
@@ -1031,6 +1036,7 @@ pub(super) fn prepare(
         payer,
         liquidator,
         shutdown,
+        stop_poll,
         halt,
         slot_watch,
         producer,

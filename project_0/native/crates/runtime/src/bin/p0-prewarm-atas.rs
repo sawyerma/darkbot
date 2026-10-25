@@ -1,6 +1,5 @@
 use darkbot_project0::protocol;
 use darkbot_solana::tx;
-use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::{
     RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
 };
@@ -55,7 +54,17 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let token_v1 = Pubkey::from_str(protocol::TOKEN_PROGRAM_ID)?;
     let token_2022 = Pubkey::from_str(protocol::TOKEN_2022_PROGRAM_ID)?;
-    let rpc = RpcClient::new(rpc_url);
+    // F-01/C07: through the process provider budget like every other client (no plain client).
+    let rpc = darkbot_solana::provider::rpc_client(
+        rpc_url,
+        std::time::Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .rpc_timeout_ms,
+        ),
+        CommitmentConfig::finalized(),
+        darkbot_solana::provider::Workload::Bootstrap,
+    );
     let balance = rpc.get_balance(&payer_pk)?;
 
     let mut missing = Vec::new();

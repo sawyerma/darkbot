@@ -42,13 +42,30 @@ pub(crate) fn apply_operational_environment(
     }
 }
 
+/// F-01 (CTRL-01/03): a Shadow runtime is only the child of `p0ctl run start --mode shadow`
+/// (its launch marker; admission then requires the approved network audit). Any other start —
+/// an argument-less one included — is refused before anything is read from the network.
+fn controller_refusal(mode: &str, launched: bool) -> Option<&'static str> {
+    (mode == "shadow" && !launched).then_some("SHADOW_REQUIRES_CONTROLLER")
+}
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|s| s == "--help" || s == "-h") {
         print!("{}", darkbot_solana::runtime_config::Resolved::help());
         return Ok(());
     }
-    if !args.is_empty()
+    let launched = std::env::var_os("P0_CTL_LAUNCH_RUN_ID").is_some();
+    let requested_mode = std::env::var("P0_MODE").unwrap_or_default();
+    if let Some(code) = controller_refusal(&requested_mode, launched) {
+        eprintln!("{code}: a Shadow run starts only through `p0ctl run start --mode shadow` (capture.sh shadow)");
+        return Err(Box::new(super::state_owner::OwnerTerminal(code)));
+    }
+    let shadow = requested_mode == "shadow";
+    // A Shadow run always runs on its typed configuration: its bounded operational window comes
+    // from the launcher's measurement plan (P6-MT MT11/MT12).
+    if shadow
+        || !args.is_empty()
         || std::env::var_os("P0_PROFILE").is_some()
         || std::env::var_os("P0_OPERATIONAL_CONFIG_FILE").is_some()
     {
@@ -68,11 +85,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // gates while obtaining operational values from the shared contract.
         apply_operational_environment(&resolved.config);
         resolved.activate()?;
-        darkbot_solana::provider::enable_measurement_budget();
     }
     // FEUI-01: one runtime owner per project (launchers set P0_RUNTIME_LOCK) and an ordered
-    // operator stop for the observation modes that poll it (econ4h, market). Shadow keeps the
-    // default signal behaviour because it has no stop poll.
+    // operator stop for every mode (econ4h and market poll it; the Shadow owner ends its loop on
+    // it and seals its journals).
     let mode = config::require("P0_MODE")?;
     let _owner = match std::env::var_os("P0_RUNTIME_LOCK") {
         Some(path) => {
@@ -90,7 +106,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => None,
     };
-    if mode == "market" || mode == "econ4h" {
+    if mode == "market" || mode == "econ4h" || mode == "shadow" {
         super::control::install_stop_handler()?;
     }
     // [C0-MO] Market mode branches off before any trading-stack initialisation: no RPC URL,
@@ -184,7 +200,6 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
 fn run_econ4h(
     admission: Result<Option<super::boot_audit::NetworkAudit>, &'static str>,
 ) -> Result<(), String> {
-    darkbot_solana::provider::enable_measurement_budget();
     use crate::analytics::econ;
     use crate::market::observer as market_observer;
     let clock = Clock::new();
@@ -427,6 +442,21 @@ mod supervise_tests {
     use crate::market_observer::{JournalSink, MarketSink, MARKET_JOURNAL};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+
+    /// F-01 (CTRL-01/03): an argument-less or otherwise uncontrolled Shadow start is refused;
+    /// only the child of `p0ctl run start --mode shadow` (its launch marker) proceeds. The other
+    /// modes keep their own gates.
+    #[test]
+    fn f01_shadow_starts_only_under_the_controller() {
+        assert_eq!(
+            controller_refusal("shadow", false),
+            Some("SHADOW_REQUIRES_CONTROLLER")
+        );
+        assert_eq!(controller_refusal("shadow", true), None);
+        for mode in ["econ4h", "market", ""] {
+            assert_eq!(controller_refusal(mode, false), None, "{mode}");
+        }
+    }
 
     /// A5: after the supervisor's abort (analytics ended) the process waits for the owners: the
     /// market owner drains and seals its journal INCOMPLETE before the wait returns (without the

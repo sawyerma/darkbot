@@ -133,7 +133,6 @@ fn run() -> Result<(), String> {
     };
     record(&mut evidence, &operational, None)?;
     resolved.activate()?;
-    provider::enable_measurement_budget();
     let deadline = Instant::now() + Duration::from_secs(config.limits.fe_seconds);
     let mut calls = 0u64;
     let result = {
@@ -261,7 +260,6 @@ fn smoke(
     };
     record(&mut evidence, &operational, None)?;
     resolved.activate()?;
-    provider::enable_measurement_budget();
     let deadline = Instant::now() + Duration::from_secs(config.limits.fe_seconds);
     let mut journal_error = None;
     let mut result = fe::smoke(&config, |keys, floor| {

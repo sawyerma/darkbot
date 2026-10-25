@@ -3,7 +3,8 @@
 #   capture.sh [econ4h] --duration 10m|1h|5h|24h [typed options]   typed C0-E1 measurement via `p0ctl run start`
 #   capture.sh econ4h-launcher --duration D [native options]           econ4h capture, native verify + report (p0ctl only)
 #   capture.sh market                                                 C0-MO unfiltered read-only market observer
-#   capture.sh shadow                                                 Mainnet Shadow, observe-only submission adapter
+#   capture.sh shadow --duration D [-- OPERATIONAL_ARGS]              bounded Mainnet Shadow via `p0ctl run start --mode shadow`
+#   capture.sh shadow-launcher --duration D [-- OPERATIONAL_ARGS]     Shadow runtime of that run (p0ctl only)
 # scripts/test.sh (PHASENPLAN operator command) runs `capture.sh econ4h`. Every mode works from any working directory.
 set -euo pipefail
 
@@ -372,33 +373,89 @@ exec cargo run --release \
   --bin p0-longtail
 }
 
+# Operator entry of a bounded Mainnet Shadow run (P6-MT MT11/MT12): the native control plane validates
+# the arguments, runs the boot audit, requires the Mainnet approval, owns the run (lock, stop) and starts
+# shadow-launcher. F-01 (CTRL-01/03): there is no Shadow start outside this controller.
 shadow() {
+if [[ -n "${P0_CTL_LAUNCH_RUN_ID:-}" ]]; then
+  echo "RECURSIVE_LAUNCH: capture.sh shadow inside the launcher of run $P0_CTL_LAUNCH_RUN_ID" >&2; exit 2
+fi
+absolute_paths
+(cd "$REPO_ROOT" && cargo build --release --locked --quiet --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
+  --features "crate_health txv1" --bin p0ctl >&2) || { echo "p0ctl build failed" >&2; exit 2; }
+exec "${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0ctl" --project "$PROJECT_DIR" run start --mode shadow "$@"
+}
+
+shadow_launcher() {
+# Started only by `p0ctl run start --mode shadow` (boot audit, owner lock, operator Mainnet approval).
+if [[ -z "${P0_CTL_LAUNCH_RUN_ID:-}" ]]; then
+  echo "LAUNCHER_REQUIRES_P0CTL: shadow-launcher is started only by p0ctl run start --mode shadow; use capture.sh shadow --duration D" >&2; exit 2
+fi
 load_env
 absolute_paths
+usage() { echo 'Usage: capture.sh shadow-launcher --duration D [-- OPERATIONAL_ARGS...]' >&2; exit 2; }
+DURATION=""; RUNTIME_ARGS=()
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" == -- ]]; then
+    shift
+    # A relative `--config FILE` keeps the caller's working directory as its base (as absolute_paths).
+    while [[ "$#" -gt 0 ]]; do
+      RUNTIME_ARGS+=("$1")
+      if [[ "$1" == --config && "$#" -ge 2 ]]; then
+        shift; if [[ "$1" == /* ]]; then RUNTIME_ARGS+=("$1"); else RUNTIME_ARGS+=("$PWD/$1"); fi
+      fi
+      shift
+    done
+    break
+  fi
+  [[ "$#" -ge 2 && "$1" == --duration && -z "$DURATION" ]] || usage
+  DURATION="$2"; shift 2
+done
+[[ -n "$DURATION" ]] || usage
+case "${P0_SHADOW_RUN_ID:-}" in
+  ''|.*|*[!A-Za-z0-9_.-]*) echo "P0_SHADOW_RUN_ID invalid or missing (set by p0ctl run start)" >&2; exit 2 ;;
+esac
 require_signer
 case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
   false:false|0:0|false:0|0:false) ;;
   *) echo "shadow requires LIVE and submission disabled" >&2; exit 2 ;;
 esac
 export P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
+# The bounded operational window: the runtime resolves its typed configuration with this duration
+# (the same rule p0ctl audited) and ends after it, counted from Ready.
+export P0_MEASUREMENT_DURATION="$DURATION"
 export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
 export P0_MODE=shadow
 export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
-# One directory per Shadow run: journals are created exclusively and never appended across runs.
-export P0_RECORD_PATH="${P0_RECORD_PATH:-$PROJECT_DIR/data/shadow/shadow_$(date -u +%Y%m%dT%H%M%SZ)_$$/opportunities.p0j}"
 export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
 export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
 export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
 export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
 export P0_DEADLINE_NS="${P0_DEADLINE_NS:-2000000000}"
-
-mkdir -p "$(dirname "$P0_RECORD_PATH")"
 export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$PROJECT_DIR/data/.p0-runtime.lock}"
+# The run's code identity (head, source hashes) is read from this checkout, not the build path.
+export P0_PROJECT_DIR="$PROJECT_DIR"
+# One directory per Shadow run, created exactly once: journals are never appended across runs.
+RUN_DIR="$PROJECT_DIR/data/shadow/$P0_SHADOW_RUN_ID"
+mkdir -p "$PROJECT_DIR/data/shadow"
+mkdir "$RUN_DIR" 2>/dev/null || { echo "RUN_EXISTS: $RUN_DIR" >&2; exit 2; }
+export P0_RECORD_PATH="$RUN_DIR/opportunities.p0j"
 
-echo "Project_0 Mainnet Shadow"
+cd "$REPO_ROOT"
+cargo build --release --locked --manifest-path "$PROJECT_DIR/native/Cargo.toml" \
+  --features "crate_health txv1" --bin p0-longtail --bin p0-measurement-plan --bin p0ctl >&2 || {
+  echo "Build failed" >&2; exit 2;
+}
+BIN="${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0-longtail"
+BIN_DIR="$(dirname "$BIN")"
+# JFI-04: the runtime reads the typed plan journal; stdout is its duration in seconds (text).
+SHADOW_SECS="$("$BIN_DIR/p0-measurement-plan" --out "$RUN_DIR/measurement_plan.p0j")" || exit 2
+export P0_MEASUREMENT_PLAN="$RUN_DIR/measurement_plan.p0j"
+
+echo "Project_0 Mainnet Shadow (run $P0_SHADOW_RUN_ID, ${SHADOW_SECS}s from Ready)"
 echo "  program=$P0_PROGRAM_ID"
 echo "  group=$P0_GROUP_ID"
 echo "  rpc_host=$(endpoint_host P0_RPC_URL)"
@@ -408,18 +465,14 @@ echo "  zero_prefund_qualified=$P0_ZERO_PREFUND_QUALIFIED"
 echo "  zero_prefund_shadow_probe=$P0_ZERO_PREFUND_SHADOW_PROBE"
 echo "  record=$P0_RECORD_PATH"
 echo "  journals=binary .p0j: record (opportunities, reconcile, daily summary) and <record>.mt0.p0j"
-
-cd "$REPO_ROOT"
-exec cargo run --release \
-  --manifest-path project_0/native/Cargo.toml \
-  --features "crate_health txv1" \
-  --bin p0-longtail
+exec "$BIN" ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"}
 }
 
 case "${1:-}" in
   econ4h-launcher) shift; econ4h_launcher "$@" ;;
   market) shift; market "$@" ;;
   shadow) shift; shadow "$@" ;;
+  shadow-launcher) shift; shadow_launcher "$@" ;;
   econ4h) shift; econ4h "$@" ;;
   *) econ4h "$@" ;;
 esac

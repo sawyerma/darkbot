@@ -162,6 +162,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         payer: solana_sdk::signature::Keypair::new(),
         liquidator,
         shutdown: shutdown.clone(),
+        stop_poll: || false,
         halt: IngressHalt::new(),
         slot_watch: SlotWatch::new(),
         producer: producer.clone(),
@@ -3098,4 +3099,14 @@ fn mt5b_projection_results_are_judged_against_ownership_and_newest_revision() {
     assert_eq!(f.owner.metrics.result_actions.get(ResultAction::Accept), 1);
     assert!(f.owner.projection_cache.contains_key(&candidate));
     cleanup(f);
+}
+
+/// F-01: the operator stop (`p0ctl run stop`, SIGTERM/SIGINT) ends a standalone Shadow owner's
+/// loop at the next pass, so `finish` seals its journals instead of the process being killed.
+#[test]
+fn f01_operator_stop_ends_a_standalone_shadow_owner() {
+    let mut f = fixture("f01-stop");
+    assert!(f.owner.lifecycle(), "running without a stop");
+    f.owner.stop_poll = || true;
+    assert!(!f.owner.lifecycle(), "the operator stop ends the loop");
 }

@@ -75,7 +75,7 @@ impl ShadowOwner {
                 Ok(false) => {}
             }
         }
-        if self.shutdown.is_requested() {
+        if self.shutdown.is_requested() || (self.stop_poll)() {
             return false;
         }
         if self.halt.is_raised() {

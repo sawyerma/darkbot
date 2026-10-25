@@ -202,6 +202,9 @@ pub(super) struct ShadowOwner {
     payer: solana_sdk::signature::Keypair,
     liquidator: Pubkey,
     shutdown: Shutdown,
+    /// F-01: the operator stop of a standalone Shadow run (`p0ctl run stop`, SIGTERM/SIGINT);
+    /// an econ run stops through its own abort instead.
+    stop_poll: fn() -> bool,
     halt: IngressHalt,
     slot_watch: SlotWatch,
     producer: darkbot_common::channel::Producer<IngressEvent>,

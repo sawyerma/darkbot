@@ -632,7 +632,7 @@ Directory: [scripts/](scripts/)
 
 | Entry point | Purpose |
 |---|---|
-| [capture.sh](scripts/capture.sh) | `capture.sh --duration 10m` typed C0-E1 measurement (verification and report follow); `capture.sh econ4h-launcher`, `capture.sh market` (C0-MO), `capture.sh shadow` (Mainnet Shadow, observe only). |
+| [capture.sh](scripts/capture.sh) | `capture.sh --duration 10m` typed C0-E1 measurement (verification and report follow); `capture.sh econ4h-launcher`, `capture.sh market` (C0-MO), `capture.sh shadow --duration D` (bounded Mainnet Shadow through `p0ctl run start --mode shadow`, observe only). |
 | [smoke.sh](scripts/smoke.sh) | Controlled gap/reconnect smoke through a market-only loopback proxy. |
 | [verify.sh](scripts/verify.sh) / [report.sh](scripts/report.sh) | Read-only historical verification and offline reports for a run id or path. |
 | [preflight.sh](scripts/preflight.sh) | Read-only FE preflight and effective-config inspection. |
@@ -789,10 +789,10 @@ cargo test --locked -p darkbot-runner
 cargo test --locked -p darkbot-runner --features txv1
 ```
 
-Mainnet Shadow entry:
+Mainnet Shadow entry (bounded, through the controller: boot audit, `--network-audit FILE --mainnet-approved TOKEN`, owner lock):
 
 ```bash
-project_0/scripts/capture.sh shadow
+project_0/scripts/capture.sh shadow --duration 3m --network-audit FILE --mainnet-approved TOKEN
 ```
 
 Qualification (native, after the verification):

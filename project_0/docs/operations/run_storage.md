@@ -23,8 +23,8 @@ were removed (25.10., P0-PROD-CTRL-09).
   explicit root must be `data/runs`, otherwise the launcher stops with `RUN_ROOT_CONFLICT`.
 - **Standalone C0-MO stays V1:** it writes no pre-capture manifest, which layout V2 requires. Its Rust runtime rejects
   `P0_RUN_LAYOUT=v2`.
-- **Shadow mainnet (`capture.sh shadow`) and `operations/capture/c0_census.py` are not runs:** they append to `data/shadow/` or write `data/c0/`
-  and keep that semantics.
+- **Shadow mainnet (`capture.sh shadow` → `p0ctl run start --mode shadow`, F-01) and `operations/capture/c0_census.py` are not V1/V2 runs:** a Shadow run gets
+  `data/shadow/<P0_SHADOW_RUN_ID>/` (created once, with its `measurement_plan.p0j`); the census writes `data/c0/`.
 - **Run id:** 1–128 characters of `A-Z a-z 0-9 _ -`. Path separators and dots are impossible, so an id cannot leave its root.
   The Rust runtime validates the same character set (`econ.rs`, `market_observer.rs`).
 - **Created exactly once:** the run directory is created atomically. An id that already exists in the target root or in any of
@@ -83,7 +83,7 @@ python3 project_0/operations/capture/run_store.py path <run_dir> economics_final
 | Rust econ4h runtime (`econ.rs`, `econ_canonical.rs`) | `shadow_evaluations.p0j` (capture); `economics_reports.p0j` plus its renders `hour_0N.json`, `economics_final.json`, `opportunity_economics.jsonl`, `canonical_market_shadow.jsonl` (snapshots) via `RunPaths` | `project_0/data/econ4h/<id>`, layout V1 when started without the launcher | `P0_ECON_OUT_DIR`, `P0_ECON_RUN_ID`, `P0_RUN_LAYOUT` |
 | Rust MeasurementPlan/manifest (`measurement.rs`) | manifest (JSON document) and `measurement_phases.p0j`; `measurement_phases.jsonl` is rendered when the run ends | — | `P0_MEASUREMENT_PLAN` (plan file) |
 | Rust C0-MO (`market/`) | `market.p0j`; renders `transactions.jsonl`, `liquidations.jsonl`, `coverage.jsonl`; `summary.json` (with `evidence_journal` binding), `final_report.txt` | `project_0/data/market/<id>`; inside econ4h `<run>/market/` (V1) or `<run>/capture/market/` (V2) | `P0_MARKET_OUT_DIR`, `P0_MARKET_RUN_ID` |
-| Rust Shadow owner (`orchestration/state_owner`) | `opportunities.p0j` (records, opportunities, reconcile rows, daily summary, owner diagnostics), `<record>.mt0.p0j`, `operational_config_<ns>.json` | `capture.sh shadow`: `project_0/data/shadow/shadow_<UTC>_<pid>/`; econ4h: run directory (V1) or `capture/` (V2) | `P0_RECORD_PATH`, `P0_MT0_PATH` (`P0_SUMMARY_PATH` is no longer read) |
+| Rust Shadow owner (`orchestration/state_owner`) | `opportunities.p0j` (records, opportunities, reconcile rows, daily summary, owner diagnostics), `<record>.mt0.p0j`, `operational_config_<ns>.json` | `capture.sh shadow`: `project_0/data/shadow/<P0_SHADOW_RUN_ID>/`; econ4h: run directory (V1) or `capture/` (V2) | `P0_RECORD_PATH`, `P0_MT0_PATH` (`P0_SUMMARY_PATH` is no longer read) |
 | `capture.sh` (econ4h-launcher) | allocates the run, selects the layout; logs, plan, storage preflight, candidate manifest; V2 assembles `config.json` from a temporary staging directory before the capture starts | via `run_store.py` | as above |
 | `smoke.sh` | delegates to `capture.sh econ4h-launcher`; adds `gap_proxy.log`; PASS checks read through `run_store` | via `run_store.py` | as above |
 | `capture.sh market` | allocates the C0-MO run (always V1) | via `run_store.py` | as above |

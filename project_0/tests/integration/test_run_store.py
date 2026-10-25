@@ -267,28 +267,35 @@ class Launchers(unittest.TestCase):
             self.assertFalse((project/'data/runs/old_run').exists())
 
     def test_shadow_runs_the_real_binary_from_any_directory(self):
+        # F-01: the Shadow runtime starts only as p0ctl's launcher child (`capture.sh shadow-launcher`, the marker stands in
+        # for `p0ctl run start --mode shadow`); one directory per run under data/shadow, created once.
         with tempfile.TemporaryDirectory() as folder:
             tmp=Path(folder);project=self.real_project(tmp);caller=tmp/'caller';caller.mkdir();(tmp/'tmpdir').mkdir()
             env=self.real_env(tmp);shutil.copy2(env['P0_KEYPAIR_PATH'],caller/'key.json');(caller/'key.json').chmod(0o600)
             env['P0_KEYPAIR_PATH']='key.json'  # relative to the caller: the signer gate and the runtime must use this same file
-            run=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'shadow'],env={**env,**extra},capture_output=True,text=True,timeout=600,cwd=caller)
-            p=run({'P0_RECORD_PATH':'out/opps.jsonl','P0_SUMMARY_PATH':'out/sum.jsonl','P0_MT0_PATH':'out/mt0.jsonl',
-                   'P0_RPC_URL':'http://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET',
+            run=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'shadow-launcher','--duration','61s'],env={**env,**extra},
+                                            capture_output=True,text=True,timeout=600,cwd=caller)
+            p=run({'P0_SHADOW_RUN_ID':'shadow_a','P0_RPC_URL':'http://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET',
                    'P0_WS_URL':'ws://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET'})
             out=p.stdout+p.stderr
             self.assertEqual(p.returncode,2,out[-2000:]);self.assertIn('p0-longtail: ',p.stderr)  # real binary started from the repository
+            self.assertIn('BOOT_NETWORK_AUDIT_MISSING',p.stderr)  # a controller child needs the approved network audit
             self.assertNotIn('could not find `Cargo.toml`',out);self.assertNotIn('missing required env',out)
             for secret in ('private:','SECRET','PRIVATE_KEY'):
                 self.assertNotIn(secret,out)
             self.assertIn('rpc_host=http://127.0.0.1',p.stdout)
             self.assertIn('ws_host=ws://127.0.0.1',p.stdout)
             record=Path(next(l.split('record=',1)[1] for l in p.stdout.splitlines() if 'record=' in l))
-            self.assertEqual(record.resolve(),(caller/'out/opps.jsonl').resolve());self.assertTrue((caller/'out').is_dir())
-            p=run({});self.assertEqual(p.returncode,2);self.assertIn('p0-longtail: ',p.stderr)
-            self.assertTrue((project/'data/shadow').is_dir())  # absolute default under the (temporary) project
-            self.assertEqual(sorted(x.name for x in caller.iterdir()),['key.json','out'])
+            run_dir=project/'data/shadow/shadow_a'
+            self.assertEqual(record.resolve(),(run_dir/'opportunities.p0j').resolve())
+            self.assertTrue((run_dir/'measurement_plan.p0j').is_file())  # the typed plan of the bounded window
+            self.assertEqual(sorted(x.name for x in caller.iterdir()),['key.json'])
+            p=run({'P0_SHADOW_RUN_ID':'shadow_a'});self.assertEqual(p.returncode,2);self.assertIn('RUN_EXISTS',p.stderr)
+            for extra in ({'P0_SHADOW_RUN_ID':'../x'},{}):
+                p=run(extra);self.assertEqual(p.returncode,2);self.assertIn('P0_SHADOW_RUN_ID invalid or missing',p.stderr)
             for extra in ({'P0_LIVE_ENABLED':'true'},{'P0_SUBMISSION_ENABLED':'1'}):
-                p=run(extra);self.assertEqual(p.returncode,2);self.assertIn('shadow requires LIVE and submission disabled',p.stderr)
+                p=run({**extra,'P0_SHADOW_RUN_ID':'shadow_b'});self.assertEqual(p.returncode,2)
+                self.assertIn('shadow requires LIVE and submission disabled',p.stderr)
                 self.assertNotIn('p0-longtail: ',p.stderr)  # refused before cargo and the binary
 
     def test_changed_launchers_parse(self):

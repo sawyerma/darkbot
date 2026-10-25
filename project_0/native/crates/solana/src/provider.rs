@@ -11,20 +11,10 @@ use solana_client::{
 use solana_commitment_config::CommitmentConfig;
 use std::{
     collections::VecDeque,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex, MutexGuard, OnceLock,
-    },
+    sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant, SystemTime},
 };
 
-static ENABLED: AtomicBool = AtomicBool::new(false);
-pub fn enable_measurement_budget() {
-    ENABLED.store(true, Ordering::Release);
-}
-pub fn enabled() -> bool {
-    ENABLED.load(Ordering::Acquire)
-}
 #[derive(Clone, Copy, Debug)]
 pub enum Workload {
     Bootstrap,
@@ -677,9 +667,7 @@ pub fn rpc_client(
     commitment: CommitmentConfig,
     work: Workload,
 ) -> RpcClient {
-    if !enabled() {
-        return RpcClient::new_with_timeout_and_commitment(url, timeout, commitment);
-    }
+    // F-01/C07: every client is budgeted; there is no unbudgeted start path.
     RpcClient::new_sender(
         BudgetedSender {
             url,
@@ -694,7 +682,6 @@ pub fn rpc_client(
                 .build()
                 .expect("HTTP client configuration"),
             budget: shared(),
-            admission: true,
             stats: Mutex::new(RpcTransportStats::default()),
         },
         RpcClientConfig::with_commitment(commitment),
@@ -706,10 +693,6 @@ struct BudgetedSender {
     work: Workload,
     http: reqwest::Client,
     budget: Arc<Budget>,
-    /// N2: `false` — the provider budget is not enabled for this process: no permit, no byte
-    /// accounting, no provider degradation/backoff, no fallback endpoint and a single attempt,
-    /// exactly as the unbudgeted client; the deadline-bound request path is the same.
-    admission: bool,
     stats: Mutex<RpcTransportStats>,
 }
 struct CallTimer<'a> {
@@ -777,7 +760,7 @@ impl BudgetedSender {
             }
         };
         // Repeating submission can spend funds. This transport never retries sendTransaction.
-        let attempts = if request == RpcRequest::SendTransaction || !self.admission {
+        let attempts = if request == RpcRequest::SendTransaction {
             1
         } else {
             self.budget.limits.rpc_attempts
@@ -785,22 +768,16 @@ impl BudgetedSender {
         for attempt in 0..attempts {
             let work = self.work;
             let budget = self.budget.clone();
-            let permit = if self.admission {
-                Some(
-                    tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
-                        .await
-                        .map_err(|_| CallError::Transport("RPC_ADMISSION_JOIN"))?
-                        .map_err(|r| {
-                            if r.deadline_bound || Instant::now() >= deadline {
-                                CallError::Deadline(r.code)
-                            } else {
-                                CallError::Budget(r.code)
-                            }
-                        })?,
-                )
-            } else {
-                None
-            };
+            let permit = tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
+                .await
+                .map_err(|_| CallError::Transport("RPC_ADMISSION_JOIN"))?
+                .map_err(|r| {
+                    if r.deadline_bound || Instant::now() >= deadline {
+                        CallError::Deadline(r.code)
+                    } else {
+                        CallError::Budget(r.code)
+                    }
+                })?;
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Err(CallError::Deadline("RPC_REQUEST_BUDGET"));
@@ -813,14 +790,11 @@ impl BudgetedSender {
             let request_bytes = serde_json::to_vec(&body)
                 .map_err(|_| CallError::Transport("RPC_ENCODE"))?
                 .len();
-            if self.admission {
-                self.budget
-                    .account_bytes(request_bytes)
-                    .map_err(CallError::Budget)?;
-            }
+            self.budget
+                .account_bytes(request_bytes)
+                .map_err(CallError::Budget)?;
             let config = &self.budget;
-            let endpoint = if self.admission
-                && config.fallback
+            let endpoint = if config.fallback
                 && request != RpcRequest::SendTransaction
                 && config.rpc_endpoints.first() == Some(&self.url)
             {
@@ -844,9 +818,7 @@ impl BudgetedSender {
                     if caller_bound && Instant::now() >= deadline {
                         return Err(CallError::Deadline("RPC_TRANSPORT"));
                     }
-                    if self.admission {
-                        self.budget.degraded();
-                    }
+                    self.budget.degraded();
                     drop(permit);
                     if attempt + 1 == attempts {
                         return Err(late("RPC_TRANSPORT"));
@@ -854,8 +826,7 @@ impl BudgetedSender {
                     continue;
                 }
             };
-            // Unbudgeted (as the plain client it replaces) writes no stderr of its own.
-            if self.admission && !response.status().is_success() {
+            if !response.status().is_success() {
                 eprintln!(
                     "[PROVIDER/RPC] method={request} status={} workload={:?} attempt={}",
                     response.status().as_u16(),
@@ -864,31 +835,22 @@ impl BudgetedSender {
                 );
             }
             if response.status().as_u16() == 429 {
-                if self.admission {
-                    self.budget.rate_limited_header(retry_after_header(
-                        response
-                            .headers()
-                            .get("retry-after")
-                            .and_then(|h| h.to_str().ok()),
-                        SystemTime::now(),
-                    ));
-                }
+                self.budget.rate_limited_header(retry_after_header(
+                    response
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|h| h.to_str().ok()),
+                    SystemTime::now(),
+                ));
                 drop(permit);
                 if attempt + 1 == attempts {
-                    // Without a local budget the provider's own 429 is a transport answer.
-                    return Err(if self.admission {
-                        CallError::Budget("RPC_RATE_LIMIT")
-                    } else {
-                        CallError::Transport("RPC_RATE_LIMIT")
-                    });
+                    return Err(CallError::Budget("RPC_RATE_LIMIT"));
                 }
                 continue;
             }
             if !response.status().is_success() {
                 if response.status().is_server_error() {
-                    if self.admission {
-                        self.budget.degraded();
-                    }
+                    self.budget.degraded();
                     drop(permit);
                     if attempt + 1 < attempts {
                         continue;
@@ -898,11 +860,9 @@ impl BudgetedSender {
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| late("RPC_BODY_READ"))? {
-                if self.admission {
-                    self.budget
-                        .account_bytes(chunk.len())
-                        .map_err(CallError::Budget)?;
-                }
+                self.budget
+                    .account_bytes(chunk.len())
+                    .map_err(CallError::Budget)?;
                 if bytes.len().saturating_add(chunk.len())
                     > (self.budget.limits.max_response_mib * 1024 * 1024) as usize
                 {
@@ -934,9 +894,7 @@ impl BudgetedSender {
                     .into(),
                 ));
             }
-            if self.admission {
-                self.budget.succeeded();
-            }
+            self.budget.succeeded();
             return value
                 .get_mut("result")
                 .map(Value::take)
@@ -976,26 +934,12 @@ pub struct DeadlineRpc {
     runtime: tokio::runtime::Runtime,
 }
 impl DeadlineRpc {
-    /// Like `rpc_client`: against the process-wide provider budget when it is enabled
-    /// (`enable_measurement_budget`), otherwise unbudgeted — the deadline binds in both.
+    /// Like `rpc_client`: against the process-wide provider budget (always; F-01/C07).
     pub fn new(url: String, work: Workload) -> Result<Self, String> {
-        Self::build(url, work, shared(), enabled())
+        Self::with_budget(url, work, shared())
     }
     /// Against an explicit budget (an isolated profile; tests that hold its permits).
     pub fn with_budget(url: String, work: Workload, budget: Arc<Budget>) -> Result<Self, String> {
-        Self::build(url, work, budget, true)
-    }
-    /// Unbudgeted (the provider budget not enabled), with `budget` only for its limits.
-    #[cfg(test)]
-    fn unbudgeted(url: String, work: Workload, budget: Arc<Budget>) -> Result<Self, String> {
-        Self::build(url, work, budget, false)
-    }
-    fn build(
-        url: String,
-        work: Workload,
-        budget: Arc<Budget>,
-        admission: bool,
-    ) -> Result<Self, String> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(
                 crate::runtime_config::active()
@@ -1015,7 +959,6 @@ impl DeadlineRpc {
                 work,
                 http,
                 budget,
-                admission,
                 stats: Mutex::new(RpcTransportStats::default()),
             },
             runtime,
@@ -1423,15 +1366,38 @@ mod http_tests {
             work: Workload::Simulation,
             http: reqwest::Client::new(),
             budget: Arc::new(Budget::default()),
-            admission: true,
             stats: Mutex::new(RpcTransportStats::default()),
         }
     }
-    /// N2: without an enabled provider budget the candidate transport behaves like the
-    /// unbudgeted client — no permit (a fully held budget does not block it), no degradation —
-    /// and the candidate deadline still ends a hanging request.
+    /// F-01/C07: every RPC client of the process is budgeted — no start path (an argument-less
+    /// launch included) gets a plain unbudgeted client; the call counts against the shared
+    /// provider budget without anything having been enabled first.
     #[test]
-    fn n2_unbudgeted_candidate_transport_needs_no_permit_and_keeps_the_deadline() {
+    fn f01_rpc_client_is_always_budgeted() {
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":7}"#;
+        let (url, server) = server(format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        ));
+        let before = shared().snapshot().requests;
+        let rpc = rpc_client(
+            url,
+            Duration::from_secs(2),
+            CommitmentConfig::finalized(),
+            Workload::Bootstrap,
+        );
+        assert_eq!(rpc.get_slot().unwrap(), 7);
+        server.join().unwrap();
+        assert!(
+            shared().snapshot().requests > before,
+            "unbudgeted RPC client"
+        );
+    }
+    /// N2: the candidate deadline ends a hanging request of the (always budgeted) transport, and
+    /// a cut by the caller's deadline before the transport's own limit is no provider failure —
+    /// the budget is not degraded for other workloads.
+    #[test]
+    fn n2_candidate_deadline_ends_a_hanging_request_without_degrading() {
         let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", socket.local_addr().unwrap());
         let hold = std::thread::spawn(move || {
@@ -1443,10 +1409,7 @@ mod http_tests {
         config.limits.rpc_concurrency = 1;
         config.limits.rpc_backoff_ms = 5_000;
         let budget = Arc::new(Budget::configured(&config));
-        let held = budget
-            .acquire(Workload::LiveRead, Instant::now() + Duration::from_secs(5))
-            .unwrap();
-        let rpc = DeadlineRpc::unbudgeted(url, Workload::Simulation, budget.clone()).unwrap();
+        let rpc = DeadlineRpc::with_budget(url, Workload::Simulation, budget.clone()).unwrap();
         let started = Instant::now();
         let deadline = started + Duration::from_millis(300);
         let result = rpc.call(RpcRequest::GetSlot, serde_json::json!([]), deadline);
@@ -1456,8 +1419,7 @@ mod http_tests {
             "{:?}",
             started.elapsed()
         );
-        assert_eq!(rpc.request_count(), 1, "sent without a permit");
-        drop(held);
+        assert_eq!(rpc.request_count(), 1);
         assert!(
             budget
                 .acquire(
@@ -1465,7 +1427,7 @@ mod http_tests {
                     Instant::now() + Duration::from_millis(100)
                 )
                 .is_ok(),
-            "no degradation without the budget"
+            "no degradation by a caller deadline"
         );
         hold.join().unwrap();
     }

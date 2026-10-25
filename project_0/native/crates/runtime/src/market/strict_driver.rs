@@ -591,7 +591,6 @@ pub fn cli(args: &[String]) -> Result<(String, bool), String> {
         }
         resolved.activate()?;
     }
-    darkbot_solana::provider::enable_measurement_budget();
     let l = &darkbot_solana::runtime_config::active().limits;
     let mib = 1024 * 1024;
     let mut budget = StrictBudget {

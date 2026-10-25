@@ -82,6 +82,25 @@ class MeasurementCli(unittest.TestCase):
         self.assertIn('RECURSIVE_LAUNCH: run start inside the launcher of run outer', p.stderr)
         self.assertNotIn('BOOT AUDIT', p.stdout)
 
+    def test_shadow_starts_only_through_the_controller(self):
+        # F-01 (CTRL-01/03): the Shadow launcher refuses to run without p0ctl's launch marker, `capture.sh shadow`
+        # never recurses inside a launcher, and the runtime refuses an argument-less Shadow start outright.
+        p = subprocess.run([str(SCRIPTS / 'capture.sh'), 'shadow-launcher', '--duration', '3m'], env=clean_env(),
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn('LAUNCHER_REQUIRES_P0CTL', p.stderr)
+        marked = {**clean_env(), 'P0_CTL_LAUNCH_RUN_ID': 'outer'}
+        p = subprocess.run([str(SCRIPTS / 'capture.sh'), 'shadow', '--duration', '3m'], env=marked,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn('RECURSIVE_LAUNCH: capture.sh shadow inside the launcher of run outer', p.stderr)
+        runtime = ROOT / 'project_0/native/target/release/p0-longtail'
+        if not runtime.exists():
+            self.skipTest('NOT_RUN: release p0-longtail not built')
+        p = subprocess.run([str(runtime)], env={**clean_env(), 'P0_MODE': 'shadow'}, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn('SHADOW_REQUIRES_CONTROLLER', p.stderr)
+
     def test_launcher_uses_persisted_plan_and_no_total_capture_timebox(self):
         release = ROOT / 'project_0/native/target/release'
         if not all((release / b).exists() for b in ('p0-longtail', 'p0-measurement-plan', 'p0ctl')):

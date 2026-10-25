@@ -122,7 +122,7 @@ fn boot_budget(c: &RuntimeConfig) -> Result<(u64, u64), String> {
 }
 impl NetworkReads {
     pub fn new(c: &RuntimeConfig) -> Result<Self, String> {
-        if !darkbot_solana::runtime_config::configured() || !provider::enabled() {
+        if !darkbot_solana::runtime_config::configured() {
             return Err("BOOT_PROVIDER_NOT_INITIALIZED".into());
         }
         Self::from_config(c)
@@ -578,7 +578,6 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
     let resolved =
         darkbot_solana::runtime_config::Resolved::parse(operational, &|k| std::env::var(k).ok())?;
     resolved.activate()?;
-    provider::enable_measurement_budget();
     let c = darkbot_solana::runtime_config::active();
     let offline = boot_audit::offline(&boot_audit::OfflineInputs::for_project(project))?;
     if val("--network-approved").as_deref() != Some(&offline.readiness_token[..16]) {

@@ -1,14 +1,23 @@
 //! Explicit read-only provider capability probe; never calls sendTransaction.
 use base64::Engine;
 use darkbot_solana::tx::{self, BuildVersion, Resources, TxLimits, TxPlan};
-use solana_client::{rpc_client::RpcClient, rpc_request::RpcRequest};
+use solana_client::rpc_request::RpcRequest;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Signer};
 use std::{env, error::Error, str::FromStr};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let rpc =
-        RpcClient::new_with_commitment(env::var("P0_RPC_URL")?, CommitmentConfig::confirmed());
+    // F-01/C07: through the process provider budget like every other client (no plain client).
+    let rpc = darkbot_solana::provider::rpc_client(
+        env::var("P0_RPC_URL")?,
+        std::time::Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .rpc_timeout_ms,
+        ),
+        CommitmentConfig::confirmed(),
+        darkbot_solana::provider::Workload::Simulation,
+    );
     let payer = tx::load_keypair_json(&env::var("P0_KEYPAIR_PATH")?)?;
     let expected = Pubkey::from_str(&env::var("P0_EXPECTED_PUBKEY")?)?;
     if payer.pubkey() != expected {
