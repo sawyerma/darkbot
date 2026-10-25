@@ -213,6 +213,13 @@ pub fn active_limits() -> &'static Limits {
     &runtime_config::active().limits
 }
 
+/// Activates the operational configuration of a standalone status process from its environment
+/// (`P0_PROFILE`, `P0_OPERATIONAL_CONFIG_FILE`, the registry's `P0_*` variables): the one typed
+/// authority of its bounds.
+pub fn activate_from_env() -> Result<(), String> {
+    runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?.activate()
+}
+
 /// The operational configuration of this process.
 pub fn operational_snapshot() -> OperationalSnapshot {
     operational_snapshot_of(

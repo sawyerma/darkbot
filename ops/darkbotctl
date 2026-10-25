@@ -32,6 +32,7 @@ DIST_BUILD="$ROOT/frontend/dist"
 CAPTURE_BUILD="$ROOT/project_0/native/target/release/p0-market-capture-reported"
 CAPTURE_BIN="$APP_HOME/current/p0-market-capture-reported"
 P0CTL_BUILD="$ROOT/project_0/native/target/release/p0ctl"
+P0A_BUILD="$ROOT/project_0/native/target/release/p0-analytics-reporter"
 APP_CONF="${DARKBOT_APP_CONF:-$HOME/.darkbot/app.conf}"
 LOCKFILE="$RUNDIR/lifecycle.lock"
 RESULT_FILE="$RUNDIR/capture.result"
@@ -71,6 +72,16 @@ fi
 GEN_NEXT="${GEN_FILE%.*}.next"
 # The deployed Project 0 controller; its project directory is the app's data home.
 P0CTL_BIN="$APP_HOME/current/p0ctl"
+# B03/U-9: the Project 0 analytics publisher (project0.analytics.jobs without a capture): its own
+# socket and generation, the gateway's auxiliary `project0.analytics` feed, kept alive by launchd.
+P0A_LABEL="${LABEL%.gateway}.p0.analytics"
+P0A_PLIST="$RUNDIR/$P0A_LABEL.plist"
+P0A_BIN="$APP_HOME/current/p0-analytics-reporter"
+P0A_SOCK="/tmp/darkbot/project0-analytics.sock"
+P0A_GEN_FILE="$HOME/.darkbot/p0-analytics.generation"
+if [ -n "${DARKBOT_TEST_DIR:-}" ]; then
+  P0A_SOCK="$DARKBOT_TEST_DIR/a.sock"; P0A_GEN_FILE="$RUNDIR/p0-analytics.generation"
+fi
 umask 077
 
 mkdir -p "$APP_HOME/releases" "$LOGDIR" "$RUNDIR" "$(dirname "$SOCK")" "$(dirname "$PLIST")"
@@ -196,7 +207,7 @@ write_plist() {
     $(plist_env DARKBOT_GATEWAY_STATIC_DIR "$APP_HOME/current/dist")
 $(plist_env DARKBOT_GATEWAY_BIND "127.0.0.1:$PORT")
 $(plist_env DARKBOT_GATEWAY_GENERATION_FILE "$RUNDIR/gateway.generation")
-    $(plist_env DARKBOT_GATEWAY_FEEDS "project0=$SOCK,bsc=$BSC_SOCKET")
+    $(plist_env DARKBOT_GATEWAY_FEEDS "project0=$SOCK,project0.analytics=$P0A_SOCK,bsc=$BSC_SOCKET")
 $(plist_env DARKBOT_CTL "$APP_HOME/current/darkbotctl")
 $(plist_env DARKBOT_RUNDIR "$RUNDIR")
 $(plist_env DARKBOT_LOGDIR "$LOGDIR")
@@ -238,7 +249,6 @@ write_capture_plist() {
 $(plist_env P0_CAPTURE_BIN "$CAPTURE_BIN")
 $(plist_env P0_ENV_FILE "$ENV_FILES")
 $(plist_env P0_MARKET_OUT_DIR "$APP_HOME/data/market")
-$(plist_env P0_PROJECT_DIR "$APP_HOME")
 $(plist_env P0_REPORT_SOCKET "$SOCK")
 $(plist_env P0_REPORT_GENERATION_FILE "$GEN_FILE")
 $(plist_env P0_MARKET_RUN_ID "app-$launch")
@@ -258,6 +268,35 @@ EOF
   )
 }
 
+p0_analytics_up() {
+  [ -x "$P0A_BIN" ] || return 0
+  if launchctl list "$P0A_LABEL" >/dev/null 2>&1; then return 0; fi
+  ( umask 077; cat > "$P0A_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$P0A_LABEL</string>
+  <key>ProgramArguments</key><array><string>$(printf '%s' "$P0A_BIN" | xml_escape)</string></array>
+  <key>WorkingDirectory</key><string>$(printf '%s' "$APP_HOME/current" | xml_escape)</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+$(plist_env P0_REPORT_SOCKET "$P0A_SOCK")
+$(plist_env P0_REPORT_GENERATION_FILE "$P0A_GEN_FILE")
+$(plist_env P0_REPORT_ANALYTICS_PROJECT_DIR "$APP_HOME")
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>$(printf '%s' "$LOGDIR/p0-analytics.log" | xml_escape)</string>
+  <key>StandardErrorPath</key><string>$(printf '%s' "$LOGDIR/p0-analytics.log" | xml_escape)</string>
+</dict>
+</plist>
+EOF
+  )
+  launchctl bootstrap "$DOMAIN" "$P0A_PLIST"
+}
+
 # ---------------------------------------------------------------- build / deploy / window
 stage_capture_env() {
   [ -z "${DARKBOT_TEST_DIR:-}" ] || return 0
@@ -273,7 +312,7 @@ cmd_build() {
   command -v cargo >/dev/null || die "cargo nicht im PATH – im Terminal ausführen"
   (cd "$ROOT/frontend" && npm run lint && npm run lint:boundaries && npm run lint:css && npm run check:freeze && npm run build)
   (cd "$ROOT/gateway" && cargo build --release --locked --offline)
-  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported && cargo build --release --locked --offline -p darkbot-runner --bin p0ctl)
+  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported --bin p0-analytics-reporter && cargo build --release --locked --offline -p darkbot-runner --bin p0ctl)
   (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness --bin g07_candidate)
   /usr/bin/python3 "$ROOT/ops/release_manifest.py" --write
   say "build ok – weiter mit: darkbotctl deploy"
@@ -285,6 +324,7 @@ cmd_deploy() {
   [ -f "$DIST_BUILD/index.html" ] || die "Frontend nicht gebaut: darkbotctl build"
   [ -x "$CAPTURE_BUILD" ] || die "Capture nicht gebaut: darkbotctl build"
   [ -x "$P0CTL_BUILD" ] || die "p0ctl nicht gebaut: darkbotctl build"
+  [ -x "$P0A_BUILD" ] || die "p0-analytics-reporter nicht gebaut: darkbotctl build"
   if capture_running && [ -f "$APP_HOME/current/SCHEMA_ID" ] && ! cmp -s "$ROOT/protocol/schema_id.txt" "$APP_HOME/current/SCHEMA_ID"; then
     die "Schema geändert: Capture zuerst geordnet stoppen; Deploy und Neustart gemeinsam durchführen"
   fi
@@ -299,6 +339,7 @@ cmd_deploy() {
   cp "$GATEWAY_BUILD" "$rel/darkbot-gateway"
   cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
   cp "$P0CTL_BUILD" "$rel/p0ctl"
+  cp "$P0A_BUILD" "$rel/p0-analytics-reporter"
   cp "$ROOT/ops/darkbotctl" "$rel/darkbotctl"
   cp "$ROOT/ops/bsc-control.sh" "$rel/bsc-control.sh"
   cp "$ROOT/bsc/engine/target/release/bsc-status-reporter" "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" "$ROOT/bsc/engine/target/release/g07_candidate" "$rel/"
@@ -313,6 +354,10 @@ cmd_deploy() {
   if launchctl list "$BSC_REPORTER_LABEL" >/dev/null 2>&1; then
     launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL"
     bsc_reporter_up
+  fi
+  if launchctl list "$P0A_LABEL" >/dev/null 2>&1; then
+    launchctl bootout "$DOMAIN/$P0A_LABEL"
+    p0_analytics_up
   fi
   # Previous releases stay; a running capture keeps executing the binary it was started from.
   say "deployed $(cat "$rel/COMMIT")"
@@ -343,6 +388,7 @@ cmd_up_inner() {
     launchctl bootstrap "$DOMAIN" "$PLIST"
   fi
   bsc_reporter_up
+  p0_analytics_up
   local i=0; until healthy || [ $i -ge 50 ]; do sleep 0.2; i=$((i+1)); done
   healthy || die "Gateway antwortet nicht – siehe $LOGDIR/gateway.log"
   say "gateway: $(/usr/bin/curl -fsS "${URL}healthz")"
@@ -542,6 +588,7 @@ _down_finish() {
   capture_running && die "Capture noch aktiv; Gateway bleibt an"
   [ -z "$(bsc_pid)" ] || die "BSC Readiness stoppt noch; Gateway bleibt aktiv"
   launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL" >/dev/null 2>&1 || true
+  launchctl bootout "$DOMAIN/$P0A_LABEL" >/dev/null 2>&1 || true
   _gateway_down
   rm -f "$DOWN_FILE"
 }

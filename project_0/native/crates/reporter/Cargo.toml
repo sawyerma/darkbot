@@ -25,6 +25,11 @@ path = "src/bin/p0_market_capture_reported.rs"
 name = "p0-longtail"
 path = "src/bin/p0_longtail.rs"
 
+# B03/U-9: the standalone Project 0 analytics publisher (project0.analytics.jobs).
+[[bin]]
+name = "p0-analytics-reporter"
+path = "src/bin/p0_analytics_reporter.rs"
+
 [features]
 test-fixture = []
 # Pass-through of the runtime's features (launchers build with "crate_health txv1").

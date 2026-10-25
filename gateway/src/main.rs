@@ -12,12 +12,15 @@ use tracing_subscriber::EnvFilter;
 fn engine_feeds(cfg: &GatewayConfig) -> Vec<Arc<dyn EngineFeed>> {
     cfg.feeds
         .iter()
-        .map(|f| {
-            UnixSocketFeed::new(
+        .enumerate()
+        .map(|(i, f)| {
+            UnixSocketFeed::owning(
                 f.project,
                 f.label,
                 f.socket.clone(),
                 cfg.limits.max_state_full_bytes as usize,
+                darkbot_gateway::config::owned_topics(&cfg.feeds, i),
+                f.auxiliary.is_some(),
             ) as Arc<dyn EngineFeed>
         })
         .collect()

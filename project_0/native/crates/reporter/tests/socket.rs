@@ -435,14 +435,16 @@ fn b03_analytics_jobs_reach_the_wire_from_the_job_store() {
     let tap = StatusTap::new();
     let mut cfg = ReporterConfig::new(sock("analytics"), dir.join("generation"), "run".into());
     cfg.project_dir = Some(project.clone());
+    cfg.capture = false;
     let handle = start(cfg.clone(), tap).unwrap();
     let mut stream = connect(&cfg);
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
     match next(&mut stream).msg.unwrap() {
+        // The analytics publisher declares its one topic (the gateway's auxiliary feed).
         engine_frame::Msg::Hello(h) => {
-            assert!(h.topics.contains(&(TopicId::Project0AnalyticsJobs as i32)))
+            assert_eq!(h.topics, vec![TopicId::Project0AnalyticsJobs as i32])
         }
         other => panic!("{other:?}"),
     }

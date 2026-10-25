@@ -73,6 +73,31 @@ fn env_config_defaults_off_and_validates_enabled() {
     let cfg = config_from_env("r", &ok).unwrap().unwrap();
     assert_eq!(cfg.heartbeat, Duration::from_millis(1500));
     assert_eq!(cfg.run_id, "r");
+    // B03/U-9: the analytics topic only on the explicit publisher variable, never from the
+    // project directory a controller passes to its children.
+    assert_eq!(cfg.project_dir, None);
+    let with_project = |key: &str| match key {
+        "P0_PROJECT_DIR" => Some("/p".to_owned()),
+        other => ok(other),
+    };
+    assert_eq!(
+        config_from_env("r", &with_project)
+            .unwrap()
+            .unwrap()
+            .project_dir,
+        None
+    );
+    let analytics = |key: &str| match key {
+        "P0_REPORT_ANALYTICS_PROJECT_DIR" => Some("/p".to_owned()),
+        other => ok(other),
+    };
+    assert_eq!(
+        config_from_env("r", &analytics)
+            .unwrap()
+            .unwrap()
+            .project_dir,
+        Some("/p".into())
+    );
 }
 
 #[test]

@@ -208,6 +208,29 @@ pub struct FeedSpec {
     pub project: crate::proto::ProjectId,
     pub label: &'static str,
     pub socket: PathBuf,
+    /// An auxiliary feed's own topics (B03/U-9 `project0.analytics`: project0.analytics.jobs);
+    /// `None`: the project's main feed (every other topic of the project).
+    pub auxiliary: Option<&'static [crate::proto::TopicId]>,
+}
+
+/// The STATE topics feed `i` of `feeds` owns: an auxiliary feed its own, a main feed every topic
+/// of its project that no auxiliary feed of the project owns.
+pub fn owned_topics(feeds: &[FeedSpec], i: usize) -> Vec<crate::proto::TopicId> {
+    let f = &feeds[i];
+    if let Some(own) = f.auxiliary {
+        return own.to_vec();
+    }
+    crate::topics::topics_of(f.project)
+        .filter(|t| t.is_state())
+        .map(|t| t.id)
+        .filter(|id| {
+            !feeds
+                .iter()
+                .filter(|o| o.project == f.project)
+                .filter_map(|o| o.auxiliary)
+                .any(|own| own.contains(id))
+        })
+        .collect()
 }
 pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
     use crate::proto::ProjectId;
@@ -217,10 +240,12 @@ pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
             key: "DARKBOT_GATEWAY_FEEDS",
             value: entry.into(),
         })?;
-        let (project, label) = match name.trim() {
-            "project0" => (ProjectId::Project0, "Project 0"),
-            "bsc" => (ProjectId::Bsc, "BSC"),
-            "solana" => (ProjectId::Solana, "Solana"),
+        const ANALYTICS: &[crate::proto::TopicId] = &[crate::proto::TopicId::Project0AnalyticsJobs];
+        let (project, label, auxiliary) = match name.trim() {
+            "project0" => (ProjectId::Project0, "Project 0", None),
+            "project0.analytics" => (ProjectId::Project0, "Project 0 analytics", Some(ANALYTICS)),
+            "bsc" => (ProjectId::Bsc, "BSC", None),
+            "solana" => (ProjectId::Solana, "Solana", None),
             _ => {
                 return Err(ConfigError::Invalid {
                     key: "DARKBOT_GATEWAY_FEEDS",
@@ -230,7 +255,7 @@ pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
         };
         if path.trim().is_empty()
             || !path.trim().starts_with('/')
-            || out.iter().any(|f| f.project == project)
+            || out.iter().any(|f| f.label == label)
         {
             return Err(ConfigError::Invalid {
                 key: "DARKBOT_GATEWAY_FEEDS",
@@ -241,6 +266,7 @@ pub fn parse_feeds(input: &str) -> Result<Vec<FeedSpec>, ConfigError> {
             project,
             label,
             socket: PathBuf::from(path.trim()),
+            auxiliary,
         });
     }
     Ok(out)
@@ -315,5 +341,32 @@ mod tests {
             "https://darkbot.example",
             "HTTPS://ops.example"
         ])));
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::{owned_topics, parse_feeds};
+    use crate::proto::{ProjectId, TopicId};
+    /// B03/U-9: the Project 0 analytics publisher is an auxiliary feed owning the analytics
+    /// topic; the main Project 0 feed owns every other one; a label is configured once.
+    #[test]
+    fn the_analytics_feed_owns_its_topic_and_the_main_feed_the_rest() {
+        let feeds = parse_feeds("project0=/a,project0.analytics=/b,bsc=/c").unwrap();
+        assert_eq!(feeds.len(), 3);
+        let main = owned_topics(&feeds, 0);
+        assert!(main.contains(&TopicId::Project0Status));
+        assert!(!main.contains(&TopicId::Project0AnalyticsJobs));
+        assert_eq!(
+            owned_topics(&feeds, 1),
+            vec![TopicId::Project0AnalyticsJobs]
+        );
+        assert_eq!(feeds[1].project, ProjectId::Project0);
+        assert!(owned_topics(&feeds, 2).contains(&TopicId::BscStatus));
+        // Without the analytics feed the main feed keeps the topic.
+        let alone = parse_feeds("project0=/a").unwrap();
+        assert!(owned_topics(&alone, 0).contains(&TopicId::Project0AnalyticsJobs));
+        assert!(parse_feeds("project0.analytics=/b,project0.analytics=/d").is_err());
+        assert!(parse_feeds("project0=/a,project0=/d").is_err());
     }
 }

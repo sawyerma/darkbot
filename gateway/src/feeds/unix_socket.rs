@@ -20,6 +20,9 @@ pub struct UnixSocketFeed {
     path: PathBuf,
     max_payload: usize,
     max_frame: usize,
+    /// The STATE topics this source may declare and publish.
+    owned: Vec<TopicId>,
+    auxiliary: bool,
 }
 /// Exact largest valid STATE frame of one source: a StateFull carrying `max_payload` bytes with
 /// every other field at its longest encoding (u64::MAX, i64::MIN, the highest topic id) and the
@@ -44,12 +47,30 @@ pub fn max_state_frame(max_payload: usize, source_id: &str) -> usize {
 }
 impl UnixSocketFeed {
     pub fn new(project: ProjectId, label: &'static str, path: PathBuf, max: usize) -> Arc<Self> {
+        let owned = topics::topics_of(project)
+            .filter(|t| t.is_state())
+            .map(|t| t.id)
+            .collect();
+        Self::owning(project, label, path, max, owned, false)
+    }
+    /// A source of `owned` topics of `project` only (`auxiliary`: beside the project's main
+    /// source, which then owns the other topics).
+    pub fn owning(
+        project: ProjectId,
+        label: &'static str,
+        path: PathBuf,
+        max: usize,
+        owned: Vec<TopicId>,
+        auxiliary: bool,
+    ) -> Arc<Self> {
         Arc::new(Self {
             project,
             label,
             path,
             max_payload: max,
             max_frame: max.saturating_add(ENVELOPE_RESERVE),
+            owned,
+            auxiliary,
         })
     }
     fn validate(&self, h: &EngineHello) -> Result<HashSet<TopicId>, FeedError> {
@@ -69,6 +90,7 @@ impl UnixSocketFeed {
             if spec.project != self.project
                 || !spec.available()
                 || !spec.is_state()
+                || !self.owned.contains(&spec.id)
                 || !ids.insert(spec.id)
             {
                 return Err(FeedError::Mismatch(
@@ -130,6 +152,12 @@ impl EngineFeed for UnixSocketFeed {
     }
     fn label(&self) -> &'static str {
         self.label
+    }
+    fn topics(&self) -> Vec<TopicId> {
+        self.owned.clone()
+    }
+    fn auxiliary(&self) -> bool {
+        self.auxiliary
     }
     async fn attach(&self) -> Result<mpsc::Receiver<FeedMessage>, FeedError> {
         let mut stream = UnixStream::connect(&self.path)
@@ -281,5 +309,55 @@ mod peer_tests {
     fn only_the_gateway_user_may_feed() {
         assert!(same_user(current_uid(), current_uid()));
         assert!(!same_user(current_uid().wrapping_add(1), current_uid()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// A source may declare only the topics its feed owns (an analytics publisher nothing but
+    /// project0.analytics.jobs, the main Project 0 source not that one when it is owned apart).
+    #[test]
+    fn a_hello_declares_only_owned_topics() {
+        let hello = |topics: &[TopicId]| EngineHello {
+            project: ProjectId::Project0 as i32,
+            schema_id: SCHEMA_ID.into(),
+            source_id: "s".into(),
+            generation: 1,
+            topics: topics.iter().map(|t| *t as i32).collect(),
+        };
+        let aux = UnixSocketFeed::owning(
+            ProjectId::Project0,
+            "Project 0 analytics",
+            "/x".into(),
+            1024,
+            vec![TopicId::Project0AnalyticsJobs],
+            true,
+        );
+        assert!(aux
+            .validate(&hello(&[TopicId::Project0AnalyticsJobs]))
+            .is_ok());
+        assert!(aux.validate(&hello(&[TopicId::Project0Status])).is_err());
+        let main = UnixSocketFeed::owning(
+            ProjectId::Project0,
+            "Project 0",
+            "/y".into(),
+            1024,
+            vec![TopicId::Project0Status, TopicId::Project0CaptureState],
+            false,
+        );
+        assert!(main
+            .validate(&hello(&[
+                TopicId::Project0Status,
+                TopicId::Project0CaptureState
+            ]))
+            .is_ok());
+        assert!(main
+            .validate(&hello(&[
+                TopicId::Project0Status,
+                TopicId::Project0AnalyticsJobs
+            ]))
+            .is_err());
+        assert!(aux.auxiliary() && !main.auxiliary());
     }
 }

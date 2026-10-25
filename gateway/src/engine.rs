@@ -14,7 +14,7 @@ use tracing::{info, warn};
 
 use crate::config::GatewayConfig;
 use crate::hub::{PublishError, PublishOutcome, StateHub, StateUpdate};
-use crate::proto::ProjectId;
+use crate::proto::{ProjectId, TopicId};
 use crate::topics;
 
 #[derive(Debug)]
@@ -47,6 +47,19 @@ pub trait EngineFeed: Send + Sync + 'static {
     fn project(&self) -> ProjectId;
     fn label(&self) -> &'static str;
     async fn attach(&self) -> Result<mpsc::Receiver<FeedMessage>, FeedError>;
+    /// The STATE topics this feed may publish: every one of its project unless an auxiliary
+    /// feed of the project owns some.
+    fn topics(&self) -> Vec<TopicId> {
+        crate::topics::topics_of(self.project())
+            .filter(|t| t.is_state())
+            .map(|t| t.id)
+            .collect()
+    }
+    /// An auxiliary feed publishes its own topics beside the project's source (B03/U-9: the
+    /// Project 0 analytics publisher); it never changes the project's source state.
+    fn auxiliary(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,10 +175,13 @@ fn validate_feed_state(project: ProjectId, u: &StateUpdate) -> Result<(), FeedEr
 /// too large instead of sending it). A stored state or FRAME_TOO_LARGE marker shows a live,
 /// connected source (`Ok(true)`); an older or duplicate one changes nothing (`Ok(false)`); an
 /// identity or topic violation detaches the source (`Err`).
+#[allow(clippy::too_many_arguments)]
 fn deliver(
     hub: &StateHub,
     registry: &SourceRegistry,
     project: ProjectId,
+    owned: &[TopicId],
+    auxiliary: bool,
     u: StateUpdate,
     declared: Option<u64>,
     at: Instant,
@@ -173,6 +189,10 @@ fn deliver(
     let sid = u.source_id.clone();
     if let Err(e) = validate_feed_state(project, &u) {
         warn!(?project, error = %e, "invalid engine feed identity or topic; detaching");
+        return Err(());
+    }
+    if !owned.iter().any(|t| *t as i32 == u.topic as i32) {
+        warn!(?project, topic = ?u.topic, "topic not owned by this feed; detaching");
         return Err(());
     }
     let topic = u.topic;
@@ -201,13 +221,16 @@ fn deliver(
             return Err(());
         }
     }
-    registry.update(project, |s| {
-        let changed = s.state != SourceState::Connected || s.source_id.as_deref() != Some(&*sid);
-        s.state = SourceState::Connected;
-        s.source_id = Some(sid.clone());
-        s.last_message_at = Some(at);
-        changed
-    });
+    if !auxiliary {
+        registry.update(project, |s| {
+            let changed =
+                s.state != SourceState::Connected || s.source_id.as_deref() != Some(&*sid);
+            s.state = SourceState::Connected;
+            s.source_id = Some(sid.clone());
+            s.last_message_at = Some(at);
+            changed
+        });
+    }
     Ok(true)
 }
 
@@ -224,6 +247,14 @@ pub fn spawn_supervisor(
 
     tokio::spawn(async move {
         let project = feed.project();
+        let owned = feed.topics();
+        let auxiliary = feed.auxiliary();
+        // The project's source state belongs to its main feed; an auxiliary one leaves it.
+        let update = |f: &mut dyn FnMut(&mut SourceStatus) -> bool| {
+            if !auxiliary {
+                registry.update(project, |s| f(s));
+            }
+        };
         let mut attach_failures: u32 = 0;
         loop {
             let mut rx = match feed.attach().await {
@@ -238,7 +269,7 @@ pub fn spawn_supervisor(
                     } else {
                         tracing::debug!(?project, attach_failures, error = %e, "engine feed attach failed");
                     }
-                    registry.update(project, |s| {
+                    update(&mut |s| {
                         let next = if s.attach_count == 0 {
                             SourceState::NotConnected
                         } else {
@@ -260,7 +291,7 @@ pub fn spawn_supervisor(
                 ?project,
                 "engine feed attached; waiting for validated state"
             );
-            registry.update(project, |s| {
+            update(&mut |s| {
                 // IPC attach by itself is not a qualified/connected projection.
                 s.attach_count += 1;
                 s.last_message_at = Some(Instant::now());
@@ -275,12 +306,19 @@ pub fn spawn_supervisor(
                     Ok(Some(m @ (FeedMessage::State(_) | FeedMessage::StateTooLarge { .. }))) => {
                         last_msg = Instant::now();
                         let delivered = match m {
-                            FeedMessage::StateTooLarge { update, bytes } => {
-                                deliver(&hub, &registry, project, update, Some(bytes), last_msg)
-                            }
-                            FeedMessage::State(u) => {
-                                deliver(&hub, &registry, project, u, None, last_msg)
-                            }
+                            FeedMessage::StateTooLarge { update: u, bytes } => deliver(
+                                &hub,
+                                &registry,
+                                project,
+                                &owned,
+                                auxiliary,
+                                u,
+                                Some(bytes),
+                                last_msg,
+                            ),
+                            FeedMessage::State(u) => deliver(
+                                &hub, &registry, project, &owned, auxiliary, u, None, last_msg,
+                            ),
                             FeedMessage::Heartbeat | FeedMessage::ProtocolViolation(_) => Ok(false),
                         };
                         match delivered {
@@ -291,7 +329,7 @@ pub fn spawn_supervisor(
                     }
                     Ok(Some(FeedMessage::ProtocolViolation(why))) => {
                         tracing::error!(?project, %why, "engine IPC protocol violation; detaching");
-                        registry.update(project, |s| {
+                        update(&mut |s| {
                             s.protocol_violations += 1;
                             true
                         });
@@ -300,7 +338,7 @@ pub fn spawn_supervisor(
                     Ok(Some(FeedMessage::Heartbeat)) => {
                         last_msg = Instant::now();
                         // Heartbeats alone never restore STALE / DETACHED cached state.
-                        registry.update(project, |s| {
+                        update(&mut |s| {
                             s.last_message_at = Some(last_msg);
                             false
                         });
@@ -321,8 +359,8 @@ pub fn spawn_supervisor(
                         }
                         if !stale_marked {
                             stale_marked = true;
-                            hub.mark_stale(project);
-                            registry.update(project, |s| {
+                            hub.overlay_topics(&owned, crate::proto::StateQuality::Stale);
+                            update(&mut |s| {
                                 // Never-connected source stays NOT_CONNECTED.
                                 if s.state == SourceState::Connected {
                                     s.state = SourceState::Stale;
@@ -337,8 +375,8 @@ pub fn spawn_supervisor(
             }
 
             // DETACHED: bestehende Subscriber bekommen das Overlay sofort, neue sehen nie OK.
-            let n = hub.mark_detached(project);
-            registry.update(project, |s| {
+            let n = hub.overlay_topics(&owned, crate::proto::StateQuality::SourceDetached);
+            update(&mut |s| {
                 s.state = SourceState::Detached;
                 s.detach_count += 1;
                 true
@@ -361,16 +399,29 @@ pub mod test_feed {
         label: &'static str,
         pending: Mutex<Option<mpsc::Receiver<FeedMessage>>>,
         handed: watch::Sender<u32>,
+        owned: Option<Vec<TopicId>>,
+        auxiliary: bool,
     }
 
     impl ChannelFeed {
         pub fn new(project: ProjectId, label: &'static str) -> Arc<Self> {
+            Self::owning(project, label, None, false)
+        }
+
+        pub fn owning(
+            project: ProjectId,
+            label: &'static str,
+            owned: Option<Vec<TopicId>>,
+            auxiliary: bool,
+        ) -> Arc<Self> {
             let (handed, _) = watch::channel(0);
             Arc::new(Self {
                 project,
                 label,
                 pending: Mutex::new(None),
                 handed,
+                owned,
+                auxiliary,
             })
         }
 
@@ -394,6 +445,17 @@ pub mod test_feed {
         }
         fn label(&self) -> &'static str {
             self.label
+        }
+        fn topics(&self) -> Vec<TopicId> {
+            self.owned.clone().unwrap_or_else(|| {
+                crate::topics::topics_of(self.project)
+                    .filter(|t| t.is_state())
+                    .map(|t| t.id)
+                    .collect()
+            })
+        }
+        fn auxiliary(&self) -> bool {
+            self.auxiliary
         }
         async fn attach(&self) -> Result<mpsc::Receiver<FeedMessage>, FeedError> {
             loop {
@@ -722,6 +784,87 @@ mod liveness_tests {
             q() == Some(StateQuality::SourceDetached)
         })
         .await;
+    }
+
+    /// B03/U-9: the Project 0 analytics publisher beside the main source — the main source's
+    /// silence overlays its own topics only (the analytics state stays OK), the auxiliary feed
+    /// never changes the project's source state, and it is detached for a topic it does not own.
+    #[tokio::test]
+    async fn an_auxiliary_feed_keeps_its_topics_apart_from_the_project_source() {
+        let (hub, registry) = (Arc::new(StateHub::new(1024)), SourceRegistry::new());
+        let main = ChannelFeed::owning(
+            ProjectId::Project0,
+            "Project 0",
+            Some(vec![TopicId::Project0Status, TopicId::Project0CaptureState]),
+            false,
+        );
+        let aux = ChannelFeed::owning(
+            ProjectId::Project0,
+            "Project 0 analytics",
+            Some(vec![TopicId::Project0AnalyticsJobs]),
+            true,
+        );
+        let main_tx = main.connect(16).await;
+        let aux_tx = aux.connect(16).await;
+        let aux_attached = aux.attach_count();
+        let _m = spawn_supervisor(main.clone(), hub.clone(), registry.clone(), &cfg());
+        let _a = spawn_supervisor(aux.clone(), hub.clone(), registry.clone(), &cfg());
+        let p0 = |topic, seq| {
+            FeedMessage::State(StateUpdate {
+                topic,
+                generation: 1,
+                seq,
+                source_timestamp_unix_ns: 1,
+                source_id: Arc::from("TEST_ONLY"),
+                payload: Bytes::from(vec![8u8; 4]),
+            })
+        };
+        aux_tx
+            .send(p0(TopicId::Project0AnalyticsJobs, 1))
+            .await
+            .unwrap();
+        let q = |t| hub.current(t).map(|s| s.quality);
+        until("analytics OK", || {
+            q(TopicId::Project0AnalyticsJobs) == Some(StateQuality::Ok)
+        })
+        .await;
+        assert_ne!(
+            registry.status(ProjectId::Project0).unwrap().state,
+            SourceState::Connected,
+            "an auxiliary feed never connects the project source"
+        );
+        main_tx.send(p0(TopicId::Project0Status, 1)).await.unwrap();
+        until("main connected", || {
+            registry.status(ProjectId::Project0).map(|s| s.state) == Some(SourceState::Connected)
+        })
+        .await;
+        // The analytics publisher keeps sending; the main source falls silent and detaches.
+        let keep = tokio::spawn(async move {
+            for seq in 2..60 {
+                if aux_tx
+                    .send(p0(TopicId::Project0AnalyticsJobs, seq))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            aux_tx
+        });
+        until("main detached", || {
+            q(TopicId::Project0Status) == Some(StateQuality::SourceDetached)
+        })
+        .await;
+        assert_eq!(q(TopicId::Project0AnalyticsJobs), Some(StateQuality::Ok));
+        let aux_tx = keep.await.unwrap();
+        // A topic the analytics feed does not own detaches it.
+        aux_tx.send(p0(TopicId::Project0Status, 9)).await.unwrap();
+        until("aux detached for a foreign topic", || {
+            q(TopicId::Project0AnalyticsJobs) == Some(StateQuality::SourceDetached)
+        })
+        .await;
+        assert_eq!(*aux_attached.borrow(), 1);
     }
 
     #[tokio::test]

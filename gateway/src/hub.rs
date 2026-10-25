@@ -205,6 +205,26 @@ impl StateHub {
         changed
     }
 
+    /// The overlay for `topics` only (the topics of one feed).
+    pub fn overlay_topics(&self, topics: &[TopicId], quality: StateQuality) -> usize {
+        let mut changed = 0;
+        for topic in topics {
+            if let Some(tx) = self.slots.get(topic) {
+                tx.send_if_modified(|slot| match slot.as_ref() {
+                    Some(cur) if cur.quality != quality => {
+                        let mut next = (**cur).clone();
+                        next.quality = quality;
+                        *slot = Some(Arc::new(next));
+                        changed += 1;
+                        true
+                    }
+                    _ => false,
+                });
+            }
+        }
+        changed
+    }
+
     pub fn mark_detached(&self, project: ProjectId) -> usize {
         self.overlay_quality(project, StateQuality::SourceDetached)
     }

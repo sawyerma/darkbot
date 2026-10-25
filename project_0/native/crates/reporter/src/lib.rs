@@ -58,6 +58,9 @@ pub struct ReporterConfig {
     /// B03/U-9: the project directory whose analytics job store this process publishes
     /// (project0.analytics.jobs, declared in the hello); `None`: not published.
     pub project_dir: Option<PathBuf>,
+    /// The process publishes project0.status and project0.capture.state (a capture or runtime);
+    /// the standalone analytics publisher does not.
+    pub capture: bool,
 }
 
 impl ReporterConfig {
@@ -71,6 +74,7 @@ impl ReporterConfig {
             min_interval: Duration::from_millis(100),
             owner: false,
             project_dir: None,
+            capture: true,
         }
     }
 }
@@ -531,13 +535,23 @@ fn frame(message: engine_frame::Msg) -> Vec<u8> {
     output
 }
 
-/// The topics this source publishes; an owner process adds the three owner topics, a process
-/// with a project directory the analytics topic.
-pub fn hello_frame(source_id: &str, generation: u64, owner: bool, analytics: bool) -> Vec<u8> {
-    let mut topics = vec![
-        TopicId::Project0Status as i32,
-        TopicId::Project0CaptureState as i32,
-    ];
+/// The topics this source publishes: a capture or runtime project0.status and the capture
+/// state, an owner process the three owner topics, a process with a project directory the
+/// analytics topic.
+pub fn hello_frame(
+    source_id: &str,
+    generation: u64,
+    capture: bool,
+    owner: bool,
+    analytics: bool,
+) -> Vec<u8> {
+    let mut topics = Vec::new();
+    if capture {
+        topics.extend([
+            TopicId::Project0Status as i32,
+            TopicId::Project0CaptureState as i32,
+        ]);
+    }
     if owner {
         topics.extend([
             TopicId::Project0FinanceSummary as i32,
@@ -937,6 +951,7 @@ fn session(
     send(&hello_frame(
         source_id,
         generation,
+        cfg.capture,
         cfg.owner,
         cfg.project_dir.is_some(),
     ))?;
@@ -1025,7 +1040,9 @@ pub fn config_from_env(
     );
     config.heartbeat = Duration::from_millis(heartbeat);
     config.min_interval = Duration::from_millis(min_interval);
-    config.project_dir = lookup("P0_PROJECT_DIR")
+    // B03/U-9: only the standalone analytics publisher sets it; with the gateway's
+    // `project0.analytics` feed it is the topic's one owner.
+    config.project_dir = lookup("P0_REPORT_ANALYTICS_PROJECT_DIR")
         .filter(|s| !s.trim().is_empty())
         .map(|s| PathBuf::from(s.trim()));
     Ok(Some(config))
@@ -1487,14 +1504,15 @@ mod contract_tests {
     /// The analytics topic is declared only by a process that publishes a project's store.
     #[test]
     fn b03_hello_declares_the_analytics_topic_only_with_a_project() {
-        let topics =
-            |analytics| match EngineFrame::decode(&hello_frame("s", 1, false, analytics)[4..])
-                .unwrap()
-                .msg
-            {
-                Some(engine_frame::Msg::Hello(h)) => h.topics,
-                other => panic!("{other:?}"),
-            };
+        let topics = |analytics| match EngineFrame::decode(
+            &hello_frame("s", 1, true, false, analytics)[4..],
+        )
+        .unwrap()
+        .msg
+        {
+            Some(engine_frame::Msg::Hello(h)) => h.topics,
+            other => panic!("{other:?}"),
+        };
         let analytics = TopicId::Project0AnalyticsJobs as i32;
         assert!(!topics(false).contains(&analytics));
         assert!(topics(true).contains(&analytics));
