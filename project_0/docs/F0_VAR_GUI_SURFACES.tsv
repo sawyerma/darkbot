@@ -127,16 +127,16 @@ DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	32	Runtime ow
 DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	38	Runtime owner
 DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	40	Run
 DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	41	State
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	42	Ingress · generation / reconnects
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	43	Same-slot updates · unversioned refused / unordered
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	44	Trigger · lanes L0/L1/L2 · detect
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	45	Repeats suppressed · soft cap
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	46	Day · health / liquidatable / plans
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	47	Day · simulations pass / fail · shadow ready / wins
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	48	Latency p95 · decision (rx→ready) / fee quote / simulation
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	49	Safety · capital in use / limit
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	50	Safety · day realized / loss limit
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	52	Rebalancing · plan
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	43	Ingress · generation / reconnects
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	44	Same-slot updates · unversioned refused / unordered
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	45	Trigger · lanes L0/L1/L2 · detect
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	46	Repeats suppressed · soft cap
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	47	Day · health / liquidatable / plans
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	48	Day · simulations pass / fail · shadow ready / wins
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	49	Latency p95 · decision (rx→ready) / fee quote / simulation
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	50	Safety · capital in use / limit
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	51	Safety · day realized / loss limit
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	53	Rebalancing · plan
 DISPLAY	frontend/src/features/project0/components/RunsSection.tsx	29	Recorded runs · post-capture
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	43	Run
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	44	Verification
@@ -146,14 +146,14 @@ CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	46	Bud
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	47	Budget · RAM MiB
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	49	Verify, report & qualify
 TS_DECLARATION	frontend/src/features/project0/components/SourcesSection.tsx	7	Mode
-DISPLAY	frontend/src/features/project0/components/SourcesSection.tsx	32	Data sources · runtime owner
-DISPLAY	frontend/src/features/project0/components/SourcesSection.tsx	38	Observed / rejected · changes applied / refused
-CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	42	Unit
-CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	43	Mode
-CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	44	Off
-CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	44	Observe
-CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	44	Active (needs a qualification)
-CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	46	Request mode
+DISPLAY	frontend/src/features/project0/components/SourcesSection.tsx	35	Data sources · runtime owner
+DISPLAY	frontend/src/features/project0/components/SourcesSection.tsx	41	Observed / rejected · changes applied / refused
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	45	Unit
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	46	Mode
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	47	Off
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	47	Observe
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	47	Active (needs a qualification)
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	49	Request mode
 TS_DECLARATION	frontend/src/features/project0/model/analytics.ts	6	RunQualificationView
 TS_DECLARATION	frontend/src/features/project0/model/analytics.ts	13	AnalyticsRunView
 TS_DECLARATION	frontend/src/features/project0/model/analytics.ts	24	JobParamsView
@@ -173,15 +173,16 @@ TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	26	ReportMarker
 TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	28	DraftOrigin
 TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	29	LiquidatorDraft
 TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	40	FinanceSnapshot
-TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	52	MonitorSnapshot
+TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	52	ProgramPinView
+TS_DECLARATION	frontend/src/features/project0/model/contracts.ts	64	MonitorSnapshot
 TS_DECLARATION	frontend/src/features/project0/model/owner.ts	7	CapabilityView
 TS_DECLARATION	frontend/src/features/project0/model/owner.ts	14	OwnerEngineView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	27	OwnerTriggerView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	37	OwnerPipelineView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	53	OwnerSafetyView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	68	RebalanceView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	79	LiquidatorView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	99	WalletsView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	46	OwnerTriggerView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	56	OwnerPipelineView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	72	OwnerSafetyView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	87	RebalanceView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	98	LiquidatorView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	121	WalletsView
 TS_DECLARATION	frontend/src/features/project0/model/status.ts	2	CapturePhaseName
 TS_DECLARATION	frontend/src/features/project0/model/status.ts	4	RunView
 TS_DECLARATION	frontend/src/features/project0/model/status.ts	17	PhaseView
@@ -275,22 +276,22 @@ DISPLAY	frontend/src/features/project0/pages/LiquidatorPanel.tsx	50	Background r
 CONTROL_OR_TEXT	frontend/src/features/project0/pages/LiquidatorPanel.tsx	51	"goto(""capture"")}>Capture →"
 CONTROL_OR_TEXT	frontend/src/features/project0/pages/LiquidatorPanel.tsx	52	"goto(""analytics"")}>Analytics →"
 CONTROL_OR_TEXT	frontend/src/features/project0/pages/LiquidatorPanel.tsx	52	Start fleet
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	13	System status
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	16	RPC latency · p95
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	19	Decision latency · p95
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	22	Stream freshness
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	24	Total capital · USD
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	26	Liquidator
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	27	Execution
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	27	Available capital
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/OverviewPanel.tsx	28	"goto(""liquidator"")}>Open Liquidator →"
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	29	Capture
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	30	Market stream
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	31	Unique transactions / recorded gaps
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/OverviewPanel.tsx	32	"goto(""capture"")}>Open Capture →"
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	33	Analytics
-DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	34	Replay / Optimization
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/OverviewPanel.tsx	35	"goto(""analytics"")}>Open Analytics →"
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	17	System status
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	20	RPC latency · p95
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	23	Decision latency · p95
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	26	Stream freshness
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	28	Total capital · USD
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	30	Liquidator
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	31	Execution
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	31	Available capital
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/OverviewPanel.tsx	33	"goto(""liquidator"")}>Open Liquidator →"
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	34	Capture
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	35	Market stream
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	36	Unique transactions / recorded gaps
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/OverviewPanel.tsx	37	"goto(""capture"")}>Open Capture →"
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	38	Analytics
+DISPLAY	frontend/src/features/project0/pages/OverviewPanel.tsx	39	Backtest / optimizer jobs
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/OverviewPanel.tsx	40	"goto(""analytics"")}>Open Analytics →"
 TS_DECLARATION	frontend/src/features/project0/pages/WalletsPanel.tsx	5	WalletTab
 DISPLAY	frontend/src/features/project0/pages/WalletsPanel.tsx	11	Wallets & Treasury
 DISPLAY	frontend/src/features/project0/pages/WalletsPanel.tsx	12	Wallet views

@@ -205,6 +205,8 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 | P6-04 Nit | `jito.rs:297-310` | `deadline` durch `submit` reichen wie bei `simulate_bundle` (`:246-254`) | Pfad produktiv inaktiv |
 | P3-02 | `ws_rpc.rs:749-750` | Messvertrag `T_rx` = Userland-Dequeue dokumentieren; Reader-Task nur mit Vertrag für `T_rx_first` | Burst-Loopback |
 
+- **Stand 25.10.:** P3-01 `fbe84af3`; P3-02/P3-04 `64f36f42` (Pong vom Read-Poll, Schreibpuffer begrenzt); P3-03 über F-16 `e568c7c4`; P5c-05/P5a-04 `c9a5bef7`; P3-07 `0ab0fc6e`; P1-04, P1-02 (Vergleich), P2-02 `0d1adf62`. Offen: P1-05 (Schema-Bump ohne Profil), P1-02 Feldtyp (gepinntes Layout), P6-04 (Handoff-Deadline = FE-06-Vertrag).
+
 ### V2-15 — Vor FE-06/LIVE zu entscheidende Verträge (keine heutigen Codefehler)
 - **P9-01b:** `admission.rs:144-156` baut **eine** `Current` und reicht sie an `reserve_payload` (`:159`) und `submit_payload` (`:170`); `validate()` prüft nur übergebene Felder. Vor FE-06: `Current.slot/now_unix_ms` unmittelbar vor `submit_payload` aus autoritativen Quellen erneuern; RED-Test: Alterung während der Simulation ⇒ Handoff-Refusal (heute Submitted). Heute kein produktiver Aufrufer (`detect.rs:541 fe04: None`).
 - **P7-03:** zweite Simulation in `admission.rs:113` nur relevant, wenn FE-04 verdrahtet wird; dann Pipeline-`SimResult` an `wire_sha256` gebunden wiederverwenden — Entscheid, kein heutiger Doppelaufruf.
