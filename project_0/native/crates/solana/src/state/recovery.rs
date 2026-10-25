@@ -209,15 +209,30 @@ impl RecoveryDriver {
         drain: &mut DrainFn<'_>,
         cancelled: &dyn Fn() -> bool,
     ) -> Option<RecoveryOutcome> {
-        let trigger = matches!(ev, IngressEvent::Reconnected { .. });
+        let reconnected = matches!(ev, IngressEvent::Reconnected { .. });
+        let root = matches!(ev, IngressEvent::Root { .. });
+        let was_tradable = st.run_state().is_tradable();
         st.on_event(ev);
         if let Some(detail) = st.fatal_detail() {
             return Some(RecoveryOutcome::Fatal {
                 code: fatal_code(detail),
             });
         }
-        if !trigger {
+        // V2-02: a root that orphaned accounts halted a tradable state with StateGap on a live
+        // stream (no open feed gap). It recovers on the same session — the same A/B snapshot and
+        // reconcile, the same attempt budget; no halt flag is cleared, nothing recurses.
+        let fork_gap = root
+            && was_tradable
+            && st.run_state() == RunState::Halted(HaltReason::StateGap)
+            && !st.gap_open();
+        if !(reconnected || fork_gap) {
             return None;
+        }
+        if fork_gap {
+            self.note(format!(
+                "[recovery] root-orphaned writes halted the state (orphaned_writes={}): recovering on the live session",
+                st.counters().orphaned_writes
+            ));
         }
         let outcome = self.recover_cancellable(st, fetch, drain, cancelled);
         // C1: a Reconnected applied during the final attempt is a new stream generation whose
@@ -830,6 +845,59 @@ mod tests {
         assert!(!state.run_state().is_tradable());
     }
 
+    /// V2-02 (P3-05/P5a-03): a root that orphans a branch carrying an account halts a Ready state
+    /// with StateGap on a live stream; the driver recovers it on the same session (A/B snapshot +
+    /// reconcile) instead of staying halted until a foreign reconnect. A root without an affected
+    /// account starts nothing.
+    #[test]
+    fn v2_02_fork_induced_state_gap_is_recovered_on_the_live_session() {
+        use crate::ingress::{SlotStatus, SlotUpdate};
+        use std::cell::Cell;
+        let pk = Pubkey::new_unique();
+        let mut state = StateCore::new(10);
+        let mut driver = RecoveryDriver::new(3);
+        let calls = Cell::new(0);
+        let mut fetch = snapshots(pk, 0, &calls);
+        let mut drain = |_: &mut StateCore| {};
+        let mut step = |state: &mut StateCore, ev| {
+            driver.on_event_cancellable(state, ev, &mut fetch, &mut drain, &|| false)
+        };
+        assert_eq!(
+            step(&mut state, reconnected()),
+            Some(RecoveryOutcome::Ready)
+        );
+        let slot = |slot, parent| {
+            IngressEvent::Slot(SlotUpdate {
+                slot,
+                parent: Some(parent),
+                status: SlotStatus::Processed,
+                source: SourceKind::WsRpcControl,
+                t_rx_ns: 0,
+            })
+        };
+        let root = |slot| IngressEvent::Root {
+            slot,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        };
+        assert_eq!(step(&mut state, slot(11, 10)), None);
+        assert_eq!(
+            step(&mut state, root(11)),
+            None,
+            "no orphan: nothing to recover"
+        );
+        assert_eq!(step(&mut state, slot(12, 11)), None);
+        assert_eq!(
+            step(
+                &mut state,
+                IngressEvent::Account(upd(Pubkey::new_unique(), 12, 2))
+            ),
+            None
+        );
+        assert_eq!(step(&mut state, slot(13, 11)), None);
+        assert_eq!(step(&mut state, root(13)), Some(RecoveryOutcome::Ready));
+        assert!(state.run_state().is_tradable());
+    }
     fn gap() -> IngressEvent {
         IngressEvent::Gap {
             source: SourceKind::WsRpcControl,
