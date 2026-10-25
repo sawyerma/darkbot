@@ -45,7 +45,7 @@ else cat "$1"; fi
     "dbrec_compare": "exit 0\n",
     "g06a_preflight_record": """while [ $# -gt 0 ]; do case "$1" in --out) out=$2; shift;; --upgrade-out) up=$2; shift;; --from) from=$2; shift;; esac; shift; done
 if [ -n "$from" ]; then printf 'scanned_from_block=%s\\nscanned_to_block=%s\\nheaders_verified=7\\nbloom_candidate_blocks=0\\n' "$from" "$(val head)" > "$out"; exit 0; fi
-printf 'latest_block_number=%s\\nportal_implementation=0x7a94f37b61a82c395f9812cf266b444783cc5e8c\\nwallet_qualification.addresses_bound=true\\nwallet_qualification.distinct=true\\nwallet_qualification.funding_pass=true\\nlauncher_pending_nonce=0\\nbuyer_pending_nonce=0\\n' "$(val head)" > "$out"
+printf 'latest_block_number=%s\\nlatest_block_hash=0x%064x\\nportal_implementation=0x7a94f37b61a82c395f9812cf266b444783cc5e8c\\nwallet_qualification.addresses_bound=true\\nwallet_qualification.distinct=true\\nwallet_qualification.funding_pass=true\\nlauncher_pending_nonce=0\\nbuyer_pending_nonce=0\\n' "$(val head)" "$(val head)" > "$out"
 printf 'scanned_from_block=127865761\\nscanned_to_block=%s\\nheaders_verified=7\\nbloom_candidate_blocks=0\\nupgrades[0].block = 1\\n' "$(val head)" > "$up"
 """,
     "g06a_native_bnb_quote": "printf 'expected_output=%s\\n' \"$(val output)\" > \"$2\"\n",
@@ -283,6 +283,9 @@ class Full(unittest.TestCase):
             self.assertNotIn("BSC_LAUNCHER_PRIVATE_KEY", env, (tool, argv))
             self.assertEqual(f"DARKBOT_G06A_SALT={A_SALT}" in env, salted, (tool, argv))
         self.assertNotIn(TEST_KEY, out.stdout + out.stderr)
+        # BSC-002: the simulation reads exactly the preflight block by hash.
+        sim = [c for c in w.calls() if c[0] == "node" and "simulate.cjs" in c[1][0]][0]
+        self.assertIn("DARKBOT_G06A_SEND_HEAD_HASH=0x%064x" % 129400000, sim[2])
 
 
 class Sign(unittest.TestCase):
