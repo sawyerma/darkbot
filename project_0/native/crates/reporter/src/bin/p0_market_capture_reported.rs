@@ -69,6 +69,11 @@ fn main() -> ExitCode {
         }
         result
     };
+    // F-16 (review 72b74fc1): the capture's last console lines are written before the process
+    // ends, bounded by `report_final_flush_ms` (as p0-longtail).
+    darkbot_runner::console::flush(std::time::Duration::from_millis(
+        darkbot_runner::status_tap::active_limits().report_final_flush_ms,
+    ));
     write_result(&result, run.as_deref(), generation);
     match result {
         Ok(()) => ExitCode::SUCCESS,

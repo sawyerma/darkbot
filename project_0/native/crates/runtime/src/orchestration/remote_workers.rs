@@ -152,8 +152,11 @@ pub struct RemoteWorkers {
     #[cfg(feature = "crate_health")]
     pub rebalance: Option<RebalanceQueues>,
     /// The doorbells of later attached workers (the owner's `wake`, the workers' `space`).
+    #[cfg(feature = "crate_health")]
     wake: Wakeup,
+    #[cfg(feature = "crate_health")]
     space: Wakeup,
+    #[cfg(feature = "crate_health")]
     capacity: usize,
 }
 
@@ -463,8 +466,11 @@ impl RemoteWorkers {
             fe04_settlement_results,
             #[cfg(feature = "crate_health")]
             rebalance: None,
+            #[cfg(feature = "crate_health")]
             wake: wake.clone(),
+            #[cfg(feature = "crate_health")]
             space,
+            #[cfg(feature = "crate_health")]
             capacity,
         })
     }
@@ -578,8 +584,11 @@ impl RemoteWorkers {
             fe04_settlement_results,
             #[cfg(feature = "crate_health")]
             rebalance: None,
+            #[cfg(feature = "crate_health")]
             wake: wake.clone(),
+            #[cfg(feature = "crate_health")]
             space: space.clone(),
+            #[cfg(feature = "crate_health")]
             capacity,
         };
         (

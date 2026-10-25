@@ -31,12 +31,14 @@ fn p0ctl_source_set_reaches_the_runtime_owner_queue() {
     let d = std::env::temp_dir().join(format!("p0ctl_source_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("data")).unwrap();
-    // No runtime: the request is recorded, nothing applies it.
+    // No runtime: refused, nothing recorded (a request nobody applies is no success; review
+    // 72b74fc1: the GUI receipt then says FAILED, never COMPLETED).
     let (code, out, err) = p0ctl(&d, &["source", "set", "geyser:publicnode", "observe"]);
-    assert_eq!(code, 0, "{out}{err}");
-    assert!(
-        out.contains("seq=1") && out.contains("no runtime is running"),
-        "{out}"
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(err.contains("SOURCE_NO_RUNTIME"), "{err}");
+    assert_eq!(
+        source_control::latest_request(&source_control::request_dir(&d)).unwrap(),
+        None
     );
     let (code, _, err) = p0ctl(&d, &["source", "set", "geyser:publicnode", "on"]);
     assert_eq!(code, 2);
@@ -62,19 +64,19 @@ fn p0ctl_source_set_reaches_the_runtime_owner_queue() {
     let (code, out, err) = p0ctl(&d, &["source", "set", "geyser:publicnode", "off"]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(
-        out.contains("seq=2") && out.contains("sent to runtime pid"),
+        out.contains("seq=1") && out.contains("sent to runtime pid"),
         "{out}"
     );
     assert!(matches!(
         next(),
-        ControlMessage::Apply { seq: 2, control } if control.mode == OperatingMode::Off
+        ControlMessage::Apply { seq: 1, control } if control.mode == OperatingMode::Off
     ));
     let (code, out, _) = p0ctl(&d, &["source", "set", "geyser:publicnode", "active"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(
         next(),
         ControlMessage::Refused {
-            seq: 3,
+            seq: 2,
             request: "geyser:publicnode active".into(),
             reason: "SOURCE_ACTIVE_REQUIRES_QUALIFICATION".into()
         }
@@ -82,7 +84,7 @@ fn p0ctl_source_set_reaches_the_runtime_owner_queue() {
     let (code, out, _) = p0ctl(&d, &["source", "status"]);
     assert_eq!(code, 0);
     assert!(
-        out.contains("seq=3 unit=geyser:publicnode mode=active")
+        out.contains("seq=2 unit=geyser:publicnode mode=active")
             && out.contains("runtime: running"),
         "{out}"
     );

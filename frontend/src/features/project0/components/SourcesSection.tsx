@@ -11,6 +11,9 @@ type Mode = "off" | "observe" | "active";
  * qualification, generation, the canonical unit, the last control decision — and the mode change
  * through the same controller as `p0ctl source set` (the owner applies or refuses it in order;
  * ACTIVE needs a qualification record). A state that is not LIVE is never offered for a change.
+ * The command reaches only a runtime owner of the app's data home; without one it fails
+ * (SOURCE_NO_RUNTIME), and a run started from a terminal elsewhere is changed with `p0ctl source
+ * set` in its own project (review 72b74fc1).
  */
 export function SourcesSection({ owner, topicStatus }: { owner: LiquidatorView | null; topicStatus: TopicStatus }) {
   const { busy, receipt } = useAnalyticsControl();
@@ -42,6 +45,7 @@ export function SourcesSection({ owner, topicStatus }: { owner: LiquidatorView |
       </div>
       <div className="p0-actions"><button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined} onClick={apply}>Request mode</button></div>
       {blocked ? <p className="p0-quiet">{blocked}</p> : null}
+      <p className="p0-quiet">Reaches the runtime owner of this app's data home only (none running: the command fails, SOURCE_NO_RUNTIME); a run started from a terminal elsewhere is changed there with <code>p0ctl source set</code>.</p>
     </> : null}
     {msg ? <Notice>{msg}</Notice> : null}
     {receipt?.action === "project0.source.set" ? <Notice><span data-testid="p0-source-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""} · the owner's decision follows above</span></Notice> : null}

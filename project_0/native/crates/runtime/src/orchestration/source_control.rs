@@ -95,9 +95,15 @@ pub fn control_of(unit: SourceUnit, mode: OperatingMode) -> Result<SourceControl
 }
 
 /// `p0ctl`: writes the next request (sequence = newest + 1) after checking unit and mode.
-pub fn write_request(dir: &Path, unit: &str, mode: &str, now_unix_s: u64) -> Result<u64, String> {
+/// A request's unit and mode are valid (checked before anything is written or sent).
+pub fn validate(unit: &str, mode: &str) -> Result<(), String> {
     parse_unit(unit)?;
     mode.parse::<OperatingMode>()?;
+    Ok(())
+}
+
+pub fn write_request(dir: &Path, unit: &str, mode: &str, now_unix_s: u64) -> Result<u64, String> {
+    validate(unit, mode)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("SOURCE_CONTROL_IO: {e}"))?;
     let seq = sequences(dir)?.last().map_or(1, |s| s + 1);
     let request = SourceControlRequest {

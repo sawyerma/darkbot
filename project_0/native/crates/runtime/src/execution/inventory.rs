@@ -108,9 +108,15 @@ pub fn plan_with_quotes(
         }
     };
     let actions = rebalance(available, targets, &|_| false, &quote, budget_usd_micro);
-    let mut wanted = wanted.into_inner();
-    wanted.dedup();
-    (actions, wanted)
+    (actions, unique_in_order(wanted.into_inner()))
+}
+
+/// Review 72b74fc1: one request per quote, in first-asked order (the same quote can be wanted by
+/// several bands, not only adjacently; `Vec::dedup` drops adjacent repeats only).
+fn unique_in_order(mut keys: Vec<QuoteKey>) -> Vec<QuoteKey> {
+    let mut seen = std::collections::BTreeSet::new();
+    keys.retain(|k| seen.insert(k.clone()));
+    keys
 }
 
 /// P5-JIT-01: `P0_JIT_FUNDING_BANK`, the bank whose inventory funds a JIT buy. Empty is none (no
@@ -423,6 +429,21 @@ mod tests {
         assert!(parse_mode("on")
             .unwrap_err()
             .starts_with("REBALANCE_MODE_INVALID"));
+    }
+
+    #[test]
+    fn wanted_quotes_are_asked_once_even_when_not_adjacent() {
+        let key = |s: &str, b: &str, n: u64| (s.to_string(), b.to_string(), n);
+        assert_eq!(
+            unique_in_order(vec![
+                key("B", "A", 800),
+                key("B", "C", 500),
+                key("B", "A", 800),
+                key("B", "C", 500),
+                key("B", "A", 300),
+            ]),
+            vec![key("B", "A", 800), key("B", "C", 500), key("B", "A", 300)]
+        );
     }
 
     /// B01 OBSERVE: a pass plans from cached quotes only — a missing quote is wanted (never

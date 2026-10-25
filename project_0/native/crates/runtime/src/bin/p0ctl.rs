@@ -873,16 +873,17 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| "SOURCE_CONTROL_CLOCK")?
                 .as_secs();
+            source_control::validate(unit, mode)?;
+            // Review 72b74fc1: a request nobody applies is no success; without a runtime owner of
+            // this project nothing is written and the call fails (the GUI receipt says FAILED).
+            let OwnerState::Running { pid, run_id, .. } =
+                control::owner_state(&lock_path(project))?
+            else {
+                return Err("SOURCE_NO_RUNTIME: no runtime owner runs for this project; nothing would apply the request (a run starts from P0_SOURCE_GEYSER)".into());
+            };
             let seq = source_control::write_request(&dir, unit, mode, now)?;
-            match control::owner_state(&lock_path(project))? {
-                OwnerState::Running { pid, run_id, .. } => {
-                    source_control::signal(pid)?;
-                    println!("[p0ctl] source request seq={seq} {unit} {mode} sent to runtime pid {pid} (run {run_id}); the owner journals `source_control: applied|refused seq={seq}`");
-                }
-                OwnerState::NotRunning { .. } => println!(
-                    "[p0ctl] source request seq={seq} {unit} {mode} recorded; no runtime is running, nothing applies it (a run starts from P0_SOURCE_GEYSER)"
-                ),
-            }
+            source_control::signal(pid)?;
+            println!("[p0ctl] source request seq={seq} {unit} {mode} sent to runtime pid {pid} (run {run_id}); the owner journals `source_control: applied|refused seq={seq}`");
             Ok(true)
         }
         [status] if status == "status" => {
