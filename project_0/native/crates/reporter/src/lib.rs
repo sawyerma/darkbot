@@ -1156,6 +1156,30 @@ mod contract_tests {
                         finished_unix_ms: None,
                     })),
                 },
+                JobStatus {
+                    request: request(
+                        "pc-1",
+                        JobSpec::PostCapture {
+                            chain_verify: "strict".into(),
+                            offline: true,
+                            resume: true,
+                            provider_evidence: None,
+                        },
+                    ),
+                    state: JobState::Done(Box::new(JobOutcome {
+                        job_id: "pc-1".into(),
+                        state: COMPLETED.into(),
+                        code: String::new(),
+                        result: Some(JobResult::PostCapture {
+                            verification_ok: false,
+                            report_ok: true,
+                            verdict: None,
+                        }),
+                        worker_pid: 8,
+                        started_unix_ms: Some(1_760_000_000_600),
+                        finished_unix_ms: Some(1_760_000_000_700),
+                    })),
+                },
             ],
             error: None,
         }

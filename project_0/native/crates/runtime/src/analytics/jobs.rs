@@ -47,6 +47,18 @@ pub enum JobSpec {
         /// Save the chosen point as an offline Shadow candidate profile (never a LIVE setting).
         save_profile: bool,
     },
+    /// A08/F-02: the production chain after a capture (`post_capture`: the verification, the
+    /// native report, the master qualification). The job's budget is the verification's time
+    /// and RAM budget; its other bounds are the registry's (`verify_*`).
+    PostCapture {
+        /// `off` (identities only, no chain read) or `strict`.
+        chain_verify: String,
+        /// Strict from the verification cache only (no network).
+        offline: bool,
+        resume: bool,
+        /// The operator's provider evidence for an online strict verification (terminal only).
+        provider_evidence: Option<String>,
+    },
 }
 
 impl JobSpec {
@@ -54,6 +66,7 @@ impl JobSpec {
         match self {
             Self::Backtest { .. } => "BACKTEST",
             Self::Optimize { .. } => "OPTIMIZE",
+            Self::PostCapture { .. } => "POST_CAPTURE",
         }
     }
 }
@@ -93,6 +106,14 @@ pub enum JobResult {
         result_sha256: [u8; 32],
         /// The saved candidate profile's file name under `data/profiles/`.
         profile: Option<String>,
+    },
+    /// The chain ran: each stage's outcome; the qualification record is the run's own.
+    PostCapture {
+        /// `off` (NOT_RUN recorded) or a CANONICAL_VERIFIED strict result.
+        verification_ok: bool,
+        report_ok: bool,
+        /// The master verdict; `None`: the qualification could not run.
+        verdict: Option<String>,
     },
 }
 
@@ -301,6 +322,21 @@ fn validate(project: &Path, r: &JobRequest) -> Result<PathBuf, String> {
                 p.validate()?;
             }
         }
+        JobSpec::PostCapture {
+            chain_verify,
+            offline,
+            provider_evidence,
+            ..
+        } => {
+            if !matches!(chain_verify.as_str(), "off" | "strict") {
+                return Err(format!(
+                    "CHAIN_VERIFY_{chain_verify}_BLOCKED: a native run verifies strict or off"
+                ));
+            }
+            if chain_verify == "strict" && !offline && provider_evidence.is_none() {
+                return Err("STRICT_PROVIDER_EVIDENCE_REQUIRED: online strict verification needs the operator's --provider-evidence (else --offline)".into());
+            }
+        }
     }
     Ok(run)
 }
@@ -364,7 +400,11 @@ pub fn start(project: &Path, request: &JobRequest, worker: &Path) -> Result<(), 
 
 /// `job cancel`: asks the running worker to stop (SIGTERM); it records CANCELLED itself.
 pub fn cancel(project: &Path, job_id: &str) -> Result<u32, String> {
-    match status(project, job_id)?.state {
+    let s = status(project, job_id)?;
+    match s.state {
+        JobState::Running { .. } if matches!(s.request.spec, JobSpec::PostCapture { .. }) => {
+            Err("JOB_NOT_CANCELLABLE: a post-capture verification ends at its own budget".into())
+        }
         JobState::Running { pid, .. } if pid > 0 => {
             // SAFETY: kill(2) with SIGTERM to the pid of the job's worker lock holder.
             if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
@@ -389,6 +429,8 @@ fn write_outcome(dir: &Path, outcome: &JobOutcome) -> Result<(), String> {
 /// What one execution produced, for the terminal's full rendering.
 pub enum Executed {
     Backtest(Box<Backtest>),
+    /// The chain's terminal text and stage outcomes.
+    PostCapture(super::post_capture::Outcome),
     Optimize {
         result: Box<OptimizeResult>,
         path: PathBuf,
@@ -420,6 +462,11 @@ impl Executed {
                     .as_ref()
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().into_owned()),
+            },
+            Self::PostCapture(o) => JobResult::PostCapture {
+                verification_ok: o.verification_ok,
+                report_ok: o.report_ok,
+                verdict: o.verdict.clone(),
             },
         }
     }
@@ -473,6 +520,32 @@ fn execute(
                 path,
                 profile,
             })
+        }
+        JobSpec::PostCapture {
+            chain_verify,
+            offline,
+            resume,
+            provider_evidence,
+        } => {
+            let mut args = vec![
+                "--verify-seconds".to_string(),
+                r.max_seconds.to_string(),
+                "--verify-ram-bytes".into(),
+                r.max_ram_bytes.to_string(),
+            ];
+            if *offline {
+                args.push("--offline".into());
+            }
+            if *resume {
+                args.push("--resume-verification".into());
+            }
+            if let Some(file) = provider_evidence {
+                args.extend(["--provider-evidence".into(), file.clone()]);
+            }
+            if let Some(wanted) = &r.verification_result {
+                args.extend(["--verification-result".into(), wanted.clone()]);
+            }
+            super::post_capture::post_capture(&run, chain_verify, &args).map(Executed::PostCapture)
         }
     }
 }
@@ -587,7 +660,17 @@ pub fn request_of(project: &Path, kind: &str, args: &[String]) -> Result<JobRequ
                 save_profile: args.iter().any(|a| a == "--save-profile"),
             }
         }
-        other => return Err(format!("JOB_KIND_UNKNOWN: {other} (backtest|optimize)")),
+        "post-capture" => JobSpec::PostCapture {
+            chain_verify: flag("--chain-verify")?.ok_or("--chain-verify off|strict required")?,
+            offline: args.iter().any(|a| a == "--offline"),
+            resume: args.iter().any(|a| a == "--resume-verification"),
+            provider_evidence: flag("--provider-evidence")?,
+        },
+        other => {
+            return Err(format!(
+                "JOB_KIND_UNKNOWN: {other} (backtest|optimize|post-capture)"
+            ))
+        }
     };
     Ok(JobRequest {
         job_id: match flag("--id")? {
@@ -613,6 +696,14 @@ pub fn render(s: &JobStatus) -> String {
             Some(JobResult::Backtest { result_id, .. } | JobResult::Optimize { result_id, .. }) => {
                 format!("result {result_id}")
             }
+            Some(JobResult::PostCapture {
+                verification_ok,
+                report_ok,
+                verdict,
+            }) => format!(
+                "verification_ok={verification_ok} report_ok={report_ok} verdict={}",
+                verdict.as_deref().unwrap_or("NOT_RUN")
+            ),
             None => String::new(),
         },
         _ => String::new(),
@@ -893,6 +984,58 @@ mod tests {
             JobState::Done(o) => assert_eq!((o.state.as_str(), o.code), (FAILED, spawn)),
             s => panic!("{s:?}"),
         }
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// A08/F-02: a post-capture job verifies strict or off; online strict needs the operator's
+    /// provider evidence (the GUI can only ask for strict from the cache); a running
+    /// verification is not cancellable (it ends at its own budget).
+    #[test]
+    fn post_capture_jobs_are_validated_and_not_cancellable() {
+        let d = project("post_capture");
+        let spec = |mode: &str, offline, evidence: Option<&str>| JobSpec::PostCapture {
+            chain_verify: mode.into(),
+            offline,
+            resume: false,
+            provider_evidence: evidence.map(String::from),
+        };
+        let with = |id: &str, s| JobRequest {
+            spec: s,
+            ..request(id)
+        };
+        assert!(submit(&d, &with("a", spec("index", false, None)))
+            .unwrap_err()
+            .starts_with("CHAIN_VERIFY_index_BLOCKED"));
+        assert!(submit(&d, &with("b", spec("strict", false, None)))
+            .unwrap_err()
+            .starts_with("STRICT_PROVIDER_EVIDENCE_REQUIRED"));
+        submit(&d, &with("c", spec("strict", true, None))).unwrap();
+        submit(&d, &with("e", spec("strict", false, Some("/evidence.p0j")))).unwrap();
+        let args: Vec<String> = [
+            "--run",
+            "run-a",
+            "--id",
+            "f",
+            "--chain-verify",
+            "strict",
+            "--offline",
+            "--max-seconds",
+            "5",
+            "--max-ram-bytes",
+            "9",
+        ]
+        .map(String::from)
+        .to_vec();
+        let parsed = request_of(&d, "post-capture", &args).unwrap();
+        assert_eq!(parsed.spec, spec("strict", true, None));
+        assert_eq!((parsed.job_id.as_str(), parsed.max_seconds), ("f", 5));
+        let lock = d.join(JOB_DIR).join("c").join(WORKER_LOCK);
+        let mut worker = open_lock(&lock).unwrap();
+        assert!(flock_nb(&worker, libc::LOCK_EX).unwrap());
+        writeln!(worker, "pid=4242 started_unix_ms=9").unwrap();
+        assert!(cancel(&d, "c")
+            .unwrap_err()
+            .starts_with("JOB_NOT_CANCELLABLE"));
         let _ = std::fs::remove_dir_all(d);
     }
 

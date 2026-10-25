@@ -49,7 +49,8 @@ export interface CounterfactualView {
 
 export type JobResultView =
   | { kind: "BACKTEST"; resultId: string; liquidations: bigint; rows: bigint; attempts: bigint; counterfactual: CounterfactualView | null; realized: string }
-  | { kind: "OPTIMIZE"; resultId: string; points: bigint; chosen: JobParamsView | null; chosenObjectiveBps: string | null; baselineObjectiveBps: string | null; profile: string };
+  | { kind: "OPTIMIZE"; resultId: string; points: bigint; chosen: JobParamsView | null; chosenObjectiveBps: string | null; baselineObjectiveBps: string | null; profile: string }
+  | { kind: "POST_CAPTURE"; verificationOk: boolean; reportOk: boolean; verdict: string | null };
 
 export interface AnalyticsJobView {
   jobId: string;
@@ -63,6 +64,8 @@ export interface AnalyticsJobView {
   maxSeconds: bigint;
   maxRamBytes: bigint;
   params: JobParamsView | null;
+  /** Post-capture jobs: the verification request. */
+  verification: { chainVerify: string; offline: boolean } | null;
   result: JobResultView | null;
 }
 

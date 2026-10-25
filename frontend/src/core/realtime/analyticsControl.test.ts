@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, CommandLookupResponseSchema } from "../generated/darkbot/control/v1/commands_pb";
-import { BacktestJobCommandSchema, OptimizeJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
-import { analyticsCommand, backtestCommand, optimizeCommand, useAnalyticsControl, type PointInput } from "./analyticsControl";
+import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import { analyticsCommand, backtestCommand, optimizeCommand, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
 const accepted = (phase: CommandPhase, detail = "") => new Response(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, phase, detail })));
@@ -25,6 +25,17 @@ describe("Analytics job commands", () => {
     const g = fromBinary(OptimizeJobCommandSchema, o.params);
     expect([g.baseline?.runId, g.minProfitUsdGrid, g.fundingSets.map((s) => s.classes), g.holdoutBps, g.maxPoints, g.saveProfile])
       .toEqual(["run-a", ["1.5", "2"], [[], ["NO_SWAP_INVENTORY"]], 3000n, 4n, true]);
+  });
+
+  it("types a verification off or strict from the cache, with an explicit budget", () => {
+    const v = verifyCommand({ runId: "run-a", mode: "strict-cache", resume: true, maxSeconds: "60", maxRamMib: "1" });
+    if (!("params" in v)) throw new Error(v.problem);
+    const c = fromBinary(PostCaptureJobCommandSchema, v.params);
+    expect([c.runId, c.chainVerify, c.offline, c.resumeVerification, c.maxSeconds, c.maxRamBytes]).toEqual(["run-a", "strict", true, true, 60n, 1_048_576n]);
+    const off = verifyCommand({ runId: "run-a", mode: "off", resume: false, maxSeconds: "60", maxRamMib: "1" });
+    if (!("params" in off)) throw new Error(off.problem);
+    expect(fromBinary(PostCaptureJobCommandSchema, off.params).offline).toBe(false);
+    expect("problem" in verifyCommand({ runId: "run-a", mode: "off", resume: false, maxSeconds: "", maxRamMib: "1" })).toBe(true);
   });
 
   it("posts one typed request whose id becomes the job id, and shows the native refusal", async () => {

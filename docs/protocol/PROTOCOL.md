@@ -102,6 +102,9 @@
     - [OptimizeJobCommand](#darkbot-project0-v1-OptimizeJobCommand)
     - [OptimizeResult](#darkbot-project0-v1-OptimizeResult)
     - [OptimizeScore](#darkbot-project0-v1-OptimizeScore)
+    - [PostCaptureJobCommand](#darkbot-project0-v1-PostCaptureJobCommand)
+    - [PostCaptureResult](#darkbot-project0-v1-PostCaptureResult)
+    - [PostCaptureSpec](#darkbot-project0-v1-PostCaptureSpec)
     - [RunQualification](#darkbot-project0-v1-RunQualification)
     - [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual)
 
@@ -1554,6 +1557,8 @@ One analytics job of the controller&#39;s store.
 | verification_result | [string](#string) |  | The verification result the job reads; empty: the run&#39;s canonical one. |
 | backtest | [BacktestResult](#darkbot-project0-v1-BacktestResult) |  | A completed backtest. |
 | optimize | [OptimizeResult](#darkbot-project0-v1-OptimizeResult) |  | A completed optimization. |
+| post_capture | [PostCaptureResult](#darkbot-project0-v1-PostCaptureResult) |  | A completed post-capture chain. |
+| post_capture_spec | [PostCaptureSpec](#darkbot-project0-v1-PostCaptureSpec) |  | Post-capture only: the verification request. |
 
 
 
@@ -1775,6 +1780,63 @@ The score of one point on one part of the window.
 | ----- | ---- | ----- | ----------- |
 | counterfactual | [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual) |  | The point&#39;s counterfactual on that part. |
 | objective_bps_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) |  | Best return on capital over its scenarios; unset when not known (never 0). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-PostCaptureJobCommand"></a>
+
+### PostCaptureJobCommand
+Parameters (CommandRequest.params) of project0.capture.verify.start: the options of
+`p0ctl job start post-capture` the GUI may give (online strict needs the operator&#39;s provider
+evidence and stays terminal-only).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_id | [string](#string) |  | The run id under the project&#39;s run roots (never a path). |
+| chain_verify | [string](#string) |  | off or strict (strict only with offline). |
+| offline | [bool](#bool) |  | Strict from the verification cache only (no network). |
+| resume_verification | [bool](#bool) |  | Resume an incomplete verification. |
+| max_seconds | [uint64](#uint64) |  | The verification&#39;s time budget. |
+| max_ram_bytes | [uint64](#uint64) |  | The verification&#39;s memory budget. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-PostCaptureResult"></a>
+
+### PostCaptureResult
+A completed post-capture chain: each stage&#39;s outcome (the qualification record is the run&#39;s).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| verification_ok | [bool](#bool) |  | off (NOT_RUN recorded) or a CANONICAL_VERIFIED strict result. |
+| report_ok | [bool](#bool) |  | The native report completed. |
+| verdict | [string](#string) |  | The master verdict; empty: the qualification could not run. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-PostCaptureSpec"></a>
+
+### PostCaptureSpec
+The verification request of a post-capture job (A08/F-02).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| chain_verify | [string](#string) |  | off (identities only, no chain read) or strict. |
+| offline | [bool](#bool) |  | Strict from the verification cache only (no network). |
+| resume | [bool](#bool) |  | Resume an incomplete verification. |
+| provider_evidence | [bool](#bool) |  | An operator provider evidence was given (online strict; terminal only). |
 
 
 

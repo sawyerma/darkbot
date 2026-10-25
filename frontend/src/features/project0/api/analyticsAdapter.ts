@@ -68,6 +68,7 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
       maxSeconds: j.maxSeconds,
       maxRamBytes: j.maxRamBytes,
       params: params(j.params),
+      verification: j.postCaptureSpec ? { chainVerify: j.postCaptureSpec.chainVerify, offline: j.postCaptureSpec.offline } : null,
       result:
         j.result.case === "backtest"
           ? {
@@ -89,7 +90,9 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
                 baselineObjectiveBps: decimal(j.result.value.baselineHoldout?.objectiveBpsSigned),
                 profile: j.result.value.profile,
               }
-            : null,
+            : j.result.case === "postCapture"
+              ? { kind: "POST_CAPTURE", verificationOk: j.result.value.verificationOk, reportOk: j.result.value.reportOk, verdict: j.result.value.verdict || null }
+              : null,
     })),
   };
 }

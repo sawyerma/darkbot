@@ -2,7 +2,7 @@ import { create as message, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
-import { BacktestJobCommandSchema, OptimizeJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
 
 /**
  * B03/U-9: the analytics job commands (POST /api/v1/command → gateway → `darkbotctl p0 job` →
@@ -10,7 +10,8 @@ import { BacktestJobCommandSchema, OptimizeJobCommandSchema } from "../generated
  * the job and started its worker; the job's progress and end are its state in
  * project0.analytics.jobs. A lost acknowledgement is looked up once, never posted again.
  */
-export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel";
+export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel"
+  | "project0.capture.verify.start";
 interface Receipt { id: string; action: JobAction; phase: string; detail: string }
 interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
 export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
@@ -73,6 +74,20 @@ export function optimizeCommand(p: PointInput, g: GridInput): { params: Uint8Arr
     params: toBinary(OptimizeJobCommandSchema, message(OptimizeJobCommandSchema, {
       baseline, minProfitUsdGrid: grid, fundingSets: (sets as string[][]).map((classes) => ({ classes })),
       holdoutBps: holdout, maxPoints: points, saveProfile: g.saveProfile,
+    })),
+  };
+}
+
+/** A08/F-02: verification off, or strict from the cache (online strict is a terminal action). */
+export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; resume: boolean; maxSeconds: string; maxRamMib: string }): { params: Uint8Array } | { problem: string } {
+  const seconds = positive(v.maxSeconds);
+  const mib = positive(v.maxRamMib);
+  if (!v.runId) return { problem: "Select a run." };
+  if (seconds === null || mib === null) return { problem: "Verification budget: positive seconds and MiB are required." };
+  return {
+    params: toBinary(PostCaptureJobCommandSchema, message(PostCaptureJobCommandSchema, {
+      runId: v.runId, chainVerify: v.mode === "off" ? "off" : "strict", offline: v.mode === "strict-cache", resumeVerification: v.resume,
+      maxSeconds: seconds, maxRamBytes: mib * 1_048_576n,
     })),
   };
 }

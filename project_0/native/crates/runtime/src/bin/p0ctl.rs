@@ -18,6 +18,7 @@
 //! p0ctl [--project DIR] optimize --run RUN_ID --capital-usd LIST [--min-profit-usd X] [--funding …] --min-profit-usd-grid X,Y --funding-sets all;A,B --holdout-bps N --max-points N --max-seconds N --max-ram-bytes N [--save-profile]
 //! p0ctl [--project DIR] profiles compare --run RUN_ID --baseline FILE --candidate FILE --max-seconds N --max-ram-bytes N
 //! p0ctl [--project DIR] job start backtest|optimize [--id ID] (the backtest|optimize options)
+//! p0ctl [--project DIR] job start post-capture [--id ID] --run RUN_ID --chain-verify off|strict [--offline] [--resume-verification] [--provider-evidence FILE] --max-seconds N --max-ram-bytes N
 //! p0ctl [--project DIR] job cancel --id ID
 //! p0ctl [--project DIR] job status [--id ID]
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|strict [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
@@ -958,13 +959,14 @@ fn foreground_job(project: &Path, kind: &str, args: &[String]) -> Result<bool, S
                 }
             }
         }
+        Some(jobs::Executed::PostCapture(chain)) => print!("{}", chain.text),
         None => return Err(outcome.code),
     }
     println!("job {} {}", outcome.job_id, outcome.state);
     Ok(true)
 }
 
-const JOB_USAGE: &str = "usage: p0ctl job start backtest|optimize [--id ID] … | job cancel --id ID | job status [--id ID]";
+const JOB_USAGE: &str = "usage: p0ctl job start backtest|optimize|post-capture [--id ID] … | job cancel --id ID | job status [--id ID]";
 
 /// `job start|cancel|status|run` (B03, P0-PROD-CTRL-03): the analytics job controller.
 fn job_cmd(project: &Path, args: &[String]) -> Result<bool, String> {

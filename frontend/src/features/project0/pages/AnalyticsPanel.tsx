@@ -18,6 +18,7 @@ function resultLine(r: JobResultView | null): string {
     const nets = c?.scenarios.map(s => `${usdMicroDisplay(s.capitalUsdMicro.toString())} → ${usdMicroDisplay(s.netUsdMicro)}`).join(", ") ?? "—";
     return ` · ${r.liquidations} liquidations · ${c?.matched ?? "—"} matched · ${c?.wins ?? "—"} wins · Shadow net ${nets} · landing ${c?.landing ?? "—"}`;
   }
+  if (r.kind === "POST_CAPTURE") return ` · verification ${r.verificationOk ? "ok" : "incomplete"} · report ${r.reportOk ? "ok" : "incomplete"} · ${r.verdict ?? "qualification NOT_RUN"}`;
   const chosen = r.chosen ? `min profit ${usdMicroDisplay(r.chosen.minProfitUsdMicro)} · funding ${r.chosen.funding.length ? r.chosen.funding.join(",") : "all"}` : "no point chosen (NO_SAMPLE)";
   return ` · ${r.points} points · ${chosen} · holdout ${r.chosenObjectiveBps ?? "—"} bps vs baseline ${r.baselineObjectiveBps ?? "—"} bps${r.profile ? ` · Shadow candidate ${r.profile}` : ""}`;
 }

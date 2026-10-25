@@ -4,8 +4,8 @@
 use crate::proto::control::{SignedDecimal, UnsignedDecimal};
 use crate::proto::project0::{
     analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, BacktestResult, CapitalScenario,
-    FundingSet, JobGrid, JobParams, OptimizeResult, OptimizeScore, RunQualification,
-    ShadowCounterfactual,
+    FundingSet, JobGrid, JobParams, OptimizeResult, OptimizeScore, PostCaptureResult,
+    PostCaptureSpec, RunQualification, ShadowCounterfactual,
 };
 use darkbot_runner::analytics::backtest::{Counterfactual, Params, Score};
 use darkbot_runner::analytics::jobs::{
@@ -130,6 +130,15 @@ fn job(s: &JobStatus) -> AnalyticsJob {
                     result_sha256: result_sha256.to_vec().into(),
                     profile: profile.clone().unwrap_or_default(),
                 }),
+                JobResult::PostCapture {
+                    verification_ok,
+                    report_ok,
+                    verdict,
+                } => analytics_job::Result::PostCapture(PostCaptureResult {
+                    verification_ok: *verification_ok,
+                    report_ok: *report_ok,
+                    verdict: verdict.clone().unwrap_or_default(),
+                }),
             }),
         ),
         JobState::Running {
@@ -143,8 +152,8 @@ fn job(s: &JobStatus) -> AnalyticsJob {
         ),
         other => (other.name().into(), String::new(), None, None, None),
     };
-    let (job_params, grid) = match &r.spec {
-        JobSpec::Backtest { params: p } => (params(p), None),
+    let (job_params, grid, post_capture_spec) = match &r.spec {
+        JobSpec::Backtest { params: p } => (Some(params(p)), None, None),
         JobSpec::Optimize {
             baseline,
             space,
@@ -152,7 +161,7 @@ fn job(s: &JobStatus) -> AnalyticsJob {
             max_points,
             save_profile,
         } => (
-            params(baseline),
+            Some(params(baseline)),
             Some(JobGrid {
                 min_profit_usd_micro_signed: space
                     .min_profit_usd_micro
@@ -168,6 +177,22 @@ fn job(s: &JobStatus) -> AnalyticsJob {
                 max_points: *max_points,
                 save_profile: *save_profile,
             }),
+            None,
+        ),
+        JobSpec::PostCapture {
+            chain_verify,
+            offline,
+            resume,
+            provider_evidence,
+        } => (
+            None,
+            None,
+            Some(PostCaptureSpec {
+                chain_verify: chain_verify.clone(),
+                offline: *offline,
+                resume: *resume,
+                provider_evidence: provider_evidence.is_some(),
+            }),
         ),
     };
     AnalyticsJob {
@@ -181,8 +206,9 @@ fn job(s: &JobStatus) -> AnalyticsJob {
         finished_unix_ms: finished,
         max_seconds: r.max_seconds,
         max_ram_bytes: r.max_ram_bytes,
-        params: Some(job_params),
+        params: job_params,
         grid,
+        post_capture_spec,
         verification_result: r.verification_result.clone().unwrap_or_default(),
         result,
     }

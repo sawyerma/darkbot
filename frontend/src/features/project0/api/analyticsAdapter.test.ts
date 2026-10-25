@@ -16,7 +16,11 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(view.jobs.map((j) => [j.jobId, j.kind, j.state])).toEqual([
       ["opt-1", "OPTIMIZE", "RUNNING"],
       ["bt-1", "BACKTEST", "COMPLETED"],
+      ["pc-1", "POST_CAPTURE", "COMPLETED"],
     ]);
+    expect(view.jobs[2]?.verification).toEqual({ chainVerify: "strict", offline: true });
+    expect(view.jobs[2]?.result).toEqual({ kind: "POST_CAPTURE", verificationOk: false, reportOk: true, verdict: null });
+    expect(view.jobs[2]?.params).toBeNull();
     expect(view.jobs[0]?.result).toBeNull();
     expect(view.jobs[0]?.params?.minProfitUsdMicro).toBe("1500000");
   });

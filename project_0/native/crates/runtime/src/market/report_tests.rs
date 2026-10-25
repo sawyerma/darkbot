@@ -997,6 +997,45 @@ mod report_e2e {
         let _ = std::fs::remove_dir_all(f.d);
     }
 
+    /// A08/F-02: the post-capture chain as a job of the controller (the GUI's verify action):
+    /// verification off, the native report and the master qualification run once; the job
+    /// records each stage, and the qualification record it wrote is the run's newest.
+    #[test]
+    fn a08_post_capture_job_runs_the_production_chain() {
+        use crate::analytics::{jobs, qualification};
+        let f = canonical_run(line!(), true);
+        let project = f.d.join("project");
+        let request = jobs::JobRequest {
+            job_id: "pc-1".into(),
+            run: f.run.display().to_string(),
+            verification_result: None,
+            max_seconds: 60,
+            max_ram_bytes: 1 << 26,
+            spec: jobs::JobSpec::PostCapture {
+                chain_verify: "off".into(),
+                offline: false,
+                resume: false,
+                provider_evidence: None,
+            },
+            requested_unix_ms: Some(1),
+        };
+        jobs::submit(&project, &request).unwrap();
+        let (outcome, _) = jobs::run(&project, "pc-1", None).unwrap();
+        assert_eq!(outcome.state, jobs::COMPLETED, "{}", outcome.code);
+        let Some(jobs::JobResult::PostCapture {
+            verification_ok,
+            report_ok,
+            verdict,
+        }) = outcome.result
+        else {
+            panic!("{:?}", outcome.result)
+        };
+        assert!(verification_ok && report_ok);
+        let record = qualification::latest(&f.run).unwrap().unwrap();
+        assert_eq!(verdict, Some(record.verdict));
+        let _ = std::fs::remove_dir_all(f.d);
+    }
+
     /// Review 4: like the optimizer, a backtest never goes below the run's recorded minimum
     /// profit (nothing was evaluated there); at or above it, it runs.
     #[test]

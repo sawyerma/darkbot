@@ -38,7 +38,17 @@ const BSC_CANDIDATE: &str = "bsc.candidate.select";
 const BACKTEST_START: &str = "project0.analytics.backtest.start";
 const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
 const JOB_CANCEL: &str = "project0.analytics.job.cancel";
-const JOB_ACTIONS: [&str; 3] = [BACKTEST_START, OPTIMIZE_START, JOB_CANCEL];
+/// A08/F-02: the post-capture chain (verification, report, qualification) of a recorded run.
+const VERIFY_START: &str = "project0.capture.verify.start";
+const JOB_ACTIONS: [&str; 4] = [BACKTEST_START, OPTIMIZE_START, JOB_CANCEL, VERIFY_START];
+/// Online strict verification reads the chain with the operator's provider evidence: a terminal
+/// action (`p0ctl job start post-capture --provider-evidence`), never a GUI one.
+fn online_strict(req: &CommandRequest) -> bool {
+    use crate::proto::project0::v1::PostCaptureJobCommand;
+    req.action == VERIFY_START
+        && PostCaptureJobCommand::decode(req.params.as_ref())
+            .is_ok_and(|c| c.chain_verify == "strict" && !c.offline)
+}
 fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32
         && ([START, STOP].contains(&action) || JOB_ACTIONS.contains(&action)))
@@ -140,7 +150,9 @@ fn valid_job_id(s: &str) -> bool {
 /// parameters mapped 1:1 onto the options of `p0ctl job`, which validates them again. A start's
 /// job id is the request id; a cancel names its job as the resource.
 fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
-    use crate::proto::project0::v1::{BacktestJobCommand, OptimizeJobCommand};
+    use crate::proto::project0::v1::{
+        BacktestJobCommand, OptimizeJobCommand, PostCaptureJobCommand,
+    };
     if req.expected.is_some() {
         return None;
     }
@@ -185,6 +197,36 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             ]);
             if c.save_profile {
                 args.push("--save-profile".into());
+            }
+            Some(args)
+        }
+        VERIFY_START if req.resource_id.is_empty() => {
+            let c = PostCaptureJobCommand::decode(req.params.as_ref()).ok()?;
+            let offline_strict = c.chain_verify == "strict" && c.offline;
+            if !run_id_ok(&c.run_id)
+                || !(c.chain_verify == "off" || offline_strict)
+                || (c.offline && c.chain_verify == "off")
+                || c.max_seconds == 0
+                || c.max_ram_bytes == 0
+            {
+                return None;
+            }
+            let mut args = start("post-capture");
+            args.extend([
+                "--run".into(),
+                c.run_id,
+                "--chain-verify".into(),
+                c.chain_verify,
+                "--max-seconds".into(),
+                c.max_seconds.to_string(),
+                "--max-ram-bytes".into(),
+                c.max_ram_bytes.to_string(),
+            ]);
+            if c.offline {
+                args.push("--offline".into());
+            }
+            if c.resume_verification {
+                args.push("--resume-verification".into());
             }
             Some(args)
         }
@@ -527,6 +569,14 @@ impl Control {
         } else {
             None
         };
+        if online_strict(req) {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::GateBlocked,
+                "Online strict verification needs the operator's provider evidence: p0ctl job start post-capture --provider-evidence FILE (terminal); the GUI verifies off or strict from the cache",
+            );
+        }
         let job = if JOB_ACTIONS.contains(&req.action.as_str()) {
             match job_args(req) {
                 Some(args) => Some(args),
@@ -813,6 +863,8 @@ impl Control {
                 record.phase = CommandPhase::Completed as i32;
                 record.detail = if action == JOB_CANCEL {
                     "Stop requested from the job's worker; it records CANCELLED in project0.analytics.jobs"
+                } else if action == VERIFY_START {
+                    "Post-capture job recorded and its worker started; the run's qualification follows in project0.analytics.jobs"
                 } else {
                     "Job recorded and its worker started; progress in project0.analytics.jobs"
                 }
@@ -1980,6 +2032,38 @@ mod tests {
             argv(),
             "p0\njob\ncancel\n--id\n12345678-1234-1234-1234-123456789abc\n"
         );
+        // A08/F-02: verification off, or strict from the cache; online strict is gate-blocked.
+        use crate::proto::project0::v1::PostCaptureJobCommand;
+        let verify = PostCaptureJobCommand {
+            run_id: "run-a".into(),
+            chain_verify: "strict".into(),
+            offline: true,
+            resume_verification: true,
+            max_seconds: 60,
+            max_ram_bytes: 1_048_576,
+        };
+        let r = control
+            .execute(&request(5, VERIFY_START, "", verify.encode_to_vec()))
+            .await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert_eq!(
+            argv(),
+            "p0\njob\nstart\npost-capture\n--id\n52345678-1234-1234-1234-123456789abc\n--run\nrun-a\n--chain-verify\nstrict\n--max-seconds\n60\n--max-ram-bytes\n1048576\n--offline\n--resume-verification\n"
+        );
+        let online = PostCaptureJobCommand {
+            offline: false,
+            ..verify.clone()
+        };
+        let r = control
+            .execute(&request(6, VERIFY_START, "", online.encode_to_vec()))
+            .await;
+        assert_eq!(
+            (r.status, r.reject_reason),
+            (
+                CommandStatus::Rejected as i32,
+                CommandRejectReason::GateBlocked as i32
+            )
+        );
         // Invalid parameters: rejected, no receipt, nothing dispatched.
         fs::remove_file(&log).unwrap();
         let bad = |c: BacktestJobCommand| c.encode_to_vec();
@@ -2064,6 +2148,46 @@ mod tests {
                 ),
             ),
             (4, request(4, BACKTEST_START, "", vec![0xFF, 0xFF])),
+            (
+                5,
+                request(
+                    5,
+                    VERIFY_START,
+                    "",
+                    PostCaptureJobCommand {
+                        chain_verify: "index".into(),
+                        ..verify.clone()
+                    }
+                    .encode_to_vec(),
+                ),
+            ),
+            (
+                6,
+                request(
+                    6,
+                    VERIFY_START,
+                    "",
+                    PostCaptureJobCommand {
+                        chain_verify: "off".into(),
+                        offline: true,
+                        ..verify.clone()
+                    }
+                    .encode_to_vec(),
+                ),
+            ),
+            (
+                7,
+                request(
+                    7,
+                    VERIFY_START,
+                    "",
+                    PostCaptureJobCommand {
+                        run_id: "/abs".into(),
+                        ..verify.clone()
+                    }
+                    .encode_to_vec(),
+                ),
+            ),
         ] {
             // Fresh ids: none of these may reuse a receipt of the dispatched commands above.
             let mut req = req;

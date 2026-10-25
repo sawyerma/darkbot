@@ -88,7 +88,33 @@ message AnalyticsJob {
     BacktestResult backtest = 14;
     // A completed optimization.
     OptimizeResult optimize = 15;
+    // A completed post-capture chain.
+    PostCaptureResult post_capture = 17;
   }
+  // Post-capture only: the verification request.
+  PostCaptureSpec post_capture_spec = 16;
+}
+
+// The verification request of a post-capture job (A08/F-02).
+message PostCaptureSpec {
+  // off (identities only, no chain read) or strict.
+  string chain_verify = 1;
+  // Strict from the verification cache only (no network).
+  bool offline = 2;
+  // Resume an incomplete verification.
+  bool resume = 3;
+  // An operator provider evidence was given (online strict; terminal only).
+  bool provider_evidence = 4;
+}
+
+// A completed post-capture chain: each stage's outcome (the qualification record is the run's).
+message PostCaptureResult {
+  // off (NOT_RUN recorded) or a CANONICAL_VERIFIED strict result.
+  bool verification_ok = 1;
+  // The native report completed.
+  bool report_ok = 2;
+  // The master verdict; empty: the qualification could not run.
+  string verdict = 3;
 }
 
 // Economic parameters of a backtest point.
@@ -248,4 +274,22 @@ message OptimizeJobCommand {
   uint64 max_points = 5;
   // Save the chosen point as an offline Shadow candidate profile (never a LIVE setting).
   bool save_profile = 6;
+}
+
+// Parameters (CommandRequest.params) of project0.capture.verify.start: the options of
+// `p0ctl job start post-capture` the GUI may give (online strict needs the operator's provider
+// evidence and stays terminal-only).
+message PostCaptureJobCommand {
+  // The run id under the project's run roots (never a path).
+  string run_id = 1;
+  // off or strict (strict only with offline).
+  string chain_verify = 2;
+  // Strict from the verification cache only (no network).
+  bool offline = 3;
+  // Resume an incomplete verification.
+  bool resume_verification = 4;
+  // The verification's time budget.
+  uint64 max_seconds = 5;
+  // The verification's memory budget.
+  uint64 max_ram_bytes = 6;
 }
