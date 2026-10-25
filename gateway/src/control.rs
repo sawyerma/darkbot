@@ -310,12 +310,18 @@ fn refusal(stderr: &[u8]) -> String {
     format!("Native controller refused: {code}")
 }
 
+/// The launchd control binary the capture/readiness state is read from (macOS).
+pub const LAUNCHCTL: &str = "/bin/launchctl";
+
 #[derive(Clone)]
 pub struct Paths {
     pub ctl: PathBuf,
     pub rundir: PathBuf,
     pub logdir: PathBuf,
     pub label: String,
+    /// CI-N1: the launchd query binary — `LAUNCHCTL` in production; tests pass a hermetic stand-in
+    /// so they never depend on the host's launchd (and run where there is none, e.g. Linux CI).
+    pub launchctl: PathBuf,
 }
 /// Time-bounded idempotency (Wire V1.3 §7), all bounds from `Limits` (`command_*`). Every open
 /// record (PENDING / PENDING_RECONCILE) stays in `commands/`. At `command_ledger_records` the
@@ -477,6 +483,7 @@ impl Control {
                 rundir: std::env::var_os("DARKBOT_RUNDIR")?.into(),
                 logdir: std::env::var_os("DARKBOT_LOGDIR")?.into(),
                 label: std::env::var("DARKBOT_CAPTURE_LABEL").ok()?,
+                launchctl: LAUNCHCTL.into(),
             })
         })();
         Self::new(paths, limits)
@@ -507,7 +514,7 @@ impl Control {
         // List is read-only. An execution/permission/timeout error is NEVER evidence of STOPPED.
         let output = tokio::time::timeout(
             Duration::from_secs(2),
-            Command::new("/bin/launchctl")
+            Command::new(&p.launchctl)
                 .args(["list", &p.label])
                 .kill_on_drop(true)
                 .output(),
@@ -600,7 +607,7 @@ impl Control {
             ) == s.run_id;
         let out = tokio::time::timeout(
             Duration::from_secs(2),
-            Command::new("/bin/launchctl")
+            Command::new(&p.launchctl)
                 .args(["list", &label])
                 .kill_on_drop(true)
                 .output(),
@@ -1225,8 +1232,8 @@ fn records(dir: &Path) -> Result<Vec<(SystemTime, PathBuf)>, ()> {
 }
 fn terminal(path: &Path) -> bool {
     ledger_record::read(path).is_ok_and(|r| {
-            r.phase == CommandPhase::Completed as i32 || r.phase == CommandPhase::Failed as i32
-        })
+        r.phase == CommandPhase::Completed as i32 || r.phase == CommandPhase::Failed as i32
+    })
 }
 fn oldest_terminal(dir: &Path) -> Result<Option<PathBuf>, ()> {
     let mut all = records(dir)?;
@@ -1529,6 +1536,20 @@ pub async fn logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CI-N1: a hermetic launchd stand-in that knows no job — what launchd answers for an absent
+    /// label — so the tests never read the host's launchd and also run where none exists (Linux).
+    fn absent_launchctl(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("launchctl");
+        fs::write(
+            &path,
+            "#!/bin/sh\necho \"Could not find service \\\"$2\\\" in domain for port\" >&2\nexit 113\n",
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
     /// Ledger bounds come from `Limits` exactly as in production; only the capacity is small so
     /// that fsync-bound tests stay fast, and real-time tests shrink the clock window.
     const CAPACITY: usize = 16;
@@ -1539,6 +1560,10 @@ mod tests {
         }
     }
     /// Real-time ledger: a short clock window and a ledger small enough to flood well within it.
+    /// The clock window of the real-time ledger tests: its retention (twice the window) must
+    /// outlast filling the ledger, which costs process starts per command (controller and launchd
+    /// stand-ins) and is slow on a loaded runner — 1 s left too little headroom (CI-N1).
+    const REAL_TIME_WINDOW_MS: u64 = 3_000;
     fn short(window_ms: u64) -> Limits {
         Limits {
             command_clock_window_ms: window_ms,
@@ -1562,6 +1587,7 @@ mod tests {
             rundir: dir.clone(),
             logdir: dir.clone(),
             label: "test".into(),
+            launchctl: absent_launchctl(&dir),
         };
         (Control::new(Some(paths), &limits()), dir)
     }
@@ -1630,10 +1656,9 @@ mod tests {
         put(&control, CAPACITY, CommandPhase::Completed).unwrap();
         assert_eq!(records(&dir.join("commands")).unwrap().len(), CAPACITY);
         assert!(control.record_path(&uuid(0)).unwrap().exists());
-        assert!(
-            dir.join(format!("commands/archive/{}.cmd", uuid(1)))
-                .exists()
-        );
+        assert!(dir
+            .join(format!("commands/archive/{}.cmd", uuid(1)))
+            .exists());
         let replay = control.execute(&stored(1)).await;
         assert_eq!(replay.status, CommandStatus::Accepted as i32);
         assert_eq!(replay.phase, CommandPhase::Completed as i32);
@@ -1683,6 +1708,7 @@ mod tests {
                 rundir: self.dir.join("run"),
                 logdir: self.dir.clone(),
                 label: "test.capture".into(),
+                launchctl: absent_launchctl(&self.dir),
             };
             Control::new(Some(paths), &self.limits)
         }
@@ -1794,13 +1820,11 @@ mod tests {
         control.persist(&x.request_id, &record).unwrap();
         assert!(cmd.exists() && !legacy.exists());
         assert_eq!(ledger_record::read(&cmd), Ok(record));
-        assert!(
-            fs::read_dir(env.ledger()).unwrap().all(|e| e
-                .unwrap()
-                .path()
-                .extension()
-                .is_none_or(|x| x != "json"))
-        );
+        assert!(fs::read_dir(env.ledger()).unwrap().all(|e| e
+            .unwrap()
+            .path()
+            .extension()
+            .is_none_or(|x| x != "json")));
     }
     /// BSC-051: a damaged record makes the ledger unreadable; it is never "no record".
     #[tokio::test]
@@ -1851,11 +1875,10 @@ mod tests {
         for n in 0..CAPACITY {
             put(&control, n, CommandPhase::Completed).unwrap();
         }
-        assert!(
-            env.ledger()
-                .join(format!("archive/{}.cmd", x.request_id))
-                .exists()
-        );
+        assert!(env
+            .ledger()
+            .join(format!("archive/{}.cmd", x.request_id))
+            .exists());
         let control = env.restart();
         assert!(completed(&control.execute(&x).await));
         for other in [
@@ -2043,7 +2066,7 @@ mod tests {
     /// same id with a new time is then a new intent (the documented contract limit).
     #[tokio::test]
     async fn within_its_retention_a_request_id_never_runs_twice() {
-        let env = Env::with("case1", short(1_000));
+        let env = Env::with("case1", short(REAL_TIME_WINDOW_MS));
         let cap = env.limits.command_ledger_records;
         let control = env.restart();
         let x = candidate(9_000, now());
@@ -2091,7 +2114,7 @@ mod tests {
     /// and afterwards the mark never blocks a current stamp.
     #[tokio::test]
     async fn stamps_at_the_upper_clock_bound_never_block_current_commands() {
-        let l = short(1_000);
+        let l = short(REAL_TIME_WINDOW_MS);
         let env = Env::with("case2", l.clone());
         let cap = l.command_ledger_records;
         let control = env.restart();
@@ -2124,7 +2147,7 @@ mod tests {
     /// reason before and after archiving (no ledger effect) and runs once its clock is corrected.
     #[tokio::test]
     async fn a_browser_clock_beyond_the_window_is_refused_regardless_of_archiving() {
-        let env = Env::with("case3", short(1_000));
+        let env = Env::with("case3", short(REAL_TIME_WINDOW_MS));
         let control = env.restart();
         let hour = 3_600_000_000_000;
         let behind = control.execute(&candidate(40_000, now() - hour)).await;
@@ -2295,6 +2318,7 @@ mod tests {
                 rundir: dir.join("run"),
                 logdir: dir.clone(),
                 label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
             }),
             &Limits::default(),
         );
@@ -2418,6 +2442,7 @@ mod tests {
                 rundir: dir.join("run"),
                 logdir: dir.clone(),
                 label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
             }),
             &Limits::default(),
         );
@@ -2515,6 +2540,7 @@ mod tests {
                 rundir: dir.join("run"),
                 logdir: dir.clone(),
                 label: "com.darkbot.test.absent.capture".into(),
+                launchctl: absent_launchctl(&dir),
             }),
             &Limits::default(),
         );
@@ -2855,6 +2881,7 @@ mod tests {
                 rundir: dir.join("run"),
                 logdir: dir.clone(),
                 label: "com.darkbot.test.absent.capture".into(),
+                launchctl: absent_launchctl(&dir),
             }),
             &Limits::default(),
         );

@@ -20,7 +20,10 @@ use axum::{
 use prost::Message as _;
 use std::{
     collections::HashMap,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tokio_stream::{wrappers::WatchStream, StreamExt, StreamMap};
@@ -36,20 +39,26 @@ pub async fn upgrade(
         return (StatusCode::UNAUTHORIZED, "session required").into_response();
     }
     // Atomic reservation prevents a concurrent upgrade from exceeding max_clients.
-    let limit = app.cfg.limits.max_clients;
-    if app
-        .clients
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-            (n < limit).then_some(n + 1)
-        })
-        .is_err()
-    {
+    if !reserve_slot(&app.clients, app.cfg.limits.max_clients) {
         return (StatusCode::SERVICE_UNAVAILABLE, "client limit").into_response();
     }
     let size = app.cfg.limits.max_client_frame_bytes;
     ws.max_message_size(size)
         .max_frame_size(size)
         .on_upgrade(move |socket| run(app, socket))
+}
+/// Reserves one client slot below `limit` in one atomic step (two concurrent upgrades never both
+/// take the last slot). An explicit compare-exchange loop: `fetch_update` is deprecated on current
+/// stable (CI) and its successor does not exist on the pinned local toolchain.
+fn reserve_slot(clients: &AtomicUsize, limit: usize) -> bool {
+    let mut n = clients.load(Ordering::Acquire);
+    while n < limit {
+        match clients.compare_exchange_weak(n, n + 1, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(current) => n = current,
+        }
+    }
+    false
 }
 struct Guard(Arc<AppState>);
 impl Drop for Guard {
@@ -334,5 +343,29 @@ impl Client {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+
+    /// The client limit holds under concurrency: of many racing reservations exactly `limit`
+    /// win, and a released slot can be taken again.
+    #[test]
+    fn client_slots_never_exceed_the_limit() {
+        let clients = Arc::new(AtomicUsize::new(0));
+        let threads: Vec<_> = (0..16)
+            .map(|_| {
+                let c = clients.clone();
+                std::thread::spawn(move || (0..100).filter(|_| reserve_slot(&c, 7)).count())
+            })
+            .collect();
+        let won: usize = threads.into_iter().map(|t| t.join().unwrap()).sum();
+        assert_eq!((won, clients.load(Ordering::Acquire)), (7, 7));
+        assert!(!reserve_slot(&clients, 7));
+        clients.fetch_sub(1, Ordering::AcqRel);
+        assert!(reserve_slot(&clients, 7));
+        assert!(!reserve_slot(&AtomicUsize::new(0), 0));
     }
 }

@@ -72,7 +72,7 @@ async fn try_connect(
     cookie: bool,
     origin: Option<&str>,
     host: Option<&str>,
-) -> Result<Ws, WsError> {
+) -> Result<Ws, Box<WsError>> {
     let mut req = s.url().into_client_request().unwrap();
     req.headers_mut()
         .insert("origin", origin.unwrap_or(&s.origin()).parse().unwrap());
@@ -86,9 +86,11 @@ async fn try_connect(
             format!("darkbot_session={token}").parse().unwrap(),
         );
     }
+    // Boxed: the handshake error is large (clippy::result_large_err on current stable).
     tokio_tungstenite::connect_async(req)
         .await
         .map(|(ws, _)| ws)
+        .map_err(Box::new)
 }
 async fn connect(s: &TestServer) -> Ws {
     try_connect(s, true, None, None).await.unwrap()
@@ -231,7 +233,7 @@ async fn cookie_origin_host_guards() {
         let err = try_connect(&s, cookie, origin, host)
             .await
             .expect_err("must reject");
-        match err {
+        match *err {
             WsError::Http(res) => assert_eq!(res.status().as_u16(), expected),
             other => panic!("{other:?}"),
         }
