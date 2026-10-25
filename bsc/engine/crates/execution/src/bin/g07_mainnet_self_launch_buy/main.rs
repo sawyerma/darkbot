@@ -46,22 +46,12 @@ use inputs::*;
 use shared::*;
 use transactions::*;
 
-/// A stop before the release: the local latch and the shared attempt
-/// authority (BSC-005) are given back; the authority only while the attempt
-/// directory holds no RELEASED marker.
-fn release_unsent(
-    attempt_dir: &Path,
-    evidence: Option<&EvidenceFile>,
-    outcome: &str,
-    authority: &attempt_authority::Claim,
-    git: &attempt_authority::Git,
-) -> String {
-    let released = fs::symlink_metadata(attempt_dir.join(RELEASED_MARKER_FILE)).is_ok();
-    let latch = release_unsent_attempt(attempt_dir, evidence, outcome);
-    if released {
-        return format!("{latch}; the attempt authority stays consumed");
-    }
-    format!("{latch}; {}", authority.return_unsent(git))
+/// A stop after the authority CAS but before the capture journal exists:
+/// the latch is released; the shared attempt authority (BSC-005) stays
+/// consumed, as no journal can show the stop was byte-free (T5).
+fn release_without_journal(attempt_dir: &Path, evidence: Option<&EvidenceFile>) -> String {
+    let (_, latch) = release_unsent_attempt(attempt_dir, evidence, "pre-egress");
+    format!("{latch}; the attempt authority stays consumed (no journal yet)")
 }
 
 fn main() {
@@ -341,8 +331,7 @@ fn main() {
     let evidence_out = owner_uid(&attempt_dir)
         .and_then(|uid| EvidenceFile::create(&evidence_path, uid))
         .unwrap_or_else(|e| {
-            let released =
-                release_unsent(&attempt_dir, None, "pre-egress", &authority, &authority_git);
+            let released = release_without_journal(&attempt_dir, None);
             panic!("G0.7 evidence file DARKBOT_G07_EVIDENCE_PATH: {e}; {released}")
         });
     let capture_path = attempt_dir.join(CAPTURE_JOURNAL_FILE);
@@ -355,24 +344,20 @@ fn main() {
         &producer_witness_source,
     )
     .unwrap_or_else(|e| {
-        let released = release_unsent(
-            &attempt_dir,
-            Some(&evidence_out),
-            "pre-egress",
-            &authority,
-            &authority_git,
-        );
+        let released = release_without_journal(&attempt_dir, Some(&evidence_out));
         panic!("G0.7 capture pre-arm failed: {e}; {released}")
     });
     let capture_clock = capture.clock();
+    // From here to the release barrier the claim lives in `unsent`; only its
+    // terminal abort can return it, and the barrier consumes it (T5).
     let unsent = Unsent {
         attempt_dir: &attempt_dir,
         evidence: &evidence_out,
-        authority: &authority,
+        authority,
         git: &authority_git,
     };
 
-    let contract = match verify_live_authorization(
+    let authorized = verify_live_authorization(
         Path::new(V5_RELATIVE_PATH),
         &LiveGuardContext {
             attempt_id: attempt_id.clone(),
@@ -399,21 +384,22 @@ fn main() {
             candidate_profile: selected.profile.name().to_string(),
             candidate_id: hex::encode(selected.id),
             launch_path_current: Some(launch_path_current.clone()),
-            attempt_authority: authority.proof(),
+            attempt_authority: Some(unsent.authority.proof()),
         },
-    ) {
+    );
+    let contract = match authorized {
         Ok(contract) => contract,
         Err(e) => {
             let now = capture_clock.now_ns();
             let _ = capture.record_text("AUTHORIZATION_REFUSED", now, &format!("reason={e}"));
-            let _ = capture.finish();
-            eprintln!("{}", unsent.release("refused"));
-            panic!("G0.7 live authorization refused: {e}");
+            let stopped =
+                unsent.abort(capture, &capture_clock, "refused", "live authorization", &e);
+            panic!("G0.7 live authorization refused: {e}; {stopped}");
         }
     };
 
     let evidence_binding = format!(
-        "contract_sha256={}\nlaunch_path_record_sha256={}\nlaunch_path_verified_block_hash={}\ndry_record_sha256={}\ndry_legacy_sha256={}\npreflight_record_sha256={}\npreflight_legacy_sha256={}\nbuilder_policy_record_sha256={}\nbuilder_policy_legacy_sha256={}\nproducer_witness_source_record_sha256={}\nproducer_witness_source_legacy_sha256={}\nlaunch_tx_hash={}\nbuy_tx_hash={}\ntoken={}",
+        "contract_sha256={}\nlaunch_path_record_sha256={}\nlaunch_path_verified_block_hash={}\ndry_record_sha256={}\ndry_legacy_sha256={}\npreflight_record_sha256={}\npreflight_legacy_sha256={}\nbuilder_policy_record_sha256={}\nbuilder_policy_legacy_sha256={}\nproducer_witness_source_record_sha256={}\nproducer_witness_source_legacy_sha256={}\nlaunch_tx_hash={}\nbuy_tx_hash={}\ntoken={}\nattempt_authority_consumed={}",
         contract.sha256,
         hex::encode(launch_path_current.record_sha256()),
         hex::encode(launch_path_current.block_hash()),
@@ -433,7 +419,8 @@ fn main() {
             .unwrap_or("none"),
         launch_hash,
         buy_hash,
-        token
+        token,
+        unsent.authority.consumed_commit()
     );
     // Every stop from here to the release is pre-egress and releases the latch.
     let bound = capture
@@ -448,7 +435,7 @@ fn main() {
         })
         .and_then(|()| capture.record_raw_tx("buy_B", capture_clock.now_ns(), &buy_hash, &buy.raw));
     if let Err(e) = bound {
-        pre_egress_abort(capture, &capture_clock, &unsent, "journal attempt", &e)
+        pre_egress_abort(capture, &capture_clock, unsent, "journal attempt", &e)
     }
 
     // The evidence of the attempt, completed and written atomically right
@@ -539,12 +526,12 @@ fn main() {
     // the guard phase) before the builder prewarm, so the builder connections
     // only idle for the wait for the next block.
     if let Err(e) = head_poller.latest() {
-        pre_egress_abort(capture, &capture_clock, &unsent, "head poller", &e)
+        pre_egress_abort(capture, &capture_clock, unsent, "head poller", &e)
     }
     // TLS/DNS/handshake all happen before the economic write boundary.
     let mut club48_tls = match connect_tls(CLUB48_HOST) {
         Ok(stream) => stream,
-        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "48Club TLS prewarm", &e),
+        Err(e) => pre_egress_abort(capture, &capture_clock, unsent, "48Club TLS prewarm", &e),
     };
     // The 48Club connection is the older one: it bounds the idle time.
     let club48_ready_at = Instant::now();
@@ -553,7 +540,7 @@ fn main() {
         Err(e) => pre_egress_abort(
             capture,
             &capture_clock,
-            &unsent,
+            unsent,
             "BlockRazor TLS prewarm",
             &e,
         ),
@@ -564,7 +551,7 @@ fn main() {
         capture_clock.now_ns(),
         &format!("preflight_head={preflight_head}\npreflight_head_hash={preflight_head_hash}"),
     ) {
-        pre_egress_abort(capture, &capture_clock, &unsent, "journal prewarm", &e)
+        pre_egress_abort(capture, &capture_clock, unsent, "journal prewarm", &e)
     }
 
     // The send head is the next block, read as soon as the endpoint has it:
@@ -572,7 +559,7 @@ fn main() {
     // earlier.
     let fresh = match head_poller.next_head(HEAD_TRANSITION_TIMEOUT) {
         Ok(observation) => observation,
-        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "send head read", &e),
+        Err(e) => pre_egress_abort(capture, &capture_clock, unsent, "send head read", &e),
     };
     let window = match bundle_window(
         preflight_head,
@@ -582,14 +569,14 @@ fn main() {
         fresh.excess_staleness_ms,
     ) {
         Ok(window) => window,
-        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "send head window", &e),
+        Err(e) => pre_egress_abort(capture, &capture_clock, unsent, "send head window", &e),
     };
     let send_head = fresh.head.number;
     let Some(send_head_hash) = hex_word(&fresh.head.hash) else {
         pre_egress_abort(
             capture,
             &capture_clock,
-            &unsent,
+            unsent,
             "send head hash",
             &fresh.head.hash,
         )
@@ -660,7 +647,7 @@ fn main() {
         // The exact bodies are on file before any of their bytes leaves.
         .and_then(|()| capture.wait_appended(CAPTURE_APPEND_TIMEOUT));
     if let Err(e) = journaled {
-        pre_egress_abort(capture, &capture_clock, &unsent, "journal submission", &e)
+        pre_egress_abort(capture, &capture_clock, unsent, "journal submission", &e)
     }
     if club48_ready_at.elapsed() > MAX_BUILDER_IDLE {
         let idle = format!(
@@ -668,7 +655,7 @@ fn main() {
             club48_ready_at.elapsed().as_millis(),
             MAX_BUILDER_IDLE.as_millis()
         );
-        pre_egress_abort(capture, &capture_clock, &unsent, "builder idle", &idle)
+        pre_egress_abort(capture, &capture_clock, unsent, "builder idle", &idle)
     }
     // A builder that closed its idle connection would swallow the bundle unseen.
     for (stage, stream) in [
@@ -676,7 +663,7 @@ fn main() {
         ("BlockRazor liveness", &mut blockrazor_tls),
     ] {
         if let Err(e) = transport_alive(stream) {
-            pre_egress_abort(capture, &capture_clock, &unsent, stage, &e)
+            pre_egress_abort(capture, &capture_clock, unsent, stage, &e)
         }
     }
 
@@ -731,7 +718,10 @@ fn main() {
                     .flatten()
                     .map(|e| e.to_string())
                     .collect();
-                return Err(format!("send thread spawn failed: {}", reasons.join("; ")));
+                return Err((
+                    format!("send thread spawn failed: {}", reasons.join("; ")),
+                    unsent,
+                ));
             }
         };
         // Each receiver lives in its spawned closure until that closure has
@@ -739,9 +729,15 @@ fn main() {
         // nothing has been released.
         if go48.send(()).is_err() {
             drop(gobr);
-            return Err("48Club send thread ended before its go signal".to_string());
+            return Err((
+                "48Club send thread ended before its go signal".to_string(),
+                unsent,
+            ));
         }
         let _ = gobr.send(());
+        // The release barrier: the attempt authority is spent for good; past
+        // this line no return of it compiles (T5).
+        let spent = unsent.cross();
         release_before_ns = capture_clock.now_ns();
         barrier.wait();
         release_after_ns = capture_clock.now_ns();
@@ -798,19 +794,22 @@ fn main() {
         release_evidence = write_evidence(&evidence_out, &evidence);
         release_marker = mark_released(&attempt_dir, release_after_ns);
         Ok((
-            h48.join()
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| panicked_provider_result("48Club/Puissant")),
-            hbr.join()
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| panicked_provider_result("BlockRazor")),
+            (
+                h48.join()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| panicked_provider_result("48Club/Puissant")),
+                hbr.join()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| panicked_provider_result("BlockRazor")),
+            ),
+            spent,
         ))
     });
-    let (club48_result, blockrazor_result) = match sent {
+    let ((club48_result, blockrazor_result), spent) = match sent {
         Ok(results) => results,
-        Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, "send threads", &e),
+        Err((e, unsent)) => pre_egress_abort(capture, &capture_clock, unsent, "send threads", &e),
     };
 
     for result in [&club48_result, &blockrazor_result] {
@@ -839,7 +838,10 @@ fn main() {
     let _ = capture.record_text(
         "BUNDLE_RELEASE_BRACKET",
         capture_clock.now_ns(),
-        &format!("release_before_ns={release_before_ns}\nrelease_after_ns={release_after_ns}"),
+        &format!(
+            "release_before_ns={release_before_ns}\nrelease_after_ns={release_after_ns}\nattempt_authority_spent={}",
+            spent.consumed_commit()
+        ),
     );
 
     let both_flushed =
@@ -1127,44 +1129,89 @@ fn mark_released(attempt_dir: &Path, release_after_ns: u64) -> String {
     }
 }
 
-/// What a stop before the release hands back: the attempt's latch directory
-/// and this run's evidence file.
+/// What a stop before the release hands back: the attempt's latch directory,
+/// this run's evidence file and the consumed authority itself. Owned, not
+/// borrowed: `abort` and `cross` take it, so it is gone after either.
 struct Unsent<'a> {
     attempt_dir: &'a Path,
     evidence: &'a EvidenceFile,
-    authority: &'a attempt_authority::Claim,
+    authority: attempt_authority::Claim,
     git: &'a attempt_authority::Git,
 }
 
+/// Whether a byte-free stop may give the authority back (T5): only when its
+/// journal took the abort and the latch was released intact (renamed to
+/// `latched_at`). Returns the RELEASED marker path the return must find
+/// absent.
+fn return_condition(
+    journaled: Result<(), String>,
+    latched_at: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    journaled.map_err(|e| format!("the journal did not take the abort ({e})"))?;
+    latched_at
+        .map(|dir| dir.join(RELEASED_MARKER_FILE))
+        .ok_or_else(|| "the latch was not released".to_string())
+}
+
 impl Unsent<'_> {
-    fn release(&self, outcome: &str) -> String {
-        release_unsent(
-            self.attempt_dir,
-            Some(self.evidence),
-            outcome,
-            self.authority,
-            self.git,
-        )
+    /// The release barrier: the authority is spent for good.
+    fn cross(self) -> attempt_authority::Released {
+        self.authority.release()
+    }
+
+    /// The terminal stop before the release barrier. The journal takes the
+    /// byte-free abort (on file before anything is given back), the latch is
+    /// released, the authority is returned only under `return_condition` and
+    /// with no RELEASED marker, else it stays consumed; the outcome is
+    /// journaled and the journal closed. Returns what happened.
+    fn abort(
+        self,
+        mut capture: CaptureSession,
+        clock: &CaptureClock,
+        outcome: &str,
+        stage: &str,
+        reason: &str,
+    ) -> String {
+        let journaled = capture
+            .record_text(
+                "PRE_EGRESS_ABORT",
+                clock.now_ns(),
+                &format!("stage={stage}\nreason={reason}\nbundle_bytes_written=false"),
+            )
+            .and_then(|()| capture.wait_appended(CAPTURE_APPEND_TIMEOUT));
+        let (latched_at, latch) =
+            release_unsent_attempt(self.attempt_dir, Some(self.evidence), outcome);
+        let returned = return_condition(journaled, latched_at)
+            .and_then(|marker| self.authority.return_unsent(self.git, &marker));
+        let (event, body, authority) = match returned {
+            Ok(()) => (
+                "AUTHORITY_RETURNED",
+                "attempt_authority=AUTHORIZED\nautomatic_retry=false".to_string(),
+                "the attempt authority was returned (AUTHORIZED again; no automatic retry)"
+                    .to_string(),
+            ),
+            Err(e) => (
+                "AUTHORITY_KEPT",
+                format!("attempt_authority=CONSUMED\nreason={e}"),
+                format!("the attempt authority stays consumed: {e}"),
+            ),
+        };
+        let _ = capture.record_text(event, clock.now_ns(), &body);
+        let _ = capture.finish();
+        format!("{latch}; {authority}")
     }
 }
 
-/// Terminal stop after the guard but before any bundle byte was written: the
-/// journal is closed and the latch released (the attempt state is kept).
+/// Terminal stop after the guard but before any bundle byte was written.
 fn pre_egress_abort(
-    mut capture: CaptureSession,
+    capture: CaptureSession,
     clock: &CaptureClock,
-    unsent: &Unsent,
+    unsent: Unsent,
     stage: &str,
     reason: &str,
 ) -> ! {
-    let _ = capture.record_text(
-        "PRE_EGRESS_ABORT",
-        clock.now_ns(),
-        &format!("stage={stage}\nreason={reason}\nbundle_bytes_written=false"),
-    );
-    let _ = capture.finish();
-    let released = unsent.release("pre-egress");
-    panic!("G0.7 {stage} failed; no valid bundle write attempted: {reason}; {released}");
+    let stopped = unsent.abort(capture, clock, "pre-egress", stage, reason);
+    panic!("G0.7 {stage} failed; no valid bundle write attempted: {reason}; {stopped}");
 }
 
 /// A SHA-256 in hex as a record word; read before the attempt is latched.
@@ -1176,6 +1223,9 @@ fn word(sha256: &str) -> RecordValue {
 fn opt_word(sha256: &Option<String>) -> Option<RecordValue> {
     sha256.as_deref().map(word)
 }
+
+#[cfg(test)]
+mod t5_abort_tests;
 
 #[cfg(test)]
 mod tests {

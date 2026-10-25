@@ -451,17 +451,34 @@ impl EvidenceFile {
 /// refusal or pre-egress stop): the attempt directory is renamed with its
 /// journal, never deleted, and this run's evidence placeholder is removed if
 /// still empty, so a corrected run can start without deleting anything by
-/// hand. Refuses once the RELEASED marker exists. Returns what happened.
+/// hand. Refuses unless the RELEASED marker is provably absent. Returns the
+/// directory the latch was renamed to (none if it was not released) and what
+/// happened.
 pub(crate) fn release_unsent_attempt(
     attempt_dir: &Path,
     evidence: Option<&EvidenceFile>,
     outcome: &str,
-) -> String {
-    if fs::symlink_metadata(attempt_dir.join(RELEASED_MARKER_FILE)).is_ok() {
-        return format!(
-            "{} holds the RELEASED marker: the latch is never released",
-            attempt_dir.display()
-        );
+) -> (Option<PathBuf>, String) {
+    match fs::symlink_metadata(attempt_dir.join(RELEASED_MARKER_FILE)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(_) => {
+            return (
+                None,
+                format!(
+                    "{} holds the RELEASED marker: the latch is never released",
+                    attempt_dir.display()
+                ),
+            );
+        }
+        Err(e) => {
+            return (
+                None,
+                format!(
+                    "the RELEASED marker of {} is unclear ({e}): the latch is kept",
+                    attempt_dir.display()
+                ),
+            );
+        }
     }
     let name = attempt_dir
         .file_name()
@@ -472,26 +489,30 @@ pub(crate) fn release_unsent_attempt(
         .map(|n| attempt_dir.with_file_name(format!("{name}.{outcome}-{stamp}-{n}")))
         .find(|candidate| fs::symlink_metadata(candidate).is_err())
         .unwrap_or_else(|| attempt_dir.with_file_name(format!("{name}.{outcome}-{stamp}")));
-    let latch = match fs::rename(attempt_dir, &released) {
+    let (renamed, latch) = match fs::rename(attempt_dir, &released) {
         Ok(()) => {
             if let Some(root) = attempt_dir.parent() {
                 let _ = sync_dir(root);
             }
-            format!(
+            let note = format!(
                 "nothing was sent; latch released, attempt state kept at {}",
                 released.display()
-            )
+            );
+            (Some(released), note)
         }
-        Err(e) => format!(
-            "nothing was sent, but the latch could not be released ({e}); this run stopped before the release, so {} may be renamed by hand",
-            attempt_dir.display()
+        Err(e) => (
+            None,
+            format!(
+                "nothing was sent, but the latch could not be released ({e}); this run stopped before the release, so {} may be renamed by hand",
+                attempt_dir.display()
+            ),
         ),
     };
     let evidence = evidence.map_or_else(
         || "this run created no evidence file".to_string(),
         EvidenceFile::remove_if_unwritten,
     );
-    format!("{latch}; {evidence}")
+    (renamed, format!("{latch}; {evidence}"))
 }
 
 pub(crate) fn validate_producer_witness_source(
@@ -790,7 +811,7 @@ mod tests {
         let dir = latch_attempt(&root, "attempt-1", "").unwrap();
         fs::write(dir.join(CAPTURE_JOURNAL_FILE), b"journal").unwrap();
         let (evidence, path) = evidence_in(&base);
-        let note = release_unsent_attempt(&dir, Some(&evidence), "refused");
+        let (renamed, note) = release_unsent_attempt(&dir, Some(&evidence), "refused");
         assert!(
             note.contains("latch released") && note.contains("removed"),
             "{note}"
@@ -802,6 +823,7 @@ mod tests {
             .collect();
         assert_eq!(kept.len(), 1);
         let kept = root.join(&kept[0]);
+        assert_eq!(renamed.as_deref(), Some(kept.as_path()));
         assert!(kept.to_string_lossy().contains("attempt-1.refused-"));
         assert_eq!(
             fs::read(kept.join(CAPTURE_JOURNAL_FILE)).unwrap(),
@@ -812,19 +834,30 @@ mod tests {
         let dir = latch_attempt(&root, "attempt-1", "").unwrap();
         let (evidence, path) = evidence_in(&base);
         evidence.replace(b"{}\n").unwrap();
-        let note = release_unsent_attempt(&dir, Some(&evidence), "pre-egress");
+        let (_, note) = release_unsent_attempt(&dir, Some(&evidence), "pre-egress");
         assert!(note.contains("is not empty and was left alone"), "{note}");
         assert!(path.exists());
 
         // After the release marker the latch is never released.
         let dir = latch_attempt(&root, "attempt-1", "").unwrap();
         fs::write(dir.join(RELEASED_MARKER_FILE), b"released").unwrap();
-        let note = release_unsent_attempt(&dir, None, "pre-egress");
-        assert!(note.contains("never released"), "{note}");
+        let (renamed, note) = release_unsent_attempt(&dir, None, "pre-egress");
+        assert!(
+            note.contains("never released") && renamed.is_none(),
+            "{note}"
+        );
         assert!(dir.join(ATTEMPT_LATCH_FILE).exists());
         assert!(latch_attempt(&root, "attempt-1", "").is_err());
+        // A marker that cannot be inspected is not an absent one.
+        fs::remove_file(dir.join(RELEASED_MARKER_FILE)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let (renamed, note) = release_unsent_attempt(&dir, None, "pre-egress");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(note.contains("unclear") && renamed.is_none(), "{note}");
+        assert!(dir.join(ATTEMPT_LATCH_FILE).exists());
 
-        let note = release_unsent_attempt(&root.join("missing"), None, "pre-egress");
+        let (renamed, note) = release_unsent_attempt(&root.join("missing"), None, "pre-egress");
+        assert!(renamed.is_none());
         assert!(
             note.contains("could not be released") && note.contains("created no evidence file"),
             "{note}"

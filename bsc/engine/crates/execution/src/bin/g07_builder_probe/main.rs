@@ -111,7 +111,7 @@ fn main() {
     let evidence = owner_uid(&probe_dir)
         .and_then(|uid| EvidenceFile::create(&evidence_path.to_string_lossy(), uid))
         .unwrap_or_else(|e| {
-            let released = release_unsent_attempt(&probe_dir, None, "pre-egress");
+            let (_, released) = release_unsent_attempt(&probe_dir, None, "pre-egress");
             panic!("builder probe evidence: {e}; nothing sent; {released}")
         });
 
@@ -120,7 +120,7 @@ fn main() {
     };
     // The evidence file must take a report before anything is sent.
     if let Err(e) = persist(&[], "IN_PROGRESS") {
-        let released = release_unsent_attempt(&probe_dir, Some(&evidence), "pre-egress");
+        let (_, released) = release_unsent_attempt(&probe_dir, Some(&evidence), "pre-egress");
         panic!("builder probe evidence: {e}; nothing sent; {released}");
     }
 

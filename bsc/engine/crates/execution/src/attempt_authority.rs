@@ -14,7 +14,10 @@
 //!   again.
 //! - `Claim::return_unsent` gives it back (CONSUMED -> AUTHORIZED, again a
 //!   compare-and-swap from this claim) only where the run provably wrote no
-//!   bundle byte; nothing after the release returns it.
+//!   bundle byte (T5): it consumes the claim, and `Claim::release` consumes
+//!   it at the release barrier, so no return compiles after the release, and
+//!   a returned claim has no guard proof left. A crash, kill, panic, UNKNOWN
+//!   or any other path keeps it CONSUMED: nothing gives it back on drop.
 //!
 //! Git runs as a child with a cleared environment (PATH, HOME, an SSH agent
 //! socket), no hooks, no prompt and a hard deadline. Commits are empty-tree
@@ -23,7 +26,7 @@
 
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -300,8 +303,9 @@ pub fn existing(git: &Git, attempt_id: &str) -> Result<Option<String>, String> {
 /// Qualifies the remote as the authority medium with exactly the production
 /// operations, on a self-test attempt ID of its own (`selftest-<nonce>`):
 /// create-only grant, concurrent consumers with exactly one winner, a stale
-/// claim that cannot return it, return and re-consume, and a deletion under
-/// lease that leaves nothing behind. Every step is reported.
+/// claim that cannot return it, a RELEASED marker that keeps it consumed, a
+/// return of an unsent claim, and a deletion under lease that leaves nothing
+/// behind. Every step is reported.
 pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
     let binding = Binding {
         attempt_id: format!("selftest-{nonce}"),
@@ -310,6 +314,13 @@ pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
         buy_tx_hash: [0x2b; 32],
     };
     let reference = binding.reference()?;
+    // A RELEASED marker of this self-test, and a path that provably is none.
+    let scratch = std::env::temp_dir().join(format!("darkbot-authority-selftest-{nonce}"));
+    let absent_marker = scratch.join("absent").join("RELEASED");
+    let marker = scratch.join("RELEASED");
+    std::fs::create_dir_all(&scratch)
+        .and_then(|()| std::fs::write(&marker, b"selftest"))
+        .map_err(|e| format!("self-test marker: {e}"))?;
     let mut steps = Vec::new();
     let result = (|| -> Result<(), String> {
         let mut step = |name: &str, ok: bool| {
@@ -366,19 +377,33 @@ pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
             "second_consume_refused",
             consume(git, &binding, "late").is_err(),
         )?;
-        let first = &winners[0];
-        step(
-            "return_unsent",
-            first.return_unsent(git).contains("returned"),
-        )?;
-        let second = consume(git, &binding, "again").map_err(|e| format!("re-consume: {e}"))?;
+        // A claim the remote no longer holds (moved back by another writer,
+        // then taken by another run) never returns the newer one.
+        let stale = winners.into_iter().next().ok_or("no winner")?;
+        git.swap(&reference, &stale.consumed, &authorized)?;
+        let current = consume(git, &binding, "current").map_err(|e| format!("re-consume: {e}"))?;
         step(
             "stale_claim_cannot_return",
-            first.return_unsent(git).contains("stays consumed"),
+            stale.return_unsent(git, &absent_marker).is_err()
+                && git.remote_head(&reference)?.as_deref() == Some(current.consumed.as_str()),
+        )?;
+        // The durable RELEASED marker keeps it consumed.
+        let held = current.consumed.clone();
+        step(
+            "released_marker_keeps_consumed",
+            current.return_unsent(git, &marker).is_err()
+                && git.remote_head(&reference)?.as_deref() == Some(held.as_str()),
+        )?;
+        git.swap(&reference, &held, &authorized)?;
+        let unsent = consume(git, &binding, "unsent").map_err(|e| format!("re-consume: {e}"))?;
+        step(
+            "return_unsent",
+            unsent.return_unsent(git, &absent_marker).is_ok()
+                && state(git, &binding)? == State::Authorized,
         )?;
         step(
             "delete_under_lease",
-            git.delete(&reference, &second.consumed).is_ok(),
+            git.delete(&reference, &authorized).is_ok(),
         )?;
         step("absent_after", state(git, &binding)? == State::Missing)?;
         Ok(())
@@ -389,6 +414,7 @@ pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
             let _ = git.delete(&reference, &head);
         }
     }
+    let _ = std::fs::remove_dir_all(&scratch);
     result.map(|()| steps)
 }
 
@@ -409,14 +435,78 @@ pub fn grant(git: &Git, binding: &Binding) -> Result<String, String> {
     Ok(authorized)
 }
 
-/// A consumed authority, held by the run that consumed it.
+/// A consumed authority, held by the run that consumed it until the release
+/// barrier. Neither `Clone` nor `Drop`: whatever ends the run without
+/// `return_unsent` (crash, kill, panic, UNKNOWN, an unclear latch, journal
+/// or remote) leaves it CONSUMED. `release` consumes it at the barrier, so a
+/// return after the release does not compile:
+///
+/// ```compile_fail
+/// # use darkbot_bsc_execution::attempt_authority::{Claim, Git};
+/// fn after_the_release(claim: Claim, git: &Git, marker: &std::path::Path) {
+///     let _released = claim.release();
+///     let _ = claim.return_unsent(git, marker);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// # use darkbot_bsc_execution::attempt_authority::{Git, Released};
+/// fn released(released: Released, git: &Git, marker: &std::path::Path) {
+///     let _ = released.return_unsent(git, marker);
+/// }
+/// ```
+///
+/// Before the release both compile; this is the order the runner uses:
+///
+/// ```
+/// # use darkbot_bsc_execution::attempt_authority::{Claim, Git, Released};
+/// fn before_the_release(claim: Claim, git: &Git, marker: &std::path::Path) -> Result<(), String> {
+///     let _proof = claim.proof();
+///     claim.return_unsent(git, marker)
+/// }
+/// fn at_the_release(claim: Claim) -> Released {
+///     claim.release()
+/// }
+/// ```
+///
+/// A returned claim has no guard proof left, and no proof outlives it:
+///
+/// ```compile_fail
+/// # use darkbot_bsc_execution::attempt_authority::{Claim, Git};
+/// fn returned(claim: Claim, git: &Git, marker: &std::path::Path) {
+///     let _ = claim.return_unsent(git, marker);
+///     let _ = claim.proof();
+/// }
+/// ```
+///
+/// ```compile_fail
+/// # use darkbot_bsc_execution::attempt_authority::{Claim, Git};
+/// fn kept(claim: Claim, git: &Git, marker: &std::path::Path) {
+///     let proof = claim.proof();
+///     let _ = claim.return_unsent(git, marker);
+///     let _ = proof;
+/// }
+/// ```
 #[derive(Debug)]
 pub struct Claim {
     reference: String,
     authorized: String,
     consumed: String,
     proof: crate::acceptance_guard::AttemptAuthorityProof,
-    returned: std::cell::Cell<bool>,
+}
+
+/// The authority of a run past its release barrier: spent for good. It
+/// names the consumed commit and has no way back.
+#[derive(Debug)]
+#[must_use]
+pub struct Released {
+    consumed: String,
+}
+
+impl Released {
+    pub fn consumed_commit(&self) -> &str {
+        &self.consumed
+    }
 }
 
 /// Takes the authority: AUTHORIZED -> CONSUMED in one compare-and-swap.
@@ -458,32 +548,45 @@ pub fn consume(git: &Git, binding: &Binding, note: &str) -> Result<Claim, String
             &binding.attempt_id,
             binding.v5_sha256,
         ),
-        returned: std::cell::Cell::new(false),
     })
 }
 
 impl Claim {
-    /// The guard's proof that this run holds exactly this authority; none
-    /// once it was given back.
-    pub fn proof(&self) -> Option<crate::acceptance_guard::AttemptAuthorityProof> {
-        (!self.returned.get()).then(|| self.proof.clone())
+    /// The guard's proof that this run holds exactly this authority, borrowed
+    /// from the claim: it cannot outlive a return or the release.
+    pub fn proof(&self) -> &crate::acceptance_guard::AttemptAuthorityProof {
+        &self.proof
     }
 
-    /// Gives the authority back after a provably unsent run: CONSUMED (this
-    /// claim) -> AUTHORIZED. Fails closed when anything else moved it.
-    pub fn return_unsent(&self, git: &Git) -> String {
-        match git.remote_head(&self.reference) {
-            Ok(Some(head)) if head == self.consumed => {}
-            Ok(_) => return "attempt authority stays consumed (no longer this claim's)".into(),
-            Err(e) => return format!("attempt authority stays consumed ({e})"),
+    /// The CONSUMED commit of this claim, for the attempt's journal.
+    pub fn consumed_commit(&self) -> &str {
+        &self.consumed
+    }
+
+    /// The release barrier: the claim is spent, nothing returns it any more.
+    pub fn release(self) -> Released {
+        Released {
+            consumed: self.consumed,
         }
-        match git.swap(&self.reference, &self.consumed, &self.authorized) {
-            Ok(()) => {
-                self.returned.set(true);
-                "attempt authority returned (AUTHORIZED again)".into()
-            }
-            Err(e) => format!("attempt authority stays consumed ({e})"),
+    }
+
+    /// Gives the authority back after a provably byte-free stop before the
+    /// release barrier (T5): CONSUMED (exactly this claim) -> AUTHORIZED, in
+    /// one compare-and-swap. `released_marker` is the attempt's durable
+    /// RELEASED marker: only its proven absence (not found) allows it. Any
+    /// marker, an unclear marker or remote, or a remote that holds anything
+    /// else keeps it consumed (`Err` names why). Takes the claim either way.
+    pub fn return_unsent(self, git: &Git, released_marker: &Path) -> Result<(), String> {
+        match std::fs::symlink_metadata(released_marker) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => return Err("the RELEASED marker exists: bytes may have left".into()),
+            Err(e) => return Err(format!("the RELEASED marker is unclear ({e})")),
         }
+        match git.remote_head(&self.reference)? {
+            Some(head) if head == self.consumed => {}
+            _ => return Err("the remote authority is no longer this claim's".into()),
+        }
+        git.swap(&self.reference, &self.consumed, &self.authorized)
     }
 }
 
@@ -531,9 +634,14 @@ mod tests {
         }
     }
 
+    /// A RELEASED marker path that provably does not exist.
+    fn no_marker(base: &Path) -> PathBuf {
+        base.join("no-attempt-dir").join("RELEASED")
+    }
+
     #[test]
     fn only_one_checkout_or_host_ever_consumes_a_granted_authority() {
-        let (_, git) = remote("once", 3);
+        let (base, git) = remote("once", 3);
         let b = binding(1);
         // Never granted (or lost): blocked.
         assert_eq!(state(&git[0], &b), Ok(State::Missing));
@@ -558,22 +666,150 @@ mod tests {
             grant(&git[2], &b).is_err(),
             "never re-granted over a consumed one"
         );
-        // Provably unsent: this claim gives it back exactly once.
-        assert!(claim.return_unsent(&git[1]).contains("returned"));
-        assert!(claim.return_unsent(&git[1]).contains("stays consumed"));
+        // Provably unsent: this claim gives it back (and is spent doing so).
+        claim.return_unsent(&git[1], &no_marker(&base)).unwrap();
+        assert_eq!(state(&git[0], &b), Ok(State::Authorized));
         let second = consume(&git[2], &b, "host2").unwrap();
-        assert!(
-            claim.return_unsent(&git[0]).contains("stays consumed"),
-            "a stale claim"
+        second.return_unsent(&git[2], &no_marker(&base)).unwrap();
+    }
+
+    /// T5: only this claim, no RELEASED marker and a clear remote return it;
+    /// a stale claim, a marker, an unclear marker or an unreachable remote
+    /// keep it CONSUMED.
+    #[test]
+    fn a_return_needs_this_claim_no_marker_and_a_clear_remote() {
+        let (base, git) = remote("return", 2);
+        let b = binding(6);
+        let reference = b.reference().unwrap();
+        let authorized = grant(&git[0], &b).unwrap();
+        // The deterministic AUTHORIZED commit, built in the second checkout too.
+        assert_eq!(git[1].commit(&b.message("AUTHORIZED")).unwrap(), authorized);
+        let held = |g: &Git| g.remote_head(&reference).unwrap();
+
+        // A stale claim: another writer moved the ref, another run took it.
+        let stale = consume(&git[0], &b, "stale").unwrap();
+        git[1]
+            .swap(&reference, &stale.consumed, &authorized)
+            .unwrap();
+        let current = consume(&git[1], &b, "current").unwrap();
+        let e = stale.return_unsent(&git[0], &no_marker(&base)).unwrap_err();
+        assert!(e.contains("no longer this claim's"), "{e}");
+        assert_eq!(held(&git[0]).as_deref(), Some(current.consumed.as_str()));
+
+        // The durable RELEASED marker: bytes may have left.
+        let attempt = base.join("attempt");
+        std::fs::create_dir_all(&attempt).unwrap();
+        std::fs::write(attempt.join("RELEASED"), b"released").unwrap();
+        let consumed = current.consumed.clone();
+        let e = current
+            .return_unsent(&git[1], &attempt.join("RELEASED"))
+            .unwrap_err();
+        assert!(e.contains("RELEASED marker exists"), "{e}");
+        assert_eq!(held(&git[0]), Some(consumed.clone()));
+
+        // A marker that cannot be inspected is not an absent marker.
+        git[1].swap(&reference, &consumed, &authorized).unwrap();
+        let claim = consume(&git[1], &b, "unclear").unwrap();
+        let sealed = base.join("sealed");
+        std::fs::create_dir_all(&sealed).unwrap();
+        std::fs::set_permissions(&sealed, std::os::unix::fs::PermissionsExt::from_mode(0o000))
+            .unwrap();
+        let consumed = claim.consumed.clone();
+        let e = claim
+            .return_unsent(&git[1], &sealed.join("RELEASED"))
+            .unwrap_err();
+        std::fs::set_permissions(&sealed, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
+        assert!(e.contains("unclear"), "{e}");
+        assert_eq!(held(&git[0]), Some(consumed.clone()));
+
+        // An unreachable remote: unclear, so it stays consumed.
+        git[1].swap(&reference, &consumed, &authorized).unwrap();
+        let claim = consume(&git[1], &b, "offline").unwrap();
+        let consumed = claim.consumed.clone();
+        let offline = Git::new(
+            git[1].repo.clone(),
+            &base.join("no-such-remote.git").display().to_string(),
         );
-        assert!(second.return_unsent(&git[2]).contains("returned"));
+        assert!(claim.return_unsent(&offline, &no_marker(&base)).is_err());
+        assert_eq!(held(&git[0]), Some(consumed));
+    }
+
+    /// A run that consumed the authority and ends without returning it (a
+    /// panic unwinding through it here; SIGKILL in the next test) leaves it
+    /// CONSUMED: a restart neither consumes nor re-grants it.
+    #[test]
+    fn a_panic_after_the_cas_keeps_it_consumed() {
+        let (_, git) = remote("panic", 1);
+        let b = binding(7);
+        grant(&git[0], &b).unwrap();
+        let unwound = std::panic::catch_unwind(|| {
+            let _claim = consume(&git[0], &b, "panics").unwrap();
+            panic!("stop between the CAS and the barrier");
+        });
+        assert!(unwound.is_err());
+        assert!(matches!(state(&git[0], &b), Ok(State::Other(_))));
+        assert!(consume(&git[0], &b, "restart").is_err());
+        assert!(grant(&git[0], &b).is_err());
+    }
+
+    const CHILD_REPO: &str = "DARKBOT_AUTHORITY_TEST_CHILD_REPO";
+
+    /// The child of the kill test: consumes, reports, then waits to be killed.
+    #[test]
+    #[ignore = "run only as the child process of the kill test"]
+    fn claim_holder_child() {
+        let Ok(repo) = std::env::var(CHILD_REPO) else {
+            return;
+        };
+        let git = Git::new(PathBuf::from(&repo), "origin");
+        let claim = consume(&git, &binding(8), "child").unwrap();
+        std::fs::write(Path::new(&repo).join("CONSUMED"), claim.consumed_commit()).unwrap();
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    /// SIGKILL between the CAS and the release barrier, then a restart.
+    #[test]
+    fn a_kill_between_the_cas_and_the_barrier_keeps_it_consumed() {
+        let (_, git) = remote("kill", 2);
+        let b = binding(8);
+        grant(&git[0], &b).unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "attempt_authority::tests::claim_holder_child",
+            ])
+            .env(CHILD_REPO, &git[1].repo)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let reported = git[1].repo.join("CONSUMED");
+        let started = Instant::now();
+        while !reported.exists() {
+            assert!(
+                started.elapsed() < Duration::from_secs(30),
+                "child never consumed"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let consumed = std::fs::read_to_string(&reported).unwrap();
+        assert_eq!(state(&git[0], &b), Ok(State::Other(consumed)));
+        // The restart (any checkout) finds it consumed; no grant replaces it.
+        for g in &git {
+            assert!(consume(g, &b, "restart").is_err());
+        }
+        assert!(grant(&git[0], &b).is_err());
     }
 
     #[test]
     fn the_remote_qualification_runs_the_production_operations_and_leaves_nothing() {
         let (_, git) = remote("qualify", 1);
         let steps = qualify_remote(&git[0], "unit").unwrap();
-        assert_eq!(steps.len(), 12, "{steps:?}");
+        assert_eq!(steps.len(), 13, "{steps:?}");
         assert!(steps.iter().all(|s| s.ends_with("=OK")), "{steps:?}");
         assert_eq!(existing(&git[0], "selftest-unit"), Ok(None));
     }
@@ -583,7 +819,7 @@ mod tests {
     /// two claims of one binding never build the same commit.
     #[test]
     fn a_no_op_push_never_counts_as_a_won_swap_and_claims_are_unique() {
-        let (_, git) = remote("noop", 2);
+        let (base, git) = remote("noop", 2);
         let b = binding(5);
         let authorized = grant(&git[0], &b).unwrap();
         let reference = b.reference().unwrap();
@@ -594,15 +830,22 @@ mod tests {
                 .is_err()
         );
         let claim = consume(&git[0], &b, "same-note").unwrap();
-        assert!(claim.return_unsent(&git[0]).contains("returned"));
+        let first = claim.consumed.clone();
+        claim.return_unsent(&git[0], &no_marker(&base)).unwrap();
         let again = consume(&git[1], &b, "same-note").unwrap();
-        assert_ne!(
-            claim.consumed, again.consumed,
-            "a claim commit must be unique"
+        assert_ne!(first, again.consumed, "a claim commit must be unique");
+        // The proof is exactly this attempt's and v5's (a returned claim has
+        // none: `return_unsent` takes it, see the compile_fail examples).
+        assert_eq!(
+            again.proof(),
+            &crate::acceptance_guard::AttemptAuthorityProof::new(&b.attempt_id, b.v5_sha256)
         );
-        // Review #6: a returned claim yields no guard proof.
-        assert!(claim.proof().is_none());
-        assert!(again.proof().is_some());
+        // The barrier spends it: the remote keeps this claim's CONSUMED commit.
+        let released = again.release();
+        assert_eq!(
+            git[0].remote_head(&reference).unwrap().as_deref(),
+            Some(released.consumed_commit())
+        );
     }
 
     /// Review 25.10. #4: a Git child whose helper keeps the output open

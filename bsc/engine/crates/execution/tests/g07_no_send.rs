@@ -84,10 +84,10 @@ fn refuses_without_frozen_dry_evidence() {
 #[test]
 fn guard_refusal_is_terminal_before_any_builder_connection() {
     let guard = SOURCE
-        .find("let contract = match verify_live_authorization(")
+        .find("let authorized = verify_live_authorization(")
         .expect("guard call");
     let refused = SOURCE
-        .find("panic!(\"G0.7 live authorization refused: {e}\")")
+        .find("panic!(\"G0.7 live authorization refused: {e}; {stopped}\")")
         .expect("terminal refusal");
     let first_tls = SOURCE
         .find("match connect_tls(")
@@ -123,7 +123,7 @@ fn token_evidence_and_latch_precede_the_guard() {
     let latch = pos("let attempt_dir = latch_attempt(");
     let evidence_file = pos("let evidence_out = owner_uid(&attempt_dir)");
     let prearm = pos("CaptureSession::prearm(");
-    let guard = pos("let contract = match verify_live_authorization(");
+    let guard = pos("let authorized = verify_live_authorization(");
     assert!(token < probe && evidence_target < probe);
     assert!(probe < latch && latch < evidence_file && evidence_file < prearm && prearm < guard);
     assert_eq!(
@@ -137,13 +137,15 @@ fn token_evidence_and_latch_precede_the_guard() {
     assert!(!SOURCE.contains("req_env(\"DARKBOT_G07_CAPTURE_JOURNAL\")"));
     // A refused run releases its latch (it journaled no signed byte) before
     // the terminal refusal.
-    let refused = pos("panic!(\"G0.7 live authorization refused: {e}\")");
-    assert!(SOURCE[guard..refused].contains("unsent.release(\"refused\")"));
+    let refused = pos("panic!(\"G0.7 live authorization refused: {e}; {stopped}\")");
+    assert!(SOURCE[guard..refused].contains(
+        "unsent.abort(capture, &capture_clock, \"refused\", \"live authorization\", &e)"
+    ));
 }
 
 #[test]
 fn bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm() {
-    let guard = pos("let contract = match verify_live_authorization(");
+    let guard = pos("let authorized = verify_live_authorization(");
     let raw_txs = pos("record_raw_tx(\"buy_B\"");
     let poller_check = pos("if let Err(e) = head_poller.latest()");
     let club48_tls = pos("match connect_tls(CLUB48_HOST)");
@@ -278,7 +280,7 @@ fn nothing_after_the_release_can_panic() {
     assert!(!SOURCE[release..joins].contains(")?"));
     assert_eq!(after.matches("pre_egress_abort(").count(), 1);
     assert!(after.contains(
-        "Err(e) => pre_egress_abort(capture, &capture_clock, &unsent, \"send threads\", &e)"
+        "Err((e, unsent)) => pre_egress_abort(capture, &capture_clock, unsent, \"send threads\", &e)"
     ));
     let marker_fn =
         &SOURCE[pos("fn mark_released(")..pos("/// What a stop before the release hands back")];
@@ -426,23 +428,36 @@ fn the_bundle_semantics_have_one_native_definition_and_the_runner_checks_the_dry
 
 #[test]
 fn one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_unsent() {
-    // BSC-005 (BSC_Bug_V2 P3-F4): a fresh checkout, a second host or an old
-    // binary find the shared authority CONSUMED; it is taken atomically
-    // before the local latch and given back only where provably nothing was
-    // sent, never after the release.
+    // BSC-005 (BSC_Bug_V2 P3-F4, T5): a fresh checkout, a second host or an
+    // old binary find the shared authority CONSUMED; it is taken atomically
+    // before the local latch and given back only by the terminal byte-free
+    // abort before the release barrier, which consumes the claim.
     let consume = pos("attempt_authority::consume(");
+    assert_eq!(SOURCE.matches("attempt_authority::consume(").count(), 1);
     assert!(pos("bundle_wire::check_projection(&dry)") < consume);
     assert!(consume < pos("latch_attempt("));
-    // Every unsent release goes through the one helper that returns it.
-    assert_eq!(SOURCE.matches("release_unsent_attempt(").count(), 1);
-    let helper = function_body(SOURCE, "fn release_unsent(");
-    assert!(helper.contains("release_unsent_attempt("));
-    assert!(helper.contains(".return_unsent("));
-    assert!(!SOURCE[pos("barrier.wait();")..].contains(".return_unsent("));
-    // The guard itself requires the proof of exactly this consumed authority.
-    let guard = pos("let contract = match verify_live_authorization(");
+    // Exactly one return, in the abort, behind the journaled abort and the
+    // released latch; the stops without a journal keep it consumed.
+    assert_eq!(SOURCE.matches(".return_unsent(").count(), 1);
+    let abort = function_body(SOURCE, "fn abort(");
+    assert!(abort.contains("self.authority.return_unsent("));
+    assert!(abort.contains("return_condition(journaled, latched_at)"));
+    assert!(abort.find("\"PRE_EGRESS_ABORT\"") < abort.find("release_unsent_attempt("));
+    let early = &SOURCE[pos("fn release_without_journal(")..pos("fn main()")];
+    assert!(early.contains("stays consumed") && !early.contains("return_unsent"));
+    // The claim moves into `unsent`; the barrier consumes it after the go
+    // signals and right before `barrier.wait()`: no return compiles past it.
+    assert!(SOURCE.contains("        authority,\n        git: &authority_git,"));
+    let cross = pos("let spent = unsent.cross();");
+    assert_eq!(SOURCE.matches("unsent.cross()").count(), 1);
+    assert!(pos("let _ = gobr.send(());") < cross && cross < pos("barrier.wait();"));
+    assert!(function_body(SOURCE, "fn cross(").contains("self.authority.release()"));
+    // A stop is terminal (no retry in this process).
+    assert!(SOURCE.contains("    reason: &str,\n) -> ! {"));
+    // The guard borrows the proof of exactly this consumed authority.
+    let guard = pos("let authorized = verify_live_authorization(");
     assert!(consume < guard);
-    assert!(SOURCE[guard..].contains("attempt_authority: authority.proof(),"));
+    assert!(SOURCE[guard..].contains("attempt_authority: Some(unsent.authority.proof()),"));
 }
 
 #[test]

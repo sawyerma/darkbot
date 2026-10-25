@@ -40,7 +40,7 @@ fn at_repo_root() {
 
 /// A context that matches the contract in every field the guard compares,
 /// so that only the arming state can refuse it.
-fn matching_context() -> LiveGuardContext {
+fn matching_context() -> LiveGuardContext<'static> {
     let snap = inspect_v3(Path::new(V3_RELATIVE_PATH)).unwrap();
     LiveGuardContext {
         attempt_id: snap.attempt_id.clone(),

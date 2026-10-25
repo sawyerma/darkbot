@@ -84,12 +84,13 @@ impl CapturePrearmedProof {
 /// Proof that this run consumed the shared one-attempt authority (BSC-005)
 /// of exactly this attempt and exactly the approved v5 bytes: only
 /// `attempt_authority::consume` creates it, so no ARMED build can authorize
-/// without the authority.
+/// without the authority. Not `Clone`: the guard borrows it from the live
+/// claim, so no copy survives a return of the authority (T5).
 ///
 /// ```compile_fail
 /// let _ = darkbot_bsc_execution::acceptance_guard::AttemptAuthorityProof { attempt_id: String::new(), v5_sha256: [0; 32] };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AttemptAuthorityProof {
     attempt_id: String,
     v5_sha256: [u8; 32],
@@ -165,7 +166,7 @@ impl WitnessSourceProof {
 }
 
 #[derive(Debug, Clone)]
-pub struct LiveGuardContext {
+pub struct LiveGuardContext<'a> {
     pub attempt_id: String,
     pub launcher_address: String,
     pub buyer_address: String,
@@ -193,8 +194,9 @@ pub struct LiveGuardContext {
     pub candidate_id: String,
     /// The v5-bound launch path, re-verified at the current pinned block.
     pub launch_path_current: Option<launch_path::CurrentProof>,
-    /// BSC-005: this run's consumed shared one-attempt authority.
-    pub attempt_authority: Option<AttemptAuthorityProof>,
+    /// BSC-005: this run's consumed shared one-attempt authority, borrowed
+    /// from its claim.
+    pub attempt_authority: Option<&'a AttemptAuthorityProof>,
 }
 
 #[derive(Debug, Clone)]
@@ -683,7 +685,7 @@ pub fn verify_live_authorization(
     if !snap.execution_ready {
         return Err("v5 authorization.execution_ready is not true".into());
     }
-    verify_attempt_authority(ctx.attempt_authority.as_ref(), &ctx.attempt_id, &bytes)?;
+    verify_attempt_authority(ctx.attempt_authority, &ctx.attempt_id, &bytes)?;
     if !ctx
         .dry_pass
         .record_sha256
