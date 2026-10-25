@@ -2,7 +2,7 @@ import { AllValues } from "./AllValues";
 import { DetailRow, Notice } from "./PanelPrimitives";
 import type { CounterName } from "../model/status";
 import {
-  DASH, fmtAgeNs, fmtBytes, fmtBytesExact, fmtClockMs, fmtEtaS, fmtRate, orDash,
+  DASH, fmtAgeNs, fmtBytes, fmtBytesExact, fmtClockMs, fmtEtaS, fmtProvider, fmtRate, orDash,
 } from "../model/statusFormat";
 import { counterOf, phaseLabel } from "../model/statusSelectors";
 import { selectCapture, selectSystem, useProject0Store } from "../store/project0Store";
@@ -38,7 +38,9 @@ export function HealthSection() {
     <DetailRow title="Software & program identity" value={run ? `program ${run.programId}${a?.deploymentError ? ` · ${a.deploymentError}` : ""}` : "Not checked"}/>
     <DetailRow title="RPC / WebSocket / slot progression (last reported)" value={run || t ? `${run?.wsHost ?? DASH} · ${connection} · last slot ${orDash(counterOf(c, "last_observed_slot") ?? t?.lastSlot ?? null)} · frame age ${fmtAgeNs(t?.lastFrameAgeNs)}` : "Not checked"}/>
     <DetailRow title="Transport events" value={t || c?.market ? `${t?.lastState || "none"}${t?.lastCode ? ` ${t.lastCode}` : ""} · HTTP 429 ${n("transport_http_429")} · reconnect attempts ${n("transport_reconnect_attempts")} · recovered ${n("transport_recovered")}` : DASH}/>
-    <DetailRow title="Wallet / provider / capacity" value="Not collected"/>
+    <DetailRow title="Provider budget · requests / 429 / queue / rate / cooldown / state" value={fmtProvider(c?.provider)}/>
+    <DetailRow title="Provider sample · engine clock / scope / bytes / quota" value={c?.provider ? `${fmtClockMs(c.provider.sampledUnixMs)} / ${c.provider.scope} / ${fmtBytes(c.provider.bytes)} / ${c.provider.quotaQualified ? "qualified" : "not qualified (local ceiling)"}` : "Not sampled"}/>
+    <DetailRow title="Wallet / capacity" value="Not collected"/>
     <DetailRow title="RPC latency · p50 / p95 / p99" value="Not collected"/>
     <DetailRow title="Ingress → decision · p50 / p95 / p99" value="Not collected"/>
     <DetailRow title="Stream age / writer queue" value={c ? `${fmtAgeNs(t?.lastFrameAgeNs)} / ${w ? `${fmtBytes(w.queueBytes)} (lag ${w.lagFrames})` : DASH}` : "— / —"}/>

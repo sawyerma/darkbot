@@ -4,6 +4,9 @@
 //! delivered states, so the capture can hand its final state over before it returns.
 pub use crate::market::observer::{MarketStats, ReceiverRank};
 use crate::storage::writer::StorageStatus;
+pub use darkbot_solana::provider::{
+    CooldownCause, CooldownStatus, ProviderSnapshot, RetryAfterHeader,
+};
 use darkbot_solana::runtime_config;
 pub use darkbot_solana::runtime_config::{EffectiveConfig, Limits, Profile};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -145,6 +148,16 @@ pub struct StorageSample {
     pub status: StorageStatus,
 }
 
+/// The process provider budget at one instant (F-01/C07: every RPC client is budgeted), taken
+/// at the capture's 2 s display cadence; values as the budget holds them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProviderSample {
+    pub at_unix_ms: u64,
+    pub snapshot: ProviderSnapshot,
+    pub cooldown: CooldownStatus,
+    pub halt_code: Option<&'static str>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterValue {
     pub field: &'static str,
@@ -211,6 +224,7 @@ pub struct StatusSnapshot {
     pub market: Option<MarketSnapshot>,
     pub assessment: Option<Arc<AssessmentSnapshot>>,
     pub storage: Option<StorageSample>,
+    pub provider: Option<Arc<ProviderSample>>,
 }
 
 #[derive(Default)]
@@ -318,6 +332,17 @@ impl StatusTap {
         self.publish(false, |v| {
             v.storage = Some(StorageSample { at_unix_ms, status })
         });
+    }
+
+    /// Called at the capture's 2 s display cadence with the process provider budget.
+    pub fn publish_provider(&self, budget: &darkbot_solana::provider::Budget) {
+        let sample = Arc::new(ProviderSample {
+            at_unix_ms: unix_ms_now(),
+            snapshot: budget.snapshot(),
+            cooldown: budget.cooldown(),
+            halt_code: budget.halt_code(),
+        });
+        self.publish(false, |v| v.provider = Some(sample));
     }
 
     pub fn reader(&self) -> Reader {
@@ -442,6 +467,26 @@ mod tests {
             .storage
             .unwrap();
         assert_eq!(sample.status, status);
+        assert!(sample.at_unix_ms > 1_600_000_000_000);
+    }
+
+    /// F-01b: the provider budget reaches the tap whole (counters, cooldown, halt state).
+    #[test]
+    fn provider_sample_is_the_budget_as_it_holds_it() {
+        let tap = StatusTap::new();
+        let mut reader = tap.reader();
+        let budget = darkbot_solana::provider::Budget::configured(
+            &darkbot_solana::runtime_config::RuntimeConfig::default(),
+        );
+        tap.publish_provider(&budget);
+        let sample = reader
+            .wait_changed(Duration::from_millis(5))
+            .unwrap()
+            .provider
+            .unwrap();
+        assert_eq!(sample.snapshot, budget.snapshot());
+        assert_eq!(sample.cooldown, budget.cooldown());
+        assert_eq!(sample.halt_code, None);
         assert!(sample.at_unix_ms > 1_600_000_000_000);
     }
 

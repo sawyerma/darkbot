@@ -70,6 +70,29 @@ export interface WriterView {
   diskExhaustionS: number | null;
 }
 
+/** The process provider budget every RPC of the capture runs through (F-01/C07). */
+export interface ProviderView {
+  sampledUnixMs: bigint;
+  scope: string;
+  requests: bigint;
+  http429Count: bigint;
+  inFlight: bigint;
+  queued: bigint;
+  maxRps: bigint;
+  effectiveRps: number;
+  maxConcurrency: bigint;
+  burst: bigint;
+  bytes: bigint;
+  /** NONE | LOCAL_BACKOFF | SERVER_RETRY_AFTER | RETRY_AFTER_UNREPRESENTABLE. */
+  cooldownCause: string;
+  /** Null when the server delay is unrepresentable (never 0). */
+  cooldownRemainingMs: bigint | null;
+  /** Null while the budget admits. */
+  haltCode: string | null;
+  /** Local counters never qualify a provider quota. */
+  quotaQualified: boolean;
+}
+
 export interface CaptureView {
   run: RunView | null;
   phase: PhaseView | null;
@@ -77,6 +100,7 @@ export interface CaptureView {
   market: MarketView | null;
   assessment: AssessmentView | null;
   writer: WriterView | null;
+  provider: ProviderView | null;
 }
 
 export interface SystemView {

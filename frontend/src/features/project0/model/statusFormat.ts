@@ -1,3 +1,5 @@
+import type { ProviderView } from "./status";
+
 export const DASH = "—";
 
 export function orDash(v: bigint | string | null | undefined): string {
@@ -36,6 +38,17 @@ export function fmtEtaS(s: number | null | undefined): string {
   if (s === null || s === undefined || !Number.isFinite(s)) return "not available";
   if (s < 120) return `${s.toFixed(0)} s`;
   return s < 7_200 ? `${(s / 60).toFixed(0)} min` : `${(s / 3_600).toFixed(1)} h`;
+}
+
+/** F-01: the provider budget in one line. An unrepresentable cooldown reads "unbounded", never 0;
+ *  a halted budget names its code. */
+export function fmtProvider(p: ProviderView | null | undefined): string {
+  if (!p) return "Not reported";
+  const cooldown = p.cooldownCause === "NONE"
+    ? "no cooldown"
+    : `cooldown ${p.cooldownCause} ${p.cooldownRemainingMs === null ? "unbounded" : `${p.cooldownRemainingMs} ms`}`;
+  return `${p.requests} requests · HTTP 429 ${p.http429Count} · ${p.inFlight} in flight / ${p.queued} queued`
+    + ` · ${p.effectiveRps.toFixed(1)} / ${p.maxRps} rps · ${cooldown} · ${p.haltCode ? `halted ${p.haltCode}` : "admitting"}`;
 }
 
 /** Wall-clock time with milliseconds, local time zone. */

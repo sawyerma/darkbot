@@ -22,6 +22,13 @@ describe("Project 0 wire contract (golden frames written by the Rust reporter)",
     expect(capture.writer?.diskFreeBytes).toBe(10n);
     expect(capture.writer?.queuePeakBytes).toBe(18_446_744_073_709_551_615n);
     expect(capture.assessment?.verdict).toBe("MARKET_DATA_INCOMPLETE");
+    // F-01: the provider budget of the reporter's golden frame, unrepresentable cooldown kept null.
+    expect(capture.provider?.requests).toBe(21n);
+    expect(capture.provider?.http429Count).toBe(3n);
+    expect(capture.provider?.bytes).toBe(18_446_744_073_709_551_615n);
+    expect(capture.provider?.cooldownCause).toBe("RETRY_AFTER_UNREPRESENTABLE");
+    expect(capture.provider?.cooldownRemainingMs).toBeNull();
+    expect(capture.provider?.haltCode).toBe("PROVIDER_BUDGET_POISONED");
   });
 
   it("preserves missing blocks and rejects malformed wire bytes", () => {

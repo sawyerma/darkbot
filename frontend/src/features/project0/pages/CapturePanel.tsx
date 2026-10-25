@@ -5,7 +5,7 @@ import type { CaptureView } from "../model/status";
 import type { TopicStatus } from "@/core/realtime";
 import { captureButtons, captureCommand, useCaptureControl, watchCaptureControl } from "@/core/realtime/captureControl";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
-import { DASH, fmtAgeNs, orDash } from "../model/statusFormat";
+import { DASH, fmtAgeNs, fmtProvider, orDash } from "../model/statusFormat";
 import { counterOf, phaseLabel } from "../model/statusSelectors";
 import { RUN_START_VERIFY, runStartPreview } from "../model/capturePreview";
 
@@ -25,6 +25,7 @@ function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null;
       <DetailRow title="Stream" value={t ? `${t.connected == null ? "unknown" : t.connected ? "connected" : "disconnected"} · frame age ${fmtAgeNs(t.lastFrameAgeNs)}${t.lastCode ? ` · last ${t.lastCode}` : ""}` : DASH}/>
       <DetailRow title="Transactions / liquidation events" value={`${orDash(counterOf(capture, "unique_transactions"))} / ${orDash(counterOf(capture, "liquidation_events"))}`}/>
       <DetailRow title="Verdict (live)" value={a?.verdict ?? DASH}/>
+      <DetailRow title="Provider budget" value={fmtProvider(capture?.provider)}/>
       {capture?.phase?.phase === "ENDED" ? <DetailRow title="Result" value={capture.phase.endResult}/> : null}
     </> : <p className="p0-quiet">No capture reported by Project 0.</p>}
   </Section>;

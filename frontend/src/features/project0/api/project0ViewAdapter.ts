@@ -31,7 +31,7 @@ export function decodeSystemStatus(bytes: Uint8Array): SystemMessage {
 }
 
 export function toCaptureView(m: CaptureMessage): CaptureView {
-  const { run, phase, transport, market, assessment, writer } = m;
+  const { run, phase, transport, market, assessment, writer, provider } = m;
   return {
     run: run
       ? {
@@ -105,6 +105,25 @@ export function toCaptureView(m: CaptureMessage): CaptureView {
           diskFreeBytes: writer.diskFreeBytes ?? null,
           diskReserveBytes: writer.diskReserveBytes,
           diskExhaustionS: writer.diskExhaustionS ?? null,
+        }
+      : null,
+    provider: provider
+      ? {
+          sampledUnixMs: provider.sampledUnixMs,
+          scope: provider.scope,
+          requests: provider.requests,
+          http429Count: provider.http429Count,
+          inFlight: provider.inFlight,
+          queued: provider.queued,
+          maxRps: provider.maxRps,
+          effectiveRps: provider.effectiveRps,
+          maxConcurrency: provider.maxConcurrency,
+          burst: provider.burst,
+          bytes: provider.bytes,
+          cooldownCause: provider.cooldownCause,
+          cooldownRemainingMs: provider.cooldownRemainingMs ?? null,
+          haltCode: provider.haltCode ?? null,
+          quotaQualified: provider.quotaQualified,
         }
       : null,
   };

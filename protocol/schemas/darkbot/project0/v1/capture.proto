@@ -19,6 +19,8 @@ message CaptureState {
   MarketAssessment assessment = 5;
   // Writer lane of the market journal (storage/writer.rs::StorageStatus); every 2 s.
   WriterLane writer = 6;
+  // Process provider budget every RPC of the capture runs through (solana/src/provider.rs); every 2 s.
+  ProviderBudget provider = 7;
 }
 
 // Run identity and configuration. Endpoints only as scheme://host, never a key or query.
@@ -237,4 +239,39 @@ message WriterLane {
   uint64 disk_reserve_bytes = 12;
   // Seconds until the disk reserve is reached at the current write rate; unset without writes.
   optional double disk_exhaustion_s = 13;
+}
+
+// Process-wide provider budget, sampled by the capture at its 2 s display cadence. A local client
+// ceiling, never a qualification of purchased provider capacity.
+message ProviderBudget {
+  // Engine wall clock when the capture published the sample.
+  uint64 sampled_unix_ms = 1;
+  // Scope of the account counters (e.g. PROCESS_SOLANA_PROVIDER_ACCOUNT).
+  string scope = 2;
+  // Requests admitted so far, all workloads.
+  uint64 requests = 3;
+  // HTTP 429 answers so far.
+  uint64 http_429_count = 4;
+  // Requests holding a permit now.
+  uint64 in_flight = 5;
+  // Requests waiting for a permit now.
+  uint64 queued = 6;
+  // Configured request ceiling per second.
+  uint64 max_rps = 7;
+  // Current adaptive request rate per second.
+  double effective_rps = 8;
+  // Configured concurrent requests.
+  uint64 max_concurrency = 9;
+  // Configured burst.
+  uint64 burst = 10;
+  // Request and response bytes accounted so far.
+  uint64 bytes = 11;
+  // Why the account waits: NONE | LOCAL_BACKOFF | SERVER_RETRY_AFTER | RETRY_AFTER_UNREPRESENTABLE.
+  string cooldown_cause = 12;
+  // Remaining wait, rounded up; unset when the server delay is unrepresentable.
+  optional uint64 cooldown_remaining_ms = 13;
+  // Code with which the budget refuses every admission; unset while it admits.
+  optional string halt_code = 14;
+  // Provider quota qualified by evidence; these local counters never qualify it (false).
+  bool quota_qualified = 15;
 }

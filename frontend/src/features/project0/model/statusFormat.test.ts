@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fmtAgeNs, fmtBytesExact, fmtEtaS, formatField } from "./statusFormat";
+import type { ProviderView } from "./status";
+import { fmtAgeNs, fmtBytesExact, fmtEtaS, fmtProvider, formatField } from "./statusFormat";
 
 describe("status units and missing measurements", () => {
   it("keeps uint64 values exact", () => {
@@ -12,5 +13,23 @@ describe("status units and missing measurements", () => {
     expect(fmtAgeNs(null)).toBe("—");
     expect(fmtAgeNs(0n)).toBe("0 ns");
     expect(formatField("connected", false)).toBe("no");
+  });
+});
+
+describe("provider budget (F-01)", () => {
+  const budget: ProviderView = {
+    sampledUnixMs: 1n, scope: "PROCESS_SOLANA_PROVIDER_ACCOUNT", requests: 21n, http429Count: 3n, inFlight: 1n, queued: 2n,
+    maxRps: 10n, effectiveRps: 2.5, maxConcurrency: 4n, burst: 5n, bytes: 7n, cooldownCause: "NONE",
+    cooldownRemainingMs: 0n, haltCode: null, quotaQualified: false,
+  };
+  it("shows the counters and an admitting budget", () => {
+    expect(fmtProvider(budget)).toBe("21 requests · HTTP 429 3 · 1 in flight / 2 queued · 2.5 / 10 rps · no cooldown · admitting");
+  });
+  it("never shows an unrepresentable cooldown as 0 and names a halt", () => {
+    const halted = { ...budget, cooldownCause: "RETRY_AFTER_UNREPRESENTABLE", cooldownRemainingMs: null, haltCode: "PROVIDER_BUDGET_POISONED" };
+    expect(fmtProvider(halted)).toContain("cooldown RETRY_AFTER_UNREPRESENTABLE unbounded");
+    expect(fmtProvider(halted)).toContain("halted PROVIDER_BUDGET_POISONED");
+    expect(fmtProvider({ ...budget, cooldownCause: "SERVER_RETRY_AFTER", cooldownRemainingMs: 1500n })).toContain("cooldown SERVER_RETRY_AFTER 1500 ms");
+    expect(fmtProvider(null)).toBe("Not reported");
   });
 });

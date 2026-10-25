@@ -5,7 +5,7 @@ pub mod proto;
 
 use darkbot_runner::status_tap::{
     AssessmentSnapshot, CapturePhase, MarketSnapshot, OperationalSnapshot, PhaseSnapshot,
-    RunSnapshot, StatusSnapshot, StatusTap, StorageSample, TransportSnapshot,
+    ProviderSample, RunSnapshot, StatusSnapshot, StatusTap, StorageSample, TransportSnapshot,
     TransportStateSnapshot,
 };
 use prost::Message;
@@ -15,8 +15,8 @@ use proto::control::{
 };
 use proto::project0::{
     CapturePhase as WirePhase, CaptureState, Counter, EffectiveRecord, MarketAssessment,
-    MarketCounters, OperationalConfig, OperationalParameter, PhaseStatus, ReasonCount,
-    ReceiverTotal, RunInfo, SystemStatus, TransportStatus, WriterLane,
+    MarketCounters, OperationalConfig, OperationalParameter, PhaseStatus, ProviderBudget,
+    ReasonCount, ReceiverTotal, RunInfo, SystemStatus, TransportStatus, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -140,6 +140,7 @@ pub fn capture_state(s: &StatusSnapshot) -> CaptureState {
         market: s.market.as_ref().map(market_counters),
         assessment: s.assessment.as_deref().map(market_assessment),
         writer: s.storage.as_ref().map(writer_lane),
+        provider: s.provider.as_deref().map(provider_budget),
     }
 }
 
@@ -289,6 +290,28 @@ fn writer_lane(sample: &StorageSample) -> WriterLane {
         disk_free_bytes: w.disk_free_bytes,
         disk_reserve_bytes: w.disk_reserve_bytes,
         disk_exhaustion_s: w.disk_exhaustion_s,
+    }
+}
+
+/// `ProviderSample` → `ProviderBudget`, field by field, no derived values (F-01b).
+fn provider_budget(p: &ProviderSample) -> ProviderBudget {
+    let s = &p.snapshot;
+    ProviderBudget {
+        sampled_unix_ms: p.at_unix_ms,
+        scope: s.scope.clone(),
+        requests: s.requests,
+        http_429_count: s.http_429_count,
+        in_flight: s.in_flight,
+        queued: s.queued,
+        max_rps: s.max_rps,
+        effective_rps: s.effective_rps,
+        max_concurrency: s.max_concurrency,
+        burst: s.burst,
+        bytes: s.bytes,
+        cooldown_cause: p.cooldown.cause.as_str().into(),
+        cooldown_remaining_ms: p.cooldown.remaining_ms,
+        halt_code: p.halt_code.map(Into::into),
+        quota_qualified: s.quota_qualified,
     }
 }
 
@@ -817,6 +840,35 @@ mod contract_tests {
                 ..Default::default()
             })),
             storage: Some(storage),
+            provider: Some(Arc::new(provider_sample())),
+        }
+    }
+
+    /// A budget in a server cooldown that refuses every admission (F-01b golden values).
+    fn provider_sample() -> ProviderSample {
+        ProviderSample {
+            at_unix_ms: 1_760_000_002_000,
+            snapshot: darkbot_runner::status_tap::ProviderSnapshot {
+                scope: "PROCESS_SOLANA_PROVIDER_ACCOUNT".into(),
+                requests: 21,
+                http_429_count: 3,
+                in_flight: 1,
+                queued: 2,
+                max_rps: 10,
+                effective_rps: 2.5,
+                max_concurrency: 4,
+                burst: 5,
+                bytes: u64::MAX,
+                quota_qualified: false,
+            },
+            cooldown: darkbot_runner::status_tap::CooldownStatus {
+                cause: darkbot_runner::status_tap::CooldownCause::RetryAfterUnrepresentable,
+                remaining_ms: None,
+                last_retry_after: darkbot_runner::status_tap::RetryAfterHeader::Absent,
+                max_retry_after_secs: 30,
+                http_429_count: 3,
+            },
+            halt_code: Some("PROVIDER_BUDGET_POISONED"),
         }
     }
 
@@ -857,7 +909,27 @@ mod contract_tests {
         let c = capture_state(&s);
         assert!(c.run.is_none() && c.phase.is_none() && c.transport.is_none());
         assert!(c.market.is_none() && c.assessment.is_none() && c.writer.is_none());
+        assert!(c.provider.is_none());
         assert!(system_status(&s).is_none());
+    }
+
+    /// F-01b: every budget value reaches the wire unchanged; an unrepresentable cooldown stays
+    /// unset (never 0) and the halt code is carried.
+    #[test]
+    fn provider_budget_carries_every_budget_field() {
+        let b = provider_budget(&provider_sample());
+        assert_eq!(b.sampled_unix_ms, 1_760_000_002_000);
+        assert_eq!(b.scope, "PROCESS_SOLANA_PROVIDER_ACCOUNT");
+        assert_eq!(
+            (b.requests, b.http_429_count, b.in_flight, b.queued),
+            (21, 3, 1, 2)
+        );
+        assert_eq!((b.max_rps, b.max_concurrency, b.burst), (10, 4, 5));
+        assert_eq!((b.effective_rps, b.bytes), (2.5, u64::MAX));
+        assert_eq!(b.cooldown_cause, "RETRY_AFTER_UNREPRESENTABLE");
+        assert_eq!(b.cooldown_remaining_ms, None);
+        assert_eq!(b.halt_code.as_deref(), Some("PROVIDER_BUDGET_POISONED"));
+        assert!(!b.quota_qualified);
     }
 
     #[test]

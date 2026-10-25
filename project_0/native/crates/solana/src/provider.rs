@@ -93,6 +93,17 @@ pub enum CooldownCause {
     /// (`RPC_RATE_LIMIT`, fail-closed) until the process restarts.
     RetryAfterUnrepresentable,
 }
+impl CooldownCause {
+    /// The wire name of the projection (`ProviderBudget.cooldown_cause`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CooldownCause::None => "NONE",
+            CooldownCause::LocalBackoff => "LOCAL_BACKOFF",
+            CooldownCause::ServerRetryAfter => "SERVER_RETRY_AFTER",
+            CooldownCause::RetryAfterUnrepresentable => "RETRY_AFTER_UNREPRESENTABLE",
+        }
+    }
+}
 /// A23-06: the typed cooldown status of the provider account at one instant.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CooldownStatus {
@@ -487,6 +498,11 @@ impl Budget {
         self.changed.notify_all();
     }
     /// A23-06: the typed cooldown status now.
+    /// The code with which this budget refuses every admission (configuration drift, poisoned
+    /// state); `None` while it admits.
+    pub fn halt_code(&self) -> Option<&'static str> {
+        halted(&self.lock_state())
+    }
     pub fn cooldown(&self) -> CooldownStatus {
         let s = self.lock_state();
         let now = Instant::now();

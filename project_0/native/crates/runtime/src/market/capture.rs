@@ -624,6 +624,8 @@ fn run_embedded_inner(
             }
             if let Some(tap) = &status_tap {
                 tap.publish_assessment(core.assessment_snapshot());
+                // F-01b: the provider budget every RPC of this process runs through.
+                tap.publish_provider(&darkbot_solana::provider::shared());
             }
         }
         let overflow = consumer.stats().overflow;

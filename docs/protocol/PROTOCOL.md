@@ -95,6 +95,7 @@
     - [MarketAssessment](#darkbot-project0-v1-MarketAssessment)
     - [MarketCounters](#darkbot-project0-v1-MarketCounters)
     - [PhaseStatus](#darkbot-project0-v1-PhaseStatus)
+    - [ProviderBudget](#darkbot-project0-v1-ProviderBudget)
     - [ReasonCount](#darkbot-project0-v1-ReasonCount)
     - [ReceiverTotal](#darkbot-project0-v1-ReceiverTotal)
     - [RunInfo](#darkbot-project0-v1-RunInfo)
@@ -1517,6 +1518,7 @@ Units are part of the field names.
 | market | [MarketCounters](#darkbot-project0-v1-MarketCounters) |  | Every capture counter (market/core.rs::MarketStats::counters); on coverage events and slots. |
 | assessment | [MarketAssessment](#darkbot-project0-v1-MarketAssessment) |  | Completeness, live verdict and edge distribution (market/core.rs::ObserverCore); every 2 s and at the end. |
 | writer | [WriterLane](#darkbot-project0-v1-WriterLane) |  | Writer lane of the market journal (storage/writer.rs::StorageStatus); every 2 s. |
+| provider | [ProviderBudget](#darkbot-project0-v1-ProviderBudget) |  | Process provider budget every RPC of the capture runs through (solana/src/provider.rs); every 2 s. |
 
 
 
@@ -1603,6 +1605,36 @@ Capture lifecycle state.
 | drain_complete | [bool](#bool) | optional | Whether the drain reached the end of the channel; unset before finalization. |
 | write_error | [string](#string) | optional | Evidence write error, if any. |
 | end_result | [string](#string) |  | After ENDED: CAPTURE_COMPLETE, or exactly the error the capture returned; empty before. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProviderBudget"></a>
+
+### ProviderBudget
+Process-wide provider budget, sampled by the capture at its 2 s display cadence. A local client
+ceiling, never a qualification of purchased provider capacity.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| sampled_unix_ms | [uint64](#uint64) |  | Engine wall clock when the capture published the sample. |
+| scope | [string](#string) |  | Scope of the account counters (e.g. PROCESS_SOLANA_PROVIDER_ACCOUNT). |
+| requests | [uint64](#uint64) |  | Requests admitted so far, all workloads. |
+| http_429_count | [uint64](#uint64) |  | HTTP 429 answers so far. |
+| in_flight | [uint64](#uint64) |  | Requests holding a permit now. |
+| queued | [uint64](#uint64) |  | Requests waiting for a permit now. |
+| max_rps | [uint64](#uint64) |  | Configured request ceiling per second. |
+| effective_rps | [double](#double) |  | Current adaptive request rate per second. |
+| max_concurrency | [uint64](#uint64) |  | Configured concurrent requests. |
+| burst | [uint64](#uint64) |  | Configured burst. |
+| bytes | [uint64](#uint64) |  | Request and response bytes accounted so far. |
+| cooldown_cause | [string](#string) |  | Why the account waits: NONE | LOCAL_BACKOFF | SERVER_RETRY_AFTER | RETRY_AFTER_UNREPRESENTABLE. |
+| cooldown_remaining_ms | [uint64](#uint64) | optional | Remaining wait, rounded up; unset when the server delay is unrepresentable. |
+| halt_code | [string](#string) | optional | Code with which the budget refuses every admission; unset while it admits. |
+| quota_qualified | [bool](#bool) |  | Provider quota qualified by evidence; these local counters never qualify it (false). |
 
 
 

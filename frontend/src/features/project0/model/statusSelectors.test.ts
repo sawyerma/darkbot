@@ -5,7 +5,7 @@ import { STREAM_STALE_AFTER_MS } from "./streamFreshness";
 
 function view(phase: CapturePhaseName, transport: Partial<TransportView> = {}, counters: Record<string, bigint> = {}, endResult = ""): CaptureView {
   return {
-    run: null, assessment: null, writer: null,
+    run: null, assessment: null, writer: null, provider: null,
     phase: { phase, changedUnixMs: 0n, streamReadyUnixS: null, stopReason: "", drainComplete: null, writeError: null, endResult },
     transport: { connected: true, lastFrameAgeNs: null, applicationFrames: 1n, lastSlot: null,
       lastState: "CAPTURING", lastCode: "APPLICATION_SLOT_PROGRESS", lastAttempt: 1, ...transport },
