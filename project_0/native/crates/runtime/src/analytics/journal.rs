@@ -48,8 +48,9 @@ pub mod kind {
     /// The finished capture's market summary (`market_summary.p0j`, JFI-FIX-05): typed record;
     /// `summary.json` is its explicit offline render for the pinned readers.
     pub const MARKET_SUMMARY: u16 = 305;
-    /// Strict verifier (A3): resolved slot scope, cached JSON-RPC exchange (wire text of the
-    /// external boundary), batch checkpoint and result — each a sealed single-value journal.
+    /// Strict verifier (A3): resolved slot scope, batch checkpoint and result — each a sealed
+    /// single-value journal. `STRICT_RPC_CACHE` is HISTORICAL (raw JSON-RPC wire text, before F10):
+    /// read-only for earlier runs, never written (typed successor `STRICT_CHAIN_CACHE`).
     pub const STRICT_SCOPE: u16 = 310;
     pub const STRICT_RPC_CACHE: u16 = 311;
     pub const STRICT_CHECKPOINT: u16 = 312;
@@ -60,6 +61,9 @@ pub mod kind {
     pub const STRICT_ATTEMPT: u16 = 316;
     /// C0E1-P4-RESUME: post-capture deployment continuity of one canonical strict result.
     pub const DEPLOYMENT_PROOF: u16 = 317;
+    /// Strict verifier typed chain-read cache (F10): read, decoder version, decoded answer.
+    /// Replaces `STRICT_RPC_CACHE` (311), which stays readable for earlier runs only.
+    pub const STRICT_CHAIN_CACHE: u16 = 318;
     /// SK-06 capacity preflight report (single-value journal before a capture).
     pub const CAPACITY_PREFLIGHT: u16 = 320;
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
@@ -104,8 +108,8 @@ pub mod kind {
     pub const RUN_MANIFEST: u16 = 503;
     /// MT0 measurement snapshot (cumulative counters), off-owner reporter thread.
     pub const MT0_SNAPSHOT: u16 = 600;
-    /// FE-01 read-only observation: effective configuration, each saved RPC read
-    /// `{method, params, result|error}` (fsynced before it is decoded), and the result.
+    /// BOOT network audit result (`NetworkAudit`, typed; RPC answers are decoded at the
+    /// `boot_network` wire edge and never stored as JSON).
     pub const BOOT_NETWORK: u16 = 710;
     /// Measured FREE_ONLY provider evidence read by the network boot audit, imported offline
     /// from the measured JSON (`p0-journal import-provider-evidence`).
@@ -160,6 +164,7 @@ pub mod kind {
         CAPTURE_EVIDENCE,
         STRICT_ATTEMPT,
         DEPLOYMENT_PROOF,
+        STRICT_CHAIN_CACHE,
         CAPACITY_PREFLIGHT,
         SEGMENT_LINK,
         SEGMENT_NEXT,

@@ -23,6 +23,47 @@ impl std::fmt::Display for ChainError {
     }
 }
 
+/// Version of this decoder's semantics (F10): every change of a decoded value or reason bumps it,
+/// so a typed answer cached by another decoder version is refused instead of reused. The golden
+/// test `decoded_block_is_pinned_to_the_decoder_version` forces the bump.
+pub const WIRE_DECODER_VERSION: u16 = 1;
+
+/// The closed set of reasons this module's JSON-RPC/WSS decoder produces; a stored `ChainError`
+/// maps back onto it or fails to decode, so a typed cache never invents a reason.
+pub const DECODER_CODES: [&str; 14] = [
+    "BLOCK_DECODE",
+    "BLOCK_HEADER_INVALID",
+    "BLOCK_TRANSACTIONS_MISSING",
+    "INSTRUCTION_DATA_INVALID",
+    "INVALID_KEY",
+    "LOADED_ADDRESSES_MISSING",
+    "LOGS_NOTIFICATION_DECODE",
+    "NOTIFICATION_DECODE",
+    "NOTIFICATION_SIGNATURE_MISMATCH",
+    "TOKEN_AMOUNT_INVALID",
+    "TX_DECODE",
+    "TX_SLOT_MISMATCH",
+    "TX_SLOT_MISSING",
+    "TX_VERSION_UNSUPPORTED",
+];
+
+impl serde::Serialize for ChainError {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ChainError {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let code = String::deserialize(d)?;
+        DECODER_CODES
+            .into_iter()
+            .find(|c| *c == code)
+            .map(ChainError)
+            .ok_or_else(|| serde::de::Error::custom("unknown ChainError code"))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TxWireVersion {
     Legacy,
@@ -216,7 +257,7 @@ impl ChainTx {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainBlock {
     pub slot: u64,
     pub blockhash: String,
@@ -1054,6 +1095,68 @@ mod stored_tests {
         }
         let forged = bincode::serialize(&TxStatusStored::Unknown("NOT_A_CODE".into())).unwrap();
         assert!(bincode::deserialize::<TxStatus>(&forged).is_err());
+    }
+
+    /// A finalized block of a real v0 (5 LUT) transaction and an undecodable entry.
+    fn fixture_block() -> serde_json::Value {
+        let tx: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/evidence/AUDIT_20261005/3ab7mnuTErWjRtS8iz4Nm619VNvm3FSw47VVvdjYnSLNzB2btCoreDsQqmzfb4Qt5oBA29saPQ98Rgy2nyAUExRB.json"
+        ))
+        .unwrap();
+        let slot = tx["slot"].as_u64().unwrap();
+        serde_json::json!({
+            "parentSlot": slot - 1, "previousBlockhash": "p", "blockhash": "h",
+            "blockTime": tx["blockTime"], "blockHeight": 7,
+            "transactions": [
+                {"transaction": tx["transaction"], "meta": tx["meta"], "version": tx["version"]},
+                {"transaction": 1}
+            ]
+        })
+    }
+
+    /// F10: every reason this decoder constructs is registered, a decoded block (entry errors
+    /// included) survives the binary encoding exactly and a forged reason never decodes.
+    #[test]
+    fn decoded_block_round_trips_and_every_reason_is_registered() {
+        let production = include_str!("chain.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let used: std::collections::BTreeSet<&str> = production
+            .split("ChainError(\"")
+            .skip(1)
+            .map(|rest| &rest[..rest.find('"').unwrap()])
+            .collect();
+        assert_eq!(used, DECODER_CODES.into_iter().collect());
+        let raw = fixture_block();
+        let slot = raw["parentSlot"].as_u64().unwrap() + 1;
+        let block = decode_block(&raw, slot).unwrap();
+        assert!(block.transactions[0].is_ok());
+        assert_eq!(block.transactions[1], Err(ChainError("TX_DECODE")));
+        let bytes = bincode::serialize(&block).unwrap();
+        assert_eq!(bincode::deserialize::<ChainBlock>(&bytes).unwrap(), block);
+        let forged = bincode::serialize("NOT_A_CODE").unwrap();
+        assert!(bincode::deserialize::<ChainError>(&forged).is_err());
+    }
+
+    /// The decoder's output is pinned to `WIRE_DECODER_VERSION`: a changed decode result or
+    /// layout fails here until the version is bumped and the pin renewed (typed caches of the
+    /// old version are then refused, never reused).
+    #[test]
+    fn decoded_block_is_pinned_to_the_decoder_version() {
+        let raw = fixture_block();
+        let slot = raw["parentSlot"].as_u64().unwrap() + 1;
+        let bytes = bincode::serialize(&decode_block(&raw, slot).unwrap()).unwrap();
+        assert_eq!(
+            (
+                WIRE_DECODER_VERSION,
+                solana_sdk::hash::hash(&bytes).to_string()
+            ),
+            (
+                1,
+                "4mM6avd1hwbYYiooUmigRBue8g3F8ZxEcEtU9ySa2izu".to_string()
+            )
+        );
     }
 }
 

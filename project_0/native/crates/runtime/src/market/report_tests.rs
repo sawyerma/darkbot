@@ -2,8 +2,9 @@
 // live capture journal, an offline strict verification from cached finalized blocks, the
 // Shadow evaluation journal and an opportunity row.
 mod report_e2e {
+    use super::super::reconcile::ChainRead;
     use super::super::strict_driver::{drive, DriverRequest, StrictBudget, NATIVE_PREFIX};
-    use super::super::verification::{RpcCacheEntry, StrictScope};
+    use super::super::verification::{cache_fixture, StrictScope};
     use super::*;
     use crate::analytics::journal::{self, Provenance};
     use crate::analytics::measurement::{
@@ -72,23 +73,9 @@ mod report_e2e {
         w.seal(true).unwrap();
     }
 
-    fn cache(dir: &Path, method: &str, params: Value, result: Value) {
-        std::fs::create_dir_all(dir).unwrap();
-        let key = json!({"method": method, "params": params});
-        let name = solana_sdk::hash::hash(&serde_json::to_vec(&key).unwrap()).to_string();
-        let bytes = serde_json::to_vec(&result).unwrap();
-        let entry = RpcCacheEntry {
-            method: method.into(),
-            params: params.to_string(),
-            result_sha256: solana_sdk::hash::hash(&bytes).to_bytes(),
-            result: bytes,
-        };
-        journal::write_typed_value(
-            &dir.join(format!("{name}.p0j")),
-            journal::source::STRICT,
-            &entry,
-        )
-        .unwrap();
+    /// `dir` is the strict output's `cache/` directory.
+    fn cache(dir: &Path, read: ChainRead, wire: Value) {
+        cache_fixture(dir.parent().unwrap(), read, &wire);
     }
 
     fn hashes(run: &Path) -> BTreeMap<String, [u8; 32]> {
@@ -149,14 +136,9 @@ mod report_e2e {
         let plan = MeasurementPlan::new(60).unwrap();
         let clock = darkbot_common::timing::Clock::new();
         // The run records its minimum profit like every launcher run (capture.sh exports it).
-        persist_manifest_with(
-            &paths,
-            "run_r",
-            "test",
-            &plan,
-            clock,
-            &|k| (k == "P0_MIN_PROFIT").then(|| "0".into()),
-        )
+        persist_manifest_with(&paths, "run_r", "test", &plan, clock, &|k| {
+            (k == "P0_MIN_PROFIT").then(|| "0".into())
+        })
         .unwrap();
         let window = plan.capture_window(clock, 1_000 * NS).unwrap();
         let w_s = (window.capture_start_unix_ns / u128::from(NS)) as i64;
@@ -328,17 +310,11 @@ mod report_e2e {
             },
         )
         .unwrap();
-        cache(
-            &cache_dir,
-            "getSlot",
-            json!([{"commitment":"finalized"}]),
-            json!(90),
-        );
+        cache(&cache_dir, ChainRead::FinalizedSlot, json!(90));
         for lo in [10, 41, 73] {
             cache(
                 &cache_dir,
-                "getBlocks",
-                json!([lo, 90, {"commitment":"finalized"}]),
+                ChainRead::Blocks { start: lo, end: 90 },
                 json!((lo..=90).collect::<Vec<u64>>()),
             );
         }
@@ -346,8 +322,7 @@ mod report_e2e {
             let txs = if slot == 30 { vec![tx.clone()] } else { vec![] };
             cache(
                 &cache_dir,
-                "getBlock",
-                json!([slot,{"encoding":"json","transactionDetails":"full","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]),
+                ChainRead::FullBlock { slot },
                 json!({"parentSlot": slot - 1, "previousBlockhash": format!("h{}", slot - 1),
                     "blockhash": format!("h{slot}"), "blockTime": w_s - 1 + (slot as i64 - 10),
                     "transactions": txs}),
@@ -629,8 +604,7 @@ mod report_e2e {
             f.second.verification_result_id
         );
         assert!(path.starts_with(f.run.join(qualification::QUALIFICATION_DIR)));
-        let stored: qualification::QualificationRecord =
-            journal::read_typed_value(&path).unwrap();
+        let stored: qualification::QualificationRecord = journal::read_typed_value(&path).unwrap();
         assert_eq!(stored, q);
         // Reproducible and immutable.
         let bytes = std::fs::read(&path).unwrap();
@@ -648,7 +622,9 @@ mod report_e2e {
         let (old, _) = qualification::qualify(&f.run, &first_opts).unwrap();
         assert_ne!(old.qualification_id, q.qualification_id);
         assert_eq!(old.verdict, NOT_QUALIFIED);
-        assert!(old.failed.contains(&"VERIFICATION_NOT_CANONICAL".to_string()));
+        assert!(old
+            .failed
+            .contains(&"VERIFICATION_NOT_CANONICAL".to_string()));
         // A stored result is never replaced by a different one for the same inputs.
         let mut forged = q.clone();
         forged.verdict = MASTER_PASS.into();
@@ -717,14 +693,21 @@ mod report_e2e {
             p
         };
         for (case, p) in [
-            ("after hash", forged(&|p| p.after.as_mut().unwrap().hash = "forged".into())),
+            (
+                "after hash",
+                forged(&|p| p.after.as_mut().unwrap().hash = "forged".into()),
+            ),
             ("slot bound", forged(&|p| p.end_slot = 79)),
             ("before read", forged(&|p| p.before = Some(audited(8)))),
         ] {
             std::fs::remove_file(&proof).unwrap();
             journal::write_typed_value(&proof, journal::source::STRICT, &p).unwrap();
             let (forged_q, _) = qualification::qualify(&f.run, &opts).unwrap();
-            assert_eq!(forged_q.failed, ["DEPLOYMENT_CONTINUITY_UNPROVEN"], "{case}");
+            assert_eq!(
+                forged_q.failed,
+                ["DEPLOYMENT_CONTINUITY_UNPROVEN"],
+                "{case}"
+            );
         }
         // Without the post-capture deployment proof the same run is not qualified.
         std::fs::remove_file(&proof).unwrap();
@@ -741,7 +724,10 @@ mod report_e2e {
         // The deployment proof belongs to the canonical result only.
         assert_eq!(
             old.failed,
-            ["VERIFICATION_NOT_CANONICAL", "DEPLOYMENT_CONTINUITY_UNPROVEN"]
+            [
+                "VERIFICATION_NOT_CANONICAL",
+                "DEPLOYMENT_CONTINUITY_UNPROVEN"
+            ]
         );
         assert_eq!(old.economics, "ECONOMICS_REPLAYED_PROVISIONAL");
         std::fs::remove_dir_all(&f.d).unwrap();
@@ -863,7 +849,10 @@ mod report_e2e {
         );
         // The receivership names no bank pair: the evaluation is a diagnostic, never a match.
         assert_eq!(a.summary.counterfactual.matched, 0);
-        assert_eq!(a.rows[0].facts.loss_provenance, "TARGET_EPISODE_DIAGNOSTIC; executable identity unproven");
+        assert_eq!(
+            a.rows[0].facts.loss_provenance,
+            "TARGET_EPISODE_DIAGNOSTIC; executable identity unproven"
+        );
         assert_eq!(a.summary.realized, backtest::REALIZED_NOT_RUN);
         let again = backtest::backtest(&f.run, None, &p, BACKTEST_BUDGET).unwrap();
         assert_eq!(again.summary, a.summary);
@@ -963,7 +952,10 @@ mod report_e2e {
         let mut bytes = std::fs::read(&batch).unwrap();
         bytes.push(0);
         std::fs::write(&batch, bytes).unwrap();
-        assert_eq!(refused(&f.run, None, BACKTEST_BUDGET), "RESULT_EVIDENCE_CHANGED");
+        assert_eq!(
+            refused(&f.run, None, BACKTEST_BUDGET),
+            "RESULT_EVIDENCE_CHANGED"
+        );
 
         let g = canonical_run(line!(), true);
         std::fs::write(g.run.join("capture/shadow_evaluations.jsonl"), b"{}\n").unwrap();
@@ -979,7 +971,10 @@ mod report_e2e {
             "BACKTEST_BLOCKED: NO_VERIFIED_RESULT"
         );
         for run in [&f.run, &g.run, &h.run] {
-            assert!(!run.join(backtest::BACKTEST_DIR).exists(), "nothing written");
+            assert!(
+                !run.join(backtest::BACKTEST_DIR).exists(),
+                "nothing written"
+            );
         }
         for d in [f.d, g.d, h.d] {
             let _ = std::fs::remove_dir_all(d);

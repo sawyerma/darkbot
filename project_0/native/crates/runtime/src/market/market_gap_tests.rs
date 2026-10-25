@@ -118,7 +118,7 @@ fn gap_intervals_are_bounded_and_capacity_is_incomplete() {
 #[test]
 fn complete_canonical_window_is_authority_despite_transport_gap_telemetry() {
     let (mut c, mut s) = canonical_core(10, 12);
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, p, _| {
             Ok(match m {
                 "getSlot" => json!(12),
@@ -177,7 +177,10 @@ fn p2_527_failures_coalesce_without_losing_raw_evidence_or_claiming_recovery() {
     c.stop_observation();
     // Restored transport is still a gap: only the strict finalized scan can prove the interval.
     assert!(!c.coverage_complete());
-    assert_eq!(view(&c.summary(&ctx(true, false, 4.0)))["gap_unrecovered"], 1);
+    assert_eq!(
+        view(&c.summary(&ctx(true, false, 4.0)))["gap_unrecovered"],
+        1
+    );
 }
 
 #[test]

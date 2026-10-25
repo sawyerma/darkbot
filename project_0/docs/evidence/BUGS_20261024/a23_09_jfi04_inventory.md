@@ -76,3 +76,5 @@ explicit offline import · **C** operator config/approval file · **I** internal
 
 Not violations, watched: `JsonlSink` is a public production type built only in tests;
 `p0-strict-verify --compat` renders legacy JSON after a live verify (opt-in, transitional).
+
+25.10. (F10): strict verifier cache typed (`ChainCacheEntry`, kind 318, bound to read + `WIRE_DECODER_VERSION`); JSON only in `wire_params`/`wire_answer`/`fetch`; kind 311 read-only historical; open internal list empty, pin 287.

@@ -1,19 +1,20 @@
 //! Post-capture strict verification. Reuses the canonical slot/parent/skip engine.
 //! Raw capture files are never opened for writing; only this specification's directory.
 //!
-//! Evidence is native (Ticket 3 A3): the resolved scope, every cached JSON-RPC exchange, the
-//! batch market journals, the batch checkpoints and the result are typed `.p0j` journals. JSON
-//! exists only as the wire text of the cached external JSON-RPC exchange (JFI-02 boundary) and
-//! in the explicit `--compat` render for the transitional pinned Python driver/report.
+//! Evidence is native (Ticket 3 A3): the resolved scope, every cached chain read, the batch
+//! market journals, the batch checkpoints and the result are typed `.p0j` journals. JSON exists
+//! only in `fetch`, the JSON-RPC wire edge (JFI-02): the answer is decoded there at once and
+//! cached typed (`ChainCacheEntry`, F10); no provider JSON is persisted or handed on.
 //! The liquidation truth comes from the finalized blocks themselves (`reconcile_slots` →
 //! `truth::classify`), never from the market observer's rows.
-use super::reconcile::RequestPacer;
+use super::reconcile::{ChainAnswer, ChainRead, RequestPacer};
 use super::rows::{MarketCoverage, MarketLiquidation, ReconciliationRow};
 use super::*;
 use crate::analytics::journal::{self, kind, source};
 use crate::analytics::payload::Payload;
 use crate::storage::budget::{current_rss_bytes, free_disk_bytes, MIB};
 use crate::storage::writer::WriterConfig;
+use darkbot_solana::chain::WIRE_DECODER_VERSION;
 use serde::{Deserialize, Serialize};
 use solana_sdk::hash::hash;
 
@@ -54,7 +55,21 @@ impl Payload for StrictScope {
     const KIND: u16 = kind::STRICT_SCOPE;
 }
 
-/// One cached JSON-RPC exchange: request and `result` as wire text of the external boundary.
+/// One cached chain read (F10, JFI-01/02): the typed answer decoded at the JSON-RPC wire edge,
+/// bound to its read and the wire decoder version. The provider's JSON is never persisted.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainCacheEntry {
+    pub read: ChainRead,
+    /// `darkbot_solana::chain::WIRE_DECODER_VERSION` of the decode; another version is refused.
+    pub decoder: u16,
+    pub answer: ChainAnswer,
+}
+impl Payload for ChainCacheEntry {
+    const KIND: u16 = kind::STRICT_CHAIN_CACHE;
+}
+
+/// HISTORICAL (before F10, 25.10.): a cached JSON-RPC exchange as wire text. Never written; kept
+/// only so the caches of earlier strict runs stay verifiable read-only (`p0-journal`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RpcCacheEntry {
     pub method: String,
@@ -124,9 +139,29 @@ impl Payload for StrictResult {
     const KIND: u16 = kind::STRICT_RESULT;
 }
 
-/// Identity of a wire request (method + params as JSON-RPC wire text).
-fn digest(v: &Value) -> String {
-    hash(&serde_json::to_vec(v).unwrap()).to_string()
+/// The typed cache file of one read (F10): named by the read itself, never by provider JSON.
+fn cache_path(output: &Path, read: &ChainRead) -> PathBuf {
+    let name = match *read {
+        ChainRead::FinalizedSlot => "slot_finalized".to_string(),
+        ChainRead::FirstAvailableBlock => "first_available_block".to_string(),
+        ChainRead::Blocks { start, end } => format!("blocks_{start}_{end}"),
+        ChainRead::BlockHeader { slot } => format!("header_{slot}"),
+        ChainRead::FullBlock { slot } => format!("block_{slot}"),
+    };
+    output.join("cache").join(format!("{name}.p0j"))
+}
+/// The single JSON-RPC exchange of a read (JFI-02 wire edge): typed request to wire params, wire
+/// answer decoded at once; P2 admission, Retry-After/circuit and the bounded body reader of
+/// `gap_request_metered` stay authoritative. The provider's JSON never leaves this function.
+fn fetch(
+    rpc: &RpcFetcher,
+    read: &ChainRead,
+    deadline: Instant,
+    max_bytes: u64,
+) -> Result<(ChainAnswer, u64), &'static str> {
+    let (method, params) = reconcile::wire_params(read);
+    let (wire, bytes) = rpc.gap_request_metered(method, params, deadline, 10_000, max_bytes)?;
+    Ok((reconcile::wire_answer(read, &wire), bytes))
 }
 fn io_code(_: std::io::Error) -> &'static str {
     "EVIDENCE_IO"
@@ -154,7 +189,7 @@ fn file_len(path: &Path) -> u64 {
 fn read_ahead_group(
     slot: u64,
     produced: &[u64],
-    held: &BTreeMap<u64, Result<Value, &'static str>>,
+    held: &BTreeMap<u64, Result<ChainAnswer, &'static str>>,
     cached: &dyn Fn(u64) -> bool,
     limit: usize,
 ) -> Vec<u64> {
@@ -181,7 +216,7 @@ struct Client<'a> {
     bytes: u64,
     disk: u64,
     produced: Vec<u64>,
-    held: BTreeMap<u64, Result<Value, &'static str>>,
+    held: BTreeMap<u64, Result<ChainAnswer, &'static str>>,
     previous_block: Option<u64>,
     completed_batches: Vec<BatchRef>,
 }
@@ -205,47 +240,36 @@ impl Client<'_> {
         }
         Ok(())
     }
-    fn cache_path(&self, method: &str, params: &Value) -> (Value, PathBuf) {
-        let key = json!({"method": method, "params": params});
-        let path = self
-            .job
-            .output
-            .join("cache")
-            .join(format!("{}.p0j", digest(&key)));
-        (key, path)
-    }
-    fn cached(&self, method: &str, params: &Value) -> Result<Option<Value>, &'static str> {
-        let (_, path) = self.cache_path(method, params);
+    fn cached(&self, read: &ChainRead) -> Result<Option<ChainAnswer>, &'static str> {
+        let path = cache_path(&self.job.output, read);
         if !path.exists() {
             return Ok(None);
         }
-        let e: RpcCacheEntry = journal::read_typed_value(&path).map_err(|_| "CACHE_CORRUPT")?;
-        // The entry stores the params' JSON text; compare against the same rendering.
-        let rendered = params.to_string();
-        if e.method != method
-            || e.params != rendered
-            || hash(&e.result).to_bytes() != e.result_sha256
-        {
+        let e: ChainCacheEntry = journal::read_typed_value(&path).map_err(|_| "CACHE_CORRUPT")?;
+        if e.read != *read {
             return Err("CACHE_CORRUPT");
         }
-        serde_json::from_slice(&e.result)
-            .map(Some)
-            .map_err(|_| "CACHE_CORRUPT")
+        if e.decoder != WIRE_DECODER_VERSION {
+            return Err("CACHE_DECODER_VERSION");
+        }
+        Ok(Some(e.answer))
     }
-    fn store(&mut self, method: &str, params: &Value, v: &Value) -> Result<(), &'static str> {
-        let (_, path) = self.cache_path(method, params);
-        let result = serde_json::to_vec(v).map_err(|_| "EVIDENCE_IO")?;
-        let entry = RpcCacheEntry {
-            method: method.into(),
-            params: params.to_string(),
-            result_sha256: hash(&result).to_bytes(),
-            result,
+    fn store(
+        &mut self,
+        read: &ChainRead,
+        answer: ChainAnswer,
+    ) -> Result<ChainAnswer, &'static str> {
+        let path = cache_path(&self.job.output, read);
+        let entry = ChainCacheEntry {
+            read: *read,
+            decoder: WIRE_DECODER_VERSION,
+            answer,
         };
         journal::write_typed_value(&path, source::STRICT, &entry).map_err(io_code)?;
         self.disk += file_len(&path);
-        Ok(())
+        Ok(entry.answer)
     }
-    fn network(&mut self, method: &str, params: &Value) -> Result<Value, &'static str> {
+    fn network(&mut self, read: &ChainRead) -> Result<ChainAnswer, &'static str> {
         if self.calls >= self.job.max_calls {
             return Err("VERIFICATION_CALL_BUDGET");
         }
@@ -256,72 +280,59 @@ impl Client<'_> {
         let rpc = self.rpc.as_ref().ok_or("OFFLINE_CACHE_MISS")?;
         self.pacer.wait(self.deadline)?;
         self.calls += 1;
-        // P2 admission, Retry-After/circuit and bounded body reader remain authoritative.
-        let (v, bytes) = rpc.gap_request_metered(
-            method,
-            params.clone(),
-            self.deadline,
-            10_000,
-            remaining_bytes,
-        )?;
+        let (answer, bytes) = fetch(rpc, read, self.deadline, remaining_bytes)?;
         self.bytes += bytes;
-        self.store(method, params, &v)?;
+        let answer = self.store(read, answer)?;
         self.guard()?;
-        Ok(v)
+        Ok(answer)
     }
-    fn call(&mut self, method: &str, params: Value) -> Result<Value, &'static str> {
+    /// One typed chain read (F10): JSON exists only inside `fetch`; the cache, the read-ahead and
+    /// every caller see the typed answer.
+    fn read(&mut self, read: &ChainRead) -> Result<ChainAnswer, &'static str> {
         self.guard()?;
-        if !matches!(
-            method,
-            "getFirstAvailableBlock" | "getSlot" | "getBlocks" | "getBlock"
-        ) {
-            return Err("VERIFICATION_METHOD_FORBIDDEN");
+        if let ChainRead::FullBlock { slot } = *read {
+            return self.block(slot);
         }
-        if method == "getBlock" {
-            return self.block(params);
-        }
-        let v = match self.cached(method, &params)? {
-            Some(v) => v,
-            None => self.network(method, &params)?,
+        let answer = match self.cached(read)? {
+            Some(answer) => answer,
+            None => self.network(read)?,
         };
-        if method == "getBlocks" {
-            self.produced = v
-                .as_array()
-                .map(|a| a.iter().filter_map(Value::as_u64).collect())
-                .unwrap_or_default();
+        if let ChainAnswer::Blocks(list) = &answer {
+            self.produced = list.clone().unwrap_or_default();
         }
-        Ok(v)
+        Ok(answer)
     }
-    /// `getBlock` with bounded read-ahead over the last produced-slot list. Validation and
-    /// ledger order stay strictly canonical in `reconcile_slots`; every response is cached.
-    fn block(&mut self, params: Value) -> Result<Value, &'static str> {
-        let slot = params[0].as_u64().ok_or("BLOCK_SLOT_INVALID")?;
-        let options = params[1].clone();
+    /// A full block with bounded read-ahead over the last produced-slot list. Only full-block
+    /// reads are read ahead and held (a header probe never serves a full read). Validation and
+    /// ledger order stay strictly canonical in `reconcile_slots`; every answer is cached.
+    fn block(&mut self, slot: u64) -> Result<ChainAnswer, &'static str> {
+        let read = ChainRead::FullBlock { slot };
         let retry = self.previous_block == Some(slot);
         self.previous_block = Some(slot);
         if retry {
             self.held.remove(&slot);
-        } else if let Some(v) = self.held.remove(&slot) {
-            return v;
+        } else if let Some(answer) = self.held.remove(&slot) {
+            return answer;
         }
-        if let Some(v) = self.cached("getBlock", &params)? {
-            return Ok(v);
+        if let Some(answer) = self.cached(&read)? {
+            return Ok(answer);
         }
         let group = if retry {
             vec![slot]
         } else {
-            let cached = |s: u64| self.cache_path("getBlock", &json!([s, options])).1.exists();
+            let output = &self.job.output;
+            let cached = |s: u64| cache_path(output, &ChainRead::FullBlock { slot: s }).exists();
             read_ahead_group(slot, &self.produced, &self.held, &cached, PREFETCH)
         };
         if group.len() <= 1 || self.rpc.is_none() {
-            return self.network("getBlock", &params);
+            return self.network(&read);
         }
-        self.prefetch(&group, &options)?;
+        self.prefetch(&group)?;
         self.held
             .remove(&slot)
             .unwrap_or(Err("PREFETCH_SLOT_MISSING"))
     }
-    fn prefetch(&mut self, group: &[u64], options: &Value) -> Result<(), &'static str> {
+    fn prefetch(&mut self, group: &[u64]) -> Result<(), &'static str> {
         let budget = self.job.max_calls.saturating_sub(self.calls) as usize;
         let group = &group[..group.len().min(budget)];
         if group.is_empty() {
@@ -334,17 +345,16 @@ impl Client<'_> {
         let rpc = self.rpc.as_ref().ok_or("OFFLINE_CACHE_MISS")?;
         let (pacer, deadline) = (&self.pacer, self.deadline);
         self.calls += group.len() as u64;
-        type Fetched = Vec<(u64, Result<(Value, u64), &'static str>)>;
+        type Fetched = Vec<(u64, Result<(ChainAnswer, u64), &'static str>)>;
         let fetched: Fetched = std::thread::scope(|scope| {
             let jobs: Vec<_> = group
                 .iter()
                 .map(|&s| {
-                    let params = json!([s, options]);
                     (
                         s,
                         scope.spawn(move || {
                             pacer.wait(deadline)?;
-                            rpc.gap_request_metered("getBlock", params, deadline, 10_000, remaining)
+                            fetch(rpc, &ChainRead::FullBlock { slot: s }, deadline, remaining)
                         }),
                     )
                 })
@@ -353,12 +363,12 @@ impl Client<'_> {
                 .map(|(s, j)| (s, j.join().unwrap_or(Err("BLOCK_FETCH_WORKER_FAILED"))))
                 .collect()
         });
-        // Accounted in slot order; responses beyond the byte budget are refused, not kept.
+        // Accounted in slot order; answers beyond the byte budget are refused, not kept.
         for (s, r) in fetched {
             let r = match r {
-                Ok((v, bytes)) if self.bytes + bytes <= self.job.max_bytes => {
+                Ok((answer, bytes)) if self.bytes + bytes <= self.job.max_bytes => {
                     self.bytes += bytes;
-                    self.store("getBlock", &json!([s, options]), &v).map(|_| v)
+                    self.store(&ChainRead::FullBlock { slot: s }, answer)
                 }
                 Ok(_) => Err("VERIFICATION_NETWORK_BUDGET"),
                 Err(e) => Err(e),
@@ -368,30 +378,31 @@ impl Client<'_> {
         self.guard()
     }
     fn header_at_or_after(&mut self, slot: u64, tip: u64) -> Result<(u64, i64), &'static str> {
-        let slots = self.call(
-            "getBlocks",
-            json!([slot,slot.saturating_add(512).min(tip),{"commitment":"finalized"}]),
-        )?;
-        let s = slots
-            .as_array()
-            .and_then(|v| v.first())
-            .and_then(Value::as_u64)
-            .filter(|s| *s >= slot && *s <= tip)
-            .ok_or("UTC_BOUNDARY_SLOT_UNAVAILABLE")?;
-        let h = self.call("getBlock", json!([s,{"transactionDetails":"none","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]))?;
-        let header = darkbot_solana::chain::decode_block_header(&h, s)
-            .map_err(|_| "UTC_BLOCK_HEADER_INVALID")?;
+        use reconcile::{ChainAnswer, ChainRead};
+        let slots = self.read(&ChainRead::Blocks {
+            start: slot,
+            end: slot.saturating_add(512).min(tip),
+        })?;
+        let s = match slots {
+            ChainAnswer::Blocks(Some(list)) => list.first().copied(),
+            _ => None,
+        }
+        .filter(|s| *s >= slot && *s <= tip)
+        .ok_or("UTC_BOUNDARY_SLOT_UNAVAILABLE")?;
+        let header = match self.read(&ChainRead::BlockHeader { slot: s })? {
+            ChainAnswer::Header(Ok(header)) => header,
+            _ => return Err("UTC_BLOCK_HEADER_INVALID"),
+        };
         Ok((s, header.block_time.ok_or("UTC_BLOCK_TIME_UNKNOWN")?))
     }
     fn resolve_window(&mut self) -> Result<(u64, u64), &'static str> {
-        let first = self
-            .call("getFirstAvailableBlock", json!([]))?
-            .as_u64()
-            .ok_or("ARCHIVE_FIRST_SLOT_UNKNOWN")?;
-        let tip = self
-            .call("getSlot", json!([{"commitment":"finalized"}]))?
-            .as_u64()
-            .ok_or("FINALIZED_TIP_INVALID")?;
+        use reconcile::{ChainAnswer, ChainRead};
+        let ChainAnswer::Slot(Some(first)) = self.read(&ChainRead::FirstAvailableBlock)? else {
+            return Err("ARCHIVE_FIRST_SLOT_UNKNOWN");
+        };
+        let ChainAnswer::Slot(Some(tip)) = self.read(&ChainRead::FinalizedSlot)? else {
+            return Err("FINALIZED_TIP_INVALID");
+        };
         let mut lower = self.header_at_or_after(first, tip)?;
         let upper = self.header_at_or_after(tip, tip)?;
         let start = self.job.start_ns as i128;
@@ -697,16 +708,23 @@ pub fn run(job: Job) -> Result<StrictResult, String> {
                         }
                     }
                     core.reconcile_slots(
-                        &mut |m, p, _| {
-                            let value = c.call(m, p.clone())?;
-                            if m == "getBlock" {
-                                if let Some((s, h)) = &anchor {
-                                    if p[0] == *s && value["blockhash"] != *h {
-                                        return Err("BATCH_ANCHOR_MISMATCH");
-                                    }
+                        &mut |read, _| {
+                            let answer = c.read(read)?;
+                            // The previous batch's last block must be the same block again.
+                            if let (
+                                reconcile::ChainRead::FullBlock { slot },
+                                reconcile::ChainAnswer::Block { header, .. },
+                                Some((s, h)),
+                            ) = (read, &answer, &anchor)
+                            {
+                                if slot == s
+                                    && header.as_ref().map(|x| x.blockhash.as_str()).ok()
+                                        != Some(h.as_str())
+                                {
+                                    return Err("BATCH_ANCHOR_MISMATCH");
                                 }
                             }
-                            Ok(value)
+                            Ok(answer)
                         },
                         &mut sink,
                     )
@@ -986,6 +1004,21 @@ fn read_report_inner(
     r
 }
 
+/// Test fixture: a JSON-RPC wire answer cached as the typed entry the verifier itself would
+/// write — decoded through the same `wire_answer` edge (no test-only decode).
+#[cfg(test)]
+pub(crate) fn cache_fixture(output: &Path, read: ChainRead, wire: &Value) {
+    let path = cache_path(output, &read);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let _ = fs::remove_file(&path);
+    let entry = ChainCacheEntry {
+        read,
+        decoder: WIRE_DECODER_VERSION,
+        answer: reconcile::wire_answer(&read, wire),
+    };
+    journal::write_typed_value(&path, source::STRICT, &entry).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,19 +1043,8 @@ mod tests {
             offline: true,
         }
     }
-    fn cache(j: &Job, method: &str, params: Value, result: Value) {
-        fs::create_dir_all(j.output.join("cache")).unwrap();
-        let key = json!({"method":method,"params":params});
-        let path = j.output.join("cache").join(format!("{}.p0j", digest(&key)));
-        let _ = fs::remove_file(&path);
-        let bytes = serde_json::to_vec(&result).unwrap();
-        let entry = RpcCacheEntry {
-            method: method.into(),
-            params: params.to_string(),
-            result_sha256: hash(&bytes).to_bytes(),
-            result: bytes,
-        };
-        journal::write_typed_value(&path, source::STRICT, &entry).unwrap();
+    fn cache(j: &Job, read: ChainRead, wire: Value) {
+        cache_fixture(&j.output, read, &wire);
     }
     fn fixture(j: &Job, stop: Option<u64>) {
         fs::create_dir_all(&j.output).unwrap();
@@ -1037,12 +1059,11 @@ mod tests {
         if !path.exists() {
             journal::write_typed_value(&path, source::STRICT, &scope).unwrap();
         }
-        cache(j, "getSlot", json!([{"commitment":"finalized"}]), json!(90));
+        cache(j, ChainRead::FinalizedSlot, json!(90));
         for lo in [10, 41, 73] {
             cache(
                 j,
-                "getBlocks",
-                json!([lo,90,{"commitment":"finalized"}]),
+                ChainRead::Blocks { start: lo, end: 90 },
                 json!((lo..=90)
                     .filter(|s| *s != 15 && *s != 79)
                     .collect::<Vec<_>>()),
@@ -1056,8 +1077,7 @@ mod tests {
             if stop.is_none_or(|stop| slot <= stop) {
                 cache(
                     j,
-                    "getBlock",
-                    json!([slot,{"encoding":"json","transactionDetails":"full","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]),
+                    ChainRead::FullBlock { slot },
                     json!({"parentSlot":parent,"previousBlockhash":format!("h{parent}"),"blockhash":format!("h{slot}"),"blockTime":slot,"transactions":[]}),
                 );
             }
@@ -1152,35 +1172,152 @@ mod tests {
     fn wrong_parent_and_corrupt_cached_response_never_pass() {
         let j = job();
         fixture(&j, None);
-        let params = json!([42,{"encoding":"json","transactionDetails":"full","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]);
-        let key = json!({"method":"getBlock","params":params});
-        let p = j.output.join("cache").join(format!("{}.p0j", digest(&key)));
-        let mut e: RpcCacheEntry = journal::read_typed_value(&p).unwrap();
-        let mut v: Value = serde_json::from_slice(&e.result).unwrap();
-        v["parentSlot"] = json!(40);
-        e.result = serde_json::to_vec(&v).unwrap();
-        fs::remove_file(&p).unwrap();
-        journal::write_typed_value(&p, source::STRICT, &e).unwrap();
+        let read = ChainRead::FullBlock { slot: 42 };
+        let p = cache_path(&j.output, &read);
+        let original: ChainCacheEntry = journal::read_typed_value(&p).unwrap();
+        let rewrite = |e: &ChainCacheEntry| {
+            fs::remove_file(&p).unwrap();
+            journal::write_typed_value(&p, source::STRICT, e).unwrap();
+        };
+        // A damaged file, an entry of another read and another decoder version never pass.
+        let mut bytes = fs::read(&p).unwrap();
+        let at = bytes.len() / 2;
+        bytes[at] ^= 0xff;
+        fs::write(&p, &bytes).unwrap();
         assert_eq!(
             run(reload(&j)).unwrap().reason.as_deref(),
             Some("CACHE_CORRUPT")
         );
-        e.result_sha256 = hash(&e.result).to_bytes();
-        fs::remove_file(&p).unwrap();
-        journal::write_typed_value(&p, source::STRICT, &e).unwrap();
+        let mut e = original.clone();
+        e.read = ChainRead::FullBlock { slot: 43 };
+        rewrite(&e);
+        assert_eq!(
+            run(reload(&j)).unwrap().reason.as_deref(),
+            Some("CACHE_CORRUPT")
+        );
+        let mut e = original.clone();
+        e.decoder = WIRE_DECODER_VERSION + 1;
+        rewrite(&e);
+        assert_eq!(
+            run(reload(&j)).unwrap().reason.as_deref(),
+            Some("CACHE_DECODER_VERSION")
+        );
+        // A consistent but wrong answer is caught by the canonical parent chain.
+        let mut e = original;
+        let ChainAnswer::Block {
+            header: Ok(header),
+            block: Ok(block),
+        } = &mut e.answer
+        else {
+            panic!("fixture block");
+        };
+        header.parent_slot = 40;
+        block.parent_slot = 40;
+        rewrite(&e);
         assert_eq!(
             run(reload(&j)).unwrap().reason.as_deref(),
             Some("FINALIZED_PARENT_CHAIN_MISMATCH")
         );
         fs::remove_dir_all(j.output).unwrap();
     }
+    /// Loopback JSON-RPC endpoint answering from the request body: `getBlocks` lists every slot,
+    /// `getBlock` with `transactionDetails = none` is a header-only block, `full` carries its
+    /// (empty) transaction list.
+    fn loopback_chain() -> String {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut request = vec![0u8; length];
+                let _ = reader.read_exact(&mut request);
+                let request: Value = serde_json::from_slice(&request).unwrap_or(Value::Null);
+                let params = &request["params"];
+                let result = match request["method"].as_str() {
+                    Some("getBlocks") => json!((params[0].as_u64().unwrap()
+                        ..=params[1].as_u64().unwrap())
+                        .collect::<Vec<_>>()),
+                    Some("getBlock") => {
+                        let slot = params[0].as_u64().unwrap();
+                        let mut block = json!({"parentSlot": slot - 1,
+                            "previousBlockhash": format!("h{}", slot - 1),
+                            "blockhash": format!("h{slot}"), "blockTime": slot});
+                        if params[1]["transactionDetails"] == "full" {
+                            block["transactions"] = json!([]);
+                        }
+                        block
+                    }
+                    _ => json!(90),
+                };
+                let body = json!({"jsonrpc": "2.0", "id": 1, "result": result}).to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        url
+    }
+
+    /// F10: header probes of the window resolution never fill the full-block read-ahead. A full
+    /// read of a slot whose header was probed (and read ahead) gets the block with its
+    /// transactions, and every answer is cached typed under its own read.
+    #[test]
+    fn header_probes_never_serve_a_full_block_read() {
+        use reconcile::{ChainAnswer, ChainRead};
+        let mut j = job();
+        j.offline = false;
+        fs::create_dir_all(j.output.join("cache")).unwrap();
+        let mut c = Client {
+            job: &j,
+            rpc: Some(RpcFetcher::new(loopback_chain(), 5_000, "finalized").unwrap()),
+            deadline: Instant::now() + Duration::from_secs(60),
+            pacer: RequestPacer::new(1_000),
+            calls: 0,
+            bytes: 0,
+            disk: 0,
+            produced: Vec::new(),
+            held: BTreeMap::new(),
+            previous_block: None,
+            completed_batches: Vec::new(),
+        };
+        assert!(matches!(
+            c.read(&ChainRead::Blocks { start: 10, end: 40 }),
+            Ok(ChainAnswer::Blocks(Some(_)))
+        ));
+        assert!(matches!(
+            c.read(&ChainRead::BlockHeader { slot: 10 }),
+            Ok(ChainAnswer::Header(Ok(_)))
+        ));
+        let Ok(ChainAnswer::Block { block, .. }) = c.read(&ChainRead::FullBlock { slot: 11 })
+        else {
+            panic!("full block read failed");
+        };
+        assert_eq!(block.map(|b| (b.slot, b.transactions.len())), Ok((11, 0)));
+        fs::remove_dir_all(&j.output).unwrap();
+    }
+
     /// The bounded read-ahead takes at most `limit` produced slots without held or cached
     /// responses; an unknown slot is fetched alone.
     #[test]
     fn read_ahead_group_is_bounded_and_skips_known_slots() {
         let produced: Vec<u64> = (10..30).collect();
         let mut held = BTreeMap::new();
-        held.insert(12, Ok(json!(12)));
+        held.insert(12, Ok(ChainAnswer::Slot(Some(12))));
         let cached = |s: u64| s == 13;
         assert_eq!(
             read_ahead_group(10, &produced, &held, &cached, 8),

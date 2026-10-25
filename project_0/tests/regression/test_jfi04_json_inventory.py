@@ -45,9 +45,8 @@ PINNED = {
     'runtime/src/market/summary.rs': (4, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/market/winner.rs': (3, 'W'),
     'runtime/src/market_gap.rs': (3, 'W'),
-    'runtime/src/market_reconcile.rs': (3, 'W'),
+    'runtime/src/market_reconcile.rs': (5, 'W'),  # wire_params/wire_answer: the one JSON-RPC edge of verifier and reconcile; engine and strict cache typed, verifier file JSON-free (F10, 25.10.)
     'runtime/src/market_truth.rs': (2, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
-    'runtime/src/market_verification.rs': (11, 'WI'),  # JSON-RPC responses kept in the strict RPC cache (F10, open); --compat render removed (F5, 25.10.)
     'runtime/src/orchestration/boot_network.rs': (12, 'W'),
     'runtime/src/orchestration/fe_replay.rs': (3, 'H'),
     'runtime/src/orchestration/provider_evidence.rs': (1, 'C'),  # measured operator file (F13)
@@ -65,9 +64,7 @@ PINNED = {
 # JFI-04 is REOPENED (24.10.): productive internal JSON still exists in these files. Each migration
 # removes its file here; the list may only shrink. Never re-label a file to empty it.
 OPEN_INTERNAL = sorted(f for f, (_, c) in PINNED.items() if 'I' in c)
-EXPECTED_OPEN_INTERNAL = [
-    'runtime/src/market_verification.rs',
-]
+EXPECTED_OPEN_INTERNAL = []  # last entry (strict RPC cache) migrated to typed ChainCacheEntry (F10, 25.10.)
 
 USE_VALUE = re.compile(r'^\s*use serde_json::(Value\b|\{[^}]*\bValue\b)')
 JSON = re.compile(r'serde_json::|json!\(')
@@ -142,7 +139,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 296)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 287)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

@@ -720,6 +720,7 @@ macro_rules! typed_kinds {
             }
             k::STRICT_SCOPE => $f::<strict::StrictScope>($kind, $schema, $bytes),
             k::STRICT_RPC_CACHE => $f::<strict::RpcCacheEntry>($kind, $schema, $bytes),
+            k::STRICT_CHAIN_CACHE => $f::<strict::ChainCacheEntry>($kind, $schema, $bytes),
             k::STRICT_CHECKPOINT => $f::<strict::StrictCheckpoint>($kind, $schema, $bytes),
             k::STRICT_RESULT => $f::<strict::StrictResult>($kind, $schema, $bytes),
             k::STRICT_SPEC => $f::<crate::market::observer::strict_driver::VerificationSpec>(

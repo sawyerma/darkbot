@@ -86,7 +86,7 @@ fn golden_core() -> ObserverCore {
         false,
     );
     found["meta"]["innerInstructions"] = json!([]);
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, params, _| {
             Ok(match m {
                 "getSlot" => json!(12),

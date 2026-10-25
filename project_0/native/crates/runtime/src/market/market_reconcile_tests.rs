@@ -28,7 +28,7 @@ fn validate_raw(raw: &Value) -> Result<(), &'static str> {
 fn full_slot_every_produced_block_and_transaction_are_scanned() {
     let (mut c, mut s) = canonical_core(10, 12);
     let mut fetched = vec![];
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, p, _| {
             Ok(match m {
                 "getSlot" => json!(12),
@@ -65,7 +65,7 @@ fn full_slot_every_produced_block_and_transaction_are_scanned() {
 #[test]
 fn full_slot_skipped_slots_require_finalized_parent_proof_including_tail() {
     let (mut c, mut s) = canonical_core(10, 13);
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, p, _| {
             Ok(match m {
                 "getSlot" => json!(14),
@@ -89,7 +89,7 @@ fn full_slot_skipped_slots_require_finalized_parent_proof_including_tail() {
 fn full_slot_missing_produced_block_cannot_masquerade_as_skipped() {
     for bad_hash in [false, true] {
         let (mut c, mut s) = canonical_core(10, 12);
-        c.reconcile_slots(
+        c.reconcile_slots_wire(
             &mut |m, p, _| {
                 Ok(match m {
                     "getSlot" => json!(12),
@@ -121,7 +121,7 @@ fn full_slot_missing_produced_block_cannot_masquerade_as_skipped() {
 fn full_slot_unproven_tail_rpc_failure_and_future_window_fail_closed() {
     for case in 0..3 {
         let (mut c, mut s) = canonical_core(10, 12);
-        c.reconcile_slots(
+        c.reconcile_slots_wire(
             &mut |m, p, _| match m {
                 "getSlot" => Ok(json!(if case == 2 { 11 } else { 12 })),
                 "getBlocks" => Ok(json!([10])),
@@ -150,10 +150,10 @@ fn full_slot_cannot_run_in_capture_or_without_boundaries() {
     let mut c = open_core(MarketSource::Logs, EnrichConfig::DEFAULT);
     let mut s = VecSink::default();
     assert!(c
-        .reconcile_slots(&mut |_, _, _| panic!("hotpath RPC"), &mut s)
+        .reconcile_slots_wire(&mut |_, _, _| panic!("hotpath RPC"), &mut s)
         .is_err());
     c.stop_observation();
-    c.reconcile_slots(&mut |_, _, _| panic!("no window"), &mut s)
+    c.reconcile_slots_wire(&mut |_, _, _| panic!("no window"), &mut s)
         .unwrap();
     assert_eq!(
         c.reconciliation.error,
@@ -168,7 +168,7 @@ fn full_slot_repeat_and_live_duplicate_do_not_double_count() {
     c.on_transaction(as_observed(&tx, "live", 10, false), 0, &mut s)
         .unwrap();
     c.stop_observation();
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, _, _| {
             Ok(match m {
                 "getSlot" => json!(10),
@@ -180,7 +180,7 @@ fn full_slot_repeat_and_live_duplicate_do_not_double_count() {
         &mut s,
     )
     .unwrap();
-    c.reconcile_slots(&mut |_, _, _| panic!("repeat RPC"), &mut s)
+    c.reconcile_slots_wire(&mut |_, _, _| panic!("repeat RPC"), &mut s)
         .unwrap();
     assert!(c.reconciliation.complete);
     assert_eq!(c.stats.liquidation_events, 1);
@@ -194,7 +194,7 @@ fn full_slot_live_duplicate_still_validates_instruction_event_parity() {
         .unwrap();
     c.stop_observation();
     tx["meta"]["logMessages"] = json!([]);
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, _, _| {
             Ok(match m {
                 "getSlot" => json!(10),
@@ -245,11 +245,11 @@ fn full_transaction_checks_loaded_address_counts_even_when_present() {
 fn full_slot_budget_and_large_range_are_bounded() {
     let (mut c, mut s) = canonical_core(10, 5010);
     c.reconcile_cfg.max_slots = 5000;
-    c.reconcile_slots(&mut |_, _, _| panic!("budget"), &mut s)
+    c.reconcile_slots_wire(&mut |_, _, _| panic!("budget"), &mut s)
         .unwrap();
     assert_eq!(c.reconciliation.error, Some("RECONCILIATION_SLOT_BUDGET"));
     let (mut c, mut s) = canonical_core(10, 5009);
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, p, _| {
             Ok(match m {
                 "getSlot" => json!(5009),
@@ -274,7 +274,7 @@ fn full_slot_transient_rate_limit_retries_without_skipping_block() {
     let (mut c, mut s) = canonical_core(10, 10);
     c.reconcile_cfg.max_attempts = 2;
     let mut calls = 0;
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, _, _| match m {
             "getSlot" => Ok(json!(10)),
             "getBlocks" => Ok(json!([10])),
@@ -298,7 +298,7 @@ fn full_slot_transient_rate_limit_retries_without_skipping_block() {
 }
 
 fn reconcile_one_block(c: &mut ObserverCore, s: &mut VecSink, slot: u64, txs: Vec<Value>) {
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, _, _| {
             Ok(match m {
                 "getSlot" => json!(slot),
@@ -458,7 +458,7 @@ fn full_slot_invalid_transaction_is_counted_and_the_scan_goes_on() {
     let (mut c, mut s) = canonical_core(10, 11);
     let mut bad = canonical_tx("bad", 10);
     bad["version"] = json!(2);
-    c.reconcile_slots(
+    c.reconcile_slots_wire(
         &mut |m, p, _| {
             Ok(match m {
                 "getSlot" => json!(11),
@@ -482,16 +482,25 @@ fn full_slot_invalid_transaction_is_counted_and_the_scan_goes_on() {
     assert!(!r.complete);
     assert_eq!(r.error, Some("TRANSACTIONS_INVALID"));
     assert_eq!(
-        (r.transactions_scanned, r.transactions_invalid, r.slots_fetched),
+        (
+            r.transactions_scanned,
+            r.transactions_invalid,
+            r.slots_fetched
+        ),
         (3, 1, 2)
     );
     let (slot, index, code) = r.first_invalid.unwrap();
     assert_eq!((slot, index), (10, 0));
-    assert_eq!(c.stats.liquidation_events, 2, "events of the other transactions");
+    assert_eq!(
+        c.stats.liquidation_events, 2,
+        "events of the other transactions"
+    );
     let row = super::rows::ReconciliationRow::from(r);
     assert_eq!(
         row.error,
-        Some(format!("TRANSACTIONS_INVALID n=1 first=slot 10 index 0 {code}"))
+        Some(format!(
+            "TRANSACTIONS_INVALID n=1 first=slot 10 index 0 {code}"
+        ))
     );
 }
 

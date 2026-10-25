@@ -7,7 +7,7 @@ use super::rows::{
 use super::*;
 use crate::winner::{resolve_account_keys, ChainInstruction, ChainTx, TxStatus};
 use darkbot_solana::chain::TxWireVersion;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReconcileConfig {
@@ -158,7 +158,84 @@ impl From<&Reconciliation> for ReconciliationRow {
         }
     }
 }
-type ReconcileRpc<'a> = dyn FnMut(&str, Value, Duration) -> Result<Value, &'static str> + 'a;
+/// One chain read of the finalized reconciliation and the strict verifier (F10, JFI-02): the
+/// transport encodes it as a JSON-RPC request and decodes the answer at its wire edge
+/// (`wire_params`, `wire_answer`); the engine sees only the typed `ChainAnswer`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChainRead {
+    FinalizedSlot,
+    FirstAvailableBlock,
+    /// Produced slots in `[start, end]` (finalized).
+    Blocks {
+        start: u64,
+        end: u64,
+    },
+    /// `getBlock` without transactions.
+    BlockHeader {
+        slot: u64,
+    },
+    /// `getBlock` with every transaction (`encoding = json`).
+    FullBlock {
+        slot: u64,
+    },
+}
+
+/// The typed answer of a `ChainRead`. Decode failures stay part of the answer (never a transport
+/// error), so a malformed finalized block keeps its own reason and is not retried as a failure.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChainAnswer {
+    /// `None`: the answer is no slot number.
+    Slot(Option<u64>),
+    /// `None`: the answer is no list of slot numbers.
+    Blocks(Option<Vec<u64>>),
+    Header(Result<darkbot_solana::chain::BlockHeader, darkbot_solana::chain::ChainError>),
+    Block {
+        header: Result<darkbot_solana::chain::BlockHeader, darkbot_solana::chain::ChainError>,
+        block: Result<darkbot_solana::chain::ChainBlock, darkbot_solana::chain::ChainError>,
+    },
+}
+
+/// The JSON-RPC wire request of a read (JFI-02 wire edge; the exact params of the provider API).
+pub fn wire_params(read: &ChainRead) -> (&'static str, Value) {
+    match *read {
+        ChainRead::FinalizedSlot => ("getSlot", json!([{"commitment":"finalized"}])),
+        ChainRead::FirstAvailableBlock => ("getFirstAvailableBlock", json!([])),
+        ChainRead::Blocks { start, end } => {
+            ("getBlocks", json!([start, end, {"commitment":"finalized"}]))
+        }
+        ChainRead::BlockHeader { slot } => (
+            "getBlock",
+            json!([slot,{"transactionDetails":"none","rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]),
+        ),
+        ChainRead::FullBlock { slot } => (
+            "getBlock",
+            json!([slot, {"encoding":"json","transactionDetails":"full",
+                "rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]),
+        ),
+    }
+}
+
+/// The typed answer of a JSON-RPC wire answer (JFI-02: decoded once, at the wire edge).
+pub fn wire_answer(read: &ChainRead, value: &Value) -> ChainAnswer {
+    use darkbot_solana::chain::{decode_block, decode_block_header};
+    match *read {
+        ChainRead::FinalizedSlot | ChainRead::FirstAvailableBlock => {
+            ChainAnswer::Slot(value.as_u64())
+        }
+        ChainRead::Blocks { .. } => ChainAnswer::Blocks(
+            value
+                .as_array()
+                .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>()),
+        ),
+        ChainRead::BlockHeader { slot } => ChainAnswer::Header(decode_block_header(value, slot)),
+        ChainRead::FullBlock { slot } => ChainAnswer::Block {
+            header: decode_block_header(value, slot),
+            block: decode_block(value, slot),
+        },
+    }
+}
+
+type ReconcileRpc<'a> = dyn FnMut(&ChainRead, Duration) -> Result<ChainAnswer, &'static str> + 'a;
 
 /// Validate ALL key/index views before deciding relevance, including inner instructions.
 /// Legacy/v0 and the JSON v1 account/instruction view are covered by real F8 fixtures.
@@ -268,6 +345,23 @@ impl ObserverCore {
         })
     }
 
+    /// Test entry over JSON-RPC wire fixtures: the same `wire_params`/`wire_answer` edge as the
+    /// production transport, so the engine is tested on exactly the typed answers it gets live.
+    #[cfg(test)]
+    pub(super) fn reconcile_slots_wire(
+        &mut self,
+        rpc: &mut dyn FnMut(&str, Value, Duration) -> Result<Value, &'static str>,
+        sink: &mut dyn MarketSink,
+    ) -> std::io::Result<()> {
+        self.reconcile_slots(
+            &mut |read: &ChainRead, timeout| {
+                let (method, params) = wire_params(read);
+                rpc(method, params, timeout).map(|v| wire_answer(read, &v))
+            },
+            sink,
+        )
+    }
+
     pub(super) fn reconcile_slots(
         &mut self,
         rpc: &mut ReconcileRpc<'_>,
@@ -282,18 +376,14 @@ impl ObserverCore {
         self.reconciliation.attempted = true;
         let cfg = self.reconcile_cfg;
         let deadline = Instant::now() + Duration::from_secs(cfg.phase_max_secs);
-        let mut request = |method: &str, params: Value| -> Result<Value, &'static str> {
+        let mut request = |read: &ChainRead| -> Result<ChainAnswer, &'static str> {
             let mut result = Err("RECONCILIATION_DEADLINE");
             for attempt in 0..cfg.max_attempts {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
                     return Err("RECONCILIATION_DEADLINE");
                 }
-                result = rpc(
-                    method,
-                    params.clone(),
-                    remaining.min(Duration::from_millis(cfg.timeout_ms)),
-                );
+                result = rpc(read, remaining.min(Duration::from_millis(cfg.timeout_ms)));
                 if Instant::now() >= deadline {
                     return Err("RECONCILIATION_DEADLINE");
                 }
@@ -324,7 +414,7 @@ impl ObserverCore {
 
     fn reconcile_range(
         &mut self,
-        request: &mut dyn FnMut(&str, Value) -> Result<Value, &'static str>,
+        request: &mut dyn FnMut(&ChainRead) -> Result<ChainAnswer, &'static str>,
         deadline: Instant,
         sink: &mut dyn MarketSink,
     ) -> std::io::Result<Result<(), &'static str>> {
@@ -352,8 +442,10 @@ impl ObserverCore {
             + Duration::from_secs(self.reconcile_cfg.finality_wait_secs))
         .min(deadline);
         let tip = loop {
-            let tip = require!(request("getSlot", json!([{"commitment":"finalized"}]))
-                .and_then(|v| v.as_u64().ok_or("FINALIZED_TIP_INVALID")));
+            let tip = require!(request(&ChainRead::FinalizedSlot).and_then(|a| match a {
+                ChainAnswer::Slot(Some(tip)) => Ok(tip),
+                _ => Err("FINALIZED_TIP_INVALID"),
+            }));
             if tip >= hi {
                 break tip;
             }
@@ -368,36 +460,31 @@ impl ObserverCore {
         // Request a bounded successor beyond hi so a trailing skipped slot can be proven
         // by a finalized parent link, never by absence from getBlocks alone.
         let search_end = hi.saturating_add(512).min(tip);
-        let list = require!(request(
-            "getBlocks",
-            json!([lo,search_end,{"commitment":"finalized"}])
-        ));
-        let produced = require!(list.as_array().ok_or("PRODUCED_SLOT_LIST_INVALID"));
+        let produced = require!(request(&ChainRead::Blocks {
+            start: lo,
+            end: search_end
+        })
+        .and_then(|a| match a {
+            ChainAnswer::Blocks(Some(list)) => Ok(list),
+            _ => Err("PRODUCED_SLOT_LIST_INVALID"),
+        }));
         let mut previous = None;
-        for entry in produced {
-            let s = require!(entry.as_u64().ok_or("PRODUCED_SLOT_LIST_INVALID"));
+        for &s in &produced {
             if s < lo || s > search_end || previous.is_some_and(|p| s <= p) {
                 return Ok(Err("PRODUCED_SLOT_LIST_INVALID"));
             }
             previous = Some(s);
         }
-        r.slots_produced = produced
-            .iter()
-            .filter(|v| v.as_u64().is_some_and(|s| s <= hi))
-            .count() as u64;
+        r.slots_produced = produced.iter().filter(|s| **s <= hi).count() as u64;
         let mut next = lo;
         let mut previous_block: Option<(u64, String)> = None;
-        for entry in produced {
-            let slot = entry.as_u64().unwrap();
+        for slot in produced {
             if next > hi {
                 break;
             }
-            let block = match request(
-                "getBlock",
-                json!([slot, {"encoding":"json","transactionDetails":"full",
-                "rewards":false,"commitment":"finalized","maxSupportedTransactionVersion":1}]),
-            ) {
-                Ok(v) => v,
+            let (header, decoded) = match request(&ChainRead::FullBlock { slot }) {
+                Ok(ChainAnswer::Block { header, block }) => (header, block),
+                Ok(_) => return Ok(Err("CHAIN_ANSWER_MISMATCH")),
                 Err(e) => {
                     self.reconciliation.slots_failed += 1;
                     sink.coverage(&MarketCoverage::SlotFailed {
@@ -407,9 +494,8 @@ impl ObserverCore {
                     return Ok(Err(e));
                 }
             };
-            // JFI-02: the getBlock answer is decoded once into the typed block model.
-            let header =
-                require!(darkbot_solana::chain::decode_block_header(&block, slot).map_err(|e| e.0));
+            // JFI-02: the getBlock answer was decoded once at the wire edge (`wire_answer`).
+            let header = require!(header.map_err(|e| e.0));
             let (parent, hash) = (header.parent_slot, header.blockhash.as_str());
             let prev_hash = require!(header
                 .previous_blockhash
@@ -439,8 +525,7 @@ impl ObserverCore {
                 next = hi.saturating_add(1);
                 break;
             }
-            let typed =
-                require!(darkbot_solana::chain::decode_block(&block, slot).map_err(|e| e.0));
+            let typed = require!(decoded.map_err(|e| e.0));
             let total = typed.transactions.len() as u64;
             for (index, entry) in typed.transactions.into_iter().enumerate() {
                 if Instant::now() >= deadline {
