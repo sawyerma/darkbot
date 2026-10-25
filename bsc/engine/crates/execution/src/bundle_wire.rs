@@ -20,6 +20,9 @@ pub const MAX_BLOCK_OFFSET: u64 = 2;
 pub const FORTYEIGHTCLUB_NO_MERGE: bool = true;
 /// 48Club `positionFirst` ("strictly order by priorityFee", not top-of-block).
 pub const FORTYEIGHTCLUB_POSITION_FIRST: bool = true;
+/// The longest wait for a builder's complete response after the flush
+/// (BSC-010): one absolute deadline, bound into the v5 contract text.
+pub const BUILDER_RESPONSE_DEADLINE_MS: u64 = 15_000;
 
 /// A JSON wire string: quoted, with `"`, `\` and control characters
 /// escaped. The G0.7 fields are 0x-hex, which passes through unchanged.

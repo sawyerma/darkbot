@@ -189,8 +189,10 @@ pub(crate) fn read_http_response<R: Read>(stream: &mut R) -> Result<HttpResponse
 }
 
 /// The longest wait for a builder's complete response after the flush
-/// (BSC-010): one absolute deadline, not a per-read timeout.
-pub(crate) const BUILDER_RESPONSE_DEADLINE: Duration = Duration::from_secs(15);
+/// (BSC-010): one absolute deadline, not a per-read timeout; its value is the
+/// one the v5 contract binds.
+pub(crate) const BUILDER_RESPONSE_DEADLINE: Duration =
+    Duration::from_millis(darkbot_bsc_execution::bundle_wire::BUILDER_RESPONSE_DEADLINE_MS);
 
 /// One HTTP response within an absolute `deadline`: a watchdog shuts the
 /// socket down when it passes, so a peer trickling bytes (even inside one

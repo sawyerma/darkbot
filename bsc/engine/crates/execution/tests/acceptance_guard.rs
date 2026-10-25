@@ -649,6 +649,52 @@ fn v5_binds_the_launch_path_and_candidate_and_supersedes_the_v4_proposal() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// Einheit 0/1: the v5 bytes the user approves name the runtime gates of
+/// this code with their compiled values (BSC-003/004/005/010), so a change
+/// of any of them changes the contract and needs a new approval.
+#[test]
+fn the_v5_contract_binds_the_runtime_gates_with_their_compiled_values() {
+    use darkbot_bsc_execution::{builder_policy, bundle_wire};
+    at_repo_root();
+    let (root, dir, policy) = v5_root("v5-gates");
+    let v5 = attempt1_v5(
+        &attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).unwrap(),
+        Authorization::Proposed,
+    )
+    .unwrap();
+    let record = decode(&contract::V5, &v5).unwrap();
+    let tag = contract::V5
+        .fields
+        .iter()
+        .find(|f| f.name == "send_guard.required_checks")
+        .unwrap()
+        .tag;
+    let checks: Vec<String> = record
+        .fields()
+        .iter()
+        .filter(|(t, _)| *t == tag)
+        .map(|(_, v)| darkbot_bsc_record::plain(v))
+        .collect();
+    let has = |needle: String| {
+        assert!(
+            checks.iter().any(|c| c.contains(&needle)),
+            "{needle}: {checks:#?}"
+        )
+    };
+    has(format!(
+        "absolute deadline of {} ms after the flush",
+        bundle_wire::BUILDER_RESPONSE_DEADLINE_MS
+    ));
+    has("refs/darkbot/g07-attempt-authority/".to_string());
+    has(format!("at most {} s old", builder_policy::MAX_AGE_S));
+    has(format!(
+        "noMerge={}, positionFirst={}, max_block - send_head = {}",
+        bundle_wire::FORTYEIGHTCLUB_NO_MERGE,
+        bundle_wire::FORTYEIGHTCLUB_POSITION_FIRST,
+        bundle_wire::MAX_BLOCK_OFFSET
+    ));
+}
+
 /// BSC-003 (BSC_Bug_V2 P3-F2): v5 binds a DRY only when its bundle
 /// projection is the compiled bundle semantics -- 48Club flags and the
 /// expiry offset (never its absolute blocks against a later head).

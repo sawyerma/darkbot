@@ -1259,6 +1259,35 @@ pub fn attempt1_v5(e: &V5Evidence, authorization: Authorization) -> Result<Vec<u
         tag("send_guard.required_checks")?,
         "The selected candidate (profile and ID, verified from its salt) equals authorization.candidate",
     );
+    // The runtime gates of this code, with their compiled values: a change
+    // of any of them changes these bytes and needs a new approval.
+    d.push(
+        tag("send_guard.required_checks")?,
+        format!(
+            "The bound DRY's bundle projection is the compiled bundle semantics (48Club noMerge={}, positionFirst={}, max_block - send_head = {}); the runner refuses any other right before the latch (BSC-003)",
+            crate::bundle_wire::FORTYEIGHTCLUB_NO_MERGE,
+            crate::bundle_wire::FORTYEIGHTCLUB_POSITION_FIRST,
+            crate::bundle_wire::MAX_BLOCK_OFFSET
+        ),
+    );
+    d.push(
+        tag("send_guard.required_checks")?,
+        format!(
+            "The bound builder policy's oldest fetched source is at most {} s old right before the latch; an older policy needs a new bound policy and contract (BSC-004)",
+            crate::builder_policy::MAX_AGE_S
+        ),
+    );
+    d.push(
+        tag("send_guard.required_checks")?,
+        "The shared one-attempt authority refs/darkbot/g07-attempt-authority/<attempt_id> on the checkout's origin, granted by the user for exactly these bytes, is consumed in one compare-and-swap before the latch; a missing, foreign or consumed authority refuses, and the guard requires the consumed authority's proof (BSC-005)",
+    );
+    d.push(
+        tag("send_guard.required_checks")?,
+        format!(
+            "Each builder response has one absolute deadline of {} ms after the flush; a later or partial answer is recorded as UNKNOWN (bytes may have left), never retried (BSC-010)",
+            crate::bundle_wire::BUILDER_RESPONSE_DEADLINE_MS
+        ),
+    );
     d.push(
         tag("send_guard.forbidden_authorities")?,
         "bsc/config/g07_attempt1_acceptance_v4.dbrec (superseded proposal without launch-path binding)",

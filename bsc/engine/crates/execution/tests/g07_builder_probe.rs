@@ -23,8 +23,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// here too; the sent bytes are unchanged (golden tests) (was 06187594…).
 /// BSC-010: the builder response has one absolute deadline (was 6c279792…).
 /// Einheit 0: the guard requires the consumed attempt authority (was 8f8eb831…).
+/// The builder response deadline is bundle_wire's, bound into v5 (was 75a04d5c…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "75a04d5cf413c953959ff6bddfdb4471e1ce83b246ddcae6c142f192a70e06b3";
+const PINNED_PLAN_SHA256: &str = "69cee91f4172a905d986021c35b45799b70b93856cd98c8e9bae1f62bebc05d2";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);
