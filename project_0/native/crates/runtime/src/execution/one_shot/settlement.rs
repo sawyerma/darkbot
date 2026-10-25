@@ -365,6 +365,42 @@ impl Journal {
 
     /// Finalized but not yet booked (e.g. a valuation that was unknown, or a restart between the
     /// two transitions): settled from the journal alone, no read needed.
+    /// C02/F-04: the settled attempt's landing telemetry — the one reconcile path. Its primary
+    /// signature with the finalized slot, outcome and fees of the settlement; compute units and
+    /// the paid tip are not read here (`None`, never 0). `released`: the capital the booking of
+    /// this settlement released.
+    pub fn landing_record(
+        &self,
+        released: u64,
+    ) -> Option<crate::execution::pending::ReconcileRecord> {
+        let s = self.saved.as_ref()?;
+        let Phase::Settled(done) = &s.phase else {
+            return None;
+        };
+        let signature = s.intent.signatures.first()?.clone();
+        let landed_slot = s.observations.get(&signature).map(|o| o.slot);
+        Some(crate::execution::pending::ReconcileRecord {
+            signature,
+            path: "FE04_SETTLEMENT".into(),
+            outcome: if !done.landed {
+                "NOT_LANDED"
+            } else if done.landed_success {
+                "LANDED_SUCCESS"
+            } else {
+                "LANDED_FAILED"
+            }
+            .into(),
+            landed_slot: landed_slot.filter(|_| done.landed),
+            fee_lamports: Some(done.fee_lamports),
+            compute_units_consumed: None,
+            paid_tip_lamports: None,
+            network_and_tip_lamports: None,
+            error: None,
+            exposure_released: released,
+            pnl_complete: true,
+        })
+    }
+
     pub fn awaits_booking(&self) -> bool {
         self.saved
             .as_ref()

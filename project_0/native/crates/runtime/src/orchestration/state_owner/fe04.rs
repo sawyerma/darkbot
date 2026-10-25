@@ -216,6 +216,22 @@ impl ShadowOwner {
                     self.fe04_unbooked = None;
                     self.fe04_rebuild_book();
                 }
+                // C02/F-04: the settlement is the one landing-telemetry path (exactly once: a
+                // repeated or restarted settlement takes the `settled_before` branch).
+                let released = if booked.is_ok() {
+                    unbooked.reserved_capital.unwrap_or(0)
+                } else {
+                    0
+                };
+                if let Some(record) = self
+                    .fe04_held
+                    .as_ref()
+                    .and_then(|j| j.landing_record(released))
+                {
+                    if let Err(e) = self.evidence.emit(OwnerEvidence::Reconcile(record)) {
+                        owner_log!(self, "fe04_settlement: landing telemetry not written {e}");
+                    }
+                }
                 owner_log!(
                     self,
                     "fe04_settlement: settled landed={} landed_success={} fee_lamports={} realized_net_usd_micro={} unrealized_inventory_usd_micro={} booked_unix_s={} safety={}",

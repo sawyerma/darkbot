@@ -2,13 +2,12 @@ use crate::analytics::record::Decision;
 use crate::analytics::shadow_ledger::ShadowLedger;
 #[cfg(feature = "crate_health")]
 use crate::execution::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
-use crate::execution::pending::PendingSubmission;
 use crate::execution::pipeline::{pipeline_timing_snapshot, Mode, NetworkBudget, Pipeline};
 #[cfg(feature = "crate_health")]
 use crate::execution::route::JupiterV2RouteProvider;
 use crate::market::winner::{race_outcome, RaceOutcome};
 use crate::orchestration::remote_workers::{
-    OraclePriceProjectionWork, ProjectionWork, ReconcileWork, RemoteWorkers, WinnerWatch,
+    OraclePriceProjectionWork, ProjectionWork, RemoteWorkers, WinnerWatch,
 };
 use crate::orchestration::winner_tracker::{
     is_winner_relevant, WinnerDispatch, WinnerResolution, WinnerTracker, WinnerTrackerConfig,
@@ -74,7 +73,6 @@ use candidates::*;
 
 use crate::analytics::evidence::{HealthEvidence, OwnerEvidence, OwnerEvidenceWriter, RecordEvent};
 mod detect;
-mod dispatch;
 mod events;
 mod ingress;
 mod lifecycle;
@@ -147,7 +145,6 @@ pub(super) struct ShadowOwner {
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,
     remote_worker_capacity: usize,
-    pending: Vec<ReconcileWork>,
     projection_cache: HashMap<Pubkey, CachedProjection>,
     projection_pending: HashSet<Pubkey>,
     /// N4: projection outcomes (E9 discards).
@@ -299,7 +296,7 @@ pub(super) fn run_shadow(
             if !owner.lifecycle() {
                 break;
             }
-            let worker_now_s = owner.remote_apply()?;
+            owner.remote_apply()?;
             if let Some(h) = &owner.econ {
                 if h.admission_closed() {
                     owner.ingress_session.request();
@@ -312,7 +309,6 @@ pub(super) fn run_shadow(
                     continue;
                 }
             }
-            owner.dispatch(worker_now_s)?;
             owner.sweep();
             let detect = match owner.events(&mut fetch, &ingress)? {
                 OwnerStep::Next(detect) => detect,

@@ -1,18 +1,17 @@
 //! [FIX-108][R4] Remote RPC work isolated from the ingress/detection loop.
 //!
-//! Winner lookup and submission reconciliation own their own RpcClient instances.
-//! The state thread only sends/receives bounded native work items.
+//! Winner lookup and the FE-04 settlement own their own RpcClient instances (C02: the
+//! settlement is the one reconcile path). The state thread only sends/receives bounded native
+//! work items.
 
 use crate::analytics::record::LossReason;
-use crate::execution::pending::{try_reconcile, PendingSubmission, ReconcileResult};
 use crate::market::winner::{find_winner, Winner};
 use darkbot_common::channel::{bounded, ChannelError, Consumer, Producer, Wakeup};
 use darkbot_common::lifecycle::Shutdown;
-use darkbot_common::timing::Clock;
 use darkbot_solana::submit::rpc::RpcSubmitter;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{hash::Hash, transaction::VersionedTransaction};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct WinnerWatch {
@@ -33,26 +32,6 @@ pub struct WinnerWatch {
 pub struct WinnerResult {
     pub watch: WinnerWatch,
     pub result: Result<Option<Winner>, String>,
-}
-
-pub struct ReconcileWork {
-    pub submission: PendingSubmission,
-    pub next_check_unix_s: u64,
-}
-
-pub struct ReconcileResultMessage {
-    pub work: ReconcileWork,
-    /// `Err` = the reconcile could not run (wall clock unreadable); never a fabricated time.
-    pub result: Result<Option<ReconcileResult>, &'static str>,
-}
-
-/// [P8] Reconcile timeouts are measured against the real wall clock. An unreadable clock is an
-/// error for the owner (financial HALT), never epoch 0 handed to `try_reconcile`.
-fn reconcile_at(
-    now_unix_s: Result<u64, &'static str>,
-    run: impl FnOnce(u64) -> Option<ReconcileResult>,
-) -> Result<Option<ReconcileResult>, &'static str> {
-    now_unix_s.map(run)
 }
 
 pub struct ProjectionWork {
@@ -130,7 +109,6 @@ pub struct Fe04SettlementResult {
 #[cfg(all(test, feature = "crate_health"))]
 pub(crate) struct Detached {
     pub(crate) projection: Producer<ProjectionResultMessage>,
-    pub(crate) reconcile: Producer<ReconcileResultMessage>,
     pub(crate) fe04_jobs: Consumer<Fe04SettlementWork>,
     pub(crate) fe04_results: Producer<Fe04SettlementResult>,
     pub(crate) space: Wakeup,
@@ -140,8 +118,6 @@ pub struct RemoteWorkers {
     threads: Vec<std::thread::JoinHandle<()>>,
     pub winner_jobs: Producer<WinnerWatch>,
     pub winner_results: Consumer<WinnerResult>,
-    pub reconcile_jobs: Producer<ReconcileWork>,
-    pub reconcile_results: Consumer<ReconcileResultMessage>,
     pub projection_jobs: Producer<ProjectionWork>,
     pub projection_results: Consumer<ProjectionResultMessage>,
     pub oracle_price_projection_jobs: Producer<OraclePriceProjectionWork>,
@@ -224,10 +200,6 @@ impl RemoteWorkers {
         let (winner_jobs, winner_job_rx) = bounded::<WinnerWatch>("winner-rpc-jobs", capacity);
         let (winner_done_tx, winner_results) =
             result_queue::<WinnerResult>("winner-rpc-results", capacity, wake, &space);
-        let (reconcile_jobs, reconcile_job_rx) =
-            bounded::<ReconcileWork>("reconcile-rpc-jobs", capacity);
-        let (reconcile_done_tx, reconcile_results) =
-            result_queue::<ReconcileResultMessage>("reconcile-rpc-results", capacity, wake, &space);
         let (projection_jobs, projection_job_rx) =
             bounded::<ProjectionWork>("projection-rpc-jobs", capacity);
         let (projection_done_tx, projection_results) = result_queue::<ProjectionResultMessage>(
@@ -321,54 +293,6 @@ impl RemoteWorkers {
                             WinnerResult { watch, result },
                             &winner_shutdown,
                             &winner_space,
-                        ) {
-                            return;
-                        }
-                    }
-                })?,
-        );
-
-        let reconcile_shutdown = shutdown.clone();
-        // D08: the reconcile worker's times come from a validated wall clock (never 0).
-        let reconcile_clock = Clock::try_new().map_err(std::io::Error::other)?;
-        let reconcile_space = space.clone();
-        let reconcile_rpc_url = rpc_url.clone();
-        threads.push(
-            std::thread::Builder::new()
-                .name("reconcile-rpc".into())
-                .spawn(move || {
-                    let rpc = darkbot_solana::provider::rpc_client(
-                        reconcile_rpc_url,
-                        Duration::from_secs(30),
-                        Default::default(),
-                        // C5: own prioritized workload inside the same global provider budget.
-                        darkbot_solana::provider::Workload::Reconcile,
-                    );
-                    let clock = reconcile_clock;
-                    while !reconcile_shutdown.is_requested() {
-                        let Some(work) = reconcile_job_rx.pop_timeout(Duration::from_millis(250))
-                        else {
-                            continue;
-                        };
-                        let now_s = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .map_err(|_| "WALL_CLOCK_BEFORE_UNIX_EPOCH");
-                        let result = reconcile_at(now_s, |now_s| {
-                            try_reconcile(
-                                &rpc,
-                                None,
-                                &work.submission,
-                                now_s,
-                                clock.now_ns(),
-                                crate::execution::pending::RECONCILE_UNRESOLVED_AFTER_S,
-                            )
-                        });
-                        if !push_result(
-                            &reconcile_done_tx,
-                            ReconcileResultMessage { work, result },
-                            &reconcile_shutdown,
-                            &reconcile_space,
                         ) {
                             return;
                         }
@@ -492,8 +416,6 @@ impl RemoteWorkers {
             threads,
             winner_jobs,
             winner_results,
-            reconcile_jobs,
-            reconcile_results,
             projection_jobs,
             projection_results,
             oracle_price_projection_jobs,
@@ -515,8 +437,6 @@ impl RemoteWorkers {
         shutdown.ring_on_request(&space);
         let (projection_done_tx, projection_results) =
             result_queue("projection-rpc-results", capacity, wake, &space);
-        let (reconcile, reconcile_results) =
-            result_queue("reconcile-rpc-results", capacity, wake, &space);
         let (fe04_settlement_jobs, fe04_jobs) = bounded("fe04-settlement-jobs", 1);
         let (fe04_results, fe04_settlement_results) =
             result_queue("fe04-settlement-results", 1, wake, &space);
@@ -524,8 +444,6 @@ impl RemoteWorkers {
             threads: Vec::new(),
             winner_jobs: bounded("winner-rpc-jobs", capacity).0,
             winner_results: result_queue("winner-rpc-results", capacity, wake, &space).1,
-            reconcile_jobs: bounded("reconcile-rpc-jobs", capacity).0,
-            reconcile_results,
             projection_jobs: bounded("projection-rpc-jobs", capacity).0,
             projection_results,
             oracle_price_projection_jobs: bounded("oracle-price-projection-rpc-jobs", capacity).0,
@@ -543,7 +461,6 @@ impl RemoteWorkers {
             workers,
             Detached {
                 projection: projection_done_tx,
-                reconcile,
                 fe04_jobs,
                 fe04_results,
                 space,
@@ -629,23 +546,5 @@ mod tests {
         };
         assert_eq!(w.next_check_unix_s, 65);
         assert!(w.shadow_ready);
-    }
-
-    #[test]
-    fn p8_unreadable_wall_clock_is_an_error_not_epoch_zero() {
-        let mut called = false;
-        let r = super::reconcile_at(Err("WALL_CLOCK_BEFORE_UNIX_EPOCH"), |_| {
-            called = true;
-            None
-        });
-        assert_eq!(r.err(), Some("WALL_CLOCK_BEFORE_UNIX_EPOCH"));
-        assert!(!called, "try_reconcile must not run with a fabricated time");
-        let mut seen = None;
-        assert!(super::reconcile_at(Ok(1_700_000_000), |t| {
-            seen = Some(t);
-            None
-        })
-        .is_ok_and(|r| r.is_none()));
-        assert_eq!(seen, Some(1_700_000_000));
     }
 }

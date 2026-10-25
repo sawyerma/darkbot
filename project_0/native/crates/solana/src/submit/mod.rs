@@ -428,33 +428,6 @@ pub fn build_tip_tx(
         .map_err(|e| SubmitError::Serialize(e.to_string()))
 }
 
-/// Ledger §4 — Outcome pro Pfad. Kosten werden erst durch Reconciliation gefüllt.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LandingOutcome {
-    NotLanded,
-    LandedSuccess,
-    LandedFailed,
-    /// C4: observed in a processed/confirmed status only — telemetry, never settlement evidence
-    /// (no fee, outcome or capital release until a finalized status and receipt exist).
-    LandedUnfinalized,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LandingEvidence {
-    pub path: SubmissionPath,
-    pub signature: Signature,
-    pub outcome: LandingOutcome,
-    pub landed_slot: Option<u64>,
-    /// Index im Block, nur wenn per getBlock ermittelt; sonst None.
-    pub tx_index_in_slot: Option<u32>,
-    pub confirmation: Option<String>,
-    /// Gesamtgebühr laut meta.fee (Base + Priority); None wenn nicht gelandet/unbekannt.
-    pub fee_lamports: Option<u64>,
-    pub compute_units_consumed: Option<u64>,
-    pub error: Option<String>,
-    pub t_observed_landed_ns: Option<u64>,
-}
-
 /// Serialisierung (bincode-kompatibles Wire-Format). VERIFY: `bincode` als
 /// Dependency ergänzen, falls solana-sdk keine Serialisierungsfunktion re-exportiert.
 pub fn serialize_tx(tx: &VersionedTransaction) -> Result<Vec<u8>, crate::tx::BuildError> {

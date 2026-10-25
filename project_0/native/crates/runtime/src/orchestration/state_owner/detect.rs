@@ -721,35 +721,8 @@ impl ShadowOwner {
                 now,
             );
         }
-        // [FIX-18][FIX-23] Submitted und AmbiguousSubmission landen beide in der Reconciliation
-        // (Telemetrie; finanzieller Abschluss: FE-04-Journal-Settlement).
-        if let (Some(sig), Some(exp)) = (rec.signature.as_deref(), rec.exposure) {
-            if let Ok(s) = sig.parse() {
-                let sigs = rec
-                    .all_signatures
-                    .iter()
-                    .filter_map(|x| x.parse().ok())
-                    .collect();
-                // [FIX-33] tatsächlich verwendeter Pfad aus dem Record, nicht die Adapter-Default.
-                let path = match rec.path.as_deref() {
-                    Some("JITO_BUNDLE") => darkbot_solana::submit::SubmissionPath::JitoBundle,
-                    Some("JITO_SINGLE") => darkbot_solana::submit::SubmissionPath::JitoSingle,
-                    _ => darkbot_solana::submit::SubmissionPath::Rpc,
-                };
-                self.pending.push(ReconcileWork {
-                    submission: PendingSubmission {
-                        signature: s,
-                        signatures: sigs,
-                        bundle_id: rec.bundle_id.clone(),
-                        path,
-                        exposure: exp,
-                        submitted_unix_s: now,
-                        tip: rec.submitted_tip.clone(),
-                    },
-                    next_check_unix_s: now,
-                });
-            }
-        }
+        // C02/F-04: a submission's landing telemetry is the FE-04 settlement's (`fe04.rs`), the one
+        // reconcile path; no separate RAM reconcile polls its signatures.
         Ok(true)
     }
 }

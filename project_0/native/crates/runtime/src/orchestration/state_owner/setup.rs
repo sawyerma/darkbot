@@ -562,7 +562,6 @@ pub(super) fn prepare(
         remote_worker_capacity,
         &wake,
     )?;
-    let pending: Vec<ReconcileWork> = Vec::new();
 
     #[cfg(feature = "crate_health")]
     let projection_cache: HashMap<Pubkey, CachedProjection> = HashMap::new();
@@ -998,7 +997,6 @@ pub(super) fn prepare(
         integration_probe_enabled,
         integration_probe_limit_per_kind,
         remote_worker_capacity,
-        pending,
         projection_cache,
         projection_requeues: HashMap::new(),
         projection_parked: ParkedProjections::default(),

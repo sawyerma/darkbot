@@ -5,7 +5,6 @@ impl ShadowOwner {
     /// A23-01: a worker result or the census outcome waits for `remote_apply`.
     pub(super) fn remote_pending(&self) -> bool {
         self.remote.winner_results.pending()
-            || self.remote.reconcile_results.pending()
             || self.remote.projection_results.pending()
             || self.remote.oracle_price_projection_results.pending()
             || self.c0_census.as_ref().is_some_and(|c| c.outcome_pending())
@@ -90,28 +89,6 @@ impl ShadowOwner {
                         expected_net: w.expected_net,
                     };
                     self.evidence.emit(OwnerEvidence::Record(line))?;
-                }
-            }
-        }
-
-        while let Some(done) = self.remote.reconcile_results.try_pop() {
-            let mut work = done.work;
-            match done.result {
-                Err(e) => {
-                    // [P8] Keep the unresolved submission (exposure stays held) and halt.
-                    self.pending.push(work);
-                    return Err(format!("RECONCILE_CLOCK_UNAVAILABLE:{e}").into());
-                }
-                Ok(Some(r)) => {
-                    // FE-04/C3: landing telemetry only. Every submission is an FE-04 attempt
-                    // (B1: the admission is the only send); its financial close — capital,
-                    // PnL, inventory, the day — is the wallet journal's settlement (`fe04.rs`),
-                    // never booked here as well.
-                    self.evidence.emit(OwnerEvidence::Reconcile(r.record))?;
-                }
-                Ok(None) => {
-                    work.next_check_unix_s = worker_now_s.saturating_add(1);
-                    self.pending.push(work);
                 }
             }
         }

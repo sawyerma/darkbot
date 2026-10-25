@@ -119,7 +119,6 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,
         remote_worker_capacity: 16,
-        pending: vec![],
         projection_cache: HashMap::new(),
         projection_requeues: HashMap::new(),
         projection_parked: ParkedProjections::default(),
@@ -2086,6 +2085,47 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     cleanup(f);
 }
 
+/// C02/F-04: the FE-04 settlement is the one landing-telemetry path — a settled attempt emits
+/// exactly one reconcile record (outcome, fee, the capital released), also when the answer is
+/// repeated; no separate RAM reconcile polls the signature.
+#[test]
+fn c02_fe04_settlement_emits_the_one_landing_telemetry_record() {
+    use crate::analytics::payload::{decode, Payload};
+    use crate::execution::one_shot::settlement::SettlementEvidence;
+    use crate::execution::pending::ReconcileRecord;
+    let (mut f, intent, proof) = fe04_fixture("c02_landing", "unknown");
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    let evidence = SettlementEvidence {
+        observations: vec![],
+        proof: Some(Ok(proof)),
+    };
+    fe04_answer(&f, evidence.clone());
+    run_until(&mut f, fe04_settled);
+    fe04_answer(&f, evidence);
+    run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut records = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == ReconcileRecord::KIND {
+            let r: ReconcileRecord = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            records.push((r.signature, r.outcome, r.exposure_released));
+        }
+    }
+    assert_eq!(
+        records,
+        [(
+            intent.signatures[0].clone(),
+            "NOT_LANDED".to_string(),
+            intent.capital_usd_micro
+        )]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// C3: evidence that proves nothing (an unexpired blockhash, a failed read) keeps the attempt
 /// UNKNOWN with every hold — capital, book, HALT — and the next read waits the backoff.
 #[test]
@@ -2202,63 +2242,6 @@ fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
         (safety.day().realized_pnl, safety.day().failed_attempts),
         (0, 1)
     );
-    cleanup(f);
-}
-
-/// C3/P8: a RAM reconcile result of the FE-04 attempt is landing telemetry only — Safety books
-/// nothing (capital, day, inventory unchanged); the journal settlement is the financial close.
-#[test]
-fn p8_ram_reconcile_is_telemetry_and_never_books_an_fe04_attempt() {
-    use crate::execution::pending::{PendingSubmission, ReconcileRecord, ReconcileResult};
-    use crate::orchestration::remote_workers::{ReconcileResultMessage, ReconcileWork};
-    let (mut f, intent, _) = fe04_fixture("fe04_ram", "unknown");
-    let ledger = |o: &ShadowOwner| {
-        (
-            o.safety.capital_in_use(),
-            o.safety.inventory_outstanding(),
-            o.safety.day(),
-        )
-    };
-    let before = ledger(&f.owner);
-    let signature: solana_sdk::signature::Signature = intent.signatures[0].parse().unwrap();
-    let d = f.results.as_ref().unwrap();
-    assert!(d
-        .reconcile
-        .try_push(ReconcileResultMessage {
-            work: ReconcileWork {
-                submission: PendingSubmission {
-                    signature,
-                    signatures: vec![signature],
-                    bundle_id: None,
-                    path: darkbot_solana::submit::SubmissionPath::Rpc,
-                    exposure: intent.capital_usd_micro,
-                    submitted_unix_s: 0,
-                    tip: None,
-                },
-                next_check_unix_s: 0,
-            },
-            result: Ok(Some(ReconcileResult {
-                record: ReconcileRecord {
-                    signature: signature.to_string(),
-                    path: "RPC".into(),
-                    outcome: "LANDED_FAILED".into(),
-                    landed_slot: Some(70),
-                    fee_lamports: Some(5_000),
-                    compute_units_consumed: None,
-                    paid_tip_lamports: None,
-                    network_and_tip_lamports: Some(5_000),
-                    error: None,
-                    exposure_released: intent.capital_usd_micro,
-                    pnl_complete: false,
-                },
-                landed_success: false,
-                realized_pnl: Some(-500),
-            })),
-        })
-        .is_ok());
-    run_until(&mut f, |o| !o.remote.reconcile_results.pending());
-    assert_eq!(ledger(&f.owner), before);
-    assert!(f.owner.pending.is_empty(), "the telemetry record is final");
     cleanup(f);
 }
 

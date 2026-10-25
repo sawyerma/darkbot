@@ -343,10 +343,6 @@ fn owner_thread_sources_have_no_json_io_env_or_blocking_logging() {
             include_str!("../orchestration/state_owner/detect.rs"),
         ),
         (
-            "dispatch.rs",
-            include_str!("../orchestration/state_owner/dispatch.rs"),
-        ),
-        (
             "events.rs",
             include_str!("../orchestration/state_owner/events.rs"),
         ),
