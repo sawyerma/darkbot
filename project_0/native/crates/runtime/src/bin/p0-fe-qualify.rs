@@ -19,10 +19,12 @@ fn run() -> Result<(), String> {
     let mut qualification = None;
     let mut replay = None;
     let mut against = None;
+    let mut legacy_reads = false;
     let mut funding_class = "ZERO_PREFUND_SAME_TX".to_string();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--execute" => execute = true,
+            "--legacy-reads" => legacy_reads = true,
             "--replay" => {
                 replay = Some(
                     args.next()
@@ -44,7 +46,7 @@ fn run() -> Result<(), String> {
         }
     }
     if operational.iter().any(|s| s == "--help" || s == "-h") {
-        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
+        println!("p0-fe-qualify --fe-mode smoke --execute --output NEW_DIRECTORY [operational options]   (P1A deployment/target observation)\np0-fe-qualify (--execute --provider-qualification FILE | --replay SAVED_DIRECTORY [--legacy-reads]) --output NEW_DIRECTORY --fe-mode full [--funding-class ZERO_PREFUND_SAME_TX|NO_SWAP_INVENTORY] [--against EARLIER_OUTPUT (freeze drift blocks)] [operational options]\n{}",Resolved::help());
         return Ok(());
     }
     let mut resolved = Resolved::parse(&operational, &|k| std::env::var(k).ok())?;
@@ -73,7 +75,7 @@ fn run() -> Result<(), String> {
     }
     if let Some(directory) = replay {
         let (mut report, freeze) =
-            fe_replay::replay_frozen(&resolved.config, &directory, funding_class)?;
+            fe_replay::replay_frozen(&resolved.config, &directory, funding_class, legacy_reads)?;
         fs::create_dir(&output).map_err(|_| "FE_OUTPUT_CREATE")?;
         // FE-01 freeze: its own typed journal; drift against an earlier freeze blocks.
         let (summary, unblocked) = fe_freeze::record(&output, Some(freeze), against.as_deref())?;

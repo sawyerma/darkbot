@@ -20,8 +20,14 @@ class OfflineReplay(unittest.TestCase):
             output = Path(directory) / 'out'
             result = self.call('--replay', directory, '--output', str(output), '--fe-mode', 'full')
             self.assertEqual(result.returncode, 2)
-            self.assertIn('FE_REPLAY_READ_MISSING', result.stderr)
+            # A14: without the binary journal the legacy read files are not a fallback.
+            self.assertIn('FE_REPLAY_JOURNAL_MISSING', result.stderr)
             self.assertNotIn('RPC_URL_MISSING', result.stderr)
+            self.assertFalse(output.exists())
+            legacy = self.call('--replay', directory, '--legacy-reads', '--output', str(output), '--fe-mode', 'full')
+            self.assertEqual(legacy.returncode, 2)
+            self.assertIn('FE_REPLAY_READ_MISSING', legacy.stderr)
+            self.assertNotIn('RPC_URL_MISSING', legacy.stderr)
             self.assertFalse(output.exists())
 
     def test_replay_and_execute_are_mutually_exclusive_before_rpc(self):
@@ -43,5 +49,5 @@ class OfflineReplay(unittest.TestCase):
                                      '--output', str(Path(directory) / 'out'), '--fe-mode', 'full'],
                                     cwd=directory, env=env, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 2)
-            self.assertIn('FE_REPLAY_READ_MISSING', result.stderr)
+            self.assertIn('FE_REPLAY_JOURNAL_MISSING', result.stderr)
             self.assertNotIn('FREE_ONLY_PROVIDER_QUALIFICATION_REQUIRED', result.stderr)

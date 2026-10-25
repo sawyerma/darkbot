@@ -1278,7 +1278,11 @@ pub(crate) mod tests {
         .unwrap();
         let calls = saved.len();
         let class = fe_replay::first_class("ZERO_PREFUND_SAME_TX").unwrap();
-        let replayed = fe_replay::replay(&c, &dir, class).unwrap();
+        // A14: the pre-PERSIST-01 read files are a historical source, read only on request.
+        assert!(fe_replay::replay(&c, &dir, class, false)
+            .unwrap_err()
+            .starts_with("FE_REPLAY_JOURNAL_MISSING"));
+        let replayed = fe_replay::replay(&c, &dir, class, true).unwrap();
         assert_eq!(replayed.observation, original.observation);
         let replay = replayed.replay.as_ref().unwrap();
         assert_eq!(
@@ -1340,7 +1344,7 @@ pub(crate) mod tests {
             }
             w.sync().unwrap();
             assert_eq!(
-                fe_replay::replay(&c, &binary, class).unwrap_err(),
+                fe_replay::replay(&c, &binary, class, false).unwrap_err(),
                 "FE_REPLAY_INCOMPLETE"
             );
             if typed {
@@ -1355,7 +1359,7 @@ pub(crate) mod tests {
                 .unwrap();
             }
             w.seal(true).unwrap();
-            let from_journal = fe_replay::replay(&c, &binary, class).unwrap();
+            let from_journal = fe_replay::replay(&c, &binary, class, false).unwrap();
             assert_eq!(
                 from_journal.observation, original.observation,
                 "typed={typed}"
@@ -1366,7 +1370,7 @@ pub(crate) mod tests {
             // A second primary source is refused, never merged into the sealed archive.
             std::fs::write(binary.join("read_000001.json"), b"{}").unwrap();
             assert_eq!(
-                fe_replay::replay(&c, &binary, class).unwrap_err(),
+                fe_replay::replay(&c, &binary, class, false).unwrap_err(),
                 "FE_REPLAY_AMBIGUOUS_SOURCE"
             );
             drop(w);
@@ -1374,13 +1378,13 @@ pub(crate) mod tests {
         }
         c.limits.fe_calls = 1;
         assert_eq!(
-            fe_replay::replay(&c, &dir, class).unwrap_err(),
+            fe_replay::replay(&c, &dir, class, true).unwrap_err(),
             "FE_REPLAY_CALL_LIMIT"
         );
         c.limits.fe_calls = 100;
         std::fs::write(dir.join("read_999999.json"), b"{}").unwrap();
         assert_eq!(
-            fe_replay::replay(&c, &dir, class).unwrap_err(),
+            fe_replay::replay(&c, &dir, class, true).unwrap_err(),
             "FE_REPLAY_UNUSED_READS"
         );
         std::fs::remove_dir_all(dir).unwrap();

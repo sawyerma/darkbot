@@ -203,15 +203,19 @@ pub fn replay(
     config: &RuntimeConfig,
     directory: &Path,
     class: FundingClass,
+    legacy_reads: bool,
 ) -> Result<Fe01Report, String> {
-    replay_frozen(config, directory, class).map(|(report, _)| report)
+    replay_frozen(config, directory, class, legacy_reads).map(|(report, _)| report)
 }
 
-/// The replay report and the historical one-class freeze of the same saved scope (FE-01).
+/// The replay report and the historical one-class freeze of the same saved scope (FE-01). The
+/// saved observation is the binary `fe01.p0j`; a pre-PERSIST-01 observation (`read_NNNNNN.json`
+/// files) is a historical source, read only with `legacy_reads` (A14, `--legacy-reads`).
 pub fn replay_frozen(
     config: &RuntimeConfig,
     directory: &Path,
     class: FundingClass,
+    legacy_reads: bool,
 ) -> Result<
     (
         Fe01Report,
@@ -234,6 +238,11 @@ pub fn replay_frozen(
         limit,
         config.limits.fe_calls.min(config.limits.max_requests),
     )?;
+    if saved.is_none() && !legacy_reads {
+        return Err(format!(
+            "FE_REPLAY_JOURNAL_MISSING: no {FE01_JOURNAL} (a pre-PERSIST-01 read_NNNNNN.json observation is read only with --legacy-reads)"
+        ));
+    }
     let mut total = 0u64;
     let mut reads = Vec::new();
     let (mut report, freeze) = fe::collect_frozen(
