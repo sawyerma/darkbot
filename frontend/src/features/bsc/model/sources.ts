@@ -11,7 +11,9 @@ export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_IN
 export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
 export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string }
-export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number }
+/** The canonical chain follower (G0.4 denominator); absent when not configured. */
+export interface CanonicalView { state: string; head: string; headAgeMs: string; chain: string; launches: string; join: string }
+export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView }
 export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; runtime: RuntimeView }
 
 /** The runtime's own status record; stale once older than `staleMs` (never assumed running). */
@@ -29,7 +31,16 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number,
       counters: `full ${g("full")} · hash ${g("hash_only")} · rejected ${g("rejected")} · first ${g("first_full")} · launches ${g("launch_sightings")}/${g("launch_first")} · dropped ${g("dropped")}`,
     });
   }
-  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined }, health };
+  const c = (k: string) => f.get(`canonical[0].${k}`) ?? "?";
+  const canonical: CanonicalView | undefined = f.has("canonical[0].state") ? {
+    state: fresh ? c("state") : "STALE",
+    head: f.get("canonical[0].head") ?? "UNKNOWN",
+    headAgeMs: f.get("canonical[0].head_age_ms") ?? "UNKNOWN",
+    chain: `blocks ${c("blocks")} · reorgs ${c("reorgs")} · resyncs ${c("resyncs")} · rpc errors ${c("rpc_errors")} · rate limited ${c("rate_limited")}`,
+    launches: `Flap ${c("flap_launches")} · Four ${c("four_launches")} · orphaned ${c("orphaned_launches")} · external buys ${c("external_buys")}`,
+    join: `full before block ${c("seen_full_before")} · hash only before ${c("seen_hash_only_before")} · after ${c("seen_after")} · missed ${c("missed")}`,
+  } : undefined;
+  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical }, health };
 }
 
 /** The source group from the native record; nothing is inferred locally. */

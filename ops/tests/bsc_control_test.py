@@ -16,7 +16,10 @@ try:
     # The job's public read-only endpoint and clock, as bsc_sync copies them into every snapshot.
     (source/'bsc/config').mkdir(parents=True)
     shutil.copy2(h.ROOT/'bsc/config/readiness.public.env',source/'bsc/config/readiness.public.env')
-    shutil.copy2(h.ROOT/'bsc/config/ingress.public.env',source/'bsc/config/ingress.public.env')
+    # The runtime's real configuration; only the census interval is shortened for the test.
+    ingress=(h.ROOT/'bsc/config/ingress.public.env').read_text()
+    assert 'BSC_RUNTIME_CENSUS_MS=60000\n' in ingress
+    (source/'bsc/config/ingress.public.env').write_text(ingress.replace('BSC_RUNTIME_CENSUS_MS=60000\n','BSC_RUNTIME_CENSUS_MS=5000\n'))
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
     evidence=source/'bsc/native/evidence/g07/fixture';evidence.mkdir(parents=True)
     shutil.copy2(h.ROOT/'protocol/golden/bsc/readiness.dbrec',evidence/'readiness.dbrec')

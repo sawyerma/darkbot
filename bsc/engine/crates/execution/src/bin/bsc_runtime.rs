@@ -6,14 +6,19 @@
 //! bsc_runtime source init --state <dir>
 //! bsc_runtime source show --state <dir>
 //! bsc_runtime source request <SOURCE_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
+//! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! ```
+//!
+//! `census` replays every runtime journal of the run directory into the
+//! G0.4 census record (`bsc-runtime/g04-census.dbrec`) and prints its text
+//! view; the running runtime refreshes the same record itself.
 //!
 //! `request` applies one user request with its generation as the CAS and
 //! prints its receipt as one line; the same request again prints the same
 //! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
 //! authorization exists). Exit 0 when applied, 2 when refused or stale.
 
-use darkbot_bsc_execution::runtime::{RuntimeConfig, run as run_runtime};
+use darkbot_bsc_execution::runtime::{RuntimeConfig, run as run_runtime, write_census};
 use darkbot_bsc_execution::sources::{Mode, SourceId, Store};
 use std::process::ExitCode;
 
@@ -41,6 +46,14 @@ fn run(args: &[String]) -> Result<bool, String> {
                 std::path::Path::new(flag(rest, "--sources")?),
                 std::path::Path::new(flag(rest, "--rundir")?),
             )?;
+            Ok(true)
+        }
+        [cmd, rest @ ..] if cmd == "census" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let census = write_census(&config, std::path::Path::new(flag(rest, "--rundir")?))?;
+            print!("{}", census.summary());
             Ok(true)
         }
         [area, cmd, rest @ ..] if area == "source" && cmd == "init" => {
@@ -79,7 +92,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|show --state DIR | source request SOURCE_ID MODE --expect-generation N --request-id ID --state DIR | census --rundir DIR --config FILE".into()),
     }
 }
 

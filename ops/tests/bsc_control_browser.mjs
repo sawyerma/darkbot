@@ -108,6 +108,9 @@ try{
  await until(async()=> (await p.locator('.g-line',{hasText:'BSC runtime'}).first().innerText()).includes('RUNNING'),'BSC runtime RUNNING');
  await until(async()=> {const t=await srcLine('BSC_INGRESS_PUBLICNODE').innerText();const n=Number((t.match(/full (\d+)/)||[])[1]);return t.includes('HEALTHY')&&n>0;},'PUBLICNODE HEALTHY with real verified full txs');
  assert(!(await srcLine('BSC_INGRESS_GETH').innerText()).includes('HEALTHY'),'GETH not connected (OFF)');
+ // The canonical follower (free public RPC) follows real Mainnet blocks: Monitoring §6.
+ await until(async()=> {const t=await p.locator('.g-line',{hasText:'Canonical follower'}).first().innerText();return t.includes('FOLLOWING')&&/head \d+/.test(t)&&/blocks [1-9]/.test(t);},'canonical follower FOLLOWING real blocks');
+ assert((await p.locator('.g-line',{hasText:'Canonical launches (G0.4 denominator)'}).first().innerText()).includes('Flap'),'G0.4 denominator line');
  await requestSource('BSC_INGRESS_DRPC','LIVE','effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED');
  await until(async()=> {const t=await srcLine('BSC_INGRESS_DRPC').innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_NOT_AUTHORIZED');},'DRPC LIVE stays BLOCKED');
  await requestSource('BSC_INGRESS_48CLUB','SHADOW','effective=BLOCKED block_reason=SOURCE_ACCESS_UNQUALIFIED');
@@ -118,7 +121,12 @@ try{
  assert((await srcLine('BSC_INGRESS_GETH').innerText()).includes('OFF'),'stale request changed nothing');
  for(const bad of ['BSC_INGRESS_GETH:ARMED','BSC_INGRESS_X:SHADOW','BSC_INGRESS_GETH']){const r=await api.post(base+'/api/v1/command',{headers,data:Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:crypto.randomUUID(),action:'bsc.source.mode.set',resourceId:bad,expected:{version:{case:'configVersion',value:3n}},issuedAtUnixNs:BigInt(Date.now())*1_000_000n})))});assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await r.body())).status,proto.CommandStatus.REJECTED,bad);}
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
+ // The G0.4 census, replayed by the runtime from its journals: Analytics §2, no verdict.
+ await p.getByRole('tab',{name:'Analytics',exact:true}).click();
+ await until(async()=> (await p.locator('.g-line',{hasText:'criteria'}).filter({hasText:'CRITERIA_UNCONFIRMED'}).count())>0,'G0.4 census on Analytics, CRITERIA_UNCONFIRMED');
+ assert((await p.locator('.g-line',{hasText:'flap_launches'}).count())>0,'census denominator row');
  await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
+ await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
 
  // A bounded fixture child is used for explicit cancellation and crash tests only.
  const fixture=`#!/usr/bin/python3\nimport pathlib,signal,time,sys\nmode=pathlib.Path(${JSON.stringify(dir+'/mode')}).read_text().strip()\nif mode=='crash': sys.exit(19)\ndef stop(a,b):\n time.sleep(3);sys.exit(0)\nsignal.signal(signal.SIGTERM,stop)\nwhile True: time.sleep(.1)\n`;
@@ -175,5 +183,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

@@ -19,7 +19,7 @@ pub(super) type TlsStream = StreamOwned<ClientConnection, TcpStream>;
 
 /// A validated `wss://` endpoint.
 #[derive(Debug)]
-pub(super) struct Endpoint {
+pub(crate) struct Endpoint {
     host: String,
     port: u16,
     /// The normalized URL for the upgrade request (path `/` when absent).
@@ -29,7 +29,7 @@ pub(super) struct Endpoint {
 impl Endpoint {
     /// Accepts exactly `wss://host[:port][/path]` with a DNS name or IPv4
     /// host, no user information, query or fragment.
-    pub(super) fn parse(url: &str) -> Result<Self, UrlError> {
+    pub(crate) fn parse(url: &str) -> Result<Self, UrlError> {
         let rest = url.strip_prefix("wss://").ok_or(UrlError::NotWss)?;
         if rest.contains(['?', '#']) {
             return Err(UrlError::QueryOrFragment);
@@ -68,7 +68,7 @@ impl Endpoint {
         })
     }
 
-    pub(super) fn url(&self) -> &str {
+    pub(crate) fn url(&self) -> &str {
         &self.url
     }
 }
@@ -85,7 +85,7 @@ fn parse_port(port: &str) -> Result<u16, UrlError> {
 
 /// The client configuration: the ring provider explicitly (never a process
 /// default), the webpki roots, ALPN `http/1.1` for the upgrade.
-pub(super) fn tls_config() -> Result<Arc<ClientConfig>, rustls::Error> {
+pub(crate) fn tls_config() -> Result<Arc<ClientConfig>, rustls::Error> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let mut config = ClientConfig::builder_with_provider(provider)
@@ -105,7 +105,7 @@ pub(super) fn configure_socket(tcp: &TcpStream, limits: &WssLimits) -> io::Resul
 
 /// A read or write that only ran into the socket timeout: the caller checks
 /// its bounds and retries.
-pub(super) fn is_tick(e: &io::Error) -> bool {
+pub(crate) fn is_tick(e: &io::Error) -> bool {
     matches!(
         e.kind(),
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
@@ -113,7 +113,7 @@ pub(super) fn is_tick(e: &io::Error) -> bool {
 }
 
 /// A socket error, or a TLS error carried in one.
-pub(super) fn classify_io(e: &io::Error) -> DisconnectReason {
+pub(crate) fn classify_io(e: &io::Error) -> DisconnectReason {
     match e.get_ref() {
         Some(inner) if inner.is::<rustls::Error>() => DisconnectReason::Tls,
         _ => DisconnectReason::Io(e.kind()),
@@ -122,7 +122,7 @@ pub(super) fn classify_io(e: &io::Error) -> DisconnectReason {
 
 /// Resolves, connects (each address within `connect_timeout`) and completes
 /// the TLS handshake within the attempt's `handshake_timeout`.
-pub(super) fn connect_tls(
+pub(crate) fn connect_tls(
     endpoint: &Endpoint,
     tls: &Arc<ClientConfig>,
     limits: &WssLimits,

@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use darkbot_bsc_trading::signer::SignerError;
 
-mod endpoint;
+pub(crate) mod endpoint;
 mod jsonrpc;
 mod session;
 mod verify;

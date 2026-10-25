@@ -974,6 +974,14 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             Err(_) => warnings.push("RUNTIME_STATUS_INVALID".into()),
         }
     }
+    // The G0.4 census replayed from the runtime journals (no verdict).
+    let census = rundir.join("bsc-runtime/g04-census.dbrec");
+    if let Some(bytes) = read(&census) {
+        match record::decode(&schema::bsc_census::census::SCHEMA, &bytes) {
+            Ok(r) => monitoring.records.push(native_record(rundir, &census, &r)),
+            Err(_) => warnings.push("G04_CENSUS_INVALID".into()),
+        }
+    }
     let gates = vec![
         gate(
             "G0.6a",

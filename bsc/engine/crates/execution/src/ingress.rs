@@ -76,6 +76,15 @@ pub struct SourceStats {
     pub last_event_ns: Option<u64>,
 }
 
+/// What the sources delivered for one hash while it is remembered: the
+/// first sighting of any kind and the first verified full one, each with
+/// its source and monotonic time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sighting {
+    pub first_any: (SourceId, u64),
+    pub first_full: Option<(SourceId, u64)>,
+}
+
 #[derive(Clone, Copy)]
 struct Seen {
     first_any: (usize, u64),
@@ -122,6 +131,16 @@ impl IngressCore {
     /// Distinct Flap launches seen as verified full transactions.
     pub fn launches(&self) -> u64 {
         self.launches
+    }
+
+    /// The sighting of `hash`, if it is still remembered (bounded window).
+    pub fn sighting(&self, hash: &[u8; 32]) -> Option<Sighting> {
+        let seen = self.seen.get(hash)?;
+        let at = |(i, ns): (usize, u64)| (SourceId::ALL[i], ns);
+        Some(Sighting {
+            first_any: at(seen.first_any),
+            first_full: seen.first_full.map(at),
+        })
     }
 
     fn remember(&mut self, hash: [u8; 32], seen: Seen) {
@@ -390,6 +409,15 @@ mod tests {
             (b.launch_sightings, b.launch_first, b.duplicates),
             (1, 0, 1)
         );
+        // The join reads both firsts with their source and time.
+        assert_eq!(
+            core.sighting(&h),
+            Some(Sighting {
+                first_any: (SourceId::Drpc, 100),
+                first_full: Some((SourceId::PublicNode, 150)),
+            })
+        );
+        assert_eq!(core.sighting(&[1; 32]), None);
     }
 
     #[test]

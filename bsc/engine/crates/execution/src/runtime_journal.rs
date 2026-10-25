@@ -12,9 +12,23 @@
 //! - `Runtime` `b'S'`: a source transition, `b'S' | source u8 | event u8`
 //!   (see [`SourceEvent`]).
 //!
+//! - `Canonical` `b'C'`: a canonical launch joined with the sightings,
+//!   `b'C' | venue u8 | block u64 | block_hash [32] | tx_index u64 | tx_hash
+//!   [32] | token? u8 [20] | buys? u8 | external_buys u32 | class u8 | source u8 |
+//!   delta_ns u64` (integers LE; venue 1 Flap, 2 Four; class per
+//!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF and delta 0 for a miss).
+//! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
+//!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
+//! - `Reorg` `b'R'`: a reorg, `b'R' | depth u32 | new head u64 | hash [32]`.
+//! - `Reorg` `b'G'`: a resync (gap or reorg deeper than the window),
+//!   `b'G' | from u64 | to u64`.
+//! - `Canonical` `b'H'` / `b'E'`: the first / last canonical block of this
+//!   process, `b'H'|b'E' | number u64 | hash [32]`: the covered window.
+//!
 //! Other pending transactions are only counted (runtime status), not
 //! journaled: the journal stays bounded over long read-only runs.
 
+use crate::canonical_join::{Joined, LaunchRef, Venue};
 use crate::sources::SourceId;
 use darkbot_bsc_journal::{JournalError, JournalManifest, JournalWriter, RecordKind, Recorder};
 use std::fs;
@@ -58,6 +72,72 @@ pub fn later_sighting_payload(source: SourceId, hash: &[u8; 32], lag_ns: u64) ->
 
 pub fn source_event_payload(source: SourceId, event: SourceEvent) -> Vec<u8> {
     vec![b'S', source_byte(source), event as u8]
+}
+
+fn venue_byte(venue: Venue) -> u8 {
+    match venue {
+        Venue::Flap => 1,
+        Venue::Four => 2,
+    }
+}
+
+pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
+    let l = &j.launch;
+    let mut out = Vec::with_capacity(152);
+    out.push(b'C');
+    out.push(venue_byte(l.venue));
+    out.extend_from_slice(&l.block_number.to_le_bytes());
+    out.extend_from_slice(&l.block_hash);
+    out.extend_from_slice(&l.tx_index.to_le_bytes());
+    out.extend_from_slice(&l.tx_hash);
+    out.push(u8::from(l.token.is_some()));
+    out.extend_from_slice(&l.token.unwrap_or([0; 20]));
+    out.push(u8::from(l.external_buys.is_some()));
+    out.extend_from_slice(&l.external_buys.unwrap_or(0).to_le_bytes());
+    out.push(j.visibility.code());
+    let (source, delta) = match j.visibility.source_and_delta() {
+        Some((s, d)) => (source_byte(s), d),
+        None => (0xFF, 0),
+    };
+    out.push(source);
+    out.extend_from_slice(&delta.to_le_bytes());
+    out
+}
+
+pub fn orphaned_launch_payload(l: &LaunchRef) -> Vec<u8> {
+    let mut out = Vec::with_capacity(74);
+    out.push(b'O');
+    out.push(venue_byte(l.venue));
+    out.extend_from_slice(&l.block_number.to_le_bytes());
+    out.extend_from_slice(&l.block_hash);
+    out.extend_from_slice(&l.tx_hash);
+    out
+}
+
+pub fn reorg_payload(depth: u32, head: u64, hash: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(45);
+    out.push(b'R');
+    out.extend_from_slice(&depth.to_le_bytes());
+    out.extend_from_slice(&head.to_le_bytes());
+    out.extend_from_slice(hash);
+    out
+}
+
+pub fn resync_payload(from: u64, to: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(17);
+    out.push(b'G');
+    out.extend_from_slice(&from.to_le_bytes());
+    out.extend_from_slice(&to.to_le_bytes());
+    out
+}
+
+/// `first` true: the first canonical block of this process (`H`), else the last (`E`).
+pub fn window_payload(first: bool, number: u64, hash: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(41);
+    out.push(if first { b'H' } else { b'E' });
+    out.extend_from_slice(&number.to_le_bytes());
+    out.extend_from_slice(hash);
+    out
 }
 
 pub struct RuntimeJournal {
@@ -218,6 +298,57 @@ mod tests {
         // create-new: the same start time never overwrites a journal.
         assert!(RuntimeJournal::open(&dir, 7, 64, 4096).is_err());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_payloads_have_their_fixed_layout() {
+        use crate::canonical_join::{Joined, LaunchRef, Venue, Visibility};
+        let launch = LaunchRef {
+            venue: Venue::Flap,
+            block_number: 7,
+            block_hash: [1; 32],
+            tx_index: 3,
+            tx_hash: [2; 32],
+            token: Some([4; 20]),
+            external_buys: Some(5),
+            block_seen_ns: 0,
+        };
+        let joined = Joined {
+            launch,
+            visibility: Visibility::FullBefore {
+                source: SourceId::PublicNode,
+                lead_ns: 9,
+            },
+        };
+        let c = canonical_launch_payload(&joined);
+        assert_eq!(
+            c.len(),
+            1 + 1 + 8 + 32 + 8 + 32 + 1 + 20 + 1 + 4 + 1 + 1 + 8
+        );
+        assert_eq!(&c[..2], &[b'C', 1]);
+        assert_eq!(&c[2..10], &7u64.to_le_bytes());
+        assert_eq!(&c[42..50], &3u64.to_le_bytes());
+        assert_eq!(
+            &c[82..108],
+            &[&[1u8][..], &[4u8; 20][..], &[1, 5, 0, 0, 0][..]].concat()[..]
+        );
+        assert_eq!(
+            &c[108..],
+            &[&[1u8, 1][..], &9u64.to_le_bytes()[..]].concat()[..]
+        );
+        let missed = Joined {
+            launch,
+            visibility: Visibility::Missed,
+        };
+        let m = canonical_launch_payload(&missed);
+        assert_eq!(
+            &m[m.len() - 10..],
+            &[&[4u8, 0xFF][..], &[0u8; 8][..]].concat()[..]
+        );
+        assert_eq!(orphaned_launch_payload(&launch).len(), 74);
+        assert_eq!(reorg_payload(2, 9, &[3; 32])[..5], [b'R', 2, 0, 0, 0]);
+        assert_eq!(resync_payload(1, 2).len(), 17);
+        assert_eq!(window_payload(false, 1, &[0; 32])[0], b'E');
     }
 
     #[test]

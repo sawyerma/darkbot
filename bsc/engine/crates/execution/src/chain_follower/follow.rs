@@ -1,0 +1,393 @@
+//! The follower: the typed RPC calls, the kept canonical window, reorg
+//! resolution and the step loop with its backoff.
+
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::sync::atomic::AtomicBool;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use super::http::Client;
+use super::jsonrpc::{self, BlockHead, Header, Receipt};
+use super::launches;
+use super::{Call, CanonicalEvent, FollowerFault, FollowerLimits, RequestError, stopped};
+use crate::wss::DisconnectReason;
+
+/// The typed JSON-RPC calls over one HTTP client.
+pub(super) struct Rpc<S, C> {
+    http: Client<S, C>,
+    next_id: u64,
+}
+
+impl<S, C> Rpc<S, C>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    pub(super) fn new(http: Client<S, C>) -> Self {
+        Self { http, next_id: 1 }
+    }
+
+    fn post(&mut self, call: Call, stop: &AtomicBool) -> Result<(Vec<u8>, u64), FollowerFault> {
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        let body = jsonrpc::request(id, call);
+        self.http
+            .post(body.as_bytes(), stop)
+            .map(|answer| (answer, id))
+            .map_err(|error| FollowerFault::Request { call, error })
+    }
+
+    fn block_number(&mut self, stop: &AtomicBool) -> Result<u64, FollowerFault> {
+        let call = Call::BlockNumber;
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_block_number(&answer, id)
+            .map_err(|error| FollowerFault::Request { call, error })
+    }
+
+    fn header(&mut self, number: u64, stop: &AtomicBool) -> Result<BlockHead, FollowerFault> {
+        let call = Call::Header(number);
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_header(&answer, id, number)
+            .map_err(|error| FollowerFault::Request { call, error })?
+            .ok_or(FollowerFault::Unavailable(call))
+    }
+
+    fn receipts(&mut self, number: u64, stop: &AtomicBool) -> Result<Vec<Receipt>, FollowerFault> {
+        let call = Call::Receipts(number);
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_receipts(&answer, id)
+            .map_err(|error| FollowerFault::Request { call, error })?
+            .ok_or(FollowerFault::Unavailable(call))
+    }
+}
+
+/// Runs steps until `stop`: after a completed step wait `poll`, after a
+/// fault report it and wait the backoff (doubling from `backoff_initial`
+/// to `backoff_max`; `backoff_max` at once after a rate-limit signal).
+pub(super) fn run<S, C>(
+    rpc: &mut Rpc<S, C>,
+    limits: &FollowerLimits,
+    stop: &AtomicBool,
+    sink: &mut dyn FnMut(CanonicalEvent),
+) where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    let mut follower = Follower::new(limits);
+    let mut next_wait = limits.backoff_initial;
+    while !stopped(stop) {
+        let wait = match follower.step(rpc, stop, sink) {
+            Ok(()) => {
+                next_wait = limits.backoff_initial;
+                limits.poll
+            }
+            Err(FollowerFault::Request {
+                error: RequestError::Transport(DisconnectReason::Stopped),
+                ..
+            }) => return,
+            Err(fault) => {
+                let rate_limited = matches!(
+                    fault,
+                    FollowerFault::Request {
+                        error: RequestError::RateLimited(_),
+                        ..
+                    }
+                );
+                let wait = if rate_limited {
+                    limits.backoff_max
+                } else {
+                    next_wait
+                };
+                next_wait = wait.saturating_mul(2).min(limits.backoff_max);
+                sink(CanonicalEvent::Fault(fault));
+                wait
+            }
+        };
+        if !wait_unless_stopped(wait, limits.read_tick, stop) {
+            return;
+        }
+    }
+}
+
+/// Sleeps `wait` in slices of at most `tick`; `false` when `stop` was set.
+fn wait_unless_stopped(wait: Duration, tick: Duration, stop: &AtomicBool) -> bool {
+    let start = Instant::now();
+    loop {
+        if stopped(stop) {
+            return false;
+        }
+        let remaining = wait.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return true;
+        }
+        thread::sleep(remaining.min(tick));
+    }
+}
+
+/// The canonical window and the follower's position.
+pub(super) struct Follower {
+    reorg_depth: u64,
+    max_catch_up: u64,
+    /// The last followed blocks, contiguous and ascending: at most
+    /// `reorg_depth + 1` (the deepest provable fork point included).
+    kept: VecDeque<Header>,
+    /// The lowest height not yet followed; `None` before the first block.
+    next: Option<u64>,
+    /// When a header (number, hash) was first held, for blocks not yet
+    /// followed; at most `reorg_depth + 2` entries.
+    seen: VecDeque<(u64, [u8; 32], Instant)>,
+}
+
+impl Follower {
+    pub(super) fn new(limits: &FollowerLimits) -> Self {
+        Self {
+            reorg_depth: limits.reorg_depth,
+            max_catch_up: limits.max_catch_up,
+            kept: VecDeque::new(),
+            next: None,
+            seen: VecDeque::new(),
+        }
+    }
+
+    /// One head report and every block up to it.
+    fn step<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        stop: &AtomicBool,
+        sink: &mut dyn FnMut(CanonicalEvent),
+    ) -> Result<(), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        let head = rpc.block_number(stop)?;
+        let Some(last) = self.kept.back().map(|h| h.number) else {
+            return self.restart(rpc, head, stop, sink);
+        };
+        if head <= last {
+            return Ok(());
+        }
+        if head - last > self.max_catch_up {
+            self.kept.clear();
+            return self.restart(rpc, head, stop, sink);
+        }
+        for number in last + 1..=head {
+            if stopped(stop) {
+                return Ok(());
+            }
+            self.advance(rpc, number, stop, sink)?;
+        }
+        Ok(())
+    }
+
+    /// Follows from `head` with no kept window: the first block, or a
+    /// resync. Heights skipped since the last followed one are a gap.
+    fn restart<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        head: u64,
+        stop: &AtomicBool,
+        sink: &mut dyn FnMut(CanonicalEvent),
+    ) -> Result<(), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        if let Some(next) = self.next {
+            if head < next {
+                // The provider reports less than was followed: wait.
+                return Ok(());
+            }
+            if head > next {
+                sink(CanonicalEvent::Gap {
+                    from: next,
+                    to: head - 1,
+                });
+                self.next = Some(head);
+            }
+        }
+        let (block, observed) = self.fetch_header(rpc, head, stop)?;
+        self.accept(rpc, block, observed, stop, sink)
+    }
+
+    /// Follows block `number`, the kept head's successor.
+    fn advance<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        number: u64,
+        stop: &AtomicBool,
+        sink: &mut dyn FnMut(CanonicalEvent),
+    ) -> Result<(), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        let (block, observed) = self.fetch_header(rpc, number, stop)?;
+        let extends = self
+            .kept
+            .back()
+            .is_none_or(|head| head.hash == block.header.parent_hash);
+        if extends {
+            self.accept(rpc, block, observed, stop, sink)
+        } else {
+            self.reorg(rpc, block, observed, stop, sink)
+        }
+    }
+
+    /// `tip` does not extend the kept head: walk its parent links down to
+    /// a kept block (the fork point), report the orphaned blocks and follow
+    /// the new chain. Without a kept ancestor, report every kept block as
+    /// orphaned and follow from `tip`.
+    fn reorg<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        tip: BlockHead,
+        tip_observed: Instant,
+        stop: &AtomicBool,
+        sink: &mut dyn FnMut(CanonicalEvent),
+    ) -> Result<(), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        let new_head = (tip.header.number, tip.header.hash);
+        // The new chain from the tip downwards. Bounded: each round goes
+        // one height down and ends below the kept window.
+        let mut chain = vec![(tip, tip_observed)];
+        let fork = loop {
+            let Some(child) = chain.last().map(|(block, _)| block.header) else {
+                break None;
+            };
+            let Some(kept) = child.number.checked_sub(1).and_then(|h| self.kept_at(h)) else {
+                break None;
+            };
+            if kept.hash == child.parent_hash {
+                break Some(kept.number);
+            }
+            let (parent, observed) = self.fetch_header(rpc, kept.number, stop)?;
+            if parent.header.hash != child.parent_hash {
+                return Err(FollowerFault::ChainMoved(kept.number));
+            }
+            chain.push((parent, observed));
+        };
+        match fork {
+            Some(fork) => {
+                let mut orphaned = Vec::new();
+                while let Some(head) = self.kept.back().filter(|h| h.number > fork) {
+                    orphaned.push((head.number, head.hash));
+                    self.kept.pop_back();
+                }
+                orphaned.reverse();
+                sink(CanonicalEvent::Reorg { orphaned, new_head });
+            }
+            None => {
+                let orphaned = self.kept.drain(..).map(|h| (h.number, h.hash)).collect();
+                sink(CanonicalEvent::ReorgTooDeep { orphaned, new_head });
+                chain.truncate(1);
+            }
+        }
+        for (block, observed) in chain.into_iter().rev() {
+            self.accept(rpc, block, observed, stop, sink)?;
+        }
+        Ok(())
+    }
+
+    /// Fetches the receipts of `block`, verifies them against it, reports
+    /// the block and its launches and keeps its header.
+    fn accept<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        block: BlockHead,
+        observed: Instant,
+        stop: &AtomicBool,
+        sink: &mut dyn FnMut(CanonicalEvent),
+    ) -> Result<(), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        let header = block.header;
+        let receipts = rpc.receipts(header.number, stop)?;
+        if !receipts_match(&block, &receipts) {
+            return Err(FollowerFault::ReceiptsMismatch(header.number));
+        }
+        let launches = launches::detect(&block, &receipts);
+        sink(CanonicalEvent::Block {
+            number: header.number,
+            hash: header.hash,
+            parent_hash: header.parent_hash,
+            timestamp_s: header.timestamp_s,
+            observed,
+        });
+        for launch in launches {
+            sink(CanonicalEvent::Launch(launch));
+        }
+        self.kept.push_back(header);
+        while self.kept.len() as u64 > self.reorg_depth.saturating_add(1) {
+            self.kept.pop_front();
+        }
+        self.next = Some(header.number.saturating_add(1));
+        self.seen.retain(|(number, _, _)| *number > header.number);
+        Ok(())
+    }
+
+    /// The header of block `number` and when this follower first held it.
+    fn fetch_header<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        number: u64,
+        stop: &AtomicBool,
+    ) -> Result<(BlockHead, Instant), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        let block = rpc.header(number, stop)?;
+        let now = Instant::now();
+        let id = (block.header.number, block.header.hash);
+        let observed = match self.seen.iter().find(|(n, h, _)| (*n, *h) == id) {
+            Some((_, _, first)) => *first,
+            None => {
+                self.seen.push_back((id.0, id.1, now));
+                while self.seen.len() as u64 > self.reorg_depth.saturating_add(2) {
+                    self.seen.pop_front();
+                }
+                now
+            }
+        };
+        Ok((block, observed))
+    }
+
+    fn kept_at(&self, number: u64) -> Option<Header> {
+        let front = self.kept.front()?.number;
+        let index = usize::try_from(number.checked_sub(front)?).ok()?;
+        self.kept.get(index).copied()
+    }
+}
+
+/// The receipts are exactly the block's transactions: same count, in
+/// order, each bound to the block's hash and number, with the block's log
+/// indices contiguous from 0.
+pub(super) fn receipts_match(block: &BlockHead, receipts: &[Receipt]) -> bool {
+    if receipts.len() != block.transactions.len() {
+        return false;
+    }
+    let mut next_log = 0u64;
+    for (index, (receipt, tx)) in receipts.iter().zip(&block.transactions).enumerate() {
+        let bound = receipt.tx_index == index as u64
+            && receipt.tx_hash == *tx
+            && receipt.block_hash == block.header.hash
+            && receipt.block_number == block.header.number;
+        if !bound {
+            return false;
+        }
+        for log in &receipt.logs {
+            if log.log_index != next_log {
+                return false;
+            }
+            next_log += 1;
+        }
+    }
+    true
+}

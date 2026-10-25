@@ -61,12 +61,21 @@ pub mod wss;
 /// The one owner of first sightings across the sources (C1, plan §5a.3).
 #[cfg(feature = "runtime")]
 pub mod ingress;
+/// Canonical launches joined with the pending sightings (G0.4 denominator).
+#[cfg(feature = "runtime")]
+pub mod canonical_join;
+/// The G0.4 market census replayed from the runtime journals.
+#[cfg(feature = "runtime")]
+pub mod g04_census;
 /// The runtime's bounded binary journal.
 #[cfg(feature = "runtime")]
 pub mod runtime_journal;
 /// The read-only runtime process: sources, ingress, journal, status.
 #[cfg(feature = "runtime")]
 pub mod runtime;
+/// The native canonical chain follower: G0.4 launches from canonical receipts.
+#[cfg(feature = "runtime")]
+pub mod chain_follower;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKEND_UNAVAILABLE, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, sourceControlView } from "./sources";
+import { BACKEND_UNAVAILABLE, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, runtimeView, sourceControlView } from "./sources";
 import type { NativeRecordView } from "./types";
 
 const record = (generation: string, rows: [string, string, string, string?][]): NativeRecordView => ({
@@ -46,5 +46,17 @@ describe("BSC source control", () => {
     const stale = sourceControlView([modes, status(10_000)], 20_000, 5000);
     expect(stale.runtime.state).toBe("STALE");
     expect(stale.rows.find(r => r.id === "BSC_INGRESS_PUBLICNODE")?.health).toBe("STALE");
+  });
+  it("shows the canonical follower only when the runtime reports it, stale as STALE", () => {
+    const status = (observed: number, canonical: boolean): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "unix_milliseconds" },
+      ...(canonical ? [{ name: "canonical[0].state", value: "FOLLOWING", kind: 7, unit: "" }, { name: "canonical[0].head", value: "100", kind: 2, unit: "" },
+        { name: "canonical[0].flap_launches", value: "3", kind: 2, unit: "" }, { name: "canonical[0].seen_full_before", value: "2", kind: 2, unit: "" }] : [])] });
+    expect(runtimeView([status(10_000, false)], 11_000, 5000).view.canonical).toBeUndefined();
+    const c = runtimeView([status(10_000, true)], 11_000, 5000).view.canonical;
+    expect(c).toMatchObject({ state: "FOLLOWING", head: "100", headAgeMs: "UNKNOWN" });
+    expect(c?.launches).toContain("Flap 3");
+    expect(c?.join).toContain("full before block 2");
+    expect(runtimeView([status(10_000, true)], 20_000, 5000).view.canonical?.state).toBe("STALE");
   });
 });

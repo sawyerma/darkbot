@@ -150,6 +150,64 @@ pub mod runtime_status {
         };
     }
 
+    /// The canonical chain follower (the G0.4 denominator): what really
+    /// landed, joined with the pending sightings by local monotonic time.
+    pub mod canonical {
+        use super::*;
+
+        /// `CONNECTING`, `FOLLOWING`, `RATE_LIMITED`, `FAILING` or `STOPPED`.
+        pub const STATE: u16 = 1;
+        /// The last canonical block; absent before the first.
+        pub const HEAD: u16 = 2;
+        /// Milliseconds since the follower first had that block's header.
+        pub const HEAD_AGE_MS: u16 = 3;
+        pub const BLOCKS: u16 = 4;
+        pub const REORGS: u16 = 5;
+        /// Reorgs deeper than the kept window, and head gaps: resynced, never silent.
+        pub const RESYNCS: u16 = 6;
+        pub const RPC_ERRORS: u16 = 7;
+        pub const RATE_LIMITED: u16 = 8;
+        /// Canonical Flap launches, orphaned ones removed.
+        pub const FLAP_LAUNCHES: u16 = 9;
+        pub const FOUR_LAUNCHES: u16 = 10;
+        /// Launches of blocks a reorg orphaned (taken out of the counts above).
+        pub const ORPHANED_LAUNCHES: u16 = 11;
+        /// Flap launches with a verified full pending sighting before the block.
+        pub const SEEN_FULL_BEFORE: u16 = 12;
+        /// Flap launches only seen as a hash (not actionable) before the block.
+        pub const SEEN_HASH_ONLY_BEFORE: u16 = 13;
+        /// Flap launches first seen pending only after the block.
+        pub const SEEN_AFTER: u16 = 14;
+        /// Flap launches no source delivered.
+        pub const MISSED: u16 = 15;
+        /// External buys after the launch in the launch block (all Flap launches).
+        pub const EXTERNAL_BUYS: u16 = 16;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.runtime-status.canonical",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(STATE, "state", Text),
+                Field::opt(HEAD, "head", U64),
+                Field::opt(HEAD_AGE_MS, "head_age_ms", U64),
+                Field::req(BLOCKS, "blocks", U64),
+                Field::req(REORGS, "reorgs", U64),
+                Field::req(RESYNCS, "resyncs", U64),
+                Field::req(RPC_ERRORS, "rpc_errors", U64),
+                Field::req(RATE_LIMITED, "rate_limited", U64),
+                Field::req(FLAP_LAUNCHES, "flap_launches", U64),
+                Field::req(FOUR_LAUNCHES, "four_launches", U64),
+                Field::req(ORPHANED_LAUNCHES, "orphaned_launches", U64),
+                Field::req(SEEN_FULL_BEFORE, "seen_full_before", U64),
+                Field::req(SEEN_HASH_ONLY_BEFORE, "seen_hash_only_before", U64),
+                Field::req(SEEN_AFTER, "seen_after", U64),
+                Field::req(MISSED, "missed", U64),
+                Field::req(EXTERNAL_BUYS, "external_buys", U64),
+            ],
+        };
+    }
+
     /// The source-modes generation the runtime applies.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -165,6 +223,8 @@ pub mod runtime_status {
     pub const JOURNAL_LOST: u16 = 9;
     /// `READ_ONLY`: observation only, no build, signature or send exists.
     pub const MODE: u16 = 10;
+    /// Absent when no canonical endpoint is configured (then no denominator).
+    pub const CANONICAL: u16 = 11;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
@@ -185,6 +245,12 @@ pub mod runtime_status {
             Field::req(JOURNAL_RECORDS, "journal_records", U64),
             Field::req(JOURNAL_LOST, "journal_lost", U64),
             Field::req(MODE, "mode", Text),
+            Field::nested(
+                CANONICAL,
+                "canonical",
+                Presence::Optional,
+                &canonical::SCHEMA,
+            ),
         ],
     };
 }

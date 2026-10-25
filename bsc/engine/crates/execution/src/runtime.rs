@@ -4,15 +4,28 @@
 //! sightings and source transitions, and rewrites its status record. No
 //! transaction is built, signed or sent anywhere in this program.
 //!
+//! With a canonical endpoint it also follows the canonical chain
+//! (`chain_follower`) and joins every canonical launch with the sightings
+//! (`canonical_join`): the G0.4 denominator. The census
+//! (`bsc-runtime/g04-census.dbrec`) is replayed from the journals every
+//! `census_ms` and at stop.
+//!
 //! Lifecycle: `run` until the stop file exists (written by `darkbotctl`),
-//! then stops every adapter, commits the journal and writes a final status.
+//! then stops every adapter and the follower, joins the launches still
+//! waiting, commits the journal and writes a final status and census.
 //! A source without a configured endpoint, or without an adapter in this
 //! build (the local geth Fast Lane needs a synced node), is `UNQUALIFIED`.
 
+use crate::canonical_join::{LaunchRef, Ledger};
+use crate::chain_follower::{
+    CanonicalEvent, FollowerFault, FollowerLimits, RequestError, run_follower,
+};
+use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::runtime_journal::{
-    RuntimeJournal, SourceEvent, first_sighting_payload, later_sighting_payload,
-    source_event_payload,
+    RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
+    later_sighting_payload, orphaned_launch_payload, reorg_payload, resync_payload,
+    source_event_payload, window_payload,
 };
 use crate::sources::{Effective, Generation, SourceId, Store};
 use crate::wss::{DisconnectReason, WssEvent, WssLimits, WssSource, run_source};
@@ -42,6 +55,21 @@ pub struct RuntimeConfig {
     pub status_ms: u64,
     /// Every bound of the WSS adapters, validated by `WssLimits::validate`.
     pub wss: WssLimits,
+    /// The canonical chain follower, when `BSC_CANONICAL_RPC` is set.
+    pub canonical: Option<CanonicalConfig>,
+    /// How often the census is replayed from the journals.
+    pub census_ms: u64,
+}
+
+/// The canonical follower's endpoint and bounds (`BSC_CANONICAL_*`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CanonicalConfig {
+    /// `https://` without credentials.
+    pub endpoint: String,
+    pub limits: FollowerLimits,
+    /// A launch is joined this long after its block was seen, so sightings
+    /// still queued behind the block count.
+    pub join_delay_ms: u64,
 }
 
 fn bounded(name: &str, value: &str, min: u64, max: u64) -> Result<u64, String> {
@@ -83,6 +111,7 @@ impl RuntimeConfig {
                 endpoints.push((source, url.to_string()));
             }
         }
+        let canonical_rpc = values.remove("BSC_CANONICAL_RPC");
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -90,6 +119,43 @@ impl RuntimeConfig {
             bounded(name, v, min, max)
         };
         let ms = Duration::from_millis;
+        let canonical = match canonical_rpc {
+            None => None,
+            Some(url) => {
+                let rest = url
+                    .strip_prefix("https://")
+                    .ok_or("BSC_CANONICAL_RPC must be https://")?;
+                if rest.is_empty() || rest.contains('@') || rest.contains(char::is_whitespace) {
+                    return Err("BSC_CANONICAL_RPC is not a plain https:// endpoint".into());
+                }
+                let limits = FollowerLimits {
+                    poll: ms(take("BSC_CANONICAL_POLL_MS", 50, 60_000)?),
+                    reorg_depth: take("BSC_CANONICAL_REORG_DEPTH", 1, 10_000)?,
+                    max_catch_up: take("BSC_CANONICAL_MAX_CATCH_UP", 1, 100_000)?,
+                    connect_timeout: ms(take("BSC_CANONICAL_CONNECT_TIMEOUT_MS", 100, 60_000)?),
+                    handshake_timeout: ms(take(
+                        "BSC_CANONICAL_HANDSHAKE_TIMEOUT_MS",
+                        100,
+                        120_000,
+                    )?),
+                    read_tick: ms(take("BSC_CANONICAL_READ_TICK_MS", 10, 5_000)?),
+                    write_timeout: ms(take("BSC_CANONICAL_WRITE_TIMEOUT_MS", 100, 60_000)?),
+                    request_timeout: ms(take("BSC_CANONICAL_REQUEST_TIMEOUT_MS", 100, 300_000)?),
+                    max_response_bytes: take("BSC_CANONICAL_MAX_RESPONSE_BYTES", 65_536, 1 << 30)?
+                        as usize,
+                    backoff_initial: ms(take("BSC_CANONICAL_BACKOFF_INITIAL_MS", 100, 60_000)?),
+                    backoff_max: ms(take("BSC_CANONICAL_BACKOFF_MAX_MS", 1_000, 3_600_000)?),
+                };
+                limits
+                    .validate()
+                    .map_err(|e| format!("canonical bounds: {e:?}"))?;
+                Some(CanonicalConfig {
+                    endpoint: url.to_string(),
+                    limits,
+                    join_delay_ms: take("BSC_CANONICAL_JOIN_DELAY_MS", 0, 600_000)?,
+                })
+            }
+        };
         let wss = WssLimits {
             connect_timeout: ms(take("BSC_RUNTIME_CONNECT_TIMEOUT_MS", 100, 60_000)?),
             handshake_timeout: ms(take("BSC_RUNTIME_HANDSHAKE_TIMEOUT_MS", 100, 120_000)?),
@@ -110,6 +176,8 @@ impl RuntimeConfig {
             journal_queue: take("BSC_RUNTIME_JOURNAL_QUEUE", 16, 1 << 20)? as usize,
             status_ms: take("BSC_RUNTIME_STATUS_MS", 100, 60_000)?,
             wss,
+            canonical,
+            census_ms: take("BSC_RUNTIME_CENSUS_MS", 1_000, 86_400_000)?,
         };
         config
             .wss
@@ -149,7 +217,192 @@ struct Clock(Instant);
 
 impl Clock {
     fn now_ns(self) -> u64 {
-        u64::try_from(self.0.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        self.ns_at(Instant::now())
+    }
+
+    /// `at` on this clock (an instant before its start reads 0).
+    fn ns_at(self, at: Instant) -> u64 {
+        u64::try_from(at.saturating_duration_since(self.0).as_nanos()).unwrap_or(u64::MAX)
+    }
+}
+
+/// The follower thread and its stop flag.
+struct Follower {
+    stop: Arc<AtomicBool>,
+    handle: JoinHandle<()>,
+}
+
+/// Every canonical event crosses to the runtime with its time on the
+/// runtime clock (a block: when the follower first had its header). The
+/// send blocks: the follower falls behind rather than losing an event.
+fn spawn_follower(
+    config: CanonicalConfig,
+    tx: SyncSender<(u64, CanonicalEvent)>,
+    clock: Clock,
+) -> Result<Follower, String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    let handle = thread::Builder::new()
+        .name("bsc-canonical".into())
+        .spawn(move || {
+            let mut sink = |event: CanonicalEvent| {
+                let at = match &event {
+                    CanonicalEvent::Block { observed, .. } => clock.ns_at(*observed),
+                    _ => clock.now_ns(),
+                };
+                // Err only once the runtime dropped the receiver at stop.
+                let _ = tx.send((at, event));
+            };
+            if let Err(e) = run_follower(&config.endpoint, &config.limits, &flag, &mut sink) {
+                eprintln!("canonical follower refused its configuration: {e:?}");
+            }
+        })
+        .map_err(|e| format!("spawn canonical follower: {e}"))?;
+    Ok(Follower { stop, handle })
+}
+
+/// The runtime's view of the canonical chain and the launch join.
+struct Canonical {
+    state: &'static str,
+    head: Option<(u64, [u8; 32])>,
+    head_seen_ns: Option<u64>,
+    first_journaled: bool,
+    blocks: u64,
+    reorgs: u64,
+    resyncs: u64,
+    rpc_errors: u64,
+    rate_limited: u64,
+    ledger: Ledger,
+}
+
+impl Canonical {
+    fn new(config: &CanonicalConfig) -> Self {
+        Canonical {
+            state: "CONNECTING",
+            head: None,
+            head_seen_ns: None,
+            first_journaled: false,
+            blocks: 0,
+            reorgs: 0,
+            resyncs: 0,
+            rpc_errors: 0,
+            rate_limited: 0,
+            ledger: Ledger::new(
+                config.join_delay_ms.saturating_mul(1_000_000),
+                config.limits.reorg_depth,
+            ),
+        }
+    }
+
+    fn orphan(&mut self, orphaned: &[(u64, [u8; 32])], at: u64, journal: &mut RuntimeJournal) {
+        let hashes: Vec<[u8; 32]> = orphaned.iter().map(|(_, h)| *h).collect();
+        for l in self.ledger.orphan(&hashes) {
+            journal.record(RecordKind::Canonical, at, &orphaned_launch_payload(&l));
+        }
+    }
+
+    fn event(&mut self, at: u64, event: CanonicalEvent, journal: &mut RuntimeJournal) {
+        match event {
+            CanonicalEvent::Block { number, hash, .. } => {
+                if !self.first_journaled {
+                    self.first_journaled = true;
+                    journal.record(
+                        RecordKind::Canonical,
+                        at,
+                        &window_payload(true, number, &hash),
+                    );
+                }
+                self.state = "FOLLOWING";
+                self.head = Some((number, hash));
+                self.head_seen_ns = Some(at);
+                self.blocks += 1;
+            }
+            CanonicalEvent::Launch(l) => self.ledger.push(LaunchRef {
+                venue: l.venue,
+                block_number: l.block_number,
+                block_hash: l.block_hash,
+                tx_index: l.tx_index,
+                tx_hash: l.tx_hash,
+                token: l.token,
+                external_buys: l.external_buys_after,
+                // Its block was the last one reported.
+                block_seen_ns: match self.head {
+                    Some((_, h)) if h == l.block_hash => self.head_seen_ns.unwrap_or(at),
+                    _ => at,
+                },
+            }),
+            CanonicalEvent::Reorg { orphaned, new_head } => {
+                self.reorgs += 1;
+                let depth = u32::try_from(orphaned.len()).unwrap_or(u32::MAX);
+                journal.record(
+                    RecordKind::Reorg,
+                    at,
+                    &reorg_payload(depth, new_head.0, &new_head.1),
+                );
+                self.orphan(&orphaned, at, journal);
+            }
+            CanonicalEvent::ReorgTooDeep { orphaned, new_head } => {
+                self.resyncs += 1;
+                let from = orphaned.first().map_or(new_head.0, |(n, _)| *n);
+                journal.record(RecordKind::Reorg, at, &resync_payload(from, new_head.0));
+                self.orphan(&orphaned, at, journal);
+            }
+            CanonicalEvent::Gap { from, to } => {
+                self.resyncs += 1;
+                journal.record(RecordKind::Reorg, at, &resync_payload(from, to));
+            }
+            CanonicalEvent::Fault(fault) => {
+                self.rpc_errors += 1;
+                let limited = matches!(
+                    fault,
+                    FollowerFault::Request {
+                        error: RequestError::RateLimited(_),
+                        ..
+                    }
+                );
+                self.rate_limited += u64::from(limited);
+                self.state = if limited { "RATE_LIMITED" } else { "FAILING" };
+            }
+        }
+    }
+
+    /// Joins the launches due at `now` (all of them with `u64::MAX`).
+    fn join(&mut self, now: u64, core: &IngressCore, journal: &mut RuntimeJournal) {
+        let head = self.head.map_or(0, |(n, _)| n);
+        for j in self.ledger.join_due(now, head, |h| core.sighting(h)) {
+            journal.record(
+                RecordKind::Canonical,
+                j.launch.block_seen_ns,
+                &canonical_launch_payload(&j),
+            );
+        }
+    }
+
+    fn draft(&self, now: u64) -> Draft {
+        use rs::canonical as e;
+        let c = self.ledger.counters();
+        let mut d = Draft::new(&e::SCHEMA);
+        d.set(e::STATE, self.state)
+            .set(e::BLOCKS, self.blocks)
+            .set(e::REORGS, self.reorgs)
+            .set(e::RESYNCS, self.resyncs)
+            .set(e::RPC_ERRORS, self.rpc_errors)
+            .set(e::RATE_LIMITED, self.rate_limited)
+            .set(e::FLAP_LAUNCHES, c.flap_launches)
+            .set(e::FOUR_LAUNCHES, c.four_launches)
+            .set(e::ORPHANED_LAUNCHES, c.orphaned_launches)
+            .set(e::SEEN_FULL_BEFORE, c.seen_full_before)
+            .set(e::SEEN_HASH_ONLY_BEFORE, c.seen_hash_only_before)
+            .set(e::SEEN_AFTER, c.seen_after)
+            .set(e::MISSED, c.missed)
+            .set(e::EXTERNAL_BUYS, c.external_buys);
+        if let Some((n, _)) = self.head {
+            d.set(e::HEAD, n);
+        }
+        if let Some(at) = self.head_seen_ns {
+            d.set(e::HEAD_AGE_MS, now.saturating_sub(at) / 1_000_000);
+        }
+        d
     }
 }
 
@@ -211,6 +464,22 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     written.map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The payload bound of the runtime journal; the census reads with the same.
+pub fn journal_max_payload(config: &RuntimeConfig) -> usize {
+    config.wss.max_message_bytes + 64
+}
+
+/// Replays the journals of `rundir` into `bsc-runtime/g04-census.dbrec`.
+pub fn write_census(config: &RuntimeConfig, rundir: &Path) -> Result<Census, String> {
+    let dir = rundir.join("bsc-runtime");
+    let census = census(&dir.join("journal"), journal_max_payload(config))?;
+    replace(
+        &dir.join("g04-census.dbrec"),
+        &census.encode(observed_now()?)?,
+    )?;
+    Ok(census)
+}
+
 /// The status record of this moment.
 #[allow(clippy::too_many_arguments)]
 fn status_bytes(
@@ -223,6 +492,7 @@ fn status_bytes(
     journal: &str,
     journal_records: u64,
     journal_lost: u64,
+    canonical: Option<&Canonical>,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
     let mut d = Draft::new(&rs::SCHEMA);
@@ -258,6 +528,9 @@ fn status_bytes(
         }
         d.push(rs::SOURCES, row.into_nested());
     }
+    if let Some(c) = canonical {
+        d.set(rs::CANONICAL, c.draft(now).into_nested());
+    }
     d.encode().map_err(|e| e.to_string())
 }
 
@@ -278,7 +551,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
         &dir.join("journal"),
         started_ms,
         config.journal_queue,
-        config.wss.max_message_bytes + 64,
+        journal_max_payload(config),
     )?;
     let journal_rel: PathBuf = journal
         .path()
@@ -296,6 +569,17 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     let mut generation = store.current()?;
+    let (canonical_tx, canonical_rx) = sync_channel::<(u64, CanonicalEvent)>(config.queue_events);
+    let canonical_rx = Some(canonical_rx);
+    let mut canonical = config.canonical.as_ref().map(Canonical::new);
+    let mut follower = match &config.canonical {
+        Some(c) => Some(spawn_follower(c.clone(), canonical_tx, clock)?),
+        None => {
+            drop(canonical_tx);
+            None
+        }
+    };
+    let mut next_census = Instant::now() + Duration::from_millis(config.census_ms);
     let mut next_status = Instant::now();
     let mut next_reconcile = Instant::now();
     let reconcile_every = Duration::from_millis(config.status_ms.min(500));
@@ -425,6 +709,39 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 None => {}
             }
         }
+        // Canonical events: every queued one, then the joins that are due.
+        if let (Some(c), Some(crx)) = (canonical.as_mut(), canonical_rx.as_ref()) {
+            if stopping && let Some(f) = follower.take() {
+                // The follower ends within its read tick and request bound;
+                // its events up to then are still processed.
+                f.stop.store(true, Ordering::Release);
+                loop {
+                    match crx.recv_timeout(reconcile_every) {
+                        Ok((at, event)) => c.event(at, event, &mut journal),
+                        Err(RecvTimeoutError::Timeout) if !f.handle.is_finished() => {}
+                        Err(_) => break,
+                    }
+                }
+                let _ = f.handle.join();
+            }
+            while let Ok((at, event)) = crx.try_recv() {
+                c.event(at, event, &mut journal);
+            }
+            let now = if stopping { u64::MAX } else { clock.now_ns() };
+            c.join(now, &core, &mut journal);
+            if stopping && c.state != "STOPPED" {
+                if let Some((n, h)) = c.head {
+                    journal.record(
+                        RecordKind::Canonical,
+                        clock.now_ns(),
+                        &window_payload(false, n, &h),
+                    );
+                }
+                c.state = "STOPPED";
+            } else if follower.as_ref().is_some_and(|f| f.handle.is_finished()) {
+                c.state = "FAILING";
+            }
+        }
         if Instant::now() >= next_status || stopping {
             next_status = Instant::now() + status_every;
             let now = clock.now_ns();
@@ -456,12 +773,23 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 &journal_rel.display().to_string(),
                 journal.appended(),
                 journal.lost(),
+                canonical.as_ref(),
             )?;
             replace(&status_path, &bytes)?;
+        }
+        if Instant::now() >= next_census && !stopping {
+            next_census = Instant::now() + Duration::from_millis(config.census_ms);
+            // A census failure is visible in the log; observation goes on.
+            if let Err(e) = write_census(config, rundir) {
+                eprintln!("g04 census: {e}");
+            }
         }
         if stopping && adapters.is_empty() {
             drop(tx);
             journal.finish()?;
+            if let Err(e) = write_census(config, rundir) {
+                eprintln!("g04 census: {e}");
+            }
             return Ok(());
         }
     }
@@ -486,6 +814,17 @@ mod tests {
             None,
             "no endpoint: UNQUALIFIED"
         );
+        let canonical = c.canonical.as_ref().unwrap();
+        assert_eq!(canonical.endpoint, "https://bsc-dataseed.bnbchain.org");
+        assert_eq!(canonical.limits.reorg_depth, 64);
+        // Without the endpoint the canonical bounds are unknown keys.
+        assert!(RuntimeConfig::parse(&CONFIG.replace("BSC_CANONICAL_RPC=", "#")).is_err());
+        let without: String = CONFIG
+            .lines()
+            .filter(|l| !l.starts_with("BSC_CANONICAL_"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert_eq!(RuntimeConfig::parse(&without).unwrap().canonical, None);
         for bad in [
             CONFIG.replace("wss://bsc-rpc", "ws://bsc-rpc"),
             CONFIG.replace("wss://bsc-rpc", "wss://user:pw@bsc-rpc"),
@@ -497,9 +836,140 @@ mod tests {
                 .replace("BACKOFF_INITIAL_MS=1000", "BACKOFF_INITIAL_MS=60000")
                 .replace("BACKOFF_MAX_MS=60000", "BACKOFF_MAX_MS=1000"),
             CONFIG.replace("MAX_FRAME_BYTES=1048576", "MAX_FRAME_BYTES=2097152"),
+            CONFIG.replace("https://bsc-dataseed", "http://bsc-dataseed"),
+            CONFIG.replace("BSC_CANONICAL_JOIN_DELAY_MS=2000\n", ""),
+            CONFIG.replace("BACKOFF_MAX_MS=30000", "BACKOFF_MAX_MS=100"),
+            CONFIG.replace("BSC_RUNTIME_CENSUS_MS=60000\n", ""),
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
+    }
+
+    /// The follower's events, joined with the sightings, reach the status
+    /// counters, the journal and the census alike; a reorg takes its
+    /// launches out of all three.
+    #[test]
+    fn canonical_events_join_into_status_journal_and_census() {
+        use crate::chain_follower::{CanonicalLaunch, Venue};
+        use crate::wss::ProtocolFault;
+        let base = std::env::temp_dir().join(format!("bsc-runtime-canon-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let cc = config.canonical.clone().unwrap();
+        let mut c = Canonical::new(&cc);
+        let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
+        let mut core = IngressCore::new(64);
+        let clock = Clock(Instant::now());
+        let block = |n: u8| CanonicalEvent::Block {
+            number: u64::from(n),
+            hash: [n; 32],
+            parent_hash: [n - 1; 32],
+            timestamp_s: 0,
+            observed: clock.0,
+        };
+        let launch = |n: u8, tx: u8, buys| {
+            CanonicalEvent::Launch(CanonicalLaunch {
+                venue: Venue::Flap,
+                block_number: u64::from(n),
+                block_hash: [n; 32],
+                tx_index: 0,
+                tx_hash: [tx; 32],
+                token: Some([tx; 20]),
+                creator: None,
+                external_buys_after: buys,
+                first_external_buy_index: None,
+            })
+        };
+        // A verified sighting of launch 1 before its block; launch 2 unseen.
+        core.observe(
+            SourceId::PublicNode,
+            Observation::HashOnly { hash: [1; 32] },
+            5,
+        );
+        journal.record(
+            RecordKind::Runtime,
+            1,
+            &source_event_payload(SourceId::PublicNode, SourceEvent::Connected),
+        );
+        c.event(10, block(10), &mut journal);
+        c.event(10, launch(10, 1, Some(2)), &mut journal);
+        c.event(20, block(11), &mut journal);
+        c.event(20, launch(11, 2, None), &mut journal);
+        c.event(
+            25,
+            CanonicalEvent::Fault(FollowerFault::Request {
+                call: crate::chain_follower::Call::BlockNumber,
+                error: RequestError::Transport(DisconnectReason::Protocol(
+                    ProtocolFault::MalformedJson,
+                )),
+            }),
+            &mut journal,
+        );
+        assert_eq!(c.state, "FAILING");
+        c.event(30, block(12), &mut journal);
+        // Not yet due (join delay), then due.
+        c.join(30, &core, &mut journal);
+        assert_eq!(c.ledger.counters().flap_launches, 0);
+        c.join(u64::MAX, &core, &mut journal);
+        let k = c.ledger.counters();
+        assert_eq!(
+            (
+                k.flap_launches,
+                k.seen_hash_only_before,
+                k.missed,
+                k.external_buys,
+                k.buys_unknown
+            ),
+            (2, 1, 1, 2, 1)
+        );
+        c.event(
+            40,
+            CanonicalEvent::Reorg {
+                orphaned: vec![(11, [11; 32]), (12, [12; 32])],
+                new_head: (12, [0xEE; 32]),
+            },
+            &mut journal,
+        );
+        c.event(50, CanonicalEvent::Gap { from: 13, to: 99 }, &mut journal);
+        let k = c.ledger.counters();
+        assert_eq!((k.flap_launches, k.missed, k.orphaned_launches), (1, 0, 1));
+        assert_eq!(
+            (c.state, c.blocks, c.reorgs, c.resyncs, c.rpc_errors),
+            ("FOLLOWING", 3, 1, 1, 1)
+        );
+        let status = status_bytes(
+            &Generation::initial(),
+            &[],
+            clock,
+            1,
+            1,
+            0,
+            "j",
+            0,
+            0,
+            Some(&c),
+        )
+        .unwrap();
+        let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
+        let n = r.nested(rs::CANONICAL).unwrap();
+        assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 1);
+        assert_eq!(n.u64(rs::canonical::HEAD).unwrap(), 12);
+        journal.finish().unwrap();
+        let census = census(&base, journal_max_payload(&config)).unwrap();
+        assert_eq!(
+            (
+                census.flap_launches,
+                census.hash_only_before,
+                census.orphaned_launches
+            ),
+            (1, 1, 1)
+        );
+        assert_eq!(census.windows[0].first_block, Some(10));
+        assert_eq!(
+            (census.windows[0].reorgs, census.windows[0].resyncs),
+            (1, 1)
+        );
+        fs::remove_dir_all(&base).unwrap();
     }
 
     /// With every source OFF the runtime connects nothing, writes its
@@ -510,8 +980,14 @@ mod tests {
         let base = std::env::temp_dir().join(format!("bsc-runtime-idle-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
-        let config =
-            RuntimeConfig::parse(&CONFIG.replace("STATUS_MS=1000", "STATUS_MS=100")).unwrap();
+        // No canonical endpoint: this test opens no connection at all.
+        let text: String = CONFIG
+            .replace("STATUS_MS=1000", "STATUS_MS=100")
+            .lines()
+            .filter(|l| !l.starts_with("BSC_CANONICAL_"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let config = RuntimeConfig::parse(&text).unwrap();
         let sources = base.join("bsc-sources");
         Store::open(&sources, 8).unwrap().init(1).unwrap();
         let rundir = base.clone();
