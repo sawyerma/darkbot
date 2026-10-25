@@ -22,9 +22,7 @@
 //! p0ctl [--project DIR] job cancel --id ID
 //! p0ctl [--project DIR] job status [--id ID]
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|strict [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
-//! p0ctl [--project DIR] verify  --run RUN_ID --historical --mode index|crosscheck …   (pinned reader, runs without native records only)
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
-//! p0ctl [--project DIR] report  --run RUN_ID --historical …   (pinned reader, runs without native records only)
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
@@ -72,9 +70,9 @@
 //! start` records the same request and runs it in a detached worker (`job run`, internal) — the
 //! action the GUI starts — `job cancel` stops a running one, `job status` shows the store.
 //!
-//! `report` and `verify` read runs with native capture records natively (B7, strict/off); the
-//! pinned Python readers serve only runs without native records and only on `--historical`
-//! (JFI-01/03, P0-PROD-CTRL-02: never a fallback for a native run). `qualify` is the separate C0-E1 master qualification after the
+//! `report` and `verify` read runs with native capture records natively (B7, strict/off); p0ctl
+//! never starts a pinned Python reader (A09, JFI-01/03, P0-PROD-CTRL-02): a historical run is
+//! read with the isolated `scripts/report.sh` / `scripts/verify.sh`. `qualify` is the separate C0-E1 master qualification after the
 //! verification (PHASENPLAN L.2): it binds the report's axes, the run's final technical record
 //! and the owners' end, persists an immutable result and exits 0 only for `C0_E1_MASTER_PASS`.
 use darkbot_runner::analytics::journal;
@@ -741,28 +739,17 @@ fn manifest_line(dir: &Path) -> Result<String, String> {
     ))
 }
 
-/// JFI-01/03: the pinned Python readers serve historical runs (no native records) only, and only
-/// on the explicit `--historical` request — never a fallback for a native run.
-fn historical(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
-    if value(args, "--run")
-        .and_then(|r| find_run(project, &r))
-        .is_some_and(|run| native_run(&run))
-    {
-        return Err(format!(
-            "NATIVE_RUN_REFUSED: {script} is the pinned reader of historical runs; a native run is read natively"
-        ));
+/// A09 (P0-PROD-CTRL-02, JFI-01/03): p0ctl reads native runs only and never starts a pinned
+/// Python reader. A run without native records is read with its isolated read-only reader
+/// (`scripts/report.sh`, `scripts/verify.sh`), which refuses a native run itself (U-7).
+fn not_native(project: &Path, script: &str, args: &[String]) -> String {
+    match value(args, "--run") {
+        None => "RUN_REQUIRED: --run RUN_ID".into(),
+        Some(r) if find_run(project, &r).is_none() => format!("RUN_NOT_FOUND: {r}"),
+        Some(r) => format!(
+            "HISTORICAL_RUN_NOT_NATIVE: run {r} has no native capture records; p0ctl reads native runs only, a historical run is read with the isolated pinned reader project_0/scripts/{script}"
+        ),
     }
-    if !args.iter().any(|a| a == "--historical") {
-        return Err(format!(
-            "HISTORICAL_READER_REQUIRES_OPT_IN: {script} reads historical runs only; add --historical"
-        ));
-    }
-    let rest: Vec<String> = args
-        .iter()
-        .filter(|a| *a != "--historical")
-        .cloned()
-        .collect();
-    delegate(project, script, &rest)
 }
 
 fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
@@ -770,7 +757,7 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         .and_then(|r| find_run(project, &r))
         .filter(|run| native_run(run))
     else {
-        return historical(project, "report.sh", args);
+        return Err(not_native(project, "report.sh", args));
     };
     native_layout(&run)?;
     if !run.join("capture/market/market_completion.p0j").is_file() {
@@ -793,14 +780,14 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 /// C0E1-P5-CLI: one verify contract. A run with native records verifies `strict` or `off` (an
 /// explicit `--mode`) through the typed native driver (the request `p0-strict-verify --run`
 /// takes: online strict only with `--provider-evidence`); `index`/`crosscheck` are refused for
-/// it. Only a historical run reaches the pinned Python verifier, on `--historical`.
+/// it. A historical run is refused with its isolated pinned verifier named (A09).
 fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::market_observer::strict_driver;
     let Some(run) = value(args, "--run")
         .and_then(|r| find_run(project, &r))
         .filter(|run| native_run(run))
     else {
-        return historical(project, "verify.sh", args);
+        return Err(not_native(project, "verify.sh", args));
     };
     native_layout(&run)?;
     let mode = value(args, "--mode").ok_or("VERIFY_MODE_REQUIRED: --mode strict|off")?;
@@ -1032,13 +1019,6 @@ fn profiles_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         print!("{}", backtest::render_backtest(&b));
     }
     Ok(true)
-}
-
-fn delegate(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
-    let e = Command::new(project.join("scripts").join(script))
-        .args(args)
-        .exec();
-    Err(format!("EXEC {script}: {e}"))
 }
 
 /// An approval profile is a small operator file; anything larger is not one.
@@ -1339,7 +1319,7 @@ mod tests {
 
     /// JFI-01/03, P0-PROD-CTRL-02: a run with native records is never handed to a pinned Python
     /// reader (report and verify stay native; `index`/`crosscheck` are refused for it), and a
-    /// historical run reaches the pinned reader only on the explicit `--historical` request.
+    /// historical run is refused with its isolated pinned reader named, never started (A09).
     #[test]
     fn native_runs_never_reach_the_pinned_python_readers() {
         let project = std::env::temp_dir().join(format!("p0ctl_route_{}", std::process::id()));
@@ -1349,16 +1329,25 @@ mod tests {
         std::fs::write(native.join("run_manifest.p0j"), b"").unwrap();
         std::fs::create_dir_all(project.join("data/runs/h")).unwrap();
         let err = |r: Result<bool, String>| r.unwrap_err();
-        for script in ["report.sh", "verify.sh"] {
-            assert!(err(historical(
-                &project,
-                script,
-                &strings(&["--run", "n", "--historical"])
-            ))
-            .starts_with("NATIVE_RUN_REFUSED"));
-            assert!(err(historical(&project, script, &strings(&["--run", "h"])))
-                .starts_with("HISTORICAL_READER_REQUIRES_OPT_IN"));
+        // A09 (CTRL-02): p0ctl never starts a pinned Python reader; a historical run is named
+        // with its isolated reader, with or without `--historical`.
+        for args in [&["--run", "h"][..], &["--run", "h", "--historical"]] {
+            let a = strings(args);
+            for (r, script) in [
+                (report_cmd(&project, &a), "scripts/report.sh"),
+                (verify_cmd(&project, &a), "scripts/verify.sh"),
+            ] {
+                let e = err(r);
+                assert!(
+                    e.starts_with("HISTORICAL_RUN_NOT_NATIVE") && e.contains(script),
+                    "{e}"
+                );
+            }
         }
+        assert!(
+            err(report_cmd(&project, &strings(&["--run", "missing"]))).starts_with("RUN_NOT_FOUND")
+        );
+        assert!(err(verify_cmd(&project, &[])).starts_with("RUN_REQUIRED"));
         assert!(err(report_cmd(
             &project,
             &strings(&["--run", "n", "--historical"])

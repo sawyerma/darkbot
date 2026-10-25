@@ -374,7 +374,7 @@ pub fn bind_capture(run: &Path) -> Result<CaptureBinding, String> {
     let run = run.canonicalize().map_err(|e| format!("RUN: {e}"))?;
     let manifest_path = run.join("capture").join(RUN_MANIFEST_JOURNAL);
     let manifest: RunManifest = journal::read_typed_value(&manifest_path)
-        .map_err(|_| "NATIVE_MANIFEST_MISSING: the run has no native capture records (a historical run is read only with --historical)")?;
+        .map_err(|_| "NATIVE_MANIFEST_MISSING: the run has no native capture records (a historical run is read with project_0/scripts/verify.sh)")?;
     if manifest.layout.as_deref() != Some(crate::run_layout::RunLayout::V2.tag()) {
         return Err("NATIVE_DRIVER_REQUIRES_LAYOUT_V2".into());
     }
