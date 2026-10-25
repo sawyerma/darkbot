@@ -1,5 +1,15 @@
 # Gate 0 — BSC/Solana Birth-to-BUY Feasibility Gate
 
+## BINDING SCOPE CLARIFICATION — 2026-10-25 (GATE-0 EVIDENCE UNCHANGED; OFFLINE DEVELOPMENT PERMITTED)
+
+**Latest express user decision:** The original technical and economic Gate-0 tests remain authoritative **for actual BUY/acquisition, competitor ordering, cost, qualified provenance and physically witnessed T0→T_buy <1 ms**. Without original producer witness, physical latency stays `UNKNOWN/NOT_PROVEN`; an **independent, narrower G0.8 acquisition/ordering/cost verdict** may nonetheless PASS if the full real canonical evidence satisfies its own frozen conditions. **This is not an overall physical sub-ms Gate-0 PASS.** Incomplete capture/no canonical receipts => G0.8 `UNRESOLVED`, never PASS or proof of no send.
+
+**The historic requirement to perform a real Mainnet BUY *before writing any C1/C2/production code* is expressly superseded for offline technical work.** The authoritative `bsc/docs/1_PLAN/PHASENPLAN.md` (binding 2026-10-25 decision) now permits **C0–I** real native code, interfaces, integration, read-only analysis, tests, technical phase acceptance and PAPER/SHADOW without a Mainnet trade, with E only after separately frozen G0.1 Four contracts. None of that implies actual acquisition or production activation. **No real Mainnet SIGN/ARM/Funding/BUY/SEND/LIVE, paid provider access, automatic retry or Mainnet nonce-burning transaction** without separate explicit authorization; native effective LIVE remains disabled. Allowed Chapel testnet traffic is limited to separately isolated Chain-97 testnet identities and test scope.
+
+**G0.4/V10-8:** A bounded (default ≤7 days), free-only, pre-registered read-only competitor/launch census may run concurrently without impeding G0.7. Its assessment is required before *operational* C2/J activation, not before offline C2 implementation. Gate 0 physical witness standards, frozen G0.1 numeric scopes and terminal LIVE approvals are not weakened. This clarification resolves only the former schedule deadlock; dated older rules below remain useful historical scope and test definitions.
+
+---
+
 > **ABSOLUTE TOP PRIORITY / STOP RULE — REAL BUY ONLY:**  
 > For the current BSC Gate-0 work, the only acceptance target is a **real successful on-chain BUY with token acquisition** and a **measured/proven `T0 → T_buy < 1 ms`**.  
 > **Until that is achieved, no other tests, optimizations, features, venues, strategies or follow-up work are allowed.**  
@@ -503,7 +513,7 @@ Do not use any of these alone:
 
 ## 11. Project rule
 
-Gate 0 comes before:
+**Historical scheduling list (superseded for technical offline development by the binding 2026-10-25 clarification):** Gate 0 comes before:
 
 - full BSC C0/C1/C2/C3 production build;
 - full Flap/Four production decoder phases;
@@ -621,4 +631,4 @@ If exact execution times are missing, the capture still proves supported orderin
 - [ ] Produce raw-trade/price/cost/ordering analysis and explicit timing uncertainty.
 - [ ] Update existing run result/manifest and the central measurement ledger; commit/push raw evidence without secrets or build artifacts.
 
-Keep acquisition, first-BUY placement, capture completeness and sub-ms timing as separate result fields. All tasks above are directly BUY-related and may proceed even if a run misses the timing target; unrelated production phases remain stopped. Only valid source-execution evidence can satisfy the existing sub-ms gate.
+Keep acquisition, first-BUY placement, capture completeness and sub-ms timing as separate result fields. All tasks above are directly BUY-related and may proceed even if a run misses the timing target; unrelated production phases remain stopped. Only valid source-execution evidence can satisfy the existing sub-ms gate. The historical blanket restriction on unrelated offline code was superseded on 2026-10-25 for C0–I technical work only; live/economic activation remains separately gated.
