@@ -1,0 +1,73 @@
+C1.9b controlled Testnet ETH/68 hook/path re-qualification - run 20261025T233848Z (UTC)
+
+source: DarkBot HEAD 0a12076fa25bc3daf77801d98e2e4686f781d0ed at run start (bsc/engine, bsc/geth, bsc/tools clean;
+  only change vs 0addbeee in those paths: overlay outbound_test.go, not in the binary; geth rebuilt from the
+  0a12076f overlay is byte-identical, sha256 b9b56268740587161f446cf680248c77f964155bf334c2dc3ed43bf37d470f90)
+geth: bnb-chain/bsc v1.7.8 pin cdb7548b5baacfdae92f9f63437d6456411665f3, disposable --shared clone of the Backup
+  bsc-geth repo, overlay via bsc/tools/c1_apply_geth_overlay.py (marker DARKBOT_C1_FASTLANE_C1_7_E72, hooks +
+  C1_9B hardened accept-txs gate verified, darkbot/fastlane byte-identical to bsc/geth/overlay), Go 1.25.0 offline
+rust: c19b_capture sha256 2230c446d4104c1d987084e902c959513295e437e8c2570c93e0ddd16864a03f,
+  c19b_report (analyzer) sha256 362a6519cd9e219709ce6a0d34b73ddf2116fa5b282663ad9b3ae9a41830ed21 (release, --locked --offline)
+chapel: built-in --chapel of the pinned client (genesis 0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34,
+  network id 97); testnet.zip not used; node unsynced at genesis (head = genesis, TD 1)
+fast lane env: DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet, DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES, MAX_PEERS=2,
+  CHURN_RESERVE=2 (capture PEER_LANES=4), generation 202610252338, boot id 38D19A2D-0569-4BB7-9D35-910441C5E6DB
+
+isolation: --nodiscover (no DNS discovery), --bootnodes "", no static/trusted nodes, --maxpeers 2,
+  --netrestrict 127.0.0.0/8, --nat none, --ipcdisable, P2P ListenAddr 127.0.0.1 (TOML), HTTP 127.0.0.1 only
+  peer id=087da02f80829d88d20d5c91353e4a6693f2f5eea289364785d26a85b03ca0ed remote=127.0.0.1:50524 local=127.0.0.1:30397 inbound=True trusted=False static=False caps=eth/68 name=darkbot-c19b-replay
+  admin_peers_count=1
+  net_peerCount=1
+  replay_self_id=087da02f80829d88d20d5c91353e4a6693f2f5eea289364785d26a85b03ca0ed
+  geth sockets at that moment: 127.0.0.1:30397 LISTEN, 127.0.0.1:18597 LISTEN, one ESTABLISHED 127.0.0.1<->127.0.0.1
+  after the run: net_peerCount=0. Replay peer: eth/68 only, mirrored the node's own status, DisablePeerTxBroadcast
+
+launches: 25 already-signed, already-mined public Chapel txs to Portal 0x5beacaf7abcbb3ab280e80d007fd31fce26510e9,
+  selector 0x8cb5772c (newTokenV6), blocks 137809555..138760701 (7 legacy EIP-155, 18 EIP-1559; 1205..1621 bytes).
+  discovery: eth_getLogs(Portal) over publicnode back to block 136929922 (3 launches; logs/receipts pruned below
+  ~138.47M), then header logsBloom scan (Portal address bits, geth types.Bloom) on BNB data-seed RPCs over
+  137730001..138530000 in 200k-block steps (4 of max 15 used): 22 launches; stop at >=24.
+  bytes: eth_getRawTransactionByHash on publicnode and data-seed byte-identical; keccak(raw)==hash, decode, chain 97,
+  to/selector, sender recovery, receipt status 1, inclusion block checked. Never signed or modified here.
+  replay: one Transactions packet per launch over local authenticated RLPx, handoff = CLOCK_MONOTONIC immediately
+  before the write; spacing 250.1..252.1 ms; write return 38..72 us after handoff
+
+result (c19b_report, gate NOT_DECIDED_BY_THIS_TOOL): launches=25 observed=25 missed=0 excluded_before_handoff=0
+  capture: rows=25 invalid_records=0 lane_faults=0 (exit 0); sources: eth-broadcast first for 25, eth-pooled 0
+  peer 087da02f80829d88d20d5c91353e4a6693f2f5eea289364785d26a85b03ca0ed (eth-broadcast): observed 25, not observed 0
+  handoff_to_packet_decode: n=25 min=125000 p50=152000 p95=204000 p99=328000 max=328000 misses_ge_1ms=0 (ns)
+  packet_decode_to_T_ingress: n=25 min=8000 p50=10000 p95=57000 p99=370000 max=370000 misses_ge_1ms=0 (ns)
+  handoff_to_T_ingress: n=25 min=134000 p50=161000 p95=213000 p99=698000 max=698000 misses_ge_1ms=0 (ns)
+  T_ingress_behind_first_source: n=25 min=0 p50=0 p95=0 p99=0 max=0 misses_ge_1ms=0 (ns)
+  max (698 us) is the first launch after the session opened; darwin CLOCK_MONOTONIC has 1 us granularity
+  report sha256 94c0524d578ba31a456cfbab4e41956cdc37d9c5e85aba8ca2a4d3b948fbb324
+
+non-claims: MAINNET_INGRESS_COVERAGE = NOT_PROVEN; T0_TO_T_BUY_LT_1MS = NOT_PROVEN;
+  PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED; private-flow visibility not measured; LIVE = BLOCKED
+
+launch list (block tx_hash handoff_ns):
+  138760701 0xfafb9f2a6dfe75b22910fce2eb78cdc4ccab983eba9bde41188d21e1b93d05ab 2172910021775000
+  138664335 0xd72c9f0bf252f5bab73d0b99930c6c7cd6094ff16b4017ab90169abdd959e0f3 2172910273492000
+  138641380 0x357b329c39817f759af50b3ad4b1b9fe1304f4b1a0cda5085fdfc85130b136b1 2172910525591000
+  138467316 0xc8c53b7a5221a98731dd18ec569e8882ea0475a5f1cf9ca5e92395b20fd6ff4c 2172910775872000
+  138467307 0xdca71f6dfaca6a3eed3431477e750c7ff881f4c844dbdd174b35a9510d0abcb6 2172911027958000
+  138467294 0xd749173fcaea8d1eaf6975e10ff2bf9f322096cb53cc71aed9784655cde1b4ac 2172911278886000
+  138234625 0xa96da7a84bf5de244eb1253ff10745f5de7774fb5bbed7be381467e24b9394a4 2172911529162000
+  138232944 0xdb52c65bb75cb4a27621a780df63d0a5878e9321f7b874c24fe1fa1182fa67e3 2172911779383000
+  138183417 0x0ec44e4751b14ca880b62b15e773a8f7758a0fca761927508bb56478fee50d24 2172912031473000
+  138058318 0xfcc998dff8aa14038a220048a89b8fd2973979415a1d16a5dd5e17d0278d1dbc 2172912283551000
+  138001543 0x7e50d6bbc8f777e77b00e54b862fa8185cbb441ba9d92e3423bf6e9cc30d0d4b 2172912535640000
+  137995866 0x38a0abeda7c5fb3f661cea4d83ab84e8a0df57e3136f8489048312c3c8bf704e 2172912785944000
+  137917288 0x47e74d2be766e49d9085fce3b8e5eb292a04341b4a697d6a0b52dc0420a40677 2172913038047000
+  137917069 0x42c9d955fbac59d224d4e317e6ed10e86326c7acf6ba753a4c024546da59e0c2 2172913290146000
+  137916864 0xf9fd93418ca941170d35a4c391eb831e9773f52dd9138fd20e731c20b030bc51 2172913542228000
+  137916576 0x4e0eb197df7807f078aa079c9efdfb8cbafe9ed16bff6b02551c657c9b1df31c 2172913794316000
+  137909160 0x850d886a0bba9305bea97557e6b881f521400f88ccd4abd9ea376c4a27e4ae98 2172914046422000
+  137906605 0x335ebd5fe7bae23eeec7abca8fda36749d59a0f556e70fa9f979ef5d39db38fd 2172914298522000
+  137858314 0x93b69b9744404613e1f8fa4bb0101e4ae015642b520e800914505cb25e359a54 2172914550625000
+  137852798 0x9ba0686f3cc545e18bcb86afc608d24d9cc86061dc689a206dd7c38892b68761 2172914801035000
+  137839656 0x945a683c62ca1d86c4f5dab52329b86ed5bf3b8974d4acf2ec37438ee242a85e 2172915051183000
+  137838673 0x735f984d40f4c66fb00cf2ebed9498ad983f4d5daa11db44458291d3444ee546 2172915303270000
+  137813152 0x42a279b60a202072a4040572daed6f09e6e589996caa98a9339a9ef225c08639 2172915555346000
+  137812932 0x727afb34aa749610a58ba7263925721858a276470b8d78f8bfa7d8a7ebbdc162 2172915807415000
+  137809555 0x6ae4148e1ad1a2b278e85fd410a6969892b89a2d81ca50f890c02459bbf92184 2172916059503000

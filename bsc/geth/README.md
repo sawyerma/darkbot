@@ -9,8 +9,12 @@ repository  https://github.com/bnb-chain/bsc.git
 release     v1.7.8
 commit      cdb7548b5baacfdae92f9f63437d6456411665f3
 tree        d8d88097521d43cef66047fdd93dd6825a2a7843
+module      github.com/ethereum/go-ethereum
 go.mod      go 1.25.0
+selected    2026-10-06: latest production-stable release; v1.8.0-alpha is a preview and not selected
 ```
+
+The verifier below is the pin's single authority (no separate pin file).
 
 The pin is source identity only. It does not claim that upstream v1.7.8 already
 contains DarkBot's Fast-Lane hooks, mmap/SPSC transport, producer timestamps,
