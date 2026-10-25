@@ -135,7 +135,7 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
             report,
             "V5_CONTRACT",
             "BLOCKED",
-            "No v5 contract yet: v4 binds no launch-path snapshot (C1/R1); run the requalification DRY with its launch-path trace (tools/g06a_final_dry.sh), then write the v5 proposal (g07_acceptance_contract)",
+            "No v5 contract yet: v4 binds no launch-path snapshot (C1/R1); run the requalification DRY (tools/g06a_final_dry.sh --prepare, then the separately authorized --sign), then write the v5 proposal (g07_acceptance_contract)",
         );
         return Err("requalification pending: no v5 contract".into());
     }

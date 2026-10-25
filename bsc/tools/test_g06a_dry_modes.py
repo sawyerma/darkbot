@@ -257,10 +257,23 @@ class Prepare(unittest.TestCase):
 
 
 class Full(unittest.TestCase):
+    def test_no_mode_and_unflagged_full_or_sign_never_read_keys_or_sign(self):
+        # BSC-001 (P2-D4): a call without arguments must not sign; FULL and
+        # SIGN both need the explicit signing flag before any read.
+        for args, env in [([], {}), (["--full"], {}), (["--full"], {"DARKBOT_G06A_SIGN": "no"}),
+                          (["--sign", "/nonexistent"], {})]:
+            w = World({}, FULL_SECRETS)
+            self.addCleanup(w.close)
+            w.secrets.chmod(0)
+            out = w.run(*args, env=env)
+            self.assertEqual(out.returncode, 2, (args, out.stdout + out.stderr))
+            self.assertEqual(w.calls(), [], args)
+            self.assertNotIn(TEST_KEY, out.stdout + out.stderr)
+
     def test_full_mode_keeps_the_a_sequence_and_scopes_keys_and_the_public_salt(self):
         w = World({}, FULL_SECRETS)
         self.addCleanup(w.close)
-        out = w.run()
+        out = w.run("--full", env={"DARKBOT_G06A_SIGN": "YES"})
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertIn("FLAP_REQUALIFICATION=PASS", out.stdout)
         for tool, argv, env in w.calls():

@@ -25,25 +25,27 @@ clear_exports
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
-# Modes (v9.1 D2-D4): FULL, the default (A: R0 .. DRY-4 at one head, needs
-# the wallet keys); PREPARE (key-free preview at H1 for the selected
+# Modes (v9.1 D2-D4; BSC-001: no default): --full (A: R0 .. DRY-4 at one
+# head, needs the wallet keys); --prepare (key-free preview at H1 for the selected
 # candidate: bsc/secrets.env is never read, steps 4 and 5 never run, the
 # output is PREPARE_ONLY / NOT_REQUALIFIED); SIGN <prepare_dir> (at a fresh
 # head H2: only the verified R0 record and candidate reference of PREPARE
 # cross, everything else is recomputed before the wallet-key steps; private
-# output directory). Real-key SIGN needs the user's explicit authorization.
-MODE=FULL
+# output directory). Every key-reading mode (--full, --sign) needs the
+# explicit signing flag before anything is read; the flag only carries the
+# user's authorization, it is not one.
+MODE=""
 PROFILE=SELF_A
 PREPARED=""
 case "$#:${1:-}:${2:-}:${3:-}" in
-  "0:::") ;;
+  "1:--full::") MODE=FULL ;;
   "1:--prepare::" | "3:--prepare:--profile:A") MODE=PREPARE ;;
   "3:--prepare:--profile:B") MODE=PREPARE PROFILE=SELF_B ;;
   2:--sign:?*:) MODE=SIGN PREPARED="$2" ;;
-  *) printf 'usage: g06a_final_dry.sh [--prepare [--profile A|B] | --sign <prepare_dir>]\n' >&2; exit 2 ;;
+  *) printf 'usage: g06a_final_dry.sh --prepare [--profile A|B] | --sign <prepare_dir> | --full\n' >&2; exit 2 ;;
 esac
-if [[ "$MODE" == SIGN && "${DARKBOT_G06A_SIGN:-}" != YES ]]; then
-  printf 'STOP: SIGN signs locally with the wallet keys; set DARKBOT_G06A_SIGN=YES only with the explicit user authorization (AWAITING_USER_AUTHORIZATION)\n' >&2
+if [[ "$MODE" != PREPARE && "${DARKBOT_G06A_SIGN:-}" != YES ]]; then
+  printf 'STOP: --%s signs locally with the wallet keys; set DARKBOT_G06A_SIGN=YES only with the explicit user authorization (AWAITING_USER_AUTHORIZATION)\n' "$(printf '%s' "$MODE" | tr '[:upper:]' '[:lower:]')" >&2
   exit 2
 fi
 
