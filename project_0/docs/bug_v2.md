@@ -166,11 +166,13 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **Fix:** `updated_marginfi_account` auch setzen, wenn der Account bereits im ReverseIndex ist; bestehender Post-Apply-Pfad liefert `None` ⇒ Remove. **Test:** indexierter Account, Event mit leerer Data/System-Owner ⇒ `banks_for_account` leer (heute nicht leer). Kein Prune aus bloßem Fehlen in B (GPA liefert keine `null`-Zeilen).
 - **Grenze des Fixes (Nachtrag):** greift nur, wenn ein Update zugestellt wird. Liability-Accounts kommen über gefiltertes `programSubscribe` (`accounts.rs:341-353`: DataSize + Group-Memcmp + `is_lending_only == 0`; `setup.rs:287-292`; `ws_rpc.rs:172-178`); ein Account, der den Filter verlässt (Close ⇒ DataSize 0, Owner-Wechsel), erzeugt keine passende Notification. Dependencies laufen über `accountSubscribe` (`ws_rpc.rs:186`), dort kommt ein Close an. Vollständige Bereinigung nur über den Recovery-Rebuild bei Ready (`events.rs:284`) oder einen gezielten Account-Read. Abnahme: Filter-Austritt, Close, Recovery-Rebuild je als Test; Restlücke bis dahin dokumentiert.
 
+- **Stand 25.10.: erledigt** `2ba31a77` (Close eines indexierten Accounts entfernt ihn; Filter-Austritt nur über Recovery-Rebuild).
 ### V2-11 — `CandidateLanes::admit` überschreibt `work` bedingungslos (P5b-05)
 - **Priorität/Phase:** P3 Messung/Freshness-Provenienz · MT3/FIX-21.
 - **Pfad:** `candidates.rs:697`, `:719-727` (kein Vergleich mit `existing.work`); älterer Trigger über Bank-Projection-Fallback möglich (`events.rs:948-950`). Auswertung bleibt korrekt (Detect liest kanonischen State), aber `max_opportunity_age_ns` kann fälschlich „stale“ werten.
 - **Fix:** `existing.work` behalten, wenn `(a.slot, a.t_rx_ns) < (existing.work.2, existing.work.1)`. **Test:** admit (250,12) dann (100,10) ⇒ (250,12) (heute (100,10)); `mt3_23_coalescing_keeps_t_rx_first_and_takes_the_newest_work` grün.
 
+- **Stand 25.10.: erledigt** `4fde18de` (älterer Trigger ersetzt neuere Arbeit nie).
 ### V2-12 — Recovery-Snapshot-Fetch blockiert den Owner-Drain (P3-06/P4-01/P5a-01)
 - **Priorität/Phase:** **P2 (bounded, kein belegter Overflow) · MT6 Snapshot-Modell · Cross-Ref D3, C1.**
 - **Pfad:** `state_owner.rs:312` (`owner.events(&mut fetch, …)` auf dem Owner), `events.rs:182-195`, `recovery.rs:282→309→310→315→337` (A, Install, Drain, B, Drain; kein Drain **im** Fetch), `setup.rs:361-395` (Liability-GPA + Bank-GPA + 100er-Chunks), Queue 65 536 (`setup.rs:115/129`, `runtime_config.rs:56`), Overflow `ws_rpc.rs:926-936` (HALT + give_up + Gap-Versuch), `state/mod.rs:444` `accounts.clear()`, `:471-482` Replay nur `self.buffer` (füllt sich nur im Bootstrap, `:366-376`).
@@ -178,12 +180,15 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **Fix nur als Staging-Modell:** Fetch auf Helper-Thread, Owner drainet unter `recovering`-Flag in einen Recovery-Staging-Puffer, danach Install + Replay mit **einer** Regel (Slot + write_version wie `apply()`); Control-Events (Root/Gap/Reconnected/Fatal) getrennt; Kapazität O(verschiedene Konten) mit HALT bei Überlauf. Vorher Messauftrag: A/B-Dauer, Events/s, Queue-Peak, `sink_overflow_lines`, Gap/Reconnected aus **demselben** qualifizierten Lauf.
 - **Tests:** RED/GREEN-Matrix (MD §18 a–h): Event vor A-Context, neuer als A, gleicher Slot ± write_version, A/B verschiedene Kontexte, 100k Events mit 1k/65k Keys, Gap/Fatal/Root dazwischen, Cancellation/Reconnect im letzten Versuch, keine frühe READY-Promotion; `owner_end_to_end_recovers_only_with_a_valid_snapshot` (`owner_e2e_tests.rs:305`).
 
+- **Stand 25.10.: BLOCKED** (Staging-Fix erst nach Messauftrag aus einem qualifizierten Lauf).
+
 ### V2-13 — Threshold-Pfad: `all_accounts`-Vollscan je Bank und wiederholte `candidates()` (P4-03/P5b-02/P5c-01)
 - **Priorität/Phase:** P2 LATENZ (opt-in) · nach V2-03.
 - **Pfad:** `events.rs:889-893` (`all_accounts: Vec<Pubkey>` je Bank je Dependency-Update), `:907-912` (`candidates()`), `:914-917` (Schnittmenge über die große Seite), Fehlerzweige `:939-1083` (`fallback.extend(all_accounts)`); `remote_apply.rs:209-230`; `index.rs:30` (`HashMap<Pubkey, HashSet<Pubkey>>`), `:116-121` `banks_for_account`, `:197-220` `candidates`, `:228-258` `crossed_candidates` **ohne Aufrufer**; Richtung Asset-Low fällt / Liability-High steigt (`index.rs:8-10,145-149,221-227`; TXT-Vorzeichen „monoton steigend im Liability-Preis“ falsch).
 - **Wiederholungsdrossel fehlt (Nachtrag 24.10.):** `candidate_cache`/`periodic_due`/`candidate_should_forward` existieren nur im Sweep-Pfad (`sweep.rs:232-352`); der Threshold-Enqueue (`events.rs:907-912`, `remote_apply.rs:209-230`) admittiert bei jedem Oracle-Tick alle bereits gefährdeten Accounts erneut nach L0 und verbraucht Kandidaten-Netzbudget (`P0_RPC_CANDIDATES_PER_DRAIN`). Fix: Recheck-/Soft-Cap-Policy modusunabhängig herauslösen (zusammen mit V2-03). Test: zwei Oracle-Ticks ohne Revisionsänderung ⇒ genau ein Forward.
 - **Fix:** `ReverseIndex::bank_has_account` O(1); Fallback-Schnittmenge über `threshold_fallback` iterieren; `all_accounts` nur in Fehlerzweigen lazy materialisieren; `fallback_all` bei Stale/Fehler unverändert. **Tests:** Accessor-Unit-Test; Owner-Test Threshold-Modus `enqueued = candidates ∪ fallback` bei 0/228/alle Fallbacks, Success/Stale/Fehler.
 
+- **Stand 25.10.: erledigt** `abc9f4a6` (Threshold-Admission über RepeatGate, `bank_has_account`, keine Bank-Listen).
 ### V2-14 — Mikro-Sammelticket (nur nach Profil oder im ohnehin berührten Modul; keine Latenzbehauptung)
 | Punkt | Pfad | Einzeiliger Fix | Absicherung |
 |---|---|---|---|
@@ -205,6 +210,7 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **P7-03:** zweite Simulation in `admission.rs:113` nur relevant, wenn FE-04 verdrahtet wird; dann Pipeline-`SimResult` an `wire_sha256` gebunden wiederverwenden — Entscheid, kein heutiger Doppelaufruf.
 - **P7-02:** Nonlanding-Proof (`settlement.rs:158-197`, Reihenfolge korrekt) vertraut Provider-History; Policy „zweiter Endpunkt / `getTransaction`“ vor LIVE entscheiden. Cross-Ref C12.
 
+- **Stand 25.10.: TEILWEISE** `8e96c458` (P9-01b am Handoff validiert; P7-03/P7-02 = Vertragsentscheid vor FE-06).
 ---
 
 ## 4. Widerlegte Thesen — nicht bauen
