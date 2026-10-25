@@ -7,10 +7,8 @@ use darkbot_bsc_execution::acceptance_contract::{
     Authorization, WITNESS_SOURCE_RECORD, attempt1_v5, attempt1_v5_evidence,
 };
 use darkbot_bsc_execution::acceptance_guard::{V3_RELATIVE_PATH, V5_RELATIVE_PATH};
-use darkbot_bsc_record::schema::{
-    PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, g06a, g07::contract as c,
-};
-use darkbot_bsc_record::{Draft, Schema, Value, decode};
+use darkbot_bsc_record::schema::{g06a, g07::contract as c};
+use darkbot_bsc_record::{Draft, Value, decode};
 
 const BIN: &str = env!("CARGO_BIN_EXE_g07_pre_live_readiness");
 const FROZEN: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";
@@ -37,36 +35,11 @@ fn run(root: &Path, args: &[&str]) -> (Option<i32>, String) {
     )
 }
 
-/// A native record of `native` with a frozen import record's fields (same
-/// tags): offline stand-ins for a requalification DRY that exercise the v4
-/// wiring only and never qualify anything.
-fn native_copy(
-    root: &Path,
-    import: &str,
-    schema: &'static Schema,
-    native: &'static Schema,
-) -> Vec<u8> {
-    let bytes = std::fs::read(root.join(format!("{FROZEN}/{import}"))).unwrap();
-    let record = decode(schema, &bytes).unwrap();
-    let mut d = Draft::new(native);
-    for (tag, value) in record.fields() {
-        if *tag > 2 {
-            d.push(*tag, value.clone());
-        }
-    }
-    if native.field(PROVENANCE_TOOL).is_some() {
-        d.set(PROVENANCE_TOOL, "offline-test")
-            .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64);
-    }
-    d.encode().unwrap()
-}
-
 /// A temporary repository root with the committed inputs, their legacy
 /// sources, stand-in requalification records (with the real launch-path
 /// snapshot and a candidate record) and a v5 proposal binding them; `edit`
 /// may alter the contract before it is written.
 fn v5_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
-    use g06a::{dry, economics, local_simulation, portal_upgrade as up, preflight};
     let repo = repo_root();
     let root = std::env::temp_dir().join(format!("darkbot-readiness-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -82,68 +55,7 @@ fn v5_root(tag: &str, edit: impl FnOnce(&mut Draft)) -> PathBuf {
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         std::fs::copy(repo.join(path), to).unwrap();
     }
-    let dir = root.join(REQUAL);
-    std::fs::create_dir_all(&dir).unwrap();
-    let write = |name: &str, bytes: Vec<u8>| std::fs::write(dir.join(name), bytes).unwrap();
-    write(
-        "dry_result.dbrec",
-        native_copy(&repo, "dry_result.dbrec", &dry::SCHEMA, &dry::NATIVE),
-    );
-    write(
-        "preflight.dbrec",
-        native_copy(
-            &repo,
-            "preflight.dbrec",
-            &preflight::SCHEMA,
-            &preflight::SCHEMA,
-        ),
-    );
-    write(
-        "local_simulation.dbrec",
-        native_copy(
-            &repo,
-            "local_simulation.dbrec",
-            &local_simulation::SCHEMA,
-            &local_simulation::NATIVE,
-        ),
-    );
-    write(
-        "economics_crosscheck.dbrec",
-        native_copy(
-            &repo,
-            "economics_crosscheck.dbrec",
-            &economics::SCHEMA,
-            &economics::NATIVE,
-        ),
-    );
-    let implementation = decode(
-        &preflight::SCHEMA,
-        &std::fs::read(dir.join("preflight.dbrec")).unwrap(),
-    )
-    .unwrap()
-    .address(preflight::PORTAL_IMPLEMENTATION)
-    .unwrap();
-    let mut scan = Draft::new(&up::SCHEMA);
-    scan.set(PROVENANCE_TOOL, "offline-test")
-        .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64)
-        .set(up::PROXY, Value::Address([0xe2; 20]))
-        .set(up::SCANNED_FROM_BLOCK, 1u64)
-        .set(up::SCANNED_TO_BLOCK, 2u64)
-        .set(up::CURRENT_IMPLEMENTATION, Value::Address(implementation))
-        .set(up::BASELINE_IMPLEMENTATION, Value::Address(implementation))
-        .set(up::COVERAGE_METHOD, up::METHOD)
-        .set(up::CHAIN_SOURCE, "offline-test")
-        .set(up::ARCHIVE_SOURCE, "offline-test")
-        .set(up::HEADERS_VERIFIED, 2u64)
-        .set(up::BLOOM_CANDIDATE_BLOCKS, 0u64)
-        .set(
-            up::CURRENT_IMPLEMENTATION_CODE_SHA256,
-            Value::B256([0x42; 32]),
-        )
-        .set(up::CURRENT_IMPLEMENTATION_CODE_BYTES, 1u64)
-        .set(up::FIRST_PARENT_HASH, Value::B256([1; 32]))
-        .set(up::LAST_BLOCK_HASH, Value::B256([2; 32]));
-    write("portal_upgrade.dbrec", scan.encode().unwrap());
+    requalification_fixture::stand_in_records(&root, REQUAL, &repo);
     requalification_fixture::fixture(&root, REQUAL, &policy, &repo);
     requalification_fixture::upgrade_to_v5(&root, REQUAL, &policy, &repo);
     let evidence = attempt1_v5_evidence(

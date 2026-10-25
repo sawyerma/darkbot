@@ -6,7 +6,11 @@
 //! g06a_dry_handoff exec-salt --candidate <id> --generation <n> --preflight <preflight.dbrec> -- <consumer...>
 //! g06a_dry_handoff prepare --run <prepare_dir> --profile SELF_A|SELF_B --frozen <frozen_dir>
 //! g06a_dry_handoff verify --prepare <prepare_dir> --frozen <frozen_dir> --out <new sign_dir>
+//! g06a_dry_handoff archive --sign bsc/.local/g06a_sign/<run> --to <private dir>
+//! g06a_dry_handoff restore --from <archive>/<run> --expect <SUMS_SHA256>
 //! ```
+//!
+//! `archive` / `restore` (BSC-006): see `g06a_dry_handoff/archive.rs`.
 //!
 //! `prepare` (D3) closes a PREPARE run: its R0 record must be coherent
 //! (shared R0 check, anchored at the pinned frozen preflight) and end at the
@@ -32,6 +36,9 @@
 //! wrong, missing or stale candidate STOPs (exit 2) without a fallback to A.
 //! Runs at the root of the main checkout.
 #![allow(dead_code, unused_imports)]
+// BSC-006: the private SIGN evidence archived and restored.
+#[path = "g06a_dry_handoff/archive.rs"]
+mod archive;
 #[path = "g07_mainnet_self_launch_buy/builder_submission.rs"]
 mod builder_submission;
 #[path = "g07_candidate/candidate.rs"]
@@ -433,7 +440,9 @@ fn main() {
         Some("exec-salt") => exec_salt(&args[1..]),
         Some("prepare") => prepare(&args[1..]),
         Some("verify") => verify(&args[1..]),
-        _ => Err("usage: g06a_dry_handoff selection | exec-salt | prepare | verify (see the source header)".into()),
+        Some("archive") => archive::archive(&args[1..]),
+        Some("restore") => archive::restore(&args[1..]),
+        _ => Err("usage: g06a_dry_handoff selection | exec-salt | prepare | verify | archive | restore (see the source header)".into()),
     };
     match result {
         Ok(code) => std::process::exit(code),

@@ -5,6 +5,9 @@
 //! signing consumers keep the (synthetic) keys, nothing prints it, and every
 //! wrong, stale or foreign input STOPs without running the consumer.
 
+#[path = "support/requalification.rs"]
+mod requalification_fixture;
+
 use darkbot_bsc_record::schema::{g06a::preflight as pf, g07_candidate::secret};
 use darkbot_bsc_record::{Draft, Value, decode};
 use std::os::unix::fs::PermissionsExt;
@@ -316,7 +319,12 @@ fn a_wrong_stale_or_foreign_candidate_consumer_or_preflight_stops_before_the_con
 
 #[test]
 fn the_handoff_source_never_reads_keys_rpc_or_writes_the_salt() {
-    let source = include_str!("../src/bin/g06a_dry_handoff.rs").replace("eprintln!", "");
+    let source = [
+        include_str!("../src/bin/g06a_dry_handoff.rs"),
+        include_str!("../src/bin/g06a_dry_handoff/archive.rs"),
+    ]
+    .concat()
+    .replace("eprintln!", "");
     for forbidden in [
         "rpc(",
         "run_current_preflight",
@@ -671,4 +679,424 @@ fn prepare_refuses_an_r0_record_not_closed_at_its_own_preflight_or_incoherent() 
     );
     assert!(String::from_utf8_lossy(&out.stderr).contains("pinned"));
     std::fs::remove_dir_all(&f.root).unwrap();
+}
+
+// BSC-006 (BSC_Bug_V2 P3-F5): the private SIGN evidence a v5 contract binds
+// survives the loss of its checkout only through a verified private archive,
+// restored bit-identical at exactly its bound path.
+
+const SIGN_RUN: &str = "g06a_sign_20261025T000000Z";
+
+/// The run's manifest as the harness writes it (`shasum -a 256`).
+fn sums(dir: &Path) {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .filter(|n| n != "SHA256SUMS")
+        .collect();
+    names.sort();
+    let text: String = names
+        .iter()
+        .map(|n| {
+            let digest = darkbot_bsc_record::sha256(&std::fs::read(dir.join(n)).unwrap());
+            format!("{}  ./{n}\n", darkbot_bsc_record::hex(&digest))
+        })
+        .collect();
+    std::fs::write(dir.join("SHA256SUMS"), text).unwrap();
+}
+
+/// The harness's permissions (umask 077): the run 0700, its files 0600.
+fn private(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if !std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+        {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+fn mode(path: &Path) -> u32 {
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+/// A repository root with a SELF_A SIGN run of stand-in records laid out as
+/// `--sign` writes it (builder policy and candidate inside the run), a view,
+/// a comparison, its manifest and the v5 proposal binding the run.
+fn sign_root(tag: &str) -> (PathBuf, String) {
+    use darkbot_bsc_execution::acceptance_contract::{
+        Authorization, WITNESS_SOURCE_RECORD, attempt1_v5, attempt1_v5_evidence,
+    };
+    use darkbot_bsc_execution::acceptance_guard::{V3_RELATIVE_PATH, V5_RELATIVE_PATH};
+    let repo = repo();
+    let root = std::fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("g06a-archive-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for dir in [".git", "bsc/engine"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    std::fs::write(root.join("bsc/engine/Cargo.toml"), "").unwrap();
+    std::fs::write(root.join("bsc/.gitignore"), "/.local/\n").unwrap();
+    let dir = format!("bsc/.local/g06a_sign/{SIGN_RUN}");
+    let policy = format!("{dir}/builder_policy.dbrec");
+    requalification_fixture::stand_in_records(&root, &dir, &repo);
+    for (from, to) in [
+        (
+            WITNESS_SOURCE_RECORD.to_string(),
+            WITNESS_SOURCE_RECORD.to_string(),
+        ),
+        (V3_RELATIVE_PATH.to_string(), V3_RELATIVE_PATH.to_string()),
+        (
+            format!("{FROZEN}/builder_policy.dbrec"),
+            format!("{FROZEN}/builder_policy.dbrec"),
+        ),
+        (format!("{FROZEN}/builder_policy.dbrec"), policy.clone()),
+    ] {
+        std::fs::create_dir_all(root.join(&to).parent().unwrap()).unwrap();
+        std::fs::copy(repo.join(from), root.join(to)).unwrap();
+    }
+    requalification_fixture::fixture(&root, &dir, &policy, &repo);
+    // A real quote record (the committed PREPARE run's) for the text stand-in.
+    std::fs::copy(
+        repo.join("bsc/native/evidence/g06a/g06a_prepare_20261023T211704Z/native_quote.dbrec"),
+        root.join(&dir).join("native_quote.dbrec"),
+    )
+    .unwrap();
+    requalification_fixture::refresh(&root, &dir, &policy);
+    requalification_fixture::upgrade_to_v5(&root, &dir, &policy, &repo);
+    let candidate = format!("{dir}/candidate.dbrec");
+    std::fs::copy(
+        root.join(requalification_fixture::CANDIDATE_RECORD),
+        root.join(&candidate),
+    )
+    .unwrap();
+    let evidence = attempt1_v5_evidence(&root, &dir, &policy, &candidate).unwrap();
+    let v5 = attempt1_v5(&evidence, Authorization::Proposed).unwrap();
+    std::fs::create_dir_all(root.join(V5_RELATIVE_PATH).parent().unwrap()).unwrap();
+    std::fs::write(root.join(V5_RELATIVE_PATH), v5).unwrap();
+    let run = root.join(&dir);
+    std::fs::write(
+        run.join("dry_result.view.txt"),
+        "derived view of dry_result.dbrec\n",
+    )
+    .unwrap();
+    std::fs::write(run.join("COMPARISON_dry_result.md"), "no differences\n").unwrap();
+    sums(&run);
+    private(&run);
+    (root, dir)
+}
+
+fn line<'a>(stdout: &'a str, key: &str) -> &'a str {
+    stdout
+        .lines()
+        .find_map(|l| l.strip_prefix(&format!("{key}=")))
+        .unwrap_or_else(|| panic!("{key} missing in {stdout}"))
+}
+
+#[test]
+fn a_sign_run_is_archived_privately_and_restored_bit_identical_only_at_its_bound_path() {
+    let (root, dir) = sign_root("roundtrip");
+    let run_dir = root.join(&dir);
+    let backup = root.with_extension("backup");
+    let _ = std::fs::remove_dir_all(&backup);
+    std::fs::create_dir_all(&backup).unwrap();
+    let run = |args: &[&str]| cmd(&root, HANDOFF, args, "/usr/bin:/bin");
+    let stderr = |o: &Output| String::from_utf8_lossy(&o.stderr).to_string();
+
+    // Never into the repository outside its ignored private area.
+    std::fs::create_dir_all(root.join("bsc/native")).unwrap();
+    let inside = root.join("bsc/native").display().to_string();
+    let out = run(&["archive", "--sign", &dir, "--to", &inside]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(stderr(&out).contains("repository"), "{}", stderr(&out));
+
+    let to = backup.display().to_string();
+    let out = run(&["archive", "--sign", &dir, "--to", &to]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let manifest = std::fs::read(run_dir.join("SHA256SUMS")).unwrap();
+    let anchor = darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(&manifest));
+    assert_eq!(line(&stdout, "SUMS_SHA256"), anchor);
+    let archived = backup.join(SIGN_RUN);
+    assert_eq!(mode(&archived), 0o700);
+    let names: Vec<_> = std::fs::read_dir(&run_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(std::fs::read_dir(&archived).unwrap().count(), names.len());
+    for name in &names {
+        assert_eq!(
+            std::fs::read(archived.join(name)).unwrap(),
+            std::fs::read(run_dir.join(name)).unwrap()
+        );
+        assert_eq!(mode(&archived.join(name)), 0o400, "{name:?}");
+    }
+    // An archive is never overwritten.
+    assert_eq!(
+        run(&["archive", "--sign", &dir, "--to", &to]).status.code(),
+        Some(2)
+    );
+
+    // A fresh checkout without the run; only the exact manifest restores it.
+    std::fs::remove_dir_all(root.join("bsc/.local")).unwrap();
+    let from = archived.display().to_string();
+    let out = run(&["restore", "--from", &from, "--expect", &"00".repeat(32)]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!run_dir.exists());
+    let out = run(&["restore", "--from", &from, "--expect", &anchor]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert_eq!(line(&stdout, "RESTORED"), dir);
+    assert!(
+        line(&stdout, "V5_REPRODUCED").starts_with("PROPOSAL "),
+        "{stdout}"
+    );
+    for private_dir in [
+        root.join("bsc/.local"),
+        root.join("bsc/.local/g06a_sign"),
+        run_dir.clone(),
+    ] {
+        assert_eq!(mode(&private_dir), 0o700);
+    }
+    for name in &names {
+        assert_eq!(
+            std::fs::read(run_dir.join(name)).unwrap(),
+            std::fs::read(archived.join(name)).unwrap()
+        );
+    }
+    let out = run(&["restore", "--from", &from, "--expect", &anchor]);
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(line(&stdout, "ALREADY_PRESENT_IDENTICAL"), dir);
+    assert!(line(&stdout, "V5_REPRODUCED").starts_with("PROPOSAL "));
+
+    // A consistent forgery (a bound record and the manifest rewritten
+    // together) does not reproduce v5: nothing stays at the bound path.
+    std::fs::remove_dir_all(&run_dir).unwrap();
+    let forged = backup.join("forged").join(SIGN_RUN);
+    std::fs::create_dir_all(&forged).unwrap();
+    for name in &names {
+        std::fs::copy(archived.join(name), forged.join(name)).unwrap();
+    }
+    private(&forged);
+    let sim = std::fs::read(forged.join("local_simulation.dbrec")).unwrap();
+    std::fs::write(
+        forged.join("local_simulation.dbrec"),
+        requalification_fixture::with(
+            &sim,
+            &darkbot_bsc_record::schema::g06a::local_simulation::NATIVE,
+            &[("buy_execution_gas", Value::U64(1))],
+        ),
+    )
+    .unwrap();
+    sums(&forged);
+    private(&forged);
+    let forged_anchor = darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(
+        &std::fs::read(forged.join("SHA256SUMS")).unwrap(),
+    ));
+    let out = run(&[
+        "restore",
+        "--from",
+        &forged.display().to_string(),
+        "--expect",
+        &forged_anchor,
+    ]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(stderr(&out).contains("v5"), "{}", stderr(&out));
+    assert!(!run_dir.exists());
+    assert!(
+        std::fs::read_dir(run_dir.parent().unwrap())
+            .unwrap()
+            .any(|e| {
+                e.unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&format!("{SIGN_RUN}.unbound-"))
+            })
+    );
+
+    // An archive that lost its access protection is refused.
+    std::fs::set_permissions(&archived, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = run(&["restore", "--from", &from, "--expect", &anchor]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("private"), "{}", stderr(&out));
+    assert!(!run_dir.exists());
+}
+
+#[test]
+fn archive_refuses_unlisted_changed_linked_or_open_files_raw_bytes_wallet_keys_and_the_b_salt() {
+    use darkbot_bsc_record::schema::g06a::local_simulation as ls;
+    let f = fixture("archive");
+    let dir = format!("bsc/.local/g06a_sign/{SIGN_RUN}");
+    let run_dir = f.root.join(&dir);
+    let backup = f.root.with_extension("backup");
+    let salt_hex = f.salt.trim_start_matches("0x").to_ascii_lowercase();
+    // A SIGN run of the selected SELF_B candidate: its public record, a
+    // simulation and a text view; then one deviation.
+    let archive = |edit: &dyn Fn(&Path)| -> Output {
+        let _ = std::fs::remove_dir_all(&run_dir);
+        let _ = std::fs::remove_dir_all(&backup);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::copy(
+            f.root.join("bsc/.local/g07_candidates/b.candidate.dbrec"),
+            run_dir.join("candidate.dbrec"),
+        )
+        .unwrap();
+        std::fs::copy(
+            repo().join(FROZEN).join("local_simulation.dbrec"),
+            run_dir.join("local_simulation.dbrec"),
+        )
+        .unwrap();
+        std::fs::write(
+            run_dir.join("local_simulation.out.txt"),
+            "LOCAL_SIMULATION=WRITTEN\n",
+        )
+        .unwrap();
+        sums(&run_dir);
+        private(&run_dir);
+        edit(&run_dir);
+        cmd(
+            &f.root,
+            HANDOFF,
+            &[
+                "archive",
+                "--sign",
+                &dir,
+                "--to",
+                &backup.display().to_string(),
+            ],
+            "/usr/bin:/bin",
+        )
+    };
+    let ok = archive(&|_| {});
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let write_resummed = |d: &Path, name: &str, bytes: &[u8]| {
+        std::fs::write(d.join(name), bytes).unwrap();
+        sums(d);
+        private(d);
+    };
+    let key1 = format!("0x{}1", "0".repeat(63));
+    let cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+        (
+            "not in SHA256SUMS",
+            Box::new(|d| std::fs::write(d.join("extra.txt"), "x").unwrap()),
+        ),
+        (
+            "SHA-256",
+            Box::new(|d| std::fs::write(d.join("local_simulation.out.txt"), "changed").unwrap()),
+        ),
+        (
+            "regular file",
+            Box::new(|d| {
+                std::fs::remove_file(d.join("local_simulation.out.txt")).unwrap();
+                std::os::unix::fs::symlink("candidate.dbrec", d.join("local_simulation.out.txt"))
+                    .unwrap();
+            }),
+        ),
+        (
+            "private",
+            Box::new(|d| {
+                std::fs::set_permissions(
+                    d.join("candidate.dbrec"),
+                    std::fs::Permissions::from_mode(0o644),
+                )
+                .unwrap()
+            }),
+        ),
+        (
+            "private",
+            Box::new(|d| {
+                std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o750)).unwrap()
+            }),
+        ),
+        (
+            "raw",
+            Box::new(|d| {
+                write_resummed(
+                    d,
+                    "local_simulation.out.txt",
+                    format!("RAW=0x{}\n", "f8".repeat(150)).as_bytes(),
+                )
+            }),
+        ),
+        (
+            "salt",
+            Box::new(|d| {
+                write_resummed(
+                    d,
+                    "local_simulation.out.txt",
+                    format!("X={}\n", f.salt.to_ascii_uppercase().replace("0X", "0x")).as_bytes(),
+                )
+            }),
+        ),
+        (
+            "salt",
+            Box::new(|d| {
+                let raw = darkbot_bsc_record::schema::g06a::preflight::SCHEMA
+                    .name
+                    .as_bytes()
+                    .to_vec();
+                let mut bytes = raw;
+                bytes.extend_from_slice(&hex_bytes(&salt_hex));
+                write_resummed(d, "local_simulation.out.txt", &bytes)
+            }),
+        ),
+        (
+            "salt record",
+            Box::new(|d| {
+                let salt =
+                    std::fs::read(f.root.join("bsc/.local/g07_candidates/b.salt.dbrec")).unwrap();
+                write_resummed(d, "kept.dbrec", &salt)
+            }),
+        ),
+        (
+            "private key",
+            Box::new(|d| {
+                let sim = std::fs::read(d.join("local_simulation.dbrec")).unwrap();
+                let buyer = Value::Address(
+                    hex_bytes("7e5f4552091a69125d5dfcb7b8c2659029395bdf")
+                        .try_into()
+                        .unwrap(),
+                );
+                std::fs::write(
+                    d.join("local_simulation.dbrec"),
+                    requalification_fixture::with(&sim, &ls::SCHEMA, &[("buyer", buyer)]),
+                )
+                .unwrap();
+                write_resummed(
+                    d,
+                    "local_simulation.out.txt",
+                    format!("K={key1}\n").as_bytes(),
+                )
+            }),
+        ),
+    ];
+    for (needle, edit) in &cases {
+        let out = archive(edit.as_ref());
+        let err = String::from_utf8_lossy(&out.stderr).to_ascii_lowercase();
+        assert_eq!(out.status.code(), Some(2), "{needle}: {err}");
+        assert!(
+            err.contains(&needle.to_ascii_lowercase()),
+            "{needle}: {err}"
+        );
+        assert!(!err.contains(&salt_hex), "the salt is never printed");
+        assert!(!backup.join(SIGN_RUN).exists(), "{needle}");
+    }
+}
+
+fn hex_bytes(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+        .collect()
 }

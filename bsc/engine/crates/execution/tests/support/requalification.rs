@@ -26,6 +26,101 @@ pub const B_TOKEN: [u8; 20] = [
 ];
 pub const B_COMMITMENT: [u8; 32] = [0x5c; 32];
 
+/// A native record of `native` with a frozen import record's fields (same
+/// tags), provenance instead of the import: offline stand-ins for a
+/// requalification DRY that exercise the wiring only, never qualify.
+pub fn native_copy(
+    repo: &Path,
+    import: &str,
+    schema: &'static Schema,
+    native: &'static Schema,
+) -> Vec<u8> {
+    let bytes = std::fs::read(repo.join(FROZEN_DIR).join(import)).unwrap();
+    let record = decode(schema, &bytes).unwrap();
+    let mut d = Draft::new(native);
+    for (tag, value) in record.fields() {
+        if *tag > 2 {
+            d.push(*tag, value.clone());
+        }
+    }
+    if native.field(PROVENANCE_TOOL).is_some() {
+        d.set(PROVENANCE_TOOL, "offline-test")
+            .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+    }
+    d.encode().unwrap()
+}
+
+/// The stand-in records of a requalification run in `root/dir`: the frozen
+/// DRY, preflight, simulation and cross-check as native records and an R0
+/// record from the frozen implementation to itself.
+pub fn stand_in_records(root: &Path, dir: &str, repo: &Path) {
+    use darkbot_bsc_record::schema::g06a::{
+        dry, economics, local_simulation, portal_upgrade as up, preflight,
+    };
+    std::fs::create_dir_all(root.join(dir)).unwrap();
+    let write =
+        |name: &str, bytes: Vec<u8>| std::fs::write(root.join(dir).join(name), bytes).unwrap();
+    write(
+        "dry_result.dbrec",
+        native_copy(repo, "dry_result.dbrec", &dry::SCHEMA, &dry::NATIVE),
+    );
+    write(
+        "preflight.dbrec",
+        native_copy(
+            repo,
+            "preflight.dbrec",
+            &preflight::SCHEMA,
+            &preflight::SCHEMA,
+        ),
+    );
+    write(
+        "local_simulation.dbrec",
+        native_copy(
+            repo,
+            "local_simulation.dbrec",
+            &local_simulation::SCHEMA,
+            &local_simulation::NATIVE,
+        ),
+    );
+    write(
+        "economics_crosscheck.dbrec",
+        native_copy(
+            repo,
+            "economics_crosscheck.dbrec",
+            &economics::SCHEMA,
+            &economics::NATIVE,
+        ),
+    );
+    let implementation = decode(
+        &preflight::SCHEMA,
+        &std::fs::read(root.join(dir).join("preflight.dbrec")).unwrap(),
+    )
+    .unwrap()
+    .address(preflight::PORTAL_IMPLEMENTATION)
+    .unwrap();
+    let mut scan = Draft::new(&up::SCHEMA);
+    scan.set(PROVENANCE_TOOL, "offline-test")
+        .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+        .set(up::PROXY, Value::Address([0xe2; 20]))
+        .set(up::SCANNED_FROM_BLOCK, 1u64)
+        .set(up::SCANNED_TO_BLOCK, 2u64)
+        .set(up::CURRENT_IMPLEMENTATION, Value::Address(implementation))
+        .set(up::BASELINE_IMPLEMENTATION, Value::Address(implementation))
+        .set(up::COVERAGE_METHOD, up::METHOD)
+        .set(up::CHAIN_SOURCE, "offline-test")
+        .set(up::ARCHIVE_SOURCE, "offline-test")
+        .set(up::HEADERS_VERIFIED, 2u64)
+        .set(up::BLOOM_CANDIDATE_BLOCKS, 0u64)
+        .set(
+            up::CURRENT_IMPLEMENTATION_CODE_SHA256,
+            Value::B256([0x42; 32]),
+        )
+        .set(up::CURRENT_IMPLEMENTATION_CODE_BYTES, 1u64)
+        .set(up::FIRST_PARENT_HASH, Value::B256([1; 32]))
+        .set(up::LAST_BLOCK_HASH, Value::B256([2; 32]));
+    write("portal_upgrade.dbrec", scan.encode().unwrap());
+}
+
 pub fn fixture(root: &Path, dir: &str, policy: &str, repo: &Path) {
     std::fs::copy(repo.join(DRY_RECORD), root.join(DRY_RECORD)).unwrap();
     std::fs::write(root.join(dir).join("native_quote.dbrec"), b"offline-test quote stand-in; wiring only").unwrap();
