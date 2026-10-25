@@ -56,6 +56,12 @@ impl ReverseIndex {
     /// Setzt die Bank-Menge eines Accounts (bei jedem Account-Update aufrufen;
     /// alte Zuordnungen werden entfernt).
     pub fn set_account_banks(&mut self, account: Pubkey, banks: &[Pubkey]) {
+        // V2-14 P5c-05: an unchanged bank set (the common account update) changes nothing.
+        if self.account_to_banks.get(&account).is_some_and(|old| {
+            banks.iter().all(|b| old.contains(b)) && old.iter().all(|b| banks.contains(b))
+        }) {
+            return;
+        }
         if let Some(old) = self.account_to_banks.remove(&account) {
             for b in old {
                 if let Some(set) = self.bank_to_accounts.get_mut(&b) {
@@ -290,6 +296,10 @@ mod tests {
         ix.set_account_banks(a1, &[b2]);
         assert!(!ix.accounts_for_bank(&b1).any(|x| x == &a1));
         assert!(ix.accounts_for_bank(&b2).any(|x| x == &a1));
+        // V2-14 P5c-05: the same set again (reordered, repeated) keeps every mapping.
+        ix.set_account_banks(a2, &[b2, b1, b2]);
+        assert!(ix.bank_has_account(&b1, &a2) && ix.bank_has_account(&b2, &a2));
+        assert_eq!(ix.banks_for_account(&a2).count(), 2);
         ix.remove_account(&a2);
         assert_eq!(ix.accounts_for_bank(&b1).count(), 0);
         // Bank wechselt Oracle: alte Zuordnung weg

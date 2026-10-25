@@ -35,6 +35,7 @@ pub fn status_of_commitment(commitment: &str) -> Option<SlotStatus> {
 use darkbot_common::error::HaltReason;
 use darkbot_common::lifecycle::RunState;
 use solana_sdk::pubkey::Pubkey;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,8 +201,7 @@ impl StateCore {
         self.removed_floor
     }
     fn next_epoch(&mut self) -> u64 {
-        self.state_epoch = self.state_epoch.saturating_add(1);
-        self.state_epoch
+        bump_epoch(&mut self.state_epoch)
     }
     fn note_removed(&mut self, key: Pubkey) {
         let epoch = self.next_epoch();
@@ -240,8 +240,11 @@ impl StateCore {
     pub fn invalidate_slots(&mut self, orphaned: &[u64]) {
         let before = self.accounts.len();
         let mut removed: Vec<Pubkey> = Vec::new();
+        // V2-14 P5a-04: one sorted copy, a binary search per account (not a scan per account).
+        let mut orphaned = orphaned.to_vec();
+        orphaned.sort_unstable();
         self.accounts.retain(|k, r| {
-            let keep = !orphaned.contains(&r.slot);
+            let keep = orphaned.binary_search(&r.slot).is_err();
             if !keep {
                 removed.push(*k);
             }
@@ -386,7 +389,10 @@ impl StateCore {
                 return ApplyOutcome::BelowRoot;
             }
         }
-        if let Some(existing) = self.accounts.get(&a.pubkey) {
+        // V2-14 P5a-04: one hash lookup for the order check and the write.
+        let entry = self.accounts.entry(a.pubkey);
+        if let Entry::Occupied(e) = &entry {
+            let existing = e.get();
             if a.slot < existing.slot {
                 self.counters.stale_slot += 1;
                 return ApplyOutcome::StaleSlot;
@@ -411,21 +417,27 @@ impl StateCore {
                 }
             }
         }
-        let last_changed_epoch = self.written();
-        self.accounts.insert(
-            a.pubkey,
-            AccountRecord {
-                owner: a.owner,
-                lamports: a.lamports,
-                data: a.data,
-                slot: a.slot,
-                write_version: a.write_version,
-                status,
-                source: a.source,
-                t_rx_ns: a.t_rx_ns,
-                last_changed_epoch,
-            },
-        );
+        // A record is (re)written: fresh epoch (as `written`).
+        let last_changed_epoch = bump_epoch(&mut self.state_epoch);
+        let record = AccountRecord {
+            owner: a.owner,
+            lamports: a.lamports,
+            data: a.data,
+            slot: a.slot,
+            write_version: a.write_version,
+            status,
+            source: a.source,
+            t_rx_ns: a.t_rx_ns,
+            last_changed_epoch,
+        };
+        match entry {
+            Entry::Occupied(mut e) => {
+                e.insert(record);
+            }
+            Entry::Vacant(e) => {
+                e.insert(record);
+            }
+        }
         self.counters.applied += 1;
         ApplyOutcome::Applied
     }
@@ -814,6 +826,12 @@ mod commitment_tests {
         }));
         assert_eq!(st.get(&key).unwrap().status, STATE_SLOT_STATUS);
     }
+}
+
+/// The state epoch's next value (every write and removal takes one).
+fn bump_epoch(epoch: &mut u64) -> u64 {
+    *epoch = epoch.saturating_add(1);
+    *epoch
 }
 
 #[cfg(test)]
