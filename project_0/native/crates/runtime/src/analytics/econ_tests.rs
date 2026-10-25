@@ -3246,6 +3246,7 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
         min_profit,
         unbounded,
         Duration::ZERO,
+        true,
     )
 }
 
@@ -3257,13 +3258,14 @@ fn counting_submitter() -> CountingSubmitter {
 }
 
 /// `evaluate_once` with its own adapter and freshness; `rx_age` passes between T_rx and the
-/// evaluation.
+/// evaluation; without `blockhash` the blockhash cache is empty.
 fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: SubmissionAdapter>(
     builder: &B,
     submitter: &S,
     min_profit: i128,
     freshness: darkbot_project0::execution::Freshness,
     rx_age: Duration,
+    blockhash: bool,
 ) -> OpportunityRecord {
     use crate::execution::pipeline::{Mode, NetworkBudget, Pipeline};
     use darkbot_project0::{
@@ -3277,11 +3279,13 @@ fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
     let prereq_program = [Pubkey::new_from_array([8; 32])];
     let clock = Clock::new();
     let bh = BlockhashCache::new();
-    bh.set(CachedBlockhash {
-        hash: solana_sdk::hash::Hash::new_unique(),
-        last_valid_block_height: 100,
-        refreshed_ns: clock.now_ns(),
-    });
+    if blockhash {
+        bh.set(CachedBlockhash {
+            hash: solana_sdk::hash::Hash::new_unique(),
+            last_valid_block_height: 100,
+            refreshed_ns: clock.now_ns(),
+        });
+    }
     let zero = Limits {
         max_total_capital: 0,
         max_outstanding_inventory: 0,
@@ -3383,7 +3387,7 @@ fn v2_04_t_detect_is_marked_after_the_fee_quote_and_the_economics() {
         inner: counting_submitter(),
         delay,
     };
-    let r = evaluate_shadow(&TestBuilder, &slow, 0, unbounded, Duration::ZERO);
+    let r = evaluate_shadow(&TestBuilder, &slow, 0, unbounded, Duration::ZERO, true);
     assert_eq!(r.decision, Decision::ShadowReady, "{:?}", r.reason);
     let t = &r.timing;
     let (rx, detect, ready) = (
@@ -3397,6 +3401,58 @@ fn v2_04_t_detect_is_marked_after_the_fee_quote_and_the_economics() {
     let below = evaluate_once(&TestBuilder, i128::MAX);
     assert_eq!(below.loss, Some(LossReason::ThresholdTooHigh));
     assert_eq!((below.timing.t_detect_ns, below.detect_slot), (None, None));
+}
+
+/// V2-09 (P1-01): a blockhash already stale before planning is counted
+/// (`blockhash_stale_before_planning`); the late check after planning stays the verdict — the
+/// planning still runs once and the loss is `Build` "blockhash stale" (loss priority unchanged
+/// until decided).
+#[test]
+fn v2_09_stale_blockhash_before_planning_is_counted_and_the_late_check_decides() {
+    use crate::execution::pipeline::ReceivershipBuilder;
+    use darkbot_common::mt0::{Counter, MT0};
+    struct Counted(std::cell::Cell<u32>);
+    impl ReceivershipBuilder for Counted {
+        fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+            TestBuilder.native_cost_usd_micro(n)
+        }
+        fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+            test_table()
+        }
+        fn plans(
+            &self,
+            a: &Pubkey,
+            n: u64,
+            s: u64,
+            d: std::time::Instant,
+        ) -> Result<
+            Vec<crate::execution::pipeline::ReceivershipPlan>,
+            crate::execution::pipeline::PlanError,
+        > {
+            self.0.set(self.0.get() + 1);
+            TestBuilder.plans(a, n, s, d)
+        }
+    }
+    let unbounded = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: u64::MAX,
+    };
+    let builder = Counted(std::cell::Cell::new(0));
+    let before = MT0.get(Counter::BlockhashStaleBeforePlanning);
+    let r = evaluate_shadow(
+        &builder,
+        &counting_submitter(),
+        0,
+        unbounded,
+        Duration::ZERO,
+        false,
+    );
+    assert_eq!(
+        (r.loss, r.reason.as_deref()),
+        (Some(LossReason::Build), Some("blockhash stale"))
+    );
+    assert_eq!(builder.0.get(), 1, "planning unchanged");
+    assert!(MT0.get(Counter::BlockhashStaleBeforePlanning) > before);
 }
 
 /// V2-04: the execution deadline counts from T_rx, not from the later T_detect mark: 300 ms
@@ -3414,6 +3470,7 @@ fn v2_04_execution_deadline_counts_from_t_rx() {
         0,
         deadline,
         Duration::from_millis(300),
+        true,
     );
     assert_eq!(
         (late.loss, late.reason.as_deref()),
@@ -3425,6 +3482,7 @@ fn v2_04_execution_deadline_counts_from_t_rx() {
         0,
         deadline,
         Duration::ZERO,
+        true,
     );
     assert_eq!(fresh.decision, Decision::ShadowReady, "{:?}", fresh.reason);
 }

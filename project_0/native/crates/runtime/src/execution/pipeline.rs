@@ -547,6 +547,19 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("opportunity stale before planning".into());
             return rec.with_timeline(&tl);
         }
+        // V2-09 (P1-01): a blockhash already stale here makes the planning budget below a loss;
+        // counted for the evidence. The late check after planning stays the verdict — moving it
+        // ahead changes the loss priority (RpcBudget/RpcDeadline/Routing/Plan before Build).
+        if self
+            .blockhash
+            .fresh(self.clock.now_ns(), self.blockhash_max_age_ns)
+            .is_none()
+        {
+            darkbot_common::mt0::MT0.add(
+                darkbot_common::mt0::Counter::BlockhashStaleBeforePlanning,
+                1,
+            );
+        }
         // B6: routes, fee quotes and simulation only within the owner's network budget.
         if self.network.remaining == 0 {
             rec.loss = Some(LossReason::RpcBudget);

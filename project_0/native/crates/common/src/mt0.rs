@@ -315,8 +315,11 @@ pub enum Counter {
     FeeParityMatch,
     FeeParityMismatch,
     FeeParityUnsupported,
+    /// V2-09 (P1-01): candidates whose blockhash was already stale before planning spent its
+    /// budget (diagnostic; the late blockhash check stays the verdict).
+    BlockhashStaleBeforePlanning,
 }
-const COUNTERS: usize = 10;
+const COUNTERS: usize = 11;
 const COUNTER_LIST: [(Counter, &str); COUNTERS] = [
     (Counter::PipelineEvaluations, "pipeline_evaluations"),
     (Counter::RoutedEvaluations, "routed_evaluations"),
@@ -334,6 +337,10 @@ const COUNTER_LIST: [(Counter, &str); COUNTERS] = [
     (Counter::FeeParityMatch, "fee_parity_match"),
     (Counter::FeeParityMismatch, "fee_parity_mismatch"),
     (Counter::FeeParityUnsupported, "fee_parity_unsupported"),
+    (
+        Counter::BlockhashStaleBeforePlanning,
+        "blockhash_stale_before_planning",
+    ),
 ];
 
 /// Latency at or above this is consistent with at least one hidden 500 ms 429-retry sleep of
