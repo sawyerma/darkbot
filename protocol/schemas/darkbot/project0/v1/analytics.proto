@@ -20,6 +20,8 @@ message AnalyticsJobs {
   repeated AnalyticsJob jobs = 4;
   // Why the job store was not readable (jobs is then empty); empty when read.
   string store_error = 5;
+  // Why the runner state is unknown (runner_busy is then not a fact); empty when known.
+  string runner_error = 6;
 }
 
 // One run directory under the project's run roots.

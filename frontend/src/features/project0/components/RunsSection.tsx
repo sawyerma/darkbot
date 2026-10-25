@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import { analyticsCommand, useAnalyticsControl, verifyCommand } from "@/core/realtime/analyticsControl";
-import type { AnalyticsView } from "../model/analytics";
+import { jobCommandBlock, type AnalyticsView } from "../model/analytics";
 import { DetailRow, Notice, Section } from "./PanelPrimitives";
 
 /**
@@ -19,7 +19,7 @@ export function RunsSection({ analytics, topicStatus }: { analytics: AnalyticsVi
   const verifiable = runs.filter(r => r.layout === "NATIVE_V2" && r.captureComplete && !r.running);
   const [wanted, setWanted] = useState("");
   const run = verifiable.find(r => r.runId === wanted) ?? verifiable[0] ?? null;
-  const blocked = busy ? "Command in progress" : topicStatus === "LIVE" && analytics?.runnerBusy ? "A job is running (one at a time)" : "";
+  const blocked = jobCommandBlock(analytics, topicStatus, busy);
   const start = () => {
     const typed = verifyCommand({ runId: run?.runId ?? "", mode, resume: mode === "strict-cache", maxSeconds: seconds, maxRamMib: mib });
     if ("problem" in typed) { setMsg(typed.problem); return; }
@@ -47,6 +47,7 @@ export function RunsSection({ analytics, topicStatus }: { analytics: AnalyticsVi
         <label>Budget · RAM MiB<input value={mib} placeholder="required" onChange={e => setMib(e.target.value)}/></label>
       </div>
       <div className="p0-actions"><button className="p0-primary" disabled={blocked !== ""} title={blocked || undefined} onClick={start}>Verify, report & qualify</button></div>
+      {blocked ? <p className="p0-quiet">{blocked}</p> : null}
       <p className="p0-note">Online strict verification reads the chain with the operator's provider evidence: p0ctl job start post-capture --chain-verify strict --provider-evidence FILE (terminal).</p>
     </> : null}
     {msg ? <Notice>{msg}</Notice> : null}

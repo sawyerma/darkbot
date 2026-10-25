@@ -85,12 +85,13 @@ impl RunPaths {
 /// projection read the same ones).
 pub const RUN_ROOTS: [&str; 4] = ["data/runs", "data/econ4h", "data/market", "data/shadow"];
 
-/// A run directory given as a path, or the one run named `run_id` under the roots of `project`
-/// (`None`: missing or ambiguous).
+/// A run directory given as a path (it contains `/`), or the one run named `run_id` under the
+/// roots of `project` (`None`: missing or ambiguous). A bare name is never resolved against the
+/// working directory.
 pub fn find_run(project: &Path, run_id: &str) -> Option<PathBuf> {
-    let direct = Path::new(run_id);
-    if direct.is_dir() {
-        return Some(direct.to_path_buf());
+    if run_id.contains('/') {
+        let direct = Path::new(run_id);
+        return direct.is_dir().then(|| direct.to_path_buf());
     }
     let found: Vec<_> = RUN_ROOTS
         .iter()
@@ -146,6 +147,27 @@ pub fn native_layout(run: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    /// Review M5: a bare run id is resolved under the project's run roots only, never against
+    /// the working directory (a directory `src` exists in the test's working directory).
+    #[test]
+    fn a_bare_run_id_never_resolves_against_the_working_directory() {
+        let project = std::env::temp_dir().join(format!("p0_runs_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(project.join("data/econ4h/r1")).unwrap();
+        assert!(std::path::Path::new("src").is_dir());
+        assert_eq!(super::find_run(&project, "src"), None);
+        assert_eq!(
+            super::find_run(&project, "r1"),
+            Some(project.join("data/econ4h/r1"))
+        );
+        let direct = project.join("data/econ4h/r1").display().to_string();
+        assert_eq!(
+            super::find_run(&project, &direct),
+            Some(direct.clone().into())
+        );
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
     use super::*;
 
     #[test]

@@ -74,7 +74,7 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
 /// A run id under the project's run roots: never a path.
 fn run_id_ok(s: &str) -> bool {
     (1..=128).contains(&s.len())
-        && !s.starts_with('.')
+        && !s.starts_with(['.', '-'])
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
@@ -144,7 +144,9 @@ fn point_args(c: &crate::proto::project0::v1::BacktestJobCommand) -> Option<Vec<
 }
 /// A job id of the controller (`[A-Za-z0-9-]`, at most 64).
 fn valid_job_id(s: &str) -> bool {
-    (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    (1..=64).contains(&s.len())
+        && !s.starts_with('-')
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 /// B03/U-9: the `darkbotctl p0 job …` arguments of an analytics job action — the typed
 /// parameters mapped 1:1 onto the options of `p0ctl job`, which validates them again. A start's
@@ -2188,6 +2190,19 @@ mod tests {
                     .encode_to_vec(),
                 ),
             ),
+            (
+                8,
+                request(
+                    8,
+                    BACKTEST_START,
+                    "",
+                    bad(BacktestJobCommand {
+                        run_id: "--project".into(),
+                        ..point.clone()
+                    }),
+                ),
+            ),
+            (9, request(9, JOB_CANCEL, "-job", vec![])),
         ] {
             // Fresh ids: none of these may reuse a receipt of the dispatched commands above.
             let mut req = req;

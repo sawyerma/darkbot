@@ -218,6 +218,7 @@ pub fn analytics_jobs(s: &AnalyticsSnapshot) -> AnalyticsJobs {
     AnalyticsJobs {
         published_unix_ms: s.at_unix_ms,
         runner_busy: s.runner_busy,
+        runner_error: s.runner_error.clone().unwrap_or_default(),
         runs: s.runs.iter().map(run).collect(),
         jobs: s.jobs.iter().map(job).collect(),
         store_error: s.error.clone().unwrap_or_default(),

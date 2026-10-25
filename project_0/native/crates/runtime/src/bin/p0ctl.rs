@@ -937,7 +937,9 @@ fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {
 fn foreground_job(project: &Path, kind: &str, args: &[String]) -> Result<bool, String> {
     let request = jobs::request_of(project, kind, args)?;
     jobs::submit(project, &request)?;
-    let (outcome, executed) = jobs::run(project, &request.job_id, None)?;
+    // `job cancel` (SIGTERM) ends a foreground job as CANCELLED, as it ends a worker.
+    control::install_stop_handler()?;
+    let (outcome, executed) = jobs::run(project, &request.job_id, Some(control::stop_requested))?;
     match executed {
         Some(jobs::Executed::Backtest(b)) => print!("{}", backtest::render_backtest(&b)),
         Some(jobs::Executed::Optimize {

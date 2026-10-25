@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import analyticsHex from "../../../../../protocol/golden/project0/analytics_jobs.hex?raw";
 import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
-import { jobReadableRuns } from "../model/analytics";
+import { jobCommandBlock, jobReadableRuns } from "../model/analytics";
 
 const bytes = (hex: string) => Uint8Array.from(hex.trim().match(/../g)!.map((h) => parseInt(h, 16)));
 
@@ -38,6 +38,16 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
     expect(jobReadableRuns(view).map((r) => r.runId)).toEqual(["run-a", "run-b"]);
     expect(jobReadableRuns({ ...view, runs: view.runs.map((r) => ({ ...r, layout: "HISTORICAL" })) })).toEqual([]);
     expect(jobReadableRuns(null)).toEqual([]);
+  });
+
+  it("issues job commands on a LIVE list with a known idle runner only (review H1, M4)", () => {
+    const idle = { ...view, runnerBusy: false };
+    expect(jobCommandBlock(idle, "LIVE", false)).toBe("");
+    expect(jobCommandBlock(idle, "DETACHED", false)).toMatch(/not current \(DETACHED\)/);
+    expect(jobCommandBlock(null, "LIVE", false)).not.toBe("");
+    expect(jobCommandBlock({ ...idle, runnerError: "JOB_STORE_IO: denied" }, "LIVE", false)).toMatch(/unknown/);
+    expect(jobCommandBlock(view, "LIVE", false)).toMatch(/running/);
+    expect(jobCommandBlock(idle, "LIVE", true)).toMatch(/in progress/);
   });
 
   it("rejects malformed wire bytes", () => {

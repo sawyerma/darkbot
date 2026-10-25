@@ -72,6 +72,8 @@ export interface AnalyticsJobView {
 export interface AnalyticsView {
   publishedUnixMs: bigint;
   runnerBusy: boolean;
+  /** Why the runner state is unknown; then runnerBusy is no fact. */
+  runnerError: string;
   runs: readonly AnalyticsRunView[];
   jobs: readonly AnalyticsJobView[];
   storeError: string;
@@ -79,6 +81,18 @@ export interface AnalyticsView {
 
 /** Job states with an outcome (never run again). */
 export const TERMINAL_JOB_STATES: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+
+/**
+ * Why a job command must not be issued now (empty: it may). Only a LIVE projection with a known
+ * runner state is current; a stale list could name runs and jobs that are no longer so.
+ */
+export function jobCommandBlock(view: AnalyticsView | null, topicStatus: string, busy: boolean): string {
+  if (busy) return "Command in progress";
+  if (topicStatus !== "LIVE" || !view) return `Job status not current (${topicStatus}); no command is sent on a stale list`;
+  if (view.runnerError) return `Runner state unknown: ${view.runnerError}`;
+  if (view.runnerBusy) return "An analytics job is running (one at a time)";
+  return "";
+}
 
 /** Runs a backtest or optimization can read: native layout V2 with a recorded capture end. */
 export function jobReadableRuns(view: AnalyticsView | null): readonly AnalyticsRunView[] {

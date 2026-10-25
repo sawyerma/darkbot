@@ -1102,6 +1102,7 @@ mod contract_tests {
         AnalyticsSnapshot {
             at_unix_ms: 1_760_000_003_000,
             runner_busy: true,
+            runner_error: None,
             runs: vec![
                 run("run-a", None),
                 run(

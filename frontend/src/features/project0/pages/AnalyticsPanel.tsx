@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorDraft, Project0Tab } from "../model/contracts";
-import { jobReadableRuns, type AnalyticsJobView, type AnalyticsView, type JobResultView } from "../model/analytics";
+import { jobCommandBlock, jobReadableRuns, type AnalyticsJobView, type AnalyticsView, type JobResultView } from "../model/analytics";
 import { usdMicroDisplay } from "../model/format";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
-import { analyticsCommand, backtestCommand, optimizeCommand, useAnalyticsControl, type GridInput, type PointInput } from "@/core/realtime/analyticsControl";
+import { analyticsCommand, backtestCommand, optimizeCommand, recheck, useAnalyticsControl, type GridInput, type PointInput } from "@/core/realtime/analyticsControl";
 
 type AnalTab = "report" | "backtest" | "optimize";
 const tabs: ReadonlyArray<{ value: AnalTab; label: string }> = [
@@ -23,10 +23,10 @@ function resultLine(r: JobResultView | null): string {
   return ` · ${r.points} points · ${chosen} · holdout ${r.chosenObjectiveBps ?? "—"} bps vs baseline ${r.baselineObjectiveBps ?? "—"} bps${r.profile ? ` · Shadow candidate ${r.profile}` : ""}`;
 }
 
-function JobRow({ job, busy }: { job: AnalyticsJobView; busy: boolean }) {
+function JobRow({ job, cancelBlock }: { job: AnalyticsJobView; cancelBlock: string }) {
   return <><DetailRow title={`${job.kind} · ${job.run} · ${job.jobId.slice(0, 8)}`}
     value={`${job.state}${job.code ? ` · ${job.code}` : ""}${resultLine(job.result)}`}/>
-    {job.state === "RUNNING" ? <div className="p0-actions"><button className="p0-secondary" disabled={busy}
+    {job.state === "RUNNING" && job.kind !== "POST_CAPTURE" ? <div className="p0-actions"><button className="p0-secondary" disabled={cancelBlock !== ""} title={cancelBlock || undefined}
       onClick={() => void analyticsCommand("project0.analytics.job.cancel", { resourceId: job.jobId })}>Cancel job</button></div> : null}</>;
 }
 
@@ -59,7 +59,9 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
   const backtest = latest?.result?.kind === "BACKTEST" ? latest.result : null;
   const live = topicStatus === "LIVE";
   const input: PointInput = { ...point, runId: run?.runId ?? "" };
-  const blocked = busy ? "Command in progress" : live && analytics?.runnerBusy ? "An analytics job is running (one at a time)" : "";
+  const blocked = jobCommandBlock(analytics, topicStatus, busy);
+  // Cancel needs a current list only (a running job is what it cancels).
+  const cancelBlock = busy ? "Command in progress" : live ? "" : `Job status not current (${topicStatus})`;
   const start = (kind: "backtest" | "optimize") => {
     const typed = kind === "backtest" ? backtestCommand(input) : optimizeCommand(input, grid);
     if ("problem" in typed) { setMsg(typed.problem); return; }
@@ -98,9 +100,11 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
           createDraft({ capitalUsd: capital, minimumNetUsd: minimumNet }); goto("liquidator"); }}>Add as bot draft →</button></div>
       <p className="p0-note">Only typed input values are copied to a draft; a saved optimizer profile is an offline Shadow candidate, never a LIVE setting.</p></> : null}
     {msg ? <Notice>{msg}</Notice> : null}
-    {receipt ? <Notice><span data-testid="p0-analytics-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""} · {receipt.action.endsWith(".start") ? "job" : "request"} {receipt.id.slice(0, 8)}</span></Notice> : null}</Section>
+    {blocked ? <p className="p0-quiet">{blocked}</p> : null}
+    {receipt ? <Notice><span data-testid="p0-analytics-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""} · {receipt.action.endsWith(".start") ? "job" : "request"} {receipt.id.slice(0, 8)}</span>
+      {["UNKNOWN", "PENDING", "PENDING_RECONCILE"].includes(receipt.phase) ? <> · outcome open: check the job list before a new command <button className="p0-secondary" onClick={() => void recheck()}>Look up again</button></> : null}</Notice> : null}</Section>
   <Section title="Analytics jobs" aside={<span className="p0-quiet">{jobs.length} listed</span>}>
     {jobs.length === 0 ? <p className="p0-quiet">{analytics ? "No analytics jobs." : "No job list received (a Project 0 process publishes it)."}</p> : null}
-    {jobs.map(j => <JobRow key={j.jobId} job={j} busy={busy}/>)}
+    {jobs.map(j => <JobRow key={j.jobId} job={j} cancelBlock={cancelBlock}/>)}
   </Section></>;
 }

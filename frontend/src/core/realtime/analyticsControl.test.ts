@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, CommandLookupResponseSchema } from "../generated/darkbot/control/v1/commands_pb";
 import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
-import { analyticsCommand, backtestCommand, optimizeCommand, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
+import { analyticsCommand, backtestCommand, optimizeCommand, recheck, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
 const accepted = (phase: CommandPhase, detail = "") => new Response(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, phase, detail })));
@@ -47,6 +47,17 @@ describe("Analytics job commands", () => {
     const req = fromBinary(CommandRequestSchema, (fetch.mock.calls[1]?.[1] as RequestInit).body as Uint8Array);
     expect([req.action, req.resourceId, fromBinary(BacktestJobCommandSchema, req.params).runId]).toEqual(["project0.analytics.backtest.start", "", "run-a"]);
     expect(useAnalyticsControl.getState()).toMatchObject({ busy: false, receipt: { id: req.requestId, phase: "FAILED", detail: "Native controller refused: JOB_RUNNER_BUSY" } });
+  });
+
+  it("never locks the panel after an unknown outcome and looks it up again on request", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(session()).mockRejectedValueOnce(new TypeError("reset")).mockRejectedValueOnce(new TypeError("down"))
+      .mockResolvedValueOnce(lookup(CommandPhase.COMPLETED));
+    vi.stubGlobal("fetch", fetch);
+    await analyticsCommand("project0.analytics.job.cancel", { resourceId: "job-1" });
+    expect(useAnalyticsControl.getState()).toMatchObject({ busy: false, receipt: { phase: "UNKNOWN" } });
+    await recheck();
+    expect(fetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toHaveLength(1);
+    expect(useAnalyticsControl.getState().receipt?.phase).toBe("COMPLETED");
   });
 
   it("looks a lost acknowledgement up once and never posts again", async () => {

@@ -45,6 +45,7 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
   return {
     publishedUnixMs: m.publishedUnixMs,
     runnerBusy: m.runnerBusy,
+    runnerError: m.runnerError,
     storeError: m.storeError,
     runs: m.runs.map((r) => ({
       runId: r.runId,

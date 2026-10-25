@@ -1582,6 +1582,7 @@ i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
 | runs | [AnalyticsRun](#darkbot-project0-v1-AnalyticsRun) | repeated | Newest runs first, at most analytics_runs_listed. |
 | jobs | [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob) | repeated | Newest requests first, at most analytics_jobs_listed. |
 | store_error | [string](#string) |  | Why the job store was not readable (jobs is then empty); empty when read. |
+| runner_error | [string](#string) |  | Why the runner state is unknown (runner_busy is then not a fact); empty when known. |
 
 
 

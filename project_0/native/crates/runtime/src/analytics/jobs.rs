@@ -26,6 +26,11 @@ const REQUEST: &str = "request.p0j";
 const OUTCOME: &str = "outcome.p0j";
 const WORKER_LOCK: &str = "worker.lock";
 const RUNNER_LOCK: &str = "runner.lock";
+/// Serializes runner probes and the runner acquisition (as E7 does for the owner lock): a probe's
+/// momentary shared lock never makes a starting worker fail.
+const PROBE_LOCK: &str = "probe.lock";
+/// The process that will run a queued job: the submitter, then the spawned worker (`pid=…`).
+const SPAWN: &str = "spawn.pid";
 /// The longest job id (the gateway's UUIDs and `p0ctl`'s generated ids fit).
 const MAX_ID: usize = 64;
 
@@ -164,10 +169,11 @@ pub struct JobStatus {
     pub state: JobState,
 }
 
-/// A job id: 1..=64 of `[A-Za-z0-9-]` (never a path).
+/// A job id: 1..=64 of `[A-Za-z0-9-]`, not starting with `-` (never a path or an option).
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_ID
+        && !id.starts_with('-')
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
@@ -220,6 +226,31 @@ fn held(path: &Path) -> Result<bool, String> {
     }
 }
 
+/// The probe guard of the store (held for a few syscalls only).
+fn probe_guard(project: &Path) -> Result<File, String> {
+    let guard = open_lock(&store(project).join(PROBE_LOCK)).map_err(io)?;
+    // SAFETY: flock on an owned, open file descriptor.
+    if unsafe { libc::flock(guard.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(io(std::io::Error::last_os_error()));
+    }
+    Ok(guard)
+}
+
+/// Whether process `pid` exists (EPERM: it exists under another user).
+fn alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: kill(2) with signal 0 only checks the target.
+    pid > 0
+        && (unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
+}
+
+fn write_spawn(dir: &Path, pid: u32) -> Result<(), String> {
+    std::fs::write(dir.join(SPAWN), format!("pid={pid}\n")).map_err(io)
+}
+
 /// The pid and start time a worker wrote into its lock (`pid=… started_unix_ms=…`).
 fn worker_record(path: &Path) -> (u32, Option<u64>) {
     let mut text = String::new();
@@ -262,11 +293,18 @@ pub fn status(project: &Path, job_id: &str) -> Result<JobStatus, String> {
                 pid,
                 started_unix_ms,
             }
-        } else if pid > 0 {
-            // A worker recorded itself and is gone without an outcome.
-            JobState::Interrupted
-        } else {
+        } else if outcome.exists() {
+            // The worker finished between the outcome check and the lock probe.
+            JobState::Done(Box::new(
+                journal::read_typed_value(&outcome)
+                    .map_err(|e| format!("JOB_OUTCOME_INVALID: {e}"))?,
+            ))
+        } else if pid == 0 && alive(worker_record(&dir.join(SPAWN)).0) {
+            // Requested; its submitter or spawned worker is alive and has not taken it yet.
             JobState::Queued
+        } else {
+            // A worker recorded itself and is gone, or no process will ever take the job.
+            JobState::Interrupted
         }
     };
     Ok(JobStatus { request, state })
@@ -351,11 +389,16 @@ pub fn submit(project: &Path, request: &JobRequest) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err("JOB_EXISTS".into()),
         Err(e) => return Err(io(e)),
     }
+    write_spawn(&dir, std::process::id())?;
     journal::write_typed_value(&dir.join(REQUEST), journal::source::BACKTEST, request).map_err(io)
 }
 
 /// Whether a job of the project is running now.
 pub fn runner_busy(project: &Path) -> Result<bool, String> {
+    if !store(project).is_dir() {
+        return Ok(false);
+    }
+    let _guard = probe_guard(project)?;
     held(&store(project).join(RUNNER_LOCK))
 }
 
@@ -381,6 +424,9 @@ pub fn start(project: &Path, request: &JobRequest, worker: &Path) -> Result<(), 
             .process_group(0)
             .spawn()
     };
+    if let Ok(child) = &spawned {
+        write_spawn(&dir, child.id())?;
+    }
     if let Err(e) = spawned {
         // The request stays; its outcome says why it never ran.
         let outcome = JobOutcome {
@@ -559,12 +605,9 @@ pub fn run(
     cancelled: Option<fn() -> bool>,
 ) -> Result<(JobOutcome, Option<Executed>), String> {
     let dir = job_dir(project, job_id)?;
-    let request: JobRequest = journal::read_typed_value(&dir.join(REQUEST))
-        .map_err(|e| format!("JOB_REQUEST_INVALID: {e}"))?;
     if dir.join(OUTCOME).exists() {
         return Err("JOB_DONE: the job has an outcome".into());
     }
-    let runner = open_lock(&store(project).join(RUNNER_LOCK)).map_err(io)?;
     let finish = |state: &str, code: String, result, started| -> Result<JobOutcome, String> {
         let outcome = JobOutcome {
             job_id: job_id.into(),
@@ -578,27 +621,41 @@ pub fn run(
         write_outcome(&dir, &outcome)?;
         Ok(outcome)
     };
-    if !flock_nb(&runner, libc::LOCK_EX).map_err(io)? {
-        let outcome = finish(
-            FAILED,
-            "JOB_RUNNER_BUSY: another analytics job is running".into(),
-            None,
-            None,
-        )?;
-        return Ok((outcome, None));
-    }
-    let mut worker = open_lock(&dir.join(WORKER_LOCK)).map_err(io)?;
+    // Every refusal before the execution is the job's FAILED outcome (never a job that stays
+    // QUEUED): an unreadable request, a lock that cannot be taken, a busy runner.
+    let failed = |code: String| finish(FAILED, code, None, None).map(|o| (o, None));
+    let request: JobRequest = match journal::read_typed_value(&dir.join(REQUEST)) {
+        Ok(r) => r,
+        Err(e) => return failed(format!("JOB_REQUEST_INVALID: {e}")),
+    };
+    let runner = match (|| {
+        let _guard = probe_guard(project)?;
+        let runner = open_lock(&store(project).join(RUNNER_LOCK)).map_err(io)?;
+        Ok::<_, String>(
+            flock_nb(&runner, libc::LOCK_EX)
+                .map_err(io)?
+                .then_some(runner),
+        )
+    })() {
+        Ok(Some(runner)) => runner,
+        Ok(None) => return failed("JOB_RUNNER_BUSY: another analytics job is running".into()),
+        Err(e) => return failed(e),
+    };
+    let mut worker = match open_lock(&dir.join(WORKER_LOCK)) {
+        Ok(w) => w,
+        Err(e) => return failed(io(e)),
+    };
     // Blocking: only an instant status probe can hold it besides a duplicate worker, and a
     // duplicate cannot pass the runner lock.
     // SAFETY: flock on an owned, open file descriptor.
     if unsafe { libc::flock(worker.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(io(std::io::Error::last_os_error()));
+        return failed(io(std::io::Error::last_os_error()));
     }
     if dir.join(OUTCOME).exists() {
         return Err("JOB_DONE: the job has an outcome".into());
     }
     let started = crate::status_tap::unix_ms_now();
-    (|| {
+    if let Err(e) = (|| {
         worker.set_len(0)?;
         worker.seek(SeekFrom::Start(0))?;
         writeln!(
@@ -608,8 +665,9 @@ pub fn run(
             started.map_or_else(|| "UNKNOWN".into(), |s| s.to_string())
         )?;
         worker.sync_all()
-    })()
-    .map_err(io)?;
+    })() {
+        return failed(io(e));
+    }
     let (outcome, executed) = match execute(project, &request, cancelled) {
         Ok(done) => (
             finish(COMPLETED, String::new(), Some(done.result()), started)?,
@@ -742,6 +800,8 @@ pub struct RunEntry {
 pub struct AnalyticsSnapshot {
     pub at_unix_ms: u64,
     pub runner_busy: bool,
+    /// Why the runner state is unknown (`runner_busy` is then not a fact).
+    pub runner_error: Option<String>,
     pub runs: Vec<RunEntry>,
     pub jobs: Vec<JobStatus>,
     /// Why the job store was not readable (the job list is then empty, never a guess).
@@ -794,9 +854,14 @@ pub fn projection(
         Ok(jobs) => (jobs, None),
         Err(e) => (vec![], Some(e)),
     };
+    let (runner_busy, runner_error) = match runner_busy(project) {
+        Ok(busy) => (busy, None),
+        Err(e) => (false, Some(e)),
+    };
     AnalyticsSnapshot {
         at_unix_ms: 0,
-        runner_busy: runner_busy(project).unwrap_or(false),
+        runner_busy,
+        runner_error,
         runs,
         jobs,
         error,
@@ -947,6 +1012,12 @@ mod tests {
             }
         );
         drop(held_by_test);
+        // A process forked by another test thread holds the lock's description until its exec:
+        // the release is observed within a bounded wait.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while state() != JobState::Interrupted && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         assert_eq!(state(), JobState::Interrupted);
         assert!(cancel(&d, "j").unwrap_err().starts_with("JOB_NOT_RUNNING"));
         assert_eq!(status(&d, "other").unwrap_err(), "JOB_UNKNOWN");
@@ -1036,6 +1107,34 @@ mod tests {
         assert!(cancel(&d, "c")
             .unwrap_err()
             .starts_with("JOB_NOT_CANCELLABLE"));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Review M3: a queued job whose submitter or worker is gone is INTERRUPTED, never QUEUED
+    /// forever; a refusal before the execution is the job's FAILED outcome.
+    #[test]
+    fn a_job_without_a_live_process_is_interrupted_and_refusals_are_outcomes() {
+        let d = project("dead");
+        submit(&d, &request("j")).unwrap();
+        assert_eq!(status(&d, "j").unwrap().state, JobState::Queued);
+        let mut gone = std::process::Command::new("true").spawn().unwrap();
+        let pid = gone.id();
+        gone.wait().unwrap();
+        write_spawn(&d.join(JOB_DIR).join("j"), pid).unwrap();
+        assert_eq!(status(&d, "j").unwrap().state, JobState::Interrupted);
+        submit(&d, &request("k")).unwrap();
+        std::fs::write(d.join(JOB_DIR).join("k").join(REQUEST), b"broken").unwrap();
+        // An unreadable request is no status; its run records why it never ran.
+        assert!(status(&d, "k").is_err());
+        let (outcome, none) = run(&d, "k", None).unwrap();
+        assert!(none.is_none());
+        assert_eq!(outcome.state, FAILED);
+        assert!(
+            outcome.code.starts_with("JOB_REQUEST_INVALID"),
+            "{}",
+            outcome.code
+        );
+        assert!(!valid_id("-j") && !valid_id("--project"));
         let _ = std::fs::remove_dir_all(d);
     }
 

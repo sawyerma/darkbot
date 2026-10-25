@@ -98,9 +98,20 @@ async function csrf(): Promise<string> {
   if (!r.ok || !token) throw new Error("Session unavailable");
   return token;
 }
+/**
+ * Review L7: an open or unknown receipt never locks the panel for good — the next command waits
+ * only while a command is being sent. Its state stays visible, and `recheck` looks it up again;
+ * the job list (project0.analytics.jobs) is what a new command is decided on.
+ */
 function decide(id: string, action: JobAction, phase: CommandPhase, detail: string): void {
-  const open = phase === CommandPhase.PENDING || phase === CommandPhase.PENDING_RECONCILE;
-  useAnalyticsControl.setState({ busy: open, receipt: { id, action, phase: CommandPhase[phase] ?? "UNKNOWN", detail } });
+  useAnalyticsControl.setState({ busy: false, receipt: { id, action, phase: CommandPhase[phase] ?? "UNKNOWN", detail } });
+}
+
+/** One lookup of the shown receipt (after UNKNOWN or an open phase); never a new POST. */
+export async function recheck(): Promise<void> {
+  const r = useAnalyticsControl.getState().receipt;
+  if (!r || !["UNKNOWN", "PENDING", "PENDING_RECONCILE"].includes(r.phase)) return;
+  try { await lookup(r.id, r.action); } catch { /* the receipt stays as it is */ }
 }
 /** One targeted lookup, only after a lost acknowledgement; never a polling loop. */
 async function lookup(id: string, action: JobAction): Promise<void> {
@@ -132,7 +143,7 @@ export async function analyticsCommand(action: JobAction, args: { resourceId?: s
     const detail = error instanceof Error ? error.message : String(error);
     if (submitted) {
       try { await lookup(id, action); return; } catch { /* unknown outcome, never replay POST */ }
-      useAnalyticsControl.setState({ busy: true, receipt: { id, action, phase: "UNKNOWN", detail } });
+      useAnalyticsControl.setState({ busy: false, receipt: { id, action, phase: "UNKNOWN", detail } });
       return;
     }
     useAnalyticsControl.setState({ busy: false, receipt: { id, action, phase: "FAILED", detail } });
