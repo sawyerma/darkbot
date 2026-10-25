@@ -20,6 +20,12 @@ use darkbot_bsc_record::schema::{
     g06a::{dry, local_simulation as sim},
 };
 use darkbot_bsc_record::{Draft, Value, decode};
+// BSC-003: G0.7's bundle semantics and wire templates, one definition; the
+// 48Club maxTimestamp is projected as 0 (set from the send head at release).
+use darkbot_bsc_execution::bundle_wire::{
+    FORTYEIGHTCLUB_NO_MERGE, FORTYEIGHTCLUB_POSITION_FIRST, MAX_BLOCK_OFFSET, blockrazor_body,
+    club48_body,
+};
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 use k256::elliptic_curve::zeroize::Zeroizing;
 use std::io::Write;
@@ -425,24 +431,6 @@ fn buy_calldata(token: Address, input: U256, minimum: U256) -> Vec<u8> {
     .abi_encode()
 }
 
-/// The BlockRazor `eth_sendBundle` body exactly as G0.7 frames it.
-fn blockrazor_body(request_id: &str, txs: [&str; 2], max_block: u64) -> String {
-    format!(
-        r#"{{"id":"{request_id}","jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"txs":["{}","{}"]}}]}}"#,
-        txs[0], txs[1]
-    )
-}
-
-/// The 48Club `eth_sendBundle` body exactly as G0.7 frames it. G0.7 sets
-/// maxTimestamp from the send head at the release; the DRY projection has
-/// no send head and uses 0, so its digest describes the template only.
-fn club48_body(request_id: &str, txs: [&str; 2], max_block: u64, max_timestamp: u64) -> String {
-    format!(
-        r#"{{"id":"{request_id}","jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"maxTimestamp":{max_timestamp},"noMerge":true,"positionFirst":true,"txs":["{}","{}"]}}]}}"#,
-        txs[0], txs[1]
-    )
-}
-
 fn is_wire_hex(text: &str) -> bool {
     text.strip_prefix("0x")
         .is_some_and(|h| !h.is_empty() && h.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -596,12 +584,11 @@ fn main() {
         );
     }
 
+    // BSC-003: the expiry is the compiled bundle semantics, as G0.7 sends it.
     let send_head = env_u64("DARKBOT_G06A_SEND_HEAD");
-    let max_block = env_u64("DARKBOT_G06A_MAX_BLOCK");
-    assert!(
-        max_block >= send_head && max_block <= send_head + 2,
-        "DRY-4 expiry must be within send_head..=send_head+2"
-    );
+    let max_block = send_head
+        .checked_add(MAX_BLOCK_OFFSET)
+        .expect("DRY-4 expiry overflows");
 
     // Exact same transaction bytes are projected into both builder envelopes,
     // framed with G0.7's fixed templates. These strings remain in RAM only.
@@ -790,8 +777,11 @@ fn main() {
         )
         .set(tag("bundle_projection.send_head"), send_head)
         .set(tag("bundle_projection.max_block"), max_block)
-        .set(tag("bundle_projection.fortyeightclub_noMerge"), true)
-        .set(tag("bundle_projection.fortyeightclub_positionFirst"), true)
+        .set(tag("bundle_projection.fortyeightclub_noMerge"), FORTYEIGHTCLUB_NO_MERGE)
+        .set(
+            tag("bundle_projection.fortyeightclub_positionFirst"),
+            FORTYEIGHTCLUB_POSITION_FIRST,
+        )
         .set(tag("budget.worst_case_reserved_wei"), Value::u128(reserved))
         .set(
             tag("budget.v2_proposal_per_attempt_ceiling_wei"),

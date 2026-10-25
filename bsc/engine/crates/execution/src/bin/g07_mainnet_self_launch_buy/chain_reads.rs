@@ -12,8 +12,8 @@ use std::str::FromStr;
 
 /// BSC block interval (BEP-619).
 pub(crate) const BLOCK_INTERVAL_MS: u64 = 450;
-/// maxBlockNumber = send head + 2: the bundle is valid for send head + 1 ..= + 2.
-pub(crate) const MAX_BLOCK_OFFSET: u64 = 2;
+/// maxBlockNumber = send head + MAX_BLOCK_OFFSET (BSC-003: one definition).
+pub(crate) use darkbot_bsc_execution::bundle_wire::MAX_BLOCK_OFFSET;
 /// The send head may be at most one interval old, so head+2 still has at least
 /// one full interval left when the bundle is released.
 pub(crate) const MAX_HEAD_AGE_MS: i64 = BLOCK_INTERVAL_MS as i64;

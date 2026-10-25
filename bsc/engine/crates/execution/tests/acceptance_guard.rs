@@ -648,6 +648,49 @@ fn v5_binds_the_launch_path_and_candidate_and_supersedes_the_v4_proposal() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// BSC-003 (BSC_Bug_V2 P3-F2): v5 binds a DRY only when its bundle
+/// projection is the compiled bundle semantics -- 48Club flags and the
+/// expiry offset (never its absolute blocks against a later head).
+#[test]
+fn a_dry_projection_other_than_the_compiled_bundle_semantics_makes_no_v5() {
+    at_repo_root();
+    let (root, dir, policy) = v5_root("v5-wire");
+    let path = root.join(dir).join("dry_result.dbrec");
+    let good = std::fs::read(&path).unwrap();
+    let send_head = decode(&g06a::dry::NATIVE, &good)
+        .unwrap()
+        .u64(
+            darkbot_bsc_record::schema::g06a::dry::NATIVE
+                .fields
+                .iter()
+                .find(|f| f.name == "bundle_projection.send_head")
+                .unwrap()
+                .tag,
+        )
+        .unwrap();
+    for (name, value) in [
+        (
+            "bundle_projection.fortyeightclub_noMerge",
+            Value::Bool(false),
+        ),
+        (
+            "bundle_projection.fortyeightclub_positionFirst",
+            Value::Bool(false),
+        ),
+        ("bundle_projection.max_block", Value::U64(send_head + 3)),
+        ("bundle_projection.max_block", Value::U64(send_head + 1)),
+    ] {
+        let edited = requalification_fixture::with(&good, &g06a::dry::NATIVE, &[(name, value)]);
+        std::fs::write(&path, edited).unwrap();
+        requalification_fixture::refresh_v5(&root, dir, &policy);
+        let refused = attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).expect_err(name);
+        assert!(refused.contains("bundle semantics"), "{name}: {refused}");
+    }
+    std::fs::write(&path, good).unwrap();
+    requalification_fixture::refresh_v5(&root, dir, &policy);
+    assert!(attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).is_ok());
+}
+
 #[test]
 fn a_missing_manipulated_stale_or_contradictory_snapshot_or_candidate_makes_no_v5() {
     use darkbot_bsc_record::schema::g06a::launch_path as lp;

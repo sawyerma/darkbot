@@ -183,8 +183,10 @@ fn bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm() {
         1
     );
     assert!(!SOURCE.contains("\"maxBlockNumber\""));
-    let club48 = function_body(BIN_SOURCES[1], "pub(crate) fn club48_bundle_body(");
-    let blockrazor = function_body(BIN_SOURCES[1], "pub(crate) fn blockrazor_bundle_body(");
+    // BSC-003: their one definition is execution::bundle_wire.
+    let wire = include_str!("../src/bundle_wire.rs");
+    let club48 = function_body(wire, "pub fn club48_body(");
+    let blockrazor = function_body(wire, "pub fn blockrazor_body(");
     assert!(club48.contains("\"maxBlockNumber\":{max_block}"));
     assert!(club48.contains("\"maxTimestamp\":{max_timestamp}"));
     assert!(blockrazor.contains("\"maxBlockNumber\":{max_block}"));
@@ -209,8 +211,10 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
         .find(signature)
         .unwrap_or_else(|| panic!("missing {signature}"));
     let rest = &source[start..];
-    let end = rest[1..]
-        .find("\npub(crate) fn ")
+    let end = ["\npub(crate) fn ", "\npub fn "]
+        .iter()
+        .filter_map(|next| rest[1..].find(next))
+        .min()
         .map(|i| i + 1)
         .or_else(|| rest.find("\n#[cfg(test)]"))
         .unwrap_or(rest.len());
@@ -356,6 +360,62 @@ fn a_secret_salt_profile_never_sends_launch_calldata_to_an_external_rpc() {
     assert!(SOURCE[b_arm..b_end].contains("further.local_launch_gas_used"));
     assert!(!SOURCE[b_arm..b_end].contains("rpc_"));
     assert!(pos("verify_further_v5_evidence(") < b_arm);
+}
+
+#[test]
+fn the_bundle_semantics_have_one_native_definition_and_the_runner_checks_the_dry_projection() {
+    // BSC-003 (BSC_Bug_V2 P2-D1/P3-F2): the 48Club flags, the expiry offset
+    // and the wire templates exist once (execution::bundle_wire); live
+    // runner, DRY projection, requalification and harness use them.
+    let code = |s: &'static str| &s[..s.find("#[cfg(test)]").unwrap_or(s.len())];
+    for (name, source) in [
+        (
+            "builder_submission.rs",
+            code(include_str!(
+                "../src/bin/g07_mainnet_self_launch_buy/builder_submission.rs"
+            )),
+        ),
+        (
+            "chain_reads.rs",
+            code(include_str!(
+                "../src/bin/g07_mainnet_self_launch_buy/chain_reads.rs"
+            )),
+        ),
+        (
+            "g06a_self_launch_bundle.rs",
+            code(include_str!(
+                "../../qualification/src/bin/g06a_self_launch_bundle.rs"
+            )),
+        ),
+        (
+            "g06a_requal_check.rs",
+            code(include_str!(
+                "../../qualification/src/bin/g06a_requal_check.rs"
+            )),
+        ),
+    ] {
+        for twin in [
+            r#"eth_sendBundle","params""#,
+            r#"noMerge":"#,
+            "MAX_BLOCK_OFFSET: u64 =",
+            "head + 2",
+        ] {
+            assert!(!source.contains(twin), "{name} defines {twin:?} again");
+        }
+    }
+    assert!(!include_str!("../../../../tools/g06a_final_dry.sh").contains("SEND_HEAD + 2"));
+    // The values themselves are unchanged (K1/K2 stay PROVIDER_UNQUALIFIED).
+    let wire = include_str!("../src/bundle_wire.rs");
+    for value in [
+        "pub const MAX_BLOCK_OFFSET: u64 = 2;",
+        "pub const FORTYEIGHTCLUB_NO_MERGE: bool = true;",
+        "pub const FORTYEIGHTCLUB_POSITION_FIRST: bool = true;",
+    ] {
+        assert!(wire.contains(value), "{value}");
+    }
+    // The runner checks the bound DRY projection right before the latch.
+    let check = pos("bundle_wire::check_projection(&dry)");
+    assert!(pos("probe_window") < check && check < pos("latch_attempt("));
 }
 
 #[test]

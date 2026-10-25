@@ -30,6 +30,9 @@ pub mod acceptance_guard;
 /// The 24-h freshness of the bound builder policy (BSC-004).
 #[cfg(feature = "acceptance-guard")]
 pub mod builder_policy;
+/// The one definition of the G0.7 bundle semantics and wire bodies (BSC-003).
+#[cfg(feature = "acceptance-guard")]
+pub mod bundle_wire;
 /// The launch-path code identity snapshot (v9.1 C1/R1): check and drift.
 #[cfg(feature = "acceptance-guard")]
 pub mod launch_path;

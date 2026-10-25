@@ -18,9 +18,11 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// 20c4cfd2… after the E4 source changes). Re-pinned 2026-10-23 (C1/R1):
 /// the guard, preflight reads and root check moved to the v5 contract (was
 /// 32cd2947…); again for the B private cross-check binding (ee8d4aeb…).
-/// D1 moved the root marker off the contract (was dd62ff52…).
+/// D1 moved the root marker off the contract (was dd62ff52…). BSC-003: the
+/// wire bodies and expiry offset moved to execution::bundle_wire, now bound
+/// here too; the sent bytes are unchanged (golden tests) (was 06187594…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "061875948953294e678efef7710f237cc2ef94fdc972706b7cf3b05f94b8fef8";
+const PINNED_PLAN_SHA256: &str = "6c2797920ef49b3f3e9b04696b0235b304a3ee8658770797ef3460c59b36c461";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

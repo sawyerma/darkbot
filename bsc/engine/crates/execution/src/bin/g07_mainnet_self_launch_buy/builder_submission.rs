@@ -57,52 +57,10 @@ pub(crate) fn connect_tls_port(host: &str, port: u16) -> Result<Tls, String> {
     ))
 }
 
-/// A JSON wire string: quoted, with `"`, `\` and control characters
-/// escaped. The G0.7 fields are 0x-hex, which passes through unchanged.
-pub(crate) fn wire_string(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// The 48Club `eth_sendBundle` body of a G0.7 bundle: integer expiry block
-/// and Unix-second expiry time, `noMerge` and `positionFirst` (documented
-/// only as "strictly order by priorityFee", not as top-of-block; placement
-/// is UNQUALIFIED). A fixed template (keys in the documented order) with the
-/// fields patched in.
-pub(crate) fn club48_bundle_body(
-    request_id: &str,
-    txs: [&str; 2],
-    max_block: u64,
-    max_timestamp: u64,
-) -> String {
-    format!(
-        r#"{{"id":{},"jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"maxTimestamp":{max_timestamp},"noMerge":true,"positionFirst":true,"txs":[{},{}]}}]}}"#,
-        wire_string(request_id),
-        wire_string(txs[0]),
-        wire_string(txs[1])
-    )
-}
-
-/// The BlockRazor `eth_sendBundle` body of a G0.7 bundle: integer expiry
-/// block only.
-pub(crate) fn blockrazor_bundle_body(request_id: &str, txs: [&str; 2], max_block: u64) -> String {
-    format!(
-        r#"{{"id":{},"jsonrpc":"2.0","method":"eth_sendBundle","params":[{{"maxBlockNumber":{max_block},"txs":[{},{}]}}]}}"#,
-        wire_string(request_id),
-        wire_string(txs[0]),
-        wire_string(txs[1])
-    )
-}
+// BSC-003: the wire bodies and their string encoding have one definition.
+pub(crate) use darkbot_bsc_execution::bundle_wire::{
+    blockrazor_body as blockrazor_bundle_body, club48_body as club48_bundle_body, wire_string,
+};
 
 /// A non-empty HTTP header value without control characters. main checks the
 /// BlockRazor token with it before the guard, so a bad token stops the run

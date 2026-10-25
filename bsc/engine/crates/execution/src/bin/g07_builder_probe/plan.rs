@@ -379,7 +379,7 @@ pub(crate) fn worked_example(case_index: usize, case: &Case) -> (CaseRequest, St
 /// (versions and checksums of every external crate) and the toolchain pin.
 /// Their SHA-256s are part of the plan, so the approval binds this exact code
 /// and dependency set.
-const PROBE_SOURCES: [(&str, &str); 10] = [
+const PROBE_SOURCES: [(&str, &str); 11] = [
     ("g07_builder_probe/main.rs", include_str!("main.rs")),
     ("g07_builder_probe/plan.rs", include_str!("plan.rs")),
     (
@@ -405,6 +405,11 @@ const PROBE_SOURCES: [(&str, &str); 10] = [
     (
         "execution/src/acceptance_guard.rs",
         include_str!("../../acceptance_guard.rs"),
+    ),
+    // BSC-003: the wire bodies and expiry offset the probe sends.
+    (
+        "execution/src/bundle_wire.rs",
+        include_str!("../../bundle_wire.rs"),
     ),
     (
         "engine/Cargo.lock",

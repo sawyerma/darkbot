@@ -281,6 +281,9 @@ fn main() {
         probe.excess_staleness_ms,
     )
     .unwrap_or_else(|e| panic!("G0.7 head probe: {e}"));
+    // BSC-003: the bound DRY's bundle projection is the compiled semantics.
+    darkbot_bsc_execution::bundle_wire::check_projection(&dry)
+        .unwrap_or_else(|e| panic!("G0.7 bundle semantics: {e}"));
     // BSC-004: the bound builder policy is fresh at the release boundary.
     darkbot_bsc_execution::builder_policy::require_fresh(&builder_policy, unix_time_ms())
         .unwrap_or_else(|e| panic!("G0.7 builder policy: {e}"));

@@ -1084,6 +1084,8 @@ pub fn attempt1_v5_evidence(
         Shape::V5
     };
     let (base, dry, pre) = base_evidence(root, requal_dir, builder_policy, shape)?;
+    // BSC-003: only a DRY whose bundle projection is the compiled semantics.
+    crate::bundle_wire::check_projection(&dry)?;
     let path = format!("{}/{REQUAL_LAUNCH_PATH}", requal_dir.trim_end_matches('/'));
     evidence_path(root, &path)?;
     let bytes = std::fs::read(root.join(&path)).map_err(|x| format!("{path}: {x}"))?;

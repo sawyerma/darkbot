@@ -23,6 +23,7 @@
 //! usage: g06a_requal_check <requal_dir> <frozen_dir> <builder_policy.dbrec> [--candidate <b.candidate.dbrec>]
 
 use darkbot_bsc_execution::acceptance_guard::{V3_RELATIVE_PATH, sha256_hex};
+use darkbot_bsc_execution::bundle_wire::{self, MAX_BLOCK_OFFSET};
 use darkbot_bsc_record::schema::g06a::{
     builder_policy, dry, economics, local_simulation as sim, portal_upgrade as up, preflight as pf,
     quote, requalification as rq,
@@ -527,8 +528,16 @@ fn evaluate(
     // DRY-4: expiry, nonces, single attempt, zero egress.
     let mut p = Vec::new();
     let send_head = int(one(&d, "bundle_projection.send_head"));
-    if send_head != Some(head) || int(one(&d, "bundle_projection.max_block")) != Some(head + 2) {
-        p.push("expiry projection is not preflight head .. head+2".into());
+    // BSC-003: flags and expiry offset are the compiled bundle semantics.
+    if send_head != Some(head)
+        || int(one(&d, "bundle_projection.max_block")) != Some(head + MAX_BLOCK_OFFSET)
+    {
+        p.push(format!(
+            "expiry projection is not preflight head .. head+{MAX_BLOCK_OFFSET}"
+        ));
+    }
+    if let Err(e) = bundle_wire::check_projection(&d) {
+        p.push(e);
     }
     for (name, r) in [("preflight", &pre), ("frozen", &f_pre)] {
         if int(one(r, "launcher_pending_nonce")) != Some(0) || int(one(r, "buyer_pending_nonce")) != Some(0) {
