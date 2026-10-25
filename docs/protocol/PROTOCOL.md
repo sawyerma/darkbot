@@ -1570,7 +1570,8 @@ One analytics job of the controller&#39;s store.
 ### AnalyticsJobs
 project0.analytics.jobs (topic 15, STATE; B03/U-9, STARTUP §4 B/C/E): the runs of the project a
 job can read and its native analytics jobs, as the Rust job controller&#39;s store holds them
-(data/analytics-jobs). Jobs are started and cancelled through the same controller as
+(data/analytics-jobs). Its one publisher is the standalone analytics reporter on its own socket
+(the gateway&#39;s auxiliary `project0.analytics` feed); a capture or runtime source never declares it. Jobs are started and cancelled through the same controller as
 `p0ctl job …`; a counterfactual Shadow result is never realized profit. Amounts are exact:
 i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
 

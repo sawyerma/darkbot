@@ -247,8 +247,11 @@ fn alive(pid: u32) -> bool {
             || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
 }
 
+/// The spawn record, replaced atomically (a probe never reads a half-written one).
 fn write_spawn(dir: &Path, pid: u32) -> Result<(), String> {
-    std::fs::write(dir.join(SPAWN), format!("pid={pid}\n")).map_err(io)
+    let partial = dir.join(format!(".{SPAWN}.{}", std::process::id()));
+    std::fs::write(&partial, format!("pid={pid}\n")).map_err(io)?;
+    std::fs::rename(&partial, dir.join(SPAWN)).map_err(io)
 }
 
 /// The pid and start time a worker wrote into its lock (`pid=… started_unix_ms=…`).
