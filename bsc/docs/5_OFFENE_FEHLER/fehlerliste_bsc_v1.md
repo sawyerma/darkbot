@@ -255,7 +255,7 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 
 **BSC-008 = Option A**, **BSC-011 = Option B**, **BSC-049 = SELF_A** sind hiermit als **technische Profilentscheidungen** festgelegt; Providerwirkung, echte Erwerbs-Evidence und wirtschaftliche V5-/SIGN-/ARM-/G0.7-Approval bleiben **unqualifiziert bzw. nicht autorisiert**. Die bisherige „AWAITING_USER_DECISION“-Tabelle §7 ist insoweit überholt.
 
-**BSC-005 verbindliche T5-Semantik, korrigiert am 25.10.:** `Claim::return_unsent` ist **nur** für bytefrei bewiesenen PRE_EGRESS_ABORT vor der Release-Barriere vorgesehen und nicht zu entfernen. Derselbe Claim darf CONSUMED→AUTHORIZED per CAS zurückgeben, solange kein RELEASED-Marker/Byte-Egress möglich ist und Latch/Journal korrekt sind; danach, bei Crash/Kill, UNKNOWN, Remote-Unklarheit oder fremdem/stalem Claim nie. Kein automatischer Retry. **OPEN/CODE_GAP bleibt allein für die noch fehlende typisierte, beim Barrier-Übergang konsumierte `Unsent`-Capability und gezielte Abbruch-/Journal-/Crash-/Remote-CAS-/Release-Marker-/Guard-Proof-Regressionen**; bestehender CAS-Remote-Qualifikationsnachweis bleibt in seinem Scope erhalten. Keine wirtschaftliche Freigabe aus LOCAL_PASS.
+**BSC-005 verbindliche T5-Semantik, korrigiert am 25.10.:** `Claim::return_unsent` ist **nur** für bytefrei bewiesenen PRE_EGRESS_ABORT vor der Release-Barriere vorgesehen und nicht zu entfernen. Derselbe Claim darf CONSUMED→AUTHORIZED per CAS zurückgeben, solange kein RELEASED-Marker/Byte-Egress möglich ist und Latch/Journal korrekt sind; danach, bei Crash/Kill, UNKNOWN, Remote-Unklarheit oder fremdem/stalem Claim nie. Kein automatischer Retry. **OPEN/CODE_GAP bleibt allein für die noch fehlende typisierte, beim Barrier-Übergang konsumierte `Unsent`-Capability und gezielte Abbruch-/Journal-/Crash-/Remote-CAS-/Release-Marker-/Guard-Proof-Regressionen**; bestehender CAS-Remote-Qualifikationsnachweis bleibt in seinem Scope erhalten. Keine wirtschaftliche Freigabe aus LOCAL_PASS. **Stand 25.10.: Codegap geschlossen in `746fdf29`** (siehe §7).
 
 **Definition TECHNISCH FERTIG:** Alle konkret realisierbaren Anforderungen samt produktiven Aufrufern, native/Protobuf/Gateway/Frontend-End-to-End dort, wo relevant, positive/negative und Risiko-/Recovery-Tests, Release-/Format-/Build-/Regression-Nachweis und aktualisierte Evidence sind auf dem exakten gepushten SHA geprüft. Fehlt nur ausdrücklich externe Mainnet-/Producer-/Provider-Evidence, ist allein `TECHNISCH FERTIG — EXTERNAL_BLOCKED` mit Liste zulässig. `LOCAL_PASS` allein ist nie ein Vollabschluss.
 
@@ -267,7 +267,7 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 | BSC-002 | LOCAL_PASS | `c2267886`/`4ee72212`: EIP-1898-Pin aller DRY-EVM-States + Requal-Hashgleichheit + Re-Check vor Evidence |
 | BSC-003 | LOCAL_PASS | `2652e80d`: `execution::bundle_wire` einzige Definition; V5/Requal/Runner prüfen DRY-Projektion fail-closed |
 | BSC-004 | LOCAL_PASS | `34213bcf`: 24-h-Policy-Frische auch im Runner direkt vor dem Latch |
-| BSC-005 | LOCAL_PASS + REMOTE_QUALIFIED (Scope CAS) / TYPE_BARRIER_OPEN | `37344055`/`26b39c42`: Authority-Ref auf `origin` (CAS vor dem Latch); Guard verlangt `AttemptAuthorityProof`; alle je committeten Guard-Werte `UNARMED` (kein ARMED-Altbinary); GitHub-`selftest` 25.10. PASS (create-only, 4 Racer → 1 Gewinner, Lease-Delete); Readiness `ATTEMPT_AUTHORITY` + Overview; `13ef1ef5`: V5-Text bindet die Gates; `04078b6c` Review-Fixes: No-op-Push zählt nie als CAS, Claim-Nonce, Gate-Werte zur Laufzeit geprüft, Git-Prozessgruppe mit Frist, Selftest erneut 12/12 |
+| BSC-005 | TECHNISCH FERTIG — EXTERNAL_BLOCKED: echter Grant/Versuch (Nutzerfreigabe) | `746fdf29` T5: `Claim` ohne Clone/Drop, `return_unsent(self, …)`/`release(self)` (Rückgabe nach Barriere kompiliert nicht, 4 compile_fail), Rückgabe nur mit journaliertem Abbruch + freigegebenem Latch + fehlendem RELEASED-Marker, alle 14 Pre-Egress-Stufen real getestet, SIGKILL/Panic/Stale/Offline/Marker halten CONSUMED, GitHub-Selftest 13/13; `e9f88965` Review: Sender schreiben nur mit Ticket aus dem verbrauchten Claim (Gate statt Barrier), Abbruch fsync vor CAS, unklarer Push vom Remote entschieden; davor: `37344055`/`26b39c42`: Authority-Ref auf `origin` (CAS vor dem Latch); Guard verlangt `AttemptAuthorityProof`; alle je committeten Guard-Werte `UNARMED` (kein ARMED-Altbinary); GitHub-`selftest` 25.10. PASS (create-only, 4 Racer → 1 Gewinner, Lease-Delete); Readiness `ATTEMPT_AUTHORITY` + Overview; `13ef1ef5`: V5-Text bindet die Gates; `04078b6c` Review-Fixes: No-op-Push zählt nie als CAS, Claim-Nonce, Gate-Werte zur Laufzeit geprüft, Git-Prozessgruppe mit Frist, Selftest erneut 12/12 |
 | BSC-006 | LOCAL_PASS | `68862fbc`: `g06a_dry_handoff archive/restore` mit Manifest-Anker, Hygiene, V5-Reproduktion |
 | BSC-007 | LOCAL_PASS | `0b52d5c2`: Keys einmal gelesen, ENV geleert, Zeroizing, nach Signatur verworfen |
 | BSC-048 | LOCAL_PASS | `694264c2`: Reporter liest Builder-Probe nur nativ; `provenance.dbrec` (Typ 37) statt JSON als Import-Gate; Snapshot-Manifest `SOURCES.SHA256SUMS`. Rest außerhalb G0.7/G0.8: `darkbot-release.json` (BSC-051), Census-Generator (Frontend), Q5A-TLS-JSON (später) |
@@ -280,7 +280,7 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 | BSC-008 | USER_DECIDED_A / PROVIDER_UNQUALIFIED | Provider-Qualifikation braucht reale Provider-Evidenz |
 | BSC-009 | NOT_APPLICABLE | nur bei SELF_B-Änderung (heute SELF_A) |
 | BSC-010 | LOCAL_PASS | `1397fb60`: absolute 15-s-Builder-Antwortfrist (Watchdog), sonst UNKNOWN |
-| BSC-011 | LOCAL_PASS | `0f325e06`: Option B umgesetzt (Schema v6 `chain_outcome` + `evidence_integrity`, Gesamtverdikt unverändert, Gate-Reason-Codes, Frontend v6) |
+| BSC-011 | TECHNISCH FERTIG | `0f325e06`: Option B (Schema v6 `chain_outcome` + `evidence_integrity`, Gesamtverdikt unverändert, Gate-Reason-Codes, Frontend v6); `f91274bb`: UNRESOLVED (keine Receipts) = CHAIN_UNKNOWN/EVIDENCE_UNKNOWN, echter G0.8-Lauf gegen Mainnet-RPC → Reporter → Gateway → Browser (Overview/Monitoring §5/Analytics) |
 | BSC-012 | LOCAL_PASS + QUALIFIED | `1b022678` EIP-1898-State-Reads; `ba0c5b15` `--qualify-history` 25.10.: Blast-Archiv QUALIFIED (bis 28800 Blöcke), Dataseed NOT_QUALIFIED (≥128) → G0.8 nur mit Archiv-Endpunkt |
 | BSC-013 | LOCAL_PASS | `6a52f295`: späte UNRESOLVED-Abbrüche tragen bereits aufgelöste Receipts |
 | BSC-014 | LOCAL_PASS | `ae59bef3`: Provider-Widerspruch am Receipt-Index → UNRESOLVED statt STOP |
@@ -299,3 +299,31 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 | BSC-008 | **USER_DECIDED_A** | Bestehende `bundle_wire`-Semantik `noMerge=true`, `positionFirst=true`, `send_head+2` bleibt; Providerwirkung weiterhin **PROVIDER_UNQUALIFIED** | Technische Profilentscheidung verbindlich; **keine** V5-/SIGN-/ARM-/Mainnet-Freigabe |
 | BSC-049 | **USER_DECIDED_SELF_A** | SELF_A (öffentlicher, bestehender eingefrorener Salt; Kollisions-/Partial-Inclusion-Risiko weiterhin nicht real bewiesen). SELF_B bleibt separates Requalifikationsprofil. | Technische Profilentscheidung verbindlich; **keine** V5-/SIGN-/ARM-/Mainnet-Freigabe |
 | BSC-005 | Authority-Medium | `origin`-Ref per CAS (umgesetzt, GitHub qualifiziert) · Alternative nur betrieblich (ein Host) | `origin`-Ref; der echte Grant ist Nutzeraktion nach der V5-Freigabe |
+
+## 8. BSC-050 Vollinventur (25.10.2026, einmalig; Auftrag V2 §3)
+
+Umfang: produktive Pfade von `bsc/engine` (Bins/Libs ohne Tests), `bsc/geth/overlay` (Go ohne `_test`), `bsc/tools` (aktive Readiness/Sync/DRY), Gateway-BSC-Anteil, `status.proto`, Frontend `features/bsc`, `ops/bsc-control.sh`/`darkbotctl`/Release-Manifest. Urteil: BUG (bestätigt, behoben bzw. Phase), KEIN_BUG (Nachweis), SOLL_MISSING (Funktion fehlt, Phase).
+
+| Fund | Datei::Funktion | Aktiver Caller | Urteil | Fix / Phase |
+|---|---|---|---|---|
+| Ledger als internes JSON (BSC-051) | `gateway/src/control.rs::persist/load` | jedes Control-Command (P0+BSC) | BUG | `0a10f0d5` binär `DBCMD001`, JSON nur noch lesend; P0-E2E control/lifecycle PASS |
+| Uhrfehler → 0 bei Admission/Status (BSC-053) | `control.rs::now_ms`, `overview::unix_ns_now` im Fenster-Check | Command-Admission, Prozess-Snapshot | BUG | `0a10f0d5` fail-closed |
+| Uhrfehler → Builder-Refresh nie abgelaufen | `qualification/status/projection.rs::now` | Reporter → `bsc.monitoring.state` | BUG (fail-open) | `e9f88965` (`CLOCK_UNAVAILABLE`, Refresh gilt als abgelaufen) |
+| Uhrfehler → 0 in Policy-Evidence | `g06a_builder_policy_record::now_ms` | Builder-Refresh-Tool | BUG | `e9f88965` Abbruch statt Zeit 0 |
+| Uhrfehler → `unix_time_ns=0` im Journal | `qualification_capture::text_payload` | G0.7-Capture | BUG (niedrig) | `e9f88965` `UNKNOWN` statt 0 |
+| Uhrfehler → 0 im Runner | `chain_reads::unix_time_ms` | `require_fresh`, `bundle_window` | KEIN_BUG | 0 ⇒ „in der Zukunft“/Clock-Lag ⇒ STOP (fail-closed belegt) |
+| Ungebundener/mehrdeutiger G0.8-PASS sichtbar | `projection.rs` G0.8-Auswahl | alle Reiter | BUG | `e9f88965` UNRESOLVED + `RECORDED_VERDICT_*`/`G08_RECORDS_AMBIGUOUS` |
+| Gap-Zeit 0 (BSC-052) | `ingress.go::recordGapLocked` | C1-Ingress | BUG | Paket 3 (C1) |
+| Veränderlicher Testseam im Hotpath (BSC-043) | `ingress.go::serializeTxV2` | C1-Ingress | BUG | Paket 3 (C1) |
+| Öffentlicher Test-Clock-Setter (BSC-044) | `hot0.rs::set_clock` | HOT0 | BUG | Paket 3 (C1) |
+| V1-Ring ohne produktiven Rust-Aufrufer (BSC-045) | `geth_ipc::protocol_v1` (`pub use *`) | nur `RecordKind`/`HASH_LEN`/`PEER_LEN` genutzt | BUG (toter Pfad) | Paket 3: Go-Seite prüfen, toten Ring entfernen, Konstanten behalten |
+| Hostprofil als JSON (BSC-033) | `geth_ipc::host::to_json` | `c16_host_profile` (C1.6-Evidence) | BUG | Paket 3 → DBREC-Record |
+| `test-support` in Release-Builds (BSC-046) | `cargo tree` Release-Features | `darkbotctl build` | KEIN_BUG | nur `default`/`runner-startup` |
+| Panics im Dauerprozess | `status/*`, `bsc-status-reporter` | Reporter (launchd) | KEIN_BUG | keine `unwrap/expect/panic` außerhalb Tests |
+| `*_legacy_v2.sh` | `bsc/tools` | kein Aufrufer | KEIN_BUG | historisch isoliert |
+| Gate-0-JS-DRY-Tools (`g06a_*.cjs`) | `g06a_final_dry.sh` PREPARE/SIGN | Gate-0 | KEIN_BUG (BSC-048 gilt) | binäre Records; kein Neubau als SIGN-Vorbedingung |
+| Betriebsgrenzen als Literale (BSC-047) | G0.7-Runner (`MAX_BUILDER_IDLE`, `CAPTURE_WINDOW_NS`, Receipt-Fristen) | G0.7 | KEIN_BUG (G0.7) | V5-gebundene Versuchssemantik bleibt eingefroren; neue Runtime-Parameter nur typisiert/validiert (C0, Paket 3) |
+| Kein BSC-Runtime-Prozess C0–I | Release-Manifest: nur Reporter/Readiness/Candidate | – | SOLL_MISSING | Pakete 3–7 (Runner READ_ONLY/SHADOW/PAPER) |
+| Quellen/Venues/Latenz statisch `FUTURE_PHASE_BLOCKED`, „Runtime readiness UNKNOWN“ | `MonitoringPanel`/`AnalyticsPanel`/`OverviewPanel` | Frontend | SOLL_MISSING | echte native Owner mit `OFF/SHADOW/LIVE` requested/effective in C1/D/E/F |
+| Heartbeat-/Quellzeit 0 bei Uhrfehler | `gateway/src/ws.rs`/`overview.rs::unix_ns_now` | gemeinsamer Wire (P0) | KEIN_BSC_BUG | Wire-Konvention 0 = unset; Project_0-Owner |
+| Kein synchronisierter Mainnet-geth | Host: 475 GB frei, BSC-Full ≈ 3 TB NVMe | C1-Live-Beobachtung | EXTERNAL_BLOCKED | Kostenentscheidung (Paket 3) |
