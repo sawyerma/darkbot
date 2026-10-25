@@ -218,6 +218,55 @@ mod tests {
         );
     }
 
+    /// BSC-041 (BSC_Bug_V2 J3): the journal's own SHA-256 against
+    /// independent references -- the FIPS 180 / NIST vectors and, at every
+    /// padding boundary, digests from an independent implementation
+    /// (OpenSSL via Python hashlib) -- in one call and streamed in chunks.
+    #[test]
+    fn sha256_matches_independent_vectors_at_every_padding_boundary_and_streamed() {
+        let digest = |data: &[u8], chunk: usize| {
+            let mut sha = Sha256::new();
+            for part in data.chunks(chunk.max(1)) {
+                sha.update(part);
+            }
+            hex(&sha.finalize())
+        };
+        let a = |n: usize| vec![b'a'; n];
+        let vectors: Vec<(Vec<u8>, &str)> = vec![
+            (Vec::new(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            (
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq".to_vec(),
+                "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+            ),
+            (
+                b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu".to_vec(),
+                "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1",
+            ),
+            (a(55), "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"),
+            (a(56), "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"),
+            (a(63), "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"),
+            (a(64), "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"),
+            (a(65), "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0"),
+            (a(119), "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb"),
+            (a(120), "2f3d335432c70b580af0e8e1b3674a7c020d683aa5f73aaaedfdc55af904c21c"),
+            (a(128), "6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e"),
+            (a(1_000_000), "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"),
+        ];
+        for (data, expected) in &vectors {
+            for chunk in [usize::MAX, 1, 7, 55, 63, 64, 65, 4096] {
+                if chunk == 1 && data.len() > 1024 {
+                    continue;
+                }
+                assert_eq!(
+                    digest(data, chunk),
+                    *expected,
+                    "{} bytes in {chunk}-byte chunks",
+                    data.len()
+                );
+            }
+        }
+    }
+
     #[test]
     fn journal_roundtrip_preserves_exact_records_and_manifest() {
         let mut writer = JournalWriter::new(Vec::new());
