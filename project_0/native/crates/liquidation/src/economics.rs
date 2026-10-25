@@ -193,7 +193,9 @@ pub fn tag_wakeup(
 /// Closeout-Schwelle (0.1.11 hob sie dort auf); ein getaggter Account kann mehr erlauben, die
 /// Basis ist die untere Schranke. Post-Health/Solvenz prüft das Sizing (`sizing.rs`).
 /// Rückgabe: maximal beschlagnahmbarer Equity-Wert für einen gegebenen Repay-Wert (gleiche Einheit);
-/// `None` bei ungültigem FeeState oder Überlauf (B5).
+/// `None` bei ungültigem FeeState oder Überlauf (B5). F-14: the production bound is enforced in
+/// `sizing.rs`; this closed form is the tests' reference only.
+#[cfg(test)]
 pub fn max_seizable_for_repay(repaid_equity: u128, fee_state_max_bps: u64) -> Option<u128> {
     if !fee_state_valid(fee_state_max_bps) {
         return None;
@@ -369,7 +371,9 @@ pub fn compare_evaluations(a: Evaluation, b: Evaluation) -> std::cmp::Ordering {
 
 /// Wählt aus bereits technisch machbaren Kandidaten die beste deterministische Variante.
 /// Unknown oder `net <= min_profit` werden verworfen. TX-/State-/Safety-Feasibility muss der
-/// Aufrufer vorher prüfen; diese Funktion ersetzt bewusst **keine** Execution-Gates.
+/// Aufrufer vorher prüfen; diese Funktion ersetzt bewusst **keine** Execution-Gates. F-14: the
+/// pipeline chooses with `compare_evaluations` itself; this is the tests' reference only.
+#[cfg(test)]
 pub fn choose_best_candidate(
     candidates: &[CandidateInput],
     failed: &FailedCostMatrix,

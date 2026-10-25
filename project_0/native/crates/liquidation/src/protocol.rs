@@ -116,12 +116,6 @@ pub fn liquidity_vault_authority_pda(program: &Pubkey, bank: &Pubkey) -> Pubkey 
 pub fn fee_state_pda(program: &Pubkey) -> Pubkey {
     memo_pda(FEE_STATE_SEED, program, None)
 }
-/// Pyth-Push PriceUpdateV2-PDA: [shard(u16 LE)=0, feed_id] unter dem Push-Oracle-Programm.
-/// VERIFY: Shard-Index 0 und Seed-Layout (eva01 pyth_cranker: `PDA([0, feed_id], pyth-push-oracle)`).
-pub fn pyth_push_price_pda(feed_id: &[u8; 32]) -> Pubkey {
-    let prog = Pubkey::from_str(PYTH_PUSH_ORACLE_ID).expect("static");
-    Pubkey::find_program_address(&[&0u16.to_le_bytes(), feed_id], &prog).0
-}
 
 // ---- Liquidations-Ökonomie (constants.rs, BELEGT) ----
 /// `seized <= repaid × (1 + max(FeeState.liquidation_max_fee, 0.05))` — in Equity-(EMA-)Werten.

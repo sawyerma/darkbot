@@ -99,6 +99,8 @@ impl TimeScheduler {
         out
     }
 
+    /// The earliest due time (an inspection accessor: the owner end-to-end tests read it; the
+    /// owner itself takes due entries with `due`).
     pub fn next_due(&mut self) -> Option<u64> {
         while let Some(Reverse((at, seq))) = self.heap.peek().copied() {
             if self.by_seq.contains_key(&seq) {

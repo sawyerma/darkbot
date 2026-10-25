@@ -128,7 +128,9 @@ impl ResultAction {
             ResultAction::Drop => 5,
         }
     }
-    /// The only action that may commit a result and touch the account's in-flight entry.
+    /// The only action that may commit a result and touch the account's in-flight entry
+    /// (F-14: the tests' predicate; the owner matches `Accept` itself).
+    #[cfg(test)]
     pub fn commits(self) -> bool {
         matches!(self, ResultAction::Accept)
     }

@@ -421,6 +421,8 @@ impl Journal {
     }
 
     /// FE-04/C3: one settlement step through the reconciliation RPC (worker read, then apply).
+    /// F-14: the tests' composition; the owner reads on its worker and applies the evidence.
+    #[cfg(test)]
     pub fn settle_step(
         &mut self,
         rpc: &RpcClient,
