@@ -508,6 +508,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         "bsc/native/evidence/g06a",
         "bsc/native/evidence/g07",
         "bsc/native/evidence/g08",
+        "bsc/native/evidence/c1",
         "bsc/data/g06a_final_dry",
     ] {
         walk(&root.join(dir), 5, &mut paths);
@@ -913,7 +914,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         }
     }
     {
-        use schema::{g06a, g07, g08};
+        use schema::{c1_qualification as c1, g06a, g07, g08};
         launch.records = latest_records(
             root,
             &records,
@@ -952,6 +953,11 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 &[&g08::chain_session::SCHEMA],
                 &[&g08::producer_witness::SCHEMA],
                 &[&g08::timing_verdict::SCHEMA],
+                // C1.9/C1.9b local measurements (BSC-023): boundary, source, clock.
+                &[&c1::native_latency::SCHEMA],
+                &[&c1::host_profile::SCHEMA],
+                &[&c1::c19_rust_summary::SCHEMA],
+                &[&c1::hook_path::SCHEMA],
             ],
         );
     }

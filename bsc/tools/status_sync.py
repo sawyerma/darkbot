@@ -50,7 +50,7 @@ def sync(root, app, run):
             os.rename(staging,target)
     dest=base/uuid.uuid4().hex; dest.mkdir(mode=0o700)
     files=[]
-    for parent in ['bsc/native/evidence/g06a','bsc/native/evidence/g07','bsc/native/evidence/g08']:
+    for parent in ['bsc/native/evidence/g06a','bsc/native/evidence/g07','bsc/native/evidence/g08','bsc/native/evidence/c1']:
         for path in sorted((root/parent).rglob('*.dbrec')):
             if any(p.is_symlink() for p in path.parents if p!=root): raise ValueError('symlink source')
             files.append(path)

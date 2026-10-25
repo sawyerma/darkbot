@@ -24,6 +24,9 @@ try:
     evidence=source/'bsc/native/evidence/g07/fixture';evidence.mkdir(parents=True)
     shutil.copy2(h.ROOT/'protocol/golden/bsc/readiness.dbrec',evidence/'readiness.dbrec')
     # Committed native qualification records, so every panel shows real public leaves end to end.
+    # The committed C1.9 qualification run (binary records), as the sync copies it (BSC-023).
+    c1=source/'bsc/native/evidence/c1';c1.mkdir(parents=True)
+    for record in (h.ROOT/'bsc/native/evidence/c1').glob('c1-9-native-latency-20261025T234144*.dbrec'):shutil.copy2(record,c1/record.name)
     for name in ('g06a_prepare_20261023T211704Z','g07_binary_import_20261016'):
         target=source/'bsc/native/evidence/g06a'/name;target.mkdir(parents=True)
         for record in (h.ROOT/'bsc/native/evidence/g06a'/name).glob('*.dbrec'):shutil.copy2(record,target/record.name)

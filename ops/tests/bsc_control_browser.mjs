@@ -125,6 +125,9 @@ try{
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
  await until(async()=> (await p.locator('.g-line',{hasText:'criteria'}).filter({hasText:'CRITERIA_UNCONFIRMED'}).count())>0,'G0.4 census on Analytics, CRITERIA_UNCONFIRMED');
  assert((await p.locator('.g-line',{hasText:'flap_launches'}).count())>0,'census denominator row');
+ // BSC-023: the C1.9 native latency report (boundary, clock, eligibility) on Analytics §3.
+ assert((await p.locator('.g-line',{hasText:'c1_9_qualification_eligible'}).filter({hasText:'true'}).count())>0,'C1.9 report eligible on Analytics');
+ assert((await p.locator('.g-line',{hasText:'clock.domain'}).count())>0,'C1.9 clock domain row');
  await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
  await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
 
@@ -183,5 +186,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

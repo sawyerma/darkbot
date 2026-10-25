@@ -1064,3 +1064,55 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+/// BSC-023: the latest C1.9 report and its host profile and integrity
+/// summary reach the monitoring topic from the committed binary evidence;
+/// the older run and the legacy JSON files beside them are not projected.
+#[test]
+fn the_latest_c19_evidence_is_projected_from_binary_records() {
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-c19-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let c1 = root.join("bsc/native/evidence/c1");
+    fs::create_dir_all(&c1).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    let source = repo().join("bsc/native/evidence/c1");
+    let mut copied = 0;
+    for e in fs::read_dir(&source).unwrap().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with("c1-9-native-latency-20261025T2341")
+            || name.ends_with("20261010T230358.json")
+        {
+            fs::copy(e.path(), c1.join(&name)).unwrap();
+            copied += 1;
+        }
+    }
+    assert!(copied >= 9, "the committed C1.9 evidence is present");
+    let s = projection::project(&root, &root.join("run"));
+    assert!(
+        !s.status.warnings.iter().any(|w| w.contains("evidence/c1")),
+        "{:?}",
+        s.status.warnings
+    );
+    let path_of = |name: &str| {
+        s.monitoring
+            .records
+            .iter()
+            .find(|r| r.schema == name)
+            .and_then(|r| r.evidence.as_ref())
+            .map(|e| e.path.clone())
+            .unwrap_or_default()
+    };
+    assert!(
+        path_of("darkbot.c1.native-latency.v1")
+            .ends_with("c1-9-native-latency-20261025T234144.dbrec")
+    );
+    assert!(path_of("darkbot.c1.host-profile.v1").ends_with("20261025T234144-host_profile.dbrec"));
+    assert!(
+        path_of("darkbot.c1.c19-rust-summary.v1").ends_with("20261025T234144-rust_summary.dbrec")
+    );
+    assert_eq!(
+        path_of("darkbot.c1.hook-path.v1"),
+        "",
+        "no C1.9b run exists"
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
