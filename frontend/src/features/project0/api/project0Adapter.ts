@@ -1,5 +1,7 @@
 import type { JsonObject } from "@bufbuild/protobuf";
 import { TopicId, topics, type StateMeta } from "@/core/realtime";
+import { project0Registration } from "@/app/projectRegistry";
+import type { Project0Tab } from "../model/contracts";
 import { useProject0Store, type OwnerTopic } from "../store/project0Store";
 import {
   decodeFinanceSummary,
@@ -92,4 +94,16 @@ export function allValues(): { system: JsonObject | null; capture: JsonObject | 
     system: lastSystem ? systemJsonOf(lastSystem) : null,
     capture: lastCapture ? captureJsonOf(lastCapture) : null,
   };
+}
+
+/**
+ * Holds the topics the visible tab renders (registry `panels`) until the returned release is
+ * called: without an acquisition a topic is never subscribed, however many listeners exist.
+ */
+export function holdPanelTopics(
+  tab: Project0Tab,
+  acquire: (topic: TopicId) => () => void = (t) => topics.acquire(t),
+): () => void {
+  const release = project0Registration.topics.panels[tab].map((t) => acquire(t));
+  return () => release.forEach((r) => r());
 }

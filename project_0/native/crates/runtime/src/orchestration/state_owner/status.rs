@@ -39,6 +39,7 @@ impl ShadowOwner {
             mode: self.mode.clone(),
             wallet: self.liquidator.to_string(),
             program_id: self.program.to_string(),
+            end_result: self.end_result.map(String::from),
             engine: self.engine_status(),
             trigger: OwnerTrigger {
                 mode: if self.use_threshold_trigger {
@@ -87,7 +88,7 @@ impl ShadowOwner {
         OwnerPipeline {
             evaluations: MT0.get(Counter::PipelineEvaluations),
             day: self.ledger.day().clone(),
-            decision_p95_ns: self.ledger.rx_detect_p95_ns(),
+            decision_p95_ns: self.ledger.rx_ready_p95_ns(),
             fee_quote_p95_ns: MT0.remote_latency(RemoteClass::FeeRpc).p95,
             simulation_p95_ns: MT0.remote_latency(RemoteClass::Simulation).p95,
         }
@@ -242,10 +243,11 @@ impl ShadowOwner {
     }
 
     /// The finance summary: reserved capital from Safety, realized net from the settled steps;
-    /// totals and withdrawable profit need reconciled wallet balances and stay unknown.
+    /// totals and withdrawable profit need reconciled wallet balances and stay unknown. VERIFIED
+    /// only with every field known and every step settled; PARTIAL once the journal was read.
     fn finance_status(&self) -> OwnerFinance {
         let view = self.ledger_view.as_ref().and_then(|v| v.as_ref().ok());
-        OwnerFinance {
+        let mut f = OwnerFinance {
             as_of_slot: self.st.highest_slot(),
             total_capital_usd_micro: None,
             available_capital_usd_micro: None,
@@ -253,11 +255,24 @@ impl ShadowOwner {
             realized_net_pnl_usd_micro: view.and_then(|v| v.totals.realized_net_usd_micro),
             withdrawable_profit_usd_micro: None,
             transferred_to_treasury_usd_micro: view.map(|_| 0),
-            status: match view.map(|v| &v.verdict) {
-                None => "UNKNOWN",
-                Some(Verdict::Unknown(_)) => "PARTIAL",
-                Some(_) => "VERIFIED",
-            },
-        }
+            status: "UNKNOWN",
+        };
+        let complete = [
+            f.total_capital_usd_micro,
+            f.available_capital_usd_micro,
+            f.reserved_capital_usd_micro,
+            f.realized_net_pnl_usd_micro,
+            f.withdrawable_profit_usd_micro,
+            f.transferred_to_treasury_usd_micro,
+        ]
+        .iter()
+        .all(Option::is_some);
+        f.status = match view.map(|v| &v.verdict) {
+            None => "UNKNOWN",
+            Some(Verdict::Unknown(_)) => "PARTIAL",
+            Some(_) if complete => "VERIFIED",
+            Some(_) => "PARTIAL",
+        };
+        f
     }
 }

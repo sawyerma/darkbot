@@ -9,7 +9,7 @@ license = "UNLICENSED"
 # Health-Engine ein (`health::crate_impl::CrateHealth`); keine eigene Health-Formel. kamino-/drift-/juplend-mocks sind
 # trotz des Namens die Integrations-Kontolayouts des marginfi-v2-Programms selbst (Kamino Reserve, Drift SpotMarket/User,
 # JupLend Lending), die für die Bewertung realer Integrationskonten benötigt werden. Ohne das Feature gibt es keine
-# Health-Engine; das Binary p0-longtail verlangt es (`required-features`).
+# Health-Engine; das Binary p0-longtail (Reporter-Crate) baut es immer mit (`darkbot-runner/crate_health`).
 
 [features]
 default = []

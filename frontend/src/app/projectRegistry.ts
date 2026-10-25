@@ -50,12 +50,13 @@ const project0: ProjectRegistration<Project0Panel> = {
   page: lazy(() => import("@/features/project0/Project0Page")),
   topics: {
     base: [TopicId.PROJECT0_STATUS, TopicId.PROJECT0_CAPTURE_STATE],
+    // Every topic a tab renders (Project0Page holds them while the tab is visible).
     panels: {
-      overview: [TopicId.PROJECT0_FINANCE_SUMMARY],
-      liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE],
+      overview: [TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE],
+      liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],
       capture: [TopicId.PROJECT0_CAPTURE_STATE],
       analytics: [TopicId.PROJECT0_ANALYTICS_JOBS],
-      wallets: [TopicId.PROJECT0_WALLETS_STATE],
+      wallets: [TopicId.PROJECT0_WALLETS_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],
       // EVENT-Topics (execution.events, capture.events) hält das Panel explizit per
       // useTopic(..., { startPolicy }) – nie automatisch über die Route.
     },

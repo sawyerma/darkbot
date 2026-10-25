@@ -32,6 +32,8 @@ message OwnerRun {
   string wallet = 4;
   // Marginfi program id, base58.
   string program_id = 5;
+  // Empty while the owner runs; at its end RUN_COMPLETE or the terminal code.
+  string end_result = 6;
 }
 
 // Canonical state, ingress and recovery.
@@ -128,7 +130,7 @@ message OwnerPipeline {
   uint64 shadow_wins = 9;
   // Loss reasons of the day.
   repeated LossCount losses = 10;
-  // p95 of T_rx→T_detect of the day; unset without a sample.
+  // p95 of T_rx→T_ready (decision ready: economics and the built plan) of the day; unset without a sample.
   optional uint64 decision_p95_ns = 11;
   // p95 of the fee-quote RPC of this process; unset without a sample.
   optional uint64 fee_quote_p95_ns = 12;
@@ -195,14 +197,14 @@ message WalletsState {
   string verdict = 4;
   // Why the verdict is UNKNOWN (unsettled steps, open inventory) or the journal read error.
   repeated string unknown_reasons = 5;
-  // Own attempts in the journals (archived and active).
-  uint64 attempts = 6;
-  // Archived attempts.
-  uint64 archived_attempts = 7;
-  // Settled attempts that landed.
-  uint64 landed_attempts = 8;
-  // Settled exits.
-  uint64 settled_exits = 9;
+  // Own attempts in the journals (archived and active); unset unless the journal was read.
+  optional uint64 attempts = 6;
+  // Archived attempts; unset unless the journal was read.
+  optional uint64 archived_attempts = 7;
+  // Settled attempts that landed; unset unless the journal was read.
+  optional uint64 landed_attempts = 8;
+  // Settled exits; unset unless the journal was read.
+  optional uint64 settled_exits = 9;
   // Fees of the settled steps; unset on overflow.
   optional uint64 fee_lamports = 10;
   // Mark of the open inventory; unset when a position is unvalued.
@@ -242,6 +244,6 @@ message FinanceSummary {
   optional int64 withdrawable_profit_usd_micro = 7;
   // No transfer path exists: 0 once the journal was read.
   optional int64 transferred_to_treasury_usd_micro = 8;
-  // VERIFIED (every step settled) | PARTIAL (unsettled steps) | UNKNOWN (no journal read).
+  // VERIFIED (every field known) | PARTIAL (journal read, a field unknown) | UNKNOWN (no journal read).
   string status = 9;
 }

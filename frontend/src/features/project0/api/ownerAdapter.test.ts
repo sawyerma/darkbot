@@ -41,7 +41,10 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(finance.availableCapitalUsdMicro).toBeNull();
     expect(finance.withdrawableProfitUsdMicro).toBeNull();
     expect(finance.reservedCapitalUsdMicro).toBe("0");
-    expect(finance.status).toBe("VERIFIED");
+    // Review E4: a read journal without reconciled balances is PARTIAL, never VERIFIED.
+    expect(finance.status).toBe("PARTIAL");
+    expect(wallets.attempts).toBe(0n);
+    expect(liquidator.endResult).toBe("");
     expect(finance.snapshotId).toBe(wallets.financeSnapshotId);
     expect(wallets.policyReserves).toEqual([{ asset: "SOL", units: 50_000_000n }]);
   });

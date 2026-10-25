@@ -464,7 +464,7 @@ Directory: [native/crates/runtime/](native/crates/runtime/)
 
 | Responsibility | File |
 |---|---|
-| binary entrypoint | [main.rs](native/crates/runtime/src/main.rs) |
+| binary entrypoint | [p0_longtail.rs](native/crates/reporter/src/bin/p0_longtail.rs) (composition root with the status reporter) |
 | runtime owner / candidate cache / event loop | **[state_owner.rs](native/crates/runtime/src/orchestration/state_owner.rs)** |
 | startup / mode lifecycle | [startup.rs](native/crates/runtime/src/orchestration/startup.rs) |
 | read-only capture / decoding / verification | [market/](native/crates/runtime/src/market/) |

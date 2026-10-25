@@ -4018,3 +4018,22 @@ fn market_summary_frame_text_names_the_gap_facts() {
         assert!(text.contains(fact), "{fact} in {text}");
     }
 }
+
+/// Review E4: the decision latency is T_rx→T_ready (economics and the built plan), not
+/// T_rx→T_detect; a record without both stamps adds no sample.
+#[test]
+fn decision_latency_spans_rx_to_ready() {
+    let mut l = crate::analytics::shadow_ledger::ShadowLedger::new();
+    assert_eq!(l.rx_ready_p95_ns(), None);
+    let mut r = rec();
+    r.timing.t_rx_ns = Some(1_000);
+    r.timing.t_detect_ns = Some(1_200);
+    r.timing.t_ready_ns = Some(5_000);
+    r.intervals_ns = vec![("T_rx→T_detect".into(), Some(200))];
+    l.on_record(&r, None);
+    let p95 = l.rx_ready_p95_ns().unwrap();
+    assert!((4_000..5_000).contains(&p95), "{p95}");
+    r.timing.t_ready_ns = None;
+    l.on_record(&r, None);
+    assert_eq!(l.rx_ready_p95_ns(), Some(p95));
+}

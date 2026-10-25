@@ -148,6 +148,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             published_unix_ms: o.at_unix_ms,
             wallet: o.wallet.clone(),
             program_id: o.program_id.clone(),
+            end_result: o.end_result.clone().unwrap_or_default(),
         }),
         engine: Some(OwnerEngine {
             run_state: o.engine.run_state.into(),
@@ -250,10 +251,11 @@ pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
         journal_read: w.journal_read,
         verdict: w.verdict.clone(),
         unknown_reasons: w.unknown_reasons.clone(),
-        attempts: w.totals.attempts as u64,
-        archived_attempts: w.totals.archived as u64,
-        landed_attempts: w.totals.landed_attempts as u64,
-        settled_exits: w.totals.settled_exits as u64,
+        // Unknown without a read journal (never a measured 0).
+        attempts: w.journal_read.then_some(w.totals.attempts as u64),
+        archived_attempts: w.journal_read.then_some(w.totals.archived as u64),
+        landed_attempts: w.journal_read.then_some(w.totals.landed_attempts as u64),
+        settled_exits: w.journal_read.then_some(w.totals.settled_exits as u64),
         fee_lamports: w.totals.fee_lamports.filter(|_| w.journal_read),
         open_inventory_mark_usd_micro: w
             .totals
@@ -1003,6 +1005,7 @@ mod contract_tests {
             mode: "shadow".into(),
             wallet: "LiqWa11et1111111111111111111111111111111111".into(),
             program_id: "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA".into(),
+            end_result: None,
             engine: E {
                 run_state: "READY",
                 halt_reason: None,
@@ -1072,7 +1075,7 @@ mod contract_tests {
                 realized_net_pnl_usd_micro: Some(0),
                 withdrawable_profit_usd_micro: None,
                 transferred_to_treasury_usd_micro: Some(0),
-                status: "VERIFIED",
+                status: "PARTIAL",
             },
         }
     }
@@ -1250,6 +1253,7 @@ mod contract_tests {
             (w.fee_lamports, w.open_inventory_mark_usd_micro),
             (None, None)
         );
+        assert_eq!((w.attempts, w.landed_attempts), (None, None));
     }
 
     #[test]

@@ -37,6 +37,7 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
     mode: run?.mode ?? "",
     publishedUnixMs: run?.publishedUnixMs ?? 0n,
     wallet: run?.wallet ?? "",
+    endResult: run?.endResult ?? "",
     engine: engine
       ? {
           runState: engine.runState,
@@ -110,9 +111,9 @@ export function toWalletsView(m: WalletsState): WalletsView {
     journalRead: m.journalRead,
     verdict: m.verdict,
     unknownReasons: [...m.unknownReasons],
-    attempts: m.attempts,
-    landedAttempts: m.landedAttempts,
-    settledExits: m.settledExits,
+    attempts: optional(m.attempts),
+    landedAttempts: optional(m.landedAttempts),
+    settledExits: optional(m.settledExits),
     feeLamports: optional(m.feeLamports),
     openInventoryMarkUsdMicro: decimal(m.openInventoryMarkUsdMicro),
     holds: amounts(m.holds),

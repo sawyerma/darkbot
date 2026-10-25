@@ -16,7 +16,7 @@ export function LiquidatorPanel({fleet,authorization,goto,owner,ownerStatus,fina
  const toggle=(k:StrategyKind,v:boolean)=>{if(d)patch({enabledStrategies:v?Array.from(new Set([...d.enabledStrategies,k])):d.enabledStrategies.filter(x=>x!==k)})};
  return <><Section title="Liquidator fleet" aside={<span className="p0-badge">Execution locked · V0</span>}>
  <p className="p0-quiet">Shared market state · Independent bot drafts · No live instances.</p>
- <DetailRow title="Running liquidators" value={owner?`1 · ${owner.mode} · ${owner.engine?.runState??"—"} · ${authorization}`:`— · ${authorization}`}/>
+ <DetailRow title="Running liquidators" value={owner&&ownerStatus==="LIVE"?`1 · ${owner.mode} · ${owner.engine?.runState??"—"} · ${authorization}`:`— · ${ownerStatus} · ${authorization}`}/>
  <DetailRow title="Available working capital" value={usdMicroDisplay(finance?.availableCapitalUsdMicro)}/>
  <DetailRow title="Realized net PnL" value={`${usdMicroDisplay(finance?.realizedNetPnlUsdMicro)} · ${finance?.status??"UNKNOWN"}`}/></Section>
  <OwnerSection owner={owner} topicStatus={ownerStatus} parameters={system?.parameters??null}/>

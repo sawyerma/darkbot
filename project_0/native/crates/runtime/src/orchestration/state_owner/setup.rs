@@ -960,6 +960,7 @@ pub(super) fn prepare(
         fe04_settle_retry: Duration::from_millis(operational.fe04_settle_retry_ms),
         fe04_refresh: Duration::from_millis(operational.fe04_refresh_ms),
         projection_requeue_max: u8::try_from(operational.projection_requeue_max)?,
+        end_result: None,
         required_dependency_keys,
         mt0_reporter,
         optional_dependency_keys,

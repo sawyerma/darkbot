@@ -32,8 +32,11 @@ export function OwnerSection({ owner, topicStatus, parameters }: { owner: Liquid
       <p className="p0-quiet">No Shadow/econ4h owner state received.</p>{params}</Section>;
   }
   const { engine: e, trigger: t, pipeline: p, safety: s } = owner;
-  return <Section title="Runtime owner" aside={<span className="p0-badge">{e?.runState ?? "—"} · {owner.mode}</span>}>
-    <DetailRow title="Run" value={`${owner.runId} · ${owner.mode}`}/>
+  // A state of a topic that is not LIVE is the last reported one, never shown as running.
+  const live = topicStatus === "LIVE";
+  return <Section title="Runtime owner" aside={<span className="p0-badge">{live ? `${e?.runState ?? "—"} · ${owner.mode}` : `${topicStatus} · last ${e?.runState ?? "—"}`}</span>}>
+    {live ? null : <p className="p0-quiet">Last reported state ({topicStatus}); not current.</p>}
+    <DetailRow title="Run" value={`${owner.runId} · ${owner.mode}${owner.endResult ? ` · ended ${owner.endResult}` : ""}`}/>
     <DetailRow title="State" value={e ? `${e.runState}${e.haltReason ? ` · ${e.haltReason}` : ""}${e.programUpgradeLatched ? " · program upgrade" : ""}` : "—"}/>
     <DetailRow title="Ingress · generation / reconnects" value={e ? `${e.ingressGeneration} / ${e.reconnects}${e.gapOpen ? " · gap open" : ""}${e.ingressHaltRaised ? " · halt raised" : ""}` : "—"}/>
     <DetailRow title="Same-slot updates · unversioned refused / unordered" value={e ? `${orDash(e.counters.get("same_slot_unversioned_refused"))} / ${orDash(e.counters.get("same_slot_no_wv"))}` : "—"}/>
@@ -41,7 +44,7 @@ export function OwnerSection({ owner, topicStatus, parameters }: { owner: Liquid
     <DetailRow title="Repeats suppressed · soft cap" value={t ? `${t.suppressed} · ${t.softcapSuppressed}` : "—"}/>
     <DetailRow title="Day · health / liquidatable / plans" value={p ? `${p.healthChecked} / ${p.liquidatable} / ${p.plansBuilt} built, ${p.plansRejected} rejected` : "—"}/>
     <DetailRow title="Day · simulations pass / fail · shadow ready / wins" value={p ? `${p.simulationsPassed} / ${p.simulationsFailed} · ${p.shadowReady} / ${p.shadowWins}` : "—"}/>
-    <DetailRow title="Latency p95 · decision / fee quote / simulation" value={p ? `${ms(p.decisionP95Ns)} / ${ms(p.feeQuoteP95Ns)} / ${ms(p.simulationP95Ns)}` : "—"}/>
+    <DetailRow title="Latency p95 · decision (rx→ready) / fee quote / simulation" value={p ? `${ms(p.decisionP95Ns)} / ${ms(p.feeQuoteP95Ns)} / ${ms(p.simulationP95Ns)}` : "—"}/>
     <DetailRow title="Safety · capital in use / limit" value={s ? `${usdMicroDisplay(s.capitalInUseUsdMicro)} / ${usdMicroDisplay(s.maxTotalCapitalUsdMicro)}${s.haltReason ? ` · halted ${s.haltReason}` : ""}` : "—"}/>
     <DetailRow title="Safety · day realized / loss limit" value={s ? `${usdMicroDisplay(s.dayRealizedUsdMicro)} / ${usdMicroDisplay(s.maxDailyLossUsdMicro)}` : "—"}/>
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}

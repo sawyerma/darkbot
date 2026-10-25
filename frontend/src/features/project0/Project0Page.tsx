@@ -4,7 +4,7 @@ import { ownerMonitor } from "./model/owner";
 import { useFleetDrafts } from "./hooks/useFleetDrafts";
 import { TabStrip } from "./components/PanelPrimitives";
 import { HealthSection } from "./components/HealthSection";
-import { ensureProject0Adapter } from "./api/project0Adapter";
+import { ensureProject0Adapter, holdPanelTopics } from "./api/project0Adapter";
 import { useNowMs } from "./hooks/useStatusClock";
 import { executionAuthorization, healthLabel } from "./model/statusSelectors";
 import { selectCapture, selectFinance, selectLiquidator, selectSystem, useProject0Store } from "./store/project0Store";
@@ -49,7 +49,12 @@ export default function Project0Page() {
   const authorization = executionAuthorization(system.value, system.topicStatus);
   const liquidator = useProject0Store(selectLiquidator);
   const finance = useProject0Store(selectFinance);
-  const monitor = useMemo(() => ownerMonitor(liquidator.value, finance.value), [liquidator.value, finance.value]);
+  // The visible tab holds its topics (registry `panels`); the frozen Wallets panel cannot.
+  useEffect(() => holdPanelTopics(tab), [tab]);
+  // A value of a topic that is not LIVE is never shown as current (detached, stale, idle).
+  const liveLiquidator = liquidator.topicStatus === "LIVE" ? liquidator.value : null;
+  const liveFinance = finance.topicStatus === "LIVE" ? finance.value : null;
+  const monitor = useMemo(() => ownerMonitor(liveLiquidator, liveFinance), [liveLiquidator, liveFinance]);
   useEffect(() => { ensureProject0Adapter(); }, []);
   return <div className="p0-graphite"><div className="p0-panel">
     <div className="p0-heading">
@@ -58,11 +63,11 @@ export default function Project0Page() {
     </div>
     <TabStrip label="Project 0 areas" options={TABS} value={tab} onChange={setTab}/>
     {healthOpen ? <HealthSection/> : null}
-    {tab === "overview" ? <OverviewPanel monitor={monitor} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} goto={setTab}/> : null}
-    {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab} owner={liquidator.value} ownerStatus={liquidator.topicStatus} finance={finance.value} system={system.value}/> : null}
+    {tab === "overview" ? <OverviewPanel monitor={monitor} financeStatus={finance.topicStatus} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} goto={setTab}/> : null}
+    {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab} owner={liquidator.value} ownerStatus={liquidator.topicStatus} finance={liveFinance} system={system.value}/> : null}
     {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus}/> : null}
     {tab === "analytics" ? <AnalyticsPanel createDraft={fleet.create} goto={setTab}/> : null}
-    {tab === "wallets" ? <WalletsPanel finance={finance.value}/> : null}
+    {tab === "wallets" ? <WalletsPanel finance={liveFinance}/> : null}
     <footer className="p0-footer">Graphite V0 · Read-only status via gateway · No live submissions or transfers</footer>
   </div></div>;
 }

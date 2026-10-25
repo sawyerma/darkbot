@@ -113,6 +113,8 @@ pub(super) struct ShadowOwner {
     fe04_refresh: Duration,
     /// D01: E9 requeues per external trigger (`projection_requeue_max`).
     projection_requeue_max: u8,
+    /// The run's end for the final status (RUN_COMPLETE or the terminal code); `None` running.
+    end_result: Option<&'static str>,
     // Read once at setup, never from the environment on the owner thread.
     eval_slippage_bps: u64,
     zero_prefund_enabled: bool,
@@ -341,6 +343,11 @@ pub(super) fn run_shadow(
         owner.shutdown.request();
         owner.ingress_session.request();
     }
+    // Review E4: the final status carries how the run ended (published by `finish`).
+    owner.end_result = Some(match &outcome {
+        Ok(()) => "RUN_COMPLETE",
+        Err(e) => super::startup::shadow_failure_code(e.as_ref()),
+    });
     // Every exit, including errors, joins and drains the evidence writer.
     let finish = owner.finish();
     finish.and(outcome)

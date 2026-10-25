@@ -230,6 +230,8 @@ pub struct OwnerSnapshot {
     pub mode: String,
     pub wallet: String,
     pub program_id: String,
+    /// `None` while the owner runs; at its end RUN_COMPLETE or the terminal code.
+    pub end_result: Option<String>,
     pub engine: OwnerEngine,
     pub trigger: OwnerTrigger,
     pub pipeline: OwnerPipeline,

@@ -6,7 +6,7 @@ import { usdMicroDisplay } from "../model/format";
 import { fmtAgeNs, orDash } from "../model/statusFormat";
 import { counterOf, phaseLabel } from "../model/statusSelectors";
 
-export function OverviewPanel({ monitor, capture, topicStatus, authorization, goto }: { monitor: MonitorSnapshot; capture: CaptureView | null; topicStatus: TopicStatus; authorization: string; goto: (tab: Project0Tab) => void }) {
+export function OverviewPanel({ monitor, financeStatus, capture, topicStatus, authorization, goto }: { monitor: MonitorSnapshot; financeStatus: TopicStatus; capture: CaptureView | null; topicStatus: TopicStatus; authorization: string; goto: (tab: Project0Tab) => void }) {
   const t = capture?.transport ?? null;
   const stream = t?.connected == null ? "Unknown"
     : t.connected ? `Connected · ${capture?.run?.wsHost ?? "—"}` : "Disconnected";
@@ -22,7 +22,7 @@ export function OverviewPanel({ monitor, capture, topicStatus, authorization, go
       : <UnknownMetric label="Stream freshness" unit="ms"/>}
     <div className="p0-metric"><span>Realized net PnL</span><b>{usdMicroDisplay(monitor.finance?.realizedNetPnlUsdMicro)}</b></div>
   </div><DetailRow title="Total capital · USD" value={usdMicroDisplay(monitor.finance?.totalCapitalUsdMicro)}/>
-  <p className="p0-note">{monitor.finance ? `Finance ${monitor.finance.status} · slot ${monitor.finance.asOfSlot}. Unknown values stay —.` : capture ? `Last reported stream values · ${topicStatus}. No owner finance received.` : "No measured values. Click Health for detailed diagnostics."}</p></Section>
+  <p className="p0-note">{monitor.finance ? `Finance ${monitor.finance.status} · slot ${monitor.finance.asOfSlot} · ${financeStatus}. Unknown values stay —.` : capture ? `Last reported stream values · ${topicStatus}. Owner finance · ${financeStatus}.` : `No measured values · owner finance ${financeStatus}. Click Health for detailed diagnostics.`}</p></Section>
   <Section title="Liquidator" aside={<span className="p0-badge">Locked</span>}>
     <DetailRow title="Execution" value={`Disabled · ${authorization}`}/><DetailRow title="Available capital" value={usdMicroDisplay(monitor.finance?.availableCapitalUsdMicro)}/>
     <button className="p0-secondary" onClick={() => goto("liquidator")}>Open Liquidator →</button></Section>

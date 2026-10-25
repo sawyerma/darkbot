@@ -2,6 +2,13 @@
 use super::*;
 impl ShadowOwner {
     pub(super) fn finish(mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Review E4: every exit publishes the final owner state (also an error exit inside the
+        // rate limit), so the reporter's last frame is the run's end, never an older state.
+        #[cfg(feature = "crate_health")]
+        {
+            self.status_published = None;
+            self.publish_status();
+        }
         if let Some(h) = &self.econ {
             let ws = self.winner_tracker.stats();
             h.shared.submission_attempts.store(

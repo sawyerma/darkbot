@@ -69,6 +69,8 @@ export interface LiquidatorView {
   mode: string;
   publishedUnixMs: bigint;
   wallet: string;
+  /** Empty while the owner runs; at its end RUN_COMPLETE or the terminal code. */
+  endResult: string;
   engine: OwnerEngineView | null;
   trigger: OwnerTriggerView | null;
   pipeline: OwnerPipelineView | null;
@@ -82,9 +84,10 @@ export interface WalletsView {
   journalRead: boolean;
   verdict: string;
   unknownReasons: readonly string[];
-  attempts: bigint;
-  landedAttempts: bigint;
-  settledExits: bigint;
+  /** Unknown (null) unless the journal was read. */
+  attempts: bigint | null;
+  landedAttempts: bigint | null;
+  settledExits: bigint | null;
   feeLamports: bigint | null;
   openInventoryMarkUsdMicro: string | null;
   holds: ReadonlyArray<{ asset: string; units: bigint }>;

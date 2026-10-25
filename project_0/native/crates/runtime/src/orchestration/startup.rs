@@ -71,6 +71,13 @@ fn controller_refusal(mode: &str, launched: bool) -> Option<&'static str> {
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    run_with(&mut || {})
+}
+
+/// `run` with `after_owner_lock`, called once the process holds the project's runtime lock
+/// (and its stop handler), before any mode starts: a composition root attaches its status
+/// reporter there — never for `--help`/printing, never before a refused second owner.
+pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|s| s == "--help" || s == "-h") {
         print!("{}", darkbot_solana::runtime_config::Resolved::help());
@@ -107,10 +114,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         apply_operational_environment(&resolved.config);
         resolved.activate()?;
     }
-    // P0-PROD-CTRL-04: the process status (operational parameters) of a reported run.
-    if let Some(tap) = crate::status_tap::installed() {
-        tap.publish_operational(crate::status_tap::operational_snapshot());
-    }
     // FEUI-01: one runtime owner per project (launchers set P0_RUNTIME_LOCK) and an ordered
     // operator stop for every mode (econ4h and market poll it; the Shadow owner ends its loop on
     // it and seals its journals).
@@ -130,6 +133,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     if mode == "market" || mode == "econ4h" || mode == "shadow" {
         super::control::install_stop_handler()?;
+    }
+    after_owner_lock();
+    // P0-PROD-CTRL-04: the process status (operational parameters) of a reported run.
+    if let Some(tap) = crate::status_tap::installed() {
+        tap.publish_operational(crate::status_tap::operational_snapshot());
     }
     // [C0-MO] Market mode branches off before any trading-stack initialisation: no RPC URL,
     // keypair, signer, health engine, planner, simulation or submission is constructed.

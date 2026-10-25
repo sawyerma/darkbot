@@ -941,8 +941,8 @@ async fn wait_shutdown(shutdown: &Shutdown) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
-/// A01: the periodic health of the session of source `attempt` (1 = the first session): its
-/// reconnects are the sessions before it, never a placeholder 0.
+/// A01: the periodic health of the session of connect attempt `attempt` (1 = the first): its
+/// reconnects are the connect attempts before it (failed ones included), never a placeholder 0.
 fn session_health(
     attempt: u32,
     frames: u64,
@@ -1038,7 +1038,7 @@ pub fn audit_liveness(
 
 #[cfg(test)]
 mod tests {
-    /// A01: the health of a session counts the reconnects before it (the second session: one),
+    /// A01: the health of a session counts the connect attempts before it (the second: one),
     /// never the former placeholder 0.
     #[test]
     fn a01_session_health_counts_the_reconnects_before_it() {

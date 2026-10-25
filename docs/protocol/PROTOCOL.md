@@ -1861,7 +1861,7 @@ finance_snapshot_id as project0.wallets.state). Unknown values stay unset.
 | realized_net_pnl_usd_micro | [int64](#int64) | optional | Realized net of the settled steps (FE-04 accounting). |
 | withdrawable_profit_usd_micro | [int64](#int64) | optional | Withdrawable realized profit; unset unless every input is known. |
 | transferred_to_treasury_usd_micro | [int64](#int64) | optional | No transfer path exists: 0 once the journal was read. |
-| status | [string](#string) |  | VERIFIED (every step settled) | PARTIAL (unsettled steps) | UNKNOWN (no journal read). |
+| status | [string](#string) |  | VERIFIED (every field known) | PARTIAL (journal read, a field unknown) | UNKNOWN (no journal read). |
 
 
 
@@ -1947,7 +1947,7 @@ Pipeline evaluations and decisions of the current day (Shadow ledger) and this p
 | shadow_ready | [uint64](#uint64) |  | Shadow-ready decisions on the day. |
 | shadow_wins | [uint64](#uint64) |  | Shadow wins against the observed winner on the day. |
 | losses | [LossCount](#darkbot-project0-v1-LossCount) | repeated | Loss reasons of the day. |
-| decision_p95_ns | [uint64](#uint64) | optional | p95 of T_rx→T_detect of the day; unset without a sample. |
+| decision_p95_ns | [uint64](#uint64) | optional | p95 of T_rx→T_ready (decision ready: economics and the built plan) of the day; unset without a sample. |
 | fee_quote_p95_ns | [uint64](#uint64) | optional | p95 of the fee-quote RPC of this process; unset without a sample. |
 | simulation_p95_ns | [uint64](#uint64) | optional | p95 of the simulation RPC of this process; unset without a sample. |
 
@@ -1969,6 +1969,7 @@ Run identity of the owner.
 | published_unix_ms | [uint64](#uint64) |  | Wall clock of this publication. |
 | wallet | [string](#string) |  | Liquidator wallet, base58 (public key only). |
 | program_id | [string](#string) |  | Marginfi program id, base58. |
+| end_result | [string](#string) |  | Empty while the owner runs; at its end RUN_COMPLETE or the terminal code. |
 
 
 
@@ -2063,10 +2064,10 @@ wallet&#39;s FE-04 journals (execution/accounting.rs) and the reservation book.
 | journal_read | [bool](#bool) |  | An FE-04 journal directory is configured and was read. |
 | verdict | [string](#string) |  | FE-07 verdict: NO_TRADE | FIRST_REALIZED_PROFIT_EVIDENCED | LOSS | UNKNOWN. |
 | unknown_reasons | [string](#string) | repeated | Why the verdict is UNKNOWN (unsettled steps, open inventory) or the journal read error. |
-| attempts | [uint64](#uint64) |  | Own attempts in the journals (archived and active). |
-| archived_attempts | [uint64](#uint64) |  | Archived attempts. |
-| landed_attempts | [uint64](#uint64) |  | Settled attempts that landed. |
-| settled_exits | [uint64](#uint64) |  | Settled exits. |
+| attempts | [uint64](#uint64) | optional | Own attempts in the journals (archived and active); unset unless the journal was read. |
+| archived_attempts | [uint64](#uint64) | optional | Archived attempts; unset unless the journal was read. |
+| landed_attempts | [uint64](#uint64) | optional | Settled attempts that landed; unset unless the journal was read. |
+| settled_exits | [uint64](#uint64) | optional | Settled exits; unset unless the journal was read. |
 | fee_lamports | [uint64](#uint64) | optional | Fees of the settled steps; unset on overflow. |
 | open_inventory_mark_usd_micro | [int64](#int64) | optional | Mark of the open inventory; unset when a position is unvalued. |
 | holds | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Holds of every attempt in the reservation book, per asset (&#34;SOL&#34; lamports or mint units). |

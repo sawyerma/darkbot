@@ -39,6 +39,8 @@ pub struct ShadowLedger {
     h_rx_detect: Histogram,
     h_detect_ready: Histogram,
     h_ready_sign: Histogram,
+    /// Decision latency (GRAPHITE finance contract): T_rx→T_ready of each record with both.
+    h_rx_ready: Histogram,
 }
 
 impl Default for ShadowLedger {
@@ -57,6 +59,7 @@ impl ShadowLedger {
             h_rx_detect: Histogram::new(),
             h_detect_ready: Histogram::new(),
             h_ready_sign: Histogram::new(),
+            h_rx_ready: Histogram::new(),
         }
     }
 
@@ -65,9 +68,9 @@ impl ShadowLedger {
         &self.day
     }
 
-    /// p95 of T_rx→T_detect of the current day; `None` without a sample.
-    pub fn rx_detect_p95_ns(&self) -> Option<u64> {
-        self.h_rx_detect.percentile(0.95)
+    /// Decision latency: p95 of T_rx→T_ready of the current day; `None` without a sample.
+    pub fn rx_ready_p95_ns(&self) -> Option<u64> {
+        self.h_rx_ready.percentile(0.95)
     }
 
     fn roll(&mut self, now_unix_s: u64) -> Option<DaySummary> {
@@ -83,6 +86,7 @@ impl ShadowLedger {
             self.h_rx_detect.reset();
             self.h_detect_ready.reset();
             self.h_ready_sign.reset();
+            self.h_rx_ready.reset();
             return if done.account_updates > 0 || done.health_checked > 0 {
                 Some(done)
             } else {
@@ -144,6 +148,9 @@ impl ShadowLedger {
                     _ => {}
                 }
             }
+        }
+        if let (Some(rx), Some(ready)) = (rec.timing.t_rx_ns, rec.timing.t_ready_ns) {
+            self.h_rx_ready.record(ready.saturating_sub(rx));
         }
     }
 

@@ -94,6 +94,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_settle_retry: Duration::from_millis(OPERATIONAL.fe04_settle_retry_ms),
         fe04_refresh: Duration::from_millis(OPERATIONAL.fe04_refresh_ms),
         projection_requeue_max: OPERATIONAL.projection_requeue_max as u8,
+        end_result: None,
         eval_slippage_bps: 0,
         zero_prefund_enabled: false,
         c0_census: None,
@@ -378,6 +379,17 @@ fn owner_projection_carries_real_engine_safety_and_unknown_finance() {
     assert_eq!(s.finance.reserved_capital_usd_micro, Some(0));
     assert!(!s.wallets.journal_read);
     assert_eq!(s.wallets.held_attempt, "NONE");
+    assert_eq!(s.end_result, None);
+    // Review E4: a read journal without reconciled balances is PARTIAL (never VERIFIED while
+    // a field is unknown); the run's end reaches the final snapshot.
+    f.owner.ledger_view = Some(Ok(super::status_view::LedgerView::of(
+        &crate::execution::accounting::Ledger::default(),
+    )));
+    f.owner.end_result = Some("STATE_RECOVERY_EXHAUSTED");
+    let s = f.owner.owner_snapshot(1_760_000_000_000);
+    assert_eq!(s.finance.status, "PARTIAL");
+    assert_eq!(s.finance.realized_net_pnl_usd_micro, Some(0));
+    assert_eq!(s.end_result.as_deref(), Some("STATE_RECOVERY_EXHAUSTED"));
     cleanup(f);
 }
 
