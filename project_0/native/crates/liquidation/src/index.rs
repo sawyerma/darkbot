@@ -75,6 +75,11 @@ impl ReverseIndex {
         self.account_to_banks.insert(account, set);
     }
 
+    /// Indexed accounts.
+    pub fn account_count(&self) -> usize {
+        self.account_to_banks.len()
+    }
+
     pub fn remove_account(&mut self, account: &Pubkey) {
         self.set_account_banks(*account, &[]);
         self.account_to_banks.remove(account);

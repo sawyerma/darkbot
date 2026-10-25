@@ -518,6 +518,11 @@ impl Safety {
         self.capital_in_use
     }
 
+    /// The configured limits (read-only projection).
+    pub fn limits(&self) -> &Limits {
+        &self.limits
+    }
+
     /// Inventory held from finalized attempts (USD micro, conservative mark).
     pub fn inventory_outstanding(&self) -> u64 {
         self.inventory_outstanding

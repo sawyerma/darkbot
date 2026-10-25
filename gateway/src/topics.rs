@@ -69,14 +69,14 @@ pub const TOPICS: &[TopicSpec] = &[
         TopicClass::State,
         ProjectId::Project0,
         "project0.finance.summary",
-        "",
+        "darkbot.project0.v1.FinanceSummary",
     ),
     s(
         TopicId::Project0LiquidatorState,
         TopicClass::State,
         ProjectId::Project0,
         "project0.liquidator.state",
-        "",
+        "darkbot.project0.v1.LiquidatorState",
     ),
     s(
         TopicId::Project0CaptureState,
@@ -90,7 +90,7 @@ pub const TOPICS: &[TopicSpec] = &[
         TopicClass::State,
         ProjectId::Project0,
         "project0.wallets.state",
-        "",
+        "darkbot.project0.v1.WalletsState",
     ),
     s(
         TopicId::Project0AnalyticsJobs,

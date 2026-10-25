@@ -6,15 +6,24 @@ impl ShadowOwner {
         // P8-RES-02: the book follows the durable FE-04 journal (a finalized reconciliation
         // releases, UNKNOWN keeps holding, an unreadable journal blocks every offer).
         // FE-04/C3: a held journal changes only through this owner (the book is rebuilt there).
-        if let (Some(dir), None) = (&self.fe04_journal, &self.fe04_held) {
+        if let Some(dir) = &self.fe04_journal {
             if self.fe04_refreshed.elapsed() >= std::time::Duration::from_secs(5) {
-                self.reservations = crate::execution::reservation::WalletReservations::refreshed(
-                    dir,
-                    &self.liquidator.to_string(),
-                );
+                let wallet = self.liquidator.to_string();
+                if self.fe04_held.is_none() {
+                    self.reservations =
+                        crate::execution::reservation::WalletReservations::refreshed(dir, &wallet);
+                }
+                // P0-PROD-CTRL-04: the accounting the status projection carries, read only when
+                // a status tap is installed (read-only, no wallet lock).
+                #[cfg(feature = "crate_health")]
+                if crate::status_tap::installed().is_some() {
+                    self.ledger_view = Some(status_view::LedgerView::load(dir, &wallet));
+                }
                 self.fe04_refreshed = std::time::Instant::now();
             }
         }
+        #[cfg(feature = "crate_health")]
+        self.publish_status();
         // P6-MT.1 (MT5b): the per-account SUBMITTED ownership is the book's target hold —
         // synchronized before this pass judges any result or evaluates any candidate.
         self.sync_ownership();

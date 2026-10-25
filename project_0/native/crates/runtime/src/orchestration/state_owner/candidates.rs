@@ -724,7 +724,6 @@ impl CandidateLanes {
     pub(crate) fn oldest_t_rx_first(&self) -> Option<u64> {
         self.by_first.first().map(|(t, _)| *t)
     }
-    #[cfg(test)]
     pub(crate) fn lane_len(&self, lane: Lane) -> usize {
         self.order[lane.idx()].len()
     }

@@ -9,6 +9,7 @@ pub use darkbot_solana::provider::{
 };
 use darkbot_solana::runtime_config;
 pub use darkbot_solana::runtime_config::{EffectiveConfig, Limits, Profile};
+pub use darkbot_solana::state::StateCounters;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -213,6 +214,130 @@ pub fn operational_snapshot() -> OperationalSnapshot {
     )
 }
 
+/// P0-PROD-CTRL-04: the Shadow/econ4h state owner's projection, copied by the owner at most every
+/// `owner_status_ms` (`state_owner/status.rs`). Values as the owner holds them; an unknown value
+/// is `None`, never 0. Topics project0.liquidator.state, .wallets.state, .finance.summary.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OwnerSnapshot {
+    pub at_unix_ms: u64,
+    pub run_id: String,
+    /// shadow | econ4h.
+    pub mode: String,
+    pub wallet: String,
+    pub program_id: String,
+    pub engine: OwnerEngine,
+    pub trigger: OwnerTrigger,
+    pub pipeline: OwnerPipeline,
+    pub safety: OwnerSafety,
+    pub capabilities: Vec<OwnerCapability>,
+    pub wallets: OwnerWallets,
+    pub finance: OwnerFinance,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerEngine {
+    /// BOOTSTRAPPING | RECONCILING | READY | HALTED.
+    pub run_state: &'static str,
+    pub halt_reason: Option<String>,
+    pub ingress_generation: u64,
+    /// A01: Reconnected events applied to the state of this run.
+    pub reconnects: u64,
+    pub gap_open: bool,
+    pub highest_slot: u64,
+    pub ingress_halt_raised: bool,
+    pub program_upgrade_latched: bool,
+    pub counters: StateCounters,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerTrigger {
+    /// sweep | threshold.
+    pub mode: &'static str,
+    pub threshold_ready: bool,
+    /// Pending candidates of L0, L1, L2.
+    pub lanes: [u64; 3],
+    pub detect_queue: u64,
+    pub indexed_accounts: u64,
+    pub suppressed: u64,
+    pub softcap_suppressed: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerPipeline {
+    pub evaluations: u64,
+    /// The Shadow ledger's current day.
+    pub day: crate::analytics::shadow_ledger::DaySummary,
+    pub decision_p95_ns: Option<u64>,
+    pub fee_quote_p95_ns: Option<u64>,
+    pub simulation_p95_ns: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerSafety {
+    pub capital_in_use_usd_micro: u64,
+    pub max_total_capital_usd_micro: u64,
+    pub max_daily_loss_usd_micro: u64,
+    pub max_exposure_per_attempt_usd_micro: u64,
+    pub max_concurrent_positions: u32,
+    pub max_outstanding_attempts: u32,
+    pub max_failed_attempts_per_day: u32,
+    pub halt_reason: Option<String>,
+    pub day_realized_usd_micro: i128,
+    pub day_failed_attempts: u32,
+    pub day_attempts: u32,
+}
+
+/// One switchable capability (P0-PROD-CTRL-03): requested, effective, why blocked.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerCapability {
+    pub name: &'static str,
+    pub requested: &'static str,
+    pub effective: &'static str,
+    pub block_reason: &'static str,
+}
+
+/// FE-04 wallet state from the accounting ledger and the reservation book.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerWallets {
+    pub finance_snapshot_id: String,
+    pub journal_read: bool,
+    pub verdict: String,
+    pub unknown_reasons: Vec<String>,
+    pub totals: crate::execution::accounting::Totals,
+    pub holds: std::collections::BTreeMap<String, u64>,
+    pub policy_reserves: std::collections::BTreeMap<String, u64>,
+    /// NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED.
+    pub held_attempt: &'static str,
+}
+
+/// The finance summary (`FinanceSnapshot` of the frontend contract); unknown stays `None`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerFinance {
+    pub as_of_slot: u64,
+    pub total_capital_usd_micro: Option<i128>,
+    pub available_capital_usd_micro: Option<i128>,
+    pub reserved_capital_usd_micro: Option<i128>,
+    pub realized_net_pnl_usd_micro: Option<i128>,
+    pub withdrawable_profit_usd_micro: Option<i128>,
+    pub transferred_to_treasury_usd_micro: Option<i128>,
+    /// VERIFIED | PARTIAL | UNKNOWN.
+    pub status: &'static str,
+}
+
+static INSTALLED: std::sync::OnceLock<StatusTap> = std::sync::OnceLock::new();
+
+/// The process status tap a composition root installed before the runtime starts (the state
+/// owner publishes its projection into it); without one nothing is published.
+pub fn install(tap: StatusTap) -> Result<(), &'static str> {
+    INSTALLED
+        .set(tap)
+        .map_err(|_| "STATUS_TAP_ALREADY_INSTALLED")
+}
+
+pub fn installed() -> Option<&'static StatusTap> {
+    INSTALLED.get()
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StatusSnapshot {
     pub seq: u64,
@@ -220,6 +345,9 @@ pub struct StatusSnapshot {
     pub system_version: u64,
     /// Bumped by every change of a capture block.
     pub capture_version: u64,
+    /// Bumped by every owner publication.
+    pub owner_version: u64,
+    pub owner: Option<Arc<OwnerSnapshot>>,
     pub operational: Option<Arc<OperationalSnapshot>>,
     pub run: Option<Arc<RunSnapshot>>,
     pub phase: Option<PhaseSnapshot>,
@@ -244,6 +372,12 @@ struct Inner {
     delivered: Condvar,
 }
 
+enum Block {
+    System,
+    Capture,
+    Owner,
+}
+
 #[derive(Clone)]
 pub struct StatusTap(Arc<Inner>);
 
@@ -264,16 +398,33 @@ impl StatusTap {
     }
 
     fn publish(&self, system: bool, f: impl FnOnce(&mut StatusSnapshot)) {
+        self.publish_block(
+            if system {
+                Block::System
+            } else {
+                Block::Capture
+            },
+            f,
+        )
+    }
+
+    fn publish_block(&self, block: Block, f: impl FnOnce(&mut StatusSnapshot)) {
         let mut s = lock(&self.0.latest);
         f(&mut s);
         s.seq = s.seq.checked_add(1).expect("status-tap sequence overflow");
-        if system {
-            s.system_version += 1;
-        } else {
-            s.capture_version += 1;
+        match block {
+            Block::System => s.system_version += 1,
+            Block::Capture => s.capture_version += 1,
+            Block::Owner => s.owner_version += 1,
         }
         drop(s);
         self.0.changed.notify_all();
+    }
+
+    /// The state owner's projection (one publication replaces the previous one).
+    pub fn publish_owner(&self, owner: OwnerSnapshot) {
+        let owner = Arc::new(owner);
+        self.publish_block(Block::Owner, |v| v.owner = Some(owner));
     }
 
     pub fn publish_operational(&self, s: OperationalSnapshot) {

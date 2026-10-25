@@ -1,6 +1,14 @@
 import type { JsonObject } from "@bufbuild/protobuf";
 import { TopicId, topics, type StateMeta } from "@/core/realtime";
-import { useProject0Store } from "../store/project0Store";
+import { useProject0Store, type OwnerTopic } from "../store/project0Store";
+import {
+  decodeFinanceSummary,
+  decodeLiquidatorState,
+  decodeWalletsState,
+  toFinanceSnapshot,
+  toLiquidatorView,
+  toWalletsView,
+} from "./ownerAdapter";
 import {
   captureJsonOf,
   decodeCaptureState,
@@ -63,6 +71,19 @@ export function ensureProject0Adapter(): void {
     const message = decodeCaptureState(bytes);
     applyCapture({ value: message, meta, receivedAtMs: Date.now() });
   });
+  // P0-PROD-CTRL-04: the state owner's projection (Liquidator, Wallets, Overview finance).
+  const owner: ReadonlyArray<[OwnerTopic, TopicId, (bytes: Uint8Array) => Parameters<ReturnType<typeof store>["applyOwner"]>[1]]> = [
+    ["liquidator", TopicId.PROJECT0_LIQUIDATOR_STATE, (b) => toLiquidatorView(decodeLiquidatorState(b))],
+    ["wallets", TopicId.PROJECT0_WALLETS_STATE, (b) => toWalletsView(decodeWalletsState(b))],
+    ["finance", TopicId.PROJECT0_FINANCE_SUMMARY, (b) => toFinanceSnapshot(decodeFinanceSummary(b))],
+  ];
+  for (const [slice, topic, decode] of owner) {
+    const apply = frameBatcher<ReturnType<typeof decode>>((u) => store().applyOwner(slice, u.value, u.meta, u.receivedAtMs));
+    topics.onTopicStatus(topic, (status, reason) => store().setOwnerTopic(slice, status, reason));
+    topics.onState(topic, (bytes: Uint8Array, meta: StateMeta) => {
+      apply({ value: decode(bytes), meta, receivedAtMs: Date.now() });
+    });
+  }
 }
 
 /** Every value of the latest received states, generated from the contract. */

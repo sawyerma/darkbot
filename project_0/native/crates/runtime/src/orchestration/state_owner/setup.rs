@@ -963,6 +963,15 @@ pub(super) fn prepare(
             None => None,
         },
         mode,
+        run_id: super::super::startup::owner_run_id(&|k| std::env::var(k).ok()),
+        status_interval: Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .owner_status_ms,
+        ),
+        status_published: None,
+        status_seq: 0,
+        ledger_view: None,
         required_dependency_keys,
         mt0_reporter,
         optional_dependency_keys,

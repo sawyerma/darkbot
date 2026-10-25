@@ -756,17 +756,9 @@ impl WsRpcControlSource {
             if t_rx_ns.saturating_sub(last_health_ns) >= health_interval_ns {
                 last_health_ns = t_rx_ns;
                 // L3: a control/health event lost to a full queue is counted as dropped.
-                if let Err(ChannelError::Full(_)) =
-                    sink.try_push(IngressEvent::Health(super::SourceHealth {
-                        source: SourceKind::WsRpcControl,
-                        connected: true,
-                        last_frame_age_ns: last_frame_ns.map(|l| t_rx_ns.saturating_sub(l)),
-                        frames,
-                        reconnects: 0,
-                        last_slot: *last_slot,
-                        t_rx_ns,
-                    }))
-                {
+                if let Err(ChannelError::Full(_)) = sink.try_push(IngressEvent::Health(
+                    session_health(attempt, frames, last_frame_ns, *last_slot, t_rx_ns),
+                )) {
                     sink.give_up();
                 }
             }
@@ -946,6 +938,26 @@ async fn wait_shutdown(shutdown: &Shutdown) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
+/// A01: the periodic health of the session of source `attempt` (1 = the first session): its
+/// reconnects are the sessions before it, never a placeholder 0.
+fn session_health(
+    attempt: u32,
+    frames: u64,
+    last_frame_ns: Option<u64>,
+    last_slot: Option<u64>,
+    t_rx_ns: u64,
+) -> super::SourceHealth {
+    super::SourceHealth {
+        source: SourceKind::WsRpcControl,
+        connected: true,
+        last_frame_age_ns: last_frame_ns.map(|l| t_rx_ns.saturating_sub(l)),
+        frames,
+        reconnects: attempt.saturating_sub(1),
+        last_slot,
+        t_rx_ns,
+    }
+}
+
 pub(crate) fn reconnect_delay(
     initial: Duration,
     maximum: Duration,
@@ -1023,6 +1035,22 @@ pub fn audit_liveness(
 
 #[cfg(test)]
 mod tests {
+    /// A01: the health of a session counts the reconnects before it (the second session: one),
+    /// never the former placeholder 0.
+    #[test]
+    fn a01_session_health_counts_the_reconnects_before_it() {
+        assert_eq!(session_health(1, 0, None, None, 5).reconnects, 0);
+        let h = session_health(2, 7, Some(3), Some(9), 5);
+        assert_eq!(
+            (h.reconnects, h.frames, h.last_frame_age_ns),
+            (1, 7, Some(2))
+        );
+        assert_eq!(
+            session_health(u32::MAX, 0, None, None, 0).reconnects,
+            u32::MAX - 1
+        );
+    }
+
     use super::*;
     include!("ws_rpc_recovery_tests.rs");
     include!("ws_rpc_stop_tests.rs");

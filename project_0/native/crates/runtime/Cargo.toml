@@ -46,8 +46,3 @@ tungstenite = { version = "=0.24.0", default-features = false, features = ["hand
 # S1-02: the loopback gRPC server of the owner's source E2E tests.
 darkbot-solana = { path = "../solana", features = ["test-support"] }
 
-[[bin]]
-name = "p0-longtail"
-path = "src/main.rs"
-# Since FIX-78/FIX-79c the Shadow subscription and detection filters need the typed MarginfiAccount layout.
-required-features = ["crate_health"]

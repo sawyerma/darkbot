@@ -84,15 +84,26 @@ mod generations;
 mod ownership;
 mod shutdown;
 mod sources;
+#[cfg(feature = "crate_health")]
+mod status;
 mod sweep;
 mod telemetry;
 
 mod metrics;
+mod status_view;
 use metrics::OwnerMetrics;
 
 pub(super) struct ShadowOwner {
     metrics: OwnerMetrics,
     mode: String,
+    /// The run id the owner lock records (`startup::owner_run_id`).
+    run_id: String,
+    /// P0-PROD-CTRL-04: the owner status projection — its cadence (`owner_status_ms`), the last
+    /// publication, its sequence and the FE-04 accounting read at the journal refresh cadence.
+    status_interval: Duration,
+    status_published: Option<std::time::Instant>,
+    status_seq: u64,
+    ledger_view: Option<Result<status_view::LedgerView, String>>,
     // Read once at setup, never from the environment on the owner thread.
     eval_slippage_bps: u64,
     zero_prefund_enabled: bool,

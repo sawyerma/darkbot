@@ -45,7 +45,13 @@ pub(crate) fn apply_operational_environment(
 /// The run id the owner lock records, so `p0ctl run stop --run ID` and `run status` find the
 /// run: the controller's launch marker first (its run id for every mode, Shadow included), then
 /// the mode's own id (unlaunched econ4h/market tools); "-" only for an unnamed local run.
-fn owner_run_id(get: &dyn Fn(&str) -> Option<String>) -> String {
+/// The run id of this process from its environment (`owner_run_id`): the reporter of the
+/// composition root names its session with it.
+pub fn run_id_from_env() -> String {
+    owner_run_id(&|k| std::env::var(k).ok())
+}
+
+pub(crate) fn owner_run_id(get: &dyn Fn(&str) -> Option<String>) -> String {
     [
         "P0_CTL_LAUNCH_RUN_ID",
         "P0_SHADOW_RUN_ID",
@@ -100,6 +106,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // gates while obtaining operational values from the shared contract.
         apply_operational_environment(&resolved.config);
         resolved.activate()?;
+    }
+    // P0-PROD-CTRL-04: the process status (operational parameters) of a reported run.
+    if let Some(tap) = crate::status_tap::installed() {
+        tap.publish_operational(crate::status_tap::operational_snapshot());
     }
     // FEUI-01: one runtime owner per project (launchers set P0_RUNTIME_LOCK) and an ordered
     // operator stop for every mode (econ4h and market poll it; the Shadow owner ends its loop on

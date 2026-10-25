@@ -99,8 +99,9 @@ Jede Variable benötigt genau einen nativen fachlichen Owner. 'EXISTS_INTERNAL' 
 |---|---|---|
 | 'overview.aggregates' | project_id,label,route,health,readiness,execution_authorization,running_instances,active_jobs,warnings,as_of | Gateway read-only Aggregation, native Source-Proof |
 | 'project0.status' | config_version,pending_commands[],recent_command_results[],source_quality,storage,transport,rpc/decision_latency_series | Project0 Backend + Gateway quality overlay |
-| 'project0.finance.summary' | finance_snapshot_id,realized_net_pnl_usd_micro,total_capital_usd_micro,valuation_quality,pnl_quality | P0 finalisiertes Portfolio, SOLL |
-| 'project0.liquidator.state' | native profile_version, bot_id/phase/limits/fees; React Drafts != active | P0 Runtime, vor F8 nur EIN Bot |
+| 'project0.finance.summary' | finance_snapshot_id,as_of_slot,total/available/reserved capital,realized_net_pnl,withdrawable,transferred (usd_micro, optional),status | P0 `state_owner/status.rs`, IST 25.10. |
+| 'project0.liquidator.state' | run, engine (run_state, reconnects, state counters), trigger/lanes, pipeline day, safety, capabilities requested/effective/block_reason; React Drafts != active | P0 `state_owner/status.rs`, IST 25.10. |
+| 'project0.wallets.state' | finance_snapshot_id, journal verdict/totals, holds, policy reserves, held attempt | P0 `state_owner/status.rs`, IST 25.10. |
 | 'bsc.status' | G0.6a/G0.7/G0.8 status, portal drift, builder status, config_version, pending/recent commands | BSC native status adapter |
 | 'bsc.launch.state' | plan_version, signed parameters, live gate, attempt identity | BSC acceptance guard, no generic UI send |
 | EVENT | topic,journal_epoch,durable_cursor,event_id,run/source/proof | native Journal, not gateway seq |

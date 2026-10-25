@@ -81,6 +81,11 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
     let owner = ShadowOwner {
         metrics: OwnerMetrics::default(),
         mode: "shadow".into(),
+        run_id: format!("e2e-{tag}"),
+        status_interval: Duration::from_millis(1),
+        status_published: None,
+        status_seq: 0,
+        ledger_view: None,
         eval_slippage_bps: 0,
         zero_prefund_enabled: false,
         c0_census: None,
@@ -298,6 +303,74 @@ fn snapshot(f: &Fixture, missing_required: bool) -> SnapshotData {
             vec![]
         },
     }
+}
+
+/// P0-PROD-CTRL-04 (A01, F-05): the owner projection carries what the owner holds — the applied
+/// reconnect counted (never a placeholder 0), a refused unversioned same-slot update counted,
+/// Safety's configured limits, every gated capability with its reason — and without an FE-04
+/// journal the finance totals stay UNKNOWN (never 0) while the reserved capital is known.
+#[test]
+fn owner_projection_carries_real_engine_safety_and_unknown_finance() {
+    let mut f = fixture("owner_projection");
+    let good = snapshot(&f, false);
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: good.slot,
+            accounts: good.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    let versioned = |wv, byte| AccountUpdate {
+        pubkey: f.program_data_account.pubkey,
+        write_version: wv,
+        data: vec![byte; 8],
+        slot: 10,
+        ..f.program_data_account.clone()
+    };
+    f.owner
+        .st
+        .on_event(IngressEvent::Account(versioned(Some(9), 1)));
+    f.owner
+        .st
+        .on_event(IngressEvent::Account(versioned(None, 2)));
+    let s = f.owner.owner_snapshot(1_760_000_000_000);
+    assert_eq!((s.engine.run_state, s.engine.reconnects), ("READY", 1));
+    assert_eq!(s.engine.counters.same_slot_unversioned_refused, 1);
+    assert_eq!(s.run_id, "e2e-owner_projection");
+    assert_eq!(
+        s.safety.max_concurrent_positions,
+        e2e_limits().max_concurrent_positions
+    );
+    let cap = |name: &str| {
+        s.capabilities
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| (c.requested, c.effective))
+            .unwrap()
+    };
+    assert_eq!(cap("LIVE"), ("OFF", "BLOCKED"));
+    assert_eq!(cap("SUBMISSION"), ("OFF", "NOT_AUTHORIZED"));
+    assert_eq!(cap("JITO_BUNDLE"), ("OFF", "BLOCKED"));
+    assert!(s
+        .capabilities
+        .iter()
+        .filter(|c| c.effective == "BLOCKED" || c.effective == "NOT_AUTHORIZED")
+        .all(|c| !c.block_reason.is_empty()));
+    assert_eq!(s.finance.status, "UNKNOWN");
+    assert_eq!(
+        (
+            s.finance.total_capital_usd_micro,
+            s.finance.realized_net_pnl_usd_micro,
+            s.finance.transferred_to_treasury_usd_micro
+        ),
+        (None, None, None)
+    );
+    assert_eq!(s.finance.reserved_capital_usd_micro, Some(0));
+    assert!(!s.wallets.journal_read);
+    assert_eq!(s.wallets.held_attempt, "NONE");
+    cleanup(f);
 }
 
 /// V2-10 (P5a-02): a delivered update that takes an indexed account out of the group's

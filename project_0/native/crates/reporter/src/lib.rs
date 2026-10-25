@@ -4,9 +4,9 @@ pub mod generation;
 pub mod proto;
 
 use darkbot_runner::status_tap::{
-    AssessmentSnapshot, CapturePhase, MarketSnapshot, OperationalSnapshot, PhaseSnapshot,
-    ProviderSample, RunSnapshot, StatusSnapshot, StatusTap, StorageSample, TransportSnapshot,
-    TransportStateSnapshot,
+    AssessmentSnapshot, CapturePhase, MarketSnapshot, OperationalSnapshot, OwnerSnapshot,
+    PhaseSnapshot, ProviderSample, RunSnapshot, StatusSnapshot, StatusTap, StorageSample,
+    TransportSnapshot, TransportStateSnapshot,
 };
 use prost::Message;
 use proto::control::{
@@ -14,9 +14,11 @@ use proto::control::{
     StateWatermark, TopicId,
 };
 use proto::project0::{
-    CapturePhase as WirePhase, CaptureState, Counter, EffectiveRecord, MarketAssessment,
-    MarketCounters, OperationalConfig, OperationalParameter, PhaseStatus, ProviderBudget,
-    ReasonCount, ReceiverTotal, RunInfo, SystemStatus, TransportStatus, WriterLane,
+    AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, EffectiveRecord,
+    FinanceSummary, LiquidatorState, LossCount, MarketAssessment, MarketCounters,
+    OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
+    OwnerTrigger, PhaseStatus, ProviderBudget, ReasonCount, ReceiverTotal, RunInfo, StateCounters,
+    SystemStatus, TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -49,6 +51,9 @@ pub struct ReporterConfig {
     pub write_timeout: Duration,
     /// Minimum spacing of capture-state frames; newer states in between replace older ones.
     pub min_interval: Duration,
+    /// The process runs a state owner: it publishes project0.liquidator.state, .wallets.state
+    /// and .finance.summary (declared in the hello).
+    pub owner: bool,
 }
 
 impl ReporterConfig {
@@ -60,6 +65,7 @@ impl ReporterConfig {
             heartbeat: Duration::from_secs(5),
             write_timeout: Duration::from_secs(2),
             min_interval: Duration::from_millis(100),
+            owner: false,
         }
     }
 }
@@ -129,6 +135,152 @@ pub fn system_status(s: &StatusSnapshot) -> Option<SystemStatus> {
     s.operational.as_deref().map(|o| SystemStatus {
         operational: Some(operational_config(o)),
     })
+}
+
+/// project0.liquidator.state of the state owner's projection.
+pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
+    let c = &o.engine.counters;
+    let day = &o.pipeline.day;
+    LiquidatorState {
+        run: Some(OwnerRun {
+            run_id: o.run_id.clone(),
+            mode: o.mode.clone(),
+            published_unix_ms: o.at_unix_ms,
+            wallet: o.wallet.clone(),
+            program_id: o.program_id.clone(),
+        }),
+        engine: Some(OwnerEngine {
+            run_state: o.engine.run_state.into(),
+            halt_reason: o.engine.halt_reason.clone().unwrap_or_default(),
+            ingress_generation: o.engine.ingress_generation,
+            reconnects: o.engine.reconnects,
+            gap_open: o.engine.gap_open,
+            highest_slot: o.engine.highest_slot,
+            ingress_halt_raised: o.engine.ingress_halt_raised,
+            program_upgrade_latched: o.engine.program_upgrade_latched,
+            counters: Some(StateCounters {
+                applied: c.applied,
+                stale_slot: c.stale_slot,
+                stale_write_version: c.stale_write_version,
+                same_slot_no_wv: c.same_slot_no_wv,
+                same_slot_unversioned_refused: c.same_slot_unversioned_refused,
+                below_root: c.below_root,
+                buffered: c.buffered,
+                buffer_dropped_le_snapshot: c.buffer_dropped_le_snapshot,
+                reconcile_mismatch: c.reconcile_mismatch,
+                reconcile_missing_local: c.reconcile_missing_local,
+                reconcile_missing_remote: c.reconcile_missing_remote,
+                orphaned_writes: c.orphaned_writes,
+            }),
+        }),
+        trigger: Some(OwnerTrigger {
+            mode: o.trigger.mode.into(),
+            threshold_ready: o.trigger.threshold_ready,
+            lane_l0: o.trigger.lanes[0],
+            lane_l1: o.trigger.lanes[1],
+            lane_l2: o.trigger.lanes[2],
+            detect_queue: o.trigger.detect_queue,
+            indexed_accounts: o.trigger.indexed_accounts,
+            suppressed: o.trigger.suppressed,
+            softcap_suppressed: o.trigger.softcap_suppressed,
+        }),
+        pipeline: Some(OwnerPipeline {
+            evaluations: o.pipeline.evaluations,
+            health_checked: day.health_checked,
+            liquidatable: day.liquidatable,
+            plans_built: day.plans_built,
+            plans_rejected: day.plans_rejected,
+            simulations_passed: day.sim_pass,
+            simulations_failed: day.sim_fail,
+            shadow_ready: day.shadow_ready,
+            shadow_wins: day.shadow_wins,
+            losses: day
+                .losses
+                .iter()
+                .map(|(reason, count)| LossCount {
+                    reason: reason.clone(),
+                    count: *count,
+                })
+                .collect(),
+            decision_p95_ns: o.pipeline.decision_p95_ns,
+            fee_quote_p95_ns: o.pipeline.fee_quote_p95_ns,
+            simulation_p95_ns: o.pipeline.simulation_p95_ns,
+        }),
+        safety: Some(OwnerSafety {
+            capital_in_use_usd_micro: o.safety.capital_in_use_usd_micro,
+            max_total_capital_usd_micro: o.safety.max_total_capital_usd_micro,
+            max_daily_loss_usd_micro: o.safety.max_daily_loss_usd_micro,
+            max_exposure_per_attempt_usd_micro: o.safety.max_exposure_per_attempt_usd_micro,
+            max_concurrent_positions: o.safety.max_concurrent_positions,
+            max_outstanding_attempts: o.safety.max_outstanding_attempts,
+            max_failed_attempts_per_day: o.safety.max_failed_attempts_per_day,
+            halt_reason: o.safety.halt_reason.clone().unwrap_or_default(),
+            day_realized_usd_micro: i64::try_from(o.safety.day_realized_usd_micro).ok(),
+            day_failed_attempts: o.safety.day_failed_attempts,
+            day_attempts: o.safety.day_attempts,
+        }),
+        capabilities: o
+            .capabilities
+            .iter()
+            .map(|c| Capability {
+                name: c.name.into(),
+                requested: c.requested.into(),
+                effective: c.effective.into(),
+                block_reason: c.block_reason.into(),
+            })
+            .collect(),
+    }
+}
+
+fn amounts(m: &std::collections::BTreeMap<String, u64>) -> Vec<AssetAmount> {
+    m.iter()
+        .map(|(asset, units)| AssetAmount {
+            asset: asset.clone(),
+            units: *units,
+        })
+        .collect()
+}
+
+/// project0.wallets.state of the state owner's projection.
+pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
+    let w = &o.wallets;
+    WalletsState {
+        finance_snapshot_id: w.finance_snapshot_id.clone(),
+        wallet: o.wallet.clone(),
+        journal_read: w.journal_read,
+        verdict: w.verdict.clone(),
+        unknown_reasons: w.unknown_reasons.clone(),
+        attempts: w.totals.attempts as u64,
+        archived_attempts: w.totals.archived as u64,
+        landed_attempts: w.totals.landed_attempts as u64,
+        settled_exits: w.totals.settled_exits as u64,
+        fee_lamports: w.totals.fee_lamports.filter(|_| w.journal_read),
+        open_inventory_mark_usd_micro: w
+            .totals
+            .open_inventory_mark_usd_micro
+            .filter(|_| w.journal_read)
+            .and_then(|v| i64::try_from(v).ok()),
+        holds: amounts(&w.holds),
+        policy_reserves: amounts(&w.policy_reserves),
+        held_attempt: w.held_attempt.into(),
+    }
+}
+
+/// project0.finance.summary of the state owner's projection (same snapshot id as the wallets).
+pub fn finance_summary(o: &OwnerSnapshot) -> FinanceSummary {
+    let f = &o.finance;
+    let usd = |v: Option<i128>| v.and_then(|v| i64::try_from(v).ok());
+    FinanceSummary {
+        finance_snapshot_id: o.wallets.finance_snapshot_id.clone(),
+        as_of_slot: f.as_of_slot,
+        total_capital_usd_micro: usd(f.total_capital_usd_micro),
+        available_capital_usd_micro: usd(f.available_capital_usd_micro),
+        reserved_capital_usd_micro: usd(f.reserved_capital_usd_micro),
+        realized_net_pnl_usd_micro: usd(f.realized_net_pnl_usd_micro),
+        withdrawable_profit_usd_micro: usd(f.withdrawable_profit_usd_micro),
+        transferred_to_treasury_usd_micro: usd(f.transferred_to_treasury_usd_micro),
+        status: f.status.into(),
+    }
 }
 
 /// project0.capture.state; blocks the engine has not reported stay unset.
@@ -365,16 +517,25 @@ fn frame(message: engine_frame::Msg) -> Vec<u8> {
     output
 }
 
-pub fn hello_frame(source_id: &str, generation: u64) -> Vec<u8> {
+/// The topics this source publishes; an owner process adds the three owner topics.
+pub fn hello_frame(source_id: &str, generation: u64, owner: bool) -> Vec<u8> {
+    let mut topics = vec![
+        TopicId::Project0Status as i32,
+        TopicId::Project0CaptureState as i32,
+    ];
+    if owner {
+        topics.extend([
+            TopicId::Project0FinanceSummary as i32,
+            TopicId::Project0LiquidatorState as i32,
+            TopicId::Project0WalletsState as i32,
+        ]);
+    }
     frame(engine_frame::Msg::Hello(EngineHello {
         project: ProjectId::Project0 as i32,
         schema_id: schema_id().to_owned(),
         source_id: source_id.to_owned(),
         generation,
-        topics: vec![
-            TopicId::Project0Status as i32,
-            TopicId::Project0CaptureState as i32,
-        ],
+        topics,
     }))
 }
 
@@ -426,14 +587,21 @@ fn next_seq(counters: &Counters) -> Result<u64, String> {
 struct Sent {
     system: u64,
     capture: u64,
+    owner: u64,
     system_seq: u64,
     capture_seq: u64,
+    liquidator_seq: u64,
+    wallets_seq: u64,
+    finance_seq: u64,
 }
 impl Sent {
     fn watermarks(&self) -> Vec<(TopicId, u64)> {
         [
             (TopicId::Project0Status, self.system_seq),
             (TopicId::Project0CaptureState, self.capture_seq),
+            (TopicId::Project0LiquidatorState, self.liquidator_seq),
+            (TopicId::Project0WalletsState, self.wallets_seq),
+            (TopicId::Project0FinanceSummary, self.finance_seq),
         ]
         .into_iter()
         .filter(|(_, seq)| *seq > 0)
@@ -464,6 +632,38 @@ fn send_changes(
             sent.system_seq = seq;
         }
         sent.system = snapshot.system_version;
+    }
+    if snapshot.owner_version != sent.owner {
+        if let Some(owner) = snapshot.owner.as_deref() {
+            let seq = next_seq(counters)?;
+            send(&state_frame(
+                TopicId::Project0LiquidatorState,
+                source_id,
+                generation,
+                seq,
+                &liquidator_state(owner),
+            ))?;
+            sent.liquidator_seq = seq;
+            let seq = next_seq(counters)?;
+            send(&state_frame(
+                TopicId::Project0WalletsState,
+                source_id,
+                generation,
+                seq,
+                &wallets_state(owner),
+            ))?;
+            sent.wallets_seq = seq;
+            let seq = next_seq(counters)?;
+            send(&state_frame(
+                TopicId::Project0FinanceSummary,
+                source_id,
+                generation,
+                seq,
+                &finance_summary(owner),
+            ))?;
+            sent.finance_seq = seq;
+        }
+        sent.owner = snapshot.owner_version;
     }
     if snapshot.capture_version == sent.capture {
         return Ok(false);
@@ -679,7 +879,7 @@ fn session(
         counters.frames_sent.fetch_add(1, Ordering::Relaxed);
         Ok(())
     };
-    send(&hello_frame(source_id, generation))?;
+    send(&hello_frame(source_id, generation, cfg.owner))?;
     let mut reader = tap.reader();
     let mut sent = Sent::default();
     let mut heartbeat_id = 0u64;
@@ -776,6 +976,107 @@ mod contract_tests {
     };
     use std::path::Path;
 
+    /// An owner projection with every block set and an unknown finance total (never 0).
+    fn golden_owner() -> OwnerSnapshot {
+        use darkbot_runner::status_tap::{
+            OwnerCapability, OwnerEngine as E, OwnerFinance, OwnerPipeline as P, OwnerSafety as S,
+            OwnerTrigger as T, OwnerWallets,
+        };
+        let mut day = darkbot_runner::analytics::shadow_ledger::DaySummary {
+            health_checked: 40,
+            liquidatable: 3,
+            plans_built: 2,
+            sim_pass: 1,
+            sim_fail: 1,
+            shadow_ready: 1,
+            ..Default::default()
+        };
+        day.losses.insert("ROUTING".into(), 2);
+        let counters = darkbot_runner::status_tap::StateCounters {
+            applied: 1_000,
+            same_slot_unversioned_refused: 2,
+            ..Default::default()
+        };
+        OwnerSnapshot {
+            at_unix_ms: 1_760_000_003_000,
+            run_id: "golden-run".into(),
+            mode: "shadow".into(),
+            wallet: "LiqWa11et1111111111111111111111111111111111".into(),
+            program_id: "MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA".into(),
+            engine: E {
+                run_state: "READY",
+                halt_reason: None,
+                ingress_generation: 2,
+                reconnects: 1,
+                gap_open: false,
+                highest_slot: 400_000_200,
+                ingress_halt_raised: false,
+                program_upgrade_latched: false,
+                counters,
+            },
+            trigger: T {
+                mode: "sweep",
+                threshold_ready: false,
+                lanes: [1, 2, 3],
+                detect_queue: 4,
+                indexed_accounts: 83_274,
+                suppressed: 5,
+                softcap_suppressed: 1,
+            },
+            pipeline: P {
+                evaluations: 7,
+                day,
+                decision_p95_ns: Some(4_500_000),
+                fee_quote_p95_ns: Some(180_000_000),
+                simulation_p95_ns: None,
+            },
+            safety: S {
+                capital_in_use_usd_micro: 0,
+                max_total_capital_usd_micro: 100_000_000,
+                max_daily_loss_usd_micro: 5_000_000,
+                max_exposure_per_attempt_usd_micro: 10_000_000,
+                max_concurrent_positions: 1,
+                max_outstanding_attempts: 1,
+                max_failed_attempts_per_day: 3,
+                halt_reason: None,
+                day_realized_usd_micro: 0,
+                day_failed_attempts: 0,
+                day_attempts: 0,
+            },
+            capabilities: vec![OwnerCapability {
+                name: "LIVE",
+                requested: "OFF",
+                effective: "BLOCKED",
+                block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)",
+            }],
+            wallets: OwnerWallets {
+                finance_snapshot_id: "golden-run-3".into(),
+                journal_read: true,
+                verdict: "NO_TRADE".into(),
+                unknown_reasons: vec![],
+                totals: darkbot_runner::execution::accounting::Totals {
+                    realized_net_usd_micro: Some(0),
+                    fee_lamports: Some(0),
+                    open_inventory_mark_usd_micro: Some(0),
+                    ..Default::default()
+                },
+                holds: [("SOL".to_string(), 0)].into(),
+                policy_reserves: [("SOL".to_string(), 50_000_000)].into(),
+                held_attempt: "NONE",
+            },
+            finance: OwnerFinance {
+                as_of_slot: 400_000_200,
+                total_capital_usd_micro: None,
+                available_capital_usd_micro: None,
+                reserved_capital_usd_micro: Some(0),
+                realized_net_pnl_usd_micro: Some(0),
+                withdrawable_profit_usd_micro: None,
+                transferred_to_treasury_usd_micro: Some(0),
+                status: "VERIFIED",
+            },
+        }
+    }
+
     fn golden_snapshot() -> StatusSnapshot {
         let mut market = MarketSnapshot {
             observing: true,
@@ -800,6 +1101,8 @@ mod contract_tests {
             seq: 9,
             system_version: 1,
             capture_version: 8,
+            owner_version: 1,
+            owner: Some(Arc::new(golden_owner())),
             operational: Some(Arc::new(operational_snapshot_of(&Limits::default(), None))),
             run: Some(Arc::new(RunSnapshot {
                 run_id: "golden-run".into(),
@@ -901,6 +1204,52 @@ mod contract_tests {
             "system_status.hex",
             &system_status(&s).unwrap().encode_to_vec(),
         );
+        let owner = s.owner.as_deref().unwrap();
+        check_golden(
+            "liquidator_state.hex",
+            &liquidator_state(owner).encode_to_vec(),
+        );
+        check_golden("wallets_state.hex", &wallets_state(owner).encode_to_vec());
+        check_golden(
+            "finance_summary.hex",
+            &finance_summary(owner).encode_to_vec(),
+        );
+    }
+
+    /// P0-PROD-CTRL-04/08: the owner projection reaches the wire unchanged; unknown finance
+    /// totals stay unset (never 0) and both wallet topics carry the same snapshot id.
+    #[test]
+    fn owner_projection_keeps_unknown_unset_and_one_snapshot_id() {
+        let owner = golden_owner();
+        let f = finance_summary(&owner);
+        assert_eq!(f.total_capital_usd_micro, None);
+        assert_eq!(f.available_capital_usd_micro, None);
+        assert_eq!(f.withdrawable_profit_usd_micro, None);
+        assert_eq!(f.reserved_capital_usd_micro, Some(0));
+        assert_eq!(
+            f.finance_snapshot_id,
+            wallets_state(&owner).finance_snapshot_id
+        );
+        let l = liquidator_state(&owner);
+        assert_eq!(l.engine.as_ref().unwrap().reconnects, 1);
+        assert_eq!(
+            l.engine
+                .as_ref()
+                .unwrap()
+                .counters
+                .as_ref()
+                .unwrap()
+                .same_slot_unversioned_refused,
+            2
+        );
+        assert_eq!(l.pipeline.as_ref().unwrap().simulation_p95_ns, None);
+        let mut unread = owner.clone();
+        unread.wallets.journal_read = false;
+        let w = wallets_state(&unread);
+        assert_eq!(
+            (w.fee_lamports, w.open_inventory_mark_usd_micro),
+            (None, None)
+        );
     }
 
     #[test]
@@ -997,7 +1346,13 @@ mod contract_tests {
         s.capture_version += 1;
         assert!(send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
         assert!(!send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
-        assert_eq!(frames, 3, "system once, capture twice");
+        // An owner publication re-sends its three topics only.
+        s.owner_version += 1;
+        assert!(!send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
+        assert_eq!(
+            frames, 9,
+            "system once, the three owner topics twice, capture twice"
+        );
     }
 
     #[test]

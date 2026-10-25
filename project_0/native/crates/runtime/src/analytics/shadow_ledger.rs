@@ -60,6 +60,16 @@ impl ShadowLedger {
         }
     }
 
+    /// The current day (status projection).
+    pub fn day(&self) -> &DaySummary {
+        &self.day
+    }
+
+    /// p95 of T_rx→T_detect of the current day; `None` without a sample.
+    pub fn rx_detect_p95_ns(&self) -> Option<u64> {
+        self.h_rx_detect.percentile(0.95)
+    }
+
     fn roll(&mut self, now_unix_s: u64) -> Option<DaySummary> {
         let idx = now_unix_s / 86_400;
         if idx != self.day.day_index {

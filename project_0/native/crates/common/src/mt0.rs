@@ -484,6 +484,11 @@ impl Registry {
         }
     }
 
+    /// The latency histogram of one remote class (count, percentiles in ns).
+    pub fn remote_latency(&self, class: RemoteClass) -> HistSnapshot {
+        self.remote_latency[class.idx()].snapshot()
+    }
+
     pub fn remote_count(&self, class: RemoteClass, outcome: RemoteOutcome) -> u64 {
         self.remote_outcomes[class.idx()][outcome.idx()].load(Relaxed)
     }

@@ -96,6 +96,7 @@ parameters! {
     market_writer_flush_ms = 1000, "ms", "P0_MARKET_WRITER_FLUSH_MS";
     market_writer_sync_ms = 60000, "ms", "P0_MARKET_WRITER_SYNC_MS";
     owner_evidence_sync_ms = 60000, "ms", "P0_OWNER_EVIDENCE_SYNC_MS";
+    owner_status_ms = 1000, "ms", "P0_OWNER_STATUS_MS";
     market_writer_stall_ms = 30000, "ms", "P0_MARKET_WRITER_STALL_MS";
     market_disk_reserve_mib = 2048, "MiB", "P0_MARKET_DISK_RESERVE_MIB";
     capacity_safety_percent = 50, "percent", "P0_CAPACITY_SAFETY_PERCENT";
@@ -108,8 +109,9 @@ parameters! {
 /// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1);
 /// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8); 5: `fee_rps`,
 /// `send_rps` (V2-05); 6: `sweep_batch_max_events`, `sweep_batch_max_age_ns`,
-/// `ingress_burst_before_detect` (V2-08); 7: `rpc_pool_idle_ms`, `rpc_tcp_keepalive_ms` (V2-07).
-pub const LIMITS_REVISION: u16 = 7;
+/// `ingress_burst_before_detect` (V2-08); 7: `rpc_pool_idle_ms`, `rpc_tcp_keepalive_ms` (V2-07);
+/// 8: `owner_status_ms` (owner status projection).
+pub const LIMITS_REVISION: u16 = 8;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -1112,9 +1114,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                7,
-                78,
-                "HkWcp9bpwsBp7cbBE464bG2aCe7AD7ybEVtHumuDVwzw".to_string()
+                8,
+                79,
+                "CvDx7XYmMTESMfAg7HGFU8zMZccMpFL4RVCQ1pXuTkxb".to_string()
             )
         );
     }

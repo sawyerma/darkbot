@@ -159,6 +159,13 @@ pub fn archived(directory: &Path, wallet: &str) -> Result<Vec<ArchivedAttempt>, 
         .collect()
 }
 
+impl super::Journal {
+    /// The accounting state of the journal's attempt; `None` without an attempt.
+    pub fn step_state(&self) -> Option<crate::execution::accounting::StepState> {
+        self.saved.as_ref().map(|s| record(s, false).state)
+    }
+}
+
 /// The accounting view of one attempt (archived or active).
 fn record(saved: &Saved, archived: bool) -> crate::execution::accounting::AttemptRecord {
     use crate::execution::accounting::{AttemptRecord, ExitRecord, StepState};

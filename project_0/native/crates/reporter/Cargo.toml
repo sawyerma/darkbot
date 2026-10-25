@@ -18,8 +18,18 @@ protox = "0.7"
 name = "p0-market-capture-reported"
 path = "src/bin/p0_market_capture_reported.rs"
 
+# The Shadow/econ4h runtime: its composition root starts the status reporter when P0_REPORT_SOCKET
+# is set (the engine never depends on the reporter crate). One production runtime binary, the one
+# the boot admission binds next to p0ctl.
+[[bin]]
+name = "p0-longtail"
+path = "src/bin/p0_longtail.rs"
+
 [features]
 test-fixture = []
+# Pass-through of the runtime's features (launchers build with "crate_health txv1").
+crate_health = ["darkbot-runner/crate_health"]
+txv1 = ["darkbot-runner/txv1"]
 
 [[bin]]
 name = "p0-reporter-fixture"

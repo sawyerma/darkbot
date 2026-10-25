@@ -104,6 +104,20 @@
 
     - [CapturePhase](#darkbot-project0-v1-CapturePhase)
 
+- [darkbot/project0/v1/owner.proto](#darkbot_project0_v1_owner-proto)
+    - [AssetAmount](#darkbot-project0-v1-AssetAmount)
+    - [Capability](#darkbot-project0-v1-Capability)
+    - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
+    - [LiquidatorState](#darkbot-project0-v1-LiquidatorState)
+    - [LossCount](#darkbot-project0-v1-LossCount)
+    - [OwnerEngine](#darkbot-project0-v1-OwnerEngine)
+    - [OwnerPipeline](#darkbot-project0-v1-OwnerPipeline)
+    - [OwnerRun](#darkbot-project0-v1-OwnerRun)
+    - [OwnerSafety](#darkbot-project0-v1-OwnerSafety)
+    - [OwnerTrigger](#darkbot-project0-v1-OwnerTrigger)
+    - [StateCounters](#darkbot-project0-v1-StateCounters)
+    - [WalletsState](#darkbot-project0-v1-WalletsState)
+
 - [darkbot/project0/v1/status.proto](#darkbot_project0_v1_status-proto)
     - [StatusProjection](#darkbot-project0-v1-StatusProjection)
 
@@ -1779,6 +1793,290 @@ Capture lifecycle phase.
 | CAPTURE_PHASE_DRAIN | 3 | Capture loop ended; ingress stopped, channel draining. |
 | CAPTURE_PHASE_FINALIZE | 4 | Drain done; finalization, summary and report running. |
 | CAPTURE_PHASE_ENDED | 5 | Finished; see end_result. |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_project0_v1_owner-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/project0/v1/owner.proto
+
+
+
+<a name="darkbot-project0-v1-AssetAmount"></a>
+
+### AssetAmount
+One amount of one asset.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| asset | [string](#string) |  | &#34;SOL&#34; or the mint, base58. |
+| units | [uint64](#uint64) |  | Amount in base units (lamports for SOL). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-Capability"></a>
+
+### Capability
+One switchable capability (P0-PROD-CTRL-03).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | LIVE | SUBMISSION | JITO_BUNDLE | V1_MESSAGES | JIT_EXACT_IN | INVENTORY_REBALANCING | THRESHOLD_TRIGGER. |
+| requested | [string](#string) |  | What is configured: OFF | OBSERVE | ACTIVE. |
+| effective | [string](#string) |  | What runs: OFF | OBSERVE | ACTIVE | BLOCKED | NOT_AUTHORIZED | UNSUPPORTED. |
+| block_reason | [string](#string) |  | Why effective differs from requested (gate, missing qualification), else empty. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-FinanceSummary"></a>
+
+### FinanceSummary
+Finance summary of the liquidator: STATE topic project0.finance.summary (same
+finance_snapshot_id as project0.wallets.state). Unknown values stay unset.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| finance_snapshot_id | [string](#string) |  | Same id as the WalletsState of this state. |
+| as_of_slot | [uint64](#uint64) |  | Newest slot of the state the summary was taken at. |
+| total_capital_usd_micro | [int64](#int64) | optional | Needs reconciled wallet balances; unset until they exist. |
+| available_capital_usd_micro | [int64](#int64) | optional | Needs reconciled wallet balances; unset until they exist. |
+| reserved_capital_usd_micro | [int64](#int64) | optional | Capital reserved by in-flight attempts. |
+| realized_net_pnl_usd_micro | [int64](#int64) | optional | Realized net of the settled steps (FE-04 accounting). |
+| withdrawable_profit_usd_micro | [int64](#int64) | optional | Withdrawable realized profit; unset unless every input is known. |
+| transferred_to_treasury_usd_micro | [int64](#int64) | optional | No transfer path exists: 0 once the journal was read. |
+| status | [string](#string) |  | VERIFIED (every step settled) | PARTIAL (unsettled steps) | UNKNOWN (no journal read). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-LiquidatorState"></a>
+
+### LiquidatorState
+Live state of the Shadow/econ4h state owner: STATE topic project0.liquidator.state
+(orchestration/state_owner, status_tap::OwnerSnapshot). Sent at most every owner_status_ms.
+Values are what the owner holds; an unknown value stays unset, never 0.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run | [OwnerRun](#darkbot-project0-v1-OwnerRun) |  | Run identity of the owner. |
+| engine | [OwnerEngine](#darkbot-project0-v1-OwnerEngine) |  | Canonical state, ingress and recovery (solana/src/state, ingress session). |
+| trigger | [OwnerTrigger](#darkbot-project0-v1-OwnerTrigger) |  | Candidate trigger and its lanes (state_owner/candidates.rs). |
+| pipeline | [OwnerPipeline](#darkbot-project0-v1-OwnerPipeline) |  | Pipeline evaluations and decisions of this run (analytics/shadow_ledger.rs, MT0). |
+| safety | [OwnerSafety](#darkbot-project0-v1-OwnerSafety) |  | Safety layer: limits, capital in use, halts (liquidation/src/safety.rs). |
+| capabilities | [Capability](#darkbot-project0-v1-Capability) | repeated | Every switchable capability: requested, effective and why it is blocked. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-LossCount"></a>
+
+### LossCount
+One loss reason with its count.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| reason | [string](#string) |  | Loss reason (record name). |
+| count | [uint64](#uint64) |  | Count of the day. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OwnerEngine"></a>
+
+### OwnerEngine
+Canonical state, ingress and recovery.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_state | [string](#string) |  | BOOTSTRAPPING | RECONCILING | READY | HALTED. |
+| halt_reason | [string](#string) |  | Halt reason while HALTED (e.g. FeedGap), else empty. |
+| ingress_generation | [uint64](#uint64) |  | Current ingress session generation. |
+| reconnects | [uint64](#uint64) |  | Reconnected events applied to the state in this run (A01: counted, never a placeholder). |
+| gap_open | [bool](#bool) |  | A feed gap is open (no new stream generation yet). |
+| highest_slot | [uint64](#uint64) |  | Newest slot seen by the state. |
+| ingress_halt_raised | [bool](#bool) |  | The out-of-band ingress halt is raised. |
+| program_upgrade_latched | [bool](#bool) |  | A ProgramData change halted the owner. |
+| counters | [StateCounters](#darkbot-project0-v1-StateCounters) |  | State write counters. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OwnerPipeline"></a>
+
+### OwnerPipeline
+Pipeline evaluations and decisions of the current day (Shadow ledger) and this process (MT0).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| evaluations | [uint64](#uint64) |  | Pipeline evaluations of this process (MT0). |
+| health_checked | [uint64](#uint64) |  | Exact Health evaluations of the day. |
+| liquidatable | [uint64](#uint64) |  | Accounts found liquidatable on the day. |
+| plans_built | [uint64](#uint64) |  | Plans built / rejected on the day. |
+| plans_rejected | [uint64](#uint64) |  | Plans rejected on the day. |
+| simulations_passed | [uint64](#uint64) |  | Simulations passed on the day. |
+| simulations_failed | [uint64](#uint64) |  | Simulations failed on the day. |
+| shadow_ready | [uint64](#uint64) |  | Shadow-ready decisions on the day. |
+| shadow_wins | [uint64](#uint64) |  | Shadow wins against the observed winner on the day. |
+| losses | [LossCount](#darkbot-project0-v1-LossCount) | repeated | Loss reasons of the day. |
+| decision_p95_ns | [uint64](#uint64) | optional | p95 of T_rx→T_detect of the day; unset without a sample. |
+| fee_quote_p95_ns | [uint64](#uint64) | optional | p95 of the fee-quote RPC of this process; unset without a sample. |
+| simulation_p95_ns | [uint64](#uint64) | optional | p95 of the simulation RPC of this process; unset without a sample. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OwnerRun"></a>
+
+### OwnerRun
+Run identity of the owner.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_id | [string](#string) |  | Run id (p0ctl run id, or &#34;-&#34; for an unnamed local run). |
+| mode | [string](#string) |  | Owner mode: shadow | econ4h. |
+| published_unix_ms | [uint64](#uint64) |  | Wall clock of this publication. |
+| wallet | [string](#string) |  | Liquidator wallet, base58 (public key only). |
+| program_id | [string](#string) |  | Marginfi program id, base58. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OwnerSafety"></a>
+
+### OwnerSafety
+Safety layer.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| capital_in_use_usd_micro | [uint64](#uint64) |  | Capital reserved by in-flight attempts, USD micro. |
+| max_total_capital_usd_micro | [uint64](#uint64) |  | Configured limits. |
+| max_daily_loss_usd_micro | [uint64](#uint64) |  | Configured maximum daily loss, USD micro. |
+| max_exposure_per_attempt_usd_micro | [uint64](#uint64) |  | Configured maximum exposure per attempt, USD micro. |
+| max_concurrent_positions | [uint32](#uint32) |  | Configured maximum concurrent positions. |
+| max_outstanding_attempts | [uint32](#uint32) |  | Configured maximum outstanding attempts. |
+| max_failed_attempts_per_day | [uint32](#uint32) |  | Configured maximum failed attempts per day. |
+| halt_reason | [string](#string) |  | Halt reason of the Safety layer, empty when not halted. |
+| day_realized_usd_micro | [int64](#int64) | optional | Booked day: realized PnL (USD micro) and failed / total attempts. |
+| day_failed_attempts | [uint32](#uint32) |  | Failed attempts of the day. |
+| day_attempts | [uint32](#uint32) |  | Attempts of the day. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OwnerTrigger"></a>
+
+### OwnerTrigger
+Candidate trigger and its lanes.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [string](#string) |  | sweep | threshold. |
+| threshold_ready | [bool](#bool) |  | Threshold mode: every account&#39;s thresholds are known. |
+| lane_l0 | [uint64](#uint64) |  | Pending candidates per lane. |
+| lane_l1 | [uint64](#uint64) |  | Pending L1 candidates. |
+| lane_l2 | [uint64](#uint64) |  | Pending L2 candidates (re-checks). |
+| detect_queue | [uint64](#uint64) |  | Detection work queued behind the lanes. |
+| indexed_accounts | [uint64](#uint64) |  | Accounts in the reverse index. |
+| suppressed | [uint64](#uint64) |  | Repeats suppressed by the forward policy (no new cause). |
+| softcap_suppressed | [uint64](#uint64) |  | Due repeats suppressed by the repeat soft cap. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-StateCounters"></a>
+
+### StateCounters
+StateCore write counters (solana/src/state::StateCounters).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| applied | [uint64](#uint64) |  | Accepted writes. |
+| stale_slot | [uint64](#uint64) |  | Updates older than the stored slot. |
+| stale_write_version | [uint64](#uint64) |  | Same-slot updates with an older write_version. |
+| same_slot_no_wv | [uint64](#uint64) |  | Same-slot updates without write_version on both sides (later wins, counted). |
+| same_slot_unversioned_refused | [uint64](#uint64) |  | F-05: unversioned same-slot updates refused against a versioned record. |
+| below_root | [uint64](#uint64) |  | Updates below the rooted slot. |
+| buffered | [uint64](#uint64) |  | Updates buffered before the first snapshot. |
+| buffer_dropped_le_snapshot | [uint64](#uint64) |  | Buffered updates not newer than the snapshot. |
+| reconcile_mismatch | [uint64](#uint64) |  | Reconcile: data differs from the snapshot. |
+| reconcile_missing_local | [uint64](#uint64) |  | Reconcile: in the snapshot, not in the state. |
+| reconcile_missing_remote | [uint64](#uint64) |  | Reconcile: in the state, not in the snapshot. |
+| orphaned_writes | [uint64](#uint64) |  | Writes removed by fork invalidation. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-WalletsState"></a>
+
+### WalletsState
+FE-04 wallet state of the liquidator: STATE topic project0.wallets.state. Read from the
+wallet&#39;s FE-04 journals (execution/accounting.rs) and the reservation book.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| finance_snapshot_id | [string](#string) |  | Same id as the FinanceSummary of this state. |
+| wallet | [string](#string) |  | Liquidator wallet, base58. |
+| journal_read | [bool](#bool) |  | An FE-04 journal directory is configured and was read. |
+| verdict | [string](#string) |  | FE-07 verdict: NO_TRADE | FIRST_REALIZED_PROFIT_EVIDENCED | LOSS | UNKNOWN. |
+| unknown_reasons | [string](#string) | repeated | Why the verdict is UNKNOWN (unsettled steps, open inventory) or the journal read error. |
+| attempts | [uint64](#uint64) |  | Own attempts in the journals (archived and active). |
+| archived_attempts | [uint64](#uint64) |  | Archived attempts. |
+| landed_attempts | [uint64](#uint64) |  | Settled attempts that landed. |
+| settled_exits | [uint64](#uint64) |  | Settled exits. |
+| fee_lamports | [uint64](#uint64) | optional | Fees of the settled steps; unset on overflow. |
+| open_inventory_mark_usd_micro | [int64](#int64) | optional | Mark of the open inventory; unset when a position is unvalued. |
+| holds | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Holds of every attempt in the reservation book, per asset (&#34;SOL&#34; lamports or mint units). |
+| policy_reserves | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Never-spent policy reserves of the inventory bands. |
+| held_attempt | [string](#string) |  | State of the attempt held by this run: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED. |
+
+
+
+
+
 
 
 

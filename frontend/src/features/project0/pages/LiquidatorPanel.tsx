@@ -1,19 +1,24 @@
 import { useState } from "react";
-import type { LiquidatorDraft, Project0Tab, StrategyKind } from "../model/contracts";
+import type { TopicStatus } from "@/core/realtime";
+import type { FinanceSnapshot, LiquidatorDraft, Project0Tab, StrategyKind } from "../model/contracts";
+import type { LiquidatorView } from "../model/owner";
+import { usdMicroDisplay } from "../model/format";
+import { OwnerSection } from "../components/OwnerSection";
 import { validateDraft } from "../hooks/useFleetDrafts";
 import { DetailRow, Section, Notice } from "../components/PanelPrimitives";
 type Fleet={drafts:LiquidatorDraft[];selected:LiquidatorDraft|null;selectedId:string|null;
  select:(id:string|null)=>void;update:(id:string,patch:Partial<LiquidatorDraft>)=>void;
  create:()=>void;duplicate:()=>void;remove:()=>void};
-export function LiquidatorPanel({fleet,authorization,goto}:{fleet:Fleet;authorization:string;goto:(t:Project0Tab)=>void}) {
+export function LiquidatorPanel({fleet,authorization,goto,owner,ownerStatus,finance}:{fleet:Fleet;authorization:string;goto:(t:Project0Tab)=>void;owner:LiquidatorView|null;ownerStatus:TopicStatus;finance:FinanceSnapshot|null}) {
  const [message,setMessage]=useState("");const d=fleet.selected;
  const patch=(p:Partial<LiquidatorDraft>)=>{if(d)fleet.update(d.id,p)};
  const toggle=(k:StrategyKind,v:boolean)=>{if(d)patch({enabledStrategies:v?Array.from(new Set([...d.enabledStrategies,k])):d.enabledStrategies.filter(x=>x!==k)})};
  return <><Section title="Liquidator fleet" aside={<span className="p0-badge">Execution locked · V0</span>}>
  <p className="p0-quiet">Shared market state · Independent bot drafts · No live instances.</p>
- <DetailRow title="Running liquidators" value={`— · ${authorization}`}/>
- <DetailRow title="Available working capital" value="— USD · Not connected"/>
- <DetailRow title="Realized net PnL" value="— USD · Not proven"/></Section>
+ <DetailRow title="Running liquidators" value={owner?`1 · ${owner.mode} · ${owner.engine?.runState??"—"} · ${authorization}`:`— · ${authorization}`}/>
+ <DetailRow title="Available working capital" value={usdMicroDisplay(finance?.availableCapitalUsdMicro)}/>
+ <DetailRow title="Realized net PnL" value={`${usdMicroDisplay(finance?.realizedNetPnlUsdMicro)} · ${finance?.status??"UNKNOWN"}`}/></Section>
+ <OwnerSection owner={owner} topicStatus={ownerStatus}/>
  <Section title="Bots & strategies" aside={<button className="p0-secondary" onClick={()=>fleet.create()}>+ Add bot</button>}>
  <div className="p0-fleet"><div><p className="p0-quiet">Liquidators · {fleet.drafts.length} drafts</p>
  <div role="listbox" aria-label="Bot drafts">{fleet.drafts.map(x=><button key={x.id} role="option" aria-selected={x.id===fleet.selectedId}

@@ -5,7 +5,19 @@
 use std::process::Command;
 
 fn p0ctl(project: &std::path::Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_p0ctl"))
+    p0ctl_at(
+        std::path::Path::new(env!("CARGO_BIN_EXE_p0ctl")),
+        project,
+        args,
+    )
+}
+
+fn p0ctl_at(
+    bin: &std::path::Path,
+    project: &std::path::Path,
+    args: &[&str],
+) -> (i32, String, String) {
+    let out = Command::new(bin)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .arg("--project")
@@ -162,9 +174,17 @@ fn approval_show_passes_only_for_this_clean_build() {
     git(&["add", "README"]);
     git(&["commit", "-q", "-m", "p0"]);
     let head = git(&["rev-parse", "HEAD"]);
+    // The bound identity is p0ctl plus the runtime next to it; a copied p0ctl beside a stand-in
+    // runtime keeps the test hermetic (the runtime binary is built by the reporter crate).
+    let bin = d.with_extension("bin");
+    let _ = std::fs::remove_dir_all(&bin);
+    std::fs::create_dir_all(&bin).unwrap();
+    let ctl = bin.join("p0ctl");
+    std::fs::copy(env!("CARGO_BIN_EXE_p0ctl"), &ctl).unwrap();
+    std::fs::write(bin.join("p0-longtail"), b"runtime stand-in").unwrap();
     let binary = darkbot_runner::orchestration::boot_audit::binary_identity_of(
-        std::path::Path::new(env!("CARGO_BIN_EXE_p0ctl")),
-        std::path::Path::new(env!("CARGO_BIN_EXE_p0-longtail")),
+        &ctl,
+        &bin.join("p0-longtail"),
     )
     .unwrap();
     // Profiles live outside the project tree (they would make it dirty).
@@ -172,15 +192,16 @@ fn approval_show_passes_only_for_this_clean_build() {
     let _ = std::fs::remove_dir_all(&files);
     std::fs::create_dir_all(&files).unwrap();
     let bound = write(&files, "a.json", &attempt(&head, &binary));
-    let (code, out, err) = p0ctl(&d, &["approval", "show", &bound]);
+    let (code, out, err) = p0ctl_at(&ctl, &d, &["approval", "show", &bound]);
     assert_eq!(code, 0, "{out}{err}");
     assert_eq!(out.matches(" MATCH").count(), 2, "{out}");
     let other = write(&files, "o.json", &attempt(&head, &"c".repeat(64)));
-    let (code, out, _) = p0ctl(&d, &["approval", "show", &other]);
+    let (code, out, _) = p0ctl_at(&ctl, &d, &["approval", "show", &other]);
     assert!(code == 2 && out.contains("MISMATCH (this build"), "{out}");
     std::fs::write(d.join("README"), "changed").unwrap();
-    let (code, out, _) = p0ctl(&d, &["approval", "show", &bound]);
+    let (code, out, _) = p0ctl_at(&ctl, &d, &["approval", "show", &bound]);
     assert!(code == 2 && out.contains("UNKNOWN (this project"), "{out}");
     let _ = std::fs::remove_dir_all(&d);
     let _ = std::fs::remove_dir_all(&files);
+    let _ = std::fs::remove_dir_all(&bin);
 }
