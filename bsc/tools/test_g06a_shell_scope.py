@@ -61,6 +61,26 @@ with_public_salt 2>/dev/null && exit 1 || true
             out=self.shell(script,{"DIGEST":digest,"RC":str(code)})
             self.assertEqual(out.returncode==0,ok,out.stderr)
 
+    def test_keys_are_dropped_from_the_harness_after_the_last_signer(self):
+        # BSC-007: after DRY-1 no shell copy of a key remains; a later signer
+        # would stop instead of silently receiving the keys again.
+        code = r'''clear_exports
+BSC_LAUNCHER_PRIVATE_KEY=FAKE_LAUNCHER_ONLY_FOR_TEST
+BSC_BUYER_PRIVATE_KEY=FAKE_BUYER_ONLY_FOR_TEST
+drop_keys
+[[ ! ${BSC_LAUNCHER_PRIVATE_KEY+x} && ! ${BSC_BUYER_PRIVATE_KEY+x} ]]
+with_keys /bin/true && exit 1 || true
+'''
+        out=self.shell(code)
+        self.assertEqual(out.returncode,0,out.stderr)
+        self.assertIn("launcher key required",out.stderr)
+        self.assertNotIn("FAKE_",out.stdout+out.stderr)
+        text=(ROOT/"bsc/tools/g06a_final_dry.sh").read_text()
+        last_signer=text.rindex('"$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence')
+        self.assertEqual(text.count('drop_keys'),1)
+        self.assertLess(last_signer,text.index('drop_keys'))
+        self.assertLess(text.index('drop_keys'),text.index('=== 6/6 '))
+
     def test_legacy_tools_stop_before_credentials_or_network(self):
         for tool in ["g07_find_min_executable_buy.sh","g07_min_spend_probe.sh"]:
             out=subprocess.run(["/bin/bash",str(ROOT/"bsc/tools"/tool)],env={"PATH":"/no-tools"},capture_output=True,text=True)

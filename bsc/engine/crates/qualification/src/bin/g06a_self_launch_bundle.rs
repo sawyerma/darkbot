@@ -21,6 +21,7 @@ use darkbot_bsc_record::schema::{
 };
 use darkbot_bsc_record::{Draft, Value, decode};
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
+use k256::elliptic_curve::zeroize::Zeroizing;
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs, path::Path, str::FromStr};
@@ -91,12 +92,48 @@ fn env_u128(name: &str) -> u128 {
         .unwrap_or_else(|_| panic!("{name} must be decimal u128"))
 }
 
-fn key_from_env(name: &str) -> SigningKey {
-    let raw = req_env(name);
-    let bytes = hex::decode(raw.trim().trim_start_matches("0x"))
-        .unwrap_or_else(|_| panic!("{name} is not valid hex"));
-    assert_eq!(bytes.len(), 32, "{name} must be exactly 32 bytes");
-    SigningKey::from_slice(&bytes).unwrap_or_else(|_| panic!("{name} is not a valid secp256k1 key"))
+// BSC-007 (BSC_Bug_V2 P2-D5): the live runner's key rule (g07 inputs.rs).
+// Both keys are read once into zeroizing strings, every key variable is
+// cleared before parsing (also on a missing or malformed key), and the hex
+// is decoded only into a zeroizing fixed buffer.
+fn parse_key(raw: &str) -> Result<SigningKey, &'static str> {
+    let mut bytes = Zeroizing::new([0u8; 32]);
+    hex::decode_to_slice(raw.trim().trim_start_matches("0x"), &mut bytes[..])
+        .map_err(|_| "a wallet key must be exactly 32 bytes of hex")?;
+    SigningKey::from_slice(&bytes[..]).map_err(|_| "a wallet key is not a valid secp256k1 key")
+}
+
+// Callbacks let the test check the clearing order without mutating the
+// multithreaded test harness's environment.
+fn read_and_clear_keys(
+    read: impl Fn(&str) -> Option<String>,
+    clear: impl Fn(&str),
+) -> Result<(SigningKey, SigningKey), &'static str> {
+    let launcher = read("DARKBOT_G06A_LAUNCHER_PRIVATE_KEY").map(Zeroizing::new);
+    let buyer = read("DARKBOT_G06A_BUYER_PRIVATE_KEY").map(Zeroizing::new);
+    for name in [
+        "DARKBOT_G06A_LAUNCHER_PRIVATE_KEY",
+        "DARKBOT_G06A_BUYER_PRIVATE_KEY",
+        "BSC_LAUNCHER_PRIVATE_KEY",
+        "BSC_BUYER_PRIVATE_KEY",
+    ] {
+        clear(name);
+    }
+    let launcher = launcher.ok_or("DARKBOT_G06A_LAUNCHER_PRIVATE_KEY is required")?;
+    let buyer = buyer.ok_or("DARKBOT_G06A_BUYER_PRIVATE_KEY is required")?;
+    Ok((parse_key(&launcher)?, parse_key(&buyer)?))
+}
+
+/// # Safety
+/// `main` only, while the process is single-threaded: this binary starts no
+/// thread and no child process.
+unsafe fn take_keys() -> (SigningKey, SigningKey) {
+    read_and_clear_keys(
+        |name| env::var(name).ok(),
+        // SAFETY: the caller guarantees exclusive access to the environment.
+        |name| unsafe { env::remove_var(name) },
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn signer_address(key: &SigningKey) -> Address {
@@ -467,8 +504,8 @@ fn main() {
         .as_deref()
         == Some("YES");
 
-    let launcher_key = key_from_env("DARKBOT_G06A_LAUNCHER_PRIVATE_KEY");
-    let buyer_key = key_from_env("DARKBOT_G06A_BUYER_PRIVATE_KEY");
+    // SAFETY: single-threaded main; no thread or child process exists.
+    let (launcher_key, buyer_key) = unsafe { take_keys() };
     let launcher = signer_address(&launcher_key);
     let buyer = signer_address(&buyer_key);
     let wallets_distinct = launcher != buyer;
@@ -533,6 +570,8 @@ fn main() {
         U256::from(buy_value),
         buy_calldata(token, U256::from(buy_value), min_output),
     );
+    // The signing keys end with the two signatures (SigningKey zeroizes on drop).
+    drop((launcher_key, buyer_key));
 
     // Independent decode+recover from final RLP bytes, not from the original key objects.
     let recovered_launcher = recover_sender(&launch);
@@ -796,6 +835,64 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC-007 (BSC_Bug_V2 P2-D5): both keys are read once, every key
+    /// variable is cleared before parsing -- also when a key is missing or
+    /// malformed -- and decoded only into a zeroizing fixed buffer.
+    #[test]
+    fn keys_are_read_once_and_cleared_before_parsing() {
+        use std::cell::RefCell;
+        let one = format!("0x{}1", "0".repeat(63));
+        let two = format!("0x{}2", "0".repeat(63));
+        let cleared = RefCell::new(Vec::new());
+        let take = |launcher: Option<&str>, buyer: Option<&str>| {
+            cleared.borrow_mut().clear();
+            let keys = read_and_clear_keys(
+                |name| match name {
+                    "DARKBOT_G06A_LAUNCHER_PRIVATE_KEY" => launcher.map(str::to_string),
+                    "DARKBOT_G06A_BUYER_PRIVATE_KEY" => buyer.map(str::to_string),
+                    other => panic!("unexpected read of {other}"),
+                },
+                |name| cleared.borrow_mut().push(name.to_string()),
+            );
+            let mut names = cleared.borrow().clone();
+            names.sort();
+            assert_eq!(
+                names,
+                [
+                    "BSC_BUYER_PRIVATE_KEY",
+                    "BSC_LAUNCHER_PRIVATE_KEY",
+                    "DARKBOT_G06A_BUYER_PRIVATE_KEY",
+                    "DARKBOT_G06A_LAUNCHER_PRIVATE_KEY"
+                ]
+            );
+            keys
+        };
+        let (launcher, buyer) = take(Some(&one), Some(&two)).unwrap();
+        assert_eq!(
+            signer_address(&launcher),
+            Address::from_str("0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf").unwrap()
+        );
+        assert_eq!(
+            signer_address(&buyer),
+            Address::from_str("0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF").unwrap()
+        );
+        for (launcher, buyer) in [
+            (None, Some(two.as_str())),
+            (Some(one.as_str()), None),
+            (Some("0x1234"), Some(two.as_str())),
+            (Some(one.as_str()), Some(&two.replace('2', "g"))),
+            (Some(&format!("0x{}", "0".repeat(64))), Some(two.as_str())),
+        ] {
+            assert!(take(launcher, buyer).is_err());
+        }
+        let source = include_str!("g06a_self_launch_bundle.rs");
+        let source = &source[..source.find(concat!("#[cfg(test)]\n", "mod tests")).unwrap()];
+        assert!(!source.contains(concat!("fn key_", "from_env")));
+        assert!(source.contains("let (launcher_key, buyer_key) = unsafe { take_keys() };"));
+        let dropped = source.find("drop((launcher_key, buyer_key));").unwrap();
+        assert!(source.rfind("&buyer_key,").unwrap() < dropped);
+    }
 
     /// The projection bodies are byte-identical to G0.7's golden wire format
     /// (crates/execution .../builder_submission.rs).

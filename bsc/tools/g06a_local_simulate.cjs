@@ -43,6 +43,20 @@ function req(name) {
   return v;
 }
 function dec(name) { return BigInt(req(name)); }
+// BSC-007 (BSC_Bug_V2 P2-D5): both wallet keys are read once and every key
+// variable leaves this process's environment before they are used (also
+// when one is missing); only the two signers hold them, until both
+// transactions are signed. No child process is started.
+function takeKeys(env) {
+  const launcher = env.DARKBOT_G06A_LAUNCHER_PRIVATE_KEY;
+  const buyer = env.DARKBOT_G06A_BUYER_PRIVATE_KEY;
+  for (const name of ['DARKBOT_G06A_LAUNCHER_PRIVATE_KEY', 'DARKBOT_G06A_BUYER_PRIVATE_KEY', 'BSC_LAUNCHER_PRIVATE_KEY', 'BSC_BUYER_PRIVATE_KEY']) {
+    delete env[name];
+  }
+  if (!launcher) throw new Error('DARKBOT_G06A_LAUNCHER_PRIVATE_KEY is required');
+  if (!buyer) throw new Error('DARKBOT_G06A_BUYER_PRIVATE_KEY is required');
+  return { launcher, buyer };
+}
 async function rpc(url, method, params = []) {
   const delaysMs = [0, 150, 500, 1200];
   let lastError;
@@ -158,9 +172,13 @@ async function main() {
   if (!outPath) throw new Error('usage: node g06a_local_simulate.cjs <local_simulation.dbrec>');
 
   const rpcUrl = req('BSC_MAINNET_RPC_HTTPS');
-  const launcherWallet = new ethers.Wallet(req('DARKBOT_G06A_LAUNCHER_PRIVATE_KEY'));
-  const buyerWallet = new ethers.Wallet(req('DARKBOT_G06A_BUYER_PRIVATE_KEY'));
-  if (launcherWallet.address.toLowerCase() === buyerWallet.address.toLowerCase()) {
+  const keys = takeKeys(process.env);
+  let launcherWallet = new ethers.Wallet(keys.launcher);
+  let buyerWallet = new ethers.Wallet(keys.buyer);
+  keys.launcher = keys.buyer = null;
+  const launcherAddress = launcherWallet.address;
+  const buyerAddress = buyerWallet.address;
+  if (launcherAddress.toLowerCase() === buyerAddress.toLowerCase()) {
     throw new Error('launcher and buyer must be distinct');
   }
 
@@ -183,7 +201,7 @@ async function main() {
   const minOutput = localExpected * (10000n - SLIPPAGE_BPS) / 10000n;
   if (minOutput <= 0n) throw new Error('minOutput must be >0');
 
-  const launchData = launchCalldata(launcherWallet.address, salt);
+  const launchData = launchCalldata(launcherAddress, salt);
   const buyData = buyCalldata(token, buyValue, minOutput);
   // The salt, the launch calldata and the token never leave the process.
   guardEgress([salt, launchData, token]);
@@ -200,6 +218,7 @@ async function main() {
   // Offline signing only. Raw bytes are intentionally never printed or persisted.
   const rawLaunch = await launcherWallet.signTransaction(launchReq);
   const rawBuy = await buyerWallet.signTransaction(buyReq);
+  launcherWallet = buyerWallet = null;
   const launchHash = ethers.keccak256(rawLaunch);
   const buyHash = ethers.keccak256(rawBuy);
 
@@ -222,8 +241,8 @@ async function main() {
   localCreations(evm, state, [token]);
   const block = { header: blockHeaderFromRpc(parent) };
 
-  const launcherAddr = createAddressFromString(launcherWallet.address);
-  const buyerAddr = createAddressFromString(buyerWallet.address);
+  const launcherAddr = createAddressFromString(launcherAddress);
+  const buyerAddr = createAddressFromString(buyerAddress);
   const portalAddr = createAddressFromString(portal);
 
   // DRY-only local EOA overlay. Keep the real wallet identities and frozen
@@ -277,7 +296,7 @@ async function main() {
     origin: buyerAddr,
     to: createAddressFromString(token),
     value: 0n,
-    data: hexToBytes(balanceOfCalldata(buyerWallet.address)),
+    data: hexToBytes(balanceOfCalldata(buyerAddress)),
     gasLimit: 500000n,
     gasPrice: 0n,
     block,
@@ -312,10 +331,10 @@ async function main() {
   }
 
   const launcherPending = BigInt(await rpc(
-    rpcUrl, 'eth_getTransactionCount', [launcherWallet.address, 'pending']
+    rpcUrl, 'eth_getTransactionCount', [launcherAddress, 'pending']
   ));
   const buyerPending = BigInt(await rpc(
-    rpcUrl, 'eth_getTransactionCount', [buyerWallet.address, 'pending']
+    rpcUrl, 'eth_getTransactionCount', [buyerAddress, 'pending']
   ));
 
   const floorWei = dec('DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI');
@@ -337,8 +356,8 @@ async function main() {
     launch_tx_hash: launchHash,
     buy_tx_hash: buyHash,
     token,
-    launcher: launcherWallet.address,
-    buyer: buyerWallet.address,
+    launcher: launcherAddress,
+    buyer: buyerAddress,
     launcher_pending_nonce: launcherPending,
     buyer_pending_nonce: buyerPending,
     launch_success: true,
@@ -372,7 +391,11 @@ async function main() {
   console.log(`LOCAL_SIMULATION=WRITTEN\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNumber}\nLAUNCH_TX_HASH=${launchHash}\nBUY_TX_HASH=${buyHash}\nTOKEN=${token}\nSIMULATED_RECEIVED_AMOUNT=${returned}\nOUTPUT_DIFFERENCE=${returned - localExpected}\nLAUNCH_GAS_UPPER=${launchGasUpper}\nBUY_GAS_UPPER=${buyGasUpper}\nVALID_SIGNED_TX_BYTES_SUBMITTED=false`);
 }
 
-main().catch((e) => {
-  console.error(e.stack || String(e));
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e.stack || String(e));
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { takeKeys };

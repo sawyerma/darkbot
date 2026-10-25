@@ -345,6 +345,7 @@ else
   with_keys_public_salt "$A_SALT" "$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence "$LOCAL_SIM" --out "$DRY" \
     > "$OUT_DIR/dry_result.view.txt" || die "final G0.6A DRY qualification failed"
 fi
+drop_keys
 for key in DRY_1_bytes_and_signers DRY_2_independent_local_simulation DRY_3_gas_floor_and_budget DRY_4_expiry_nonces_zero_egress all; do
 _dbrec_23="$(get_required "dry_pass.$key" "$DRY")" || die "required typed DBREC field unavailable"
   value="${_dbrec_23}"

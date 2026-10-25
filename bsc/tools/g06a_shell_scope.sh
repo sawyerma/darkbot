@@ -24,6 +24,8 @@ with_keys() (
   export DARKBOT_G06A_BUYER_PRIVATE_KEY="${BSC_BUYER_PRIVATE_KEY:?buyer key required}"
   exec "$@"
 )
+# BSC-007: after the last signer no shell copy of a key remains.
+drop_keys() { unset BSC_LAUNCHER_PRIVATE_KEY BSC_BUYER_PRIVATE_KEY; }
 # A's public frozen salt, for exactly one local consumer. B's secret salt
 # never enters this shell: `g06a_dry_handoff exec-salt` gives it to its
 # allowlisted consumer only.
