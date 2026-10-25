@@ -45,6 +45,9 @@ pub mod r0;
 #[cfg(feature = "rpc-wire")]
 pub mod rpc_wire;
 
+/// The one shared, atomically consumed authority of a G0.7 attempt (BSC-005).
+#[cfg(feature = "g07-mainnet")]
+pub mod attempt_authority;
 /// G0.7 bounded qualification capture (adapter over `darkbot-bsc-journal`).
 /// Built only with the `g07-mainnet` feature.
 #[cfg(feature = "g07-mainnet")]

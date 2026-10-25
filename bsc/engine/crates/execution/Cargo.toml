@@ -97,6 +97,14 @@ required-features = ["g07-mainnet"]
 name = "g06a_dry_handoff"
 required-features = ["g07-mainnet"]
 
+[[bin]]
+name = "g07_attempt_authority"
+required-features = ["g07-mainnet"]
+
+[[test]]
+name = "g07_attempt_authority"
+required-features = ["g07-mainnet"]
+
 [[test]]
 name = "g07_readiness"
 required-features = ["g07-mainnet"]

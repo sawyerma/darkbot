@@ -419,6 +419,23 @@ fn the_bundle_semantics_have_one_native_definition_and_the_runner_checks_the_dry
 }
 
 #[test]
+fn one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_unsent() {
+    // BSC-005 (BSC_Bug_V2 P3-F4): a fresh checkout, a second host or an old
+    // binary find the shared authority CONSUMED; it is taken atomically
+    // before the local latch and given back only where provably nothing was
+    // sent, never after the release.
+    let consume = pos("attempt_authority::consume(");
+    assert!(pos("bundle_wire::check_projection(&dry)") < consume);
+    assert!(consume < pos("latch_attempt("));
+    // Every unsent release goes through the one helper that returns it.
+    assert_eq!(SOURCE.matches("release_unsent_attempt(").count(), 1);
+    let helper = function_body(SOURCE, "fn release_unsent(");
+    assert!(helper.contains("release_unsent_attempt("));
+    assert!(helper.contains(".return_unsent("));
+    assert!(!SOURCE[pos("barrier.wait();")..].contains(".return_unsent("));
+}
+
+#[test]
 fn the_bound_builder_policy_is_fresh_at_the_release_boundary() {
     // BSC-004: an earlier readiness PASS is no freshness proof at release;
     // the runner checks the bound policy's age right before the latch.

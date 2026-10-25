@@ -14,6 +14,7 @@
 
 use darkbot_bsc_execution::{
     acceptance_guard::{LiveGuardContext, V5_RELATIVE_PATH, verify_live_authorization},
+    attempt_authority,
     qualification_capture::{CaptureSession, CaptureSummary},
 };
 use darkbot_bsc_record::Value as RecordValue;
@@ -44,6 +45,24 @@ use chain_reads::*;
 use inputs::*;
 use shared::*;
 use transactions::*;
+
+/// A stop before the release: the local latch and the shared attempt
+/// authority (BSC-005) are given back; the authority only while the attempt
+/// directory holds no RELEASED marker.
+fn release_unsent(
+    attempt_dir: &Path,
+    evidence: Option<&EvidenceFile>,
+    outcome: &str,
+    authority: &attempt_authority::Claim,
+    git: &attempt_authority::Git,
+) -> String {
+    let released = fs::symlink_metadata(attempt_dir.join(RELEASED_MARKER_FILE)).is_ok();
+    let latch = release_unsent_attempt(attempt_dir, evidence, outcome);
+    if released {
+        return format!("{latch}; the attempt authority stays consumed");
+    }
+    format!("{latch}; {}", authority.return_unsent(git))
+}
 
 fn main() {
     assert_eq!(
@@ -287,6 +306,27 @@ fn main() {
     // BSC-004: the bound builder policy is fresh at the release boundary.
     darkbot_bsc_execution::builder_policy::require_fresh(&builder_policy, unix_time_ms())
         .unwrap_or_else(|e| panic!("G0.7 builder policy: {e}"));
+    // BSC-005: the one shared attempt authority, taken atomically on the
+    // checkout's origin before the local latch. A missing, foreign or
+    // consumed authority or an unreachable remote stops here.
+    let authority_git = attempt_authority::Git::origin();
+    let claim_note: String = format!("{boot_id}/{}/{}", std::process::id(), unix_time_ms())
+        .chars()
+        .filter(|c| c.is_ascii_graphic())
+        .collect();
+    let authority = attempt_authority::consume(
+        &authority_git,
+        &attempt_authority::Binding {
+            attempt_id: attempt_id.clone(),
+            v5_sha256: darkbot_bsc_record::sha256(
+                &fs::read(V5_RELATIVE_PATH).expect("read the v5 contract"),
+            ),
+            launch_tx_hash: launch.hash.0,
+            buy_tx_hash: buy.hash.0,
+        },
+        &claim_note,
+    )
+    .unwrap_or_else(|e| panic!("G0.7 attempt authority: {e}"));
 
     let attempt_dir = latch_attempt(
         Path::new(ATTEMPT_STATE_ROOT),
@@ -301,7 +341,8 @@ fn main() {
     let evidence_out = owner_uid(&attempt_dir)
         .and_then(|uid| EvidenceFile::create(&evidence_path, uid))
         .unwrap_or_else(|e| {
-            let released = release_unsent_attempt(&attempt_dir, None, "pre-egress");
+            let released =
+                release_unsent(&attempt_dir, None, "pre-egress", &authority, &authority_git);
             panic!("G0.7 evidence file DARKBOT_G07_EVIDENCE_PATH: {e}; {released}")
         });
     let capture_path = attempt_dir.join(CAPTURE_JOURNAL_FILE);
@@ -314,13 +355,21 @@ fn main() {
         &producer_witness_source,
     )
     .unwrap_or_else(|e| {
-        let released = release_unsent_attempt(&attempt_dir, Some(&evidence_out), "pre-egress");
+        let released = release_unsent(
+            &attempt_dir,
+            Some(&evidence_out),
+            "pre-egress",
+            &authority,
+            &authority_git,
+        );
         panic!("G0.7 capture pre-arm failed: {e}; {released}")
     });
     let capture_clock = capture.clock();
     let unsent = Unsent {
         attempt_dir: &attempt_dir,
         evidence: &evidence_out,
+        authority: &authority,
+        git: &authority_git,
     };
 
     let contract = match verify_live_authorization(
@@ -1082,11 +1131,19 @@ fn mark_released(attempt_dir: &Path, release_after_ns: u64) -> String {
 struct Unsent<'a> {
     attempt_dir: &'a Path,
     evidence: &'a EvidenceFile,
+    authority: &'a attempt_authority::Claim,
+    git: &'a attempt_authority::Git,
 }
 
 impl Unsent<'_> {
     fn release(&self, outcome: &str) -> String {
-        release_unsent_attempt(self.attempt_dir, Some(self.evidence), outcome)
+        release_unsent(
+            self.attempt_dir,
+            Some(self.evidence),
+            outcome,
+            self.authority,
+            self.git,
+        )
     }
 }
 
