@@ -6021,3 +6021,10 @@ Commits `26f6194b` (JIT), `98254f75` (source control, Geyser, lead, p0ctl/UntilS
 - Geyser: WSS backoff policy, the budget counts only consecutive failed sessions, stop during backoff; one token variable. Lead: canonical WSS copy measured against the observed Geyser copy (content + slot), only while an observer runs.
 - p0ctl: `run preflight`, `runs list`, `run stop --run`, `--profile`; `RunHorizon::UntilStopped` typed, start refused `RUN_HORIZON_UNTIL_STOPPED_GATED`.
 - Open: JIT admission (bundle fees unquoted), current quotes/simulation NOT_RUN, cross-class quote budget; backtest/optimizer (native typed jobs; the existing replay is the legacy JSONL path); inventory planner has no caller (live balances + quotes); UntilStopped activation (rolling SK-07, runway preflight); gateway capture path without BOOT/lock (outside Project_0); Geyser `created_at`; provider NOT_RUN.
+
+## 2026-10-25 — Korrekturauftrag Einheit 0 und F-01 (LOCAL_PASS offline)
+
+- Einheit 0 (`bf646966`…`c14bc83b`, `c8e75987`): keine produktive interne JSON-Kante mehr (JFI-04 offene Liste leer, Pin 287); Strict-Cache typisiert (`STRICT_CHAIN_CACHE` 318); Layout-Pins 318/350–355/704; Gate PASS (fmt, Clippy ×4, 905/903/421/421, Release, Python).
+- F-01/C07 (`760fc483`, `276e0998`): Provider-Budget immer aktiv; Shadow nur über `p0ctl run start --mode shadow`; `CaptureState.provider` (Schema-ID `e545c226…`) bis Capture-Reiter; Reporter/Gateway-E2E PASS; nicht deployt (Reporter-Rebuild nötig).
+- NOT_RUN: Gap-Smoke und jeder Mainnet-Lauf (Freigabe nötig); Review U-6 offen; Owner-Publisher (Shadow/econ4h → Overview/Liquidator/Wallets) offen.
+

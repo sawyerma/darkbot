@@ -105,7 +105,7 @@ Klassen: **W** externer Wire · **H** historischer Read-only-Leser · **C** expl
 | C03 | bestätigt | `pipeline.rs:409` `evaluate()` ohne produktiven Aufrufer. | **CTRL-09:** `#[cfg(test)]` oder löschen. |
 | C04/C05 | bestätigt | `index.rs:228/132/116/123` nur Tests oder 0 Referenzen. | **CTRL-09:** entfernen oder im Threshold-Controller verdrahten (bug_v2 V2-03/V2-13). |
 | C06 | bestätigt | `transport.rs:179-184` dupliziert `unknown()`. | **CTRL-09:** ein Helfer. |
-| C07 | **bestätigt, HIGH** | `provider.rs:680-681` `!enabled()` ⇒ nackter `RpcClient` (`:703-705`); erreichbar über `capture.sh shadow` (F-01); weitere unbudgetierte Bins `p0-prewarm-atas.rs:58`, `p0-probe-v1.rs:11`. | **CTRL-01/03/08:** Budget **immer** aktiv; `!enabled()` fail-closed; Provider-/Budget-Parameter (rps, burst, Klassen, Fallback) als validierte Config; Budget-Status (enabled, 429, Cooldown) → Capture-Reiter. |
+| C07 | **bestätigt, HIGH** | `provider.rs:680-681` `!enabled()` ⇒ nackter `RpcClient` (`:703-705`); erreichbar über `capture.sh shadow` (F-01); weitere unbudgetierte Bins `p0-prewarm-atas.rs:58`, `p0-probe-v1.rs:11`. | **CTRL-01/03/08:** Budget **immer** aktiv; `!enabled()` fail-closed; Provider-/Budget-Parameter (rps, burst, Klassen, Fallback) als validierte Config; Budget-Status (enabled, 429, Cooldown) → Capture-Reiter.  **Stand 25.10.: erledigt** `760fc483` (Budget immer), `276e0998` (Capture-Rundweg). |
 | C08 | bestätigt | bug_v2 V2-13. | **CTRL-09/03:** eine Admission-Policy für Sweep und Threshold; Modus OFF/OBSERVE/ACTIVE im Controller → Liquidator. |
 
 ---
@@ -135,7 +135,7 @@ E01 (`reporter/Cargo.toml:21-27` `required-features = ["test-fixture"]`), E02 (`
 
 | ID | Schwere | Pfad | Befund | Fix / Test | **Verbindliche Korrektur (P0-PROD-CTRL)** |
 |---|---|---|---|---|---|
-| **F-01** | **HIGH Safety/Liveness** | `scripts/capture.sh:385-416`, `startup.rs:50-53,79`, `provider.rs:680-705` | `capture.sh shadow` ohne Args/Profil ⇒ `enable_measurement_budget()` nie ⇒ Shadow-Worker (`remote_workers.rs:263/297/333/384/448`) ohne Pacing, 429-Backoff, Byte-Accounting, Fallback. `p0ctl`-Pfad ist budgetiert. | Budget unbedingt in `startup::run()`; `rpc_client()` bei `!enabled()` Err. Fail-before: argloser Start ⇒ `enabled()`. | **CTRL-01/03/08/12:** ein Launcher-Pfad (`p0ctl run start`), `capture.sh shadow` auf denselben Controller routen oder entfernen; Budget-Parameter typisiert; Budget-Status → Capture-Reiter. Sofort anhalten, Ursache dokumentieren, beide Prüfagenten. |
+| **F-01** | **HIGH Safety/Liveness** | `scripts/capture.sh:385-416`, `startup.rs:50-53,79`, `provider.rs:680-705` | `capture.sh shadow` ohne Args/Profil ⇒ `enable_measurement_budget()` nie ⇒ Shadow-Worker (`remote_workers.rs:263/297/333/384/448`) ohne Pacing, 429-Backoff, Byte-Accounting, Fallback. `p0ctl`-Pfad ist budgetiert. | Budget unbedingt in `startup::run()`; `rpc_client()` bei `!enabled()` Err. Fail-before: argloser Start ⇒ `enabled()`. | **CTRL-01/03/08/12:** ein Launcher-Pfad (`p0ctl run start`), `capture.sh shadow` auf denselben Controller routen oder entfernen; Budget-Parameter typisiert; Budget-Status → Capture-Reiter. Sofort anhalten, Ursache dokumentieren, beide Prüfagenten.  **Stand 25.10.: erledigt** `760fc483` (Shadow nur über `p0ctl run start --mode shadow`), `276e0998` (Budget → Capture); Owner-Publisher Shadow/econ4h OFFEN. |
 | **F-02** | MEDIUM Prozess | `p0ctl.rs:645-650` | `verify` ohne `--mode` ⇒ `index` ⇒ `verify.sh` ⇒ Python ⇒ `job.json`. | Default `strict`; `index`/`crosscheck` nur `--legacy`. | **CTRL-02/03/05:** `verify` = native Controller-Action (Level-Parameter), identisch für `p0ctl` und Capture-Reiter-Command; Legacy-Level nativ nachbauen oder historisch isolieren. |
 | **F-03** | MEDIUM Status | `p0ctl.rs:484-489,570` | = A12. | typisierter Qualification-Record. | **CTRL-01/04:** wie A12. |
 | **F-04** | MEDIUM Budget | `detect.rs:716`, `remote_apply.rs:113`, `pending.rs:108`, `remote_workers.rs:333-368` | RAM-Reconcile 1 s × 90 s je Signatur, nur Telemetrie, parallel FE-04 (10 s). | eine Quelle oder Kadenz = `FE04_SETTLE_RETRY`; E2E: Reconcile-Calls ≤ Settlement-Calls. | **CTRL-09/08:** Pfad konsolidieren (C02); Kadenzen als Config-Felder. |
@@ -239,3 +239,19 @@ E01 (`reporter/Cargo.toml:21-27` `required-features = ["test-fixture"]`), E02 (`
 9. **U-10 bleibt BLOCKED**, bis ein genehmigter nativer Run mit strikter Verifikation und Shadow-Journal existiert; Status ehrlich `NOT_RUN` ausweisen.
 
 **Register-Update nach Abschluss:** A02/A03/A05/A08/A12/A13/F-02/F-03/F-10/F-11 ⇒ erledigt mit SHA; A04 ⇒ nur, wenn `index`/`crosscheck` nativ oder explizit historisch; A10/A11 ⇒ erst mit Aufrufgraph-/Run-Dir-Assertion; B03 ⇒ erst mit U-9. Bis dahin **alle genannten Positionen OPEN**.
+
+### 11.4 Stand 25.10. (Einheit 0: Code und Gate PASS auf `c14bc83b`; Review U-6 offen)
+
+| Nr. | Status | Beleg |
+|---|---|---|
+| U-1/U-2 | erledigt | `bf646966` (Tests auf 4/5-Parameter-API, nativer Pfad vor Entfernung) |
+| U-3/U-4/U-7 | erledigt | `1ecb8ce3`, `8cba2393`, `f43adb6e`, `97df05a0` (Plan/Config/Views typisiert, `--historical` isoliert) |
+| U-5 | erledigt | `scripts/gate.sh` PASS: fmt, Clippy ×4, 905/903/421/421, Release, Python |
+| U-6 | OFFEN | ein Prüfagent gestartet, durch Session-Limit abgebrochen; Wiederaufnahme nach Reset |
+| U-8 | erledigt | `c14bc83b` (Layout-Pins 318, 350–355, 704); Ledger-Zeile `98d15d1b` |
+| U-9 | OFFEN | B03-Rundweg (Einheit 4) |
+| U-10 | BLOCKED / NOT_RUN | kein genehmigter nativer Run mit strikter Verifikation |
+| U-11 | getrennt | nicht Teil dieser Einheit |
+| F10 (JSON-RPC-Cache) | erledigt | `98d15d1b` (typisierter `ChainCacheEntry`, Read-ahead nur Full-Blocks) |
+
+**Register:** A02/A03/F-11, A05, A13 ⇒ erledigt (`bf646966`, `97df05a0`, `1ecb8ce3`); A08, F-02 ⇒ Code erledigt (keine implizite Delegation, `verify --mode` Pflicht), Controller-Rundweg OFFEN; A12/F-03 ⇒ TEILWEISE (Status liest Records, Projektion → Capture OFFEN); F-10 ⇒ erledigt `c8e75987` (Lauf NOT_RUN, braucht Freigabe).

@@ -45,7 +45,7 @@ All work goes directly to `main`. No development branches. Preserve `project_0/`
 ## macOS Cockpit service (manual start)
 From repository root: `ops/darkbotctl build && ops/darkbotctl deploy && ops/darkbotctl install-apps`.
 
-**Deployment dependency (binding):** every schema change (latest `d46f76c6`, schema id `68bae95c…`) needs the Project_0 reporter `p0-market-capture-reported` and the BSC reporter rebuilt from the same tree; the engine hop refuses a reporter with another schema id. Deploy only via `build` → `deploy`: the release manifest binds schema id and binary hashes, and deploy refuses while a capture runs on another schema.
+**Deployment dependency (binding):** every schema change (latest `276e0998` ProviderBudget, schema id `e545c226…`) needs the Project_0 reporter `p0-market-capture-reported` and the BSC reporter rebuilt from the same tree; the engine hop refuses a reporter with another schema id. Deploy only via `build` → `deploy`: the release manifest binds schema id and binary hashes, and deploy refuses while a capture runs on another schema.
 Use the desktop **DarkBot** app or `ops/darkbotctl up` to launch only the
 read-only gateway and browser; the market capture is never started automatically.
 The gateway serves `frontend/dist` at `http://127.0.0.1:8787` over same-origin,

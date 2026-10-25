@@ -100,12 +100,13 @@ Weitere echte `RuntimeConfig`-Felder: `profile` (smoke/standard/performance/cust
 | Rust-Owner | Reale Typen / Feldnamen |
 |---|---|
 | `analytics/journal.rs` | `MAGIC=P0JRNL01`, `VERSION=1`, `Provenance {source,source_seq,slot,fork,rx_ns,unix_ns}` |
-| `analytics/journal.rs::kind` | `MARKET_TRANSACTION=300`, `MARKET_LIQUIDATION=301`, `MARKET_COVERAGE=302`, `STRICT_SCOPE=310`, `STRICT_RPC_CACHE=311`, `STRICT_CHECKPOINT=312`, `STRICT_RESULT=313`, `CAPACITY_PREFLIGHT=320` |
+| `analytics/journal.rs::kind` | `MARKET_TRANSACTION=300`, `MARKET_LIQUIDATION=301`, `MARKET_COVERAGE=302`, `STRICT_SCOPE=310`, `STRICT_RPC_CACHE=311` (historisch), `STRICT_CHECKPOINT=312`, `STRICT_RESULT=313`, `STRICT_CHAIN_CACHE=318`, `CAPACITY_PREFLIGHT=320` |
 | dito | `ECON_SHADOW_EVALUATION=400`, `ECON_SNAPSHOT=410`, `ECON_FINAL=411`, `ECON_OPPORTUNITY=412`, `ECON_CANONICAL=413` |
 | `market/rows.rs` | `MarketTransaction{signature,slot,origin}`, `MarketLiquidation`, `MarketCoverage`, `WindowEvent`, `ReconciliationRow` |
 | `solana/chain.rs` | `ChainTx,ChainMeta,ChainBlock,TxStatus::{Success,Failed,Unknown}`; Legacy/v0/v1/LUT/CPI |
 | `market/core.rs` | `MarketStats.transactions_received,successful_transactions,failed_transactions,unknown_status_transactions,gap_count,transport_http_429,ingress_overflow_count,last_observed_slot` |
 | `storage/writer.rs` | `StorageStatus {queue_bytes,queue_peak_bytes,admission_limit_bytes,max_bytes,free_budget_bytes,ingress_bytes_per_s,write_bytes_per_s,lag_frames,budget_exhaustion_s,disk_free_bytes,disk_reserve_bytes,disk_exhaustion_s}` |
+| `status_tap.rs` / `solana/provider.rs` | `ProviderSample {at_unix_ms, snapshot: ProviderSnapshot, cooldown: CooldownStatus, halt_code}` → `CaptureState.provider` (`ProviderBudget`) → `ProviderView` → Capture „Provider budget“, Health (F-01b) |
 | `storage/preflight.rs` | `CapacityReport {request,basis,write_bytes_per_s,environment,checks,verdict,start_allowed}`; WIP |
 | `liquidation/economics.rs` | `CandidateInput,Evaluation::{Known,Unknown},FailedCostMatrix,actionable,t_profitable`; USD-micro, Gebühren, Rent, Funding, Capital |
 | `analytics/econ.rs` | `CAPITAL_USD=[200,500,1000,2500,5000,10000]`; `SPEEDUP_MS=[1,5,10,25,50,100,200,500,1000]` |

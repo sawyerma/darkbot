@@ -93,7 +93,7 @@ BSC Native Rust                                 Project_0 Native Rust
 | **F4 – BLOCKED/OPEN** | Durable EVENT-Reconciliation nicht durch F3/F6-Fixes ersetzt. |
 | **Project_0-Polling – OPEN** | Ausschließlich Project_0-Owner; kein BSC-Fix und kein stiller Umbau. |
 
-**Deploy-Grenze:** Protobuf-Schema-ID `68bae95c365d2e697b528d9f52aad60ec41ea4f3115de1e601f276dbf0189db1` ist gepusht, **nicht deployt**. P0- und BSC-Reporter müssen gemeinsam zum Schema gebaut werden; nur bestehender `darkbotctl build` → `deploy`-Prozess. Keine SIGN-/ARM-/LIVE-Freigabe.
+**Deploy-Grenze:** Protobuf-Schema-ID `e545c226b50c2752316a494dc6cd3e193e936111fa6134fd9e34cd846b2c4570` (`276e0998`) ist gepusht, **nicht deployt**. P0- und BSC-Reporter müssen gemeinsam zum Schema gebaut werden; nur bestehender `darkbotctl build` → `deploy`-Prozess. Keine SIGN-/ARM-/LIVE-Freigabe.
 
 **Fortsetzungsentscheidung:** Das F3/F6/F7-Bugfix-Paket ist **geschlossen**; nicht ohne konkrete neue Fehler reproduktiv wieder öffnen. **Jetzt BSC Gate0 fortsetzen**, nicht das Frontend oder Project_0 damit vermischen. Der verbindliche BSC-Ist- und Übergabestand steht in [BSC STATUS – 2026-10-24](../bsc/docs/1_PLAN/STATUS.md): Flap v5.26.0 **PREPARE SELF_A** schlüsselfrei vorhanden; V5 weiterhin UNARMED, SIGN/VERIFY separat freigabepflichtig, G0.7/G0.8 NICHT ausgeführt. Zuerst verbliebene G0.7/G0.8-Code-/Qualifikationslücken prüfen; Reihenfolge G0.7 → G0.8 → PASS/ADAPT/STOP → erst danach C1/C2. Ursprüngliches BSC-Produktziel `T_buy - T0 < 1 ms` bleibt **NOT_PROVEN**. Dies ist keine neue Phase und keine wirtschaftliche Freigabe.
 
