@@ -14,7 +14,8 @@
 //! Status: UNTESTED / VERIFY.
 
 pub mod analytics;
-pub mod console;
+/// F-16: the process console lives in `darkbot-common` (the solana crate prints through it).
+pub use darkbot_common::console;
 pub mod execution;
 pub mod market;
 pub mod orchestration;

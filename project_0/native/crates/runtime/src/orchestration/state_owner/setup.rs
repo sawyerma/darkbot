@@ -98,7 +98,9 @@ pub(super) fn prepare(
     let operational_failure = None;
     let admission = admission.map(Box::new);
     if admission.is_some() {
-        eprintln!("admission: approved network audit verified; identities bind at the first Ready");
+        crate::console::line(
+            "admission: approved network audit verified; identities bind at the first Ready".into(),
+        );
     }
     let ws_url = config::require("P0_WS_URL")?;
     let ws_url_for_spawn = ws_url.clone();
@@ -151,7 +153,7 @@ pub(super) fn prepare(
     // against the qualified deployment pin, latched PROGRAM_UPGRADE), both before admission.
     let genesis = dep_rpc.get_genesis_hash()?;
     check_cluster(&genesis)?;
-    eprintln!("cluster: genesis={genesis}");
+    crate::console::line(format!("cluster: genesis={genesis}"));
     let program_data = darkbot_project0::protocol::program_data_address(&program);
     let program_data_account = dep_rpc
         .get_account_with_commitment(&program_data, CommitmentConfig::confirmed())?
@@ -166,7 +168,7 @@ pub(super) fn prepare(
     .map_err(|e| format!("PROGRAM_DATA_INVALID: {} {:?}", program_data, e))?;
     let program_data_baseline_hash = deployment.hash;
     let deployment_pin = darkbot_project0::protocol::deployment_pin(&program, &deployment);
-    eprintln!(
+    crate::console::line(format!(
         "program_upgrade_watch: program={} program_data={} baseline_hash={} deployment_slot={} upgrade_authority={} pin={:?}",
         program,
         program_data,
@@ -174,7 +176,7 @@ pub(super) fn prepare(
         deployment.deployment_slot,
         deployment.upgrade_authority.map_or_else(|| "NONE".to_string(), |a| a.to_string()),
         deployment_pin
-    );
+    ));
 
     // [FIX-98] A signed Shadow simulation uses the real fee payer. If that pubkey has never
     // been funded on-chain, Solana rejects the transaction during account loading with
@@ -189,10 +191,10 @@ pub(super) fn prepare(
             liquidator
         ).into());
     };
-    eprintln!(
+    crate::console::line(format!(
         "payer_preflight: pubkey={} lamports={} owner={} executable={}",
         liquidator, payer_account.lamports, payer_account.owner, payer_account.executable
-    );
+    ));
     #[cfg(feature = "crate_health")]
     let pre =
         snapshot::program_accounts_filtered(&dep_rpc, &program, bank_filters(&group), &clock)?;
@@ -221,10 +223,10 @@ pub(super) fn prepare(
         let scan =
             darkbot_project0::health::dependency_scan(&StateView(&pre_state), &program, &bank_keys);
         for (bank, gap) in scan.gaps {
-            eprintln!(
+            crate::console::line(format!(
                 "dependency_gap: bank={bank} code={} detail={gap:?}",
                 gap.code()
-            );
+            ));
             // N6: the owner starts with these gaps known; it reports only their changes.
             dependency_gaps.insert(bank, gap);
         }
@@ -265,25 +267,25 @@ pub(super) fn prepare(
         find_supported_cost_bank_by_mint(&StateView(&pre_state), &program, &bank_keys, &native_sol_mint)
             .ok_or("no supported generic Marginfi WSOL bank found; cannot value SOL-denominated liquidation costs")?;
     #[cfg(feature = "crate_health")]
-    eprintln!(
+    crate::console::line(format!(
         "sol_cost_bank: {} asset_tag={} oracle_setup={:?} operational_state={:?}",
         sol_bank,
         sol_cost_bank.config.asset_tag,
         sol_cost_bank.config.oracle_setup,
         sol_cost_bank.config.operational_state
-    );
+    ));
 
     let mut subscription_keys = required_dependency_keys.clone();
     subscription_keys.extend(optional_dependency_keys.iter().copied());
     subscription_keys.sort_unstable_by_key(|k| k.to_bytes());
     subscription_keys.dedup();
 
-    eprintln!(
+    crate::console::line(format!(
         "dependencies: banks={} required={} optional_atas={}",
         bank_keys.len(),
         required_dependency_keys.len(),
         optional_dependency_keys.len()
-    );
+    ));
     drop(pre_state);
     // Ingress-Thread (WSS). Provider nur als URL.
     let sub = Subscription {
@@ -319,7 +321,9 @@ pub(super) fn prepare(
     // RpcClient::new() 30-second default. Keep a bounded, independently configurable
     // timeout for snapshot/dependency fetches; never weaken recovery/reconcile gates.
     let snapshot_rpc_timeout_secs = operational.snapshot_timeout_seconds;
-    eprintln!("snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}");
+    crate::console::line(format!(
+        "snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}"
+    ));
     let rpc = darkbot_solana::provider::rpc_client(
         rpc_url.clone(),
         Duration::from_secs(snapshot_rpc_timeout_secs),
@@ -344,10 +348,10 @@ pub(super) fn prepare(
     {
         return Err("P0_RECOVERY_ROOT_STALL_SECS must be 5..=180 and P0_RECOVERY_ROOT_HARD_MAX_SECS must be 30..=900 and >= P0_RECOVERY_ROOT_CATCHUP_SECS".into());
     }
-    eprintln!(
+    crate::console::line(format!(
         "recovery: root_soft_s={} root_stall_s={} root_hard_s={}",
         root_catchup_secs, root_stall_secs, root_hard_secs
-    );
+    ));
     let drv = RecoveryDriver::new(3)
         .with_root_catchup(Duration::from_secs(root_catchup_secs))
         .with_root_progress_limits(
@@ -360,7 +364,7 @@ pub(super) fn prepare(
     let opt_for_fetch = opt_shared.clone();
     let fetch = move || -> Result<SnapshotData, String> {
         let t0 = std::time::Instant::now();
-        eprintln!("snapshot: start");
+        crate::console::line("snapshot: start".into());
         // [FIX-78] Recovery snapshot = target-group liability accounts + target-group banks +
         // explicit required/optional dependencies. Lending-only accounts are excluded.
         #[cfg(feature = "crate_health")]
@@ -372,10 +376,10 @@ pub(super) fn prepare(
         )
         .map_err(|e| {
             // Log a duration without provider URL, response body or API credentials.
-            eprintln!(
+            crate::console::line(format!(
                 "snapshot: failed stage=liability_gpa elapsed_ms={}",
                 t0.elapsed().as_millis()
-            );
+            ));
             format!("stage=liability_gpa {e}")
         })?;
         #[cfg(feature = "crate_health")]
@@ -413,7 +417,7 @@ pub(super) fn prepare(
         if o.slot != 0 {
             slot = slot.min(o.slot);
         }
-        eprintln!(
+        crate::console::line(format!(
             "snapshot: done slot={} liability_accounts={} banks={} required={} optional={} missing_required={} total={} elapsed_ms={}",
             slot,
             liability_count,
@@ -423,7 +427,7 @@ pub(super) fn prepare(
             missing_required_count,
             accounts.len(),
             t0.elapsed().as_millis()
-        );
+        ));
         Ok(SnapshotData {
             slot,
             accounts,
@@ -432,7 +436,7 @@ pub(super) fn prepare(
     };
     // [FIX-35] Bootstrap läuft über die StreamReady-Barriere: das erste `Reconnected` (alle ACKs)
     // löst im Event-Loop die Recovery aus. Kein sleep, kein vorzeitiger Snapshot.
-    eprintln!("bootstrap: waiting for StreamReady (all subscription ACKs)");
+    crate::console::line("bootstrap: waiting for StreamReady (all subscription ACKs)".into());
     // [FIX-1] Pipeline-Bausteine: Keypair (nur signieren, Shadow sendet nicht), Blockhash-Cache,
     // Safety aus Env (Limits sind Konfiguration), Allowlist aus Source, Submitter nur für Simulation.
     let blockhash = BlockhashCache::new();
@@ -613,14 +617,14 @@ pub(super) fn prepare(
         full_queue_backoff_s: operational.winner_watch_full_backoff_seconds,
     }
     .validate()?;
-    eprintln!(
+    crate::console::line(format!(
         "winner_watch_config: capacity={} ttl_s={} initial_delay_s={} recheck_s={} full_backoff_s={} provisional=true",
         winner_watch_cfg.capacity,
         winner_watch_cfg.ttl_s,
         winner_watch_cfg.initial_delay_s,
         winner_watch_cfg.recheck_interval_s,
         winner_watch_cfg.full_queue_backoff_s
-    );
+    ));
     let winner_tracker = WinnerTracker::new(winner_watch_cfg);
     let record_path = config::parsed_or::<String>(
         "P0_RECORD_PATH",
@@ -751,10 +755,10 @@ pub(super) fn prepare(
         return Err("P0_CANDIDATE_REPEAT_SOFT_CAP must be > 0".into());
     }
     #[cfg(feature = "crate_health")]
-    eprintln!(
+    crate::console::line(format!(
         "r127_candidate_cache_config: recheck_slots={} error_recheck_slots={} repeat_soft_cap={}",
         candidate_recheck_slots, candidate_error_recheck_slots, candidate_repeat_soft_cap
-    );
+    ));
     #[cfg(feature = "crate_health")]
     let candidate_cache: HashMap<Pubkey, CandidateCacheEntry> = HashMap::new();
     #[cfg(feature = "crate_health")]
@@ -1277,7 +1281,7 @@ pub(super) fn run_blockhash_refresh(
         match refreshed {
             Ok(_) => {
                 if degraded {
-                    eprintln!("blockhash refresh: recovered");
+                    crate::console::line("blockhash refresh: recovered".into());
                     degraded = false;
                 }
             }
@@ -1285,7 +1289,7 @@ pub(super) fn run_blockhash_refresh(
                 if !degraded {
                     // [FIX-82] Never print provider URLs/API keys embedded in transport errors.
                     let safe = e.split(" for url ").next().unwrap_or("rpc transport error");
-                    eprintln!("blockhash refresh: {}", safe);
+                    crate::console::line(format!("blockhash refresh: {}", safe));
                     degraded = true;
                 }
             }

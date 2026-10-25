@@ -487,7 +487,9 @@ impl WsRpcControlSource {
                     };
                     self.transport(&sink, "DEGRADED", code, attempt, last_slot);
                     // Error text may contain provider response bodies/URLs: emit safe classes only.
-                    eprintln!("[ws_rpc] state=DEGRADED attempt={attempt} code={code}");
+                    darkbot_common::console::line(format!(
+                        "[ws_rpc] state=DEGRADED attempt={attempt} code={code}"
+                    ));
                     let delay = reconnect_delay(
                         self.cfg.reconnect_initial,
                         self.cfg.reconnect_max,
@@ -584,7 +586,7 @@ impl WsRpcControlSource {
         let deadline = recovery.deadline;
         let healthy = &mut recovery.healthy;
         let retry_after = &mut recovery.retry_after;
-        eprintln!("[ws_rpc] session attempt={} connecting", attempt);
+        darkbot_common::console::line(format!("[ws_rpc] session attempt={} connecting", attempt));
         let connect_budget = deadline
             .map(|d| d.saturating_duration_since(tokio::time::Instant::now()))
             .unwrap_or(self.cfg.idle_timeout)
@@ -657,7 +659,7 @@ impl WsRpcControlSource {
 
         // Subscribe-Requests senden; Bestätigungen (id → subscription) einsammeln.
         let request_total = requests.len();
-        eprintln!(
+        darkbot_common::console::line(format!(
             "[ws_rpc] session attempt={} connected; subscriptions={} (programs={} filtered_programs={} accounts={} slots={} roots={} tx={})",
             attempt,
             request_total,
@@ -667,7 +669,7 @@ impl WsRpcControlSource {
             self.cfg.subscription.slots as u8,
             self.cfg.subscription.roots as u8,
             self.cfg.subscription.transactions_mentioning.len()
-        );
+        ));
         let mut pending: HashMap<u64, (SubKind, Option<Pubkey>)> = HashMap::new();
         let mut acc_iter = self.cfg.subscription.accounts.iter();
         for (id, kind, req) in &requests {
@@ -812,10 +814,10 @@ impl WsRpcControlSource {
                 }
                 let acked = request_total.saturating_sub(pending.len());
                 if acked == request_total || acked == 1 || acked.is_multiple_of(100) {
-                    eprintln!(
+                    darkbot_common::console::line(format!(
                         "[ws_rpc] session attempt={} subscription ACKs={}/{}",
                         attempt, acked, request_total
-                    );
+                    ));
                 }
                 // [FIX-36] StreamReady-Barriere: alle Subscriptions bestätigt → genau ein `Reconnected`.
                 if !stream_ready && pending.is_empty() {
@@ -823,12 +825,12 @@ impl WsRpcControlSource {
                     last_progress_at = tokio::time::Instant::now();
                     last_app_frame_at = last_progress_at;
                     self.transport(sink, "READY", "SUBSCRIPTIONS_ACKED", attempt, *last_slot);
-                    eprintln!(
+                    darkbot_common::console::line(format!(
                         "[ws_rpc] session attempt={} StreamReady; ACK phase {} ms for {} subscriptions",
                         attempt,
                         ack_started.elapsed().as_millis(),
                         request_total
-                    );
+                    ));
                     if self.cfg.recovery_budget.is_none() {
                         self.ready(sink, halt, attempt, t_rx_ns)?;
                     }

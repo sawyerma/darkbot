@@ -55,6 +55,10 @@ fn main() {
         ));
         handle.stop();
     }
+    // F-16: the runtime's last console lines are written before the process ends (bounded).
+    darkbot_runner::console::flush(Duration::from_millis(
+        status_tap::active_limits().report_final_flush_ms,
+    ));
     if let Err(e) = result {
         eprintln!(
             "p0-longtail: {}",

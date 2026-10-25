@@ -86,7 +86,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
     let launched = std::env::var_os("P0_CTL_LAUNCH_RUN_ID").is_some();
     let requested_mode = std::env::var("P0_MODE").unwrap_or_default();
     if let Some(code) = controller_refusal(&requested_mode, launched) {
-        eprintln!("{code}: a Shadow run starts only through `p0ctl run start --mode shadow` (capture.sh shadow)");
+        crate::console::line(format!("{code}: a Shadow run starts only through `p0ctl run start --mode shadow` (capture.sh shadow)"));
         return Err(Box::new(super::state_owner::OwnerTerminal(code)));
     }
     let shadow = requested_mode == "shadow";
@@ -166,7 +166,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         &super::boot_audit::runtime_binary_identity,
     )
     .map_err(|e| {
-        eprintln!("BOOT admission refused: {e}");
+        crate::console::line(format!("BOOT admission refused: {e}"));
         super::boot_audit::admission_code(&e)
     });
     // The terminal code itself, never a boxed box (whose report would lose the code).
@@ -247,7 +247,7 @@ fn run_econ4h(
         move |handle: econ::Handle| {
             run_shadow(clock, Some(handle), admission).map_err(|e| {
                 let report = failure_report(e.as_ref());
-                eprintln!("C0_E1_SHADOW_FAILED category={report}");
+                crate::console::line(format!("C0_E1_SHADOW_FAILED category={report}"));
                 report
             })
         }
@@ -285,7 +285,7 @@ where
     };
     let rendered = crate::analytics::measurement::finalize_phases(&paths, result.is_ok());
     if let Err(e) = &rendered {
-        eprintln!("C0_E1_PHASE_JOURNAL_INCOMPLETE {e}");
+        crate::console::line(format!("C0_E1_PHASE_JOURNAL_INCOMPLETE {e}"));
     }
     result.and(rendered)
 }
@@ -300,7 +300,9 @@ fn refuse_before_owners(
     code: &'static str,
 ) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    eprintln!("C0_E1_ADMISSION_REFUSED {code}: no owner started; live=false submission=false");
+    crate::console::line(format!(
+        "C0_E1_ADMISSION_REFUSED {code}: no owner started; live=false submission=false"
+    ));
     let shared = &handle.shared;
     for flag in [
         &shared.abort,
@@ -386,15 +388,15 @@ where
         );
         if last_status != Some(status) {
             if status.1 && !status.3 {
-                eprintln!(
+                crate::console::line(format!(
                     "[MARKET/STATUS] phase=POST_CAPTURE_FINALIZATION shadow_done={} shadow_failed={} market_done={} market_failed={} live=false submission=false",
                     status.1, status.2, status.3, status.4
-                );
+                ));
             } else {
-                eprintln!(
+                crate::console::line(format!(
                     "[SHADOW/STATUS] ready={} done={} failed={} market_done={} market_failed={} live=false submission=false",
                     status.0, status.1, status.2, status.3, status.4
-                );
+                ));
             }
             last_status = Some(status);
         }
@@ -402,7 +404,7 @@ where
         {
             handle.shared.operator_stop.store(true, Ordering::Release);
             handle.shared.abort.store(true, Ordering::Release);
-            eprintln!("[C0_E1/STOP] operator stop requested: admission closed, capture drains, journals sealed, coverage INCOMPLETE (OPERATOR_STOP); live=false submission=false");
+            crate::console::line("[C0_E1/STOP] operator stop requested: admission closed, capture drains, journals sealed, coverage INCOMPLETE (OPERATOR_STOP); live=false submission=false".into());
         }
         if analytics.is_finished() || std::time::Instant::now() >= deadline {
             handle.shared.abort.store(true, Ordering::Release);
@@ -420,12 +422,12 @@ where
     if !quiescent {
         handle.shared.shadow_failed.store(true, Ordering::Release);
         handle.shared.market_failed.store(true, Ordering::Release);
-        eprintln!(
+        crate::console::line(format!(
             "C0_E1_OWNERS_NOT_QUIESCENT shadow_finished={} market_finished={} grace_s={}; live=false submission=false",
             shadow.is_finished(),
             observer.is_finished(),
             grace.as_secs()
-        );
+        ));
     }
     if shadow.is_finished() && !matches!(shadow.join(), Ok(Ok(()))) {
         handle.shared.shadow_failed.store(true, Ordering::Release);

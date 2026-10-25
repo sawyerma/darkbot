@@ -13,6 +13,7 @@
 
 pub mod channel;
 pub mod config;
+pub mod console;
 pub mod error;
 pub mod histogram;
 pub mod journal;

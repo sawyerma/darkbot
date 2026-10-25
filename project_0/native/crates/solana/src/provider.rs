@@ -199,11 +199,11 @@ impl Budget {
         let mut s = self.lock_state();
         if !s.drift {
             s.drift = true;
-            eprintln!(
+            darkbot_common::console::line(format!(
                 "PROVIDER_BUDGET_CONFIG_DRIFT field={field} rpc_endpoints={}->{}",
                 self.rpc_endpoints.len(),
                 c.rpc_endpoints.len()
-            );
+            ));
         }
         drop(s);
         self.changed.notify_all();
@@ -524,7 +524,7 @@ impl Budget {
         };
         if server_imposed {
             // A23-06: a server-imposed wait is announced once per start/extension (no URL).
-            eprintln!(
+            darkbot_common::console::line(format!(
                 "[PROVIDER] cooldown cause={} retry_after_secs={} http_429={}",
                 if s.retry_after_overflow {
                     "RETRY_AFTER_UNREPRESENTABLE"
@@ -533,7 +533,7 @@ impl Budget {
                 },
                 retry.as_secs(),
                 s.rate_limits
-            );
+            ));
         }
         s.last_retry_after = header;
         if let RetryAfterHeader::Delay { secs } = header {
@@ -699,10 +699,10 @@ pub fn observe_response(
             "getAccountInfo" | "getTransaction" | "getBlock" | "getBlocks" | "getSlot" => method,
             _ => "OTHER",
         };
-        eprintln!(
+        darkbot_common::console::line(format!(
             "[PROVIDER/RPC] method={method} status={} phase=MEASUREMENT",
             response.status().as_u16()
-        );
+        ));
     }
     if response.status().as_u16() == 429 {
         shared().rate_limited_header(retry_after_header(
@@ -940,12 +940,12 @@ impl BudgetedSender {
                 }
             };
             if !response.status().is_success() {
-                eprintln!(
+                darkbot_common::console::line(format!(
                     "[PROVIDER/RPC] method={request} status={} workload={:?} attempt={}",
                     response.status().as_u16(),
                     work,
                     attempt + 1
-                );
+                ));
             }
             if response.status().as_u16() == 429 {
                 self.budget.rate_limited_header(retry_after_header(

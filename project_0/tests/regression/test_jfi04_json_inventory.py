@@ -191,5 +191,22 @@ class JsonInventory(unittest.TestCase):
                 self.assertNotIn(word, text, f'{word} in {rel}')
 
 
+    def test_owner_ingress_and_provider_print_through_the_console(self):
+        """F-16: the state owner, the runtime start, the WSS ingress and the provider never write stderr
+        directly (a blocked stderr would stall them); their lines go through the bounded console sink."""
+        modules = [
+            'runtime/src/orchestration/startup.rs',
+            'runtime/src/orchestration/state_owner.rs',
+            'solana/src/ingress/ws_rpc.rs',
+            'solana/src/provider.rs',
+        ]
+        owner = CRATES / 'runtime/src/orchestration/state_owner'
+        modules += [str(f.relative_to(CRATES)) for f in sorted(owner.glob('*.rs'))
+                    if not f.name.endswith('tests.rs')]
+        for rel in modules:
+            text = (CRATES / rel).read_text(encoding='utf-8').split('#[cfg(test)]\nmod ')[0]
+            self.assertFalse('eprintln!' in text, f'eprintln! in {rel}')
+
+
 if __name__ == '__main__':
     unittest.main()
