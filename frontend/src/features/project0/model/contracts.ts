@@ -59,7 +59,8 @@ export interface ProgramPinView {
   referenceSourceTag: string;
   referenceHash: string;
 }
-/** No backend endpoint publishes FinanceSnapshot as of V0. */
+/** The Overview monitor: owner pipeline p95 values and the owner's FinanceSummary (topic
+ * project0.finance.summary); every slot stays null without a current owner. */
 export interface MonitorSnapshot {
   rpcP95Ms: number | null;
   decisionP95Ms: number | null;
