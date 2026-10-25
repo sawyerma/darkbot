@@ -49,8 +49,14 @@ fn p0ctl_source_set_reaches_the_runtime_owner_queue() {
         control::acquire_owner(&control::default_lock_path(&d), "src_test", "shadow").unwrap();
     let (tx, rx) = bounded::<ControlMessage>("source-control", 4);
     let shutdown = Shutdown::new();
-    let thread =
-        source_control::spawn(source_control::request_dir(&d), tx, shutdown.clone()).unwrap();
+    let dir = source_control::request_dir(&d);
+    let thread = source_control::spawn(
+        dir.clone(),
+        tx,
+        shutdown.clone(),
+        source_control::head(&dir).unwrap(),
+    )
+    .unwrap();
     let next = || {
         let t = Instant::now();
         loop {
@@ -88,6 +94,35 @@ fn p0ctl_source_set_reaches_the_runtime_owner_queue() {
             && out.contains("runtime: running"),
         "{out}"
     );
+    // CTRL-03 CAS: a change based on a stale configuration version is refused and writes
+    // nothing; the current version (the request log's head) admits the next request.
+    let set = |v: &str| {
+        p0ctl(
+            &d,
+            &[
+                "source",
+                "set",
+                "geyser:publicnode",
+                "observe",
+                "--expect-version",
+                v,
+            ],
+        )
+    };
+    let (code, out, err) = set("1");
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(
+        err.contains("SOURCE_VERSION_CONFLICT") && err.contains("current 2"),
+        "{err}"
+    );
+    assert_eq!(source_control::head(&dir).unwrap(), 2);
+    let (code, out, err) = set("2");
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("seq=3"), "{out}");
+    assert!(matches!(next(), ControlMessage::Apply { seq: 3, .. }));
+    let (code, _, err) = set("x");
+    assert_eq!(code, 2);
+    assert!(err.contains("--expect-version"), "{err}");
     shutdown.request();
     thread.join().unwrap();
     std::fs::remove_dir_all(d).unwrap();

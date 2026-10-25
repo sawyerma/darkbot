@@ -2005,7 +2005,7 @@ fn with_loopback_geyser(
         &f.owner.wake,
         Some(rx),
     )
-    .record_decisions_in(f.dir.join("source-control"));
+    .record_decisions_in(f.dir.join("source-control"), 0);
     f.owner.start_sources().unwrap();
     (tx, seen, k)
 }
@@ -2223,6 +2223,9 @@ fn s1_02_runtime_control_toggles_and_hands_canonical_authority_over() {
     );
     assert_eq!(newest.detail, "SOURCE_MODE_INVALID");
     assert_eq!(newest.owner_pid, std::process::id());
+    // CTRL-03: the projected configuration version is the newest decided request (refused ones
+    // included), the CAS a GUI change states.
+    assert_eq!(f.owner.sources.config_version, Some(6));
     // Journaled order: trading resumed after the grant only through a recovery.
     use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
     let dir = f.dir.clone();

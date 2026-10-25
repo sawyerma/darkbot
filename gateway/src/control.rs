@@ -163,9 +163,15 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
         BacktestJobCommand, OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
     };
-    if req.expected.is_some() {
-        return None;
-    }
+    // CTRL-03: only a source change carries a CAS — the configuration version its view showed
+    // (`LiquidatorState.source_config_version`); `p0ctl source set --expect-version` checks it.
+    let expect_version = match req.expected.as_ref().map(|e| e.version) {
+        None => None,
+        Some(Some(expected_version::Version::ConfigVersion(v))) if req.action == SOURCE_SET => {
+            Some(v)
+        }
+        Some(_) => return None,
+    };
     let start = |kind: &str| -> Vec<String> {
         ["p0", "job", "start", kind, "--id", &req.request_id]
             .map(String::from)
@@ -251,11 +257,13 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             if !unit_ok || !["off", "observe", "active"].contains(&c.mode.as_str()) {
                 return None;
             }
-            Some(
-                ["p0", "source", "set", &c.unit, &c.mode]
-                    .map(String::from)
-                    .to_vec(),
-            )
+            let mut args: Vec<String> = ["p0", "source", "set", &c.unit, &c.mode]
+                .map(String::from)
+                .to_vec();
+            if let Some(v) = expect_version {
+                args.extend(["--expect-version".into(), v.to_string()]);
+            }
+            Some(args)
         }
         JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
             ["p0", "job", "cancel", "--id", &req.resource_id]
@@ -1835,6 +1843,53 @@ mod tests {
         assert!(allowed(ProjectId::Bsc as i32, BSC_CANDIDATE));
         assert!(!allowed(ProjectId::Project0 as i32, BSC_CANDIDATE));
         assert!(!allowed(ProjectId::Solana as i32, BSC_START));
+    }
+    #[test]
+    fn only_a_source_change_carries_the_configuration_version_cas() {
+        use crate::proto::project0::v1::SourceControlCommand;
+        use expected_version::Version::*;
+        let req = |action: &str,
+                   resource: &str,
+                   params: Vec<u8>,
+                   expected: Option<expected_version::Version>| CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: "12345678-1234-1234-1234-123456789abc".into(),
+            action: action.into(),
+            resource_id: resource.into(),
+            expected: expected.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+            params: params.into(),
+            issued_at_unix_ns: 0,
+        };
+        let source = SourceControlCommand {
+            unit: "geyser:publicnode".into(),
+            mode: "off".into(),
+        }
+        .encode_to_vec();
+        let cas = job_args(&req(SOURCE_SET, "", source.clone(), Some(ConfigVersion(4)))).unwrap();
+        assert_eq!(
+            cas[3..],
+            ["geyser:publicnode", "off", "--expect-version", "4"]
+        );
+        assert_eq!(
+            job_args(&req(SOURCE_SET, "", source.clone(), None))
+                .unwrap()
+                .len(),
+            5
+        );
+        assert_eq!(
+            job_args(&req(SOURCE_SET, "", source, Some(ProfileVersion(4)))),
+            None
+        );
+        assert_eq!(
+            job_args(&req(JOB_CANCEL, "job-1", vec![], None))
+                .unwrap()
+                .len(),
+            5
+        );
+        assert_eq!(
+            job_args(&req(JOB_CANCEL, "job-1", vec![], Some(ConfigVersion(1)))),
+            None
+        );
     }
     #[test]
     fn a_candidate_request_takes_only_a_fixed_profile_and_the_generation() {

@@ -102,10 +102,41 @@ pub fn validate(unit: &str, mode: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The source configuration's version: the request log's head (0 before the first request).
+/// CTRL-03: a change states the version it was based on; the owner projects the version it has
+/// decided up to, so a change on top of an undecided one is refused too.
+pub fn head(dir: &Path) -> Result<u64, String> {
+    Ok(sequences(dir)?.last().copied().unwrap_or(0))
+}
+
 pub fn write_request(dir: &Path, unit: &str, mode: &str, now_unix_s: u64) -> Result<u64, String> {
+    write_request_expecting(dir, unit, mode, now_unix_s, None)
+}
+
+/// `write_request` with the compare-and-swap of CTRL-03: with `expected`, the request is written
+/// only when the log's head is exactly that version. The request file is published without
+/// overwriting (a concurrent writer of the same sequence loses), so two operators never both
+/// win one version.
+pub fn write_request_expecting(
+    dir: &Path,
+    unit: &str,
+    mode: &str,
+    now_unix_s: u64,
+    expected: Option<u64>,
+) -> Result<u64, String> {
     validate(unit, mode)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("SOURCE_CONTROL_IO: {e}"))?;
-    let seq = sequences(dir)?.last().map_or(1, |s| s + 1);
+    let current = head(dir)?;
+    let conflict = |current: u64| {
+        format!(
+            "SOURCE_VERSION_CONFLICT: expected {}, current {current}; reload the sources and retry",
+            expected.map_or("none".into(), |e| e.to_string())
+        )
+    };
+    if expected.is_some_and(|e| e != current) {
+        return Err(conflict(current));
+    }
+    let seq = current + 1;
     let request = SourceControlRequest {
         seq,
         unit: unit.into(),
@@ -117,7 +148,14 @@ pub fn write_request(dir: &Path, unit: &str, mode: &str, now_unix_s: u64) -> Res
         journal::source::SOURCE_CONTROL,
         &request,
     )
-    .map_err(|e| format!("SOURCE_CONTROL_IO: {e}"))?;
+    .map_err(|e| {
+        // Another writer published this sequence first: the version moved on.
+        if e.kind() == std::io::ErrorKind::AlreadyExists || e.to_string() == "IMMUTABLE_CONFLICT" {
+            conflict(head(dir).unwrap_or(seq))
+        } else {
+            format!("SOURCE_CONTROL_IO: {e}")
+        }
+    })?;
     Ok(seq)
 }
 
@@ -272,13 +310,16 @@ fn wait_signal(timeout_ms: i32) -> bool {
 /// the owner, in sequence order. Requests written before the start are not applied (a new run
 /// starts from its configuration). The 250-ms bound lets the thread see the shutdown and retry
 /// a full owner queue.
+/// `baseline`: the request log's head when the runtime started (`head`); earlier requests are
+/// not applied again, and the owner's projected version starts there.
 pub fn spawn(
     dir: PathBuf,
     owner: Producer<ControlMessage>,
     shutdown: Shutdown,
+    baseline: u64,
 ) -> Result<std::thread::JoinHandle<()>, String> {
     install_signal()?;
-    let mut handed = sequences(&dir)?.last().copied().unwrap_or(0);
+    let mut handed = baseline;
     std::thread::Builder::new()
         .name("p0-source-control".into())
         .spawn(move || {
@@ -471,7 +512,7 @@ mod tests {
         write_request(&d, "geyser:publicnode", "observe", 1).unwrap();
         let (tx, rx) = bounded::<ControlMessage>("source-control", 4);
         let shutdown = Shutdown::new();
-        let thread = spawn(d.clone(), tx, shutdown.clone()).unwrap();
+        let thread = spawn(d.clone(), tx, shutdown.clone(), head(&d).unwrap()).unwrap();
         // SAFETY: the handler is installed; SIGUSR1 only writes to the self-pipe.
         unsafe { libc::raise(libc::SIGUSR1) };
         std::thread::sleep(std::time::Duration::from_millis(50));

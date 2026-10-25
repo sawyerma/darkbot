@@ -317,6 +317,9 @@ pub struct OwnerSnapshot {
     pub sources: Vec<OwnerSource>,
     pub last_source_decision: Option<OwnerSourceDecision>,
     pub source_stats: OwnerSourceStats,
+    /// CTRL-03: the source configuration version decided up to (the CAS a change states);
+    /// `None` without source control.
+    pub source_config_version: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

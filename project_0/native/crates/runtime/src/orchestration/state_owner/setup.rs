@@ -61,8 +61,15 @@ fn configured_sources(
         Some(project) => {
             let dir = source_control::request_dir(std::path::Path::new(&project));
             let (tx, rx) = bounded::<source_control::ControlMessage>("source-control", 8);
-            source_control::spawn(dir.clone(), tx.with_wakeup(wake), shutdown.clone())?;
-            Some((rx, dir))
+            // CTRL-03: the configuration version the owner starts from (the request log's head).
+            let baseline = source_control::head(&dir)?;
+            source_control::spawn(
+                dir.clone(),
+                tx.with_wakeup(wake),
+                shutdown.clone(),
+                baseline,
+            )?;
+            Some((rx, (dir, baseline)))
         }
         None => None,
     };
@@ -70,7 +77,7 @@ fn configured_sources(
     let sources =
         super::sources::OwnerSources::new(arbiter, Some(unit), spawn, 4_096, wake, controls);
     Ok(match decisions {
-        Some(dir) => sources.record_decisions_in(dir),
+        Some((dir, baseline)) => sources.record_decisions_in(dir, baseline),
         None => sources,
     })
 }

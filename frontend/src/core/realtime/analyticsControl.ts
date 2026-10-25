@@ -129,7 +129,8 @@ async function lookup(id: string, action: JobAction): Promise<void> {
 }
 
 /** One request per user action; a start's request id becomes the job id. */
-export async function analyticsCommand(action: JobAction, args: { resourceId?: string; params?: Uint8Array }): Promise<void> {
+/** `configVersion`: the CTRL-03 CAS of a source change (the version the projection showed). */
+export async function analyticsCommand(action: JobAction, args: { resourceId?: string; params?: Uint8Array; configVersion?: bigint }): Promise<void> {
   if (useAnalyticsControl.getState().busy) return;
   const id = crypto.randomUUID();
   useAnalyticsControl.setState({ busy: true, receipt: { id, action, phase: "SENDING", detail: "" } });
@@ -138,6 +139,7 @@ export async function analyticsCommand(action: JobAction, args: { resourceId?: s
     const token = await csrf();
     const body = toBinary(CommandRequestSchema, message(CommandRequestSchema, {
       project: ProjectId.PROJECT_0, requestId: id, action, resourceId: args.resourceId ?? "", params: args.params ?? new Uint8Array(),
+      expected: args.configVersion == null ? undefined : { version: { case: "configVersion", value: args.configVersion } },
       issuedAtUnixNs: BigInt(Date.now()) * 1_000_000n,
     }));
     submitted = true;

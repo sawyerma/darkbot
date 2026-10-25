@@ -850,12 +850,22 @@ fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const SOURCE_USAGE: &str =
-    "usage: p0ctl source set wss|geyser:PROVIDER off|observe|active | p0ctl source status";
+    "usage: p0ctl source set wss|geyser:PROVIDER off|observe|active [--expect-version N] | p0ctl source status";
 
 fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     let dir = source_control::request_dir(project);
     match args {
-        [set, unit, mode] if set == "set" => {
+        [set, unit, mode, cas @ ..] if set == "set" => {
+            // CTRL-03: `--expect-version N` (the version the operator's view showed).
+            let expected = match cas {
+                [] => None,
+                [flag, v] if flag == "--expect-version" => {
+                    Some(v.parse::<u64>().map_err(|_| {
+                        format!("SOURCE_VERSION_INVALID: --expect-version {v}; {SOURCE_USAGE}")
+                    })?)
+                }
+                _ => return Err(SOURCE_USAGE.into()),
+            };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| "SOURCE_CONTROL_CLOCK")?
@@ -868,7 +878,7 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             else {
                 return Err("SOURCE_NO_RUNTIME: no runtime owner runs for this project; nothing would apply the request (a run starts from P0_SOURCE_GEYSER)".into());
             };
-            let seq = source_control::write_request(&dir, unit, mode, now)?;
+            let seq = source_control::write_request_expecting(&dir, unit, mode, now, expected)?;
             source_control::signal(pid)?;
             println!("[p0ctl] source request seq={seq} {unit} {mode} sent to runtime pid {pid} (run {run_id}); the owner journals `source_control: applied|refused seq={seq}`");
             Ok(true)

@@ -60,6 +60,9 @@ pub(super) struct OwnerSources {
     pub(super) stats: SourceStats,
     /// The owner's last control decision (the applied state the status projection shows).
     pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
+    /// CTRL-03: the source configuration version the owner has decided up to (the request
+    /// log's head at its start, then every decided request); `None` without source control.
+    pub(super) config_version: Option<u64>,
 }
 
 impl OwnerSources {
@@ -85,12 +88,14 @@ impl OwnerSources {
             health: SourceHealth::default(),
             stats: SourceStats::default(),
             last_decision: None,
+            config_version: None,
         }
     }
 
     /// The owner records every control decision in `dir` (`p0ctl source status`).
-    pub(super) fn record_decisions_in(mut self, dir: std::path::PathBuf) -> Self {
+    pub(super) fn record_decisions_in(mut self, dir: std::path::PathBuf, baseline: u64) -> Self {
         self.control_dir = Some(dir);
+        self.config_version = Some(baseline);
         self
     }
 
@@ -275,6 +280,9 @@ impl ShadowOwner {
     /// Records the owner's decision on request `seq` (the applied state of `p0ctl source
     /// status`); a failed write is journaled, the decision itself stands.
     fn record_source_decision(&mut self, seq: u64, request: String, applied: bool, detail: String) {
+        if let Some(version) = &mut self.sources.config_version {
+            *version = (*version).max(seq);
+        }
         self.sources.last_decision = Some(crate::status_tap::OwnerSourceDecision {
             seq,
             request: request.clone(),

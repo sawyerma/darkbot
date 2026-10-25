@@ -293,6 +293,8 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect(source.action).toBe("project0.source.set");
   const s = fromBinary(SourceControlCommandSchema, source.params);
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
+  // CTRL-03: the change states the configuration version the Liquidator projection showed.
+  expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
   expect(sent.map((r) => r.action)).toEqual(["project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });

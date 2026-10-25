@@ -2306,6 +2306,7 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | sources | [DataSource](#darkbot-project0-v1-DataSource) | repeated | S1-02: every controlled data source of the owner with its applied control. |
 | last_source_decision | [SourceDecision](#darkbot-project0-v1-SourceDecision) |  | The owner&#39;s last source-control decision; unset before the first one. |
 | source_stats | [SourceStats](#darkbot-project0-v1-SourceStats) |  | Source counters of this run. |
+| source_config_version | [uint64](#uint64) | optional | CTRL-03: the source configuration version the owner has decided up to — the ExpectedVersion.config_version a source change states; unset without source control. |
 
 
 

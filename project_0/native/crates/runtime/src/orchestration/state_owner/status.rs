@@ -63,6 +63,7 @@ impl ShadowOwner {
             rebalance: self.rebalance.projection(self.st.highest_slot()),
             sources: self.sources_status(),
             last_source_decision: self.sources.last_decision.clone(),
+            source_config_version: self.sources.config_version,
             source_stats: crate::status_tap::OwnerSourceStats {
                 observed: self.sources.stats.observed,
                 rejected: self.sources.stats.rejected,

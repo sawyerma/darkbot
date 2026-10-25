@@ -41,6 +41,7 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     // S1-02: the applied source controls and the owner's last decision.
     expect(liquidator.sources.map((s) => [s.unit, s.mode, s.canonical])).toEqual([["geyser:publicnode", "observe", false], ["wss", "active", true]]);
     expect(liquidator.lastSourceDecision).toEqual({ seq: 3n, request: "geyser:publicnode active", applied: false, detail: "SOURCE_ACTIVE_REQUIRES_QUALIFICATION" });
+    expect(liquidator.sourceConfigVersion).toBe(3n);
   });
 
   it("keeps unknown finance unknown and one snapshot id across the wallet topics", () => {

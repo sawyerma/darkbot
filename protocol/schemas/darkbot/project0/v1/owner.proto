@@ -26,6 +26,9 @@ message LiquidatorState {
   SourceDecision last_source_decision = 9;
   // Source counters of this run.
   SourceStats source_stats = 10;
+  // CTRL-03: the source configuration version the owner has decided up to — the
+  // ExpectedVersion.config_version a source change states; unset without source control.
+  optional uint64 source_config_version = 11;
 }
 
 // One controlled data source (the owner's arbiter: at most one canonical unit).

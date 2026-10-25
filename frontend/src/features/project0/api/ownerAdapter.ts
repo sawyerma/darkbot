@@ -126,6 +126,7 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
     lastSourceDecision: m.lastSourceDecision
       ? { seq: m.lastSourceDecision.seq, request: m.lastSourceDecision.request, applied: m.lastSourceDecision.applied, detail: m.lastSourceDecision.detail }
       : null,
+    sourceConfigVersion: m.sourceConfigVersion ?? null,
     sourceStats: m.sourceStats
       ? { observed: m.sourceStats.observed, rejected: m.sourceStats.rejected, applied: m.sourceStats.applied, refused: m.sourceStats.refused }
       : null,

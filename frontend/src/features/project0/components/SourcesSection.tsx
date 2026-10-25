@@ -21,12 +21,15 @@ export function SourcesSection({ owner, topicStatus }: { owner: LiquidatorView |
   const [wanted, setWanted] = useState(""); const [mode, setMode] = useState<Mode>("observe"); const [msg, setMsg] = useState("");
   const unit = units.find(u => u.unit === wanted) ?? units[0] ?? null;
   const live = topicStatus === "LIVE";
-  const blocked = busy ? "Command in progress" : !live || !owner ? `Runtime owner not current (${topicStatus})` : "";
+  const version = owner?.sourceConfigVersion ?? null;
+  const blocked = busy ? "Command in progress" : !live || !owner ? `Runtime owner not current (${topicStatus})`
+    : version == null ? "Source configuration version unknown (no source control in this runtime)" : "";
   const apply = () => {
     const typed = sourceCommand(unit?.unit ?? "", mode);
     if ("problem" in typed) { setMsg(typed.problem); return; }
     setMsg("");
-    void analyticsCommand("project0.source.set", { params: typed.params });
+    // CTRL-03: the change states the version this view showed; a newer one is a conflict.
+    void analyticsCommand("project0.source.set", { params: typed.params, configVersion: version ?? undefined });
   };
   const d = owner?.lastSourceDecision ?? null;
   return <Section title="Data sources · runtime owner" aside={<span className="p0-badge">{topicStatus}</span>}>

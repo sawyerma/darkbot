@@ -305,6 +305,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             applied: o.source_stats.applied,
             refused: o.source_stats.refused,
         }),
+        source_config_version: o.source_config_version,
     }
 }
 
@@ -1418,6 +1419,7 @@ mod contract_tests {
                 applied: 1,
                 refused: 1,
             },
+            source_config_version: Some(3),
         }
     }
 
@@ -1712,6 +1714,8 @@ mod contract_tests {
         assert!(l.sources[1].canonical && l.sources[1].mode == "active");
         let d = l.last_source_decision.as_ref().unwrap();
         assert_eq!((d.seq, d.applied), (3, false));
+        // CTRL-03: the version a source change states as its CAS.
+        assert_eq!(l.source_config_version, Some(3));
         assert_eq!(l.source_stats.as_ref().unwrap().refused, 1);
         let mut unread = owner.clone();
         unread.wallets.journal_read = false;
