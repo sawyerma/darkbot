@@ -18,7 +18,7 @@ impl ShadowOwner {
         chain_clock(&self.st).is_ok_and(|c| {
             self.time_schedule
                 .earliest()
-                .is_some_and(|at| at <= u64::try_from(c.unix_timestamp).unwrap_or(0))
+                .is_some_and(|at| at <= c.unix_s())
         })
     }
 
@@ -79,7 +79,7 @@ impl ShadowOwner {
                 // premium); a tagged candidate is forwarded again, not held by its repeat interval.
                 if let Ok(c) = chain_clock(&self.st) {
                     let (t_rx_ns, slot) = (self.clock.now_ns(), self.slot_watch.get());
-                    let now = u64::try_from(c.unix_timestamp).unwrap_or(0);
+                    let now = c.unix_s();
                     for due in self.time_schedule.pop_due(now) {
                         if due.trigger == darkbot_project0::schedule::Trigger::TagProfitable {
                             self.candidate_force_rearm.insert(due.account);
@@ -155,7 +155,7 @@ impl ShadowOwner {
                                     .ok()
                                     .and_then(|decay| {
                                         darkbot_project0::schedule::premium_boundary_unix_s(
-                                            u64::try_from(c.unix_timestamp).unwrap_or(0),
+                                            c.unix_s(),
                                             h.maintenance_health,
                                             decay,
                                         )

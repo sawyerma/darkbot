@@ -362,11 +362,14 @@ pub(crate) struct ChainClock {
     pub unix_timestamp: i64,
     /// Slot of the state record that carried this clock (provenance).
     pub record_slot: u64,
+    /// F-15: `unix_timestamp` validated positive by `decode_clock`, the only constructor.
+    unix_secs: u64,
 }
 
 impl ChainClock {
+    /// The chain time in seconds (validated at decode; never a fallback 0).
     pub(crate) fn unix_s(&self) -> u64 {
-        self.unix_timestamp as u64
+        self.unix_secs
     }
 }
 
@@ -383,9 +386,10 @@ pub(crate) fn decode_clock(
     let data: &[u8; 40] = data.try_into().map_err(|_| "CHAIN_CLOCK_LAYOUT")?;
     let slot = u64::from_le_bytes(data[0..8].try_into().expect("len"));
     let unix_timestamp = i64::from_le_bytes(data[32..40].try_into().expect("len"));
-    if unix_timestamp <= 0 {
-        return Err("CHAIN_CLOCK_TIME");
-    }
+    let unix_secs = u64::try_from(unix_timestamp)
+        .ok()
+        .filter(|s| *s > 0)
+        .ok_or("CHAIN_CLOCK_TIME")?;
     if slot > record_slot {
         return Err("CHAIN_CLOCK_SLOT_AHEAD_OF_RECORD");
     }
@@ -393,6 +397,7 @@ pub(crate) fn decode_clock(
         slot,
         unix_timestamp,
         record_slot,
+        unix_secs,
     })
 }
 

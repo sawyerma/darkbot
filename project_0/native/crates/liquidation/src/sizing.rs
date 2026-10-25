@@ -893,6 +893,9 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         account: &MarginfiAccount,
         clock: &Clock,
     ) -> Result<Positions, SizingError> {
+        // F-15: a negative chain clock is no time for premium and accrual (never taken as 0).
+        let now = u64::try_from(clock.unix_timestamp)
+            .map_err(|_| SizingError::from("CHAIN_CLOCK_TIME: negative unix_timestamp"))?;
         let mut assets = Vec::new();
         let mut liabs = Vec::new();
         for balance in &account.lending_account.balances {
@@ -915,7 +918,6 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                 continue;
             }
             let prices = self.prices(&bank, clock)?;
-            let now = u64::try_from(clock.unix_timestamp).unwrap_or(0);
             let (amount, opposite_amount, maint_price, is_asset, owed) = match side {
                 BalanceSide::Assets => (
                     bank.get_asset_amount(balance.asset_shares.into())
@@ -1395,6 +1397,40 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F-15 (P0-PROD-CTRL-08): a negative chain clock is refused (CHAIN_CLOCK_TIME), never taken
+    /// as time 0 for premium and accrual; a valid clock sizes as before.
+    #[test]
+    fn f15_negative_chain_clock_is_refused_never_zero() {
+        struct Empty;
+        impl AccountSource for Empty {
+            fn account(&self, _: &Pubkey) -> Option<(Pubkey, u64, &[u8])> {
+                None
+            }
+        }
+        let s = ProtocolSizer {
+            state: &Empty,
+            program: Pubkey::new_unique(),
+            group: Pubkey::new_unique(),
+            headroom_bps: 0,
+        };
+        let account = <MarginfiAccount as bytemuck::Zeroable>::zeroed();
+        let clock = |unix_timestamp| Clock {
+            slot: 10,
+            epoch_start_timestamp: 0,
+            epoch: 0,
+            leader_schedule_epoch: 0,
+            unix_timestamp,
+        };
+        let refused = s.positions(&account, &clock(-1)).err();
+        assert!(
+            refused
+                .as_ref()
+                .is_some_and(|e| e.text.starts_with("CHAIN_CLOCK_TIME")),
+            "{refused:?}"
+        );
+        assert!(s.positions(&account, &clock(1_700_000_000)).is_ok());
+    }
 
     /// B4: the conservative cost conversion takes the bank's upper price bound under the pinned
     /// adapter — max(time-weighted + confidence, real-time + confidence) — converts the exact
