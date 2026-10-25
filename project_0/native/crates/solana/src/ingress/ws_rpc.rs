@@ -784,9 +784,11 @@ impl WsRpcControlSource {
             // transport Ping/Pong (incl. replies to our heartbeat) never reset the idle budget.
 
             let text = match frame {
-                Message::Text(t) => t.to_string(),
-                Message::Binary(b) => String::from_utf8(b.to_vec())
-                    .map_err(|_| IngressError::Protocol("WSS_UTF8".into()))?,
+                // V2-14 P3-01: the frame's buffer becomes the text (no copy).
+                Message::Text(t) => t,
+                Message::Binary(b) => {
+                    String::from_utf8(b).map_err(|_| IngressError::Protocol("WSS_UTF8".into()))?
+                }
                 Message::Ping(p) => {
                     tokio::time::timeout(Duration::from_secs(5), tx.send(Message::Pong(p)))
                         .await
