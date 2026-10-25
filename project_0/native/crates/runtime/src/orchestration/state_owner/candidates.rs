@@ -716,6 +716,12 @@ impl CandidateLanes {
             } else if lane > existing.lane {
                 self.stats.demotions = self.stats.demotions.saturating_add(1);
             }
+            // V2-11: an older trigger (slot, then receive time) never replaces newer work.
+            let work = if (a.slot, a.t_rx_ns) < (existing.work.2, existing.work.1) {
+                existing.work
+            } else {
+                work
+            };
             self.link(PendingCandidate {
                 work,
                 t_rx_first: existing.t_rx_first.min(first),
@@ -1022,6 +1028,31 @@ mod mt3_lane_tests {
             250,
             "FIX-21: newest t_rx to the detect"
         );
+    }
+
+    /// V2-11 (P5b-05): an older trigger coalesced into a pending entry never replaces its newer
+    /// work (slot, then receive time) — `max_opportunity_age_ns` measures the newest cause; the
+    /// first receive time still goes back to the oldest.
+    #[test]
+    fn v2_11_an_older_trigger_never_replaces_newer_work() {
+        let a = Pubkey::new_unique();
+        let mut lanes = CandidateLanes::default();
+        let at = |t_rx_ns, slot| LaneAdmission {
+            t_rx_ns,
+            slot,
+            trigger: "bank_projection_fallback",
+            lane: Lane::L1,
+            revision: 4,
+            last_forwarded_slot: 0,
+        };
+        lanes.admit(a, at(250, 12));
+        assert_eq!(
+            lanes.admit(a, at(100, 10)),
+            CandidateQueueAdmission::Coalesced
+        );
+        let e = *lanes.get(&a).unwrap();
+        assert_eq!((e.work.1, e.work.2), (250, 12));
+        assert_eq!(e.t_rx_first, 100);
     }
 
     /// P6-MT.14 #39: only a strictly newer canonical revision may demote (L0 → L1 here); the
