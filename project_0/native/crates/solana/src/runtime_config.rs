@@ -21,6 +21,10 @@ pub mod defaults {
     pub const ENRICH_MAX_ATTEMPTS: u64 = 5;
     pub const ENRICH_RETRY_MS: u64 = 2_000;
     pub const ENRICH_TIMEOUT_MS: u64 = 10_000;
+    /// The runs and the jobs one analytics projection lists at most: with every result at its
+    /// largest (32 capital scenarios per score) the frame stays far below one STATE frame.
+    pub const ANALYTICS_RUNS_MAX: u64 = 64;
+    pub const ANALYTICS_JOBS_MAX: u64 = 16;
 }
 
 macro_rules! parameters {
@@ -150,6 +154,9 @@ parameters! {
     enrich_max_attempts = defaults::ENRICH_MAX_ATTEMPTS, "attempts", "P0_MARKET_ENRICH_MAX_ATTEMPTS";
     enrich_retry_ms = defaults::ENRICH_RETRY_MS, "ms", "P0_MARKET_ENRICH_RETRY_MS";
     enrich_timeout_ms = defaults::ENRICH_TIMEOUT_MS, "ms", "P0_MARKET_ENRICH_TIMEOUT_MS";
+    analytics_status_ms = 2000, "ms", "P0_ANALYTICS_STATUS_MS";
+    analytics_runs_listed = 32, "runs", "P0_ANALYTICS_RUNS_LISTED";
+    analytics_jobs_listed = 8, "jobs", "P0_ANALYTICS_JOBS_LISTED";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -159,8 +166,9 @@ parameters! {
 /// `ingress_burst_before_detect` (V2-08); 7: `rpc_pool_idle_ms`, `rpc_tcp_keepalive_ms` (V2-07);
 /// 8: `owner_status_ms` (owner status projection) and D01–D06/D11 — the owner, FE-04, WSS,
 /// Jupiter, lane, winner-watch, deployment, reporter and market bounds that were literals or
-/// duplicate defaults (from `owner_status_ms` on, appended).
-pub const LIMITS_REVISION: u16 = 8;
+/// duplicate defaults (from `owner_status_ms` on, appended); 9: `analytics_status_ms`,
+/// `analytics_runs_listed`, `analytics_jobs_listed` (B03/U-9 analytics job projection).
+pub const LIMITS_REVISION: u16 = 9;
 
 /// The oldest `Limits` layout an earlier record can be read in: revision 4 is checked against the
 /// git history (the current field order filtered to its fields); earlier ones are not.
@@ -177,6 +185,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("analytics_status_ms") => 9,
         f if position(f) >= position("owner_status_ms") => 8,
         _ => 1,
     }
@@ -241,6 +250,8 @@ impl Parameter {
             "fe_batch_size" => 100,
             "market_retention" | "econ_retention" => defaults::RETENTION_ROWS_MAX,
             "econ_queue_capacity" => defaults::ECON_QUEUE_CAPACITY_MAX,
+            "analytics_runs_listed" => defaults::ANALYTICS_RUNS_MAX,
+            "analytics_jobs_listed" => defaults::ANALYTICS_JOBS_MAX,
             _ => u64::from(u32::MAX),
         }
     }
@@ -1230,9 +1241,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                8,
-                106,
-                "8QfwCwQELRb4R43Sy5r17efz8t4UDWA5yXRcm3T8Dtyp".to_string()
+                9,
+                109,
+                "6KwyVPT9DUX9jruBhfbHvuacQkVhzsT3jK9PGJA1fSLm".to_string()
             )
         );
     }

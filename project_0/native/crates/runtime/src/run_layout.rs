@@ -100,6 +100,35 @@ pub fn find_run(project: &Path, run_id: &str) -> Option<PathBuf> {
     (found.len() == 1).then(|| found[0].clone())
 }
 
+/// One run directory under a project's run roots.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RunDir {
+    pub run_id: String,
+    pub root: &'static str,
+    pub path: PathBuf,
+}
+
+/// Every run directory under the roots of `project`, by id, then root (unreadable roots are
+/// skipped).
+pub fn runs(project: &Path) -> Vec<RunDir> {
+    let mut runs: Vec<RunDir> = RUN_ROOTS
+        .iter()
+        .filter_map(|root| Some((root, std::fs::read_dir(project.join(root)).ok()?)))
+        .flat_map(|(root, entries)| {
+            entries
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .map(move |e| RunDir {
+                    run_id: e.file_name().to_string_lossy().into_owned(),
+                    root,
+                    path: e.path(),
+                })
+        })
+        .collect();
+    runs.sort();
+    runs
+}
+
 /// A run with native records (a typed run manifest).
 pub fn native_run(run: &Path) -> bool {
     run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()

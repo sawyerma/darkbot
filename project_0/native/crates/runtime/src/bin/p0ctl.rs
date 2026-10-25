@@ -82,7 +82,7 @@ use darkbot_runner::analytics::{backtest, jobs, qualification, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::orchestration::source_control;
-use darkbot_runner::run_layout::{find_run, native_layout, native_run, RUN_ROOTS};
+use darkbot_runner::run_layout::{self, find_run, native_layout, native_run, RunDir, RUN_ROOTS};
 use darkbot_runner::storage::preflight;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::process::CommandExt;
@@ -99,9 +99,7 @@ fn project_dir(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
 }
 
 fn lock_path(project: &Path) -> PathBuf {
-    std::env::var_os("P0_RUNTIME_LOCK")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| control::default_lock_path(project))
+    control::lock_path(project)
 }
 
 fn value(args: &[String], flag: &str) -> Option<String> {
@@ -645,33 +643,17 @@ fn has_p0j(dir: &Path) -> &'static str {
 }
 
 fn run_rows(project: &Path, running: Option<&str>) -> Vec<String> {
-    let mut runs: Vec<(String, &str, PathBuf)> = RUN_ROOTS
-        .iter()
-        .filter_map(|root| Some((root, std::fs::read_dir(project.join(root)).ok()?)))
-        .flat_map(|(root, entries)| {
-            entries
-                .flatten()
-                .filter(|e| e.path().is_dir())
-                .map(move |e| {
-                    (
-                        e.file_name().to_string_lossy().into_owned(),
-                        *root,
-                        e.path(),
-                    )
-                })
-        })
-        .collect();
-    runs.sort();
-    runs.into_iter()
-        .map(|(id, root, run)| {
-            let has = |p: &str| if run.join(p).is_file() { "yes" } else { "no" };
+    run_layout::runs(project)
+        .into_iter()
+        .map(|RunDir { run_id, root, path }| {
+            let has = |p: &str| if path.join(p).is_file() { "yes" } else { "no" };
             format!(
-                "{id}\troot={root}\tmanifest={}\tcompletion={}\treport={}\tqualification={}{}",
+                "{run_id}\troot={root}\tmanifest={}\tcompletion={}\treport={}\tqualification={}{}",
                 has("capture/run_manifest.p0j"),
                 has("capture/market/market_completion.p0j"),
-                has_p0j(&run.join(report::REPORT_DIR)),
-                has_p0j(&run.join(qualification::QUALIFICATION_DIR)),
-                if running == Some(id.as_str()) {
+                has_p0j(&path.join(report::REPORT_DIR)),
+                has_p0j(&path.join(qualification::QUALIFICATION_DIR)),
+                if running == Some(run_id.as_str()) {
                     "\tRUNNING"
                 } else {
                     ""

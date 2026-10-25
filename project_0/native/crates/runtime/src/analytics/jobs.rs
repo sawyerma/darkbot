@@ -627,6 +627,134 @@ pub fn render(s: &JobStatus) -> String {
     )
 }
 
+/// One run of the project as the analytics projection lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunEntry {
+    pub run_id: String,
+    /// Its run root under the project (`data/econ4h`, …).
+    pub root: &'static str,
+    /// NATIVE_V2 (a job can read it), NATIVE_V1 (no native reader) or HISTORICAL (no native
+    /// records).
+    pub layout: &'static str,
+    /// The capture recorded its completion (`capture/market/market_completion.p0j`).
+    pub capture_complete: bool,
+    /// The newest post-capture qualification (A12/F-03): the record, or why it is unreadable.
+    pub qualification: Option<Result<super::qualification::QualificationRecord, String>>,
+    /// Directory modification time; `None` when unreadable.
+    pub modified_unix_ms: Option<u64>,
+    /// The runtime owner runs it now.
+    pub running: bool,
+}
+
+/// The analytics projection (topic project0.analytics.jobs): runs a job can read and the jobs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AnalyticsSnapshot {
+    pub at_unix_ms: u64,
+    pub runner_busy: bool,
+    pub runs: Vec<RunEntry>,
+    pub jobs: Vec<JobStatus>,
+    /// Why the job store was not readable (the job list is then empty, never a guess).
+    pub error: Option<String>,
+}
+
+fn layout_of(run: &Path) -> &'static str {
+    if run.join("capture/run_manifest.p0j").is_file() {
+        "NATIVE_V2"
+    } else if run.join("run_manifest.p0j").is_file() {
+        "NATIVE_V1"
+    } else {
+        "HISTORICAL"
+    }
+}
+
+/// The newest `runs_max` runs (by directory modification time, then id) and `jobs_max` jobs of
+/// `project`; `running` is the run the runtime owner runs now.
+pub fn projection(
+    project: &Path,
+    runs_max: usize,
+    jobs_max: usize,
+    running: Option<&str>,
+) -> AnalyticsSnapshot {
+    let mut runs: Vec<RunEntry> = crate::run_layout::runs(project)
+        .into_iter()
+        .map(|r| RunEntry {
+            layout: layout_of(&r.path),
+            capture_complete: r
+                .path
+                .join("capture/market")
+                .join(crate::market::observer::rows::MARKET_COMPLETION_JOURNAL)
+                .is_file(),
+            qualification: super::qualification::latest(&r.path),
+            modified_unix_ms: std::fs::metadata(&r.path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| u64::try_from(d.as_millis()).ok()),
+            running: running == Some(r.run_id.as_str()),
+            run_id: r.run_id,
+            root: r.root,
+        })
+        .collect();
+    runs.sort_by(|a, b| {
+        (b.modified_unix_ms, &a.run_id, a.root).cmp(&(a.modified_unix_ms, &b.run_id, b.root))
+    });
+    runs.truncate(runs_max);
+    let (jobs, error) = match list(project, jobs_max) {
+        Ok(jobs) => (jobs, None),
+        Err(e) => (vec![], Some(e)),
+    };
+    AnalyticsSnapshot {
+        at_unix_ms: 0,
+        runner_busy: runner_busy(project).unwrap_or(false),
+        runs,
+        jobs,
+        error,
+    }
+}
+
+/// Publishes the projection of `project` into `tap` every `analytics_status_ms` while it
+/// changed, until `stop` (the reporter's stop; it unparks this thread). Without a wall clock
+/// (D08) nothing is published.
+pub fn spawn_projection(
+    project: PathBuf,
+    tap: crate::status_tap::StatusTap,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    use std::sync::atomic::Ordering;
+    std::thread::Builder::new()
+        .name("p0-analytics".into())
+        .spawn(move || {
+            let mut last: Option<AnalyticsSnapshot> = None;
+            while !stop.load(Ordering::Acquire) {
+                let limits = crate::status_tap::active_limits();
+                let running = match crate::orchestration::control::owner_state(
+                    &crate::orchestration::control::lock_path(&project),
+                ) {
+                    Ok(crate::orchestration::control::OwnerState::Running { run_id, .. }) => {
+                        Some(run_id)
+                    }
+                    _ => None,
+                };
+                let mut s = projection(
+                    &project,
+                    usize::try_from(limits.analytics_runs_listed).unwrap_or(usize::MAX),
+                    usize::try_from(limits.analytics_jobs_listed).unwrap_or(usize::MAX),
+                    running.as_deref(),
+                );
+                if last.as_ref() != Some(&s) {
+                    if let Some(at) = crate::status_tap::unix_ms_now() {
+                        last = Some(s.clone());
+                        s.at_unix_ms = at;
+                        tap.publish_analytics(s);
+                    }
+                }
+                std::thread::park_timeout(std::time::Duration::from_millis(
+                    limits.analytics_status_ms,
+                ));
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

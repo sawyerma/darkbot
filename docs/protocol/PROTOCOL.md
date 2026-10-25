@@ -89,6 +89,20 @@
     - [Readiness](#darkbot-control-v1-Readiness)
     - [SourceState](#darkbot-control-v1-SourceState)
 
+- [darkbot/project0/v1/analytics.proto](#darkbot_project0_v1_analytics-proto)
+    - [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob)
+    - [AnalyticsJobs](#darkbot-project0-v1-AnalyticsJobs)
+    - [AnalyticsRun](#darkbot-project0-v1-AnalyticsRun)
+    - [BacktestResult](#darkbot-project0-v1-BacktestResult)
+    - [CapitalScenario](#darkbot-project0-v1-CapitalScenario)
+    - [FundingSet](#darkbot-project0-v1-FundingSet)
+    - [JobGrid](#darkbot-project0-v1-JobGrid)
+    - [JobParams](#darkbot-project0-v1-JobParams)
+    - [OptimizeResult](#darkbot-project0-v1-OptimizeResult)
+    - [OptimizeScore](#darkbot-project0-v1-OptimizeScore)
+    - [RunQualification](#darkbot-project0-v1-RunQualification)
+    - [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual)
+
 - [darkbot/project0/v1/capture.proto](#darkbot_project0_v1_capture-proto)
     - [CaptureState](#darkbot-project0-v1-CaptureState)
     - [Counter](#darkbot-project0-v1-Counter)
@@ -1498,6 +1512,271 @@ Runtime-Readiness ist keine LIVE-Freigabe. READY heißt: Engine läuft und ist e
 | SOURCE_STATE_CONNECTED | 2 |  |
 | SOURCE_STATE_STALE | 3 | Engine liefert, aber Freshness abgelaufen |
 | SOURCE_STATE_DETACHED | 4 | Engine war da und ist weg |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_project0_v1_analytics-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/project0/v1/analytics.proto
+
+
+
+<a name="darkbot-project0-v1-AnalyticsJob"></a>
+
+### AnalyticsJob
+One analytics job of the controller&#39;s store.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| job_id | [string](#string) |  | The job id (the command&#39;s request id when started from the GUI). |
+| kind | [string](#string) |  | BACKTEST or OPTIMIZE. |
+| run | [string](#string) |  | The run as requested (an id under the run roots). |
+| state | [string](#string) |  | QUEUED, RUNNING, INTERRUPTED (the worker is gone without an outcome), COMPLETED, FAILED or CANCELLED. |
+| code | [string](#string) |  | The refusal code of a failed or cancelled job; empty otherwise. |
+| requested_unix_ms | [uint64](#uint64) | optional | Wall clock of the request; unset when it was not readable. |
+| started_unix_ms | [uint64](#uint64) | optional | Wall clock the worker started; unset before or when not readable. |
+| finished_unix_ms | [uint64](#uint64) | optional | Wall clock of the outcome; unset before or when not readable. |
+| max_seconds | [uint64](#uint64) |  | The job&#39;s explicit time budget. |
+| max_ram_bytes | [uint64](#uint64) |  | The job&#39;s explicit memory budget. |
+| params | [JobParams](#darkbot-project0-v1-JobParams) |  | The parameters (backtest) or the baseline (optimization). |
+| grid | [JobGrid](#darkbot-project0-v1-JobGrid) |  | Optimization only: the grid. |
+| verification_result | [string](#string) |  | The verification result the job reads; empty: the run&#39;s canonical one. |
+| backtest | [BacktestResult](#darkbot-project0-v1-BacktestResult) |  | A completed backtest. |
+| optimize | [OptimizeResult](#darkbot-project0-v1-OptimizeResult) |  | A completed optimization. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-AnalyticsJobs"></a>
+
+### AnalyticsJobs
+project0.analytics.jobs (topic 15, STATE; B03/U-9, STARTUP §4 B/C/E): the runs of the project a
+job can read and its native analytics jobs, as the Rust job controller&#39;s store holds them
+(data/analytics-jobs). Jobs are started and cancelled through the same controller as
+`p0ctl job …`; a counterfactual Shadow result is never realized profit. Amounts are exact:
+i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| published_unix_ms | [uint64](#uint64) |  | Wall clock of this projection. |
+| runner_busy | [bool](#bool) |  | Whether a job of the project runs now (one at a time). |
+| runs | [AnalyticsRun](#darkbot-project0-v1-AnalyticsRun) | repeated | Newest runs first, at most analytics_runs_listed. |
+| jobs | [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob) | repeated | Newest requests first, at most analytics_jobs_listed. |
+| store_error | [string](#string) |  | Why the job store was not readable (jobs is then empty); empty when read. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-AnalyticsRun"></a>
+
+### AnalyticsRun
+One run directory under the project&#39;s run roots.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_id | [string](#string) |  | Directory name of the run (the id a job request names). |
+| root | [string](#string) |  | Run root under the project (data/econ4h, data/runs, data/market, data/shadow). |
+| layout | [string](#string) |  | NATIVE_V2 (a job can read it), NATIVE_V1 (no native reader) or HISTORICAL (no native records). |
+| capture_complete | [bool](#bool) |  | The capture recorded its completion. |
+| qualification | [RunQualification](#darkbot-project0-v1-RunQualification) |  | The newest post-capture qualification (A12/F-03); unset when none is recorded. |
+| modified_unix_ms | [uint64](#uint64) | optional | Directory modification time; unset when unreadable. |
+| running | [bool](#bool) |  | The runtime owner runs it now. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-BacktestResult"></a>
+
+### BacktestResult
+A completed backtest (OBSERVED_MARKET and COUNTERFACTUAL_SHADOW).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| result_id | [string](#string) |  | The content-addressed result id (reports/backtests/&lt;id&gt;.p0j of the run). |
+| capture_run_id | [string](#string) |  | The capture run the result read. |
+| rows | [uint64](#uint64) |  | Verified liquidations joined with the Shadow facts. |
+| attempts | [uint64](#uint64) |  | False positives: executable evaluations without a verified liquidation. |
+| liquidations | [uint64](#uint64) |  | Verified chain liquidations of the window. |
+| counterfactual | [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual) |  | The counterfactual Shadow executions. |
+| realized | [string](#string) |  | REALIZED_ONCHAIN is not part of a capture: realized results come from the FE-04 journals. |
+| result_sha256 | [bytes](#bytes) |  | Hash over the parameters, rows, attempts and summary. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-CapitalScenario"></a>
+
+### CapitalScenario
+One capital scenario of the counterfactual.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| capital_usd_micro | [uint64](#uint64) |  | The scenario&#39;s capital. |
+| wins | [uint64](#uint64) |  | Wins within the capital. |
+| win_net_usd_micro_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) |  | Net of the wins. |
+| failed_attempts | [uint64](#uint64) |  | Lost races and false positives within the capital. |
+| failed_cost_usd_micro_sum | [darkbot.control.v1.UnsignedDecimal](#darkbot-control-v1-UnsignedDecimal) |  | Known cost of the failed attempts. |
+| failed_cost_unknown | [uint64](#uint64) |  | Failed attempts whose cost is unknown. |
+| over_budget | [uint64](#uint64) |  | Evaluations beyond the capital. |
+| net_usd_micro_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) |  | Wins minus failed costs; unset when a failed cost is unknown (never 0). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-FundingSet"></a>
+
+### FundingSet
+Admitted funding classes; empty: every class.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| classes | [string](#string) | repeated | Funding class names. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-JobGrid"></a>
+
+### JobGrid
+The bounded explicit grid of an optimization.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| min_profit_usd_micro_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) | repeated | Minimum profits of the grid, ascending. |
+| funding_sets | [FundingSet](#darkbot-project0-v1-FundingSet) | repeated | Funding sets of the grid. |
+| holdout_bps | [uint64](#uint64) |  | Holdout share of the capture window. |
+| max_points | [uint64](#uint64) |  | The most grid points the job evaluates. |
+| save_profile | [bool](#bool) |  | Save the chosen point as an offline Shadow candidate profile (never a LIVE setting). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-JobParams"></a>
+
+### JobParams
+Economic parameters of a backtest point.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| min_profit_usd_micro_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) |  | A known net must exceed it (never negative). |
+| capital_usd_micro | [uint64](#uint64) | repeated | Capital scenarios, ascending. |
+| funding | [string](#string) | repeated | Admitted funding classes; empty: every class. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OptimizeResult"></a>
+
+### OptimizeResult
+A completed optimization: the point chosen on the training part and its holdout score.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| result_id | [string](#string) |  | The content-addressed result id (reports/optimize/&lt;id&gt;.p0j of the run). |
+| capture_run_id | [string](#string) |  | The capture run the result read. |
+| points | [uint64](#uint64) |  | Grid points evaluated. |
+| chosen | [JobParams](#darkbot-project0-v1-JobParams) |  | The chosen point; unset: no point has an objective (NO_SAMPLE). |
+| chosen_holdout | [OptimizeScore](#darkbot-project0-v1-OptimizeScore) |  | The chosen point&#39;s score on the holdout part. |
+| baseline_holdout | [OptimizeScore](#darkbot-project0-v1-OptimizeScore) |  | The baseline&#39;s score on the holdout part. |
+| result_sha256 | [bytes](#bytes) |  | Hash over the result. |
+| profile | [string](#string) |  | The saved candidate profile&#39;s file name under data/profiles; empty: none saved. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OptimizeScore"></a>
+
+### OptimizeScore
+The score of one point on one part of the window.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| counterfactual | [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual) |  | The point&#39;s counterfactual on that part. |
+| objective_bps_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) |  | Best return on capital over its scenarios; unset when not known (never 0). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RunQualification"></a>
+
+### RunQualification
+The newest C0-E1 master qualification record of a run.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| verdict | [string](#string) |  | C0_E1_MASTER_PASS, C0_E1_NOT_QUALIFIED, or UNREADABLE (see error). |
+| verification | [string](#string) |  | The selected verification result&#39;s status (CANONICAL_VERIFIED, …) or NOT_RUN. |
+| failed | [string](#string) | repeated | Every failed master gate, in check order. |
+| qualification_id | [string](#string) |  | Identity of the qualification record. |
+| error | [string](#string) |  | Why the newest record is unreadable; empty when read. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ShadowCounterfactual"></a>
+
+### ShadowCounterfactual
+Counterfactual Shadow executions: hypothetical, landing UNPROVEN, safety NOT_EVALUATED.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| matched | [uint64](#uint64) |  | Verified liquidations joined with an evaluation. |
+| unknown | [uint64](#uint64) |  | Evaluations whose outcome is unknown. |
+| funding_excluded | [uint64](#uint64) |  | Evaluations outside the admitted funding classes. |
+| below_minimum | [uint64](#uint64) |  | Evaluations below the minimum profit. |
+| wins | [uint64](#uint64) |  | Counterfactual wins. |
+| lost_races | [uint64](#uint64) |  | Lost races. |
+| no_chain_event | [uint64](#uint64) |  | Executable evaluations without a chain event. |
+| scenarios | [CapitalScenario](#darkbot-project0-v1-CapitalScenario) | repeated | One entry per capital scenario. |
+| landing | [string](#string) |  | Landing status of every counterfactual execution (UNPROVEN). |
+| safety | [string](#string) |  | Safety status of every counterfactual execution (NOT_EVALUATED). |
+
+
+
+
+
 
 
 

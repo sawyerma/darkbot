@@ -8,7 +8,7 @@ pub use darkbot_solana::provider::{
     CooldownCause, CooldownStatus, ProviderSnapshot, RetryAfterHeader,
 };
 use darkbot_solana::runtime_config;
-pub use darkbot_solana::runtime_config::{EffectiveConfig, Limits, Profile};
+pub use darkbot_solana::runtime_config::{defaults, EffectiveConfig, Limits, Profile};
 pub use darkbot_solana::state::StateCounters;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -357,6 +357,9 @@ pub struct StatusSnapshot {
     /// Bumped by every owner publication.
     pub owner_version: u64,
     pub owner: Option<Arc<OwnerSnapshot>>,
+    /// Bumped by every analytics publication (B03/U-9).
+    pub analytics_version: u64,
+    pub analytics: Option<Arc<crate::analytics::jobs::AnalyticsSnapshot>>,
     pub operational: Option<Arc<OperationalSnapshot>>,
     pub run: Option<Arc<RunSnapshot>>,
     pub phase: Option<PhaseSnapshot>,
@@ -385,6 +388,7 @@ enum Block {
     System,
     Capture,
     Owner,
+    Analytics,
 }
 
 #[derive(Clone)]
@@ -425,6 +429,7 @@ impl StatusTap {
             Block::System => s.system_version += 1,
             Block::Capture => s.capture_version += 1,
             Block::Owner => s.owner_version += 1,
+            Block::Analytics => s.analytics_version += 1,
         }
         drop(s);
         self.0.changed.notify_all();
@@ -434,6 +439,12 @@ impl StatusTap {
     pub fn publish_owner(&self, owner: OwnerSnapshot) {
         let owner = Arc::new(owner);
         self.publish_block(Block::Owner, |v| v.owner = Some(owner));
+    }
+
+    /// The analytics projection (one publication replaces the previous one).
+    pub fn publish_analytics(&self, s: crate::analytics::jobs::AnalyticsSnapshot) {
+        let s = Arc::new(s);
+        self.publish_block(Block::Analytics, |v| v.analytics = Some(s));
     }
 
     pub fn publish_operational(&self, s: OperationalSnapshot) {

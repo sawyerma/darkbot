@@ -55,6 +55,13 @@ pub fn default_lock_path(project: &Path) -> PathBuf {
     project.join("data").join(".p0-runtime.lock")
 }
 
+/// The runtime-owner lock of a project: `P0_RUNTIME_LOCK`, else the default path.
+pub fn lock_path(project: &Path) -> PathBuf {
+    std::env::var_os("P0_RUNTIME_LOCK")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_lock_path(project))
+}
+
 /// Held exclusive runtime-owner lock (released when dropped or at process exit).
 #[derive(Debug)]
 pub struct OwnerLock {

@@ -1,0 +1,214 @@
+syntax = "proto3";
+
+package darkbot.project0.v1;
+
+import "darkbot/control/v1/numeric.proto";
+
+// project0.analytics.jobs (topic 15, STATE; B03/U-9, STARTUP §4 B/C/E): the runs of the project a
+// job can read and its native analytics jobs, as the Rust job controller's store holds them
+// (data/analytics-jobs). Jobs are started and cancelled through the same controller as
+// `p0ctl job …`; a counterfactual Shadow result is never realized profit. Amounts are exact:
+// i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
+message AnalyticsJobs {
+  // Wall clock of this projection.
+  uint64 published_unix_ms = 1;
+  // Whether a job of the project runs now (one at a time).
+  bool runner_busy = 2;
+  // Newest runs first, at most analytics_runs_listed.
+  repeated AnalyticsRun runs = 3;
+  // Newest requests first, at most analytics_jobs_listed.
+  repeated AnalyticsJob jobs = 4;
+  // Why the job store was not readable (jobs is then empty); empty when read.
+  string store_error = 5;
+}
+
+// One run directory under the project's run roots.
+message AnalyticsRun {
+  // Directory name of the run (the id a job request names).
+  string run_id = 1;
+  // Run root under the project (data/econ4h, data/runs, data/market, data/shadow).
+  string root = 2;
+  // NATIVE_V2 (a job can read it), NATIVE_V1 (no native reader) or HISTORICAL (no native records).
+  string layout = 3;
+  // The capture recorded its completion.
+  bool capture_complete = 4;
+  // The newest post-capture qualification (A12/F-03); unset when none is recorded.
+  RunQualification qualification = 5;
+  // Directory modification time; unset when unreadable.
+  optional uint64 modified_unix_ms = 6;
+  // The runtime owner runs it now.
+  bool running = 7;
+}
+
+// The newest C0-E1 master qualification record of a run.
+message RunQualification {
+  // C0_E1_MASTER_PASS, C0_E1_NOT_QUALIFIED, or UNREADABLE (see error).
+  string verdict = 1;
+  // The selected verification result's status (CANONICAL_VERIFIED, …) or NOT_RUN.
+  string verification = 2;
+  // Every failed master gate, in check order.
+  repeated string failed = 3;
+  // Identity of the qualification record.
+  string qualification_id = 4;
+  // Why the newest record is unreadable; empty when read.
+  string error = 5;
+}
+
+// One analytics job of the controller's store.
+message AnalyticsJob {
+  // The job id (the command's request id when started from the GUI).
+  string job_id = 1;
+  // BACKTEST or OPTIMIZE.
+  string kind = 2;
+  // The run as requested (an id under the run roots).
+  string run = 3;
+  // QUEUED, RUNNING, INTERRUPTED (the worker is gone without an outcome), COMPLETED, FAILED or CANCELLED.
+  string state = 4;
+  // The refusal code of a failed or cancelled job; empty otherwise.
+  string code = 5;
+  // Wall clock of the request; unset when it was not readable.
+  optional uint64 requested_unix_ms = 6;
+  // Wall clock the worker started; unset before or when not readable.
+  optional uint64 started_unix_ms = 7;
+  // Wall clock of the outcome; unset before or when not readable.
+  optional uint64 finished_unix_ms = 8;
+  // The job's explicit time budget.
+  uint64 max_seconds = 9;
+  // The job's explicit memory budget.
+  uint64 max_ram_bytes = 10;
+  // The parameters (backtest) or the baseline (optimization).
+  JobParams params = 11;
+  // Optimization only: the grid.
+  JobGrid grid = 12;
+  // The verification result the job reads; empty: the run's canonical one.
+  string verification_result = 13;
+  // A completed job's result headline (the full result is the run's result journal).
+  oneof result {
+    // A completed backtest.
+    BacktestResult backtest = 14;
+    // A completed optimization.
+    OptimizeResult optimize = 15;
+  }
+}
+
+// Economic parameters of a backtest point.
+message JobParams {
+  // A known net must exceed it (never negative).
+  darkbot.control.v1.SignedDecimal min_profit_usd_micro_signed = 1;
+  // Capital scenarios, ascending.
+  repeated uint64 capital_usd_micro = 2;
+  // Admitted funding classes; empty: every class.
+  repeated string funding = 3;
+}
+
+// The bounded explicit grid of an optimization.
+message JobGrid {
+  // Minimum profits of the grid, ascending.
+  repeated darkbot.control.v1.SignedDecimal min_profit_usd_micro_signed = 1;
+  // Funding sets of the grid.
+  repeated FundingSet funding_sets = 2;
+  // Holdout share of the capture window.
+  uint64 holdout_bps = 3;
+  // The most grid points the job evaluates.
+  uint64 max_points = 4;
+  // Save the chosen point as an offline Shadow candidate profile (never a LIVE setting).
+  bool save_profile = 5;
+}
+
+// Admitted funding classes; empty: every class.
+message FundingSet {
+  // Funding class names.
+  repeated string classes = 1;
+}
+
+// A completed backtest (OBSERVED_MARKET and COUNTERFACTUAL_SHADOW).
+message BacktestResult {
+  // The content-addressed result id (reports/backtests/<id>.p0j of the run).
+  string result_id = 1;
+  // The capture run the result read.
+  string capture_run_id = 2;
+  // Verified liquidations joined with the Shadow facts.
+  uint64 rows = 3;
+  // False positives: executable evaluations without a verified liquidation.
+  uint64 attempts = 4;
+  // Verified chain liquidations of the window.
+  uint64 liquidations = 5;
+  // The counterfactual Shadow executions.
+  ShadowCounterfactual counterfactual = 6;
+  // REALIZED_ONCHAIN is not part of a capture: realized results come from the FE-04 journals.
+  string realized = 7;
+  // Hash over the parameters, rows, attempts and summary.
+  bytes result_sha256 = 8;
+}
+
+// Counterfactual Shadow executions: hypothetical, landing UNPROVEN, safety NOT_EVALUATED.
+message ShadowCounterfactual {
+  // Verified liquidations joined with an evaluation.
+  uint64 matched = 1;
+  // Evaluations whose outcome is unknown.
+  uint64 unknown = 2;
+  // Evaluations outside the admitted funding classes.
+  uint64 funding_excluded = 3;
+  // Evaluations below the minimum profit.
+  uint64 below_minimum = 4;
+  // Counterfactual wins.
+  uint64 wins = 5;
+  // Lost races.
+  uint64 lost_races = 6;
+  // Executable evaluations without a chain event.
+  uint64 no_chain_event = 7;
+  // One entry per capital scenario.
+  repeated CapitalScenario scenarios = 8;
+  // Landing status of every counterfactual execution (UNPROVEN).
+  string landing = 9;
+  // Safety status of every counterfactual execution (NOT_EVALUATED).
+  string safety = 10;
+}
+
+// One capital scenario of the counterfactual.
+message CapitalScenario {
+  // The scenario's capital.
+  uint64 capital_usd_micro = 1;
+  // Wins within the capital.
+  uint64 wins = 2;
+  // Net of the wins.
+  darkbot.control.v1.SignedDecimal win_net_usd_micro_signed = 3;
+  // Lost races and false positives within the capital.
+  uint64 failed_attempts = 4;
+  // Known cost of the failed attempts.
+  darkbot.control.v1.UnsignedDecimal failed_cost_usd_micro_sum = 5;
+  // Failed attempts whose cost is unknown.
+  uint64 failed_cost_unknown = 6;
+  // Evaluations beyond the capital.
+  uint64 over_budget = 7;
+  // Wins minus failed costs; unset when a failed cost is unknown (never 0).
+  darkbot.control.v1.SignedDecimal net_usd_micro_signed = 8;
+}
+
+// A completed optimization: the point chosen on the training part and its holdout score.
+message OptimizeResult {
+  // The content-addressed result id (reports/optimize/<id>.p0j of the run).
+  string result_id = 1;
+  // The capture run the result read.
+  string capture_run_id = 2;
+  // Grid points evaluated.
+  uint64 points = 3;
+  // The chosen point; unset: no point has an objective (NO_SAMPLE).
+  JobParams chosen = 4;
+  // The chosen point's score on the holdout part.
+  OptimizeScore chosen_holdout = 5;
+  // The baseline's score on the holdout part.
+  OptimizeScore baseline_holdout = 6;
+  // Hash over the result.
+  bytes result_sha256 = 7;
+  // The saved candidate profile's file name under data/profiles; empty: none saved.
+  string profile = 8;
+}
+
+// The score of one point on one part of the window.
+message OptimizeScore {
+  // The point's counterfactual on that part.
+  ShadowCounterfactual counterfactual = 1;
+  // Best return on capital over its scenarios; unset when not known (never 0).
+  darkbot.control.v1.SignedDecimal objective_bps_signed = 2;
+}

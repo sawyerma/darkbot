@@ -235,6 +235,7 @@ write_capture_plist() {
 $(plist_env P0_CAPTURE_BIN "$CAPTURE_BIN")
 $(plist_env P0_ENV_FILE "$ENV_FILES")
 $(plist_env P0_MARKET_OUT_DIR "$APP_HOME/data/market")
+$(plist_env P0_PROJECT_DIR "$APP_HOME")
 $(plist_env P0_REPORT_SOCKET "$SOCK")
 $(plist_env P0_REPORT_GENERATION_FILE "$GEN_FILE")
 $(plist_env P0_MARKET_RUN_ID "app-$launch")

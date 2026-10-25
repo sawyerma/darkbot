@@ -54,7 +54,7 @@ const project0: ProjectRegistration<Project0Panel> = {
     panels: {
       overview: [TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE],
       liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],
-      capture: [TopicId.PROJECT0_CAPTURE_STATE],
+      capture: [TopicId.PROJECT0_CAPTURE_STATE, TopicId.PROJECT0_ANALYTICS_JOBS],
       analytics: [TopicId.PROJECT0_ANALYTICS_JOBS],
       wallets: [TopicId.PROJECT0_WALLETS_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],
       // EVENT-Topics (execution.events, capture.events) hält das Panel explizit per

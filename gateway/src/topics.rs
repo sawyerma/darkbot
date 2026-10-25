@@ -97,7 +97,7 @@ pub const TOPICS: &[TopicSpec] = &[
         TopicClass::State,
         ProjectId::Project0,
         "project0.analytics.jobs",
-        "",
+        "darkbot.project0.v1.AnalyticsJobs",
     ),
     s(
         TopicId::Project0ExecutionEvents,

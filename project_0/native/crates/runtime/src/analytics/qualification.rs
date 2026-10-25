@@ -426,6 +426,22 @@ pub fn qualify(
     Ok((record, path))
 }
 
+/// The run's newest qualification record (by modification time, then name): `None` when none is
+/// recorded, `Err` when the newest one is unreadable (never an older one in its place).
+pub fn latest(run: &Path) -> Option<Result<QualificationRecord, String>> {
+    let newest = std::fs::read_dir(run.join(QUALIFICATION_DIR))
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("qualification-") && name.ends_with(".p0j")
+        })
+        .map(|e| (e.metadata().and_then(|m| m.modified()).ok(), e.path()))
+        .max()?;
+    Some(journal::read_typed_value(&newest.1).map_err(|e| format!("QUALIFICATION_UNREADABLE: {e}")))
+}
+
 /// Terminal lines of a qualification (axes first, then the verdict and its failed gates).
 pub fn render(r: &QualificationRecord) -> String {
     format!(

@@ -7,7 +7,7 @@ import { HealthSection } from "./components/HealthSection";
 import { ensureProject0Adapter, holdPanelTopics } from "./api/project0Adapter";
 import { useNowMs } from "./hooks/useStatusClock";
 import { executionAuthorization, healthLabel } from "./model/statusSelectors";
-import { selectCapture, selectFinance, selectLiquidator, selectSystem, useProject0Store } from "./store/project0Store";
+import { selectAnalytics, selectCapture, selectFinance, selectLiquidator, selectSystem, useProject0Store } from "./store/project0Store";
 import { OverviewPanel } from "./pages/OverviewPanel";
 import { LiquidatorPanel } from "./pages/LiquidatorPanel";
 import { CapturePanel } from "./pages/CapturePanel";
@@ -49,6 +49,7 @@ export default function Project0Page() {
   const authorization = executionAuthorization(system.value, system.topicStatus);
   const liquidator = useProject0Store(selectLiquidator);
   const finance = useProject0Store(selectFinance);
+  const analytics = useProject0Store(selectAnalytics);
   // The visible tab holds its topics (registry `panels`); the frozen Wallets panel cannot.
   useEffect(() => holdPanelTopics(tab), [tab]);
   // A value of a topic that is not LIVE is never shown as current (detached, stale, idle).
@@ -65,8 +66,8 @@ export default function Project0Page() {
     {healthOpen ? <HealthSection/> : null}
     {tab === "overview" ? <OverviewPanel monitor={monitor} financeStatus={finance.topicStatus} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} goto={setTab}/> : null}
     {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab} owner={liquidator.value} ownerStatus={liquidator.topicStatus} finance={liveFinance} system={system.value}/> : null}
-    {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus}/> : null}
-    {tab === "analytics" ? <AnalyticsPanel createDraft={fleet.create} goto={setTab}/> : null}
+    {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus} analytics={analytics.value} analyticsStatus={analytics.topicStatus}/> : null}
+    {tab === "analytics" ? <AnalyticsPanel analytics={analytics.value} topicStatus={analytics.topicStatus} createDraft={fleet.create} goto={setTab}/> : null}
     {tab === "wallets" ? <WalletsPanel finance={liveFinance}/> : null}
     <footer className="p0-footer">Graphite V0 · Read-only status via gateway · No live submissions or transfers</footer>
   </div></div>;

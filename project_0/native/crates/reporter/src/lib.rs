@@ -1,4 +1,5 @@
 //! Project_0 read-only status publisher. Engine owns the socket; gateway reads it.
+pub mod analytics;
 pub mod env_file;
 pub mod generation;
 pub mod proto;
@@ -54,6 +55,9 @@ pub struct ReporterConfig {
     /// The process runs a state owner: it publishes project0.liquidator.state, .wallets.state
     /// and .finance.summary (declared in the hello).
     pub owner: bool,
+    /// B03/U-9: the project directory whose analytics job store this process publishes
+    /// (project0.analytics.jobs, declared in the hello); `None`: not published.
+    pub project_dir: Option<PathBuf>,
 }
 
 impl ReporterConfig {
@@ -66,6 +70,7 @@ impl ReporterConfig {
             write_timeout: Duration::from_secs(2),
             min_interval: Duration::from_millis(100),
             owner: false,
+            project_dir: None,
         }
     }
 }
@@ -81,6 +86,8 @@ pub struct Counters {
 pub struct ReporterHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// The analytics projection's publisher (B03/U-9), when the config names a project.
+    analytics: Option<JoinHandle<()>>,
     socket_path: PathBuf,
     lock_path: PathBuf,
     socket_lock_path: PathBuf,
@@ -102,6 +109,10 @@ impl ReporterHandle {
 
     fn shutdown(&mut self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(analytics) = self.analytics.take() {
+            analytics.thread().unpark();
+            let _ = analytics.join();
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -520,8 +531,9 @@ fn frame(message: engine_frame::Msg) -> Vec<u8> {
     output
 }
 
-/// The topics this source publishes; an owner process adds the three owner topics.
-pub fn hello_frame(source_id: &str, generation: u64, owner: bool) -> Vec<u8> {
+/// The topics this source publishes; an owner process adds the three owner topics, a process
+/// with a project directory the analytics topic.
+pub fn hello_frame(source_id: &str, generation: u64, owner: bool, analytics: bool) -> Vec<u8> {
     let mut topics = vec![
         TopicId::Project0Status as i32,
         TopicId::Project0CaptureState as i32,
@@ -532,6 +544,9 @@ pub fn hello_frame(source_id: &str, generation: u64, owner: bool) -> Vec<u8> {
             TopicId::Project0LiquidatorState as i32,
             TopicId::Project0WalletsState as i32,
         ]);
+    }
+    if analytics {
+        topics.push(TopicId::Project0AnalyticsJobs as i32);
     }
     frame(engine_frame::Msg::Hello(EngineHello {
         project: ProjectId::Project0 as i32,
@@ -591,6 +606,8 @@ struct Sent {
     system: u64,
     capture: u64,
     owner: u64,
+    analytics: u64,
+    analytics_seq: u64,
     system_seq: u64,
     capture_seq: u64,
     liquidator_seq: u64,
@@ -605,6 +622,7 @@ impl Sent {
             (TopicId::Project0LiquidatorState, self.liquidator_seq),
             (TopicId::Project0WalletsState, self.wallets_seq),
             (TopicId::Project0FinanceSummary, self.finance_seq),
+            (TopicId::Project0AnalyticsJobs, self.analytics_seq),
         ]
         .into_iter()
         .filter(|(_, seq)| *seq > 0)
@@ -667,6 +685,20 @@ fn send_changes(
             sent.finance_seq = seq;
         }
         sent.owner = snapshot.owner_version;
+    }
+    if snapshot.analytics_version != sent.analytics {
+        if let Some(a) = snapshot.analytics.as_deref() {
+            let seq = next_seq(counters)?;
+            send(&state_frame(
+                TopicId::Project0AnalyticsJobs,
+                source_id,
+                generation,
+                seq,
+                &analytics::analytics_jobs(a),
+            ))?;
+            sent.analytics_seq = seq;
+        }
+        sent.analytics = snapshot.analytics_version;
     }
     if snapshot.capture_version == sent.capture {
         return Ok(false);
@@ -742,6 +774,20 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
         }
     };
     let stop = Arc::new(AtomicBool::new(false));
+    let analytics = match &cfg.project_dir {
+        Some(project) => match darkbot_runner::analytics::jobs::spawn_projection(
+            project.clone(),
+            tap.clone(),
+            stop.clone(),
+        ) {
+            Ok(thread) => Some(thread),
+            Err(e) => {
+                release(true);
+                return Err(format!("reporter analytics publisher: {e}"));
+            }
+        },
+        None => None,
+    };
     let counters = Arc::new(Counters::default());
     let source_id = format!("project0-{}-{}", std::process::id(), now_ns());
     let (stop_thread, counts_thread, cfg_thread) = (stop.clone(), counters.clone(), cfg.clone());
@@ -762,6 +808,11 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
     let thread = match join {
         Ok(thread) => thread,
         Err(e) => {
+            stop.store(true, Ordering::Release);
+            if let Some(analytics) = analytics {
+                analytics.thread().unpark();
+                let _ = analytics.join();
+            }
             release(true);
             return Err(e);
         }
@@ -769,6 +820,7 @@ pub fn start(cfg: ReporterConfig, tap: StatusTap) -> Result<ReporterHandle, Stri
     Ok(ReporterHandle {
         stop,
         thread: Some(thread),
+        analytics,
         socket_path: cfg.socket_path,
         lock_path,
         socket_lock_path,
@@ -882,7 +934,12 @@ fn session(
         counters.frames_sent.fetch_add(1, Ordering::Relaxed);
         Ok(())
     };
-    send(&hello_frame(source_id, generation, cfg.owner))?;
+    send(&hello_frame(
+        source_id,
+        generation,
+        cfg.owner,
+        cfg.project_dir.is_some(),
+    ))?;
     let mut reader = tap.reader();
     let mut sent = Sent::default();
     let mut heartbeat_id = 0u64;
@@ -968,6 +1025,9 @@ pub fn config_from_env(
     );
     config.heartbeat = Duration::from_millis(heartbeat);
     config.min_interval = Duration::from_millis(min_interval);
+    config.project_dir = lookup("P0_PROJECT_DIR")
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| PathBuf::from(s.trim()));
     Ok(Some(config))
 }
 
@@ -980,6 +1040,127 @@ mod contract_tests {
     use std::path::Path;
 
     /// An owner projection with every block set and an unknown finance total (never 0).
+    /// A counterfactual with `n` capital scenarios, amounts beyond u64/i64 where they can be.
+    fn golden_counterfactual(n: u64) -> darkbot_runner::analytics::backtest::Counterfactual {
+        use darkbot_runner::analytics::backtest::{Counterfactual, Scenario, LANDING, SAFETY};
+        Counterfactual {
+            matched: 1,
+            unknown: 2,
+            funding_excluded: 3,
+            below_minimum: 4,
+            wins: 5,
+            lost_races: 6,
+            no_chain_event: 7,
+            scenarios: (1..=n)
+                .map(|i| Scenario {
+                    capital_usd_micro: i * 1_000_000_000,
+                    wins: i,
+                    win_net_usd_micro: -170_141_183_460_469_231_731_687_303_715_884_105_728,
+                    failed_attempts: 1,
+                    failed_cost_usd_micro: u128::MAX,
+                    failed_cost_unknown: 1,
+                    over_budget: 0,
+                    net_usd_micro: (i % 2 == 0).then_some(i128::from(i) * -1_000),
+                })
+                .collect(),
+            loss_attribution: Default::default(),
+            loss_attribution_model: "M".into(),
+            landing: LANDING.into(),
+            safety: SAFETY.into(),
+            concurrent_capital_allocation_proven: false,
+        }
+    }
+
+    /// One run without and one with an unreadable qualification; a completed backtest and a
+    /// running optimization.
+    fn golden_analytics() -> darkbot_runner::analytics::jobs::AnalyticsSnapshot {
+        use darkbot_runner::analytics::backtest::{BacktestSummary, Observed, Params, Space};
+        use darkbot_runner::analytics::jobs::*;
+        let params = Params {
+            min_profit_usd_micro: 1_500_000,
+            capital_usd_micro: vec![1_000_000_000, 2_000_000_000],
+            funding: vec!["JIT_EXACT_IN".into()],
+        };
+        let request = |id: &str, spec| JobRequest {
+            job_id: id.into(),
+            run: "run-a".into(),
+            verification_result: None,
+            max_seconds: 60,
+            max_ram_bytes: 1 << 20,
+            spec,
+            requested_unix_ms: Some(1_760_000_000_000),
+        };
+        let run = |id: &str, qualification| RunEntry {
+            run_id: id.into(),
+            root: "data/econ4h",
+            layout: "NATIVE_V2",
+            capture_complete: true,
+            qualification,
+            modified_unix_ms: Some(1_760_000_000_100),
+            running: false,
+        };
+        AnalyticsSnapshot {
+            at_unix_ms: 1_760_000_003_000,
+            runner_busy: true,
+            runs: vec![
+                run("run-a", None),
+                run(
+                    "run-b",
+                    Some(Err("QUALIFICATION_UNREADABLE: FRAME_CRC".into())),
+                ),
+            ],
+            jobs: vec![
+                JobStatus {
+                    request: request(
+                        "opt-1",
+                        JobSpec::Optimize {
+                            baseline: params.clone(),
+                            space: Space {
+                                min_profit_usd_micro: vec![1_500_000, 2_000_000],
+                                funding: vec![vec![], vec!["JIT_EXACT_IN".into()]],
+                                capital_usd_micro: params.capital_usd_micro.clone(),
+                            },
+                            holdout_bps: 3_000,
+                            max_points: 4,
+                            save_profile: true,
+                        },
+                    ),
+                    state: JobState::Running {
+                        pid: 7,
+                        started_unix_ms: Some(1_760_000_001_000),
+                    },
+                },
+                JobStatus {
+                    request: request("bt-1", JobSpec::Backtest { params }),
+                    state: JobState::Done(Box::new(JobOutcome {
+                        job_id: "bt-1".into(),
+                        state: COMPLETED.into(),
+                        code: String::new(),
+                        result: Some(JobResult::Backtest {
+                            result_id: "r".repeat(64),
+                            capture_run_id: "run-a".into(),
+                            summary: Box::new(BacktestSummary {
+                                rows: 1,
+                                attempts: 2,
+                                observed: Observed {
+                                    liquidations: 3,
+                                    ..Default::default()
+                                },
+                                counterfactual: golden_counterfactual(2),
+                                realized: "NOT_RUN".into(),
+                                result_sha256: [9; 32],
+                            }),
+                        }),
+                        worker_pid: 7,
+                        started_unix_ms: Some(1_760_000_000_500),
+                        finished_unix_ms: None,
+                    })),
+                },
+            ],
+            error: None,
+        }
+    }
+
     fn golden_owner() -> OwnerSnapshot {
         use darkbot_runner::status_tap::{
             OwnerCapability, OwnerEngine as E, OwnerFinance, OwnerPipeline as P, OwnerSafety as S,
@@ -1107,6 +1288,8 @@ mod contract_tests {
             capture_version: 8,
             owner_version: 1,
             owner: Some(Arc::new(golden_owner())),
+            analytics_version: 1,
+            analytics: Some(Arc::new(golden_analytics())),
             operational: Some(Arc::new(operational_snapshot_of(&Limits::default(), None))),
             run: Some(Arc::new(RunSnapshot {
                 run_id: "golden-run".into(),
@@ -1219,6 +1402,77 @@ mod contract_tests {
             "finance_summary.hex",
             &finance_summary(owner).encode_to_vec(),
         );
+        check_golden(
+            "analytics_jobs.hex",
+            &analytics::analytics_jobs(s.analytics.as_deref().unwrap()).encode_to_vec(),
+        );
+    }
+
+    /// B03/U-9: the analytics projection keeps i128/u128 amounts exact, an unknown net and a
+    /// missing qualification unset, an unreadable qualification visible, and the job states and
+    /// parameters as the store holds them.
+    #[test]
+    fn b03_analytics_projection_is_exact_and_never_invents_values() {
+        use crate::proto::project0::analytics_job::Result as R;
+        let a = analytics::analytics_jobs(&golden_analytics());
+        assert!(a.runner_busy && a.store_error.is_empty());
+        assert_eq!(a.runs[0].qualification, None);
+        let unreadable = a.runs[1].qualification.as_ref().unwrap();
+        assert_eq!(
+            (unreadable.verdict.as_str(), unreadable.error.as_str()),
+            ("UNREADABLE", "QUALIFICATION_UNREADABLE: FRAME_CRC")
+        );
+        let (opt, bt) = (&a.jobs[0], &a.jobs[1]);
+        assert_eq!(
+            (opt.state.as_str(), opt.started_unix_ms),
+            ("RUNNING", Some(1_760_000_001_000))
+        );
+        assert!(opt.result.is_none() && opt.grid.as_ref().unwrap().save_profile);
+        assert_eq!(
+            opt.params
+                .as_ref()
+                .unwrap()
+                .min_profit_usd_micro_signed
+                .as_ref()
+                .unwrap()
+                .value,
+            "1500000"
+        );
+        let Some(R::Backtest(r)) = &bt.result else {
+            panic!("{:?}", bt.result)
+        };
+        assert_eq!(
+            (bt.state.as_str(), r.liquidations, r.rows),
+            ("COMPLETED", 3, 1)
+        );
+        let s = &r.counterfactual.as_ref().unwrap().scenarios;
+        assert_eq!(
+            s[0].win_net_usd_micro_signed.as_ref().unwrap().value,
+            i128::MIN.to_string()
+        );
+        assert_eq!(
+            s[0].failed_cost_usd_micro_sum.as_ref().unwrap().value,
+            u128::MAX.to_string()
+        );
+        assert_eq!(s[0].net_usd_micro_signed, None, "unknown net stays unset");
+        assert_eq!(s[1].net_usd_micro_signed.as_ref().unwrap().value, "-2000");
+        assert_eq!(bt.finished_unix_ms, None);
+    }
+
+    /// The analytics topic is declared only by a process that publishes a project's store.
+    #[test]
+    fn b03_hello_declares_the_analytics_topic_only_with_a_project() {
+        let topics =
+            |analytics| match EngineFrame::decode(&hello_frame("s", 1, false, analytics)[4..])
+                .unwrap()
+                .msg
+            {
+                Some(engine_frame::Msg::Hello(h)) => h.topics,
+                other => panic!("{other:?}"),
+            };
+        let analytics = TopicId::Project0AnalyticsJobs as i32;
+        assert!(!topics(false).contains(&analytics));
+        assert!(topics(true).contains(&analytics));
     }
 
     /// A01: the ingress session reconnects reach the Capture transport status; before a health
@@ -1368,12 +1622,14 @@ mod contract_tests {
         s.capture_version += 1;
         assert!(send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
         assert!(!send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
-        // An owner publication re-sends its three topics only.
+        // An owner publication re-sends its three topics only, an analytics one its topic.
         s.owner_version += 1;
         assert!(!send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
+        s.analytics_version += 1;
+        assert!(!send_changes(&s, &mut sent, "t", 1, &counters, &mut count).unwrap());
         assert_eq!(
-            frames, 9,
-            "system once, the three owner topics twice, capture twice"
+            frames, 11,
+            "system once, the three owner topics twice, analytics twice, capture twice"
         );
     }
 
@@ -1426,6 +1682,50 @@ mod contract_tests {
         let capture = capture_state(&s).encoded_len();
         assert!(system < 32 * 1024, "system status {system} bytes");
         assert!(capture < 8 * 1024, "capture state {capture} bytes");
+        // B03/U-9: the most runs and jobs listed, every job an optimization with the most
+        // scenarios in both scores.
+        use darkbot_runner::analytics::backtest::{Params, Score};
+        use darkbot_runner::analytics::jobs::{JobOutcome, JobResult, JobState};
+        use darkbot_runner::status_tap::defaults;
+        let mut a = golden_analytics();
+        let template = a.runs[1].clone();
+        a.runs = (0..defaults::ANALYTICS_RUNS_MAX)
+            .map(|i| darkbot_runner::analytics::jobs::RunEntry {
+                run_id: format!("{i:0>64}"),
+                ..template.clone()
+            })
+            .collect();
+        let score = || Score {
+            counterfactual: golden_counterfactual(32),
+            objective_bps: Some(i128::MIN),
+        };
+        let mut job = a.jobs[0].clone();
+        job.state = JobState::Done(Box::new(JobOutcome {
+            job_id: "j".repeat(64),
+            state: "COMPLETED".into(),
+            code: "C".repeat(256),
+            result: Some(JobResult::Optimize {
+                result_id: "r".repeat(64),
+                capture_run_id: "c".repeat(64),
+                points: u64::MAX,
+                chosen: Some(Params {
+                    min_profit_usd_micro: i128::MAX,
+                    capital_usd_micro: vec![u64::MAX; 32],
+                    funding: vec!["JIT_EXACT_IN".into(); 4],
+                }),
+                chosen_holdout: Some(Box::new(score())),
+                baseline_holdout: Box::new(score()),
+                result_sha256: [0xFF; 32],
+                profile: Some("p".repeat(80)),
+            }),
+            worker_pid: u32::MAX,
+            started_unix_ms: Some(u64::MAX),
+            finished_unix_ms: Some(u64::MAX),
+        }));
+        a.jobs = vec![job; defaults::ANALYTICS_JOBS_MAX as usize];
+        let analytics = analytics::analytics_jobs(&a).encoded_len();
+        // At most three quarters of the gateway's 256 KiB STATE frame.
+        assert!(analytics < 192 * 1024, "analytics jobs {analytics} bytes");
     }
 }
 

@@ -11,6 +11,7 @@ import {
   toLiquidatorView,
   toWalletsView,
 } from "./ownerAdapter";
+import { decodeAnalyticsJobs, toAnalyticsView } from "./analyticsAdapter";
 import {
   captureJsonOf,
   decodeCaptureState,
@@ -73,11 +74,14 @@ export function ensureProject0Adapter(): void {
     const message = decodeCaptureState(bytes);
     applyCapture({ value: message, meta, receivedAtMs: Date.now() });
   });
-  // P0-PROD-CTRL-04: the state owner's projection (Liquidator, Wallets, Overview finance).
+  // P0-PROD-CTRL-04: the state owner's projection (Liquidator, Wallets, Overview finance) and
+  // the analytics job store.
   const owner: ReadonlyArray<[OwnerTopic, TopicId, (bytes: Uint8Array) => Parameters<ReturnType<typeof store>["applyOwner"]>[1]]> = [
     ["liquidator", TopicId.PROJECT0_LIQUIDATOR_STATE, (b) => toLiquidatorView(decodeLiquidatorState(b))],
     ["wallets", TopicId.PROJECT0_WALLETS_STATE, (b) => toWalletsView(decodeWalletsState(b))],
     ["finance", TopicId.PROJECT0_FINANCE_SUMMARY, (b) => toFinanceSnapshot(decodeFinanceSummary(b))],
+    // B03/U-9: the analytics job controller's store (Analytics, Capture run qualification).
+    ["analytics", TopicId.PROJECT0_ANALYTICS_JOBS, (b) => toAnalyticsView(decodeAnalyticsJobs(b))],
   ];
   for (const [slice, topic, decode] of owner) {
     const apply = frameBatcher<ReturnType<typeof decode>>((u) => store().applyOwner(slice, u.value, u.meta, u.receivedAtMs));

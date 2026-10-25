@@ -404,3 +404,74 @@ fn r23_heartbeat_watermarks_follow_the_sent_state_frames() {
     handle.stop();
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// B03/U-9: a reporter with a project directory declares project0.analytics.jobs and publishes
+/// the job store: a requested job arrives QUEUED with its run, its outcome follows; stopping the
+/// reporter ends the publisher without waiting out its interval.
+#[test]
+fn b03_analytics_jobs_reach_the_wire_from_the_job_store() {
+    use darkbot_p0_reporter::proto::project0::AnalyticsJobs;
+    use darkbot_runner::analytics::backtest::Params;
+    use darkbot_runner::analytics::jobs;
+    let dir = directory("analytics");
+    let project = dir.join("project");
+    std::fs::create_dir_all(project.join("data/econ4h/run-a/capture")).unwrap();
+    let request = jobs::JobRequest {
+        job_id: "j-1".into(),
+        run: "run-a".into(),
+        verification_result: None,
+        max_seconds: 5,
+        max_ram_bytes: 1 << 20,
+        spec: jobs::JobSpec::Backtest {
+            params: Params {
+                min_profit_usd_micro: 0,
+                capital_usd_micro: vec![1_000_000_000],
+                funding: vec![],
+            },
+        },
+        requested_unix_ms: Some(1),
+    };
+    jobs::submit(&project, &request).unwrap();
+    let tap = StatusTap::new();
+    let mut cfg = ReporterConfig::new(sock("analytics"), dir.join("generation"), "run".into());
+    cfg.project_dir = Some(project.clone());
+    let handle = start(cfg.clone(), tap).unwrap();
+    let mut stream = connect(&cfg);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    match next(&mut stream).msg.unwrap() {
+        engine_frame::Msg::Hello(h) => {
+            assert!(h.topics.contains(&(TopicId::Project0AnalyticsJobs as i32)))
+        }
+        other => panic!("{other:?}"),
+    }
+    let mut analytics = || loop {
+        if let Some(engine_frame::Msg::State(s)) = next(&mut stream).msg {
+            if s.topic == TopicId::Project0AnalyticsJobs as i32 {
+                return AnalyticsJobs::decode(s.payload).unwrap();
+            }
+        }
+    };
+    let first = analytics();
+    assert_eq!(first.runs.len(), 1);
+    assert_eq!(
+        (first.runs[0].run_id.as_str(), first.runs[0].layout.as_str()),
+        ("run-a", "HISTORICAL")
+    );
+    assert_eq!(
+        (first.jobs[0].job_id.as_str(), first.jobs[0].state.as_str()),
+        ("j-1", "QUEUED")
+    );
+    let (outcome, _) = jobs::run(&project, "j-1", None).unwrap();
+    let second = analytics();
+    assert_eq!(second.jobs[0].state, "FAILED");
+    assert_eq!(second.jobs[0].code, outcome.code);
+    let stopped = Instant::now();
+    handle.stop();
+    assert!(
+        stopped.elapsed() < Duration::from_millis(1_000),
+        "the publisher is unparked, never waited out"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

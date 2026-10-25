@@ -29,7 +29,7 @@ export const TOPIC_TABLE: readonly TopicBinding[] = [
   b(TopicId.PROJECT0_LIQUIDATOR_STATE, "project0.liquidator.state", TopicClass.STATE, ProjectId.PROJECT_0, "darkbot.project0.v1.LiquidatorState"),
   b(TopicId.PROJECT0_CAPTURE_STATE, "project0.capture.state", TopicClass.STATE, ProjectId.PROJECT_0, "darkbot.project0.v1.CaptureState"),
   b(TopicId.PROJECT0_WALLETS_STATE, "project0.wallets.state", TopicClass.STATE, ProjectId.PROJECT_0, "darkbot.project0.v1.WalletsState"),
-  b(TopicId.PROJECT0_ANALYTICS_JOBS, "project0.analytics.jobs", TopicClass.STATE, ProjectId.PROJECT_0),
+  b(TopicId.PROJECT0_ANALYTICS_JOBS, "project0.analytics.jobs", TopicClass.STATE, ProjectId.PROJECT_0, "darkbot.project0.v1.AnalyticsJobs"),
   b(TopicId.PROJECT0_EXECUTION_EVENTS, "project0.execution.events", TopicClass.EVENT, ProjectId.PROJECT_0),
   b(TopicId.PROJECT0_CAPTURE_EVENTS, "project0.capture.events", TopicClass.EVENT, ProjectId.PROJECT_0),
 

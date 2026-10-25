@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "darkbot/project0/v1/capture.proto",
         "darkbot/project0/v1/system.proto",
         "darkbot/project0/v1/owner.proto",
+        "darkbot/project0/v1/analytics.proto",
     ];
     for file in files {
         println!("cargo:rerun-if-changed={}", root.join(file).display());

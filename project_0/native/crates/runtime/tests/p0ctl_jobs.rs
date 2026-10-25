@@ -57,7 +57,10 @@ fn a_started_job_runs_in_its_detached_worker_and_records_the_outcome() {
         std::thread::sleep(Duration::from_millis(50));
     };
     // No capture binding in the run: the worker refuses with the backtest's code.
-    assert!(line.starts_with("job-1 BACKTEST FAILED run=run-a "), "{line}");
+    assert!(
+        line.starts_with("job-1 BACKTEST FAILED run=run-a "),
+        "{line}"
+    );
     let log = std::fs::read_to_string(project.join("data/analytics-jobs/job-1/worker.log"));
     assert!(log.unwrap().contains("job job-1 FAILED"));
     let (code, _, err) = p0ctl(&project, &["job", "cancel", "--id", "job-1"]);
