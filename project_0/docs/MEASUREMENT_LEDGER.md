@@ -6027,4 +6027,5 @@ Commits `26f6194b` (JIT), `98254f75` (source control, Geyser, lead, p0ctl/UntilS
 - Einheit 0 (`bf646966`…`c14bc83b`, `c8e75987`): keine produktive interne JSON-Kante mehr (JFI-04 offene Liste leer, Pin 287); Strict-Cache typisiert (`STRICT_CHAIN_CACHE` 318); Layout-Pins 318/350–355/704; Gate PASS (fmt, Clippy ×4, 905/903/421/421, Release, Python).
 - F-01/C07 (`760fc483`, `276e0998`): Provider-Budget immer aktiv; Shadow nur über `p0ctl run start --mode shadow`; `CaptureState.provider` (Schema-ID `e545c226…`) bis Capture-Reiter; Reporter/Gateway-E2E PASS; nicht deployt (Reporter-Rebuild nötig).
 - NOT_RUN: Gap-Smoke und jeder Mainnet-Lauf (Freigabe nötig); Review U-6 offen; Owner-Publisher (Shadow/econ4h → Overview/Liquidator/Wallets) offen.
+- Einheit 1 (`77f00f04`, `214679e1`, `b7f4b296`): Wanduhr-/Chain-Uhr-Fallbacks auf 0 entfernt (Verweigerung/Unknown), unbewertetes Inventar Unknown; Gate PASS auf `b7f4b296` (918/916/427/427, Release, Python). Review (ein Agent) Einheit 0+1: 14 Befunde behoben `4035dd80` (u. a. econ4h immer Layout V2, Shadow-Run-ID im Owner-Lock, Backtest matched/Mindestgewinn, FE-01-Smoke Owner-Prüfung).
 

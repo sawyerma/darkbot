@@ -1,6 +1,6 @@
 # Project 0 — Current status
 
-**Korrekturauftrag 25.10. (fehlstellen_v1 + bug_v2):** Einheit 0 Code + Gate PASS (`bf646966`…`c14bc83b`, `c8e75987`), Review offen; Einheit 1 F-01/C07 erledigt (`760fc483`, `276e0998` Budget → Capture); weiter D07/F-06, D08, F-07, F-15, D09 ([fehlstellen_v1 §11.4](fehlstellen_v1.md)).
+**Korrekturauftrag 25.10. (fehlstellen_v1 + bug_v2):** Einheit 0 + 1 erledigt (`bf646966`…`b7f4b296`, Gate PASS auf `b7f4b296`; Review 14 Befunde behoben `4035dd80`); offen: Owner-Publisher für Overview/Wallets; weiter Einheit 2 (V2-01…V2-03) ([fehlstellen_v1 §11.4](fehlstellen_v1.md)).
 
 ## Gemeinsamer Frontend-/Gateway-Übergabe-Checkpoint — 2026-10-24 (auch für Project_0 verbindlich)
 
