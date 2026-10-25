@@ -459,6 +459,12 @@ fn evaluate(
         if int(one(r, "state_source.block_number")) != Some(head) {
             p.push(format!("{name} state is not the preflight head"));
         }
+        // BSC-002: the same block, not just the same height.
+        if word(one(r, "state_source.block_hash")) != word(one(&pre, "latest_block_hash")) {
+            p.push(format!(
+                "{name} state is another block than the preflight's (hash)"
+            ));
+        }
     }
     if one(&d, "dry_pass.DRY_2_independent_local_simulation") != Some(Value::Bool(true)) {
         p.push("DRY-2 did not pass".into());
@@ -833,6 +839,13 @@ mod tests {
         std::fs::write(dir.join("native_quote.dbrec"), q.encode().unwrap()).unwrap();
         let state = |d: &mut Draft, schema: &'static Schema| {
             d.set(tag_of(schema, "state_source.block_number"), HEAD);
+            // BSC-002: same height, another block (load balancer / reorg).
+            let other = (breaks == "ls_hash" && schema.name.contains("local-simulation"))
+                || (breaks == "econ_hash" && schema.name.contains("crosscheck"));
+            d.set(
+                tag_of(schema, "state_source.block_hash"),
+                Value::B256(if other { [0x99; 32] } else { HEAD_HASH }),
+            );
         };
         std::fs::write(
             dir.join("economics_crosscheck.dbrec"),
@@ -1231,6 +1244,8 @@ mod tests {
             ("h2_curve", "DRY2_SIMULATION"),
             ("h1_econ", "DRY2_SIMULATION"),
             ("h1_quote", "DRY3_GAS_ECONOMICS_BUDGET"),
+            ("ls_hash", "DRY2_SIMULATION"),
+            ("econ_hash", "DRY2_SIMULATION"),
             ("lp_token", "DRY5_LAUNCH_PATH"),
         ] {
             let (pass, checks) = verdict(breaks);

@@ -30,6 +30,7 @@ const { createLegacyTx } = require(path.join(LEGACY_TOOLS, '@ethereumjs/tx'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const dbrec = require('./dbrec.cjs');
 const { guardEgress, localCreations } = require('./g06a_private_mode.cjs');
+const { pin, pinState, requireBlock } = require('./g06a_state_pin.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
@@ -205,9 +206,8 @@ async function main() {
   const chain = BigInt(await rpc(rpcUrl, 'eth_chainId'));
   if (chain !== CHAIN_ID) throw new Error(`wrong chain: ${chain}`);
   const parentNumber = dec('DARKBOT_G06A_SEND_HEAD');
-  const parentTag = '0x' + parentNumber.toString(16);
-  const parent = await rpc(rpcUrl, 'eth_getBlockByNumber', [parentTag, false]);
-  if (!parent) throw new Error(`preflight parent block unavailable: ${parentTag}`);
+  // BSC-002: exactly the preflight's block, by hash (DARKBOT_G06A_SEND_HEAD_HASH).
+  const parent = await requireBlock(rpc, rpcUrl, parentNumber, req('DARKBOT_G06A_SEND_HEAD_HASH'), 'before the simulation');
 
   const common = createCustomCommon(
     { chainId: Number(CHAIN_ID) },
@@ -215,7 +215,8 @@ async function main() {
     { hardfork: Hardfork.Osaka }
   );
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNumber });
-  installBasicAccountLoader(state, rpcUrl, parentTag);
+  pinState(state, parent.hash);
+  installBasicAccountLoader(state, rpcUrl, pin(parent.hash));
   const blockchain = new RPCBlockChain(rpcUrl);
   const evm = await createEVM({ common, stateManager: state, blockchain });
   localCreations(evm, state, [token]);
@@ -365,6 +366,7 @@ async function main() {
       'No signed transaction or bundle is submitted to any RPC or builder'
     ],
   });
+  await requireBlock(rpc, rpcUrl, parentNumber, parent.hash, 'before the evidence write');
   dbrec.writeNew(outPath, record);
   const sha = require('crypto').createHash('sha256').update(record).digest('hex');
   console.log(`LOCAL_SIMULATION=WRITTEN\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNumber}\nLAUNCH_TX_HASH=${launchHash}\nBUY_TX_HASH=${buyHash}\nTOKEN=${token}\nSIMULATED_RECEIVED_AMOUNT=${returned}\nOUTPUT_DIFFERENCE=${returned - localExpected}\nLAUNCH_GAS_UPPER=${launchGasUpper}\nBUY_GAS_UPPER=${buyGasUpper}\nVALID_SIGNED_TX_BYTES_SUBMITTED=false`);

@@ -30,6 +30,7 @@ const { createLegacyTx } = require(path.join(LEGACY_TOOLS, '@ethereumjs/tx'));
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const dbrec = require('./dbrec.cjs');
 const { guardEgress, localCreations } = require('./g06a_private_mode.cjs');
+const { pin: statePin, pinState, requireBlock } = require('./g06a_state_pin.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
@@ -178,7 +179,8 @@ async function main() {
   guardEgress([salt, launchCalldata(pre.launcher_address, salt), token]);
   const common = createCustomCommon({ chainId: Number(CHAIN_ID) }, Mainnet, { hardfork: Hardfork.Osaka });
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: number });
-  installBasicAccountLoader(state, rpcUrl, tag);
+  pinState(state, parent.hash);
+  installBasicAccountLoader(state, rpcUrl, statePin(parent.hash));
   const evm = await createEVM({ common, stateManager: state, blockchain: new RPCBlockChain(rpcUrl) });
   const created = localCreations(evm, state, [token]);
   const block = { header: blockHeaderFromRpc(parent) };
@@ -259,6 +261,7 @@ async function main() {
     'storage.value': storage.value,
     'storage.selects': storage.selects,
   });
+  await requireBlock(rpc, rpcUrl, number, parent.hash, 'before the evidence write');
   dbrec.writeNew(outPath, record);
   console.log(`LAUNCH_PATH=WRITTEN\nRECORD=${outPath}\nBLOCK=${number}\nCODE_ENTRIES=${code.address.length}\nSTORAGE_SELECTORS=${storage.address.length}\nLAUNCH_OK=${!launch.execResult.exceptionError}\nBUY_OK=${!buy.execResult.exceptionError}`);
 }

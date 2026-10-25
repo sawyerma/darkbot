@@ -214,6 +214,9 @@ _dbrec_10="$(get_required buyer_pending_nonce "$PREFLIGHT")" || die "required ty
 DARKBOT_G06A_BUYER_NONCE="${_dbrec_10}"
 _dbrec_11="$(get_required latest_block_number "$PREFLIGHT")" || die "required typed DBREC field unavailable"
 DARKBOT_G06A_SEND_HEAD="${_dbrec_11}"
+# BSC-002: every local EVM run reads exactly this block, by hash.
+_dbrec_33="$(get_required latest_block_hash "$PREFLIGHT")" || die "required typed DBREC field unavailable"
+DARKBOT_G06A_SEND_HEAD_HASH="${_dbrec_33}"
 [[ ${#DARKBOT_G06A_SEND_HEAD} -lt 19 || ( ${#DARKBOT_G06A_SEND_HEAD} -eq 19 && "$DARKBOT_G06A_SEND_HEAD" < "9223372036854775806" ) ]] || die "head exceeds safe shell range"
 DARKBOT_G06A_MAX_BLOCK="$((DARKBOT_G06A_SEND_HEAD + 2))"
 printf 'PREFLIGHT=PASS  head=%s  implementation=%s  launcher_nonce=%s  buyer_nonce=%s\n' \

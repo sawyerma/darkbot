@@ -11,7 +11,7 @@ allowed_environment() {
     DARKBOT_G06A_LAUNCHER_ADDRESS DARKBOT_G06A_BUYER_ADDRESS DARKBOT_G06A_TAX_V3_IMPL \
     DARKBOT_G06A_GAS_PRICE_WEI DARKBOT_G06A_LAUNCH_GAS_LIMIT DARKBOT_G06A_BUY_GAS_LIMIT \
     DARKBOT_G06A_LAUNCH_VALUE_WEI DARKBOT_G06A_BUY_VALUE_WEI DARKBOT_G06A_STRICTEST_BUILDER_FLOOR_WEI \
-    DARKBOT_G06A_LAUNCHER_NONCE DARKBOT_G06A_BUYER_NONCE DARKBOT_G06A_SEND_HEAD DARKBOT_G06A_MAX_BLOCK \
+    DARKBOT_G06A_LAUNCHER_NONCE DARKBOT_G06A_BUYER_NONCE DARKBOT_G06A_SEND_HEAD DARKBOT_G06A_SEND_HEAD_HASH DARKBOT_G06A_MAX_BLOCK \
     DARKBOT_G06A_LOCAL_EXPECTED_OUTPUT DARKBOT_G06A_BUILDER_FLOOR_EVIDENCE_SHA256; do
     if [[ ${!name+x} ]]; then export "$name"; fi
   done
@@ -48,7 +48,7 @@ get_required() {
   case "$1" in
     *nonce|*block|latest_block_number|headers_verified|bloom_candidate_blocks|expected_output|simulated_received_amount|output_difference|*floor_wei|transactions.min_output)
       [[ "$value" =~ ^(0|[1-9][0-9]*)$ ]] || return 1 ;;
-    salt|transactions.*tx_hash) [[ "$value" =~ ^0x[[:xdigit:]]{64}$ ]] || return 1 ;;
+    salt|transactions.*tx_hash|latest_block_hash) [[ "$value" =~ ^0x[[:xdigit:]]{64}$ ]] || return 1 ;;
     launcher|buyer|portal_implementation|transactions.token) [[ "$value" =~ ^0x[[:xdigit:]]{40}$ ]] || return 1 ;;
     wallet_qualification.*|launch_success|buy_success|dry_pass.*) [[ "$value" == true || "$value" == false ]] || return 1 ;;
   esac

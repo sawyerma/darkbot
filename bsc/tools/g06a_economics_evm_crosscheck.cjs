@@ -45,6 +45,7 @@ const {
 const ethers = require(path.join(ABI_TOOLS, 'ethers'));
 const dbrec = require('./dbrec.cjs');
 const { guardEgress, localCreations } = require('./g06a_private_mode.cjs');
+const { pin, pinState, requireBlock } = require('./g06a_state_pin.cjs');
 
 const CHAIN_ID = 56n;
 const PORTAL = '0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0';
@@ -266,8 +267,8 @@ async function main() {
   let portalCode;
   let taxCode;
   try {
-    portalCode = await rpc(rpcUrl, 'eth_getCode', [PORTAL, parentTag]);
-    taxCode = await rpc(rpcUrl, 'eth_getCode', [TAX_V3_IMPL, parentTag]);
+    portalCode = await rpc(rpcUrl, 'eth_getCode', [PORTAL, pin(parent.hash)]);
+    taxCode = await rpc(rpcUrl, 'eth_getCode', [TAX_V3_IMPL, pin(parent.hash)]);
   } catch (e) {
     if (String(e).includes('missing trie node')) {
       throw new Error(
@@ -281,7 +282,7 @@ async function main() {
   if (BigInt(ethers.getBytes(portalCode).length) !== preflight.portal_code_bytes) throw new Error('Portal code length mismatch');
   if (BigInt(ethers.getBytes(taxCode).length) !== preflight.tax_v3_impl_code_bytes) throw new Error('TAX_V3 code length mismatch');
 
-  const saltChoice = secretChoice ?? await chooseSalt(rpcUrl, parentTag);
+  const saltChoice = secretChoice ?? await chooseSalt(rpcUrl, pin(parent.hash));
   const launchData = launchCalldata(LAUNCHER, saltChoice.salt);
   const buyData = buyCalldata(saltChoice.token);
   if (secret) return privateSequence(rpcUrl, preflightPath, outPath, parentNum, parent, saltChoice, launchData, buyData);
@@ -297,7 +298,7 @@ async function main() {
       to: PORTAL,
       value: '0x0',
       data: launchData
-    }, parentTag]));
+    }, pin(parent.hash)]));
   } catch (e) {
     throw new Error(
       'MAINNET_ESTIMATE_GAS_LAUNCH_REVERT: exact launch parameters are rejected before gas estimation at ' +
@@ -314,7 +315,7 @@ async function main() {
       value: '0x0',
       data: launchData,
       gas: '0x' + rpcLaunchGasLimit.toString(16)
-    }, parentTag]);
+    }, pin(parent.hash)]);
   } catch (e) {
     throw new Error(
       'MAINNET_ETH_CALL_LAUNCH_REVERT_AFTER_ESTIMATE: estimateGas succeeded but eth_call reverted at ' +
@@ -336,7 +337,8 @@ async function main() {
     { hardfork: Hardfork.Osaka }
   );
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNum });
-  installBasicAccountLoader(state, rpcUrl, parentTag);
+  pinState(state, parent.hash);
+  installBasicAccountLoader(state, rpcUrl, pin(parent.hash));
   const blockchain = new RPCBlockChain(rpcUrl);
 
   const launcherAddr = createAddressFromString(LAUNCHER);
@@ -463,6 +465,7 @@ async function main() {
       'This probe proves economics/contract semantics only; wallet nonces, builder floors and signed bundle validity belong to later DRY checks'
     ],
   });
+  await requireBlock(rpc, rpcUrl, parentNum, parent.hash, 'before the evidence write');
   dbrec.writeNew(outPath, record);
   const sha = require('crypto').createHash('sha256').update(record).digest('hex');
   console.log(`ECONOMICS_CROSSCHECK=EVM_SEQUENCE_PASS\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNum}\nSALT=${saltChoice.salt}\nSALT_COUNTER=${saltChoice.counter}\nTOKEN=${saltChoice.token}\nSIMULATED_RECEIVED_AMOUNT=${returned}`);
@@ -473,7 +476,8 @@ async function privateSequence(rpcUrl, preflightPath, outPath, parentNum, parent
   const launchGasLimit = BigInt(req('DARKBOT_G06A_LAUNCH_GAS_LIMIT'));
   const common = createCustomCommon({ chainId: Number(CHAIN_ID) }, Mainnet, { hardfork: Hardfork.Osaka });
   const state = new RPCStateManager({ provider: rpcUrl, blockTag: parentNum });
-  installBasicAccountLoader(state, rpcUrl, '0x' + parentNum.toString(16));
+  pinState(state, parent.hash);
+  installBasicAccountLoader(state, rpcUrl, pin(parent.hash));
   const evm = await createEVM({ common, stateManager: state, blockchain: new RPCBlockChain(rpcUrl) });
   localCreations(evm, state, [saltChoice.token]);
   const launcherAddr = createAddressFromString(LAUNCHER);
@@ -512,6 +516,7 @@ async function privateSequence(rpcUrl, preflightPath, outPath, parentNum, parent
     preflightPath, parentNum, parent, commitment, token: saltChoice.token, returned, balance,
     launchGas: launchRes.execResult.executionGasUsed, buyGas: buyRes.execResult.executionGasUsed,
   });
+  await requireBlock(rpc, rpcUrl, parentNum, parent.hash, 'before the evidence write');
   dbrec.writeNew(outPath, record);
   const sha = require('crypto').createHash('sha256').update(record).digest('hex');
   console.log(`ECONOMICS_CROSSCHECK=EVM_SEQUENCE_PASS\nMODE=PRIVATE_SALT\nRECORD=${outPath}\nRECORD_SHA256=${sha}\nBLOCK=${parentNum}\nSALT_COMMITMENT=${commitment}\nTOKEN=${saltChoice.token}\nSIMULATED_RECEIVED_AMOUNT=${returned}`);
