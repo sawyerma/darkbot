@@ -64,6 +64,24 @@ fn write_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("{path} replaced but not yet durable: {e}"))
 }
 
+/// BSC-015 (BSC_Bug_V2 P4-G5): an independent lower bound, whatever the
+/// witness's clock model: clock quantization and unit normalization are
+/// never inside a raw before/after bracket, so the remaining uncertainty is
+/// at least the larger of them (no sum is assumed, nothing counted twice).
+/// A smaller declared remainder is an inconsistent witness: no verdict.
+fn uncertainty_consistent(
+    remaining_uncertainty_ns: u64,
+    clock_resolution_ns: u64,
+    normalization_error_ns: u64,
+) -> Result<(), &'static str> {
+    if remaining_uncertainty_ns < clock_resolution_ns.max(normalization_error_ns) {
+        return Err(
+            "remaining uncertainty is below the clock resolution or the normalization error",
+        );
+    }
+    Ok(())
+}
+
 fn timing_bounds(
     t0_before: u64,
     t0_after: u64,
@@ -229,6 +247,12 @@ fn main() {
     assert!(field(witness.bool(w::CLOCK_RESOLUTION_ACCOUNTED)));
     assert!(field(witness.bool(w::HOOK_OVERHEAD_ACCOUNTED)));
     assert!(field(witness.bool(w::NORMALIZATION_ERROR_ACCOUNTED)));
+    uncertainty_consistent(
+        remaining_uncertainty_ns,
+        clock_resolution_ns,
+        normalization_error_ns,
+    )
+    .expect("inconsistent producer witness uncertainty");
 
     let (lower_bound_ns, bracket_upper_ns, upper_bound_ns) = timing_bounds(
         t0_before,
@@ -348,6 +372,18 @@ mod tests {
         let (_, bracket, upper) = timing_bounds(100, 120, 700, 800, 50).unwrap();
         assert_eq!(bracket, 700);
         assert_eq!(upper, 750);
+    }
+
+    /// BSC-015 (BSC_Bug_V2 P4-G5): clock quantization and unit
+    /// normalization are never inside a raw before/after bracket, so the
+    /// declared remaining uncertainty is at least the larger of them.
+    #[test]
+    fn a_remaining_uncertainty_below_an_unbracketable_component_gives_no_verdict() {
+        assert!(uncertainty_consistent(100, 50, 80).is_ok());
+        assert!(uncertainty_consistent(80, 80, 80).is_ok());
+        assert!(uncertainty_consistent(0, 1, 0).is_err());
+        assert!(uncertainty_consistent(60, 50, 80).is_err());
+        assert!(uncertainty_consistent(49, 50, 0).is_err());
     }
 
     #[test]
