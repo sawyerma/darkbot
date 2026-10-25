@@ -1,6 +1,6 @@
 # Project_0 — ENTSCHEIDUNGEN.md
 
-**Version:** 1.0 · **Datum:** 2026-10-25
+**Version:** 1.1 · **Datum:** 2026-10-25
 **Art des Dokuments:** Entscheidungsnachweis. Dieses Dokument ist **keine** Status- und **keine** Phasenplan-Autorität. Status: `BUGS.md`. Plan und Gates: `PHASENPLAN.md`.
 **Codebasis der Entscheidungsvorbereitung:** Docs `72a99cc2`, Code `865867af`; Gegenprüfung durch eine zweite Instanz an `87c064ba` und `746fdf29`. Vor jeder Umsetzung muss gegen den dann aktuellen HEAD neu gepinnt werden. Dateinamen in diesem Dokument zeigen nur, wo eine Änderung ansetzt; sie sind keine verbindlichen Zeilenangaben.
 
@@ -412,3 +412,16 @@ Parallel dazu und unabhängig vom Code: Freigabe C-01 beantragen.
 - Die Entscheidungsvorbereitung beruht auf statischer Code-Lesung und den Registern zu den genannten Commits. Es wurden keine Tests ausgeführt und keine Messungen gemacht.
 - Die CI-Ergebnisse auf GitHub konnten nicht selbst geprüft werden.
 - Zeilenangaben aus Vorlagen sind nicht übernommen worden. Vor jeder Umsetzung muss gegen den aktuellen HEAD neu gepinnt werden.
+
+---
+
+## 7. Nachträge vom 25.10.2026
+
+| ID | Gegenstand | Status |
+|---|---|---|
+| **N-1** | **G-1 gilt nur für die 15 Entscheidungen DEC-01…15.** Die übrige Roadmap bleibt verbindlich; MT6–MT10 benötigen C0-MO und einen belegten Engpass. Eine Ausweitung erfordert einen weiteren Nutzerbeschluss. Bereits im Phasenplan (Commit `76d515b4`). | **ENTSCHIEDEN** |
+| **N-2** | Vorschlag: Bei widersprechenden B-Quellen zu Non-Landing einen lückenlosen C-Nachweis allein entscheiden lassen. Wie positive Landing-Evidence gegen negative C-Evidence aufgelöst wird, ist sicherheitsrelevant und noch nicht entschieden. Bestehende fail-closed-Regel bleibt gültig. | **OFFEN** |
+| **N-3** | Vorschlag: Quellberichte nach vollständiger ID-Übernahme auch mit offenen Tickets nach `fertig/` verschieben. Bis zur Entscheidung bleiben Berichte unverändert an Ort und Stelle. | **OFFEN** |
+| **N-4 / Z-1** | Vorschlag: `project0-gate` und betroffene gemeinsame Proto-/Gateway-/Frontend-Jobs grün; unabhängige BSC-Fehler nur mit dokumentiertem Eltern-Commit und Ursachenbeleg separat ausweisen. Keine Behauptung einer grünen Gesamt-CI bei roten Jobs. | **OFFEN** |
+
+Diese Nachträge legen für N-2 bis N-4 **keine neue Nutzerentscheidung** fest. DEC-04/11/13 sind bestehende, im Phasenplan präzisierte Beschlüsse. Die FE-07-Folgepflicht steht bereits in PHASENPLAN §0.6.
