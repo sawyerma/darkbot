@@ -871,6 +871,8 @@ T_observed_landed
     Landing von uns beobachtet
 ```
 
+Execution-Deadline (`P0_DEADLINE_NS`) und Opportunity-Alter zählen ab `T_rx`, nie ab `T_detect`; `T_detect` erst nach bestandenem Economic Gate (V2-04, 25.10.).
+
 P6-MT ergänzt ausschließlich **diagnostische** Grenzen; die normativen Zeitpunkte oben bleiben unverändert:
 
 ```text

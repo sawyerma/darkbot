@@ -1718,6 +1718,8 @@ fn v9_safety_denials_are_their_own_cause() {
         "{:?}",
         r.reason
     );
+    // V2-04: a plan Safety refuses at the economic gate is no detection.
+    assert_eq!((r.timing.t_detect_ns, r.detect_slot), (None, None));
     // Admission boundary: the plan passes the preview, the day's loss limit refuses its worst case.
     let dir = std::env::temp_dir().join(format!("p0-v9-safety-{}", Pubkey::new_unique()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -3234,9 +3236,37 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
     builder: &B,
     min_profit: i128,
 ) -> OpportunityRecord {
+    let unbounded = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: u64::MAX,
+    };
+    evaluate_shadow(
+        builder,
+        &counting_submitter(),
+        min_profit,
+        unbounded,
+        Duration::ZERO,
+    )
+}
+
+fn counting_submitter() -> CountingSubmitter {
+    CountingSubmitter {
+        calls: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+    }
+}
+
+/// `evaluate_once` with its own adapter and freshness; `rx_age` passes between T_rx and the
+/// evaluation.
+fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: SubmissionAdapter>(
+    builder: &B,
+    submitter: &S,
+    min_profit: i128,
+    freshness: darkbot_project0::execution::Freshness,
+    rx_age: Duration,
+) -> OpportunityRecord {
     use crate::execution::pipeline::{Mode, NetworkBudget, Pipeline};
     use darkbot_project0::{
-        execution::Freshness,
         planner::Allowlist,
         safety::{Allow, Limits, Safety},
     };
@@ -3245,10 +3275,6 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
         tx::{Resources, TxLimits},
     };
     let prereq_program = [Pubkey::new_from_array([8; 32])];
-    let submitter = CountingSubmitter {
-        calls: Arc::new(AtomicU64::new(0)),
-        sims: Arc::new(AtomicU64::new(0)),
-    };
     let clock = Clock::new();
     let bh = BlockhashCache::new();
     bh.set(CachedBlockhash {
@@ -3278,7 +3304,7 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
         clock: &clock,
         health: &TestHealth,
         builder,
-        submitter: &submitter,
+        submitter,
         safety: &mut safety,
         blockhash: &bh,
         payer: &payer,
@@ -3293,10 +3319,7 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
         min_profit,
         blockhash_max_age_ns: u64::MAX,
         p7_passed: false,
-        freshness: Freshness {
-            max_opportunity_age_ns: u64::MAX,
-            execution_deadline_ns: u64::MAX,
-        },
+        freshness,
         tip_account: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &prereq_program,
@@ -3305,7 +3328,105 @@ fn evaluate_once<B: crate::execution::pipeline::ReceivershipBuilder>(
         simulation_failure: None,
         fe04: None,
     };
-    p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
+    let t_rx = clock.now_ns();
+    std::thread::sleep(rx_age);
+    p.evaluate(Pubkey::new_unique(), "test", t_rx, 100, 10, true)
+}
+
+/// V2-04: the counting adapter whose fee quote takes `delay`.
+struct SlowFeeSubmitter {
+    inner: CountingSubmitter,
+    delay: Duration,
+}
+impl SubmissionAdapter for SlowFeeSubmitter {
+    fn path(&self) -> SubmissionPath {
+        self.inner.path()
+    }
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        deadline: std::time::Instant,
+    ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
+        std::thread::sleep(self.delay);
+        self.inner.fee_for_message(tx, deadline)
+    }
+    fn simulate(&self, tx: &VersionedTransaction, deadline: std::time::Instant) -> SimResult {
+        self.inner.simulate(tx, deadline)
+    }
+    fn simulate_bundle(&self, txs: &[VersionedTransaction], d: std::time::Instant) -> SimResult {
+        self.inner.simulate_bundle(txs, d)
+    }
+    fn submit(&self, tx: &VersionedTransaction, n: u64) -> Result<SubmitAck, SubmitError> {
+        self.inner.submit(tx, n)
+    }
+    fn submit_bundle(
+        &self,
+        txs: &[VersionedTransaction],
+        n: u64,
+    ) -> Result<SubmitAck, SubmitError> {
+        self.inner.submit_bundle(txs, n)
+    }
+}
+
+/// V2-04 (P1-06): T_detect = valid and economic, marked after the fee quote and the economic
+/// gate. A fee quote of 30 ms lies between T_rx and T_detect, never between T_detect and T_ready
+/// (before: marked ahead of the build, T_detect→T_ready ≥ 30 ms). A known plan below the
+/// threshold is no detection: no T_detect, no detect slot.
+#[test]
+fn v2_04_t_detect_is_marked_after_the_fee_quote_and_the_economics() {
+    let delay = Duration::from_millis(30);
+    let unbounded = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: u64::MAX,
+    };
+    let slow = SlowFeeSubmitter {
+        inner: counting_submitter(),
+        delay,
+    };
+    let r = evaluate_shadow(&TestBuilder, &slow, 0, unbounded, Duration::ZERO);
+    assert_eq!(r.decision, Decision::ShadowReady, "{:?}", r.reason);
+    let t = &r.timing;
+    let (rx, detect, ready) = (
+        t.t_rx_ns.unwrap(),
+        t.t_detect_ns.unwrap(),
+        t.t_ready_ns.unwrap(),
+    );
+    let delay_ns = delay.as_nanos() as u64;
+    assert!(detect - rx >= delay_ns, "rx→detect {}", detect - rx);
+    assert!(ready - detect < delay_ns, "detect→ready {}", ready - detect);
+    let below = evaluate_once(&TestBuilder, i128::MAX);
+    assert_eq!(below.loss, Some(LossReason::ThresholdTooHigh));
+    assert_eq!((below.timing.t_detect_ns, below.detect_slot), (None, None));
+}
+
+/// V2-04: the execution deadline counts from T_rx, not from the later T_detect mark: 300 ms
+/// between T_rx and the evaluation exceed a 200 ms deadline (before: counted from T_detect,
+/// inside it); within the deadline the same candidate is ready.
+#[test]
+fn v2_04_execution_deadline_counts_from_t_rx() {
+    let deadline = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: 200_000_000,
+    };
+    let late = evaluate_shadow(
+        &TestBuilder,
+        &counting_submitter(),
+        0,
+        deadline,
+        Duration::from_millis(300),
+    );
+    assert_eq!(
+        (late.loss, late.reason.as_deref()),
+        (Some(LossReason::Build), Some("execution deadline passed"))
+    );
+    let fresh = evaluate_shadow(
+        &TestBuilder,
+        &counting_submitter(),
+        0,
+        deadline,
+        Duration::ZERO,
+    );
+    assert_eq!(fresh.decision, Decision::ShadowReady, "{:?}", fresh.reason);
 }
 
 /// Q5 through `Pipeline::evaluate`: a planning failure is recorded with the decision and loss of

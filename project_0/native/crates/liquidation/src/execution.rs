@@ -13,18 +13,19 @@ use std::collections::HashMap;
 /// Drift-keep-rs-Muster (adaptiert): stale Opportunities verwerfen, harte Deadline pro Versuch.
 #[derive(Clone, Copy, Debug)]
 pub struct Freshness {
-    /// Opportunity älter als das (ab T_detect, ns) → nicht ausführen.
+    /// Opportunity älter als das (ab T_rx, ns) → nicht ausführen.
     pub max_opportunity_age_ns: u64,
-    /// Build+Sign+Submit müssen innerhalb dieser Frist ab T_detect liegen.
+    /// V2-04: Build+Sign+Submit müssen innerhalb dieser Frist ab T_rx liegen (nicht ab T_detect,
+    /// das erst nach der Ökonomie markiert wird).
     pub execution_deadline_ns: u64,
 }
 
 impl Freshness {
-    pub fn is_stale(&self, t_detect_ns: u64, now_ns: u64) -> bool {
-        now_ns.saturating_sub(t_detect_ns) > self.max_opportunity_age_ns
+    pub fn is_stale(&self, t_rx_ns: u64, now_ns: u64) -> bool {
+        now_ns.saturating_sub(t_rx_ns) > self.max_opportunity_age_ns
     }
-    pub fn deadline_passed(&self, t_detect_ns: u64, now_ns: u64) -> bool {
-        now_ns.saturating_sub(t_detect_ns) > self.execution_deadline_ns
+    pub fn deadline_passed(&self, t_rx_ns: u64, now_ns: u64) -> bool {
+        now_ns.saturating_sub(t_rx_ns) > self.execution_deadline_ns
     }
 }
 

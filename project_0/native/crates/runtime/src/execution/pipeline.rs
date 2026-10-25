@@ -759,10 +759,6 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 ));
                 continue;
             }
-            if tl.get(Stage::Detect).is_none() {
-                tl.mark(Stage::Detect, self.clock.now_ns());
-                rec.detect_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
-            }
             let txplan = TxPlan {
                 version: plan.tx_version,
                 payer: tx::payer_of(self.payer),
@@ -942,6 +938,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 ));
                 continue;
             }
+            // V2-04: T_detect = valid and economic (PHASENPLAN §6) — the first plan that passes the
+            // economic gate; a plan the gate rejects never marks it (its intervals stay None).
+            if tl.get(Stage::Detect).is_none() {
+                tl.mark(Stage::Detect, self.clock.now_ns());
+                rec.detect_slot = Some(self.slot_watch.get()).filter(|s| *s > 0);
+            }
 
             if actionable {
                 let replace = best_actionable.as_ref().is_none_or(|(_, _, current, _)| {
@@ -1038,11 +1040,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         }
 
         // Drift-Muster: stale Opportunity / Deadline → nicht senden (Record bleibt für P6).
-        let t_detect = tl.get(Stage::Detect).unwrap_or(t_rx_ns);
-        if self
-            .freshness
-            .deadline_passed(t_detect, self.clock.now_ns())
-        {
+        // V2-04: the deadline counts from T_rx — externally defined, it never moves with the
+        // T_detect mark (stricter than the former T_detect anchor).
+        if self.freshness.deadline_passed(t_rx_ns, self.clock.now_ns()) {
             rec.loss = Some(LossReason::Build);
             rec.reason = Some("execution deadline passed".into());
             return rec.with_timeline(&tl);
