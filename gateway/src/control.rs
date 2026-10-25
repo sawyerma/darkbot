@@ -1087,7 +1087,8 @@ mod tests {
         }
         fn with(name: &str, limits: Limits) -> Self {
             use std::os::unix::fs::PermissionsExt;
-            let dir = std::env::temp_dir().join(format!("gw-ledger-{name}-{}", std::process::id()));
+            // Distinct from ledger()'s directories: tests run in parallel.
+            let dir = std::env::temp_dir().join(format!("gw-env-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(dir.join("bsc-root")).unwrap();
             fs::create_dir_all(dir.join("run")).unwrap();
