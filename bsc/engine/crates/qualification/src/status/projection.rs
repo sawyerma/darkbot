@@ -964,6 +964,16 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         Err(_) if !sources.exists() => {}
         Err(_) => warnings.push("SOURCE_MODES_INVALID".into()),
     }
+    // The running runtime's own status (health and counters per source).
+    let runtime_status = rundir.join("bsc-runtime/status.dbrec");
+    if let Some(bytes) = read(&runtime_status) {
+        match record::decode(&schema::bsc_runtime::runtime_status::SCHEMA, &bytes) {
+            Ok(r) => monitoring
+                .records
+                .push(native_record(rundir, &runtime_status, &r)),
+            Err(_) => warnings.push("RUNTIME_STATUS_INVALID".into()),
+        }
+    }
     let gates = vec![
         gate(
             "G0.6a",

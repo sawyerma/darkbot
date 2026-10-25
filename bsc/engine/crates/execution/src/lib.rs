@@ -55,6 +55,18 @@ pub mod qualification_capture;
 /// The native owner of the five signal sources' modes (C0/C1, order V2 §5).
 #[cfg(feature = "runtime")]
 pub mod sources;
+/// The native WSS pending-transaction source adapter (verified full txs).
+#[cfg(feature = "runtime")]
+pub mod wss;
+/// The one owner of first sightings across the sources (C1, plan §5a.3).
+#[cfg(feature = "runtime")]
+pub mod ingress;
+/// The runtime's bounded binary journal.
+#[cfg(feature = "runtime")]
+pub mod runtime_journal;
+/// The read-only runtime process: sources, ingress, journal, status.
+#[cfg(feature = "runtime")]
+pub mod runtime;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.

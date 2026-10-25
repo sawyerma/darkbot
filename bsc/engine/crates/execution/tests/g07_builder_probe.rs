@@ -27,8 +27,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// Review 25.10.: the guard checks the v5 runtime gates (was 69cee91f…).
 /// T5: the authority return is a consumable capability (was 642280d6…).
 /// Review 25.10. (Paket 1): ticketed release gate, durable abort (was 895ced5b…).
+/// C1 runtime WSS dependencies in Cargo.lock (was afe825e3…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "afe825e3aae74f423d444f62b52e28c6b4f3eb9d02b02d5e482fb94376d23a0a";
+const PINNED_PLAN_SHA256: &str = "19078cc4fd0e68d2953480ea92fb53b385d51ee641b5df8d99163eda255b5278";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

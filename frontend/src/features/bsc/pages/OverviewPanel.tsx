@@ -5,6 +5,8 @@ import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
 import { SECTIONS } from "../model/placement";
 import { checkStatus } from "../model/checks";
 import type { BscTab } from "../BscPage";
+import { runtimeView } from "../model/sources";
+import { useNativeRecords } from "./useNativeRecords";
 
 const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
 const age = (s: bigint | undefined) => s && s > 0n ? `${Math.max(0, Math.floor(Date.now() / 1000) - Number(s))} s` : "UNKNOWN";
@@ -14,6 +16,7 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
   const { projection: s, status } = useBscStore(selectStatus);
   const job = s?.jobs.find(j => j.job === "readiness");
   const r = s?.readiness;
+  const runtime = runtimeView(useNativeRecords(), Date.now(), 5000).view;
   return <>
     <Section title={title(1)}>
       <Line label="Source quality" value={<ValueState state={status} />} hint="Transport state of bsc.status, never a trading permission" />
@@ -38,7 +41,7 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
       <Line label="LIVE" value={<ValueState state={s?.liveState} />} />
     </Section>
     <Section title={title(4)}>
-      <Line label="Runtime readiness" value="UNKNOWN" hint="No BSC execution engine is running" />
+      <Line label="Runtime readiness" value={<ValueState state={runtime.state} />} hint={`${runtime.mode}: read-only observation of the effective SHADOW sources; no build, signature or send exists`} />
       <Line label="Pre-Live verdict" value={<ValueState state={r?.verdict} />} />
       <Line label="Mode" value={<ValueState state={r?.mode || undefined} />} />
       <Line label="Selected candidate binding" value={<ValueState state={r?.candidateBinding || undefined} />} hint="Only BOUND counts for the selected candidate; STALE is history" />

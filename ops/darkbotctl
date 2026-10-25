@@ -356,6 +356,10 @@ cmd_deploy() {
     launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL"
     bsc_reporter_up
   fi
+  if launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1; then
+    bsc_runtime_down
+    bsc_runtime_up
+  fi
   if launchctl list "$P0A_LABEL" >/dev/null 2>&1; then
     launchctl bootout "$DOMAIN/$P0A_LABEL"
     p0_analytics_up
@@ -389,6 +393,7 @@ cmd_up_inner() {
     launchctl bootstrap "$DOMAIN" "$PLIST"
   fi
   bsc_reporter_up
+  bsc_runtime_up
   p0_analytics_up
   local i=0; until healthy || [ $i -ge 50 ]; do sleep 0.2; i=$((i+1)); done
   healthy || die "Gateway antwortet nicht – siehe $LOGDIR/gateway.log"
@@ -588,6 +593,7 @@ _down_finish() {
   [ "$(cat "$DOWN_FILE" 2>/dev/null || true)" = "$$" ] || die "Stopp-Zuordnung geändert"
   capture_running && die "Capture noch aktiv; Gateway bleibt an"
   [ -z "$(bsc_pid)" ] || die "BSC Readiness stoppt noch; Gateway bleibt aktiv"
+  bsc_runtime_down
   launchctl bootout "$DOMAIN/$BSC_REPORTER_LABEL" >/dev/null 2>&1 || true
   launchctl bootout "$DOMAIN/$P0A_LABEL" >/dev/null 2>&1 || true
   _gateway_down

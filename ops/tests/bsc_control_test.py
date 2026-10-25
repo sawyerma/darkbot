@@ -16,6 +16,7 @@ try:
     # The job's public read-only endpoint and clock, as bsc_sync copies them into every snapshot.
     (source/'bsc/config').mkdir(parents=True)
     shutil.copy2(h.ROOT/'bsc/config/readiness.public.env',source/'bsc/config/readiness.public.env')
+    shutil.copy2(h.ROOT/'bsc/config/ingress.public.env',source/'bsc/config/ingress.public.env')
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
     evidence=source/'bsc/native/evidence/g07/fixture';evidence.mkdir(parents=True)
     shutil.copy2(h.ROOT/'protocol/golden/bsc/readiness.dbrec',evidence/'readiness.dbrec')
@@ -40,7 +41,7 @@ try:
     subprocess.run(['node',str(h.ROOT/'ops/tests/bsc_control_browser.mjs'),str(h.port),str(h.WORK),str(h.ROOT)],check=True,timeout=180,env=h.env)
 finally:
     h.run('down',ok=False)
-    for kind in ('bsc.readiness','bsc.reporter','gateway'):
+    for kind in ('bsc.readiness','bsc.reporter','bsc.runtime','gateway'):
         subprocess.run(['launchctl','bootout',h.domain+'/'+h.label+'.'+kind],capture_output=True)
     h.server.shutdown()
     print('Isolated BSC evidence:',h.WORK,flush=True)

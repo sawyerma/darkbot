@@ -27,8 +27,9 @@ export function MonitoringPanel() {
     <Line label="Monitoring source quality" value={<ValueState state={quality} />} hint="bsc.monitoring.state transport" />
     <PlacedSection panel="monitoring" section={1} records={records}>
       <Line label="Source modes generation" value={sources.available ? sources.generation.toString() : sources.reason} hint="Native bsc_runtime source owner; requested vs. effective, LIVE stays BLOCKED" />
-      {sources.rows.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
-        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""}`} />)}
+      <Line label="BSC runtime" value={<ValueState state={sources.runtime.state} />} hint={`${sources.runtime.mode} · launches ${sources.runtime.launches} · journal ${sources.runtime.journal}`} />
+      {sources.rows.map(row => <Line key={row.id} label={row.id} value={<><ValueState state={row.effective} /> <ValueState state={row.health} /></>}
+        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""}${row.counters ? ` · ${row.counters}` : ""}`} />)}
       <SourceActions view={sources} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={2} records={records}>

@@ -54,7 +54,7 @@ def sync(root, app, run):
         for path in sorted((root/parent).rglob('*.dbrec')):
             if any(p.is_symlink() for p in path.parents if p!=root): raise ValueError('symlink source')
             files.append(path)
-    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/tools/readiness_job.py']:
+    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/config/ingress.public.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
     # BSC-050 A-scan: exactly the files the v5 contract binds, as the native readiness names them.

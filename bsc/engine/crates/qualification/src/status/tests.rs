@@ -1021,6 +1021,32 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
         field("sources[1].block_reason").as_deref(),
         Some("ECONOMIC_LIVE_NOT_AUTHORIZED")
     );
+    // The running runtime's status record reaches monitoring as well.
+    {
+        use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+        let mut d = Draft::new(&rs::SCHEMA);
+        d.set(rs::GENERATION, 1u64)
+            .set(rs::PROVENANCE_TOOL, "bsc_runtime")
+            .set(rs::PROVENANCE_OBSERVED_UNIX_MS, 5u64)
+            .set(rs::STARTED_UNIX_MS, 4u64)
+            .set(rs::LAUNCHES, 0u64)
+            .set(rs::JOURNAL_PATH, "bsc-runtime/journal/4.dbjnl")
+            .set(rs::JOURNAL_RECORDS, 0u64)
+            .set(rs::JOURNAL_LOST, 0u64)
+            .set(rs::MODE, "READ_ONLY");
+        fs::create_dir_all(run.join("bsc-runtime")).unwrap();
+        fs::write(run.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
+        let snap = projection::project(&root, &run);
+        assert!(names(&snap).contains(&"darkbot.bsc.runtime-status.v1".to_string()));
+        fs::write(run.join("bsc-runtime/status.dbrec"), b"DBREC001 broken").unwrap();
+        let snap = projection::project(&root, &run);
+        assert!(!names(&snap).contains(&"darkbot.bsc.runtime-status.v1".to_string()));
+        assert!(
+            snap.status
+                .warnings
+                .contains(&"RUNTIME_STATUS_INVALID".to_string())
+        );
+    }
     // A tampered generation: no record, a warning.
     let generations = run.join("bsc-sources/generations");
     let newest = fs::read_dir(&generations)

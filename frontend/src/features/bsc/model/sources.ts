@@ -6,17 +6,39 @@
 import type { NativeRecordView } from "./types";
 
 export const SOURCE_SCHEMA = "darkbot.bsc.source-modes.v1";
+export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
 export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"] as const;
 export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
-export interface SourceRow { id: string; requested: string; effective: string; blockReason: string }
-export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[] }
+export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string }
+export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number }
+export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; runtime: RuntimeView }
+
+/** The runtime's own status record; stale once older than `staleMs` (never assumed running). */
+export function runtimeView(records: readonly NativeRecordView[], nowMs: number, staleMs: number): { view: RuntimeView; health: Map<string, { health: string; counters: string }> } {
+  const health = new Map<string, { health: string; counters: string }>();
+  const record = records.find(r => r.schema === RUNTIME_SCHEMA);
+  if (!record) return { view: { state: "NOT_RUNNING", mode: "UNKNOWN", launches: "UNKNOWN", journal: "UNKNOWN" }, health };
+  const f = new Map(record.fields.map(x => [x.name, x.value]));
+  const observed = Number(f.get("_provenance.observed_unix_ms"));
+  const fresh = Number.isFinite(observed) && observed > 0 && nowMs - observed <= staleMs;
+  for (let i = 0; f.has(`sources[${i}].source_id`); i++) {
+    const g = (k: string) => f.get(`sources[${i}].${k}`) ?? "?";
+    health.set(f.get(`sources[${i}].source_id`) ?? "", {
+      health: fresh ? g("health") : "STALE",
+      counters: `full ${g("full")} · hash ${g("hash_only")} · rejected ${g("rejected")} · first ${g("first_full")} · launches ${g("launch_sightings")}/${g("launch_first")} · dropped ${g("dropped")}`,
+    });
+  }
+  return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined }, health };
+}
 
 /** The source group from the native record; nothing is inferred locally. */
-export function sourceControlView(records: readonly NativeRecordView[]): SourceControlView {
+export function sourceControlView(records: readonly NativeRecordView[], nowMs = Date.now(), staleMs = 5000): SourceControlView {
+  const { view: runtime, health } = runtimeView(records, nowMs, staleMs);
+  const healthOf = (id: string) => health.get(id) ?? { health: runtime.state === "NOT_RUNNING" ? "NOT_RUNNING" : "UNKNOWN", counters: "" };
   const unavailable = (reason: string): SourceControlView => ({
-    available: false, reason, generation: 0n,
-    rows: SOURCE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "" })),
+    available: false, reason, generation: 0n, runtime,
+    rows: SOURCE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", ...healthOf(id) })),
   });
   const record = records.find(r => r.schema === SOURCE_SCHEMA);
   if (!record) return unavailable(BACKEND_UNAVAILABLE);
@@ -30,9 +52,10 @@ export function sourceControlView(records: readonly NativeRecordView[]): SourceC
       requested: f.get(`sources[${i}].requested`) ?? "UNKNOWN",
       effective: f.get(`sources[${i}].effective`) ?? "UNKNOWN",
       blockReason: f.get(`sources[${i}].block_reason`) ?? "",
+      ...healthOf(f.get(`sources[${i}].source_id`) ?? ""),
     });
   }
   const ids = rows.map(r => r.id).sort();
   if (ids.join() !== [...SOURCE_IDS].sort().join()) return unavailable("BACKEND_INVALID");
-  return { available: true, reason: "", generation, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!) };
+  return { available: true, reason: "", generation, runtime, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!) };
 }

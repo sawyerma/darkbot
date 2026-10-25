@@ -1,10 +1,12 @@
 # Sourced by darkbotctl; paths and lock are owned by that controller.
 BSC_REPORTER_LABEL="${LABEL%.gateway}.bsc.reporter"
 BSC_READINESS_LABEL="${LABEL%.gateway}.bsc.readiness"
+BSC_RUNTIME_LABEL="${LABEL%.gateway}.bsc.runtime"
 BSC_SOCKET="/tmp/darkbot/bsc.sock"
 if [ -n "${DARKBOT_TEST_DIR:-}" ]; then BSC_SOCKET="$DARKBOT_TEST_DIR/b.sock"; fi
 BSC_JOB_PLIST="$RUNDIR/$BSC_READINESS_LABEL.plist"
 BSC_REPORTER_PLIST="$RUNDIR/$BSC_REPORTER_LABEL.plist"
+BSC_RUNTIME_PLIST="$RUNDIR/$BSC_RUNTIME_LABEL.plist"
 BSC_ROOT="$APP_HOME/bsc-source"
 
 bsc_pid() { launchctl list "$BSC_READINESS_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
@@ -26,7 +28,7 @@ $(plist_env DARKBOT_BSC_READINESS_LABEL "$BSC_READINESS_LABEL")
 $(plist_env DARKBOT_BSC_LAUNCH_ID "${BSC_LAUNCH:-}")
 $(plist_env DARKBOT_BSC_READINESS_BIN "$APP_HOME/current/g07_pre_live_readiness")
 </dict>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><$keep/>
+<key>RunAtLoad</key><true/><key>KeepAlive</key>$(if [ "$keep" = crash ]; then printf '<dict><key>SuccessfulExit</key><false/></dict>'; else printf '<%s/>' "$keep"; fi)
 <key>ThrottleInterval</key><integer>5</integer>
 <key>ExitTimeOut</key><integer>330</integer>
 <key>StandardOutPath</key><string>$(printf '%s' "$log" | xml_escape)</string>
@@ -43,6 +45,26 @@ bsc_reporter_up() {
   if launchctl list "$BSC_REPORTER_LABEL" >/dev/null 2>&1; then return 0; fi
   bsc_plist "$BSC_REPORTER_LABEL" "$APP_HOME/current/bsc-status-reporter" "" "$LOGDIR/bsc-reporter.log" true > "$BSC_REPORTER_PLIST"
   launchctl bootstrap "$DOMAIN" "$BSC_REPORTER_PLIST"
+}
+# The read-only BSC runtime (C1, order V2 §5): observes the sources the native
+# owner made effective SHADOW; idle while all are OFF. Restarted by launchd only
+# after a crash; a stop is a stop file it answers by committing its journal.
+bsc_runtime_pid() { launchctl list "$BSC_RUNTIME_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
+bsc_runtime_up() {
+  [ -x "$APP_HOME/current/bsc_runtime" ] || return 0
+  if launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1; then return 0; fi
+  rm -f "$RUNDIR/bsc.runtime.stop"
+  local args
+  args="$(for a in run --sources "$RUNDIR/bsc-sources" --rundir "$RUNDIR" --config "$BSC_ROOT/bsc/config/ingress.public.env"; do printf '<string>%s</string>' "$(printf '%s' "$a" | xml_escape)"; done)"
+  bsc_plist "$BSC_RUNTIME_LABEL" "$APP_HOME/current/bsc_runtime" "$args" "$LOGDIR/bsc-runtime.log" crash > "$BSC_RUNTIME_PLIST"
+  launchctl bootstrap "$DOMAIN" "$BSC_RUNTIME_PLIST"
+}
+bsc_runtime_down() {
+  launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1 || return 0
+  printf 'stop\n' > "$RUNDIR/bsc.runtime.stop"
+  local i=0; while [ -n "$(bsc_runtime_pid)" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+  launchctl bootout "$DOMAIN/$BSC_RUNTIME_LABEL" >/dev/null 2>&1 || true
+  rm -f "$RUNDIR/bsc.runtime.stop"
 }
 bsc_readiness_start() {
   assert_not_down
