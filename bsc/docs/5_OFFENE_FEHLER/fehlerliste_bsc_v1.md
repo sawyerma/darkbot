@@ -249,6 +249,16 @@ Für jedes fachlich implementierte Ticket **genau die relevanten** Prüfungen; b
 - BSC-050 vor Gate C als Vollinventur, davor nur Gate-A-Teilscan; BSC-051/053 gemeinsamem Gateway-Owner zuordnen, BSC-052 C1-Clock-/Gap-Fehler.
 - Maximal ein optionaler read-only Agent, standardmäßig keiner; Project_0-P0-PROD-CTRL-10 wurde ebenso geändert. Keine zwei Vetoprüfer.
 
+## Bindender Stand 25.10.2026 — technische Freigabe versus wirtschaftliche Autorisierung
+
+Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Abschnitt „GELTENDE REGELN“. Die früheren C1/C2-Entwicklungsstopps gelten **nicht** für die technische Offline-Implementierung. C0–I (E erst nach qualifizierten Four-Verträgen) dürfen nach fachlicher Abhängigkeit implementiert, end-to-end integriert und lokal technisch abgenommen werden; **Mainnet-SIGN/ARM/Funding/BUY/SEND/LIVE** bleiben separat genehmigungspflichtig. Kein produktiver Mock/Stub/Fake oder rein optisches disabled: der echte Native-Controller und `requested/effective`-Guard mit E2E-Anbindung müssen implementiert sein. BSC-050 Vollinventur vor dem breiten C1/C2-Fix.
+
+**BSC-008 = Option A**, **BSC-011 = Option B**, **BSC-049 = SELF_A** sind hiermit als **technische Profilentscheidungen** festgelegt; Providerwirkung, echte Erwerbs-Evidence und wirtschaftliche V5-/SIGN-/ARM-/G0.7-Approval bleiben **unqualifiziert bzw. nicht autorisiert**. Die bisherige „AWAITING_USER_DECISION“-Tabelle §7 ist insoweit überholt.
+
+**BSC-005 erneute sicherheitskritische Codeabweichung:** Die neu verbindliche strengere Regel verbraucht die Remote-Authority unwiderruflich ab erfolgreichem CAS, selbst vor Egress/bei lokalem Latch-Abbruch. Der derzeitige Runner kann über `attempt_authority::Claim::return_unsent` sowie `g07_mainnet_self_launch_buy/main.rs::release_unsent` eine AUTHORIZED-Ref nach einem nachgewiesenen Pre-Release-Abbruch zurückgeben. **STATUS = OPEN/CODE_GAP**, gezielte RED→GREEN-/Crash-/CAS-/GUI-Readiness-Tests und echte Rust-Codekorrektur nötig **vor jeglicher Echtgeldfreigabe**. Kein Ersatz durch Dokumentation oder Fake-Guard.
+
+**Definition TECHNISCH FERTIG:** Alle konkret realisierbaren Anforderungen samt produktiven Aufrufern, native/Protobuf/Gateway/Frontend-End-to-End dort, wo relevant, positive/negative und Risiko-/Recovery-Tests, Release-/Format-/Build-/Regression-Nachweis und aktualisierte Evidence sind auf dem exakten gepushten SHA geprüft. Fehlt nur ausdrücklich externe Mainnet-/Producer-/Provider-Evidence, ist allein `TECHNISCH FERTIG — EXTERNAL_BLOCKED` mit Liste zulässig. `LOCAL_PASS` allein ist nie ein Vollabschluss.
+
 ## 7. Umsetzungsstand Gate A (Einzeiler, je Ticket)
 
 | Ticket | Status | Nachweis |
@@ -267,7 +277,7 @@ Für jedes fachlich implementierte Ticket **genau die relevanten** Prüfungen; b
 
 | Ticket | Status | Nachweis |
 |---|---|---|
-| BSC-008 | AWAITING_USER_DECISION / EXTERNAL | Provider-Qualifikation braucht reale Provider-Evidenz |
+| BSC-008 | USER_DECIDED_A / PROVIDER_UNQUALIFIED | Provider-Qualifikation braucht reale Provider-Evidenz |
 | BSC-009 | NOT_APPLICABLE | nur bei SELF_B-Änderung (heute SELF_A) |
 | BSC-010 | LOCAL_PASS | `1397fb60`: absolute 15-s-Builder-Antwortfrist (Watchdog), sonst UNKNOWN |
 | BSC-011 | LOCAL_PASS | `0f325e06`: Option B umgesetzt (Schema v6 `chain_outcome` + `evidence_integrity`, Gesamtverdikt unverändert, Gate-Reason-Codes, Frontend v6) |
@@ -279,13 +289,13 @@ Für jedes fachlich implementierte Ticket **genau die relevanten** Prüfungen; b
 | BSC-017 | LOCAL_PASS | `0f325e06`: G0.8-Result v6 nur um die zwei BSC-011-Felder (In-place-Bump wie v4→v5; kein G0.8-Record existiert) |
 | BSC-041 | LOCAL_PASS | `19b49fa2`: Journal-SHA-256 gegen FIPS-/Padding-/Streaming-Referenzen |
 | Gate-Regression | LOCAL_PASS | `1519adcd`: Gateway-Testisolation (`gw-ledger-open` kollidierte); clippy `-D warnings` execution/qualification/record sauber (`26b39c42`) |
-| BSC-018–036, 043–047, 050 (voll), 051–053 | FUTURE_PHASE_BLOCKED | Gate C erst nach echtem G0.7/G0.8-Verdikt |
-| BSC-037–040, 042 | FUTURE_PHASE_BLOCKED | Gate D nur nach Messnachweis |
+| BSC-018–036, 043–047, 050 (voll), 051–053 | OFFLINE_IMPLEMENTATION_AUTHORIZED_BY_PHASE / LIVE_BLOCKED | Bindender PHASENPLAN 25.10.2026: BSC-050 Vollscan vor umfassender C1/C2-Arbeit; C0–I nach fachlichen Abhängigkeiten offline entwickeln und technisch abnehmen, E erst nach Four-G0.1-Vertragsfreeze; G0.7/G0.8 bleiben echte Geld-/Betriebsgates; Shared Gateway nur mit P0-Owner |
+| BSC-037–040, 042 | MEASUREMENT_DEPENDENT / NO_FAKE_PASS | Gezielte Offline-Optimierung erst nach real vergleichbarer Messbasis; keine künstliche µs-Gewinnangabe; operative Freischaltung separat |
 
 **Entscheidungen — AWAITING_USER_DECISION (vor der jeweiligen Freigabe):**
 
 | Ticket | Frage | Optionen | Empfehlung |
 |---|---|---|---|
-| BSC-008 | 48Club `noMerge`/`positionFirst`, Ablauf `+2` | A: unverändert (heutige DRY/V5-Projektion, Rest-Risiko PROVIDER_UNQUALIFIED ausdrücklich akzeptiert) · B: ändern → neue `bundle_wire`-Werte, neuer SIGN/Requal/V5/Probe-Plan | A, sofern keine Provider-Evidenz für B vorliegt |
-| BSC-049 | Profil SELF_A vs. SELF_B | A: öffentlicher Salt, eingefrorene Bytes, vorhersehbare Adresse (Kollision unbewiesen) · B: geheimer Salt, eigene Requal/V5 | Nutzerentscheidung (wirtschaftliches Risiko); heute A gewählt (Gen 1) |
+| BSC-008 | **USER_DECIDED_A** | Bestehende `bundle_wire`-Semantik `noMerge=true`, `positionFirst=true`, `send_head+2` bleibt; Providerwirkung weiterhin **PROVIDER_UNQUALIFIED** | Technische Profilentscheidung verbindlich; **keine** V5-/SIGN-/ARM-/Mainnet-Freigabe |
+| BSC-049 | **USER_DECIDED_SELF_A** | SELF_A (öffentlicher, bestehender eingefrorener Salt; Kollisions-/Partial-Inclusion-Risiko weiterhin nicht real bewiesen). SELF_B bleibt separates Requalifikationsprofil. | Technische Profilentscheidung verbindlich; **keine** V5-/SIGN-/ARM-/Mainnet-Freigabe |
 | BSC-005 | Authority-Medium | `origin`-Ref per CAS (umgesetzt, GitHub qualifiziert) · Alternative nur betrieblich (ein Host) | `origin`-Ref; der echte Grant ist Nutzeraktion nach der V5-Freigabe |
