@@ -77,6 +77,8 @@ pub struct StateCounters {
     pub stale_slot: u64,
     pub stale_write_version: u64,
     pub same_slot_no_wv: u64,
+    /// F-05: same-slot updates without write_version refused against a versioned record.
+    pub same_slot_unversioned_refused: u64,
     pub below_root: u64,
     pub buffered: u64,
     pub buffer_dropped_le_snapshot: u64,
@@ -396,6 +398,12 @@ impl StateCore {
                         return ApplyOutcome::StaleWriteVersion;
                     }
                     (Some(_), Some(_)) => {}
+                    // F-05: no order from missing information — an unversioned update never
+                    // overwrites a versioned record of the same slot.
+                    (None, Some(_)) => {
+                        self.counters.same_slot_unversioned_refused += 1;
+                        return ApplyOutcome::StaleWriteVersion;
+                    }
                     _ => {
                         // Ohne write_version keine Ordnung im Slot: später gewinnt, gezählt.
                         self.counters.same_slot_no_wv += 1;
@@ -880,11 +888,22 @@ mod tests {
             Some(ApplyOutcome::Applied)
         );
         assert_eq!(st.get(&pk).unwrap().data, vec![4]);
-        // ohne write_version im selben Slot: angewendet, aber gezählt
+        // F-05: an update without write_version never overwrites a versioned record of the same
+        // slot (no order from missing information): refused, counted, the record stays.
         assert_eq!(
             st.on_event(IngressEvent::Account(upd(pk, 10, None, 5))),
+            Some(ApplyOutcome::StaleWriteVersion)
+        );
+        assert_eq!(st.get(&pk).unwrap().data, vec![4]);
+        assert_eq!(st.counters().same_slot_unversioned_refused, 1);
+        // Both unversioned (WSS only): the later update wins, counted.
+        let ws = Pubkey::new_unique();
+        st.on_event(IngressEvent::Account(upd(ws, 10, None, 1)));
+        assert_eq!(
+            st.on_event(IngressEvent::Account(upd(ws, 10, None, 2))),
             Some(ApplyOutcome::Applied)
         );
+        assert_eq!(st.get(&ws).unwrap().data, vec![2]);
         assert_eq!(st.counters().same_slot_no_wv, 1);
     }
 
