@@ -202,6 +202,11 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
     // send buffer of at most 4 MiB and the peer's 4 KiB receive buffer hold), its reader is not:
     // every Ping is taken without a stalled send of the peer.
     const FLOOD_PINGS: usize = 48 * 1024;
+    // P0-007: a send counts as stalled (the client stopped reading) only after 3 s — a loaded CI
+    // runner can delay one send by more than the former 500 ms without any blocked reader, while
+    // a reader blocked on its own Pong (the pre-P3-04 code, up to its 5 s Pong timeout) still
+    // stalls the peer far longer.
+    const FLOOD_STALL: Duration = Duration::from_secs(3);
     let (flooded, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let release = Shutdown::new();
     let (addr_tx, addr_rx) = std::sync::mpsc::channel();
@@ -240,7 +245,7 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
             let mut sent = 0usize;
             while sent < FLOOD_PINGS && tokio::time::Instant::now() < until {
                 let ping = ws.send(Message::Ping(vec![0x5A; 125]));
-                match tokio::time::timeout(Duration::from_millis(500), ping).await {
+                match tokio::time::timeout(FLOOD_STALL, ping).await {
                     Ok(Ok(())) => sent += 1,
                     // A stalled send: the client stopped reading.
                     _ => break,
