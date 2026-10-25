@@ -228,12 +228,24 @@ pub struct SettlementEvidence {
 /// V2-01: the signatures whose observation is complete (final; never read again).
 pub(super) fn complete_signatures(
     observations: &BTreeMap<String, super::receipts::FinalizedObservation>,
-) -> BTreeSet<String> {
-    observations
-        .iter()
-        .filter(|(_, o)| o.is_complete())
-        .map(|(signature, _)| signature.clone())
-        .collect()
+) -> Observed {
+    Observed {
+        complete: observations
+            .iter()
+            .filter(|(_, o)| o.is_complete())
+            .map(|(signature, _)| signature.clone())
+            .collect(),
+        stored: !observations.is_empty(),
+    }
+}
+
+/// What a settlement read starts from: the signatures with a complete observation (not read
+/// again, V2-01) and whether any observation is stored at all — then no non-landing proof is
+/// read (it could never be accepted while an observation exists).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Observed {
+    pub complete: BTreeSet<String>,
+    pub stored: bool,
 }
 
 /// V2-01: a read replaces the stored observation unless that one is complete and the read is
@@ -252,17 +264,18 @@ pub(super) fn keep_strongest(
     observations.insert(signature, read);
 }
 
-/// The settlement worker's reads for `intent` (signatures in `observed` are not read again).
+/// The settlement worker's reads for `intent` (signatures with a complete observation are not
+/// read again).
 pub fn fetch_settlement_evidence(
     rpc: &RpcClient,
     intent: &SettlementSubject,
-    observed: &BTreeSet<String>,
+    observed: &Observed,
 ) -> SettlementEvidence {
     let wallet = intent.wallet.parse();
     let observations: Vec<_> = intent
         .signatures
         .iter()
-        .filter(|s| !observed.contains(*s))
+        .filter(|s| !observed.complete.contains(*s))
         .map(|signature| {
             let read = match (&wallet, signature.parse()) {
                 (Ok(wallet), Ok(sig)) => super::receipts::fetch_finalized(
@@ -278,7 +291,7 @@ pub fn fetch_settlement_evidence(
             (signature.clone(), read)
         })
         .collect();
-    let none_observed = observed.is_empty() && observations.iter().all(|(_, r)| r.is_err());
+    let none_observed = !observed.stored && observations.iter().all(|(_, r)| r.is_err());
     SettlementEvidence {
         proof: none_observed.then(|| non_landing_proof(rpc, intent)),
         observations,
@@ -355,7 +368,7 @@ impl Journal {
 
     /// The settlement worker's job: the intent and the already observed signatures of an
     /// UNKNOWN attempt; `None` otherwise.
-    pub fn settlement_job(&self) -> Option<(Intent, BTreeSet<String>)> {
+    pub fn settlement_job(&self) -> Option<(Intent, Observed)> {
         self.saved
             .as_ref()
             .filter(|s| s.phase == Phase::HandoffUnknown)
@@ -363,8 +376,6 @@ impl Journal {
             .map(|s| (s.intent.clone(), complete_signatures(&s.observations)))
     }
 
-    /// Finalized but not yet booked (e.g. a valuation that was unknown, or a restart between the
-    /// two transitions): settled from the journal alone, no read needed.
     /// C02/F-04: the settled attempt's landing telemetry — the one reconcile path. Its primary
     /// signature with the finalized slot, outcome and fees of the settlement; compute units and
     /// the paid tip are not read here (`None`, never 0). `released`: the capital the booking of
@@ -401,6 +412,8 @@ impl Journal {
         })
     }
 
+    /// Finalized but not yet booked (e.g. a valuation that was unknown, or a restart between the
+    /// two transitions): settled from the journal alone, no read needed.
     pub fn awaits_booking(&self) -> bool {
         self.saved
             .as_ref()
@@ -637,7 +650,7 @@ mod tests {
         let step = j.apply_settlement_evidence(ev(&incomplete), &value, BOOKED);
         assert!(matches!(step, Ok(SettleStep::Unknown(_))), "{step:?}");
         assert!(
-            j.settlement_job().unwrap().1.is_empty(),
+            j.settlement_job().unwrap().1.complete.is_empty(),
             "an incomplete observation is read again"
         );
         let size = fs::metadata(&journal).unwrap().len();
@@ -645,6 +658,40 @@ mod tests {
         assert_eq!(fs::metadata(&journal).unwrap().len(), size, "nothing new");
         let step = j.apply_settlement_evidence(ev(&complete), &value, BOOKED);
         assert!(matches!(step, Ok(SettleStep::Settled(_))), "{step:?}");
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    /// Review E3 (V2-01): with an observation stored (here incomplete) a failed re-read reads no
+    /// non-landing proof — it could never be accepted (an observation exists), so its three
+    /// calls (block height, history floor, statuses) would only spend the Reconcile budget.
+    #[test]
+    fn v2_01_a_stored_observation_reads_no_non_landing_proof() {
+        let (path, mut j, i) = handed_off(1);
+        let s1 = i.signatures[0].clone();
+        let incomplete = FinalizedObservation {
+            signature: s1.clone(),
+            slot: 500,
+            success: true,
+            fee_lamports: 5_000,
+            wallet_sol_delta_lamports: -5_000,
+            wallet_token_deltas: None,
+            unknown_reasons: vec!["ARCHIVE_429".into()],
+        };
+        let evidence = SettlementEvidence {
+            observations: vec![(s1.clone(), Ok(incomplete))],
+            proof: None,
+        };
+        let step = j.apply_settlement_evidence(evidence, &value, BOOKED);
+        assert!(matches!(step, Ok(SettleStep::Unknown(_))), "{step:?}");
+        let (client, calls) = rpc(vec![]);
+        let step = j.settle_step(&client, &value, BOOKED);
+        assert!(matches!(step, Ok(SettleStep::Unknown(_))), "{step:?}");
+        let calls = calls.lock().unwrap().clone();
+        assert!(
+            calls.iter().all(|m| m == "getTransaction"),
+            "only the re-read: {calls:?}"
+        );
+        assert!(j.active_hold().is_some());
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -676,7 +723,7 @@ mod tests {
         assert!(j.saved.as_ref().unwrap().observations[&s1]
             .unknown_reasons
             .is_empty());
-        assert_eq!(j.settlement_job().unwrap().1, [s1.clone()].into());
+        assert_eq!(j.settlement_job().unwrap().1.complete, [s1.clone()].into());
         let step = j.apply_settlement_evidence(ev(&s2, obs(&s2, true)), &value, BOOKED);
         assert!(matches!(step, Ok(SettleStep::Settled(_))), "{step:?}");
         fs::remove_dir_all(path).unwrap();

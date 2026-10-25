@@ -11,7 +11,7 @@ pub mod geyser_loopback;
 pub mod sources;
 pub mod ws_rpc;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// [FIX-40] Zuletzt beobachteter Chain-Slot, vom Ingress lockfrei aktualisiert, exakt bei T_sign gelesen
@@ -37,9 +37,12 @@ impl SlotWatch {
 
 /// Out-of-Band-Signal: Sink-Overflow oder Fatal, das **nicht** über den (vollen) Channel
 /// transportiert werden kann. Der Consumer prüft es vor jeder Entscheidung → HALT(FeedGap).
+/// Raises are counted: a recovery clears only those raised before it started
+/// (`clear_through`), a failure during it stays raised.
 #[derive(Clone, Debug, Default)]
 pub struct IngressHalt {
-    flag: Arc<AtomicBool>,
+    raised: Arc<AtomicU64>,
+    cleared: Arc<AtomicU64>,
 }
 
 impl IngressHalt {
@@ -47,14 +50,22 @@ impl IngressHalt {
         Self::default()
     }
     pub fn raise(&self) {
-        self.flag.store(true, Ordering::SeqCst);
+        self.raised.fetch_add(1, Ordering::SeqCst);
     }
     pub fn is_raised(&self) -> bool {
-        self.flag.load(Ordering::SeqCst)
+        self.raised.load(Ordering::SeqCst) != self.cleared.load(Ordering::SeqCst)
+    }
+    /// Raises so far (the mark a recovery takes when it starts).
+    pub fn raises(&self) -> u64 {
+        self.raised.load(Ordering::SeqCst)
     }
     /// Nur nach vollständiger Recovery zurücksetzen.
     pub fn clear(&self) {
-        self.flag.store(false, Ordering::SeqCst);
+        self.clear_through(self.raises());
+    }
+    /// Clears the raises up to `mark` (`raises()` when the recovery started); later ones stay.
+    pub fn clear_through(&self, mark: u64) {
+        self.cleared.fetch_max(mark, Ordering::SeqCst);
     }
 }
 

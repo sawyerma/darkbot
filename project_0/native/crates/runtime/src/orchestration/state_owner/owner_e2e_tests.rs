@@ -300,6 +300,93 @@ fn snapshot(f: &Fixture, missing_required: bool) -> SnapshotData {
     }
 }
 
+/// Review E3 (V2-02): an ingress failure raised while a recovery runs (a sink overflow during
+/// the snapshot fetch) is not covered by that recovery — its Ready clears only what was raised
+/// before it started; the new halt stays for the lifecycle (FeedGap) and the next stream.
+#[test]
+fn recovery_ready_keeps_a_halt_raised_during_the_recovery() {
+    let mut f = fixture("halt_during_recovery");
+    f.owner.halt.raise();
+    let good = snapshot(&f, false);
+    let halt = f.owner.halt.clone();
+    let mut fetch = || {
+        halt.raise();
+        Ok(SnapshotData {
+            slot: good.slot,
+            accounts: good.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert!(
+        f.owner.halt.is_raised(),
+        "a failure during the recovery stays"
+    );
+}
+
+/// Review E3 (V2-02): a raised ingress halt not yet consumed by the lifecycle (same drain batch)
+/// blocks the fork trigger — a root that orphans a write starts no recovery whose Ready would
+/// clear that halt; the state stays halted.
+#[test]
+fn fork_trigger_never_runs_over_a_raised_ingress_halt() {
+    use darkbot_solana::ingress::{AccountUpdate, SlotStatus, SlotUpdate};
+    let mut f = fixture("fork_over_halt");
+    let good = snapshot(&f, false);
+    let fetches = std::cell::Cell::new(0);
+    let mut fetch = || {
+        fetches.set(fetches.get() + 1);
+        Ok(SnapshotData {
+            slot: good.slot,
+            accounts: good.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert!(f.owner.st.run_state().is_tradable());
+    let before = fetches.get();
+    let slot = |slot, parent| {
+        IngressEvent::Slot(SlotUpdate {
+            slot,
+            parent: Some(parent),
+            status: SlotStatus::Processed,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        })
+    };
+    let root = |slot| IngressEvent::Root {
+        slot,
+        source: SourceKind::WsRpcControl,
+        t_rx_ns: 0,
+    };
+    for ev in [
+        slot(11, 10),
+        root(11),
+        slot(12, 11),
+        IngressEvent::Account(AccountUpdate {
+            pubkey: Pubkey::new_unique(),
+            owner: Pubkey::new_unique(),
+            lamports: 1,
+            data: vec![1; 8],
+            slot: 12,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }),
+        slot(13, 11),
+    ] {
+        f.producer.try_push(ev).unwrap();
+    }
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    f.owner.halt.raise();
+    f.producer.try_push(root(13)).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert_eq!(fetches.get(), before, "no recovery over a raised halt");
+    assert!(f.owner.halt.is_raised());
+    assert!(!f.owner.st.run_state().is_tradable());
+}
+
 /// C1 test 7, Ready path: a StreamReady with a valid A/B snapshot pair (ProgramData equal to the
 /// startup baseline) makes the owner Ready and clears the ingress halt; finish ends in order.
 #[test]
@@ -2046,7 +2133,7 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     run_until(&mut f, |o| o.fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the read is handed to the worker");
     assert_eq!(job.subject.signatures, intent.signatures);
-    assert!(job.observed.is_empty());
+    assert_eq!(job.observed, Default::default());
     let evidence = SettlementEvidence {
         observations: vec![],
         proof: Some(Ok(proof)),

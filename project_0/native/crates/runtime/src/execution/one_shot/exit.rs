@@ -392,7 +392,7 @@ impl Journal {
 
     /// The open exit's signatures and its proof bounds (`last_valid_block_height`, state slot)
     /// with the already observed signatures, for the settlement worker; `None` otherwise.
-    pub fn exit_job(&self) -> Option<(ExitIntent, BTreeSet<String>)> {
+    pub fn exit_job(&self) -> Option<(ExitIntent, super::settlement::Observed)> {
         self.saved
             .as_ref()
             .and_then(active)
@@ -1163,7 +1163,7 @@ pub(crate) mod tests {
         let step = j.apply_exit_evidence(evidence(sig, incomplete.clone()), &value, 2_000);
         assert!(matches!(step, Ok(ExitStep::Unknown(_))), "{step:?}");
         assert!(
-            j.exit_job().unwrap().1.is_empty(),
+            j.exit_job().unwrap().1.complete.is_empty(),
             "an incomplete exit observation is read again"
         );
         let step = j.apply_exit_evidence(evidence(sig, complete), &value, 2_000);

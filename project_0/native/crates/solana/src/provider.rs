@@ -339,16 +339,17 @@ impl Budget {
             budget: self.clone(),
         }
     }
-    /// V2-07: the permit without waiting — only when no admission is queued (their order is
-    /// kept) and everything `admit` would wait for is free now: a token, the workload's pacing,
-    /// no cooldown, a concurrency slot, call and byte budget. `None` leaves the caller to the
-    /// queued `admit`, which reports every refusal.
-    pub(crate) fn try_admit(self: &Arc<Self>, work: Workload) -> Option<Permit> {
+    /// V2-07: the permit without waiting — only before `deadline`, when no admission is queued
+    /// (their order is kept) and everything `admit` would wait for is free now: a token, the
+    /// workload's pacing, no cooldown, a concurrency slot, call and byte budget. `None` leaves the
+    /// caller to the queued `admit`, which reports every refusal.
+    pub(crate) fn try_admit(self: &Arc<Self>, work: Workload, deadline: Instant) -> Option<Permit> {
         let mut s = self.lock_state();
-        if halted(&s).is_some() || s.retry_after_overflow || !s.queue.is_empty() {
+        let now = Instant::now();
+        if now >= deadline || halted(&s).is_some() || s.retry_after_overflow || !s.queue.is_empty()
+        {
             return None;
         }
-        let now = Instant::now();
         self.refill(&mut s, now);
         let free = s.tokens >= 1.0
             && s.next_workload[work.index()] <= now
@@ -878,7 +879,7 @@ impl BudgetedSender {
             let budget = self.budget.clone();
             // V2-07: a permit that is free now is taken inline; only a waiting admission
             // occupies a blocking thread.
-            let permit = match budget.try_admit(work) {
+            let permit = match budget.try_admit(work, deadline) {
                 Some(permit) => permit,
                 None => tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
                     .await
@@ -1383,6 +1384,21 @@ mod tests {
             waited >= Duration::from_millis(500),
             "shared pacing slot kept: {waited:?}"
         );
+    }
+    /// Review E3 (V2-07): the inline admission grants nothing at or after the caller's deadline
+    /// — no token, no request count, no pacing slot (as `admit` refuses it); before the deadline
+    /// a free permit is granted at once.
+    #[test]
+    fn try_admit_grants_nothing_after_the_deadline() {
+        let b = Arc::new(Budget::configured(
+            &crate::runtime_config::RuntimeConfig::default(),
+        ));
+        let past = Instant::now();
+        assert!(b.try_admit(Workload::FeeQuote, past).is_none());
+        assert_eq!(b.snapshot().requests, 0);
+        let permit = b.try_admit(Workload::FeeQuote, Instant::now() + Duration::from_secs(5));
+        assert!(permit.is_some());
+        assert_eq!(b.snapshot().requests, 1);
     }
     /// C5: a reconciliation waiting behind many analytics jobs is admitted first, inside the
     /// same concurrency and call budget.

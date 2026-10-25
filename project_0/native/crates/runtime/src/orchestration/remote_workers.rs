@@ -94,7 +94,7 @@ pub struct OraclePriceProjectionResultMessage {
 /// signatures); `exit` names the exit (its approval id), `None` the attempt.
 pub struct Fe04SettlementWork {
     pub subject: crate::execution::one_shot::settlement::SettlementSubject,
-    pub observed: std::collections::BTreeSet<String>,
+    pub observed: crate::execution::one_shot::settlement::Observed,
     pub exit: Option<String>,
 }
 

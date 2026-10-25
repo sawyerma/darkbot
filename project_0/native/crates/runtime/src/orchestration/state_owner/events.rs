@@ -180,6 +180,13 @@ impl ShadowOwner {
                 };
                 self.counts[i] += 1;
             }
+            // Review E3: a raised ingress halt not yet consumed by the lifecycle halts the state
+            // first — no fork-triggered recovery runs over it; a Ready clears only the raises
+            // from before this recovery (a failure during it stays raised).
+            if self.halt.is_raised() {
+                self.st.halt(darkbot_common::error::HaltReason::FeedGap);
+            }
+            let raises_before = self.halt.raises();
             let outcome = self.drv.on_event_cancellable(
                 &mut self.st,
                 ev,
@@ -249,7 +256,7 @@ impl ShadowOwner {
                             }
                         }
                     }
-                    self.halt.clear();
+                    self.halt.clear_through(raises_before);
 
                     // A program upgrade can race startup/recovery before its WSS notification is
                     // observed. Re-check the canonical recovered ProgramData bytes against the
