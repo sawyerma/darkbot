@@ -39,10 +39,9 @@ use inputs::*;
 use shared::*;
 use transactions::*;
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
+/// Record time; a clock error stops the command (never the time 0).
+fn now_ms() -> Result<u64, String> {
+    darkbot_bsc_record::observed_now()
 }
 
 fn flag<'a>(args: &'a [String], name: &str) -> Result<&'a str, String> {
@@ -115,7 +114,7 @@ fn run(args: &[String]) -> Result<(), String> {
             expected,
             flag(args, "--request-id")?,
             FROZEN_APPROVED_V5_SHA256,
-            now_ms(),
+            now_ms()?,
         )?;
         println!(
             "candidate.request = RECORDED profile={} expected_generation={expected}; effective only after the native apply at the next desktop sync",
@@ -131,7 +130,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 &read_input(flag(args, "--economics")?)?,
                 &read_input(flag(args, "--dry")?)?,
                 &read_input(flag(args, "--preflight")?)?,
-                now_ms(),
+                now_ms()?,
             )?;
             print_candidate(&Store::create(dir)?.init_a(candidate, salt)?);
         }
@@ -140,7 +139,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let (candidate, salt) = fresh_b(
                 &read_input(flag(args, "--preflight")?)?,
                 &read_input(flag(args, "--dry")?)?,
-                now_ms(),
+                now_ms()?,
                 &mut os_random,
             )?;
             print_candidate(&store.create_b(candidate, salt)?);
@@ -154,7 +153,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 expected,
                 FROZEN_APPROVED_V5_SHA256,
                 Path::new(ATTEMPT_STATE_ROOT),
-                now_ms(),
+                now_ms()?,
             )?;
             println!("selection.generation = {}", selection.generation);
             println!("selection.profile = {}", selection.profile.name());
@@ -176,7 +175,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 &read_input(&run.join("dry_result.dbrec").to_string_lossy())?,
                 &read_input(&run.join("preflight.dbrec").to_string_lossy())?,
             )?;
-            store.qualify(profile, &qualification, now_ms())?;
+            store.qualify(profile, &qualification, now_ms()?)?;
             println!(
                 "{}.qualification = QUALIFIED_FOR {} ({}); not economic approval",
                 profile.name(),
@@ -191,7 +190,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 Path::new(flag(args, "--rundir")?),
                 FROZEN_APPROVED_V5_SHA256,
                 Path::new(ATTEMPT_STATE_ROOT),
-                now_ms(),
+                now_ms()?,
             )? {
                 println!("candidate.request.{id} = {state}: {detail}");
             }
@@ -283,7 +282,7 @@ mod tests {
         let base = fs::canonicalize(env::temp_dir()).unwrap().join(format!(
             "g07-candidate-{tag}-{}-{}",
             std::process::id(),
-            now_ms()
+            now_ms().unwrap()
         ));
         fs::DirBuilder::new().mode(0o700).create(&base).unwrap();
         base

@@ -18,7 +18,6 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 };
 use darkbot_bsc_trading::economics::slippage::min_output;
 use std::io::Write;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 const DEFAULT_BUY_VALUE_WEI: u64 = 1_000_000_000_000_000;
@@ -68,10 +67,8 @@ fn main() {
     let min_output = min_output(quote.output_amount, SLIPPAGE_BPS as u16)
         .unwrap_or_else(|e| panic!("minimum output failed: {e}"));
 
-    let observed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let observed = darkbot_bsc_record::observed_now()
+        .unwrap_or_else(|e| panic!("provenance clock: {e}; no quote record"));
     let mut d = Draft::new(&q::SCHEMA);
     d.set(PROVENANCE_TOOL, "g06a_native_bnb_quote")
         .set(PROVENANCE_OBSERVED_UNIX_MS, observed)

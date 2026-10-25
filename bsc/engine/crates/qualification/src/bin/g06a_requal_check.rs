@@ -37,7 +37,6 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The head of the frozen DRY (the shared R0 check reads it from the frozen
 /// preflight; the stand-in records use it).
@@ -666,10 +665,8 @@ fn bounded_detail(text: &str) -> &str {
 fn status_record(dir: &Path, frozen: &Path, e: Evaluation) -> (bool, Vec<u8>) {
     let pass = e.checks.iter().all(|c| c.pass);
     let mut d = e.facts;
-    let observed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|t| t.as_millis() as u64)
-        .unwrap_or(0);
+    let observed = darkbot_bsc_record::observed_now()
+        .unwrap_or_else(|e| panic!("provenance clock: {e}; no requalification record"));
     d.set(PROVENANCE_TOOL, "g06a_requal_check")
         .set(PROVENANCE_OBSERVED_UNIX_MS, observed)
         .set(rq::VERDICT, if pass { "PASS" } else { "STOP" })

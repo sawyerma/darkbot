@@ -944,6 +944,22 @@ fn display(value: &Value) -> String {
     }
 }
 
+/// Provenance time in milliseconds since the Unix epoch of `now`. A clock
+/// before 1970 or beyond the u64 millisecond range is an error, never the
+/// valid-looking time 0 (BSC-050 A-scan B6).
+pub fn observed_unix_ms(now: std::time::SystemTime) -> Result<u64, String> {
+    let since = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "the clock is before 1970".to_string())?;
+    u64::try_from(since.as_millis())
+        .map_err(|_| "the clock is beyond the u64 millisecond range".to_string())
+}
+
+/// [`observed_unix_ms`] of the current system time.
+pub fn observed_now() -> Result<u64, String> {
+    observed_unix_ms(std::time::SystemTime::now())
+}
+
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
@@ -1016,6 +1032,18 @@ pub fn u256_from_decimal(text: &str) -> Option<[u8; 32]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC-050 A-scan B6: a clock before 1970 is an error, never time 0.
+    #[test]
+    fn observed_unix_ms_refuses_a_clock_before_the_epoch() {
+        use std::time::{Duration, UNIX_EPOCH};
+        assert_eq!(
+            observed_unix_ms(UNIX_EPOCH + Duration::from_millis(1500)),
+            Ok(1500)
+        );
+        assert!(observed_unix_ms(UNIX_EPOCH - Duration::from_secs(1)).is_err());
+        assert!(observed_now().is_ok_and(|ms| ms > 1_700_000_000_000));
+    }
 
     const INNER: Schema = Schema {
         name: "test.inner",

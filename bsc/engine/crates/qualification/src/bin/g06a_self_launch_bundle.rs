@@ -29,7 +29,6 @@ use darkbot_bsc_execution::bundle_wire::{
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 use k256::elliptic_curve::zeroize::Zeroizing;
 use std::io::Write;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs, path::Path, str::FromStr};
 
 const CHAIN_ID: u64 = 56;
@@ -729,10 +728,8 @@ fn main() {
     let dry4 = dry4_nonce && dry4_zero_egress;
     let all = dry1 && dry2 && dry3 && dry4;
 
-    let observed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let observed = darkbot_bsc_record::observed_now()
+        .unwrap_or_else(|e| panic!("provenance clock: {e}; no DRY record"));
     let mut d = Draft::new(&dry::NATIVE);
     d.set(PROVENANCE_TOOL, "g06a_self_launch_bundle")
         .set(PROVENANCE_OBSERVED_UNIX_MS, observed)
