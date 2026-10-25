@@ -5,20 +5,21 @@
 //! not perform venue semantics, chain reconciliation, signing, provider
 //! submission or LIVE authorization.
 //!
-//! The ring is one-producer/one-consumer, fixed-capacity, mmap-backed and
-//! sequence-numbered. Producer publication is Release; consumer observation
-//! is Acquire. Queue overflow is explicit and never overwrites unread data.
+//! Wire V2 (`protocol_v2`): per-lane one-producer/one-consumer, fixed-capacity,
+//! mmap-backed and sequence-numbered rings. Producer publication is Release;
+//! consumer observation is Acquire. Queue overflow is explicit and never
+//! overwrites unread data.
 
 pub mod host;
 pub mod hot0;
 pub mod ingress;
 pub mod outbound;
-pub mod protocol_v1;
 pub mod protocol_v2;
 pub mod trust;
+pub mod wire;
 
-// Wire V1 keeps its public paths at the crate root (`darkbot_bsc_geth_ipc::Producer`, ...).
-pub use protocol_v1::*;
+// The shared wire vocabulary keeps its paths at the crate root.
+pub use wire::{AUX_LEN, HASH_LEN, PEER_LEN, RecordKind, SOURCE_LEN, UnknownRecordKind};
 
 /// Wire V2 under its pre-R11 module path: the same items as [`protocol_v2`],
 /// kept so that existing consumers of `darkbot_bsc_geth_ipc::v2` stay valid.

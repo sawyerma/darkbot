@@ -1,5 +1,7 @@
 # C1 Fast-Lane wire contract v1
 
+> **HISTORISCH (25.10.2026, BSC-045):** Kein produktiver Aufrufer mehr; der Rust-V1-Ring ist entfernt, gültig ist [FASTLANE_WIRE_V2.md](FASTLANE_WIRE_V2.md). `RecordKind`-Nummern und Feldlängen gelten unverändert in V2 (`geth_ipc::wire`).
+
 Status: **IMPLEMENTATION CONTRACT / NOT YET QUALIFIED**
 
 Pinned chain client:

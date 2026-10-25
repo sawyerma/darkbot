@@ -843,7 +843,15 @@ enum LanePoll {
     Handled(Hot0Outcome),
 }
 
-/// The single-owner multi-lane receive loop of HOT0 (C1.5).
+/// The single-owner multi-lane receive loop of HOT0 (C1.5). Its clock is
+/// the qualified `monotonic_ns`; no caller outside this module's tests can
+/// replace it (BSC-044):
+///
+/// ```compile_fail,E0599
+/// fn replace(poller: &mut darkbot_bsc_geth_ipc::hot0::Hot0Poller) {
+///     poller.set_clock(|| 0);
+/// }
+/// ```
 pub struct Hot0Poller {
     lanes: LaneSetV2,
     chain: Option<usize>,
@@ -902,8 +910,9 @@ impl Hot0Poller {
         Ok(poller)
     }
 
-    /// Replaces the clock; for tests.
-    pub fn set_clock(&mut self, clock: fn() -> u64) {
+    /// Replaces the clock; this module's tests only (BSC-044).
+    #[cfg(test)]
+    fn set_clock(&mut self, clock: fn() -> u64) {
         self.core.clock = clock;
     }
 
