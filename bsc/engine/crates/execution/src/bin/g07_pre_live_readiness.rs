@@ -19,6 +19,7 @@ use chain_reads::*;
 use darkbot_bsc_execution::acceptance_guard::{
     FROZEN_APPROVED_V5_SHA256, V5_RELATIVE_PATH, inspect_v5, verify_further_v5_evidence,
 };
+use darkbot_bsc_execution::builder_policy;
 use darkbot_bsc_execution::launch_path::Current;
 use darkbot_bsc_record::{
     Value, decode,
@@ -119,11 +120,6 @@ fn bound_input(
         _ => return Err(format!("legacy hash binding mismatch: {path}")),
     }
     Ok(record)
-}
-
-// Freshness is measured from a fetch time, never from a date or a file mtime.
-fn freshness(observed: Option<u64>, now: u64) -> bool {
-    observed.is_some_and(|t| now.checked_sub(t).is_some_and(|age| age <= 86400))
 }
 
 fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
@@ -349,19 +345,13 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     let now = unix_time_ms() / 1000;
     let date = field(policy.text(b::OBSERVED_DATE));
     // Only a native re-determination carries fetched sources; its freshness
-    // is the fetch time of its oldest source. An import's date is history.
-    let fetched = if policy.schema() == &b::NATIVE {
-        field(policy.nested_all(b::SOURCES))
-            .iter()
-            .map(|s| field(s.u64(b::source::FETCHED_UNIX_MS)) / 1000)
-            .min()
-    } else {
-        None
-    };
+    // is the fetch time of its oldest source (BSC-004: the runner applies the
+    // same rule right before its latch). An import's date is history.
+    let fetched = builder_policy::oldest_fetch_s(&policy);
     check(
         report,
         "BUILDER_FRESHNESS",
-        if freshness(fetched, now) {
+        if builder_policy::age_ok(fetched, now) {
             "PASS"
         } else {
             "BLOCKED"
@@ -799,12 +789,5 @@ mod readiness_tests {
                 "protocol_fee_bps.buy: 100 -> 101"
             ]
         );
-    }
-    #[test]
-    fn freshness_is_bounded_and_never_accepts_future_or_missing_fetch_times() {
-        assert!(freshness(Some(10), 86410));
-        assert!(!freshness(Some(10), 86411));
-        assert!(!freshness(Some(11), 10));
-        assert!(!freshness(None, 10));
     }
 }

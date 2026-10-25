@@ -123,7 +123,7 @@ fn main() {
     assert_eq!(Address::from(field(dry.address(d::PORTAL))), portal);
 
     let gas_price = field(dry.u64(d::GAS_PRICE_WEI));
-    let (_builder_policy, builder_policy_hashes) =
+    let (builder_policy, builder_policy_hashes) =
         validate_builder_policy(&builder_policy_path, gas_price);
     let launch_gas_limit = field(dry.u64(d::LAUNCH_GAS_LIMIT));
     let buy_gas_limit = field(dry.u64(d::BUY_GAS_LIMIT));
@@ -281,6 +281,9 @@ fn main() {
         probe.excess_staleness_ms,
     )
     .unwrap_or_else(|e| panic!("G0.7 head probe: {e}"));
+    // BSC-004: the bound builder policy is fresh at the release boundary.
+    darkbot_bsc_execution::builder_policy::require_fresh(&builder_policy, unix_time_ms())
+        .unwrap_or_else(|e| panic!("G0.7 builder policy: {e}"));
 
     let attempt_dir = latch_attempt(
         Path::new(ATTEMPT_STATE_ROOT),

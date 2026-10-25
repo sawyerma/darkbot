@@ -359,6 +359,19 @@ fn a_secret_salt_profile_never_sends_launch_calldata_to_an_external_rpc() {
 }
 
 #[test]
+fn the_bound_builder_policy_is_fresh_at_the_release_boundary() {
+    // BSC-004: an earlier readiness PASS is no freshness proof at release;
+    // the runner checks the bound policy's age right before the latch.
+    let check = pos("builder_policy::require_fresh(&builder_policy, unix_time_ms())");
+    assert!(pos("validate_builder_policy(") < check);
+    assert!(check < pos("latch_attempt("));
+    assert!(
+        pos("probe_window") < check,
+        "after the head probe, close to the release"
+    );
+}
+
+#[test]
 fn the_launch_path_is_re_verified_before_signing_and_the_latch_and_bound_by_the_guard() {
     // v9.1 C1/R1: the v5-bound snapshot is re-read at the current preflight
     // block before any signature or latch; drift panics pre-egress, and the
