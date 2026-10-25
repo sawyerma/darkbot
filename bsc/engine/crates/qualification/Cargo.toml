@@ -15,6 +15,9 @@ darkbot-bsc-trading = { path = "../trading" }
 darkbot-bsc-journal = { path = "../journal" }
 # G0.7 evidence, G0.8 results, witness and chain capture payloads (DBREC001).
 darkbot-bsc-record = { path = "../record" }
+# The C1.9 report reads the Fast-Lane outbound status codes of the raw
+# evidence (already built through the execution runtime feature).
+darkbot-bsc-geth-ipc = { path = "../geth_ipc" }
 alloy-primitives = { workspace = true }
 alloy-sol-types = { workspace = true }
 k256 = { workspace = true }

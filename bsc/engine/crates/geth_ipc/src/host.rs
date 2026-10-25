@@ -17,8 +17,16 @@
 //! Profile S keeps the qualified Unit-5 builder execution sequential.
 //! Profile P runs parallel builder workers; those exist only with Unit-5
 //! Runner Rev4 (C3), so in C1 a request for P is refused, not downgraded.
+//!
+//! The evidence is a typed binary record (`darkbot.c1.host-profile.v1`,
+//! [`HostProfileReport::to_record`]); JSON is never an output. The topology
+//! identity is the CRC32C of a fixed canonical byte string, kept unchanged
+//! so that every recorded fingerprint stays valid.
 
 use std::fmt::Write as _;
+
+use darkbot_bsc_record::schema::c1_qualification::host_profile as record;
+use darkbot_bsc_record::{Draft, Value};
 
 use crate::protocol_v2::crc32c;
 
@@ -137,9 +145,12 @@ impl HostTopology {
         level.physical_cpus.value().copied()
     }
 
-    /// The topology as canonical JSON: fixed key order, no whitespace
-    /// variation, no timestamps. The same host yields the same bytes.
-    pub fn to_json(&self) -> String {
+    /// The fingerprint preimage: one canonical byte string of the topology
+    /// with a fixed key order, no whitespace variation and no timestamp, so
+    /// the same host yields the same bytes. Its layout is frozen (it is the
+    /// JSON-shaped string the C1.6 fingerprints of 2026-10 were taken over);
+    /// it identifies the topology and is never written as evidence.
+    pub(crate) fn fingerprint_preimage(&self) -> String {
         let mut out = String::with_capacity(1024);
         out.push('{');
         json_text(&mut out, "os", &Probe::Value(self.os.to_string()));
@@ -178,11 +189,128 @@ impl HostTopology {
         out
     }
 
-    /// CRC32C of [`HostTopology::to_json`]: the topology identity bound into
+    /// CRC32C of the fingerprint preimage: the topology identity bound into
     /// measurement evidence.
     pub fn fingerprint(&self) -> u32 {
-        crc32c(self.to_json().as_bytes())
+        crc32c(self.fingerprint_preimage().as_bytes())
     }
+
+    /// The topology as the nested value of a host-profile record: each
+    /// probe is its value or the reason it is unavailable.
+    pub fn to_record_value(&self) -> Value {
+        use record::topology as t;
+        let mut draft = Draft::new(&t::SCHEMA);
+        draft.set(t::OS, self.os).set(t::ARCH, self.arch);
+        text_probe(&mut draft, t::MODEL, t::MODEL_UNAVAILABLE, &self.model);
+        text_probe(
+            &mut draft,
+            t::CPU_BRAND,
+            t::CPU_BRAND_UNAVAILABLE,
+            &self.cpu_brand,
+        );
+        text_probe(
+            &mut draft,
+            t::OS_RELEASE,
+            t::OS_RELEASE_UNAVAILABLE,
+            &self.os_release,
+        );
+        let numbers = [
+            (
+                t::PHYSICAL_CPUS,
+                t::PHYSICAL_CPUS_UNAVAILABLE,
+                &self.physical_cpus,
+            ),
+            (
+                t::LOGICAL_CPUS,
+                t::LOGICAL_CPUS_UNAVAILABLE,
+                &self.logical_cpus,
+            ),
+            (
+                t::CACHE_LINE_BYTES,
+                t::CACHE_LINE_BYTES_UNAVAILABLE,
+                &self.cache_line_bytes,
+            ),
+            (t::PAGE_BYTES, t::PAGE_BYTES_UNAVAILABLE, &self.page_bytes),
+            (
+                t::MEMORY_BYTES,
+                t::MEMORY_BYTES_UNAVAILABLE,
+                &self.memory_bytes,
+            ),
+        ];
+        for (tag, unavailable, probe) in numbers {
+            number_probe(&mut draft, tag, unavailable, probe);
+        }
+        match &self.perf_levels {
+            Probe::Unavailable(reason) => {
+                draft.set(t::PERF_LEVELS_UNAVAILABLE, *reason);
+            }
+            Probe::Value(levels) => {
+                for level in levels {
+                    draft.push(t::PERF_LEVELS, level.to_record_value());
+                }
+            }
+        }
+        draft.into_nested()
+    }
+}
+
+impl PerfLevel {
+    fn to_record_value(&self) -> Value {
+        use record::perf_level as l;
+        let mut draft = Draft::new(&l::SCHEMA);
+        draft.set(l::INDEX, u64::from(self.index));
+        text_probe(&mut draft, l::NAME, l::NAME_UNAVAILABLE, &self.name);
+        let numbers = [
+            (
+                l::PHYSICAL_CPUS,
+                l::PHYSICAL_CPUS_UNAVAILABLE,
+                &self.physical_cpus,
+            ),
+            (
+                l::LOGICAL_CPUS,
+                l::LOGICAL_CPUS_UNAVAILABLE,
+                &self.logical_cpus,
+            ),
+            (
+                l::L1D_CACHE_BYTES,
+                l::L1D_CACHE_BYTES_UNAVAILABLE,
+                &self.l1d_cache_bytes,
+            ),
+            (
+                l::L1I_CACHE_BYTES,
+                l::L1I_CACHE_BYTES_UNAVAILABLE,
+                &self.l1i_cache_bytes,
+            ),
+            (
+                l::L2_CACHE_BYTES,
+                l::L2_CACHE_BYTES_UNAVAILABLE,
+                &self.l2_cache_bytes,
+            ),
+            (
+                l::CPUS_PER_L2,
+                l::CPUS_PER_L2_UNAVAILABLE,
+                &self.cpus_per_l2,
+            ),
+        ];
+        for (tag, unavailable, probe) in numbers {
+            number_probe(&mut draft, tag, unavailable, probe);
+        }
+        draft.into_nested()
+    }
+}
+
+fn text_probe(draft: &mut Draft, tag: u16, unavailable: u16, probe: &Probe<String>) {
+    match probe {
+        Probe::Value(text) => draft.set(tag, text.as_str()),
+        Probe::Unavailable(reason) => draft.set(unavailable, *reason),
+    };
+}
+
+fn number_probe(draft: &mut Draft, tag: u16, unavailable: u16, probe: &Probe<u64>) {
+    match probe {
+        Probe::Value(number) => draft.set(tag, *number),
+        Probe::Unavailable(reason) => draft.set(unavailable, *reason),
+    };
 }
 
 fn json_escape(out: &mut String, text: &str) {
@@ -488,6 +616,16 @@ pub enum ProfileSource {
     HintNotRunnable,
 }
 
+impl ProfileSource {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Configured => "configured",
+            Self::TopologyHint => "topology-hint",
+            Self::HintNotRunnable => "hint-not-runnable-in-this-build",
+        }
+    }
+}
+
 /// The profile to run, and why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProfileSelection {
@@ -500,6 +638,14 @@ pub enum ProfileError {
     /// Profile P was configured but this build has no parallel builders.
     /// The configured profile is never replaced silently.
     ParallelBuildersUnavailable,
+}
+
+impl ProfileError {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ParallelBuildersUnavailable => "parallel-builders-unavailable",
+        }
+    }
 }
 
 /// Chooses the profile to run. An explicit configuration wins over the hint
@@ -557,54 +703,52 @@ impl HostProfileReport {
         }
     }
 
-    /// The report as JSON. The topology part and its fingerprint are stable
-    /// for a host; the report carries no timestamp.
-    pub fn to_json(&self) -> String {
-        let mut out = String::with_capacity(2048);
-        out.push_str("{\"schema\":\"darkbot.c1.host_profile.v1\",");
-        let _ = write!(out, "\"topology\":{},", self.topology.to_json());
-        let fingerprint = self.topology.fingerprint();
-        let _ = write!(
-            out,
-            "\"topology_fingerprint_crc32c\":\"{fingerprint:#010x}\","
-        );
-        out.push_str("\"profile_hint\":{");
-        let _ = write!(out, "\"profile\":\"{}\",", self.hint.profile.name());
-        out.push_str("\"basis\":");
-        json_escape(&mut out, self.hint.basis);
-        out.push_str(",\"hint_only\":true},");
-        out.push_str("\"profile_selection\":");
+    /// The report as a `darkbot.c1.host-profile.v1` record. It carries no
+    /// timestamp: the same host and request yield the same bytes.
+    pub fn to_record(&self) -> Draft {
+        let mut draft = Draft::new(&record::SCHEMA);
+        draft
+            .set(record::TOPOLOGY, self.topology.to_record_value())
+            .set(
+                record::TOPOLOGY_FINGERPRINT_CRC32C,
+                u64::from(self.topology.fingerprint()),
+            )
+            .set(record::HINT_PROFILE, self.hint.profile.name())
+            .set(record::HINT_BASIS, self.hint.basis)
+            .set(record::HINT_ONLY, true);
         match self.selection {
             Ok(selection) => {
-                let source = match selection.source {
-                    ProfileSource::Configured => "configured",
-                    ProfileSource::TopologyHint => "topology-hint",
-                    ProfileSource::HintNotRunnable => "hint-not-runnable-in-this-build",
-                };
-                let profile = selection.profile.name();
-                let _ = write!(
-                    out,
-                    "{{\"profile\":\"{profile}\",\"source\":\"{source}\"}},"
-                );
+                draft
+                    .set(record::SELECTION_PROFILE, selection.profile.name())
+                    .set(record::SELECTION_SOURCE, selection.source.name());
             }
-            Err(ProfileError::ParallelBuildersUnavailable) => {
-                out.push_str("{\"error\":\"parallel-builders-unavailable\"},");
+            Err(error) => {
+                draft.set(record::SELECTION_ERROR, error.name());
             }
         }
-        out.push_str("\"qos\":");
-        match self.qos {
-            Some(outcome) => json_escape(&mut out, &outcome.describe()),
-            None => out.push_str("\"not-requested\""),
+        let qos = self
+            .qos
+            .map_or_else(|| "not-requested".to_string(), QosOutcome::describe);
+        draft
+            .set(record::QOS, qos)
+            .set(record::QOS_IS_ADVISORY_NOT_PINNING, true)
+            .set(record::HOST_ROLE, HOST_ROLE);
+        for claim in NON_CLAIMS {
+            draft.push(record::NON_CLAIMS, claim);
         }
-        out.push_str(",\"qos_is_advisory_not_pinning\":true,");
-        out.push_str("\"host_role\":\"development-and-c1-diagnostic\",");
-        out.push_str("\"non_claims\":[");
-        out.push_str("\"topology selects an initial experiment only\",");
-        out.push_str("\"no core count qualifies a profile\",");
-        out.push_str("\"a result on this host does not qualify the Linux C3 target\"]}");
-        out
+        draft
     }
 }
+
+/// The role of the host this module profiles.
+pub const HOST_ROLE: &str = "development-and-c1-diagnostic";
+
+/// What a host profile never claims.
+pub const NON_CLAIMS: [&str; 3] = [
+    "topology selects an initial experiment only",
+    "no core count qualifies a profile",
+    "a result on this host does not qualify the Linux C3 target",
+];
 
 #[cfg(test)]
 mod tests {
@@ -677,17 +821,157 @@ mod tests {
     fn the_report_is_reproducible_for_the_same_host() {
         let first = HostTopology::capture_with(&apple(10));
         let second = HostTopology::capture_with(&apple(10));
-        assert_eq!(first.to_json(), second.to_json());
+        assert_eq!(first.fingerprint_preimage(), second.fingerprint_preimage());
         assert_eq!(first.fingerprint(), second.fingerprint());
         let other = HostTopology::capture_with(&apple(12));
         assert_ne!(first.fingerprint(), other.fingerprint());
-        let json = first.to_json();
-        assert!(json.starts_with("{\"os\":"));
-        assert!(json.contains("\"cache_line_bytes\":128,"));
-        assert!(json.contains("\"name\":\"Performance\",\"physical_cpus\":10,"));
-        assert!(json.contains("\"l2_cache_bytes\":{\"unavailable\":"));
-        assert!(json.ends_with("}]}"));
-        assert_eq!(json.matches('{').count(), json.matches('}').count());
+        // The preimage layout is frozen: it defines every recorded fingerprint.
+        let preimage = first.fingerprint_preimage();
+        assert!(preimage.starts_with("{\"os\":"));
+        assert!(preimage.contains("\"cache_line_bytes\":128,"));
+        assert!(preimage.contains("\"name\":\"Performance\",\"physical_cpus\":10,"));
+        assert!(preimage.contains("\"l2_cache_bytes\":{\"unavailable\":"));
+        assert!(preimage.ends_with("}]}"));
+        assert_eq!(preimage.matches('{').count(), preimage.matches('}').count());
+    }
+
+    /// The host of the C1.9 run of 2026-10-10, exactly as recorded in
+    /// `bsc/native/evidence/c1/c1-9-native-latency-20261010T230358-host_profile.json`
+    /// (Apple M4 Max, 12 performance and 4 efficiency CPUs).
+    fn recorded_m4_max() -> HostTopology {
+        let mut host = Fixed::default();
+        host.text.insert("hw.model", "Mac16,6");
+        host.text.insert("machdep.cpu.brand_string", "Apple M4 Max");
+        host.text.insert("kern.osrelease", "24.6.0");
+        host.text.insert("hw.perflevel0.name", "Performance");
+        host.text.insert("hw.perflevel1.name", "Efficiency");
+        let numbers = [
+            ("hw.physicalcpu", 16),
+            ("hw.logicalcpu", 16),
+            ("hw.cachelinesize", 128),
+            ("hw.pagesize", 16_384),
+            ("hw.memsize", 137_438_953_472),
+            ("hw.nperflevels", 2),
+            ("hw.perflevel0.physicalcpu", 12),
+            ("hw.perflevel0.logicalcpu", 12),
+            ("hw.perflevel0.l1dcachesize", 131_072),
+            ("hw.perflevel0.l1icachesize", 196_608),
+            ("hw.perflevel0.l2cachesize", 16_777_216),
+            ("hw.perflevel0.cpusperl2", 6),
+            ("hw.perflevel1.physicalcpu", 4),
+            ("hw.perflevel1.logicalcpu", 4),
+            ("hw.perflevel1.l1dcachesize", 65_536),
+            ("hw.perflevel1.l1icachesize", 131_072),
+            ("hw.perflevel1.l2cachesize", 4_194_304),
+            ("hw.perflevel1.cpusperl2", 4),
+        ];
+        for (name, value) in numbers {
+            host.number.insert(name, value);
+        }
+        let mut topology = HostTopology::capture_with(&host);
+        // The recorded host's OS and architecture, whatever host runs the test.
+        topology.os = "macos";
+        topology.arch = "aarch64";
+        topology
+    }
+
+    /// Golden: the binary migration keeps the topology identity. The same
+    /// topology yields the `topology_fingerprint_crc32c` recorded in
+    /// `c1-9-native-latency-20261010T230358-host_profile.json`.
+    #[test]
+    fn the_recorded_c19_host_keeps_its_fingerprint_0xfc5501a8() {
+        let topology = recorded_m4_max();
+        assert_eq!(topology.fingerprint(), 0xfc55_01a8);
+        let preimage = topology.fingerprint_preimage();
+        let expected = concat!(
+            "{\"os\":\"macos\",\"arch\":\"aarch64\",\"model\":\"Mac16,6\",",
+            "\"cpu_brand\":\"Apple M4 Max\",\"os_release\":\"24.6.0\",",
+            "\"physical_cpus\":16,\"logical_cpus\":16,\"cache_line_bytes\":128,",
+            "\"page_bytes\":16384,\"memory_bytes\":137438953472,\"perf_levels\":[",
+            "{\"index\":0,\"name\":\"Performance\",\"physical_cpus\":12,\"logical_cpus\":12,",
+            "\"l1d_cache_bytes\":131072,\"l1i_cache_bytes\":196608,",
+            "\"l2_cache_bytes\":16777216,\"cpus_per_l2\":6},",
+            "{\"index\":1,\"name\":\"Efficiency\",\"physical_cpus\":4,\"logical_cpus\":4,",
+            "\"l1d_cache_bytes\":65536,\"l1i_cache_bytes\":131072,",
+            "\"l2_cache_bytes\":4194304,\"cpus_per_l2\":4}]}"
+        );
+        assert_eq!(preimage, expected);
+    }
+
+    #[test]
+    fn the_host_profile_record_is_typed_reproducible_and_keeps_the_id() {
+        use darkbot_bsc_record::decode;
+        let topology = recorded_m4_max();
+        let hint = initial_profile_hint(&topology);
+        let configured_s = ProfileRequest {
+            configured: Some(SchedulingProfile::S),
+            ..C1_BUILD
+        };
+        let report = HostProfileReport {
+            selection: select_profile(configured_s, hint),
+            hint,
+            qos: None,
+            topology,
+        };
+        let bytes = report.to_record().encode().unwrap();
+        assert_eq!(bytes, report.to_record().encode().unwrap());
+        assert_eq!(&bytes[..8], b"DBREC001");
+        let decoded = decode(&record::SCHEMA, &bytes).unwrap();
+        assert_eq!(
+            decoded.u64(record::TOPOLOGY_FINGERPRINT_CRC32C).unwrap(),
+            0xfc55_01a8
+        );
+        assert_eq!(decoded.text(record::HINT_PROFILE).unwrap(), "P");
+        assert!(decoded.bool(record::HINT_ONLY).unwrap());
+        assert_eq!(decoded.text(record::SELECTION_PROFILE).unwrap(), "S");
+        assert_eq!(
+            decoded.text(record::SELECTION_SOURCE).unwrap(),
+            "configured"
+        );
+        assert_eq!(decoded.opt_text(record::SELECTION_ERROR).unwrap(), None);
+        assert_eq!(decoded.text(record::QOS).unwrap(), "not-requested");
+        assert_eq!(decoded.texts(record::NON_CLAIMS).unwrap(), NON_CLAIMS);
+        let topology = decoded.nested(record::TOPOLOGY).unwrap();
+        assert_eq!(
+            topology.text(record::topology::CPU_BRAND).unwrap(),
+            "Apple M4 Max"
+        );
+        let levels = topology.nested_all(record::topology::PERF_LEVELS).unwrap();
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[1].u64(record::perf_level::CPUS_PER_L2).unwrap(), 4);
+
+        // An unavailable value is its reason, never a zero; a refusal is recorded.
+        let bare = HostTopology::capture_with(&Fixed::default());
+        let refused = HostProfileReport {
+            hint: initial_profile_hint(&bare),
+            selection: Err(ProfileError::ParallelBuildersUnavailable),
+            qos: Some(QosOutcome::Unsupported("test host")),
+            topology: bare,
+        };
+        let decoded = decode(&record::SCHEMA, &refused.to_record().encode().unwrap()).unwrap();
+        assert_eq!(
+            decoded.text(record::SELECTION_ERROR).unwrap(),
+            "parallel-builders-unavailable"
+        );
+        assert_eq!(decoded.opt_text(record::SELECTION_PROFILE).unwrap(), None);
+        assert_eq!(decoded.text(record::QOS).unwrap(), "unsupported:test host");
+        let topology = decoded.nested(record::TOPOLOGY).unwrap();
+        assert_eq!(
+            topology.opt_u64(record::topology::PHYSICAL_CPUS).unwrap(),
+            None
+        );
+        assert_eq!(
+            topology
+                .text(record::topology::PHYSICAL_CPUS_UNAVAILABLE)
+                .unwrap(),
+            NO_SYSCTL
+        );
+        assert_eq!(
+            topology
+                .text(record::topology::PERF_LEVELS_UNAVAILABLE)
+                .unwrap(),
+            NO_PERF_LEVELS
+        );
     }
 
     #[test]
@@ -702,7 +986,7 @@ mod tests {
         assert_eq!(hint.performance_cpus, None);
         assert!(
             topology
-                .to_json()
+                .fingerprint_preimage()
                 .contains("\"perf_levels\":{\"unavailable\":")
         );
 
@@ -714,11 +998,11 @@ mod tests {
     }
 
     #[test]
-    fn json_strings_are_escaped() {
+    fn preimage_strings_are_escaped() {
         let mut host = Fixed::default();
         host.text.insert("hw.model", "a\"b\\c\nd");
-        let json = HostTopology::capture_with(&host).to_json();
-        assert!(json.contains("\"model\":\"a\\\"b\\\\c\\u000ad\","));
+        let preimage = HostTopology::capture_with(&host).fingerprint_preimage();
+        assert!(preimage.contains("\"model\":\"a\\\"b\\\\c\\u000ad\","));
     }
 
     #[test]
@@ -819,12 +1103,12 @@ mod tests {
         assert_eq!(report.qos, None);
         // C1 has no parallel builders, so whatever the hint, S runs.
         assert_eq!(report.selection.unwrap().profile, SchedulingProfile::S);
-        let json = report.to_json();
-        assert!(json.starts_with("{\"schema\":\"darkbot.c1.host_profile.v1\","));
-        assert!(json.contains("\"hint_only\":true"));
-        assert!(json.contains("\"qos\":\"not-requested\""));
-        assert!(json.contains("does not qualify the Linux C3 target"));
-        assert_eq!(json.matches('{').count(), json.matches('}').count());
+        let bytes = report.to_record().encode().unwrap();
+        let decoded = darkbot_bsc_record::decode(&record::SCHEMA, &bytes).unwrap();
+        assert!(decoded.bool(record::HINT_ONLY).unwrap());
+        assert_eq!(decoded.text(record::QOS).unwrap(), "not-requested");
+        let claims = decoded.texts(record::NON_CLAIMS).unwrap();
+        assert!(claims.contains(&"a result on this host does not qualify the Linux C3 target"));
         // Captured twice, the topology identity is the same.
         let again = HostProfileReport::capture(C1_BUILD, None);
         assert_eq!(report.topology.fingerprint(), again.topology.fingerprint());

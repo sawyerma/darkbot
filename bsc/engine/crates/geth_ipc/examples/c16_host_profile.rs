@@ -1,27 +1,38 @@
 //! C1.6 host/profile report.
 //!
-//! Prints the host profile evidence of this machine as one JSON object:
-//! topology, its fingerprint, the profile hint, the profile selection and,
-//! if requested, the outcome of a QoS request for this thread.
+//! Writes the host profile evidence of this machine as one binary record
+//! (`darkbot.c1.host-profile.v1`, DBREC001): topology, its fingerprint, the
+//! profile hint, the profile selection and, if requested, the outcome of a
+//! QoS request for this thread. Stdout carries the derived text view.
 //!
 //! ```text
 //! c16_host_profile [--profile S|P] [--qos CLASS] [--out PATH]
 //! ```
 //!
 //! `CLASS` is user-interactive, user-initiated, default, utility or
-//! background. The report carries no timestamp, so two runs on the same host
-//! produce the same topology section and fingerprint. A configured Profile P
-//! is refused in C1 (exit code 2); it is never replaced by S.
+//! background. `PATH` must not exist yet. The record carries no timestamp,
+//! so two runs on the same host produce the same bytes. A configured
+//! Profile P is refused in C1 (exit code 2, the record says so); it is never
+//! replaced by S.
 
 use darkbot_bsc_geth_ipc::host::{HostProfileReport, ProfileRequest, QosClass, SchedulingProfile};
+use darkbot_bsc_record::decode;
+use darkbot_bsc_record::schema::c1_qualification::host_profile;
 use std::env;
-use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::process::ExitCode;
 
 fn usage(problem: &str) -> ExitCode {
     eprintln!("c16_host_profile: {problem}");
     eprintln!("usage: c16_host_profile [--profile S|P] [--qos CLASS] [--out PATH]");
     ExitCode::from(64)
+}
+
+fn write_new(path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 fn main() -> ExitCode {
@@ -49,15 +60,25 @@ fn main() -> ExitCode {
         parallel_builders_available: false,
     };
     let report = HostProfileReport::capture(request, qos);
-    let json = report.to_json();
-    match out {
-        Some(path) => {
-            if let Err(err) = fs::write(&path, format!("{json}\n")) {
-                eprintln!("c16_host_profile: cannot write {path}: {err}");
-                return ExitCode::from(74);
-            }
+    let bytes = match report.to_record().encode() {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("c16_host_profile: cannot encode the record: {err}");
+            return ExitCode::from(70);
         }
-        None => println!("{json}"),
+    };
+    if let Some(path) = &out
+        && let Err(err) = write_new(path, &bytes)
+    {
+        eprintln!("c16_host_profile: cannot write {path}: {err}");
+        return ExitCode::from(74);
+    }
+    match decode(&host_profile::SCHEMA, &bytes) {
+        Ok(record) => print!("{}", record.render()),
+        Err(err) => {
+            eprintln!("c16_host_profile: the record does not decode: {err}");
+            return ExitCode::from(70);
+        }
     }
     if report.selection.is_err() {
         eprintln!("C1_6_PROFILE_REFUSED parallel builders are not available in C1");

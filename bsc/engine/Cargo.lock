@@ -734,6 +734,7 @@ name = "darkbot-bsc-geth-ipc"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "darkbot-bsc-record",
  "darkbot-bsc-trading",
  "libc",
 ]
@@ -757,6 +758,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "darkbot-bsc-execution",
+ "darkbot-bsc-geth-ipc",
  "darkbot-bsc-journal",
  "darkbot-bsc-record",
  "darkbot-bsc-trading",

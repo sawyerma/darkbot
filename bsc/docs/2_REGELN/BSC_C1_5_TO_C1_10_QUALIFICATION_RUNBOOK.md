@@ -53,15 +53,15 @@ Exit: lifetime tests (the `compile_fail` doctests of `RecordGuardV2`), `protocol
 ## C1.6 — M4 development profile
 
 ```bash
-cargo test -p darkbot-bsc-geth-ipc --locked --offline host::
-cargo run -p darkbot-bsc-geth-ipc --release --locked --offline --example c16_host_profile -- --profile S --out /tmp/c16-a.json
-cargo run -p darkbot-bsc-geth-ipc --release --locked --offline --example c16_host_profile -- --profile S --out /tmp/c16-b.json
-cmp /tmp/c16-a.json /tmp/c16-b.json           # reproducible report
+cargo test -p darkbot-bsc-geth-ipc --locked --offline host::   # incl. the fingerprint golden test (0xfc5501a8)
+cargo run -p darkbot-bsc-geth-ipc --release --locked --offline --example c16_host_profile -- --profile S --out /tmp/c16-a.dbrec
+cargo run -p darkbot-bsc-geth-ipc --release --locked --offline --example c16_host_profile -- --profile S --out /tmp/c16-b.dbrec
+cmp /tmp/c16-a.dbrec /tmp/c16-b.dbrec         # reproducible record (darkbot.c1.host-profile.v1, no timestamp)
 cargo run -p darkbot-bsc-geth-ipc --release --locked --offline --example c16_host_profile -- --profile P ; echo "exit=$?"   # 2: refused, not downgraded
 go test -race -run 'TestC16' ./darkbot/fastlane
 ```
 
-Exit: reproducible host/profile evidence; every unavailable value labelled; Profile P refused in C1. No statement about the Linux C3 host.
+Exit: reproducible host/profile evidence; every unavailable value labelled; Profile P refused in C1. No statement about the Linux C3 host. `--out` never overwrites; `dbrec_show <file>` prints the derived view.
 
 ## C1.7 — local-geth outbound
 
@@ -86,11 +86,11 @@ plus the ownership check printed by the overlay tool (`C1_8_CHAIN_OWNERSHIP_VERI
 ## C1.9 — native latency qualification
 
 ```bash
-python3 -m unittest test_c1_qualification_tools -v      # in bsc/tools: the analyzer logic
+cargo test -p darkbot-bsc-qualification --locked --offline --lib c1_   # report, hook/path and freeze logic
 bsc/tools/c19_native_latency.sh
 ```
 
-The window is fixed by `DARKBOT_C19_PEERS`, `DARKBOT_C19_WARMUP_PER_PEER`, `DARKBOT_C19_SAMPLES_PER_PEER` and `DARKBOT_C19_OUTBOUND_WORKERS` before the run (defaults 4, 32, 2500, 2: 10,000 qualification samples, enough for p99.99). The script writes raw CSVs, the snapshots and `c1-9-native-latency-<stamp>.json` to `bsc/native/evidence/c1/`. It reports integrity and measurements and decides no gate. The default outbound mode is `production_devp2p_selected_peer_handoff`: two selected
+The window is fixed by `DARKBOT_C19_PEERS`, `DARKBOT_C19_WARMUP_PER_PEER`, `DARKBOT_C19_SAMPLES_PER_PEER` and `DARKBOT_C19_OUTBOUND_WORKERS` before the run (defaults 4, 32, 2500, 2: 10,000 qualification samples, enough for p99.99). The script writes `c1-9-native-latency-<stamp>-*` to `bsc/native/evidence/c1/`: raw tables `raw_ingress.dbtab`/`raw_outbound.dbtab`, `rust_summary.dbrec`, `host_profile.dbrec`, `go_snapshot.bin`, `manifest.txt`, the logs, the report `<stamp>.dbrec` (`darkbot.c1.native-latency.v1`, written by `c19_report`) and its derived view `report.txt`. No JSON. It reports integrity and measurements and decides no gate. `DARKBOT_C19_GETH_SOURCE` names the bsc-geth Git checkout to clone (default `bsc/vendor/bsc-geth`); it must be its own repository and contain the pin. The default outbound mode is `production_devp2p_selected_peer_handoff`: two selected
 local devp2p peers, real authenticated RLPx/protocol transports, and the actual
 `Peer.SendRawTransaction` method. Both legacy and typed signed transactions are
 received and decoded. Setup is outside the measurement window. This transport
@@ -106,42 +106,41 @@ C1.9b cannot substitute for the outbound measurement.
 ## C1.9b — hook/path early qualification (Testnet only)
 
 1. Start the overlay geth on BSC Testnet with the Fast Lane enabled.
-2. Start the capture on the same host: `c19b_capture` (see its header for the environment).
-3. Send controlled launches; the launcher writes the launches file in the shape of `evidence/c1/templates/c1-9b-controlled-launches.template.json`, with `CLOCK_MONOTONIC` handoff times of the same host and boot.
-4. Stop the capture (`touch <out>.stop`) and analyze:
+2. Start the capture on the same host: `c19b_capture` (see its header for the environment). `DARKBOT_C19B_OUT=<obs>.dbtab` receives the observation table, `<obs>.dbtab.capture.dbrec` the capture record.
+3. Record the controlled launches with `CLOCK_MONOTONIC` handoff times of the same host and boot (`R=bsc/engine/target/release`):
 
 ```bash
-python3 bsc/tools/c19b_hook_path.py --launches <launches.json> --observations <capture.csv> --output <report.json>
+$R/c19b_report launches init --out <launches>.dbrec --chain-id 97 --clock-id 1 --host-boot-id <boot id> --handoff-boundary "<what handoff_ns marks>"
+$R/c19b_report launches add --launches <launches>.dbrec --launch <tx hash> <handoff_ns> [--launch ...]
 ```
 
-The tool refuses Mainnet chain ids and incomparable clocks. No value-bearing Mainnet action is part of this gate. `MAINNET_INGRESS_COVERAGE = NOT_PROVEN` stays.
+4. Stop the capture (`touch <obs>.dbtab.stop`) and analyze:
+
+```bash
+$R/c19b_report --launches <launches>.dbrec --observations <obs>.dbtab --capture <obs>.dbtab.capture.dbrec --output <report>.dbrec
+```
+
+The tool refuses Mainnet chain ids, incomparable clocks or boots, and an incomplete or unbound capture. No value-bearing Mainnet action is part of this gate. `MAINNET_INGRESS_COVERAGE = NOT_PROVEN` stays.
 
 ## C1.10 — freeze
 
-```bash
-python3 bsc/tools/c1_freeze.py --repo . --inputs <freeze-inputs.json> --output <record.json>            # INCOMPLETE or READY_TO_FREEZE
-python3 bsc/tools/c1_freeze.py --repo . --inputs <freeze-inputs.json> --output <record.json> --freeze   # writes IMPLEMENTED_TESTED/FROZEN only if complete
-python3 bsc/tools/c1_freeze.py --repo . --inputs <freeze-inputs.json> --verify <record.json>
-```
-
-The inputs file starts from `evidence/c1/templates/c1-10-freeze-inputs.template.json`. Each gate entry is a statement of local acceptance with its evidence files; the tool refuses out-of-order acceptance, missing files, templates and missing non-claims. It also refuses a missing or
-mismatched DarkBot HEAD, any dirty/untracked working-tree state, absent/mismatched
-`final_c1_source_sha256`, or source bytes different from HEAD even when Git is
-configured to assume them unchanged. The complete tracked `bsc/engine`, `bsc/geth`, `bsc/tools` and `bsc/native` (evidence) tree
-includes all crates, tools, overlay and build inputs. Binary artifacts remain
-separate bindings. C1.9 additionally requires an eligible production-mode report.
-
-After committing the final inputs/sources, obtain the explicit expected source
-identity (run from the project root); keep freeze input/output files outside the
-repository or intentionally ignored so writing the record does not dirty it:
+The inputs are a `darkbot.c1.freeze-inputs.v1` record built only by `c1_freeze inputs` (`R=bsc/engine/target/release`, paths relative to the repository root; keep `<inputs>`/`<record>` outside the repository or ignored):
 
 ```bash
-python3 -c 'import sys,pathlib,json; sys.path.insert(0,"bsc/tools"); import c1_freeze; r=pathlib.Path.cwd(); print(c1_freeze.git_head(r)); print(json.dumps(c1_freeze.source_binding(r),indent=2))'
+$R/c1_freeze inputs init --out <inputs>.dbrec                       # pin, geth checkout bsc/vendor/bsc-geth, non-claims
+$R/c1_freeze inputs set-artifact geth_binary --inputs <inputs>.dbrec --path <geth binary>
+#   one --path: wire_v2_spec (bsc/geth/FASTLANE_WIRE_V2.md), overlay_sources (bsc/geth/overlay/darkbot/fastlane),
+#   overlay_tool (bsc/tools/c1_apply_geth_overlay.py), host_profile_evidence, build_commands;
+#   one or more: rust_binaries, c1_config, test_inventory, raw_measurement_evidence
+$R/c1_freeze inputs accept-gate C1.5 --inputs <inputs>.dbrec --repo . --accepted-by <name> --statement "<what was accepted>" --evidence <files>...
+#   then C1.6, C1.7, C1.8, C1.9 (needs an eligible production c19 report), C1.9b — strictly in this order
+$R/c1_freeze inputs set-commit --inputs <inputs>.dbrec --repo .      # after committing: HEAD + source binding, clean tree only
+$R/c1_freeze --repo . --inputs <inputs>.dbrec --output <record>.dbrec            # INCOMPLETE or READY_TO_FREEZE
+$R/c1_freeze --repo . --inputs <inputs>.dbrec --output <record>.dbrec --freeze   # IMPLEMENTED_TESTED/FROZEN only if complete
+$R/c1_freeze --repo . --inputs <inputs>.dbrec --verify <record>.dbrec
 ```
 
-Set `darkbot_commit` and `final_c1_source_sha256` in the inputs to these reviewed
-values. `--verify` reevaluates all source and evidence bindings; it also verifies
-the recorded binding checksum. An integrated but uncommitted candidate cannot freeze.
+The tool refuses out-of-order acceptance, missing files, templates (`TEMPLATE_NOT_EVIDENCE`), missing non-claims, a C1.9 without an eligible production-mode `darkbot.c1.native-latency.v1` report, a missing or mismatched DarkBot HEAD, any dirty/untracked working-tree state, an absent/mismatched source binding, and source bytes different from HEAD even when Git is told to assume them unchanged. The binding covers every tracked `bsc/engine`, `bsc/geth`, `bsc/tools` and `bsc/native` file; binary artifacts are separate bindings. `--verify` re-evaluates every binding and the record's own `bindings_sha256`. An existing record is never overwritten.
 
 ## Non-claims that every result keeps
 

@@ -1,0 +1,15 @@
+generation=1909
+peers=4
+warmup_per_peer=32
+samples_per_peer=200
+outbound_workers=2
+peer_lane_capacity=4096
+peer_lane_slot_stride=4096
+lane_ids=16,17,18,19
+clock_id=1
+clock=CLOCK_MONOTONIC
+load_model=parallel_peers_one_outstanding_per_lane_with_explicit_warmup
+outbound_mode=production_devp2p_selected_peer_handoff
+purpose=regression_smoke
+transport_topology=controlled_localhost_peers_no_external_network
+chain_load=canonical_head_every_500us_under_one_lock

@@ -11,6 +11,9 @@ libc = { workspace = true }
 # The economic egress capability (`intent::EgressWrite`, E6-2). No feature:
 # the generic core only.
 darkbot-bsc-trading = { path = "../trading" }
+# The C1.6 host profile and the C1.9/C1.9b raw evidence as typed binary
+# records (DBREC001) and tables; no cycle: the record crate depends on sha2 only.
+darkbot-bsc-record = { path = "../record" }
 
 [dev-dependencies]
 # `IntentLane::dispatched_for_tests` for the egress tests and the C1.9

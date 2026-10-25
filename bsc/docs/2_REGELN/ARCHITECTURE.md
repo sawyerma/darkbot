@@ -61,11 +61,10 @@ Namen sind stabile CLI (Runbooks, Testplan und Nachweise rufen sie so auf) und b
 | `g07_pre_live_readiness.sh`, `g07_min_spend_probe.sh`, `g07_find_min_executable_buy.sh` | G0.7-Bereitschaft, Spend-Kandidaten, minimale ausführbare BUY-Suche | read-only, kein Send |
 | `c1_apply_geth_overlay.py`, `c1_verify_geth_pin.sh` | Overlay auf gepinntes bsc-geth anwenden / Pin prüfen | — |
 | `c13_lifecycle_interop.sh`, `c14_ingress_interop.sh` | Go↔Rust-Interop V2-Lifecycle / Ingress | lokal |
-| `c14a_early_latency.sh` + `c14a_analyze.py`, `c19_native_latency.sh` + `c19_analyze.py`, `c19_prepare_production.py`, `c19b_hook_path.py` | C1-Latenzmessungen und Auswertung | lokal |
-| `c1_freeze.py`, `c1_freeze_geth_patch_evidence.py`, `c1_c1_1_v1_baseline.py` | C1-Freeze-Records und -Nachweise | — |
+| `c14a_early_latency.sh` + `c14a_analyze.py`, `c19_native_latency.sh` (Auswertung: nativer `c19_report`), `c19_prepare_production.py`; C1.9b: nativer `c19b_report` | C1-Latenzmessungen und Auswertung (DBREC/DBTAB, kein JSON) | lokal |
+| nativer `c1_freeze` (DBREC-Inputs per CLI), `c1_freeze_geth_patch_evidence.py`, `c1_c1_1_v1_baseline.py` | C1-Freeze-Records und -Nachweise | — |
 | `q5a_check_evidence.py` | Q5A-TLS-Evidence prüfen | — |
 | `lock_qualify.sh` + `verify_lock_member.py` | Lockfile-Mitgliedsprüfung | offline |
-| `test_c1_qualification_tools.py` | Unit-Tests der C1-Werkzeuge | — |
 
 ## Aufrufkonvention
 

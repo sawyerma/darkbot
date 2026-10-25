@@ -13,7 +13,10 @@
 //! measured loop; that constructor skips the economic binding check, so these
 //! BUYs prove transport latency only, never an economic admission.
 //!
-//! It records raw boundaries only; `c19_analyze.py` derives every statistic:
+//! It records raw boundaries only, as fixed-width binary tables
+//! (`raw_ingress.dbtab`, `raw_outbound.dbtab`, DBTAB001) and a summary record
+//! (`rust_summary.dbrec`, DBREC001) that binds both tables; the
+//! `c19_report` tool of `darkbot-bsc-qualification` derives every statistic:
 //!
 //! - `T_packet_decoded`, `T_ingress`: from the record (geth, clock id 1);
 //! - L1: geth's pre-commit and post-commit probes around the SPSC Release
@@ -24,6 +27,7 @@
 //!
 //! Every timestamp is `CLOCK_MONOTONIC` of this host. Heap allocations of
 //! this thread inside the qualification window are counted and reported.
+//! Any failure is one `C19_RUST_CONSUMER_FAIL` line on stderr and exit 1.
 
 use alloy_primitives::{Address, B256};
 use darkbot_bsc_geth_ipc::hot0::{
@@ -31,19 +35,23 @@ use darkbot_bsc_geth_ipc::hot0::{
 };
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
 use darkbot_bsc_geth_ipc::outbound::{
-    EgressProducerV2, HandoffEvidence, OutboundStatus, chain_lane, decode_handoff, evidence_lane,
+    EgressProducerV2, EvidenceOrigin, HandoffEvidence, OutboundStatus, chain_lane, decode_handoff,
+    evidence_lane,
 };
 use darkbot_bsc_geth_ipc::protocol_v2::{
     BorrowedRecordV2, DirectionV2, LaneClassV2, LaneConfigV2, LaneSetV2, arena_path_v2,
 };
+use darkbot_bsc_record::schema::c1_qualification::{c19_rust_summary as summary, table};
+use darkbot_bsc_record::{Draft, Value, observed_now, sha256};
 use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, ArmedFence, Dispatch, IntentLane};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write as _;
 use std::os::fd::AsRawFd;
 use std::path::Path;
+use std::process::ExitCode;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -107,9 +115,15 @@ struct RawMap {
 }
 
 impl RawMap {
-    fn open(path: &Path) -> Self {
-        let file = File::options().read(true).write(true).open(path).unwrap();
-        let len = usize::try_from(file.metadata().unwrap().len()).unwrap();
+    fn open(path: &Path) -> Result<Self, String> {
+        let what = |e: std::io::Error| format!("arena {}: {e}", path.display());
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(what)?;
+        let len = file.metadata().map_err(what)?.len();
+        let len = usize::try_from(len).map_err(|_| "arena larger than memory".to_string())?;
         let raw = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
@@ -120,41 +134,55 @@ impl RawMap {
                 0,
             )
         };
-        assert_ne!(raw, libc::MAP_FAILED);
-        let ptr = NonNull::new(raw.cast::<u8>()).expect("mmap returned null");
-        Self {
+        if raw == libc::MAP_FAILED {
+            return Err(format!(
+                "mmap {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+        let ptr = NonNull::new(raw.cast::<u8>()).ok_or("mmap returned null")?;
+        Ok(Self {
             _file: file,
             ptr,
             len,
+        })
+    }
+
+    /// The aligned word at `offset`; `None` outside the mapping.
+    fn u64_at(&self, offset: usize) -> Option<u64> {
+        if offset.checked_add(8)? > self.len || !offset.is_multiple_of(8) {
+            return None;
+        }
+        let cell = unsafe { &*self.ptr.as_ptr().add(offset).cast::<AtomicU64>() };
+        Some(cell.load(Ordering::Acquire))
+    }
+
+    fn bytes(&self, offset: usize, len: usize) -> Result<&[u8], String> {
+        match offset.checked_add(len) {
+            Some(end) if end <= self.len => {
+                Ok(unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().add(offset), len) })
+            }
+            _ => Err(format!("arena read at {offset}+{len} outside the mapping")),
         }
     }
 
-    fn u64_at(&self, offset: usize) -> u64 {
-        assert!(offset + 8 <= self.len && offset.is_multiple_of(8));
-        let cell = unsafe { &*self.ptr.as_ptr().add(offset).cast::<AtomicU64>() };
-        cell.load(Ordering::Acquire)
-    }
-
-    fn bytes(&self, offset: usize, len: usize) -> &[u8] {
-        assert!(offset + len <= self.len);
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr().add(offset), len) }
-    }
-
     /// Lane id -> lane offset, from the arena directory.
-    fn lane_offsets(&self) -> BTreeMap<u16, usize> {
+    fn lane_offsets(&self) -> Result<BTreeMap<u16, usize>, String> {
         let mut count = [0u8; 4];
-        count.copy_from_slice(self.bytes(SH_LANE_COUNT, 4));
+        count.copy_from_slice(self.bytes(SH_LANE_COUNT, 4)?);
         let mut out = BTreeMap::new();
         for entry in 0..u32::from_le_bytes(count) as usize {
             let base = SUPER_HEADER_SIZE + entry * DIRECTORY_ENTRY_SIZE;
             let mut id = [0u8; 2];
             let mut offset = [0u8; 8];
-            id.copy_from_slice(self.bytes(base + DE_LANE_ID, 2));
-            offset.copy_from_slice(self.bytes(base + DE_LANE_OFFSET, 8));
-            let lane_offset = usize::try_from(u64::from_le_bytes(offset)).unwrap();
+            id.copy_from_slice(self.bytes(base + DE_LANE_ID, 2)?);
+            offset.copy_from_slice(self.bytes(base + DE_LANE_OFFSET, 8)?);
+            let lane_offset = usize::try_from(u64::from_le_bytes(offset))
+                .map_err(|_| "lane offset beyond the address space".to_string())?;
             out.insert(u16::from_le_bytes(id), lane_offset);
         }
-        out
+        Ok(out)
     }
 }
 
@@ -166,39 +194,59 @@ impl Drop for RawMap {
     }
 }
 
-fn manifest(path: &Path) -> BTreeMap<String, String> {
-    let text = fs::read_to_string(path).unwrap();
+fn manifest(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let pairs = text.lines().filter_map(|line| line.split_once('='));
-    pairs.map(|(k, v)| (k.to_owned(), v.to_owned())).collect()
+    Ok(pairs.map(|(k, v)| (k.to_owned(), v.to_owned())).collect())
 }
 
-fn number(map: &BTreeMap<String, String>, key: &str) -> u64 {
-    let value = map
-        .get(key)
-        .unwrap_or_else(|| panic!("manifest has no {key}"));
-    value.parse().unwrap_or_else(|_| panic!("manifest {key}"))
+fn text<'m>(map: &'m BTreeMap<String, String>, key: &str) -> Result<&'m str, String> {
+    map.get(key)
+        .map(String::as_str)
+        .ok_or_else(|| format!("manifest has no {key}"))
 }
 
-fn unhex(text: &str) -> Vec<u8> {
-    let step = (0..text.len()).step_by(2);
-    step.map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
-        .collect()
+fn number(map: &BTreeMap<String, String>, key: &str) -> Result<u64, String> {
+    let value = text(map, key)?;
+    value
+        .parse()
+        .map_err(|_| format!("manifest {key}={value:?} is not a number"))
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = write!(out, "{byte:02x}");
+fn size(map: &BTreeMap<String, String>, key: &str) -> Result<usize, String> {
+    usize::try_from(number(map, key)?).map_err(|_| format!("manifest {key} is too large"))
+}
+
+fn unhex(text: &str) -> Result<Vec<u8>, String> {
+    if !text.len().is_multiple_of(2) || !text.is_ascii() {
+        return Err(format!("{text:?} is not hex"));
     }
-    out
+    let step = (0..text.len()).step_by(2);
+    step.map(|i| {
+        u8::from_str_radix(&text[i..i + 2], 16).map_err(|_| format!("{text:?} is not hex"))
+    })
+    .collect()
 }
 
-fn wait_for(path: &Path) {
+fn wait_for(path: &Path) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(120);
     while !path.exists() {
-        assert!(Instant::now() < deadline, "timed out: {}", path.display());
+        if Instant::now() >= deadline {
+            return Err(format!("timed out waiting for {}", path.display()));
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
+    Ok(())
+}
+
+/// Writes a new file; an existing one is never replaced.
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 struct IngressRow {
@@ -225,20 +273,33 @@ fn scope_decision(record: &BorrowedRecordV2<'_>) -> Hot0Decision {
     }
 }
 
-fn main() {
-    let dir = std::env::var_os("DARKBOT_C19_DIR").expect("DARKBOT_C19_DIR");
+fn main() -> ExitCode {
+    match run() {
+        Ok(samples) => {
+            println!("C19_RUST_CONSUMER_OK samples={samples}");
+            ExitCode::SUCCESS
+        }
+        Err(problem) => {
+            eprintln!("C19_RUST_CONSUMER_FAIL {problem}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run() -> Result<usize, String> {
+    let dir = std::env::var_os("DARKBOT_C19_DIR").ok_or("DARKBOT_C19_DIR is not set")?;
     let dir = Path::new(&dir);
-    let m = manifest(&dir.join("manifest.txt"));
-    let generation = number(&m, "generation");
-    let warmup = number(&m, "warmup_per_peer");
-    let samples = number(&m, "samples_per_peer");
-    let workers = number(&m, "outbound_workers") as usize;
-    let capacity = number(&m, "peer_lane_capacity") as usize;
-    let stride = number(&m, "peer_lane_slot_stride") as usize;
-    let lane_ids: Vec<u16> = m["lane_ids"]
+    let m = manifest(&dir.join("manifest.txt"))?;
+    let generation = number(&m, "generation")?;
+    let warmup = number(&m, "warmup_per_peer")?;
+    let samples = number(&m, "samples_per_peer")?;
+    let workers = size(&m, "outbound_workers")?;
+    let capacity = size(&m, "peer_lane_capacity")?;
+    let stride = size(&m, "peer_lane_slot_stride")?;
+    let lane_ids: Vec<u16> = text(&m, "lane_ids")?
         .split(',')
-        .map(|id| id.parse().unwrap())
-        .collect();
+        .map(|id| id.parse().map_err(|_| format!("lane id {id:?}")))
+        .collect::<Result<_, String>>()?;
     let peers: Vec<LaneConfigV2> = lane_ids
         .iter()
         .map(|lane_id| LaneConfigV2 {
@@ -250,36 +311,49 @@ fn main() {
             slot_stride: stride,
         })
         .collect();
-    let total = (warmup + samples) as usize * peers.len();
+    let per_peer = warmup
+        .checked_add(samples)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or("warmup + samples overflows")?;
+    let total = per_peer
+        .checked_mul(peers.len())
+        .ok_or("the sample count overflows")?;
 
     // Prepared signed BUYs: `hash raw` in hex, one per admitted launch.
-    let buys: Vec<(Vec<u8>, Vec<u8>)> = fs::read_to_string(dir.join("buys.txt"))
-        .unwrap()
+    let buys_path = dir.join("buys.txt");
+    let buys: Vec<(Vec<u8>, Vec<u8>)> = fs::read_to_string(&buys_path)
+        .map_err(|e| format!("{}: {e}", buys_path.display()))?
         .lines()
         .filter_map(|line| line.split_once(' '))
-        .map(|(hash, raw)| (unhex(hash), unhex(raw)))
-        .collect();
-    assert!(
-        workers == 0 || buys.len() >= total,
-        "{} prepared BUYs",
-        buys.len()
-    );
+        .map(|(hash, raw)| Ok((unhex(hash)?, unhex(raw)?)))
+        .collect::<Result<_, String>>()?;
+    if workers > 0 && buys.len() < total {
+        return Err(format!("{} prepared BUYs for {total} samples", buys.len()));
+    }
+    if buys.iter().any(|(hash, _)| hash.len() != 32) {
+        return Err("a prepared BUY hash is not 32 bytes".into());
+    }
 
     let path = arena_path_v2(dir, generation);
-    let raw = RawMap::open(&path);
-    let offsets = raw.lane_offsets();
+    let raw = RawMap::open(&path)?;
+    let offsets = raw.lane_offsets()?;
     let config = Hot0Config {
         intent_slots: 8,
         dedup_sets: 4096,
     };
     let chain = Some(chain_lane());
-    let mut poller = Hot0Poller::open(&path, generation, &peers, chain, config).unwrap();
+    let mut poller = Hot0Poller::open(&path, generation, &peers, chain, config)
+        .map_err(|e| format!("HOT0 poller: {e:?}"))?;
     // With outbound workers the egress and evidence lanes must open.
-    let open_egress = || EgressProducerV2::open(&path, generation).unwrap();
-    let mut egress = (workers > 0).then(open_egress);
+    let mut egress = match workers {
+        0 => None,
+        _ => Some(
+            EgressProducerV2::open(&path, generation).map_err(|e| format!("egress lane: {e:?}"))?,
+        ),
+    };
     // One dispatched intent per prepared BUY, allocated before the loop.
-    let adapter = AdapterId::new(0).unwrap();
-    let permits = AdapterSet::new(&[adapter]).unwrap();
+    let adapter = AdapterId::new(0).ok_or("adapter 0 is refused")?;
+    let permits = AdapterSet::new(&[adapter]).ok_or("adapter set is refused")?;
     let mut intents: Vec<(IntentLane, Dispatch)> = buys
         .iter()
         .enumerate()
@@ -287,12 +361,17 @@ fn main() {
             let fence = ArmedFence::for_tests(97, Address::repeat_byte(0x11), index as u64);
             let token = Address::with_last_byte((index % 251) as u8 + 1);
             IntentLane::dispatched_for_tests(fence, token, signed, B256::from_slice(hash), permits)
-                .expect("dispatched intent")
+                .map_err(|e| format!("dispatched intent {index}: {e:?}"))
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
     let evidence_lanes: Vec<LaneConfigV2> = (0..=workers).map(evidence_lane).collect();
-    let open_evidence = || LaneSetV2::open(&path, generation, &evidence_lanes).unwrap();
-    let mut evidence = (workers > 0).then(open_evidence);
+    let mut evidence = match workers {
+        0 => None,
+        _ => Some(
+            LaneSetV2::open(&path, generation, &evidence_lanes)
+                .map_err(|e| format!("evidence lanes: {e:?}"))?,
+        ),
+    };
 
     // Everything the measured loop writes is allocated before it starts.
     let mut ingress_rows: Vec<IngressRow> = Vec::with_capacity(total);
@@ -300,16 +379,21 @@ fn main() {
     let mut chain_records = 0u64;
     let mut window_allocations = 0u64;
     let mut window_open = None;
-    let warmup_total = warmup as usize * peers.len();
+    let warmup_total = usize::try_from(warmup)
+        .ok()
+        .and_then(|warmup| warmup.checked_mul(peers.len()))
+        .ok_or("the warmup window overflows")?;
 
-    fs::write(dir.join("rust.ready"), b"ok\n").unwrap();
+    write_new(&dir.join("rust.ready"), b"ok\n")?;
     let deadline = Instant::now() + Duration::from_secs(600);
     while ingress_rows.len() < total {
-        assert!(
-            Instant::now() < deadline,
-            "timed out at {}",
-            ingress_rows.len()
-        );
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "timed out at {} of {total}; HOT0 {:?}",
+                ingress_rows.len(),
+                poller.stats()
+            ));
+        }
         if ingress_rows.len() == warmup_total && window_open.is_none() {
             window_open = Some(allocations());
         }
@@ -321,25 +405,37 @@ fn main() {
             continue;
         };
         let pool = poller.intents_mut();
-        let slot = pool.get_mut(handle).expect("live intent");
+        let slot = pool.get_mut(handle).ok_or("admitted intent is not live")?;
         let (lane_id, _epoch, sequence) = slot.launch_provenance();
-        let lane_offset = offsets[&lane_id];
+        let Some(&lane_offset) = offsets.get(&lane_id) else {
+            return Err(format!("lane {lane_id} is not in the arena directory"));
+        };
         let slot_offset = lane_offset + LANE_HEADER_SIZE + (sequence as usize % capacity) * stride;
+        let probe = |offset: usize| {
+            raw.u64_at(slot_offset + offset)
+                .ok_or_else(|| format!("L1 probe of lane {lane_id} outside the arena"))
+        };
         // The probes are written just after the commit; wait for the marker.
         let probe_deadline = Instant::now() + Duration::from_millis(200);
-        while raw.u64_at(slot_offset + PROBE_MAGIC_OFFSET) != PROBE_MAGIC {
-            assert!(Instant::now() < probe_deadline, "L1 probe missing");
+        while probe(PROBE_MAGIC_OFFSET)? != PROBE_MAGIC {
+            if Instant::now() >= probe_deadline {
+                return Err(format!(
+                    "L1 probe missing on lane {lane_id} sequence {sequence}"
+                ));
+            }
             std::hint::spin_loop();
         }
-        let write = raw.u64_at(lane_offset + LH_WRITE_SEQUENCE);
+        let write = raw
+            .u64_at(lane_offset + LH_WRITE_SEQUENCE)
+            .ok_or("lane header outside the arena")?;
         ingress_rows.push(IngressRow {
             lane_id,
             sequence,
             hash: *slot.launch_hash(),
             packet_decoded_ns: slot.packet_decoded_ns(),
             ingress_ns: slot.ingress_ns(),
-            l1_pre_ns: raw.u64_at(slot_offset + PROBE_PRE_COMMIT),
-            l1_post_ns: raw.u64_at(slot_offset + PROBE_POST_COMMIT),
+            l1_pre_ns: probe(PROBE_PRE_COMMIT)?,
+            l1_post_ns: probe(PROBE_POST_COMMIT)?,
             l2_ns: slot.received_ns(),
             queue_depth: write.wrapping_sub(sequence),
         });
@@ -358,32 +454,42 @@ fn main() {
                 signed_buy: signed,
             };
             // HOT0 storage only; the slot is no egress authority.
-            slot.seal(&buy).expect("seal");
+            slot.seal(&buy).map_err(|e| format!("seal: {e:?}"))?;
             let (lane, dispatch) = &mut intents[ingress_rows.len() - 1];
             let write = lane
                 .start_write(dispatch.ticket, adapter, dispatch.tx_hash)
-                .expect("permit");
+                .map_err(|e| format!("egress permit: {e:?}"))?;
             // The egress commit boundary: clock, then the one publish.
             let commit_ns = monotonic_ns();
             egress
                 .publish_buy(write, commit_ns)
-                .expect("egress publish");
+                .map_err(|e| format!("egress publish: {e:?}"))?;
             // One BUY outstanding: read its evidence before the next sample.
             let mut expected = usize::MAX;
             let mut seen = 0usize;
             let evidence_deadline = Instant::now() + Duration::from_secs(10);
             while seen < expected {
-                assert!(
-                    Instant::now() < evidence_deadline,
-                    "outbound evidence missing"
-                );
+                if Instant::now() >= evidence_deadline {
+                    return Err(format!(
+                        "outbound evidence missing for BUY {}",
+                        buy.intent_id
+                    ));
+                }
                 for index in 0..=workers {
-                    let Some(guard) = evidence.try_acquire(index).expect("evidence lane") else {
+                    let acquired = evidence
+                        .try_acquire(index)
+                        .map_err(|e| format!("evidence lane {index}: {e:?}"))?;
+                    let Some(guard) = acquired else {
                         continue;
                     };
-                    let decoded = decode_handoff(&guard.record()).expect("evidence record");
-                    guard.release().expect("evidence release");
-                    assert_eq!(decoded.hash, buy_hash, "evidence of another BUY");
+                    let decoded = decode_handoff(&guard.record())
+                        .map_err(|e| format!("evidence record: {e:?}"))?;
+                    guard
+                        .release()
+                        .map_err(|e| format!("evidence release: {e:?}"))?;
+                    if decoded.hash != buy_hash {
+                        return Err(format!("evidence of another BUY at {}", buy.intent_id));
+                    }
                     if decoded.status == OutboundStatus::Dispatched {
                         // One summary, one record per worker slot.
                         expected = workers + 1;
@@ -396,93 +502,95 @@ fn main() {
                 }
             }
         }
-        assert!(poller.intents_mut().release(handle));
+        if !poller.intents_mut().release(handle) {
+            return Err("intent release refused".into());
+        }
     }
     if let Some(open) = window_open {
         window_allocations = allocations() - open;
     }
 
-    wait_for(&dir.join("go.done"));
-    let mut csv = String::from(
-        "phase,lane_id,lane_sequence,tx_hash,t_packet_decoded_ns,t_ingress_ns,\
-         l1_pre_commit_ns,l1_post_commit_ns,l2_acquire_ns,queue_depth\n",
-    );
+    wait_for(&dir.join("go.done"))?;
+    let mut rows = Vec::with_capacity(ingress_rows.len() * table::IngressSample::WIDTH);
     let mut per_lane: BTreeMap<u16, u64> = BTreeMap::new();
     for row in &ingress_rows {
         let seen = per_lane.entry(row.lane_id).or_insert(0);
-        let phase = if *seen < warmup {
-            "warmup"
-        } else {
-            "qualification"
-        };
+        let qualification = *seen >= warmup;
         *seen += 1;
-        let _ = writeln!(
-            csv,
-            "{phase},{},{},{},{},{},{},{},{},{}",
-            row.lane_id,
-            row.sequence,
-            hex(&row.hash),
-            row.packet_decoded_ns,
-            row.ingress_ns,
-            row.l1_pre_ns,
-            row.l1_post_ns,
-            row.l2_ns,
-            row.queue_depth
-        );
+        table::IngressSample {
+            qualification,
+            lane_id: row.lane_id,
+            lane_sequence: row.sequence,
+            tx_hash: row.hash,
+            t_packet_decoded_ns: row.packet_decoded_ns,
+            t_ingress_ns: row.ingress_ns,
+            l1_pre_commit_ns: row.l1_pre_ns,
+            l1_post_commit_ns: row.l1_post_ns,
+            l2_acquire_ns: row.l2_ns,
+            queue_depth: row.queue_depth,
+        }
+        .write(&mut rows);
     }
-    fs::write(dir.join("raw_ingress.csv"), csv).unwrap();
+    let ingress_table = table::encode(&table::C19_INGRESS, &rows).map_err(|e| e.0)?;
+    write_new(&dir.join("raw_ingress.dbtab"), &ingress_table)?;
 
-    let mut csv = String::from(
-        "tx_hash,egress_sequence,egress_commit_ns,origin,worker,status,selected,queued,\
-         coordinator_observed_ns,third_ns,event_ns,peer,evidence_lane,evidence_sequence\n",
-    );
+    let mut rows = Vec::with_capacity(outbound_rows.len() * table::OutboundEvidence::WIDTH);
     for row in &outbound_rows {
         let e = &row.evidence;
-        let worker = e.worker.map_or(-1, i32::from);
-        let _ = writeln!(
-            csv,
-            "{},{},{},{:?},{worker},{},{},{},{},{},{},{},{},{}",
-            hex(&e.hash),
-            e.egress_sequence,
-            row.egress_commit_ns,
-            e.origin,
-            e.status.name(),
-            e.selected,
-            e.queued,
-            e.observed_ns,
-            e.third_ns,
-            e.event_ns,
-            hex(&e.peer),
-            e.lane_id,
-            e.lane_sequence
-        );
+        table::OutboundEvidence {
+            tx_hash: e.hash,
+            peer: e.peer,
+            egress_sequence: e.egress_sequence,
+            egress_commit_ns: row.egress_commit_ns,
+            coordinator_observed_ns: e.observed_ns,
+            third_ns: e.third_ns,
+            event_ns: e.event_ns,
+            evidence_lane_sequence: e.lane_sequence,
+            evidence_lane_id: e.lane_id,
+            from_worker: e.origin == EvidenceOrigin::Worker,
+            status: e.status as u8,
+            worker: e.worker,
+            selected: e.selected,
+            queued: e.queued,
+        }
+        .write(&mut rows);
     }
-    fs::write(dir.join("raw_outbound.csv"), csv).unwrap();
+    let outbound_table = table::encode(&table::C19_OUTBOUND, &rows).map_err(|e| e.0)?;
+    write_new(&dir.join("raw_outbound.dbtab"), &outbound_table)?;
 
     let stats = poller.stats();
-    let mut summary = String::new();
-    let _ = writeln!(summary, "ingress_samples={}", ingress_rows.len());
-    let _ = writeln!(summary, "outbound_evidence_rows={}", outbound_rows.len());
-    let _ = writeln!(summary, "chain_records_serviced={chain_records}");
-    let _ = writeln!(
-        summary,
-        "hot0_allocations_in_qualification_window={window_allocations}"
-    );
-    let _ = writeln!(summary, "hot0_polls={}", stats.polls);
-    let _ = writeln!(summary, "hot0_idle_polls={}", stats.idle_polls);
-    let _ = writeln!(summary, "hot0_peer_records={}", stats.peer_records);
-    let _ = writeln!(summary, "hot0_admitted={}", stats.admitted);
-    let _ = writeln!(summary, "hot0_rejected={}", stats.rejected);
-    let _ = writeln!(summary, "hot0_duplicates={}", stats.duplicates);
-    let _ = writeln!(summary, "hot0_invalid_records={}", stats.invalid_records);
-    let _ = writeln!(summary, "hot0_lane_faults={}", stats.lane_faults);
-    let _ = writeln!(summary, "hot0_chain_gaps={}", stats.chain_gaps);
     let dropped =
         stats.dropped_pool_exhausted + stats.dropped_launch_too_large + stats.dropped_unstable_slot;
-    let _ = writeln!(summary, "hot0_dropped={dropped}");
-    let _ = writeln!(summary, "hot0_dedup_evictions={}", poller.dedup_evictions());
-    let _ = writeln!(summary, "clock=CLOCK_MONOTONIC");
-    fs::write(dir.join("rust_summary.txt"), summary).unwrap();
-    fs::write(dir.join("rust.done"), b"ok\n").unwrap();
-    println!("C19_RUST_CONSUMER_OK samples={}", ingress_rows.len());
+    let mut record = Draft::new(&summary::SCHEMA);
+    record
+        .set(summary::INGRESS_SAMPLES, ingress_rows.len() as u64)
+        .set(summary::OUTBOUND_EVIDENCE_ROWS, outbound_rows.len() as u64)
+        .set(summary::PROVENANCE_TOOL, "geth_ipc example c19_consumer")
+        .set(summary::PROVENANCE_OBSERVED_UNIX_MS, observed_now()?)
+        .set(summary::CHAIN_RECORDS_SERVICED, chain_records)
+        .set(summary::HOT0_ALLOCATIONS_IN_WINDOW, window_allocations)
+        .set(summary::HOT0_POLLS, stats.polls)
+        .set(summary::HOT0_IDLE_POLLS, stats.idle_polls)
+        .set(summary::HOT0_PEER_RECORDS, stats.peer_records)
+        .set(summary::HOT0_ADMITTED, stats.admitted)
+        .set(summary::HOT0_REJECTED, stats.rejected)
+        .set(summary::HOT0_DUPLICATES, stats.duplicates)
+        .set(summary::HOT0_INVALID_RECORDS, stats.invalid_records)
+        .set(summary::HOT0_LANE_FAULTS, stats.lane_faults)
+        .set(summary::HOT0_CHAIN_GAPS, stats.chain_gaps)
+        .set(summary::HOT0_DROPPED, dropped)
+        .set(summary::HOT0_DEDUP_EVICTIONS, poller.dedup_evictions())
+        .set(summary::CLOCK, "CLOCK_MONOTONIC")
+        .set(
+            summary::RAW_INGRESS_SHA256,
+            Value::B256(sha256(&ingress_table)),
+        )
+        .set(
+            summary::RAW_OUTBOUND_SHA256,
+            Value::B256(sha256(&outbound_table)),
+        );
+    let bytes = record.encode().map_err(|e| e.0)?;
+    write_new(&dir.join("rust_summary.dbrec"), &bytes)?;
+    write_new(&dir.join("rust.done"), b"ok\n")?;
+    Ok(ingress_rows.len())
 }

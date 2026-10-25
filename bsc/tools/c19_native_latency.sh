@@ -22,12 +22,19 @@
 # This script produces measurements. It does not decide the C1.9 gate: the
 # evidence is reviewed against the plan. Exit 0 means the run and its
 # integrity checks completed.
+#
+# Evidence (bsc/native/evidence/c1/c1-9-native-latency-<stamp>*): binary only
+# (no JSON): raw_ingress.dbtab and raw_outbound.dbtab (DBTAB001 tables),
+# rust_summary.dbrec, host_profile.dbrec and the report <stamp>.dbrec
+# (DBREC001), go_snapshot.bin (fixed-width counters + SHA-256), plus the
+# manifest and the logs as text and report.txt, the report's derived view.
 set -euo pipefail
 
 PIN="cdb7548b5baacfdae92f9f63437d6456411665f3"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENGINE="$ROOT/bsc/engine"
-SOURCE_GETH="$ROOT/bsc/vendor/bsc-geth"
+# A Git checkout of bsc-geth that contains the pin (default: the vendored one).
+SOURCE_GETH="${DARKBOT_C19_GETH_SOURCE:-$ROOT/bsc/vendor/bsc-geth}"
 EVIDENCE="$ROOT/bsc/native/evidence/c1"
 STAMP="$(date +%Y%m%dT%H%M%S)"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/darkbot-c19.XXXXXX")"
@@ -36,6 +43,7 @@ DATA="$RUN_DIR/run"
 GO_BIN="$RUN_DIR/c19-go.test"
 RUST_BIN="$ENGINE/target/release/examples/c19_consumer"
 HOST_BIN="$ENGINE/target/release/examples/c16_host_profile"
+REPORT_BIN="$ENGINE/target/release/c19_report"
 PREFIX="$EVIDENCE/c1-9-native-latency-$STAMP"
 
 export DARKBOT_C19_PEERS="${DARKBOT_C19_PEERS:-4}"
@@ -62,13 +70,17 @@ trap cleanup EXIT
 
 mkdir -p "$EVIDENCE" "$DATA"
 
-if [ "$(git -C "$SOURCE_GETH" rev-parse "$PIN")" != "$PIN" ]; then
-  echo "C19_FAIL reason=geth-pin-unavailable" >&2
+# The source must be its own repository (not a directory inside another one)
+# and hold the pinned commit.
+GETH_TOP="$(git -C "$SOURCE_GETH" rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$GETH_TOP" ] || [ "$(cd "$GETH_TOP" && pwd -P)" != "$(cd "$SOURCE_GETH" && pwd -P)" ] \
+  || ! git -C "$SOURCE_GETH" cat-file -e "$PIN^{commit}" 2>/dev/null; then
+  echo "C19_FAIL reason=geth-pin-unavailable source=$SOURCE_GETH" >&2
   exit 1
 fi
 
 echo "=== C1.9 CREATE DISPOSABLE PINNED GETH CLONE ==="
-git clone --shared --no-checkout "$SOURCE_GETH" "$GETH" >/dev/null 2>&1
+git clone --shared --no-checkout "$SOURCE_GETH" "$GETH" >/dev/null
 git -C "$GETH" checkout --detach "$PIN" >/dev/null 2>&1
 python3 "$ROOT/bsc/tools/c1_apply_geth_overlay.py" "$GETH"
 
@@ -121,8 +133,10 @@ cat > "$GETH/darkbot/fastlane/c19_latency_test.go" <<'GO'
 package fastlane
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -203,6 +217,75 @@ func c19LoopbackTarget(t *testing.T, id byte) OutboundTargetV2 {
 			return err
 		},
 	}
+}
+
+// The producer snapshot (go_snapshot.bin), layout version 1, little-endian:
+// magic, u32 version, u32 flags (bit 0: outbound present), the u64 counters
+// below in this order (outbound zero without the flag), u64 worker count,
+// 12 u64 per worker, and the SHA-256 of every preceding byte. The reader is
+// darkbot-bsc-qualification c1_latency::GoSnapshot.
+var c19SnapshotMagic = [8]byte{'D', 'B', 'C', '1', '9', 'S', 'N', 'P'}
+
+const c19SnapshotVersion = uint32(1)
+
+func c19Count(t *testing.T, name string, value int) uint64 {
+	t.Helper()
+	if value < 0 {
+		t.Fatalf("C1.9 snapshot %s is negative: %d", name, value)
+	}
+	return uint64(value)
+}
+
+func c19Flag(value bool) uint64 {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func c19Snapshot(t *testing.T, in IngressEvidenceV2, chain ChainEvidenceV2, out OutboundEvidenceV2, hasOutbound bool) []byte {
+	t.Helper()
+	p := in.Peers
+	words := []uint64{
+		c19Count(t, "live_peers", in.LivePeers), c19Count(t, "live_covered", in.LiveCovered),
+		c19Count(t, "live_uncovered", in.LiveUncovered), in.CoveredBinds, in.UncoveredBinds,
+		c19Count(t, "pending_release", in.PendingRelease), in.Reclaimed, in.ReleaseFailures,
+		in.CloseFailures, in.GapTotal, in.GapClockErrors, in.TxpoolPublished, in.TxpoolRefused,
+		in.TxpoolSerializeErrs, in.TxpoolClockErrors,
+		p.Packets, p.RejectedPackets, p.Matched, p.Filtered, p.Published, p.QueueFull, p.Oversize,
+		p.Refused, p.SerializeErrors, p.ClockErrors, p.UncoveredCandidates,
+		uint64(chain.LaneID), chain.Published, chain.Gaps, chain.Lost, chain.PendingLost,
+		chain.ClockErrors, chain.OwnershipViolations, chain.DroppedFull, chain.Oversize,
+	}
+	flags := uint32(0)
+	var workers []OutboundWorkerEvidenceV2
+	if hasOutbound {
+		flags = 1
+		workers = out.PerWorker
+		words = append(words,
+			c19Count(t, "workers", out.Workers), c19Flag(out.Running), out.EgressRecords,
+			out.InvalidEgress, out.Dispatched, out.Queued, out.QueueFull, out.NoTarget,
+			out.EvidenceLost, out.EgressErrors, out.Reassignments, out.ClockErrors)
+	} else {
+		words = append(words, make([]uint64, 12)...)
+	}
+	words = append(words, uint64(len(workers)))
+	for _, w := range workers {
+		words = append(words,
+			c19Count(t, "worker index", w.Index), uint64(w.EvidenceLane), c19Flag(w.HasTarget),
+			w.HandedOff, w.SendErrors, w.NoTarget, w.AlreadyKnown, w.EvidenceLost, w.AbandonedStop,
+			c19Count(t, "worker queue_depth", w.QueueDepth), w.ClockErrors, w.ClockRefused)
+	}
+	var buf bytes.Buffer
+	buf.Write(c19SnapshotMagic[:])
+	for _, field := range []any{c19SnapshotVersion, flags, words} {
+		if err := binary.Write(&buf, binary.LittleEndian, field); err != nil {
+			t.Fatal(err)
+		}
+	}
+	digest := sha256.Sum256(buf.Bytes())
+	buf.Write(digest[:])
+	return buf.Bytes()
 }
 
 var c19MakeTarget = func(t *testing.T, id byte, total int) OutboundTargetV2 {
@@ -297,19 +380,25 @@ func TestC19NativeLatencyProducer(t *testing.T) {
 	c19WriteFile(t, filepath.Join(dir, "manifest.txt"), []byte(manifest))
 	c19WaitForFile(t, filepath.Join(dir, "rust.ready"))
 
-	// Chain evidence is published throughout, as under chain import.
+	// Chain evidence is published throughout, as under chain import: one
+	// contiguous canonical chain (each head's parent is the previous head),
+	// so HOT0's E7-2 continuity check holds and the chain stays available.
 	stopChain := make(chan struct{})
 	var chainDone sync.WaitGroup
 	chainDone.Add(1)
 	go func() {
 		defer chainDone.Done()
+		var parent common.Hash
 		for number := int64(1); ; number++ {
 			select {
 			case <-stopChain:
 				return
 			default:
 			}
-			PublishCanonicalV2(c15Header(number, byte(number)), int(number%200))
+			header := c15Header(number, 0)
+			header.ParentHash = parent
+			PublishCanonicalV2(header, int(number%200))
+			parent = header.Hash()
 			time.Sleep(500 * time.Microsecond)
 		}
 	}()
@@ -386,19 +475,14 @@ func TestC19NativeLatencyProducer(t *testing.T) {
 	if chain.OwnershipViolations != 0 || chain.Lost != 0 || chain.Published == 0 {
 		t.Fatalf("C1.9 chain evidence %+v", chain)
 	}
-	evidence := map[string]any{"ingress": snapshot, "chain": chain}
-	if outbound, ok := OutboundV2Snapshot(); ok {
+	outbound, hasOutbound := OutboundV2Snapshot()
+	if hasOutbound {
 		if outbound.Dispatched != expected || outbound.InvalidEgress != 0 || outbound.QueueFull != 0 ||
 			outbound.EvidenceLost != 0 || outbound.EgressErrors != 0 {
 			t.Fatalf("C1.9 outbound evidence %+v", outbound)
 		}
-		evidence["outbound"] = outbound
 	}
-	encoded, err := json.MarshalIndent(evidence, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	c19WriteFile(t, filepath.Join(dir, "go_snapshot.json"), append(encoded, '\n'))
+	c19WriteFile(t, filepath.Join(dir, "go_snapshot.bin"), c19Snapshot(t, snapshot, chain, outbound, hasOutbound))
 	c19WriteFile(t, filepath.Join(dir, "go.done"), []byte("ok\n"))
 	c19WaitForFile(t, filepath.Join(dir, "rust.done"))
 	fmt.Println("C19_GETH_PRODUCER_OK")
@@ -419,12 +503,14 @@ if [ "$DARKBOT_C19_OUTBOUND_MODE" = production_devp2p_selected_peer_handoff ]; t
 fi
 (cd "$GETH" && go test -c -o "$GO_BIN" "$GO_PACKAGE")
 
-echo "=== C1.9 BUILD RUST RELEASE CONSUMER AND HOST PROFILE ==="
+echo "=== C1.9 BUILD RUST RELEASE CONSUMER, HOST PROFILE AND REPORT ==="
 (cd "$ENGINE" && cargo build -p darkbot-bsc-geth-ipc --release --locked --offline \
   --example c19_consumer --example c16_host_profile)
+(cd "$ENGINE" && cargo build -p darkbot-bsc-qualification --release --locked --offline \
+  --bin c19_report)
 
 echo "=== C1.9 HOST PROFILE ==="
-"$HOST_BIN" --profile "$PROFILE" --out "$DATA/host_profile.json"
+"$HOST_BIN" --profile "$PROFILE" --out "$DATA/host_profile.dbrec"
 
 echo "=== C1.9 START GO PRODUCERS ==="
 "$GO_BIN" -test.run '^TestC19NativeLatencyProducer$' -test.count=1 -test.v -test.timeout 30m \
@@ -473,25 +559,36 @@ if ! grep -q 'C19_RUST_CONSUMER_OK' "$DATA/rust.log"; then
   exit 1
 fi
 
-# The raw evidence is kept exactly as recorded, warmup included.
-for name in raw_ingress.csv raw_outbound.csv go_snapshot.json rust_summary.txt manifest.txt \
-  host_profile.json go.log rust.log; do
+# The raw evidence is kept exactly as recorded, warmup included; nothing is
+# ever overwritten.
+if compgen -G "$PREFIX*" >/dev/null; then
+  echo "C19_FAIL reason=evidence-exists prefix=$PREFIX" >&2
+  exit 1
+fi
+for name in raw_ingress.dbtab raw_outbound.dbtab go_snapshot.bin rust_summary.dbrec manifest.txt \
+  host_profile.dbrec go.log rust.log; do
   cp "$DATA/$name" "$PREFIX-$name"
 done
 
-python3 "$ROOT/bsc/tools/c19_analyze.py" \
-  --raw-ingress "$PREFIX-raw_ingress.csv" \
-  --raw-outbound "$PREFIX-raw_outbound.csv" \
+REPORT_STATUS=0
+"$REPORT_BIN" \
+  --raw-ingress "$PREFIX-raw_ingress.dbtab" \
+  --raw-outbound "$PREFIX-raw_outbound.dbtab" \
   --manifest "$PREFIX-manifest.txt" \
-  --go-snapshot "$PREFIX-go_snapshot.json" \
-  --rust-summary "$PREFIX-rust_summary.txt" \
-  --host-profile "$PREFIX-host_profile.json" \
+  --go-snapshot "$PREFIX-go_snapshot.bin" \
+  --rust-summary "$PREFIX-rust_summary.dbrec" \
+  --host-profile "$PREFIX-host_profile.dbrec" \
   --repo "$ROOT" \
   --geth "$GETH" \
   --go-bin "$GO_BIN" \
   --rust-bin "$RUST_BIN" \
-  --output "$PREFIX.json"
+  --output "$PREFIX.dbrec" >"$PREFIX-report.txt" || REPORT_STATUS=$?
+cat "$PREFIX-report.txt"
+if [ "$REPORT_STATUS" -ne 0 ]; then
+  echo "C19_FAIL reason=report-exit-$REPORT_STATUS" >&2
+  exit 1
+fi
 
 echo "=== C1.9 RESULT ==="
-echo "evidence=$PREFIX.json"
+echo "evidence=$PREFIX.dbrec"
 echo "C1_9_MEASUREMENT_COMPLETE (review the evidence; this script does not pass the gate)"

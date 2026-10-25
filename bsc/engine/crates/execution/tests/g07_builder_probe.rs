@@ -28,8 +28,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// T5: the authority return is a consumable capability (was 642280d6…).
 /// Review 25.10. (Paket 1): ticketed release gate, durable abort (was 895ced5b…).
 /// C1 runtime WSS dependencies in Cargo.lock (was afe825e3…).
+/// C1 binary evidence: record/geth-ipc lines in Cargo.lock (was 19078cc4…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "19078cc4fd0e68d2953480ea92fb53b385d51ee641b5df8d99163eda255b5278";
+const PINNED_PLAN_SHA256: &str = "1207890ffa3396ea9f5db4e59f84da1dd7199a692567ad4ca1f0d68671dfd432";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

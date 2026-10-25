@@ -16,9 +16,17 @@
 //! - [`stats`] and [`verdict`]: aggregation and the acceptance rules;
 //! - [`identity`]: what the build is bound to;
 //! - [`json`]: a small JSON writer.
+//!
+//! C1 qualification (typed binary records, no JSON): [`c1_latency`] (C1.9
+//! `c19_report`), [`c1_hook_path`] (C1.9b `c19b_report`), [`c1_freeze`]
+//! (C1.10 `c1_freeze`) and what they share, [`c1_common`].
 
 #![forbid(unsafe_code)]
 
+pub mod c1_common;
+pub mod c1_freeze;
+pub mod c1_hook_path;
+pub mod c1_latency;
 pub mod evidence;
 pub mod identity;
 pub mod json;
