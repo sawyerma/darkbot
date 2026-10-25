@@ -1,10 +1,10 @@
 # DarkBot BSC — Birth-Entry Architecture Contract
 
 Status: **AUTHORITATIVE / NO ARCHITECTURE DRIFT**
-Updated: 2026-09-27
+Updated: 2026-10-25 (offline-development scope clarification; historic architecture retained)
 
 Normative feasibility gate:
-- `docs/bsc/GATE0_TESTPLAN_SHORT.md`
+- `bsc/docs/1_PLAN/GATE0_TESTPLAN_SHORT.md`
 
 ## 0. Direct-chain invariant
 
@@ -229,7 +229,9 @@ Receipt success alone is insufficient. Launch-internal creator/presale/initial p
 
 ## 6. Production architecture after Gate-0 PASS
 
-Only after PASS build the full native runtime:
+**Binding user decision 2026-10-25 (supersedes the following historical development restriction, not the architecture):** All needed real native C0–I code may be implemented, integrated, regression-tested and technically frozen offline before an actual G0.7/G0.8 BUY. E requires the separately verified G0.1 Four Classic/OpenFour contract freeze. The production/native ownership, binary/data, no-mock and no-duplicate-runtime constraints below are unchanged. **Only operating/value-bearing LIVE and genuine economic activation remain conditional on separately authorized Gate-0 acquisition/ordering/cost evidence, safety gates and explicit user approval; physical producer T0→T_buy stays UNKNOWN without original witness.** No Mainnet key use, SIGN, funding, ARM, SEND, BUY, LIVE or paid providers are approved by this clarification.
+
+**Historical pre-2026-10-25 project scheduling, no longer a ban on offline coding:** Only after PASS build the full native runtime:
 
 ```
 one pinned bsc-geth
@@ -260,7 +262,9 @@ Python is offline analysis/reporting only.
 
 ## 7. What is NOT required before Gate-0 PASS
 
-Do not prebuild:
+**Current scope 2026-10-25:** The following historical list meant these were *not Gate-0 prerequisites*. It does **not** prohibit their full technical offline C0–I implementation under the new express user authorization. Remaining specialty work (including J/KB/K and unsupported Four profiles) retains its own qualification and authorization gates; technical evidence is never confused with on-chain execution. No productive mock, no internal JSON/legacy bridge, no fake LIVE. The old wording is preserved below for historical context.
+
+Historical restriction (superseded for authorized offline development) — Do not prebuild:
 
 - complete reorg/restart state machine;
 - full binary research journal;
