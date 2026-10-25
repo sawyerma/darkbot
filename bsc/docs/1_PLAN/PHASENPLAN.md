@@ -1,7 +1,19 @@
 # BSC PHASENPLAN — DarkBot Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-10-23 (v9.1 implementation/hardening addendum; v9 granular identity and v8 A/B preserved)
+Updated: 2026-10-25 (C0/C1/C2 offline-development override; v9.1/v9/v8 evidence and economic safeguards preserved)
+
+## BINDING USER DECISION — 2026-10-25: C0/C1/C2 OFFLINE-ENTWICKLUNG FREIGEGEBEN; WIRTSCHAFTLICHE AUSFÜHRUNG WEITER GESPERRT
+
+**Neue ausdrückliche Nutzerentscheidung mit Vorrang vor allen älteren widersprechenden C1/C2-Entwicklungsstopps in diesem Dokument und untergeordneten STATUS-/Bug-/Auftragsdokumenten.** Ab sofort dürfen die vorhandenen BSC-Phasen **C0 (soweit nötig), C1 einschließlich C1.9/C1.9b/C1.10 und C2** nach ihrer technischen Abhängigkeitsreihenfolge vollständig **offline entwickelt, repariert, nativ integriert, lokal/reproduzierbar getestet, dokumentiert und für ihren nachweisbaren technischen Scope eingefroren** werden, **ohne auf G0.7/G0.8-Mainnet-Ergebnisse zu warten**. Zuvor bestätigte Gate-A-/Gate-B-Code- und Integrationslücken zuerst schließen; **BSC-050-Vollinventur vor der umfassenden C1/C2-Fortsetzung** durchführen. C2 respektiert die fachlichen C1-Interface-/Freeze-Abhängigkeiten; alte Statusangaben „C1 PAUSED“ bzw. „C2 BLOCKED“ aufgrund des ausstehenden Mainnet-BUY gelten für die *Offline-Entwicklung* ab dieser Entscheidung nicht mehr. Bereits verifizierte Arbeit nicht neu bauen. Bestehende C0–C2-Scope-, Golden-, Race-, Release-, Wire-, Safety- und Frontend-Abnahmekriterien bleiben unverändert verbindlich.
+
+**Absolute wirtschaftliche Grenze unverändert:** Diese Entscheidung genehmigt **weder echte Wallet-Key-SIGN/VERIFY-Läufe noch ARM, Funding, echte Nonce-Burns, bezahlte Provideraktionen, Transaktions-Broadcast/SEND, Mainnet-BUY, LIVE oder automatische Retries**. Kein Geldtransfer und keine on-chain Transaktion im Rahmen dieses Auftrags. `FROZEN_APPROVED_V5_SHA256="UNARMED"`, `approved=false`, `execution_ready=false` bleiben. Alle solchen Schritte bedürfen weiterhin ihrer jeweils **separaten ausdrücklichen Nutzerfreigabe**. Read-only öffentliche RPC-Abfragen und lokale/synthetische Negativtests dürfen nicht als echte Kauf-/Producer-Evidence gelten.
+
+**G0.7/G0.8 als reale Qualifikationsgrenze unverändert:** Die Abfolge **separat genehmigter echter G0.7-BUY → G0.8 kanonischer Erwerbs-/Reihenfolge-/Kostennachweis → PASS/ADAPT/STOP** bleibt für **wirtschaftliche Freischaltung, Produktionsaktivierung/LIVE und Behauptungen über tatsächlichen Erwerb oder physische T0→T_buy-Latenz** verpflichtend. Ein technisch grünes C1.10/C2-Offline-Gate ist **kein** produktiver Gate-0-PASS. Fehlender Original-Producer-Witness bleibt `UNKNOWN/UNQUALIFIED`, nicht `PASS`. Nachweislich noch nicht extern prüfbare Teilkriterien getrennt als `EXTERNAL_BLOCKED/NOT_RUN` führen, statt sie zu fingieren oder sämtliche unabhängig machbaren Codearbeiten zu stoppen.
+
+**Reihenfolge für Claude:** (1) offene ausführbare Gate-A-/Gate-B-Code-/Frontend-/Schema-Integrationen, (2) BSC-050-Vollinventur mit konkreten aktiven Fehlern, (3) C1 samt vorhandenem Freeze-/geth-/HOT0-Regression-Gate technisch fertigstellen, (4) C2 mit echtem nativen State-/Nonce-/Reorg-/Recovery-Owner samt erforderlicher Integration technisch fertigstellen, (5) weitere *explizit genehmigungsfreie* Phasenarbeiten nur gemäß bestehenden Fachabhängigkeiten; C3/D–K erhalten durch diese Entscheidung **keine pauschale neue Freigabe**. Kein produktiver Mock, Fake, Legacy-Fallback, internes JSON, unnötiges Hardcoding oder paralleler Runtime-Pfad; Test-Fixtures sind keine produktiven Ersatzimplementierungen. Pro Paket tatsächliche RED/GREEN-/Integrations-/Release-/Frontend-Nachweise, dokumentierten sachlichen Status und Commit/Push auf `origin/main`. **`LOCAL_PASS` allein bedeutet weder betriebsbereit noch vollständige reale Qualifikation.** Untergeordnete Dokumente sind auf diese neue Prioritätsregel anzupassen; historische Evidenz und signierte/gebundene Bytes unverändert lassen.
+
+---
 
 
 ## BINDING v9.1 D1–D6 — G0.6a DRY secret isolation and PREPARE → SIGN/VERIFY split (2026-10-23)
@@ -157,24 +169,22 @@ The user explicitly authorized offline corrections of E5–E8 in `bsc_bug_v1.md`
 
 **Development milestone: G0.7 CODE READY — AWAITING EXPLICIT ECONOMIC APPROVAL. This is NOT G0.7 or Gate-0 PASS.**
 
-## **ABSOLUTE STOP RULE — REAL MAINNET BUY BEFORE ANY MORE C1/C2 WORK**
+## **ABSOLUTE ECONOMIC / LIVE STOP — OFFLINE C0/C1/C2 DEVELOPMENT EXPRESSLY PERMITTED (2026-10-25)**
 
-> **DO NOT continue C1, C1.10 freeze, C2, C3, decoder work, optimization, refactoring or additional synthetic benchmarking before G0.7/G0.8.**
+> **Echte SIGN-/ARM-/Funding-/Nonce-Burn-/Sende-/BUY-/LIVE-Aktionen sind ohne jeweils separate ausdrückliche Nutzerfreigabe verboten.** Keine eigenmächtige wirtschaftliche Ausführung.
 >
-> **THE NEXT PRODUCT TEST IS THE REAL CONTROLLED BSC MAINNET BUY:** a value-bearing on-chain BUY must execute successfully, the intended token must actually arrive at the intended buyer, and acquisition/ordering evidence must be recorded.
+> **Offline C0/C1/C2 implementieren, testen und technisch qualifizieren ist ab sofort ausdrücklich gestattet**, auch bevor ein G0.7-/G0.8-Mainnet-Versuch durchgeführt wurde; siehe vorrangigen BINDING USER DECISION vom 2026-10-25 oben. Die bereits vorhandenen C1-Komponenten und Evidence weiterführen; C1.10-Offline-Freeze nach seinen echten technischen Kriterien abschließen, danach C2 entsprechend der C1-Verträge. Keine Fake-, Legacy- oder Mock-Produktionsabkürzung.
 >
-> **Local latency, Testnet BUYs, geth/Fast-Lane measurements, builder ACKs, handoff timing and receipts without acquisition are NOT substitutes for this test.**
->
-> Required next sequence:
+> **Für wirtschaftliche Freischaltung, echten Erwerbsnachweis, Produktions-LIVE und tatsächliche Gate-0-Verdikte bleibt die zwingende Reihenfolge:**
 >
 > ```text
-> G0.7  controlled minimal-value Mainnet BUY
->   -> G0.8  prove actual token acquisition + ordering + costs
+> separat ausdrücklich genehmigter G0.7 Mainnet-BUY
+>   -> G0.8 kanonischer tatsächlicher Erwerb + Ordering + Kosten
 >   -> PASS / ADAPT / STOP
->   -> only then resume C1 freeze / C2 production work
+>   -> erst dann wirtschaftliche/operative Produktionsfreischaltung
 > ```
 >
-> C1 engineering may remain preserved at its current qualified checkpoint, but it is **PAUSED** until the real BUY test is executed and evaluated.
+> **Weder C1.10-Offline-Freeze noch C2-Offline-Integration ersetzen einen echten Erwerbsversuch.** Lokale Messungen, Builder-ACKs, N+1, Receipts ohne Erwerb oder Testnet-BUYs beweisen keine physische T_buy−T0-Latenz. Bei fehlendem Original-Producer-Witness bleibt diese UNKNOWN. C3/Decoder/weitere produktive Phasen bleiben an ihre bestehenden gesonderten Fach- und Freigabegates gebunden.
 
 ## BINDING DATA-PATH INVARIANT — BINARY HOT PATH / EXTERNAL PROTOCOL BOUNDARY (2026-10-16)
 
@@ -193,7 +203,7 @@ The user explicitly authorized offline corrections of E5–E8 in `bsc_bug_v1.md`
 ### Phase-accurate implementation (no new engine or refactor loop)
 
 1. **Now, G0.7/G0.8:** close the internal JSON compliance gap in the existing qualification harness, configuration/authorization contract, probe evidence and G0.8 verification with a **minimal, auditable binary migration before any live authorization**. Do not replace the tested BUY/signing algorithms or alter frozen signed launch/BUY bytes, existing DRY hashes or original historical evidence. Establish byte/field equivalence, guard fail-closed behavior, durable-recovery behavior, test parity and G0.8 reader compatibility with a few targeted regressions. Keep the guard `UNARMED` until a separate explicit approval of the final contract and single economic attempt; a changed approval contract needs its own new reviewed binding. There is **no internal JSON exemption for G0.7/G0.8**. Historical JSON remains immutable evidence, not an active authority.
-2. **After G0.7/G0.8 verdict, C1.10 -> C2/C3 and venue phases:** implement the single production runtime and actual binary HOT0 -> state -> BUY -> qualified egress path. Prewarm RPC/HTTP(S)/TLS and serialize provider templates outside its measured boundary. Qualify any bounded dynamic patching independently (byte-exact requests, matching signature hashes, expiry/window and provider policy); do not introduce a second BUY/signing algorithm or use G0.7 as the permanent trading runner.
+2. **C1.10 -> C2 offline now; operational egress only after G0.7/G0.8 verdict:** implement the single production runtime and actual binary HOT0 -> state -> BUY -> qualified egress path. Prewarm RPC/HTTP(S)/TLS and serialize provider templates outside its measured boundary. Qualify any bounded dynamic patching independently (byte-exact requests, matching signature hashes, expiry/window and provider policy); do not introduce a second BUY/signing algorithm or use G0.7 as the permanent trading runner.
 3. **PAPER / final production hot-path requalification (I) before LIVE (J):** verify real-path allocation/blocking/format boundaries with instrumentation and measured worst-case latency, counters for dropped/late records, replay/crash tests and independent on-chain outcome checks. `PASS` requires evidence from the actual runtime, not from `c19_consumer` fixtures, derived reports, FakeTransport, builder ACKs or local-only handoff.
 
 ### Non-regression / acceptance checks
@@ -205,7 +215,7 @@ The user explicitly authorized offline corrections of E5–E8 in `bsc_bug_v1.md`
 
 ## G0.6a–G0.8 qualification update — binding 2026-10-13
 
-**Existing evidence remains valid.** The existing G0.6 DRY1–DRY4 PASS is retained with its original scope and exact parameters. This update does not reopen all of G0.6 or authorize a live transaction. Additional qualification applies to the new G07 minimum-value and dynamic gas candidate and to any modified signed parameters. The absolute Gate-0 stop rule above remains unchanged.
+**Existing evidence remains valid.** The existing G0.6 DRY1–DRY4 PASS is retained with its original scope and exact parameters. This update does not reopen all of G0.6 or authorize a live transaction. Additional qualification applies to the new G07 minimum-value and dynamic gas candidate and to any modified signed parameters. The absolute *economic and operational* Gate-0 stop rule remains unchanged; C0/C1/C2 offline implementation is explicitly allowed by the 2026-10-25 binding decision.
 
 ### Evidence and scope
 
@@ -244,7 +254,7 @@ One wei is the smallest positive native unit, **not a qualified final minimum** 
 2. Qualify technical minimum, economically allowed minimal test spend, gas candidate and exact signed G0.7 parameters.
 3. Run required changed-parameter final DRY checks, followed by explicit authorization for at most the approved Mainnet attempt.
 4. G0.7 actual controlled on-chain BUY; G0.8 confirm canonical buyer token acquisition, position relative to launch and competition, builder route and complete costs. Treat T0-to-T_buy as UNKNOWN without a valid producing-execution witness; position N+1 alone is not sub-ms timing.
-5. PASS / ADAPT / STOP. Only then resume frozen C1/C2 work.
+5. PASS / ADAPT / STOP. Only then permit economic/operational production activation; offline C1/C2 coding and technical qualification may proceed beforehand under the 2026-10-25 decision.
 
 **DYNAMIC_INCLUSION_BID_OPTIMIZER: PLANNED / BLOCKED UNTIL G0.7/G0.8.** Develop distinct P2P, 48Club and BlockRazor gas/bundle/tip policies under hard total-spend and profitability bounds, with safe signing invalidation on bid changes. Benchmark actual successful acquisition, inclusion position, validator reach and net costs, not RPC suggestions, ACKs or local handoff alone.
 
@@ -333,8 +343,8 @@ Fast local code, pending lead, geth acceptance or builder acknowledgement are no
 | G0.10 | **BLOCKED** | Own-builder feasibility: validator/proposer reach, operating cost, bid competitiveness and independence from third-party providers |
 | G0.11 | **BLOCKED** | PASS / ADAPT / STOP decision per venue |
 | C0 | **IN PROGRESS / FOUNDATION FROZEN** | Unit-6 startup authorization + recorder/replay foundation IMPLEMENTED_TESTED/FROZEN for foundation scope; carried unchanged through the R1–R13 restructure (2026-10-15/16, regression identical to baseline, STATUS.md); full production qualification remains separate |
-| C1 | **PAUSED BEFORE FREEZE — DO NOT CONTINUE BEFORE G0.7/G0.8** | C1.1–C1.8 PASS and C1.9/C1.9b qualified on the pre-restructure source (ledger); C1.10A checkpoint 2026-10-10: regression PASS with pinned-baseline race exception but `C1_10A_COMPLETE = NO` (full non-race suite, final build, identity binding, frozen-binary C1.9 measurement and freeze still open); no C1.10B acceptance record; after the R1–R13 restructure and C1.5–C1.8 re-integration (2026-10-16) the C1.9/C1.9b binding and the C1.10 freeze must be done on the new source; freeze deliberately deferred until the real Mainnet BUY/acquisition test is executed and evaluated |
-| C2 | **BLOCKED BY C1.10** | Production pending/canonical/reorg/nonce/replacement state |
+| C1 | **OFFLINE DEVELOPMENT AUTHORIZED — C1.10 TECHNICAL FREEZE OPEN** | C1.1–C1.8 PASS and C1.9/C1.9b qualified on the pre-restructure source (ledger); C1.10A checkpoint 2026-10-10: regression PASS with pinned-baseline race exception but `C1_10A_COMPLETE = NO` (full non-race suite, final build, identity binding, frozen-binary C1.9 measurement and freeze still open); no C1.10B acceptance record; after the R1–R13 restructure and C1.5–C1.8 re-integration (2026-10-16) the C1.9/C1.9b binding and the C1.10 freeze must be done on the new source; offline technical freeze authorized by the 2026-10-25 decision; economic production activation still waits for real G0.7/G0.8 |
+| C2 | **OFFLINE DEVELOPMENT AUTHORIZED AFTER C1 TECHNICAL INTERFACE/FREEZE; LIVE BLOCKED** | Production pending/canonical/reorg/nonce/replacement state |
 | C3 | **BLOCKED** | Production local build/sign/geth path benchmark; engineering proof only |
 | D | **BLOCKED** | Full production Flap Rust decoder |
 | E | **BLOCKED** | Full production Four.meme Rust decoder |
@@ -393,7 +403,7 @@ Local engineering target remains <1 ms for the controllable hot path.
 
 ## 5a. BSC Parallel Ingress Portfolio — five independently switchable signal sources (binding proposal adopted 2026-10-22, v6)
 
-**Scope and priority.** This is an additive ingress contract, not a second engine, an alternative Gate-0 acceptance rule, an exception for signing/sending, or authority to continue paused C1/C2 product implementation. Preserve G0.7 -> G0.8 -> PASS/ADAPT/STOP, the frozen exact-V4 economic approval, the UNARMED default and all binary internal-format rules. Bounded read-only G0.4 observation of these candidates is allowed; no value-bearing send or unapproved private-feed expense follows from this section.
+**Scope and priority.** This is an additive ingress contract, not a second engine, an alternative Gate-0 acceptance rule, an exception for signing/sending, or authority for C1/C2 economic LIVE activation; offline C1/C2 implementation is authorized by the 2026-10-25 binding decision. Preserve G0.7 -> G0.8 -> PASS/ADAPT/STOP, the frozen exact-V4 economic approval, the UNARMED default and all binary internal-format rules. Bounded read-only G0.4 observation of these candidates is allowed; no value-bearing send or unapproved private-feed expense follows from this section.
 
 ### 5a.1 Product objective and timing — never confuse block arrival with T0
 
@@ -439,7 +449,7 @@ Per source + venue + deployment/version + inclusion adapter, record: actual full
 - **G0.4:** scoped read-only parallel observation and evidence under the existing stop-rule; no production LIVE promotion.
 - **G0.5/G0.6:** integrated source-to-send and ingress x inclusion qualification when permitted under the Gate-0 execution sequence.
 - **G0.7/G0.8:** remain strictly tied to their original frozen controlled minimal-value attempt and approved SHA; no alteration of launch/BUY bytes or broader live source set by this amendment.
-- **C1/C2:** after G0.7/G0.8 verdict, source adapters, binary ingress and candidate/state dedup; pinned geth remains an independent baseline.
+- **C1/C2:** source adapters, binary ingress and candidate/state dedup may be implemented and locally qualified offline before G0.7/G0.8; production activation remains after the actual verdict; pinned geth remains an independent baseline.
 - **C3/D/E/F/G/H:** exact native hot-path, distinct venue decoders, journal/market evidence, economics and common strategy.
 - **I/J:** all-mode switching, failure isolation and strict qualified LIVE gates; no unqualified source can trigger a BUY.
 - **K:** additional escalation only with reproducible evidence.
@@ -483,9 +493,9 @@ Gate 0 treats Four Classic TokenManager2 and OpenFour Core as separate current p
 
 Do not assume pre-execution token-address derivation. Prove it or record that it is unavailable.
 
-## 8. C0 — production foundation after PASS
+## 8. C0 — production foundation (offline development permitted; activation after PASS)
 
-Only after at least one BSC venue passes Gate 0:
+Offline C0 foundation and C1/C2-dependent technical work may proceed under the 2026-10-25 binding decision; production activation still requires the real Gate-0 verdict. The original foundation deliverables remain:
 
 - create clean Rust workspace;
 - versioned native event schema;
@@ -810,7 +820,7 @@ If one venue passes, production work proceeds only for the proven venue first. T
 | I/J | Launch: getrennte requested/effective REPLAY/PAPER/SHADOW/LIVE und tatsächliche wirtschaftliche/native Autorisierung; Monitoring: Inclusion und Reconciliation; Analytics: freezegebundene Kampagne, T0→T_buy original producer evidence. LIVE nur nach J und separater expliziter Freigabe. |
 | KB/K | Erweitern nur nach eigener gemessener Qualifikation; bestehende Topics/Controls benutzen oder versioniert additiv erweitern. |
 
-**Sperre:** Dies ist eine Dokumentations-/F0-VAR-Ergänzung, **keine Freigabe** zur Umsetzung der derzeit pausierten C1/C2-Produktionsphasen oder zum Starten eines Mainnet-BUY. Kein Wechsel des Designsystems, keine Parallel-Engine, kein zweites Wire-Protokoll, keine heimliche Änderung von Project_0/Solana und keine Entkopplung des BSC-STOP-Gates.
+**Sperre:** Diese historische Dokumentations-/F0-VAR-Ergänzung selbst erteilt keine Geld-/LIVE-Freigabe. Die gesonderte bindende Nutzerentscheidung vom 2026-10-25 erlaubt ausdrücklich die C0/C1/C2-Offline-Entwicklung, **nicht** den Mainnet-BUY oder wirtschaftliche Produktionsaktivierung. Kein Wechsel des Designsystems, keine Parallel-Engine, kein zweites Wire-Protokoll, keine heimliche Änderung von Project_0/Solana und keine Entkopplung des BSC-STOP-Gates.
 
 **Read-only-Bindungsgrenze (konsolidiert):** Die fachliche Gate-Reihenfolge bleibt unverändert. Der aktuelle Readiness-Runner kennt `PASS_READ_ONLY`, `BLOCKED`, `STOP` und `READ_ONLY_RPC|OFFLINE_ZERO_EGRESS`; der GUI-Wrapper verliert heute `BLOCKED` an den Exitcode, und beide Prozessbeobachter (`qualification/src/status/publisher.rs::job`, `gateway/src/control.rs::observe_project`) müssen einen regulär abgeschlossenen `BLOCKED`-Run von Prozess-`FAILED` unterscheiden. Der BSC-Publisher fügt den echten Job bereits vor dem Protobuf-STATE-Send hinzu. Der isolierte GUI-RPC-Child besitzt gegenwärtig keine `DARKBOT_G07_CLOCK_ID`/`DARKBOT_G07_BOOT_ID`; damit bleibt sein `CLOCK_CONFIG` blockiert, solange kein attestierter Clock-Owner existiert. G0.7-Klassifikationen und G0.8-`PASS/ADAPT/STOP/UNRESOLVED` müssen unverfälscht und identitätsgebunden im UI erscheinen, nicht als wirtschaftlicher Gate-PASS ohne Originalevidence. **Die konkreten Frontend-/Gateway-Bugfixes und Tests gehören ausschließlich zum [Astra-Auftrag §E](../../../frontend/docs/ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md) und [Audit](../../../frontend/docs/BSC_FRONTEND_QUERSCHNITT_AUDIT_2026-10-23.md), nicht als zweiter BSC-Arbeitsplan hierher.** Keine Freigabe von Signing, ARM, Mainnet-BUY, Source-/Venue-LIVE oder C1/C2.
 
