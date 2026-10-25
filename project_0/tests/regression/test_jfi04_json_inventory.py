@@ -167,5 +167,29 @@ class JsonInventory(unittest.TestCase):
                         self.assertIn(rel, files_ok, f'{call} in {rel}')
 
 
+    def test_productive_controllers_and_owners_reach_no_json(self):
+        """A10 (P0-PROD-CTRL-02): the productive control, owner and projection modules — the analytics job
+        controller, the post-capture chain, the runtime start, the state owner, source control, the status tap and
+        the reporter's analytics projection — reference neither serde_json, the historical renders nor the JSONL
+        view builder outside their test modules (the run-directory side is the post-capture job test)."""
+        modules = [
+            'runtime/src/analytics/jobs.rs',
+            'runtime/src/analytics/post_capture.rs',
+            'runtime/src/orchestration/startup.rs',
+            'runtime/src/orchestration/state_owner.rs',
+            'runtime/src/orchestration/source_control.rs',
+            'runtime/src/status_tap.rs',
+            'reporter/src/analytics.rs',
+        ]
+        owner = CRATES / 'runtime/src/orchestration/state_owner'
+        modules += [str(f.relative_to(CRATES)) for f in sorted(owner.glob('*.rs'))
+                    if not f.name.endswith('tests.rs')]
+        forbidden = ('serde_json', 'json!(', 'renders::', 'journal::export')
+        for rel in modules:
+            text = (CRATES / rel).read_text(encoding='utf-8').split('#[cfg(test)]\nmod ')[0]
+            for word in forbidden:
+                self.assertNotIn(word, text, f'{word} in {rel}')
+
+
 if __name__ == '__main__':
     unittest.main()

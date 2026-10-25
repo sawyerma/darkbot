@@ -1033,6 +1033,13 @@ mod report_e2e {
         assert!(verification_ok && report_ok);
         let record = qualification::latest(&f.run).unwrap().unwrap();
         assert_eq!(verdict, Some(record.verdict));
+        // A10: the native post-capture chain writes no JSON view into the run.
+        for file in files(&f.run) {
+            assert!(
+                !(file.ends_with(".json") || file.ends_with(".jsonl")),
+                "{file}"
+            );
+        }
         let _ = std::fs::remove_dir_all(f.d);
     }
 
