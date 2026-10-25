@@ -833,6 +833,40 @@ pub(crate) mod tests {
     /// FE-01 smoke (P1A): program, ProgramData and targets over three typed reads; the deployment
     /// pin against the qualified reference; MISSING/FOREIGN_OWNER targets are observed facts; a
     /// missing ProgramData or a regressing context slot is INCOMPLETE, never a partial pass.
+    /// U-8 (PERSIST-04): the binary layout of `FE01_SMOKE` (704) is pinned. A failing pin is a
+    /// layout change: bump `SCHEMA`, keep old frames readable, renew the pin — never silently.
+    #[test]
+    fn fe01_smoke_layout_is_pinned() {
+        use crate::analytics::payload::{encode, Fe01Smoke, Fe01SmokeTarget, Payload};
+        let key = |b: u8| Pubkey::new_from_array([b; 32]);
+        let s = Fe01Smoke {
+            status: "INCOMPLETE".into(),
+            reason: Some("FE01_SMOKE_TARGET_MISSING".into()),
+            program: key(1),
+            program_data: Some(key(2)),
+            program_data_sha256: Some("sha".into()),
+            deployment_slot: Some(7),
+            deployment_pin: Some("UNPINNED".into()),
+            context_slots: vec![100, 101],
+            targets: vec![Fe01SmokeTarget {
+                account: key(3),
+                status: "MISSING".into(),
+                bytes: None,
+                sha256: None,
+            }],
+            logical_reads: 2,
+            provider_actual: None,
+            pilot_ready: false,
+            live_enabled: false,
+            submission_enabled: false,
+        };
+        let hash = solana_sdk::hash::hash(&encode(&s).unwrap()).to_string();
+        assert_eq!(
+            (Fe01Smoke::KIND, Fe01Smoke::SCHEMA, hash.as_str()),
+            (704, 2, "5M2J1tN1RGCRqhYeUCnCAEH5rVXTegizcByUvRxY6c2E")
+        );
+    }
+
     #[test]
     fn smoke_observes_deployment_and_targets_and_fails_closed() {
         let (mut c, mut state) = fixture();

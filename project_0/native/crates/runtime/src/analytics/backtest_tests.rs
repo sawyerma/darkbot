@@ -364,3 +364,106 @@ fn objective_is_exact_and_unknown_is_never_zero() {
     );
     assert!(better(&a, &b) && !better(&b, &a));
 }
+
+/// U-8 (PERSIST-04): the binary layouts of the backtest kinds 350–355 are pinned (kind, schema,
+/// SHA-256 of a canonical value). A failing pin is a layout change: bump the kind's `SCHEMA` and
+/// keep the old frames readable (`decode_earlier`), then renew the pin — never re-pin silently.
+#[test]
+fn backtest_kind_layouts_are_pinned() {
+    fn pin<P: crate::analytics::payload::Payload>(v: &P) -> (u16, u16, String) {
+        let bytes = crate::analytics::payload::encode(v).unwrap();
+        (
+            P::KIND,
+            P::SCHEMA,
+            solana_sdk::hash::hash(&bytes).to_string(),
+        )
+    }
+    let rows = vec![
+        row(1, Some(3 * MICRO), true, MICRO_U, "NO_SWAP_INVENTORY"),
+        unmatched(2),
+    ];
+    let fps = vec![attempt(
+        3,
+        MICRO,
+        MICRO_U,
+        "NO_SWAP_INVENTORY",
+        Some(MICRO_U),
+    )];
+    let p = params(0, &[10], &[]);
+    let header = BacktestHeader {
+        job_id: "job".into(),
+        capture_run_id: "run".into(),
+        capture_evidence_digest: "evidence".into(),
+        verification_spec_id: "spec".into(),
+        verification_result_id: "result".into(),
+        verification_status: "CANONICAL_VERIFIED".into(),
+        verified_through_slot: Some(9),
+        capture_window: (1, 2),
+        live_coverage: "COMPLETE".into(),
+        market_commitment: "confirmed".into(),
+        earlier_attribution_records: 3,
+        params: p.clone(),
+        engine: "engine".into(),
+        binary_sha256: [7; 32],
+    };
+    let refs = (
+        rows.iter().collect::<Vec<_>>(),
+        fps.iter().collect::<Vec<_>>(),
+    );
+    let s = score(&refs.0, &refs.1, &p, "M");
+    let optimize = OptimizeResult {
+        job_id: "opt".into(),
+        capture_run_id: "run".into(),
+        capture_evidence_digest: "evidence".into(),
+        verification_result_id: "result".into(),
+        verification_status: "CANONICAL_VERIFIED".into(),
+        verified_through_slot: Some(9),
+        live_coverage: "COMPLETE".into(),
+        recorded_min_profit_usd_micro: MICRO,
+        baseline: p.clone(),
+        space: Space {
+            min_profit_usd_micro: vec![0, MICRO],
+            funding: vec![vec![], vec!["NO_SWAP_INVENTORY".into()]],
+            capital_usd_micro: vec![MICRO_U],
+        },
+        holdout_bps: 2_000,
+        split_unix_ns: 5,
+        train_rows: 2,
+        train_attempts: 1,
+        holdout_rows: 0,
+        holdout_attempts: 0,
+        train: vec![s.clone()],
+        chosen: Some(0),
+        chosen_holdout: Some(s.clone()),
+        baseline_train: s.clone(),
+        baseline_holdout: s,
+        engine: "engine".into(),
+        binary_sha256: [7; 32],
+        result_sha256: [8; 32],
+    };
+    let profile = Profile {
+        params: p.clone(),
+        origin: ORIGIN_OPTIMIZER.into(),
+        optimize_job_id: Some("opt".into()),
+    };
+    let pins = vec![
+        pin(&header),
+        pin(&rows[0]),
+        pin(&summarize(&rows, &fps, &p, "M").unwrap()),
+        pin(&optimize),
+        pin(&profile),
+        pin(&fps[0]),
+    ];
+    let expected: Vec<(u16, u16, String)> = [
+        (350, 2, "wWwCseMMpx8N5vf4aLZsphQQWHwViSSNQPsnzPPDi1V"),
+        (351, 2, "E9xuPeDYKCRjwh8uANfYxHQ7TkCjYwHpgfsmcKT7Xopv"),
+        (352, 2, "E9Cewjqu4dCwFpQWuNa1f6NMh25i7JqHi5SL341MyH9W"),
+        (353, 2, "5AnB2eGjPXazZajy1wbL5GkWduBiLNnJMcb399Wi2cj8"),
+        (354, 2, "4CBZ2VK9HEfYghj1cqZKH9bVrY2oayUpHDYnntijj5BS"),
+        (355, 2, "J5TMm7LgFNYN7Y84kirkQQjTteQQEgk4ZDmtkKPgGW7s"),
+    ]
+    .into_iter()
+    .map(|(k, s, h)| (k, s, h.to_string()))
+    .collect();
+    assert_eq!(pins, expected);
+}

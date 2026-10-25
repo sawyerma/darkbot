@@ -1220,6 +1220,30 @@ mod tests {
         );
         fs::remove_dir_all(j.output).unwrap();
     }
+    /// U-8 (PERSIST-04): the binary layout of `STRICT_CHAIN_CACHE` (318) is pinned over a
+    /// decoded block entry. A failing pin is a layout change: bump `SCHEMA` (or, for a changed
+    /// decode, `WIRE_DECODER_VERSION`) and renew the pin — never silently.
+    #[test]
+    fn chain_cache_layout_is_pinned() {
+        let read = ChainRead::FullBlock { slot: 42 };
+        let wire = json!({"parentSlot": 41, "previousBlockhash": "h41", "blockhash": "h42",
+            "blockTime": 42, "blockHeight": 40, "transactions": [{"transaction": 1}]});
+        let e = ChainCacheEntry {
+            read,
+            decoder: WIRE_DECODER_VERSION,
+            answer: reconcile::wire_answer(&read, &wire),
+        };
+        let hash = hash(&crate::analytics::payload::encode(&e).unwrap()).to_string();
+        assert_eq!(
+            (
+                ChainCacheEntry::KIND,
+                ChainCacheEntry::SCHEMA,
+                hash.as_str()
+            ),
+            (318, 2, "29UrVy3axv8swUmRGy7hWGz5musWJkwafSkNs571ydSx")
+        );
+    }
+
     /// Loopback JSON-RPC endpoint answering from the request body: `getBlocks` lists every slot,
     /// `getBlock` with `transactionDetails = none` is a header-only block, `full` carries its
     /// (empty) transaction list.
