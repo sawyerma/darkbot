@@ -65,19 +65,24 @@ pub struct CaptureSession {
     appended: Arc<AtomicU64>,
 }
 
-fn unix_time_ns() -> u128 {
+/// The wall clock of a record (diagnostic, not timing authority); `None`
+/// when the clock is before 1970. Never panics: records are also written
+/// after the release.
+fn unix_time_ns() -> Option<u128> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
-        .unwrap_or(0)
+        .ok()
 }
 
 fn text_payload(event: &str, body: &str) -> Vec<u8> {
-    format!(
-        "schema={G07_CAPTURE_SCHEMA}\nevent={event}\nunix_time_ns={}\n{body}",
-        unix_time_ns()
-    )
-    .into_bytes()
+    payload_at(event, body, unix_time_ns())
+}
+
+/// A text record at the wall clock `wall`; a clock fault is UNKNOWN, never 0.
+fn payload_at(event: &str, body: &str, wall: Option<u128>) -> Vec<u8> {
+    let wall = wall.map_or_else(|| "UNKNOWN".to_string(), |ns| ns.to_string());
+    format!("schema={G07_CAPTURE_SCHEMA}\nevent={event}\nunix_time_ns={wall}\n{body}").into_bytes()
 }
 
 fn push_len_prefixed(out: &mut Vec<u8>, bytes: &[u8]) {
@@ -247,6 +252,15 @@ impl CaptureSession {
         }
     }
 
+    /// [`wait_appended`](Self::wait_appended), then the journal file synced
+    /// to disk: what is journaled is durable before anything depends on it.
+    pub fn wait_durable(&self, timeout: Duration) -> Result<(), String> {
+        self.wait_appended(timeout)?;
+        std::fs::File::open(&self.path)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| format!("sync capture {}: {e}", self.path.display()))
+    }
+
     pub fn stats(&self) -> Option<RecorderStats> {
         self.recorder.as_ref().map(Recorder::stats)
     }
@@ -340,12 +354,21 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// BSC-050: a wall-clock fault is written as UNKNOWN, never as time 0.
+    #[test]
+    fn a_clock_fault_is_unknown_never_time_zero() {
+        let text = String::from_utf8(payload_at("E", "k=v", None)).unwrap();
+        assert!(text.contains("\nunix_time_ns=UNKNOWN\n"), "{text}");
+        let text = String::from_utf8(payload_at("E", "k=v", Some(7))).unwrap();
+        assert!(text.contains("\nunix_time_ns=7\n"), "{text}");
+    }
+
     #[test]
     fn prearmed_capture_finishes_with_integrity_manifest() {
         let path = std::env::temp_dir().join(format!(
             "darkbot-g07-capture-test-{}-{}.bin",
             std::process::id(),
-            unix_time_ns()
+            unix_time_ns().unwrap()
         ));
         let mut session = CaptureSession::prearm(
             &path,

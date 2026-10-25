@@ -428,7 +428,7 @@ impl EvidenceFile {
     }
 
     /// Removes the evidence file if it is still this run's empty placeholder.
-    fn remove_if_unwritten(&self) -> String {
+    pub(crate) fn remove_if_unwritten(&self) -> String {
         let path = self.path.display();
         if !same_file(&self.path, &self.current.borrow()) {
             return format!("{path} is no longer this run's evidence file and was left alone");

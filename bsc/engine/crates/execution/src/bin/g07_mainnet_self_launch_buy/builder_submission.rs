@@ -329,14 +329,111 @@ fn peer_state(stream: &mut Tls) -> Result<(), String> {
     state
 }
 
+/// The release gate of one attempt (BSC-005 T5). A sender writes only with a
+/// `ReleaseTicket`, and tickets exist only from `ReleaseGate::spend`, which
+/// consumes the attempt authority's claim: no bundle byte can be written
+/// while the authority could still be given back. The gate opens once every
+/// ticket holder is waiting at it, or is cancelled (nobody writes).
+pub(crate) struct ReleaseGate {
+    /// Ticket holders waiting at the gate, and the decision (open or not).
+    state: Mutex<(usize, Option<bool>)>,
+    changed: Condvar,
+}
+
+/// One sender's right to pass the gate; see [`ReleaseGate`].
+pub(crate) struct ReleaseTicket {
+    gate: Arc<ReleaseGate>,
+}
+
+impl ReleaseGate {
+    /// Spends the claim and mints one ticket per sender.
+    pub(crate) fn spend<const N: usize>(
+        claim: darkbot_bsc_execution::attempt_authority::Claim,
+    ) -> (
+        darkbot_bsc_execution::attempt_authority::Released,
+        Arc<ReleaseGate>,
+        [ReleaseTicket; N],
+    ) {
+        let gate = Arc::new(ReleaseGate {
+            state: Mutex::new((0, None)),
+            changed: Condvar::new(),
+        });
+        let tickets = std::array::from_fn(|_| ReleaseTicket {
+            gate: Arc::clone(&gate),
+        });
+        (claim.release(), gate, tickets)
+    }
+
+    fn decide(&self, open: bool) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.1.get_or_insert(open);
+        self.changed.notify_all();
+    }
+
+    /// Opens the gate once `senders` ticket holders wait at it; if they are
+    /// not all there within `deadline`, cancels it instead (nobody writes).
+    pub(crate) fn release(&self, senders: usize, deadline: Duration) -> Result<(), String> {
+        let until = Instant::now() + deadline;
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        while state.0 < senders && state.1.is_none() {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                let waiting = state.0;
+                drop(state);
+                self.decide(false);
+                return Err(format!(
+                    "{waiting} of {senders} senders reached the release gate within {} ms; nothing was written",
+                    deadline.as_millis()
+                ));
+            }
+            state = self
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        drop(state);
+        self.decide(true);
+        Ok(())
+    }
+}
+
+impl ReleaseTicket {
+    /// Waits at the gate; true once it opened, false if it was cancelled.
+    pub(crate) fn pass(self) -> bool {
+        let mut state = self.gate.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.0 += 1;
+        self.gate.changed.notify_all();
+        loop {
+            if let Some(open) = state.1 {
+                return open;
+            }
+            state = self
+                .gate
+                .changed
+                .wait(state)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
 pub(crate) fn submit_provider(
     provider: &'static str,
     mut stream: Tls,
     request: Vec<u8>,
-    barrier: Arc<Barrier>,
+    ticket: ReleaseTicket,
     clock: CaptureClock,
 ) -> ProviderResult {
-    barrier.wait();
+    if !ticket.pass() {
+        return ProviderResult {
+            provider,
+            write_started_ns: None,
+            write_flushed_ns: None,
+            bytes_may_have_left: false,
+            answer: None,
+            error: Some("release gate cancelled before any write".into()),
+        };
+    }
     let write_started_ns = clock.now_ns();
     match stream.write_all(&request).and_then(|_| stream.flush()) {
         Err(e) => ProviderResult {

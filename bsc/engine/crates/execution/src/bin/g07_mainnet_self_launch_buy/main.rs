@@ -668,30 +668,29 @@ fn main() {
     }
 
     // From the release on nothing may panic: the evidence of a value-bearing
-    // attempt must be written whatever happens. Each sender waits for a go
-    // signal before the barrier: if the other cannot be spawned, dropping the
-    // signal ends it without a write and the run stops before the release.
-    let barrier = Arc::new(Barrier::new(3));
+    // attempt must be written whatever happens. Each sender waits for its
+    // release ticket; tickets exist only by spending the attempt authority
+    // (T5), and the gate opens only once both senders wait at it. If a sender
+    // cannot be spawned, dropping its channel ends it without a write and the
+    // run stops before the authority is spent.
     let mut release_marker = String::new();
     let mut release_evidence: Result<(), String> = Err("not written".into());
     let mut release_before_ns = 0u64;
     let mut release_after_ns = 0u64;
     let sent = thread::scope(|scope| {
-        let (go48, wait48) = mpsc::channel::<()>();
-        let (gobr, waitbr) = mpsc::channel::<()>();
-        let b48 = Arc::clone(&barrier);
-        let bbr = Arc::clone(&barrier);
+        let (go48, wait48) = mpsc::channel::<ReleaseTicket>();
+        let (gobr, waitbr) = mpsc::channel::<ReleaseTicket>();
         let c48_clock = capture_clock.clone();
         let br_clock = capture_clock.clone();
         let h48 = thread::Builder::new()
             .name("g07-send-48club".into())
             .spawn_scoped(scope, move || {
-                wait48.recv().ok().map(|()| {
+                wait48.recv().ok().map(|ticket| {
                     submit_provider(
                         "48Club/Puissant",
                         club48_tls,
                         club48_request,
-                        b48,
+                        ticket,
                         c48_clock,
                     )
                 })
@@ -699,12 +698,12 @@ fn main() {
         let hbr = thread::Builder::new()
             .name("g07-send-blockrazor".into())
             .spawn_scoped(scope, move || {
-                waitbr.recv().ok().map(|()| {
+                waitbr.recv().ok().map(|ticket| {
                     submit_provider(
                         "BlockRazor",
                         blockrazor_tls,
                         blockrazor_request,
-                        bbr,
+                        ticket,
                         br_clock,
                     )
                 })
@@ -718,29 +717,25 @@ fn main() {
                     .flatten()
                     .map(|e| e.to_string())
                     .collect();
-                return Err((
+                return Err(SendStop::Unsent(
                     format!("send thread spawn failed: {}", reasons.join("; ")),
                     unsent,
                 ));
             }
         };
-        // Each receiver lives in its spawned closure until that closure has
-        // received, so neither send can fail; should the first fail anyway,
-        // nothing has been released.
-        if go48.send(()).is_err() {
-            drop(gobr);
-            return Err((
-                "48Club send thread ended before its go signal".to_string(),
-                unsent,
-            ));
-        }
-        let _ = gobr.send(());
-        // The release barrier: the attempt authority is spent for good; past
-        // this line no return of it compiles (T5).
-        let spent = unsent.cross();
+        // The release: the attempt authority is spent for good before any
+        // sender can pass; past this line no return of it compiles (T5). A
+        // ticket that cannot be delivered leaves the gate short: it is
+        // cancelled at the deadline and nobody writes.
+        let (spent, gate, [t48, tbr]) = unsent.cross();
+        let _ = go48.send(t48);
+        let _ = gobr.send(tbr);
         release_before_ns = capture_clock.now_ns();
-        barrier.wait();
+        let opened = gate.release(2, MAX_BUILDER_IDLE);
         release_after_ns = capture_clock.now_ns();
+        if let Err(e) = opened {
+            return Err(SendStop::Spent(e, spent));
+        }
         // Provisional evidence first, while the senders run (main is idle
         // here), so a kill or hang before the builders answer still leaves it
         // on file; then the RELEASED marker (the latch is already durable).
@@ -809,7 +804,12 @@ fn main() {
     });
     let ((club48_result, blockrazor_result), spent) = match sent {
         Ok(results) => results,
-        Err((e, unsent)) => pre_egress_abort(capture, &capture_clock, unsent, "send threads", &e),
+        Err(SendStop::Unsent(e, unsent)) => {
+            pre_egress_abort(capture, &capture_clock, unsent, "send threads", &e)
+        }
+        Err(SendStop::Spent(e, spent)) => {
+            release_cancelled(capture, &capture_clock, &evidence_out, &spent, &e)
+        }
     };
 
     for result in [&club48_result, &blockrazor_result] {
@@ -1140,23 +1140,64 @@ struct Unsent<'a> {
 }
 
 /// Whether a byte-free stop may give the authority back (T5): only when its
-/// journal took the abort and the latch was released intact (renamed to
-/// `latched_at`). Returns the RELEASED marker path the return must find
-/// absent.
+/// journal took the abort durably and the latch was released intact (renamed
+/// to `latched_at`; `latch` says what happened to it). Returns the RELEASED
+/// marker path the return must find absent.
 fn return_condition(
     journaled: Result<(), String>,
     latched_at: Option<PathBuf>,
+    latch: &str,
 ) -> Result<PathBuf, String> {
     journaled.map_err(|e| format!("the journal did not take the abort ({e})"))?;
     latched_at
         .map(|dir| dir.join(RELEASED_MARKER_FILE))
-        .ok_or_else(|| "the latch was not released".to_string())
+        .ok_or_else(|| format!("the latch was not released ({latch})"))
+}
+
+/// Why the send scope ended before both providers were released.
+enum SendStop<'a> {
+    /// Before the authority was spent: the byte-free abort may return it.
+    Unsent(String, Unsent<'a>),
+    /// After it was spent, the gate cancelled: nothing written, it stays consumed.
+    Spent(String, attempt_authority::Released),
+}
+
+/// Terminal stop after the authority was spent but the release gate was
+/// cancelled: no sender wrote a byte. The authority stays consumed, the latch
+/// stays (no rerun of this attempt), the journal records why.
+fn release_cancelled(
+    mut capture: CaptureSession,
+    clock: &CaptureClock,
+    evidence: &EvidenceFile,
+    spent: &attempt_authority::Released,
+    reason: &str,
+) -> ! {
+    let _ = capture.record_text(
+        "RELEASE_CANCELLED",
+        clock.now_ns(),
+        &format!(
+            "reason={reason}\nbundle_bytes_written=false\nattempt_authority=CONSUMED\nattempt_authority_spent={}\nautomatic_retry=false",
+            spent.consumed_commit()
+        ),
+    );
+    let _ = capture.finish();
+    let evidence = evidence.remove_if_unwritten();
+    panic!(
+        "G0.7 release cancelled; no bundle byte written: {reason}; the attempt authority stays consumed; {evidence}"
+    );
 }
 
 impl Unsent<'_> {
-    /// The release barrier: the authority is spent for good.
-    fn cross(self) -> attempt_authority::Released {
-        self.authority.release()
+    /// The release: the authority is spent for good, and only this mints the
+    /// senders' tickets.
+    fn cross(
+        self,
+    ) -> (
+        attempt_authority::Released,
+        Arc<ReleaseGate>,
+        [ReleaseTicket; 2],
+    ) {
+        ReleaseGate::spend(self.authority)
     }
 
     /// The terminal stop before the release barrier. The journal takes the
@@ -1178,10 +1219,11 @@ impl Unsent<'_> {
                 clock.now_ns(),
                 &format!("stage={stage}\nreason={reason}\nbundle_bytes_written=false"),
             )
-            .and_then(|()| capture.wait_appended(CAPTURE_APPEND_TIMEOUT));
+            // Durable (synced) before the latch or the authority moves.
+            .and_then(|()| capture.wait_durable(CAPTURE_APPEND_TIMEOUT));
         let (latched_at, latch) =
             release_unsent_attempt(self.attempt_dir, Some(self.evidence), outcome);
-        let returned = return_condition(journaled, latched_at)
+        let returned = return_condition(journaled, latched_at, &latch)
             .and_then(|marker| self.authority.return_unsent(self.git, &marker));
         let (event, body, authority) = match returned {
             Ok(()) => (
@@ -1189,6 +1231,11 @@ impl Unsent<'_> {
                 "attempt_authority=AUTHORIZED\nautomatic_retry=false".to_string(),
                 "the attempt authority was returned (AUTHORIZED again; no automatic retry)"
                     .to_string(),
+            ),
+            Err(e) if e.starts_with("UNCLEAR") => (
+                "AUTHORITY_UNCLEAR",
+                format!("attempt_authority=UNCLEAR\nreason={e}"),
+                format!("the attempt authority is unclear (treat as consumed): {e}"),
             ),
             Err(e) => (
                 "AUTHORITY_KEPT",

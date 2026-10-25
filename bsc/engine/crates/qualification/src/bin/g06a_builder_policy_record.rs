@@ -20,7 +20,7 @@ use darkbot_bsc_record::schema::{PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL, d
 use darkbot_bsc_record::{Draft, Value, sha256};
 use std::io::Write;
 use std::process::{Command, ExitCode};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 const BLOCKRAZOR: &str = "https://blockrazor.io/support/";
 /// The 48Club documentation is rendered by Next.js; its server-component
@@ -43,11 +43,9 @@ struct Page {
     body: Vec<u8>,
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+/// The observation time; a clock fault stops the record (never time 0).
+fn now_ms() -> Result<u64, String> {
+    darkbot_bsc_record::observed_unix_ms(SystemTime::now())
 }
 
 fn fetch(url: &'static str, rsc: bool) -> Result<Page, String> {
@@ -79,7 +77,7 @@ fn fetch(url: &'static str, rsc: bool) -> Result<Page, String> {
     Ok(Page {
         url,
         status,
-        fetched_unix_ms: now_ms(),
+        fetched_unix_ms: now_ms()?,
         body: out.stdout[..split].to_vec(),
     })
 }
@@ -252,7 +250,7 @@ fn run(frozen_path: &str, out_path: &str) -> Result<String, String> {
     let text_of = |tag| frozen.text(tag).map(str::to_string).map_err(e);
     let mut d = Draft::new(&b::NATIVE);
     d.set(PROVENANCE_TOOL, "g06a_builder_policy_record")
-        .set(PROVENANCE_OBSERVED_UNIX_MS, now_ms())
+        .set(PROVENANCE_OBSERVED_UNIX_MS, now_ms()?)
         .set(b::LEGACY_SCHEMA, b::NATIVE.name)
         .set(b::OBSERVED_DATE, date.as_str())
         .set(

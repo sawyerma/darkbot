@@ -718,28 +718,57 @@ fn g08_and_g07_belong_together_only_with_the_same_attempt_and_g07_hash() {
     fs::create_dir_all(root.join("run")).unwrap();
     let g07_bytes = filled(&g07::evidence::SCHEMA).encode().unwrap();
     fs::write(g07_dir.join("evidence.dbrec"), &g07_bytes).unwrap();
-    let g08_gate = |g07_sha: [u8; 32]| {
+    let pass = |g07_sha: [u8; 32]| {
         let mut d = filled(&g08::result::SCHEMA);
         d.set(
             tag(&g08::result::SCHEMA, "g07_evidence_sha256"),
             Value::B256(g07_sha),
-        );
-        fs::write(g08_dir.join("result.dbrec"), d.encode().unwrap()).unwrap();
+        )
+        .set(g08::result::VERDICT, "PASS");
+        d.encode().unwrap()
+    };
+    let g08_gate = || {
         projection::project(&root, &root.join("run"))
             .status
             .gates
             .into_iter()
             .find(|g| g.gate_id == "G0.8")
             .unwrap()
-            .reason_codes
     };
     // Same attempt ID (fixture) and exactly the SHA-256 of the G0.7 record.
     // (The verdict dimensions follow the binding code; BSC-011 tests them.)
+    let bound = pass(darkbot_bsc_record::sha256(&g07_bytes));
+    fs::write(g08_dir.join("result.dbrec"), &bound).unwrap();
+    let g = g08_gate();
     assert_eq!(
-        g08_gate(darkbot_bsc_record::sha256(&g07_bytes))[0],
-        "G07_EVIDENCE_BOUND"
+        (g.state.as_str(), g.reason_codes[0].as_str()),
+        ("PASS", "G07_EVIDENCE_BOUND")
     );
-    assert_eq!(g08_gate([0x55; 32])[0], "G07_EVIDENCE_UNBOUND");
+    // Review MEDIUM-2: an unbound PASS is UNRESOLVED, the record's verdict a reason.
+    fs::write(g08_dir.join("result.dbrec"), pass([0x55; 32])).unwrap();
+    let g = g08_gate();
+    assert_eq!(g.state, "UNRESOLVED");
+    assert_eq!(g.reason_codes[0], "G07_EVIDENCE_UNBOUND");
+    assert!(
+        g.reason_codes
+            .contains(&"RECORDED_VERDICT_PASS".to_string()),
+        "{:?}",
+        g.reason_codes
+    );
+    // Two G0.8 records (no time orders them): never the PASS of whichever path
+    // sorts last, even when that one is bound.
+    fs::write(g08_dir.join("result.dbrec"), &bound).unwrap();
+    let other = root.join("bsc/native/evidence/g08/attempt-10");
+    fs::create_dir_all(&other).unwrap();
+    let mut u = filled(&g08::unresolved::SCHEMA);
+    u.set(g08::unresolved::VERDICT, "UNRESOLVED");
+    fs::write(other.join("unresolved.dbrec"), u.encode().unwrap()).unwrap();
+    let g = g08_gate();
+    assert_eq!(g.state, "UNRESOLVED", "{:?}", g.reason_codes);
+    assert!(
+        g.reason_codes
+            .contains(&"G08_RECORDS_AMBIGUOUS".to_string())
+    );
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -932,4 +961,11 @@ fn the_g08_gate_carries_the_chain_outcome_and_the_evidence_integrity() {
     );
     assert_eq!(s.monitoring.state, "UNRESOLVED");
     fs::remove_dir_all(root).unwrap();
+}
+/// BSC-050: a clock fault never makes the builder refresh look fresh.
+#[test]
+fn without_a_clock_the_builder_refresh_counts_as_expired() {
+    assert!(projection::refresh_expired(u64::MAX, None));
+    assert!(projection::refresh_expired(10, Some(11)));
+    assert!(!projection::refresh_expired(12, Some(11)));
 }

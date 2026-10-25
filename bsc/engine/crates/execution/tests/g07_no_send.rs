@@ -156,8 +156,8 @@ fn bundle_expiry_comes_from_the_next_block_read_after_the_transport_prewarm() {
     let journaled = pos(".and_then(|()| capture.wait_appended(CAPTURE_APPEND_TIMEOUT))");
     let idle = pos("if club48_ready_at.elapsed() > MAX_BUILDER_IDLE");
     let liveness = pos("transport_alive(stream)");
-    let go = pos("let _ = gobr.send(());");
-    let release = pos("barrier.wait();");
+    let go = pos("let _ = gobr.send(tbr);");
+    let release = pos("let opened = gate.release(2, MAX_BUILDER_IDLE);");
     assert!(guard < raw_txs && raw_txs < poller_check && poller_check < club48_tls);
     assert!(club48_tls < blockrazor_tls && blockrazor_tls < read && read < window);
     assert!(window < first_body && first_body < journaled && journaled < idle);
@@ -230,9 +230,13 @@ fn nothing_after_the_release_can_panic() {
         function_body(BIN_SOURCES[1], "pub(crate) fn submit_provider(")
             .contains("read_http_response_until(&mut stream, &sock, BUILDER_RESPONSE_DEADLINE)")
     );
-    let release = pos("barrier.wait();");
+    let release = pos("let opened = gate.release(2, MAX_BUILDER_IDLE);");
     let end = pos("fn mark_released(");
     let after = &SOURCE[release..end];
+    // A cancelled gate (nobody wrote) ends the scope right after the release
+    // call; from the opened gate on nothing leaves it early.
+    let opened = pos("let mut bundle = Draft::new(&evidence::bundle::SCHEMA);");
+    assert!(SOURCE[release..opened].contains("return Err(SendStop::Spent(e, spent));"));
     for forbidden in PANICKING {
         assert!(!after.contains(forbidden), "{forbidden} after the release");
     }
@@ -272,16 +276,17 @@ fn nothing_after_the_release_can_panic() {
     let at_release = pos("release_evidence = write_evidence(&evidence_out, &evidence);");
     let marker = pos("release_marker = mark_released(&attempt_dir, release_after_ns);");
     let joins = pos("h48.join()");
-    assert!(release < at_release && at_release < marker && marker < joins);
-    // Between the release and the joins nothing can leave the scope early,
-    // and the only pre-egress stop after the barrier text is the one for a
-    // failed spawn (the scope returns Err only before the barrier).
-    assert!(!SOURCE[release..joins].contains("return"));
-    assert!(!SOURCE[release..joins].contains(")?"));
+    assert!(release < opened && opened < at_release && at_release < marker && marker < joins);
+    // Between the opened gate and the joins nothing can leave the scope early,
+    // and the only pre-egress stop after the release text is the one for a
+    // failed spawn (the scope returns it only before the authority is spent).
+    assert!(!SOURCE[opened..joins].contains("return"));
+    assert!(!SOURCE[opened..joins].contains(")?"));
     assert_eq!(after.matches("pre_egress_abort(").count(), 1);
     assert!(after.contains(
-        "Err((e, unsent)) => pre_egress_abort(capture, &capture_clock, unsent, \"send threads\", &e)"
+        "Err(SendStop::Unsent(e, unsent)) => {\n            pre_egress_abort(capture, &capture_clock, unsent, \"send threads\", &e)"
     ));
+    assert!(after.contains("Err(SendStop::Spent(e, spent)) => {\n            release_cancelled("));
     let marker_fn =
         &SOURCE[pos("fn mark_released(")..pos("/// What a stop before the release hands back")];
     for forbidden in PANICKING {
@@ -306,17 +311,31 @@ fn nothing_after_the_release_can_panic() {
 }
 
 #[test]
-fn senders_wait_for_the_go_signal_and_the_barrier_before_writing() {
-    // Each spawned sender first receives its go signal, then submit_provider
-    // waits on the barrier before the first write.
-    assert!(pos("wait48.recv().ok().map(") < pos("submit_provider("));
-    let after_48 = pos("wait48.recv().ok().map(");
-    assert!(SOURCE[after_48..].contains("waitbr.recv().ok().map("));
-    let submit = function_body(BIN_SOURCES[1], "pub(crate) fn submit_provider(");
-    let wait = submit.find("barrier.wait();").expect("barrier");
+fn senders_write_only_past_the_gate_with_a_ticket_of_the_spent_authority() {
+    // Each spawned sender first receives its release ticket, then
+    // submit_provider passes the gate before the first write; a cancelled
+    // gate writes nothing.
+    assert!(pos("wait48.recv().ok().map(|ticket|") < pos("submit_provider("));
+    let after_48 = pos("wait48.recv().ok().map(|ticket|");
+    assert!(SOURCE[after_48..].contains("waitbr.recv().ok().map(|ticket|"));
+    let builder = BIN_SOURCES[1];
+    let submit = function_body(builder, "pub(crate) fn submit_provider(");
+    assert!(submit.contains("    ticket: ReleaseTicket,\n"));
+    let pass = submit.find("if !ticket.pass() {").expect("gate");
     let write = submit.find("write_all(&request)").expect("write");
-    assert!(wait < write);
+    assert!(pass < write);
+    assert!(submit[pass..write].contains("bytes_may_have_left: false"));
     assert_eq!(submit.matches("write_all(").count(), 1);
+    // BSC-005 T5, review MEDIUM-1: a ticket exists only by spending the claim.
+    let mint = "ReleaseTicket {\n            gate: ";
+    assert_eq!(builder.matches(mint).count(), 1, "exactly one mint");
+    let spend = &builder[builder
+        .find("    pub(crate) fn spend<const N: usize>(")
+        .expect("spend")
+        ..builder.find("    fn decide(&self").expect("decide")];
+    assert!(spend.contains("claim: darkbot_bsc_execution::attempt_authority::Claim,"));
+    assert!(spend.contains(mint) && spend.contains("claim.release()"));
+    assert!(!builder.contains("Barrier"));
 }
 
 #[test]
@@ -441,17 +460,24 @@ fn one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_u
     assert_eq!(SOURCE.matches(".return_unsent(").count(), 1);
     let abort = function_body(SOURCE, "fn abort(");
     assert!(abort.contains("self.authority.return_unsent("));
-    assert!(abort.contains("return_condition(journaled, latched_at)"));
+    assert!(abort.contains("return_condition(journaled, latched_at, &latch)"));
+    // Review LOW-1: the abort is synced to disk before the latch or authority moves.
+    assert!(abort.contains(".and_then(|()| capture.wait_durable(CAPTURE_APPEND_TIMEOUT));"));
     assert!(abort.find("\"PRE_EGRESS_ABORT\"") < abort.find("release_unsent_attempt("));
     let early = &SOURCE[pos("fn release_without_journal(")..pos("fn main()")];
     assert!(early.contains("stays consumed") && !early.contains("return_unsent"));
-    // The claim moves into `unsent`; the barrier consumes it after the go
-    // signals and right before `barrier.wait()`: no return compiles past it.
+    // The claim moves into `unsent`; the release consumes it after both
+    // senders exist and before any ticket is handed out: no return compiles
+    // past it, and no sender can write before it.
     assert!(SOURCE.contains("        authority,\n        git: &authority_git,"));
-    let cross = pos("let spent = unsent.cross();");
+    let cross = pos("let (spent, gate, [t48, tbr]) = unsent.cross();");
     assert_eq!(SOURCE.matches("unsent.cross()").count(), 1);
-    assert!(pos("let _ = gobr.send(());") < cross && cross < pos("barrier.wait();"));
-    assert!(function_body(SOURCE, "fn cross(").contains("self.authority.release()"));
+    assert!(pos("let (h48, hbr) = match (h48, hbr) {") < cross);
+    assert!(cross < pos("let _ = go48.send(t48);"));
+    assert!(
+        pos("let _ = gobr.send(tbr);") < pos("let opened = gate.release(2, MAX_BUILDER_IDLE);")
+    );
+    assert!(function_body(SOURCE, "fn cross(").contains("ReleaseGate::spend(self.authority)"));
     // A stop is terminal (no retry in this process).
     assert!(SOURCE.contains("    reason: &str,\n) -> ! {"));
     // The guard borrows the proof of exactly this consumed authority.
@@ -470,7 +496,7 @@ fn a_crash_anywhere_after_the_authority_is_consumed_never_releases_the_attempt()
     // is therefore diagnostic, not the barrier.
     let consume = pos("attempt_authority::consume(");
     let latch = pos("latch_attempt(");
-    let release = pos("barrier.wait();");
+    let release = pos("let opened = gate.release(2, MAX_BUILDER_IDLE);");
     let evidence = pos("release_evidence = write_evidence(");
     let marker = pos("release_marker = mark_released(");
     assert!(consume < latch && latch < release && release < evidence && evidence < marker);

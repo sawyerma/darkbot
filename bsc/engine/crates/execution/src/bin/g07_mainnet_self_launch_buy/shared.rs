@@ -19,7 +19,7 @@ pub(crate) use std::{
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, Barrier},
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };

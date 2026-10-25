@@ -123,16 +123,52 @@ fn armed(base: &Path, n: u8) -> Armed {
     }
 }
 
-/// T5: every byte-free stop before the barrier journals the abort, then
-/// releases the latch and returns exactly this claim (AUTHORIZED again),
-/// and journals that; nothing retries.
+/// The stops whose cause is the capture journal itself: a broken journal
+/// cannot prove the stop byte-free, so these keep the authority.
+const JOURNAL_STAGES: [&str; 3] = ["journal attempt", "journal prewarm", "journal submission"];
+
+/// Breaks the capture writer the way a real journal fault does (an enqueue
+/// it refuses marks the session failed); nothing is faked in the session.
+fn break_journal(capture: &mut CaptureSession) {
+    let oversize =
+        "x".repeat(darkbot_bsc_execution::qualification_capture::DEFAULT_CAPTURE_MAX_PAYLOAD + 1);
+    assert!(capture.record_text("OVERSIZE", 0, &oversize).is_err());
+    assert!(!capture.healthy());
+}
+
+fn renamed_latch(base: &Path, attempt_id: &str, outcome: &str) -> PathBuf {
+    let renamed: Vec<PathBuf> = fs::read_dir(base.join("g07"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&format!("{attempt_id}.{outcome}-"))
+        })
+        .collect();
+    assert_eq!(renamed.len(), 1, "{attempt_id}");
+    renamed.into_iter().next().unwrap()
+}
+
+/// T5, through the real abort for every stop of this runner (stage list
+/// from its own source): with an intact journal the byte-free stop is
+/// journaled durably, the latch released and exactly this claim returned
+/// (AUTHORIZED again), and that is journaled; where the stop's cause is the
+/// journal (a refused, failed writer), the latch is released but the
+/// authority stays CONSUMED. Nothing retries.
 #[test]
-fn every_pre_egress_stop_journals_the_abort_and_returns_the_authority() {
+fn every_pre_egress_stop_returns_the_authority_only_with_a_durable_journal() {
     let base = private_dir("t5-stages");
     let stages = pre_egress_stages();
     assert_eq!(stages.len(), 14, "{stages:?}");
+    assert!(JOURNAL_STAGES.iter().all(|j| stages.iter().any(|s| s == j)));
     for (n, stage) in stages.iter().enumerate() {
-        let a = armed(&base, n as u8);
+        let mut a = armed(&base, n as u8);
+        let journal_fault = JOURNAL_STAGES.contains(&stage.as_str());
+        if journal_fault {
+            break_journal(&mut a.capture);
+        }
         let clock = a.capture.clock();
         let outcome = if stage == "live authorization" {
             "refused"
@@ -146,56 +182,58 @@ fn every_pre_egress_stop_journals_the_abort_and_returns_the_authority() {
             git: &a.git,
         };
         let said = unsent.abort(a.capture, &clock, outcome, stage, "test stop");
-        assert!(
-            said.contains("latch released") && said.contains("was returned"),
-            "{stage}: {said}"
-        );
-        assert_eq!(
-            attempt_authority::state(&a.git, &a.binding),
-            Ok(attempt_authority::State::Authorized),
-            "{stage}"
-        );
+        assert!(said.contains("latch released"), "{stage}: {said}");
         assert!(!a.attempt_dir.exists(), "{stage}: latch released");
-        let renamed: Vec<PathBuf> = fs::read_dir(base.join("g07"))
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .filter(|p| {
-                p.file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with(&format!("{}.{outcome}-", a.binding.attempt_id))
-            })
+        let journal =
+            renamed_latch(&base, &a.binding.attempt_id, outcome).join(CAPTURE_JOURNAL_FILE);
+        let events = journal_events(&journal);
+        let names: Vec<&str> = events
+            .iter()
+            .map(|e| e.split('|').next().unwrap())
             .collect();
-        assert_eq!(renamed.len(), 1, "{stage}");
-        let events = journal_events(&renamed[0].join(CAPTURE_JOURNAL_FILE));
-        assert_eq!(events.len(), 3, "{stage}: {events:?}");
-        assert!(
-            events[0].starts_with("event=SESSION_PREARMED|"),
-            "{events:?}"
-        );
-        assert!(
-            events[1].starts_with("event=PRE_EGRESS_ABORT|"),
-            "{events:?}"
-        );
-        assert!(
-            events[1].contains(&format!("stage={stage}\n")),
-            "{events:?}"
-        );
-        assert!(
-            events[1].contains("bundle_bytes_written=false"),
-            "{events:?}"
-        );
-        assert!(
-            events[2].starts_with("event=AUTHORITY_RETURNED|"),
-            "{events:?}"
-        );
-        assert!(events[2].contains("attempt_authority=AUTHORIZED\nautomatic_retry=false"));
+        let state = attempt_authority::state(&a.git, &a.binding);
+        if journal_fault {
+            assert!(
+                said.contains("stays consumed") && said.contains("journal"),
+                "{stage}: {said}"
+            );
+            assert!(
+                matches!(state, Ok(attempt_authority::State::Other(_))),
+                "{stage}"
+            );
+            assert!(
+                !names.contains(&"event=AUTHORITY_RETURNED"),
+                "{stage}: {names:?}"
+            );
+            assert!(attempt_authority::consume(&a.git, &a.binding, "restart").is_err());
+        } else {
+            assert!(said.contains("was returned"), "{stage}: {said}");
+            assert_eq!(state, Ok(attempt_authority::State::Authorized), "{stage}");
+            assert_eq!(
+                names,
+                [
+                    "event=SESSION_PREARMED",
+                    "event=PRE_EGRESS_ABORT",
+                    "event=AUTHORITY_RETURNED"
+                ],
+                "{stage}"
+            );
+            assert!(
+                events[1].contains(&format!("stage={stage}\n")),
+                "{events:?}"
+            );
+            assert!(
+                events[1].contains("bundle_bytes_written=false"),
+                "{events:?}"
+            );
+            assert!(events[2].contains("attempt_authority=AUTHORIZED\nautomatic_retry=false"));
+        }
     }
     fs::remove_dir_all(&base).unwrap();
 }
 
 /// T5: a durable RELEASED marker in the attempt directory keeps the
-/// latch and the authority CONSUMED, and the journal says so.
+/// latch and the authority CONSUMED, and the journal names the marker.
 #[test]
 fn a_released_marker_keeps_the_latch_and_the_authority() {
     let base = private_dir("t5-marker");
@@ -228,7 +266,8 @@ fn a_released_marker_keeps_the_latch_and_the_authority() {
     let last = events.last().unwrap();
     assert!(last.starts_with("event=AUTHORITY_KEPT|"), "{events:?}");
     assert!(
-        last.contains("attempt_authority=CONSUMED\nreason=the latch was not released"),
+        last.contains("attempt_authority=CONSUMED\nreason=the latch was not released (")
+            && last.contains("RELEASED marker"),
         "{last}"
     );
     assert!(attempt_authority::consume(&a.git, &a.binding, "restart").is_err());
@@ -241,17 +280,52 @@ fn a_released_marker_keeps_the_latch_and_the_authority() {
 fn the_return_needs_the_journaled_abort_and_the_released_latch() {
     let dir = PathBuf::from("/attempt.pre-egress-1-0");
     assert!(
-        return_condition(Err("writer failed".into()), Some(dir.clone()))
+        return_condition(Err("writer failed".into()), Some(dir.clone()), "released")
             .unwrap_err()
             .contains("journal")
     );
-    assert!(
-        return_condition(Ok(()), None)
-            .unwrap_err()
-            .contains("latch")
-    );
+    let e = return_condition(Ok(()), None, "holds the RELEASED marker").unwrap_err();
+    assert!(e.contains("latch") && e.contains("RELEASED marker"), "{e}");
     assert_eq!(
-        return_condition(Ok(()), Some(dir.clone())),
+        return_condition(Ok(()), Some(dir.clone()), "released"),
         Ok(dir.join(RELEASED_MARKER_FILE))
     );
+}
+
+/// Review MEDIUM-1/LOW-3: the release gate opens only with every sender
+/// waiting at it; tickets exist only by spending the claim (the remote stays
+/// CONSUMED); a sender that never arrives cancels the gate at the deadline
+/// and nobody writes, nothing hangs.
+#[test]
+fn the_release_gate_needs_the_spent_claim_and_every_sender() {
+    let base = private_dir("t5-gate");
+    let a = armed(&base, 1);
+    let (spent, gate, [t1, t2]) = ReleaseGate::spend::<2>(a.claim);
+    assert!(matches!(
+        attempt_authority::state(&a.git, &a.binding),
+        Ok(attempt_authority::State::Other(head)) if head == spent.consumed_commit()
+    ));
+    let passed = thread::scope(|s| {
+        let runs = [t1, t2].map(|t| s.spawn(move || t.pass()));
+        gate.release(2, MAX_BUILDER_IDLE).unwrap();
+        runs.map(|r| r.join().unwrap())
+    });
+    assert_eq!(passed, [true, true]);
+    // One sender missing: cancelled at the deadline, the other writes nothing.
+    let b = armed(&base, 2);
+    let (_, gate, [t1, t2]) = ReleaseGate::spend::<2>(b.claim);
+    drop(t2);
+    let started = Instant::now();
+    let passed = thread::scope(|s| {
+        let run = s.spawn(move || t1.pass());
+        let e = gate.release(2, Duration::from_millis(200)).unwrap_err();
+        assert!(
+            e.contains("1 of 2 senders") && e.contains("nothing was written"),
+            "{e}"
+        );
+        run.join().unwrap()
+    });
+    assert!(!passed);
+    assert!(started.elapsed() < MAX_BUILDER_IDLE);
+    fs::remove_dir_all(&base).unwrap();
 }

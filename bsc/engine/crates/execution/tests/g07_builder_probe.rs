@@ -26,8 +26,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// The builder response deadline is bundle_wire's, bound into v5 (was 75a04d5c…).
 /// Review 25.10.: the guard checks the v5 runtime gates (was 69cee91f…).
 /// T5: the authority return is a consumable capability (was 642280d6…).
+/// Review 25.10. (Paket 1): ticketed release gate, durable abort (was 895ced5b…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "895ced5b3655d40d8cc71bf1a059a5bf51715376aca9c74126a299eb8f724d4c";
+const PINNED_PLAN_SHA256: &str = "afe825e3aae74f423d444f62b52e28c6b4f3eb9d02b02d5e482fb94376d23a0a";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

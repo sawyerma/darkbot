@@ -315,11 +315,19 @@ pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
     };
     let reference = binding.reference()?;
     // A RELEASED marker of this self-test, and a path that provably is none.
+    // A fresh private directory (never an existing or shared one).
     let scratch = std::env::temp_dir().join(format!("darkbot-authority-selftest-{nonce}"));
     let absent_marker = scratch.join("absent").join("RELEASED");
     let marker = scratch.join("RELEASED");
-    std::fs::create_dir_all(&scratch)
-        .and_then(|()| std::fs::write(&marker, b"selftest"))
+    std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700)
+        .create(&scratch)
+        .and_then(|()| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&marker)
+                .and_then(|mut f| f.write_all(b"selftest"))
+        })
         .map_err(|e| format!("self-test marker: {e}"))?;
     let mut steps = Vec::new();
     let result = (|| -> Result<(), String> {
@@ -441,7 +449,7 @@ pub fn grant(git: &Git, binding: &Binding) -> Result<String, String> {
 /// or remote) leaves it CONSUMED. `release` consumes it at the barrier, so a
 /// return after the release does not compile:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0382
 /// # use darkbot_bsc_execution::attempt_authority::{Claim, Git};
 /// fn after_the_release(claim: Claim, git: &Git, marker: &std::path::Path) {
 ///     let _released = claim.release();
@@ -449,7 +457,7 @@ pub fn grant(git: &Git, binding: &Binding) -> Result<String, String> {
 /// }
 /// ```
 ///
-/// ```compile_fail
+/// ```compile_fail,E0599
 /// # use darkbot_bsc_execution::attempt_authority::{Git, Released};
 /// fn released(released: Released, git: &Git, marker: &std::path::Path) {
 ///     let _ = released.return_unsent(git, marker);
@@ -471,7 +479,7 @@ pub fn grant(git: &Git, binding: &Binding) -> Result<String, String> {
 ///
 /// A returned claim has no guard proof left, and no proof outlives it:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0382
 /// # use darkbot_bsc_execution::attempt_authority::{Claim, Git};
 /// fn returned(claim: Claim, git: &Git, marker: &std::path::Path) {
 ///     let _ = claim.return_unsent(git, marker);
@@ -479,7 +487,7 @@ pub fn grant(git: &Git, binding: &Binding) -> Result<String, String> {
 /// }
 /// ```
 ///
-/// ```compile_fail
+/// ```compile_fail,E0505
 /// # use darkbot_bsc_execution::attempt_authority::{Claim, Git};
 /// fn kept(claim: Claim, git: &Git, marker: &std::path::Path) {
 ///     let proof = claim.proof();
@@ -586,7 +594,23 @@ impl Claim {
             Some(head) if head == self.consumed => {}
             _ => return Err("the remote authority is no longer this claim's".into()),
         }
-        git.swap(&self.reference, &self.consumed, &self.authorized)
+        let Err(e) = git.swap(&self.reference, &self.consumed, &self.authorized) else {
+            return Ok(());
+        };
+        // A failed push may still have landed (a deadline after the remote
+        // took it): the remote decides, and anything unclear says so.
+        match git.remote_head(&self.reference) {
+            Ok(Some(head)) if head == self.authorized => Ok(()),
+            Ok(Some(head)) if head == self.consumed => Err(format!(
+                "the return failed, the authority stays consumed: {e}"
+            )),
+            Ok(other) => Err(format!(
+                "UNCLEAR: after a failed return the remote holds {other:?}: {e}"
+            )),
+            Err(read) => Err(format!(
+                "UNCLEAR: the remote is unreadable after a failed return ({read}): {e}"
+            )),
+        }
     }
 }
 
@@ -733,6 +757,47 @@ mod tests {
         );
         assert!(claim.return_unsent(&offline, &no_marker(&base)).is_err());
         assert_eq!(held(&git[0]), Some(consumed));
+    }
+
+    /// Review LOW-2: a return whose push reports failure is settled by the
+    /// remote: landed (the deadline hit after the remote took it) is
+    /// returned, not landed stays consumed; it is never guessed.
+    #[test]
+    fn a_failed_return_push_is_settled_by_what_the_remote_holds() {
+        let (base, git) = remote("unclear", 1);
+        let b = binding(9);
+        grant(&git[0], &b).unwrap();
+        let wrapper = |name: &str, push: &str| {
+            let path = base.join(name);
+            std::fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\ncase \"$*\" in *push*) {push}; exit 1;; esac\nexec git \"$@\"\n"
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            Git {
+                program: path,
+                ..Git::new(git[0].repo.clone(), "origin")
+            }
+        };
+        // The push lands, then reports failure: the authority is returned.
+        let claim = consume(&git[0], &b, "landed").unwrap();
+        let landed = wrapper("git-landed", "git \"$@\" >/dev/null 2>&1");
+        assert_eq!(claim.return_unsent(&landed, &no_marker(&base)), Ok(()));
+        assert_eq!(state(&git[0], &b), Ok(State::Authorized));
+        // The push never lands: it stays consumed, and says so.
+        let claim = consume(&git[0], &b, "lost").unwrap();
+        let consumed = claim.consumed.clone();
+        let lost = wrapper("git-lost", ":");
+        let e = claim.return_unsent(&lost, &no_marker(&base)).unwrap_err();
+        assert!(
+            e.contains("stays consumed") && !e.starts_with("UNCLEAR"),
+            "{e}"
+        );
+        assert_eq!(state(&git[0], &b), Ok(State::Other(consumed)));
     }
 
     /// A run that consumed the authority and ends without returning it (a

@@ -14,11 +14,17 @@ pub struct Snapshot {
     pub monitoring: BscMonitoringState,
     pub wallets: BscWalletsState,
 }
-pub fn now() -> u64 {
+/// Seconds since 1970; `None` when the clock is before it (BSC-050: a clock
+/// fault is never time 0, which would make every deadline look unexpired).
+pub fn clock_s() -> Option<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+        .ok()
+        .map(|d| d.as_secs())
+}
+/// [`clock_s`], 0 (the wire's "unset") without a clock.
+pub fn now() -> u64 {
+    clock_s().unwrap_or(0)
 }
 fn read(path: &Path) -> Option<Vec<u8>> {
     let meta = fs::symlink_metadata(path).ok()?;
@@ -109,6 +115,10 @@ fn time_ms(r: &Record) -> u64 {
         .iter()
         .find_map(|n| field(r, n)?.parse::<u64>().ok())
         .unwrap_or(0)
+}
+/// A builder refresh is expired at `now`, and always without a clock.
+pub(crate) fn refresh_expired(expires_unix_s: u64, now: Option<u64>) -> bool {
+    now.is_none_or(|now| expires_unix_s < now)
 }
 fn time(r: &Record) -> u64 {
     time_ms(r) / 1000
@@ -769,7 +779,12 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         e.observed_unix_s = answered;
         builder.probe = Some(e);
     }
-    if builder.refresh_expires_unix_s < now() {
+    // Without a clock no refresh counts as fresh (fail closed).
+    let clock = clock_s();
+    if clock.is_none() {
+        warnings.push("CLOCK_UNAVAILABLE".into());
+    }
+    if refresh_expired(builder.refresh_expires_unix_s, clock) {
         warnings.push("BUILDER_REFRESH_EXPIRED_OR_UNQUALIFIED".into());
     }
     let mut monitoring = BscMonitoringState {
@@ -781,13 +796,15 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         .into(),
         ..Default::default()
     };
-    let g08 = latest(
-        &records,
-        &[
-            schema::g08::result::SCHEMA.name,
-            schema::g08::unresolved::SCHEMA.name,
-        ],
-    );
+    let g08_names = [
+        schema::g08::result::SCHEMA.name,
+        schema::g08::unresolved::SCHEMA.name,
+    ];
+    let g08_records = records
+        .iter()
+        .filter(|(_, r)| g08_names.contains(&r.schema().name))
+        .count();
+    let g08 = latest(&records, &g08_names);
     if let Some((p, r)) = g08 {
         monitoring.state = field(r, "verdict").unwrap_or_else(|| "UNKNOWN".into());
         monitoring.evidence = Some(evidence(root, p, Some(r)));
@@ -849,6 +866,20 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             }
             .into(),
         );
+        // V2 §2.3 (review MEDIUM-2): a G0.8 verdict counts only alone and bound
+        // to its G0.7 evidence; an unbound one, or one of several G0.8 records
+        // (no record orders them in time), is UNRESOLVED, never PASS/ADAPT/STOP.
+        if g08_records > 1 {
+            g08_reasons.push("G08_RECORDS_AMBIGUOUS".into());
+        }
+        if (!bound || g08_records > 1) && monitoring.state != "UNRESOLVED" {
+            let recorded = ["PASS", "ADAPT", "STOP"]
+                .into_iter()
+                .find(|v| *v == monitoring.state)
+                .unwrap_or("UNKNOWN");
+            g08_reasons.push(format!("RECORDED_VERDICT_{recorded}"));
+            monitoring.state = "UNRESOLVED".into();
+        }
         // BSC-011: the chain outcome and the evidence integrity next to the
         // verdict; anything unknown stays UNKNOWN. An UNRESOLVED record (no
         // canonical receipts) proves neither: both UNKNOWN, never a PASS,
