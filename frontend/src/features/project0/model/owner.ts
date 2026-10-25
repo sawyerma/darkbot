@@ -64,6 +64,18 @@ export interface OwnerSafetyView {
   dayAttempts: number;
 }
 
+/** B01: the owner's rebalancing plan in OBSERVE (planned, never traded). */
+export interface RebalanceView {
+  mode: string;
+  /** null before the first plan. */
+  atUnixMs: bigint | null;
+  slot: bigint;
+  trades: ReadonlyArray<{ sell: string; buy: string; amountIn: bigint; minimumOut: bigint; costUsdMicro: bigint }>;
+  blocked: ReadonlyArray<{ asset: string; reason: string }>;
+  quotesPending: bigint;
+  budgetUsdMicro: bigint;
+}
+
 export interface LiquidatorView {
   runId: string;
   mode: string;
@@ -76,6 +88,8 @@ export interface LiquidatorView {
   pipeline: OwnerPipelineView | null;
   safety: OwnerSafetyView | null;
   capabilities: readonly CapabilityView[];
+  /** null while rebalancing is OFF. */
+  rebalance: RebalanceView | null;
 }
 
 export interface WalletsView {

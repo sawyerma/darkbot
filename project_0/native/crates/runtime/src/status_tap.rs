@@ -228,6 +228,33 @@ pub fn operational_snapshot() -> OperationalSnapshot {
     )
 }
 
+/// B01: one planned rebalance trade (OBSERVE: planned, never sent).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RebalanceTrade {
+    pub sell: String,
+    pub buy: String,
+    pub amount_in: u64,
+    pub minimum_out: u64,
+    pub cost_usd_micro: u64,
+}
+
+/// B01: the owner's rebalancing observation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerRebalance {
+    /// OFF or OBSERVE.
+    pub mode: &'static str,
+    /// Wall clock of the plan; `None` before the first one or without a wall clock.
+    pub at_unix_ms: Option<u64>,
+    /// Highest slot of the canonical state the plan read.
+    pub slot: u64,
+    pub trades: Vec<RebalanceTrade>,
+    /// Assets that are not rebalanced, with the stable reason.
+    pub blocked: Vec<(String, &'static str)>,
+    /// Quotes asked and not answered yet (the plan is then provisional).
+    pub quotes_pending: u64,
+    pub budget_usd_micro: u64,
+}
+
 /// P0-PROD-CTRL-04: the Shadow/econ4h state owner's projection, copied by the owner at most every
 /// `owner_status_ms` (`state_owner/status.rs`). Values as the owner holds them; an unknown value
 /// is `None`, never 0. Topics project0.liquidator.state, .wallets.state, .finance.summary.
@@ -248,6 +275,8 @@ pub struct OwnerSnapshot {
     pub capabilities: Vec<OwnerCapability>,
     pub wallets: OwnerWallets,
     pub finance: OwnerFinance,
+    /// B01: the rebalancing observation; `None` while the mode is OFF.
+    pub rebalance: Option<OwnerRebalance>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

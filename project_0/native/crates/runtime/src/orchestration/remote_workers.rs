@@ -29,6 +29,29 @@ pub struct WinnerWatch {
     pub next_check_unix_s: u64,
 }
 
+/// B01 OBSERVE: one rebalance quote, asked off the owner (the route provider's ExactIn quote).
+#[cfg(feature = "crate_health")]
+pub struct RebalanceQuoteWork {
+    pub key: crate::execution::inventory::QuoteKey,
+    pub sell_mint: Pubkey,
+    pub buy_mint: Pubkey,
+}
+
+/// The quote's on-chain enforced minimum output: `Ok(None)` without a route (or a route for
+/// another amount), `Err` when the provider was not reachable.
+#[cfg(feature = "crate_health")]
+pub struct RebalanceQuoteResult {
+    pub key: crate::execution::inventory::QuoteKey,
+    pub minimum_out: Result<Option<u64>, String>,
+}
+
+/// The owner's ends of the rebalance quote queues (present in OBSERVE only).
+#[cfg(feature = "crate_health")]
+pub struct RebalanceQueues {
+    pub jobs: Producer<RebalanceQuoteWork>,
+    pub results: Consumer<RebalanceQuoteResult>,
+}
+
 pub struct WinnerResult {
     pub watch: WinnerWatch,
     pub result: Result<Option<Winner>, String>,
@@ -125,6 +148,13 @@ pub struct RemoteWorkers {
     pub oracle_price_projection_results: Consumer<OraclePriceProjectionResultMessage>,
     pub fe04_settlement_jobs: Producer<Fe04SettlementWork>,
     pub fe04_settlement_results: Consumer<Fe04SettlementResult>,
+    /// B01 OBSERVE: the rebalance quote queues, once `start_rebalance_quoter` ran.
+    #[cfg(feature = "crate_health")]
+    pub rebalance: Option<RebalanceQueues>,
+    /// The doorbells of later attached workers (the owner's `wake`, the workers' `space`).
+    wake: Wakeup,
+    space: Wakeup,
+    capacity: usize,
 }
 
 /// A23-08: liveness bound of one wait on a full result queue. Progress is event-driven: the
@@ -431,7 +461,88 @@ impl RemoteWorkers {
             oracle_price_projection_results,
             fe04_settlement_jobs,
             fe04_settlement_results,
+            #[cfg(feature = "crate_health")]
+            rebalance: None,
+            wake: wake.clone(),
+            space,
+            capacity,
         })
+    }
+
+    /// B01 OBSERVE: starts the rebalance quote worker — the route provider's ExactIn quote of
+    /// each asked rebalance, bounded by `jupiter_timeout_ms`, off the owner; stopped and joined
+    /// with the other workers.
+    #[cfg(feature = "crate_health")]
+    pub fn start_rebalance_quoter(
+        &mut self,
+        routes: crate::execution::route::JupiterV2RouteProvider,
+        shutdown: &Shutdown,
+    ) -> std::io::Result<()> {
+        use crate::execution::builder::p0::RouteProvider;
+        let (jobs, job_rx) = bounded::<RebalanceQuoteWork>("rebalance-quote-jobs", self.capacity);
+        let (done_tx, results) = result_queue::<RebalanceQuoteResult>(
+            "rebalance-quote-results",
+            self.capacity,
+            &self.wake,
+            &self.space,
+        );
+        let (shutdown, space) = (shutdown.clone(), self.space.clone());
+        self.threads.push(
+            std::thread::Builder::new()
+                .name("rebalance-quotes".into())
+                .spawn(move || {
+                    while !shutdown.is_requested() {
+                        let Some(work) = job_rx.pop_timeout(Duration::from_millis(250)) else {
+                            continue;
+                        };
+                        let deadline = std::time::Instant::now()
+                            + Duration::from_millis(
+                                darkbot_solana::runtime_config::active()
+                                    .limits
+                                    .jupiter_timeout_ms,
+                            );
+                        let amount_in = work.key.2;
+                        let minimum_out = routes
+                            .quote_exact_in(
+                                &work.sell_mint,
+                                &work.buy_mint,
+                                amount_in,
+                                &[],
+                                deadline,
+                            )
+                            .map(|route| {
+                                route
+                                    .filter(|r| r.amount_in == amount_in)
+                                    .and_then(|r| r.minimum_executable_out)
+                            });
+                        let result = RebalanceQuoteResult {
+                            key: work.key,
+                            minimum_out,
+                        };
+                        if !push_result(&done_tx, result, &shutdown, &space) {
+                            return;
+                        }
+                    }
+                })?,
+        );
+        self.rebalance = Some(RebalanceQueues { jobs, results });
+        Ok(())
+    }
+
+    /// Test seam: the rebalance quote queues without a worker; the test answers the jobs.
+    #[cfg(all(test, feature = "crate_health"))]
+    pub(crate) fn detached_rebalance(
+        &mut self,
+    ) -> (Consumer<RebalanceQuoteWork>, Producer<RebalanceQuoteResult>) {
+        let (jobs, job_rx) = bounded("rebalance-quote-jobs", self.capacity);
+        let (done_tx, results) = result_queue(
+            "rebalance-quote-results",
+            self.capacity,
+            &self.wake,
+            &self.space,
+        );
+        self.rebalance = Some(RebalanceQueues { jobs, results });
+        (job_rx, done_tx)
     }
 
     /// Test seam (A23-01): the production result queues without worker threads; the test drives
@@ -465,6 +576,11 @@ impl RemoteWorkers {
             oracle_price_projection_results,
             fe04_settlement_jobs,
             fe04_settlement_results,
+            #[cfg(feature = "crate_health")]
+            rebalance: None,
+            wake: wake.clone(),
+            space: space.clone(),
+            capacity,
         };
         (
             workers,

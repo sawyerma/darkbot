@@ -41,6 +41,78 @@ pub enum Action {
     Blocked { asset: String, reason: &'static str },
 }
 
+/// B01 (CTRL-03): the operator's rebalancing mode (`P0_REBALANCE_MODE`). OBSERVE plans from the
+/// wallet's real balances, real quotes and conservative costs and never trades; ACTIVE trades
+/// and needs the LIVE gate (B10), so it is refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RebalanceMode {
+    Off,
+    Observe,
+}
+
+impl RebalanceMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Off => "OFF",
+            Self::Observe => "OBSERVE",
+        }
+    }
+}
+
+pub fn parse_mode(text: &str) -> Result<RebalanceMode, String> {
+    match text.trim() {
+        "" | "off" => Ok(RebalanceMode::Off),
+        "observe" => Ok(RebalanceMode::Observe),
+        "active" => Err(
+            "REBALANCE_ACTIVE_REQUIRES_LIVE: rebalancing trades only after the LIVE gate (B10)"
+                .into(),
+        ),
+        other => Err(format!("REBALANCE_MODE_INVALID: {other} (off|observe)")),
+    }
+}
+
+/// A rebalance quote's key: `amount_in` of the asset `sell` for the asset `buy`.
+pub type QuoteKey = (String, String, u64);
+
+/// B01 OBSERVE: one planning pass over cached quotes (`Some(minimum_out)`, or `None` for no
+/// route). A quote not cached yet is never guessed: its asset is blocked as cost unknown in this
+/// pass and the quote is returned as wanted. `cost` values selling `amount_in` of `sell` for
+/// `minimum_out` of `buy` conservatively. The wallet's other assets are not read here, so none
+/// counts as collateral with a proven realization.
+pub fn plan_with_quotes(
+    available: &BTreeMap<String, u64>,
+    targets: &BTreeMap<String, Target>,
+    quotes: &BTreeMap<QuoteKey, Option<u64>>,
+    cost: &dyn Fn(&str, u64, &str, u64) -> Option<u64>,
+    budget_usd_micro: u64,
+) -> (Vec<Action>, Vec<QuoteKey>) {
+    let wanted = std::cell::RefCell::new(Vec::new());
+    let quote = |sell: &str, buy: &str, amount_in: u64| -> RebalanceQuote {
+        let key = (sell.to_string(), buy.to_string(), amount_in);
+        match quotes.get(&key) {
+            Some(Some(out)) => RebalanceQuote {
+                minimum_out: Some(*out),
+                cost_usd_micro: cost(sell, amount_in, buy, *out),
+            },
+            Some(None) => RebalanceQuote {
+                minimum_out: None,
+                cost_usd_micro: None,
+            },
+            None => {
+                wanted.borrow_mut().push(key);
+                RebalanceQuote {
+                    minimum_out: None,
+                    cost_usd_micro: None,
+                }
+            }
+        }
+    };
+    let actions = rebalance(available, targets, &|_| false, &quote, budget_usd_micro);
+    let mut wanted = wanted.into_inner();
+    wanted.dedup();
+    (actions, wanted)
+}
+
 /// P5-JIT-01: `P0_JIT_FUNDING_BANK`, the bank whose inventory funds a JIT buy. Empty is none (no
 /// JIT plan); anything but one bank key is an error.
 pub fn parse_funding_bank(text: &str) -> Result<Option<solana_sdk::pubkey::Pubkey>, String> {
@@ -336,5 +408,75 @@ mod tests {
         ] {
             assert!(parse_targets(bad).is_err(), "{bad}");
         }
+    }
+
+    /// B01: OFF and OBSERVE are the modes an operator may choose; ACTIVE trades and is refused
+    /// until the LIVE gate (B10); anything else is invalid.
+    #[test]
+    fn rebalance_mode_parses_strictly_and_active_needs_live() {
+        assert_eq!(parse_mode(""), Ok(RebalanceMode::Off));
+        assert_eq!(parse_mode("off"), Ok(RebalanceMode::Off));
+        assert_eq!(parse_mode(" observe "), Ok(RebalanceMode::Observe));
+        assert!(parse_mode("active")
+            .unwrap_err()
+            .starts_with("REBALANCE_ACTIVE_REQUIRES_LIVE"));
+        assert!(parse_mode("on")
+            .unwrap_err()
+            .starts_with("REBALANCE_MODE_INVALID"));
+    }
+
+    /// B01 OBSERVE: a pass plans from cached quotes only — a missing quote is wanted (never
+    /// guessed) and blocks its asset as cost unknown; the next pass with the quote plans the
+    /// rebalance at its quoted output and conservative cost; a refused quote stays unknown.
+    #[test]
+    fn observe_plans_from_cached_quotes_and_asks_for_the_missing_ones() {
+        let targets = BTreeMap::from([
+            ("A".to_string(), band(100, 200, 300)),
+            ("B".to_string(), band(100, 200, 300)),
+        ]);
+        let available = BTreeMap::from([("A".to_string(), 50u64), ("B".to_string(), 1_000)]);
+        let cost = |sell: &str, amount_in: u64, buy: &str, out: u64| -> Option<u64> {
+            assert_eq!((sell, buy), ("B", "A"));
+            Some(amount_in - out)
+        };
+        let mut quotes = BTreeMap::new();
+        let (actions, wanted) = plan_with_quotes(&available, &targets, &quotes, &cost, 1_000);
+        assert_eq!(wanted, vec![("B".to_string(), "A".to_string(), 800)]);
+        assert_eq!(
+            actions,
+            vec![Action::Blocked {
+                asset: "A".into(),
+                reason: "REBALANCE_COST_UNKNOWN"
+            }]
+        );
+        // The full surplus quoted: 800 B for at least 400 A; the shortfall needs 150 A, so the
+        // plan asks for the scaled quote (300 B) next, then trades it.
+        quotes.insert(("B".to_string(), "A".to_string(), 800), Some(400));
+        let (_, wanted) = plan_with_quotes(&available, &targets, &quotes, &cost, 1_000);
+        assert_eq!(wanted, vec![("B".to_string(), "A".to_string(), 300)]);
+        quotes.insert(("B".to_string(), "A".to_string(), 300), Some(150));
+        let (actions, wanted) = plan_with_quotes(&available, &targets, &quotes, &cost, 1_000);
+        assert!(wanted.is_empty());
+        assert_eq!(
+            actions,
+            vec![Action::Rebalance {
+                sell: "B".into(),
+                buy: "A".into(),
+                amount_in: 300,
+                minimum_out: 150,
+                cost_usd_micro: 150
+            }]
+        );
+        // No route for the scaled amount: unknown, never traded.
+        quotes.insert(("B".to_string(), "A".to_string(), 300), None);
+        let (actions, wanted) = plan_with_quotes(&available, &targets, &quotes, &cost, 1_000);
+        assert!(wanted.is_empty());
+        assert!(matches!(
+            actions[..],
+            [Action::Blocked {
+                reason: "REBALANCE_COST_UNKNOWN",
+                ..
+            }]
+        ));
     }
 }

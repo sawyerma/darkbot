@@ -134,6 +134,9 @@
     - [OwnerRun](#darkbot-project0-v1-OwnerRun)
     - [OwnerSafety](#darkbot-project0-v1-OwnerSafety)
     - [OwnerTrigger](#darkbot-project0-v1-OwnerTrigger)
+    - [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked)
+    - [RebalancePlan](#darkbot-project0-v1-RebalancePlan)
+    - [RebalanceTrade](#darkbot-project0-v1-RebalanceTrade)
     - [StateCounters](#darkbot-project0-v1-StateCounters)
     - [WalletsState](#darkbot-project0-v1-WalletsState)
 
@@ -2274,6 +2277,7 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | pipeline | [OwnerPipeline](#darkbot-project0-v1-OwnerPipeline) |  | Pipeline evaluations and decisions of this run (analytics/shadow_ledger.rs, MT0). |
 | safety | [OwnerSafety](#darkbot-project0-v1-OwnerSafety) |  | Safety layer: limits, capital in use, halts (liquidation/src/safety.rs). |
 | capabilities | [Capability](#darkbot-project0-v1-Capability) | repeated | Every switchable capability: requested, effective and why it is blocked. |
+| rebalance | [RebalancePlan](#darkbot-project0-v1-RebalancePlan) |  | B01: the rebalancing observation of the inventory bands; unset while OFF. |
 
 
 
@@ -2408,6 +2412,63 @@ Candidate trigger and its lanes.
 | indexed_accounts | [uint64](#uint64) |  | Accounts in the reverse index. |
 | suppressed | [uint64](#uint64) |  | Repeats suppressed by the forward policy (no new cause). |
 | softcap_suppressed | [uint64](#uint64) |  | Due repeats suppressed by the repeat soft cap. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RebalanceBlocked"></a>
+
+### RebalanceBlocked
+An asset the plan does not rebalance.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| asset | [string](#string) |  | Inventory key. |
+| reason | [string](#string) |  | Stable reason (INVENTORY_BALANCE_UNKNOWN, REBALANCE_COST_UNKNOWN, …). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RebalancePlan"></a>
+
+### RebalancePlan
+B01 (P8-INV-01): the owner&#39;s rebalancing plan in OBSERVE — real balances, quotes and conservative
+costs; planned, never traded (ACTIVE needs LIVE).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [string](#string) |  | OFF or OBSERVE. |
+| at_unix_ms | [uint64](#uint64) | optional | Wall clock of the plan; unset before the first one. |
+| slot | [uint64](#uint64) |  | Highest slot of the canonical state the plan read. |
+| trades | [RebalanceTrade](#darkbot-project0-v1-RebalanceTrade) | repeated | Planned trades. |
+| blocked | [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked) | repeated | Assets not rebalanced, with the stable reason. |
+| quotes_pending | [uint64](#uint64) |  | Quotes asked and not answered yet (the plan is then provisional). |
+| budget_usd_micro | [uint64](#uint64) |  | The plan&#39;s cost budget. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RebalanceTrade"></a>
+
+### RebalanceTrade
+One planned rebalance trade (ExactIn).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| sell | [string](#string) |  | Inventory key sold (SOL or a mint). |
+| buy | [string](#string) |  | Inventory key bought. |
+| amount_in | [uint64](#uint64) |  | Amount sold (base units). |
+| minimum_out | [uint64](#uint64) |  | The on-chain enforced minimum output (base units). |
+| cost_usd_micro | [uint64](#uint64) |  | Conservative cost: value given minus value received plus the planned network fee. |
 
 
 

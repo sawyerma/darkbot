@@ -82,6 +82,8 @@ use ingress::{IngressSession, IngressSessions, RetiredEvents};
 mod fe04;
 mod generations;
 mod ownership;
+#[cfg(feature = "crate_health")]
+mod rebalance;
 mod shutdown;
 mod sources;
 #[cfg(feature = "crate_health")]
@@ -143,6 +145,9 @@ pub(super) struct ShadowOwner {
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
     /// P5-JIT-01: the bank whose inventory funds a JIT buy (`P0_JIT_FUNDING_BANK`, empty: none).
     jit_funding_bank: Option<Pubkey>,
+    /// B01: the rebalancing observation of the bands (`P0_REBALANCE_MODE`).
+    #[cfg(feature = "crate_health")]
+    rebalance: rebalance::Observer,
     /// P2-07: prepared candidate templates, invalidated by any byte change of what they read,
     /// a ProgramData change or a new ingress generation.
     prepared: std::cell::RefCell<crate::execution::prepared::PreparedCache>,

@@ -18,6 +18,49 @@ message LiquidatorState {
   OwnerSafety safety = 5;
   // Every switchable capability: requested, effective and why it is blocked.
   repeated Capability capabilities = 6;
+  // B01: the rebalancing observation of the inventory bands; unset while OFF.
+  RebalancePlan rebalance = 7;
+}
+
+// B01 (P8-INV-01): the owner's rebalancing plan in OBSERVE — real balances, quotes and conservative
+// costs; planned, never traded (ACTIVE needs LIVE).
+message RebalancePlan {
+  // OFF or OBSERVE.
+  string mode = 1;
+  // Wall clock of the plan; unset before the first one.
+  optional uint64 at_unix_ms = 2;
+  // Highest slot of the canonical state the plan read.
+  uint64 slot = 3;
+  // Planned trades.
+  repeated RebalanceTrade trades = 4;
+  // Assets not rebalanced, with the stable reason.
+  repeated RebalanceBlocked blocked = 5;
+  // Quotes asked and not answered yet (the plan is then provisional).
+  uint64 quotes_pending = 6;
+  // The plan's cost budget.
+  uint64 budget_usd_micro = 7;
+}
+
+// One planned rebalance trade (ExactIn).
+message RebalanceTrade {
+  // Inventory key sold (SOL or a mint).
+  string sell = 1;
+  // Inventory key bought.
+  string buy = 2;
+  // Amount sold (base units).
+  uint64 amount_in = 3;
+  // The on-chain enforced minimum output (base units).
+  uint64 minimum_out = 4;
+  // Conservative cost: value given minus value received plus the planned network fee.
+  uint64 cost_usd_micro = 5;
+}
+
+// An asset the plan does not rebalance.
+message RebalanceBlocked {
+  // Inventory key.
+  string asset = 1;
+  // Stable reason (INVENTORY_BALANCE_UNKNOWN, REBALANCE_COST_UNKNOWN, …).
+  string reason = 2;
 }
 
 // Run identity of the owner.

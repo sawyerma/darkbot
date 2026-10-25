@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/project0/v1/owner.proto.
  */
 export const file_darkbot_project0_v1_owner: GenFile = /*@__PURE__*/
-  fileDesc("Ch9kYXJrYm90L3Byb2plY3QwL3YxL293bmVyLnByb3RvEhNkYXJrYm90LnByb2plY3QwLnYxIsICCg9MaXF1aWRhdG9yU3RhdGUSKgoDcnVuGAEgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Pd25lclJ1bhIwCgZlbmdpbmUYAiABKAsyIC5kYXJrYm90LnByb2plY3QwLnYxLk93bmVyRW5naW5lEjIKB3RyaWdnZXIYAyABKAsyIS5kYXJrYm90LnByb2plY3QwLnYxLk93bmVyVHJpZ2dlchI0CghwaXBlbGluZRgEIAEoCzIiLmRhcmtib3QucHJvamVjdDAudjEuT3duZXJQaXBlbGluZRIwCgZzYWZldHkYBSABKAsyIC5kYXJrYm90LnByb2plY3QwLnYxLk93bmVyU2FmZXR5EjUKDGNhcGFiaWxpdGllcxgGIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuQ2FwYWJpbGl0eSJ7CghPd25lclJ1bhIOCgZydW5faWQYASABKAkSDAoEbW9kZRgCIAEoCRIZChFwdWJsaXNoZWRfdW5peF9tcxgDIAEoBBIOCgZ3YWxsZXQYBCABKAkSEgoKcHJvZ3JhbV9pZBgFIAEoCRISCgplbmRfcmVzdWx0GAYgASgJIoECCgtPd25lckVuZ2luZRIRCglydW5fc3RhdGUYASABKAkSEwoLaGFsdF9yZWFzb24YAiABKAkSGgoSaW5ncmVzc19nZW5lcmF0aW9uGAMgASgEEhIKCnJlY29ubmVjdHMYBCABKAQSEAoIZ2FwX29wZW4YBSABKAgSFAoMaGlnaGVzdF9zbG90GAYgASgEEhsKE2luZ3Jlc3NfaGFsdF9yYWlzZWQYByABKAgSHwoXcHJvZ3JhbV91cGdyYWRlX2xhdGNoZWQYCCABKAgSNAoIY291bnRlcnMYCSABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLlN0YXRlQ291bnRlcnMi0wIKDVN0YXRlQ291bnRlcnMSDwoHYXBwbGllZBgBIAEoBBISCgpzdGFsZV9zbG90GAIgASgEEhsKE3N0YWxlX3dyaXRlX3ZlcnNpb24YAyABKAQSFwoPc2FtZV9zbG90X25vX3d2GAQgASgEEiUKHXNhbWVfc2xvdF91bnZlcnNpb25lZF9yZWZ1c2VkGAUgASgEEhIKCmJlbG93X3Jvb3QYBiABKAQSEAoIYnVmZmVyZWQYByABKAQSIgoaYnVmZmVyX2Ryb3BwZWRfbGVfc25hcHNob3QYCCABKAQSGgoScmVjb25jaWxlX21pc21hdGNoGAkgASgEEh8KF3JlY29uY2lsZV9taXNzaW5nX2xvY2FsGAogASgEEiAKGHJlY29uY2lsZV9taXNzaW5nX3JlbW90ZRgLIAEoBBIXCg9vcnBoYW5lZF93cml0ZXMYDCABKAQiyAEKDE93bmVyVHJpZ2dlchIMCgRtb2RlGAEgASgJEhcKD3RocmVzaG9sZF9yZWFkeRgCIAEoCBIPCgdsYW5lX2wwGAMgASgEEg8KB2xhbmVfbDEYBCABKAQSDwoHbGFuZV9sMhgFIAEoBBIUCgxkZXRlY3RfcXVldWUYBiABKAQSGAoQaW5kZXhlZF9hY2NvdW50cxgHIAEoBBISCgpzdXBwcmVzc2VkGAggASgEEhoKEnNvZnRjYXBfc3VwcHJlc3NlZBgJIAEoBCKuAwoNT3duZXJQaXBlbGluZRITCgtldmFsdWF0aW9ucxgBIAEoBBIWCg5oZWFsdGhfY2hlY2tlZBgCIAEoBBIUCgxsaXF1aWRhdGFibGUYAyABKAQSEwoLcGxhbnNfYnVpbHQYBCABKAQSFgoOcGxhbnNfcmVqZWN0ZWQYBSABKAQSGgoSc2ltdWxhdGlvbnNfcGFzc2VkGAYgASgEEhoKEnNpbXVsYXRpb25zX2ZhaWxlZBgHIAEoBBIUCgxzaGFkb3dfcmVhZHkYCCABKAQSEwoLc2hhZG93X3dpbnMYCSABKAQSLgoGbG9zc2VzGAogAygLMh4uZGFya2JvdC5wcm9qZWN0MC52MS5Mb3NzQ291bnQSHAoPZGVjaXNpb25fcDk1X25zGAsgASgESACIAQESHQoQZmVlX3F1b3RlX3A5NV9ucxgMIAEoBEgBiAEBEh4KEXNpbXVsYXRpb25fcDk1X25zGA0gASgESAKIAQFCEgoQX2RlY2lzaW9uX3A5NV9uc0ITChFfZmVlX3F1b3RlX3A5NV9uc0IUChJfc2ltdWxhdGlvbl9wOTVfbnMiKgoJTG9zc0NvdW50Eg4KBnJlYXNvbhgBIAEoCRINCgVjb3VudBgCIAEoBCKTAwoLT3duZXJTYWZldHkSIAoYY2FwaXRhbF9pbl91c2VfdXNkX21pY3JvGAEgASgEEiMKG21heF90b3RhbF9jYXBpdGFsX3VzZF9taWNybxgCIAEoBBIgChhtYXhfZGFpbHlfbG9zc191c2RfbWljcm8YAyABKAQSKgoibWF4X2V4cG9zdXJlX3Blcl9hdHRlbXB0X3VzZF9taWNybxgEIAEoBBIgChhtYXhfY29uY3VycmVudF9wb3NpdGlvbnMYBSABKA0SIAoYbWF4X291dHN0YW5kaW5nX2F0dGVtcHRzGAYgASgNEiMKG21heF9mYWlsZWRfYXR0ZW1wdHNfcGVyX2RheRgHIAEoDRITCgtoYWx0X3JlYXNvbhgIIAEoCRIjChZkYXlfcmVhbGl6ZWRfdXNkX21pY3JvGAkgASgDSACIAQESGwoTZGF5X2ZhaWxlZF9hdHRlbXB0cxgKIAEoDRIUCgxkYXlfYXR0ZW1wdHMYCyABKA1CGQoXX2RheV9yZWFsaXplZF91c2RfbWljcm8iVgoKQ2FwYWJpbGl0eRIMCgRuYW1lGAEgASgJEhEKCXJlcXVlc3RlZBgCIAEoCRIRCgllZmZlY3RpdmUYAyABKAkSFAoMYmxvY2tfcmVhc29uGAQgASgJIrEECgxXYWxsZXRzU3RhdGUSGwoTZmluYW5jZV9zbmFwc2hvdF9pZBgBIAEoCRIOCgZ3YWxsZXQYAiABKAkSFAoMam91cm5hbF9yZWFkGAMgASgIEg8KB3ZlcmRpY3QYBCABKAkSFwoPdW5rbm93bl9yZWFzb25zGAUgAygJEhUKCGF0dGVtcHRzGAYgASgESACIAQESHgoRYXJjaGl2ZWRfYXR0ZW1wdHMYByABKARIAYgBARIcCg9sYW5kZWRfYXR0ZW1wdHMYCCABKARIAogBARIaCg1zZXR0bGVkX2V4aXRzGAkgASgESAOIAQESGQoMZmVlX2xhbXBvcnRzGAogASgESASIAQESKgodb3Blbl9pbnZlbnRvcnlfbWFya191c2RfbWljcm8YCyABKANIBYgBARIvCgVob2xkcxgMIAMoCzIgLmRhcmtib3QucHJvamVjdDAudjEuQXNzZXRBbW91bnQSOQoPcG9saWN5X3Jlc2VydmVzGA0gAygLMiAuZGFya2JvdC5wcm9qZWN0MC52MS5Bc3NldEFtb3VudBIUCgxoZWxkX2F0dGVtcHQYDiABKAlCCwoJX2F0dGVtcHRzQhQKEl9hcmNoaXZlZF9hdHRlbXB0c0ISChBfbGFuZGVkX2F0dGVtcHRzQhAKDl9zZXR0bGVkX2V4aXRzQg8KDV9mZWVfbGFtcG9ydHNCIAoeX29wZW5faW52ZW50b3J5X21hcmtfdXNkX21pY3JvIisKC0Fzc2V0QW1vdW50Eg0KBWFzc2V0GAEgASgJEg0KBXVuaXRzGAIgASgEIpEECg5GaW5hbmNlU3VtbWFyeRIbChNmaW5hbmNlX3NuYXBzaG90X2lkGAEgASgJEhIKCmFzX29mX3Nsb3QYAiABKAQSJAoXdG90YWxfY2FwaXRhbF91c2RfbWljcm8YAyABKANIAIgBARIoChthdmFpbGFibGVfY2FwaXRhbF91c2RfbWljcm8YBCABKANIAYgBARInChpyZXNlcnZlZF9jYXBpdGFsX3VzZF9taWNybxgFIAEoA0gCiAEBEicKGnJlYWxpemVkX25ldF9wbmxfdXNkX21pY3JvGAYgASgDSAOIAQESKgodd2l0aGRyYXdhYmxlX3Byb2ZpdF91c2RfbWljcm8YByABKANIBIgBARIuCiF0cmFuc2ZlcnJlZF90b190cmVhc3VyeV91c2RfbWljcm8YCCABKANIBYgBARIOCgZzdGF0dXMYCSABKAlCGgoYX3RvdGFsX2NhcGl0YWxfdXNkX21pY3JvQh4KHF9hdmFpbGFibGVfY2FwaXRhbF91c2RfbWljcm9CHQobX3Jlc2VydmVkX2NhcGl0YWxfdXNkX21pY3JvQh0KG19yZWFsaXplZF9uZXRfcG5sX3VzZF9taWNyb0IgCh5fd2l0aGRyYXdhYmxlX3Byb2ZpdF91c2RfbWljcm9CJAoiX3RyYW5zZmVycmVkX3RvX3RyZWFzdXJ5X3VzZF9taWNyb0KTAQoXY29tLmRhcmtib3QucHJvamVjdDAudjFCCk93bmVyUHJvdG9QAaICA0RQWKoCE0Rhcmtib3QuUHJvamVjdDAuVjHKAhNEYXJrYm90XFByb2plY3QwXFYx4gIfRGFya2JvdFxQcm9qZWN0MFxWMVxHUEJNZXRhZGF0YeoCFURhcmtib3Q6OlByb2plY3QwOjpWMWIGcHJvdG8z");
+  fileDesc("Ch9kYXJrYm90L3Byb2plY3QwL3YxL293bmVyLnByb3RvEhNkYXJrYm90LnByb2plY3QwLnYxIvkCCg9MaXF1aWRhdG9yU3RhdGUSKgoDcnVuGAEgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Pd25lclJ1bhIwCgZlbmdpbmUYAiABKAsyIC5kYXJrYm90LnByb2plY3QwLnYxLk93bmVyRW5naW5lEjIKB3RyaWdnZXIYAyABKAsyIS5kYXJrYm90LnByb2plY3QwLnYxLk93bmVyVHJpZ2dlchI0CghwaXBlbGluZRgEIAEoCzIiLmRhcmtib3QucHJvamVjdDAudjEuT3duZXJQaXBlbGluZRIwCgZzYWZldHkYBSABKAsyIC5kYXJrYm90LnByb2plY3QwLnYxLk93bmVyU2FmZXR5EjUKDGNhcGFiaWxpdGllcxgGIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuQ2FwYWJpbGl0eRI1CglyZWJhbGFuY2UYByABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLlJlYmFsYW5jZVBsYW4i8gEKDVJlYmFsYW5jZVBsYW4SDAoEbW9kZRgBIAEoCRIXCgphdF91bml4X21zGAIgASgESACIAQESDAoEc2xvdBgDIAEoBBIzCgZ0cmFkZXMYBCADKAsyIy5kYXJrYm90LnByb2plY3QwLnYxLlJlYmFsYW5jZVRyYWRlEjYKB2Jsb2NrZWQYBSADKAsyJS5kYXJrYm90LnByb2plY3QwLnYxLlJlYmFsYW5jZUJsb2NrZWQSFgoOcXVvdGVzX3BlbmRpbmcYBiABKAQSGAoQYnVkZ2V0X3VzZF9taWNybxgHIAEoBEINCgtfYXRfdW5peF9tcyJrCg5SZWJhbGFuY2VUcmFkZRIMCgRzZWxsGAEgASgJEgsKA2J1eRgCIAEoCRIRCglhbW91bnRfaW4YAyABKAQSEwoLbWluaW11bV9vdXQYBCABKAQSFgoOY29zdF91c2RfbWljcm8YBSABKAQiMQoQUmViYWxhbmNlQmxvY2tlZBINCgVhc3NldBgBIAEoCRIOCgZyZWFzb24YAiABKAkiewoIT3duZXJSdW4SDgoGcnVuX2lkGAEgASgJEgwKBG1vZGUYAiABKAkSGQoRcHVibGlzaGVkX3VuaXhfbXMYAyABKAQSDgoGd2FsbGV0GAQgASgJEhIKCnByb2dyYW1faWQYBSABKAkSEgoKZW5kX3Jlc3VsdBgGIAEoCSKBAgoLT3duZXJFbmdpbmUSEQoJcnVuX3N0YXRlGAEgASgJEhMKC2hhbHRfcmVhc29uGAIgASgJEhoKEmluZ3Jlc3NfZ2VuZXJhdGlvbhgDIAEoBBISCgpyZWNvbm5lY3RzGAQgASgEEhAKCGdhcF9vcGVuGAUgASgIEhQKDGhpZ2hlc3Rfc2xvdBgGIAEoBBIbChNpbmdyZXNzX2hhbHRfcmFpc2VkGAcgASgIEh8KF3Byb2dyYW1fdXBncmFkZV9sYXRjaGVkGAggASgIEjQKCGNvdW50ZXJzGAkgASgLMiIuZGFya2JvdC5wcm9qZWN0MC52MS5TdGF0ZUNvdW50ZXJzItMCCg1TdGF0ZUNvdW50ZXJzEg8KB2FwcGxpZWQYASABKAQSEgoKc3RhbGVfc2xvdBgCIAEoBBIbChNzdGFsZV93cml0ZV92ZXJzaW9uGAMgASgEEhcKD3NhbWVfc2xvdF9ub193dhgEIAEoBBIlCh1zYW1lX3Nsb3RfdW52ZXJzaW9uZWRfcmVmdXNlZBgFIAEoBBISCgpiZWxvd19yb290GAYgASgEEhAKCGJ1ZmZlcmVkGAcgASgEEiIKGmJ1ZmZlcl9kcm9wcGVkX2xlX3NuYXBzaG90GAggASgEEhoKEnJlY29uY2lsZV9taXNtYXRjaBgJIAEoBBIfChdyZWNvbmNpbGVfbWlzc2luZ19sb2NhbBgKIAEoBBIgChhyZWNvbmNpbGVfbWlzc2luZ19yZW1vdGUYCyABKAQSFwoPb3JwaGFuZWRfd3JpdGVzGAwgASgEIsgBCgxPd25lclRyaWdnZXISDAoEbW9kZRgBIAEoCRIXCg90aHJlc2hvbGRfcmVhZHkYAiABKAgSDwoHbGFuZV9sMBgDIAEoBBIPCgdsYW5lX2wxGAQgASgEEg8KB2xhbmVfbDIYBSABKAQSFAoMZGV0ZWN0X3F1ZXVlGAYgASgEEhgKEGluZGV4ZWRfYWNjb3VudHMYByABKAQSEgoKc3VwcHJlc3NlZBgIIAEoBBIaChJzb2Z0Y2FwX3N1cHByZXNzZWQYCSABKAQirgMKDU93bmVyUGlwZWxpbmUSEwoLZXZhbHVhdGlvbnMYASABKAQSFgoOaGVhbHRoX2NoZWNrZWQYAiABKAQSFAoMbGlxdWlkYXRhYmxlGAMgASgEEhMKC3BsYW5zX2J1aWx0GAQgASgEEhYKDnBsYW5zX3JlamVjdGVkGAUgASgEEhoKEnNpbXVsYXRpb25zX3Bhc3NlZBgGIAEoBBIaChJzaW11bGF0aW9uc19mYWlsZWQYByABKAQSFAoMc2hhZG93X3JlYWR5GAggASgEEhMKC3NoYWRvd193aW5zGAkgASgEEi4KBmxvc3NlcxgKIAMoCzIeLmRhcmtib3QucHJvamVjdDAudjEuTG9zc0NvdW50EhwKD2RlY2lzaW9uX3A5NV9ucxgLIAEoBEgAiAEBEh0KEGZlZV9xdW90ZV9wOTVfbnMYDCABKARIAYgBARIeChFzaW11bGF0aW9uX3A5NV9ucxgNIAEoBEgCiAEBQhIKEF9kZWNpc2lvbl9wOTVfbnNCEwoRX2ZlZV9xdW90ZV9wOTVfbnNCFAoSX3NpbXVsYXRpb25fcDk1X25zIioKCUxvc3NDb3VudBIOCgZyZWFzb24YASABKAkSDQoFY291bnQYAiABKAQikwMKC093bmVyU2FmZXR5EiAKGGNhcGl0YWxfaW5fdXNlX3VzZF9taWNybxgBIAEoBBIjChttYXhfdG90YWxfY2FwaXRhbF91c2RfbWljcm8YAiABKAQSIAoYbWF4X2RhaWx5X2xvc3NfdXNkX21pY3JvGAMgASgEEioKIm1heF9leHBvc3VyZV9wZXJfYXR0ZW1wdF91c2RfbWljcm8YBCABKAQSIAoYbWF4X2NvbmN1cnJlbnRfcG9zaXRpb25zGAUgASgNEiAKGG1heF9vdXRzdGFuZGluZ19hdHRlbXB0cxgGIAEoDRIjChttYXhfZmFpbGVkX2F0dGVtcHRzX3Blcl9kYXkYByABKA0SEwoLaGFsdF9yZWFzb24YCCABKAkSIwoWZGF5X3JlYWxpemVkX3VzZF9taWNybxgJIAEoA0gAiAEBEhsKE2RheV9mYWlsZWRfYXR0ZW1wdHMYCiABKA0SFAoMZGF5X2F0dGVtcHRzGAsgASgNQhkKF19kYXlfcmVhbGl6ZWRfdXNkX21pY3JvIlYKCkNhcGFiaWxpdHkSDAoEbmFtZRgBIAEoCRIRCglyZXF1ZXN0ZWQYAiABKAkSEQoJZWZmZWN0aXZlGAMgASgJEhQKDGJsb2NrX3JlYXNvbhgEIAEoCSKxBAoMV2FsbGV0c1N0YXRlEhsKE2ZpbmFuY2Vfc25hcHNob3RfaWQYASABKAkSDgoGd2FsbGV0GAIgASgJEhQKDGpvdXJuYWxfcmVhZBgDIAEoCBIPCgd2ZXJkaWN0GAQgASgJEhcKD3Vua25vd25fcmVhc29ucxgFIAMoCRIVCghhdHRlbXB0cxgGIAEoBEgAiAEBEh4KEWFyY2hpdmVkX2F0dGVtcHRzGAcgASgESAGIAQESHAoPbGFuZGVkX2F0dGVtcHRzGAggASgESAKIAQESGgoNc2V0dGxlZF9leGl0cxgJIAEoBEgDiAEBEhkKDGZlZV9sYW1wb3J0cxgKIAEoBEgEiAEBEioKHW9wZW5faW52ZW50b3J5X21hcmtfdXNkX21pY3JvGAsgASgDSAWIAQESLwoFaG9sZHMYDCADKAsyIC5kYXJrYm90LnByb2plY3QwLnYxLkFzc2V0QW1vdW50EjkKD3BvbGljeV9yZXNlcnZlcxgNIAMoCzIgLmRhcmtib3QucHJvamVjdDAudjEuQXNzZXRBbW91bnQSFAoMaGVsZF9hdHRlbXB0GA4gASgJQgsKCV9hdHRlbXB0c0IUChJfYXJjaGl2ZWRfYXR0ZW1wdHNCEgoQX2xhbmRlZF9hdHRlbXB0c0IQCg5fc2V0dGxlZF9leGl0c0IPCg1fZmVlX2xhbXBvcnRzQiAKHl9vcGVuX2ludmVudG9yeV9tYXJrX3VzZF9taWNybyIrCgtBc3NldEFtb3VudBINCgVhc3NldBgBIAEoCRINCgV1bml0cxgCIAEoBCKRBAoORmluYW5jZVN1bW1hcnkSGwoTZmluYW5jZV9zbmFwc2hvdF9pZBgBIAEoCRISCgphc19vZl9zbG90GAIgASgEEiQKF3RvdGFsX2NhcGl0YWxfdXNkX21pY3JvGAMgASgDSACIAQESKAobYXZhaWxhYmxlX2NhcGl0YWxfdXNkX21pY3JvGAQgASgDSAGIAQESJwoacmVzZXJ2ZWRfY2FwaXRhbF91c2RfbWljcm8YBSABKANIAogBARInChpyZWFsaXplZF9uZXRfcG5sX3VzZF9taWNybxgGIAEoA0gDiAEBEioKHXdpdGhkcmF3YWJsZV9wcm9maXRfdXNkX21pY3JvGAcgASgDSASIAQESLgohdHJhbnNmZXJyZWRfdG9fdHJlYXN1cnlfdXNkX21pY3JvGAggASgDSAWIAQESDgoGc3RhdHVzGAkgASgJQhoKGF90b3RhbF9jYXBpdGFsX3VzZF9taWNyb0IeChxfYXZhaWxhYmxlX2NhcGl0YWxfdXNkX21pY3JvQh0KG19yZXNlcnZlZF9jYXBpdGFsX3VzZF9taWNyb0IdChtfcmVhbGl6ZWRfbmV0X3BubF91c2RfbWljcm9CIAoeX3dpdGhkcmF3YWJsZV9wcm9maXRfdXNkX21pY3JvQiQKIl90cmFuc2ZlcnJlZF90b190cmVhc3VyeV91c2RfbWljcm9CkwEKF2NvbS5kYXJrYm90LnByb2plY3QwLnYxQgpPd25lclByb3RvUAGiAgNEUFiqAhNEYXJrYm90LlByb2plY3QwLlYxygITRGFya2JvdFxQcm9qZWN0MFxWMeICH0Rhcmtib3RcUHJvamVjdDBcVjFcR1BCTWV0YWRhdGHqAhVEYXJrYm90OjpQcm9qZWN0MDo6VjFiBnByb3RvMw");
 
 /**
  * Live state of the Shadow/econ4h state owner: STATE topic project0.liquidator.state
@@ -61,6 +61,13 @@ export type LiquidatorState = Message<"darkbot.project0.v1.LiquidatorState"> & {
    * @generated from field: repeated darkbot.project0.v1.Capability capabilities = 6;
    */
   capabilities: Capability[];
+
+  /**
+   * B01: the rebalancing observation of the inventory bands; unset while OFF.
+   *
+   * @generated from field: darkbot.project0.v1.RebalancePlan rebalance = 7;
+   */
+  rebalance?: RebalancePlan;
 };
 
 /**
@@ -69,6 +76,147 @@ export type LiquidatorState = Message<"darkbot.project0.v1.LiquidatorState"> & {
  */
 export const LiquidatorStateSchema: GenMessage<LiquidatorState> = /*@__PURE__*/
   messageDesc(file_darkbot_project0_v1_owner, 0);
+
+/**
+ * B01 (P8-INV-01): the owner's rebalancing plan in OBSERVE — real balances, quotes and conservative
+ * costs; planned, never traded (ACTIVE needs LIVE).
+ *
+ * @generated from message darkbot.project0.v1.RebalancePlan
+ */
+export type RebalancePlan = Message<"darkbot.project0.v1.RebalancePlan"> & {
+  /**
+   * OFF or OBSERVE.
+   *
+   * @generated from field: string mode = 1;
+   */
+  mode: string;
+
+  /**
+   * Wall clock of the plan; unset before the first one.
+   *
+   * @generated from field: optional uint64 at_unix_ms = 2;
+   */
+  atUnixMs?: bigint;
+
+  /**
+   * Highest slot of the canonical state the plan read.
+   *
+   * @generated from field: uint64 slot = 3;
+   */
+  slot: bigint;
+
+  /**
+   * Planned trades.
+   *
+   * @generated from field: repeated darkbot.project0.v1.RebalanceTrade trades = 4;
+   */
+  trades: RebalanceTrade[];
+
+  /**
+   * Assets not rebalanced, with the stable reason.
+   *
+   * @generated from field: repeated darkbot.project0.v1.RebalanceBlocked blocked = 5;
+   */
+  blocked: RebalanceBlocked[];
+
+  /**
+   * Quotes asked and not answered yet (the plan is then provisional).
+   *
+   * @generated from field: uint64 quotes_pending = 6;
+   */
+  quotesPending: bigint;
+
+  /**
+   * The plan's cost budget.
+   *
+   * @generated from field: uint64 budget_usd_micro = 7;
+   */
+  budgetUsdMicro: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.RebalancePlan.
+ * Use `create(RebalancePlanSchema)` to create a new message.
+ */
+export const RebalancePlanSchema: GenMessage<RebalancePlan> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_owner, 1);
+
+/**
+ * One planned rebalance trade (ExactIn).
+ *
+ * @generated from message darkbot.project0.v1.RebalanceTrade
+ */
+export type RebalanceTrade = Message<"darkbot.project0.v1.RebalanceTrade"> & {
+  /**
+   * Inventory key sold (SOL or a mint).
+   *
+   * @generated from field: string sell = 1;
+   */
+  sell: string;
+
+  /**
+   * Inventory key bought.
+   *
+   * @generated from field: string buy = 2;
+   */
+  buy: string;
+
+  /**
+   * Amount sold (base units).
+   *
+   * @generated from field: uint64 amount_in = 3;
+   */
+  amountIn: bigint;
+
+  /**
+   * The on-chain enforced minimum output (base units).
+   *
+   * @generated from field: uint64 minimum_out = 4;
+   */
+  minimumOut: bigint;
+
+  /**
+   * Conservative cost: value given minus value received plus the planned network fee.
+   *
+   * @generated from field: uint64 cost_usd_micro = 5;
+   */
+  costUsdMicro: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.RebalanceTrade.
+ * Use `create(RebalanceTradeSchema)` to create a new message.
+ */
+export const RebalanceTradeSchema: GenMessage<RebalanceTrade> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_owner, 2);
+
+/**
+ * An asset the plan does not rebalance.
+ *
+ * @generated from message darkbot.project0.v1.RebalanceBlocked
+ */
+export type RebalanceBlocked = Message<"darkbot.project0.v1.RebalanceBlocked"> & {
+  /**
+   * Inventory key.
+   *
+   * @generated from field: string asset = 1;
+   */
+  asset: string;
+
+  /**
+   * Stable reason (INVENTORY_BALANCE_UNKNOWN, REBALANCE_COST_UNKNOWN, …).
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.RebalanceBlocked.
+ * Use `create(RebalanceBlockedSchema)` to create a new message.
+ */
+export const RebalanceBlockedSchema: GenMessage<RebalanceBlocked> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_owner, 3);
 
 /**
  * Run identity of the owner.
@@ -124,7 +272,7 @@ export type OwnerRun = Message<"darkbot.project0.v1.OwnerRun"> & {
  * Use `create(OwnerRunSchema)` to create a new message.
  */
 export const OwnerRunSchema: GenMessage<OwnerRun> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 1);
+  messageDesc(file_darkbot_project0_v1_owner, 4);
 
 /**
  * Canonical state, ingress and recovery.
@@ -201,7 +349,7 @@ export type OwnerEngine = Message<"darkbot.project0.v1.OwnerEngine"> & {
  * Use `create(OwnerEngineSchema)` to create a new message.
  */
 export const OwnerEngineSchema: GenMessage<OwnerEngine> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 2);
+  messageDesc(file_darkbot_project0_v1_owner, 5);
 
 /**
  * StateCore write counters (solana/src/state::StateCounters).
@@ -299,7 +447,7 @@ export type StateCounters = Message<"darkbot.project0.v1.StateCounters"> & {
  * Use `create(StateCountersSchema)` to create a new message.
  */
 export const StateCountersSchema: GenMessage<StateCounters> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 3);
+  messageDesc(file_darkbot_project0_v1_owner, 6);
 
 /**
  * Candidate trigger and its lanes.
@@ -376,7 +524,7 @@ export type OwnerTrigger = Message<"darkbot.project0.v1.OwnerTrigger"> & {
  * Use `create(OwnerTriggerSchema)` to create a new message.
  */
 export const OwnerTriggerSchema: GenMessage<OwnerTrigger> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 4);
+  messageDesc(file_darkbot_project0_v1_owner, 7);
 
 /**
  * Pipeline evaluations and decisions of the current day (Shadow ledger) and this process (MT0).
@@ -481,7 +629,7 @@ export type OwnerPipeline = Message<"darkbot.project0.v1.OwnerPipeline"> & {
  * Use `create(OwnerPipelineSchema)` to create a new message.
  */
 export const OwnerPipelineSchema: GenMessage<OwnerPipeline> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 5);
+  messageDesc(file_darkbot_project0_v1_owner, 8);
 
 /**
  * One loss reason with its count.
@@ -509,7 +657,7 @@ export type LossCount = Message<"darkbot.project0.v1.LossCount"> & {
  * Use `create(LossCountSchema)` to create a new message.
  */
 export const LossCountSchema: GenMessage<LossCount> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 6);
+  messageDesc(file_darkbot_project0_v1_owner, 9);
 
 /**
  * Safety layer.
@@ -600,7 +748,7 @@ export type OwnerSafety = Message<"darkbot.project0.v1.OwnerSafety"> & {
  * Use `create(OwnerSafetySchema)` to create a new message.
  */
 export const OwnerSafetySchema: GenMessage<OwnerSafety> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 7);
+  messageDesc(file_darkbot_project0_v1_owner, 10);
 
 /**
  * One switchable capability (P0-PROD-CTRL-03).
@@ -642,7 +790,7 @@ export type Capability = Message<"darkbot.project0.v1.Capability"> & {
  * Use `create(CapabilitySchema)` to create a new message.
  */
 export const CapabilitySchema: GenMessage<Capability> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 8);
+  messageDesc(file_darkbot_project0_v1_owner, 11);
 
 /**
  * FE-04 wallet state of the liquidator: STATE topic project0.wallets.state. Read from the
@@ -755,7 +903,7 @@ export type WalletsState = Message<"darkbot.project0.v1.WalletsState"> & {
  * Use `create(WalletsStateSchema)` to create a new message.
  */
 export const WalletsStateSchema: GenMessage<WalletsState> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 9);
+  messageDesc(file_darkbot_project0_v1_owner, 12);
 
 /**
  * One amount of one asset.
@@ -783,7 +931,7 @@ export type AssetAmount = Message<"darkbot.project0.v1.AssetAmount"> & {
  * Use `create(AssetAmountSchema)` to create a new message.
  */
 export const AssetAmountSchema: GenMessage<AssetAmount> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 10);
+  messageDesc(file_darkbot_project0_v1_owner, 13);
 
 /**
  * Finance summary of the liquidator: STATE topic project0.finance.summary (same
@@ -861,4 +1009,4 @@ export type FinanceSummary = Message<"darkbot.project0.v1.FinanceSummary"> & {
  * Use `create(FinanceSummarySchema)` to create a new message.
  */
 export const FinanceSummarySchema: GenMessage<FinanceSummary> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_owner, 11);
+  messageDesc(file_darkbot_project0_v1_owner, 14);

@@ -18,8 +18,9 @@ use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, EffectiveRecord,
     FinanceSummary, LiquidatorState, LossCount, MarketAssessment, MarketCounters,
     OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
-    OwnerTrigger, PhaseStatus, ProviderBudget, ReasonCount, ReceiverTotal, RunInfo, StateCounters,
-    SystemStatus, TransportStatus, WalletsState, WriterLane,
+    OwnerTrigger, PhaseStatus, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan,
+    RebalanceTrade, ReceiverTotal, RunInfo, StateCounters, SystemStatus, TransportStatus,
+    WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -245,6 +246,32 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
                 block_reason: c.block_reason.into(),
             })
             .collect(),
+        rebalance: o.rebalance.as_ref().map(|r| RebalancePlan {
+            mode: r.mode.into(),
+            at_unix_ms: r.at_unix_ms,
+            slot: r.slot,
+            trades: r
+                .trades
+                .iter()
+                .map(|t| RebalanceTrade {
+                    sell: t.sell.clone(),
+                    buy: t.buy.clone(),
+                    amount_in: t.amount_in,
+                    minimum_out: t.minimum_out,
+                    cost_usd_micro: t.cost_usd_micro,
+                })
+                .collect(),
+            blocked: r
+                .blocked
+                .iter()
+                .map(|(asset, reason)| RebalanceBlocked {
+                    asset: asset.clone(),
+                    reason: (*reason).into(),
+                })
+                .collect(),
+            quotes_pending: r.quotes_pending,
+            budget_usd_micro: r.budget_usd_micro,
+        }),
     }
 }
 
@@ -1304,6 +1331,21 @@ mod contract_tests {
                 transferred_to_treasury_usd_micro: Some(0),
                 status: "PARTIAL",
             },
+            rebalance: Some(darkbot_runner::status_tap::OwnerRebalance {
+                mode: "OBSERVE",
+                at_unix_ms: Some(1_760_000_000_900),
+                slot: 400_000_200,
+                trades: vec![darkbot_runner::status_tap::RebalanceTrade {
+                    sell: "SOL".into(),
+                    buy: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(),
+                    amount_in: 3_000_000_000,
+                    minimum_out: 450_000_000,
+                    cost_usd_micro: 1_250_000,
+                }],
+                blocked: vec![("PREHELD".into(), "INVENTORY_BALANCE_UNKNOWN")],
+                quotes_pending: 0,
+                budget_usd_micro: 5_000_000,
+            }),
         }
     }
 
@@ -1564,6 +1606,19 @@ mod contract_tests {
             2
         );
         assert_eq!(l.pipeline.as_ref().unwrap().simulation_p95_ns, None);
+        // B01: the rebalancing plan reaches the wire; OFF has none.
+        let r = l.rebalance.as_ref().unwrap();
+        assert_eq!(
+            (
+                r.mode.as_str(),
+                r.trades[0].amount_in,
+                r.blocked[0].reason.as_str()
+            ),
+            ("OBSERVE", 3_000_000_000, "INVENTORY_BALANCE_UNKNOWN")
+        );
+        let mut off = owner.clone();
+        off.rebalance = None;
+        assert_eq!(liquidator_state(&off).rebalance, None);
         let mut unread = owner.clone();
         unread.wallets.journal_read = false;
         let w = wallets_state(&unread);

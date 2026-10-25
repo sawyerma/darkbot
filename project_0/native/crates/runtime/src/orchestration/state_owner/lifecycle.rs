@@ -23,6 +23,8 @@ impl ShadowOwner {
             }
         }
         #[cfg(feature = "crate_health")]
+        self.rebalance_observe();
+        #[cfg(feature = "crate_health")]
         self.publish_status();
         // P6-MT.1 (MT5b): the per-account SUBMITTED ownership is the book's target hold —
         // synchronized before this pass judges any result or evaluates any candidate.

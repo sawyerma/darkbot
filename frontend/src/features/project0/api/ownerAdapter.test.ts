@@ -34,6 +34,10 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.pipeline?.simulationP95Ns).toBeNull();
     expect(liquidator.safety?.maxTotalCapitalUsdMicro).toBe("100000000");
     expect(liquidator.capabilities[0]).toMatchObject({ name: "LIVE", effective: "BLOCKED" });
+    // B01: the rebalancing plan (planned, never traded) as the owner published it.
+    expect(liquidator.rebalance?.mode).toBe("OBSERVE");
+    expect(liquidator.rebalance?.trades[0]).toMatchObject({ sell: "SOL", amountIn: 3_000_000_000n, minimumOut: 450_000_000n, costUsdMicro: 1_250_000n });
+    expect(liquidator.rebalance?.blocked[0]).toEqual({ asset: "PREHELD", reason: "INVENTORY_BALANCE_UNKNOWN" });
   });
 
   it("keeps unknown finance unknown and one snapshot id across the wallet topics", () => {

@@ -15,6 +15,7 @@ const ms = (ns: bigint | null) => {
 const OWNER_PARAMETERS = [
   "blockhash_max_age_ms", "projection_requeue_max", "lane_weight_l0", "lane_weight_l1", "lane_weight_l2",
   "jupiter_timeout_ms", "fe04_settle_retry_ms", "fe04_refresh_ms", "owner_status_ms", "prepared_candidates",
+  "rebalance_observe_ms", "rebalance_budget_usd_micro", "rebalance_quote_rounds",
 ] as const;
 
 /**
@@ -47,6 +48,13 @@ export function OwnerSection({ owner, topicStatus, parameters }: { owner: Liquid
     <DetailRow title="Latency p95 · decision (rx→ready) / fee quote / simulation" value={p ? `${ms(p.decisionP95Ns)} / ${ms(p.feeQuoteP95Ns)} / ${ms(p.simulationP95Ns)}` : "—"}/>
     <DetailRow title="Safety · capital in use / limit" value={s ? `${usdMicroDisplay(s.capitalInUseUsdMicro)} / ${usdMicroDisplay(s.maxTotalCapitalUsdMicro)}${s.haltReason ? ` · halted ${s.haltReason}` : ""}` : "—"}/>
     <DetailRow title="Safety · day realized / loss limit" value={s ? `${usdMicroDisplay(s.dayRealizedUsdMicro)} / ${usdMicroDisplay(s.maxDailyLossUsdMicro)}` : "—"}/>
+    {owner.rebalance ? <>
+      <DetailRow title="Rebalancing · plan" value={owner.rebalance.atUnixMs == null ? `${owner.rebalance.mode} · nothing planned yet`
+        : `${owner.rebalance.mode} · slot ${owner.rebalance.slot} · budget ${usdMicroDisplay(owner.rebalance.budgetUsdMicro.toString())}${owner.rebalance.quotesPending > 0n ? ` · ${owner.rebalance.quotesPending} quotes pending (provisional)` : ""}`}/>
+      {owner.rebalance.trades.map((t, i) => <DetailRow key={`t${i}`} title={`Rebalance · sell ${t.sell.slice(0, 8)} → ${t.buy.slice(0, 8)}`}
+        value={`${t.amountIn} → ≥ ${t.minimumOut} · cost ${usdMicroDisplay(t.costUsdMicro.toString())} · planned, never traded`}/>)}
+      {owner.rebalance.blocked.map((b) => <DetailRow key={`b${b.asset}`} title={`Rebalance · ${b.asset.slice(0, 8)}`} value={b.reason}/>)}
+    </> : null}
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
     {params}

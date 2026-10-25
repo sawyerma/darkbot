@@ -118,6 +118,10 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_unbooked: None,
         inventory_targets: Default::default(),
         jit_funding_bank: None,
+        rebalance: super::rebalance::Observer::new(
+            crate::execution::inventory::RebalanceMode::Off,
+            &OPERATIONAL,
+        ),
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             8,
             vec![],
@@ -3486,5 +3490,156 @@ fn d07_fe04_replay_without_a_wall_clock_is_refused() {
     let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
     book().start(&mut safety, wall_unix_s().unwrap()).unwrap();
     assert_eq!(safety.day().failed_attempts, 1, "booked into today");
+    cleanup(f);
+}
+
+/// B01 (P8-INV-01): rebalancing in OBSERVE from the wallet's real balances in canonical state
+/// (the liquidator's lamports, a validated ATA). The owner asks the full ExactIn quote off its
+/// thread; the answer leads to the quote of exactly the shortfall's amount; without a route that
+/// asset stays blocked with an unknown cost (never traded, never guessed). The plan and the
+/// OBSERVE capability reach the projection; the next observation waits for its interval.
+#[test]
+fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading() {
+    use crate::execution::inventory::{RebalanceMode, Target};
+    use crate::orchestration::remote_workers::RebalanceQuoteResult;
+    let mut f = fixture("b01_rebalance");
+    let good = snapshot(&f, false);
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: good.slot,
+            accounts: good.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    // Not before canonical state is Ready: a bootstrapping owner plans nothing.
+    f.owner.rebalance = super::rebalance::Observer::new(
+        crate::execution::inventory::RebalanceMode::Observe,
+        &OPERATIONAL,
+    );
+    f.owner.inventory_targets = [(
+        "SOL".to_string(),
+        Target {
+            reserve: 0,
+            min: 1,
+            target: 2,
+            max: 3,
+            dust: 0,
+        },
+    )]
+    .into();
+    f.owner.rebalance_observe();
+    assert_eq!(
+        f.owner.owner_snapshot(1).rebalance.unwrap().at_unix_ms,
+        None
+    );
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert_eq!(
+        f.owner.st.run_state(),
+        darkbot_common::lifecycle::RunState::Ready
+    );
+    let mint = Pubkey::new_unique();
+    let band = |min, target, max| Target {
+        reserve: 0,
+        min,
+        target,
+        max,
+        dust: 5,
+    };
+    f.owner.inventory_targets = [
+        (
+            "SOL".to_string(),
+            band(1_000_000_000, 2_000_000_000, 3_000_000_000),
+        ),
+        (mint.to_string(), band(100, 200, 300)),
+    ]
+    .into();
+    let slot = f.owner.st.highest_slot() + 1;
+    let account = |pubkey, owner, lamports, data| {
+        IngressEvent::Account(AccountUpdate {
+            pubkey,
+            owner,
+            lamports,
+            data,
+            slot,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 1,
+        })
+    };
+    f.owner.st.on_event(account(
+        f.owner.liquidator,
+        Pubkey::default(),
+        10_000_000_000,
+        vec![],
+    ));
+    let (token_program, ata) = f.owner.atas.of(&mint)[0];
+    let mut data = vec![0u8; 165];
+    data[..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(f.owner.liquidator.as_ref());
+    data[64..72].copy_from_slice(&50u64.to_le_bytes());
+    data[108] = 1;
+    f.owner
+        .st
+        .on_event(account(ata, token_program, 2_039_280, data));
+    f.owner.rebalance = super::rebalance::Observer::new(RebalanceMode::Observe, &OPERATIONAL);
+    let (jobs, results) = f.owner.remote.detached_rebalance();
+    f.owner.rebalance_observe();
+    let job = jobs.try_pop().expect("the full surplus quote is asked");
+    assert_eq!(
+        job.key,
+        ("SOL".to_string(), mint.to_string(), 8_000_000_000)
+    );
+    assert_eq!(
+        job.sell_mint.to_string(),
+        darkbot_project0::protocol::NATIVE_SOL_MINT
+    );
+    assert_eq!(job.buy_mint, mint);
+    let plan = |f: &Fixture| f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert_eq!(plan(&f).quotes_pending, 1);
+    assert!(plan(&f).trades.is_empty());
+    // A pass while the quote is pending changes nothing.
+    f.owner.rebalance_observe();
+    assert!(jobs.try_pop().is_none());
+    results
+        .try_push(RebalanceQuoteResult {
+            key: job.key,
+            minimum_out: Ok(Some(400)),
+        })
+        .ok()
+        .unwrap();
+    f.owner.rebalance_observe();
+    // 8e9 lamports quote 400: the shortfall of 150 needs ceil(8e9 * 150 / 400).
+    let scaled = jobs.try_pop().expect("the shortfall's quote is asked");
+    assert_eq!(scaled.key.2, 3_000_000_000);
+    results
+        .try_push(RebalanceQuoteResult {
+            key: scaled.key,
+            minimum_out: Ok(None),
+        })
+        .ok()
+        .unwrap();
+    f.owner.rebalance_observe();
+    let s = f.owner.owner_snapshot(1);
+    let r = s.rebalance.unwrap();
+    assert_eq!((r.mode, r.quotes_pending), ("OBSERVE", 0));
+    assert!(
+        r.trades.is_empty(),
+        "nothing is traded without a known cost"
+    );
+    assert_eq!(
+        r.blocked,
+        vec![(mint.to_string(), "REBALANCE_COST_UNKNOWN")]
+    );
+    assert_eq!(r.budget_usd_micro, OPERATIONAL.rebalance_budget_usd_micro);
+    let cap = s
+        .capabilities
+        .iter()
+        .find(|c| c.name == "INVENTORY_REBALANCING")
+        .unwrap();
+    assert_eq!((cap.requested, cap.effective), ("OBSERVE", "OBSERVE"));
+    // The next observation waits for its interval.
+    f.owner.rebalance_observe();
+    assert!(jobs.try_pop().is_none());
     cleanup(f);
 }

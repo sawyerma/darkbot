@@ -54,59 +54,77 @@ pub(super) fn book_settlement(
 /// clock: every bank of the asset must price it (a gain at the lowest, a loss at the highest);
 /// no clock, bank or price is unknown (`None`).
 fn delta_value(o: &ShadowOwner, asset: &str, delta: i128) -> Option<i128> {
-    let clock = chain_clock(&o.st).ok()?;
-    let (price_s, slot) = (clock.unix_s() as i64, clock.slot);
-    let view = StateView(&o.st);
-    let sizer = darkbot_project0::sizing::ProtocolSizer {
-        state: &view,
-        program: o.program,
-        group: o.group,
-        headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
-    };
-    let banks = |asset: &str| -> Option<Vec<Pubkey>> {
+    conservative_value(
+        &|a, n| o.asset_value_low(a, n),
+        &|a, n| o.asset_value_high(a, n),
+        asset,
+        delta,
+    )
+}
+
+impl ShadowOwner {
+    /// The banks of the group that price an asset (`SOL`: the SOL bank; a mint: every bank of
+    /// that mint among the owner's dependencies); `None` when none does.
+    fn pricing_banks(&self, asset: &str) -> Option<Vec<Pubkey>> {
         if asset == "SOL" {
-            return Some(vec![o.sol_bank]);
+            return Some(vec![self.sol_bank]);
         }
         let mint: Pubkey = asset.parse().ok()?;
-        let banks: Vec<Pubkey> = o
+        let banks: Vec<Pubkey> = self
             .required_dependency_keys
             .iter()
             .copied()
             .filter(|k| {
-                o.st.get(k).is_some_and(|r| {
-                    r.owner == o.program
+                self.st.get(k).is_some_and(|r| {
+                    r.owner == self.program
                         && darkbot_project0::protocol::decode_bank(&r.data)
-                            .is_ok_and(|b| b.group == o.group && b.mint == mint)
+                            .is_ok_and(|b| b.group == self.group && b.mint == mint)
                 })
             })
             .collect();
         (!banks.is_empty()).then_some(banks)
-    };
-    let low = |asset: &str, amount: u64| -> Option<u64> {
-        banks(asset)?
+    }
+
+    /// `amount` of `asset` in USD-micro at the chain clock, over every pricing bank: `high`
+    /// the highest cost, else the lowest value; unknown clock, bank or price: `None`.
+    fn asset_value(&self, asset: &str, amount: u64, high: bool) -> Option<u64> {
+        let clock = chain_clock(&self.st).ok()?;
+        let (price_s, slot) = (clock.unix_s() as i64, clock.slot);
+        let view = StateView(&self.st);
+        let sizer = darkbot_project0::sizing::ProtocolSizer {
+            state: &view,
+            program: self.program,
+            group: self.group,
+            headroom_bps: darkbot_project0::sizing::DEFAULT_HEADROOM_BPS,
+        };
+        let values = self
+            .pricing_banks(asset)?
             .iter()
             .map(|b| {
-                sizer
-                    .native_amount_conservative_value_usd_micro(b, amount, price_s, slot)
-                    .ok()
+                if high {
+                    sizer.native_amount_conservative_cost_usd_micro(b, amount, price_s, slot)
+                } else {
+                    sizer.native_amount_conservative_value_usd_micro(b, amount, price_s, slot)
+                }
+                .ok()
             })
-            .collect::<Option<Vec<_>>>()?
-            .into_iter()
-            .min()
-    };
-    let high = |asset: &str, amount: u64| -> Option<u64> {
-        banks(asset)?
-            .iter()
-            .map(|b| {
-                sizer
-                    .native_amount_conservative_cost_usd_micro(b, amount, price_s, slot)
-                    .ok()
-            })
-            .collect::<Option<Vec<_>>>()?
-            .into_iter()
-            .max()
-    };
-    conservative_value(&low, &high, asset, delta)
+            .collect::<Option<Vec<_>>>()?;
+        if high {
+            values.into_iter().max()
+        } else {
+            values.into_iter().min()
+        }
+    }
+
+    /// The lowest conservative USD-micro value of `amount` of `asset` (a gain, an output).
+    pub(super) fn asset_value_low(&self, asset: &str, amount: u64) -> Option<u64> {
+        self.asset_value(asset, amount, false)
+    }
+
+    /// The highest conservative USD-micro cost of `amount` of `asset` (a loss, an input).
+    pub(super) fn asset_value_high(&self, asset: &str, amount: u64) -> Option<u64> {
+        self.asset_value(asset, amount, true)
+    }
 }
 
 impl ShadowOwner {

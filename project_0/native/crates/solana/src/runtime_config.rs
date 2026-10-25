@@ -25,6 +25,9 @@ pub mod defaults {
     /// largest (32 capital scenarios per score) the frame stays far below one STATE frame.
     pub const ANALYTICS_RUNS_MAX: u64 = 64;
     pub const ANALYTICS_JOBS_MAX: u64 = 16;
+    /// The quote rounds one rebalancing observation may take at most (each round asks the quotes
+    /// the plan still lacks).
+    pub const REBALANCE_QUOTE_ROUNDS_MAX: u64 = 8;
 }
 
 macro_rules! parameters {
@@ -157,6 +160,9 @@ parameters! {
     analytics_status_ms = 2000, "ms", "P0_ANALYTICS_STATUS_MS";
     analytics_runs_listed = 32, "runs", "P0_ANALYTICS_RUNS_LISTED";
     analytics_jobs_listed = 8, "jobs", "P0_ANALYTICS_JOBS_LISTED";
+    rebalance_observe_ms = 60000, "ms", "P0_REBALANCE_OBSERVE_MS";
+    rebalance_budget_usd_micro = 5000000, "USD-micro", "P0_REBALANCE_BUDGET_USD_MICRO";
+    rebalance_quote_rounds = 3, "rounds", "P0_REBALANCE_QUOTE_ROUNDS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -167,8 +173,9 @@ parameters! {
 /// 8: `owner_status_ms` (owner status projection) and D01–D06/D11 — the owner, FE-04, WSS,
 /// Jupiter, lane, winner-watch, deployment, reporter and market bounds that were literals or
 /// duplicate defaults (from `owner_status_ms` on, appended); 9: `analytics_status_ms`,
-/// `analytics_runs_listed`, `analytics_jobs_listed` (B03/U-9 analytics job projection).
-pub const LIMITS_REVISION: u16 = 9;
+/// `analytics_runs_listed`, `analytics_jobs_listed` (B03/U-9 analytics job projection); 10:
+/// `rebalance_observe_ms`, `rebalance_budget_usd_micro`, `rebalance_quote_rounds` (B01).
+pub const LIMITS_REVISION: u16 = 10;
 
 /// The oldest `Limits` layout an earlier record can be read in: revision 4 is checked against the
 /// git history (the current field order filtered to its fields); earlier ones are not.
@@ -185,6 +192,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("rebalance_observe_ms") => 10,
         f if position(f) >= position("analytics_status_ms") => 9,
         f if position(f) >= position("owner_status_ms") => 8,
         _ => 1,
@@ -252,6 +260,7 @@ impl Parameter {
             "econ_queue_capacity" => defaults::ECON_QUEUE_CAPACITY_MAX,
             "analytics_runs_listed" => defaults::ANALYTICS_RUNS_MAX,
             "analytics_jobs_listed" => defaults::ANALYTICS_JOBS_MAX,
+            "rebalance_quote_rounds" => defaults::REBALANCE_QUOTE_ROUNDS_MAX,
             _ => u64::from(u32::MAX),
         }
     }
@@ -1241,9 +1250,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                9,
-                109,
-                "6KwyVPT9DUX9jruBhfbHvuacQkVhzsT3jK9PGJA1fSLm".to_string()
+                10,
+                112,
+                "395MzJBYnQ4BwCfga5w2nksqssF3ZAqkxp2C7vFELq8i".to_string()
             )
         );
     }

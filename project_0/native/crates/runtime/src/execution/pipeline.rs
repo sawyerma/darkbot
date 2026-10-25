@@ -61,6 +61,17 @@ pub fn pipeline_timing_snapshot() -> PipelineTimingSnapshot {
 }
 
 const LAMPORTS_PER_SIGNATURE: u64 = 5_000;
+
+/// B01: the network fee of a transaction with `signatures` signers that spends its resources'
+/// compute-unit limit at their priority price (the most it can pay; no message is built yet).
+pub(crate) fn planned_fee_lamports(signatures: u64, r: &Resources) -> Option<u64> {
+    let priority = (u128::from(r.compute_unit_limit)
+        * u128::from(r.priority_micro_lamports_per_cu))
+    .div_ceil(MICRO_LAMPORTS_PER_LAMPORT);
+    signatures
+        .checked_mul(LAMPORTS_PER_SIGNATURE)?
+        .checked_add(u64::try_from(priority).ok()?)
+}
 const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
 const DEFAULT_CU_PER_INSTRUCTION: u64 = 200_000;
 const MAX_CU_LIMIT: u64 = 1_400_000;

@@ -555,13 +555,26 @@ pub(super) fn prepare(
 
     // [FIX-108][R4] All remote winner/reconciliation RPC is owned by bounded workers.
     let remote_worker_capacity = usize::try_from(operational.worker_queue)?;
-    let remote = RemoteWorkers::start(
-        rpc_url.clone(),
-        program,
-        &shutdown,
-        remote_worker_capacity,
-        &wake,
+    // B01: OFF or OBSERVE (ACTIVE needs LIVE and is refused); OBSERVE quotes on its own worker.
+    #[cfg(feature = "crate_health")]
+    let rebalance_mode = crate::execution::inventory::parse_mode(
+        &std::env::var("P0_REBALANCE_MODE").unwrap_or_default(),
     )?;
+    let remote = {
+        #[cfg_attr(not(feature = "crate_health"), allow(unused_mut))]
+        let mut remote = RemoteWorkers::start(
+            rpc_url.clone(),
+            program,
+            &shutdown,
+            remote_worker_capacity,
+            &wake,
+        )?;
+        #[cfg(feature = "crate_health")]
+        if rebalance_mode == crate::execution::inventory::RebalanceMode::Observe {
+            remote.start_rebalance_quoter(routes.clone(), &shutdown)?;
+        }
+        remote
+    };
 
     #[cfg(feature = "crate_health")]
     let projection_cache: HashMap<Pubkey, CachedProjection> = HashMap::new();
@@ -884,6 +897,14 @@ pub(super) fn prepare(
     let jit_funding_bank = crate::execution::inventory::parse_funding_bank(
         &std::env::var("P0_JIT_FUNDING_BANK").unwrap_or_default(),
     )?;
+    #[cfg(feature = "crate_health")]
+    if rebalance_mode != crate::execution::inventory::RebalanceMode::Off
+        && inventory_targets.is_empty()
+    {
+        return Err(
+            "REBALANCE_TARGETS_REQUIRED: OBSERVE plans against P0_INVENTORY_TARGETS".into(),
+        );
+    }
     let mut owner = ShadowOwner {
         metrics: OwnerMetrics {
             oracle_dependency_updates,
@@ -980,6 +1001,8 @@ pub(super) fn prepare(
         fe04_unbooked,
         inventory_targets,
         jit_funding_bank,
+        #[cfg(feature = "crate_health")]
+        rebalance: rebalance::Observer::new(rebalance_mode, &operational),
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
             usize::try_from(operational.prepared_candidates)?,
             vec![program_data],

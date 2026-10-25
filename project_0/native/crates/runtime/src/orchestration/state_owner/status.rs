@@ -60,6 +60,7 @@ impl ShadowOwner {
             capabilities: self.capabilities(),
             wallets: self.wallets_status(),
             finance: self.finance_status(),
+            rebalance: self.rebalance.projection(self.st.highest_slot()),
         }
     }
 
@@ -128,6 +129,7 @@ impl ShadowOwner {
             self.submitter.supports_bundle()
         };
         let rebalancing = !self.inventory_targets.is_empty();
+        let observing = self.rebalance.mode == crate::execution::inventory::RebalanceMode::Observe;
         vec![
             cap(
                 "LIVE",
@@ -183,12 +185,18 @@ impl ShadowOwner {
                     ""
                 },
             ),
+            // B01: OBSERVE plans with real balances, quotes and costs; trading needs LIVE (B10).
             cap(
                 "INVENTORY_REBALANCING",
-                on(rebalancing),
-                if rebalancing { "BLOCKED" } else { "OFF" },
-                if rebalancing {
-                    "B01: bands reserve inventory; rebalancing has no controller capability yet"
+                self.rebalance.mode.name(),
+                match (rebalancing, observing) {
+                    (true, true) => "OBSERVE",
+                    _ => "OFF",
+                },
+                if observing {
+                    "Shadow: rebalancing is planned, never traded (ACTIVE needs LIVE, B10)"
+                } else if rebalancing {
+                    "bands reserve inventory; rebalancing OFF (P0_REBALANCE_MODE)"
                 } else {
                     ""
                 },

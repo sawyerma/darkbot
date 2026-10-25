@@ -100,6 +100,17 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
       effective: c.effective,
       blockReason: c.blockReason,
     })),
+    rebalance: m.rebalance
+      ? {
+          mode: m.rebalance.mode,
+          atUnixMs: m.rebalance.atUnixMs ?? null,
+          slot: m.rebalance.slot,
+          trades: m.rebalance.trades.map((t) => ({ sell: t.sell, buy: t.buy, amountIn: t.amountIn, minimumOut: t.minimumOut, costUsdMicro: t.costUsdMicro })),
+          blocked: m.rebalance.blocked.map((b) => ({ asset: b.asset, reason: b.reason })),
+          quotesPending: m.rebalance.quotesPending,
+          budgetUsdMicro: m.rebalance.budgetUsdMicro,
+        }
+      : null,
   };
 }
 
