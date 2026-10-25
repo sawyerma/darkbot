@@ -879,6 +879,40 @@ fn transaction_at_index(block: &Block, index: u64) -> Option<&Tx> {
     block.transactions.get(index as usize)
 }
 
+/// BSC-014 (BSC_Bug_V2 P4-G4): the canonical block holds, at the receipt's
+/// index, exactly the signed transaction read by hash. Its signed content
+/// must agree; optional RPC metadata may be absent in one representation
+/// but never contradict. With the receipt's block canonical, any
+/// disagreement is a provider contradiction (the block hash commits to its
+/// transactions), not a failed execution: the caller records UNRESOLVED.
+fn signed_tx_at(block: &Block, index: u64, expected: B256, by_hash: &Tx) -> Result<(), String> {
+    let tx = usize::try_from(index)
+        .ok()
+        .and_then(|i| block.transactions.get(i))
+        .ok_or("no transaction at the receipt's index")?;
+    if tx.hash != expected || by_hash.hash != expected {
+        return Err("another transaction at the receipt's index".into());
+    }
+    let signed = |t: &Tx| (t.from, t.to, t.input.clone(), t.value, t.gas, t.nonce);
+    if signed(tx) != signed(by_hash) {
+        return Err("the same hash with other signed content".into());
+    }
+    fn agree<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
+        a.as_ref().zip(b.as_ref()).is_none_or(|(a, b)| a == b)
+    }
+    if !agree(&tx.gas_price, &by_hash.gas_price)
+        || !agree(&tx.tx_type, &by_hash.tx_type)
+        || !agree(&tx.transaction_index, &by_hash.transaction_index)
+        || [tx.transaction_index, by_hash.transaction_index]
+            .iter()
+            .flatten()
+            .any(|i| *i != index)
+    {
+        return Err("contradicting transaction metadata".into());
+    }
+    Ok(())
+}
+
 fn receipt_gas_cost(receipt: &Receipt, tx: &Tx) -> Result<U256, String> {
     let gas_price = receipt
         .effective_gas_price
@@ -1469,10 +1503,28 @@ fn main() {
     let buy_canonical_hash = buy_canonical_block.hash;
     let mut canonical =
         launch_canonical_hash == launch_block_hash && buy_canonical_hash == buy_block_hash;
-    let launch_at_index = transaction_at_index(&launch_canonical_block, launch_index)
-        .is_some_and(|tx| tx.hash == launch_hash && tx == &launch_tx);
-    let buy_at_index = transaction_at_index(&buy_canonical_block, buy_index)
-        .is_some_and(|tx| tx.hash == buy_hash && tx == &buy_tx);
+    // BSC-014: in the canonical receipt blocks a disagreement at the receipt
+    // index is a provider contradiction (UNRESOLVED), never a STOP; a reorged
+    // receipt block proves nothing either way (UNRESOLVED through !canonical).
+    let (launch_at_index, buy_at_index) = if canonical {
+        for (what, block, index, hash, tx) in [
+            (
+                "launch",
+                &launch_canonical_block,
+                launch_index,
+                launch_hash,
+                &launch_tx,
+            ),
+            ("BUY", &buy_canonical_block, buy_index, buy_hash, &buy_tx),
+        ] {
+            if let Err(e) = signed_tx_at(block, index, hash, tx) {
+                abort(&format!("provider contradiction ({what}): {e}"));
+            }
+        }
+        (true, true)
+    } else {
+        (false, false)
+    };
 
     let prior_block = launch_block.saturating_sub(1);
     let token_absent_before = Some(resolved!(read_rpc(|| wire::code(token, prior_block))))
@@ -1716,6 +1768,114 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC-014 (BSC_Bug_V2 P4-G4): the canonical block's transaction at the
+    /// receipt index must be the signed transaction read by hash; optional
+    /// RPC metadata absent in one representation is no contradiction, any
+    /// real disagreement is one (UNRESOLVED, never a STOP).
+    #[test]
+    fn the_signed_transaction_at_the_receipt_index_is_judged_by_its_signed_content() {
+        let hash = B256::repeat_byte(0x11);
+        let by_hash = wire::Tx {
+            hash,
+            from: Address::repeat_byte(1),
+            to: Some(Address::repeat_byte(2)),
+            input: vec![1, 2, 3],
+            value: U256::from(7),
+            gas: 21_000,
+            gas_price: Some(U256::from(50_000_000u64)),
+            nonce: 0,
+            transaction_index: Some(4),
+            tx_type: Some(0),
+        };
+        let block_with = |tx: wire::Tx| wire::Block {
+            number: 9,
+            hash: B256::repeat_byte(9),
+            parent_hash: B256::ZERO,
+            timestamp: 1,
+            milli_timestamp: None,
+            mix_hash: None,
+            miner: Address::ZERO,
+            gas_limit: 1,
+            gas_used: 1,
+            base_fee_per_gas: None,
+            transactions: (0..4)
+                .map(|_| wire::Tx {
+                    hash: B256::ZERO,
+                    ..by_hash.clone()
+                })
+                .chain([tx])
+                .collect(),
+        };
+        // Same signed content, metadata absent in the block representation:
+        // the old full-struct equality refused this (a false STOP).
+        let sparse = wire::Tx {
+            gas_price: None,
+            tx_type: None,
+            transaction_index: None,
+            ..by_hash.clone()
+        };
+        assert_ne!(sparse, by_hash);
+        assert_eq!(signed_tx_at(&block_with(sparse), 4, hash, &by_hash), Ok(()));
+        assert_eq!(
+            signed_tx_at(&block_with(by_hash.clone()), 4, hash, &by_hash),
+            Ok(())
+        );
+        for (what, other) in [
+            (
+                "another transaction",
+                wire::Tx {
+                    hash: B256::repeat_byte(0x22),
+                    ..by_hash.clone()
+                },
+            ),
+            (
+                "other signed content",
+                wire::Tx {
+                    input: vec![9],
+                    ..by_hash.clone()
+                },
+            ),
+            (
+                "other signed content",
+                wire::Tx {
+                    value: U256::from(8),
+                    ..by_hash.clone()
+                },
+            ),
+            (
+                "contradicting",
+                wire::Tx {
+                    gas_price: Some(U256::from(1)),
+                    ..by_hash.clone()
+                },
+            ),
+            (
+                "contradicting",
+                wire::Tx {
+                    transaction_index: Some(5),
+                    ..by_hash.clone()
+                },
+            ),
+            (
+                "contradicting",
+                wire::Tx {
+                    tx_type: Some(2),
+                    ..by_hash.clone()
+                },
+            ),
+        ] {
+            let e = signed_tx_at(&block_with(other), 4, hash, &by_hash).unwrap_err();
+            assert!(e.contains(what), "{what}: {e}");
+        }
+        assert!(
+            signed_tx_at(&block_with(by_hash.clone()), 5, hash, &by_hash)
+                .unwrap_err()
+                .contains("no transaction")
+        );
+        assert!(signed_tx_at(&block_with(by_hash.clone()), 4, B256::ZERO, &by_hash).is_err());
+    }
+
     #[test]
     fn bounded_rpc_recovery_and_receipt_errors_are_distinct_from_null() {
         let mut calls = 0;
