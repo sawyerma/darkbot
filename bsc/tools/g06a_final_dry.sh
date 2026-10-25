@@ -15,6 +15,8 @@
 # an earlier run of this script can be reused with
 # DARKBOT_G06A_UPGRADE_SCAN=<its portal_upgrade_scan.dbrec>; DRY-0 extends
 # it to the preflight's block in any case.
+# Never trace (bash -x, SHELLOPTS=xtrace): the signing steps hold the keys.
+set +x
 set -euo pipefail
 IFS=$'\n\t'
 umask 077
@@ -22,6 +24,9 @@ umask 077
 SCRIPT_DIR="$(cd "${BASH_SOURCE[0]%/*}" && pwd)"
 source "$SCRIPT_DIR/g06a_shell_scope.sh"
 clear_exports
+# Keys come only from bsc/secrets.env, right before the signers: an inherited
+# copy never stays in this shell or stands in for the file.
+drop_keys
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 

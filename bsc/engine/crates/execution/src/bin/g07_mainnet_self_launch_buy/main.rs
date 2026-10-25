@@ -399,7 +399,7 @@ fn main() {
             candidate_profile: selected.profile.name().to_string(),
             candidate_id: hex::encode(selected.id),
             launch_path_current: Some(launch_path_current.clone()),
-            attempt_authority: Some(authority.proof()),
+            attempt_authority: authority.proof(),
         },
     ) {
         Ok(contract) => contract,

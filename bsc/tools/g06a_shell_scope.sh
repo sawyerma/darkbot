@@ -28,7 +28,9 @@ with_keys() (
 # the signing steps, in a subshell that hands back one key and nothing else
 # of the file; no other variable of it ever reaches this shell.
 key_from_file() (
-  set +a
+  set +a +x
+  # Only the file defines the key, never an inherited value.
+  unset "$2"
   # shellcheck disable=SC1090
   source "$1" >/dev/null 2>&1 || exit 1
   [[ -n "${!2:-}" ]] || exit 1
@@ -38,8 +40,12 @@ load_keys() {
   BSC_LAUNCHER_PRIVATE_KEY="$(key_from_file "$1" BSC_LAUNCHER_PRIVATE_KEY)" || return 1
   BSC_BUYER_PRIVATE_KEY="$(key_from_file "$1" BSC_BUYER_PRIVATE_KEY)" || return 1
 }
-# BSC-007: after the last signer no shell copy of a key remains.
-drop_keys() { unset BSC_LAUNCHER_PRIVATE_KEY BSC_BUYER_PRIVATE_KEY; }
+# BSC-007: after the last signer no shell copy of a key remains (also any
+# inherited signer-scope copy).
+drop_keys() {
+  unset BSC_LAUNCHER_PRIVATE_KEY BSC_BUYER_PRIVATE_KEY \
+    DARKBOT_G06A_LAUNCHER_PRIVATE_KEY DARKBOT_G06A_BUYER_PRIVATE_KEY
+}
 # A's public frozen salt, for exactly one local consumer. B's secret salt
 # never enters this shell: `g06a_dry_handoff exec-salt` gives it to its
 # allowlisted consumer only.

@@ -383,12 +383,16 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     }
     // BSC-005: before the approval no shared authority of this attempt may
     // exist on the checkout's origin (any one is granted or consumed).
-    if current_rpc {
-        let git = darkbot_bsc_execution::attempt_authority::Git {
-            repo: checkout.clone(),
-            remote: "origin".into(),
-            timeout: std::time::Duration::from_secs(30),
-        };
+    if let (true, Err(reason)) = (current_rpc, repository_root_check(&checkout)) {
+        // Never the origin of whatever Git work tree a snapshot sits in.
+        check(
+            report,
+            "ATTEMPT_AUTHORITY",
+            "BLOCKED",
+            &format!("No verified main checkout for the shared authority: {reason}"),
+        );
+    } else if current_rpc {
+        let git = darkbot_bsc_execution::attempt_authority::Git::new(checkout.clone(), "origin");
         match darkbot_bsc_execution::attempt_authority::existing(&git, &snap.attempt_id) {
             Ok(None) => check(
                 report,

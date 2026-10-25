@@ -399,3 +399,41 @@ fn bound_inputs_are_exactly_the_files_the_v5_contract_binds() {
     assert!(listed.iter().all(|p| root.join(p).is_file()));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// Review 25.10. #7: a snapshot without a configured checkout never reads
+/// the shared authority of whatever Git work tree it happens to sit in.
+#[test]
+fn a_snapshot_without_its_checkout_never_reads_a_foreign_work_tree() {
+    let snapshot = v5_root("foreign", |_| {});
+    let base = std::env::temp_dir().join(format!("darkbot-readiness-wt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let parent = base.join("other-work-tree");
+    std::fs::create_dir_all(&parent).unwrap();
+    git(&base, &["init", "-q", "--bare", "origin.git"]);
+    git(&parent, &["init", "-q"]);
+    git(
+        &parent,
+        &[
+            "remote",
+            "add",
+            "origin",
+            base.join("origin.git").to_str().unwrap(),
+        ],
+    );
+    let inside = parent.join("snapshot");
+    let copied = Command::new("cp")
+        .args(["-R"])
+        .arg(&snapshot)
+        .arg(&inside)
+        .status()
+        .unwrap();
+    assert!(copied.success());
+    std::fs::remove_dir_all(&snapshot).unwrap();
+    let (_, text) = run_with(&inside, &["--current-rpc"], &[("HOME", base.as_path())]);
+    assert_eq!(
+        row(&text, "ATTEMPT_AUTHORITY").as_deref(),
+        Some("BLOCKED"),
+        "{text}"
+    );
+    std::fs::remove_dir_all(base).unwrap();
+}

@@ -15,7 +15,6 @@ use darkbot_bsc_record::schema::g06a::dry;
 use darkbot_bsc_record::{decode, sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::time::Duration;
 
 const TOOL: &str = env!("CARGO_BIN_EXE_g07_attempt_authority");
 const FROZEN: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016";
@@ -139,11 +138,7 @@ fn only_an_approved_v5_is_granted_once_and_the_runner_binding_consumes_it_once()
         launch_tx_hash: d.b256(dry::LAUNCH_TX_HASH).unwrap(),
         buy_tx_hash: d.b256(dry::BUY_TX_HASH).unwrap(),
     };
-    let checkout = Git {
-        repo: root.clone(),
-        remote: "origin".into(),
-        timeout: Duration::from_secs(20),
-    };
+    let checkout = Git::new(root.clone(), "origin");
     attempt_authority::consume(&checkout, &binding, "test-run").unwrap();
     assert!(attempt_authority::consume(&checkout, &binding, "second").is_err());
     assert!(text(&tool(&root, &["status"])).contains("authority=CONSUMED_OR_FOREIGN "));

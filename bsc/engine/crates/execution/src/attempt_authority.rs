@@ -80,23 +80,33 @@ impl Binding {
 
 /// `git -C <repo>` against one remote, as a bounded child process.
 pub struct Git {
+    pub program: PathBuf,
     pub repo: PathBuf,
     pub remote: String,
     pub timeout: Duration,
 }
 
 impl Git {
-    /// The main checkout at `.` and its `origin`, 30 s per Git call.
-    pub fn origin() -> Self {
+    /// `repo` and its `remote`, 30 s per Git call.
+    pub fn new(repo: impl Into<PathBuf>, remote: &str) -> Self {
         Self {
-            repo: PathBuf::from("."),
-            remote: "origin".into(),
+            program: PathBuf::from("git"),
+            repo: repo.into(),
+            remote: remote.into(),
             timeout: Duration::from_secs(30),
         }
     }
 
+    /// The main checkout at `.` and its `origin`.
+    pub fn origin() -> Self {
+        Self::new(".", "origin")
+    }
+
     fn run(&self, args: &[&str], stdin: &[u8]) -> Result<String, String> {
-        let mut cmd = Command::new("git");
+        use std::os::unix::process::CommandExt;
+        let mut cmd = Command::new(&self.program);
+        // Its own process group: a timeout kills git and every helper.
+        cmd.process_group(0);
         cmd.env_clear();
         for name in ["PATH", "HOME", "SSH_AUTH_SOCK"] {
             if let Some(value) = std::env::var_os(name) {
@@ -113,27 +123,73 @@ impl Git {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| format!("git: {e}"))?;
-        let mut input = child.stdin.take().ok_or("git stdin")?;
-        input
-            .write_all(stdin)
-            .map_err(|e| format!("git stdin: {e}"))?;
-        drop(input);
         let deadline = Instant::now() + self.timeout;
+        // Output is read on threads, so a helper that keeps a pipe open
+        // (an SSH ControlPersist master) can never block past the deadline.
+        let reader = |pipe: Option<Box<dyn Read + Send>>| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut text = String::new();
+                if let Some(mut p) = pipe {
+                    let _ = p.read_to_string(&mut text);
+                }
+                let _ = tx.send(text);
+            });
+            rx
+        };
+        let out_rx = reader(
+            child
+                .stdout
+                .take()
+                .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        );
+        let err_rx = reader(
+            child
+                .stderr
+                .take()
+                .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        );
+        let kill_group = |child: &mut std::process::Child| {
+            let _ = Command::new("/bin/kill")
+                .args(["-KILL", "--", &format!("-{}", child.id())])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = child.kill();
+            let _ = child.wait();
+        };
+        let mut input = child.stdin.take().ok_or("git stdin")?;
+        let written = input.write_all(stdin);
+        drop(input);
+        if let Err(e) = written {
+            kill_group(&mut child);
+            return Err(format!("git stdin: {e}"));
+        }
         let status = loop {
             if let Some(status) = child.try_wait().map_err(|e| format!("git: {e}"))? {
                 break status;
             }
             if Instant::now() > deadline {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_group(&mut child);
                 return Err(format!("git {} timed out", args[0]));
             }
             std::thread::sleep(Duration::from_millis(10));
         };
-        let mut out = String::new();
-        let mut err = String::new();
-        let _ = child.stdout.take().map(|mut o| o.read_to_string(&mut out));
-        let _ = child.stderr.take().map(|mut e| e.read_to_string(&mut err));
+        let remaining = || {
+            deadline
+                .saturating_duration_since(Instant::now())
+                .max(Duration::from_millis(100))
+        };
+        let (Ok(out), Ok(err)) = (
+            out_rx.recv_timeout(remaining()),
+            err_rx.recv_timeout(remaining()),
+        ) else {
+            kill_group(&mut child);
+            return Err(format!(
+                "git {}: a helper kept its output open past the deadline",
+                args[0]
+            ));
+        };
         if !status.success() {
             let first = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
             return Err(format!("git {} failed: {first}", args[0]));
@@ -170,24 +226,44 @@ impl Git {
 
     /// Deletes `reference` only while it still holds `expected`.
     fn delete(&self, reference: &str, expected: &str) -> Result<(), String> {
-        let lease = format!("--force-with-lease={reference}:{expected}");
-        let refspec = format!(":{reference}");
-        self.run(
-            &["push", "--porcelain", &lease, &self.remote, &refspec],
-            b"",
-        )
-        .map(|_| ())
+        self.push(reference, expected, &format!(":{reference}"), &['-'])
     }
 
     /// One compare-and-swap of `reference` from `expected` (`""`: absent).
+    /// Only a real update counts: a push of the value the remote already
+    /// holds is a Git no-op reported as success (`=`), never a won swap.
     fn swap(&self, reference: &str, expected: &str, new: &str) -> Result<(), String> {
+        let accepted: &[char] = if expected.is_empty() {
+            &['*']
+        } else {
+            &['+', ' ']
+        };
+        self.push(reference, expected, &format!("{new}:{reference}"), accepted)
+    }
+
+    /// A leased push whose porcelain status for `reference` must be one of
+    /// `accepted` (`*` new, `+` forced, ` ` fast-forward, `-` deleted).
+    fn push(
+        &self,
+        reference: &str,
+        expected: &str,
+        refspec: &str,
+        accepted: &[char],
+    ) -> Result<(), String> {
         let lease = format!("--force-with-lease={reference}:{expected}");
-        let refspec = format!("{new}:{reference}");
-        self.run(
-            &["push", "--porcelain", &lease, &self.remote, &refspec],
-            b"",
-        )
-        .map(|_| ())
+        let out = self.run(&["push", "--porcelain", &lease, &self.remote, refspec], b"")?;
+        let flag = out.lines().find_map(|l| {
+            let mut parts = l.split('\t');
+            let flag = parts.next()?.chars().next()?;
+            let (_, dst) = parts.next()?.split_once(':')?;
+            (dst == reference).then_some(flag)
+        });
+        match flag {
+            Some(f) if accepted.contains(&f) => Ok(()),
+            Some('=') => Err("the remote already held this value (no-op push, not a swap)".into()),
+            Some(f) => Err(format!("push status {f:?} for the authority")),
+            None => Err("no push status for the authority".into()),
+        }
     }
 }
 
@@ -248,6 +324,29 @@ pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
         step("grant", grant(git, &binding).is_ok())?;
         step("grant_is_create_only", grant(git, &binding).is_err())?;
         step("granted", state(git, &binding)? == State::Authorized)?;
+        // The compare-and-swap of the push itself, without the ls-remote
+        // pre-read: four pushes from the same AUTHORIZED value, one wins.
+        let authorized = git.commit(&binding.message("AUTHORIZED"))?;
+        let racers = (0..4)
+            .map(|i| git.commit(&format!("{}race={i}\n", binding.message("RACE"))))
+            .collect::<Result<Vec<_>, _>>()?;
+        let pushed: Vec<&String> = std::thread::scope(|s| {
+            let runs: Vec<_> = racers
+                .iter()
+                .map(|c| {
+                    let (reference, authorized) = (&reference, &authorized);
+                    s.spawn(move || git.swap(reference, authorized, c).is_ok().then_some(c))
+                })
+                .collect();
+            runs.into_iter()
+                .filter_map(|r| r.join().ok().flatten())
+                .collect()
+        });
+        step("push_cas_exactly_one_winner", pushed.len() == 1)?;
+        step(
+            "push_cas_restored",
+            git.swap(&reference, pushed[0], &authorized).is_ok(),
+        )?;
         let winners: Vec<Claim> = std::thread::scope(|s| {
             let runs: Vec<_> = (0..4)
                 .map(|i| {
@@ -317,6 +416,7 @@ pub struct Claim {
     authorized: String,
     consumed: String,
     proof: crate::acceptance_guard::AttemptAuthorityProof,
+    returned: std::cell::Cell<bool>,
 }
 
 /// Takes the authority: AUTHORIZED -> CONSUMED in one compare-and-swap.
@@ -337,9 +437,15 @@ pub fn consume(git: &Git, binding: &Binding, note: &str) -> Result<Claim, String
             );
         }
     }
+    // A random nonce: no two claims ever build the same commit.
+    let mut nonce = [0u8; 16];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut nonce))
+        .map_err(|e| format!("claim nonce: {e}"))?;
     let consumed = git.commit(&format!(
-        "{}authorized={authorized}\nclaim={note}\n",
-        binding.message("CONSUMED")
+        "{}authorized={authorized}\nclaim={note}\nnonce={}\n",
+        binding.message("CONSUMED"),
+        hex::encode(nonce)
     ))?;
     git.swap(&reference, &authorized, &consumed).map_err(|e| {
         format!("the authority was not consumed (another run took it, or the remote refused): {e}")
@@ -352,13 +458,15 @@ pub fn consume(git: &Git, binding: &Binding, note: &str) -> Result<Claim, String
             &binding.attempt_id,
             binding.v5_sha256,
         ),
+        returned: std::cell::Cell::new(false),
     })
 }
 
 impl Claim {
-    /// The guard's proof that this run holds exactly this authority.
-    pub fn proof(&self) -> crate::acceptance_guard::AttemptAuthorityProof {
-        self.proof.clone()
+    /// The guard's proof that this run holds exactly this authority; none
+    /// once it was given back.
+    pub fn proof(&self) -> Option<crate::acceptance_guard::AttemptAuthorityProof> {
+        (!self.returned.get()).then(|| self.proof.clone())
     }
 
     /// Gives the authority back after a provably unsent run: CONSUMED (this
@@ -370,7 +478,10 @@ impl Claim {
             Err(e) => return format!("attempt authority stays consumed ({e})"),
         }
         match git.swap(&self.reference, &self.consumed, &self.authorized) {
-            Ok(()) => "attempt authority returned (AUTHORIZED again)".into(),
+            Ok(()) => {
+                self.returned.set(true);
+                "attempt authority returned (AUTHORIZED again)".into()
+            }
             Err(e) => format!("attempt authority stays consumed ({e})"),
         }
     }
@@ -405,11 +516,7 @@ mod tests {
                 let dir = base.join(format!("checkout{i}"));
                 ok(&["init", "-q", dir.to_str().unwrap()], &base);
                 ok(&["remote", "add", "origin", origin.to_str().unwrap()], &dir);
-                Git {
-                    repo: dir,
-                    remote: "origin".into(),
-                    timeout: Duration::from_secs(20),
-                }
+                Git::new(dir, "origin")
             })
             .collect();
         (base, clones)
@@ -466,9 +573,62 @@ mod tests {
     fn the_remote_qualification_runs_the_production_operations_and_leaves_nothing() {
         let (_, git) = remote("qualify", 1);
         let steps = qualify_remote(&git[0], "unit").unwrap();
-        assert_eq!(steps.len(), 10, "{steps:?}");
+        assert_eq!(steps.len(), 12, "{steps:?}");
         assert!(steps.iter().all(|s| s.ends_with("=OK")), "{steps:?}");
         assert_eq!(existing(&git[0], "selftest-unit"), Ok(None));
+    }
+
+    /// Review 25.10. #1: a push of the value the remote already holds is a
+    /// Git no-op reported as success; it never counts as a won swap, and
+    /// two claims of one binding never build the same commit.
+    #[test]
+    fn a_no_op_push_never_counts_as_a_won_swap_and_claims_are_unique() {
+        let (_, git) = remote("noop", 2);
+        let b = binding(5);
+        let authorized = grant(&git[0], &b).unwrap();
+        let reference = b.reference().unwrap();
+        // The remote holds `authorized`; a stale lease with the same value.
+        assert!(
+            git[0]
+                .swap(&reference, &"1".repeat(40), &authorized)
+                .is_err()
+        );
+        let claim = consume(&git[0], &b, "same-note").unwrap();
+        assert!(claim.return_unsent(&git[0]).contains("returned"));
+        let again = consume(&git[1], &b, "same-note").unwrap();
+        assert_ne!(
+            claim.consumed, again.consumed,
+            "a claim commit must be unique"
+        );
+        // Review #6: a returned claim yields no guard proof.
+        assert!(claim.proof().is_none());
+        assert!(again.proof().is_some());
+    }
+
+    /// Review 25.10. #4: a Git child whose helper keeps the output open
+    /// ends at the deadline, the whole process group killed.
+    #[test]
+    fn a_git_child_holding_its_output_open_ends_at_the_deadline() {
+        let dir = std::env::temp_dir().join(format!("g07-authority-hang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("git");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 30 &\nexit 0\n").unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let git = Git {
+            program: fake,
+            repo: dir.clone(),
+            remote: "origin".into(),
+            timeout: Duration::from_millis(500),
+        };
+        let started = Instant::now();
+        assert!(git.run(&["status"], b"").is_err());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
@@ -511,11 +671,10 @@ mod tests {
             .unwrap();
         assert!(out.status.success());
         assert!(consume(&git[0], &b, "a").is_err());
-        let gone = Git {
-            repo: git[0].repo.clone(),
-            remote: base.join("no-such-remote.git").display().to_string(),
-            timeout: Duration::from_secs(20),
-        };
+        let gone = Git::new(
+            git[0].repo.clone(),
+            &base.join("no-such-remote.git").display().to_string(),
+        );
         assert!(
             consume(&gone, &b, "a")
                 .unwrap_err()

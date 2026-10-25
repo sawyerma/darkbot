@@ -134,10 +134,10 @@ class World:
         lines = [l for l in self.scenario.read_text().splitlines() if l.split("=")[0] not in values]
         self.scenario.write_text("".join(f"{l}\n" for l in lines) + "".join(f"{k}={v}\n" for k, v in values.items()))
 
-    def run(self, *args, env=None):
+    def run(self, *args, env=None, bash=()):
         base = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.dir)}
         base.update(env or {})
-        return subprocess.run(["/bin/bash", str(self.root / "bsc/tools/g06a_final_dry.sh"), *args],
+        return subprocess.run(["/bin/bash", *bash, str(self.root / "bsc/tools/g06a_final_dry.sh"), *args],
                               env=base, capture_output=True, text=True, timeout=120)
 
     def calls(self):
@@ -302,6 +302,40 @@ def assert_keys_read_only_for_the_signers(test, calls):
     signer = next(i for i, c in enumerate(calls) if c[0] == "node" and "simulate.cjs" in c[1][0])
     test.assertLess(first, signer, names)
     test.assertFalse(any(c[0] in STEP_TOOLS_BEFORE_KEYS for c in calls[first:]), names)
+
+
+class KeyHygiene(unittest.TestCase):
+    """Review 25.10. #8/#9: keys come only from the key file, read right
+    before the signers; inherited keys never stay or stand in; no trace."""
+
+    def test_inherited_keys_never_stand_in_for_the_key_file(self):
+        inherited = {"DARKBOT_G06A_SIGN": "YES", "BSC_MAINNET_RPC_HTTPS": RPC,
+                     "BSC_LAUNCHER_PRIVATE_KEY": "0xINHERITED_LAUNCHER", "BSC_BUYER_PRIVATE_KEY": "0xINHERITED_BUYER",
+                     "DARKBOT_G06A_LAUNCHER_PRIVATE_KEY": "0xINHERITED_G06A"}
+        # The file lacks the launcher key: the inherited one never stands in.
+        w = World({}, FULL_SECRETS.replace(f"BSC_LAUNCHER_PRIVATE_KEY={TEST_KEY}\n", ""))
+        self.addCleanup(w.close)
+        out = w.run("--full", env=inherited)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("missing or unreadable in bsc/secrets.env", out.stderr)
+        self.assertFalse(any("INHERITED" in env for _, _, env in w.calls()))
+        # A complete file: the signers get the file's keys, never inherited ones.
+        w = World({}, FULL_SECRETS)
+        self.addCleanup(w.close)
+        out = w.run("--full", env=inherited)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertFalse(any("INHERITED" in env for _, _, env in w.calls()))
+        sim = [c for c in w.calls() if c[0] == "node" and "simulate.cjs" in c[1][0]][0]
+        self.assertIn(f"DARKBOT_G06A_LAUNCHER_PRIVATE_KEY={TEST_KEY}", sim[2])
+
+    def test_a_traced_run_never_prints_a_key(self):
+        w = World({}, FULL_SECRETS)
+        self.addCleanup(w.close)
+        for bash, env in [(("-x",), {}), ((), {"SHELLOPTS": "xtrace"})]:
+            out = w.run("--full", env={"DARKBOT_G06A_SIGN": "YES", "BSC_MAINNET_RPC_HTTPS": RPC, **env}, bash=bash)
+            self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+            self.assertNotIn(TEST_KEY, out.stdout + out.stderr, bash or env)
+            self.assertNotIn(TEST_KEY[:-1] + "2", out.stdout + out.stderr, bash or env)
 
 
 class Sign(unittest.TestCase):

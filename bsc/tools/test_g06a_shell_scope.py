@@ -77,9 +77,11 @@ with_keys /bin/true && exit 1 || true
         self.assertNotIn("FAKE_",out.stdout+out.stderr)
         text=(ROOT/"bsc/tools/g06a_final_dry.sh").read_text()
         last_signer=text.rindex('"$ENGINE/target/debug/g06a_self_launch_bundle" --verify-evidence')
-        self.assertEqual(text.count('drop_keys'),1)
-        self.assertLess(last_signer,text.index('drop_keys'))
-        self.assertLess(text.index('drop_keys'),text.index('=== 6/6 '))
+        # Once at the start (no inherited copy), once right after the last signer.
+        self.assertEqual(text.count('drop_keys'),2)
+        self.assertLess(text.index('drop_keys'),text.index('=== R0'))
+        self.assertLess(last_signer,text.rindex('drop_keys'))
+        self.assertLess(text.rindex('drop_keys'),text.index('=== 6/6 '))
 
     def test_legacy_tools_stop_before_credentials_or_network(self):
         for tool in ["g07_find_min_executable_buy.sh","g07_min_spend_probe.sh"]:

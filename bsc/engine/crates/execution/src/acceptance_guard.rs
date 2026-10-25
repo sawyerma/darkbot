@@ -516,6 +516,7 @@ pub fn verify_further_v5_evidence(
 ) -> Result<(FurtherEvidence, launch_path::Bound), String> {
     let c = decode(&contract::V5, contract_bytes)
         .map_err(|e| format!("acceptance contract v5: {e}"))?;
+    crate::acceptance_contract::verify_runtime_gates(&c)?;
     let (further, d, pre, econ) = further(root, &c)?;
     let (_, _, bytes) = bound_bytes(
         root,

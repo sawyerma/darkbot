@@ -442,7 +442,7 @@ fn one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_u
     // The guard itself requires the proof of exactly this consumed authority.
     let guard = pos("let contract = match verify_live_authorization(");
     assert!(consume < guard);
-    assert!(SOURCE[guard..].contains("attempt_authority: Some(authority.proof()),"));
+    assert!(SOURCE[guard..].contains("attempt_authority: authority.proof(),"));
 }
 
 #[test]

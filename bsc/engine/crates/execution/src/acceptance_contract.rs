@@ -1184,6 +1184,52 @@ pub fn attempt1_v5_evidence(
     })
 }
 
+/// The runtime gates of this code as the v5 contract states them, with the
+/// compiled values of their single definitions (BSC-003/004/005/010).
+pub fn runtime_gate_checks() -> [String; 4] {
+    [
+        format!(
+            "The bound DRY's bundle projection is the compiled bundle semantics (48Club noMerge={}, positionFirst={}, max_block - send_head = {}); the runner refuses any other right before the latch (BSC-003)",
+            crate::bundle_wire::FORTYEIGHTCLUB_NO_MERGE,
+            crate::bundle_wire::FORTYEIGHTCLUB_POSITION_FIRST,
+            crate::bundle_wire::MAX_BLOCK_OFFSET
+        ),
+        format!(
+            "The bound builder policy's oldest fetched source is at most {} s old right before the latch; an older policy needs a new bound policy and contract (BSC-004)",
+            crate::builder_policy::MAX_AGE_S
+        ),
+        "The shared one-attempt authority refs/darkbot/g07-attempt-authority/<attempt_id> on the checkout's origin, granted by the user for exactly these bytes, is consumed in one compare-and-swap before the latch; a missing, foreign or consumed authority refuses, and the guard requires the consumed authority's proof (BSC-005)".to_string(),
+        format!(
+            "Each builder response has one absolute deadline of {} ms after the flush; a later or partial answer is recorded as UNKNOWN (bytes may have left), never retried (BSC-010)",
+            crate::bundle_wire::BUILDER_RESPONSE_DEADLINE_MS
+        ),
+    ]
+}
+
+/// A v5 contract states exactly the running code's runtime gates (review
+/// 25.10. #2): an approved contract whose gate values differ from the
+/// compiled ones authorizes nothing, and readiness refuses it too.
+pub fn verify_runtime_gates(contract: &Record) -> Result<(), String> {
+    let tag = tag("send_guard.required_checks")?;
+    let stated: Vec<&str> = contract
+        .fields()
+        .iter()
+        .filter(|(t, _)| *t == tag)
+        .filter_map(|(_, v)| match v {
+            Value::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    for gate in runtime_gate_checks() {
+        if !stated.contains(&gate.as_str()) {
+            return Err(format!(
+                "the v5 contract does not state the running code's runtime gate: {gate}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The exact bytes of the attempt-1 contract v5: the v4 bytes of the same
 /// evidence field for field, with the v5 authority texts, the launch-path
 /// and candidate binding and the superseded v4 proposal.
@@ -1260,34 +1306,11 @@ pub fn attempt1_v5(e: &V5Evidence, authorization: Authorization) -> Result<Vec<u
         "The selected candidate (profile and ID, verified from its salt) equals authorization.candidate",
     );
     // The runtime gates of this code, with their compiled values: a change
-    // of any of them changes these bytes and needs a new approval.
-    d.push(
-        tag("send_guard.required_checks")?,
-        format!(
-            "The bound DRY's bundle projection is the compiled bundle semantics (48Club noMerge={}, positionFirst={}, max_block - send_head = {}); the runner refuses any other right before the latch (BSC-003)",
-            crate::bundle_wire::FORTYEIGHTCLUB_NO_MERGE,
-            crate::bundle_wire::FORTYEIGHTCLUB_POSITION_FIRST,
-            crate::bundle_wire::MAX_BLOCK_OFFSET
-        ),
-    );
-    d.push(
-        tag("send_guard.required_checks")?,
-        format!(
-            "The bound builder policy's oldest fetched source is at most {} s old right before the latch; an older policy needs a new bound policy and contract (BSC-004)",
-            crate::builder_policy::MAX_AGE_S
-        ),
-    );
-    d.push(
-        tag("send_guard.required_checks")?,
-        "The shared one-attempt authority refs/darkbot/g07-attempt-authority/<attempt_id> on the checkout's origin, granted by the user for exactly these bytes, is consumed in one compare-and-swap before the latch; a missing, foreign or consumed authority refuses, and the guard requires the consumed authority's proof (BSC-005)",
-    );
-    d.push(
-        tag("send_guard.required_checks")?,
-        format!(
-            "Each builder response has one absolute deadline of {} ms after the flush; a later or partial answer is recorded as UNKNOWN (bytes may have left), never retried (BSC-010)",
-            crate::bundle_wire::BUILDER_RESPONSE_DEADLINE_MS
-        ),
-    );
+    // of any of them changes these bytes and needs a new approval, and the
+    // guard refuses a contract whose gates differ from the running code.
+    for gate in runtime_gate_checks() {
+        d.push(tag("send_guard.required_checks")?, gate);
+    }
     d.push(
         tag("send_guard.forbidden_authorities")?,
         "bsc/config/g07_attempt1_acceptance_v4.dbrec (superseded proposal without launch-path binding)",

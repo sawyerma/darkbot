@@ -695,6 +695,39 @@ fn the_v5_contract_binds_the_runtime_gates_with_their_compiled_values() {
     ));
 }
 
+/// Review 25.10. #2: the guard and readiness require the bound gate texts
+/// to carry exactly the compiled values; an approved v5 whose gate values
+/// differ from the running code refuses.
+#[test]
+fn a_v5_whose_runtime_gate_values_differ_from_the_code_refuses() {
+    at_repo_root();
+    let (root, dir, policy) = v5_root("v5-gate-drift");
+    let v5 = attempt1_v5(
+        &attempt1_v5_evidence(&root, dir, &policy, CANDIDATE).unwrap(),
+        Authorization::Proposed,
+    )
+    .unwrap();
+    let tag = contract::V5
+        .fields
+        .iter()
+        .find(|f| f.name == "send_guard.required_checks")
+        .unwrap()
+        .tag;
+    assert!(verify_further_v5_evidence(&root, &v5).is_ok());
+    let mut drifted = Draft::new(&contract::V5);
+    for (t, v) in decode(&contract::V5, &v5).unwrap().fields() {
+        let v = match v {
+            Value::Text(text) if *t == tag && text.contains("absolute deadline of") => {
+                Value::Text(text.replace("15000 ms", "60000 ms"))
+            }
+            other => other.clone(),
+        };
+        drifted.push(*t, v);
+    }
+    let err = verify_further_v5_evidence(&root, &drifted.encode().unwrap()).unwrap_err();
+    assert!(err.contains("runtime gate"), "{err}");
+}
+
 /// BSC-003 (BSC_Bug_V2 P3-F2): v5 binds a DRY only when its bundle
 /// projection is the compiled bundle semantics -- 48Club flags and the
 /// expiry offset (never its absolute blocks against a later head).
