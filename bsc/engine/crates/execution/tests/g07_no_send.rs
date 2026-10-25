@@ -442,6 +442,28 @@ fn one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_u
 }
 
 #[test]
+fn a_crash_anywhere_after_the_authority_is_consumed_never_releases_the_attempt() {
+    // BSC-016 (BSC_Bug_V2 J1/P3-F4): the shared authority is consumed
+    // before the latch, the latch before the release; a crash, OOM, disk-full
+    // or fsync failure after that point leaves the authority CONSUMED for
+    // every checkout and host and the latch directory refusing a restart --
+    // also in the window between the release and the RELEASED marker, which
+    // is therefore diagnostic, not the barrier.
+    let consume = pos("attempt_authority::consume(");
+    let latch = pos("latch_attempt(");
+    let release = pos("barrier.wait();");
+    let evidence = pos("release_evidence = write_evidence(");
+    let marker = pos("release_marker = mark_released(");
+    assert!(consume < latch && latch < release && release < evidence && evidence < marker);
+    // The marker itself is durable: file and directory synced.
+    let body = function_body(SOURCE, "fn mark_released(");
+    assert!(body.contains(".sync_all()") && body.contains("sync_dir(attempt_dir)"));
+    // A failed provisional write or marker is reported, never a panic or an
+    // unsent release (nothing_after_the_release_can_panic, the unsent helper).
+    assert!(body.contains("RELEASED marker failed"));
+}
+
+#[test]
 fn the_bound_builder_policy_is_fresh_at_the_release_boundary() {
     // BSC-004: an earlier readiness PASS is no freshness proof at release;
     // the runner checks the bound policy's age right before the latch.
