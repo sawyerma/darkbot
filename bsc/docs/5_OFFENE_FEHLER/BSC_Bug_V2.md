@@ -341,11 +341,6 @@
 
 ---
 
-# Fortsetzungsbereich
-
-**Fortsetzung:** P4 ist unten angehängt; danach P5 (Trading-Core). Alle früheren Prüfungen bleiben versionsgebunden und erhalten. Der vollständige BSC-Optimierungsplan folgt nach den relevanten Paketen aus belegten, phasentreuen Nachweisen.nsolidiert.
-
-
 ---
 
 # P4 — G0.8-Verifier und Producer-Timing: unabhängiger Codeabgleich (G1–G6)
@@ -442,11 +437,9 @@
 
 ---
 
----
-
 # Paket 5 – Trading-Core (T1–T5), eigenständige Gegenprüfung
 
-**Eingang:** `Eingefügter Text(8).txt`, „Code-Review – Paket 5: Trading-Core“, mit Review-Behauptungen vom Commit `1a05bd78` (vom Einreicher genannt; dieser historische Vergleichscommit wurde nicht als alleiniger Prüfstand übernommen).  
+**Eingang:** eingereichtes Review P5 „Code-Review – Paket 5: Trading-Core“, mit Review-Behauptungen vom Commit `1a05bd78` (vom Einreicher genannt; dieser historische Vergleichscommit wurde nicht als alleiniger Prüfstand übernommen).  
 **Tatsächlich überprüfter `origin/main`/GitHub-HEAD:** [`8f9fd3ce39a30ce99c0a6ee72ca7b36a7569bec0`](https://github.com/sawyerma/darkbot/commit/8f9fd3ce39a30ce99c0a6ee72ca7b36a7569bec0). Vergleich von `15c344719fbc6228b9a9357134bb045bddf9ad18` nach `8f9fd3ce39a30ce99c0a6ee72ca7b36a7569bec0`: fünf zusätzliche Commits; die vom GitHub-Compare aufgeführten Änderungen betreffen **ausschließlich `project_0`**, **keine BSC-Dateien**. Dies ist keine Project_0-Prüfung.  
 **Prüfverfahren:** unveränderte BSC-Quelldateien per GitHub-Connector gelesen, Funktions- und Testpfade nachvollzogen; offizielle 48Club-/BlockRazor-Dokumente als externe, nicht experimentelle Kontextevidenz geprüft. **Keine Rust-Builds, Benchmarks oder Mainnet-Handlungen selbst ausgeführt.**
 
