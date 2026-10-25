@@ -22,6 +22,8 @@ Projekt-Fachautorität: [Project_0 PHASENPLAN](../../project_0/docs/PHASENPLAN.m
 
 **Stand 2026-10-24:** Engine-Frame-Limit/`FRAME_TOO_LARGE`, Topic-Recovery, Ledger mit zeitlich begrenzter Idempotenz, isolierter Stop-All-Teilausfalltest und `npm run budget` sind umgesetzt und gezielt getestet (§8 „Infrastruktur-Abschluss 2026-10-24“); Visual-Pixeldiff, Gateway-RTT, P0-Polling, F4 und native Receipts bleiben wie oben offen.
 
+> **Project_0-Implementierungsentscheidung 2026-10-25, G-1:** [Project_0 PHASENPLAN.md – P0-DEC-2026-10-25](../../project_0/docs/PHASENPLAN.md) verpflichtet für DEC-01…15 bereits **jetzt** die vollständige native Source→Protobuf→Reporter→Gateway→Adapter/Store→bestehende fünf Reiter-Anbindung und den sicheren Command-/Receipt-/STATE-Rückweg **im selben Fachpaket**. F0-VAR ist die begleitend aktuell zu haltende betroffene Feldmatrix; weder eine erneute globale Census-Runde noch eine spätere F7-Integrationsphase darf diese ausdrücklich freigegebene Project_0-Offline-Entwicklung stoppen. Diese jüngere Project_0-Spezifizierung überschreibt allein zeitliche *Entwicklungsverschiebungen*, nicht die gebundenen F0–F8-Wire-/Codegen-/Golden-/Schema-/Deployment-Gates und nicht die BSC-Arbeitsplanung. Ein Code-/UI-Pfad wird erst nach echtem Native-/Gateway-/Playwright-Test `OFFLINE_VERIFIED`; Mainnet/Provider/Live/Signing/Submission nur bei separater Freigabe.
+
 ## 1. Produkt, visuelle Referenz und Navigation
 
 ~~~text
