@@ -397,7 +397,13 @@ impl Journal {
             .as_ref()
             .and_then(active)
             .filter(|e| e.phase == ExitPhase::HandoffUnknown)
-            .map(|e| (e.intent.clone(), e.observations.keys().cloned().collect()))
+            // V2-01: only complete observations are final; an incomplete one is read again.
+            .map(|e| {
+                (
+                    e.intent.clone(),
+                    super::settlement::complete_signatures(&e.observations),
+                )
+            })
     }
 
     /// The reserved (not yet handed off) exit: its intent and approval.
@@ -666,9 +672,7 @@ impl Journal {
                 continue;
             }
             match read {
-                Ok(o) => {
-                    e.observations.insert(signature, o);
-                }
+                Ok(o) => super::settlement::keep_strongest(&mut e.observations, signature, o),
                 Err(reason) => reasons.push(format!("{signature}:{reason}")),
             }
         }
@@ -1139,6 +1143,31 @@ pub(crate) mod tests {
             super::validate(&s, &ea, &ei, &c).unwrap_err(),
             err("EXIT_POSITION_MARK_UNKNOWN")
         );
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// V2-01 (exit variant): an incomplete finalized exit observation is read again until it is
+    /// complete, then the exit settles; a weaker read never replaces complete evidence.
+    #[test]
+    fn v2_01_incomplete_exit_observation_is_read_again_until_complete() {
+        let (path, mut j, mint, a) = settled(1_000);
+        let (ea, ei, c) = exit_for(&a, &mint, 1_000, "exit-1");
+        j.reserve_exit(ea, ei.clone(), &c).unwrap();
+        j.handoff_exit(&ei.signed_wire_sha256, &c, || Ok(()))
+            .unwrap();
+        let sig = &ei.signatures[0];
+        let complete = observation(sig, true, 5_000, &[(&mint, -1_000)]);
+        let mut incomplete = complete.clone();
+        incomplete.wallet_token_deltas = None;
+        incomplete.unknown_reasons = vec!["ARCHIVE_429".into()];
+        let step = j.apply_exit_evidence(evidence(sig, incomplete.clone()), &value, 2_000);
+        assert!(matches!(step, Ok(ExitStep::Unknown(_))), "{step:?}");
+        assert!(
+            j.exit_job().unwrap().1.is_empty(),
+            "an incomplete exit observation is read again"
+        );
+        let step = j.apply_exit_evidence(evidence(sig, complete), &value, 2_000);
+        assert!(matches!(step, Ok(ExitStep::Settled(_))), "{step:?}");
         let _ = std::fs::remove_dir_all(&path);
     }
 

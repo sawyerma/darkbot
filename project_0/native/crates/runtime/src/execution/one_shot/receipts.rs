@@ -23,6 +23,14 @@ pub struct FinalizedObservation {
     pub unknown_reasons: Vec<String>,
 }
 
+impl FinalizedObservation {
+    /// V2-01: every fact known (token deltas present, no unknown reason). Only a complete
+    /// observation is final for the settlement worker; an incomplete one is read again.
+    pub fn is_complete(&self) -> bool {
+        self.unknown_reasons.is_empty() && self.wallet_token_deltas.is_some()
+    }
+}
+
 /// Uses finalized getTransaction via the shared RPC transport. Caller owns
 /// provider quotas/timeouts; this function does not poll, retry or submit.
 pub fn fetch_finalized(

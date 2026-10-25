@@ -225,6 +225,33 @@ pub struct SettlementEvidence {
     pub proof: Option<Result<NonLandingProof, String>>,
 }
 
+/// V2-01: the signatures whose observation is complete (final; never read again).
+pub(super) fn complete_signatures(
+    observations: &BTreeMap<String, super::receipts::FinalizedObservation>,
+) -> BTreeSet<String> {
+    observations
+        .iter()
+        .filter(|(_, o)| o.is_complete())
+        .map(|(signature, _)| signature.clone())
+        .collect()
+}
+
+/// V2-01: a read replaces the stored observation unless that one is complete and the read is
+/// not (complete evidence is never weakened); an identical read changes nothing.
+pub(super) fn keep_strongest(
+    observations: &mut BTreeMap<String, super::receipts::FinalizedObservation>,
+    signature: String,
+    read: super::receipts::FinalizedObservation,
+) {
+    if observations
+        .get(&signature)
+        .is_some_and(|old| old.is_complete() && !read.is_complete())
+    {
+        return;
+    }
+    observations.insert(signature, read);
+}
+
 /// The settlement worker's reads for `intent` (signatures in `observed` are not read again).
 pub fn fetch_settlement_evidence(
     rpc: &RpcClient,
@@ -332,7 +359,8 @@ impl Journal {
         self.saved
             .as_ref()
             .filter(|s| s.phase == Phase::HandoffUnknown)
-            .map(|s| (s.intent.clone(), s.observations.keys().cloned().collect()))
+            // V2-01: only complete observations are final; an incomplete one is read again.
+            .map(|s| (s.intent.clone(), complete_signatures(&s.observations)))
     }
 
     /// Finalized but not yet booked (e.g. a valuation that was unknown, or a restart between the
@@ -389,9 +417,7 @@ impl Journal {
                 continue;
             }
             match read {
-                Ok(o) => {
-                    saved.observations.insert(signature, o);
-                }
+                Ok(o) => keep_strongest(&mut saved.observations, signature, o),
                 Err(reason) => reasons.push(format!("{signature}:{reason}")),
             }
         }
@@ -493,7 +519,7 @@ mod tests {
     use super::super::receipts::FinalizedObservation;
     use super::super::tests::{path_of, setup};
     use super::super::*;
-    use super::{non_landing_proof, NonLandingProof, SettleStep, Settlement};
+    use super::{non_landing_proof, NonLandingProof, SettleStep, Settlement, SettlementEvidence};
     use serde_json::{json, Value};
     use std::fs;
     use std::path::PathBuf;
@@ -546,6 +572,78 @@ mod tests {
             "MINT" => Some(d),
             _ => None,
         }
+    }
+
+    /// V2-01 (P7-01/P8-01): an incomplete finalized observation (unknown token metadata, an
+    /// archive 429) is read again by the worker until it is complete, then the attempt settles;
+    /// an identical answer adds nothing to the journal.
+    #[test]
+    fn v2_01_incomplete_observation_is_read_again_until_complete() {
+        let (path, mut j, i) = handed_off(1);
+        let s1 = i.signatures[0].clone();
+        let complete = FinalizedObservation {
+            signature: s1.clone(),
+            slot: 500,
+            success: true,
+            fee_lamports: 5_000,
+            wallet_sol_delta_lamports: -5_000,
+            wallet_token_deltas: Some([("MINT".to_string(), 10)].into()),
+            unknown_reasons: vec![],
+        };
+        let mut incomplete = complete.clone();
+        incomplete.wallet_token_deltas = None;
+        incomplete.unknown_reasons = vec!["ARCHIVE_429".into()];
+        let ev = |o: &FinalizedObservation| SettlementEvidence {
+            observations: vec![(s1.clone(), Ok(o.clone()))],
+            proof: None,
+        };
+        let journal = path.join(format!("{}.p0j", i.wallet));
+        let step = j.apply_settlement_evidence(ev(&incomplete), &value, BOOKED);
+        assert!(matches!(step, Ok(SettleStep::Unknown(_))), "{step:?}");
+        assert!(
+            j.settlement_job().unwrap().1.is_empty(),
+            "an incomplete observation is read again"
+        );
+        let size = fs::metadata(&journal).unwrap().len();
+        let _ = j.apply_settlement_evidence(ev(&incomplete), &value, BOOKED);
+        assert_eq!(fs::metadata(&journal).unwrap().len(), size, "nothing new");
+        let step = j.apply_settlement_evidence(ev(&complete), &value, BOOKED);
+        assert!(matches!(step, Ok(SettleStep::Settled(_))), "{step:?}");
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    /// V2-01: complete evidence is never replaced by a weaker (incomplete) read of the same
+    /// signature; in a bundle only the incomplete signature is read again.
+    #[test]
+    fn v2_01_complete_evidence_is_never_replaced_by_a_weaker_read() {
+        let (path, mut j, i) = handed_off(2);
+        let (s1, s2) = (i.signatures[0].clone(), i.signatures[1].clone());
+        let obs = |sig: &str, complete: bool| FinalizedObservation {
+            signature: sig.into(),
+            slot: 500,
+            success: true,
+            fee_lamports: 5_000,
+            wallet_sol_delta_lamports: -5_000,
+            wallet_token_deltas: complete.then(|| [("MINT".to_string(), 5)].into()),
+            unknown_reasons: if complete {
+                vec![]
+            } else {
+                vec!["TOKEN_METADATA_UNKNOWN".into()]
+            },
+        };
+        let ev = |sig: &str, o: FinalizedObservation| SettlementEvidence {
+            observations: vec![(sig.to_string(), Ok(o))],
+            proof: None,
+        };
+        let _ = j.apply_settlement_evidence(ev(&s1, obs(&s1, true)), &value, BOOKED);
+        let _ = j.apply_settlement_evidence(ev(&s1, obs(&s1, false)), &value, BOOKED);
+        assert!(j.saved.as_ref().unwrap().observations[&s1]
+            .unknown_reasons
+            .is_empty());
+        assert_eq!(j.settlement_job().unwrap().1, [s1.clone()].into());
+        let step = j.apply_settlement_evidence(ev(&s2, obs(&s2, true)), &value, BOOKED);
+        assert!(matches!(step, Ok(SettleStep::Settled(_))), "{step:?}");
+        fs::remove_dir_all(path).unwrap();
     }
 
     /// C3: a landed success books its realized net from the finalized deltas of every own
