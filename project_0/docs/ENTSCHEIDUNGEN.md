@@ -1,6 +1,6 @@
 # Project_0 — ENTSCHEIDUNGEN.md
 
-**Version:** 1.2 · **Datum:** 2026-10-25
+**Version:** 1.3 · **Datum:** 2026-10-25
 **Art des Dokuments:** Entscheidungsnachweis. Dieses Dokument ist **keine** Status- und **keine** Phasenplan-Autorität. Status: `BUGS.md`. Plan und Gates: `PHASENPLAN.md`.
 **Codebasis der Entscheidungsvorbereitung:** Docs `72a99cc2`, Code `865867af`; Gegenprüfung durch eine zweite Instanz an `87c064ba` und `746fdf29`. Vor jeder Umsetzung muss gegen den dann aktuellen HEAD neu gepinnt werden. Dateinamen in diesem Dokument zeigen nur, wo eine Änderung ansetzt; sie sind keine verbindlichen Zeilenangaben.
 
@@ -52,7 +52,7 @@
   Externe Qualifikation und LIVE-Freigabe bleiben eigenständige Gates.
 
 ### Z-1 — CI-Pflichtjob-Regel (ENTSCHIEDEN, N-4)
-- **Nutzerentscheidung vom 25.10.2026:** Verbindlich gilt N-4 in §7 einschließlich fester Pfad→Job-Tabelle aus den jeweils gültigen CI-Workflows.
+- **Nutzerentscheidung vom 25.10.2026:** Verbindlich gilt N-4 in §7 einschließlich fester Pfad→Job-Tabelle aus den jeweils gültigen CI-Workflows, präzisiert durch N-6 (Pflichtjob auf exakt geprüftem SHA) und N-7 (Project_0-CI-Auslöser).
 - Bei roten betroffenen Pflichtjobs ist `OFFLINE_VERIFIED` untersagt, außer den **vier** ausdrücklich festgelegten und belegten BSC-Ausnahmekriterien für gemeinsame Jobs; nie für `project0-gate`.
 - Keine eigenmächtige BSC-Korrektur, kein übersprungener Test, keine grüne Gesamt-CI bei rotem Lauf; alle Ausnahmen mit `BUGS.md`-ID dokumentieren.
 
@@ -113,6 +113,7 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
 - **Wallets:** exakt fünf Ergebnisklassen nach N-2 (§7), unbrauchbare B-Quellen nach Grund, Hold-Dauer, Calls und Bytes; **kein Schalter**.
 - **Abnahme:** N-2-Loopback-Matrix in §7 und echte Phase-/Provider-/Archive-Gates; ohne diese keine externe Freigabe. Keine vorzeitige Behauptung aus geschätzten Sekunden.
 - **Ansatzpunkte:** `one_shot/settlement.rs`, `one_shot/exit.rs`, `state_owner/fe04.rs`; Querverweise `BUGS.md` C12 und `bug_v2.md` V2-15.
+
 ### 4 — V7: Holds bei ZeroPrefund/FlashFunded
 - **Beschluss:** A und B. A gilt verbindlich; B wird vollständig gebaut. Modi OFF/OBSERVE/ACTIVE, Standard OBSERVE.
 - **Pflichtanforderungen:**
@@ -440,16 +441,16 @@ Parallel dazu und unabhängig vom Code: Freigabe C-01 beantragen.
 4. Nie erlaubt: BSC-Code aus Project_0-Session ändern, Tests überspringen/deaktivieren, rote CI durch Wiederholung als grün deklarieren. Flaky Tests sind eigenständig zu erfassen.
 5. Mit bewilligter Ausnahme: `OFFLINE_VERIFIED (CI-Ausnahme <ID>)`; gemeinsame CI weiterhin als **rot** ausweisen. Für `project0-gate` keine Ausnahme.
 
-**Feste Pfad→Job-Tabelle (Stand der Workflow-YAML vom 25.10.2026; bei Änderung neu ableiten):**
+**Feste Pfad→Job-Tabelle (Stand der Workflow-YAML vom 25.10.2026 einschließlich N-7; bei Änderung neu ableiten; identisch mit `PHASENPLAN.md` Z-1/N-4):**
 
 | Geänderter Pfad | Pflichtjobs aus den aktuell vorhandenen GitHub-Workflows |
 |---|---|
-| `project_0/native/**`, `project_0/scripts/**`, `project_0/tests/**` | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui` |
+| `project_0/**` außer `project_0/docs/**` (N-7) | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui` |
 | `frontend/**` | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui` |
 | `protocol/**`, `gateway/**` | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui`; zusätzlich `gateway`-Workflow: `rust`, `protocol` |
 | `.github/workflows/project0-status.yml` | alle Jobs des Workflows `Project 0 status contract` |
 | `.github/workflows/gateway.yml` | beide Jobs des Workflows `gateway` |
-| `project_0/docs/**` allein | keine automatische CI-Auslösung durch diese beiden Workflows; Dokumentabgleich gesondert nachweisen, keine erfundene CI-Freigabe |
+| `project_0/docs/**` allein | keine automatische CI-Auslösung durch diese beiden Workflows (N-7-Ausnahme); Dokumentabgleich gesondert nachweisen, keine erfundene CI-Freigabe |
 
 ### N-5 — G-1: Feste Reiter-/Command-Zuordnung
 **ENTSCHIEDEN (Nutzer, 2026-10-25).**
@@ -476,3 +477,22 @@ Die bisherige Ermessensformel `soweit technisch für die jeweilige Funktion erfo
 **Kein neues Bedienelement** bei `nein`. Ein solcher Schalter bräuchte eine neue Nutzerentscheidung. Für jede Entscheidung **mit Laufzeitwirkung** ist der typisierte persistente `.p0j`-Nachweis Pflicht; für reine Build- oder Prozessentscheidungen werden keine künstlichen Laufzeitrecords erzeugt.
 
 **Statusautorität bleibt `BUGS.md`; Plan- und Gate-Autorität bleibt `PHASENPLAN.md`.** Die N-2…N-5-Entscheidungen erlauben keine Mainnet-Reads, Paid-Provider, LIVE, Signing oder Geldtransfers.
+
+### N-6 — CI-Pflichtjob auf exakt geprüftem SHA
+**ENTSCHIEDEN (Nutzer, 25.10.2026).**
+
+- Jeder Pflichtjob muss auf dem **exakt geprüften Commit-SHA** erfolgreich abgeschlossen sein.
+- Keine Übernahme älterer grüner Ergebnisse.
+- `NOT_RUN`, `SKIPPED` und `FAILED` zählen nicht als bestanden.
+- Startet ein erforderlicher Workflow nicht automatisch: `workflow_dispatch` auf dem aktuellen `main`; der tatsächlich gestartete SHA muss dem geprüften SHA entsprechen.
+- Vor der Integration betroffener Codepakete läuft das vollständige lokale `project_0/scripts/gate.sh`.
+- Bei Protobuf-Änderungen zusätzlich `protocol/scripts/check.sh --check` gegen die korrekte Vergleichsbasis.
+- N-4 einschließlich der BSC-Ausnahme bleibt unverändert.
+
+### N-7 — Project_0-CI-Auslöser
+**ENTSCHIEDEN (Nutzer, 25.10.2026).**
+
+- Änderungen unter `project_0/**` lösen die Project_0-CI aus.
+- Ausnahme: Pushes, die ausschließlich `project_0/docs/**` ändern.
+- Die bestehenden Auslöser für `frontend/**`, `gateway/**`, `protocol/**` und die Workflow-Dateien bleiben erhalten.
+- Die Pfad→Job-Tabelle in N-4 ist entsprechend aktualisiert.
