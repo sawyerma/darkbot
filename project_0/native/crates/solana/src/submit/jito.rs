@@ -51,7 +51,7 @@ impl JitoAdapter {
         bundle_sim_rpc: Option<String>,
         timeout: Duration,
     ) -> Result<Self, SubmitError> {
-        let http = reqwest::blocking::Client::builder()
+        let http = crate::provider::blocking_http()
             .timeout(timeout)
             .build()
             .map_err(|e| SubmitError::Transport(super::rpc::safe_http_error(&e).into()))?;

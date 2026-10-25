@@ -166,7 +166,7 @@ impl JupiterV2RouteProvider {
             return Err("Jupiter max_accounts must be 1..=64".into());
         }
         Ok(Self {
-            client: reqwest::blocking::Client::builder()
+            client: darkbot_solana::provider::blocking_http()
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .map_err(|e| format!("jupiter client: {e}"))?,

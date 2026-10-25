@@ -311,6 +311,53 @@ impl Budget {
     ) -> Result<Permit, &'static str> {
         self.admit(work, deadline, shutdown).map_err(|r| r.code)
     }
+    /// Refills the global token bucket up to `now`.
+    fn refill(&self, s: &mut State, now: Instant) {
+        let elapsed = now.saturating_duration_since(s.refill_at).as_secs_f64();
+        s.tokens = (s.tokens + elapsed * s.effective_rps).min(self.limits.rpc_burst as f64);
+        s.refill_at = now;
+    }
+    /// Grants a permit: one token, one in-flight slot, the workload's next pacing time.
+    fn grant(self: &Arc<Self>, s: &mut State, work: Workload, now: Instant) -> Permit {
+        s.active += 1;
+        s.requests += 1;
+        s.tokens -= 1.0;
+        let rate = match work {
+            Workload::Bootstrap => self.limits.bootstrap_rps,
+            Workload::LiveRead | Workload::Deployment => self.limits.hotpath_rps,
+            Workload::Simulation => self.limits.simulation_rps,
+            Workload::FeeQuote => self.limits.fee_rps,
+            Workload::Send => self.limits.send_rps,
+            Workload::History => self.limits.history_rps,
+            // C5: the configured analytics rate, but a pacing slot of its own.
+            Workload::Winner | Workload::Reconcile => self.limits.analytics_rps,
+            Workload::Websocket => self.limits.wss_rps,
+        };
+        s.next_workload[work.index()] = now + Duration::from_secs_f64(1.0 / rate as f64);
+        self.changed.notify_all();
+        Permit {
+            budget: self.clone(),
+        }
+    }
+    /// V2-07: the permit without waiting — only when no admission is queued (their order is
+    /// kept) and everything `admit` would wait for is free now: a token, the workload's pacing,
+    /// no cooldown, a concurrency slot, call and byte budget. `None` leaves the caller to the
+    /// queued `admit`, which reports every refusal.
+    pub(crate) fn try_admit(self: &Arc<Self>, work: Workload) -> Option<Permit> {
+        let mut s = self.lock_state();
+        if halted(&s).is_some() || s.retry_after_overflow || !s.queue.is_empty() {
+            return None;
+        }
+        let now = Instant::now();
+        self.refill(&mut s, now);
+        let free = s.tokens >= 1.0
+            && s.next_workload[work.index()] <= now
+            && s.cooldown <= now
+            && (s.active as u64) < self.limits.rpc_concurrency
+            && s.bytes < self.limits.max_total_mib * 1024 * 1024
+            && s.requests < self.limits.max_requests;
+        free.then(|| self.grant(&mut s, work, now))
+    }
     /// N2: the admission with a typed refusal — `deadline_bound` when the permit cannot be
     /// granted before `deadline` (pacing, cooldown, concurrency), as opposed to a refusal by the
     /// budget itself. The codes are exactly those `acquire_cancellable` reports.
@@ -344,9 +391,7 @@ impl Budget {
                 return Err(refused(code));
             }
             let now = Instant::now();
-            let elapsed = now.saturating_duration_since(s.refill_at).as_secs_f64();
-            s.tokens = (s.tokens + elapsed * s.effective_rps).min(self.limits.rpc_burst as f64);
-            s.refill_at = now;
+            self.refill(&mut s, now);
             let token_ready = if s.tokens >= 1.0 {
                 now
             } else {
@@ -411,25 +456,7 @@ impl Budget {
                 && now >= ready
             {
                 s.queue.retain(|(t, _)| *t != ticket);
-                s.active += 1;
-                s.requests += 1;
-                s.tokens -= 1.0;
-                let rate = match work {
-                    Workload::Bootstrap => self.limits.bootstrap_rps,
-                    Workload::LiveRead | Workload::Deployment => self.limits.hotpath_rps,
-                    Workload::Simulation => self.limits.simulation_rps,
-                    Workload::FeeQuote => self.limits.fee_rps,
-                    Workload::Send => self.limits.send_rps,
-                    Workload::History => self.limits.history_rps,
-                    // C5: the configured analytics rate, but a pacing slot of its own.
-                    Workload::Winner | Workload::Reconcile => self.limits.analytics_rps,
-                    Workload::Websocket => self.limits.wss_rps,
-                };
-                s.next_workload[work.index()] = now + Duration::from_secs_f64(1.0 / rate as f64);
-                self.changed.notify_all();
-                return Ok(Permit {
-                    budget: self.clone(),
-                });
+                return Ok(self.grant(&mut s, work, now));
             }
             let wait = deadline
                 .saturating_duration_since(now)
@@ -716,27 +743,64 @@ pub fn rpc_client_with(
             url,
             timeout,
             work,
-            http: reqwest::Client::builder()
-                .connect_timeout(Duration::from_millis(
-                    crate::runtime_config::active()
-                        .limits
-                        .rpc_connect_timeout_ms,
-                ))
-                .build()
-                .expect("HTTP client configuration"),
             budget,
-            stats: Mutex::new(RpcTransportStats::default()),
+            stats: Arc::new(Mutex::new(RpcTransportStats::default())),
         },
         RpcClientConfig::with_commitment(commitment),
     )
 }
+
+/// V2-07: the one RPC HTTP transport of the process. A pooled connection is driven by the
+/// runtime that opened it, so the client (one connection pool per host) lives on its own
+/// runtime and every budgeted call — `rpc_client` senders and `DeadlineRpc` alike — runs its
+/// HTTP exchange there: all adapters and clients reuse the same kept-alive connections. Pool
+/// idle and TCP keepalive come from `Limits`; no ping or prewarm request is ever sent.
+struct Transport {
+    runtime: tokio::runtime::Runtime,
+    http: reqwest::Client,
+}
+fn transport() -> Result<&'static Transport, &'static str> {
+    static TRANSPORT: OnceLock<Result<Transport, &'static str>> = OnceLock::new();
+    TRANSPORT
+        .get_or_init(|| {
+            let limits = &crate::runtime_config::active().limits;
+            let http = reqwest::Client::builder()
+                .connect_timeout(Duration::from_millis(limits.rpc_connect_timeout_ms))
+                .pool_idle_timeout(Duration::from_millis(limits.rpc_pool_idle_ms))
+                .tcp_keepalive(Duration::from_millis(limits.rpc_tcp_keepalive_ms))
+                .build()
+                .map_err(|_| "RPC_HTTP_CLIENT")?;
+            // At most `rpc_concurrency` calls are admitted at once: as many workers.
+            let workers = usize::try_from(limits.rpc_concurrency).map_err(|_| "RPC_TRANSPORT")?;
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(workers)
+                .thread_name("p0-rpc-transport")
+                .enable_all()
+                .build()
+                .map_err(|_| "RPC_TRANSPORT_RUNTIME")?;
+            Ok(Transport { runtime, http })
+        })
+        .as_ref()
+        .map_err(|code| *code)
+}
+
+/// V2-07: the blocking HTTP client settings of the other host classes (Jupiter, Jito): connect
+/// timeout, pool idle and TCP keepalive from `Limits`, like the RPC transport.
+pub fn blocking_http() -> reqwest::blocking::ClientBuilder {
+    let limits = &crate::runtime_config::active().limits;
+    reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_millis(limits.rpc_connect_timeout_ms))
+        .pool_idle_timeout(Duration::from_millis(limits.rpc_pool_idle_ms))
+        .tcp_keepalive(Duration::from_millis(limits.rpc_tcp_keepalive_ms))
+}
+
+#[derive(Clone)]
 struct BudgetedSender {
     url: String,
     timeout: Duration,
     work: Workload,
-    http: reqwest::Client,
     budget: Arc<Budget>,
-    stats: Mutex<RpcTransportStats>,
+    stats: Arc<Mutex<RpcTransportStats>>,
 }
 struct CallTimer<'a> {
     stats: &'a Mutex<RpcTransportStats>,
@@ -793,6 +857,7 @@ impl BudgetedSender {
             stats: &self.stats,
             started: now,
         };
+        let http = &transport().map_err(CallError::Transport)?.http;
         let own_limit = now + Duration::from_millis(self.budget.limits.rpc_timeout_ms);
         let caller_bound = caller_deadline && deadline < own_limit;
         let deadline = deadline.min(own_limit);
@@ -811,16 +876,21 @@ impl BudgetedSender {
         };
         for attempt in 0..attempts {
             let budget = self.budget.clone();
-            let permit = tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
-                .await
-                .map_err(|_| CallError::Transport("RPC_ADMISSION_JOIN"))?
-                .map_err(|r| {
-                    if r.deadline_bound || Instant::now() >= deadline {
-                        CallError::Deadline(r.code)
-                    } else {
-                        CallError::Budget(r.code)
-                    }
-                })?;
+            // V2-07: a permit that is free now is taken inline; only a waiting admission
+            // occupies a blocking thread.
+            let permit = match budget.try_admit(work) {
+                Some(permit) => permit,
+                None => tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
+                    .await
+                    .map_err(|_| CallError::Transport("RPC_ADMISSION_JOIN"))?
+                    .map_err(|r| {
+                        if r.deadline_bound || Instant::now() >= deadline {
+                            CallError::Deadline(r.code)
+                        } else {
+                            CallError::Budget(r.code)
+                        }
+                    })?,
+            };
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Err(CallError::Deadline("RPC_REQUEST_BUDGET"));
@@ -848,8 +918,7 @@ impl BudgetedSender {
             } else {
                 &self.url
             };
-            let response = self
-                .http
+            let response = http
                 .post(endpoint)
                 .timeout(remaining)
                 .json(&body)
@@ -957,8 +1026,17 @@ impl RpcSender for BudgetedSender {
             + self
                 .timeout
                 .min(Duration::from_millis(self.budget.limits.rpc_timeout_ms));
-        self.send_until(self.work, request, params, deadline, false)
+        let transport = transport().map_err(rpc_error)?;
+        let sender = self.clone();
+        transport
+            .runtime
+            .spawn(async move {
+                sender
+                    .send_until(sender.work, request, params, deadline, false)
+                    .await
+            })
             .await
+            .unwrap_or(Err(CallError::Transport("RPC_TRANSPORT_JOIN")))
             .map_err(CallError::into_client_error)
     }
     fn get_transport_stats(&self) -> RpcTransportStats {
@@ -974,7 +1052,6 @@ impl RpcSender for BudgetedSender {
 /// RPC stack. Built once per adapter (its runtime and connection pool are reused).
 pub struct DeadlineRpc {
     sender: BudgetedSender,
-    runtime: tokio::runtime::Runtime,
 }
 impl DeadlineRpc {
     /// Like `rpc_client`: against the process-wide provider budget (always; F-01/C07).
@@ -983,28 +1060,15 @@ impl DeadlineRpc {
     }
     /// Against an explicit budget (an isolated profile; tests that hold its permits).
     pub fn with_budget(url: String, work: Workload, budget: Arc<Budget>) -> Result<Self, String> {
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_millis(
-                crate::runtime_config::active()
-                    .limits
-                    .rpc_connect_timeout_ms,
-            ))
-            .build()
-            .map_err(|_| "DEADLINE_RPC_HTTP_CLIENT".to_string())?;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|_| "DEADLINE_RPC_RUNTIME".to_string())?;
+        transport().map_err(String::from)?;
         Ok(Self {
             sender: BudgetedSender {
                 url,
                 timeout: Duration::from_millis(budget.limits.rpc_timeout_ms),
                 work,
-                http,
                 budget,
-                stats: Mutex::new(RpcTransportStats::default()),
+                stats: Arc::new(Mutex::new(RpcTransportStats::default())),
             },
-            runtime,
         })
     }
     /// One call in this transport's workload; an expired deadline starts nothing.
@@ -1027,7 +1091,7 @@ impl DeadlineRpc {
         if Instant::now() >= deadline {
             return Err(CallError::Deadline("RPC_DEADLINE"));
         }
-        self.runtime.block_on(
+        transport().map_err(CallError::Transport)?.runtime.block_on(
             self.sender
                 .send_until(work, request, params, deadline, true),
         )
@@ -1423,9 +1487,8 @@ mod http_tests {
             url,
             timeout: Duration::from_millis(500),
             work: Workload::Simulation,
-            http: reqwest::Client::new(),
             budget: Arc::new(Budget::default()),
-            stats: Mutex::new(RpcTransportStats::default()),
+            stats: Arc::new(Mutex::new(RpcTransportStats::default())),
         }
     }
     /// F-01/C07: every RPC client of the process is budgeted — no start path (an argument-less

@@ -30,6 +30,8 @@ parameters! {
     rpc_queue = 64, "requests", "P0_RPC_QUEUE";
     rpc_timeout_ms = 30000, "ms", "P0_RPC_TIMEOUT_MS";
     rpc_connect_timeout_ms = 10000, "ms", "P0_RPC_CONNECT_TIMEOUT_MS";
+    rpc_pool_idle_ms = 90000, "ms", "P0_RPC_POOL_IDLE_MS";
+    rpc_tcp_keepalive_ms = 15000, "ms", "P0_RPC_TCP_KEEPALIVE_MS";
     rpc_attempts = 3, "attempts", "P0_RPC_ATTEMPTS";
     rpc_backoff_ms = 500, "ms", "P0_RPC_BACKOFF_MS";
     rpc_backoff_max_ms = 60000, "ms", "P0_RPC_BACKOFF_MAX_MS";
@@ -106,8 +108,8 @@ parameters! {
 /// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1);
 /// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8); 5: `fee_rps`,
 /// `send_rps` (V2-05); 6: `sweep_batch_max_events`, `sweep_batch_max_age_ns`,
-/// `ingress_burst_before_detect` (V2-08).
-pub const LIMITS_REVISION: u16 = 6;
+/// `ingress_burst_before_detect` (V2-08); 7: `rpc_pool_idle_ms`, `rpc_tcp_keepalive_ms` (V2-07).
+pub const LIMITS_REVISION: u16 = 7;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -1110,9 +1112,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                6,
-                76,
-                "HWSViav76NEfVQFFag8JXYnTWwxWYUsnNNsciahpwmaq".to_string()
+                7,
+                78,
+                "HkWcp9bpwsBp7cbBE464bG2aCe7AD7ybEVtHumuDVwzw".to_string()
             )
         );
     }

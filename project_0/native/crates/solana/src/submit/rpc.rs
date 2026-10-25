@@ -668,6 +668,143 @@ mod v2_05_pacing_tests {
 }
 
 #[cfg(test)]
+mod v2_07_transport_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// A loopback JSON-RPC node with HTTP/1.1 keep-alive: every connection serves requests until
+    /// the client closes it; counts the TCP connections accepted.
+    struct Node {
+        url: String,
+        accepts: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+    }
+    impl Drop for Node {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+    }
+    fn node(signature: String) -> Node {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let (accepts, stop) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let (counted, stopped) = (accepts.clone(), stop.clone());
+        std::thread::spawn(move || {
+            while !stopped.load(Ordering::Relaxed) {
+                let Ok((c, _)) = socket.accept() else {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                };
+                counted.fetch_add(1, Ordering::Relaxed);
+                let signature = signature.clone();
+                std::thread::spawn(move || serve(c, &signature));
+            }
+        });
+        Node { url, accepts, stop }
+    }
+    fn serve(c: std::net::TcpStream, signature: &str) {
+        c.set_nonblocking(false).unwrap();
+        let mut writer = c.try_clone().unwrap();
+        let mut reader = BufReader::new(c);
+        loop {
+            let mut len = 0usize;
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    return;
+                }
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    len = v.trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0u8; len];
+            reader.read_exact(&mut body).unwrap();
+            let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let result = match request["method"].as_str().unwrap_or_default() {
+                "getFeeForMessage" => serde_json::json!({"context": {"slot": 5}, "value": 5000}),
+                "simulateTransaction" => serde_json::json!({"context": {"slot": 5},
+                    "value": {"err": null, "logs": [], "unitsConsumed": 3}}),
+                "getSlot" => serde_json::json!(7),
+                "getVersion" => serde_json::json!({"solana-core": "3.0.0", "feature-set": 1}),
+                _ => serde_json::json!(signature),
+            };
+            let reply =
+                serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
+                    .to_string();
+            write!(
+                writer,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
+        }
+    }
+
+    /// V2-07 (P6-01/P8-04): every budgeted RPC call of the process — two candidate adapters
+    /// (fee quote, simulation, send) and a plain budgeted client — runs over one shared HTTP
+    /// transport and reuses one kept-alive connection to the host (before: a pool per adapter
+    /// transport and per client, 4 connections here).
+    #[test]
+    fn v2_07_budgeted_rpc_calls_share_one_connection_per_host() {
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        for field in [
+            "rpc_rps",
+            "rpc_burst",
+            "simulation_rps",
+            "fee_rps",
+            "send_rps",
+            "hotpath_rps",
+        ] {
+            assert!(config.limits.set(field, 1_000), "{field}");
+        }
+        let budget = Arc::new(crate::provider::Budget::configured(&config));
+        let payer = solana_sdk::signature::Keypair::new();
+        let ix = solana_sdk::instruction::Instruction::new_with_bytes(
+            Pubkey::new_unique(),
+            &[1],
+            vec![],
+        );
+        let message = solana_sdk::message::Message::new_with_blockhash(
+            &[ix],
+            Some(&solana_sdk::signer::Signer::pubkey(&payer)),
+            &solana_sdk::hash::Hash::new_unique(),
+        );
+        let tx = VersionedTransaction::try_new(
+            solana_sdk::message::VersionedMessage::Legacy(message),
+            &[&payer],
+        )
+        .unwrap();
+        let node = node(tx.signatures[0].to_string());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let a = RpcSubmitter::with_budget(node.url.clone(), true, budget.clone()).unwrap();
+        let b = RpcSubmitter::with_budget(node.url.clone(), true, budget.clone()).unwrap();
+        assert!(a.fee_for_message(&tx, deadline).is_ok());
+        assert!(matches!(a.simulate(&tx, deadline), SimResult::Ok { .. }));
+        a.submit(&tx, 0).unwrap();
+        assert!(b.fee_for_message(&tx, deadline).is_ok());
+        let rpc = crate::provider::rpc_client_with(
+            node.url.clone(),
+            Duration::from_secs(5),
+            CommitmentConfig::confirmed(),
+            crate::provider::Workload::LiveRead,
+            budget,
+        );
+        assert_eq!(rpc.get_slot().unwrap(), 7);
+        assert_eq!(node.accepts.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[cfg(test)]
 mod q3_error_text_tests {
     use super::*;
 
