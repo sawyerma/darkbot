@@ -205,6 +205,89 @@ fn verdict(f: &VerdictFacts) -> &'static str {
     }
 }
 
+/// BSC-012 (BSC_Bug_V2 P4-G2): the depths below the head at which G0.8's
+/// historical state reads (by canonical block hash, EIP-1898) must work.
+/// G0.8 runs right after the G0.7 receipt window (at most ~2 min); 1200
+/// blocks (~9 min at 450 ms) leave margin. A later re-run needs more, so
+/// 28800 blocks (~3.6 h) are reported, not required.
+const HISTORY_REQUIRED_DEPTHS: [u64; 3] = [1, 128, 1_200];
+const HISTORY_REPORTED_DEPTHS: [u64; 1] = [28_800];
+
+/// Every depth probed with `probe(block_number)`; qualified only when every
+/// required depth answers. Read-only; nothing is written.
+fn qualify_history(
+    head: u64,
+    mut probe: impl FnMut(u64) -> Result<(), String>,
+) -> (bool, Vec<String>) {
+    let mut qualified = true;
+    let mut rows = Vec::new();
+    for (depth, required) in HISTORY_REQUIRED_DEPTHS
+        .iter()
+        .map(|d| (*d, true))
+        .chain(HISTORY_REPORTED_DEPTHS.iter().map(|d| (*d, false)))
+    {
+        let outcome = head
+            .checked_sub(depth)
+            .ok_or_else(|| "head below this depth".to_string())
+            .and_then(&mut probe);
+        if required && outcome.is_err() {
+            qualified = false;
+        }
+        rows.push(format!(
+            "depth={depth} required={required} {}",
+            match outcome {
+                Ok(()) => "OK".to_string(),
+                Err(e) => format!("FAIL {}", bounded_error(&e)),
+            }
+        ));
+    }
+    (qualified, rows)
+}
+
+/// The real probe of one block: its canonical hash, then the Portal's code
+/// and an eth_call at exactly that hash (state present, never `latest`).
+fn history_probe(number: u64) -> Result<(), String> {
+    let block = read_rpc(|| wire::block(number))?.ok_or("block not found")?;
+    if read_rpc(|| wire::code(PORTAL, block.hash))?.is_empty() {
+        return Err("no Portal code at that block".into());
+    }
+    read_rpc(|| wire::eth_call(Address::ZERO, &[], block.hash)).map(|_| ())
+}
+
+/// `g08_mainnet_verify --qualify-history`: the G0.8 endpoint
+/// (BSC_MAINNET_RPC_HTTPS) against HISTORY_*_DEPTHS. Exit 0 only when
+/// qualified; read-only.
+fn qualify_history_cli() -> ! {
+    let ready = read_rpc(wire::chain_id).and_then(|id| {
+        if id == CHAIN_ID {
+            read_rpc(wire::block_number)
+        } else {
+            Err(format!("wrong chain {id}"))
+        }
+    });
+    let head = match ready {
+        Ok(head) => head,
+        Err(e) => {
+            eprintln!("STOP: {}", bounded_error(&e));
+            std::process::exit(2)
+        }
+    };
+    let (qualified, rows) = qualify_history(head, history_probe);
+    println!("head={head}");
+    for row in rows {
+        println!("{row}");
+    }
+    println!(
+        "G08_HISTORY={}",
+        if qualified {
+            "QUALIFIED"
+        } else {
+            "NOT_QUALIFIED"
+        }
+    );
+    std::process::exit(if qualified { 0 } else { 2 })
+}
+
 /// BSC-011 (BSC_Bug_V2 P4-G1): the canonically proven chain outcome on its
 /// own, independent of both captures: UNKNOWN while the chain facts are
 /// unresolved (non-canonical/reorg, incomplete acquisition reads, unknown
@@ -1455,6 +1538,9 @@ fn capture_chain_window(
 }
 
 fn main() {
+    if env::args().skip(1).eq(["--qualify-history"]) {
+        qualify_history_cli();
+    }
     let g07_path = req_env("DARKBOT_G08_G07_EVIDENCE");
     let chain_capture_path = req_env("DARKBOT_G08_CHAIN_JOURNAL");
     let g07_bytes = fs::read(&g07_path).unwrap_or_else(|e| panic!("read {g07_path}: {e}"));
@@ -2554,6 +2640,48 @@ mod tests {
             }),
             "UNRESOLVED"
         );
+    }
+
+    /// BSC-012 (BSC_Bug_V2 P4-G2): the endpoint qualifies only when every
+    /// required depth serves canonical-hash state; deeper ones are reported.
+    #[test]
+    fn the_history_qualification_needs_every_required_depth() {
+        let all = |_: u64| Ok(());
+        let (ok, rows) = qualify_history(1_000_000, all);
+        assert!(ok, "{rows:?}");
+        assert_eq!(
+            rows.len(),
+            HISTORY_REQUIRED_DEPTHS.len() + HISTORY_REPORTED_DEPTHS.len()
+        );
+        // Pruned beyond 128 blocks: not qualified.
+        let (ok, rows) = qualify_history(1_000_000, |n| {
+            if 1_000_000 - n > 128 {
+                Err("missing trie node".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(!ok);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("depth=1200") && r.contains("FAIL")),
+            "{rows:?}"
+        );
+        // Only the reported depth fails: still qualified, the failure shown.
+        let (ok, rows) = qualify_history(1_000_000, |n| {
+            if 1_000_000 - n > 1_200 {
+                Err("pruned".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(ok);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("depth=28800") && r.contains("FAIL"))
+        );
+        // A head below a depth cannot be qualified.
+        assert!(!qualify_history(100, all).0);
     }
 
     /// BSC-011 (BSC_Bug_V2 P4-G1): a proven chain outcome stays visible
