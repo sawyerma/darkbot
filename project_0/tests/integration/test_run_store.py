@@ -342,7 +342,7 @@ class Launchers(unittest.TestCase):
 
     def test_changed_launchers_parse(self):
         self.assertEqual(sorted(p.name for p in SCRIPTS.iterdir() if p.is_file()),
-                         ['capture.sh','gate.sh','preflight.sh','report.sh','smoke.sh','test.sh','verify.sh'])
+                         ['bugs_register.py','capture.sh','gate.sh','preflight.sh','report.sh','smoke.sh','test.sh','verify.sh'])
         for name in ('capture.sh','smoke.sh','preflight.sh','verify.sh','report.sh','test.sh'):
             self.assertEqual(subprocess.run(['bash','-n',str(SCRIPTS/name)]).returncode,0,name)
 
