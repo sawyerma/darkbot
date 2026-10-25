@@ -10,7 +10,14 @@ fi
 buf lint
 p0_tmp=$(mktemp -d)
 trap 'rm -rf "$p0_tmp"' EXIT
+# P0-003: the compatibility base must be a real predecessor of the checked state. In CI it is
+# required explicitly (the workflow derives it from the event); a missing, all-zero, unresolvable
+# base or one equal to the checked commit fails closed instead of comparing a commit with itself.
 p0_base=${PROTOCOL_BASE_REF:-}
+if [[ -z "$p0_base" && -n "${CI:-}" ]]; then
+  echo 'P0-003: PROTOCOL_BASE_REF is required in CI (the event base); refusing a default.' >&2
+  exit 1
+fi
 if [[ -z "$p0_base" ]]; then
   for candidate in main origin/main; do
     if git -C .. rev-parse --verify --quiet "$candidate^{commit}" >/dev/null; then
@@ -19,12 +26,26 @@ if [[ -z "$p0_base" ]]; then
     fi
   done
 fi
-if [[ -z "$p0_base" ]]; then
-  echo 'No compatibility baseline. Set PROTOCOL_BASE_REF to a fetched Git ref.' >&2
+if [[ -z "$p0_base" || "$p0_base" =~ ^0+$ ]]; then
+  echo "P0-003: no compatibility base (got '${p0_base}'). Set PROTOCOL_BASE_REF to a fetched commit." >&2
   exit 1
 fi
+if ! p0_base_sha=$(git -C .. rev-parse --verify --quiet "$p0_base^{commit}"); then
+  echo "P0-003: compatibility base '$p0_base' is not a commit of this checkout (history fetched?)." >&2
+  exit 1
+fi
+if [[ -n "${PROTOCOL_CHECKED_SHA:-}" ]]; then
+  checked_sha=$(git -C .. rev-parse --verify --quiet "$PROTOCOL_CHECKED_SHA^{commit}") || {
+    echo "P0-003: checked commit '$PROTOCOL_CHECKED_SHA' is not a commit of this checkout." >&2
+    exit 1
+  }
+  if [[ "$p0_base_sha" == "$checked_sha" ]]; then
+    echo "P0-003: compatibility base equals the checked commit $checked_sha; no comparison." >&2
+    exit 1
+  fi
+fi
 mkdir -p "$p0_tmp/base"
-git -C .. archive "$p0_base" protocol | tar -x -C "$p0_tmp/base"
+git -C .. archive "$p0_base_sha" protocol | tar -x -C "$p0_tmp/base"
 buf breaking --against "$p0_tmp/base/protocol"
 if [[ "$mode" == --generate ]]; then
   buf generate
@@ -45,4 +66,4 @@ else
   diff -ru "$p0_tmp/docs/protocol" ../docs/protocol
   cmp "$p0_tmp/protocol/schema_id.txt" schema_id.txt
 fi
-echo "protocol contract: PASS (compatibility baseline: $p0_base)"
+echo "protocol contract: PASS (compatibility baseline: $p0_base = $p0_base_sha)"

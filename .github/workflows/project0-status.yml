@@ -1,10 +1,10 @@
 name: Project 0 status contract
 on:
   pull_request:
-    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', 'project_0/scripts/**', 'project_0/tests/**', '.github/workflows/project0-status.yml']
+    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/**', '!project_0/docs/**', '.github/workflows/project0-status.yml']
   push:
     branches: [main]
-    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/native/**', 'project_0/scripts/**', 'project_0/tests/**', '.github/workflows/project0-status.yml']
+    paths: ['protocol/**', 'frontend/**', 'gateway/**', 'project_0/**', '!project_0/docs/**', '.github/workflows/project0-status.yml']
   workflow_dispatch:
 jobs:
   contract-and-ui:
@@ -14,9 +14,23 @@ jobs:
         with:
           fetch-depth: 0
       - uses: bufbuild/buf-setup-action@v1
-      - run: protocol/scripts/check.sh --check
+      # P0-003: the compatibility base is the event's real predecessor, never origin/main (on a push
+      # that is the checked commit itself): push = event.before, pull request = the target branch's
+      # base SHA, workflow_dispatch = the checked commit's parent. check.sh refuses a missing,
+      # unresolvable or identical base (fail-closed).
+      - name: protocol contract against the event base
         env:
-          PROTOCOL_BASE_REF: origin/main
+          EVENT: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$EVENT" in
+            push) base="$PUSH_BEFORE" ;;
+            pull_request) base="$PR_BASE" ;;
+            workflow_dispatch) base="$(git rev-parse "$GITHUB_SHA^")" ;;
+            *) echo "P0-003: no protocol compatibility base for event $EVENT" >&2; exit 1 ;;
+          esac
+          PROTOCOL_BASE_REF="$base" PROTOCOL_CHECKED_SHA="$GITHUB_SHA" protocol/scripts/check.sh --check
       - uses: actions/setup-node@v4
         with:
           node-version: 22
