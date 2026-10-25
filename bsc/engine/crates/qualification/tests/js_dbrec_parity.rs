@@ -84,8 +84,8 @@ fn native_from_frozen(
     )
     .unwrap();
     let mut d = Draft::new(to);
-    let mut lines = format!(
-        "_provenance.tool\tText\t-\tparity-test\n_provenance.observed_unix_ms\tU64\t-\t1792231844873\n"
+    let mut lines = String::from(
+        "_provenance.tool\tText\t-\tparity-test\n_provenance.observed_unix_ms\tU64\t-\t1792231844873\n",
     );
     d.set(PROVENANCE_TOOL, "parity-test")
         .set(PROVENANCE_OBSERVED_UNIX_MS, 1_792_231_844_873u64);

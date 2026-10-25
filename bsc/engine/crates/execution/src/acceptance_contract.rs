@@ -148,8 +148,17 @@ fn requalification_pass(
 /// Checks every individual safety flag, not just the aggregate.
 pub fn require_dry_pass(dry: &Record) -> Result<(), String> {
     use g06a::dry as d;
-    for tag in [d::DRY_1, d::DRY_2, d::DRY_3, d::DRY_4, d::DRY_ALL, d::ZERO_EGRESS_STRUCTURAL] {
-        if dry.bool(tag).map_err(|e| e.0)? != true { return Err(format!("DRY flag {tag} is not PASS")); }
+    for tag in [
+        d::DRY_1,
+        d::DRY_2,
+        d::DRY_3,
+        d::DRY_4,
+        d::DRY_ALL,
+        d::ZERO_EGRESS_STRUCTURAL,
+    ] {
+        if !dry.bool(tag).map_err(|e| e.0)? {
+            return Err(format!("DRY flag {tag} is not PASS"));
+        }
     }
     Ok(())
 }

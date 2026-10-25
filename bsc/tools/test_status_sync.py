@@ -65,4 +65,35 @@ class SyncTests(unittest.TestCase):
    requests=run/'bsc-operational/g07_candidates/requests';requests.mkdir(parents=True)
    (requests/'1b4e28ba-2fa1-41d2-883f-0016d3cca427.request.dbrec').write_bytes(b'request')
    with self.assertRaises(ValueError):mod.sync(root,app,run)
+ def test_the_snapshot_carries_the_checkout_the_public_config_and_exactly_the_v5_bound_inputs(self):
+  # BSC-050 A-scan: GUI readiness evaluates the bound evidence and the checkout's latch/authority.
+  with tempfile.TemporaryDirectory(prefix='darkbot-sync-') as folder:
+   base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
+   subprocess.run(['git','init','-q',str(root)],check=True)
+   (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
+   (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_RPC_HTTPS=https://rpc.example.invalid/\n')
+   subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
+   subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
+   (root/'bsc/config/g07_attempt1_acceptance_v5.dbrec').write_bytes(b'v5 fixture')
+   sign=root/'bsc/.local/g06a_sign/g06a_sign_20261025T000000Z';sign.mkdir(parents=True)
+   (sign/'dry_result.dbrec').write_bytes(b'bound dry')
+   (root/'bsc/config/g07_producer_witness_source_attempt1.json').write_bytes(b'{"legacy":1}')
+   release=root/'bsc/engine/target/release';release.mkdir(parents=True)
+   lister=release/'g07_pre_live_readiness'
+   def bound(*paths):
+    lister.write_text('#!/bin/sh\n[ "$1" = --bound-inputs ] || exit 9\nprintf "%s\\n" '+' '.join(repr(p) for p in paths)+'\n');lister.chmod(0o755)
+   bound('bsc/.local/g06a_sign/g06a_sign_20261025T000000Z/dry_result.dbrec','bsc/config/g07_producer_witness_source_attempt1.json')
+   mod.sync(root,app,run)
+   snapshot=(app/'bsc-source').resolve()
+   self.assertEqual((snapshot/'CHECKOUT').read_text().strip(),str(root.resolve()))
+   self.assertTrue((snapshot/'bsc/config/readiness.public.env').is_file())
+   self.assertEqual((snapshot/'bsc/.local/g06a_sign/g06a_sign_20261025T000000Z/dry_result.dbrec').read_bytes(),b'bound dry')
+   manifest=(snapshot/'SOURCES.SHA256SUMS').read_text()
+   self.assertIn('./bsc/config/g07_producer_witness_source_attempt1.json',manifest)
+   for escape in ['../outside','/etc/hosts','bsc/missing.dbrec']:
+    bound(escape)
+    with self.assertRaises(ValueError,msg=escape):mod.sync(root,app,run)
+   lister.unlink()
+   with self.assertRaises(ValueError):mod.sync(root,app,run)
 if __name__=='__main__':unittest.main()

@@ -275,12 +275,11 @@ pub(crate) fn decode_builder_answer(status_line: &str, body: &[u8]) -> BuilderAn
     if let Some(error) = response.get("error").filter(|e| !e.is_null()) {
         answer.error_code = error.get("code").and_then(serde_json::Value::as_i64);
         answer.error_message = Some(bounded(
-            &error
+            error
                 .get("message")
                 .and_then(serde_json::Value::as_str)
                 .or_else(|| error.as_str())
-                .unwrap_or("unrecognized RPC error")
-                .to_string(),
+                .unwrap_or("unrecognized RPC error"),
             1024,
         ));
     }

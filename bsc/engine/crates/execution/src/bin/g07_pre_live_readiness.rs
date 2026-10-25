@@ -122,6 +122,53 @@ fn bound_input(
     Ok(record)
 }
 
+/// The checkout whose attempt latch and authority remote count: this one,
+/// or, for a GUI snapshot (no Git checkout of its own), the main checkout it
+/// was synced from (`DARKBOT_BSC_CHECKOUT`, absolute; it passes the same
+/// repository root check or the latch row stays BLOCKED).
+fn attempt_checkout() -> PathBuf {
+    if Path::new(".git").is_dir() {
+        return PathBuf::from(".");
+    }
+    env::var_os("DARKBOT_BSC_CHECKOUT")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Every file the v5 contract binds (its records and the hashed legacy
+/// sources of imports), repository-relative: exactly what a GUI snapshot
+/// carries so that readiness evaluates the bound evidence.
+fn bound_inputs() -> Result<Vec<String>, String> {
+    let bytes = fs::read(V5_RELATIVE_PATH).map_err(|e| format!("{V5_RELATIVE_PATH}: {e}"))?;
+    let contract = decode(&c::V5, &bytes).map_err(|e| e.to_string())?;
+    let mut paths = Vec::new();
+    for tag in [
+        c::DRY_RECORD_PATH,
+        c::PREFLIGHT_RECORD_PATH,
+        c::BUILDER_POLICY_RECORD_PATH,
+        c::WITNESS_SOURCE_RECORD_PATH,
+        c::LOCAL_SIMULATION_RECORD_PATH,
+        c::ECONOMICS_RECORD_PATH,
+        c::PORTAL_UPGRADE_RECORD_PATH,
+        c::LAUNCH_PATH_RECORD_PATH,
+    ] {
+        let path = contract.text(tag).map_err(|e| e.to_string())?.to_string();
+        let record = schema::decode_any(&fs::read(&path).map_err(|e| format!("{path}: {e}"))?)
+            .map_err(|e| format!("{path}: {e}"))?;
+        // An audited import carries its hashed legacy source; native records do not.
+        if let Some(darkbot_bsc_record::Value::Text(legacy)) =
+            record.get(schema::IMPORT_LEGACY_PATH)
+        {
+            paths.push(legacy.clone());
+        }
+        paths.push(path);
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     use schema::g06a::{
         builder_policy as b, dry as d, economics, local_simulation, portal_upgrade, preflight as f,
@@ -329,9 +376,48 @@ fn evaluate(current_rpc: bool, report: &mut Draft) -> Result<(), String> {
     );
     check(report, "CANDIDATE_SELECTION", status, &detail);
     validate_attempt_id(&snap.attempt_id)?;
-    match absent_attempt_latch(Path::new("."), &snap.attempt_id) {
+    let checkout = attempt_checkout();
+    match absent_attempt_latch(&checkout, &snap.attempt_id) {
         Ok(()) => check(report, "ATTEMPT_LATCH", "PASS", "Verified main checkout; no attempt directory; no latch created"),
         Err(reason) => check(report, "ATTEMPT_LATCH", "BLOCKED", &reason),
+    }
+    // BSC-005: before the approval no shared authority of this attempt may
+    // exist on the checkout's origin (any one is granted or consumed).
+    if current_rpc {
+        let git = darkbot_bsc_execution::attempt_authority::Git {
+            repo: checkout.clone(),
+            remote: "origin".into(),
+            timeout: std::time::Duration::from_secs(30),
+        };
+        match darkbot_bsc_execution::attempt_authority::existing(&git, &snap.attempt_id) {
+            Ok(None) => check(
+                report,
+                "ATTEMPT_AUTHORITY",
+                "PASS",
+                "No shared authority of this attempt on origin; the grant follows the approval (g07_attempt_authority grant)",
+            ),
+            Ok(Some(head)) => check(
+                report,
+                "ATTEMPT_AUTHORITY",
+                "STOP",
+                &format!(
+                    "A shared authority of this attempt already exists on origin (granted or consumed, {head}); this attempt is never released again"
+                ),
+            ),
+            Err(reason) => check(
+                report,
+                "ATTEMPT_AUTHORITY",
+                "BLOCKED",
+                &format!("Shared attempt authority unreadable: {reason}"),
+            ),
+        }
+    } else {
+        check(
+            report,
+            "ATTEMPT_AUTHORITY",
+            "BLOCKED",
+            "No remote read in zero-egress mode",
+        );
     }
     let (ln, bn, _) = validate_current_preflight(&baseline, &baseline, launcher, buyer, gas);
     check(
@@ -513,6 +599,7 @@ const REQUIRED_TECHNICAL_CHECKS: &[&str] = &[
     "SIGNED_TX_HASHES",
     "CANDIDATE_SELECTION",
     "ATTEMPT_LATCH",
+    "ATTEMPT_AUTHORITY",
     "FROZEN_PREFLIGHT",
     "BUILDER_FRESHNESS",
     "CURRENT_DEPLOYMENTS_NONCES_FUNDING_GAS",
@@ -579,10 +666,24 @@ fn finish_report(report: &mut Draft) -> (Vec<u8>, i32) {
 
 fn main() {
     let args: Vec<_> = env::args().skip(1).collect();
+    if args.len() == 1 && args[0] == "--bound-inputs" {
+        match bound_inputs() {
+            Ok(paths) => {
+                for path in paths {
+                    println!("{path}");
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("STOP: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
     let current_rpc = args.iter().any(|a| a == "--current-rpc");
     let binary = args.iter().any(|a| a == "--binary");
     if args.iter().any(|a| a != "--current-rpc" && a != "--binary") {
-        eprintln!("usage: g07_pre_live_readiness [--current-rpc] [--binary]");
+        eprintln!("usage: g07_pre_live_readiness [--current-rpc] [--binary] | --bound-inputs");
         std::process::exit(2);
     }
     let mut report = Draft::new(&r::SCHEMA);

@@ -81,6 +81,48 @@ impl CapturePrearmedProof {
     }
 }
 
+/// Proof that this run consumed the shared one-attempt authority (BSC-005)
+/// of exactly this attempt and exactly the approved v5 bytes: only
+/// `attempt_authority::consume` creates it, so no ARMED build can authorize
+/// without the authority.
+///
+/// ```compile_fail
+/// let _ = darkbot_bsc_execution::acceptance_guard::AttemptAuthorityProof { attempt_id: String::new(), v5_sha256: [0; 32] };
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttemptAuthorityProof {
+    attempt_id: String,
+    v5_sha256: [u8; 32],
+}
+
+impl AttemptAuthorityProof {
+    #[cfg_attr(not(feature = "g07-mainnet"), allow(dead_code))]
+    pub(crate) fn new(attempt_id: &str, v5_sha256: [u8; 32]) -> Self {
+        Self {
+            attempt_id: attempt_id.to_string(),
+            v5_sha256,
+        }
+    }
+}
+
+/// The consumed authority is of this attempt and of exactly these v5 bytes.
+fn verify_attempt_authority(
+    proof: Option<&AttemptAuthorityProof>,
+    attempt_id: &str,
+    v5_bytes: &[u8],
+) -> Result<(), String> {
+    match proof {
+        Some(p)
+            if p.attempt_id == attempt_id
+                && p.v5_sha256 == darkbot_bsc_record::sha256(v5_bytes) =>
+        {
+            Ok(())
+        }
+        Some(_) => Err("the consumed attempt authority is of another attempt or contract".into()),
+        None => Err("no consumed shared attempt authority (BSC-005) for this run".into()),
+    }
+}
+
 /// Proof that the producer-witness source contract was validated for an
 /// attempt. A bound source contract is NOT a real producer-timing witness.
 ///
@@ -151,6 +193,8 @@ pub struct LiveGuardContext {
     pub candidate_id: String,
     /// The v5-bound launch path, re-verified at the current pinned block.
     pub launch_path_current: Option<launch_path::CurrentProof>,
+    /// BSC-005: this run's consumed shared one-attempt authority.
+    pub attempt_authority: Option<AttemptAuthorityProof>,
 }
 
 #[derive(Debug, Clone)]
@@ -638,6 +682,7 @@ pub fn verify_live_authorization(
     if !snap.execution_ready {
         return Err("v5 authorization.execution_ready is not true".into());
     }
+    verify_attempt_authority(ctx.attempt_authority.as_ref(), &ctx.attempt_id, &bytes)?;
     if !ctx
         .dry_pass
         .record_sha256
@@ -781,6 +826,14 @@ fn verify_v5_runtime(
     Ok(())
 }
 
+/// Exact runtime identity binding; no normalization or empty identity.
+pub fn verify_attempt_id(expected: &str, actual: &str) -> Result<(), String> {
+    if expected.is_empty() || expected != actual {
+        return Err("runtime attempt_id differs from the frozen contract".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,6 +930,23 @@ mod tests {
         assert!(verify_v5_runtime((None, None), &bound, Some(&ok), ("SELF_A", &id)).is_err());
     }
 
+    /// BSC-005: an armed guard authorizes only with the proof that this run
+    /// consumed the shared authority of exactly this attempt and exactly the
+    /// approved v5 bytes; every ARMED build therefore contains the authority.
+    #[test]
+    fn the_guard_needs_the_consumed_attempt_authority_of_this_attempt_and_contract() {
+        let v5 = b"approved v5 bytes";
+        let proof = AttemptAuthorityProof::new("attempt-1", darkbot_bsc_record::sha256(v5));
+        assert!(verify_attempt_authority(Some(&proof), "attempt-1", v5).is_ok());
+        assert!(
+            verify_attempt_authority(None, "attempt-1", v5)
+                .unwrap_err()
+                .contains("authority")
+        );
+        assert!(verify_attempt_authority(Some(&proof), "attempt-2", v5).is_err());
+        assert!(verify_attempt_authority(Some(&proof), "attempt-1", b"other v5").is_err());
+    }
+
     #[test]
     fn frozen_hash_is_unarmed_or_sha256() {
         assert!(
@@ -887,12 +957,4 @@ mod tests {
                         .all(|b| b.is_ascii_hexdigit()))
         );
     }
-}
-
-/// Exact runtime identity binding; no normalization or empty identity.
-pub fn verify_attempt_id(expected: &str, actual: &str) -> Result<(), String> {
-    if expected.is_empty() || expected != actual {
-        return Err("runtime attempt_id differs from the frozen contract".into());
-    }
-    Ok(())
 }

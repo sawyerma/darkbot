@@ -54,9 +54,25 @@ def sync(root, app, run):
         for path in sorted((root/parent).rglob('*.dbrec')):
             if any(p.is_symlink() for p in path.parents if p!=root): raise ValueError('symlink source')
             files.append(path)
-    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/tools/readiness_job.py']:
+    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
+    # BSC-050 A-scan: exactly the files the v5 contract binds, as the native readiness names them.
+    if (root/'bsc/config/g07_attempt1_acceptance_v5.dbrec').exists():
+        lister=root/'bsc/engine/target/release/g07_pre_live_readiness'
+        if not lister.is_file(): raise ValueError('a v5 contract exists but g07_pre_live_readiness is not built')
+        listed=subprocess.run([str(lister),'--bound-inputs'],cwd=root,env={'PATH':'/usr/bin:/bin'},capture_output=True,text=True,timeout=60)
+        if listed.returncode!=0: raise ValueError('the v5-bound inputs cannot be listed: '+listed.stderr.strip()[-300:])
+        for name in listed.stdout.splitlines():
+            relative=pathlib.PurePosixPath(name)
+            if relative.is_absolute() or '..' in relative.parts or not name: raise ValueError('unsafe bound input: '+name)
+            path=root
+            for part in relative.parts:
+                path=path/part
+                if path.is_symlink(): raise ValueError('bound input linked: '+name)
+            if not path.is_file(): raise ValueError('bound input missing: '+name)
+            files.append(path)
+    files=list(dict.fromkeys(files))
     manifest={}
     for path in files:
         relative=path.relative_to(root); data=regular(path)
@@ -71,6 +87,8 @@ def sync(root, app, run):
     commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
     if subprocess.check_output(['git','-C',str(root),'status','--porcelain','--','bsc'],text=True).strip(): commit+='-dirty'
     (dest/'COMMIT').write_text(commit+'\n'); (dest/'SYNCED_AT').write_text(str(int(time.time())))
+    # The main checkout whose attempt latch and shared authority the GUI readiness reads.
+    (dest/'CHECKOUT').write_text(str(root)+'\n')
     # The snapshot manifest in the evidence SHA256SUMS format (BSC-048: no JSON); its hash is the snapshot identity.
     raw=''.join(f'{manifest[name]}  ./{name}\n' for name in sorted(manifest)).encode()
     (dest/'SOURCES.SHA256SUMS').write_bytes(raw); (dest/'SNAPSHOT_SHA256').write_text(digest(raw))

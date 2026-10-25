@@ -223,3 +223,179 @@ fn a_rebound_but_stale_or_contradictory_launch_path_or_candidate_binding_fails_c
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// The status of the readiness row `name` in a rendered record.
+fn row(text: &str, name: &str) -> Option<String> {
+    let index = text.lines().find_map(|l| {
+        let (key, value) = l.split_once(" = ")?;
+        (key.ends_with("].name") && value.trim_matches('"') == name)
+            .then(|| key.trim_end_matches(".name").to_string())
+    })?;
+    text.lines().find_map(|l| {
+        l.strip_prefix(&format!("{index}.status = "))
+            .map(|v| v.trim_matches('"').to_string())
+    })
+}
+
+fn run_with(root: &Path, args: &[&str], env: &[(&str, &Path)]) -> (Option<i32>, String) {
+    let mut cmd = Command::new(BIN);
+    cmd.current_dir(root)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("BSC_MAINNET_RPC_HTTPS", "https://127.0.0.1:1")
+        .args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().unwrap();
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+    )
+}
+
+fn git(at: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .current_dir(at)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// BSC-005 / BSC-050 A-scan: a GUI snapshot (no Git checkout of its own)
+/// reads the attempt latch and the shared attempt authority of the main
+/// checkout it was synced from; before approval no authority may exist.
+#[test]
+fn a_gui_snapshot_reads_the_latch_and_the_shared_authority_of_its_checkout() {
+    let root = v5_root("authority", |_| {});
+    let attempt = darkbot_bsc_execution::acceptance_guard::parse_v5(
+        &std::fs::read(root.join(V5_RELATIVE_PATH)).unwrap(),
+    )
+    .unwrap()
+    .attempt_id;
+    let (_, text) = run_with(&root, &[], &[]);
+    assert_eq!(
+        row(&text, "ATTEMPT_LATCH").as_deref(),
+        Some("BLOCKED"),
+        "{text}"
+    );
+    assert_eq!(
+        row(&text, "ATTEMPT_AUTHORITY").as_deref(),
+        Some("BLOCKED"),
+        "{text}"
+    );
+    // The main checkout: Git, an origin, ignored bsc/.local.
+    let base = std::env::temp_dir().join(format!("darkbot-readiness-co-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let co = base.join("checkout");
+    std::fs::create_dir_all(co.join("bsc/engine")).unwrap();
+    git(&base, &["init", "-q", "--bare", "origin.git"]);
+    git(&co, &["init", "-q"]);
+    git(
+        &co,
+        &[
+            "remote",
+            "add",
+            "origin",
+            base.join("origin.git").to_str().unwrap(),
+        ],
+    );
+    std::fs::write(co.join("bsc/engine/Cargo.toml"), "").unwrap();
+    std::fs::write(co.join("bsc/.gitignore"), "/.local/\n").unwrap();
+    let env = [
+        ("DARKBOT_BSC_CHECKOUT", co.as_path()),
+        ("HOME", base.as_path()),
+    ];
+    let (_, text) = run_with(&root, &["--current-rpc"], &env);
+    assert_eq!(
+        row(&text, "ATTEMPT_LATCH").as_deref(),
+        Some("PASS"),
+        "{text}"
+    );
+    assert_eq!(
+        row(&text, "ATTEMPT_AUTHORITY").as_deref(),
+        Some("PASS"),
+        "{text}"
+    );
+    // Any authority of this attempt on origin before approval: STOP.
+    git(
+        &co,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "x",
+        ],
+    );
+    git(
+        &co,
+        &[
+            "push",
+            "-q",
+            "origin",
+            &format!("HEAD:refs/darkbot/g07-attempt-authority/{attempt}"),
+        ],
+    );
+    let (code, text) = run_with(&root, &["--current-rpc"], &env);
+    assert_eq!(
+        row(&text, "ATTEMPT_AUTHORITY").as_deref(),
+        Some("STOP"),
+        "{text}"
+    );
+    assert_eq!(code, Some(2));
+    assert!(text.contains("PRE_LIVE_READINESS=STOP"), "{text}");
+    // A latch in the checkout: BLOCKED.
+    std::fs::create_dir_all(co.join("bsc/.local/g07").join(&attempt)).unwrap();
+    let (_, text) = run_with(&root, &[], &env);
+    assert_eq!(
+        row(&text, "ATTEMPT_LATCH").as_deref(),
+        Some("BLOCKED"),
+        "{text}"
+    );
+    std::fs::remove_dir_all(base).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// BSC-050 A-scan: the snapshot sync copies exactly what v5 binds; the
+/// readiness binary itself names those files (records and hashed legacy
+/// sources), nothing else.
+#[test]
+fn bound_inputs_are_exactly_the_files_the_v5_contract_binds() {
+    let root = v5_root("bound", |_| {});
+    let (code, text) = run_with(&root, &["--bound-inputs"], &[]);
+    assert_eq!(code, Some(0), "{text}");
+    let mut listed: Vec<&str> = text.lines().collect();
+    listed.sort();
+    let contract = decode(&c::V5, &std::fs::read(root.join(V5_RELATIVE_PATH)).unwrap()).unwrap();
+    let mut expected: Vec<String> = [
+        c::DRY_RECORD_PATH,
+        c::PREFLIGHT_RECORD_PATH,
+        c::BUILDER_POLICY_RECORD_PATH,
+        c::WITNESS_SOURCE_RECORD_PATH,
+        c::LOCAL_SIMULATION_RECORD_PATH,
+        c::ECONOMICS_RECORD_PATH,
+        c::PORTAL_UPGRADE_RECORD_PATH,
+        c::LAUNCH_PATH_RECORD_PATH,
+    ]
+    .iter()
+    .map(|t| contract.text(*t).unwrap().to_string())
+    .chain([
+        "bsc/config/g06a_builder_floor_addendum_2026-10-11.json".to_string(),
+        "bsc/config/g07_producer_witness_source_attempt1.json".to_string(),
+    ])
+    .collect();
+    expected.sort();
+    assert_eq!(listed, expected);
+    assert!(listed.iter().all(|p| root.join(p).is_file()));
+    std::fs::remove_dir_all(root).unwrap();
+}

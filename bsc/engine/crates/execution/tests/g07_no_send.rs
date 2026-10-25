@@ -439,6 +439,10 @@ fn one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_u
     assert!(helper.contains("release_unsent_attempt("));
     assert!(helper.contains(".return_unsent("));
     assert!(!SOURCE[pos("barrier.wait();")..].contains(".return_unsent("));
+    // The guard itself requires the proof of exactly this consumed authority.
+    let guard = pos("let contract = match verify_live_authorization(");
+    assert!(consume < guard);
+    assert!(SOURCE[guard..].contains("attempt_authority: Some(authority.proof()),"));
 }
 
 #[test]

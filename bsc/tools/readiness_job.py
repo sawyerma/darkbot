@@ -27,10 +27,33 @@ temporary = rundir / ('bsc.readiness.' + launch + '.tmp')
 result = 'FAILED'
 exit_code = 1
 verdict = None
+def public_config(path):
+    """The snapshot's public readiness configuration: exactly the two known keys."""
+    values = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'): continue
+        key, sep, value = line.partition('=')
+        if not sep or key not in ('BSC_READINESS_RPC_HTTPS', 'DARKBOT_G07_CLOCK_ID') or key in values:
+            raise ValueError('unexpected readiness configuration line')
+        values[key] = value.strip()
+    return values
+
 try:
     # Exact allowlist: never inherit a signing key, RPC token or builder authorization.
-    env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin',
-           'BSC_MAINNET_RPC_HTTPS': 'https://bsc-dataseed.bnbchain.org'}
+    # BSC-050 A-scan: the endpoint and the clock come from the snapshot's public
+    # configuration (no hardcoded endpoint), the boot ID from the OS, and the main
+    # checkout (attempt latch, shared authority) from the snapshot.
+    config = public_config(root / 'bsc/config/readiness.public.env')
+    rpc = config.get('BSC_READINESS_RPC_HTTPS', '')
+    if not rpc.startswith('https://') or any(c.isspace() for c in rpc):
+        raise ValueError('readiness RPC endpoint not configured')
+    env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(pathlib.Path.home()),
+           'BSC_MAINNET_RPC_HTTPS': rpc}
+    if config.get('DARKBOT_G07_CLOCK_ID'): env['DARKBOT_G07_CLOCK_ID'] = config['DARKBOT_G07_CLOCK_ID']
+    boot = subprocess.run(['/usr/sbin/sysctl', '-n', 'kern.bootsessionuuid'], capture_output=True, text=True, timeout=5).stdout.strip()
+    if boot: env['DARKBOT_G07_BOOT_ID'] = boot
+    if (root / 'CHECKOUT').is_file(): env['DARKBOT_BSC_CHECKOUT'] = (root / 'CHECKOUT').read_text().strip()
     with temporary.open('xb') as output:
         child = subprocess.Popen([binary, '--current-rpc', '--binary'], cwd=root,
                                  env=env, stdout=output, start_new_session=True)

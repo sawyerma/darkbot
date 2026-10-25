@@ -326,6 +326,10 @@ fn linked(headers: &[Header], from: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// One verified header batch: start block, first parent hash, last hash
+/// and its candidate headers.
+type HeaderBatch = (u64, [u8; 32], [u8; 32], Vec<Header>);
+
 /// Complete coverage of `from..=to` on `url`: hash-verified, linked headers,
 /// and verified receipts for every bloom candidate.
 pub(crate) fn cover(url: &str, from: u64, to: u64) -> Coverage {
@@ -334,8 +338,8 @@ pub(crate) fn cover(url: &str, from: u64, to: u64) -> Coverage {
     let topic = word(UPGRADED_TOPIC);
     let batches = (to - from) / HEADER_BATCH + 1;
     let next = AtomicU64::new(0);
-    // Per batch: (first parent hash, last hash, candidate headers).
-    let done: Mutex<Vec<(u64, [u8; 32], [u8; 32], Vec<Header>)>> = Mutex::new(Vec::new());
+    // Per batch: (start, first parent hash, last hash, candidate headers).
+    let done: Mutex<Vec<HeaderBatch>> = Mutex::new(Vec::new());
     thread::scope(|scope| {
         for _ in 0..HEADER_WORKERS.min(batches) {
             scope.spawn(|| {
@@ -356,7 +360,7 @@ pub(crate) fn cover(url: &str, from: u64, to: u64) -> Coverage {
                     let candidates =
                         headers.into_iter().filter(|h| candidate(h, &proxy, &topic)).collect();
                     done.lock().unwrap().push((start, first_parent, last, candidates));
-                    if n % 200 == 0 {
+                    if n.is_multiple_of(200) {
                         eprintln!("R0 coverage: header batch {n}/{batches} (block {start})");
                     }
                 }
@@ -398,7 +402,7 @@ pub(crate) fn cover(url: &str, from: u64, to: u64) -> Coverage {
                         verified_upgrades(header, &receipts, &proxy, &topic)
                     });
                     found.lock().unwrap().extend(upgrades);
-                    if n % 2000 == 0 {
+                    if n.is_multiple_of(2000) {
                         eprintln!("R0 coverage: candidate {n}/{} (block {})", candidates.len(), header.number);
                     }
                 }

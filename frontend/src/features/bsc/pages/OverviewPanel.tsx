@@ -3,6 +3,7 @@ import { Notice } from "@/shared/ui/graphite/Notice";
 import { selectStatus, useBscStore } from "../store/bscStore";
 import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
 import { SECTIONS } from "../model/placement";
+import { checkStatus } from "../model/checks";
 import type { BscTab } from "../BscPage";
 
 const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
@@ -13,7 +14,6 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
   const { projection: s, status } = useBscStore(selectStatus);
   const job = s?.jobs.find(j => j.job === "readiness");
   const r = s?.readiness;
-  const clock = r?.checks.find(c => c.name === "CLOCK_CONFIG");
   return <>
     <Section title={title(1)}>
       <Line label="Source quality" value={<ValueState state={status} />} hint="Transport state of bsc.status, never a trading permission" />
@@ -42,7 +42,8 @@ export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
       <Line label="Pre-Live verdict" value={<ValueState state={r?.verdict} />} />
       <Line label="Mode" value={<ValueState state={r?.mode || undefined} />} />
       <Line label="Selected candidate binding" value={<ValueState state={r?.candidateBinding || undefined} />} hint="Only BOUND counts for the selected candidate; STALE is history" />
-      <Line label="Clock (CLOCK_CONFIG)" value={<ValueState state={clock?.value.split(" · ")[0]} />} hint="Needs an attested clock/boot ID; the GUI job stays BLOCKED without one" />
+      <Line label="Clock (CLOCK_CONFIG)" value={<ValueState state={checkStatus(r?.checks, "CLOCK_CONFIG")} />} hint="Needs an attested clock/boot ID; the GUI job stays BLOCKED without one" />
+      <Line label="Attempt authority (ATTEMPT_AUTHORITY)" value={<ValueState state={checkStatus(r?.checks, "ATTEMPT_AUTHORITY")} />} hint="Shared one-attempt authority on origin: PASS = none yet (grant after approval); STOP = granted or consumed, never again" />
       <Line label="Blocking reasons" value={r?.reasons.length ? r.reasons.join(" · ") : "—"} />
     </Section>
     <Section title={title(5)}>

@@ -168,6 +168,17 @@ impl Git {
         Ok(head)
     }
 
+    /// Deletes `reference` only while it still holds `expected`.
+    fn delete(&self, reference: &str, expected: &str) -> Result<(), String> {
+        let lease = format!("--force-with-lease={reference}:{expected}");
+        let refspec = format!(":{reference}");
+        self.run(
+            &["push", "--porcelain", &lease, &self.remote, &refspec],
+            b"",
+        )
+        .map(|_| ())
+    }
+
     /// One compare-and-swap of `reference` from `expected` (`""`: absent).
     fn swap(&self, reference: &str, expected: &str, new: &str) -> Result<(), String> {
         let lease = format!("--force-with-lease={reference}:{expected}");
@@ -198,6 +209,90 @@ pub fn state(git: &Git, binding: &Binding) -> Result<State, String> {
     })
 }
 
+/// Whatever the remote holds for this attempt ID (any binding, any state);
+/// readiness, before approval, requires that nothing exists yet.
+pub fn existing(git: &Git, attempt_id: &str) -> Result<Option<String>, String> {
+    let probe = Binding {
+        attempt_id: attempt_id.to_string(),
+        v5_sha256: [0; 32],
+        launch_tx_hash: [0; 32],
+        buy_tx_hash: [0; 32],
+    };
+    git.remote_head(&probe.reference()?)
+}
+
+/// Qualifies the remote as the authority medium with exactly the production
+/// operations, on a self-test attempt ID of its own (`selftest-<nonce>`):
+/// create-only grant, concurrent consumers with exactly one winner, a stale
+/// claim that cannot return it, return and re-consume, and a deletion under
+/// lease that leaves nothing behind. Every step is reported.
+pub fn qualify_remote(git: &Git, nonce: &str) -> Result<Vec<String>, String> {
+    let binding = Binding {
+        attempt_id: format!("selftest-{nonce}"),
+        v5_sha256: [0x5e; 32],
+        launch_tx_hash: [0x1a; 32],
+        buy_tx_hash: [0x2b; 32],
+    };
+    let reference = binding.reference()?;
+    let mut steps = Vec::new();
+    let result = (|| -> Result<(), String> {
+        let mut step = |name: &str, ok: bool| {
+            steps.push(format!("{name}={}", if ok { "OK" } else { "FAILED" }));
+            if ok {
+                Ok(())
+            } else {
+                Err(format!("remote qualification failed at {name}"))
+            }
+        };
+        step("absent_before", state(git, &binding)? == State::Missing)?;
+        step("grant", grant(git, &binding).is_ok())?;
+        step("grant_is_create_only", grant(git, &binding).is_err())?;
+        step("granted", state(git, &binding)? == State::Authorized)?;
+        let winners: Vec<Claim> = std::thread::scope(|s| {
+            let runs: Vec<_> = (0..4)
+                .map(|i| {
+                    let binding = binding.clone();
+                    s.spawn(move || consume(git, &binding, &format!("selftest-racer-{i}")).ok())
+                })
+                .collect();
+            runs.into_iter()
+                .filter_map(|r| r.join().ok().flatten())
+                .collect()
+        });
+        step(
+            "concurrent_consumers_exactly_one_winner",
+            winners.len() == 1,
+        )?;
+        step(
+            "second_consume_refused",
+            consume(git, &binding, "late").is_err(),
+        )?;
+        let first = &winners[0];
+        step(
+            "return_unsent",
+            first.return_unsent(git).contains("returned"),
+        )?;
+        let second = consume(git, &binding, "again").map_err(|e| format!("re-consume: {e}"))?;
+        step(
+            "stale_claim_cannot_return",
+            first.return_unsent(git).contains("stays consumed"),
+        )?;
+        step(
+            "delete_under_lease",
+            git.delete(&reference, &second.consumed).is_ok(),
+        )?;
+        step("absent_after", state(git, &binding)? == State::Missing)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        // Best effort: never leave a self-test authority behind.
+        if let Ok(Some(head)) = git.remote_head(&reference) {
+            let _ = git.delete(&reference, &head);
+        }
+    }
+    result.map(|()| steps)
+}
+
 /// The user's grant: creates the authority, never over an existing one.
 /// (A push of the commit a ref already holds is a no-op that Git reports as
 /// success, so the existing state is read first; the lease still decides.)
@@ -221,6 +316,7 @@ pub struct Claim {
     reference: String,
     authorized: String,
     consumed: String,
+    proof: crate::acceptance_guard::AttemptAuthorityProof,
 }
 
 /// Takes the authority: AUTHORIZED -> CONSUMED in one compare-and-swap.
@@ -252,10 +348,19 @@ pub fn consume(git: &Git, binding: &Binding, note: &str) -> Result<Claim, String
         reference,
         authorized,
         consumed,
+        proof: crate::acceptance_guard::AttemptAuthorityProof::new(
+            &binding.attempt_id,
+            binding.v5_sha256,
+        ),
     })
 }
 
 impl Claim {
+    /// The guard's proof that this run holds exactly this authority.
+    pub fn proof(&self) -> crate::acceptance_guard::AttemptAuthorityProof {
+        self.proof.clone()
+    }
+
     /// Gives the authority back after a provably unsent run: CONSUMED (this
     /// claim) -> AUTHORIZED. Fails closed when anything else moved it.
     pub fn return_unsent(&self, git: &Git) -> String {
@@ -355,6 +460,15 @@ mod tests {
             "a stale claim"
         );
         assert!(second.return_unsent(&git[2]).contains("returned"));
+    }
+
+    #[test]
+    fn the_remote_qualification_runs_the_production_operations_and_leaves_nothing() {
+        let (_, git) = remote("qualify", 1);
+        let steps = qualify_remote(&git[0], "unit").unwrap();
+        assert_eq!(steps.len(), 10, "{steps:?}");
+        assert!(steps.iter().all(|s| s.ends_with("=OK")), "{steps:?}");
+        assert_eq!(existing(&git[0], "selftest-unit"), Ok(None));
     }
 
     #[test]

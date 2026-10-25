@@ -72,6 +72,7 @@ fn matching_context() -> LiveGuardContext {
         candidate_profile: "SELF_A".into(),
         candidate_id: "00".repeat(32),
         launch_path_current: None,
+        attempt_authority: None,
     }
 }
 

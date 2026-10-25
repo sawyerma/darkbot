@@ -4,7 +4,12 @@
 //! ```text
 //! g07_attempt_authority status
 //! g07_attempt_authority grant --attempt <attempt_id>
+//! g07_attempt_authority selftest
 //! ```
+//!
+//! `selftest` qualifies `origin` as the authority medium with exactly the
+//! production operations on a self-test ref of its own, which it deletes
+//! again (`attempt_authority::qualify_remote`); no real attempt is touched.
 //!
 //! Both derive the binding from the v5 contract (`V5_RELATIVE_PATH`) and the
 //! DRY record it binds: attempt ID, the contract's SHA-256 and the two signed
@@ -87,7 +92,21 @@ fn run(args: &[String]) -> Result<(), String> {
             );
             Ok(())
         }
-        _ => Err("usage: g07_attempt_authority status | grant --attempt <attempt_id>".into()),
+        [cmd] if cmd == "selftest" => {
+            let mut nonce = [0u8; 8];
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut nonce))
+                .map_err(|e| format!("nonce: {e}"))?;
+            let steps = attempt_authority::qualify_remote(&git, &hex(&nonce))?;
+            for step in steps {
+                println!("{step}");
+            }
+            println!("REMOTE_CAS_QUALIFIED=YES");
+            Ok(())
+        }
+        _ => Err(
+            "usage: g07_attempt_authority status | grant --attempt <attempt_id> | selftest".into(),
+        ),
     }
 }
 

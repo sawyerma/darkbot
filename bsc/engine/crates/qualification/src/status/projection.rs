@@ -581,16 +581,13 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     if let Some((p, r)) = latest(&records, &[schema::g07::readiness::SCHEMA.name]) {
         readiness.evidence = Some(evidence(root, p, Some(r)));
         // Native vocabulary unchanged; anything else is UNKNOWN, never a pass.
-        readiness.verdict = match field(r, "status").as_deref() {
-            Some(v @ ("PASS_READ_ONLY" | "BLOCKED" | "STOP")) => v,
-            _ => "UNKNOWN",
-        }
-        .into();
-        readiness.mode = match field(r, "mode").as_deref() {
-            Some(v @ ("READ_ONLY_RPC" | "OFFLINE_ZERO_EGRESS")) => v,
-            _ => "UNKNOWN",
-        }
-        .into();
+        let known = |name: &str, vocabulary: &[&str]| {
+            field(r, name)
+                .filter(|v| vocabulary.contains(&v.as_str()))
+                .unwrap_or_else(|| "UNKNOWN".into())
+        };
+        readiness.verdict = known("status", &["PASS_READ_ONLY", "BLOCKED", "STOP"]);
+        readiness.mode = known("mode", &["READ_ONLY_RPC", "OFFLINE_ZERO_EGRESS"]);
         if let Ok(checks) = r.nested_all(schema::g07::readiness::CHECKS) {
             for c in checks {
                 let name = field(&c, "name").unwrap_or_default();
@@ -828,12 +825,11 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     // G0.7 and G0.8 only belong together with the same attempt and, for a result, the hash
     // of exactly that G0.7 record; otherwise both stay independent observations.
     let mut g07_reasons = Vec::new();
-    if let Some((_, g07)) = execution {
-        if !guard.attempt_id.is_empty()
-            && field(g07, "attempt_id").as_deref() != Some(&guard.attempt_id)
-        {
-            g07_reasons.push("ATTEMPT_ID_NOT_V5_BOUND".into());
-        }
+    if let Some((_, g07)) = execution
+        && !guard.attempt_id.is_empty()
+        && field(g07, "attempt_id").as_deref() != Some(&guard.attempt_id)
+    {
+        g07_reasons.push("ATTEMPT_ID_NOT_V5_BOUND".into());
     }
     let mut g08_reasons = Vec::new();
     if let Some((_, r)) = g08 {
