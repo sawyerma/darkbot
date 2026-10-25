@@ -28,6 +28,8 @@ export interface TransportView {
   connected: boolean | null;
   lastFrameAgeNs: bigint | null;
   applicationFrames: bigint | null;
+  /** A01: reconnects of the ingress before its current session; null before a health report. */
+  reconnects: number | null;
   lastSlot: bigint | null;
   lastState: string;
   lastCode: string;

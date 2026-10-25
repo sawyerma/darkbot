@@ -360,6 +360,7 @@ fn transport_status(
         // R19: the age at this frame's send time, never a stale relative age.
         last_frame_age_ns: health.and_then(TransportSnapshot::last_frame_age_ns_now),
         application_frames: health.map(|h| h.application_frames),
+        reconnects: health.map(|h| h.reconnects),
         last_slot: health.and_then(|h| h.last_slot),
         last_state: state.map(|s| s.state.clone()).unwrap_or_default(),
         last_code: state.map(|s| s.code.clone()).unwrap_or_default(),
@@ -1128,6 +1129,7 @@ mod contract_tests {
                 last_frame_age_ns: Some(1_500_000),
                 last_slot: Some(400_000_123),
                 application_frames: 42,
+                reconnects: 1,
                 sampled_at: None,
             }),
             transport_state: Some(Arc::new(TransportStateSnapshot {
@@ -1217,6 +1219,22 @@ mod contract_tests {
             "finance_summary.hex",
             &finance_summary(owner).encode_to_vec(),
         );
+    }
+
+    /// A01: the ingress session reconnects reach the Capture transport status; before a health
+    /// report the field stays unset.
+    #[test]
+    fn a01_capture_transport_carries_the_session_reconnects() {
+        let t = capture_state(&golden_snapshot()).transport.unwrap();
+        assert_eq!(t.reconnects, Some(1));
+        let state_only = transport_status(
+            None,
+            Some(&TransportStateSnapshot {
+                state: "RECOVERING".into(),
+                ..Default::default()
+            }),
+        );
+        assert_eq!(state_only.unwrap().reconnects, None);
     }
 
     /// P0-PROD-CTRL-04/08: the owner projection reaches the wire unchanged; unknown finance

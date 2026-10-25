@@ -2960,3 +2960,29 @@ fn r24_market_only_retention_is_configured_bounded_and_fail_closed() {
     assert_eq!(core.stats.unique_transactions, 3, "nothing evicted");
     assert!(core.seen.len() <= 3, "bounded");
 }
+
+/// A01: the reconnects of the ingress session reach the Capture projection with its health.
+#[test]
+fn a01_source_health_reconnects_reach_the_capture_projection() {
+    use darkbot_solana::ingress::SourceHealth;
+    let tap = crate::status_tap::StatusTap::new();
+    let mut reader = tap.reader();
+    let mut core = ObserverCore::new(program(), MarketSource::Logs, EnrichConfig::DEFAULT);
+    core.status_tap = Some(tap);
+    core.start_observation(1, 4_000_000_001);
+    let health = IngressEvent::Health(SourceHealth {
+        source: SourceKind::WsRpcControl,
+        connected: true,
+        last_frame_age_ns: None,
+        frames: 3,
+        reconnects: 2,
+        last_slot: None,
+        t_rx_ns: 100,
+    });
+    core.on_ingress_event(health, 0, &mut VecSink::default())
+        .unwrap();
+    let s = reader
+        .wait_changed(std::time::Duration::from_millis(5))
+        .unwrap();
+    assert_eq!(s.transport.unwrap().reconnects, 2);
+}

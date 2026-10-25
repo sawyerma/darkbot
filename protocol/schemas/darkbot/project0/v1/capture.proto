@@ -133,6 +133,8 @@ message TransportStatus {
   optional uint64 last_valid_slot = 8;
   // Wall clock of the last transport state event.
   optional uint64 last_state_unix_ms = 9;
+  // Reconnects of the ingress before its current session (A01); unset before the first health report.
+  optional uint32 reconnects = 10;
 }
 
 // One named engine counter.

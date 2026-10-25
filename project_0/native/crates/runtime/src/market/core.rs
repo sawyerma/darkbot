@@ -837,6 +837,7 @@ impl ObserverCore {
                 if let Some(tap) = &self.status_tap {
                     tap.publish_transport(crate::status_tap::TransportSnapshot {
                         application_frames: h.frames,
+                        reconnects: h.reconnects,
                         connected: h.connected,
                         last_frame_age_ns: h.last_frame_age_ns,
                         last_slot: h.last_slot,

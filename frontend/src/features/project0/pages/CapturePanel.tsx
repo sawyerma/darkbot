@@ -22,7 +22,7 @@ function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null;
       <DetailRow title="Status feed" value={`${topicStatus} · last reported values`}/>
       <DetailRow title="Run" value={`${run.runId} · ${run.source}/${run.commitment}`}/>
       <DetailRow title="Configured duration" value={run.configuredDurationSeconds === 0n ? "Until stopped" : `${run.configuredDurationSeconds} s`}/>
-      <DetailRow title="Stream" value={t ? `${t.connected == null ? "unknown" : t.connected ? "connected" : "disconnected"} · frame age ${fmtAgeNs(t.lastFrameAgeNs)}${t.lastCode ? ` · last ${t.lastCode}` : ""}` : DASH}/>
+      <DetailRow title="Stream" value={t ? `${t.connected == null ? "unknown" : t.connected ? "connected" : "disconnected"} · frame age ${fmtAgeNs(t.lastFrameAgeNs)} · reconnects ${t.reconnects ?? DASH}${t.lastCode ? ` · last ${t.lastCode}` : ""}` : DASH}/>
       <DetailRow title="Transactions / liquidation events" value={`${orDash(counterOf(capture, "unique_transactions"))} / ${orDash(counterOf(capture, "liquidation_events"))}`}/>
       <DetailRow title="Verdict (live)" value={a?.verdict ?? DASH}/>
       <DetailRow title="Provider budget" value={fmtProvider(capture?.provider)}/>

@@ -7,7 +7,7 @@ function view(phase: CapturePhaseName, transport: Partial<TransportView> = {}, c
   return {
     run: null, assessment: null, writer: null, provider: null,
     phase: { phase, changedUnixMs: 0n, streamReadyUnixS: null, stopReason: "", drainComplete: null, writeError: null, endResult },
-    transport: { connected: true, lastFrameAgeNs: null, applicationFrames: 1n, lastSlot: null,
+    transport: { connected: true, lastFrameAgeNs: null, applicationFrames: 1n, reconnects: null, lastSlot: null,
       lastState: "CAPTURING", lastCode: "APPLICATION_SLOT_PROGRESS", lastAttempt: 1, ...transport },
     market: { observing: true, streamReady: true, counters: new Map(Object.entries(counters)) },
   };

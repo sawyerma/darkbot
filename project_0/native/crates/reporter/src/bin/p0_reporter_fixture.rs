@@ -46,6 +46,7 @@ fn main() {
         tap.publish_transport(TransportSnapshot {
             connected: true,
             application_frames: i,
+            reconnects: 0,
             last_frame_age_ns: Some(1000000 * i),
             last_slot: Some(300000000 + i),
             sampled_at: None,

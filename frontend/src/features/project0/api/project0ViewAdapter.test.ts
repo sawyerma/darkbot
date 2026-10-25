@@ -19,6 +19,7 @@ describe("Project 0 wire contract (golden frames written by the Rust reporter)",
     expect(capture.run?.runId).toBe("golden-run");
     expect(capture.phase?.phase).toBe("CAPTURE");
     expect(capture.transport?.lastCode).toBe("WSS_HTTP_429");
+    expect(capture.transport?.reconnects).toBe(1); // A01
     expect(capture.writer?.diskFreeBytes).toBe(10n);
     expect(capture.writer?.queuePeakBytes).toBe(18_446_744_073_709_551_615n);
     expect(capture.assessment?.verdict).toBe("MARKET_DATA_INCOMPLETE");

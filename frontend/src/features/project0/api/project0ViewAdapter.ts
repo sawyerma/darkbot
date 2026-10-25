@@ -63,6 +63,7 @@ export function toCaptureView(m: CaptureMessage): CaptureView {
           connected: transport.connected ?? null,
           lastFrameAgeNs: transport.lastFrameAgeNs ?? null,
           applicationFrames: transport.applicationFrames ?? null,
+          reconnects: transport.reconnects ?? null,
           lastSlot: transport.lastSlot ?? null,
           lastState: transport.lastState,
           lastCode: transport.lastCode,

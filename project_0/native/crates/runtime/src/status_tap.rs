@@ -89,6 +89,8 @@ pub struct TransportSnapshot {
     pub last_frame_age_ns: Option<u64>,
     pub last_slot: Option<u64>,
     pub application_frames: u64,
+    /// A01: reconnects of the ingress before its current session.
+    pub reconnects: u32,
     /// R19: monotonic publication time of `last_frame_age_ns`, so a reader reports the age at
     /// its own send time instead of re-sending a stale relative age as fresh.
     pub sampled_at: Option<std::time::Instant>,

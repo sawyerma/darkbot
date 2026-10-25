@@ -1745,6 +1745,7 @@ WebSocket ingress state.
 | last_attempt | [uint32](#uint32) | optional | Attempt number of the last transport state event. |
 | last_valid_slot | [uint64](#uint64) | optional | Last valid slot reported with the last transport state event. |
 | last_state_unix_ms | [uint64](#uint64) | optional | Wall clock of the last transport state event. |
+| reconnects | [uint32](#uint32) | optional | Reconnects of the ingress before its current session (A01); unset before the first health report. |
 
 
 
