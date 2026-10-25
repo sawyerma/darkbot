@@ -257,7 +257,7 @@ fn run(frozen_path: &str, out_path: &str) -> Result<String, String> {
         .set(b::OBSERVED_DATE, date.as_str())
         .set(
             12,
-            "G0.7 attempt-1 requalification (Portal v5.25.0): builder floor/ranking re-determined from the official documentation",
+            "G0.7 attempt-1 requalification: builder floor/ranking re-determined from the official documentation (the Portal deployment is bound by the run's preflight)",
         )
         .set(b::STATUS, "DRY3_POLICY_READY")
         .set(b::BLOCKRAZOR_VERIFIED, true)
@@ -342,6 +342,15 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC-050 A-scan B5: the policy's scope text names no Portal version
+    /// (the deployment is bound by the run's preflight, not by this text).
+    #[test]
+    fn the_policy_scope_text_names_no_portal_version() {
+        let source = include_str!("g06a_builder_policy_record.rs");
+        let code = &source[..source.find(concat!("#[cfg(test)]\n", "mod tests")).unwrap()];
+        assert!(!code.contains(concat!("Portal v", "5.")));
+    }
 
     #[test]
     fn the_blockrazor_floor_is_read_from_its_rule_and_never_assumed() {
