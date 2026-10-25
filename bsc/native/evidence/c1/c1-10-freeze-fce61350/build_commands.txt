@@ -1,0 +1,4 @@
+darkbot_commit fce61350
+geth: git clone --shared <bsc-geth repo> ; git checkout --detach cdb7548b5baacfdae92f9f63437d6456411665f3 ; python3 bsc/tools/c1_apply_geth_overlay.py <clone> ; go build -o bsc/.local/c1_freeze/geth ./cmd/geth   (go version go1.25.0 darwin/arm64)
+rust: cd bsc/engine ; cargo build --release --locked --offline -p darkbot-bsc-geth-ipc --example c19_consumer --example c16_host_profile --example c19b_capture ; cargo build --release --locked --offline -p darkbot-bsc-qualification --bin c19_report --bin c19b_report --bin c1_freeze   (rustc 1.93.1 (01f6ddf75 2026-02-11) (Homebrew))
+env: GOPROXY=off GOTOOLCHAIN=local GOFLAGS=-mod=mod

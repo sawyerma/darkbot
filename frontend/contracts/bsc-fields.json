@@ -3794,7 +3794,7 @@
       "status": "EXCLUDED",
       "wire": "none",
       "topic": "none",
-      "reason": "C1.10 freeze inputs/record live outside the repository and are checked by c1_freeze --verify"
+      "reason": "C1.10 freeze inputs/record (copy in bsc/native/evidence/c1/c1-10-freeze-*); verified by c1_freeze --verify at their darkbot_commit, not a GUI state"
     }
   ]
 }
