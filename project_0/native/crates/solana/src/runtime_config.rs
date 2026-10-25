@@ -41,6 +41,8 @@ parameters! {
     history_rps = 2, "requests/s", "P0_HISTORY_RPS";
     analytics_rps = 2, "requests/s", "P0_ANALYTICS_RPS";
     simulation_rps = 2, "requests/s", "P0_SIMULATION_RPS";
+    fee_rps = 2, "requests/s", "P0_FEE_RPS";
+    send_rps = 2, "requests/s", "P0_SEND_RPS";
     wss_rps = 1, "connections/s", "P0_WSS_RPS";
     wss_connections = 2, "connections", "P0_WSS_CONNECTIONS";
     wss_subscriptions = 65536, "subscriptions", "P0_WSS_SUBSCRIPTIONS";
@@ -99,8 +101,9 @@ parameters! {
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
 /// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1);
-/// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8).
-pub const LIMITS_REVISION: u16 = 4;
+/// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8); 5: `fee_rps`,
+/// `send_rps` (V2-05).
+pub const LIMITS_REVISION: u16 = 5;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -1103,9 +1106,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                4,
-                71,
-                "DqejpTXkqa3XVHsi21nU5HupQt2Ghuko261jNk4oRYoz".to_string()
+                5,
+                73,
+                "55b2EdjzNQY8ApfHA14oGAWBCee8QfswdvN93UPeBTDY".to_string()
             )
         );
     }

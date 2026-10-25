@@ -209,6 +209,8 @@ fn n2_budget(concurrency: u64) -> std::sync::Arc<darkbot_solana::provider::Budge
     c.limits.rpc_burst = 100;
     c.limits.rpc_concurrency = concurrency;
     c.limits.simulation_rps = 1_000;
+    c.limits.fee_rps = 1_000;
+    c.limits.send_rps = 1_000;
     c.limits.hotpath_rps = 1_000;
     c.limits.rpc_attempts = 3;
     // Retries after a server error fit inside the deadline (the default backoff is 500 ms).
@@ -534,6 +536,8 @@ fn n2_budget_default_backoff() -> std::sync::Arc<darkbot_solana::provider::Budge
     c.limits.rpc_burst = 100;
     c.limits.rpc_concurrency = 4;
     c.limits.simulation_rps = 1_000;
+    c.limits.fee_rps = 1_000;
+    c.limits.send_rps = 1_000;
     c.limits.hotpath_rps = 1_000;
     c.limits.rpc_attempts = 3;
     std::sync::Arc::new(darkbot_solana::provider::Budget::configured(&c))

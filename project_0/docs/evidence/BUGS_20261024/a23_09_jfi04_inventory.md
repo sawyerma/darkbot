@@ -32,7 +32,7 @@ explicit offline import · **C** operator config/approval file · **I** internal
 | runtime/src/analytics/measurement.rs | 12 | R H | `PhaseRecord::legacy_json` view; JSON plan file only for historical/manual runs (launcher hands a `.p0j`) |
 | runtime/src/bin/p0-probe-costs.rs | 12 | W R | getTransaction/getSignaturesForAddress probe, stdout |
 | runtime/src/orchestration/boot_network.rs | 12 | W | `p0ctl doctor --scope network` reads |
-| solana/src/provider.rs | 11 | W | metered HTTP JSON-RPC sender |
+| solana/src/provider.rs | 13 | W | metered HTTP JSON-RPC sender (25.10. V2-05: `call_as` wire params/result) |
 | solana/examples/p0-gap-ws-proxy.rs | 10 | W | example loopback WS proxy (qualification) |
 | solana/src/submit/rpc.rs | 9 | W | simulate/fee/send bodies, `sim_result_of` |
 | runtime/src/execution/one_shot.rs | 7 | H | `read_legacy` of a pre-binary `<wallet>.json` (once, bound by hash) |
@@ -78,3 +78,4 @@ Not violations, watched: `JsonlSink` is a public production type built only in t
 `p0-strict-verify --compat` renders legacy JSON after a live verify (opt-in, transitional).
 
 25.10. (F10): strict verifier cache typed (`ChainCacheEntry`, kind 318, bound to read + `WIRE_DECODER_VERSION`); JSON only in `wire_params`/`wire_answer`/`fetch`; kind 311 read-only historical; open internal list empty, pin 287.
+25.10. (V2-05): provider.rs 11 → 13 (`DeadlineRpc::call_as`, JSON-RPC wire only); pin 289.

@@ -24,11 +24,18 @@ pub enum Workload {
     Deployment,
     History,
     Websocket,
+    /// V2-05: `getFeeForMessage` of a candidate — its own pacing slot (`fee_rps`), so the
+    /// simulation after it waits only for the global token bucket.
+    FeeQuote,
+    /// V2-05: `sendTransaction` — its own pacing slot (`send_rps`), never behind a simulation.
+    Send,
     /// C5: financial reconciliation — the highest admission priority, paced in the analytics
     /// slot it shares with `Winner` (their combined rate stays `analytics_rps`) and always inside
     /// the same global RPS/burst/call/byte budget: no additional request budget.
     Reconcile,
 }
+/// Pacing slots: one per workload; `Reconcile` (the last) shares `Winner`'s.
+const WORKLOAD_SLOTS: usize = Workload::Reconcile as usize;
 impl Workload {
     /// Pacing slot. `Reconcile` shares `Winner`'s, so it gains precedence, never extra rate.
     fn index(self) -> usize {
@@ -52,7 +59,7 @@ struct State {
     effective_rps: f64,
     bytes: u64,
     successes: u32,
-    next_workload: [Instant; 7],
+    next_workload: [Instant; WORKLOAD_SLOTS],
     cooldown: Instant,
     rate_limits: u32,
     requests: u64,
@@ -201,6 +208,10 @@ impl Budget {
         drop(s);
         self.changed.notify_all();
     }
+    /// The operational limits this budget was built from.
+    pub fn limits(&self) -> &crate::runtime_config::Limits {
+        &self.limits
+    }
     pub fn configured(config: &crate::runtime_config::RuntimeConfig) -> Self {
         let now = Instant::now();
         Self {
@@ -221,7 +232,7 @@ impl Budget {
                 effective_rps: config.limits.rpc_rps as f64,
                 bytes: 0,
                 successes: 0,
-                next_workload: [now; 7],
+                next_workload: [now; WORKLOAD_SLOTS],
                 cooldown: now,
                 rate_limits: 0,
                 requests: 0,
@@ -383,7 +394,10 @@ impl Budget {
                         (
                             match w {
                                 Workload::Reconcile => 0,
-                                Workload::LiveRead | Workload::Simulation => 1,
+                                Workload::LiveRead
+                                | Workload::Simulation
+                                | Workload::FeeQuote
+                                | Workload::Send => 1,
                                 Workload::Bootstrap | Workload::Websocket => 2,
                                 _ => 3,
                             },
@@ -404,6 +418,8 @@ impl Budget {
                     Workload::Bootstrap => self.limits.bootstrap_rps,
                     Workload::LiveRead | Workload::Deployment => self.limits.hotpath_rps,
                     Workload::Simulation => self.limits.simulation_rps,
+                    Workload::FeeQuote => self.limits.fee_rps,
+                    Workload::Send => self.limits.send_rps,
                     Workload::History => self.limits.history_rps,
                     // C5: the configured analytics rate, but a pacing slot of its own.
                     Workload::Winner | Workload::Reconcile => self.limits.analytics_rps,
@@ -766,6 +782,7 @@ impl BudgetedSender {
     /// workloads). Ordinary calls (`RpcSender::send`) pass `false` and keep their behaviour.
     async fn send_until(
         &self,
+        work: Workload,
         request: RpcRequest,
         params: Value,
         deadline: Instant,
@@ -793,7 +810,6 @@ impl BudgetedSender {
             self.budget.limits.rpc_attempts
         };
         for attempt in 0..attempts {
-            let work = self.work;
             let budget = self.budget.clone();
             let permit = tokio::task::spawn_blocking(move || budget.admit(work, deadline, None))
                 .await
@@ -857,7 +873,7 @@ impl BudgetedSender {
                 eprintln!(
                     "[PROVIDER/RPC] method={request} status={} workload={:?} attempt={}",
                     response.status().as_u16(),
-                    self.work,
+                    work,
                     attempt + 1
                 );
             }
@@ -941,7 +957,7 @@ impl RpcSender for BudgetedSender {
             + self
                 .timeout
                 .min(Duration::from_millis(self.budget.limits.rpc_timeout_ms));
-        self.send_until(request, params, deadline, false)
+        self.send_until(self.work, request, params, deadline, false)
             .await
             .map_err(CallError::into_client_error)
     }
@@ -991,9 +1007,19 @@ impl DeadlineRpc {
             runtime,
         })
     }
-    /// One call; an expired deadline starts nothing.
+    /// One call in this transport's workload; an expired deadline starts nothing.
     pub fn call(
         &self,
+        request: RpcRequest,
+        params: Value,
+        deadline: Instant,
+    ) -> Result<Value, CallError> {
+        self.call_as(self.sender.work, request, params, deadline)
+    }
+    /// V2-05: one call paced in `work`'s slot — the same transport, pool and budget.
+    pub fn call_as(
+        &self,
+        work: Workload,
         request: RpcRequest,
         params: Value,
         deadline: Instant,
@@ -1001,8 +1027,14 @@ impl DeadlineRpc {
         if Instant::now() >= deadline {
             return Err(CallError::Deadline("RPC_DEADLINE"));
         }
-        self.runtime
-            .block_on(self.sender.send_until(request, params, deadline, true))
+        self.runtime.block_on(
+            self.sender
+                .send_until(work, request, params, deadline, true),
+        )
+    }
+    /// The provider budget this transport is admitted by.
+    pub fn budget(&self) -> Arc<Budget> {
+        self.sender.budget.clone()
     }
     /// Requests this transport sent so far.
     pub fn request_count(&self) -> usize {

@@ -55,7 +55,7 @@ PINNED = {
     'solana/src/chain.rs': (40, 'WH'),  # wire decode; encode_* only for the read-only historical view check (25.10., F4)
     'solana/src/ingress/mod.rs': (5, 'W'),
     'solana/src/ingress/ws_rpc.rs': (14, 'W'),
-    'solana/src/provider.rs': (11, 'W'),
+    'solana/src/provider.rs': (13, 'W'),  # V2-05: DeadlineRpc::call_as (JSON-RPC wire params/result)
     'solana/src/state/snapshot.rs': (4, 'W'),
     'solana/src/submit/jito.rs': (17, 'W'),
     'solana/src/submit/rpc.rs': (9, 'W'),
@@ -139,7 +139,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 287)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 289)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

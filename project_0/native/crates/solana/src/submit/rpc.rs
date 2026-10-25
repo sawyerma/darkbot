@@ -68,6 +68,8 @@ fn submission_error(e: &solana_client::client_error::ClientError) -> SubmitError
 
 pub struct RpcSubmitter {
     rpc: RpcClient,
+    /// V2-05: `sendTransaction` in its own pacing slot (`Workload::Send`) of the same budget.
+    send: RpcClient,
     /// N2: the deadline-bound transport of candidate fee quotes and simulations; only adapters of
     /// the candidate path have one (`for_candidates`), others answer those calls `Unavailable`
     /// without a network call.
@@ -164,13 +166,23 @@ impl RpcSubmitter {
         skip_preflight: bool,
         candidate: Option<crate::provider::DeadlineRpc>,
     ) -> Self {
-        RpcSubmitter {
-            rpc: crate::provider::rpc_client(
-                url,
-                std::time::Duration::from_secs(30),
+        let budget = candidate
+            .as_ref()
+            .map_or_else(crate::provider::shared, |c| c.budget());
+        let timeout = std::time::Duration::from_millis(budget.limits().rpc_timeout_ms);
+        let client = |work| {
+            crate::provider::rpc_client_with(
+                url.clone(),
+                timeout,
                 CommitmentConfig::confirmed(),
-                crate::provider::Workload::Simulation,
-            ),
+                work,
+                budget.clone(),
+            )
+        };
+        RpcSubmitter {
+            rpc: client(crate::provider::Workload::Simulation),
+            // V2-05: the send in its own pacing slot of the adapter's budget.
+            send: client(crate::provider::Workload::Send),
             candidate,
             skip_preflight,
             max_retries: Some(0),
@@ -316,7 +328,9 @@ impl SubmissionAdapter for RpcSubmitter {
             return Err(super::FeeQuoteError::Unavailable("NO_CANDIDATE_TRANSPORT"));
         };
         let mt0_start = std::time::Instant::now(); // [MT0]
-        let sent = candidate.call(
+                                                   // V2-05: its own pacing slot — the simulation after it is not spaced by `simulation_rps`.
+        let sent = candidate.call_as(
+            crate::provider::Workload::FeeQuote,
             solana_client::rpc_request::RpcRequest::GetFeeForMessage,
             serde_json::json!([base64::engine::general_purpose::STANDARD.encode(tx.message.serialize()),
                 {"commitment":"confirmed"}]),
@@ -361,7 +375,7 @@ impl SubmissionAdapter for RpcSubmitter {
         // [FIX-31] Eindeutige RPC-Ablehnung → Rejected (Kapital frei). Unklar nach dem Senden (Timeout,
         // Verbindungsabbruch, HTTP) → Transport (Ambiguous → Reconciliation). VERIFY Variantennamen 3.1.12.
         let sig = self
-            .rpc
+            .send
             .send_transaction_with_config(tx, cfg)
             .map_err(|e| submission_error(&e))?;
         Ok(SubmitAck {
@@ -522,6 +536,133 @@ fn sim_result_of(value: serde_json::Value) -> SimResult {
                 log_lines,
                 logs_truncated,
             })
+        }
+    }
+}
+
+#[cfg(test)]
+mod v2_05_pacing_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
+
+    /// A loopback JSON-RPC node (one connection per request) that answers until it served a
+    /// `sendTransaction` or `within` ends; returns each request's method and arrival.
+    fn node(
+        signature: String,
+        within: Duration,
+    ) -> (String, std::thread::JoinHandle<Vec<(String, Instant)>>) {
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        socket.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let end = Instant::now() + within;
+            let mut seen = Vec::new();
+            while Instant::now() < end {
+                let Ok((mut c, _)) = socket.accept() else {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                };
+                c.set_nonblocking(false).unwrap();
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let body = loop {
+                    let read = c.read(&mut chunk).unwrap();
+                    buf.extend_from_slice(&chunk[..read]);
+                    if let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..at]).to_ascii_lowercase();
+                        let len = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if buf.len() >= at + 4 + len {
+                            break buf[at + 4..at + 4 + len].to_vec();
+                        }
+                    }
+                    assert!(read > 0, "request truncated");
+                };
+                let arrived = Instant::now();
+                let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let method = request["method"].as_str().unwrap_or_default().to_string();
+                let result = match method.as_str() {
+                    "getFeeForMessage" => {
+                        serde_json::json!({"context": {"slot": 5}, "value": 5000})
+                    }
+                    "simulateTransaction" => serde_json::json!({"context": {"slot": 5},
+                        "value": {"err": null, "logs": [], "unitsConsumed": 3}}),
+                    "getVersion" => serde_json::json!({"solana-core": "3.0.0", "feature-set": 1}),
+                    _ => serde_json::json!(signature),
+                };
+                let reply =
+                    serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
+                        .to_string();
+                write!(
+                    c,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                )
+                .unwrap();
+                let sent = method == "sendTransaction";
+                seen.push((method, arrived));
+                if sent {
+                    break;
+                }
+            }
+            seen
+        });
+        (url, handle)
+    }
+
+    /// V2-05 (P8-02): fee quote, simulation and send each have their own pacing slot
+    /// (`Workload::FeeQuote`/`fee_rps`, `Simulation`, `Send`/`send_rps`) inside the one global
+    /// budget of the adapter. With the defaults (`rpc_rps` 5, `rpc_burst` 1 — unchanged,
+    /// FREE_ONLY) consecutive calls are ≥ 200 ms apart (global token bucket) and below the
+    /// 500 ms of a shared `simulation_rps` = 2 slot (before: fee quote and simulation in
+    /// `Simulation` ≥ 500 ms; the send outside the adapter's budget).
+    #[test]
+    fn v2_05_fee_quote_simulation_and_send_are_paced_in_their_own_slots() {
+        let config = crate::runtime_config::RuntimeConfig::default();
+        let budget = std::sync::Arc::new(crate::provider::Budget::configured(&config));
+        let payer = solana_sdk::signature::Keypair::new();
+        let ix = solana_sdk::instruction::Instruction::new_with_bytes(
+            Pubkey::new_unique(),
+            &[1],
+            vec![],
+        );
+        let message = solana_sdk::message::Message::new_with_blockhash(
+            &[ix],
+            Some(&solana_sdk::signer::Signer::pubkey(&payer)),
+            &solana_sdk::hash::Hash::new_unique(),
+        );
+        let tx = VersionedTransaction::try_new(
+            solana_sdk::message::VersionedMessage::Legacy(message),
+            &[&payer],
+        )
+        .unwrap();
+        let (url, node) = node(tx.signatures[0].to_string(), Duration::from_secs(10));
+        let adapter = RpcSubmitter::with_budget(url, true, budget).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        assert!(adapter.fee_for_message(&tx, deadline).is_ok());
+        assert!(matches!(
+            adapter.simulate(&tx, deadline),
+            SimResult::Ok { .. }
+        ));
+        adapter.submit(&tx, 0).unwrap();
+        let seen = node.join().unwrap();
+        let at = |m: &str| seen.iter().find(|(s, _)| s == m).map(|(_, t)| *t).unwrap();
+        let (fee, sim, send) = (
+            at("getFeeForMessage"),
+            at("simulateTransaction"),
+            at("sendTransaction"),
+        );
+        let global = Duration::from_secs_f64(1.0 / config.limits.rpc_rps as f64);
+        let shared_slot = Duration::from_secs_f64(1.0 / config.limits.simulation_rps as f64);
+        for (name, gap) in [("fee→sim", sim - fee), ("sim→send", send - sim)] {
+            assert!(
+                gap >= global.mul_f64(0.9) && gap < shared_slot,
+                "{name} {gap:?} {seen:?}"
+            );
         }
     }
 }

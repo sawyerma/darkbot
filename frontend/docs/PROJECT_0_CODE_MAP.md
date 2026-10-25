@@ -82,7 +82,7 @@ Produktive Decoder: `runtime/src/market_truth.rs`, `runtime/src/market/rows.rs`,
 |---|---|---|
 | `rpc_rps,rpc_burst,rpc_concurrency,rpc_queue` | `P0_RPC_RPS,P0_RPC_BURST,P0_RPC_CONCURRENCY,P0_RPC_QUEUE` | 5 req/s, 1, 2, 64 |
 | `rpc_timeout_ms,rpc_attempts,rpc_backoff_ms` | `P0_RPC_TIMEOUT_MS,P0_RPC_ATTEMPTS,P0_RPC_BACKOFF_MS` | 30000 ms,3,500 ms |
-| `hotpath_rps,bootstrap_rps,history_rps,analytics_rps,simulation_rps` | `P0_HOTPATH_RPS,P0_BOOTSTRAP_RPS,P0_HISTORY_RPS,P0_ANALYTICS_RPS,P0_SIMULATION_RPS` | 5,5,2,2,2 req/s |
+| `hotpath_rps,bootstrap_rps,history_rps,analytics_rps,simulation_rps,fee_rps,send_rps` | `P0_HOTPATH_RPS,P0_BOOTSTRAP_RPS,P0_HISTORY_RPS,P0_ANALYTICS_RPS,P0_SIMULATION_RPS,P0_FEE_RPS,P0_SEND_RPS` | 5,5,2,2,2,2,2 req/s |
 | `wss_connections,wss_subscriptions,wss_idle_timeout_ms,wss_recovery_ms` | `P0_WSS_CONNECTIONS,P0_WSS_SUBSCRIPTIONS,P0_WSS_IDLE_TIMEOUT_MS,P0_WSS_RECOVERY_MS` | 2,65536,60000ms,120000ms |
 | `workers,ingress_queue,worker_queue` | `RAYON_NUM_THREADS,P0_INGRESS_BUFFER,P0_REMOTE_WORKER_BUFFER` | 1,65536,256 |
 | `bootstrap_seconds,stream_ready_seconds,drain_seconds,market_drain_seconds` | `P0_ECON_BOOTSTRAP_SECS,P0_MARKET_READY_TIMEOUT_SECS,P0_ECON_DRAIN_SECS,P0_MARKET_DRAIN_TIMEOUT_SECS` | 600,600,180,120 s |

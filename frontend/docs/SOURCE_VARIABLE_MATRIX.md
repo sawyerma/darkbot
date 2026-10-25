@@ -25,7 +25,7 @@ Jede Variable benötigt genau einen nativen fachlichen Owner. 'EXISTS_INTERNAL' 
 | Parameterdescriptoren | 'solana/src/runtime_config.rs::{RuntimeConfig,Limits,Resolved::parse,descriptors}' | Name/Typ/Einheit/Default/Min/Max/ENV/change; echtes Schema nur aus Engine |
 | RPC-Quote | 'P0_RPC_RPS,P0_RPC_BURST,P0_RPC_CONCURRENCY,P0_RPC_QUEUE' | req/s / count, Backendlimits |
 | RPC-Timeout/Retry | 'P0_RPC_TIMEOUT_MS,P0_RPC_ATTEMPTS,P0_RPC_BACKOFF_MS' | ms / count |
-| Subsystem-Quotas | 'P0_HOTPATH_RPS,P0_BOOTSTRAP_RPS,P0_HISTORY_RPS,P0_ANALYTICS_RPS,P0_SIMULATION_RPS' | req/s; UI ist kein zweiter Quota-Owner |
+| Subsystem-Quotas | 'P0_HOTPATH_RPS,P0_BOOTSTRAP_RPS,P0_HISTORY_RPS,P0_ANALYTICS_RPS,P0_SIMULATION_RPS,P0_FEE_RPS,P0_SEND_RPS' | req/s; UI ist kein zweiter Quota-Owner |
 | WSS | 'P0_WSS_CONNECTIONS,P0_WSS_SUBSCRIPTIONS,P0_WSS_IDLE_TIMEOUT_MS,P0_WSS_RECOVERY_MS' | count / ms; Sanitized Read-Status |
 | Workerruntime | 'RAYON_NUM_THREADS,P0_INGRESS_BUFFER,P0_REMOTE_WORKER_BUFFER' | worker/count; **nicht Botanzahl** |
 | Run-Lifecycle | 'P0_ECON_BOOTSTRAP_SECS,P0_MARKET_READY_TIMEOUT_SECS,P0_ECON_DRAIN_SECS,P0_MARKET_DRAIN_TIMEOUT_SECS' | seconds, Backend Owner |
