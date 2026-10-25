@@ -1385,8 +1385,19 @@ fn main() {
     );
     persist_result(&evidence_path, &pending).expect("durable UNRESOLVED evidence before RPC");
 
+    // BSC-013: the receipts this run already resolved, monotone; every later
+    // abort records them instead of claiming that no receipt was seen.
+    let receipts_resolved = std::cell::Cell::new((false, false));
     let abort = |reason: &str| -> ! {
-        let pending = unresolved_draft(&attempt_id, launch_hash, buy_hash, false, false, bounded_error(reason));
+        let (launch_resolved, buy_resolved) = receipts_resolved.get();
+        let pending = unresolved_draft(
+            &attempt_id,
+            launch_hash,
+            buy_hash,
+            launch_resolved,
+            buy_resolved,
+            bounded_error(reason),
+        );
         match persist_result(&evidence_path, &pending) {
             Ok(record) => print!("{}", record.render()),
             Err(_) => eprintln!("UNRESOLVED terminal evidence write failed; prior pending evidence remains authoritative"),
@@ -1398,7 +1409,9 @@ fn main() {
     if chain_id != CHAIN_ID { abort("wrong RPC chain"); }
 
     let launch_receipt = resolved!(wait_receipt(launch_hash));
+    receipts_resolved.set((launch_receipt.is_some(), false));
     let buy_receipt = resolved!(wait_receipt(buy_hash));
+    receipts_resolved.set((launch_receipt.is_some(), buy_receipt.is_some()));
     if launch_receipt.is_none() || buy_receipt.is_none() {
         let pending = unresolved_draft(
             &attempt_id,

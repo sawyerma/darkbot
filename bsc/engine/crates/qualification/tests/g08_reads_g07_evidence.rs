@@ -186,3 +186,115 @@ fn g08_refuses_defective_g07_evidence_before_any_rpc() {
         assert!(err.contains(expected), "{tag}: {err}");
     }
 }
+
+/// A loopback JSON-RPC endpoint (plain HTTP, one connection per call, as
+/// curl makes them): BSC chain ID, a receipt for the launch hash, a
+/// permanent provider error for the BUY receipt. No network.
+fn rpc_stub() -> (String, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        listener.set_nonblocking(false).unwrap();
+        for _ in 0..8 {
+            let Ok((mut s, _)) = listener.accept() else {
+                return;
+            };
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 4096];
+            let body = loop {
+                let n = s.read(&mut tmp).unwrap_or(0);
+                if n == 0 {
+                    break None;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= end + 4 + length {
+                        break Some(text[end + 4..end + 4 + length].to_string());
+                    }
+                }
+            };
+            let Some(body) = body else { continue };
+            let call: serde_json::Value = serde_json::from_str(&body).unwrap();
+            let param = call["params"][0].as_str().unwrap_or("").to_string();
+            let launch = format!("0x{}", "01".repeat(32));
+            let result = match call["method"].as_str().unwrap() {
+                "eth_chainId" => r#""result":"0x38""#.to_string(),
+                "eth_getTransactionReceipt" if param == launch => format!(
+                    r#""result":{{"blockNumber":"0x10","blockHash":"0x{}","transactionIndex":"0x0","transactionHash":"{launch}","from":"0x3e7b487ae5e1c49ab1cf6222bdb5cf016e86aacd","to":"0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0","contractAddress":null,"status":"0x1","gasUsed":"0x5208","cumulativeGasUsed":"0x5208","effectiveGasPrice":"0x2faf080","logs":[]}}"#,
+                    "aa".repeat(32)
+                ),
+                _ => r#""error":{"code":-32602,"message":"stub"}"#.to_string(),
+            };
+            let payload = format!(r#"{{"jsonrpc":"2.0","id":1,{result}}}"#);
+            let _ = write!(
+                s,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                payload.len()
+            );
+        }
+    });
+    (url, server)
+}
+
+/// BSC-013 (BSC_Bug_V2 P4-G3): an abort after the launch receipt was
+/// resolved records exactly that, not "no receipt seen".
+#[test]
+fn a_late_unresolved_abort_records_the_receipts_already_resolved() {
+    use darkbot_bsc_record::schema::g08::unresolved as u;
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("darkbot-g08-abort-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("g07.dbrec");
+    fs::write(
+        &path,
+        evidence_draft("SUBMITTED_OR_SUBMISSION_UNKNOWN__RUN_G08__NO_AUTOMATIC_RETRY")
+            .encode()
+            .unwrap(),
+    )
+    .unwrap();
+    let (url, server) = rpc_stub();
+    let out = Command::new(G08)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap())
+        .env("BSC_MAINNET_RPC_HTTPS", &url)
+        .env("DARKBOT_G08_G07_EVIDENCE", &path)
+        .env("DARKBOT_G08_CHAIN_JOURNAL", dir.join("chain.journal"))
+        .env("DARKBOT_G08_EVIDENCE_PATH", dir.join("result.dbrec"))
+        .output()
+        .unwrap();
+    drop(server);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let result =
+        darkbot_bsc_record::decode(&u::SCHEMA, &fs::read(dir.join("result.dbrec")).unwrap())
+            .unwrap();
+    assert_eq!(result.text(u::VERDICT).unwrap(), "UNRESOLVED");
+    assert!(
+        result.text(u::REASON).unwrap().contains("receipt"),
+        "{}",
+        result.render()
+    );
+    assert!(
+        result.bool(u::LAUNCH_RECEIPT_RESOLVED).unwrap(),
+        "{}",
+        result.render()
+    );
+    assert!(!result.bool(u::BUY_RECEIPT_RESOLVED).unwrap());
+    assert!(!result.bool(u::AUTOMATIC_RETRY).unwrap());
+    fs::remove_dir_all(&dir).unwrap();
+}
