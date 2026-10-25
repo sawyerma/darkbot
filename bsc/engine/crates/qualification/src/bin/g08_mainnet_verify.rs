@@ -694,24 +694,68 @@ mod wire {
             .map_err(|e| format!("receipts of block {number}: {e}"))
     }
 
-    pub fn code(address: Address, block: u64) -> Result<Vec<u8>, String> {
-        let params = format!("[{},{}]", data(address.as_slice()), quantity(block));
-        bytes_of(&call("eth_getCode", &params)?, "eth_getCode")
+    /// BSC-012: a historical state read of exactly this canonical block
+    /// (EIP-1898); a node without that state, or on another fork, refuses
+    /// it and G0.8 stays UNRESOLVED -- never a number or `latest`.
+    fn pinned(block_hash: B256) -> String {
+        format!(
+            "{{\"blockHash\":{},\"requireCanonical\":true}}",
+            data(block_hash.as_slice())
+        )
     }
 
-    pub fn eth_call(to: Address, input: &[u8], block: u64) -> Result<Vec<u8>, String> {
-        let params = format!(
+    fn code_params(address: Address, block_hash: B256) -> String {
+        format!("[{},{}]", data(address.as_slice()), pinned(block_hash))
+    }
+
+    fn call_params(to: Address, input: &[u8], block_hash: B256) -> String {
+        format!(
             "[{{\"to\":{},\"data\":{}}},{}]",
             data(to.as_slice()),
             data(input),
-            quantity(block)
-        );
-        bytes_of(&call("eth_call", &params)?, "eth_call")
+            pinned(block_hash)
+        )
+    }
+
+    pub fn code(address: Address, block_hash: B256) -> Result<Vec<u8>, String> {
+        bytes_of(
+            &call("eth_getCode", &code_params(address, block_hash))?,
+            "eth_getCode",
+        )
+    }
+
+    pub fn eth_call(to: Address, input: &[u8], block_hash: B256) -> Result<Vec<u8>, String> {
+        bytes_of(
+            &call("eth_call", &call_params(to, input, block_hash))?,
+            "eth_call",
+        )
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        /// BSC-012 (BSC_Bug_V2 P4-G2): the historical state reads name
+        /// exactly one canonical block by hash (EIP-1898), never a number.
+        #[test]
+        fn historical_state_reads_are_pinned_to_a_canonical_block_hash() {
+            let hash = B256::repeat_byte(0xab);
+            let h = format!("0x{}", "ab".repeat(32));
+            let tag = format!(r#"{{"blockHash":"{h}","requireCanonical":true}}"#);
+            assert_eq!(
+                code_params(Address::repeat_byte(1), hash),
+                format!(r#"["0x{}",{tag}]"#, "01".repeat(20))
+            );
+            assert_eq!(
+                call_params(Address::repeat_byte(2), &[0x70, 0xa0], hash),
+                format!(
+                    r#"[{{"to":"0x{}","data":"0x70a0"}},{tag}]"#,
+                    "02".repeat(20)
+                )
+            );
+            let parsed: Json = serde_json::from_str(&code_params(Address::ZERO, hash)).unwrap();
+            assert_eq!(parsed[1]["requireCanonical"], true);
+        }
 
         #[test]
         fn request_bodies_are_fixed_templates() {
@@ -869,9 +913,9 @@ fn wait_receipt(hash: B256) -> Result<Option<Receipt>, String> {
     poll_receipt(|| wire::receipt(hash), || thread::sleep(RECEIPT_POLL), Instant::now() + Duration::from_secs(114), RECEIPT_TIMEOUT_POLLS)
 }
 
-fn balance_of_at(token: Address, owner: Address, block: u64) -> Result<U256, String> {
+fn balance_of_at(token: Address, owner: Address, block_hash: B256) -> Result<U256, String> {
     let data = balanceOfCall { owner }.abi_encode();
-    let value = wire::eth_call(token, &data, block)?;
+    let value = wire::eth_call(token, &data, block_hash)?;
     U256::try_from_be_slice(&value).ok_or_else(|| "balanceOf result exceeds 32 bytes".to_string())
 }
 
@@ -1526,13 +1570,22 @@ fn main() {
         (false, false)
     };
 
-    let prior_block = launch_block.saturating_sub(1);
-    let token_absent_before = Some(resolved!(read_rpc(|| wire::code(token, prior_block))))
+    // BSC-012: the state before the launch block (its canonical parent) and
+    // after the BUY block, by canonical hash (EIP-1898).
+    let prior_block_hash = launch_canonical_block.parent_hash;
+    let token_absent_before = Some(resolved!(read_rpc(|| wire::code(token, prior_block_hash))))
         .map(|code| code.is_empty());
-    let token_exists_after = Some(resolved!(read_rpc(|| wire::code(token, buy_block))))
-        .map(|code| !code.is_empty());
+    let token_exists_after = Some(resolved!(read_rpc(|| wire::code(
+        token,
+        buy_canonical_hash
+    ))))
+    .map(|code| !code.is_empty());
     let buyer_balance_after = match token_exists_after {
-        Some(true) => Some(resolved!(read_rpc(|| balance_of_at(token, buyer, buy_block)))),
+        Some(true) => Some(resolved!(read_rpc(|| balance_of_at(
+            token,
+            buyer,
+            buy_canonical_hash
+        )))),
         Some(false) => Some(U256::ZERO),
         None => None,
     };
