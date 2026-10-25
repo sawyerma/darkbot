@@ -3,7 +3,7 @@
 
 Counts every production use of `serde_json::…`, `json!(` and — in files that import it — bare
 `Value` (outside `#[cfg(test)]` modules and test-only files) per file. Each file carries its
-categories traced to their real readers (evidence: docs/evidence/BUGS_20261024/a23_09_jfi04_inventory.md
+categories traced to their real readers (evidence: docs/evidence/BUGS_20261024/a25_10_jfi04_inventory.md (24.10.: a23_09_jfi04_inventory.md)
 and its 24.10. re-audit):
 
   W  external wire (Solana JSON-RPC/WSS, Jupiter, Jito)    R  offline render / stdout / export
