@@ -126,10 +126,11 @@ impl Ledger {
                     t.fee_lamports = t.fee_lamports.and_then(|f| f.checked_add(x.fee_lamports));
                 }
             }
+            // F-07: one unvalued position makes the open inventory's mark Unknown (never 0).
             for p in a.open_positions.values() {
                 t.open_inventory_mark_usd_micro = t
                     .open_inventory_mark_usd_micro
-                    .and_then(|m| m.checked_add(p.mark_usd_micro));
+                    .and_then(|m| p.mark_usd_micro.and_then(|x| m.checked_add(x)));
             }
         }
         t
@@ -271,7 +272,8 @@ impl Ledger {
 
     /// `asset`'s withdrawable realized profit given the reconciled `balances`, the holds of
     /// every attempt (`held`) and the policy `reserve`. UNKNOWN unless the accounting is
-    /// settled with a positive verdict, the balance is known and no other asset was consumed
+    /// settled with a positive verdict, the balance, the hold and the reserve of `asset` are given
+    /// (an absent entry is UNKNOWN, D09; an explicit 0 is known) and no other asset was consumed
     /// (a cross-asset profit needs a qualified price, which this ledger does not have).
     pub fn withdrawable(
         &self,
@@ -294,9 +296,14 @@ impl Ledger {
         let Some(balance) = balances.get(asset) else {
             return unknown("BALANCE_UNKNOWN");
         };
-        let spendable = balance
-            .saturating_sub(held.get(asset).copied().unwrap_or(0))
-            .saturating_sub(reserve.get(asset).copied().unwrap_or(0));
+        // D09: a hold or reserve the caller did not provide is Unknown (an explicit 0 is known).
+        let Some(held) = held.get(asset) else {
+            return unknown("HOLD_UNKNOWN");
+        };
+        let Some(reserve) = reserve.get(asset) else {
+            return unknown("RESERVE_UNKNOWN");
+        };
+        let spendable = balance.saturating_sub(*held).saturating_sub(*reserve);
         Withdrawable::Known(u64::try_from(profit).unwrap_or(u64::MAX).min(spendable))
     }
 }
@@ -328,6 +335,52 @@ mod tests {
         }
     }
 
+    /// F-07: an unvalued open position makes the open inventory's total mark Unknown, never 0;
+    /// a valued one adds its mark.
+    #[test]
+    fn f07_open_inventory_mark_is_unknown_with_an_unvalued_position() {
+        let mut a = settled(&[("SOL", -5_000), ("MINT", 1_000)], -1);
+        a.open_positions.insert(
+            "MINT".into(),
+            Position {
+                units: 1_000,
+                mark_usd_micro: Some(700),
+            },
+        );
+        let valued = Ledger {
+            attempts: vec![a.clone()],
+        };
+        assert_eq!(valued.totals().open_inventory_mark_usd_micro, Some(700));
+        a.open_positions.get_mut("MINT").unwrap().mark_usd_micro = None;
+        let unvalued = Ledger { attempts: vec![a] };
+        assert_eq!(unvalued.totals().open_inventory_mark_usd_micro, None);
+    }
+
+    /// D09 (P0-PROD-CTRL-08): a hold or reserve entry the caller did not provide is Unknown,
+    /// never 0 — an explicit 0 is a known "nothing held / no reserve".
+    #[test]
+    fn d09_missing_hold_or_reserve_entry_is_unknown_never_zero() {
+        let m = |v: &[(&str, u64)]| -> BTreeMap<String, u64> {
+            v.iter().map(|(k, n)| (k.to_string(), *n)).collect()
+        };
+        let sol_only = Ledger {
+            attempts: vec![settled(&[("SOL", 15_000), ("MINT", 0)], 1_500)],
+        };
+        let balance = m(&[("SOL", 100_000)]);
+        assert_eq!(
+            sol_only.withdrawable("SOL", &balance, &m(&[]), &m(&[("SOL", 0)])),
+            Withdrawable::Unknown("HOLD_UNKNOWN".into())
+        );
+        assert_eq!(
+            sol_only.withdrawable("SOL", &balance, &m(&[("SOL", 0)]), &m(&[])),
+            Withdrawable::Unknown("RESERVE_UNKNOWN".into())
+        );
+        assert_eq!(
+            sol_only.withdrawable("SOL", &balance, &m(&[("SOL", 0)]), &m(&[("SOL", 0)])),
+            Withdrawable::Known(15_000)
+        );
+    }
+
     /// W-G02/W-G03 (read-only): withdrawable = min(realized profit in the asset, balance minus
     /// every hold and the never-spent reserve); UNKNOWN without a settled positive verdict, a
     /// known balance, or when another asset was consumed (that profit needs a price).
@@ -341,7 +394,12 @@ mod tests {
         };
         assert_eq!(sol_only.realized_deltas().unwrap()["SOL"], 15_000);
         assert_eq!(
-            sol_only.withdrawable("SOL", &m(&[("SOL", 100_000)]), &m(&[]), &m(&[])),
+            sol_only.withdrawable(
+                "SOL",
+                &m(&[("SOL", 100_000)]),
+                &m(&[("SOL", 0)]),
+                &m(&[("SOL", 0)])
+            ),
             Withdrawable::Known(15_000)
         );
         assert_eq!(
@@ -359,7 +417,12 @@ mod tests {
             Withdrawable::Unknown("BALANCE_UNKNOWN".into())
         );
         assert_eq!(
-            sol_only.withdrawable("MINT", &m(&[("MINT", 7)]), &m(&[]), &m(&[])),
+            sol_only.withdrawable(
+                "MINT",
+                &m(&[("MINT", 7)]),
+                &m(&[("MINT", 0)]),
+                &m(&[("MINT", 0)])
+            ),
             Withdrawable::Known(0),
             "no realized profit in this asset"
         );

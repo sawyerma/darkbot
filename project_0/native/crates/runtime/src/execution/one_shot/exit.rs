@@ -126,7 +126,8 @@ pub enum ExitStep {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
     pub units: i128,
-    pub mark_usd_micro: i128,
+    /// F-07: `None` when the settlement holds no valuation of the mint (Unknown, never 0).
+    pub mark_usd_micro: Option<i128>,
 }
 
 /// The exit not yet settled (at most one: single-flight).
@@ -145,7 +146,7 @@ pub(super) fn open_positions(s: &Saved) -> BTreeMap<String, Position> {
         .open_inventory
         .iter()
         .map(|(mint, units)| {
-            let mark = done.valuation.get(mint).copied().unwrap_or(0);
+            let mark = done.valuation.get(mint).copied();
             (
                 mint.clone(),
                 Position {
@@ -614,7 +615,12 @@ impl Journal {
             wallet_deltas: deltas,
             sold_units: if success { e.intent.amount_in } else { 0 },
             realized_usd_micro: realized,
-            released_mark_usd_micro: if success { mark } else { 0 },
+            // F-07: a sold position's mark leaves the inventory; an unvalued one is not booked.
+            released_mark_usd_micro: if success {
+                mark.ok_or_else(|| err("EXIT_POSITION_MARK_UNKNOWN"))?
+            } else {
+                0
+            },
             booked_unix_s,
         };
         e.phase = ExitPhase::Settled(done.clone());
@@ -1097,6 +1103,20 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&path);
     }
 
+    /// F-07 (P0-PROD-CTRL-08): an open position without a valuation is unvalued (Unknown), never
+    /// marked 0.
+    #[test]
+    fn f07_unvalued_position_is_unknown_never_zero() {
+        let (path, j, mint, _) = settled(1_000);
+        let mut s = j.saved.clone().unwrap();
+        if let Phase::Settled(done) = &mut s.phase {
+            done.valuation.remove(&mint);
+        }
+        let p = open_positions(&s)[&mint];
+        assert_eq!((p.units, p.mark_usd_micro), (1_000, None));
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
     /// FE-04 exit: the whole open position is sold once — durably reserved and held before its
     /// single handoff, settled from its finalized receipt: the SOL proceeds net of the fee are
     /// realized (low value), the position's mark leaves the open inventory. A repeated answer
@@ -1111,7 +1131,7 @@ pub(crate) mod tests {
                 mint.clone(),
                 Position {
                     units: 1_000,
-                    mark_usd_micro: 1_000
+                    mark_usd_micro: Some(1_000)
                 }
             )]
             .into()
