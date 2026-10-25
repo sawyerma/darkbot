@@ -1230,11 +1230,11 @@ fn mt5_projection_result_of_an_older_generation_cannot_commit() {
     cleanup(f);
 }
 
-/// P6-MT.14 #8 on the wired path (MT5a): a re-write of a key of the projection's readset that
-/// the E9 fingerprint cannot see (same slot and bytes, no write_version) still cannot commit —
-/// the key's epoch changed: counted `recheck_current`, the result takes the E9 stale path (not
-/// cached, re-requested once from the current state), and a write to a key outside the readset
-/// changes nothing.
+/// P6-MT.14 #8 on the wired path (MT5a): a re-write of a key of the projection's readset (same
+/// slot and bytes, no write_version) cannot commit — the key's epoch changed: counted
+/// `recheck_current`, the result takes the E9 stale path (not cached, re-requested once from the
+/// current state), and a write to a key outside the readset changes nothing. V2-06: the E9
+/// fingerprint binds the same epoch now and sees the re-write as well (before: blind to it).
 #[test]
 fn mt5_projection_result_with_a_rewritten_readset_key_is_rechecked() {
     use crate::execution::identity::ResultAction;
@@ -1268,7 +1268,7 @@ fn mt5_projection_result_with_a_rewritten_readset_key_is_rechecked() {
     assert_eq!(f.owner.metrics.result_actions.get(ResultAction::Accept), 1);
     f.owner.projection_cache.clear();
     f.owner.detect_queue.clear();
-    // The identical re-write of `dep`: E9 sees nothing, the readset epoch changed.
+    // The identical re-write of `dep`: the readset epoch changed, and with it (V2-06) E9.
     assert_eq!(
         f.owner.st.on_event(IngressEvent::Account(mt5_account(
             &f,
@@ -1278,10 +1278,10 @@ fn mt5_projection_result_with_a_rewritten_readset_key_is_rechecked() {
         ))),
         Some(ApplyOutcome::Applied)
     );
-    assert_eq!(
+    assert_ne!(
         dependency_fingerprint(&f.owner.st, &[dep]),
         fingerprint,
-        "E9 alone sees no change"
+        "V2-06: E9 sees the same-slot re-write"
     );
     mt5_apply(&mut f, message(identity));
     assert_eq!(

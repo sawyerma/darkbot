@@ -28,8 +28,12 @@ pub(crate) struct CachedProjection {
     pub(crate) dependency_fingerprint: Hash,
 }
 
-/// E9: one fingerprint over the canonical revision (presence, slot, data hash) of every
-/// dependency key; any change of any of them changes it, unrelated accounts never do.
+/// E9: one fingerprint over the canonical revision (presence, slot, revision epoch) of every
+/// dependency key; any accepted write of any of them changes it, unrelated accounts never do.
+/// V2-06: the epoch replaces a hash of the data (ProgramData was rehashed in full on every
+/// call) and also binds same-slot owner/lamports writes. Epochs are local to this `StateCore`
+/// instance: a fingerprint is compared only against the same instance, never persisted; a
+/// snapshot install re-epochs every record (earlier fingerprints never match again).
 pub(crate) fn dependency_fingerprint(st: &StateCore, keys: &[Pubkey]) -> Hash {
     let mut parts: Vec<Vec<u8>> = Vec::with_capacity(keys.len());
     for k in keys {
@@ -38,7 +42,7 @@ pub(crate) fn dependency_fingerprint(st: &StateCore, keys: &[Pubkey]) -> Hash {
             Some(r) => {
                 part.push(1);
                 part.extend_from_slice(&r.slot.to_le_bytes());
-                part.extend_from_slice(&hash(&r.data).to_bytes());
+                part.extend_from_slice(&r.last_changed_epoch.to_le_bytes());
             }
             None => part.push(0),
         }
@@ -1096,6 +1100,73 @@ mod d12_tests {
 mod e9_tests {
     use super::*;
 
+    /// One account update of the E9/V2-06 fixtures (owner `[3; 32]`, no write version).
+    fn update(
+        pubkey: Pubkey,
+        slot: u64,
+        lamports: u64,
+        byte: u8,
+    ) -> darkbot_solana::ingress::AccountUpdate {
+        darkbot_solana::ingress::AccountUpdate {
+            pubkey,
+            owner: Pubkey::new_from_array([3; 32]),
+            lamports,
+            data: vec![byte; 8],
+            slot,
+            write_version: None,
+            source: darkbot_solana::ingress::SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }
+    }
+
+    /// V2-06 (P5b-01/P5b-04): the fingerprint binds each dependency's revision epoch on this
+    /// `StateCore` instance instead of hashing its data. A same-slot write with equal data
+    /// (lamports 1→2) changes it (before: equal), a same-slot data write changes it, an unrelated
+    /// write keeps it, and a snapshot install of identical content re-epochs every record — no
+    /// earlier fingerprint matches again (before: equal).
+    #[test]
+    fn v2_06_fingerprint_follows_the_revision_epoch_of_one_state() {
+        use darkbot_solana::ingress::IngressEvent;
+        let (bank, oracle, unrelated) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let mut deps = vec![bank, oracle];
+        deps.sort_unstable_by_key(|k| k.to_bytes());
+        let mut st = StateCore::new(1);
+        st.install_snapshot(
+            10,
+            vec![
+                update(bank, 10, 1, 2),
+                update(oracle, 10, 1, 3),
+                update(unrelated, 10, 1, 4),
+            ],
+        );
+        let fp = dependency_fingerprint(&st, &deps);
+        st.on_event(IngressEvent::Account(update(unrelated, 10, 1, 9)));
+        assert_eq!(dependency_fingerprint(&st, &deps), fp, "unrelated write");
+        st.on_event(IngressEvent::Account(update(oracle, 10, 2, 3)));
+        let lamports = dependency_fingerprint(&st, &deps);
+        assert_ne!(lamports, fp, "same slot, same data, lamports 1→2");
+        st.on_event(IngressEvent::Account(update(bank, 10, 1, 7)));
+        let data = dependency_fingerprint(&st, &deps);
+        assert_ne!(data, lamports, "same slot, new data");
+        st.install_snapshot(
+            10,
+            vec![
+                update(bank, 10, 1, 7),
+                update(oracle, 10, 2, 3),
+                update(unrelated, 10, 1, 9),
+            ],
+        );
+        let reinstalled = dependency_fingerprint(&st, &deps);
+        assert!(
+            ![fp, lamports, data].contains(&reinstalled),
+            "a snapshot install invalidates every earlier fingerprint"
+        );
+    }
+
     /// E9: the projection fingerprint follows every dependency revision (slot, data, presence)
     /// and ignores the candidate itself and unrelated accounts.
     #[test]
@@ -1144,24 +1215,31 @@ mod e9_tests {
             (oracle, account(10, 3)),
             (unrelated, account(10, 4)),
         ];
-        let fp = dependency_fingerprint(&install(&base), &deps);
-        let mut changed_candidate = base.clone();
-        changed_candidate[0].1 = account(11, 9);
-        changed_candidate[3].1 = account(12, 9);
-        assert_eq!(
-            dependency_fingerprint(&install(&changed_candidate), &deps),
-            fp
-        );
-        for (i, replacement) in [(1, account(10, 7)), (2, account(11, 3))] {
-            let mut changed = base.clone();
-            changed[i].1 = replacement;
-            assert_ne!(dependency_fingerprint(&install(&changed), &deps), fp, "{i}");
+        // V2-06: revisions are written in place on one `StateCore` (epochs are instance-local).
+        let write = |st: &mut StateCore, k: Pubkey, (slot, data): (u64, Vec<u8>)| {
+            st.on_event(darkbot_solana::ingress::IngressEvent::Account(update(
+                k, slot, 1, data[0],
+            )));
+        };
+        let mut st = install(&base);
+        let fp = dependency_fingerprint(&st, &deps);
+        write(&mut st, candidate, account(11, 9));
+        write(&mut st, unrelated, account(12, 9));
+        assert_eq!(dependency_fingerprint(&st, &deps), fp);
+        for (k, replacement) in [(bank, account(10, 7)), (oracle, account(11, 3))] {
+            let before = dependency_fingerprint(&st, &deps);
+            write(&mut st, k, replacement);
+            assert_ne!(dependency_fingerprint(&st, &deps), before, "{k}");
         }
-        assert_ne!(
-            dependency_fingerprint(&install(&base[..2]), &deps),
-            fp,
-            "missing oracle"
+        let before = dependency_fingerprint(&st, &deps);
+        st.install_snapshot(
+            10,
+            base[..2]
+                .iter()
+                .map(|(k, (slot, data))| update(*k, *slot, 1, data[0]))
+                .collect(),
         );
+        assert_ne!(dependency_fingerprint(&st, &deps), before, "missing oracle");
         // E9: the oldest acceptable simulation context is the newest canonical slot of the
         // candidate's request and its dependencies; unrelated and missing accounts do not count.
         let mut newer = base.clone();
