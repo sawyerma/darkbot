@@ -37,11 +37,11 @@ TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	16	EventListener
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	17	TopicStatusListener
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	19	AcquireOptions
 TS_DECLARATION	frontend/src/core/realtime/TopicSubscriptions.ts	24	Entry
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	13	JobAction
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	15	Receipt
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	16	AnalyticsControlState
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	21	PointInput
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	31	GridInput
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	14	JobAction
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	16	Receipt
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	17	AnalyticsControlState
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	22	PointInput
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	32	GridInput
 TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	8	CandidateProfile
 TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	9	Receipt
 TS_DECLARATION	frontend/src/core/realtime/candidateControl.ts	11	CandidateControlState
@@ -123,19 +123,20 @@ DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	53	Transacti
 DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	54	Gaps / reconnects / liquidation events
 DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	55	Gross edge · total / p50 / p90
 DISPLAY	frontend/src/features/project0/components/HealthSection.tsx	56	Gateway topics
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	31	Runtime owner
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	37	Runtime owner
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	39	Run
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	40	State
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	41	Ingress · generation / reconnects
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	42	Same-slot updates · unversioned refused / unordered
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	43	Trigger · lanes L0/L1/L2 · detect
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	44	Repeats suppressed · soft cap
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	45	Day · health / liquidatable / plans
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	46	Day · simulations pass / fail · shadow ready / wins
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	47	Latency p95 · decision (rx→ready) / fee quote / simulation
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	48	Safety · capital in use / limit
-DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	49	Safety · day realized / loss limit
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	32	Runtime owner
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	38	Runtime owner
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	40	Run
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	41	State
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	42	Ingress · generation / reconnects
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	43	Same-slot updates · unversioned refused / unordered
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	44	Trigger · lanes L0/L1/L2 · detect
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	45	Repeats suppressed · soft cap
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	46	Day · health / liquidatable / plans
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	47	Day · simulations pass / fail · shadow ready / wins
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	48	Latency p95 · decision (rx→ready) / fee quote / simulation
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	49	Safety · capital in use / limit
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	50	Safety · day realized / loss limit
+DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	52	Rebalancing · plan
 DISPLAY	frontend/src/features/project0/components/RunsSection.tsx	29	Recorded runs · post-capture
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	43	Run
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	44	Verification
@@ -144,6 +145,15 @@ CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	45	Str
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	46	Budget · seconds
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	47	Budget · RAM MiB
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	49	Verify, report & qualify
+TS_DECLARATION	frontend/src/features/project0/components/SourcesSection.tsx	7	Mode
+DISPLAY	frontend/src/features/project0/components/SourcesSection.tsx	32	Data sources · runtime owner
+DISPLAY	frontend/src/features/project0/components/SourcesSection.tsx	38	Observed / rejected · changes applied / refused
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	42	Unit
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	43	Mode
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	44	Off
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	44	Observe
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	44	Active (needs a qualification)
+CONTROL_OR_TEXT	frontend/src/features/project0/components/SourcesSection.tsx	46	Request mode
 TS_DECLARATION	frontend/src/features/project0/model/analytics.ts	6	RunQualificationView
 TS_DECLARATION	frontend/src/features/project0/model/analytics.ts	13	AnalyticsRunView
 TS_DECLARATION	frontend/src/features/project0/model/analytics.ts	24	JobParamsView
@@ -169,8 +179,9 @@ TS_DECLARATION	frontend/src/features/project0/model/owner.ts	14	OwnerEngineView
 TS_DECLARATION	frontend/src/features/project0/model/owner.ts	27	OwnerTriggerView
 TS_DECLARATION	frontend/src/features/project0/model/owner.ts	37	OwnerPipelineView
 TS_DECLARATION	frontend/src/features/project0/model/owner.ts	53	OwnerSafetyView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	67	LiquidatorView
-TS_DECLARATION	frontend/src/features/project0/model/owner.ts	81	WalletsView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	68	RebalanceView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	79	LiquidatorView
+TS_DECLARATION	frontend/src/features/project0/model/owner.ts	99	WalletsView
 TS_DECLARATION	frontend/src/features/project0/model/status.ts	2	CapturePhaseName
 TS_DECLARATION	frontend/src/features/project0/model/status.ts	4	RunView
 TS_DECLARATION	frontend/src/features/project0/model/status.ts	17	PhaseView
@@ -204,38 +215,38 @@ CONTROL_OR_TEXT	frontend/src/features/project0/pages/AnalyticsPanel.tsx	96	Draft
 CONTROL_OR_TEXT	frontend/src/features/project0/pages/AnalyticsPanel.tsx	97	"start(""optimize"")}>Optimize"
 CONTROL_OR_TEXT	frontend/src/features/project0/pages/AnalyticsPanel.tsx	105	void recheck()}>Look up again
 DISPLAY	frontend/src/features/project0/pages/AnalyticsPanel.tsx	106	Analytics jobs
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	22	Running capture
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	24	Status feed
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	25	Run
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	26	Configured duration
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	27	Stream
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	28	Transactions / liquidation events
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	29	Verdict (live)
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	30	Provider budget
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	31	Result
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	53	Raw data capture
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	53	Duration
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	56	Until stopped · desktop control
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	58	Duration
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	59	Unit
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	59	Seconds
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	59	Minutes
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	59	Hours
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	59	Days
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	60	Source
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	60	Logs
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	60	Transactions
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	61	Observation
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	61	Market + Shadow
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	61	Raw data only
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	61	Shadow only
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	68	setArmedFor(null)}>Cancel
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	72	Chain verification
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	75	Report markers
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	75	setMarkers(REPORT_MARKERS.map(x => x.id))}>All
-CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	75	setMarkers([])}>None
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	78	CLI preview
-DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	79	Selected report markers
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	24	Running capture
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	26	Status feed
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	27	Run
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	28	Configured duration
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	29	Stream
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	30	Transactions / liquidation events
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	31	Verdict (live)
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	32	Provider budget
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	33	Result
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	57	Raw data capture
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	57	Duration
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	60	Until stopped · desktop control
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	62	Duration
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	63	Unit
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	63	Seconds
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	63	Minutes
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	63	Hours
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	63	Days
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	64	Source
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	64	Logs
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	64	Transactions
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	65	Observation
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	65	Market + Shadow
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	65	Raw data only
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	65	Shadow only
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	72	setArmedFor(null)}>Cancel
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	76	Chain verification
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	79	Report markers
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	79	setMarkers(REPORT_MARKERS.map(x => x.id))}>All
+CONTROL_OR_TEXT	frontend/src/features/project0/pages/CapturePanel.tsx	79	setMarkers([])}>None
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	82	CLI preview
+DISPLAY	frontend/src/features/project0/pages/CapturePanel.tsx	83	Selected report markers
 TS_DECLARATION	frontend/src/features/project0/pages/LiquidatorPanel.tsx	10	Fleet
 DISPLAY	frontend/src/features/project0/pages/LiquidatorPanel.tsx	17	Liquidator fleet
 DISPLAY	frontend/src/features/project0/pages/LiquidatorPanel.tsx	19	Running liquidators

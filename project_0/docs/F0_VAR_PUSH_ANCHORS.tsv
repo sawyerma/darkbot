@@ -15,8 +15,8 @@ project_0/native/crates/reporter/src/bin/p0_market_capture_reported.rs	48	let re
 project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	46	tap.publish_transport(TransportSnapshot {
 project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	54	tap.publish_market(MarketSnapshot {
 project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	65	tap.publish_storage(darkbot_runner::storage::writer::StorageStatus {
-project_0/native/crates/reporter/src/lib.rs	1828	tap.publish_transport(TransportSnapshot {
-project_0/native/crates/reporter/src/lib.rs	1849	tap.publish_transport(TransportSnapshot::default());
+project_0/native/crates/reporter/src/lib.rs	1946	tap.publish_transport(TransportSnapshot {
+project_0/native/crates/reporter/src/lib.rs	1967	tap.publish_transport(TransportSnapshot::default());
 project_0/native/crates/reporter/tests/socket.rs	88	tap.publish_market(MarketSnapshot {
 project_0/native/crates/reporter/tests/socket.rs	139	tap.publish_market(MarketSnapshot {
 project_0/native/crates/reporter/tests/socket.rs	154	tap.publish_market(MarketSnapshot {
@@ -26,8 +26,8 @@ project_0/native/crates/reporter/tests/socket.rs	377	tap.publish_market(MarketSn
 project_0/native/crates/reporter/tests/socket.rs	387	tap.publish_market(MarketSnapshot::default());
 project_0/native/crates/runtime/src/analytics/econ_a2_tests.rs	45	core.on_ingress_event(ev, 0, &mut sink).unwrap();
 project_0/native/crates/runtime/src/bin/p0ctl.rs	428	if control::stop_requested() && !forwarded {
-project_0/native/crates/runtime/src/bin/p0ctl.rs	942	let (outcome, executed) = jobs::run(project, &request.job_id, Some(control::stop_requested))?;
-project_0/native/crates/runtime/src/bin/p0ctl.rs	1005	let (outcome, _) = jobs::run(project, &id()?, Some(control::stop_requested))?;
+project_0/native/crates/runtime/src/bin/p0ctl.rs	943	let (outcome, executed) = jobs::run(project, &request.job_id, Some(control::stop_requested))?;
+project_0/native/crates/runtime/src/bin/p0ctl.rs	1006	let (outcome, _) = jobs::run(project, &id()?, Some(control::stop_requested))?;
 project_0/native/crates/runtime/src/market/capture.rs	216	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
 project_0/native/crates/runtime/src/market/capture.rs	223	if let Err(e) = core.on_ingress_event(ev, event_unix_s, sink) {
 project_0/native/crates/runtime/src/market/capture.rs	317	run_from_env_with(None, |_, _| Ok(()))
@@ -50,17 +50,17 @@ project_0/native/crates/runtime/src/market/observer_tests.rs	686	core.on_ingress
 project_0/native/crates/runtime/src/market/observer_tests.rs	2982	core.on_ingress_event(health, 0, &mut VecSink::default())
 project_0/native/crates/runtime/src/orchestration/control.rs	44	pub fn stop_requested() -> bool {
 project_0/native/crates/runtime/src/orchestration/control.rs	282	assert!(stop_requested());
-project_0/native/crates/runtime/src/orchestration/startup.rs	401	if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire)
+project_0/native/crates/runtime/src/orchestration/startup.rs	403	if super::control::stop_requested() && !handle.shared.operator_stop.load(Ordering::Acquire)
 project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	85	crate::orchestration::control::stop_requested
-project_0/native/crates/runtime/src/status_tap.rs	482	pub fn publish_transport(&self, s: TransportSnapshot) {
-project_0/native/crates/runtime/src/status_tap.rs	510	pub fn publish_market(&self, s: MarketSnapshot) {
-project_0/native/crates/runtime/src/status_tap.rs	520	pub fn publish_storage(&self, status: StorageStatus) {
-project_0/native/crates/runtime/src/status_tap.rs	635	tap.publish_market(m);
-project_0/native/crates/runtime/src/status_tap.rs	647	tap.publish_market(MarketSnapshot::default());
-project_0/native/crates/runtime/src/status_tap.rs	662	tap.publish_storage(status.clone());
-project_0/native/crates/runtime/src/status_tap.rs	739	tap.publish_transport(TransportSnapshot {
-project_0/native/crates/runtime/src/status_tap.rs	753	tap.publish_market(MarketSnapshot::default());
-project_0/native/crates/runtime/src/status_tap.rs	754	tap.publish_market(MarketSnapshot::default());
-project_0/native/crates/runtime/src/status_tap.rs	773	tap.publish_market(MarketSnapshot::default());
-project_0/native/crates/runtime/src/status_tap.rs	781	tap.publish_market(MarketSnapshot::default());
+project_0/native/crates/runtime/src/status_tap.rs	551	pub fn publish_transport(&self, s: TransportSnapshot) {
+project_0/native/crates/runtime/src/status_tap.rs	579	pub fn publish_market(&self, s: MarketSnapshot) {
+project_0/native/crates/runtime/src/status_tap.rs	589	pub fn publish_storage(&self, status: StorageStatus) {
+project_0/native/crates/runtime/src/status_tap.rs	704	tap.publish_market(m);
+project_0/native/crates/runtime/src/status_tap.rs	716	tap.publish_market(MarketSnapshot::default());
+project_0/native/crates/runtime/src/status_tap.rs	731	tap.publish_storage(status.clone());
+project_0/native/crates/runtime/src/status_tap.rs	808	tap.publish_transport(TransportSnapshot {
+project_0/native/crates/runtime/src/status_tap.rs	822	tap.publish_market(MarketSnapshot::default());
+project_0/native/crates/runtime/src/status_tap.rs	823	tap.publish_market(MarketSnapshot::default());
+project_0/native/crates/runtime/src/status_tap.rs	842	tap.publish_market(MarketSnapshot::default());
+project_0/native/crates/runtime/src/status_tap.rs	850	tap.publish_market(MarketSnapshot::default());
 project_0/operations/f0_var_inventory.py	26	"ANCHOR_RE = re.compile(r""\b(?:publish_(?:market|storage|transport)|on_ingress_event|on_slot_frame|stop_requested|onConnectionDown|run_from_env_with|topics\.onState|topics\.onEvent|gateway\.connect|applyStatus|setStatusTopic)\b"")"
