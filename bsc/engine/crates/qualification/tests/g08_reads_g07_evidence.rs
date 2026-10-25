@@ -298,3 +298,62 @@ fn a_late_unresolved_abort_records_the_receipts_already_resolved() {
     assert!(!result.bool(u::AUTOMATIC_RETRY).unwrap());
     fs::remove_dir_all(&dir).unwrap();
 }
+
+/// V2 §2.3, for real: a G0.7 attempt whose transactions never reached the
+/// chain. The real G0.8 verifier asks a real read-only BSC RPC
+/// (`BSC_MAINNET_RPC_HTTPS`), finds no canonical receipt and records
+/// UNRESOLVED with both receipts unresolved and no automatic retry; never a
+/// BUY, a "not sent", an ADAPT or a PASS. With `DARKBOT_G08_E2E_OUT` the
+/// record is kept there for the reporter→gateway→browser round trip
+/// (ops/tests/bsc_control_test.py).
+#[test]
+#[ignore = "network: real read-only BSC RPC, about four minutes of receipt polling"]
+fn g08_records_unresolved_for_a_never_sent_attempt_on_a_real_rpc() {
+    use darkbot_bsc_record::schema::g08::unresolved as un;
+    let rpc = std::env::var("BSC_MAINNET_RPC_HTTPS").expect("BSC_MAINNET_RPC_HTTPS");
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("darkbot-g08-never-sent-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let g07 = dir.join("g07.dbrec");
+    let result = dir.join("unresolved.dbrec");
+    let d = evidence_draft(
+        "PROVISIONAL_RELEASED__RECEIPT_WINDOW_OPEN__RECONCILE_G08__NO_AUTOMATIC_RETRY",
+    );
+    fs::write(&g07, d.encode().unwrap()).unwrap();
+    let out = Command::new(G08)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap())
+        .env("BSC_MAINNET_RPC_HTTPS", rpc)
+        .env("DARKBOT_G08_G07_EVIDENCE", &g07)
+        .env("DARKBOT_G08_CHAIN_JOURNAL", dir.join("chain.journal"))
+        .env("DARKBOT_G08_EVIDENCE_PATH", &result)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let r = darkbot_bsc_record::decode(&un::SCHEMA, &fs::read(&result).unwrap()).unwrap();
+    assert_eq!(r.text(un::VERDICT).unwrap(), "UNRESOLVED");
+    assert_eq!(r.text(un::REASON).unwrap(), "SENT_TRANSACTION_UNRESOLVED");
+    assert!(!r.bool(un::LAUNCH_RECEIPT_RESOLVED).unwrap());
+    assert!(!r.bool(un::BUY_RECEIPT_RESOLVED).unwrap());
+    assert!(!r.bool(un::AUTOMATIC_RETRY).unwrap());
+    assert_eq!(r.text(un::T0_TO_BUY).unwrap(), "UNKNOWN");
+    assert_eq!(
+        r.text(un::EXPIRY_OBSERVATION_SCOPE).unwrap(),
+        un::NON_CONCLUSIVE_SCOPE
+    );
+    // The real chain did not know the transactions (the read either says so
+    // or failed and is reported); it never claims they were not sent.
+    assert_ne!(r.opt_bool(un::LAUNCH_TX_KNOWN).unwrap(), Some(true));
+    assert!(stdout.contains("UNRESOLVED") && !stdout.contains("PASS"));
+    if let Some(keep) = std::env::var_os("DARKBOT_G08_E2E_OUT") {
+        fs::copy(&result, PathBuf::from(keep).join("unresolved.dbrec")).unwrap();
+    }
+    fs::remove_dir_all(&dir).unwrap();
+}

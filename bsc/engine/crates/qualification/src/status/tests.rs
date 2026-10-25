@@ -502,7 +502,10 @@ fn a_g08_record_without_its_g07_evidence_is_unbound() {
     let s = projection::project(&root, &root.join("run"));
     let g08 = s.status.gates.iter().find(|g| g.gate_id == "G0.8").unwrap();
     assert_eq!(g08.state, "UNRESOLVED");
-    assert_eq!(g08.reason_codes, vec!["G07_EVIDENCE_UNBOUND".to_string()]);
+    assert_eq!(
+        g08.reason_codes,
+        ["G07_EVIDENCE_UNBOUND", "CHAIN_UNKNOWN", "EVIDENCE_UNKNOWN"].map(String::from)
+    );
     assert_eq!(s.monitoring.state, "UNRESOLVED");
     fs::remove_dir_all(root).unwrap();
 }
@@ -901,5 +904,32 @@ fn the_g08_gate_carries_the_chain_outcome_and_the_evidence_integrity() {
         g08.reason_codes
     );
     assert!(g08.reason_codes.contains(&"EVIDENCE_UNKNOWN".to_string()));
+    // V2 §2.3: the record of missing canonical receipts is UNRESOLVED with
+    // both dimensions UNKNOWN; nothing reads as acquired, sent or retryable.
+    use darkbot_bsc_record::schema::g08::unresolved as un;
+    fs::remove_file(dir.join("result.dbrec")).unwrap();
+    let mut d = filled(&un::SCHEMA);
+    d.set(un::VERDICT, "UNRESOLVED")
+        .set(un::REASON, "SENT_TRANSACTION_UNRESOLVED")
+        .set(un::LAUNCH_RECEIPT_RESOLVED, false)
+        .set(un::BUY_RECEIPT_RESOLVED, false)
+        .set(un::AUTOMATIC_RETRY, false);
+    fs::write(dir.join("unresolved.dbrec"), d.encode().unwrap()).unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    let g08 = s.status.gates.iter().find(|g| g.gate_id == "G0.8").unwrap();
+    assert_eq!(g08.state, "UNRESOLVED");
+    for code in ["G07_EVIDENCE_UNBOUND", "CHAIN_UNKNOWN", "EVIDENCE_UNKNOWN"] {
+        assert!(
+            g08.reason_codes.contains(&code.to_string()),
+            "{:?}",
+            g08.reason_codes
+        );
+    }
+    assert!(
+        g08.reason_codes
+            .iter()
+            .all(|c| !c.contains("PASS") && !c.contains("ADAPT"))
+    );
+    assert_eq!(s.monitoring.state, "UNRESOLVED");
     fs::remove_dir_all(root).unwrap();
 }

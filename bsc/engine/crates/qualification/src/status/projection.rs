@@ -850,7 +850,12 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             .into(),
         );
         // BSC-011: the chain outcome and the evidence integrity next to the
-        // verdict (a result record only); anything unknown stays UNKNOWN.
+        // verdict; anything unknown stays UNKNOWN. An UNRESOLVED record (no
+        // canonical receipts) proves neither: both UNKNOWN, never a PASS,
+        // ADAPT or "not sent".
+        if r.schema() == &schema::g08::unresolved::SCHEMA {
+            g08_reasons.extend(["CHAIN_UNKNOWN".into(), "EVIDENCE_UNKNOWN".into()]);
+        }
         if r.schema() == &schema::g08::result::SCHEMA {
             for (name, prefix, vocabulary) in [
                 (

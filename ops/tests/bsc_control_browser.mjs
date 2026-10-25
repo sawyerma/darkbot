@@ -47,6 +47,9 @@ try{
  const p0Polls=statusGets(mark,'/api/v1/project0/process');
  await p.getByTestId('project-link-bsc').click();
  await until(async()=> (await p.locator('body').innerText()).includes('isolated-fixture'),'BSC panel real feed');
+ const gateLine=id=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+id.replace('.','\\.')+'$')})}).first();
+ await until(async()=> (await gateLine('G0.8').innerText()).includes('UNRESOLVED'),'Overview G0.8 gate UNRESOLVED');
+ assert((await gateLine('G0.8').innerText()).includes('CHAIN_UNKNOWN · EVIDENCE_UNKNOWN'),'Overview G0.8 dimensions UNKNOWN');
  mark=pageRequests.length;await idle(8000);
  for(const path of ['/api/v1/bsc/process','/api/v1/project0/process','/api/v1/command'])assert.equal(statusGets(mark,path),0,'periodic GET on /bsc: '+path);
  assert((await p.locator('body').innerText()).includes('Data as of'));
@@ -76,12 +79,19 @@ try{
  await p.screenshot({path:`${dir}/bsc-launch.png`,fullPage:true});
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
  await p.getByLabel('Report',{exact:true}).selectOption('g08');
- await until(async()=> (await p.locator('body').innerText()).includes('NOT_EXECUTED'),'G0.8 native missing evidence state');
+ // V2 §2.3: the real verifier's UNRESOLVED (no canonical receipts) reaches the report unchanged.
+ await until(async()=> (await p.locator('.g-line',{hasText:'Native verdict'}).first().innerText()).includes('UNRESOLVED'),'G0.8 native UNRESOLVED in the report');
  await expectSections('analytics');
  assert((await body()).includes('g06a.local-simulation.import.v1'),'evidence record list');
  await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
  await until(async()=> (await body()).includes('BSC_INGRESS_GETH'),'monitoring future sources');
  await expectSections('monitoring');
+ const g08Line=await p.locator('.g-line',{hasText:'G0.8 verdict'}).first().innerText();
+ assert(g08Line.includes('UNRESOLVED')&&g08Line.includes('CHAIN_UNKNOWN · EVIDENCE_UNKNOWN'),'G0.8 UNRESOLVED with both dimensions UNKNOWN: '+g08Line);
+ const g08Section=p.getByRole('heading',{name:'5. '+sections.monitoring[4],exact:true}).locator('xpath=ancestor::section[1]');
+ const g08Text=await g08Section.innerText();
+ assert(g08Text.includes('Record · g08.mainnet-acquisition-unresolved.v2')&&g08Text.includes('SENT_TRANSACTION_UNRESOLVED'),'native UNRESOLVED record in its G0.8 section 5');
+ for(const claim of ['CHAIN_PASS','CHAIN_ADAPT','EVIDENCE_COMPLETE'])assert(!(await body()).includes(claim),'no acquisition claim: '+claim);
  assert((await body()).includes('FUTURE_PHASE_BLOCKED'));assert((await body()).includes('Record · g06a.builder-floor-policy.v2'));
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
  await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
@@ -141,5 +151,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

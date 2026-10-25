@@ -20,6 +20,7 @@ export function MonitoringPanel() {
   const records = useNativeRecords();
   const b = s?.builder;
   const g07 = s?.gates.find(g => g.gateId === "G0.7");
+  const g08 = s?.gates.find(g => g.gateId === "G0.8");
   return <>
     <Line label="Monitoring source quality" value={<ValueState state={quality} />} hint="bsc.monitoring.state transport" />
     <PlacedSection panel="monitoring" section={1} records={records}>
@@ -40,7 +41,7 @@ export function MonitoringPanel() {
       <EvidenceRows evidence={g07?.evidence} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={5} records={records}>
-      <Line label="G0.8 verdict" value={<ValueState state={m?.state} />} />
+      <Line label="G0.8 verdict" value={<ValueState state={m?.state} />} hint={g08?.reasonCodes.join(" · ")} />
       <EvidenceRows evidence={m?.evidence} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={6} records={records} />
