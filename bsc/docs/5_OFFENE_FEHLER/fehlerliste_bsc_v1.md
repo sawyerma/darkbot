@@ -313,10 +313,10 @@ Umfang: produktive Pfade von `bsc/engine` (Bins/Libs ohne Tests), `bsc/geth/over
 | Uhrfehler → `unix_time_ns=0` im Journal | `qualification_capture::text_payload` | G0.7-Capture | BUG (niedrig) | `e9f88965` `UNKNOWN` statt 0 |
 | Uhrfehler → 0 im Runner | `chain_reads::unix_time_ms` | `require_fresh`, `bundle_window` | KEIN_BUG | 0 ⇒ „in der Zukunft“/Clock-Lag ⇒ STOP (fail-closed belegt) |
 | Ungebundener/mehrdeutiger G0.8-PASS sichtbar | `projection.rs` G0.8-Auswahl | alle Reiter | BUG | `e9f88965` UNRESOLVED + `RECORDED_VERDICT_*`/`G08_RECORDS_AMBIGUOUS` |
-| Gap-Zeit 0 (BSC-052) | `ingress.go::recordGapLocked` | C1-Ingress | BUG | Paket 3 (C1) |
-| Veränderlicher Testseam im Hotpath (BSC-043) | `ingress.go::serializeTxV2` | C1-Ingress | BUG | Paket 3 (C1) |
-| Öffentlicher Test-Clock-Setter (BSC-044) | `hot0.rs::set_clock` | HOT0 | BUG | Paket 3 (C1) |
-| V1-Ring ohne produktiven Rust-Aufrufer (BSC-045) | `geth_ipc::protocol_v1` (`pub use *`) | nur `RecordKind`/`HASH_LEN`/`PEER_LEN` genutzt | BUG (toter Pfad) | Paket 3: Go-Seite prüfen, toten Ring entfernen, Konstanten behalten |
+| Gap-Zeit 0 (BSC-052) | `ingress.go::recordGapLocked` | C1-Ingress | BUG | `a55e73f7` (+ Outbound/Chain/Ingress-Uhr einheitlich, nie Zeit 0) |
+| Veränderlicher Testseam im Hotpath (BSC-043) | `ingress.go::serializeTxV2` | C1-Ingress | BUG | `a55e73f7` direkt `MarshalBinary`, Tests mit echten unserialisierbaren TX |
+| Öffentlicher Test-Clock-Setter (BSC-044) | `hot0.rs::set_clock` | HOT0 | BUG | `6e9a357a` nur `cfg(test)` (compile_fail) |
+| V1-Ring ohne produktiven Rust-Aufrufer (BSC-045) | `geth_ipc::protocol_v1` (`pub use *`) | nur `RecordKind`/`HASH_LEN`/`PEER_LEN` genutzt | BUG (toter Pfad) | `6e9a357a` Rust-Ring, `a55e73f7` Go-API entfernt; `RecordKind`/Längen geteilt; c13/c14-Interop PASS |
 | Hostprofil als JSON (BSC-033) | `geth_ipc::host::to_json` | `c16_host_profile` (C1.6-Evidence) | BUG | Paket 3 → DBREC-Record |
 | `test-support` in Release-Builds (BSC-046) | `cargo tree` Release-Features | `darkbotctl build` | KEIN_BUG | nur `default`/`runner-startup` |
 | Panics im Dauerprozess | `status/*`, `bsc-status-reporter` | Reporter (launchd) | KEIN_BUG | keine `unwrap/expect/panic` außerhalb Tests |
@@ -324,6 +324,6 @@ Umfang: produktive Pfade von `bsc/engine` (Bins/Libs ohne Tests), `bsc/geth/over
 | Gate-0-JS-DRY-Tools (`g06a_*.cjs`) | `g06a_final_dry.sh` PREPARE/SIGN | Gate-0 | KEIN_BUG (BSC-048 gilt) | binäre Records; kein Neubau als SIGN-Vorbedingung |
 | Betriebsgrenzen als Literale (BSC-047) | G0.7-Runner (`MAX_BUILDER_IDLE`, `CAPTURE_WINDOW_NS`, Receipt-Fristen) | G0.7 | KEIN_BUG (G0.7) | V5-gebundene Versuchssemantik bleibt eingefroren; neue Runtime-Parameter nur typisiert/validiert (C0, Paket 3) |
 | Kein BSC-Runtime-Prozess C0–I | Release-Manifest: nur Reporter/Readiness/Candidate | – | SOLL_MISSING | Pakete 3–7 (Runner READ_ONLY/SHADOW/PAPER) |
-| Quellen/Venues/Latenz statisch `FUTURE_PHASE_BLOCKED`, „Runtime readiness UNKNOWN“ | `MonitoringPanel`/`AnalyticsPanel`/`OverviewPanel` | Frontend | SOLL_MISSING | echte native Owner mit `OFF/SHADOW/LIVE` requested/effective in C1/D/E/F |
+| Quellen/Venues/Latenz statisch `FUTURE_PHASE_BLOCKED`, „Runtime readiness UNKNOWN“ | `MonitoringPanel`/`AnalyticsPanel`/`OverviewPanel` | Frontend | SOLL_MISSING → teilweise | Quellen: `c41a27bc` nativer Owner `OFF/SHADOW/LIVE`→`BLOCKED` bis Monitoring §1; Venues/Latenz/Runtime-Health folgen (C1-Runtime, D/E/F) |
 | Heartbeat-/Quellzeit 0 bei Uhrfehler | `gateway/src/ws.rs`/`overview.rs::unix_ns_now` | gemeinsamer Wire (P0) | KEIN_BSC_BUG | Wire-Konvention 0 = unset; Project_0-Owner |
 | Kein synchronisierter Mainnet-geth | Host: 475 GB frei, BSC-Full ≈ 3 TB NVMe | C1-Live-Beobachtung | EXTERNAL_BLOCKED | Kostenentscheidung (Paket 3) |

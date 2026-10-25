@@ -9,7 +9,7 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 0 | V2 abgelegt, V1 historisch, diese Tabelle | TECHNISCH FERTIG | dieser Commit | – | Paket 1 |
 | 1 | Gate A/B: BSC-005 T5, G0.8 UNRESOLVED-Rundweg, Schema-/Readiness-Regression | TECHNISCH FERTIG — EXTERNAL_BLOCKED: SIGN/V5/Grant/echter G0.7/G0.8 (Nutzerfreigabe) | `746fdf29`, `f91274bb`, `e9f88965`; Reviewer 25.10.: kein HIGH/CRITICAL, alle MEDIUM/LOW behoben | Readiness real: `BLOCKED` (kein V5 ohne SIGN) | – |
 | 2 | BSC-050 Vollinventur + Fixes | TECHNISCH FERTIG (Inventur + Gate-0/Gateway-Fixes); C1-Funde → Paket 3 | `0a10f0d5` (BSC-051/053), `e9f88965` (Uhr-Fixes) | Fehlerliste §8 | Paket 3 |
-| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN | – | BSC-043/044/045/052/033; Source-Owner OFF/SHADOW/LIVE; WSS-Quellen; Runtime-Prozess; C1.9/C1.9b neu, C1.10-Freeze; Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | 3a C1-Fixes |
+| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN (3a C1-Fixes `6e9a357a`/`a55e73f7`, 3b Quellen-Owner `c41a27bc` fertig) | `a55e73f7` | WSS-Quellen + Runtime-Prozess (3c), BSC-033 + C1.9/C1.9b neu + C1.10-Freeze (3f); Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | 3c Runtime-Ingress |
 | 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | nach Paket 3 |
 | 5 | C3, D, G0.1-Four-Freeze, E | OFFEN | – | – | nach Paket 4 |
 | 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
