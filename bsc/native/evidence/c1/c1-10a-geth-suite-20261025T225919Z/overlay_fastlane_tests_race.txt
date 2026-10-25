@@ -1,0 +1,237 @@
+cmd=go test -race ./darkbot/fastlane/... -count=1 -v
+start_utc=2026-10-25T23:09:35Z
+# github.com/ethereum/go-ethereum/darkbot/fastlane.test
+ld: warning: '/private/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/go-link-1710509919/000026.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+=== RUN   TestC15ChainRecordsKeepTheirFieldSemantics
+--- PASS: TestC15ChainRecordsKeepTheirFieldSemantics (0.00s)
+=== RUN   TestC18SecondChainPublisherIsDetectedAndReportedInBand
+--- PASS: TestC18SecondChainPublisherIsDetectedAndReportedInBand (0.00s)
+=== RUN   TestC18FullChainLaneLosesNothingSilently
+--- PASS: TestC18FullChainLaneLosesNothingSilently (0.05s)
+=== RUN   TestC18ChainPublishersUnderOneLockAreASingleProducer
+--- PASS: TestC18ChainPublishersUnderOneLockAreASingleProducer (0.04s)
+=== RUN   TestC18UnlockedChainPublishersNeverCorruptTheLane
+--- PASS: TestC18UnlockedChainPublishersNeverCorruptTheLane (0.01s)
+=== RUN   TestE72HeadResetsArePublishedAsReasonedGaps
+--- PASS: TestE72HeadResetsArePublishedAsReasonedGaps (0.00s)
+=== RUN   TestRecordKindWireValues
+--- PASS: TestRecordKindWireValues (0.00s)
+=== RUN   TestMonotonicNSReadsATime
+--- PASS: TestMonotonicNSReadsATime (0.00s)
+=== RUN   TestClockReadingRefusesFailedAndZeroReadings
+--- PASS: TestClockReadingRefusesFailedAndZeroReadings (0.00s)
+=== RUN   TestC14ScopeIsTheCommittedFlapScope
+--- PASS: TestC14ScopeIsTheCommittedFlapScope (0.00s)
+=== RUN   TestC14FixturesAreTheCommittedCalldata
+--- PASS: TestC14FixturesAreTheCommittedCalldata (0.00s)
+=== RUN   TestC14PrefilterPassesEveryAuthorizedLaunch
+--- PASS: TestC14PrefilterPassesEveryAuthorizedLaunch (0.00s)
+=== RUN   TestC14PrefilterRejectsNonMatches
+--- PASS: TestC14PrefilterRejectsNonMatches (0.00s)
+=== RUN   TestC14LaunchPassesAndOrdinaryBuyIsFiltered
+--- PASS: TestC14LaunchPassesAndOrdinaryBuyIsFiltered (0.00s)
+=== RUN   TestC14NonMatchesAreDroppedBeforeSerialization
+--- PASS: TestC14NonMatchesAreDroppedBeforeSerialization (0.00s)
+=== RUN   TestC14DecodedIsCapturedBeforeAndIngressAfterValidation
+--- PASS: TestC14DecodedIsCapturedBeforeAndIngressAfterValidation (0.00s)
+=== RUN   TestC14AuxGoldenEncoding
+--- PASS: TestC14AuxGoldenEncoding (0.00s)
+=== RUN   TestC14RejectedPacketsPublishNothing
+--- PASS: TestC14RejectedPacketsPublishNothing (0.00s)
+=== RUN   TestC14TransactionsAndPooledShareBoundarySemantics
+--- PASS: TestC14TransactionsAndPooledShareBoundarySemantics (0.00s)
+=== RUN   TestC14ParallelPeersPublishIntoSeparateLanes
+--- PASS: TestC14ParallelPeersPublishIntoSeparateLanes (0.09s)
+=== RUN   TestC14DisconnectDrainReleaseReconnect
+--- PASS: TestC14DisconnectDrainReleaseReconnect (0.00s)
+=== RUN   TestC14LaneExhaustionIsAnExplicitGap
+--- PASS: TestC14LaneExhaustionIsAnExplicitGap (0.00s)
+=== RUN   TestC14StartupBoundsAreEnforced
+--- PASS: TestC14StartupBoundsAreEnforced (0.00s)
+=== RUN   TestC14InitFromEnvAndPeerCapacity
+--- PASS: TestC14InitFromEnvAndPeerCapacity (0.00s)
+=== RUN   TestC19bTestnetScopeIsExplicitAndFailClosed
+--- PASS: TestC19bTestnetScopeIsExplicitAndFailClosed (0.00s)
+=== RUN   TestC14QueueFullAndOversizeAreVisible
+--- PASS: TestC14QueueFullAndOversizeAreVisible (0.00s)
+=== RUN   TestC14ShutdownWithActivePeers
+--- PASS: TestC14ShutdownWithActivePeers (0.01s)
+=== RUN   TestC14TxpoolEvidenceIsIndependentOfThePrefilter
+--- PASS: TestC14TxpoolEvidenceIsIndependentOfThePrefilter (0.00s)
+=== RUN   TestC14TxpoolProducerFailuresAreCounted
+--- PASS: TestC14TxpoolProducerFailuresAreCounted (0.00s)
+=== RUN   TestC14RoleLeaseAndGenerationRulesHold
+--- PASS: TestC14RoleLeaseAndGenerationRulesHold (0.00s)
+=== RUN   TestC14InteropGethPhase1
+    ingress_test.go:1075: C1.4 Go<->Rust interop phase; run by bsc/tools/c14_ingress_interop.sh
+--- SKIP: TestC14InteropGethPhase1 (0.00s)
+=== RUN   TestC14InteropGethPhase2
+    ingress_test.go:1130: C1.4 Go<->Rust interop phase; run by bsc/tools/c14_ingress_interop.sh
+--- SKIP: TestC14InteropGethPhase2 (0.00s)
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate/production_default_does_not_override
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate/testnet_scope_without_arm_does_not_override
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate/explicit_testnet_qualification_is_allowed
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate/mainnet_scope_with_arm_fails_closed
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate/testnet_scope_on_wrong_network_fails_closed
+=== RUN   TestC19bUnsyncedAcceptTxsQualificationGate/invalid_arm_fails_closed
+--- PASS: TestC19bUnsyncedAcceptTxsQualificationGate (0.00s)
+    --- PASS: TestC19bUnsyncedAcceptTxsQualificationGate/production_default_does_not_override (0.00s)
+    --- PASS: TestC19bUnsyncedAcceptTxsQualificationGate/testnet_scope_without_arm_does_not_override (0.00s)
+    --- PASS: TestC19bUnsyncedAcceptTxsQualificationGate/explicit_testnet_qualification_is_allowed (0.00s)
+    --- PASS: TestC19bUnsyncedAcceptTxsQualificationGate/mainnet_scope_with_arm_fails_closed (0.00s)
+    --- PASS: TestC19bUnsyncedAcceptTxsQualificationGate/testnet_scope_on_wrong_network_fails_closed (0.00s)
+    --- PASS: TestC19bUnsyncedAcceptTxsQualificationGate/invalid_arm_fails_closed (0.00s)
+=== RUN   TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal
+--- PASS: TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal (0.00s)
+=== RUN   TestC14GapWithoutClockIsCountedAndUntimed
+--- PASS: TestC14GapWithoutClockIsCountedAndUntimed (0.00s)
+=== RUN   TestC17LanePlanAndBounds
+--- PASS: TestC17LanePlanAndBounds (0.00s)
+=== RUN   TestC17EverySelectedPeerGetsTheSameSignedBytes
+--- PASS: TestC17EverySelectedPeerGetsTheSameSignedBytes (0.00s)
+=== RUN   TestC17SlowPeerDoesNotDelayTheOtherPeer
+--- PASS: TestC17SlowPeerDoesNotDelayTheOtherPeer (0.01s)
+=== RUN   TestC17FailingPeerIsUnknownAndThePartialHandoffIsVisible
+--- PASS: TestC17FailingPeerIsUnknownAndThePartialHandoffIsVisible (0.00s)
+=== RUN   TestC17UnselectedWorkerSlotsAreReportedNotSent
+--- PASS: TestC17UnselectedWorkerSlotsAreReportedNotSent (0.00s)
+=== RUN   TestC17NoGoroutineIsCreatedPerBuy
+--- PASS: TestC17NoGoroutineIsCreatedPerBuy (0.24s)
+=== RUN   TestC17PeerSelectionIsStableAndOutsideDispatch
+--- PASS: TestC17PeerSelectionIsStableAndOutsideDispatch (0.00s)
+=== RUN   TestC17InvalidEgressRecordsAreRefusedExplicitly
+--- PASS: TestC17InvalidEgressRecordsAreRefusedExplicitly (0.00s)
+=== RUN   TestC17PeerThatKnowsTheTransactionIsNotSentTo
+--- PASS: TestC17PeerThatKnowsTheTransactionIsNotSentTo (0.00s)
+=== RUN   TestC17EvidenceKeepsPerWorkerOrderAndEgressSequence
+--- PASS: TestC17EvidenceKeepsPerWorkerOrderAndEgressSequence (0.00s)
+=== RUN   TestC17ShutdownStopsTheWorkersBeforeSealingTheLanes
+--- PASS: TestC17ShutdownStopsTheWorkersBeforeSealingTheLanes (0.00s)
+=== RUN   TestC16PermanentThreadQoSIsRecordedPerRole
+--- PASS: TestC16PermanentThreadQoSIsRecordedPerRole (0.00s)
+=== RUN   TestC17QueuedBuyKeepsDispatchTargetAfterReassignment
+=== RUN   TestC17QueuedBuyKeepsDispatchTargetAfterReassignment/closed=false
+=== RUN   TestC17QueuedBuyKeepsDispatchTargetAfterReassignment/closed=true
+--- PASS: TestC17QueuedBuyKeepsDispatchTargetAfterReassignment (0.00s)
+    --- PASS: TestC17QueuedBuyKeepsDispatchTargetAfterReassignment/closed=false (0.00s)
+    --- PASS: TestC17QueuedBuyKeepsDispatchTargetAfterReassignment/closed=true (0.00s)
+=== RUN   TestC17ClockFailureNeverStampsEvidence
+--- PASS: TestC17ClockFailureNeverStampsEvidence (0.00s)
+=== RUN   TestC18SimultaneousPeerHandlersLoseNothingSilently
+--- PASS: TestC18SimultaneousPeerHandlersLoseNothingSilently (0.14s)
+=== RUN   TestC18StalledConsumerIsCountedAndNeverOverwritten
+--- PASS: TestC18StalledConsumerIsCountedAndNeverOverwritten (0.01s)
+=== RUN   TestC18ChurnUnderLoadNeverReusesALaneEarly
+--- PASS: TestC18ChurnUnderLoadNeverReusesALaneEarly (0.09s)
+=== RUN   TestC18LaneExhaustionUnderChurnIsAnExplicitGap
+--- PASS: TestC18LaneExhaustionUnderChurnIsAnExplicitGap (0.00s)
+=== RUN   TestC18CanonicalAndReorgUnderTransactionLoad
+--- PASS: TestC18CanonicalAndReorgUnderTransactionLoad (0.08s)
+=== RUN   TestE75LockSymlinkAndHardlinkAreNeverTruncated
+--- PASS: TestE75LockSymlinkAndHardlinkAreNeverTruncated (0.00s)
+=== RUN   TestE75UntrustedDirectoriesFailClosed
+--- PASS: TestE75UntrustedDirectoriesFailClosed (0.00s)
+=== RUN   TestE75AncestorsNeedOwnerAndStickyWhenShared
+--- PASS: TestE75AncestorsNeedOwnerAndStickyWhenShared (0.00s)
+=== RUN   TestE75ArenaOpensRefuseSymlinksAndOpenModes
+--- PASS: TestE75ArenaOpensRefuseSymlinksAndOpenModes (0.00s)
+=== RUN   TestV2CRC32CGoldenVectors
+--- PASS: TestV2CRC32CGoldenVectors (0.00s)
+=== RUN   TestV2RoundTripWrapAndDirectory
+--- PASS: TestV2RoundTripWrapAndDirectory (0.00s)
+=== RUN   TestV2FullNeverOverwritesUnread
+--- PASS: TestV2FullNeverOverwritesUnread (0.00s)
+=== RUN   TestV2HeaderAndPayloadCorruptionDetected
+=== RUN   TestV2HeaderAndPayloadCorruptionDetected/header
+=== RUN   TestV2HeaderAndPayloadCorruptionDetected/payload
+--- PASS: TestV2HeaderAndPayloadCorruptionDetected (0.00s)
+    --- PASS: TestV2HeaderAndPayloadCorruptionDetected/header (0.00s)
+    --- PASS: TestV2HeaderAndPayloadCorruptionDetected/payload (0.00s)
+=== RUN   TestV2IndependentLanesHaveIndependentProducers
+--- PASS: TestV2IndependentLanesHaveIndependentProducers (0.00s)
+=== RUN   TestV2CreateNewRefusesStaleArena
+--- PASS: TestV2CreateNewRefusesStaleArena (0.00s)
+=== RUN   TestV2FileIsOwnerOnly
+--- PASS: TestV2FileIsOwnerOnly (0.00s)
+=== RUN   TestV2PeerLaneLifecycleRequiresDrainBeforeReuse
+--- PASS: TestV2PeerLaneLifecycleRequiresDrainBeforeReuse (0.00s)
+=== RUN   TestV2PeerLaneLifecycleRejectsWrongOwnerAndFreePublish
+--- PASS: TestV2PeerLaneLifecycleRejectsWrongOwnerAndFreePublish (0.00s)
+=== RUN   TestV2LifecycleFullCycleAndSecondBind
+--- PASS: TestV2LifecycleFullCycleAndSecondBind (0.00s)
+=== RUN   TestV2PublishWhileFreeOrClosingIsRejected
+--- PASS: TestV2PublishWhileFreeOrClosingIsRejected (0.00s)
+=== RUN   TestV2DoubleBindRejectedWithoutSideEffects
+--- PASS: TestV2DoubleBindRejectedWithoutSideEffects (0.00s)
+=== RUN   TestV2CloseAndReleaseRequireOwnerAndEpoch
+--- PASS: TestV2CloseAndReleaseRequireOwnerAndEpoch (0.00s)
+=== RUN   TestV2ReleaseBeforeDrainAndUnreadRecordPreventReuse
+--- PASS: TestV2ReleaseBeforeDrainAndUnreadRecordPreventReuse (0.00s)
+=== RUN   TestV2EmptyClosingLaneDrainsAtOnce
+--- PASS: TestV2EmptyClosingLaneDrainsAtOnce (0.00s)
+=== RUN   TestV2WrongArenaOrLaneGenerationRejected
+--- PASS: TestV2WrongArenaOrLaneGenerationRejected (0.00s)
+=== RUN   TestV2RecordOfAnotherEpochQuarantinesLaneOnce
+--- PASS: TestV2RecordOfAnotherEpochQuarantinesLaneOnce (0.00s)
+=== RUN   TestV2LaneEpochExhaustionFailsClosed
+--- PASS: TestV2LaneEpochExhaustionFailsClosed (0.00s)
+=== RUN   TestV2PoolBindsOnlyFreeLanesAndReportsExhaustion
+--- PASS: TestV2PoolBindsOnlyFreeLanesAndReportsExhaustion (0.00s)
+=== RUN   TestV2PoolBoundsMustMatchArena
+--- PASS: TestV2PoolBoundsMustMatchArena (0.00s)
+=== RUN   TestV2PoolConcurrentAllocateNeverDoubleAssigns
+--- PASS: TestV2PoolConcurrentAllocateNeverDoubleAssigns (0.00s)
+=== RUN   TestV2ChurnKeepsEpochsMonotonicAndSequencesContinuous
+--- PASS: TestV2ChurnKeepsEpochsMonotonicAndSequencesContinuous (0.00s)
+=== RUN   TestV2StaleLeaseNeverActsOnReusedLane
+--- PASS: TestV2StaleLeaseNeverActsOnReusedLane (0.00s)
+=== RUN   TestV2SlotsOfEarlierBindingNeverAccepted
+--- PASS: TestV2SlotsOfEarlierBindingNeverAccepted (0.00s)
+=== RUN   TestV2WriteAfterCloseQuarantinesLane
+--- PASS: TestV2WriteAfterCloseQuarantinesLane (0.00s)
+=== RUN   TestV2QuarantineTerminalAndRestartQuarantinesOldGeneration
+--- PASS: TestV2QuarantineTerminalAndRestartQuarantinesOldGeneration (0.00s)
+=== RUN   TestV2IndependentPeerLanesCycleConcurrently
+--- PASS: TestV2IndependentPeerLanesCycleConcurrently (0.00s)
+=== RUN   TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped
+=== RUN   TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/sequence
+=== RUN   TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/payload-length
+=== RUN   TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/epoch
+=== RUN   TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/crc
+=== RUN   TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/kind
+--- PASS: TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped (0.00s)
+    --- PASS: TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/sequence (0.00s)
+    --- PASS: TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/payload-length (0.00s)
+    --- PASS: TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/epoch (0.00s)
+    --- PASS: TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/crc (0.00s)
+    --- PASS: TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/kind (0.00s)
+=== RUN   TestV2RecordsOutsideBindingQuarantineAsLateWrites
+--- PASS: TestV2RecordsOutsideBindingQuarantineAsLateWrites (0.00s)
+=== RUN   TestV2PoolNeverTakesBoundClosingOrQuarantinedLanes
+--- PASS: TestV2PoolNeverTakesBoundClosingOrQuarantinedLanes (0.00s)
+=== RUN   TestV2RuntimeShutdownRefusesBindsAndPublishesWithoutUnmapping
+--- PASS: TestV2RuntimeShutdownRefusesBindsAndPublishesWithoutUnmapping (0.00s)
+=== RUN   TestV2RuntimeStartFailsClosedOnBoundsAndExistingArena
+--- PASS: TestV2RuntimeStartFailsClosedOnBoundsAndExistingArena (0.00s)
+=== RUN   TestV2RoleLeasesAreExclusivePerRoleAndCoexistAcrossRoles
+--- PASS: TestV2RoleLeasesAreExclusivePerRoleAndCoexistAcrossRoles (0.00s)
+=== RUN   TestV2RoleLeaseChildHolder
+    v2_test.go:1850: helper process only
+--- SKIP: TestV2RoleLeaseChildHolder (0.00s)
+=== RUN   TestV2RoleLeaseReleasedWhenHolderProcessDies
+--- PASS: TestV2RoleLeaseReleasedWhenHolderProcessDies (0.01s)
+=== RUN   TestV2ExistingArenasDetectedNeverAttachedNeverOverwritten
+--- PASS: TestV2ExistingArenasDetectedNeverAttachedNeverOverwritten (0.00s)
+=== RUN   TestV2UndefinedLifecycleStateQuarantinesEvenAnEmptyLane
+--- PASS: TestV2UndefinedLifecycleStateQuarantinesEvenAnEmptyLane (0.00s)
+=== RUN   TestV2InteropGethPhase1
+    v2_test.go:2061: C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+--- SKIP: TestV2InteropGethPhase1 (0.00s)
+=== RUN   TestV2InteropGethPhase2
+    v2_test.go:2105: C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+--- SKIP: TestV2InteropGethPhase2 (0.00s)
+PASS
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	2.175s
+exit_status=0
+end_utc=2026-10-25T23:09:48Z

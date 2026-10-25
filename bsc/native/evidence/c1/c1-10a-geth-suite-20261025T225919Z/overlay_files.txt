@@ -1,0 +1,124 @@
+# C1.10A overlay identity
+# DarkBot repo HEAD: 0addbeee10110d554ed06f666b79409df64f8c70
+# overlay + apply script git status (porcelain, empty = clean): []
+
+## overlay source files (DarkBot repo) - sha256, git blob at HEAD
+c0216295c0c5d3e5224cb12644627aea56b68778ffb7c038675e10ca7eef19e7  bsc/geth/overlay/darkbot/fastlane/chain_v2.go  blob=9892f2e96a27d7d01bdf73385979b967303f9291
+cae4b058231c2b888b28436e3993964457233df4355824607a303bae471e8832  bsc/geth/overlay/darkbot/fastlane/chain_v2_test.go  blob=7696a99684adf44db011d7f77e00c86ef1b650b4
+1e92b67573a124cd5489d752ee55e9af1501ce6574f10d75bd16fce3b39925f1  bsc/geth/overlay/darkbot/fastlane/fastlane.go  blob=2aec84e7332d8c8d4205b4c96f1b1d2bbe7f11cb
+7e8bfb838f0a19d7a507a81d2bddb4de8a5716d5b768f819355069d52d21b130  bsc/geth/overlay/darkbot/fastlane/fastlane_test.go  blob=fe91f0e288a95738351460f353b5154b2165ed91
+5c5eb8af8eb1223793b2937d5017f4b6934e1efde93f8552ee4fb9227ff89447  bsc/geth/overlay/darkbot/fastlane/ingress.go  blob=a8b6661d7a6f506b0d1e0cb406eb0c4892be2b2d
+cd3a779e39fc33b07cd2165652344b5418e3e930c1a80582b6d722ee27b3f3dd  bsc/geth/overlay/darkbot/fastlane/ingress_fixtures_test.go  blob=f2a01817c5a3ac509ff62e327e5486fd7be1a9b0
+a372a6e816d983f3beb45e046a62ae4d5f5649393acd314225e1f49f509bcb22  bsc/geth/overlay/darkbot/fastlane/ingress_test.go  blob=4061547cee08c4d54b5db38f7f1a63902afb2d44
+819f63b5e4d226ab53c27de661579bd6c48b9628fa91e48647b2c999608658e8  bsc/geth/overlay/darkbot/fastlane/outbound.go  blob=eb81c1db8e53488b7d836dfad0e68939c480cfc4
+2bc214f845690c40e4cb894a8ede2923bce7dc91e6668fa229533d3087219a4c  bsc/geth/overlay/darkbot/fastlane/outbound_test.go  blob=1071fe87fd61e7850bec952f5f432129811295d7
+8ac06472ee687db45dc73449c12c5f024907f895435e2ded64dbf73138a4c2d8  bsc/geth/overlay/darkbot/fastlane/qos.go  blob=0efadee6f83abf9d60ad8e2be20fbebb0cc80036
+25839bd41331d6c69f89b721effb0ab912a7d0eb8bcebec13cbff0da1d620df1  bsc/geth/overlay/darkbot/fastlane/qos_darwin.go  blob=cfe94486df2cf5a7901a93bd1af22dd24598cad3
+52dfa7a2dcae8632010caf90ecc7f1e0875ff4319e9ca932697bdc916d9c4397  bsc/geth/overlay/darkbot/fastlane/qos_fallback.go  blob=aefb4f0c14cd53239f45a46b91fd0be7a0a9ad79
+5640258ac46de1bc36dc9b428449d8e2dd53628701fa185105c4043eb9872579  bsc/geth/overlay/darkbot/fastlane/stress_test.go  blob=f3f6a4516c300584db5f3feeb91ab7b83ce4907a
+aef3dbfcde77f0683c47c7c974fcee6c14844ffa173b9329241259193431d8f3  bsc/geth/overlay/darkbot/fastlane/trust.go  blob=040cc0825d55262f2b38baacab4bbe3567991982
+5a55d4693fbe769fda9c6cd62b87307ae4da197ff447400f212a70933a2380ed  bsc/geth/overlay/darkbot/fastlane/trust_test.go  blob=d7a4d45e32fb30dc475df91f7a380fd08e08bfb8
+369d2683ce52230ffe512173eee9cb7c0be243e8373b401b6ad885480f99ef19  bsc/geth/overlay/darkbot/fastlane/v2.go  blob=5af581626428e12d04e67c9a1d542078fde8857a
+d057c283eea8fdb3369d9e966b68b69e2ecc6027d42b8367302f15e821a3b6df  bsc/geth/overlay/darkbot/fastlane/v2_test.go  blob=517bc2be3f3dfd9a537ada93a93227640701b40a
+e45072db0ae0e1a7a6712d918ef648d841bf9a4a0b2a1242d85832877a096ddb  bsc/tools/c1_apply_geth_overlay.py  blob=3edf7bb85c39f44d9f95e609c8af873b10f57072
+33d49549bce158a55401420f2ad5a1535d06d46791f3f7315b5f497fa0128811  bsc/tools/c1_verify_geth_pin.sh  blob=708b41d908c4b8fce73fc705d04c025bbc7a65ff
+
+## files the apply script changed in the CANDIDATE clone (git status --porcelain --untracked-files=all)
+ M core/blockchain.go
+ M eth/handler.go
+ M eth/handler_eth.go
+ M eth/protocols/eth/peer.go
+?? .darkbot-c1-fastlane-c17
+?? darkbot/fastlane/chain_v2.go
+?? darkbot/fastlane/chain_v2_test.go
+?? darkbot/fastlane/fastlane.go
+?? darkbot/fastlane/fastlane_test.go
+?? darkbot/fastlane/ingress.go
+?? darkbot/fastlane/ingress_fixtures_test.go
+?? darkbot/fastlane/ingress_test.go
+?? darkbot/fastlane/outbound.go
+?? darkbot/fastlane/outbound_test.go
+?? darkbot/fastlane/qos.go
+?? darkbot/fastlane/qos_darwin.go
+?? darkbot/fastlane/qos_fallback.go
+?? darkbot/fastlane/stress_test.go
+?? darkbot/fastlane/trust.go
+?? darkbot/fastlane/trust_test.go
+?? darkbot/fastlane/v2.go
+?? darkbot/fastlane/v2_test.go
+
+## applied candidate files - sha256 (candidate clone)
+906ddcbec3118df9d9d700546be3906fe0c49e3754016ae25939f937e3d8bd77  .darkbot-c1-fastlane-c17
+d581b35fa4ca5f9a4be7711928302dda909dfba7986eb77940c56796eec0583f  core/blockchain.go
+f81c536fd7fe0fa107eac257d6c06afb5b0d213b4047f830bd7cd563f22e9085  eth/handler.go
+2a045051e716575838114c9df5d3c06655e8c3f814612e261276c85aa0e77d8d  eth/handler_eth.go
+b7f81ceb3df09175fb6e948f75adaa43802ad4a413dc56c632f18019c0d79240  eth/protocols/eth/peer.go
+c0216295c0c5d3e5224cb12644627aea56b68778ffb7c038675e10ca7eef19e7  darkbot/fastlane/chain_v2.go
+cae4b058231c2b888b28436e3993964457233df4355824607a303bae471e8832  darkbot/fastlane/chain_v2_test.go
+1e92b67573a124cd5489d752ee55e9af1501ce6574f10d75bd16fce3b39925f1  darkbot/fastlane/fastlane.go
+7e8bfb838f0a19d7a507a81d2bddb4de8a5716d5b768f819355069d52d21b130  darkbot/fastlane/fastlane_test.go
+5c5eb8af8eb1223793b2937d5017f4b6934e1efde93f8552ee4fb9227ff89447  darkbot/fastlane/ingress.go
+cd3a779e39fc33b07cd2165652344b5418e3e930c1a80582b6d722ee27b3f3dd  darkbot/fastlane/ingress_fixtures_test.go
+a372a6e816d983f3beb45e046a62ae4d5f5649393acd314225e1f49f509bcb22  darkbot/fastlane/ingress_test.go
+819f63b5e4d226ab53c27de661579bd6c48b9628fa91e48647b2c999608658e8  darkbot/fastlane/outbound.go
+2bc214f845690c40e4cb894a8ede2923bce7dc91e6668fa229533d3087219a4c  darkbot/fastlane/outbound_test.go
+8ac06472ee687db45dc73449c12c5f024907f895435e2ded64dbf73138a4c2d8  darkbot/fastlane/qos.go
+25839bd41331d6c69f89b721effb0ab912a7d0eb8bcebec13cbff0da1d620df1  darkbot/fastlane/qos_darwin.go
+52dfa7a2dcae8632010caf90ecc7f1e0875ff4319e9ca932697bdc916d9c4397  darkbot/fastlane/qos_fallback.go
+5640258ac46de1bc36dc9b428449d8e2dd53628701fa185105c4043eb9872579  darkbot/fastlane/stress_test.go
+aef3dbfcde77f0683c47c7c974fcee6c14844ffa173b9329241259193431d8f3  darkbot/fastlane/trust.go
+5a55d4693fbe769fda9c6cd62b87307ae4da197ff447400f212a70933a2380ed  darkbot/fastlane/trust_test.go
+369d2683ce52230ffe512173eee9cb7c0be243e8373b401b6ad885480f99ef19  darkbot/fastlane/v2.go
+d057c283eea8fdb3369d9e966b68b69e2ecc6027d42b8367302f15e821a3b6df  darkbot/fastlane/v2_test.go
+
+## same four tracked files at the pristine pin - sha256 (baseline clone)
+a11414d9dea904d0441c3b84aa1ab84623a2dd704bdf26b1e5c5fd8701571b52  core/blockchain.go
+444d05190a9b161013cffb3a43ed7d068569437f35766ead12ea716eeb3467bb  eth/handler.go
+f3290367615a90f3fa37713f1695d3c11db8fe9ca2285f282cd50b26adb457b8  eth/handler_eth.go
+a3f0ebf9ca33d1a3350a75aee1ba8daf3b494c43e7ad96e93f623a8c4eedea22  eth/protocols/eth/peer.go
+
+## copy identity: overlay source vs applied candidate copy (cmp)
+IDENTICAL chain_v2.go
+IDENTICAL chain_v2_test.go
+IDENTICAL fastlane.go
+IDENTICAL fastlane_test.go
+IDENTICAL ingress.go
+IDENTICAL ingress_fixtures_test.go
+IDENTICAL ingress_test.go
+IDENTICAL outbound.go
+IDENTICAL outbound_test.go
+IDENTICAL qos.go
+IDENTICAL qos_darwin.go
+IDENTICAL qos_fallback.go
+IDENTICAL stress_test.go
+IDENTICAL trust.go
+IDENTICAL trust_test.go
+IDENTICAL v2.go
+IDENTICAL v2_test.go
+
+## marker file content
+DARKBOT_C1_FASTLANE_C1_7_E72
+
+## apply script output (python3 bsc/tools/c1_apply_geth_overlay.py <candidate clone>, exit 0, run before the suite start 2026-10-25T22:59:19Z)
+C1_9B_HARDENED_ACCEPT_TXS_PATCHED
+C1_4_HOOK_ORDER_VERIFIED
+C1_7_OUTBOUND_HOOKS_VERIFIED
+C1_8_CHAIN_OWNERSHIP_VERIFIED
+C1_GETH_OVERLAY_APPLIED
+marker=DARKBOT_C1_FASTLANE_C1_7_E72
+base=cdb7548b5baacfdae92f9f63437d6456411665f3
+
+## tracked diff stat (candidate vs pin)
+ core/blockchain.go        | 16 +++++++++-
+ eth/handler.go            | 78 +++++++++++++++++++++++++++++++++++++++++++++++
+ eth/handler_eth.go        | 13 ++++++--
+ eth/protocols/eth/peer.go | 40 ++++++++++++++++++++++++
+ 4 files changed, 144 insertions(+), 3 deletions(-)
+
+## binding note
+All runs in this directory used the overlay as committed at DarkBot HEAD 0addbeee10110d554ed06f666b79409df64f8c70
+(working tree clean for bsc/geth/overlay at apply time and when this list was written; candidate copies byte-identical
+to the hashes above). At 2026-10-25T23:11:59Z, after the suite (end 23:08:29Z) and after the overlay tests
+(end 23:09:48Z), bsc/geth/overlay/darkbot/fastlane/outbound_test.go was modified in the shared working tree by
+another actor (test-only change to TestC17SlowPeerDoesNotDelayTheOtherPeer, sha256 6387f3af...b08334).
+That edit is NOT covered by this evidence.

@@ -29,7 +29,7 @@ Peer-ingress semantics (`T_packet_decoded`, `T_ingress`, prefilter, one handler 
 ## Common gates (before C1.5)
 
 ```bash
-cargo fmt --all -- --check
+cargo fmt -p darkbot-bsc-geth-ipc -p darkbot-bsc-trading -- --check   # C1 crates; G0.x files elsewhere are hash-pinned and stay unformatted
 cargo clippy -p darkbot-bsc-geth-ipc --all-targets --locked --offline -- -D warnings
 cargo test -p darkbot-bsc-trading --test c14_prefilter_scope --locked --offline
 gofmt -l darkbot/fastlane eth/handler_eth.go eth/handler.go eth/protocols/eth/peer.go core/blockchain.go   # must print nothing

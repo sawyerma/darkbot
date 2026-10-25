@@ -1,0 +1,26 @@
+$ git clone -q --shared --no-checkout /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/Backup/DarkBot/bsc/vendor/bsc-geth /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth
+exit=0
+$ git -C /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth checkout -q --detach cdb7548b5baacfdae92f9f63437d6456411665f3
+exit=0
+$ git -C /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth rev-parse HEAD
+cdb7548b5baacfdae92f9f63437d6456411665f3
+exit=0
+$ go version
+go version go1.25.0 darwin/arm64
+exit=0
+$ python3 /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/tools/c1_apply_geth_overlay.py /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth
+C1_9B_HARDENED_ACCEPT_TXS_PATCHED
+C1_4_HOOK_ORDER_VERIFIED
+C1_7_OUTBOUND_HOOKS_VERIFIED
+C1_8_CHAIN_OWNERSHIP_VERIFIED
+C1_GETH_OVERLAY_APPLIED
+marker=DARKBOT_C1_FASTLANE_C1_7_E72
+base=cdb7548b5baacfdae92f9f63437d6456411665f3
+exit=0
+$ gofmt -l darkbot/fastlane eth/handler_eth.go eth/handler.go eth/protocols/eth/peer.go core/blockchain.go
+exit=0
+$ go build -o /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth-bin ./cmd/geth
+exit=0
+$ shasum -a 256 /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth-bin
+99484c331c1afb6d107a8c3a20ad840ae33458e6953919c2594e09cc1020c424  /private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth-bin
+exit=0

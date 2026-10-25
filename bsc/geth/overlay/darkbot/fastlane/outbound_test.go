@@ -243,6 +243,11 @@ func TestC17SlowPeerDoesNotDelayTheOtherPeer(t *testing.T) {
 	r, cfg := c17Start(t, 2)
 	slow := &c17Peer{id: c14Node(0xb1), hold: make(chan struct{})}
 	fast := &c17Peer{id: c14Node(0xb2)}
+	// A failing assertion must not leave the slow worker held: the runtime's
+	// shutdown (registered earlier, so run later) waits for every worker.
+	var release sync.Once
+	releaseSlow := func() { release.Do(func() { close(slow.hold) }) }
+	t.Cleanup(releaseSlow)
 	if err := r.outbound.assign([]OutboundTargetV2{slow.target(), fast.target()}); err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +283,7 @@ func TestC17SlowPeerDoesNotDelayTheOtherPeer(t *testing.T) {
 		t.Fatalf("slow worker reported %d handoffs while held", len(got))
 	}
 
-	close(slow.hold)
+	releaseSlow()
 	c17Wait(t, "slow peer drained", func() bool { return slow.sent.Load() == 1+c17WorkerQueueDepth })
 	r.outbound.stopAndWait()
 	full := 0

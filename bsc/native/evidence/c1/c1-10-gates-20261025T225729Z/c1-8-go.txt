@@ -1,0 +1,13 @@
+$ go test -race -count=1 -run TestC18|TestC15 ./darkbot/fastlane
+# github.com/ethereum/go-ethereum/darkbot/fastlane.test
+ld: warning: '/private/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/go-link-3831593379/000026.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	1.700s
+exit=0
+$ go test -race -count=1 ./darkbot/fastlane
+# github.com/ethereum/go-ethereum/darkbot/fastlane.test
+ld: warning: '/private/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/go-link-2375714441/000026.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	2.186s
+exit=0
+$ go test -race -count=1 ./darkbot/fastlane (after the test fix)
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	2.158s
+exit=0

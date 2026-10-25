@@ -1,0 +1,22 @@
+HEAD 0addbeee10110d554ed06f666b79409df64f8c70
+cargo fmt --all --check exit=1
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:113:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:139:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:24:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:332:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:366:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:46:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:53:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:724:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:731:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:737:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:744:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:751:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/acceptance_contract.rs:83:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:130:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:153:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:174:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:181:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:196:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:271:
+Diff in /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs:300:

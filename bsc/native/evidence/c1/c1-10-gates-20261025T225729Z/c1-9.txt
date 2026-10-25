@@ -1,0 +1,35 @@
+$ cargo test -p darkbot-bsc-qualification --locked --offline -j 2 --lib c1_
+   Compiling darkbot-bsc-qualification v0.1.0 (/Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/DarkBot/bsc/engine/crates/qualification)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_qualification-2c659a524dea9dbd)
+
+running 25 tests
+test c1_common::tests::max_is_reported_and_a_miss_starts_at_exactly_one_millisecond ... ok
+test c1_common::tests::no_samples_is_stated ... ok
+test c1_common::tests::arguments_and_hex_parse_strictly ... ok
+test c1_hook_path::tests::a_launch_seen_before_its_handoff_is_excluded_not_measured ... ok
+test c1_hook_path::tests::mainnet_and_incomparable_clocks_are_refused ... ok
+test c1_latency::tests::a_failed_peer_is_a_partial_handoff_not_a_missing_sample ... ok
+test c1_latency::tests::a_consistent_run_yields_the_fixed_window ... ok
+test c1_common::tests::extreme_percentiles_need_enough_samples ... ok
+test c1_latency::tests::first_each_and_all_handoffs_are_separate_measurements ... ok
+test c1_latency::tests::missing_evidence_is_an_integrity_failure ... ok
+test c1_latency::tests::a_gap_a_moved_window_and_a_reordered_boundary_fail ... ok
+test c1_latency::tests::the_go_snapshot_is_read_strictly ... ok
+test c1_hook_path::tests::sources_are_compared_and_misses_are_counted ... ok
+test c1_latency::tests::the_report_record_is_typed_and_states_its_rules ... ok
+test c1_hook_path::tests::the_launches_record_is_built_by_the_command_line ... ok
+test c1_freeze::tests::a_later_gate_cannot_be_accepted_before_an_earlier_one ... ok
+test c1_freeze::tests::complete_inputs_are_ready_and_bind_every_artifact ... ok
+test c1_freeze::tests::a_template_is_never_evidence ... ok
+test c1_freeze::tests::source_change_detected_even_if_git_is_told_to_ignore_it ... ok
+test c1_freeze::tests::loopback_cannot_qualify_c19_for_freeze ... ok
+test c1_freeze::tests::source_binding_refuses_missing_head_dirty_and_missing_hash ... ok
+test c1_freeze::tests::the_inputs_are_built_by_subcommands_in_gate_order ... ok
+test c1_freeze::tests::the_binding_changes_with_any_bound_file ... ok
+test c1_freeze::tests::missing_or_unaccepted_inputs_leave_it_incomplete ... ok
+test c1_freeze::tests::the_command_line_freezes_only_complete_inputs_and_verifies_them ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+
+exit=0

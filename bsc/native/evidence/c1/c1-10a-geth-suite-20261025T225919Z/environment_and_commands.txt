@@ -1,0 +1,88 @@
+C1.10A full non-race geth suite - environment and exact commands
+
+## host
+uname=Darwin 24.6.0 arm64
+macos=15.6.1
+cpu_cores=16 mem_bytes=137438953472
+note: another agent was building geth on the same host during the runs
+
+## go
+go_binary=/Users/sawyer_ma/sdk/go1.25.0/bin/go
+go version go1.25.0 darwin/arm64
+go_env: GOVERSION=go1.25.0
+go_env: GOOS=darwin
+go_env: GOARCH=arm64
+go_env: CGO_ENABLED=1
+go_env: GOFLAGS=-mod=mod
+go_env: GOPROXY=off
+go_env: GOTOOLCHAIN=local
+go_env: GOMODCACHE=/Users/sawyer_ma/go/pkg/mod
+go_env: GOCACHE=/Users/sawyer_ma/Library/Caches/go-build
+env set for every go invocation: GOPROXY=off GOTOOLCHAIN=local GOFLAGS=-mod=mod (fully offline; module cache only)
+DARKBOT_* / FASTLANE env: none set (verified by name listing before the runs)
+offline resolution: go list -e -deps -test ./... reported no package or dependency error in either clone
+packages: baseline 227, candidate 228 (extra: github.com/ethereum/go-ethereum/darkbot/fastlane)
+go.mod/go.sum unchanged after the runs: baseline [] candidate [] (empty = unchanged)
+
+## source
+pin: bnb-chain/bsc v1.7.8 commit cdb7548b5baacfdae92f9f63437d6456411665f3 tree d8d88097521d43cef66047fdd93dd6825a2a7843
+clone source (read-only object store): /Users/sawyer_ma/Desktop/Firma/2_DarkMa/6_DarkBot/Backup/DarkBot/bsc/vendor/bsc-geth
+clones (disposable, scratch): <scratch>/gethsuite/baseline and <scratch>/gethsuite/candidate
+  git clone --shared --no-checkout <source> baseline|candidate
+  git -C <clone> checkout cdb7548b5baacfdae92f9f63437d6456411665f3
+  git -C <clone> remote remove origin   (no write path back to the source repo)
+submodules tests/testdata (ethereum/tests) and tests/evm-benchmarks: not present (network required); affected tests skip identically in both runs
+
+## pin verification (bsc/tools/c1_verify_geth_pin.sh), both clones before the overlay
+-- baseline (re-run now, still pristine):
+C1_GETH_PIN_PASS
+commit=cdb7548b5baacfdae92f9f63437d6456411665f3
+tree=d8d88097521d43cef66047fdd93dd6825a2a7843
+tag=v1.7.8
+module=github.com/ethereum/go-ethereum
+go=1.25.0
+exit=0
+-- candidate (before apply; output identical to baseline: C1_GETH_PIN_PASS, same commit/tree/tag/module/go); after apply HEAD=cdb7548b5baacfdae92f9f63437d6456411665f3, tracked diff only in the 4 files listed in overlay_files.txt
+
+## overlay
+python3 bsc/tools/c1_apply_geth_overlay.py <scratch>/gethsuite/candidate   (exit 0; CANDIDATE only)
+
+## suite commands (both started 2026-10-25T22:59:19Z, concurrently, symmetric load)
+-- baseline
+   label=baseline
+   clone=/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/gethsuite/baseline
+   head=cdb7548b5baacfdae92f9f63437d6456411665f3
+   start_utc=2026-10-25T22:59:19Z
+   start_epoch=1792969159
+   cmd=go test -json ./... -count=1 -timeout 30m -p 4
+   exit_status=0
+   end_utc=2026-10-25T23:08:28Z
+   end_epoch=1792969708
+   stderr bytes: 0
+   raw stdout: baseline.go-test-json.raw.gz (gzip -9 -n of go test -json stdout; sha256 of uncompressed: 5836f86dbf262021bfdbdf627b584edb2223aa4c9fa742bdf81879fcd7722f94, bytes 8721810)
+-- candidate
+   label=candidate
+   clone=/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/gethsuite/candidate
+   head=cdb7548b5baacfdae92f9f63437d6456411665f3
+   start_utc=2026-10-25T22:59:19Z
+   start_epoch=1792969159
+   cmd=go test -json ./... -count=1 -timeout 30m -p 4
+   exit_status=0
+   end_utc=2026-10-25T23:08:29Z
+   end_epoch=1792969709
+   stderr bytes: 0
+   raw stdout: candidate.go-test-json.raw.gz (gzip -9 -n of go test -json stdout; sha256 of uncompressed: 8d3709c1b436e1d4ce68f335aa549a930ecb4f307243412d4137386eeb6a1de3, bytes 8974339)
+   full command line: cd <clone> && go test -json ./... -count=1 -timeout 30m -p 4 > <side>.raw.json 2> <side>.stderr.txt
+   wall time: baseline 549 s, candidate 550 s
+
+## overlay package tests (candidate clone)
+go test ./darkbot/fastlane/... -count=1 -v        -> overlay_fastlane_tests_normal.txt (exit 0)
+go test -race ./darkbot/fastlane/... -count=1 -v  -> overlay_fastlane_tests_race.txt (exit 0, DATA RACE warnings 0)
+gofmt -l on the 4 patched files and darkbot/fastlane in the candidate: no output
+
+## derivation of the plain-text summaries (scripts in this directory, derive_*.py)
+python3 -I derive_parse_gotest.py <side>.raw.json <prefix>       -> <side>.tests.txt (+ per-package counts)
+python3 -I derive_compare.py <b_prefix> <c_prefix> <out>          -> per-package / per-test comparison
+python3 -I derive_skip_reasons.py <side>.raw.json                 -> skip messages
+python3 -I derive_final_classification.py <an_dir> classification.txt
+reruns: none required (no test or package status differed between baseline and candidate)

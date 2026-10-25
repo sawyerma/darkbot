@@ -1,0 +1,87 @@
+$ go test -race -count=1 -run TestC17 ./darkbot/fastlane
+# github.com/ethereum/go-ethereum/darkbot/fastlane.test
+ld: warning: '/private/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/go-link-2106892008/000026.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+panic: test timed out after 10m0s
+	running tests:
+		TestC17SlowPeerDoesNotDelayTheOtherPeer (10m0s)
+
+goroutine 56 [running]:
+testing.(*M).startAlarm.func1()
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:2682 +0x490
+created by time.goFunc
+	/Users/sawyer_ma/sdk/go1.25.0/src/time/sleep.go:215 +0x44
+
+goroutine 1 [chan receive, 10 minutes]:
+testing.(*T).Run(0xc00036ce00, {0x1053c23c8, 0x27}, 0x1057cf888)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:2005 +0x700
+testing.runTests.func1(0xc00036ce00)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:2477 +0x78
+testing.tRunner(0xc00036ce00, 0xc0001f1ad8)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1934 +0x168
+testing.runTests(0xc000336000, {0x105c096e0, 0x61, 0x61}, {0x2454b3d6130fec61?, 0x0?, 0x105c1ab80?})
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:2475 +0x738
+testing.(*M).Run(0xc0005a0000)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:2337 +0xaf8
+main.main()
+	_testmain.go:237 +0x104
+
+goroutine 26 [chan receive, 10 minutes]:
+github.com/prysmaticlabs/prysm/v5/cache/nonblocking.(*LRU[...]).handleGetRequests(0x1057e1f40)
+	/Users/sawyer_ma/go/pkg/mod/github.com/prysmaticlabs/prysm/v5@v5.3.2/cache/nonblocking/lru.go:141 +0x58
+created by github.com/prysmaticlabs/prysm/v5/cache/nonblocking.NewLRU[...] in goroutine 1
+	/Users/sawyer_ma/go/pkg/mod/github.com/prysmaticlabs/prysm/v5@v5.3.2/cache/nonblocking/lru.go:41 +0x39c
+
+goroutine 52 [sync.WaitGroup.Wait, 10 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0003563f0?, 0x0?)
+	/Users/sawyer_ma/sdk/go1.25.0/src/runtime/sema.go:114 +0x38
+sync.(*WaitGroup).Wait(0xc0003563f0)
+	/Users/sawyer_ma/sdk/go1.25.0/src/sync/waitgroup.go:206 +0xc0
+github.com/ethereum/go-ethereum/darkbot/fastlane.(*outboundRuntimeV2).stopAndWait(0xc0003563c0)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound.go:250 +0x84
+github.com/ethereum/go-ethereum/darkbot/fastlane.(*ingressRuntimeV2).shutdown(0xc00018cf20)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/ingress.go:502 +0x158
+testing.(*common).Cleanup.func1()
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1308 +0x128
+testing.(*common).runCleanup(0xc00036dc00, 0x0)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1572 +0x170
+testing.tRunner.func2()
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1928 +0x4c
+runtime.Goexit()
+	/Users/sawyer_ma/sdk/go1.25.0/src/runtime/panic.go:615 +0x60
+testing.(*common).FailNow(0xc00036dc00)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1013 +0x70
+testing.(*common).Fatalf(0xc00036dc00, {0x1053b676f, 0x18}, {0xc000235a08, 0x1, 0x1})
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1219 +0x88
+github.com/ethereum/go-ethereum/darkbot/fastlane.c17Wait(0xc00036dc00, {0x1053b5a16, 0x17}, 0xc000235cb0)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound_test.go:94 +0xe0
+github.com/ethereum/go-ethereum/darkbot/fastlane.TestC17SlowPeerDoesNotDelayTheOtherPeer(0xc00036dc00)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound_test.go:265 +0x6ac
+testing.tRunner(0xc00036dc00, 0x1057cf888)
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1934 +0x168
+created by testing.(*T).Run in goroutine 1
+	/Users/sawyer_ma/sdk/go1.25.0/src/testing/testing.go:1997 +0x6e4
+
+goroutine 53 [chan receive, 10 minutes]:
+github.com/ethereum/go-ethereum/darkbot/fastlane.(*c17Peer).send(0xc00024fce0, {0xdd, 0x73, 0x8c, 0xee, 0xb8, 0xa4, 0xcf, 0x7d, 0xe1, ...}, ...)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound_test.go:34 +0x68
+github.com/ethereum/go-ethereum/darkbot/fastlane.(*outboundWorkerV2).sendAt(0xc00024fc20, {0xc000215bc0, {0xdd, 0x73, 0x8c, 0xee, 0xb8, 0xa4, 0xcf, 0x7d, ...}, ...}, ...)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound.go:472 +0xe0
+github.com/ethereum/go-ethereum/darkbot/fastlane.(*outboundWorkerV2).handle(0xc00024fc20, {0xc000215bc0, {0xdd, 0x73, 0x8c, 0xee, 0xb8, 0xa4, 0xcf, 0x7d, ...}, ...})
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound.go:460 +0xcc
+github.com/ethereum/go-ethereum/darkbot/fastlane.(*outboundWorkerV2).run(0xc00024fc20, 0xc0003563c0)
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound.go:439 +0xc8
+created by github.com/ethereum/go-ethereum/darkbot/fastlane.(*outboundRuntimeV2).start in goroutine 52
+	/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates/geth/darkbot/fastlane/outbound.go:238 +0xa8
+FAIL	github.com/ethereum/go-ethereum/darkbot/fastlane	600.218s
+FAIL
+exit=1
+
+# Rerun after the first TestC17 run timed out once under extreme host load (geth suite + geth build in parallel): 20x the single test and 20x all TestC17 passed unchanged; test-only fix: the held slow peer is released on failure (before: a failing assertion hung cleanup until the test timeout; after: fails in 10 s; proven by an injected failure).
+
+# Rerun after the first TestC17 run timed out once under extreme host load (geth suite + geth build in parallel): 20x the single test and 20x all TestC17 passed unchanged; test-only fix: the held slow peer is released on failure (before: a failing assertion hung cleanup until the test timeout; after: fails in 10 s; proven by an injected failure).
+$ go test -race -count=1 -run TestC17 ./darkbot/fastlane
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	1.530s
+exit=0
+$ go test -race -count=20 -run TestC17 ./darkbot/fastlane
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	7.202s
+exit=0

@@ -1,0 +1,186 @@
+C1.10A full non-race geth suite - classification
+baseline  = bnb-chain/bsc v1.7.8 cdb7548b5baacfdae92f9f63437d6456411665f3 (pristine)
+candidate = same pin + DarkBot C1 overlay (bsc/tools/c1_apply_geth_overlay.py)
+Fast Lane env (DARKBOT_*) unset in both runs: overlay hooks run on their disabled path.
+
+PACKAGE CLASSES (count)
+  REGRESSION                         0
+  REGRESSION_MISSING_IN_CANDIDATE    0
+  BASELINE_FAILURE                   0
+  FIXED                              0
+  DIFFERS                            0
+  CANDIDATE_ONLY                     1
+  CANDIDATE_ONLY_NOT_PASS            0
+  SAME_PASS                          141
+  SAME_NO_TEST_FILES                 86
+  BUILD_FAIL / TIMEOUT / ENV_UNAVAILABLE (package could not build offline): 0 in both runs
+
+TEST CLASSES (top-level / subtests)
+  REGRESSION_UNCONFIRMED             0 / 0
+  REGRESSION_MISSING_IN_CANDIDATE    0 / 0
+  BASELINE_FAILURE                   0 / 0
+  FIXED_UNCONFIRMED                  0 / 0
+  DIFFERS                            0 / 0
+  CANDIDATE_ONLY_PASS                92 / 15
+  CANDIDATE_ONLY_SKIP_BY_DESIGN      5 / 0
+  CANDIDATE_ONLY_FAIL                0 / 0
+  SAME_PASS                          2212 / 3259
+  SAME_SKIP                          29 / 1
+  FLAKY                              0 / 0 (no test differed between the runs; no rerun was required)
+  REGRESSION (confirmed)             0 / 0
+
+DIFFERING PACKAGES / TESTS
+  none
+
+SAME_SKIP DETAIL (identical skip in both runs; category; skip message from candidate)
+  github.com/ethereum/go-ethereum/accounts/keystore	TestV3_PBKDF2_2	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	plain_test.go:143: can't find JSON tests from submodule at ../../tests/testdata/KeyStoreTests
+  github.com/ethereum/go-ethereum/accounts/keystore	TestV3_PBKDF2_3	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	plain_test.go:143: can't find JSON tests from submodule at ../../tests/testdata/KeyStoreTests
+  github.com/ethereum/go-ethereum/accounts/keystore	TestV3_PBKDF2_4	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	plain_test.go:143: can't find JSON tests from submodule at ../../tests/testdata/KeyStoreTests
+  github.com/ethereum/go-ethereum/accounts/keystore	TestV3_Scrypt_2	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	plain_test.go:143: can't find JSON tests from submodule at ../../tests/testdata/KeyStoreTests
+  github.com/ethereum/go-ethereum/cmd/faucet	TestFacebook	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	faucet_test.go:27: The facebook access is flaky, needs to be reimplemented or removed
+  github.com/ethereum/go-ethereum/cmd/geth	TestVerification/signify-openbsd	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	version_check_test.go:56: This currently fails, minisign expects 4 lines of data, signify provides only 2
+  github.com/ethereum/go-ethereum/consensus/ethash	TestCalcDifficulty	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	consensus_test.go:67: open ../../tests/testdata/BasicTests/difficulty.json: no such file or directory
+  github.com/ethereum/go-ethereum/core/vm	TestWriteExpectedValues	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	instructions_test.go:236: Enable this test to create json test cases.
+  github.com/ethereum/go-ethereum/core/vm/runtime	TestEip2929Cases	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	runtime_test.go:516: Test only useful for generating documentation
+  github.com/ethereum/go-ethereum/crypto/kzg4844	TestCKZGCells	UPSTREAM_SKIP_BUILD_CONFIG (ckzg build tag not set in default test build)	baseline-skip-seen	kzg4844_test.go:196: CKZG unavailable in this test build
+  github.com/ethereum/go-ethereum/crypto/kzg4844	TestCKZGWithBlob	UPSTREAM_SKIP_BUILD_CONFIG (ckzg build tag not set in default test build)	baseline-skip-seen	kzg4844_test.go:77: CKZG unavailable in this test build
+  github.com/ethereum/go-ethereum/crypto/kzg4844	TestCKZGWithPoint	UPSTREAM_SKIP_BUILD_CONFIG (ckzg build tag not set in default test build)	baseline-skip-seen	kzg4844_test.go:52: CKZG unavailable in this test build
+  github.com/ethereum/go-ethereum/eth/catalyst	TestOnDemandSpam	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	simulated_beacon_test.go:152: flaky test
+  github.com/ethereum/go-ethereum/eth/protocols/bsc	TestHandleGetBlocksByRange	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	handler_test.go:78: Skipping test as it requires a more complete BlockChain mock
+  github.com/ethereum/go-ethereum/metrics/influxdb	TestExampleV1	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	influxdb_test.go:42: test skipped on ARM64 due to floating point precision differences
+  github.com/ethereum/go-ethereum/metrics/influxdb	TestExampleV2	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	influxdb_test.go:78: test skipped on ARM64 due to floating point precision differences
+  github.com/ethereum/go-ethereum/metrics/internal	TestCollectRuntimeMetrics	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	sampledata_test.go:15: Only used for generating testdata
+  github.com/ethereum/go-ethereum/miner	TestCommitBidBlockPreservesBuilderExecutionHeaderFields	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	worker_test.go:224: needs parlia-formatted genesis; see TODO above
+  github.com/ethereum/go-ethereum/p2p/nat	TestUPNP_DDWRT	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	natupnp_test.go:169: UPnP not discovered (known issue, see https://github.com/ethereum/go-ethereum/issues/21476)
+  github.com/ethereum/go-ethereum/tests	TestBlockchain	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	can't find test files in testdata/BlockchainTests, did you clone the tests submodule? | init_test.go:201: missing test files
+  github.com/ethereum/go-ethereum/tests	TestDifficulty	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	init_test.go:201: missing test files | can't find test files in testdata/RLPTests, did you clone the tests submodule?
+  github.com/ethereum/go-ethereum/tests	TestExecutionSpecBlocktests	ENV_UNAVAILABLE_OFFLINE_TESTDATA (execution-spec fixtures not present; network needed)	baseline-skip-seen	block_test.go:80: directory spec-tests/fixtures/blockchain_tests does not exist
+  github.com/ethereum/go-ethereum/tests	TestExecutionSpecState	ENV_UNAVAILABLE_OFFLINE_TESTDATA (execution-spec fixtures not present; network needed)	baseline-skip-seen	state_test.go:91: directory spec-tests/fixtures/state_tests does not exist
+  github.com/ethereum/go-ethereum/tests	TestExecutionSpecTransaction	ENV_UNAVAILABLE_OFFLINE_TESTDATA (execution-spec fixtures not present; network needed)	baseline-skip-seen	transaction_test.go:68: directory spec-tests/fixtures/state_tests does not exist
+  github.com/ethereum/go-ethereum/tests	TestLegacyState	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	can't find test files in testdata/LegacyTests/Constantinople/GeneralStateTests, did you clone the tests submodule? | init_test.go:201: missing test files
+  github.com/ethereum/go-ethereum/tests	TestMatcherRunonlylist	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	init_test.go:201: missing test files | can't find test files in testdata/EIPTests/StateTests, did you clone the tests submodule?
+  github.com/ethereum/go-ethereum/tests	TestRLP	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	init_test.go:201: missing test files | can't find test files in testdata/BasicTests, did you clone the tests submodule?
+  github.com/ethereum/go-ethereum/tests	TestState	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	init_test.go:201: missing test files | can't find test files in testdata/TransactionTests, did you clone the tests submodule?
+  github.com/ethereum/go-ethereum/tests	TestTransaction	ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)	baseline-skip-seen	can't find test files in testdata/RLPTests, did you clone the tests submodule? | init_test.go:201: missing test files
+  github.com/ethereum/go-ethereum/trie	TestUpdateVariableKeys	UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP	baseline-skip-seen	
+  -- category counts
+   12  ENV_UNAVAILABLE_OFFLINE_TESTDATA (ethereum/tests submodule not present; network needed)
+    3  ENV_UNAVAILABLE_OFFLINE_TESTDATA (execution-spec fixtures not present; network needed)
+    3  UPSTREAM_SKIP_BUILD_CONFIG (ckzg build tag not set in default test build)
+   12  UPSTREAM_UNCONDITIONAL_OR_PLATFORM_SKIP
+  note: skip messages are taken from test2json attribution; parallel tests in package tests
+  interleave their stderr lines, so a message may name a sibling test's directory.
+
+CANDIDATE_ONLY (darkbot/fastlane; must pass)
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14AuxGoldenEncoding	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14DecodedIsCapturedBeforeAndIngressAfterValidation	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14DisconnectDrainReleaseReconnect	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14FixturesAreTheCommittedCalldata	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14GapWithoutClockIsCountedAndUntimed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14InitFromEnvAndPeerCapacity	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14InteropGethPhase1	SKIP	CANDIDATE_ONLY_SKIP_BY_DESIGN	ingress_test.go:1075: C1.4 Go<->Rust interop phase; run by bsc/tools/c14_ingress_interop.sh
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14InteropGethPhase2	SKIP	CANDIDATE_ONLY_SKIP_BY_DESIGN	ingress_test.go:1130: C1.4 Go<->Rust interop phase; run by bsc/tools/c14_ingress_interop.sh
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14LaneExhaustionIsAnExplicitGap	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14LaunchPassesAndOrdinaryBuyIsFiltered	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14NonMatchesAreDroppedBeforeSerialization	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14ParallelPeersPublishIntoSeparateLanes	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14PrefilterPassesEveryAuthorizedLaunch	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14PrefilterRejectsNonMatches	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14QueueFullAndOversizeAreVisible	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14RejectedPacketsPublishNothing	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14RoleLeaseAndGenerationRulesHold	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14ScopeIsTheCommittedFlapScope	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14ShutdownWithActivePeers	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14StartupBoundsAreEnforced	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14TransactionsAndPooledShareBoundarySemantics	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14TxpoolEvidenceIsIndependentOfThePrefilter	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC14TxpoolProducerFailuresAreCounted	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC15ChainRecordsKeepTheirFieldSemantics	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC16PermanentThreadQoSIsRecordedPerRole	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17ClockFailureNeverStampsEvidence	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17EverySelectedPeerGetsTheSameSignedBytes	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17EvidenceKeepsPerWorkerOrderAndEgressSequence	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17FailingPeerIsUnknownAndThePartialHandoffIsVisible	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17InvalidEgressRecordsAreRefusedExplicitly	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17LanePlanAndBounds	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17NoGoroutineIsCreatedPerBuy	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17PeerSelectionIsStableAndOutsideDispatch	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17PeerThatKnowsTheTransactionIsNotSentTo	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17QueuedBuyKeepsDispatchTargetAfterReassignment	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17QueuedBuyKeepsDispatchTargetAfterReassignment/closed=false	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17QueuedBuyKeepsDispatchTargetAfterReassignment/closed=true	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17ShutdownStopsTheWorkersBeforeSealingTheLanes	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17SlowPeerDoesNotDelayTheOtherPeer	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC17UnselectedWorkerSlotsAreReportedNotSent	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18CanonicalAndReorgUnderTransactionLoad	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18ChainPublishersUnderOneLockAreASingleProducer	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18ChurnUnderLoadNeverReusesALaneEarly	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18FullChainLaneLosesNothingSilently	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18LaneExhaustionUnderChurnIsAnExplicitGap	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18SecondChainPublisherIsDetectedAndReportedInBand	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18SimultaneousPeerHandlersLoseNothingSilently	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18StalledConsumerIsCountedAndNeverOverwritten	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC18UnlockedChainPublishersNeverCorruptTheLane	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bTestnetScopeIsExplicitAndFailClosed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate/explicit_testnet_qualification_is_allowed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate/invalid_arm_fails_closed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate/mainnet_scope_with_arm_fails_closed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate/production_default_does_not_override	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate/testnet_scope_on_wrong_network_fails_closed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestC19bUnsyncedAcceptTxsQualificationGate/testnet_scope_without_arm_does_not_override	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestClockReadingRefusesFailedAndZeroReadings	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestE72HeadResetsArePublishedAsReasonedGaps	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestE75AncestorsNeedOwnerAndStickyWhenShared	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestE75ArenaOpensRefuseSymlinksAndOpenModes	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestE75LockSymlinkAndHardlinkAreNeverTruncated	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestE75UntrustedDirectoriesFailClosed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestMonotonicNSReadsATime	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestRecordKindWireValues	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2CRC32CGoldenVectors	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2ChurnKeepsEpochsMonotonicAndSequencesContinuous	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2CloseAndReleaseRequireOwnerAndEpoch	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2CreateNewRefusesStaleArena	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2DoubleBindRejectedWithoutSideEffects	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EmptyClosingLaneDrainsAtOnce	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/crc	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/epoch	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/kind	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/payload-length	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2EveryStructuralDefectQuarantinesOnceAndIsNeverSkipped/sequence	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2ExistingArenasDetectedNeverAttachedNeverOverwritten	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2FileIsOwnerOnly	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2FullNeverOverwritesUnread	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2HeaderAndPayloadCorruptionDetected	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2HeaderAndPayloadCorruptionDetected/header	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2HeaderAndPayloadCorruptionDetected/payload	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2IndependentLanesHaveIndependentProducers	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2IndependentPeerLanesCycleConcurrently	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2InteropGethPhase1	SKIP	CANDIDATE_ONLY_SKIP_BY_DESIGN	v2_test.go:2061: C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2InteropGethPhase2	SKIP	CANDIDATE_ONLY_SKIP_BY_DESIGN	v2_test.go:2105: C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2LaneEpochExhaustionFailsClosed	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2LifecycleFullCycleAndSecondBind	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PeerLaneLifecycleRejectsWrongOwnerAndFreePublish	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PeerLaneLifecycleRequiresDrainBeforeReuse	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PoolBindsOnlyFreeLanesAndReportsExhaustion	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PoolBoundsMustMatchArena	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PoolConcurrentAllocateNeverDoubleAssigns	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PoolNeverTakesBoundClosingOrQuarantinedLanes	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2PublishWhileFreeOrClosingIsRejected	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2QuarantineTerminalAndRestartQuarantinesOldGeneration	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RecordOfAnotherEpochQuarantinesLaneOnce	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RecordsOutsideBindingQuarantineAsLateWrites	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2ReleaseBeforeDrainAndUnreadRecordPreventReuse	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RoleLeaseChildHolder	SKIP	CANDIDATE_ONLY_SKIP_BY_DESIGN	v2_test.go:1850: helper process only
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RoleLeaseReleasedWhenHolderProcessDies	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RoleLeasesAreExclusivePerRoleAndCoexistAcrossRoles	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RoundTripWrapAndDirectory	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RuntimeShutdownRefusesBindsAndPublishesWithoutUnmapping	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2RuntimeStartFailsClosedOnBoundsAndExistingArena	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2SlotsOfEarlierBindingNeverAccepted	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2StaleLeaseNeverActsOnReusedLane	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2UndefinedLifecycleStateQuarantinesEvenAnEmptyLane	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2WriteAfterCloseQuarantinesLane	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay
+  github.com/ethereum/go-ethereum/darkbot/fastlane	TestV2WrongArenaOrLaneGenerationRejected	PASS	CANDIDATE_ONLY_PASS	exists only with the overlay

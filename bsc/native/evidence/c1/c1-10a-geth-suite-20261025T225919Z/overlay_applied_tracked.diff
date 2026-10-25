@@ -1,0 +1,349 @@
+diff --git a/core/blockchain.go b/core/blockchain.go
+index aa21ae183..611450d16 100644
+--- a/core/blockchain.go
++++ b/core/blockchain.go
+@@ -47,6 +47,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/core/tracing"
+ 	"github.com/ethereum/go-ethereum/core/types"
+ 	"github.com/ethereum/go-ethereum/core/vm"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/ethdb"
+ 	"github.com/ethereum/go-ethereum/event"
+ 	"github.com/ethereum/go-ethereum/internal/syncx"
+@@ -1225,6 +1226,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
+ 		return 0, errChainStopped
+ 	}
+ 	defer bc.chainmu.Unlock()
++	darkbotOldHead := bc.CurrentBlock()
+ 
+ 	var (
+ 		// Track the block number of the requested root hash
+@@ -1359,7 +1361,9 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
+ 		bc.SetFinalized(nil)
+ 	}
+ 
+-	return rootNumber, bc.loadLastState()
++	darkbotErr := bc.loadLastState()
++	fastlane.PublishHeadResetV2(fastlane.ChainHeadResetSetHeadV2, darkbotOldHead, bc.CurrentBlock())
++	return rootNumber, darkbotErr
+ }
+ 
+ // SnapSyncCommitHead sets the current head block to the one defined by the hash
+@@ -1384,10 +1388,12 @@ func (bc *BlockChain) SnapSyncCommitHead(hash common.Hash) error {
+ 	if !bc.chainmu.TryLock() {
+ 		return errChainStopped
+ 	}
++	darkbotOldHead := bc.CurrentBlock()
+ 	bc.currentBlock.Store(block.Header())
+ 	headBlockGauge.Update(int64(block.NumberU64()))
+ 	justifiedBlockGauge.Update(int64(bc.GetJustifiedNumber(block.Header())))
+ 	finalizedBlockGauge.Update(int64(bc.GetFinalizedNumber(block.Header())))
++	fastlane.PublishHeadResetV2(fastlane.ChainHeadResetSnapCommitV2, darkbotOldHead, block.Header())
+ 	bc.chainmu.Unlock()
+ 
+ 	// Destroy any existing state snapshot and regenerate it in the background,
+@@ -1415,6 +1421,7 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
+ 		return errChainStopped
+ 	}
+ 	defer bc.chainmu.Unlock()
++	darkbotOldHead := bc.CurrentBlock()
+ 
+ 	// Prepare the genesis block and reinitialise the chain
+ 	blockBatch := bc.db.NewBatch()
+@@ -1435,6 +1442,7 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
+ 	bc.hc.SetCurrentHeader(bc.genesisBlock.Header())
+ 	bc.currentSnapBlock.Store(bc.genesisBlock.Header())
+ 	headFastBlockGauge.Update(int64(bc.genesisBlock.NumberU64()))
++	fastlane.PublishHeadResetV2(fastlane.ChainHeadResetGenesisResetV2, darkbotOldHead, bc.genesisBlock.Header())
+ 
+ 	// Reset history pruning status.
+ 	return bc.initializeHistoryPruning(0)
+@@ -1926,6 +1934,7 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
+ 		}
+ 	}
+ 	bc.writeHeadBlock(block)
++	fastlane.PublishCanonicalV2(block.Header(), len(block.Transactions()))
+ 	return nil
+ }
+ 
+@@ -2104,6 +2113,7 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
+ 	bc.futureBlocks.Remove(block.Hash())
+ 
+ 	if status == CanonStatTy {
++		fastlane.PublishCanonicalV2(block.Header(), len(block.Transactions()))
+ 		bc.chainFeed.Send(ChainEvent{
+ 			Header:       block.Header(),
+ 			Receipts:     receipts,
+@@ -2985,6 +2995,7 @@ func (bc *BlockChain) collectReceiptsAndLogs(b *types.Block, removed bool) ([]*t
+ // Note the new head block won't be processed here, callers need to handle it
+ // externally.
+ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Header) error {
++	originalOldHead, originalNewHead := oldHead, newHead
+ 	var (
+ 		newChain    []*types.Header
+ 		oldChain    []*types.Header
+@@ -3053,6 +3064,8 @@ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Header) error
+ 		// rewind the canonical chain to a lower point.
+ 		log.Error("Impossible reorg, please file an issue", "oldnum", oldHead.Number, "oldhash", oldHead.Hash(), "oldblocks", len(oldChain), "newnum", newHead.Number, "newhash", newHead.Hash(), "newblocks", len(newChain))
+ 	}
++	fastlane.PublishReorgV2(originalOldHead, originalNewHead, commonBlock)
++
+ 	// Acquire the tx-lookup lock before mutation. This step is essential
+ 	// as the txlookups should be changed atomically, and all subsequent
+ 	// reads should be blocked until the mutation is complete.
+@@ -3210,6 +3223,7 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
+ 	// Emit events
+ 	receipts, logs := bc.collectReceiptsAndLogs(head, false)
+ 
++	fastlane.PublishCanonicalV2(head.Header(), len(head.Transactions()))
+ 	bc.chainFeed.Send(ChainEvent{
+ 		Header:       head.Header(),
+ 		Receipts:     receipts,
+diff --git a/eth/handler.go b/eth/handler.go
+index 1ea417074..b3dcffbbd 100644
+--- a/eth/handler.go
++++ b/eth/handler.go
+@@ -39,6 +39,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/core/rawdb"
+ 	"github.com/ethereum/go-ethereum/core/txpool"
+ 	"github.com/ethereum/go-ethereum/core/types"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/eth/downloader"
+ 	"github.com/ethereum/go-ethereum/eth/ethconfig"
+ 	"github.com/ethereum/go-ethereum/eth/fetcher"
+@@ -204,6 +205,19 @@ type handler struct {
+ 
+ // newHandler returns a handler for all Ethereum chain management protocol.
+ func newHandler(config *handlerConfig) (*handler, error) {
++	fastLaneOwned := false
++	if err := fastlane.InitIngressV2FromEnv(); err != nil {
++		return nil, fmt.Errorf("darkbot fastlane v2 init: %w", err)
++	}
++	if fastlane.IngressV2Enabled() {
++		fastLaneOwned = true
++		defer func() {
++			if fastLaneOwned {
++				fastlane.ShutdownIngressV2()
++			}
++		}()
++	}
++
+ 	// Create the protocol manager with the base fields
+ 	if config.EventMux == nil {
+ 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
+@@ -404,6 +418,16 @@ func newHandler(config *handlerConfig) (*handler, error) {
+ 	}
+ 	h.txFetcher = fetcher.NewTxFetcher(h.txpool.Has, addTxs, fetchTx, h.removePeer)
+ 	h.chainSync = newChainSyncer(h)
++
++	allowC19bUnsynced, err := fastlane.C19bUnsyncedAcceptTxsAllowed(h.networkID)
++	if err != nil {
++		return nil, fmt.Errorf("darkbot c1.9b qualification gate: %w", err)
++	}
++	if allowC19bUnsynced {
++		h.acceptTxs.Store(true)
++	}
++
++	fastLaneOwned = false
+ 	return h, nil
+ }
+ 
+@@ -533,6 +557,16 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
+ 	peer.Log().Debug("Ethereum peer connected", "name", peer.Name(), "peers.len", h.peers.len())
+ 	defer h.unregisterPeer(peer.ID())
+ 
++	// DarkBot C1.4: one Fast-Lane peer lane for this connection. The
++	// deferred Close runs after handler(peer) returned, i.e. after the
++	// peer's last publish, and before unregisterPeer.
++	darkbotIngress := fastlane.BindPeerIngressV2(peer.NodeID())
++	peer.SetDarkBotFastLane(darkbotIngress)
++	defer darkbotIngress.Close()
++	if darkbotIngress != nil && !darkbotIngress.Covered() {
++		peer.Log().Warn("DarkBot Fast Lane coverage gap", "reason", darkbotIngress.GapReason())
++	}
++
+ 	p := h.peers.peer(peer.ID())
+ 	if p == nil {
+ 		return errors.New("peer dropped during handling")
+@@ -721,6 +755,17 @@ func (h *handler) unregisterPeer(id string) {
+ func (h *handler) Start(maxPeers int, maxPeersPerIP int) {
+ 	h.maxPeers = maxPeers
+ 	h.maxPeersPerIP = maxPeersPerIP
++	if err := fastlane.CheckIngressV2PeerCapacity(maxPeers); err != nil {
++		log.Crit("DarkBot Fast Lane V2 peer capacity", "err", err)
++	}
++	// DarkBot C1.7: the outbound coordinator and its peer workers are
++	// started once here; the maintenance goroutine keeps their peer
++	// selection current, outside the BUY dispatch path.
++	if fastlane.OutboundV2Enabled() {
++		fastlane.StartOutboundV2()
++		h.wg.Add(1)
++		go h.fastLaneOutboundMaintenance()
++	}
+ 	// broadcast and announce transactions (only new ones, not resurrected ones)
+ 	h.wg.Add(1)
+ 	h.txsCh = make(chan core.NewTxsEvent, txChanSize)
+@@ -804,6 +849,8 @@ func (h *handler) Stop() {
+ 	// will exit when they try to register.
+ 	h.peers.close()
+ 	h.wg.Wait()
++	fastlane.StopOutboundV2()
++	fastlane.ShutdownIngressV2()
+ 
+ 	log.Info("Ethereum protocol stopped")
+ }
+@@ -1086,6 +1133,7 @@ func (h *handler) txBroadcastLoop() {
+ 	for {
+ 		select {
+ 		case event := <-h.txsCh:
++			fastlane.PublishTxpoolAcceptedV2(event.Txs)
+ 			h.BroadcastTransactions(event.Txs)
+ 		case <-h.txsSub.Err():
+ 			return
+@@ -1095,6 +1143,36 @@ func (h *handler) txBroadcastLoop() {
+ 	}
+ }
+ 
++// fastLaneOutboundMaintenance keeps the peer selection of the DarkBot C1.7
++// outbound workers current. Selecting and copying the peer set happens here,
++// on a timer; the BUY dispatch path only reads the selection the workers
++// already hold. The workers themselves live in the fastlane package and are
++// never created per transaction.
++func (h *handler) fastLaneOutboundMaintenance() {
++	defer h.wg.Done()
++	ticker := time.NewTicker(250 * time.Millisecond)
++	defer ticker.Stop()
++	for {
++		peers := h.peers.allNonEVNPeers()
++		targets := make([]fastlane.OutboundTargetV2, 0, len(peers))
++		for _, peer := range peers {
++			targets = append(targets, fastlane.OutboundTargetV2{
++				NodeID: peer.NodeID(),
++				Send:   peer.SendRawTransaction,
++				Known:  peer.KnownTransaction,
++			})
++		}
++		if err := fastlane.AssignOutboundTargetsV2(targets); err != nil {
++			log.Error("DarkBot Fast Lane outbound peer selection", "err", err)
++		}
++		select {
++		case <-h.stopCh:
++			return
++		case <-ticker.C:
++		}
++	}
++}
++
+ // txReannounceLoop announces local pending transactions to connected peers again.
+ func (h *handler) txReannounceLoop() {
+ 	defer h.wg.Done()
+diff --git a/eth/handler_eth.go b/eth/handler_eth.go
+index d56269f42..6de559e83 100644
+--- a/eth/handler_eth.go
++++ b/eth/handler_eth.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/ethereum/go-ethereum/common"
+ 	"github.com/ethereum/go-ethereum/core"
+ 	"github.com/ethereum/go-ethereum/core/types"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
+ 	"github.com/ethereum/go-ethereum/log"
+ 	"github.com/ethereum/go-ethereum/p2p/enode"
+@@ -76,7 +77,12 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+ 		if err != nil {
+ 			return fmt.Errorf("Transactions: %v", err)
+ 		}
+-		if err := handleTransactions(peer, txs, true); err != nil {
++		// DarkBot C1.4: T_packet_decoded, then geth's basic validation
++		// (unchanged result), then T_ingress, prefilter and publish into the
++		// peer's own Wire-V2 lane. A Fast-Lane refusal never reaches geth.
++		if err := fastlane.IngressV2(peer.DarkBotFastLane(), fastlane.IngressSourceEthBroadcast, txs, func() error {
++			return handleTransactions(peer, txs, true)
++		}); err != nil {
+ 			return fmt.Errorf("Transactions: %v", err)
+ 		}
+ 		return h.txFetcher.Enqueue(peer.ID(), txs, false)
+@@ -86,7 +92,10 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+ 		if err != nil {
+ 			return fmt.Errorf("PooledTransactions: %v", err)
+ 		}
+-		if err := handleTransactions(peer, txs, false); err != nil {
++		// DarkBot C1.4: same boundary as Transactions, source eth-pooled.
++		if err := fastlane.IngressV2(peer.DarkBotFastLane(), fastlane.IngressSourceEthPooled, txs, func() error {
++			return handleTransactions(peer, txs, false)
++		}); err != nil {
+ 			return fmt.Errorf("PooledTransactions: %v", err)
+ 		}
+ 		return h.txFetcher.Enqueue(peer.ID(), txs, true)
+diff --git a/eth/protocols/eth/peer.go b/eth/protocols/eth/peer.go
+index b172795fc..32ff92b6d 100644
+--- a/eth/protocols/eth/peer.go
++++ b/eth/protocols/eth/peer.go
+@@ -17,6 +17,7 @@
+ package eth
+ 
+ import (
++	"fmt"
+ 	"math/big"
+ 	"math/rand"
+ 	"sync"
+@@ -26,6 +27,7 @@ import (
+ 	mapset "github.com/deckarep/golang-set/v2"
+ 	"github.com/ethereum/go-ethereum/common"
+ 	"github.com/ethereum/go-ethereum/core/types"
++	"github.com/ethereum/go-ethereum/darkbot/fastlane"
+ 	"github.com/ethereum/go-ethereum/p2p"
+ 	"github.com/ethereum/go-ethereum/p2p/enode"
+ 	"github.com/ethereum/go-ethereum/p2p/tracker"
+@@ -61,6 +63,10 @@ const (
+ 
+ // Peer is a collection of relevant information we have about a `eth` peer.
+ type Peer struct {
++	// DarkBot C1.4 Fast-Lane ingress producer of this connection, owned by
++	// the peer's handler goroutine.
++	darkbotFastLane *fastlane.PeerIngressV2
++
+ 	*p2p.Peer // The embedded P2P package peer
+ 
+ 	id string // Unique ID for the peer, cached
+@@ -231,6 +237,40 @@ func (p *Peer) SendTransactions(txs types.Transactions) error {
+ 	return p2p.Send(p.rw, TransactionsMsg, txs)
+ }
+ 
++// SendRawTransaction sends one already-signed transaction without decoding or
++// re-encoding its inner transaction envelope. The outer ETH Transactions list
++// framing is generated by p2p.Send; raw is emitted as an RLP RawValue.
++func (p *Peer) SendRawTransaction(hash common.Hash, raw []byte) error {
++	if len(raw) == 0 {
++		return fmt.Errorf("empty signed transaction")
++	}
++	// EIP-2718 typed envelopes are RLP strings inside an ETH list;
++	// legacy envelopes are already RLP lists. Never decode/re-sign here.
++	envelope := rlp.RawValue(raw)
++	if raw[0] < 0x80 {
++		encoded, err := rlp.EncodeToBytes(raw)
++		if err != nil {
++			return err
++		}
++		envelope = encoded
++	}
++	p.knownTxs.Add(hash)
++	return p2p.Send(p.rw, TransactionsMsg, []rlp.RawValue{envelope})
++}
++
++// DarkBotFastLane returns the connection's C1.4 Fast-Lane ingress producer,
++// nil when the Fast Lane is disabled. Only the peer's handler goroutine uses
++// it.
++func (p *Peer) DarkBotFastLane() *fastlane.PeerIngressV2 {
++	return p.darkbotFastLane
++}
++
++// SetDarkBotFastLane stores the producer once, after registration and before
++// the message loop starts.
++func (p *Peer) SetDarkBotFastLane(ingress *fastlane.PeerIngressV2) {
++	p.darkbotFastLane = ingress
++}
++
+ // AsyncSendTransactions queues a list of transactions (by hash) to eventually
+ // propagate to a remote peer. The number of pending sends are capped (new ones
+ // will force old sends to be dropped)

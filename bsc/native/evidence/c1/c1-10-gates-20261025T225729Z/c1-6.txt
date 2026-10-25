@@ -1,0 +1,162 @@
+$ cargo test -p darkbot-bsc-geth-ipc --locked --offline -j 2 host::
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_geth_ipc-f26214ac1f7002cc)
+
+running 11 tests
+test host::tests::qos_class_names_and_raw_values_round_trip ... ok
+test host::tests::apple_performance_levels_and_caches_are_recorded ... ok
+test host::tests::profile_p_is_refused_not_downgraded_without_parallel_builders ... ok
+test host::tests::preimage_strings_are_escaped ... ok
+test host::tests::a_host_without_sysctl_degrades_explicitly ... ok
+test host::tests::the_hint_follows_topology_and_qualifies_nothing ... ok
+test host::tests::qos_on_a_permanent_thread_is_applied_or_explicitly_unsupported ... ok
+test host::tests::the_recorded_c19_host_keeps_its_fingerprint_0xfc5501a8 ... ok
+test host::tests::the_report_is_reproducible_for_the_same_host ... ok
+test host::tests::the_host_report_captures_this_host_without_guessing ... ok
+test host::tests::the_host_profile_record_is_typed_reproducible_and_keeps_the_id ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 117 filtered out; finished in 0.00s
+
+     Running tests/c15_hot0_alloc.rs (target/debug/deps/c15_hot0_alloc-f00a780ce41569cd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/c18_stress.rs (target/debug/deps/c18_stress-59e459688276374d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+exit=0
+$ cargo run -q -p darkbot-bsc-geth-ipc --release --locked --offline -j 2 --example c16_host_profile -- --profile S --out /var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmp.YpMmOkbxC6/c16-a.dbrec
+# darkbot.c1.host-profile.v1 (record type 42, schema version 1)
+file_sha256 = 406e65791b4407d868683ca0c685bc6a29cf830acdbfc4de050c76c0e9b23252
+topology.os = "macos"
+topology.arch = "aarch64"
+topology.model = "Mac16,6"
+topology.cpu_brand = "Apple M4 Max"
+topology.os_release = "24.6.0"
+topology.physical_cpus = 16
+topology.logical_cpus = 16
+topology.cache_line_bytes = 128
+topology.page_bytes = 16384
+topology.memory_bytes = 137438953472
+topology.perf_levels[0].index = 0
+topology.perf_levels[0].name = "Performance"
+topology.perf_levels[0].physical_cpus = 12
+topology.perf_levels[0].logical_cpus = 12
+topology.perf_levels[0].l1d_cache_bytes = 131072
+topology.perf_levels[0].l1i_cache_bytes = 196608
+topology.perf_levels[0].l2_cache_bytes = 16777216
+topology.perf_levels[0].cpus_per_l2 = 6
+topology.perf_levels[1].index = 1
+topology.perf_levels[1].name = "Efficiency"
+topology.perf_levels[1].physical_cpus = 4
+topology.perf_levels[1].logical_cpus = 4
+topology.perf_levels[1].l1d_cache_bytes = 65536
+topology.perf_levels[1].l1i_cache_bytes = 131072
+topology.perf_levels[1].l2_cache_bytes = 4194304
+topology.perf_levels[1].cpus_per_l2 = 4
+topology_fingerprint_crc32c = 4233429416
+profile_hint.profile = "P"
+profile_hint.basis = "performance level 0 has more CPUs than Profile P has critical threads"
+profile_hint.hint_only = true
+profile_selection.profile = "S"
+profile_selection.source = "configured"
+qos = "not-requested"
+qos_is_advisory_not_pinning = true
+host_role = "development-and-c1-diagnostic"
+non_claims[0] = "topology selects an initial experiment only"
+non_claims[1] = "no core count qualifies a profile"
+non_claims[2] = "a result on this host does not qualify the Linux C3 target"
+C1_6_HOST_PROFILE_CAPTURED
+exit=0
+$ cargo run -q -p darkbot-bsc-geth-ipc --release --locked --offline -j 2 --example c16_host_profile -- --profile S --out /var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmp.YpMmOkbxC6/c16-b.dbrec
+# darkbot.c1.host-profile.v1 (record type 42, schema version 1)
+file_sha256 = 406e65791b4407d868683ca0c685bc6a29cf830acdbfc4de050c76c0e9b23252
+topology.os = "macos"
+topology.arch = "aarch64"
+topology.model = "Mac16,6"
+topology.cpu_brand = "Apple M4 Max"
+topology.os_release = "24.6.0"
+topology.physical_cpus = 16
+topology.logical_cpus = 16
+topology.cache_line_bytes = 128
+topology.page_bytes = 16384
+topology.memory_bytes = 137438953472
+topology.perf_levels[0].index = 0
+topology.perf_levels[0].name = "Performance"
+topology.perf_levels[0].physical_cpus = 12
+topology.perf_levels[0].logical_cpus = 12
+topology.perf_levels[0].l1d_cache_bytes = 131072
+topology.perf_levels[0].l1i_cache_bytes = 196608
+topology.perf_levels[0].l2_cache_bytes = 16777216
+topology.perf_levels[0].cpus_per_l2 = 6
+topology.perf_levels[1].index = 1
+topology.perf_levels[1].name = "Efficiency"
+topology.perf_levels[1].physical_cpus = 4
+topology.perf_levels[1].logical_cpus = 4
+topology.perf_levels[1].l1d_cache_bytes = 65536
+topology.perf_levels[1].l1i_cache_bytes = 131072
+topology.perf_levels[1].l2_cache_bytes = 4194304
+topology.perf_levels[1].cpus_per_l2 = 4
+topology_fingerprint_crc32c = 4233429416
+profile_hint.profile = "P"
+profile_hint.basis = "performance level 0 has more CPUs than Profile P has critical threads"
+profile_hint.hint_only = true
+profile_selection.profile = "S"
+profile_selection.source = "configured"
+qos = "not-requested"
+qos_is_advisory_not_pinning = true
+host_role = "development-and-c1-diagnostic"
+non_claims[0] = "topology selects an initial experiment only"
+non_claims[1] = "no core count qualifies a profile"
+non_claims[2] = "a result on this host does not qualify the Linux C3 target"
+C1_6_HOST_PROFILE_CAPTURED
+exit=0
+$ cmp /var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmp.YpMmOkbxC6/c16-a.dbrec /var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/tmp.YpMmOkbxC6/c16-b.dbrec
+exit=0
+$ cargo run -q -p darkbot-bsc-geth-ipc --release --locked --offline -j 2 --example c16_host_profile -- --profile P
+# darkbot.c1.host-profile.v1 (record type 42, schema version 1)
+file_sha256 = 870748a8fd35f3a2952f5943843bd3b5843c8c49590172e38c3ced2697d168ee
+topology.os = "macos"
+topology.arch = "aarch64"
+topology.model = "Mac16,6"
+topology.cpu_brand = "Apple M4 Max"
+topology.os_release = "24.6.0"
+topology.physical_cpus = 16
+topology.logical_cpus = 16
+topology.cache_line_bytes = 128
+topology.page_bytes = 16384
+topology.memory_bytes = 137438953472
+topology.perf_levels[0].index = 0
+topology.perf_levels[0].name = "Performance"
+topology.perf_levels[0].physical_cpus = 12
+topology.perf_levels[0].logical_cpus = 12
+topology.perf_levels[0].l1d_cache_bytes = 131072
+topology.perf_levels[0].l1i_cache_bytes = 196608
+topology.perf_levels[0].l2_cache_bytes = 16777216
+topology.perf_levels[0].cpus_per_l2 = 6
+topology.perf_levels[1].index = 1
+topology.perf_levels[1].name = "Efficiency"
+topology.perf_levels[1].physical_cpus = 4
+topology.perf_levels[1].logical_cpus = 4
+topology.perf_levels[1].l1d_cache_bytes = 65536
+topology.perf_levels[1].l1i_cache_bytes = 131072
+topology.perf_levels[1].l2_cache_bytes = 4194304
+topology.perf_levels[1].cpus_per_l2 = 4
+topology_fingerprint_crc32c = 4233429416
+profile_hint.profile = "P"
+profile_hint.basis = "performance level 0 has more CPUs than Profile P has critical threads"
+profile_hint.hint_only = true
+profile_selection.error = "parallel-builders-unavailable"
+qos = "not-requested"
+qos_is_advisory_not_pinning = true
+host_role = "development-and-c1-diagnostic"
+non_claims[0] = "topology selects an initial experiment only"
+non_claims[1] = "no core count qualifies a profile"
+non_claims[2] = "a result on this host does not qualify the Linux C3 target"
+C1_6_PROFILE_REFUSED parallel builders are not available in C1
+exit=2

@@ -1,0 +1,25 @@
+$ cargo test -p darkbot-bsc-geth-ipc --locked --offline -j 2 outbound::
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_geth_ipc-f26214ac1f7002cc)
+
+running 4 tests
+test outbound::tests::the_lane_plan_matches_the_geth_overlay ... ok
+test outbound::tests::evidence_that_contradicts_itself_is_refused ... ok
+test outbound::tests::the_egress_lane_is_written_only_against_a_consumed_permit ... ok
+test outbound::tests::handoff_evidence_decodes_and_keeps_its_provenance ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 0.00s
+
+     Running tests/c15_hot0_alloc.rs (target/debug/deps/c15_hot0_alloc-f00a780ce41569cd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/c18_stress.rs (target/debug/deps/c18_stress-59e459688276374d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+exit=0
