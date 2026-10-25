@@ -163,8 +163,9 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
         BacktestJobCommand, OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
     };
-    // CTRL-03: only a source change carries a CAS — the configuration version its view showed
-    // (`LiquidatorState.source_config_version`); `p0ctl source set --expect-version` checks it.
+    // CTRL-03: a source change carries its CAS — the configuration version its view showed
+    // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
+    // set --expect-version` checks it. No other action takes an expectation.
     let expect_version = match req.expected.as_ref().map(|e| e.version) {
         None => None,
         Some(Some(expected_version::Version::ConfigVersion(v))) if req.action == SOURCE_SET => {
@@ -260,9 +261,7 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             let mut args: Vec<String> = ["p0", "source", "set", &c.unit, &c.mode]
                 .map(String::from)
                 .to_vec();
-            if let Some(v) = expect_version {
-                args.extend(["--expect-version".into(), v.to_string()]);
-            }
+            args.extend(["--expect-version".into(), expect_version?.to_string()]);
             Some(args)
         }
         JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
@@ -1870,12 +1869,8 @@ mod tests {
             cas[3..],
             ["geyser:publicnode", "off", "--expect-version", "4"]
         );
-        assert_eq!(
-            job_args(&req(SOURCE_SET, "", source.clone(), None))
-                .unwrap()
-                .len(),
-            5
-        );
+        // Required (review 5353cdcb): a source change without its version is refused.
+        assert_eq!(job_args(&req(SOURCE_SET, "", source.clone(), None)), None);
         assert_eq!(
             job_args(&req(SOURCE_SET, "", source, Some(ProfileVersion(4)))),
             None
@@ -2154,11 +2149,16 @@ mod tests {
             unit: "geyser:publicnode".into(),
             mode: "observe".into(),
         };
-        let r = control
-            .execute(&request(7, SOURCE_SET, "", source.encode_to_vec()))
-            .await;
+        let mut set = request(7, SOURCE_SET, "", source.encode_to_vec());
+        set.expected = Some(crate::proto::ExpectedVersion {
+            version: Some(expected_version::Version::ConfigVersion(0)),
+        });
+        let r = control.execute(&set).await;
         assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
-        assert_eq!(argv(), "p0\nsource\nset\ngeyser:publicnode\nobserve\n");
+        assert_eq!(
+            argv(),
+            "p0\nsource\nset\ngeyser:publicnode\nobserve\n--expect-version\n0\n"
+        );
         // Invalid parameters: rejected, no receipt, nothing dispatched.
         fs::remove_file(&log).unwrap();
         let bad = |c: BacktestJobCommand| c.encode_to_vec();

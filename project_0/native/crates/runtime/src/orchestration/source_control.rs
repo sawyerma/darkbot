@@ -143,14 +143,15 @@ pub fn write_request_expecting(
         mode: mode.into(),
         requested_unix_s: now_unix_s,
     };
-    journal::write_typed_value(
+    // Created, never idempotently re-written: of two writers of one version exactly one wins,
+    // even with equal content (review 5353cdcb).
+    journal::create_typed_value(
         &request_path(dir, seq),
         journal::source::SOURCE_CONTROL,
         &request,
     )
     .map_err(|e| {
-        // Another writer published this sequence first: the version moved on.
-        if e.kind() == std::io::ErrorKind::AlreadyExists || e.to_string() == "IMMUTABLE_CONFLICT" {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
             conflict(head(dir).unwrap_or(seq))
         } else {
             format!("SOURCE_CONTROL_IO: {e}")
@@ -325,7 +326,10 @@ pub fn spawn(
         .spawn(move || {
             let mut behind = false;
             while !shutdown.is_requested() {
-                if wait_signal(250) || behind {
+                // Review 5353cdcb: a lost doorbell (p0ctl killed between the publish and its
+                // signal) never strands a request — every tick also compares the log's head.
+                let rang = wait_signal(250);
+                if rang || behind || head(&dir).is_ok_and(|h| h > handed) {
                     behind = hand_over(&dir, &mut handed, &owner);
                 }
             }
@@ -500,6 +504,54 @@ mod tests {
         write_outcome(&d, &outcome(3, true)).unwrap();
         assert!(write_outcome(&d, &outcome(3, false)).is_err(), "immutable");
         assert_eq!(latest_outcome(&d).unwrap(), Some(outcome(3, true)));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Review 5353cdcb: a request whose doorbell was lost (p0ctl killed between the publish and
+    /// its signal) still reaches the owner queue within a few ticks — never stranded until the
+    /// next signal or a restart.
+    #[test]
+    fn a_request_without_its_doorbell_still_reaches_the_owner() {
+        let d = dir("lost-doorbell");
+        let (tx, rx) = bounded::<ControlMessage>("source-control", 4);
+        let shutdown = Shutdown::new();
+        let thread = spawn(d.clone(), tx, shutdown.clone(), head(&d).unwrap()).unwrap();
+        write_request(&d, "geyser:publicnode", "off", 1).unwrap();
+        let started = std::time::Instant::now();
+        let got = loop {
+            if let Some(m) = rx.try_pop() {
+                break Some(m);
+            }
+            if started.elapsed() > std::time::Duration::from_secs(3) {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(
+            matches!(got, Some(ControlMessage::Apply { seq: 1, .. })),
+            "{got:?}"
+        );
+        shutdown.request();
+        thread.join().unwrap();
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Review 5353cdcb: a request is created, never idempotently re-written — a second writer of
+    /// the same version loses even with equal content.
+    #[test]
+    fn a_request_version_is_won_once_even_with_equal_content() {
+        let d = dir("create-once");
+        std::fs::create_dir_all(&d).unwrap();
+        let request = SourceControlRequest {
+            seq: 1,
+            unit: "wss".into(),
+            mode: "active".into(),
+            requested_unix_s: 5,
+        };
+        let path = request_path(&d, 1);
+        journal::create_typed_value(&path, journal::source::SOURCE_CONTROL, &request).unwrap();
+        let again = journal::create_typed_value(&path, journal::source::SOURCE_CONTROL, &request);
+        assert_eq!(again.unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
         std::fs::remove_dir_all(d).unwrap();
     }
 

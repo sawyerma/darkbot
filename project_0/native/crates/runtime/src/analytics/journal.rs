@@ -1134,6 +1134,13 @@ pub fn write_typed_value<P: Payload + PartialEq>(
             Err(bad("IMMUTABLE_CONFLICT"))
         };
     }
+    create_typed_value(path, source, value)
+}
+
+/// Publishes a new sealed single-value journal at `path` (written aside, synced, then linked):
+/// an existing file — equal or not — is an `AlreadyExists` error, so of concurrent writers of
+/// one path exactly one wins.
+pub fn create_typed_value<P: Payload>(path: &Path, source: u32, value: &P) -> io::Result<()> {
     let partial = path.with_file_name(format!(
         ".{}.partial-{}-{}",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("value"),
