@@ -3,7 +3,7 @@
 import hashlib,json,pathlib,sys
 root=pathlib.Path(__file__).resolve().parents[1]
 target=root/'gateway/target/darkbot-release.json'
-files=['gateway/target/release/darkbot-gateway','project_0/native/target/release/p0-market-capture-reported','project_0/native/target/release/p0ctl','project_0/native/target/release/p0-analytics-reporter','bsc/engine/target/release/bsc-status-reporter','bsc/engine/target/release/g07_pre_live_readiness','bsc/engine/target/release/g07_candidate','ops/darkbotctl','ops/bsc-control.sh','bsc/tools/readiness_job.py']
+files=['gateway/target/release/darkbot-gateway','project_0/native/target/release/p0-market-capture-reported','project_0/native/target/release/p0ctl','project_0/native/target/release/p0-analytics-reporter','bsc/engine/target/release/bsc-status-reporter','bsc/engine/target/release/g07_pre_live_readiness','bsc/engine/target/release/g07_candidate','bsc/engine/target/release/bsc_runtime','ops/darkbotctl','ops/bsc-control.sh','bsc/tools/readiness_job.py']
 files += sorted(str(p.relative_to(root)) for p in (root/'frontend/dist').rglob('*') if p.is_file())
 def sha(name):
     h=hashlib.sha256()

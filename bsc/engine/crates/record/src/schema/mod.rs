@@ -8,6 +8,7 @@
 
 use crate::{Record, RecordError, Schema, decode, header};
 
+pub mod bsc_runtime;
 pub mod g06a;
 pub mod g07;
 pub mod g07_candidate;
@@ -28,6 +29,7 @@ pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = 4;
 pub fn all() -> Vec<&'static Schema> {
     g06a::ALL
         .iter()
+        .chain(bsc_runtime::ALL)
         .chain(g07::ALL)
         .chain(g07_candidate::ALL)
         .chain(g08::ALL)

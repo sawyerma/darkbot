@@ -969,3 +969,72 @@ fn without_a_clock_the_builder_refresh_counts_as_expired() {
     assert!(projection::refresh_expired(10, Some(11)));
     assert!(!projection::refresh_expired(12, Some(11)));
 }
+/// Order V2 §5: the source owner's current generation reaches the
+/// monitoring topic as its native record; a generation the owner's rule
+/// refuses is a warning, never a record.
+#[test]
+fn the_source_modes_reach_monitoring_from_their_native_owner() {
+    use darkbot_bsc_execution::sources::{Mode, SourceId, Store};
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-sources-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let run = root.join("run");
+    fs::create_dir_all(&run).unwrap();
+    let names = |s: &projection::Snapshot| {
+        s.monitoring
+            .records
+            .iter()
+            .map(|r| r.schema.clone())
+            .collect::<Vec<_>>()
+    };
+    let snap = projection::project(&root, &run);
+    assert!(!names(&snap).contains(&"darkbot.bsc.source-modes.v1".to_string()));
+    let store = Store::open(run.join("bsc-sources"), 8).unwrap();
+    store.init(1).unwrap();
+    store
+        .request("r1", SourceId::PublicNode, Mode::Live, 0, 2)
+        .unwrap();
+    let snap = projection::project(&root, &run);
+    let record = snap
+        .monitoring
+        .records
+        .iter()
+        .find(|r| r.schema == "darkbot.bsc.source-modes.v1")
+        .expect("source modes record");
+    let field = |name: &str| {
+        record
+            .fields
+            .iter()
+            .find(|f| f.name == name)
+            .map(|f| f.value.clone())
+    };
+    assert_eq!(field("generation").as_deref(), Some("1"));
+    assert_eq!(
+        field("sources[1].source_id").as_deref(),
+        Some("BSC_INGRESS_PUBLICNODE")
+    );
+    assert_eq!(field("sources[1].requested").as_deref(), Some("LIVE"));
+    assert_eq!(field("sources[1].effective").as_deref(), Some("BLOCKED"));
+    assert_eq!(
+        field("sources[1].block_reason").as_deref(),
+        Some("ECONOMIC_LIVE_NOT_AUTHORIZED")
+    );
+    // A tampered generation: no record, a warning.
+    let generations = run.join("bsc-sources/generations");
+    let newest = fs::read_dir(&generations)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .max()
+        .unwrap();
+    fs::write(&newest, b"DBREC001 broken").unwrap();
+    let snap = projection::project(&root, &run);
+    assert!(!names(&snap).contains(&"darkbot.bsc.source-modes.v1".to_string()));
+    assert!(
+        snap.status
+            .warnings
+            .contains(&"SOURCE_MODES_INVALID".to_string())
+    );
+    fs::remove_dir_all(root).unwrap();
+}

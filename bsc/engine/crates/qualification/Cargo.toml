@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 # The frozen production transport, as it is.
-darkbot-bsc-execution = { path = "../execution", features = ["acceptance-guard", "rpc-wire"] }
+darkbot-bsc-execution = { path = "../execution", features = ["acceptance-guard", "rpc-wire", "runtime"] }
 # G0.6a DRY / G0.8 read-only qualification binaries (migrated from Gate-0).
 # The quote arithmetic is the core's; the v2 check is the runner's guard.
 darkbot-bsc-trading = { path = "../trading" }

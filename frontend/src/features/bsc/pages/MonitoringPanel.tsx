@@ -6,11 +6,12 @@ import { selectMonitoring, selectStatus, useBscStore } from "../store/bscStore";
 import { EvidenceRows, PublicRows, timestamp, ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
+import { sourceControlView } from "../model/sources";
+import { SourceActions } from "../SourceActions";
 
-// The planned independent signal inputs and venues (BSC plan v9): no native owner before G0.7 → G0.8.
-const SOURCES = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"];
+// The planned venues (BSC plan v9): no native venue owner yet (phases D/E).
 const VENUES = ["FLAP", "FOUR_CLASSIC", "OPENFOUR"];
-const FUTURE = "No native source/venue owner before G0.7 → G0.8 (C1/C2); requested/effective modes stay disabled";
+const FUTURE = "No native venue owner before phases D/E; requested/effective modes stay disabled";
 
 /** Monitoring in the fixed §13 order: sources → venues → builder → G0.7 → G0.8 → chain → timing. */
 export function MonitoringPanel() {
@@ -18,13 +19,17 @@ export function MonitoringPanel() {
   const { projection: m } = useBscStore(selectMonitoring);
   const { projection: s } = useBscStore(selectStatus);
   const records = useNativeRecords();
+  const sources = sourceControlView(records);
   const b = s?.builder;
   const g07 = s?.gates.find(g => g.gateId === "G0.7");
   const g08 = s?.gates.find(g => g.gateId === "G0.8");
   return <>
     <Line label="Monitoring source quality" value={<ValueState state={quality} />} hint="bsc.monitoring.state transport" />
     <PlacedSection panel="monitoring" section={1} records={records}>
-      {SOURCES.map(id => <Line key={id} label={id} value={<ValueState state="FUTURE_PHASE_BLOCKED" />} hint={FUTURE} />)}
+      <Line label="Source modes generation" value={sources.available ? sources.generation.toString() : sources.reason} hint="Native bsc_runtime source owner; requested vs. effective, LIVE stays BLOCKED" />
+      {sources.rows.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
+        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""}`} />)}
+      <SourceActions view={sources} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={2} records={records}>
       {VENUES.map(id => <Line key={id} label={id} value={<ValueState state="FUTURE_PHASE_BLOCKED" />} hint={FUTURE} />)}

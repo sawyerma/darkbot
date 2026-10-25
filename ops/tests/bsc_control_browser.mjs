@@ -93,6 +93,26 @@ try{
  assert(g08Text.includes('Record · g08.mainnet-acquisition-unresolved.v2')&&g08Text.includes('SENT_TRANSACTION_UNRESOLVED'),'native UNRESOLVED record in its G0.8 section 5');
  for(const claim of ['CHAIN_PASS','CHAIN_ADAPT','EVIDENCE_COMPLETE'])assert(!(await body()).includes(claim),'no acquisition claim: '+claim);
  assert((await body()).includes('FUTURE_PHASE_BLOCKED'));assert((await body()).includes('Record · g06a.builder-floor-policy.v2'));
+ // Order V2 §5: the five sources from their native owner; real requests through gateway → darkbotctl → bsc_runtime.
+ const srcLine=id=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+id+'$')})}).first();
+ await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('0'),'native source owner generation 0');
+ for(const id of ['BSC_INGRESS_GETH','BSC_INGRESS_PUBLICNODE','BSC_INGRESS_DRPC','BSC_INGRESS_BLOCKREQ','BSC_INGRESS_48CLUB'])assert((await srcLine(id).innerText()).includes('OFF'),id+' OFF');
+ const requestSource=async(id,mode,expect)=>{
+  await p.getByTestId(`bsc-source-${id}-${mode}`).click();
+  await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
+  await until(async()=> (await p.getByTestId('bsc-source-receipt').innerText()).includes(expect),`${id} ${mode} receipt ${expect}`);
+ };
+ await requestSource('BSC_INGRESS_PUBLICNODE','SHADOW','outcome=APPLIED source=BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW');
+ await until(async()=> (await srcLine('BSC_INGRESS_PUBLICNODE').innerText()).includes('SHADOW'),'PUBLICNODE effective SHADOW pushed');
+ await requestSource('BSC_INGRESS_DRPC','LIVE','effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED');
+ await until(async()=> {const t=await srcLine('BSC_INGRESS_DRPC').innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_NOT_AUTHORIZED');},'DRPC LIVE stays BLOCKED');
+ await requestSource('BSC_INGRESS_48CLUB','SHADOW','effective=BLOCKED block_reason=SOURCE_ACCESS_UNQUALIFIED');
+ await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('3'),'generation 3 pushed');
+ // A stale generation is the owner's refusal; the state does not move.
+ const staleSource=await api.post(base+"/api/v1/command",{headers,data:Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:crypto.randomUUID(),action:"bsc.source.mode.set",resourceId:'BSC_INGRESS_GETH:SHADOW',expected:{version:{case:'configVersion',value:0n}},issuedAtUnixNs:BigInt(Date.now())*1_000_000n})))});
+ const staleR=fromBinary(proto.CommandResponseSchema,new Uint8Array(await staleSource.body()));assert.equal(staleR.phase,proto.CommandPhase.FAILED,'stale request fails');
+ assert((await srcLine('BSC_INGRESS_GETH').innerText()).includes('OFF'),'stale request changed nothing');
+ for(const bad of ['BSC_INGRESS_GETH:ARMED','BSC_INGRESS_X:SHADOW','BSC_INGRESS_GETH']){const r=await api.post(base+'/api/v1/command',{headers,data:Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:crypto.randomUUID(),action:'bsc.source.mode.set',resourceId:bad,expected:{version:{case:'configVersion',value:3n}},issuedAtUnixNs:BigInt(Date.now())*1_000_000n})))});assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await r.body())).status,proto.CommandStatus.REJECTED,bad);}
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
  await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
 
@@ -151,5 +171,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

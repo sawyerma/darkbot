@@ -36,6 +36,10 @@ EOF
 }
 bsc_reporter_up() {
   [ -x "$APP_HOME/current/bsc-status-reporter" ] || return 0
+  # The source owner's state is on file before the reporter projects it.
+  if [ -x "$APP_HOME/current/bsc_runtime" ]; then
+    /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source init --state "$RUNDIR/bsc-sources" >/dev/null
+  fi
   if launchctl list "$BSC_REPORTER_LABEL" >/dev/null 2>&1; then return 0; fi
   bsc_plist "$BSC_REPORTER_LABEL" "$APP_HOME/current/bsc-status-reporter" "" "$LOGDIR/bsc-reporter.log" true > "$BSC_REPORTER_PLIST"
   launchctl bootstrap "$DOMAIN" "$BSC_REPORTER_PLIST"
@@ -82,8 +86,23 @@ bsc_candidate_request() {
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/g07_candidate" request "$1" \
     --expect-generation "$2" --request-id "$3" --rundir "$RUNDIR" --snapshot "$BSC_ROOT"
 }
+# Source modes (plan §5a.2, order V2 §5): the native owner applies or refuses
+# one request with its generation as the CAS and prints the receipt; a
+# requested LIVE is recorded and stays BLOCKED. Nothing here signs or sends.
+bsc_source_request() {
+  [ "$#" -eq 4 ] || die "bsc source request <SOURCE_ID> OFF|SHADOW|LIVE <generation> <request_id>"
+  case "$2" in OFF|SHADOW|LIVE) ;; *) die "unknown source mode" ;; esac
+  case "$3" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
+  [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source request "$1" "$2" \
+    --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources"
+}
 cmd_bsc() {
   case "${1:-}" in
+    source) case "${2:-}" in
+      request) locked bsc_source_request "${@:3}" ;;
+      *) die "bsc source request <SOURCE_ID> OFF|SHADOW|LIVE <generation> <request_id>" ;;
+    esac ;;
     candidate) case "${2:-}" in
       request) locked bsc_candidate_request "${@:3}" ;;
       *) die "bsc candidate request SELF_A|SELF_B <generation> <request_id>" ;;
@@ -97,7 +116,7 @@ cmd_bsc() {
     sync) [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc sync im Terminal aus dem Original-Repository ausführen"
       locked bsc_sync ;;
     reporter) locked bsc_reporter_up ;;
-    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request" ;;
+    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request; bsc source request" ;;
   esac
 }
 

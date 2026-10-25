@@ -34,6 +34,17 @@ const BSC_START: &str = "bsc.readiness.start";
 const BSC_STOP: &str = "bsc.readiness.stop";
 /// Offline G0.7 A/B candidate selection request; never arm, sign or send.
 const BSC_CANDIDATE: &str = "bsc.candidate.select";
+/// BSC source mode request (plan §5a.2, order V2 §5): the native owner applies or
+/// refuses it; a requested LIVE stays BLOCKED there. Never arm, sign or send.
+const BSC_SOURCE: &str = "bsc.source.mode.set";
+const BSC_SOURCE_IDS: [&str; 5] = [
+    "BSC_INGRESS_GETH",
+    "BSC_INGRESS_PUBLICNODE",
+    "BSC_INGRESS_DRPC",
+    "BSC_INGRESS_BLOCKREQ",
+    "BSC_INGRESS_48CLUB",
+];
+const BSC_SOURCE_MODES: [&str; 3] = ["OFF", "SHADOW", "LIVE"];
 /// B03/U-9: offline analytics jobs of the Project 0 job controller (`p0ctl job …`).
 const BACKTEST_START: &str = "project0.analytics.backtest.start";
 const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
@@ -61,7 +72,7 @@ fn allowed(project: i32, action: &str) -> bool {
     (project == ProjectId::Project0 as i32
         && ([START, STOP].contains(&action) || JOB_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
-            && [BSC_START, BSC_STOP, BSC_CANDIDATE].contains(&action))
+            && [BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_SOURCE].contains(&action))
 }
 /// The only accepted candidate request: a fixed profile as resource and the
 /// selection generation of the last applied status as `profile_version` CAS.
@@ -74,6 +85,20 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
     match req.expected.as_ref()?.version? {
         expected_version::Version::ProfileVersion(generation) if req.params.is_empty() => {
             Some((profile, generation))
+        }
+        _ => None,
+    }
+}
+
+/// The only accepted source request: `<SOURCE_ID>:<MODE>` from the fixed sets as resource and
+/// the generation of the displayed native state as `config_version` CAS; no parameters.
+fn source_request(req: &CommandRequest) -> Option<(&'static str, &'static str, u64)> {
+    let (id, mode) = req.resource_id.split_once(':')?;
+    let id = BSC_SOURCE_IDS.into_iter().find(|s| *s == id)?;
+    let mode = BSC_SOURCE_MODES.into_iter().find(|m| *m == mode)?;
+    match req.expected.as_ref()?.version? {
+        expected_version::Version::ConfigVersion(generation) if req.params.is_empty() => {
+            Some((id, mode, generation))
         }
         _ => None,
     }
@@ -696,6 +721,21 @@ impl Control {
                 "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop and the offline BSC candidate request are available",
             );
         }
+        let source = if req.action == BSC_SOURCE {
+            match source_request(req) {
+                Some(s) => Some(s),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Source request takes exactly <SOURCE_ID>:<OFF|SHADOW|LIVE> and the config_version generation",
+                    )
+                }
+            }
+        } else {
+            None
+        };
         let candidate = if req.action == BSC_CANDIDATE {
             match candidate_request(req) {
                 Some(c) => Some(c),
@@ -736,6 +776,7 @@ impl Control {
         };
         if candidate.is_none()
             && job.is_none()
+            && source.is_none()
             && ((req.project != ProjectId::Bsc as i32 && !req.resource_id.is_empty())
                 || (req.project == ProjectId::Bsc as i32
                     && !req.resource_id.is_empty()
@@ -827,6 +868,9 @@ impl Control {
         }
         if let Some(args) = job {
             return self.dispatch_job(p, id, encoded, &req.action, args).await;
+        }
+        if let Some(source) = source {
+            return self.dispatch_source(p, id, encoded, source).await;
         }
         let before = self.observe_project(req.project).await;
         if req.project == ProjectId::Bsc as i32
@@ -1022,6 +1066,78 @@ impl Control {
             tracing::error!(request_id=%id, "command outcome could not be persisted");
         }
         tracing::info!(request_id=%id, %action, phase=record.phase, "analytics job command");
+        CommandResponse {
+            phase: record.phase,
+            detail: record.detail,
+            ..accepted
+        }
+    }
+    /// One source request through the native owner; its one-line receipt becomes the detail.
+    async fn dispatch_source(
+        &self,
+        p: &Paths,
+        id: &str,
+        encoded: Vec<u8>,
+        (source, mode, generation): (&str, &str, u64),
+    ) -> CommandResponse {
+        let accepted = reply(
+            id,
+            CommandStatus::Accepted,
+            CommandRejectReason::Unspecified,
+            "Source request persisted; the native owner decides",
+        );
+        let mut record = Record {
+            request: encoded,
+            response: accepted.encode_to_vec(),
+            phase: CommandPhase::PendingReconcile as i32,
+            detail: "Controller dispatch pending; never automatically replayed after interruption"
+                .into(),
+            launch_id: String::new(),
+        };
+        if self.persist(id, &record).is_err() {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::EngineUnavailable,
+                "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
+            );
+        }
+        let generation = generation.to_string();
+        let output = tokio::time::timeout(
+            Duration::from_secs(50),
+            Command::new(&p.ctl)
+                .args(["bsc", "source", "request", source, mode, &generation, id])
+                .env("DARKBOT_STAGED", "1")
+                .env("DARKBOT_NO_OPEN", "1")
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await;
+        let receipt = |out: &std::process::Output| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .find(|l| l.starts_with("outcome="))
+                .map(|l| redact(l.trim()).chars().take(300).collect::<String>())
+        };
+        match output {
+            Ok(Ok(out)) if out.status.success() => {
+                record.phase = CommandPhase::Completed as i32;
+                record.detail =
+                    receipt(&out).unwrap_or_else(|| "outcome=APPLIED (no receipt line)".into());
+            }
+            Ok(Ok(out)) => {
+                record.phase = CommandPhase::Failed as i32;
+                record.detail = receipt(&out).unwrap_or_else(|| refusal(&out.stderr));
+            }
+            _ => {
+                record.detail =
+                    "Controller outcome unknown; the native source state decides".into();
+            }
+        }
+        if self.persist(id, &record).is_err() {
+            tracing::error!(request_id=%id, "command outcome could not be persisted");
+        }
+        tracing::info!(request_id=%id, phase=record.phase, "bsc source request");
         CommandResponse {
             phase: record.phase,
             detail: record.detail,
@@ -2233,6 +2349,142 @@ mod tests {
                 .phase,
             CommandPhase::Failed as i32
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    /// Order V2 §5: a BSC source request is exactly `<SOURCE_ID>:<MODE>` from the fixed sets with
+    /// the displayed generation as `config_version`; it reaches the native owner through
+    /// `darkbotctl bsc source request` without a readiness launch, and the owner's one-line
+    /// receipt is the detail (APPLIED completes, REJECTED_STALE fails); nothing else passes.
+    #[tokio::test]
+    async fn a_source_request_reaches_the_native_owner_and_returns_its_receipt() {
+        use std::os::unix::fs::PermissionsExt;
+        let request = |id: &str, resource: &str, expected: Option<expected_version::Version>| {
+            CommandRequest {
+                project: ProjectId::Bsc as i32,
+                request_id: id.into(),
+                action: BSC_SOURCE.into(),
+                resource_id: resource.into(),
+                expected: expected.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+                params: Default::default(),
+                issued_at_unix_ns: crate::overview::unix_ns_now(),
+            }
+        };
+        let config = |g| Some(expected_version::Version::ConfigVersion(g));
+        // Parsing: only known sources and modes, only config_version, no parameters.
+        assert_eq!(
+            source_request(&request("x", "BSC_INGRESS_DRPC:LIVE", config(4))),
+            Some(("BSC_INGRESS_DRPC", "LIVE", 4))
+        );
+        for (resource, expected) in [
+            ("BSC_INGRESS_DRPC", config(4)),
+            ("BSC_INGRESS_OTHER:SHADOW", config(4)),
+            ("BSC_INGRESS_DRPC:ARMED", config(4)),
+            ("BSC_INGRESS_DRPC:SHADOW", None),
+            (
+                "BSC_INGRESS_DRPC:SHADOW",
+                Some(expected_version::Version::ProfileVersion(4)),
+            ),
+        ] {
+            assert_eq!(
+                source_request(&request("x", resource, expected)),
+                None,
+                "{resource}"
+            );
+        }
+        let mut with_params = request("x", "BSC_INGRESS_DRPC:SHADOW", config(4));
+        with_params.params = vec![1].into();
+        assert_eq!(source_request(&with_params), None);
+        assert!(allowed(ProjectId::Bsc as i32, BSC_SOURCE));
+        assert!(!allowed(ProjectId::Project0 as i32, BSC_SOURCE));
+
+        let dir = std::env::temp_dir().join(format!("gw-source-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        // The controller prints the owner's receipt line; generation 4 is current.
+        fs::write(
+            &ctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$6\" = 4 ] && {{ echo \"outcome=APPLIED source=$4 requested=$5 effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED generation=5 request_id=$7\"; exit 0; }}\necho \"outcome=REJECTED_STALE source=$4 requested=$5 effective=OFF generation=5 request_id=$7\"; exit 2\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+            }),
+            &Limits::default(),
+        );
+        let live = request(
+            "32345678-1234-1234-1234-123456789abc",
+            "BSC_INGRESS_PUBLICNODE:LIVE",
+            config(4),
+        );
+        let r = control.execute(&live).await;
+        assert_eq!(
+            (r.status, r.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            ),
+            "{}",
+            r.detail
+        );
+        assert!(
+            r.detail.starts_with("outcome=APPLIED") && r.detail.contains("effective=BLOCKED"),
+            "{}",
+            r.detail
+        );
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "bsc\nsource\nrequest\nBSC_INGRESS_PUBLICNODE\nLIVE\n4\n32345678-1234-1234-1234-123456789abc\n"
+        );
+        // A replay returns the stored response with the decided phase, no second dispatch;
+        // the receipt line is the ledger detail a lookup returns.
+        fs::remove_file(&log).unwrap();
+        assert_eq!(
+            control.execute(&live).await.phase,
+            CommandPhase::Completed as i32
+        );
+        assert!(!log.exists());
+        let looked = control
+            .lookup(&live.request_id, ProjectId::Bsc as i32)
+            .await;
+        assert_eq!(
+            (looked.phase, looked.detail.as_str()),
+            (CommandPhase::Completed as i32, r.detail.as_str())
+        );
+        // A stale generation is the owner's refusal: a failed receipt with its line.
+        let stale = request(
+            "42345678-1234-1234-1234-123456789abc",
+            "BSC_INGRESS_PUBLICNODE:SHADOW",
+            config(3),
+        );
+        let r = control.execute(&stale).await;
+        assert_eq!(r.phase, CommandPhase::Failed as i32);
+        assert!(
+            r.detail.starts_with("outcome=REJECTED_STALE"),
+            "{}",
+            r.detail
+        );
+        // An invalid request never reaches the ledger or the controller.
+        fs::remove_file(&log).unwrap();
+        let bad = request(
+            "52345678-1234-1234-1234-123456789abc",
+            "BSC_INGRESS_PUBLICNODE:ARMED",
+            config(4),
+        );
+        assert_eq!(
+            control.execute(&bad).await.reject_reason,
+            CommandRejectReason::InvalidParams as i32
+        );
+        assert!(!log.exists());
         fs::remove_dir_all(dir).unwrap();
     }
     /// B03/U-9: an analytics job action maps its typed parameters 1:1 onto the options of

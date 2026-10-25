@@ -955,6 +955,15 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             ],
         );
     }
+    // Order V2 §5: the five sources' modes from their native owner's state
+    // (RUNDIR/bsc-sources); a state the owner's rule refuses is a warning.
+    let sources = rundir.join("bsc-sources");
+    match darkbot_bsc_execution::sources::current_record(&sources) {
+        Ok(Some((path, r))) => monitoring.records.push(native_record(rundir, &path, &r)),
+        Ok(None) => {}
+        Err(_) if !sources.exists() => {}
+        Err(_) => warnings.push("SOURCE_MODES_INVALID".into()),
+    }
     let gates = vec![
         gate(
             "G0.6a",

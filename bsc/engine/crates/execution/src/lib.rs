@@ -52,6 +52,9 @@ pub mod attempt_authority;
 /// Built only with the `g07-mainnet` feature.
 #[cfg(feature = "g07-mainnet")]
 pub mod qualification_capture;
+/// The native owner of the five signal sources' modes (C0/C1, order V2 §5).
+#[cfg(feature = "runtime")]
+pub mod sources;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.

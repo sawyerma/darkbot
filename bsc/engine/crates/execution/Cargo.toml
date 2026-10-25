@@ -37,6 +37,8 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 # boundary into typed values; nothing internal is JSON.
 # JSON-RPC over curl with the endpoint and request on stdin, never argv.
 rpc-wire = []
+# The BSC runtime's native configuration owners (C0/C1): binary records only.
+runtime = ["dep:darkbot-bsc-record"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 
 [dev-dependencies]
@@ -112,3 +114,8 @@ required-features = ["g07-mainnet"]
 [[test]]
 name = "g07_candidate"
 required-features = ["g07-mainnet"]
+
+# The BSC runtime (C0/C1): source modes now; ingress, journal and status follow.
+[[bin]]
+name = "bsc_runtime"
+required-features = ["runtime"]

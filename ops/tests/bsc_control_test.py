@@ -7,7 +7,7 @@ import os, pathlib, shutil, subprocess
 import lifecycle_test as h
 try:
     release=h.WORK/'app/releases/test';release.mkdir(parents=True)
-    for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('darkbotctl','ops/darkbotctl'),('bsc-control.sh','ops/bsc-control.sh'),('bsc-status-reporter','bsc/engine/target/debug/bsc-status-reporter'),('g07_pre_live_readiness','bsc/engine/target/debug/g07_pre_live_readiness')]:
+    for name,source in [('darkbot-gateway','gateway/target/debug/darkbot-gateway'),('darkbotctl','ops/darkbotctl'),('bsc-control.sh','ops/bsc-control.sh'),('bsc-status-reporter','bsc/engine/target/debug/bsc-status-reporter'),('g07_pre_live_readiness','bsc/engine/target/debug/g07_pre_live_readiness'),('bsc_runtime','bsc/engine/target/debug/bsc_runtime')]:
         shutil.copy2(h.ROOT/source,release/name)
     (release/'darkbotctl').chmod(0o755)
     shutil.copytree(h.ROOT/'frontend/dist',release/'dist')
