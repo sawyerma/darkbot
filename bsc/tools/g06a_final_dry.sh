@@ -26,7 +26,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT"
 
 # Modes (v9.1 D2-D4; BSC-001: no default): --full (A: R0 .. DRY-4 at one
-# head, needs the wallet keys); --prepare (key-free preview at H1 for the selected
+# head, the wallet keys only for steps 4-5); --prepare (key-free preview at H1 for the selected
 # candidate: bsc/secrets.env is never read, steps 4 and 5 never run, the
 # output is PREPARE_ONLY / NOT_REQUALIFIED); SIGN <prepare_dir> (at a fresh
 # head H2: only the verified R0 record and candidate reference of PREPARE
@@ -84,19 +84,10 @@ build -p darkbot-bsc-execution --features g07-mainnet --bin g06a_preflight_recor
 build -p darkbot-bsc-qualification --bin g06a_native_bnb_quote --bin g06a_self_launch_bundle \
   --bin g06a_builder_policy_record --bin g06a_requal_check
 
-if [[ "$MODE" != PREPARE ]]; then
-  set +a
-  # shellcheck disable=SC1090
-  source "$SECRETS"
-  set +a
-  clear_exports
-  : "${BSC_LAUNCHER_PRIVATE_KEY:?BSC_LAUNCHER_PRIVATE_KEY missing in bsc/secrets.env}"
-  : "${BSC_BUYER_PRIVATE_KEY:?BSC_BUYER_PRIVATE_KEY missing in bsc/secrets.env}"
-  : "${BSC_MAINNET_RPC_HTTPS:?BSC_MAINNET_RPC_HTTPS missing in bsc/secrets.env}"
-else
-  # Only the read-only RPC endpoint, from the caller's environment.
-  : "${BSC_MAINNET_RPC_HTTPS:?PREPARE reads no key file: provide BSC_MAINNET_RPC_HTTPS (read-only RPC) in the environment}"
-fi
+# Every mode starts key-free: only the read-only RPC endpoint, from the
+# caller's environment. The wallet keys are read by load_keys right before
+# the two signing steps (4 and 5) and dropped right after them.
+: "${BSC_MAINNET_RPC_HTTPS:?provide BSC_MAINNET_RPC_HTTPS (read-only RPC) in the environment; the key file is read only for the signing steps}"
 DARKBOT_G06A_ARCHIVE_RPC_HTTPS="${DARKBOT_G06A_ARCHIVE_RPC_HTTPS:-https://bsc-mainnet.public.blastapi.io}"
 BSC_LAUNCHER_ADDRESS="${BSC_LAUNCHER_ADDRESS:-0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd}"
 BSC_BUYER_ADDRESS="${BSC_BUYER_ADDRESS:-0x9c8a0Db41914beEE52Dd49790c4F087E252743DE}"
@@ -311,6 +302,7 @@ if [[ "$MODE" == PREPARE ]]; then
 fi
 
 printf '\n=== 4/6 EXACT WALLET-BOUND LOCAL SIMULATION ===\n'
+load_keys "$SECRETS" || die "BSC_LAUNCHER_PRIVATE_KEY / BSC_BUYER_PRIVATE_KEY missing or unreadable in bsc/secrets.env"
 if [[ "$PROFILE" == SELF_B ]]; then
   BSC_MAINNET_RPC_HTTPS="$DARKBOT_G06A_ARCHIVE_RPC_HTTPS" \
     with_keys "$HANDOFF" exec-salt --candidate "$CANDIDATE_ID" --generation "$GENERATION" --preflight "$PREFLIGHT" -- \

@@ -127,7 +127,7 @@ class World:
             target.chmod(0o755)
         self.secrets = self.root / "bsc/secrets.env"
         if secrets is not None:
-            self.secrets.write_text(secrets)
+            self.secrets.write_text(secrets.replace("{log}", str(self.log)))
             self.secrets.chmod(0o600)
 
     def set(self, **values):
@@ -165,7 +165,10 @@ class World:
 
 
 FULL_SECRETS = (f"BSC_LAUNCHER_PRIVATE_KEY={TEST_KEY}\nBSC_BUYER_PRIVATE_KEY={TEST_KEY[:-1]}2\n"
-                f"BSC_MAINNET_RPC_HTTPS={RPC}\n")
+                f"BSC_MAINNET_RPC_HTTPS={RPC}\n"
+                # Every read of the key file is logged as a call of its own.
+                'n=$(ls "{log}" | wc -l | tr -d \' \'); printf \'secrets\\n\' > "{log}/$n.secrets.argv"; : > "{log}/$n.secrets.env"\n')
+STEP_TOOLS_BEFORE_KEYS = {"g06a_preflight_record", "g06a_native_bnb_quote", "g06a_builder_policy_record"}
 
 
 class Prepare(unittest.TestCase):
@@ -209,7 +212,7 @@ class Prepare(unittest.TestCase):
         self.assertEqual(w.run("--prepare", env={"BSC_MAINNET_RPC_HTTPS": RPC}).returncode, 0)
         missing = self.world().run("--prepare")
         self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("PREPARE reads no key file", missing.stderr)
+        self.assertIn("the key file is read only for the signing steps", missing.stderr)
 
     def test_prepare_b_gives_the_salt_only_to_its_two_key_free_consumers(self):
         w = self.world({"selected": "SELF_B", "token": B_TOKEN, "econ_token": B_TOKEN})
@@ -273,9 +276,10 @@ class Full(unittest.TestCase):
     def test_full_mode_keeps_the_a_sequence_and_scopes_keys_and_the_public_salt(self):
         w = World({}, FULL_SECRETS)
         self.addCleanup(w.close)
-        out = w.run("--full", env={"DARKBOT_G06A_SIGN": "YES"})
+        out = w.run("--full", env={"DARKBOT_G06A_SIGN": "YES", "BSC_MAINNET_RPC_HTTPS": RPC})
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertIn("FLAP_REQUALIFICATION=PASS", out.stdout)
+        assert_keys_read_only_for_the_signers(self, w.calls())
         for tool, argv, env in w.calls():
             signing = tool == "g06a_self_launch_bundle" or (tool == "node" and "simulate.cjs" in argv[0])
             salted = signing or (tool == "node" and "trace.cjs" in argv[0])
@@ -286,6 +290,18 @@ class Full(unittest.TestCase):
         # BSC-002: the simulation reads exactly the preflight block by hash.
         sim = [c for c in w.calls() if c[0] == "node" and "simulate.cjs" in c[1][0]][0]
         self.assertIn("DARKBOT_G06A_SEND_HEAD_HASH=0x%064x" % 129400000, sim[2])
+
+
+def assert_keys_read_only_for_the_signers(test, calls):
+    """Einheit 0: the key file is read only after steps 0-3, right before
+    the first signer (the local simulation), never earlier."""
+    names = [c[0] for c in calls]
+    test.assertIn("secrets", names)
+    first = names.index("secrets")
+    test.assertTrue(STEP_TOOLS_BEFORE_KEYS <= set(names[:first]), names)
+    signer = next(i for i, c in enumerate(calls) if c[0] == "node" and "simulate.cjs" in c[1][0])
+    test.assertLess(first, signer, names)
+    test.assertFalse(any(c[0] in STEP_TOOLS_BEFORE_KEYS for c in calls[first:]), names)
 
 
 class Sign(unittest.TestCase):
@@ -305,7 +321,7 @@ class Sign(unittest.TestCase):
         return w, run, before
 
     def sign(self, w, run, **env):
-        return w.run("--sign", str(run), env={"DARKBOT_G06A_SIGN": "YES", **env})
+        return w.run("--sign", str(run), env={"DARKBOT_G06A_SIGN": "YES", "BSC_MAINNET_RPC_HTTPS": RPC, **env})
 
     def test_sign_needs_the_explicit_authorization_flag_before_any_read(self):
         w, run, _ = self.prepared()
@@ -342,6 +358,20 @@ class Sign(unittest.TestCase):
         for tool, argv, env in calls:
             signing = tool == "g06a_self_launch_bundle" or (tool == "node" and "simulate.cjs" in argv[0])
             self.assertEqual("PRIVATE_KEY=" in env, signing, (tool, argv))
+        assert_keys_read_only_for_the_signers(self, calls)
+
+    def test_a_stop_before_the_signing_steps_never_reads_the_key_file(self):
+        # Einheit 0: an H2 stop in steps 0-3 happens with the key file
+        # unreadable and unread.
+        for values, message in [({"econ_output": "1"}, "quote and independent EVM output differ"),
+                                ({"head": "129400000"}, "fresh head H2")]:
+            w, run, _ = self.prepared()
+            w.set(**values)
+            w.secrets.chmod(0)
+            out = self.sign(w, run)
+            self.assertNotEqual(out.returncode, 0, values)
+            self.assertIn(message, out.stderr, values)
+            self.assertNotIn("secrets", [c[0] for c in w.calls()])
 
     def test_sign_b_keeps_the_salt_in_the_handoff_and_binds_the_candidate(self):
         w, run, _ = self.prepared({"selected": "SELF_B", "token": B_TOKEN, "econ_token": B_TOKEN,
