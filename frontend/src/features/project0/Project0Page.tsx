@@ -64,7 +64,7 @@ export default function Project0Page() {
     </div>
     <TabStrip label="Project 0 areas" options={TABS} value={tab} onChange={setTab}/>
     {healthOpen ? <HealthSection/> : null}
-    {tab === "overview" ? <OverviewPanel monitor={monitor} financeStatus={finance.topicStatus} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} goto={setTab}/> : null}
+    {tab === "overview" ? <OverviewPanel monitor={monitor} financeStatus={finance.topicStatus} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} analytics={analytics.value} analyticsStatus={analytics.topicStatus} goto={setTab}/> : null}
     {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab} owner={liquidator.value} ownerStatus={liquidator.topicStatus} finance={liveFinance} system={system.value}/> : null}
     {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus} analytics={analytics.value} analyticsStatus={analytics.topicStatus} owner={liquidator.value} ownerStatus={liquidator.topicStatus}/> : null}
     {tab === "analytics" ? <AnalyticsPanel analytics={analytics.value} topicStatus={analytics.topicStatus} createDraft={fleet.create} goto={setTab}/> : null}

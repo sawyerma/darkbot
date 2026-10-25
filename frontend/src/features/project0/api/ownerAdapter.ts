@@ -49,6 +49,17 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           ingressHaltRaised: engine.ingressHaltRaised,
           programUpgradeLatched: engine.programUpgradeLatched,
           counters,
+          programPin: engine.programPin
+            ? {
+                verdict: engine.programPin.verdict,
+                observedHash: engine.programPin.observedHash,
+                deploymentSlot: engine.programPin.deploymentSlot,
+                upgradeAuthority: engine.programPin.upgradeAuthority ?? null,
+                sourceTag: engine.programPin.sourceTag,
+                referenceSourceTag: engine.programPin.referenceSourceTag,
+                referenceHash: engine.programPin.referenceHash,
+              }
+            : null,
         }
       : null,
     trigger: trigger

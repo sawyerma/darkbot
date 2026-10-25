@@ -281,6 +281,8 @@ pub(super) struct ShadowOwner {
     last_reported_update_total: u64,
     bootstrap_probe_done: bool,
     program_upgrade_latched: bool,
+    /// §6: the startup ProgramData verdict for the status projection.
+    program_pin: Option<crate::status_tap::OwnerProgramPin>,
     reverse_index: ReverseIndex,
     threshold_index: ThresholdIndex,
     threshold_ready: bool,

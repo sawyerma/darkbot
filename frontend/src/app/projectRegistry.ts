@@ -52,7 +52,7 @@ const project0: ProjectRegistration<Project0Panel> = {
     base: [TopicId.PROJECT0_STATUS, TopicId.PROJECT0_CAPTURE_STATE],
     // Every topic a tab renders (Project0Page holds them while the tab is visible).
     panels: {
-      overview: [TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE],
+      overview: [TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_ANALYTICS_JOBS],
       liquidator: [TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY],
       capture: [TopicId.PROJECT0_CAPTURE_STATE, TopicId.PROJECT0_ANALYTICS_JOBS, TopicId.PROJECT0_LIQUIDATOR_STATE],
       analytics: [TopicId.PROJECT0_ANALYTICS_JOBS],

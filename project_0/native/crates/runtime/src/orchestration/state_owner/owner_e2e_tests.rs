@@ -260,6 +260,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         last_reported_update_total: 0,
         bootstrap_probe_done: true,
         program_upgrade_latched: false,
+        program_pin: None,
         reverse_index: ReverseIndex::new(),
         threshold_index: ThresholdIndex::new(),
         threshold_ready: false,

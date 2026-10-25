@@ -18,9 +18,9 @@ use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
     EffectiveRecord, FinanceSummary, LiquidatorState, LossCount, MarketAssessment, MarketCounters,
     OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
-    OwnerTrigger, PhaseStatus, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan,
-    RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters,
-    SystemStatus, TransportStatus, WalletsState, WriterLane,
+    OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget, ReasonCount, RebalanceBlocked,
+    RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision, SourceStats,
+    StateCounters, SystemStatus, TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -188,6 +188,15 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
                 reconcile_missing_local: c.reconcile_missing_local,
                 reconcile_missing_remote: c.reconcile_missing_remote,
                 orphaned_writes: c.orphaned_writes,
+            }),
+            program_pin: o.engine.program_pin.as_ref().map(|p| ProgramPin {
+                verdict: p.verdict.into(),
+                observed_hash: p.observed_hash.clone(),
+                deployment_slot: p.deployment_slot,
+                upgrade_authority: p.upgrade_authority.clone(),
+                source_tag: p.source_tag.into(),
+                reference_source_tag: p.reference_source_tag.into(),
+                reference_hash: p.reference_hash.into(),
             }),
         }),
         trigger: Some(OwnerTrigger {
@@ -1292,8 +1301,17 @@ mod contract_tests {
                 gap_open: false,
                 highest_slot: 400_000_200,
                 ingress_halt_raised: false,
-                program_upgrade_latched: false,
+                program_upgrade_latched: true,
                 counters,
+                program_pin: Some(darkbot_runner::status_tap::OwnerProgramPin {
+                    verdict: "NOT_REFERENCE",
+                    observed_hash: "8eY1fD3o9pR4vZ2wQ7nK5mT6xJ1cB3aL9hG2sF4dE8uW".into(),
+                    deployment_slot: 371_000_000,
+                    upgrade_authority: Some("Upgrade1111111111111111111111111111111111111".into()),
+                    source_tag: "mrgn-0.1.12-rc2",
+                    reference_source_tag: "mrgn-0.1.11-rc1",
+                    reference_hash: "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
+                }),
             },
             trigger: T {
                 mode: "sweep",
@@ -1660,6 +1678,22 @@ mod contract_tests {
             2
         );
         assert_eq!(l.pipeline.as_ref().unwrap().simulation_p95_ns, None);
+        // §6: the ProgramData verdict reaches the wire with both identities; before the owner
+        // read its ProgramData there is none.
+        let e = l.engine.as_ref().unwrap();
+        let pin = e.program_pin.as_ref().unwrap();
+        assert!(e.program_upgrade_latched);
+        assert_eq!(
+            (
+                pin.verdict.as_str(),
+                pin.reference_source_tag.as_str(),
+                pin.deployment_slot
+            ),
+            ("NOT_REFERENCE", "mrgn-0.1.11-rc1", 371_000_000)
+        );
+        let mut unread = owner.clone();
+        unread.engine.program_pin = None;
+        assert_eq!(liquidator_state(&unread).engine.unwrap().program_pin, None);
         // B01: the rebalancing plan reaches the wire; OFF has none.
         let r = l.rebalance.as_ref().unwrap();
         assert_eq!(

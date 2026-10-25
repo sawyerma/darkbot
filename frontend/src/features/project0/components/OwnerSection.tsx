@@ -1,7 +1,7 @@
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorView } from "../model/owner";
 import type { SystemView } from "../model/status";
-import { nsToMs } from "../model/owner";
+import { nsToMs, programPinStatus } from "../model/owner";
 import { usdMicroDisplay } from "../model/format";
 import { orDash } from "../model/statusFormat";
 import { DetailRow, Section } from "./PanelPrimitives";
@@ -39,6 +39,7 @@ export function OwnerSection({ owner, topicStatus, parameters }: { owner: Liquid
     {live ? null : <p className="p0-quiet">Last reported state ({topicStatus}); not current.</p>}
     <DetailRow title="Run" value={`${owner.runId} · ${owner.mode}${owner.endResult ? ` · ended ${owner.endResult}` : ""}`}/>
     <DetailRow title="State" value={e ? `${e.runState}${e.haltReason ? ` · ${e.haltReason}` : ""}${e.programUpgradeLatched ? " · program upgrade" : ""}` : "—"}/>
+    {e ? (() => { const pin = programPinStatus(e.programPin, e.programUpgradeLatched); return <DetailRow title={`Program pin · ${pin.status}`} value={pin.detail}/>; })() : null}
     <DetailRow title="Ingress · generation / reconnects" value={e ? `${e.ingressGeneration} / ${e.reconnects}${e.gapOpen ? " · gap open" : ""}${e.ingressHaltRaised ? " · halt raised" : ""}` : "—"}/>
     <DetailRow title="Same-slot updates · unversioned refused / unordered" value={e ? `${orDash(e.counters.get("same_slot_unversioned_refused"))} / ${orDash(e.counters.get("same_slot_no_wv"))}` : "—"}/>
     <DetailRow title="Trigger · lanes L0/L1/L2 · detect" value={t ? `${t.mode} · ${t.lanes.join("/")} · ${t.detectQueue}` : "—"}/>

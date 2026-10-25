@@ -694,6 +694,15 @@ pub(super) fn prepare(
                                       // [FIX-131][P1A-04]
     let program_upgrade_latched =
         deployment_pin != darkbot_project0::protocol::DeploymentPin::Reference;
+    let program_pin = Some(crate::status_tap::OwnerProgramPin {
+        verdict: deployment_pin.name(),
+        observed_hash: deployment.hash.to_string(),
+        deployment_slot: deployment.deployment_slot,
+        upgrade_authority: deployment.upgrade_authority.map(|a| a.to_string()),
+        source_tag: darkbot_project0::protocol::SOURCE_TAG,
+        reference_source_tag: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_SOURCE_TAG,
+        reference_hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH,
+    });
     #[cfg(feature = "crate_health")]
     let reverse_index = ReverseIndex::new(); // [FIX-133a]
     #[cfg(feature = "crate_health")]
@@ -1121,6 +1130,7 @@ pub(super) fn prepare(
         last_reported_update_total,
         bootstrap_probe_done,
         program_upgrade_latched,
+        program_pin,
         reverse_index,
         threshold_index,
         threshold_ready,

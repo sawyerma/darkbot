@@ -154,6 +154,27 @@ message OwnerEngine {
   bool program_upgrade_latched = 8;
   // State write counters.
   StateCounters counters = 9;
+  // The startup ProgramData verdict against the qualified deployment (absent before it is read).
+  ProgramPin program_pin = 10;
+}
+
+// The ProgramData the owner started on and the qualified deployment it is pinned against
+// (liquidation/src/protocol.rs; only REFERENCE may run unhalted, everything else is BLOCKED).
+message ProgramPin {
+  // REFERENCE | NOT_REFERENCE | UNPINNED.
+  string verdict = 1;
+  // Hash of the complete ProgramData account at startup.
+  string observed_hash = 2;
+  // ProgramData deployment slot.
+  uint64 deployment_slot = 3;
+  // Upgrade authority; absent when the program is immutable.
+  optional string upgrade_authority = 4;
+  // The protocol source this build decodes.
+  string source_tag = 5;
+  // The source the qualified reference deployment was qualified for.
+  string reference_source_tag = 6;
+  // Hash of the qualified reference deployment.
+  string reference_hash = 7;
 }
 
 // StateCore write counters (solana/src/state::StateCounters).

@@ -1,4 +1,4 @@
-import type { FinanceSnapshot, MonitorSnapshot } from "./contracts";
+import type { FinanceSnapshot, MonitorSnapshot, ProgramPinView } from "./contracts";
 
 /**
  * Views of the Shadow/econ4h state owner (topics project0.liquidator.state, .wallets.state,
@@ -22,6 +22,25 @@ export interface OwnerEngineView {
   programUpgradeLatched: boolean;
   /** StateCore write counters by proto field name. */
   counters: ReadonlyMap<string, bigint>;
+  /** §6: null before the owner read its ProgramData. */
+  programPin: ProgramPinView | null;
+}
+
+/** §6 (CTRL-04/12): the Program-Data-Pin as an honest status — REFERENCE only for the qualified
+ * deployment without a latched upgrade, BLOCKED otherwise (both identities named), UNKNOWN
+ * without a current owner. */
+export function programPinStatus(
+  pin: ProgramPinView | null,
+  latched: boolean | null,
+): { status: "REFERENCE" | "BLOCKED" | "UNKNOWN"; detail: string } {
+  if (!pin || latched == null) return { status: "UNKNOWN", detail: "No current owner has read its ProgramData" };
+  const short = (h: string) => (h.length > 12 ? `${h.slice(0, 6)}…${h.slice(-4)}` : h);
+  const observed = `observed ${short(pin.observedHash)} · slot ${pin.deploymentSlot}`;
+  if (pin.verdict === "REFERENCE" && !latched) return { status: "REFERENCE", detail: `${pin.referenceSourceTag} · ${observed}` };
+  return {
+    status: "BLOCKED",
+    detail: `${pin.verdict}${latched ? " · upgrade latched" : ""} · ${observed} · qualified ${pin.referenceSourceTag} ${short(pin.referenceHash)} · build ${pin.sourceTag}`,
+  };
 }
 
 export interface OwnerTriggerView {
@@ -131,5 +150,7 @@ export function ownerMonitor(
     decisionP95Ms: nsToMs(p?.decisionP95Ns),
     streamAgeMs: null,
     finance,
+    programPin: owner?.engine?.programPin ?? null,
+    programUpgradeLatched: owner?.engine?.programUpgradeLatched ?? null,
   };
 }

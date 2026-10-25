@@ -18,7 +18,7 @@ describe("Project 0 panel topics", () => {
   };
 
   it("acquires every owner topic the visible tab renders and releases it", () => {
-    expect(held("overview").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE]));
+    expect(held("overview").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_FINANCE_SUMMARY, TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_ANALYTICS_JOBS]));
     expect(held("liquidator").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY]));
     expect(held("wallets").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_WALLETS_STATE, TopicId.PROJECT0_FINANCE_SUMMARY]));
     expect(held("analytics").acquired).toEqual([TopicId.PROJECT0_ANALYTICS_JOBS]);

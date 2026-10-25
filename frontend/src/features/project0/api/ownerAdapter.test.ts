@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import liquidatorHex from "../../../../../protocol/golden/project0/liquidator_state.hex?raw";
 import walletsHex from "../../../../../protocol/golden/project0/wallets_state.hex?raw";
 import financeHex from "../../../../../protocol/golden/project0/finance_summary.hex?raw";
-import { ownerMonitor } from "../model/owner";
+import { ownerMonitor, programPinStatus } from "../model/owner";
 import {
   decodeFinanceSummary,
   decodeLiquidatorState,
@@ -60,7 +60,20 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     const m = ownerMonitor(liquidator, finance);
     expect(m.rpcP95Ms).toBe(180);
     expect(m.decisionP95Ms).toBe(4);
-    expect(ownerMonitor(null, null)).toEqual({ rpcP95Ms: null, decisionP95Ms: null, streamAgeMs: null, finance: null });
+    expect(ownerMonitor(null, null)).toEqual({ rpcP95Ms: null, decisionP95Ms: null, streamAgeMs: null, finance: null, programPin: null, programUpgradeLatched: null });
+  });
+
+  it("shows the Program-Data-Pin as BLOCKED with both identities, never as a pass (§6)", () => {
+    const pin = liquidator.engine?.programPin ?? null;
+    expect(pin).toMatchObject({ verdict: "NOT_REFERENCE", deploymentSlot: 371_000_000n, sourceTag: "mrgn-0.1.12-rc2", referenceSourceTag: "mrgn-0.1.11-rc1" });
+    const m = ownerMonitor(liquidator, finance);
+    const s = programPinStatus(m.programPin, m.programUpgradeLatched);
+    expect(s.status).toBe("BLOCKED");
+    expect(s.detail).toContain("NOT_REFERENCE · upgrade latched");
+    expect(s.detail).toContain("qualified mrgn-0.1.11-rc1");
+    expect(programPinStatus(null, null).status).toBe("UNKNOWN");
+    expect(programPinStatus(pin && { ...pin, verdict: "REFERENCE" }, false).status).toBe("REFERENCE");
+    expect(programPinStatus(pin && { ...pin, verdict: "REFERENCE" }, true).status).toBe("BLOCKED");
   });
 
   it("rejects malformed wire bytes", () => {

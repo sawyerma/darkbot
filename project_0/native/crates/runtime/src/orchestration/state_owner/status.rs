@@ -116,6 +116,7 @@ impl ShadowOwner {
             ingress_halt_raised: self.halt.is_raised(),
             program_upgrade_latched: self.program_upgrade_latched,
             counters: self.st.counters(),
+            program_pin: self.program_pin.clone(),
         }
     }
 

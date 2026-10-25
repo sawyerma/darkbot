@@ -135,6 +135,7 @@
     - [OwnerRun](#darkbot-project0-v1-OwnerRun)
     - [OwnerSafety](#darkbot-project0-v1-OwnerSafety)
     - [OwnerTrigger](#darkbot-project0-v1-OwnerTrigger)
+    - [ProgramPin](#darkbot-project0-v1-ProgramPin)
     - [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked)
     - [RebalancePlan](#darkbot-project0-v1-RebalancePlan)
     - [RebalanceTrade](#darkbot-project0-v1-RebalanceTrade)
@@ -2344,6 +2345,7 @@ Canonical state, ingress and recovery.
 | ingress_halt_raised | [bool](#bool) |  | The out-of-band ingress halt is raised. |
 | program_upgrade_latched | [bool](#bool) |  | A ProgramData change halted the owner. |
 | counters | [StateCounters](#darkbot-project0-v1-StateCounters) |  | State write counters. |
+| program_pin | [ProgramPin](#darkbot-project0-v1-ProgramPin) |  | The startup ProgramData verdict against the qualified deployment (absent before it is read). |
 
 
 
@@ -2439,6 +2441,28 @@ Candidate trigger and its lanes.
 | indexed_accounts | [uint64](#uint64) |  | Accounts in the reverse index. |
 | suppressed | [uint64](#uint64) |  | Repeats suppressed by the forward policy (no new cause). |
 | softcap_suppressed | [uint64](#uint64) |  | Due repeats suppressed by the repeat soft cap. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-ProgramPin"></a>
+
+### ProgramPin
+The ProgramData the owner started on and the qualified deployment it is pinned against
+(liquidation/src/protocol.rs; only REFERENCE may run unhalted, everything else is BLOCKED).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| verdict | [string](#string) |  | REFERENCE | NOT_REFERENCE | UNPINNED. |
+| observed_hash | [string](#string) |  | Hash of the complete ProgramData account at startup. |
+| deployment_slot | [uint64](#uint64) |  | ProgramData deployment slot. |
+| upgrade_authority | [string](#string) | optional | Upgrade authority; absent when the program is immutable. |
+| source_tag | [string](#string) |  | The protocol source this build decodes. |
+| reference_source_tag | [string](#string) |  | The source the qualified reference deployment was qualified for. |
+| reference_hash | [string](#string) |  | Hash of the qualified reference deployment. |
 
 
 

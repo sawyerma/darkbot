@@ -332,6 +332,25 @@ pub struct OwnerEngine {
     pub ingress_halt_raised: bool,
     pub program_upgrade_latched: bool,
     pub counters: StateCounters,
+    /// §6 Program-Data-Pin (CTRL-04/12): the startup verdict against the qualified deployment;
+    /// `None` before the owner read its ProgramData.
+    pub program_pin: Option<OwnerProgramPin>,
+}
+
+/// The ProgramData the owner started on and the qualified deployment it was pinned against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerProgramPin {
+    /// REFERENCE | NOT_REFERENCE | UNPINNED (only REFERENCE may run unhalted).
+    pub verdict: &'static str,
+    /// Hash of the complete ProgramData account at startup.
+    pub observed_hash: String,
+    pub deployment_slot: u64,
+    pub upgrade_authority: Option<String>,
+    /// The protocol source this build decodes.
+    pub source_tag: &'static str,
+    /// The source the qualified reference deployment was qualified for, and its hash.
+    pub reference_source_tag: &'static str,
+    pub reference_hash: &'static str,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

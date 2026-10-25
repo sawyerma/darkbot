@@ -348,6 +348,17 @@ pub enum DeploymentPin {
     Unpinned,
 }
 
+impl DeploymentPin {
+    /// The stable name of the verdict (status projection, logs).
+    pub fn name(&self) -> &'static str {
+        match self {
+            DeploymentPin::Reference => "REFERENCE",
+            DeploymentPin::NotReference => "NOT_REFERENCE",
+            DeploymentPin::Unpinned => "UNPINNED",
+        }
+    }
+}
+
 pub fn program_data_address(program: &Pubkey) -> Pubkey {
     let loader = Pubkey::from_str(BPF_LOADER_UPGRADEABLE_ID).expect("static");
     Pubkey::find_program_address(&[program.as_ref()], &loader).0

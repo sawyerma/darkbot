@@ -48,16 +48,32 @@ export interface FinanceSnapshot {
   transferredToTreasuryUsdMicro: string | null;
   status: "VERIFIED" | "PARTIAL" | "UNKNOWN";
 }
+/** §6 Program-Data-Pin: the owner's startup ProgramData against the qualified deployment. */
+export interface ProgramPinView {
+  /** REFERENCE | NOT_REFERENCE | UNPINNED; only REFERENCE may run unhalted. */
+  verdict: string;
+  observedHash: string;
+  deploymentSlot: bigint;
+  upgradeAuthority: string | null;
+  sourceTag: string;
+  referenceSourceTag: string;
+  referenceHash: string;
+}
 /** No backend endpoint publishes FinanceSnapshot as of V0. */
 export interface MonitorSnapshot {
   rpcP95Ms: number | null;
   decisionP95Ms: number | null;
   streamAgeMs: number | null;
   finance: FinanceSnapshot | null;
+  /** The owner's ProgramData verdict and upgrade latch; null without a current owner. */
+  programPin: ProgramPinView | null;
+  programUpgradeLatched: boolean | null;
 }
 export const UNCONNECTED_MONITOR: MonitorSnapshot = {
   rpcP95Ms: null,
   decisionP95Ms: null,
   streamAgeMs: null,
   finance: null,
+  programPin: null,
+  programUpgradeLatched: null,
 };

@@ -79,6 +79,16 @@ export interface AnalyticsView {
   storeError: string;
 }
 
+/** The Overview's one-line job summary from topic 15: the runner state is unknown when the
+ * controller says so, and a projection that is not LIVE is named as not current. */
+export function analyticsSummary(a: AnalyticsView | null, status: string): string {
+  if (!a) return `No analytics projection (${status})`;
+  const count = (state: string) => a.jobs.filter(j => j.state === state).length;
+  const runner = a.runnerError ? `runner unknown (${a.runnerError})` : a.runnerBusy ? "runner busy" : "runner idle";
+  const current = status === "LIVE" ? "" : ` · ${status}, not current`;
+  return `${runner} · ${count("RUNNING")} running · ${count("QUEUED")} queued · ${a.jobs.length} listed · ${a.runs.length} readable runs${current}`;
+}
+
 /** Job states with an outcome (never run again). */
 export const TERMINAL_JOB_STATES: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
 
