@@ -300,6 +300,84 @@ fn snapshot(f: &Fixture, missing_required: bool) -> SnapshotData {
     }
 }
 
+/// V2-10 (P5a-02): a delivered update that takes an indexed account out of the group's
+/// MarginfiAccount layout (closed: empty data, system owner) removes it from the ReverseIndex —
+/// before, only an incoming MarginfiAccount classification reached the index, so the close left
+/// its banks indexed. A recovery whose snapshot lacks the account rebuilds without it too.
+#[test]
+fn v2_10_a_closed_indexed_account_leaves_the_reverse_index() {
+    use bytemuck::Zeroable;
+    use marginfi_type_crate::types::MarginfiAccount;
+    let mut f = fixture("v2_10_close");
+    let (account, bank) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let mut a = MarginfiAccount::zeroed();
+    a.group = f.owner.group;
+    a.lending_account.balances[0].active = 1;
+    a.lending_account.balances[0].bank_pk = bank;
+    let mut snap = snapshot(&f, false);
+    let base = snap.accounts.clone();
+    snap.accounts.push(AccountUpdate {
+        pubkey: account,
+        owner: f.owner.program,
+        lamports: 1,
+        data: [
+            protocol::DISC_MARGINFI_ACCOUNT.as_slice(),
+            bytemuck::bytes_of(&a),
+        ]
+        .concat(),
+        slot: 10,
+        write_version: None,
+        source: SourceKind::Snapshot,
+        t_rx_ns: 0,
+    });
+    let mut fetch = || {
+        Ok(SnapshotData {
+            slot: snap.slot,
+            accounts: snap.accounts.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    let banks = |f: &Fixture| {
+        f.owner
+            .reverse_index
+            .banks_for_account(&account)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(banks(&f), vec![bank]);
+    f.producer
+        .try_push(IngressEvent::Account(AccountUpdate {
+            pubkey: account,
+            owner: Pubkey::default(),
+            lamports: 0,
+            data: vec![],
+            slot: 11,
+            write_version: None,
+            source: SourceKind::WsRpcControl,
+            t_rx_ns: 0,
+        }))
+        .unwrap();
+    assert_eq!(drive(&mut f, &mut fetch), Ok(()));
+    assert_eq!(
+        banks(&f),
+        Vec::<Pubkey>::new(),
+        "the close leaves the index"
+    );
+    // The recovery rebuild from a snapshot without the account keeps it out.
+    let mut without = || {
+        Ok(SnapshotData {
+            slot: 12,
+            accounts: base.clone(),
+            missing_required: vec![],
+        })
+    };
+    f.producer.try_push(reconnected()).unwrap();
+    assert_eq!(drive(&mut f, &mut without), Ok(()));
+    assert_eq!(banks(&f), Vec::<Pubkey>::new(), "rebuilt without it");
+}
+
 /// Review E3 (V2-02): an ingress failure raised while a recovery runs (a sink overflow during
 /// the snapshot fetch) is not covered by that recovery — its Ready clears only what was raised
 /// before it started; the new halt stays for the lifecycle (FeedGap) and the next stream.

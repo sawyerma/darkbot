@@ -113,10 +113,17 @@ impl ShadowOwner {
                 _ => None,
             };
             let updated_bank: Option<Pubkey> = updated_bank_event.map(|(pk, _, _)| pk);
+            // V2-10: an update of an already indexed account goes through the post-apply path as
+            // well — a close (empty data, foreign owner) decodes to no banks there and is removed.
             #[cfg(feature = "crate_health")]
             let updated_marginfi_account: Option<Pubkey> = match &ev {
                 IngressEvent::Account(a)
-                    if classify_account(&a.data) == AccountType::MarginfiAccount =>
+                    if classify_account(&a.data) == AccountType::MarginfiAccount
+                        || self
+                            .reverse_index
+                            .banks_for_account(&a.pubkey)
+                            .next()
+                            .is_some() =>
                 {
                     Some(a.pubkey)
                 }
