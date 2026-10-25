@@ -419,6 +419,81 @@ impl super::payload::Payload for RunManifest {
     const KIND: u16 = super::journal::kind::RUN_MANIFEST;
     /// Embeds `Limits` (operational config): follows its layout revision (revision 1 = schema 2).
     const SCHEMA: u16 = darkbot_solana::runtime_config::LIMITS_REVISION + 1;
+    /// A manifest of an earlier `Limits` revision (from `LIMITS_READABLE_FROM`) stays readable:
+    /// a historical run is still reported and verified (`p0ctl report`/`verify`).
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        let revision = schema.checked_sub(1)?;
+        darkbot_solana::runtime_config::fields_at(revision)?;
+        Some(manifest_of_revision(revision, bytes))
+    }
+}
+
+/// `RunManifest` around its operational config (unchanged since `LIMITS_READABLE_FROM`).
+#[derive(Deserialize)]
+struct ManifestHead {
+    schema: String,
+    layout: Option<String>,
+    run_id: String,
+    capture_run_id: String,
+    plan: MeasurementPlan,
+    created_unix_ns: u128,
+    clock_origin_unix_ns: u128,
+    clock_definition: String,
+    head: String,
+    binary_sha256: String,
+    source_sha256: std::collections::BTreeMap<String, String>,
+    provider_class: String,
+}
+#[derive(Deserialize)]
+struct ManifestTail {
+    risk_limits: std::collections::BTreeMap<String, Option<u64>>,
+    permitted_modes: Vec<String>,
+    live_enabled: bool,
+    submission_enabled: bool,
+    verification_mode: String,
+    capture_window: Option<CaptureWindow>,
+    protocol_pin: String,
+    phase_journal: String,
+    compatibility: String,
+}
+
+fn manifest_of_revision(revision: u16, bytes: &[u8]) -> std::io::Result<RunManifest> {
+    use super::payload::{decode_prefix, effective_of_revision};
+    let mut b = bytes;
+    let h: ManifestHead = decode_prefix(&mut b)?;
+    let operational_config = match decode_prefix::<u8>(&mut b)? {
+        0 => None,
+        1 => Some(effective_of_revision(revision, &mut b)?),
+        _ => return Err(super::journal::coded("PAYLOAD_DECODE")),
+    };
+    let t: ManifestTail = decode_prefix(&mut b)?;
+    if !b.is_empty() {
+        return Err(super::journal::coded("PAYLOAD_DECODE"));
+    }
+    Ok(RunManifest {
+        schema: h.schema,
+        layout: h.layout,
+        run_id: h.run_id,
+        capture_run_id: h.capture_run_id,
+        plan: h.plan,
+        created_unix_ns: h.created_unix_ns,
+        clock_origin_unix_ns: h.clock_origin_unix_ns,
+        clock_definition: h.clock_definition,
+        head: h.head,
+        binary_sha256: h.binary_sha256,
+        source_sha256: h.source_sha256,
+        provider_class: h.provider_class,
+        operational_config,
+        risk_limits: t.risk_limits,
+        permitted_modes: t.permitted_modes,
+        live_enabled: t.live_enabled,
+        submission_enabled: t.submission_enabled,
+        verification_mode: t.verification_mode,
+        capture_window: t.capture_window,
+        protocol_pin: t.protocol_pin,
+        phase_journal: t.phase_journal,
+        compatibility: t.compatibility,
+    })
 }
 impl RunManifest {
     /// `manifest.json` / `measurement_manifest.json` render (V1 has no `layout` key).
@@ -897,6 +972,64 @@ mod tests {
             assert!(MeasurementPlan::parse_duration(s).is_err(), "{s}");
         }
     }
+    /// Review E4 (historical readers): a run manifest and an operational-config record written
+    /// with an earlier `Limits` layout (revision 4 before today's bumps, revision 7 before the
+    /// owner-status revision) decode to the same record — a field that layout did not have
+    /// takes its built-in default; a revision before `LIMITS_READABLE_FROM` stays refused.
+    #[test]
+    fn earlier_limits_revisions_of_manifest_and_config_stay_readable() {
+        use super::super::journal::kind;
+        use super::super::payload::{decode, encode_with_limits_revision};
+        use darkbot_solana::runtime_config::{Limits, Resolved};
+        let effective = Resolved::parse(&["--rpc-rps".into(), "9".into()], &|_| None)
+            .unwrap()
+            .effective();
+        let manifest = RunManifest {
+            schema: "C0-E1/MeasurementManifest/3".into(),
+            layout: Some("v2".into()),
+            run_id: "historic".into(),
+            capture_run_id: "historic".into(),
+            plan: MeasurementPlan::new(4500).unwrap(),
+            created_unix_ns: 1_760_000_000_000_000_000,
+            clock_origin_unix_ns: 1_759_999_999_000_000_000,
+            clock_definition: "process monotonic ns".into(),
+            head: "a".repeat(40),
+            binary_sha256: "b".repeat(64),
+            source_sha256: [("main.rs".to_string(), "c".repeat(64))].into(),
+            provider_class: "FREE".into(),
+            operational_config: Some(effective.clone()),
+            risk_limits: [("P0_MAX_CONCURRENT".to_string(), Some(1))].into(),
+            permitted_modes: vec!["SHADOW_OBSERVE_ONLY".into()],
+            live_enabled: false,
+            submission_enabled: false,
+            verification_mode: "SEPARATE_POST_CAPTURE".into(),
+            capture_window: None,
+            protocol_pin: "p".into(),
+            phase_journal: "capture/measurement_phases.jsonl".into(),
+            compatibility: "c".into(),
+        };
+        for revision in [4u16, 7] {
+            let schema = revision + 1;
+            let old = encode_with_limits_revision(&manifest, &effective.limits, revision);
+            let read: RunManifest = decode(kind::RUN_MANIFEST, schema, &old).unwrap();
+            assert_eq!(read, manifest, "revision {revision}");
+            let old = encode_with_limits_revision(&effective, &effective.limits, revision);
+            let read: darkbot_solana::runtime_config::EffectiveConfig =
+                decode(kind::OPERATIONAL_CONFIG, schema, &old).unwrap();
+            assert_eq!(read.limits.rpc_rps, 9);
+            assert_eq!(read, effective);
+        }
+        // A field the old layout did not have takes its default, whatever the writer held now.
+        let mut changed = effective.clone();
+        changed.limits.fee_rps = 7;
+        let old = encode_with_limits_revision(&changed, &changed.limits, 4);
+        let read: darkbot_solana::runtime_config::EffectiveConfig =
+            decode(kind::OPERATIONAL_CONFIG, 5, &old).unwrap();
+        assert_eq!(read.limits.fee_rps, Limits::default().fee_rps);
+        let older = encode_with_limits_revision(&manifest, &effective.limits, 4);
+        assert!(decode::<RunManifest>(kind::RUN_MANIFEST, 4, &older).is_err());
+    }
+
     /// JFI-04: the launcher's typed plan journal is the runtime input; conflicting legacy
     /// overrides are still refused, and a tampered journal fails closed.
     #[test]

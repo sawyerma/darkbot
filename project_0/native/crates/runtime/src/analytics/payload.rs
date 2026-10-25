@@ -82,6 +82,111 @@ impl Payload for darkbot_solana::runtime_config::EffectiveConfig {
     const KIND: u16 = journal::kind::OPERATIONAL_CONFIG;
     /// Embeds `Limits`: follows its layout revision (revision 1 = schema 2).
     const SCHEMA: u16 = darkbot_solana::runtime_config::LIMITS_REVISION + 1;
+    /// A record of an earlier `Limits` revision (from `LIMITS_READABLE_FROM`) stays readable:
+    /// the fields that revision did not have keep their built-in default.
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<io::Result<Self>> {
+        let revision = schema.checked_sub(1)?;
+        darkbot_solana::runtime_config::fields_at(revision)?;
+        let mut rest = bytes;
+        Some(effective_of_revision(revision, &mut rest).and_then(|e| {
+            if rest.is_empty() {
+                Ok(e)
+            } else {
+                Err(bad("PAYLOAD_DECODE"))
+            }
+        }))
+    }
+}
+
+/// One value of the payload encoding read from the front of `bytes` (advanced past it).
+pub(crate) fn decode_prefix<T: DeserializeOwned>(bytes: &mut &[u8]) -> io::Result<T> {
+    options()
+        .deserialize_from(&mut *bytes)
+        .map_err(|_| bad("PAYLOAD_DECODE"))
+}
+
+/// `EffectiveConfig` around the `Limits` (the fields before and after it, unchanged since
+/// `LIMITS_READABLE_FROM`).
+#[derive(serde::Deserialize)]
+struct EffectiveHead {
+    schema: String,
+    profile: darkbot_solana::runtime_config::Profile,
+}
+#[derive(serde::Deserialize)]
+struct EffectiveTail {
+    rpc_endpoint_count: u64,
+    wss_endpoint_count: u64,
+    fallback: bool,
+    adaptive: bool,
+    duration: String,
+    verification: String,
+    diagnostics: bool,
+    fe_mode: String,
+    fe_targets: Vec<String>,
+    fe_group: String,
+    sources: std::collections::BTreeMap<String, String>,
+    provider_capacity_qualified: bool,
+    free_only: bool,
+    live_authorized: bool,
+    submission_authorized: bool,
+}
+
+/// An `EffectiveConfig` of `Limits` layout `revision` from the front of `bytes`.
+pub(crate) fn effective_of_revision(
+    revision: u16,
+    bytes: &mut &[u8],
+) -> io::Result<darkbot_solana::runtime_config::EffectiveConfig> {
+    let head: EffectiveHead = decode_prefix(bytes)?;
+    let (limits, rest) = darkbot_solana::runtime_config::Limits::decode_revision(revision, bytes)
+        .ok_or_else(|| bad("PAYLOAD_DECODE"))?;
+    *bytes = rest;
+    let t: EffectiveTail = decode_prefix(bytes)?;
+    Ok(darkbot_solana::runtime_config::EffectiveConfig {
+        schema: head.schema,
+        profile: head.profile,
+        limits,
+        rpc_endpoint_count: t.rpc_endpoint_count,
+        wss_endpoint_count: t.wss_endpoint_count,
+        fallback: t.fallback,
+        adaptive: t.adaptive,
+        duration: t.duration,
+        verification: t.verification,
+        diagnostics: t.diagnostics,
+        fe_mode: t.fe_mode,
+        fe_targets: t.fe_targets,
+        fe_group: t.fe_group,
+        sources: t.sources,
+        provider_capacity_qualified: t.provider_capacity_qualified,
+        free_only: t.free_only,
+        live_authorized: t.live_authorized,
+        submission_authorized: t.submission_authorized,
+    })
+}
+
+/// Test fixture: `value`'s payload with its `Limits` re-encoded in layout `revision` (what that
+/// revision's writer produced); the limits must occur exactly once in the payload.
+#[cfg(test)]
+pub(crate) fn encode_with_limits_revision<T: Serialize>(
+    value: &T,
+    limits: &darkbot_solana::runtime_config::Limits,
+    revision: u16,
+) -> Vec<u8> {
+    let bytes = encode_wire(value).unwrap();
+    let current = encode_wire(limits).unwrap();
+    let at = bytes
+        .windows(current.len())
+        .position(|w| w == current.as_slice())
+        .expect("limits inside the payload");
+    assert!(
+        bytes[at + 1..]
+            .windows(current.len())
+            .all(|w| w != current.as_slice()),
+        "limits occur once"
+    );
+    let mut old = bytes[..at].to_vec();
+    old.extend(limits.encode_revision(revision).unwrap());
+    old.extend(&bytes[at + current.len()..]);
+    old
 }
 
 /// The manifest: last frame of a sealed journal, binding frame count and chain root.

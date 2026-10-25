@@ -162,6 +162,67 @@ parameters! {
 /// duplicate defaults (from `owner_status_ms` on, appended).
 pub const LIMITS_REVISION: u16 = 8;
 
+/// The oldest `Limits` layout an earlier record can be read in: revision 4 is checked against the
+/// git history (the current field order filtered to its fields); earlier ones are not.
+pub const LIMITS_READABLE_FROM: u16 = 4;
+
+/// The revision each parameter entered the `Limits` layout. Fields only ever entered (inserted or
+/// appended); none moved or left, so a layout is the current order filtered to its fields.
+fn introduced(field: &str) -> u16 {
+    let position = |f: &str| PARAMETERS.iter().position(|p| p.field == f);
+    match field {
+        "boot_calls" | "boot_seconds" => 2,
+        "owner_evidence_sync_ms" => 3,
+        "wss_ack_ms_per_subscription" => 4,
+        "fee_rps" | "send_rps" => 5,
+        "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
+        "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("owner_status_ms") => 8,
+        _ => 1,
+    }
+}
+
+/// The parameter fields of layout `revision` in wire order; `None` outside the readable range.
+pub fn fields_at(revision: u16) -> Option<Vec<&'static str>> {
+    (LIMITS_READABLE_FROM..=LIMITS_REVISION)
+        .contains(&revision)
+        .then(|| {
+            PARAMETERS
+                .iter()
+                .map(|p| p.field)
+                .filter(|f| introduced(f) <= revision)
+                .collect()
+        })
+}
+
+impl Limits {
+    /// The `Limits` of layout `revision` at the start of `bytes` (one little-endian u64 per field
+    /// of that layout, as the fixint payload encoding writes them); a field the layout did not
+    /// have keeps its built-in default. Returns the limits and the bytes after them.
+    pub fn decode_revision(revision: u16, bytes: &[u8]) -> Option<(Limits, &[u8])> {
+        let mut limits = Limits::default();
+        let mut rest = bytes;
+        for field in fields_at(revision)? {
+            let (value, tail) = rest.split_first_chunk::<8>()?;
+            limits.set(field, u64::from_le_bytes(*value));
+            rest = tail;
+        }
+        Some((limits, rest))
+    }
+
+    /// `self` in layout `revision` (what that revision's writer produced): historical-reader
+    /// fixtures.
+    #[doc(hidden)]
+    pub fn encode_revision(&self, revision: u16) -> Option<Vec<u8>> {
+        Some(
+            fields_at(revision)?
+                .into_iter()
+                .flat_map(|f| self.get(f).unwrap_or(0).to_le_bytes())
+                .collect(),
+        )
+    }
+}
+
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
