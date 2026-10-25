@@ -34,8 +34,14 @@ const BSC_START: &str = "bsc.readiness.start";
 const BSC_STOP: &str = "bsc.readiness.stop";
 /// Offline G0.7 A/B candidate selection request; never arm, sign or send.
 const BSC_CANDIDATE: &str = "bsc.candidate.select";
+/// B03/U-9: offline analytics jobs of the Project 0 job controller (`p0ctl job …`).
+const BACKTEST_START: &str = "project0.analytics.backtest.start";
+const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
+const JOB_CANCEL: &str = "project0.analytics.job.cancel";
+const JOB_ACTIONS: [&str; 3] = [BACKTEST_START, OPTIMIZE_START, JOB_CANCEL];
 fn allowed(project: i32, action: &str) -> bool {
-    (project == ProjectId::Project0 as i32 && [START, STOP].contains(&action))
+    (project == ProjectId::Project0 as i32
+        && ([START, STOP].contains(&action) || JOB_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
             && [BSC_START, BSC_STOP, BSC_CANDIDATE].contains(&action))
 }
@@ -53,6 +59,154 @@ fn candidate_request(req: &CommandRequest) -> Option<(&'static str, u64)> {
         }
         _ => None,
     }
+}
+
+/// A run id under the project's run roots: never a path.
+fn run_id_ok(s: &str) -> bool {
+    (1..=128).contains(&s.len())
+        && !s.starts_with('.')
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+}
+/// An exact USD decimal as `p0ctl` reads it: digits, at most 6 fraction digits.
+fn usd_ok(s: &str) -> bool {
+    let (whole, fraction) = s.split_once('.').unwrap_or((s, ""));
+    (1..=15).contains(&whole.len())
+        && whole.bytes().all(|b| b.is_ascii_digit())
+        && (!s.contains('.') || (1..=6).contains(&fraction.len()))
+        && fraction.bytes().all(|b| b.is_ascii_digit())
+}
+/// A funding class name (`FundingClass::as_str`); the controller checks it is one.
+fn class_ok(s: &str) -> bool {
+    (1..=32).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+}
+fn classes(set: &[String]) -> Option<String> {
+    if set.len() > 8 || !set.iter().all(|c| class_ok(c)) {
+        return None;
+    }
+    Some(if set.is_empty() {
+        "all".into()
+    } else {
+        set.join(",")
+    })
+}
+/// The options of one backtest point (`p0ctl backtest`'s flags).
+fn point_args(c: &crate::proto::project0::v1::BacktestJobCommand) -> Option<Vec<String>> {
+    if !run_id_ok(&c.run_id)
+        || !usd_ok(&c.min_profit_usd)
+        || !(1..=32).contains(&c.capital_usd.len())
+        || c.capital_usd.contains(&0)
+        || c.max_seconds == 0
+        || c.max_ram_bytes == 0
+    {
+        return None;
+    }
+    let mut args = vec![
+        "--run".to_string(),
+        c.run_id.clone(),
+        "--min-profit-usd".into(),
+        c.min_profit_usd.clone(),
+        "--capital-usd".into(),
+        c.capital_usd
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        "--funding".into(),
+        classes(&c.funding)?,
+        "--max-seconds".into(),
+        c.max_seconds.to_string(),
+        "--max-ram-bytes".into(),
+        c.max_ram_bytes.to_string(),
+    ];
+    if !c.verification_result.is_empty() {
+        if !valid_job_id(&c.verification_result) {
+            return None;
+        }
+        args.extend([
+            "--verification-result".into(),
+            c.verification_result.clone(),
+        ]);
+    }
+    Some(args)
+}
+/// A job id of the controller (`[A-Za-z0-9-]`, at most 64).
+fn valid_job_id(s: &str) -> bool {
+    (1..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+/// B03/U-9: the `darkbotctl p0 job …` arguments of an analytics job action — the typed
+/// parameters mapped 1:1 onto the options of `p0ctl job`, which validates them again. A start's
+/// job id is the request id; a cancel names its job as the resource.
+fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
+    use crate::proto::project0::v1::{BacktestJobCommand, OptimizeJobCommand};
+    if req.expected.is_some() {
+        return None;
+    }
+    let start = |kind: &str| -> Vec<String> {
+        ["p0", "job", "start", kind, "--id", &req.request_id]
+            .map(String::from)
+            .to_vec()
+    };
+    match req.action.as_str() {
+        BACKTEST_START if req.resource_id.is_empty() => {
+            let c = BacktestJobCommand::decode(req.params.as_ref()).ok()?;
+            let mut args = start("backtest");
+            args.extend(point_args(&c)?);
+            Some(args)
+        }
+        OPTIMIZE_START if req.resource_id.is_empty() => {
+            let c = OptimizeJobCommand::decode(req.params.as_ref()).ok()?;
+            let mut args = start("optimize");
+            args.extend(point_args(c.baseline.as_ref()?)?);
+            if !(1..=64).contains(&c.min_profit_usd_grid.len())
+                || !c.min_profit_usd_grid.iter().all(|v| usd_ok(v))
+                || !(1..=16).contains(&c.funding_sets.len())
+                || c.holdout_bps == 0
+                || c.max_points == 0
+            {
+                return None;
+            }
+            let sets = c
+                .funding_sets
+                .iter()
+                .map(|s| classes(&s.classes))
+                .collect::<Option<Vec<_>>>()?;
+            args.extend([
+                "--min-profit-usd-grid".into(),
+                c.min_profit_usd_grid.join(","),
+                "--funding-sets".into(),
+                sets.join(";"),
+                "--holdout-bps".into(),
+                c.holdout_bps.to_string(),
+                "--max-points".into(),
+                c.max_points.to_string(),
+            ]);
+            if c.save_profile {
+                args.push("--save-profile".into());
+            }
+            Some(args)
+        }
+        JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
+            ["p0", "job", "cancel", "--id", &req.resource_id]
+                .map(String::from)
+                .to_vec(),
+        ),
+        _ => None,
+    }
+}
+/// The native refusal of `p0ctl` (its last error line), bounded and redacted.
+fn refusal(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let line = text
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("no reason reported");
+    let code = redact(line.trim().trim_start_matches("p0ctl: "));
+    let code: String = code.chars().take(200).collect();
+    format!("Native controller refused: {code}")
 }
 
 #[derive(Clone)]
@@ -355,7 +509,7 @@ impl Control {
                 id,
                 CommandStatus::NotImplemented,
                 CommandRejectReason::Forbidden,
-                "Only managed Project 0 capture, BSC read-only readiness start/stop and the offline BSC candidate request are available",
+                "Only managed Project 0 capture, its offline analytics jobs, BSC read-only readiness start/stop and the offline BSC candidate request are available",
             );
         }
         let candidate = if req.action == BSC_CANDIDATE {
@@ -373,7 +527,23 @@ impl Control {
         } else {
             None
         };
+        let job = if JOB_ACTIONS.contains(&req.action.as_str()) {
+            match job_args(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Analytics job parameters invalid (run id, exact USD, capital, funding classes, budget, grid or job id)",
+                    )
+                }
+            }
+        } else {
+            None
+        };
         if candidate.is_none()
+            && job.is_none()
             && ((req.project != ProjectId::Bsc as i32 && !req.resource_id.is_empty())
                 || (req.project == ProjectId::Bsc as i32
                     && !req.resource_id.is_empty()
@@ -468,6 +638,9 @@ impl Control {
                 )
             }
             _ => {}
+        }
+        if let Some(args) = job {
+            return self.dispatch_job(p, id, encoded, &req.action, args).await;
         }
         let before = self.observe_project(req.project).await;
         if req.project == ProjectId::Bsc as i32
@@ -593,6 +766,75 @@ impl Control {
         // The ledger phase known now; later progress is visible in the domain STATE.
         CommandResponse {
             phase: record.phase,
+            ..accepted
+        }
+    }
+    /// B03/U-9: an analytics job action through `darkbotctl p0 job …` (the same `p0ctl job`
+    /// a terminal runs). No capture process is observed: COMPLETED means the controller recorded
+    /// the job and started its worker (or signalled it to stop); the job's own progress and end
+    /// are its state in project0.analytics.jobs, never this receipt.
+    async fn dispatch_job(
+        &self,
+        p: &Paths,
+        id: &str,
+        encoded: Vec<u8>,
+        action: &str,
+        args: Vec<String>,
+    ) -> CommandResponse {
+        let accepted = reply(
+            id,
+            CommandStatus::Accepted,
+            CommandRejectReason::Unspecified,
+            "Analytics job intent persisted; the job's progress is project0.analytics.jobs",
+        );
+        let mut record = Record {
+            request: encoded,
+            response: accepted.encode_to_vec(),
+            phase: CommandPhase::PendingReconcile as i32,
+            detail: "Controller dispatch pending; never automatically replayed after interruption"
+                .into(),
+            launch_id: String::new(),
+        };
+        if self.persist(id, &record).is_err() {
+            return reply(
+                id,
+                CommandStatus::Rejected,
+                CommandRejectReason::EngineUnavailable,
+                "Cannot durably record command (ledger full within the idempotency window, or unavailable); retry later",
+            );
+        }
+        let output = tokio::time::timeout(
+            Duration::from_secs(50),
+            Command::new(&p.ctl).args(&args).kill_on_drop(true).output(),
+        )
+        .await;
+        match output {
+            Ok(Ok(out)) if out.status.success() => {
+                record.phase = CommandPhase::Completed as i32;
+                record.detail = if action == JOB_CANCEL {
+                    "Stop requested from the job's worker; it records CANCELLED in project0.analytics.jobs"
+                } else {
+                    "Job recorded and its worker started; progress in project0.analytics.jobs"
+                }
+                .into();
+            }
+            Ok(Ok(out)) => {
+                record.phase = CommandPhase::Failed as i32;
+                record.detail = refusal(&out.stderr);
+            }
+            _ => {
+                record.detail =
+                    "Controller outcome unknown; inspect project0.analytics.jobs before a new action"
+                        .into();
+            }
+        }
+        if self.persist(id, &record).is_err() {
+            tracing::error!(request_id=%id, "command outcome could not be persisted");
+        }
+        tracing::info!(request_id=%id, %action, phase=record.phase, "analytics job command");
+        CommandResponse {
+            phase: record.phase,
+            detail: record.detail,
             ..accepted
         }
     }
@@ -1625,6 +1867,225 @@ mod tests {
                 .phase,
             CommandPhase::Failed as i32
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    /// B03/U-9: an analytics job action maps its typed parameters 1:1 onto the options of
+    /// `p0ctl job` (through `darkbotctl p0 job`), without observing a capture process; a native
+    /// refusal is a FAILED receipt with its code; invalid parameters are rejected before the
+    /// ledger and never dispatched.
+    #[tokio::test]
+    async fn analytics_job_commands_dispatch_the_p0ctl_job_options() {
+        use crate::proto::project0::v1::{BacktestJobCommand, FundingSet, OptimizeJobCommand};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("gw-jobs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        fs::write(
+            &ctl,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$3\" != cancel ] || {{ echo 'p0ctl: JOB_NOT_RUNNING: COMPLETED' >&2; exit 2; }}\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&ctl, fs::Permissions::from_mode(0o755)).unwrap();
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "com.darkbot.test.absent.capture".into(),
+            }),
+            &Limits::default(),
+        );
+        let point = BacktestJobCommand {
+            run_id: "run-a".into(),
+            min_profit_usd: "1.5".into(),
+            capital_usd: vec![100, 1000],
+            funding: vec![],
+            max_seconds: 60,
+            max_ram_bytes: 1_048_576,
+            verification_result: String::new(),
+        };
+        let request = |n: u8, action: &str, resource: &str, params: Vec<u8>| CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: format!("{n}2345678-1234-1234-1234-123456789abc"),
+            action: action.into(),
+            resource_id: resource.into(),
+            expected: None,
+            params: params.into(),
+            issued_at_unix_ns: crate::overview::unix_ns_now(),
+        };
+        let argv = || fs::read_to_string(&log).unwrap();
+        let bt = request(1, BACKTEST_START, "", point.encode_to_vec());
+        let r = control.execute(&bt).await;
+        assert_eq!(
+            (r.status, r.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            ),
+            "{}",
+            r.detail
+        );
+        assert_eq!(
+            argv(),
+            "p0\njob\nstart\nbacktest\n--id\n12345678-1234-1234-1234-123456789abc\n--run\nrun-a\n--min-profit-usd\n1.5\n--capital-usd\n100,1000\n--funding\nall\n--max-seconds\n60\n--max-ram-bytes\n1048576\n"
+        );
+        let opt = OptimizeJobCommand {
+            baseline: Some(point.clone()),
+            min_profit_usd_grid: vec!["1.5".into(), "2".into()],
+            funding_sets: vec![
+                FundingSet { classes: vec![] },
+                FundingSet {
+                    classes: vec!["NO_SWAP_INVENTORY".into(), "PREHELD_INVENTORY".into()],
+                },
+            ],
+            holdout_bps: 3000,
+            max_points: 4,
+            save_profile: true,
+        };
+        let r = control
+            .execute(&request(2, OPTIMIZE_START, "", opt.encode_to_vec()))
+            .await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert!(argv().ends_with(
+            "--min-profit-usd-grid\n1.5,2\n--funding-sets\nall;NO_SWAP_INVENTORY,PREHELD_INVENTORY\n--holdout-bps\n3000\n--max-points\n4\n--save-profile\n"
+        ));
+        let cancel = request(
+            3,
+            JOB_CANCEL,
+            "12345678-1234-1234-1234-123456789abc",
+            vec![],
+        );
+        let r = control.execute(&cancel).await;
+        assert_eq!(
+            (r.status, r.phase),
+            (CommandStatus::Accepted as i32, CommandPhase::Failed as i32)
+        );
+        assert_eq!(
+            r.detail,
+            "Native controller refused: JOB_NOT_RUNNING: COMPLETED"
+        );
+        assert_eq!(
+            control
+                .lookup(&cancel.request_id, ProjectId::Project0 as i32)
+                .await
+                .detail,
+            r.detail
+        );
+        assert_eq!(
+            argv(),
+            "p0\njob\ncancel\n--id\n12345678-1234-1234-1234-123456789abc\n"
+        );
+        // Invalid parameters: rejected, no receipt, nothing dispatched.
+        fs::remove_file(&log).unwrap();
+        let bad = |c: BacktestJobCommand| c.encode_to_vec();
+        for (n, req) in [
+            (
+                4,
+                request(
+                    4,
+                    BACKTEST_START,
+                    "",
+                    bad(BacktestJobCommand {
+                        run_id: "../x".into(),
+                        ..point.clone()
+                    }),
+                ),
+            ),
+            (
+                5,
+                request(
+                    5,
+                    BACKTEST_START,
+                    "",
+                    bad(BacktestJobCommand {
+                        min_profit_usd: "1e5".into(),
+                        ..point.clone()
+                    }),
+                ),
+            ),
+            (
+                6,
+                request(
+                    6,
+                    BACKTEST_START,
+                    "",
+                    bad(BacktestJobCommand {
+                        capital_usd: vec![0],
+                        ..point.clone()
+                    }),
+                ),
+            ),
+            (
+                7,
+                request(
+                    7,
+                    BACKTEST_START,
+                    "",
+                    bad(BacktestJobCommand {
+                        funding: vec!["all; rm".into()],
+                        ..point.clone()
+                    }),
+                ),
+            ),
+            (
+                8,
+                request(
+                    8,
+                    BACKTEST_START,
+                    "",
+                    bad(BacktestJobCommand {
+                        max_seconds: 0,
+                        ..point.clone()
+                    }),
+                ),
+            ),
+            (
+                9,
+                request(9, BACKTEST_START, "run-a", point.encode_to_vec()),
+            ),
+            (1, request(1, JOB_CANCEL, "../job", vec![])),
+            (2, request(2, JOB_CANCEL, "job-1", vec![1])),
+            (
+                3,
+                request(
+                    3,
+                    OPTIMIZE_START,
+                    "",
+                    OptimizeJobCommand {
+                        baseline: None,
+                        ..opt.clone()
+                    }
+                    .encode_to_vec(),
+                ),
+            ),
+            (4, request(4, BACKTEST_START, "", vec![0xFF, 0xFF])),
+        ] {
+            // Fresh ids: none of these may reuse a receipt of the dispatched commands above.
+            let mut req = req;
+            req.request_id = format!("{n}2345678-1234-1234-1234-000000000000");
+            let r = control.execute(&req).await;
+            assert_eq!(
+                (r.status, r.reject_reason),
+                (
+                    CommandStatus::Rejected as i32,
+                    CommandRejectReason::InvalidParams as i32
+                ),
+                "{}",
+                req.action
+            );
+            assert!(
+                !control
+                    .lookup(&req.request_id, ProjectId::Project0 as i32)
+                    .await
+                    .found
+            );
+        }
+        assert!(!log.exists(), "nothing dispatched");
         fs::remove_dir_all(dir).unwrap();
     }
     #[cfg(target_os = "macos")]

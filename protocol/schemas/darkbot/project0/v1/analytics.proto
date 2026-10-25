@@ -212,3 +212,40 @@ message OptimizeScore {
   // Best return on capital over its scenarios; unset when not known (never 0).
   darkbot.control.v1.SignedDecimal objective_bps_signed = 2;
 }
+
+// Parameters (CommandRequest.params) of project0.analytics.backtest.start: the options of
+// `p0ctl job start backtest`, validated again by the native controller. The command's
+// request_id becomes the job id.
+message BacktestJobCommand {
+  // The run id under the project's run roots (never a path).
+  string run_id = 1;
+  // Minimum profit in USD as an exact decimal with at most 6 fraction digits ("1.5").
+  string min_profit_usd = 2;
+  // Capital scenarios in whole USD (positive; at most 32).
+  repeated uint64 capital_usd = 3;
+  // Admitted funding classes; empty: every class.
+  repeated string funding = 4;
+  // The job's explicit time budget.
+  uint64 max_seconds = 5;
+  // The job's explicit memory budget.
+  uint64 max_ram_bytes = 6;
+  // A verification result id to read instead of the run's canonical one; empty: canonical.
+  string verification_result = 7;
+}
+
+// Parameters (CommandRequest.params) of project0.analytics.optimize.start: the options of
+// `p0ctl job start optimize` (the baseline is a backtest point, the grid spans its capital).
+message OptimizeJobCommand {
+  // The run, budget and baseline point.
+  BacktestJobCommand baseline = 1;
+  // Minimum profits of the grid in USD (exact decimals, at most 6 fraction digits).
+  repeated string min_profit_usd_grid = 2;
+  // Funding sets of the grid; an empty set: every class.
+  repeated FundingSet funding_sets = 3;
+  // Holdout share of the capture window.
+  uint64 holdout_bps = 4;
+  // The most grid points the job may evaluate.
+  uint64 max_points = 5;
+  // Save the chosen point as an offline Shadow candidate profile (never a LIVE setting).
+  bool save_profile = 6;
+}

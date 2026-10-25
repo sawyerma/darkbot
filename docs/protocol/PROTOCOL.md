@@ -93,11 +93,13 @@
     - [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob)
     - [AnalyticsJobs](#darkbot-project0-v1-AnalyticsJobs)
     - [AnalyticsRun](#darkbot-project0-v1-AnalyticsRun)
+    - [BacktestJobCommand](#darkbot-project0-v1-BacktestJobCommand)
     - [BacktestResult](#darkbot-project0-v1-BacktestResult)
     - [CapitalScenario](#darkbot-project0-v1-CapitalScenario)
     - [FundingSet](#darkbot-project0-v1-FundingSet)
     - [JobGrid](#darkbot-project0-v1-JobGrid)
     - [JobParams](#darkbot-project0-v1-JobParams)
+    - [OptimizeJobCommand](#darkbot-project0-v1-OptimizeJobCommand)
     - [OptimizeResult](#darkbot-project0-v1-OptimizeResult)
     - [OptimizeScore](#darkbot-project0-v1-OptimizeScore)
     - [RunQualification](#darkbot-project0-v1-RunQualification)
@@ -1602,6 +1604,29 @@ One run directory under the project&#39;s run roots.
 
 
 
+<a name="darkbot-project0-v1-BacktestJobCommand"></a>
+
+### BacktestJobCommand
+Parameters (CommandRequest.params) of project0.analytics.backtest.start: the options of
+`p0ctl job start backtest`, validated again by the native controller. The command&#39;s
+request_id becomes the job id.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_id | [string](#string) |  | The run id under the project&#39;s run roots (never a path). |
+| min_profit_usd | [string](#string) |  | Minimum profit in USD as an exact decimal with at most 6 fraction digits (&#34;1.5&#34;). |
+| capital_usd | [uint64](#uint64) | repeated | Capital scenarios in whole USD (positive; at most 32). |
+| funding | [string](#string) | repeated | Admitted funding classes; empty: every class. |
+| max_seconds | [uint64](#uint64) |  | The job&#39;s explicit time budget. |
+| max_ram_bytes | [uint64](#uint64) |  | The job&#39;s explicit memory budget. |
+| verification_result | [string](#string) |  | A verification result id to read instead of the run&#39;s canonical one; empty: canonical. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-BacktestResult"></a>
 
 ### BacktestResult
@@ -1691,6 +1716,27 @@ Economic parameters of a backtest point.
 | min_profit_usd_micro_signed | [darkbot.control.v1.SignedDecimal](#darkbot-control-v1-SignedDecimal) |  | A known net must exceed it (never negative). |
 | capital_usd_micro | [uint64](#uint64) | repeated | Capital scenarios, ascending. |
 | funding | [string](#string) | repeated | Admitted funding classes; empty: every class. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-OptimizeJobCommand"></a>
+
+### OptimizeJobCommand
+Parameters (CommandRequest.params) of project0.analytics.optimize.start: the options of
+`p0ctl job start optimize` (the baseline is a backtest point, the grid spans its capital).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| baseline | [BacktestJobCommand](#darkbot-project0-v1-BacktestJobCommand) |  | The run, budget and baseline point. |
+| min_profit_usd_grid | [string](#string) | repeated | Minimum profits of the grid in USD (exact decimals, at most 6 fraction digits). |
+| funding_sets | [FundingSet](#darkbot-project0-v1-FundingSet) | repeated | Funding sets of the grid; an empty set: every class. |
+| holdout_bps | [uint64](#uint64) |  | Holdout share of the capture window. |
+| max_points | [uint64](#uint64) |  | The most grid points the job may evaluate. |
+| save_profile | [bool](#bool) |  | Save the chosen point as an offline Shadow candidate profile (never a LIVE setting). |
 
 
 

@@ -1,0 +1,125 @@
+import { create as message, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { create } from "zustand";
+import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
+import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
+import { BacktestJobCommandSchema, OptimizeJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+
+/**
+ * B03/U-9: the analytics job commands (POST /api/v1/command → gateway → `darkbotctl p0 job` →
+ * the same `p0ctl job` a terminal runs). ACCEPTED/COMPLETED only means the controller recorded
+ * the job and started its worker; the job's progress and end are its state in
+ * project0.analytics.jobs. A lost acknowledgement is looked up once, never posted again.
+ */
+export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel";
+interface Receipt { id: string; action: JobAction; phase: string; detail: string }
+interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
+export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
+const options: RequestInit = { credentials: "same-origin", cache: "no-store" };
+
+/** The typed inputs of one backtest point, as the operator entered them. */
+export interface PointInput {
+  runId: string;
+  minProfitUsd: string;
+  /** Whole USD, comma separated. */
+  capitalUsd: string;
+  /** `all` or comma separated funding classes. */
+  funding: string;
+  maxSeconds: string;
+  maxRamMib: string;
+}
+export interface GridInput { minProfitUsdGrid: string; fundingSets: string; holdoutBps: string; maxPoints: string; saveProfile: boolean }
+
+const USD = /^\d{1,15}(?:\.\d{1,6})?$/;
+const CLASS = /^[A-Z0-9_]{1,32}$/;
+const positive = (v: string): bigint | null => (/^[1-9]\d{0,18}$/.test(v.trim()) ? BigInt(v.trim()) : null);
+const list = (v: string, sep = ",") => v.split(sep).map((x) => x.trim()).filter((x) => x !== "");
+const classes = (v: string): string[] | null => {
+  if (v.trim() === "all") return [];
+  const c = list(v);
+  return c.length > 0 && c.length <= 8 && c.every((x) => CLASS.test(x)) ? c : null;
+};
+
+/** The typed point, or why it is not one (the controller validates it again). */
+export function backtestCommand(p: PointInput): { params: Uint8Array } | { problem: string } {
+  const capital = list(p.capitalUsd).map(positive);
+  const funding = classes(p.funding);
+  const seconds = positive(p.maxSeconds);
+  const mib = positive(p.maxRamMib);
+  if (!p.runId) return { problem: "Select a completed native run." };
+  if (!USD.test(p.minProfitUsd.trim())) return { problem: "Minimum profit: a USD amount with at most 6 decimals." };
+  if (capital.length === 0 || capital.length > 32 || capital.some((c) => c === null)) return { problem: "Capital: 1–32 positive whole USD amounts, comma separated." };
+  if (funding === null) return { problem: "Funding: all, or funding class names." };
+  if (seconds === null || mib === null) return { problem: "Budget: positive seconds and MiB are required (no hidden default)." };
+  return {
+    params: toBinary(BacktestJobCommandSchema, message(BacktestJobCommandSchema, {
+      runId: p.runId, minProfitUsd: p.minProfitUsd.trim(), capitalUsd: capital as bigint[], funding,
+      maxSeconds: seconds, maxRamBytes: mib * 1_048_576n,
+    })),
+  };
+}
+
+export function optimizeCommand(p: PointInput, g: GridInput): { params: Uint8Array } | { problem: string } {
+  const point = backtestCommand(p);
+  if ("problem" in point) return point;
+  const grid = list(g.minProfitUsdGrid);
+  const sets = list(g.fundingSets, ";").map(classes);
+  const holdout = positive(g.holdoutBps);
+  const points = positive(g.maxPoints);
+  if (grid.length === 0 || grid.length > 64 || !grid.every((v) => USD.test(v))) return { problem: "Grid: 1–64 USD amounts, comma separated." };
+  if (sets.length === 0 || sets.length > 16 || sets.some((s) => s === null)) return { problem: "Funding sets: separated by ';', each all or class names." };
+  if (holdout === null || points === null) return { problem: "Holdout bps and maximum points are required." };
+  const baseline = fromBinary(BacktestJobCommandSchema, point.params);
+  return {
+    params: toBinary(OptimizeJobCommandSchema, message(OptimizeJobCommandSchema, {
+      baseline, minProfitUsdGrid: grid, fundingSets: (sets as string[][]).map((classes) => ({ classes })),
+      holdoutBps: holdout, maxPoints: points, saveProfile: g.saveProfile,
+    })),
+  };
+}
+
+async function csrf(): Promise<string> {
+  const r = await fetch("/api/v1/session", { ...options, signal: AbortSignal.timeout(4000) });
+  const token = r.headers.get("x-csrf-token");
+  if (!r.ok || !token) throw new Error("Session unavailable");
+  return token;
+}
+function decide(id: string, action: JobAction, phase: CommandPhase, detail: string): void {
+  const open = phase === CommandPhase.PENDING || phase === CommandPhase.PENDING_RECONCILE;
+  useAnalyticsControl.setState({ busy: open, receipt: { id, action, phase: CommandPhase[phase] ?? "UNKNOWN", detail } });
+}
+/** One targeted lookup, only after a lost acknowledgement; never a polling loop. */
+async function lookup(id: string, action: JobAction): Promise<void> {
+  const r = await fetch(`/api/v1/command?project=${ProjectId.PROJECT_0}&request_id=${encodeURIComponent(id)}`, { ...options, signal: AbortSignal.timeout(6000) });
+  if (!r.ok) throw new Error(`Command lookup HTTP ${r.status}`);
+  const c = fromBinary(CommandLookupResponseSchema, new Uint8Array(await r.arrayBuffer()));
+  decide(id, action, c.found ? c.phase : CommandPhase.UNKNOWN, c.detail);
+}
+
+/** One request per user action; a start's request id becomes the job id. */
+export async function analyticsCommand(action: JobAction, args: { resourceId?: string; params?: Uint8Array }): Promise<void> {
+  if (useAnalyticsControl.getState().busy) return;
+  const id = crypto.randomUUID();
+  useAnalyticsControl.setState({ busy: true, receipt: { id, action, phase: "SENDING", detail: "" } });
+  let submitted = false;
+  try {
+    const token = await csrf();
+    const body = toBinary(CommandRequestSchema, message(CommandRequestSchema, {
+      project: ProjectId.PROJECT_0, requestId: id, action, resourceId: args.resourceId ?? "", params: args.params ?? new Uint8Array(),
+      issuedAtUnixNs: BigInt(Date.now()) * 1_000_000n,
+    }));
+    submitted = true;
+    const r = await fetch("/api/v1/command", { ...options, method: "POST", headers: { "Content-Type": "application/x-protobuf", "X-CSRF-Token": token }, body, signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`Command HTTP ${r.status}`);
+    const c = fromBinary(CommandResponseSchema, new Uint8Array(await r.arrayBuffer()));
+    if (c.status !== CommandStatus.ACCEPTED) useAnalyticsControl.setState({ busy: false, receipt: { id, action, phase: "REJECTED", detail: c.detail } });
+    else decide(id, action, c.phase, c.detail);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (submitted) {
+      try { await lookup(id, action); return; } catch { /* unknown outcome, never replay POST */ }
+      useAnalyticsControl.setState({ busy: true, receipt: { id, action, phase: "UNKNOWN", detail } });
+      return;
+    }
+    useAnalyticsControl.setState({ busy: false, receipt: { id, action, phase: "FAILED", detail } });
+  }
+}

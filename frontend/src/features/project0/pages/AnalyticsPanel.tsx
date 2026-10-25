@@ -4,6 +4,7 @@ import type { LiquidatorDraft, Project0Tab } from "../model/contracts";
 import { jobReadableRuns, type AnalyticsJobView, type AnalyticsView, type JobResultView } from "../model/analytics";
 import { usdMicroDisplay } from "../model/format";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
+import { analyticsCommand, backtestCommand, optimizeCommand, useAnalyticsControl, type GridInput, type PointInput } from "@/core/realtime/analyticsControl";
 
 type AnalTab = "report" | "backtest" | "optimize";
 const tabs: ReadonlyArray<{ value: AnalTab; label: string }> = [
@@ -21,9 +22,24 @@ function resultLine(r: JobResultView | null): string {
   return ` · ${r.points} points · ${chosen} · holdout ${r.chosenObjectiveBps ?? "—"} bps vs baseline ${r.baselineObjectiveBps ?? "—"} bps${r.profile ? ` · Shadow candidate ${r.profile}` : ""}`;
 }
 
-function JobRow({ job }: { job: AnalyticsJobView }) {
-  return <DetailRow title={`${job.kind} · ${job.run} · ${job.jobId.slice(0, 8)}`}
-    value={`${job.state}${job.code ? ` · ${job.code}` : ""}${resultLine(job.result)}`}/>;
+function JobRow({ job, busy }: { job: AnalyticsJobView; busy: boolean }) {
+  return <><DetailRow title={`${job.kind} · ${job.run} · ${job.jobId.slice(0, 8)}`}
+    value={`${job.state}${job.code ? ` · ${job.code}` : ""}${resultLine(job.result)}`}/>
+    {job.state === "RUNNING" ? <div className="p0-actions"><button className="p0-secondary" disabled={busy}
+      onClick={() => void analyticsCommand("project0.analytics.job.cancel", { resourceId: job.jobId })}>Cancel job</button></div> : null}</>;
+}
+
+/** The inputs of one backtest point; empty until the operator enters them (no hidden default). */
+function PointFields({ point, set }: { point: PointInput; set: (p: PointInput) => void }) {
+  const field = (key: keyof PointInput, label: string, placeholder: string) =>
+    <label>{label}<input value={point[key]} placeholder={placeholder} onChange={e => set({ ...point, [key]: e.target.value })}/></label>;
+  return <div className="p0-formgrid">
+    {field("minProfitUsd", "Minimum profit · USD", "run's recorded minimum or higher")}
+    {field("capitalUsd", "Capital scenarios · USD", "e.g. 100,1000")}
+    {field("funding", "Funding classes", "all or NO_SWAP_INVENTORY,…")}
+    {field("maxSeconds", "Budget · seconds", "required")}
+    {field("maxRamMib", "Budget · RAM MiB", "required")}
+  </div>;
 }
 
 export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
@@ -32,12 +48,23 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
 }) {
   const [tab, setTab] = useState<AnalTab>("report"); const [capital, setCapital] = useState(""); const [minimumNet, setMinimumNet] = useState("");
   const [msg, setMsg] = useState(""); const [wanted, setWanted] = useState("");
+  const [point, setPoint] = useState<Omit<PointInput, "runId">>({ minProfitUsd: "", capitalUsd: "", funding: "all", maxSeconds: "", maxRamMib: "" });
+  const [grid, setGrid] = useState<GridInput>({ minProfitUsdGrid: "", fundingSets: "all", holdoutBps: "", maxPoints: "", saveProfile: false });
+  const { busy, receipt } = useAnalyticsControl();
   const runs = jobReadableRuns(analytics);
   const run = runs.find(r => r.runId === wanted) ?? runs[0] ?? null;
   const jobs = analytics?.jobs ?? [];
   const latest = jobs.find(j => j.run === run?.runId && j.kind === "BACKTEST" && j.state === "COMPLETED") ?? null;
   const backtest = latest?.result?.kind === "BACKTEST" ? latest.result : null;
   const live = topicStatus === "LIVE";
+  const input: PointInput = { ...point, runId: run?.runId ?? "" };
+  const blocked = busy ? "Command in progress" : live && analytics?.runnerBusy ? "An analytics job is running (one at a time)" : "";
+  const start = (kind: "backtest" | "optimize") => {
+    const typed = kind === "backtest" ? backtestCommand(input) : optimizeCommand(input, grid);
+    if ("problem" in typed) { setMsg(typed.problem); return; }
+    setMsg("");
+    void analyticsCommand(kind === "backtest" ? "project0.analytics.backtest.start" : "project0.analytics.optimize.start", { params: typed.params });
+  };
   return <><Section title="Runs & analysis" aside={<span className="p0-badge">{live ? `${analytics?.runnerBusy ? "job running" : "idle"}` : topicStatus}</span>}>
     {!live && analytics ? <p className="p0-quiet">Last reported jobs ({topicStatus}); not current.</p> : null}
     {analytics?.storeError ? <Notice>Job store unreadable: {analytics.storeError}</Notice> : null}
@@ -53,18 +80,26 @@ export function AnalyticsPanel({ analytics, topicStatus, createDraft, goto }: {
       {backtest?.counterfactual?.scenarios.map(s => <DetailRow key={s.capitalUsdMicro.toString()} title={`Shadow net · capital ${usdMicroDisplay(s.capitalUsdMicro.toString())}`} value={usdMicroDisplay(s.netUsdMicro)}/>)}
       <DetailRow title="Realized net PnL" value={backtest ? backtest.realized : "—"}/>
       <p className="p0-note">From the newest completed backtest of the run; counterfactual Shadow results (landing UNPROVEN) are never realized profit.</p></> : null}
-    {tab === "backtest" ? <><p>Replay the run's sealed evidence through the production join (native job, offline).</p>
-      <button disabled className="p0-primary" title="Start: p0ctl job start backtest">Run backtest</button></> : null}
-    {tab === "optimize" ? <><div className="p0-formgrid"><label>Capital · USD<input type="number" value={capital} onChange={e => setCapital(e.target.value)}/></label>
-      <label>Minimum net edge · USD<input type="number" min="0" value={minimumNet} onChange={e => setMinimumNet(e.target.value)}/></label></div>
-      <div className="p0-actions"><button disabled className="p0-primary" title="Start: p0ctl job start optimize">Optimize</button><button className="p0-secondary"
+    {tab === "backtest" ? <><p>Replay the run's sealed evidence through the production join (native job, offline; the same action as p0ctl job start backtest).</p>
+      <PointFields point={input} set={({ runId: _, ...rest }) => setPoint(rest)}/>
+      <button className="p0-primary" disabled={blocked !== "" || !run} title={blocked || undefined} onClick={() => start("backtest")}>Run backtest</button></> : null}
+    {tab === "optimize" ? <><PointFields point={input} set={({ runId: _, ...rest }) => setPoint(rest)}/>
+      <div className="p0-formgrid"><label>Grid · minimum profits USD<input value={grid.minProfitUsdGrid} placeholder="e.g. 1,2,5" onChange={e => setGrid({ ...grid, minProfitUsdGrid: e.target.value })}/></label>
+        <label>Grid · funding sets<input value={grid.fundingSets} placeholder="all; NO_SWAP_INVENTORY" onChange={e => setGrid({ ...grid, fundingSets: e.target.value })}/></label>
+        <label>Holdout · bps<input value={grid.holdoutBps} placeholder="required" onChange={e => setGrid({ ...grid, holdoutBps: e.target.value })}/></label>
+        <label>Maximum points<input value={grid.maxPoints} placeholder="required" onChange={e => setGrid({ ...grid, maxPoints: e.target.value })}/></label>
+        <label className="p0-check"><input type="checkbox" checked={grid.saveProfile} onChange={e => setGrid({ ...grid, saveProfile: e.target.checked })}/>Save the chosen point as an offline Shadow candidate</label></div>
+      <div className="p0-formgrid"><label>Draft capital · USD<input type="number" value={capital} onChange={e => setCapital(e.target.value)}/></label>
+      <label>Draft minimum net edge · USD<input type="number" min="0" value={minimumNet} onChange={e => setMinimumNet(e.target.value)}/></label></div>
+      <div className="p0-actions"><button className="p0-primary" disabled={blocked !== "" || !run} title={blocked || undefined} onClick={() => start("optimize")}>Optimize</button><button className="p0-secondary"
         onClick={() => { if (!/^\d+(?:\.\d{1,6})?$/.test(capital) || Number(capital) <= 0 || !/^\d+(?:\.\d{1,6})?$/.test(minimumNet)) {
           setMsg("Enter a positive capital and nonnegative net edge."); return }
           createDraft({ capitalUsd: capital, minimumNetUsd: minimumNet }); goto("liquidator"); }}>Add as bot draft →</button></div>
       <p className="p0-note">Only typed input values are copied to a draft; a saved optimizer profile is an offline Shadow candidate, never a LIVE setting.</p></> : null}
-    {msg ? <Notice>{msg}</Notice> : null}</Section>
+    {msg ? <Notice>{msg}</Notice> : null}
+    {receipt ? <Notice><span data-testid="p0-analytics-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""} · {receipt.action.endsWith(".start") ? "job" : "request"} {receipt.id.slice(0, 8)}</span></Notice> : null}</Section>
   <Section title="Analytics jobs" aside={<span className="p0-quiet">{jobs.length} listed</span>}>
     {jobs.length === 0 ? <p className="p0-quiet">{analytics ? "No analytics jobs." : "No job list received (a Project 0 process publishes it)."}</p> : null}
-    {jobs.map(j => <JobRow key={j.jobId} job={j}/>)}
+    {jobs.map(j => <JobRow key={j.jobId} job={j} busy={busy}/>)}
   </Section></>;
 }

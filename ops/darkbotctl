@@ -31,6 +31,7 @@ GATEWAY_BUILD="$ROOT/gateway/target/release/darkbot-gateway"
 DIST_BUILD="$ROOT/frontend/dist"
 CAPTURE_BUILD="$ROOT/project_0/native/target/release/p0-market-capture-reported"
 CAPTURE_BIN="$APP_HOME/current/p0-market-capture-reported"
+P0CTL_BUILD="$ROOT/project_0/native/target/release/p0ctl"
 APP_CONF="${DARKBOT_APP_CONF:-$HOME/.darkbot/app.conf}"
 LOCKFILE="$RUNDIR/lifecycle.lock"
 RESULT_FILE="$RUNDIR/capture.result"
@@ -68,6 +69,8 @@ if [ -n "${DARKBOT_TEST_DIR:-}" ]; then
   export DARKBOT_NO_OPEN=1
 fi
 GEN_NEXT="${GEN_FILE%.*}.next"
+# The deployed Project 0 controller; its project directory is the app's data home.
+P0CTL_BIN="$APP_HOME/current/p0ctl"
 umask 077
 
 mkdir -p "$APP_HOME/releases" "$LOGDIR" "$RUNDIR" "$(dirname "$SOCK")" "$(dirname "$PLIST")"
@@ -270,7 +273,7 @@ cmd_build() {
   command -v cargo >/dev/null || die "cargo nicht im PATH – im Terminal ausführen"
   (cd "$ROOT/frontend" && npm run lint && npm run lint:boundaries && npm run lint:css && npm run check:freeze && npm run build)
   (cd "$ROOT/gateway" && cargo build --release --locked --offline)
-  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported)
+  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported && cargo build --release --locked --offline -p darkbot-runner --bin p0ctl)
   (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness --bin g07_candidate)
   /usr/bin/python3 "$ROOT/ops/release_manifest.py" --write
   say "build ok – weiter mit: darkbotctl deploy"
@@ -281,6 +284,7 @@ cmd_deploy() {
   [ -x "$GATEWAY_BUILD" ] || die "Gateway nicht gebaut: darkbotctl build"
   [ -f "$DIST_BUILD/index.html" ] || die "Frontend nicht gebaut: darkbotctl build"
   [ -x "$CAPTURE_BUILD" ] || die "Capture nicht gebaut: darkbotctl build"
+  [ -x "$P0CTL_BUILD" ] || die "p0ctl nicht gebaut: darkbotctl build"
   if capture_running && [ -f "$APP_HOME/current/SCHEMA_ID" ] && ! cmp -s "$ROOT/protocol/schema_id.txt" "$APP_HOME/current/SCHEMA_ID"; then
     die "Schema geändert: Capture zuerst geordnet stoppen; Deploy und Neustart gemeinsam durchführen"
   fi
@@ -294,6 +298,7 @@ cmd_deploy() {
   mkdir -p "$rel"
   cp "$GATEWAY_BUILD" "$rel/darkbot-gateway"
   cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
+  cp "$P0CTL_BUILD" "$rel/p0ctl"
   cp "$ROOT/ops/darkbotctl" "$rel/darkbotctl"
   cp "$ROOT/ops/bsc-control.sh" "$rel/bsc-control.sh"
   cp "$ROOT/bsc/engine/target/release/bsc-status-reporter" "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" "$ROOT/bsc/engine/target/release/g07_candidate" "$rel/"
@@ -360,6 +365,15 @@ _gateway_down() {
   else
     say "Gateway lief nicht"
   fi
+}
+
+# ---------------------------------------------------------------- project 0 controller
+# B03/U-9: the analytics jobs of the GUI run the deployed p0ctl (the same `p0ctl job` a terminal
+# runs) on the app's data home; a started job's worker outlives this call.
+cmd_p0() {
+  [ "${1:-}" = job ] || die "p0 job start backtest|optimize … | p0 job cancel --id ID | p0 job status"
+  [ -x "$P0CTL_BIN" ] || die "p0ctl nicht deployed: darkbotctl build && darkbotctl deploy"
+  P0_PROJECT_DIR="$APP_HOME" exec "$P0CTL_BIN" "$@"
 }
 
 # ---------------------------------------------------------------- capture
@@ -648,6 +662,7 @@ EOF
 
 case "${1:-status}" in
   bsc) shift; cmd_bsc "$@" ;;
+  p0) shift; cmd_p0 "$@" ;;
   build) cmd_build ;;
   deploy) locked cmd_deploy ;;
   app) cmd_app ;;
@@ -672,5 +687,5 @@ case "${1:-status}" in
   is-healthy) cmd_is_healthy ;;
   status-short) cmd_status_short ;;
   install-apps) cmd_install_apps ;;
-  *) die "unbekannt: $1 (build|deploy|app|up|down|restart-gateway|status|open|logs|capture|install-apps)" ;;
+  *) die "unbekannt: $1 (build|deploy|app|up|down|restart-gateway|status|open|logs|capture|p0|install-apps)" ;;
 esac
