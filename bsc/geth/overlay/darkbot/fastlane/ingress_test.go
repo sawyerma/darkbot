@@ -21,6 +21,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -104,6 +106,49 @@ func c14Tx(t testing.TB, nonce uint64, to *common.Address, data []byte, dynamic 
 	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(big.NewInt(56)), inner)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return tx
+}
+
+// c14UnserializableTx signs a real transaction that MarshalBinary refuses:
+// RLP cannot encode a negative big.Int, here the value (legacy) or the gas
+// tip cap (dynamic fee). Signing works, so it passes through the boundary
+// like any decoded transaction; only serializing it fails. Its hash does not
+// identify it (the failed encoding hashes to a constant).
+func c14UnserializableTx(t testing.TB, nonce uint64, to *common.Address, data []byte, dynamic bool) *types.Transaction {
+	t.Helper()
+	key, err := crypto.HexToECDSA(c14TestKeyHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inner types.TxData
+	if dynamic {
+		inner = &types.DynamicFeeTx{
+			ChainID:   big.NewInt(56),
+			Nonce:     nonce,
+			GasTipCap: big.NewInt(-1),
+			GasFeeCap: big.NewInt(3_000_000_000),
+			Gas:       6_000_000,
+			To:        to,
+			Value:     new(big.Int),
+			Data:      data,
+		}
+	} else {
+		inner = &types.LegacyTx{
+			Nonce:    nonce,
+			GasPrice: big.NewInt(1_000_000_000),
+			Gas:      6_000_000,
+			To:       to,
+			Value:    big.NewInt(-1),
+			Data:     data,
+		}
+	}
+	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(big.NewInt(56)), inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.MarshalBinary(); !errors.Is(err, rlp.ErrNegativeBigInt) {
+		t.Fatalf("transaction is serializable: %v", err)
 	}
 	return tx
 }
@@ -306,40 +351,59 @@ func TestC14LaunchPassesAndOrdinaryBuyIsFiltered(t *testing.T) {
 	c14CheckEarlyRecord(t, recs[0], IngressSourceEthBroadcast, node, launch)
 }
 
+// Every non-match below is a real transaction MarshalBinary refuses. Had the
+// boundary serialized any of them, it would have counted a serialize error;
+// zero serialize errors with both matches published proves the prefilter
+// drops non-matches before serialization. The second packet is the control:
+// the same kind of transaction, once it matches, is serialized and counted.
 func TestC14NonMatchesAreDroppedBeforeSerialization(t *testing.T) {
-	calls := 0
-	saved := serializeTxV2
-	serializeTxV2 = func(tx *types.Transaction) ([]byte, error) {
-		calls++
-		return tx.MarshalBinary()
-	}
-	defer func() { serializeTxV2 = saved }()
-
 	cfg := c14TestConfig(t, 1, 0, 8, 512)
 	r := c14Start(t, cfg)
 	node := c14Node(0x10)
 	p := c14Bind(t, r, node)
 	m0 := c14Tx(t, 0, &c14Portal, c14SmallLaunch(0), false)
 	m1 := c14Tx(t, 3, &c14Portal, c14SmallLaunch(3), true)
-	txs := []*types.Transaction{
-		m0,
-		c14Tx(t, 1, &c14OtherAddress, c14SmallLaunch(1), false),
-		c14Tx(t, 2, &c14Portal, []byte{1, 2, 3, 4, 5}, false),
-		m1,
+	nonMatches := []*types.Transaction{
+		c14UnserializableTx(t, 1, &c14OtherAddress, c14SmallLaunch(1), false), // other address
+		c14UnserializableTx(t, 2, &c14Portal, []byte{1, 2, 3, 4, 5}, true),    // other selector
+		c14UnserializableTx(t, 4, &c14Portal, c14BuyCalldata(), false),        // ordinary BUY
+		c14UnserializableTx(t, 5, nil, c14SmallLaunch(5), true),               // contract creation
 	}
+	for i, tx := range nonMatches {
+		if c14FlapScopeV2.match(tx) {
+			t.Fatalf("non-match %d passes the prefilter", i)
+		}
+	}
+	txs := []*types.Transaction{m0, nonMatches[0], nonMatches[1], nonMatches[2], nonMatches[3], m1}
 	if err := IngressV2(p, IngressSourceEthBroadcast, txs, c14Accept); err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("serialized %d transactions, want only the 2 matches", calls)
-	}
 	c := p.counters()
-	if c.Packets != 1 || c.Matched != 2 || c.Filtered != 2 || c.Published != 2 {
+	if c.SerializeErrors != 0 {
+		t.Fatalf("serialized %d non-matching transactions", c.SerializeErrors)
+	}
+	if c.Packets != 1 || c.Matched != 2 || c.Filtered != 4 || c.Published != 2 || c.Refused != 0 ||
+		c.QueueFull != 0 || c.Oversize != 0 || c.ClockErrors != 0 {
 		t.Fatalf("counters %+v", c)
 	}
-	recs := testDrainV2(t, c14Consumer(t, cfg, c14PeerLane(cfg, p.lease.LaneID)))
-	if len(recs) != 2 || recs[0].Hash != m0.Hash() || recs[1].Hash != m1.Hash() {
+	consumer := c14Consumer(t, cfg, c14PeerLane(cfg, p.lease.LaneID))
+	recs := testDrainV2(t, consumer)
+	if len(recs) != 2 {
 		t.Fatalf("records %d", len(recs))
+	}
+	c14CheckEarlyRecord(t, recs[0], IngressSourceEthBroadcast, node, m0)
+	c14CheckEarlyRecord(t, recs[1], IngressSourceEthBroadcast, node, m1)
+
+	// Control: a matching unserializable transaction reaches MarshalBinary.
+	matching := c14UnserializableTx(t, 6, &c14Portal, c14SmallLaunch(6), false)
+	if err := IngressV2(p, IngressSourceEthBroadcast, []*types.Transaction{matching}, c14Accept); err != nil {
+		t.Fatal(err)
+	}
+	if c := p.counters(); c.SerializeErrors != 1 || c.Matched != 3 || c.Published != 2 {
+		t.Fatalf("matching unserializable transaction: counters %+v", c)
+	}
+	if recs := testDrainV2(t, consumer); len(recs) != 0 {
+		t.Fatalf("an unserializable transaction was published: %d records", len(recs))
 	}
 }
 
@@ -879,19 +943,19 @@ func TestC14TxpoolProducerFailuresAreCounted(t *testing.T) {
 	cfg := c14TestConfig(t, 1, 0, 8, 512)
 	r := c14Start(t, cfg)
 	good := c14Tx(t, 0, &c14Portal, c14SmallLaunch(0), false)
-	bad := c14Tx(t, 1, &c14Portal, c14SmallLaunch(1), true)
-	saved := serializeTxV2
-	serializeTxV2 = func(tx *types.Transaction) ([]byte, error) {
-		if tx.Hash() == bad.Hash() {
-			return nil, errors.New("serialize failure")
-		}
-		return saved(tx)
+	// A real launch candidate that MarshalBinary refuses.
+	bad := c14UnserializableTx(t, 1, &c14Portal, c14SmallLaunch(1), true)
+	if !c14FlapScopeV2.match(bad) {
+		t.Fatal("the unserializable transaction is not a launch candidate")
 	}
-	defer func() { serializeTxV2 = saved }()
 	r.publishTxpool([]*types.Transaction{good, bad})
-	// After runtime shutdown every otherwise publishable txpool record is
-	// refused. c14Start does not install the runtime globally, so this test
-	// shuts down its own handle; ShutdownIngressV2 is covered by
+	if s := r.snapshot(); s.TxpoolPublished != 1 || s.TxpoolSerializeErrs != 1 || s.TxpoolRefused != 0 || s.TxpoolClockErrors != 0 {
+		t.Fatalf("txpool counters before shutdown %+v", s)
+	}
+	// After runtime shutdown every txpool record is refused before it is
+	// serialized: bad adds a refusal, not a second serialize error.
+	// c14Start does not install the runtime globally, so this test shuts down
+	// its own handle; ShutdownIngressV2 is covered by
 	// TestC14ShutdownWithActivePeers.
 	r.shutdown()
 	r.publishTxpool([]*types.Transaction{bad, good})
@@ -1184,29 +1248,29 @@ func TestC19bUnsyncedAcceptTxsQualificationGate(t *testing.T) {
 	}
 }
 
+// Marshal attempts are made visible with real transactions MarshalBinary
+// refuses: an attempt counts a serialize error, a skipped one does not.
 func TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal(t *testing.T) {
 	cfg := c14TestConfig(t, 1, 0, 8, 512)
 	r := c14Start(t, cfg)
 	tx := c14Tx(t, 0, &c14Portal, c14SmallLaunch(0), false)
-	saved := serializeTxV2
-	calls := 0
-	serializeTxV2 = func(tx *types.Transaction) ([]byte, error) { calls++; return saved(tx) }
-	defer func() { serializeTxV2 = saved }()
+	unserializable := c14UnserializableTx(t, 2, &c14Portal, c14SmallLaunch(2), false)
 	// A lane with free slots still marshals and classifies an oversized
-	// transaction as Oversize, exactly as before the precheck.
+	// transaction as Oversize, exactly as before the precheck; Oversize needs
+	// the marshalled payload.
 	huge := c14Tx(t, 1, &c14Portal, make([]byte, 5000), false)
 	r.publishTxpool([]*types.Transaction{huge})
-	if calls != 1 || testStatsV2(t, r.rt.arena, c14TxpoolLane(cfg).ID).Oversize != 1 || r.snapshot().TxpoolRefused != 1 {
-		t.Fatalf("oversize on a free lane: calls=%d counters %+v", calls, r.snapshot())
+	if s := r.snapshot(); testStatsV2(t, r.rt.arena, c14TxpoolLane(cfg).ID).Oversize != 1 || s.TxpoolRefused != 1 ||
+		s.TxpoolSerializeErrs != 0 {
+		t.Fatalf("oversize on a free lane: counters %+v", s)
 	}
 	capacity := int(r.txpool.config.Capacity)
 	for i := 0; i < capacity; i++ {
 		r.publishTxpool([]*types.Transaction{tx})
 	}
-	before := calls
-	r.publishTxpool([]*types.Transaction{tx, tx, tx})
-	if calls != before {
-		t.Fatal("full lane still marshals transactions")
+	r.publishTxpool([]*types.Transaction{unserializable, unserializable, unserializable})
+	if got := r.snapshot(); got.TxpoolSerializeErrs != 0 {
+		t.Fatalf("full lane still marshals transactions: %d serialize errors", got.TxpoolSerializeErrs)
 	}
 	if got := r.snapshot(); got.TxpoolRefused != 4 || got.TxpoolPublished != uint64(capacity) {
 		t.Fatalf("counters %+v", got)
@@ -1218,8 +1282,81 @@ func TestTxpoolFullPrecheckSkipsMarshalAndCountsEveryRefusal(t *testing.T) {
 	if _, ok, err := consumer.tryConsume(); err != nil || !ok {
 		t.Fatalf("drain %v", err)
 	}
+	r.publishTxpool([]*types.Transaction{unserializable})
+	if got := r.snapshot(); got.TxpoolSerializeErrs != 1 || got.TxpoolRefused != 4 {
+		t.Fatalf("freed slot did not resume marshal: counters %+v", got)
+	}
 	r.publishTxpool([]*types.Transaction{tx})
-	if calls != before+1 {
-		t.Fatal("freed slot did not resume marshal")
+	if got := r.snapshot(); got.TxpoolPublished != uint64(capacity)+1 || got.TxpoolSerializeErrs != 1 || got.TxpoolRefused != 4 {
+		t.Fatalf("freed slot did not publish: counters %+v", got)
+	}
+}
+
+// BSC-052: a gap whose clock reading failed is kept and counted, explicitly
+// without a timestamp; 0 is never stored as a time. MonotonicNS has no
+// failure injection, so the failing reading is fed to the event constructor
+// that recordGapLocked uses, and the event goes through the same
+// appendGapLocked; a real gap checks the successful reading end to end.
+func TestC14GapWithoutClockIsCountedAndUntimed(t *testing.T) {
+	node := c14Node(0xb0)
+	peer := hex.EncodeToString(node[:])
+	// unix.EINVAL is what clock_gettime reports for an unusable clock.
+	for _, tc := range []struct {
+		name     string
+		now      uint64
+		clockErr error
+	}{
+		{"failed reading", 0, unix.EINVAL},
+		{"reading returned with an error", 123_456, unix.EINVAL},
+		{"zero reading", 0, nil},
+	} {
+		ev := newIngressGapEventV2(node, "pool_exhausted", tc.now, tc.clockErr)
+		if ev.ClockOK || ev.MonotonicNS != 0 || ev.Peer != peer || ev.Reason != "pool_exhausted" {
+			t.Fatalf("%s: event %+v", tc.name, ev)
+		}
+	}
+	if ev := newIngressGapEventV2(node, "peer_limit", 42, nil); !ev.ClockOK || ev.MonotonicNS != 42 ||
+		ev.Peer != peer || ev.Reason != "peer_limit" {
+		t.Fatalf("timed event %+v", ev)
+	}
+
+	cfg := c14TestConfig(t, 1, 0, 8, 512)
+	r := c14Start(t, cfg)
+	r.mu.Lock()
+	r.appendGapLocked(newIngressGapEventV2(node, "close_failed: clock", 0, unix.EINVAL))
+	r.mu.Unlock()
+	c14Bind(t, r, c14Node(0xb1))
+	before, err := MonotonicNS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := r.bindPeer(c14Node(0xb2)) // no lane left: recordGapLocked
+	after, err := MonotonicNS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if late.Covered() || late.GapReason() == "" {
+		t.Fatalf("second peer bound: covered=%v reason=%q", late.Covered(), late.GapReason())
+	}
+	s := r.snapshot()
+	if s.GapTotal != 2 || s.GapClockErrors != 1 || len(s.Gaps) != 2 {
+		t.Fatalf("gap counters total=%d clock_errors=%d events=%d", s.GapTotal, s.GapClockErrors, len(s.Gaps))
+	}
+	if g := s.Gaps[0]; g.ClockOK || g.MonotonicNS != 0 || g.Peer != peer || g.Reason != "close_failed: clock" {
+		t.Fatalf("untimed gap %+v", g)
+	}
+	lateNode := c14Node(0xb2)
+	if g := s.Gaps[1]; !g.ClockOK || g.MonotonicNS < before || g.MonotonicNS > after ||
+		g.Peer != hex.EncodeToString(lateNode[:]) || g.Reason != late.GapReason() {
+		t.Fatalf("timed gap %+v not within [%d,%d]", g, before, after)
+	}
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"gap_total":2`, `"gap_clock_errors":1`, `"clock_ok":false`, `"clock_ok":true`, `"monotonic_ns":0`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("evidence json lacks %s", want)
+		}
 	}
 }

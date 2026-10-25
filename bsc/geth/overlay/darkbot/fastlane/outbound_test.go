@@ -1,7 +1,9 @@
 package fastlane
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"golang.org/x/sys/unix"
 )
 
 // c17Peer is a selected peer whose send can be held or made to fail.
@@ -616,5 +619,96 @@ func TestC17QueuedBuyKeepsDispatchTargetAfterReassignment(t *testing.T) {
 				t.Fatalf("wrong bound-peer evidence: %+v", evidence)
 			}
 		})
+	}
+}
+
+// A failed or zero clock reading never stamps outbound evidence, and a BUY
+// or send without its time fails closed. MonotonicNS has no failure
+// injection, so failing readings are fed to the functions dispatch and
+// handle pass their readings to; valid readings run through dispatch and
+// handle themselves.
+func TestC17ClockFailureNeverStampsEvidence(t *testing.T) {
+	r, cfg := c17Start(t, 1)
+	a := &c17Peer{id: c14Node(0xa7)}
+	if err := r.outbound.assign([]OutboundTargetV2{a.target()}); err != nil {
+		t.Fatal(err)
+	}
+	w := r.outbound.workers[0]
+	next := func(nonce uint64) (*recordV2, *types.Transaction) {
+		t.Helper()
+		tx := c17Egress(t, r, nonce)
+		rec, ok, err := r.outbound.egress.tryConsume()
+		if err != nil || !ok {
+			t.Fatal("missing egress", err)
+		}
+		return rec, tx
+	}
+
+	// Coordinator without an observe time: no worker gets the BUY, no
+	// record is stamped. A reading returned with an error is not used.
+	for i, observed := range []uint64{0, 123_456} {
+		rec, _ := next(uint64(801 + i))
+		r.outbound.dispatchObserved(rec, observed, unix.EINVAL)
+	}
+	if s := c17Snapshot(r); s.EgressRecords != 2 || s.ClockErrors != 2 || s.Dispatched != 0 || s.Queued != 0 ||
+		s.NoTarget != 0 || s.InvalidEgress != 0 || len(w.jobs) != 0 {
+		t.Fatalf("dispatch without observe time: %+v jobs=%d", s, len(w.jobs))
+	}
+
+	// Worker without a start time: the send is not made, nothing is stamped.
+	rec, _ := next(803)
+	r.outbound.dispatch(rec)
+	job := <-w.jobs
+	w.sendAt(job, job.target, 0, unix.EINVAL)
+	if a.sent.Load() != 0 {
+		t.Fatal("send made without a start time")
+	}
+	if ws := c17Snapshot(r).PerWorker[0]; ws.ClockErrors != 1 || ws.ClockRefused != 1 || ws.HandedOff != 0 || ws.SendErrors != 0 {
+		t.Fatalf("send without start time: %+v", ws)
+	}
+	// An outcome whose event time could not be read is not published.
+	start, err := MonotonicNS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.reportClocked(job, OutboundHandedOff, a.id, start, 0, unix.EINVAL)
+	if ws := c17Snapshot(r).PerWorker[0]; ws.ClockErrors != 2 || ws.ClockRefused != 1 {
+		t.Fatalf("untimed outcome: %+v", ws)
+	}
+
+	// Valid readings: dispatch and handle publish timed evidence as before.
+	rec, tx := next(804)
+	r.outbound.dispatch(rec)
+	w.handle(<-w.jobs)
+	s := c17Snapshot(r)
+	if s.EgressRecords != 4 || s.Dispatched != 2 || s.ClockErrors != 2 || s.PerWorker[0].HandedOff != 1 ||
+		s.PerWorker[0].ClockErrors != 2 || a.sent.Load() != 1 {
+		t.Fatalf("valid readings: %+v sent=%d", s, a.sent.Load())
+	}
+	coordinator := c17Evidence(t, cfg, 0)
+	if len(coordinator) != 2 {
+		t.Fatalf("%d coordinator records, want the 2 dispatched BUYs", len(coordinator))
+	}
+	for _, rec := range coordinator {
+		if aux := c17DecodeAux(rec); rec.TimestampNS == 0 || aux.observed != rec.TimestampNS || aux.status != OutboundDispatched {
+			t.Fatalf("coordinator record %+v", aux)
+		}
+	}
+	worker := c17Evidence(t, cfg, 1)
+	if len(worker) != 1 || worker[0].Hash != tx.Hash() {
+		t.Fatalf("%d worker records, want only the timed handoff", len(worker))
+	}
+	if aux := c17DecodeAux(worker[0]); aux.status != OutboundHandedOff || aux.observed == 0 ||
+		aux.observed > aux.third || aux.third > worker[0].TimestampNS {
+		t.Fatalf("worker record %+v at %d", aux, worker[0].TimestampNS)
+	}
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"clock_errors":2`, `"clock_refused_sends":1`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("evidence json lacks %s", want)
+		}
 	}
 }

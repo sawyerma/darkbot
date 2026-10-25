@@ -25,6 +25,9 @@
 // slot's outcome. A worker's record carries the worker's own clock reading
 // taken when the peer send returned. A returned send is a local transport
 // handoff. It is not remote receipt, inclusion, execution or a purchase.
+// A failed or zero clock reading never stamps a record: the record is left
+// out and counted as a clock error. A BUY whose observe time, or a send whose
+// start time, could not be read is not dispatched or not made (fail closed).
 //
 // Evidence record (kind OUTBOUND_PEER_HANDOFF, class OutboundHandoffEvidence):
 //
@@ -133,6 +136,11 @@ type outboundWorkerV2 struct {
 	alreadyKnown  atomic.Uint64
 	evidenceLost  atomic.Uint64
 	abandonedStop atomic.Uint64
+	// clockErrors counts failed clock readings: the record it would have
+	// stamped is not published. clockRefused counts the sends among them
+	// that were not made because the time before the send was not read.
+	clockErrors  atomic.Uint64
+	clockRefused atomic.Uint64
 }
 
 type outboundRuntimeV2 struct {
@@ -158,6 +166,9 @@ type outboundRuntimeV2 struct {
 	noTarget      atomic.Uint64
 	evidenceLost  atomic.Uint64
 	egressErrors  atomic.Uint64
+	// clockErrors counts egress records not dispatched because their observe
+	// time could not be read.
+	clockErrors atomic.Uint64
 }
 
 // outboundLanePlanV2 lists the lanes of `workers` outbound workers: the
@@ -320,8 +331,20 @@ func (o *outboundRuntimeV2) coordinate() {
 
 // dispatch hands one egress record to every worker slot without waiting.
 func (o *outboundRuntimeV2) dispatch(record *recordV2) {
-	observed, _ := MonotonicNS()
+	observed, clockErr := MonotonicNS()
+	o.dispatchObserved(record, observed, clockErr)
+}
+
+// dispatchObserved dispatches one egress record observed at `observed`.
+// Without a valid observe time it fails closed: the BUY reaches no worker
+// and no record is stamped, only clockErrors counts it. Every egress record
+// is then DISPATCHED, INVALID_EGRESS or a clock error.
+func (o *outboundRuntimeV2) dispatchObserved(record *recordV2, observed uint64, clockErr error) {
 	o.egressRecords.Add(1)
+	if !clockReadingOKV2(observed, clockErr) {
+		o.clockErrors.Add(1)
+		return
+	}
 	if !validOutboundRecordV2(record) {
 		o.invalidEgress.Add(1)
 		o.report(OutboundInvalidEgress, record, c17NoWorker, 0, 0, observed, [32]byte{})
@@ -423,27 +446,51 @@ func (w *outboundWorkerV2) handle(job outboundJobV2) {
 	if target == nil {
 		// No bound target: never silently retarget a queued BUY.
 		w.noTarget.Add(1)
-		now, _ := MonotonicNS()
-		w.report(job, OutboundNoTarget, [32]byte{}, now, now)
+		now, clockErr := MonotonicNS()
+		w.reportClocked(job, OutboundNoTarget, [32]byte{}, now, now, clockErr)
 		return
 	}
 	if target.Known != nil && target.Known(job.hash) {
 		w.alreadyKnown.Add(1)
-		now, _ := MonotonicNS()
-		w.report(job, OutboundAlreadyKnown, target.NodeID, now, now)
+		now, clockErr := MonotonicNS()
+		w.reportClocked(job, OutboundAlreadyKnown, target.NodeID, now, now, clockErr)
 		return
 	}
-	start, _ := MonotonicNS()
+	start, clockErr := MonotonicNS()
+	w.sendAt(job, target, start, clockErr)
+}
+
+// sendAt makes the peer send whose start time is `start`, read just before
+// it. Without a valid start time it fails closed: the send is not made,
+// because its evidence could not be stamped.
+func (w *outboundWorkerV2) sendAt(job outboundJobV2, target *OutboundTargetV2, start uint64, startErr error) {
+	if !clockReadingOKV2(start, startErr) {
+		w.clockErrors.Add(1)
+		w.clockRefused.Add(1)
+		return
+	}
 	err := target.Send(job.hash, job.raw)
 	// The worker's own clock, read as soon as the send returned.
-	done, _ := MonotonicNS()
+	done, clockErr := MonotonicNS()
+	status := OutboundHandedOff
 	if err != nil {
 		w.sendErrors.Add(1)
-		w.report(job, OutboundSendErrorUnknown, target.NodeID, start, done)
+		status = OutboundSendErrorUnknown
+	} else {
+		w.handedOff.Add(1)
+	}
+	w.reportClocked(job, status, target.NodeID, start, done, clockErr)
+}
+
+// reportClocked publishes the worker record only when its event time is a
+// valid clock reading. Otherwise the outcome stays counted, the record is not
+// published and clockErrors counts it: evidence is never stamped 0.
+func (w *outboundWorkerV2) reportClocked(job outboundJobV2, status OutboundStatusV2, peer [32]byte, startNS, eventNS uint64, clockErr error) {
+	if !clockReadingOKV2(eventNS, clockErr) {
+		w.clockErrors.Add(1)
 		return
 	}
-	w.handedOff.Add(1)
-	w.report(job, OutboundHandedOff, target.NodeID, start, done)
+	w.report(job, status, peer, startNS, eventNS)
 }
 
 // report publishes one worker evidence record on the worker's own lane.
@@ -474,6 +521,8 @@ type OutboundWorkerEvidenceV2 struct {
 	EvidenceLost  uint64 `json:"evidence_lost"`
 	AbandonedStop uint64 `json:"abandoned_at_stop"`
 	QueueDepth    int    `json:"queue_depth"`
+	ClockErrors   uint64 `json:"clock_errors"`
+	ClockRefused  uint64 `json:"clock_refused_sends"`
 }
 
 // OutboundEvidenceV2 is the outbound runtime's producer evidence.
@@ -489,6 +538,7 @@ type OutboundEvidenceV2 struct {
 	EvidenceLost  uint64                     `json:"coordinator_evidence_lost"`
 	EgressErrors  uint64                     `json:"egress_lane_errors"`
 	Reassignments uint64                     `json:"target_reassignments"`
+	ClockErrors   uint64                     `json:"clock_errors"`
 	PerWorker     []OutboundWorkerEvidenceV2 `json:"per_worker"`
 	QoS           map[string]string          `json:"qos"`
 }
@@ -506,6 +556,7 @@ func (o *outboundRuntimeV2) evidence() OutboundEvidenceV2 {
 		EvidenceLost:  o.evidenceLost.Load(),
 		EgressErrors:  o.egressErrors.Load(),
 		Reassignments: o.reassignments.Load(),
+		ClockErrors:   o.clockErrors.Load(),
 		QoS:           permanentThreadQoSSnapshot(),
 	}
 	for _, w := range o.workers {
@@ -520,6 +571,8 @@ func (o *outboundRuntimeV2) evidence() OutboundEvidenceV2 {
 			EvidenceLost:  w.evidenceLost.Load(),
 			AbandonedStop: w.abandonedStop.Load(),
 			QueueDepth:    len(w.jobs),
+			ClockErrors:   w.clockErrors.Load(),
+			ClockRefused:  w.clockRefused.Load(),
 		})
 	}
 	return out

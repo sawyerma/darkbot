@@ -84,10 +84,6 @@ func newIngressSourceV2(name string) IngressSourceV2 {
 	return source
 }
 
-// serializeTxV2 produces the canonical signed transaction bytes. It is a
-// variable only so that tests can count calls; production never replaces it.
-var serializeTxV2 = func(tx *types.Transaction) ([]byte, error) { return tx.MarshalBinary() }
-
 // ---------------------------------------------------------------------------
 // Prefilter: immutable startup snapshot of the address+selector superset.
 // ---------------------------------------------------------------------------
@@ -383,10 +379,15 @@ func (c *PeerIngressCountersV2) add(o PeerIngressCountersV2) {
 }
 
 // IngressGapEventV2 is structured evidence of missing Fast-Lane coverage.
+// MonotonicNS is the CLOCK_MONOTONIC reading taken when the gap was recorded
+// and is a time only when ClockOK is true. A gap whose clock reading failed is
+// still recorded and counted, with ClockOK false and MonotonicNS 0, which is
+// then no time.
 type IngressGapEventV2 struct {
 	Peer        string `json:"peer"`
 	Reason      string `json:"reason"`
 	MonotonicNS uint64 `json:"monotonic_ns"`
+	ClockOK     bool   `json:"clock_ok"`
 }
 
 type ingressRuntimeV2 struct {
@@ -400,12 +401,13 @@ type ingressRuntimeV2 struct {
 	chain    *chainPublisherV2
 	outbound *outboundRuntimeV2
 
-	mu           sync.Mutex
-	pending      []peerLaneLeaseV2
-	live         map[*PeerIngressV2]struct{}
-	gaps         []IngressGapEventV2
-	gapTotal     uint64
-	closedTotals PeerIngressCountersV2
+	mu             sync.Mutex
+	pending        []peerLaneLeaseV2
+	live           map[*PeerIngressV2]struct{}
+	gaps           []IngressGapEventV2
+	gapTotal       uint64
+	gapClockErrors uint64
+	closedTotals   PeerIngressCountersV2
 
 	coveredBinds    atomic.Uint64
 	uncoveredBinds  atomic.Uint64
@@ -671,9 +673,29 @@ func ingressGapReasonV2(err error) string {
 }
 
 func (r *ingressRuntimeV2) recordGapLocked(owner [32]byte, reason string) {
-	now, _ := MonotonicNS()
-	event := IngressGapEventV2{Peer: hex.EncodeToString(owner[:]), Reason: reason, MonotonicNS: now}
+	now, clockErr := MonotonicNS()
+	r.appendGapLocked(newIngressGapEventV2(owner, reason, now, clockErr))
+}
+
+// newIngressGapEventV2 builds one gap event from the clock reading taken for
+// it. A failed reading, or a zero reading, never becomes a timestamp: the
+// event keeps the gap with ClockOK false and MonotonicNS 0.
+func newIngressGapEventV2(owner [32]byte, reason string, now uint64, clockErr error) IngressGapEventV2 {
+	event := IngressGapEventV2{Peer: hex.EncodeToString(owner[:]), Reason: reason}
+	if clockReadingOKV2(now, clockErr) {
+		event.MonotonicNS = now
+		event.ClockOK = true
+	}
+	return event
+}
+
+// appendGapLocked counts every gap, and every gap without a timestamp, and
+// keeps the latest c14GapEventLimit events.
+func (r *ingressRuntimeV2) appendGapLocked(event IngressGapEventV2) {
 	r.gapTotal++
+	if !event.ClockOK {
+		r.gapClockErrors++
+	}
 	if len(r.gaps) >= c14GapEventLimit {
 		copy(r.gaps, r.gaps[1:])
 		r.gaps[len(r.gaps)-1] = event
@@ -774,7 +796,7 @@ func IngressV2(p *PeerIngressV2, source IngressSourceV2, txs []*types.Transactio
 		p.rejectedPackets.Add(1)
 		return err
 	}
-	if clockErr != nil {
+	if !clockReadingOKV2(decoded, clockErr) {
 		p.clockErrors.Add(1)
 		return nil
 	}
@@ -784,7 +806,7 @@ func IngressV2(p *PeerIngressV2, source IngressSourceV2, txs []*types.Transactio
 
 func (p *PeerIngressV2) publishValidated(source IngressSourceV2, decoded uint64, txs []*types.Transaction) {
 	ingress, err := MonotonicNS() // T_ingress
-	if err != nil || decoded == 0 {
+	if !clockReadingOKV2(ingress, err) || decoded == 0 {
 		p.clockErrors.Add(1)
 		return
 	}
@@ -798,7 +820,8 @@ func (p *PeerIngressV2) publishValidated(source IngressSourceV2, decoded uint64,
 		if p.lane == nil || p.closed {
 			continue
 		}
-		raw, err := serializeTxV2(tx)
+		// Canonical signed transaction bytes, only for a prefilter match.
+		raw, err := tx.MarshalBinary()
 		if err != nil {
 			p.serializeErrors.Add(1)
 			continue
@@ -858,7 +881,7 @@ func PublishTxpoolAcceptedV2(txs []*types.Transaction) {
 
 func (r *ingressRuntimeV2) publishTxpool(txs []*types.Transaction) {
 	now, err := MonotonicNS()
-	if err != nil {
+	if !clockReadingOKV2(now, err) {
 		// Every transaction of the batch stays unpublished; count each one.
 		r.txpoolClockErrors.Add(uint64(len(txs)))
 		return
@@ -868,7 +891,8 @@ func (r *ingressRuntimeV2) publishTxpool(txs []*types.Transaction) {
 			r.txpoolRefused.Add(1)
 			continue
 		}
-		raw, err := serializeTxV2(tx)
+		// Canonical signed transaction bytes, only after the lane precheck.
+		raw, err := tx.MarshalBinary()
 		if err != nil {
 			r.txpoolSerializeErrors.Add(1)
 			continue
@@ -933,6 +957,7 @@ type IngressEvidenceV2 struct {
 	TxpoolClockErrors    uint64                 `json:"txpool_clock_errors"`
 	TxpoolLane           laneStatsV2            `json:"txpool_lane"`
 	GapTotal             uint64                 `json:"gap_total"`
+	GapClockErrors       uint64                 `json:"gap_clock_errors"`
 	Gaps                 []IngressGapEventV2    `json:"gaps"`
 }
 
@@ -1007,6 +1032,7 @@ func (r *ingressRuntimeV2) snapshot() IngressEvidenceV2 {
 		TxpoolClockErrors:    r.txpoolClockErrors.Load(),
 		TxpoolLane:           r.txpool.stats(),
 		GapTotal:             r.gapTotal,
+		GapClockErrors:       r.gapClockErrors,
 		Gaps:                 append([]IngressGapEventV2(nil), r.gaps...),
 	}
 }

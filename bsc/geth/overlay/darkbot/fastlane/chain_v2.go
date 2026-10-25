@@ -104,7 +104,7 @@ func (c *chainPublisherV2) publish(kind RecordKind, source IngressSourceV2, hash
 	defer c.inside.Store(0)
 
 	now, err := MonotonicNS()
-	if err != nil {
+	if !clockReadingOKV2(now, err) {
 		c.clockErrors.Add(1)
 		c.lost.Add(1)
 		c.pendingLost.Add(1)
