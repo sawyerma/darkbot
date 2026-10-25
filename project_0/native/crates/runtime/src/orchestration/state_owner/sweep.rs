@@ -152,22 +152,32 @@ impl ShadowOwner {
                                 Ok(_) => CandidateHealthState::Liquidatable,
                                 Err(_) => CandidateHealthState::Error,
                             };
+                            let member = census_debtors.is_some_and(|d| d.contains(&account));
+                            // V2-14 P3-07: the premium decay once, typed, for both consumers (the
+                            // wake-up boundary of a healthy account and the census row).
+                            let healthy = matches!(&health, Ok(h) if !h.liquidatable);
+                            let decay = (healthy || member).then(|| match &clock {
+                                Ok(c) => engine.premium_decay_per_second(
+                                    &account,
+                                    c.unix_timestamp,
+                                    c.slot,
+                                ),
+                                Err(e) => {
+                                    Err(darkbot_project0::health::HealthError::Stale(e.to_string()))
+                                }
+                            });
                             // P2-04 (0.1.12): a healthy account with premium-active debt is woken
                             // when pending premium alone reaches its maintenance margin.
-                            let premium_boundary = match (&health, &clock) {
-                                (Ok(h), Ok(c)) if !h.liquidatable => engine
-                                    .premium_decay_per_second(&account, c.unix_timestamp, c.slot)
-                                    .ok()
-                                    .and_then(|decay| {
-                                        darkbot_project0::schedule::premium_boundary_unix_s(
-                                            c.unix_s(),
-                                            h.maintenance_health,
-                                            decay,
-                                        )
-                                    }),
+                            let premium_boundary = match (&health, &clock, &decay) {
+                                (Ok(h), Ok(c), Some(Ok(decay))) if !h.liquidatable => {
+                                    darkbot_project0::schedule::premium_boundary_unix_s(
+                                        c.unix_s(),
+                                        h.maintenance_health,
+                                        *decay,
+                                    )
+                                }
                                 _ => None,
                             };
-                            let member = census_debtors.is_some_and(|d| d.contains(&account));
                             let row = member.then(|| {
                                 let facts = engine
                                     .observation_accounts(&account)
@@ -185,18 +195,12 @@ impl ShadowOwner {
                                     view.0.get(&account).map(|r| r.slot),
                                     darkbot_project0::census::CensusRow::new(
                                         health,
-                                        match &clock {
-                                            Ok(c) => engine.premium_decay_per_second(
-                                                &account,
-                                                c.unix_timestamp,
-                                                c.slot,
-                                            ),
-                                            Err(e) => {
-                                                Err(darkbot_project0::health::HealthError::Stale(
-                                                    e.to_string(),
-                                                ))
-                                            }
-                                        },
+                                        // A member's decay is always computed above.
+                                        decay.unwrap_or_else(|| {
+                                            Err(darkbot_project0::health::HealthError::Stale(
+                                                "PREMIUM_DECAY_NOT_COMPUTED".into(),
+                                            ))
+                                        }),
                                         facts,
                                     ),
                                 )
