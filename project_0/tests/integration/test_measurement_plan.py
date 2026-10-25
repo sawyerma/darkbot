@@ -169,7 +169,7 @@ class MeasurementCli(unittest.TestCase):
                     self.assertIn('rpc_rps=1 source=config_file', status.stdout)
                 self.assertIn(f'duration={seconds}s', status.stdout)  # the typed capacity report
                 self.assertEqual([str(f) for f in run.rglob('*') if f.suffix in ('.json', '.jsonl')], [])
-                log = (run / 'runtime.log').read_text()
+                log = (run / 'logs' / 'runtime.log').read_text()  # layout V2: every new econ4h run (review 1)
                 self.assertIn('C0_E1_ADMISSION_REFUSED BOOT_NETWORK_AUDIT_MISSING', log)
                 self.assertNotIn('C0_E1_WARMUP_FAILED', log)
                 self.assertFalse((run / 'quick_timebox_report.json').exists())

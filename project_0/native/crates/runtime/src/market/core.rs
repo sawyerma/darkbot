@@ -383,8 +383,10 @@ impl ObserverCore {
 
     /// Status-tap assessment. Allocates and sorts, so only at the capture's 2 s display cadence
     /// and at the end. The verdict is the live, pre-verification one (never VALID in capture).
-    pub(crate) fn assessment_snapshot(&self) -> crate::status_tap::AssessmentSnapshot {
+    /// The live assessment; `None` without a wall clock (D08: never assessed at time 0).
+    pub(crate) fn assessment_snapshot(&self) -> Option<crate::status_tap::AssessmentSnapshot> {
         const TOP_RECEIVERS: usize = 10;
+        let assessed_unix_ms = crate::status_tap::unix_ms_now()?;
         let mut edges = self.edges.clone();
         edges.sort_by(f64::total_cmp);
         let mut receivers: Vec<ReceiverRank> = self
@@ -405,7 +407,7 @@ impl ObserverCore {
         receivers.truncate(TOP_RECEIVERS);
         let coverage = self.coverage_complete();
         let decode = self.decode_complete();
-        crate::status_tap::AssessmentSnapshot {
+        Some(crate::status_tap::AssessmentSnapshot {
             verdict: market_verdict(self.window.is_some(), coverage && decode, false),
             coverage_complete: coverage,
             decode_complete: decode,
@@ -427,8 +429,8 @@ impl ObserverCore {
             gross_edge_p99_usd: quantile_nearest_rank(&edges, 0.99),
             top_receivers: receivers,
             deployment_error: self.deployment_error,
-            assessed_unix_ms: crate::status_tap::unix_ms_now(),
-        }
+            assessed_unix_ms,
+        })
     }
 
     pub fn has_deferred(&self) -> bool {

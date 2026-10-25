@@ -528,6 +528,14 @@ where
                 },
             })
             .collect();
+        // Review 6: every configured target must exist and belong to the program (as the
+        // removed Python smoke required); the per-target statuses stay recorded.
+        if s.targets
+            .iter()
+            .any(|t| t.status != "OBSERVED_NOT_HEALTH_QUALIFIED")
+        {
+            return Err("ACCOUNT_OWNER_MISMATCH".into());
+        }
         Ok(())
     })();
     match result {
@@ -907,9 +915,18 @@ pub(crate) mod tests {
                 })
             }
         };
+        // Review 6 (parity with the removed Python smoke): a missing or foreign-owned target fails
+        // the smoke (ACCOUNT_OWNER_MISMATCH); every target's status stays recorded.
         let s = smoke(&c, reads(&state, vec![100, 101, 102]));
         assert_eq!(
             (s.status.as_str(), s.reason.as_deref()),
+            (INCOMPLETE, Some("ACCOUNT_OWNER_MISMATCH"))
+        );
+        let mut owned = c.clone();
+        owned.fe_targets.truncate(1);
+        let ok = smoke(&owned, reads(&state, vec![100, 101, 102]));
+        assert_eq!(
+            (ok.status.as_str(), ok.reason.as_deref()),
             (SMOKE_OBSERVED, None)
         );
         assert_eq!((s.deployment_slot, s.logical_reads), (Some(80), 3));

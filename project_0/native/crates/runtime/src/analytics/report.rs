@@ -315,7 +315,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
                     "strict" => ProvenanceView::Strict,
                     "shadow" => ProvenanceView::Shadow,
                     "all" => ProvenanceView::All,
-                    "index" => return Err("REPORT_PROVENANCE_INDEX_NOT_NATIVE: index evidence is read by the pinned Python report (scripts/report.sh)".into()),
+                    "index" => return Err("REPORT_PROVENANCE_INDEX_NOT_NATIVE: a native run has no index evidence (best|live|strict|shadow|all); historical runs only via `p0ctl report --run ID --historical`".into()),
                     v => return Err(format!("REPORT_ENUM_INVALID: {v}")),
                 }
             }

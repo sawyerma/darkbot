@@ -52,15 +52,17 @@ class StoreAndLayout(unittest.TestCase):
             self.assertEqual(s.resolve_store('econ4h',project=p),('runs',runs))
             self.assertEqual(s.run_layout('econ4h',project=p),'v2')
             self.assertEqual(s.resolve_store('market',project=p),('legacy',p/'data/market'))
-            self.assertEqual(s.run_layout('econ4h',store='legacy',project=p),'v1')
+            # A new econ4h run is always layout V2 (its native records have no V1 reader); the store only
+            # selects the root. Standalone market runs stay V1.
+            self.assertEqual(s.run_layout('econ4h',store='legacy',project=p),'v2')
             self.assertEqual(s.run_layout('econ4h',store='runs',project=p),'v2')
             self.assertEqual(s.run_layout('market',store='runs',project=p),'v1')
             self.assertEqual(s.resolve_store('econ4h',str(runs),project=p),('runs',runs))
             self.assertEqual(s.run_layout('econ4h',str(runs),project=p),'v2')
             self.assertEqual(s.resolve_store('econ4h',str(other),project=p),('legacy',other))
-            self.assertEqual(s.run_layout('econ4h',str(other),project=p),'v1')
+            self.assertEqual(s.run_layout('econ4h',str(other),project=p),'v2')
             with self.assertRaisesRegex(s.RunStoreError,'RUN_ROOT_CONFLICT'):s.run_layout('econ4h',str(other),store='runs',project=p)
-            with patch.dict(os.environ,{'P0_RUN_STORE':'legacy'}):self.assertEqual(s.run_layout('econ4h',str(runs),project=p),'v1')
+            with patch.dict(os.environ,{'P0_RUN_STORE':'legacy'}):self.assertEqual(s.run_layout('econ4h',str(runs),project=p),'v2')
 
     def test_allocate_v2_creates_only_the_skeleton(self):
         with tempfile.TemporaryDirectory() as folder:

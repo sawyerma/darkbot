@@ -242,6 +242,7 @@ fn p2_abort_writes_incomplete_report_and_never_enters_verification_rpc() {
     core.start_observation(0, 18_000_000_000_000);
     core.stop_observation();
     let outcome = CaptureOutcome {
+        finished_unix_s: 1_700_000_100,
         process_started_unix_s: 0,
         ready_unix_s: Some(0),
         window: Some((0, 18_000_000_000_000)),
@@ -293,6 +294,7 @@ fn p4_timer_finalizes_locally_without_verification_rpc() {
     core.start_observation(0, 18_000_000_000_000);
     core.stop_observation();
     let outcome = CaptureOutcome {
+        finished_unix_s: 1_700_000_100,
         process_started_unix_s: 0,
         ready_unix_s: Some(0),
         window: Some((0, 18_000_000_000_000)),

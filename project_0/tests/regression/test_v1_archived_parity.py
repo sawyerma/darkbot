@@ -19,6 +19,13 @@ from p0_runs import manifest_run
 
 REPO=p0_paths.REPO
 ARCHIVED='908b14c'  # last pinned readers before layout V2
+# The 100 s measurement plan as pinned data (review 13): the archived reader's input does not pass through the
+# current reader's parser; `plan_text` of the Rust text form must yield exactly this plan (asserted below).
+PLAN_100S={'schema_version':1,'duration_seconds':100,
+           'snapshot_offsets_ns':[25000000000,50000000000,75000000000,100000000000],
+           'budgets':{'bootstrap_seconds':600,'stream_ready_seconds':600,'shadow_drain_seconds':180,'market_drain_seconds':120,
+                      'quiescence_grace_seconds':150,'strict_seconds':14400,'gap_seconds':180,'enrichment_seconds':900,
+                      'shutdown_grace_seconds':180}}
 
 
 def offline():
@@ -37,18 +44,14 @@ class ArchivedParity(unittest.TestCase):
         for entry in native.iterdir():
             if entry.name!='target':(project/'native'/entry.name).symlink_to(entry)
         # Isolated test-local adapter (never production): the archived pinned reader of ARCHIVED expects the
-        # plan as JSON on stdout; it gets exactly the plan the current Rust authority prints as text
-        # (`--historical-plan`), parsed by the current reader's own text parser.
+        # plan as JSON on stdout; it gets the pinned plan PLAN_100S — independent of the current reader's parser —
+        # and fails loudly for any other duration.
         release=project/'native/target/release';release.mkdir(parents=True)
         adapter=release/'p0-measurement-plan'
         adapter.write_text('#!'+sys.executable+'\n'
-            'import json,subprocess,sys\n'
-            f'sys.path.insert(0,{str(REPO/"project_0")!r})\n'
-            'from operations.reporting.market_report import plan_text\n'
-            f'p=subprocess.run([{str(native/"target/release/p0-measurement-plan")!r},"--historical-plan"],capture_output=True,text=True)\n'
-            'sys.stderr.write(p.stderr)\n'
-            'print(json.dumps(plan_text(p.stdout)) if p.returncode==0 else "")\n'
-            'sys.exit(p.returncode)\n')
+            'import json,os,sys\n'
+            'if os.environ.get("P0_MEASUREMENT_DURATION")!="100s":sys.exit("ADAPTER_DURATION_NOT_PINNED")\n'
+            f'print(json.dumps({PLAN_100S!r}))\n')
         adapter.chmod(0o755)
         return scripts
 
@@ -62,6 +65,10 @@ class ArchivedParity(unittest.TestCase):
                    'print(json.dumps({"window":a.read_window(run),"key":m["version"]}))')
             variants=[('manifest',lambda root:manifest_run(root,'r1','v1'))]
             if legacy_plan.exists():
+                # The current parser yields exactly the pinned plan from the Rust authority's text form.
+                text=subprocess.run([str(legacy_plan),'--historical-plan'],env={**clean_env(),'P0_MEASUREMENT_DURATION':'100s'},
+                                    capture_output=True,text=True,timeout=60)
+                self.assertEqual(text.returncode,0,text.stderr);self.assertEqual(r.plan_text(text.stdout),PLAN_100S)
                 # A run without any plan record: the current reader takes the plan from the Rust authority's
                 # isolated offline text path, the archived reader from it through the test-local adapter.
                 def legacy(root):

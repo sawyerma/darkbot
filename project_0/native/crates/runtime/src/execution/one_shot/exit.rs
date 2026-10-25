@@ -301,6 +301,14 @@ fn validate(s: &Saved, a: &ExitApproval, i: &ExitIntent, c: &Current) -> Result<
     {
         return Err(err("EXIT_AMOUNT_NOT_THE_OPEN_POSITION"));
     }
+    // Review 9 (F-07): an unvalued position is refused before any handoff; its settlement could
+    // never release a mark (the hold would stay after the trade).
+    if open_positions(s)
+        .get(&i.mint)
+        .is_some_and(|p| p.mark_usd_micro.is_none())
+    {
+        return Err(err("EXIT_POSITION_MARK_UNKNOWN"));
+    }
     if c.now_unix_ms / 1000 >= a.expires_unix_s
         || c.now_unix_ms < i.evaluated_unix_ms
         || c.now_unix_ms - i.evaluated_unix_ms > a.max_state_age_ms
@@ -1114,6 +1122,23 @@ pub(crate) mod tests {
         }
         let p = open_positions(&s)[&mint];
         assert_eq!((p.units, p.mark_usd_micro), (1_000, None));
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// Review 9 (F-07): an exit of an unvalued position is refused before any reservation or
+    /// handoff (its settlement could never release a mark), not after the trade.
+    #[test]
+    fn exit_of_an_unvalued_position_is_refused_before_handoff() {
+        let (path, j, mint, a) = settled(1_000);
+        let mut s = j.saved.clone().unwrap();
+        if let Phase::Settled(done) = &mut s.phase {
+            done.valuation.remove(&mint);
+        }
+        let (ea, ei, c) = exit_for(&a, &mint, 1_000, "exit-1");
+        assert_eq!(
+            super::validate(&s, &ea, &ei, &c).unwrap_err(),
+            err("EXIT_POSITION_MARK_UNKNOWN")
+        );
         let _ = std::fs::remove_dir_all(&path);
     }
 

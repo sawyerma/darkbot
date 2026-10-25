@@ -12,13 +12,15 @@ pub use darkbot_solana::runtime_config::{EffectiveConfig, Limits, Profile};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-/// Wall clock of a status publication (display only, never evidence). D08: 0 exactly when the
-/// host clock is unavailable — the capture then refuses to start or ends with
-/// `CLOCK_UNAVAILABLE`, and the frontend shows such a stamp as "clock unavailable".
-pub fn unix_ms_now() -> u64 {
+/// Wall clock of a status publication (display only, never evidence); `None` when the host
+/// clock is unavailable (D08). Samples are then not published at all (never with time 0); a phase
+/// change keeps its previous stamp. Only a start refused for CLOCK_UNAVAILABLE carries no stamp
+/// (0: `PhaseStatus.changed_unix_ms` has implicit presence on the wire, and the frontend shows it
+/// as "clock unavailable" next to that end result).
+pub fn unix_ms_now() -> Option<u64> {
     darkbot_common::timing::wall_now()
+        .ok()
         .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
-        .unwrap_or(0)
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -286,11 +288,16 @@ impl StatusTap {
 
     /// Updates the phase in place (earlier fields are kept) and stamps the change time.
     pub fn publish_phase(&self, f: impl FnOnce(&mut PhaseSnapshot)) {
-        let at = unix_ms_now();
+        self.publish_phase_at(unix_ms_now(), f)
+    }
+
+    fn publish_phase_at(&self, at: Option<u64>, f: impl FnOnce(&mut PhaseSnapshot)) {
         self.publish(false, |v| {
             let p = v.phase.get_or_insert_with(PhaseSnapshot::default);
             f(p);
-            p.changed_unix_ms = at;
+            if let Some(at) = at {
+                p.changed_unix_ms = at;
+            }
         });
     }
 
@@ -309,12 +316,15 @@ impl StatusTap {
         attempt: u32,
         last_valid_slot: Option<u64>,
     ) {
+        let Some(at_unix_ms) = unix_ms_now() else {
+            return;
+        };
         let s = Arc::new(TransportStateSnapshot {
             state,
             code,
             attempt,
             last_valid_slot,
-            at_unix_ms: unix_ms_now(),
+            at_unix_ms,
         });
         self.publish(false, |v| v.transport_state = Some(s));
     }
@@ -330,7 +340,9 @@ impl StatusTap {
 
     /// Called at the capture's 2 s display cadence with the sample it already took.
     pub fn publish_storage(&self, status: StorageStatus) {
-        let at_unix_ms = unix_ms_now();
+        let Some(at_unix_ms) = unix_ms_now() else {
+            return;
+        };
         self.publish(false, |v| {
             v.storage = Some(StorageSample { at_unix_ms, status })
         });
@@ -338,8 +350,15 @@ impl StatusTap {
 
     /// Called at the capture's 2 s display cadence with the process provider budget.
     pub fn publish_provider(&self, budget: &darkbot_solana::provider::Budget) {
+        self.publish_provider_at(unix_ms_now(), budget)
+    }
+
+    fn publish_provider_at(&self, at: Option<u64>, budget: &darkbot_solana::provider::Budget) {
+        let Some(at_unix_ms) = at else {
+            return;
+        };
         let sample = Arc::new(ProviderSample {
-            at_unix_ms: unix_ms_now(),
+            at_unix_ms,
             snapshot: budget.snapshot(),
             cooldown: budget.cooldown(),
             halt_code: budget.halt_code(),
@@ -470,6 +489,26 @@ mod tests {
             .unwrap();
         assert_eq!(sample.status, status);
         assert!(sample.at_unix_ms > 1_600_000_000_000);
+    }
+
+    /// Review 10 (D08): without a wall clock no sample is published (never time 0) and a phase
+    /// change keeps its previous stamp.
+    #[test]
+    fn unavailable_clock_never_publishes_time_zero() {
+        let tap = StatusTap::new();
+        let budget = darkbot_solana::provider::Budget::configured(
+            &darkbot_solana::runtime_config::RuntimeConfig::default(),
+        );
+        tap.publish_provider_at(None, &budget);
+        tap.publish_phase_at(Some(7), |p| p.phase = CapturePhase::Capture);
+        tap.publish_phase_at(None, |p| p.phase = CapturePhase::Drain);
+        let s = tap.reader().wait_changed(Duration::ZERO).unwrap();
+        assert!(s.provider.is_none(), "no provider sample without a clock");
+        let phase = s.phase.unwrap();
+        assert_eq!(
+            (phase.phase, phase.changed_unix_ms),
+            (CapturePhase::Drain, 7)
+        );
     }
 
     /// F-01b: the provider budget reaches the tap whole (counters, cooldown, halt state).

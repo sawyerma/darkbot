@@ -16,10 +16,10 @@ were removed (25.10., P0-PROD-CTRL-09).
 |---|---|---|
 | unset (default) | `data/runs/<run_id>/`, layout **V2** | `data/market/<run_id>/`, layout V1 |
 | `runs` | `data/runs/<run_id>/`, layout V2 | `data/runs/<run_id>/`, layout V1 |
-| `legacy` | `data/econ4h/<run_id>/`, layout V1 | `data/market/<run_id>/`, layout V1 |
+| `legacy` | `data/econ4h/<run_id>/`, layout V2 (native runs have no V1 reader; review 25.10.) | `data/market/<run_id>/`, layout V1 |
 
 - **Explicit roots keep their legacy semantics.** `P0_ECON_OUT_DIR` / `P0_MARKET_OUT_DIR` still select another directory, e.g.
-  another volume, and write layout V1 there. An explicit `data/runs` selects the runs store. With `P0_RUN_STORE=runs` an
+  another volume (econ4h writes layout V2 there, a standalone market run V1). An explicit `data/runs` selects the runs store. With `P0_RUN_STORE=runs` an
   explicit root must be `data/runs`, otherwise the launcher stops with `RUN_ROOT_CONFLICT`.
 - **Standalone C0-MO stays V1:** it writes no pre-capture manifest, which layout V2 requires. Its Rust runtime rejects
   `P0_RUN_LAYOUT=v2`.
@@ -60,7 +60,7 @@ tests pin both tables to the same literal paths.
 
 ```bash
 project_0/scripts/capture.sh --duration 10m                          # new run in data/runs/<run_id>, layout V2
-P0_RUN_STORE=legacy project_0/scripts/capture.sh --duration 10m      # explicit legacy store, layout V1
+P0_RUN_STORE=legacy project_0/scripts/capture.sh --duration 10m      # explicit legacy store, layout V2
 project_0/scripts/capture.sh market                          # C0-MO: data/market, layout V1
 project_0/scripts/verify.sh --run <run_id> --mode index
 project_0/scripts/report.sh --run <run_id>

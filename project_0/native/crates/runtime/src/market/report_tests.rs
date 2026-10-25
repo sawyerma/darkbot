@@ -128,6 +128,11 @@ mod report_e2e {
     }
 
     fn canonical_run(tag: u32, complete: bool) -> Fixture {
+        canonical_run_recording(tag, complete, "0")
+    }
+
+    /// `canonical_run` whose launcher recorded the minimum profit `min_profit` (USD-micro).
+    fn canonical_run_recording(tag: u32, complete: bool, min_profit: &'static str) -> Fixture {
         let d = std::env::temp_dir().join(format!("p0_report_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let run = d.join("run_r");
@@ -137,7 +142,7 @@ mod report_e2e {
         let clock = darkbot_common::timing::Clock::new();
         // The run records its minimum profit like every launcher run (capture.sh exports it).
         persist_manifest_with(&paths, "run_r", "test", &plan, clock, &|k| {
-            (k == "P0_MIN_PROFIT").then(|| "0".into())
+            (k == "P0_MIN_PROFIT").then(|| min_profit.into())
         })
         .unwrap();
         let window = plan.capture_window(clock, 1_000 * NS).unwrap();
@@ -905,6 +910,26 @@ mod report_e2e {
                 "{file}"
             );
         }
+        let _ = std::fs::remove_dir_all(f.d);
+    }
+
+    /// Review 4: like the optimizer, a backtest never goes below the run's recorded minimum
+    /// profit (nothing was evaluated there); at or above it, it runs.
+    #[test]
+    fn backtest_refuses_parameters_below_the_recorded_minimum_profit() {
+        use crate::analytics::backtest;
+        let f = canonical_run_recording(line!(), true, "5");
+        let mut p = backtest_params();
+        p.min_profit_usd_micro = 4;
+        let refused = backtest::backtest(&f.run, None, &p, BACKTEST_BUDGET).err();
+        assert!(
+            refused
+                .as_deref()
+                .is_some_and(|e| e.starts_with("BACKTEST_PARAMS_BELOW_EVIDENCE")),
+            "{refused:?}"
+        );
+        p.min_profit_usd_micro = 5;
+        assert!(backtest::backtest(&f.run, None, &p, BACKTEST_BUDGET).is_ok());
         let _ = std::fs::remove_dir_all(f.d);
     }
 

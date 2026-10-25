@@ -18,6 +18,16 @@ class ContractTests(unittest.TestCase):
     setUp=fixtures.TempRunBase.setUp
     tearDown=fixtures.TempRunBase.tearDown
     write=fixtures.TempRunBase.write
+    def test_operational_profile_is_refused_instead_of_silently_ignored(self):
+        # Review 7 (P0-PROD-CTRL-02): the historical reader has no operational-config bridge; a configured profile
+        # would be ignored (no ceilings, no fallback), so a network run with one is refused before any read.
+        import contextlib, io, os
+        for key in ('P0_PROFILE','P0_OPERATIONAL_CONFIG_FILE'):
+            err=io.StringIO()
+            with patch.dict(os.environ,{key:'smoke'}),contextlib.redirect_stderr(err),contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(v.main(['--run','historical_run','--mode','index']),2)
+            self.assertIn('HISTORICAL_PROFILE_UNSUPPORTED',err.getvalue())
+
     def test_off_no_rpc_and_immutable_lifecycle(self):
         before={p.name:c.file_hash(p) for p in (self.run/'market').iterdir()}
         with patch.object(a.RPC,'call',side_effect=AssertionError('network forbidden')):

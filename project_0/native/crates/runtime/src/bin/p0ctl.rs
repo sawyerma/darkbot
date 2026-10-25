@@ -771,6 +771,16 @@ fn native_run(run: &Path) -> bool {
     run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()
 }
 
+/// The native readers read layout V2 (`capture/…`). A native run in layout V1 (its typed
+/// manifest at the run root) has no native reader and is refused with its own code, never
+/// misread as unfinished; new econ4h runs are always written in layout V2.
+fn native_layout(run: &Path) -> Result<(), String> {
+    if run.join("run_manifest.p0j").is_file() && !run.join("capture/run_manifest.p0j").is_file() {
+        return Err("NATIVE_LAYOUT_V1_UNSUPPORTED: a native run in layout V1 has no native reader (new econ4h runs are layout V2)".into());
+    }
+    Ok(())
+}
+
 /// JFI-01/03: the pinned Python readers serve historical runs (no native records) only, and only
 /// on the explicit `--historical` request — never a fallback for a native run.
 fn historical(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
@@ -802,6 +812,7 @@ fn report_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     else {
         return historical(project, "report.sh", args);
     };
+    native_layout(&run)?;
     if !run.join("capture/market/market_completion.p0j").is_file() {
         return Err(
             "CAPTURE_NOT_FINALIZED: a native run without MARKET_COMPLETION has no report".into(),
@@ -831,6 +842,7 @@ fn verify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     else {
         return historical(project, "verify.sh", args);
     };
+    native_layout(&run)?;
     let mode = value(args, "--mode").ok_or("VERIFY_MODE_REQUIRED: --mode strict|off")?;
     if !matches!(mode.as_str(), "strict" | "off") {
         return Err(format!(
@@ -858,6 +870,7 @@ fn post_capture_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     use darkbot_runner::analytics::post_capture;
     let wanted = value(args, "--run").ok_or("post-capture --run ID|PATH required")?;
     let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    native_layout(&run)?;
     let mode = value(args, "--chain-verify").unwrap_or_else(|| "off".into());
     let mut rest = Vec::new();
     let mut it = args.iter();
@@ -878,6 +891,7 @@ fn post_capture_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 fn qualify_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     let wanted = value(args, "--run").ok_or("qualify --run ID|PATH required")?;
     let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    native_layout(&run)?;
     let opts = report::Options {
         verification_result: value(args, "--verification-result"),
         ..Default::default()
@@ -953,7 +967,9 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 
 fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {
     let wanted = given(args, "--run")?.ok_or("--run ID|PATH required")?;
-    find_run(project, &wanted).ok_or_else(|| "RUN_NOT_FOUND_OR_AMBIGUOUS".into())
+    let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
+    native_layout(&run)?;
+    Ok(run)
 }
 
 fn backtest_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
@@ -1419,6 +1435,29 @@ mod tests {
         ] {
             assert!(plan(bad).is_err(), "{bad:?}");
         }
+    }
+
+    /// Review 1: a native run in layout V1 (typed manifest at the run root) has no native reader;
+    /// every native command refuses it with its own code instead of misreading it as unfinished.
+    #[test]
+    fn native_v1_runs_are_refused_with_their_own_code() {
+        let project = std::env::temp_dir().join(format!("p0ctl_v1_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        let run = project.join("data/econ4h/v1run");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(run.join("run_manifest.p0j"), b"").unwrap();
+        let refused =
+            |r: Result<bool, String>| r.unwrap_err().starts_with("NATIVE_LAYOUT_V1_UNSUPPORTED");
+        let args = strings(&["--run", "v1run"]);
+        assert!(refused(report_cmd(&project, &args)));
+        assert!(refused(verify_cmd(
+            &project,
+            &strings(&["--run", "v1run", "--mode", "off"])
+        )));
+        assert!(refused(qualify_cmd(&project, &args)));
+        assert!(refused(post_capture_cmd(&project, &args)));
+        assert!(refused(backtest_cmd(&project, &args)));
+        let _ = std::fs::remove_dir_all(&project);
     }
 
     /// A flag given without its value is an error, never an absent flag (`run stop --run`).

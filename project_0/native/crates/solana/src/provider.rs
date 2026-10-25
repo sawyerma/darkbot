@@ -684,6 +684,17 @@ pub fn rpc_client(
     work: Workload,
 ) -> RpcClient {
     // F-01/C07: every client is budgeted; there is no unbudgeted start path.
+    rpc_client_with(url, timeout, commitment, work, shared())
+}
+
+/// `rpc_client` against an explicit budget (an isolated profile; tests that observe it).
+pub fn rpc_client_with(
+    url: String,
+    timeout: Duration,
+    commitment: CommitmentConfig,
+    work: Workload,
+    budget: Arc<Budget>,
+) -> RpcClient {
     RpcClient::new_sender(
         BudgetedSender {
             url,
@@ -697,7 +708,7 @@ pub fn rpc_client(
                 ))
                 .build()
                 .expect("HTTP client configuration"),
-            budget: shared(),
+            budget,
             stats: Mutex::new(RpcTransportStats::default()),
         },
         RpcClientConfig::with_commitment(commitment),
@@ -1408,6 +1419,22 @@ mod http_tests {
             shared().snapshot().requests > before,
             "unbudgeted RPC client"
         );
+        // Review 13: deterministic — an isolated budget counts exactly this one request.
+        let (url, served) = self::server(format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+            body.len()
+        ));
+        let budget = Arc::new(Budget::default());
+        let rpc = rpc_client_with(
+            url,
+            Duration::from_secs(2),
+            CommitmentConfig::finalized(),
+            Workload::Bootstrap,
+            budget.clone(),
+        );
+        assert_eq!(rpc.get_slot().unwrap(), 7);
+        served.join().unwrap();
+        assert_eq!(budget.snapshot().requests, 1);
     }
     /// N2: the candidate deadline ends a hanging request of the (always budgeted) transport, and
     /// a cut by the caller's deadline before the transport's own limit is no provider failure —

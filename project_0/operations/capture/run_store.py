@@ -94,8 +94,10 @@ def run_root(kind,explicit=None,store=None,project=PROJECT):
     return resolve_store(kind,explicit,store,project)[1]
 
 def run_layout(kind,explicit=None,store=None,project=PROJECT):
-    """Layout V2 for econ4h runs in the runs store; every other run keeps layout V1."""
-    return 'v2' if kind=='econ4h' and resolve_store(kind,explicit,store,project)[0]=='runs' else 'v1'
+    """Layout V2 for every new econ4h run (its native records are read only in V2; a V1 native run
+    has no native reader), whatever its store or directory; standalone market runs keep layout V1."""
+    resolve_store(kind,explicit,store,project)  # the store/directory contract is still checked
+    return 'v2' if kind=='econ4h' else 'v1'
 
 def check_run(root,run_id,project=PROJECT):
     """Validate a new run without creating anything. The id pattern excludes path separators and dots."""

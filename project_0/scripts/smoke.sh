@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 accept() {
   local logs="$1"
   [[ -d "$1/logs" ]] && logs="$1/logs"
-  local report="$logs/post_capture_report.txt" failed code axis
+  local report="$logs/post_capture_report.txt" failed code axis frames gaps
   fail() { echo "CONTROLLED_GAP_SMOKE_FAIL: $*" >&2; exit 1; }
   grep -q 'GAP_PROXY_CONTROLLED_DISCONNECT' "$logs/gap_proxy.log" 2>/dev/null || fail 'no controlled disconnect in the proxy log'
   [[ -f "$report" ]] || fail "no post-capture report: $report"
@@ -21,6 +21,16 @@ accept() {
               trading=LIVE_DISABLED_NO_SUBMISSION; do
     grep -qx "$axis" "$report" || fail "qualification axis not met: $axis"
   done
+  # The controlled gap itself (review 5), from the typed market summary as `p0-journal frames` text: at
+  # least one gap, every gap recovered, no unresolved reconciliation slot.
+  local summary="$1/capture/market/market_summary.p0j"
+  [[ -f "$summary" ]] || fail "no typed market summary: $summary"
+  frames="$("${P0_JOURNAL_TOOL:-${CARGO_TARGET_DIR:-$ROOT/project_0/native/target}/release/p0-journal}" frames "$summary")" \
+    || fail 'the market summary journal does not verify'
+  gaps="$(grep -o 'gap_count: [0-9]*' <<< "$frames" | head -1 | awk '{print $2}')"
+  [[ "${gaps:-0}" -ge 1 ]] || fail 'no gap recorded: the controlled disconnect produced no gap'
+  grep -q 'gap_unrecovered: 0,' <<< "$frames" || fail 'unrecovered gaps'
+  grep -q 'slots_unresolved: 0,' <<< "$frames" || fail 'unresolved reconciliation slots'
   failed="$(sed -n 's/^failed=//p' "$report")"
   [[ -n "$failed" ]] || fail 'no failed= line in the qualification'
   if [[ "$failed" != - ]]; then
@@ -102,5 +112,5 @@ if [[ ! -d "$run" ]]; then
 fi
 logs="$run"; [[ -d "$run/logs" ]] && logs="$run/logs"
 cp "$scratch/proxy.log" "$logs/gap_proxy.log"
-echo "Controlled interruption evidence: $logs/gap_proxy.log"
+echo "Controlled interruption evidence: $logs/gap_proxy.log (launcher status $status; with --chain-verify off the post-capture chain ends NOT_QUALIFIED by design)"
 accept "$run"

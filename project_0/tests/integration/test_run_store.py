@@ -199,14 +199,15 @@ class Launchers(unittest.TestCase):
         # binary fails closed at startup. The key file holds only the public half; the real signer refuses to sign.
         return {**self.environment(tmp),'CARGO_TARGET_DIR':str(REPO/'project_0/native/target'),'TMPDIR':str(tmp/'tmpdir')}
 
-    def test_launcher_end_to_end_real_binary_writes_layout_v1_and_v2(self):
+    def test_launcher_end_to_end_real_binary_writes_layout_v2_in_both_stores(self):
         with tempfile.TemporaryDirectory() as folder:
             tmp=Path(folder);project=self.real_project(tmp,operations=True);(tmp/'tmpdir').mkdir()
             if shutil.disk_usage(tmp).free<8*2**30:self.skipTest('NOT_RUN: launcher storage preflight needs 8 GiB free')
             env=self.real_env(tmp)
             launch=lambda extra:subprocess.run(['bash',str(project/'scripts/capture.sh'),'econ4h-launcher','--duration','61s'],env={**env,**extra},
                                                capture_output=True,text=True,timeout=600,cwd=tmp)
-            for store,run_id,root,layout in (({'P0_RUN_STORE':'legacy'},'old_run','data/econ4h','v1'),({},'new_run','data/runs','v2')):
+            # Review 1: a new native econ4h run is layout V2 in either store (native readers read V2 only).
+            for store,run_id,root,layout in (({'P0_RUN_STORE':'legacy'},'old_run','data/econ4h','v2'),({},'new_run','data/runs','v2')):
                 with self.subTest(layout=layout):
                     p=launch({**store,'P0_ECON_RUN_ID':run_id})
                     # X1: a launcher child without the approved network audit record is refused after its local
@@ -261,7 +262,7 @@ class Launchers(unittest.TestCase):
             self.assertTrue(set(x.name for x in new.iterdir())<=set(s.V2_ROOT))
             self.assertFalse((new/'config.json').exists())  # no JSON configuration document (P0-PROD-CTRL-02)
             self.assertFalse(list((tmp/'tmpdir').glob('p0-run-config.*')))  # staging directory removed on exit
-            self.assertFalse(any((project/'data/econ4h/old_run'/n).exists() for n in s.V2_ONLY))
+            self.assertTrue(set(x.name for x in (project/'data/econ4h/old_run').iterdir())<=set(s.V2_ROOT))  # V2 in the legacy store too
             p=launch({'P0_RUN_STORE':'runs','P0_ECON_RUN_ID':'old_run'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr)
             self.assertFalse((project/'data/runs/old_run').exists())
@@ -303,6 +304,15 @@ class Launchers(unittest.TestCase):
         # JSON views alone never pass, and only the gates --chain-verify off cannot meet may fail.
         with tempfile.TemporaryDirectory() as folder:
             run=Path(folder)/'run';logs=run/'logs';logs.mkdir(parents=True)
+            market=run/'capture/market';market.mkdir(parents=True);(market/'market_summary.p0j').write_bytes(b'')
+            # Stand-in for `p0-journal frames` (its text form of the typed summary is pinned by the Rust test
+            # market_summary_frame_text_names_the_gap_facts); it prints the facts this test sets.
+            tool=Path(folder)/'p0-journal';facts=Path(folder)/'facts'
+            tool.write_text('#!/bin/sh\ncat "%s"\n' % facts);tool.chmod(0o755)
+            frame=lambda gaps,unrecovered,unresolved:facts.write_text(
+                f'seq=1 kind=305 payload=MarketFinal {{ summary: MarketSummary {{ gap_count: {gaps}, gap_intervals: 1, '
+                f'gap_unrecovered: {unrecovered}, full_slot_reconciliation: ReconciliationRow {{ slots_unresolved: {unresolved}, x: 1 }} }} }}\n')
+            frame(1,0,0)
             axes={'capture_clock':'CAPTURE_CLOCK_COMPLETE','live_coverage':'LIVE_COVERAGE_COMPLETE','capture_journal':'CAPTURE_JOURNAL_COMPLETE',
                   'deployment_continuity':'DEPLOYMENT_CONTINUITY_PROVEN','trading':'LIVE_DISABLED_NO_SUBMISSION','verdict':'C0_E1_NOT_QUALIFIED',
                   'failed':'VERIFICATION_NOT_CANONICAL,ECONOMICS_NOT_REPLAYED'}
@@ -311,7 +321,7 @@ class Launchers(unittest.TestCase):
                 target=logs/'post_capture_report.txt'
                 if report is None:target.unlink(missing_ok=True)
                 else:target.write_text(''.join(f'{k}={v}\n' for k,v in report.items()))
-                return subprocess.run(['bash',str(SCRIPTS/'smoke.sh')],env={**clean_env(),'P0_SMOKE_CHECK_RUN':str(run)},
+                return subprocess.run(['bash',str(SCRIPTS/'smoke.sh')],env={**clean_env(),'P0_SMOKE_CHECK_RUN':str(run),'P0_JOURNAL_TOOL':str(tool)},
                                       capture_output=True,text=True,timeout=30)
             p=check(axes);self.assertEqual(p.returncode,0,p.stderr);self.assertIn('CONTROLLED_GAP_SMOKE_PASS',p.stdout)
             p=check({**axes,'failed':'-','verdict':'C0_E1_MASTER_PASS'});self.assertEqual(p.returncode,0,p.stderr)
@@ -320,6 +330,12 @@ class Launchers(unittest.TestCase):
                                   ({'trading':'LIVE_OR_SUBMISSION_PRESENT'},'axis not met: trading=')):
                 p=check({**axes,**change});self.assertEqual(p.returncode,1);self.assertIn(reason,p.stderr)
             p=check(axes,disconnect=False);self.assertEqual(p.returncode,1);self.assertIn('no controlled disconnect',p.stderr)
+            # Review 5: the controlled gap itself — recorded, recovered, every slot resolved.
+            for facts_,reason in (((0,0,0),'no gap recorded'),((2,1,0),'unrecovered gaps'),((2,0,3),'unresolved reconciliation slots')):
+                frame(*facts_);p=check(axes);self.assertEqual(p.returncode,1);self.assertIn(reason,p.stderr)
+            frame(2,0,0);p=check(axes);self.assertEqual(p.returncode,0,p.stderr)
+            (market/'market_summary.p0j').unlink();p=check(axes);self.assertEqual(p.returncode,1);self.assertIn('no typed market summary',p.stderr)
+            (market/'market_summary.p0j').write_bytes(b'')
             (run/'economics_final.json').write_text('{"technical_qualification":{"verdict":"PASS"}}')
             p=check(None);self.assertEqual(p.returncode,1);self.assertIn('no post-capture report',p.stderr)
             self.assertNotIn('CONTROLLED_GAP_SMOKE_PASS',p.stdout)

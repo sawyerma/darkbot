@@ -1320,6 +1320,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     .unwrap();
     core.stop_observation();
     let outcome = CaptureOutcome {
+        finished_unix_s: 1_700_000_100,
         process_started_unix_s: 0,
         ready_unix_s: Some(0),
         window: Some((0, 600_000_000_000)),
@@ -2000,6 +2001,7 @@ fn capture_operator_stop_seals_incomplete() {
             core.stop_observation();
         }
         let outcome = CaptureOutcome {
+            finished_unix_s: 1_700_000_100,
             process_started_unix_s: 0,
             ready_unix_s: ready.then_some(0),
             window: ready.then_some((0, 600_000_000_000)),
@@ -2102,6 +2104,7 @@ fn ingress_panic_after_last_event_never_seals_complete() {
         );
         core.stop_observation();
         let outcome = CaptureOutcome {
+            finished_unix_s: 1_700_000_100,
             process_started_unix_s: 0,
             ready_unix_s: Some(0),
             window: Some((0, 600_000_000_000)),
@@ -2220,6 +2223,7 @@ fn r1_full_and_half_full_queue_drain_completely_before_the_seal() {
         );
         core.stop_observation();
         let outcome = CaptureOutcome {
+            finished_unix_s: 1_700_000_100,
             process_started_unix_s: 0,
             ready_unix_s: Some(0),
             window: Some((0, 600_000_000_000)),
@@ -2329,6 +2333,7 @@ fn r1_ingress_alive_past_the_drain_deadline_seals_incomplete() {
     );
     core.stop_observation();
     let outcome = CaptureOutcome {
+        finished_unix_s: 1_700_000_100,
         process_started_unix_s: 0,
         ready_unix_s: Some(0),
         window: Some((0, 600_000_000_000)),

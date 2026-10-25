@@ -467,3 +467,45 @@ fn backtest_kind_layouts_are_pinned() {
     .collect();
     assert_eq!(pins, expected);
 }
+
+/// Review 8: a re-evaluation of a matched opportunity (same account and signing slot, another
+/// record) is no false positive, whether it comes before or after the matched record; other
+/// evaluations count once per account and slot.
+#[test]
+fn reevaluation_of_a_matched_opportunity_is_no_false_positive() {
+    let mut matched = attempt(5, MICRO, MICRO_U, "NO_SWAP_INVENTORY", Some(MICRO_U));
+    matched.account = "target-a".into();
+    let mut again = matched.clone();
+    again.record_digest = [0xAA; 32];
+    let mut other = attempt(6, MICRO, MICRO_U, "NO_SWAP_INVENTORY", Some(MICRO_U));
+    other.account = "target-b".into();
+    let keys: BTreeSet<(String, Option<u64>)> =
+        [(matched.account.clone(), matched.sign_slot)].into();
+    let found = vec![again, other.clone(), other.clone()];
+    assert_eq!(select_false_positives(found, &keys), vec![other]);
+}
+
+/// Review 3: `matched` counts verified liquidations joined with an evaluation, never false
+/// positives — excluded or below-minimum attempts count in their own outcome only.
+#[test]
+fn matched_counts_joined_liquidations_only() {
+    let rows = [row(1, Some(3 * MICRO), true, MICRO_U, "NO_SWAP_INVENTORY")];
+    let fps: Vec<Attempt> = (0..10)
+        .map(|t| {
+            attempt(
+                t + 2,
+                MICRO / 2,
+                MICRO_U,
+                "NO_SWAP_INVENTORY",
+                Some(MICRO_U),
+            )
+        })
+        .collect();
+    let p = params(1, &[10], &[]);
+    let refs = (
+        rows.iter().collect::<Vec<_>>(),
+        fps.iter().collect::<Vec<_>>(),
+    );
+    let c = counterfactual(&refs.0, &refs.1, &p, "M");
+    assert_eq!((c.matched, c.wins, c.below_minimum), (1, 1, 10));
+}

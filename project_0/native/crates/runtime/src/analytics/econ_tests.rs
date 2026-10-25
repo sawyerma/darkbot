@@ -3765,3 +3765,24 @@ fn c0e1_master_qualification_requires_every_axis() {
         );
     }
 }
+
+/// Review 5: the gap smoke (`scripts/smoke.sh`) reads three facts of the typed market summary
+/// from `p0-journal frames` (`payload::describe`); their text form is pinned here.
+#[test]
+fn market_summary_frame_text_names_the_gap_facts() {
+    use crate::analytics::payload::{describe, encode, Payload};
+    use crate::market_observer::MarketFinal;
+    let mut s = market_summary(60.0);
+    s.gap_count = 2;
+    s.gap_unrecovered = 0;
+    s.full_slot_reconciliation.slots_unresolved = 0;
+    let f = MarketFinal::checkpoint(s);
+    let text = describe(MarketFinal::KIND, MarketFinal::SCHEMA, &encode(&f).unwrap()).unwrap();
+    for fact in [
+        "gap_count: 2,",
+        "gap_unrecovered: 0,",
+        "slots_unresolved: 0,",
+    ] {
+        assert!(text.contains(fact), "{fact} in {text}");
+    }
+}

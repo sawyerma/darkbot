@@ -893,9 +893,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         account: &MarginfiAccount,
         clock: &Clock,
     ) -> Result<Positions, SizingError> {
-        // F-15: a negative chain clock is no time for premium and accrual (never taken as 0).
+        // F-15: a chain clock at or before the epoch is no time for premium and accrual (never
+        // taken as 0; the runtime's clock decoder refuses the same).
         let now = u64::try_from(clock.unix_timestamp)
-            .map_err(|_| SizingError::from("CHAIN_CLOCK_TIME: negative unix_timestamp"))?;
+            .ok()
+            .filter(|s| *s > 0)
+            .ok_or_else(|| {
+                SizingError::from("CHAIN_CLOCK_TIME: unix_timestamp not after the epoch")
+            })?;
         let mut assets = Vec::new();
         let mut liabs = Vec::new();
         for balance in &account.lending_account.balances {
@@ -1422,13 +1427,16 @@ mod tests {
             leader_schedule_epoch: 0,
             unix_timestamp,
         };
-        let refused = s.positions(&account, &clock(-1)).err();
-        assert!(
-            refused
-                .as_ref()
-                .is_some_and(|e| e.text.starts_with("CHAIN_CLOCK_TIME")),
-            "{refused:?}"
-        );
+        // Review 12: at or before the epoch, as the runtime's clock decoder (time 0 included).
+        for unix_timestamp in [-1, 0] {
+            let refused = s.positions(&account, &clock(unix_timestamp)).err();
+            assert!(
+                refused
+                    .as_ref()
+                    .is_some_and(|e| e.text.starts_with("CHAIN_CLOCK_TIME")),
+                "{unix_timestamp}: {refused:?}"
+            );
+        }
         assert!(s.positions(&account, &clock(1_700_000_000)).is_ok());
     }
 

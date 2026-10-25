@@ -143,6 +143,10 @@ def main(argv=None):
 
 def execute(parser,args):
     try:
+        # Review 7: no operational-config bridge (P0-PROD-CTRL-02) — a configured profile would be silently
+        # ignored (no ceilings, no fallback), so a run that may reach the network refuses it.
+        if not args.offline and any(os.environ.get(k) for k in ('P0_PROFILE','P0_OPERATIONAL_CONFIG_FILE')):
+            raise c.ContractError('HISTORICAL_PROFILE_UNSUPPORTED: unset P0_PROFILE/P0_OPERATIONAL_CONFIG_FILE and pass the explicit transport flags, or use --offline')
         cfg=c.config(args)
         if not args.run:parser.error('--run required')
         run=audit.find_run(args.run)

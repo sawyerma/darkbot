@@ -42,6 +42,21 @@ pub(crate) fn apply_operational_environment(
     }
 }
 
+/// The run id the owner lock records, so `p0ctl run stop --run ID` and `run status` find the
+/// run: the controller's launch marker first (its run id for every mode, Shadow included), then
+/// the mode's own id (unlaunched econ4h/market tools); "-" only for an unnamed local run.
+fn owner_run_id(get: &dyn Fn(&str) -> Option<String>) -> String {
+    [
+        "P0_CTL_LAUNCH_RUN_ID",
+        "P0_SHADOW_RUN_ID",
+        "P0_ECON_RUN_ID",
+        "P0_MARKET_RUN_ID",
+    ]
+    .iter()
+    .find_map(|k| get(k).filter(|v| !v.is_empty()))
+    .unwrap_or_else(|| "-".into())
+}
+
 /// F-01 (CTRL-01/03): a Shadow runtime is only the child of `p0ctl run start --mode shadow`
 /// (its launch marker; admission then requires the approved network audit). Any other start —
 /// an argument-less one included — is refused before anything is read from the network.
@@ -94,10 +109,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => {
             // S1-02: `p0ctl source set` signals any lock holder; the doorbell exists first.
             super::source_control::install_signal()?;
-            let run_id = ["P0_ECON_RUN_ID", "P0_MARKET_RUN_ID"]
-                .iter()
-                .find_map(|k| std::env::var(k).ok())
-                .unwrap_or_else(|| "-".into());
+            let run_id = owner_run_id(&|k| std::env::var(k).ok());
             Some(super::control::acquire_owner(
                 std::path::Path::new(&path),
                 &run_id,
@@ -450,6 +462,40 @@ mod supervise_tests {
     /// F-01 (CTRL-01/03): an argument-less or otherwise uncontrolled Shadow start is refused;
     /// only the child of `p0ctl run start --mode shadow` (its launch marker) proceeds. The other
     /// modes keep their own gates.
+    /// Review 2: a Shadow run launched by the controller records its run id in the owner lock
+    /// (stop and status by run id); the launch marker wins over the mode's own variables.
+    #[test]
+    fn owner_lock_records_the_launched_run_id_for_every_mode() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert_eq!(
+            owner_run_id(&env(&[
+                ("P0_CTL_LAUNCH_RUN_ID", "shadow_1"),
+                ("P0_SHADOW_RUN_ID", "shadow_1")
+            ])),
+            "shadow_1"
+        );
+        assert_eq!(
+            owner_run_id(&env(&[("P0_SHADOW_RUN_ID", "shadow_2")])),
+            "shadow_2"
+        );
+        assert_eq!(
+            owner_run_id(&env(&[
+                ("P0_CTL_LAUNCH_RUN_ID", "econ4h_1"),
+                ("P0_ECON_RUN_ID", "econ4h_1")
+            ])),
+            "econ4h_1"
+        );
+        assert_eq!(owner_run_id(&env(&[("P0_MARKET_RUN_ID", "m1")])), "m1");
+        assert_eq!(owner_run_id(&env(&[("P0_SHADOW_RUN_ID", "")])), "-");
+    }
+
     #[test]
     fn f01_shadow_starts_only_under_the_controller() {
         assert_eq!(

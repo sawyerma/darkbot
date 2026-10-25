@@ -378,12 +378,13 @@ pub fn counterfactual(
         *c.loss_attribution
             .entry(row.facts.loss_reason.clone())
             .or_default() += 1;
-        outcome(row, p)
+        (true, outcome(row, p))
     });
-    let outcomes: Vec<Outcome> = row_outcomes
-        .chain(attempts.iter().map(|a| attempt_outcome(a, p)))
+    // `true`: a verified liquidation's outcome; `false`: a false positive's.
+    let outcomes: Vec<(bool, Outcome)> = row_outcomes
+        .chain(attempts.iter().map(|a| (false, attempt_outcome(a, p))))
         .collect();
-    for o in outcomes {
+    for (is_row, o) in outcomes {
         match o {
             Outcome::NotMatched => continue,
             Outcome::Unknown => c.unknown += 1,
@@ -393,7 +394,9 @@ pub fn counterfactual(
             Outcome::LostRace { .. } => c.lost_races += 1,
             Outcome::NoChainEvent { .. } => c.no_chain_event += 1,
         }
-        if !matches!(o, Outcome::NoChainEvent { .. }) {
+        // Review 3: matched = verified liquidations joined with an evaluation (never a false
+        // positive, whatever its outcome).
+        if is_row {
             c.matched += 1;
         }
         for s in &mut c.scenarios {
@@ -582,8 +585,8 @@ fn false_positives(
     matched: &BTreeSet<[u8; 32]>,
     meter: &mut Meter,
 ) -> Result<Vec<Attempt>, String> {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
+    let mut matched_keys = BTreeSet::new();
+    let mut found = Vec::new();
     let mut r = crate::storage::segments::ChainReader::open(shadow).map_err(|_| "SHADOW_INPUT")?;
     while let Some(frame) = r.next_frame().map_err(|_| "SHADOW_READ")? {
         meter.time()?;
@@ -599,6 +602,12 @@ fn false_positives(
             .typed::<ShadowEvaluation>()
             .map_err(|_| "SHADOW_DECODE")?
             .record;
+        // The opportunity of an exact match (its account and signing slot), wherever it appears
+        // in the stream: a re-evaluation of it is no false positive.
+        if record_digest(&rec).is_some_and(|d| matched.contains(&d)) {
+            matched_keys.insert((rec.account.clone(), rec.sign_slot));
+            continue;
+        }
         let (Some(costs), Some(t_rx_ns)) = (executable_costs(&rec), rec.timing.t_rx_ns) else {
             continue;
         };
@@ -606,9 +615,6 @@ fn false_positives(
             continue;
         };
         let digest = record_digest(&rec).ok_or("SHADOW_DECODE")?;
-        if matched.contains(&digest) || !seen.insert((rec.account.clone(), rec.sign_slot)) {
-            continue;
-        }
         let attempt = Attempt {
             account: rec.account.clone(),
             sign_slot: rec.sign_slot,
@@ -621,9 +627,25 @@ fn false_positives(
             record_digest: digest,
         };
         meter.charge(&attempt)?;
-        out.push(attempt);
+        found.push(attempt);
     }
-    Ok(out)
+    Ok(select_false_positives(found, &matched_keys))
+}
+
+/// The false positives among the executable evaluations that are no exact match: once per
+/// account and signing slot, and none for the opportunity of an exact match.
+fn select_false_positives(
+    found: Vec<Attempt>,
+    matched_keys: &BTreeSet<(String, Option<u64>)>,
+) -> Vec<Attempt> {
+    let mut seen = BTreeSet::new();
+    found
+        .into_iter()
+        .filter(|a| {
+            let key = (a.account.clone(), a.sign_slot);
+            !matched_keys.contains(&key) && seen.insert(key)
+        })
+        .collect()
 }
 
 /// Reads one finalized V2 run: the capture binding, a complete capture clock, the selected
@@ -854,6 +876,15 @@ pub fn backtest(
 ) -> Result<Backtest, String> {
     params.validate()?;
     let inputs = load(run, verification_result, budget)?;
+    // Review 4 (as the optimizer): never below the run's recorded minimum profit — the run
+    // evaluated nothing there, so a result would only look valid.
+    let recorded = recorded_min_profit(&inputs.capture.manifest)
+        .ok_or("BACKTEST_BLOCKED: BASELINE_MIN_PROFIT_UNRECORDED")?;
+    if params.min_profit_usd_micro < recorded {
+        return Err(format!(
+            "BACKTEST_PARAMS_BELOW_EVIDENCE: the run evaluated nothing below its minimum profit {recorded} USD-micro"
+        ));
+    }
     let summary = summarize(&inputs.rows, &inputs.attempts, params, inputs.loss_model())?;
     inputs.meter.time()?;
     let binary = binary_sha256()?;
