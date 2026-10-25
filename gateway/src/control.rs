@@ -317,7 +317,7 @@ pub struct ProcessSnapshot {
     pub observed_unix_ms: u64,
     pub controller_available: bool,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 struct Record {
     request: Vec<u8>,
     response: Vec<u8>,
@@ -325,11 +325,111 @@ struct Record {
     detail: String,
     launch_id: String,
 }
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+/// BSC-051: one ledger record, binary and versioned (`DBCMD001`): the phase (i32 LE), then the
+/// request, response, detail and launch ID, each with a u32-LE length, then a CRC-32 (IEEE) of
+/// everything before it. Records written before it (`<id>.json`) stay readable and are never
+/// written again; the next update of such a record replaces it with its binary form.
+mod ledger_record {
+    use super::Record;
+    use std::path::Path;
+    pub const EXT: &str = "cmd";
+    pub const LEGACY_EXT: &str = "json";
+    const MAGIC: &[u8; 8] = b"DBCMD001";
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for b in bytes {
+            crc ^= u32::from(*b);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xedb8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    pub fn encode(r: &Record) -> Result<Vec<u8>, ()> {
+        let mut out = MAGIC.to_vec();
+        out.extend_from_slice(&r.phase.to_le_bytes());
+        for field in [
+            &r.request[..],
+            &r.response,
+            r.detail.as_bytes(),
+            r.launch_id.as_bytes(),
+        ] {
+            out.extend_from_slice(&u32::try_from(field.len()).map_err(|_| ())?.to_le_bytes());
+            out.extend_from_slice(field);
+        }
+        let crc = crc32(&out);
+        out.extend_from_slice(&crc.to_le_bytes());
+        Ok(out)
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Record, ()> {
+        let body_len = bytes.len().checked_sub(4).ok_or(())?;
+        let (body, crc) = bytes.split_at(body_len);
+        if crc32(body).to_le_bytes() != crc || body.get(..8) != Some(&MAGIC[..]) {
+            return Err(());
+        }
+        let mut rest = &body[8..];
+        let mut take = |n: usize| -> Result<&[u8], ()> {
+            let (head, tail) = (rest.get(..n).ok_or(())?, rest.get(n..).ok_or(())?);
+            rest = tail;
+            Ok(head)
+        };
+        let phase = i32::from_le_bytes(take(4)?.try_into().map_err(|_| ())?);
+        let mut field = || -> Result<Vec<u8>, ()> {
+            let n = u32::from_le_bytes(take(4)?.try_into().map_err(|_| ())?);
+            Ok(take(usize::try_from(n).map_err(|_| ())?)?.to_vec())
+        };
+        let request = field()?;
+        let response = field()?;
+        let detail = String::from_utf8(field()?).map_err(|_| ())?;
+        let launch_id = String::from_utf8(field()?).map_err(|_| ())?;
+        if !rest.is_empty() {
+            return Err(());
+        }
+        Ok(Record {
+            request,
+            response,
+            phase,
+            detail,
+            launch_id,
+        })
+    }
+
+    /// A record file of either generation, by its extension.
+    pub fn read(path: &Path) -> Result<Record, ()> {
+        let bytes = std::fs::read(path).map_err(|_| ())?;
+        match path.extension().and_then(|x| x.to_str()) {
+            Some(EXT) => decode(&bytes),
+            Some(LEGACY_EXT) => serde_json::from_slice(&bytes).map_err(|_| ()),
+            _ => Err(()),
+        }
+    }
+}
+/// BSC-053: the wall clock in ms; `None` when it is before 1970 (never time 0).
+fn now_ms() -> Option<u64> {
+    let since = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    u64::try_from(since.as_millis()).ok()
+}
+/// Stamps a process observation; without a clock it is UNKNOWN, never a state at time 0.
+fn observed_now(mut snapshot: ProcessSnapshot) -> ProcessSnapshot {
+    stamp(&mut snapshot, now_ms());
+    snapshot
+}
+fn stamp(snapshot: &mut ProcessSnapshot, now: Option<u64>) {
+    match now {
+        Some(ms) => snapshot.observed_unix_ms = ms,
+        None => {
+            snapshot.state = "UNKNOWN".into();
+            snapshot.reason = "gateway clock unavailable".into();
+            snapshot.observed_unix_ms = 0;
+        }
+    }
 }
 fn text_file(path: &Path) -> String {
     fs::read_to_string(path)
@@ -371,7 +471,7 @@ impl Control {
             run_id: String::new(),
             pid: None,
             reason: "Capture controller not configured".into(),
-            observed_unix_ms: now_ms(),
+            observed_unix_ms: 0,
             controller_available: false,
         };
         let Some(p) = &self.paths else {
@@ -430,8 +530,7 @@ impl Control {
         };
         snapshot.state = state.as_str().into();
         snapshot.reason = format!("launchd: {}", p.label);
-        snapshot.observed_unix_ms = now_ms();
-        snapshot
+        observed_now(snapshot)
     }
     pub async fn observe_project(&self, project: i32) -> ProcessSnapshot {
         if project != ProjectId::Bsc as i32 {
@@ -442,7 +541,7 @@ impl Control {
             run_id: String::new(),
             pid: None,
             reason: "BSC controller unavailable".into(),
-            observed_unix_ms: now_ms(),
+            observed_unix_ms: 0,
             controller_available: false,
         };
         let Some(p) = &self.paths else {
@@ -517,25 +616,28 @@ impl Control {
                 }
             );
         }
-        s
+        observed_now(s)
     }
     fn record_path(&self, id: &str) -> Option<PathBuf> {
-        self.paths
-            .as_ref()
-            .map(|p| p.rundir.join("commands").join(format!("{id}.json")))
+        self.paths.as_ref().map(|p| {
+            p.rundir
+                .join("commands")
+                .join(format!("{id}.{}", ledger_record::EXT))
+        })
     }
+    /// The record of `id`: binary before legacy, open ledger before archive. A file that exists
+    /// but cannot be read or decoded makes the ledger unreadable (never "no record").
     fn load(&self, id: &str) -> Result<Option<Record>, ()> {
         let path = self.record_path(id).ok_or(())?;
-        let archived = path
-            .parent()
-            .ok_or(())?
-            .join("archive")
-            .join(format!("{id}.json"));
-        for p in [path, archived] {
-            match fs::read(p) {
-                Ok(b) => return serde_json::from_slice(&b).map(Some).map_err(|_| ()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                _ => return Err(()),
+        let dir = path.parent().ok_or(())?;
+        for d in [dir.to_path_buf(), dir.join("archive")] {
+            for ext in [ledger_record::EXT, ledger_record::LEGACY_EXT] {
+                let p = d.join(format!("{id}.{ext}"));
+                match fs::symlink_metadata(&p) {
+                    Ok(_) => return ledger_record::read(&p).map(Some),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return Err(()),
+                }
             }
         }
         Ok(None)
@@ -543,11 +645,13 @@ impl Control {
     fn persist(&self, id: &str, record: &Record) -> Result<(), ()> {
         let path = self.record_path(id).ok_or(())?;
         let dir = path.parent().ok_or(())?;
+        let legacy = dir.join(format!("{id}.{}", ledger_record::LEGACY_EXT));
         fs::create_dir_all(dir).map_err(|_| ())?;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|_| ())?;
-        if !path.exists() && records(dir)?.len() >= self.capacity {
+        if !path.exists() && !legacy.exists() && records(dir)?.len() >= self.capacity {
             archive_oldest_terminal(dir, self.capacity, self.retention)?;
         }
+        let bytes = ledger_record::encode(record)?;
         let tmp = path.with_extension(format!("tmp-{}", session::random_token(8)));
         let written = (|| {
             let mut f = fs::OpenOptions::new()
@@ -556,10 +660,14 @@ impl Control {
                 .mode(0o600)
                 .open(&tmp)
                 .map_err(|_| ())?;
-            f.write_all(&serde_json::to_vec(record).map_err(|_| ())?)
-                .map_err(|_| ())?;
+            f.write_all(&bytes).map_err(|_| ())?;
             f.sync_all().map_err(|_| ())?;
             fs::rename(&tmp, &path).map_err(|_| ())?;
+            // The binary form replaces a legacy record of the same id.
+            match fs::remove_file(&legacy) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(()),
+                _ => {}
+            }
             fs::File::open(dir)
                 .and_then(|f| f.sync_all())
                 .map_err(|_| ())
@@ -688,18 +796,12 @@ impl Control {
         }
         // Replay rule (see Control): a new request must be issued within the clock window and after
         // every forgotten receipt.
-        let now = crate::overview::unix_ns_now();
-        if req.issued_at_unix_ns.abs_diff(now) > self.window_ns {
-            let detail = format!(
-                "issued_at differs from the gateway clock by more than {} ms (clock skew or a stale request); issue a new command",
-                self.window_ns / 1_000_000
-            );
-            return reply(
-                id,
-                CommandStatus::Rejected,
-                CommandRejectReason::InvalidParams,
-                &detail,
-            );
+        if let Err((reason, detail)) = clock_window(
+            req.issued_at_unix_ns,
+            crate::overview::unix_ns(),
+            self.window_ns,
+        ) {
+            return reply(id, CommandStatus::Rejected, reason, &detail);
         }
         let ledger = self
             .record_path(id)
@@ -968,20 +1070,45 @@ impl Control {
         }
     }
 }
+/// Replay rule (see Control): a new request is issued within `window_ns` of the gateway receive
+/// time. Without a gateway clock (BSC-053) no request is inside the window.
+fn clock_window(
+    issued_at_unix_ns: i64,
+    now: Option<i64>,
+    window_ns: u64,
+) -> Result<(), (CommandRejectReason, String)> {
+    let Some(now) = now else {
+        return Err((
+            CommandRejectReason::EngineUnavailable,
+            "Gateway clock unavailable; nothing was executed".into(),
+        ));
+    };
+    if issued_at_unix_ns.abs_diff(now) > window_ns {
+        return Err((
+            CommandRejectReason::InvalidParams,
+            format!(
+                "issued_at differs from the gateway clock by more than {} ms (clock skew or a stale request); issue a new command",
+                window_ns / 1_000_000
+            ),
+        ));
+    }
+    Ok(())
+}
 /// The ledger records of one directory with their last update time.
 fn records(dir: &Path) -> Result<Vec<(SystemTime, PathBuf)>, ()> {
     Ok(fs::read_dir(dir)
         .map_err(|_| ())?
         .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|x| x == ledger_record::EXT || x == ledger_record::LEGACY_EXT)
+        })
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect())
 }
 fn terminal(path: &Path) -> bool {
-    fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<Record>(&b).ok())
-        .is_some_and(|r| {
+    ledger_record::read(path).is_ok_and(|r| {
             r.phase == CommandPhase::Completed as i32 || r.phase == CommandPhase::Failed as i32
         })
 }
@@ -991,7 +1118,7 @@ fn oldest_terminal(dir: &Path) -> Result<Option<PathBuf>, ()> {
     Ok(all.into_iter().map(|(_, p)| p).find(|p| terminal(p)))
 }
 fn issued_at(path: &Path) -> Option<i64> {
-    let record: Record = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    let record = ledger_record::read(path).ok()?;
     CommandRequest::decode(record.request.as_slice())
         .ok()
         .map(|r| r.issued_at_unix_ns)
@@ -1387,9 +1514,10 @@ mod tests {
         put(&control, CAPACITY, CommandPhase::Completed).unwrap();
         assert_eq!(records(&dir.join("commands")).unwrap().len(), CAPACITY);
         assert!(control.record_path(&uuid(0)).unwrap().exists());
-        assert!(dir
-            .join(format!("commands/archive/{}.json", uuid(1)))
-            .exists());
+        assert!(
+            dir.join(format!("commands/archive/{}.cmd", uuid(1)))
+                .exists()
+        );
         let replay = control.execute(&stored(1)).await;
         assert_eq!(replay.status, CommandStatus::Accepted as i32);
         assert_eq!(replay.phase, CommandPhase::Completed as i32);
@@ -1491,6 +1619,112 @@ mod tests {
     fn completed(r: &CommandResponse) -> bool {
         r.status == CommandStatus::Accepted as i32 && r.phase == CommandPhase::Completed as i32
     }
+    /// BSC-051: the binary ledger record round-trips and refuses any damage.
+    #[test]
+    fn the_binary_ledger_record_round_trips_and_refuses_damage() {
+        let r = Record {
+            request: vec![1, 2, 3],
+            response: vec![4],
+            phase: CommandPhase::Completed as i32,
+            detail: "done".into(),
+            launch_id: "launch".into(),
+        };
+        let bytes = ledger_record::encode(&r).unwrap();
+        assert_eq!(&bytes[..8], b"DBCMD001");
+        assert_eq!(ledger_record::decode(&bytes), Ok(r));
+        for cut in [0, 8, 12, bytes.len() - 1] {
+            assert!(ledger_record::decode(&bytes[..cut]).is_err(), "{cut}");
+        }
+        for at in [0, 9, 13, bytes.len() - 1] {
+            let mut flipped = bytes.clone();
+            flipped[at] ^= 1;
+            assert!(ledger_record::decode(&flipped).is_err(), "{at}");
+        }
+        let mut longer = bytes.clone();
+        longer.insert(bytes.len() - 4, 0);
+        assert!(ledger_record::decode(&longer).is_err());
+    }
+    /// BSC-051: a receipt written before the binary ledger (JSON) still replays and conflicts after
+    /// a restart; its next write replaces it with the binary form; nothing writes JSON any more.
+    #[tokio::test]
+    async fn a_legacy_json_receipt_replays_and_is_replaced_by_its_binary_form() {
+        let env = Env::new("legacy");
+        let control = env.restart();
+        let x = candidate(9_100, now());
+        assert!(completed(&control.execute(&x).await));
+        let cmd = env.ledger().join(format!("{}.cmd", x.request_id));
+        let legacy = env.ledger().join(format!("{}.json", x.request_id));
+        let record = ledger_record::read(&cmd).unwrap();
+        let json = serde_json::json!({
+            "request": record.request,
+            "response": record.response,
+            "phase": record.phase,
+            "detail": record.detail,
+            "launch_id": record.launch_id,
+        });
+        fs::write(&legacy, serde_json::to_vec(&json).unwrap()).unwrap();
+        fs::remove_file(&cmd).unwrap();
+        let control = env.restart();
+        assert!(completed(&control.execute(&x).await));
+        let other = CommandRequest {
+            resource_id: "SELF_A".into(),
+            ..x.clone()
+        };
+        assert!(refused(
+            &control.execute(&other).await,
+            CommandRejectReason::IdempotencyConflict
+        ));
+        assert_eq!(env.executions(), 1);
+        control.persist(&x.request_id, &record).unwrap();
+        assert!(cmd.exists() && !legacy.exists());
+        assert_eq!(ledger_record::read(&cmd), Ok(record));
+        assert!(
+            fs::read_dir(env.ledger()).unwrap().all(|e| e
+                .unwrap()
+                .path()
+                .extension()
+                .is_none_or(|x| x != "json"))
+        );
+    }
+    /// BSC-051: a damaged record makes the ledger unreadable; it is never "no record".
+    #[tokio::test]
+    async fn a_damaged_ledger_record_refuses_instead_of_running_again() {
+        let env = Env::new("damaged");
+        let control = env.restart();
+        let x = candidate(9_200, now());
+        assert!(completed(&control.execute(&x).await));
+        let cmd = env.ledger().join(format!("{}.cmd", x.request_id));
+        let mut bytes = fs::read(&cmd).unwrap();
+        let n = bytes.len();
+        bytes[n - 5] ^= 1;
+        fs::write(&cmd, bytes).unwrap();
+        assert!(refused(
+            &env.restart().execute(&x).await,
+            CommandRejectReason::EngineUnavailable
+        ));
+        assert_eq!(env.executions(), 1);
+    }
+    /// BSC-053: without the gateway clock no command is admitted and no process state is
+    /// reported; never time 0.
+    #[test]
+    fn a_missing_gateway_clock_admits_nothing_and_observes_nothing() {
+        let (reason, detail) = clock_window(now(), None, 1_000_000_000).unwrap_err();
+        assert_eq!(reason, CommandRejectReason::EngineUnavailable);
+        assert!(detail.contains("clock unavailable"), "{detail}");
+        assert!(clock_window(now(), Some(now()), 1_000_000_000).is_ok());
+        let mut s = ProcessSnapshot {
+            state: "RUNNING".into(),
+            run_id: "r".into(),
+            pid: Some(1),
+            reason: String::new(),
+            observed_unix_ms: 7,
+            controller_available: true,
+        };
+        stamp(&mut s, None);
+        assert_eq!((s.state.as_str(), s.observed_unix_ms), ("UNKNOWN", 0));
+        stamp(&mut s, Some(5));
+        assert_eq!(s.observed_unix_ms, 5);
+    }
     #[tokio::test]
     async fn an_archived_receipt_replays_after_a_restart_and_other_bytes_conflict() {
         let env = Env::new("restart");
@@ -1501,10 +1735,11 @@ mod tests {
         for n in 0..CAPACITY {
             put(&control, n, CommandPhase::Completed).unwrap();
         }
-        assert!(env
-            .ledger()
-            .join(format!("archive/{}.json", x.request_id))
-            .exists());
+        assert!(
+            env.ledger()
+                .join(format!("archive/{}.cmd", x.request_id))
+                .exists()
+        );
         let control = env.restart();
         assert!(completed(&control.execute(&x).await));
         for other in [
@@ -1550,7 +1785,7 @@ mod tests {
         ));
         // Crash after raising the mark but before removing the receipt: it still replays.
         let kept = after(&x, 0); // the earliest receipt still archived
-        assert!(archive.join(format!("{}.json", kept.request_id)).exists());
+        assert!(archive.join(format!("{}.cmd", kept.request_id)).exists());
         fs::write(
             archive.join(RETIRED_THROUGH),
             kept.issued_at_unix_ns.to_string(),

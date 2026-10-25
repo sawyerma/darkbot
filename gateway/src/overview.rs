@@ -83,6 +83,12 @@ fn allocate_generation(path: &std::path::Path) -> std::io::Result<u64> {
     Ok(next)
 }
 
+/// The wall clock in ns; `None` before 1970 or beyond i64 (BSC-053: a gate must not read 0).
+pub fn unix_ns() -> Option<i64> {
+    let since = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    i64::try_from(since.as_nanos()).ok()
+}
+
 pub fn unix_ns_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
