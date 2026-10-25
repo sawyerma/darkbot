@@ -1,6 +1,6 @@
 # Project_0 — ENTSCHEIDUNGEN.md
 
-**Version:** 1.1 · **Datum:** 2026-10-25
+**Version:** 1.2 · **Datum:** 2026-10-25
 **Art des Dokuments:** Entscheidungsnachweis. Dieses Dokument ist **keine** Status- und **keine** Phasenplan-Autorität. Status: `BUGS.md`. Plan und Gates: `PHASENPLAN.md`.
 **Codebasis der Entscheidungsvorbereitung:** Docs `72a99cc2`, Code `865867af`; Gegenprüfung durch eine zweite Instanz an `87c064ba` und `746fdf29`. Vor jeder Umsetzung muss gegen den dann aktuellen HEAD neu gepinnt werden. Dateinamen in diesem Dokument zeigen nur, wo eine Änderung ansetzt; sie sind keine verbindlichen Zeilenangaben.
 
@@ -51,18 +51,17 @@
 
   Externe Qualifikation und LIVE-Freigabe bleiben eigenständige Gates.
 
-### Z-1 — Geltungsbereich der CI (OFFEN, vom Nutzer zu bestätigen)
-- **Vorschlag:**
-  - Für eine Project_0-Abnahme müssen grün sein: `project0-gate` sowie jeder gemeinsame Job, den die konkrete Änderung berührt (z. B. Gateway oder Protokoll bei Frontend-Rundwegen).
-  - Rote Jobs, deren Ursache nachweislich in BSC-Code liegt, werden gemeldet. Sie werden nicht aus einer Project_0-Session repariert.
-- **Status:** OFFEN. Bis zur Entscheidung gilt der bisherige Zustand, also keine Regel.
+### Z-1 — CI-Pflichtjob-Regel (ENTSCHIEDEN, N-4)
+- **Nutzerentscheidung vom 25.10.2026:** Verbindlich gilt N-4 in §7 einschließlich fester Pfad→Job-Tabelle aus den jeweils gültigen CI-Workflows.
+- Bei roten betroffenen Pflichtjobs ist `OFFLINE_VERIFIED` untersagt, außer den **vier** ausdrücklich festgelegten und belegten BSC-Ausnahmekriterien für gemeinsame Jobs; nie für `project0-gate`.
+- Keine eigenmächtige BSC-Korrektur, kein übersprungener Test, keine grüne Gesamt-CI bei rotem Lauf; alle Ausnahmen mit `BUGS.md`-ID dokumentieren.
 
 ---
 
 ## 2. Entscheidungen 1–15
 
 Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bedeutet nicht · Abnahme · Ansatzpunkte.
-**Status jeder Entscheidung:** BESCHLOSSEN (Nutzer, 2026-10-25) · NICHT IMPLEMENTIERT.
+**Status jeder Entscheidung:** BESCHLOSSEN (Nutzer, 2026-10-25); die Code-/Frontend-Abnahmen sind je Ticket gesondert im kanonischen `BUGS.md` zu führen, keine Implementierung allein durch Dokumentation behaupten.
 
 ### 1 — V2-09: Blockhash-Frühcheck
 - **Beschluss:** Variante B. Frühabbruch mit sicherem Wiederanlauf.
@@ -106,35 +105,14 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
 - **Ansatzpunkte:** `one_shot/admission.rs`, `one_shot/transport.rs`, `execution/pipeline.rs`. Register: `bug_v2.md` V2-15.
 
 ### 3 — V2-15 / P7-02: Beweis „nicht gelandet“
-- **Beschluss:** B entscheidet, C läuft immer als Gegenprobe.
-- **Pflichtanforderungen:**
-  1. **B:** Zwei unabhängige FREE_ONLY-Quellen (verschiedene Betreiber) bestätigen jeweils:
-     - finalisierte Blockhöhe > `lastValidBlockHeight`,
-     - History-Untergrenze ≤ State-Slot,
-     - alle gebundenen Signaturen abwesend (Statusabfrage mit History),
-     - `getTransaction` (finalized) = null.
-  2. **C (Blockabgleich):**
-     - Lückenlos vom State-Slot bis zum ersten finalisierten Block mit Blockhöhe > `lastValidBlockHeight`.
-     - Die Slot-Liste kommt aus `getBlocks`.
-     - Jeder vorhandene Block ist finalisiert und erfolgreich gelesen (`transactionDetails: signatures`).
-     - Keine gebundene Signatur ist enthalten.
-  3. **C läuft in jedem Non-Landing-Fall.** Findet C eine Signatur, ist das ein **Veto**: UNKNOWN, die Holds bleiben, Alarm.
-  4. **Ist nur eine Quelle erreichbar, entscheidet C allein.**
-  5. **Fehlerfälle:** Fehlender Block, Call-Fehler oder Widerspruch ergeben UNKNOWN. Die Holds bleiben, und nach dem Retry-Intervall wird erneut gelesen.
-  6. **Kein GUI-Schalter.** Der Wallets-Reiter zeigt:
-     - Anteil „B allein entschieden“,
-     - Anteil „C nötig“,
-     - Widersprüche,
-     - Dauer der Kapitalbindung,
-     - verbrauchte Calls.
-- **Bedeutet nicht:**
-  - Keine schnellere Freigabe als nach Blockhash-Ablauf plus Finalisierung (ca. 75–90 s nach dem Signieren).
-  - Kein kostenpflichtiger Provider.
-- **Abnahme:**
-  - Loopback-Tests für alle Ausgänge (B allein, C-Veto, nur eine Quelle, fehlender Block, Widerspruch).
-  - Real: Ohne qualifizierten zweiten Endpunkt (§4, C-02) gilt Pflichtanforderung 4.
-- **Ansatzpunkte:** `one_shot/settlement.rs`, `one_shot/exit.rs`, `state_owner/fe04.rs`, Remote-Worker. Register: `BUGS.md` C12, `bug_v2.md` V2-15.
-
+- **Beschluss:** B und C prüfen die Non-Landing-Evidence; **N-2 (§7) ist die verbindliche Präzisierung und ersetzt die früheren Pflichtanforderungen 3–6 einschließlich der alten Widerspruchs- und Wallet-Kennzahlen.**
+- **B:** Zwei unabhängige FREE_ONLY-Quellen verschiedener Betreiber; je Quelle vier Kriterien: finalisierte Blockhöhe > `lastValidBlockHeight`, `minimumLedgerSlot` ≤ State-Slot, gebundene Signaturen mit History nicht vorhanden und `getTransaction(finalized)=null`. Jede Quelle wird als verwendbar / unbrauchbar / positive Sichtung typisiert eingestuft.
+- **C:** Pflichtmäßige lückenlose qualifizierte finalisierte kanonische Block-/Parent-/Skip-/Signatur-Gegenprüfung vom State-Slot bis nach dem Gültigkeitsfenster; niemals allein aus geprunten/null RPC-Responses auf Abwesenheit schließen.
+- **Veto/Settlement:** Positive Sichtung durch B oder C blockiert Non-Landing; nur vollständige bestätigte finalisierte Landung geht in FE-04-Reconciliation, Kapitalfreigabe ausschließlich über qualifiziertes Journal-Settlement. Sonst UNKNOWN/Holds bleiben/Alarm/Retry.
+- **Abwesenheit:** Keine positive Sichtung, C lückenlos negativ, dazu entweder zwei gültige unabhängige B-Negativnachweise oder bei weniger als zwei brauchbaren B-Quellen der qualifizierte C-Alleinbeweis. Kein manueller Override.
+- **Wallets:** exakt fünf Ergebnisklassen nach N-2 (§7), unbrauchbare B-Quellen nach Grund, Hold-Dauer, Calls und Bytes; **kein Schalter**.
+- **Abnahme:** N-2-Loopback-Matrix in §7 und echte Phase-/Provider-/Archive-Gates; ohne diese keine externe Freigabe. Keine vorzeitige Behauptung aus geschätzten Sekunden.
+- **Ansatzpunkte:** `one_shot/settlement.rs`, `one_shot/exit.rs`, `state_owner/fe04.rs`; Querverweise `BUGS.md` C12 und `bug_v2.md` V2-15.
 ### 4 — V7: Holds bei ZeroPrefund/FlashFunded
 - **Beschluss:** A und B. A gilt verbindlich; B wird vollständig gebaut. Modi OFF/OBSERVE/ACTIVE, Standard OBSERVE.
 - **Pflichtanforderungen:**
@@ -337,7 +315,7 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
   - Widersprüche in `STATUS.md` werden korrigiert.
   - Eine Abgleichliste belegt, dass keine ID verloren ging.
   - Es gibt eine Zählung je Commit-SHA.
-  - Die Originalberichte bleiben unverändert erhalten. Nach `fertig/` kommen nur vollständig erledigte Berichte, und erst nach belegter Vollständigkeit.
+  - **N-3:** Die drei Originalberichte bleiben unverändert an Ort und Stelle; **erst ab dem konsolidierten `BUGS.md`-Commit** sind sie als Prüfberichte eingefroren und keine Statusautorität mehr. Status danach ausschließlich in `BUGS.md`; Archivierung erst, wenn sämtliche IDs des jeweiligen Berichts `ERLEDIGT` oder `WIDERLEGT` sind.
 - **Bedeutet nicht:** Kein Löschen von Befunden, Evidence oder Originaltext.
 
 ### 15 — Git- und Session-Regel
@@ -417,11 +395,84 @@ Parallel dazu und unabhängig vom Code: Freigabe C-01 beantragen.
 
 ## 7. Nachträge vom 25.10.2026
 
-| ID | Gegenstand | Status |
-|---|---|---|
-| **N-1** | **G-1 gilt nur für die 15 Entscheidungen DEC-01…15.** Die übrige Roadmap bleibt verbindlich; MT6–MT10 benötigen C0-MO und einen belegten Engpass. Eine Ausweitung erfordert einen weiteren Nutzerbeschluss. Bereits im Phasenplan (Commit `76d515b4`). | **ENTSCHIEDEN** |
-| **N-2** | Vorschlag: Bei widersprechenden B-Quellen zu Non-Landing einen lückenlosen C-Nachweis allein entscheiden lassen. Wie positive Landing-Evidence gegen negative C-Evidence aufgelöst wird, ist sicherheitsrelevant und noch nicht entschieden. Bestehende fail-closed-Regel bleibt gültig. | **OFFEN** |
-| **N-3** | Vorschlag: Quellberichte nach vollständiger ID-Übernahme auch mit offenen Tickets nach `fertig/` verschieben. Bis zur Entscheidung bleiben Berichte unverändert an Ort und Stelle. | **OFFEN** |
-| **N-4 / Z-1** | Vorschlag: `project0-gate` und betroffene gemeinsame Proto-/Gateway-/Frontend-Jobs grün; unabhängige BSC-Fehler nur mit dokumentiertem Eltern-Commit und Ursachenbeleg separat ausweisen. Keine Behauptung einer grünen Gesamt-CI bei roten Jobs. | **OFFEN** |
+### N-1 — Scope von G-1
+**ENTSCHIEDEN (Nutzer, 2026-10-25).** G-1 gilt ausschließlich für die 15 Entscheidungen DEC-01…15. Die übrige Roadmap bleibt verbindlich, ihre Mess- und Phasengates gelten weiter (MT6–MT10 erst nach C0-MO und gemessenem Engpass). Bereits im Phasenplan-Commit `76d515b4` umgesetzt.
 
-Diese Nachträge legen für N-2 bis N-4 **keine neue Nutzerentscheidung** fest. DEC-04/11/13 sind bestehende, im Phasenplan präzisierte Beschlüsse. Die FE-07-Folgepflicht steht bereits in PHASENPLAN §0.6.
+### N-2 — Widersprüche beim Non-Landing-Beweis (Nr. 3 präzisiert)
+**ENTSCHIEDEN (Nutzer, 2026-10-25).**
+
+1. **Jede B-Quelle hat genau eine Klasse:**
+   - **Verwendbar:** Alle vier B-Kriterien (finalisierte Höhe, History-Untergrenze, Signatur-Status mit History, `getTransaction(finalized)=null`) sind erfüllt.
+   - **Unbrauchbar:** Unerreichbar, HTTP 429, geprunt (`minimumLedgerSlot` > State-Slot), finalisierte Höhe noch nicht über `lastValidBlockHeight` oder sonst fehlerhaft. Keine Bestätigung.
+   - **Positive Sichtung:** Die Quelle meldet eine gebundene Signatur finalisiert vorhanden.
+2. **Jede positive Sichtung von B oder C ist Veto gegen Non-Landing.** Danach Landungsprüfung: finalisierte Transaktion samt vollständigen Metadaten und Signaturzugehörigkeit zum finalisierten Block/Slot, soweit erreichbar von beiden Quellen. Bei **bestätigter Landung** reguläre FE-04-Reconciliation (TX-Ergebnis, Token-/Lamport-Deltas, Gebühren, ggf. Exit); **Kapital ausschließlich über qualifiziertes Journal-Settlement freigeben**. Bei unbestätigter, widersprüchlicher oder unvollständiger Landung: `UNKNOWN`, Holds bleiben, typisierter Widerspruchs-Record, Alarm und Retry.
+3. **Non-Landing-Freigabe nur kumulativ:** Keine positive Sichtung; C lückenlos und negativ; zwei verwendbare unabhängige B-Negativquellen oder, bei weniger als zwei verwendbaren B-Quellen, vollständiger qualifizierter C-Alleinbeweis.
+4. **Sonst:** Fehlender Block, Call-Fehler, unvollständiges C → `UNKNOWN`, Holds bleiben.
+5. **Keine manuelle Auflösung** und kein eigener GUI-Schalter.
+6. **Wallets: je Versuch genau eine der fünf Ergebnisklassen** `B+C bestätigt`, `C allein qualifiziert`, `Veto – Landung bestätigt`, `Veto – Widerspruch offen`, `UNKNOWN – unvollständig`; zusätzlich unbrauchbare Quellen je Grund, Hold-Dauer, Calls und Bytes. Die alten Kennzahlen `B allein entschieden`/`C nötig` sind ersetzt.
+7. **Abnahme (Loopback, separate Negativ-/Positivtests):**
+
+| Eingabe | Erwartetes Ergebnis |
+|---|---|
+| Zwei B-Quellen negativ, C negativ | `B+C bestätigt` |
+| Eine B-Quelle geprunt, 429 oder unerreichbar, C vollständig negativ | `C allein qualifiziert` |
+| Beide B-Quellen unbrauchbar, C vollständig negativ | `C allein qualifiziert` |
+| C unvollständig | `UNKNOWN – unvollständig` |
+| Eine B-Quelle meldet eine Signatur, C negativ, Landung nicht bestätigt | Keine Freigabe, `Veto – Widerspruch offen` |
+| C findet Signatur und Landung bestätigt | FE-04-Reconciliation; Kapital erst nach qualifiziertem Journal-Settlement frei |
+| Landung bestätigt, aber Deltas unvollständig | UNKNOWN, Hold bleibt |
+| Wiederholtes Lesen ohne neue Evidence | unverändert, kein Doppel-Settlement |
+
+### N-3 — Quellberichte (Nr. 14 präzisiert)
+**ENTSCHIEDEN (Nutzer, 2026-10-25).**
+
+- `bug_v2.md`, `fehlstellen_v1.md` und `bugs_b.md` bleiben **unverändert am bisherigen Pfad**.
+- Erst **ab dem erfolgreichen Konsolidierungs-Commit** sind sie eingefrorene Prüfberichte: keine Befunde, keine neuen Statusnachträge, keine Statusautorität.
+- Ab diesem Commit wird der Status **ausschließlich** in `BUGS.md` gepflegt; sein Kopf benennt die eingefrorenen Quellen.
+- Ein Bericht darf erst nach `fertig/`, wenn **alle** seine IDs in `BUGS.md` `ERLEDIGT` oder `WIDERLEGT` sind. Kein pauschaler Umzug und keine Löschung von Ursprungstext oder Evidence.
+
+### N-4 / Z-1 — CI-Pflichtjobs für `OFFLINE_VERIFIED`
+**ENTSCHIEDEN (Nutzer, 2026-10-25).**
+
+1. Pflicht sind `project0-gate` laut CI und **alle betroffenen gemeinsamen Protokoll-/Codegen-/Golden-, Gateway-, Reporter- und Frontend-/Playwright-Jobs** gemäß festem Pfad→Job-Mapping der aktuellen Workflow-YAML. Bei unbekanntem geänderten Pfad gelten **alle** gemeinsamen Jobs als Pflicht.
+2. Ein roter Pflichtjob blockiert `OFFLINE_VERIFIED`.
+3. **Einzige Ausnahme, nur für gemeinsame Jobs** bei gleichzeitigem Nachweis: (a) identischer Test/identische Fehlerursache bereits auf dem Basis-Commit rot; (b) Tests **und** Ursache sind in `bsc/**` und das Arbeitspaket ändert keine `bsc/**`-Datei; (c) alle übrigen Tests des Jobs, vor allem Project_0-relevante, grün; (d) eigenständiger `BUGS.md`-Eintrag mit Test-IDs, Baseline-Lauf, Ursache.
+4. Nie erlaubt: BSC-Code aus Project_0-Session ändern, Tests überspringen/deaktivieren, rote CI durch Wiederholung als grün deklarieren. Flaky Tests sind eigenständig zu erfassen.
+5. Mit bewilligter Ausnahme: `OFFLINE_VERIFIED (CI-Ausnahme <ID>)`; gemeinsame CI weiterhin als **rot** ausweisen. Für `project0-gate` keine Ausnahme.
+
+**Feste Pfad→Job-Tabelle (Stand der Workflow-YAML vom 25.10.2026; bei Änderung neu ableiten):**
+
+| Geänderter Pfad | Pflichtjobs aus den aktuell vorhandenen GitHub-Workflows |
+|---|---|
+| `project_0/native/**`, `project_0/scripts/**`, `project_0/tests/**` | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui` |
+| `frontend/**` | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui` |
+| `protocol/**`, `gateway/**` | `Project 0 status contract`: fünf `project0-gate`-Matrizen, `native`, `contract-and-ui`; zusätzlich `gateway`-Workflow: `rust`, `protocol` |
+| `.github/workflows/project0-status.yml` | alle Jobs des Workflows `Project 0 status contract` |
+| `.github/workflows/gateway.yml` | beide Jobs des Workflows `gateway` |
+| `project_0/docs/**` allein | keine automatische CI-Auslösung durch diese beiden Workflows; Dokumentabgleich gesondert nachweisen, keine erfundene CI-Freigabe |
+
+### N-5 — G-1: Feste Reiter-/Command-Zuordnung
+**ENTSCHIEDEN (Nutzer, 2026-10-25).**
+
+Die bisherige Ermessensformel `soweit technisch für die jeweilige Funktion erforderlich` ist ungültig. Für jede Entscheidung mit Laufzeitwirkung ist ein `.p0j`-Record Pflicht. Die folgende Zuordnung ist verbindlich:
+
+| DEC | Status bis zum bestehenden Reiter | Command-Rückweg |
+|---|---|---|
+| 01 | Liquidator: `BLOCKHASH_STALE`-Verlustgrund, Wiederanläufe | nein |
+| 02 | Liquidator: Simulation wiederverwendet / neu / abgelehnt | nein |
+| 03 | Wallets: fünf N-2-Ergebnisklassen, Bindungsdauer, Calls/Bytes | nein |
+| 04 | Wallets und Liquidator: Modus, A/B/Ist und Abweichungen | ja: Modus mit Nachweis-Gate |
+| 05 | Effektive Werte mit Herkunft in den zuständigen Reitern | nur ausdrücklich editierbare Felder (DEC-06, DEC-07) |
+| 06 | Liquidator: Threshold-/Fallback-/Latenzstatus gemäß DEC-06 | ja: Modus-Hot-Change |
+| 07 | Capture: TTL, Grenzen, Herkunft und Phase | ja: TTL zwischen Läufen; getrennte Netzwerk-/Startfreigabe |
+| 08 | Capture und Analytics: INDEX/CROSSCHECK/STRICT und Jobs | ja: START/STOP/CANCEL/STATUS |
+| 09 | keine Anzeige (Build-/Inventartest-Entscheidung) | nein |
+| 10 | Liquidator/Wallets: Approval-Status ohne Secrets | nein |
+| 11 | Liquidator: Capability `requested/effective/block_reason` | ja: Capability-Modus |
+| 12 | keine neue Anzeige; typisierte Gründe in vorhandenen Projektionen | nein |
+| 13 | Liquidator/Wallets: Admission- und LIVE-Status | ja: LIVE-Anforderung über Controller, `effective=BLOCKED` bis Freigabe |
+| 14, 15 | Prozessentscheidungen ohne neue GUI-Funktion | nein |
+
+**Kein neues Bedienelement** bei `nein`. Ein solcher Schalter bräuchte eine neue Nutzerentscheidung. Für jede Entscheidung **mit Laufzeitwirkung** ist der typisierte persistente `.p0j`-Nachweis Pflicht; für reine Build- oder Prozessentscheidungen werden keine künstlichen Laufzeitrecords erzeugt.
+
+**Statusautorität bleibt `BUGS.md`; Plan- und Gate-Autorität bleibt `PHASENPLAN.md`.** Die N-2…N-5-Entscheidungen erlauben keine Mainnet-Reads, Paid-Provider, LIVE, Signing oder Geldtransfers.
