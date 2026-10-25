@@ -214,9 +214,9 @@ impl ShadowOwner {
         let q = |v: Option<u64>| v.map_or_else(|| "none".to_string(), |v| v.to_string());
         let mut line = format!(
             "lane_stats: weights={}:{}:{} promotions={} demotions={} cancellations={}",
-            LANE_WDRR_START_WEIGHTS[0],
-            LANE_WDRR_START_WEIGHTS[1],
-            LANE_WDRR_START_WEIGHTS[2],
+            self.oracle_lanes.weights()[0],
+            self.oracle_lanes.weights()[1],
+            self.oracle_lanes.weights()[2],
             self.oracle_lanes.stats.promotions,
             self.oracle_lanes.stats.demotions,
             self.oracle_lanes.stats.cancellations,

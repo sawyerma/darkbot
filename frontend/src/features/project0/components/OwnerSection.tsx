@@ -1,5 +1,6 @@
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorView } from "../model/owner";
+import type { SystemView } from "../model/status";
 import { nsToMs } from "../model/owner";
 import { usdMicroDisplay } from "../model/format";
 import { orDash } from "../model/statusFormat";
@@ -10,15 +11,25 @@ const ms = (ns: bigint | null) => {
   return v == null ? "—" : `${v} ms`;
 };
 
+/** D01: the owner and liquidator bounds of the engine's parameter registry shown in this tab. */
+const OWNER_PARAMETERS = [
+  "blockhash_max_age_ms", "projection_requeue_max", "lane_weight_l0", "lane_weight_l1", "lane_weight_l2",
+  "jupiter_timeout_ms", "fe04_settle_retry_ms", "fe04_refresh_ms", "owner_status_ms", "prepared_candidates",
+] as const;
+
 /**
  * The running state owner as the Rust owner published it (project0.liquidator.state): state,
  * ingress, trigger, the day's decisions, Safety and every capability with its gate. Nothing is
  * derived here; a topic without a state shows its status.
  */
-export function OwnerSection({ owner, topicStatus }: { owner: LiquidatorView | null; topicStatus: TopicStatus }) {
+export function OwnerSection({ owner, topicStatus, parameters }: { owner: LiquidatorView | null; topicStatus: TopicStatus; parameters: SystemView["parameters"] | null }) {
+  const params = OWNER_PARAMETERS.map((name) => {
+    const p = parameters?.get(name);
+    return <DetailRow key={name} title={name} value={p ? `${p.value} ${p.unit} · ${p.source}` : "Not reported"}/>;
+  });
   if (!owner) {
     return <Section title="Runtime owner" aside={<span className="p0-badge">{topicStatus}</span>}>
-      <p className="p0-quiet">No Shadow/econ4h owner state received.</p></Section>;
+      <p className="p0-quiet">No Shadow/econ4h owner state received.</p>{params}</Section>;
   }
   const { engine: e, trigger: t, pipeline: p, safety: s } = owner;
   return <Section title="Runtime owner" aside={<span className="p0-badge">{e?.runState ?? "—"} · {owner.mode}</span>}>
@@ -35,5 +46,6 @@ export function OwnerSection({ owner, topicStatus }: { owner: LiquidatorView | n
     <DetailRow title="Safety · day realized / loss limit" value={s ? `${usdMicroDisplay(s.dayRealizedUsdMicro)} / ${usdMicroDisplay(s.maxDailyLossUsdMicro)}` : "—"}/>
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
+    {params}
   </Section>;
 }

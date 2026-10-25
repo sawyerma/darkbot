@@ -17,6 +17,10 @@ struct Fixture {
     results: Option<crate::orchestration::remote_workers::Detached>,
 }
 
+/// The built-in operational limits the fixture's owner runs with.
+static OPERATIONAL: std::sync::LazyLock<darkbot_solana::runtime_config::Limits> =
+    std::sync::LazyLock::new(Default::default);
+
 fn e2e_limits() -> Limits {
     Limits {
         max_total_capital: 0,
@@ -86,6 +90,10 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         status_published: None,
         status_seq: 0,
         ledger_view: None,
+        blockhash_max_age_ns: OPERATIONAL.blockhash_max_age_ms * 1_000_000,
+        fe04_settle_retry: Duration::from_millis(OPERATIONAL.fe04_settle_retry_ms),
+        fe04_refresh: Duration::from_millis(OPERATIONAL.fe04_refresh_ms),
+        projection_requeue_max: OPERATIONAL.projection_requeue_max as u8,
         eval_slippage_bps: 0,
         zero_prefund_enabled: false,
         c0_census: None,
@@ -888,7 +896,7 @@ fn z14_bootstrap_probes_never_occupy_the_ingress_channel() {
 
 /// E9: a projection made unusable by a change during the worker's projection (or by a lagging
 /// node) is requested again through the ordinary detect queue — behind work already waiting, so
-/// neither starves — at most `PROJECTION_REQUEUE_MAX` times in a row; then it is counted and the
+/// neither starves — at most `projection_requeue_max` times in a row; then it is counted and the
 /// candidate waits for its next trigger, and a later stale result starts a fresh bounded
 /// sequence. A candidate no longer in state is not requeued.
 #[test]
@@ -911,7 +919,7 @@ fn e9_stale_projection_requeue_is_bounded_and_fair() {
     let waiting = (Pubkey::new_unique(), 1, 11, "account_update");
     f.owner.detect_queue.push_back(waiting);
     let requeue = (candidate, 7, 12, "integration_projection_requeue");
-    for n in 1..=PROJECTION_REQUEUE_MAX as u64 {
+    for n in 1..=f.owner.projection_requeue_max as u64 {
         f.owner.requeue_projection(candidate, 7, None);
         assert_eq!(f.owner.projection_stats.requeued, n);
     }
@@ -919,7 +927,7 @@ fn e9_stale_projection_requeue_is_bounded_and_fair() {
     let mut expected = vec![waiting];
     expected.extend(std::iter::repeat_n(
         requeue,
-        PROJECTION_REQUEUE_MAX as usize,
+        f.owner.projection_requeue_max as usize,
     ));
     assert_eq!(queued, expected, "behind the waiting work, FIFO");
     // The bound: no further request, counted, the sequence ends.
@@ -2385,7 +2393,7 @@ fn c3_owner_keeps_unknown_holds_and_retries_after_the_backoff() {
             },
         );
         run_until(&mut f, |o| o.fe04_settle_due.is_some());
-        assert!(f.owner.fe04_settle_due.unwrap() >= sent + super::fe04::FE04_SETTLE_RETRY);
+        assert!(f.owner.fe04_settle_due.unwrap() >= sent + f.owner.fe04_settle_retry);
         assert!(!fe04_settled(&f.owner));
         assert_eq!(f.owner.safety.capital_in_use(), intent.capital_usd_micro);
         assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
@@ -2851,7 +2859,7 @@ fn fe04_exit_owner_keeps_a_partial_sale_unknown_with_its_holds() {
     assert!(exit_open(&f.owner));
     assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
     assert_eq!(ledger(&f.owner), before);
-    assert!(f.owner.fe04_settle_due.unwrap() >= sent + super::fe04::FE04_SETTLE_RETRY);
+    assert!(f.owner.fe04_settle_due.unwrap() >= sent + f.owner.fe04_settle_retry);
     f.owner.remote_apply().unwrap();
     assert!(fe04_job(&f).is_none(), "no read before the backoff ends");
     cleanup(f);

@@ -18,9 +18,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-/// Upper bound of one Jupiter request (also when the candidate deadline is further away).
-const REQUEST_TIMEOUT: Duration = Duration::from_millis(1500);
-
 const DEFAULT_BASE: &str = "https://api.jup.ag/swap/v2";
 const JUP_PROGRAM: &str = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
 /// The native mint (wrapped SOL).
@@ -144,6 +141,9 @@ pub(crate) fn swap_terms(
 #[derive(Clone)]
 pub struct JupiterV2RouteProvider {
     client: reqwest::blocking::Client,
+    /// D01: upper bound of one Jupiter request, also when the candidate deadline is further
+    /// away (`jupiter_timeout_ms`).
+    request_timeout: Duration,
     base_url: String,
     taker: Pubkey,
     api_key: Option<String>,
@@ -165,11 +165,17 @@ impl JupiterV2RouteProvider {
         if max_accounts == 0 || max_accounts > 64 {
             return Err("Jupiter max_accounts must be 1..=64".into());
         }
+        let request_timeout = Duration::from_millis(
+            darkbot_solana::runtime_config::active()
+                .limits
+                .jupiter_timeout_ms,
+        );
         Ok(Self {
             client: darkbot_solana::provider::blocking_http()
-                .timeout(REQUEST_TIMEOUT)
+                .timeout(request_timeout)
                 .build()
                 .map_err(|e| format!("jupiter client: {e}"))?,
+            request_timeout,
             base_url: DEFAULT_BASE.into(),
             taker,
             api_key,
@@ -216,7 +222,7 @@ impl JupiterV2RouteProvider {
         let mut req = self
             .client
             .get(url)
-            .timeout(remaining.min(REQUEST_TIMEOUT))
+            .timeout(remaining.min(self.request_timeout))
             .query(&[
                 ("inputMint", from_mint.to_string()),
                 ("outputMint", to_mint.to_string()),

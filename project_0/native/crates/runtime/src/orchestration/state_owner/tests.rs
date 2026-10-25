@@ -761,12 +761,10 @@ fn blockhash_freshness_is_one_policy() {
         last_valid_block_height: 1,
         refreshed_ns: 1_000,
     });
-    assert!(cache
-        .fresh(1_000 + BLOCKHASH_MAX_AGE_NS, BLOCKHASH_MAX_AGE_NS)
-        .is_some());
-    assert!(cache
-        .fresh(1_000 + BLOCKHASH_MAX_AGE_NS + 1, BLOCKHASH_MAX_AGE_NS)
-        .is_none());
+    // D01: the bound is the typed parameter `blockhash_max_age_ms`, held once by the owner.
+    let bound = darkbot_solana::runtime_config::Limits::default().blockhash_max_age_ms * 1_000_000;
+    assert!(cache.fresh(1_000 + bound, bound).is_some());
+    assert!(cache.fresh(1_000 + bound + 1, bound).is_none());
     for (name, source) in [
         ("detect.rs", include_str!("detect.rs")),
         ("events.rs", include_str!("events.rs")),
@@ -775,7 +773,7 @@ fn blockhash_freshness_is_one_policy() {
             !source.contains("30_000_000_000"),
             "{name} keeps its own bound"
         );
-        assert!(source.contains("BLOCKHASH_MAX_AGE_NS"), "{name}");
+        assert!(source.contains("self.blockhash_max_age_ns"), "{name}");
     }
 }
 

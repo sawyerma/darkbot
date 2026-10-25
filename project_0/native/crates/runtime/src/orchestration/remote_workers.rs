@@ -234,7 +234,11 @@ impl RemoteWorkers {
                 .spawn(move || {
                     let rpc = darkbot_solana::provider::rpc_client(
                         fe04_rpc_url,
-                        Duration::from_secs(30),
+                        Duration::from_millis(
+                            darkbot_solana::runtime_config::active()
+                                .limits
+                                .rpc_timeout_ms,
+                        ),
                         Default::default(),
                         // C5: financial reconciliation, the prioritized workload.
                         darkbot_solana::provider::Workload::Reconcile,
@@ -274,7 +278,11 @@ impl RemoteWorkers {
                 .spawn(move || {
                     let rpc = darkbot_solana::provider::rpc_client(
                         winner_rpc_url,
-                        Duration::from_secs(30),
+                        Duration::from_millis(
+                            darkbot_solana::runtime_config::active()
+                                .limits
+                                .rpc_timeout_ms,
+                        ),
                         Default::default(),
                         darkbot_solana::provider::Workload::Winner,
                     );

@@ -108,6 +108,8 @@ export interface SystemView {
   activated: boolean;
   profile: string | null;
   parameterCount: number;
+  /** Every operational parameter by field (value, unit, source) — the engine's one authority. */
+  parameters: ReadonlyMap<string, { value: bigint; unit: string; source: string }>;
   liveAuthorized: boolean | null;
   submissionAuthorized: boolean | null;
 }

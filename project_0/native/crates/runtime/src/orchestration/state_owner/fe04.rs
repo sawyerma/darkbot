@@ -7,7 +7,7 @@
 //! successful booking rebuilds the reservation book from the journal; a refused booking (ledger
 //! violation: Safety halts, applies nothing) keeps every hold and the capital to release, the
 //! settlement stays in the journal for the restart replay. UNKNOWN keeps every hold and is read
-//! again after `FE04_SETTLE_RETRY`; a finalized attempt whose valuation is still unknown is
+//! again after `fe04_settle_retry_ms`; a finalized attempt whose valuation is still unknown is
 //! settled again (locally, no RPC) after the same wait. The one-shot HALT stays. An exit of the
 //! open inventory is read, applied and booked the same way (`apply_fe04_exit_evidence`): its
 //! booking is the restart replay's (its day, realized net, released mark); a read applies only
@@ -49,9 +49,6 @@ pub(super) fn book_settlement(
         None => safety.restore_attempt(settled.unix_s, None, Some(settled)),
     }
 }
-
-/// Wait between two settlement reads of a still UNKNOWN attempt or exit.
-pub(super) const FE04_SETTLE_RETRY: Duration = Duration::from_secs(10);
 
 /// The conservative USD-micro value of a signed wallet delta from canonical state at the chain
 /// clock: every bank of the asset must price it (a gain at the lowest, a loss at the highest);
@@ -122,7 +119,7 @@ impl ShadowOwner {
         let open_exit = held.open_exit_id();
         // One read in flight at most (capacity 1).
         if let Some(done) = self.remote.fe04_settlement_results.try_pop() {
-            self.fe04_settle_due = Some(std::time::Instant::now() + FE04_SETTLE_RETRY);
+            self.fe04_settle_due = Some(std::time::Instant::now() + self.fe04_settle_retry);
             match done.exit {
                 None => self.apply_fe04_evidence(done.evidence),
                 Some(id) if open_exit.as_ref() == Some(&id) => {
@@ -138,7 +135,7 @@ impl ShadowOwner {
         {
             return;
         }
-        let retry = Some(std::time::Instant::now() + FE04_SETTLE_RETRY);
+        let retry = Some(std::time::Instant::now() + self.fe04_settle_retry);
         let work = match (held.settlement_job(), held.exit_job()) {
             (Some((intent, observed)), _) => Some(Fe04SettlementWork {
                 subject: (&intent).into(),

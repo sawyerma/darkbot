@@ -3,6 +3,26 @@ use serde::{Deserialize, Serialize};
 
 use std::{collections::BTreeMap, path::Path, sync::OnceLock};
 
+/// D11: defaults the runtime's own typed configurations share with the registry below (one
+/// authority: `MarketConfig`, `EnrichConfig`, `EconConfig` reference these, never a second
+/// literal).
+pub mod defaults {
+    pub const INGRESS_QUEUE: u64 = 65_536;
+    pub const STREAM_READY_SECONDS: u64 = 600;
+    pub const MARKET_DRAIN_SECONDS: u64 = 120;
+    pub const ENRICHMENT_SECONDS: u64 = 900;
+    pub const MARKET_HEARTBEAT_SECONDS: u64 = 30;
+    pub const MARKET_MIN_SAMPLE: u64 = 30;
+    pub const RETENTION_ROWS: u64 = 262_144;
+    pub const RETENTION_ROWS_MAX: u64 = 2_000_000;
+    pub const ECON_QUEUE_CAPACITY: u64 = 8_192;
+    pub const ECON_QUEUE_CAPACITY_MAX: u64 = 1_000_000;
+    pub const ENRICH_MAX_PENDING: u64 = 4_096;
+    pub const ENRICH_MAX_ATTEMPTS: u64 = 5;
+    pub const ENRICH_RETRY_MS: u64 = 2_000;
+    pub const ENRICH_TIMEOUT_MS: u64 = 10_000;
+}
+
 macro_rules! parameters {
     ($( $name:ident = $default:expr, $unit:literal, $env:literal; )*) => {
         #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,18 +77,18 @@ parameters! {
     wss_recovery_ms = 120000, "ms", "P0_WSS_RECOVERY_MS";
     wss_ack_ms_per_subscription = 5, "ms", "P0_WSS_ACK_MS_PER_SUBSCRIPTION";
     workers = 1, "threads", "RAYON_NUM_THREADS";
-    ingress_queue = 65536, "events", "P0_INGRESS_BUFFER";
+    ingress_queue = defaults::INGRESS_QUEUE, "events", "P0_INGRESS_BUFFER";
     worker_queue = 256, "jobs", "P0_REMOTE_WORKER_BUFFER";
     sweep_batch_max_events = 64, "events", "P0_SWEEP_BATCH_MAX_EVENTS";
     sweep_batch_max_age_ns = 5000000, "ns", "P0_SWEEP_BATCH_MAX_AGE_NS";
     ingress_burst_before_detect = 64, "events", "P0_INGRESS_BURST_BEFORE_DETECT";
     bootstrap_seconds = 600, "s", "P0_ECON_BOOTSTRAP_SECS";
-    stream_ready_seconds = 600, "s", "P0_MARKET_READY_TIMEOUT_SECS";
+    stream_ready_seconds = defaults::STREAM_READY_SECONDS, "s", "P0_MARKET_READY_TIMEOUT_SECS";
     drain_seconds = 180, "s", "P0_ECON_DRAIN_SECS";
-    market_drain_seconds = 120, "s", "P0_MARKET_DRAIN_TIMEOUT_SECS";
+    market_drain_seconds = defaults::MARKET_DRAIN_SECONDS, "s", "P0_MARKET_DRAIN_TIMEOUT_SECS";
     reconcile_seconds = 14400, "s", "P0_MARKET_RECONCILE_PHASE_MAX_SECS";
     gap_seconds = 180, "s", "P0_MARKET_GAP_PHASE_MAX_SECS";
-    enrichment_seconds = 900, "s", "P0_MARKET_ENRICH_PHASE_MAX_SECS";
+    enrichment_seconds = defaults::ENRICHMENT_SECONDS, "s", "P0_MARKET_ENRICH_PHASE_MAX_SECS";
     snapshot_timeout_seconds = 90, "s", "P0_SNAPSHOT_RPC_TIMEOUT_SECS";
     quiescence_seconds = 150, "s", "P0_QUIESCENCE_SECS";
     shutdown_seconds = 180, "s", "P0_SHUTDOWN_SECS";
@@ -96,13 +116,40 @@ parameters! {
     market_writer_flush_ms = 1000, "ms", "P0_MARKET_WRITER_FLUSH_MS";
     market_writer_sync_ms = 60000, "ms", "P0_MARKET_WRITER_SYNC_MS";
     owner_evidence_sync_ms = 60000, "ms", "P0_OWNER_EVIDENCE_SYNC_MS";
-    owner_status_ms = 1000, "ms", "P0_OWNER_STATUS_MS";
     market_writer_stall_ms = 30000, "ms", "P0_MARKET_WRITER_STALL_MS";
     market_disk_reserve_mib = 2048, "MiB", "P0_MARKET_DISK_RESERVE_MIB";
     capacity_safety_percent = 50, "percent", "P0_CAPACITY_SAFETY_PERCENT";
     market_segment_mib = 256, "MiB", "P0_MARKET_SEGMENT_MIB";
     econ_segment_mib = 256, "MiB", "P0_ECON_SEGMENT_MIB";
     econ_retention_mib = 1024, "MiB", "P0_ECON_RETENTION_MIB";
+    owner_status_ms = 1000, "ms", "P0_OWNER_STATUS_MS";
+    blockhash_max_age_ms = 30000, "ms", "P0_BLOCKHASH_MAX_AGE_MS";
+    fe04_settle_retry_ms = 10000, "ms", "P0_FE04_SETTLE_RETRY_MS";
+    fe04_refresh_ms = 5000, "ms", "P0_FE04_REFRESH_MS";
+    wss_healthy_reset_ms = 10000, "ms", "P0_WSS_HEALTHY_RESET_MS";
+    jupiter_timeout_ms = 1500, "ms", "P0_JUPITER_TIMEOUT_MS";
+    projection_requeue_max = 2, "requeues", "P0_PROJECTION_REQUEUE_MAX";
+    lane_weight_l0 = 8, "credits", "P0_LANE_WEIGHT_L0";
+    lane_weight_l1 = 3, "credits", "P0_LANE_WEIGHT_L1";
+    lane_weight_l2 = 1, "credits", "P0_LANE_WEIGHT_L2";
+    prepared_candidates = 1024, "templates", "P0_PREPARED_CANDIDATES";
+    winner_watch_capacity = 8192, "watches", "P0_WINNER_WATCH_CAPACITY";
+    winner_watch_ttl_seconds = 900, "s", "P0_WINNER_WATCH_TTL_S";
+    winner_watch_initial_delay_seconds = 60, "s", "P0_WINNER_WATCH_INITIAL_DELAY_S";
+    winner_watch_recheck_seconds = 5, "s", "P0_WINNER_WATCH_RECHECK_S";
+    winner_watch_full_backoff_seconds = 1, "s", "P0_WINNER_WATCH_FULL_BACKOFF_S";
+    deployment_request_ms = 10000, "ms", "P0_DEPLOYMENT_REQUEST_MS";
+    deployment_deadline_ms = 30000, "ms", "P0_DEPLOYMENT_DEADLINE_MS";
+    report_final_flush_ms = 2000, "ms", "P0_REPORT_FINAL_FLUSH_MS";
+    market_heartbeat_seconds = defaults::MARKET_HEARTBEAT_SECONDS, "s", "P0_MARKET_HEARTBEAT_SECS";
+    market_min_sample = defaults::MARKET_MIN_SAMPLE, "liquidations", "P0_MARKET_MIN_SAMPLE";
+    market_retention = defaults::RETENTION_ROWS, "rows", "P0_MARKET_RETENTION";
+    econ_retention = defaults::RETENTION_ROWS, "rows", "P0_ECON_RETENTION";
+    econ_queue_capacity = defaults::ECON_QUEUE_CAPACITY, "rows", "P0_ECON_QUEUE_CAPACITY";
+    enrich_max_pending = defaults::ENRICH_MAX_PENDING, "requests", "P0_MARKET_ENRICH_MAX_PENDING";
+    enrich_max_attempts = defaults::ENRICH_MAX_ATTEMPTS, "attempts", "P0_MARKET_ENRICH_MAX_ATTEMPTS";
+    enrich_retry_ms = defaults::ENRICH_RETRY_MS, "ms", "P0_MARKET_ENRICH_RETRY_MS";
+    enrich_timeout_ms = defaults::ENRICH_TIMEOUT_MS, "ms", "P0_MARKET_ENRICH_TIMEOUT_MS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -110,8 +157,11 @@ parameters! {
 /// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8); 5: `fee_rps`,
 /// `send_rps` (V2-05); 6: `sweep_batch_max_events`, `sweep_batch_max_age_ns`,
 /// `ingress_burst_before_detect` (V2-08); 7: `rpc_pool_idle_ms`, `rpc_tcp_keepalive_ms` (V2-07);
-/// 8: `owner_status_ms` (owner status projection).
+/// 8: `owner_status_ms` (owner status projection) and D01–D06/D11 — the owner, FE-04, WSS,
+/// Jupiter, lane, winner-watch, deployment, reporter and market bounds that were literals or
+/// duplicate defaults (from `owner_status_ms` on, appended).
 pub const LIMITS_REVISION: u16 = 8;
+
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -126,10 +176,11 @@ impl Parameter {
         self.field.replace('_', "-")
     }
     pub fn maximum(&self) -> u64 {
-        if self.field == "fe_batch_size" {
-            100
-        } else {
-            u64::from(u32::MAX)
+        match self.field {
+            "fe_batch_size" => 100,
+            "market_retention" | "econ_retention" => defaults::RETENTION_ROWS_MAX,
+            "econ_queue_capacity" => defaults::ECON_QUEUE_CAPACITY_MAX,
+            _ => u64::from(u32::MAX),
         }
     }
 }
@@ -348,9 +399,13 @@ impl RuntimeConfig {
             if self
                 .limits
                 .get(p.field)
-                .is_none_or(|n| n == 0 || n > u64::from(u32::MAX))
+                .is_none_or(|n| n == 0 || n > p.maximum())
             {
-                return Err(format!("invalid --{}: expected 1..={}", p.name(), u32::MAX));
+                return Err(format!(
+                    "invalid --{}: expected 1..={}",
+                    p.name(),
+                    p.maximum()
+                ));
             }
         }
         if self.limits.rpc_backoff_ms > self.limits.rpc_backoff_max_ms
@@ -1115,8 +1170,8 @@ mod tests {
             ),
             (
                 8,
-                79,
-                "CvDx7XYmMTESMfAg7HGFU8zMZccMpFL4RVCQ1pXuTkxb".to_string()
+                106,
+                "8QfwCwQELRb4R43Sy5r17efz8t4UDWA5yXRcm3T8Dtyp".to_string()
             )
         );
     }
@@ -1152,6 +1207,55 @@ mod tests {
             assert!(env.iter().any(|(ek, ev)| ek == k && ev == v), "{k}");
         }
         assert!(parse(&["--sweep-batch-max-events", "0"]).is_err());
+    }
+    /// D01–D06/D11: the owner, FE-04, WSS, Jupiter, lane, winner-watch, deployment, reporter and
+    /// market bounds are typed parameters — CLI values reach `Limits` and the exported
+    /// environment (before: literals or a second default per consumer); each bound is enforced.
+    #[test]
+    fn d01_d06_operational_bounds_are_typed_parameters() {
+        let r = parse(&[
+            "--blockhash-max-age-ms",
+            "15000",
+            "--fe04-settle-retry-ms",
+            "20000",
+            "--wss-healthy-reset-ms",
+            "4000",
+            "--jupiter-timeout-ms",
+            "900",
+            "--lane-weight-l0",
+            "5",
+            "--market-retention",
+            "1000",
+        ])
+        .unwrap();
+        let l = &r.config.limits;
+        assert_eq!(
+            (
+                l.blockhash_max_age_ms,
+                l.fe04_settle_retry_ms,
+                l.wss_healthy_reset_ms,
+                l.jupiter_timeout_ms,
+                l.lane_weight_l0,
+                l.market_retention
+            ),
+            (15_000, 20_000, 4_000, 900, 5, 1_000)
+        );
+        let env = r.config.environment();
+        for (k, v) in [
+            ("P0_BLOCKHASH_MAX_AGE_MS", "15000"),
+            ("P0_LANE_WEIGHT_L0", "5"),
+            ("P0_MARKET_RETENTION", "1000"),
+        ] {
+            assert!(env.iter().any(|(ek, ev)| ek == k && ev == v), "{k}");
+        }
+        assert!(parse(&["--lane-weight-l1", "0"]).is_err());
+        assert!(parse(&["--market-retention", "2000001"]).is_err());
+        assert!(parse(&["--econ-queue-capacity", "1000001"]).is_err());
+        // One default authority: the market's ready timeout is the registry's.
+        assert_eq!(
+            Limits::default().stream_ready_seconds,
+            defaults::STREAM_READY_SECONDS
+        );
     }
     #[test]
     fn explicit_endpoint_beats_legacy_audit_alias() {

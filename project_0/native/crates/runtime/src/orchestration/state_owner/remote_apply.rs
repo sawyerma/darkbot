@@ -476,6 +476,7 @@ impl ShadowOwner {
             &mut self.projection_requeues,
             &mut self.projection_stats,
             account,
+            self.projection_requeue_max,
         ) {
             let work = (account, t_rx_ns, slot, TRIGGER_PROJECTION_REQUEUE);
             match after_slot {

@@ -33,13 +33,16 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
     let url = url.ok_or("DEPLOYMENT_RPC_MISSING")?;
     let loader = Pubkey::from_str(LOADER).map_err(|_| "LOADER_ID")?;
     let address = protocol::program_data_address(program);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
+    // D01: request bound, overall deadline and attempts from the typed limits.
+    let limits = &darkbot_solana::runtime_config::active().limits;
+    let request = Duration::from_millis(limits.deployment_request_ms);
+    let client = darkbot_solana::provider::blocking_http()
+        .timeout(request)
         .build()
         .map_err(|_| "DEPLOYMENT_CLIENT")?;
     let mut response = Err("DEPLOYMENT_RPC");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    for attempt in 0..3 {
+    let deadline = Instant::now() + Duration::from_millis(limits.deployment_deadline_ms);
+    for attempt in 0..limits.rpc_attempts {
         let permit = darkbot_solana::provider::shared()
             .acquire(darkbot_solana::provider::Workload::Deployment, deadline)
             .map_err(|e| {
@@ -50,7 +53,7 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
                 }
             })?;
         response = (|| {
-            let resp=client.post(url).timeout(deadline.saturating_duration_since(Instant::now()).min(Duration::from_secs(10)))
+            let resp=client.post(url).timeout(deadline.saturating_duration_since(Instant::now()).min(request))
                 .json(&json!({"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[address.to_string(),{"encoding":"base64","commitment":"finalized"}]}))
                 .send().map_err(|_| "DEPLOYMENT_RPC_TRANSPORT")?;
             darkbot_solana::provider::observe_response(&resp, "getAccountInfo").map_err(|e| {
@@ -66,9 +69,14 @@ pub(super) fn inspect(url: Option<&str>, program: &Pubkey) -> Result<Deployment,
         if response.is_ok() || Instant::now() >= deadline {
             break;
         }
-        if attempt < 2 {
+        if attempt + 1 < limits.rpc_attempts {
+            // Exponential backoff from `rpc_backoff_ms`, capped by `rpc_backoff_max_ms`.
+            let backoff = limits
+                .rpc_backoff_ms
+                .saturating_mul(1u64 << attempt.min(16))
+                .min(limits.rpc_backoff_max_ms);
             std::thread::sleep(
-                Duration::from_millis(500 * (1 << attempt))
+                Duration::from_millis(backoff)
                     .min(deadline.saturating_duration_since(Instant::now())),
             );
         }

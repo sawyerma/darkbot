@@ -451,7 +451,7 @@ fn run_embedded_inner(
         recovery_budget_ms: ws.recovery_budget.map(|d| d.as_millis() as u64),
         recovery_attempts: ws.recovery_attempts,
         idle_timeout_ms: ws.idle_timeout.as_millis() as u64,
-        healthy_reset_ms: darkbot_solana::ingress::ws_rpc::HEALTHY_RESET.as_millis() as u64,
+        healthy_reset_ms: darkbot_solana::ingress::ws_rpc::healthy_reset().as_millis() as u64,
         readiness: "ALL_ACKS_AND_NEW_SLOT_PROGRESS".into(),
         provider_budget: darkbot_solana::provider::shared().snapshot(),
     };

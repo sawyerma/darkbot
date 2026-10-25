@@ -6,9 +6,6 @@ use darkbot_p0_reporter::{config_from_env, start};
 use darkbot_runner::status_tap::{self, StatusTap};
 use std::time::Duration;
 
-/// Bound of the final status handoff before the reporter stops.
-const FINAL_FLUSH: Duration = Duration::from_secs(2);
-
 fn main() {
     let env = |k: &str| std::env::var(k).ok();
     let mut reporter = None;
@@ -44,8 +41,11 @@ fn main() {
     }
     let result = darkbot_runner::orchestration::run();
     if let Some(handle) = reporter {
-        // The final owner state reaches the gateway before the socket closes.
-        tap.flush(FINAL_FLUSH);
+        // The final owner state reaches the gateway before the socket closes, bounded by
+        // `report_final_flush_ms` (D01).
+        tap.flush(Duration::from_millis(
+            status_tap::active_limits().report_final_flush_ms,
+        ));
         handle.stop();
     }
     if let Err(e) = result {

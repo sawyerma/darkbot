@@ -206,6 +206,11 @@ pub fn operational_snapshot_of(
     }
 }
 
+/// The operational limits of this process (installed config or built-in defaults).
+pub fn active_limits() -> &'static Limits {
+    &runtime_config::active().limits
+}
+
 /// The operational configuration of this process.
 pub fn operational_snapshot() -> OperationalSnapshot {
     operational_snapshot_of(

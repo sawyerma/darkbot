@@ -45,6 +45,9 @@ describe("Project 0 wire contract (golden frames written by the Rust reporter)",
   it("decodes the operational parameter registry", () => {
     expect(system.parameterCount).toBeGreaterThan(0);
     expect(system.activated).toBe(false);
+    // D01: a former literal arrives as a typed parameter with unit and source.
+    expect(system.parameters.get("blockhash_max_age_ms")).toEqual({ value: 30_000n, unit: "ms", source: "builtin_default" });
+    expect(system.parameters.size).toBe(system.parameterCount);
   });
 });
 

@@ -7,7 +7,7 @@ impl ShadowOwner {
         // releases, UNKNOWN keeps holding, an unreadable journal blocks every offer).
         // FE-04/C3: a held journal changes only through this owner (the book is rebuilt there).
         if let Some(dir) = &self.fe04_journal {
-            if self.fe04_refreshed.elapsed() >= std::time::Duration::from_secs(5) {
+            if self.fe04_refreshed.elapsed() >= self.fe04_refresh {
                 let wallet = self.liquidator.to_string();
                 if self.fe04_held.is_none() {
                     self.reservations =

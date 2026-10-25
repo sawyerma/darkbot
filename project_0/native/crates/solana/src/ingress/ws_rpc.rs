@@ -33,7 +33,10 @@ use tokio_tungstenite::tungstenite::Message;
 
 /// Continuous application slot progress after which a recovered stream counts as healthy again
 /// (the outage budget resets only then; one frame or a flapping connection never resets it).
-pub const HEALTHY_RESET: Duration = Duration::from_secs(10);
+/// D01: the typed parameter `wss_healthy_reset_ms`.
+pub fn healthy_reset() -> Duration {
+    Duration::from_millis(crate::runtime_config::active().limits.wss_healthy_reset_ms)
+}
 
 #[derive(Clone, Debug)]
 pub struct WsRpcConfig {
@@ -878,7 +881,7 @@ impl WsRpcControlSource {
                         );
                     }
                     // One frame / a flapping connection cannot reset the outage budget.
-                    if last_progress_at.duration_since(*since) >= HEALTHY_RESET {
+                    if last_progress_at.duration_since(*since) >= healthy_reset() {
                         *healthy = true;
                     }
                 }

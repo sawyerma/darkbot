@@ -90,13 +90,17 @@ impl EconConfig {
         };
         let plan = MeasurementPlan::from_lookup(get)?;
         let layout = crate::run_layout::RunLayout::from_lookup(get)?;
-        let queue_capacity = usize::try_from(num("P0_ECON_QUEUE_CAPACITY", 8192)?)
-            .map_err(|_| "queue capacity overflow")?;
+        let queue_capacity = usize::try_from(num(
+            "P0_ECON_QUEUE_CAPACITY",
+            darkbot_solana::runtime_config::defaults::ECON_QUEUE_CAPACITY,
+        )?)
+        .map_err(|_| "queue capacity overflow")?;
         let retention = usize::try_from(num("P0_ECON_RETENTION", DEFAULT_RETENTION as u64)?)
             .map_err(|_| "retention overflow")?;
         if queue_capacity == 0
             || retention == 0
-            || queue_capacity > 1_000_000
+            || queue_capacity
+                > darkbot_solana::runtime_config::defaults::ECON_QUEUE_CAPACITY_MAX as usize
             || retention > MAX_RETENTION
         {
             return Err("invalid econ bounded capacity/drain".into());
@@ -267,8 +271,10 @@ pub struct Handle {
 }
 /// Retained distinct capture transactions/events per run (R12: max. 1,682 per 4h observed, far
 /// below); overflow is INCOMPLETE, never an eviction. Shared by econ and market-only runs (R24).
-pub const DEFAULT_RETENTION: usize = 262_144;
-pub const MAX_RETENTION: usize = 2_000_000;
+pub const DEFAULT_RETENTION: usize =
+    darkbot_solana::runtime_config::defaults::RETENTION_ROWS as usize;
+pub const MAX_RETENTION: usize =
+    darkbot_solana::runtime_config::defaults::RETENTION_ROWS_MAX as usize;
 
 /// Test fixture: a handle without a worker thread (evidence goes to the returned consumer).
 #[cfg(test)]

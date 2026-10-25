@@ -213,9 +213,6 @@ pub(crate) struct ProjectionStats {
     pub(crate) deferred: u64,
 }
 
-/// E9: consecutive projection requeues per candidate before it waits for its next trigger.
-pub(crate) const PROJECTION_REQUEUE_MAX: u8 = 2;
-
 /// E9: trigger of the consumption of a candidate's cached projection (the projection's own work).
 pub(crate) const TRIGGER_INTEGRATION_PROJECTION: &str = "integration_projection";
 /// E9: trigger of a bounded projection requeue (the projection's own work).
@@ -323,16 +320,17 @@ impl ParkedProjections {
 }
 
 /// E9: one more projection request that no new trigger asked for (a stale result, a lagging
-/// node, a cached projection unusable at its consumption) — at most `PROJECTION_REQUEUE_MAX`
+/// node, a cached projection unusable at its consumption) — at most `projection_requeue_max`
 /// per external trigger; at the bound it is counted, the sequence ends and the candidate waits
 /// for its next trigger.
 pub(crate) fn projection_retry_allowed(
     requeues: &mut HashMap<Pubkey, u8>,
     stats: &mut ProjectionStats,
     account: Pubkey,
+    max: u8,
 ) -> bool {
     let attempts = requeues.entry(account).or_insert(0);
-    if *attempts >= PROJECTION_REQUEUE_MAX {
+    if *attempts >= max {
         requeues.remove(&account);
         stats.requeue_exhausted += 1;
         return false;
@@ -350,9 +348,10 @@ pub(crate) fn projection_request_allowed(
     stats: &mut ProjectionStats,
     account: Pubkey,
     trigger: &str,
+    max: u8,
 ) -> bool {
     match trigger {
-        TRIGGER_INTEGRATION_PROJECTION => projection_retry_allowed(requeues, stats, account),
+        TRIGGER_INTEGRATION_PROJECTION => projection_retry_allowed(requeues, stats, account, max),
         TRIGGER_PROJECTION_REQUEUE => true,
         _ => {
             requeues.remove(&account);
@@ -611,12 +610,6 @@ pub(crate) const LANES: usize = 3;
 #[cfg(feature = "crate_health")]
 pub(crate) const LANE_LIST: [Lane; LANES] = [Lane::L0, Lane::L1, Lane::L2];
 
-/// P6-MT.5: "Startgewicht WDRR 8:3:1; erst nach MT0 festschreiben" — the start weights of the
-/// weighted deficit round robin across the lanes (dispatches per round while a lane has work).
-/// Provisional until MT0 evidence fixes them.
-#[cfg(feature = "crate_health")]
-pub(crate) const LANE_WDRR_START_WEIGHTS: [u64; LANES] = [8, 3, 1];
-
 #[cfg(feature = "crate_health")]
 impl Lane {
     pub(crate) fn name(self) -> &'static str {
@@ -700,8 +693,9 @@ pub(crate) struct LaneStats {
 ///   L2 entry is served within one WDRR round once it is first in its lane).
 /// - Bounded by the account population (one entry per account); nothing is ever dropped.
 #[cfg(feature = "crate_health")]
-#[derive(Default)]
 pub(crate) struct CandidateLanes {
+    /// D01: the WDRR start weights of L0/L1/L2 (`lane_weight_l0..l2`; P6-MT.5 provisional).
+    weights: [u64; LANES],
     pending: HashMap<Pubkey, PendingCandidate>,
     order: [std::collections::BTreeSet<(u64, u64, Pubkey)>; LANES],
     /// Every pending entry by `t_rx_first`: the age of the oldest unserved trigger (MT0 backlog).
@@ -713,7 +707,32 @@ pub(crate) struct CandidateLanes {
 }
 
 #[cfg(feature = "crate_health")]
+impl Default for CandidateLanes {
+    /// The lanes with the built-in default weights.
+    fn default() -> Self {
+        let l = darkbot_solana::runtime_config::Limits::default();
+        Self::with_weights([l.lane_weight_l0, l.lane_weight_l1, l.lane_weight_l2])
+    }
+}
+
+#[cfg(feature = "crate_health")]
 impl CandidateLanes {
+    /// The lanes with their WDRR start weights (each at least 1, validated by `Limits`).
+    pub(crate) fn with_weights(weights: [u64; LANES]) -> Self {
+        Self {
+            weights,
+            pending: HashMap::new(),
+            order: Default::default(),
+            by_first: Default::default(),
+            seq: 0,
+            credit: [0; LANES],
+            turn: 0,
+            stats: Default::default(),
+        }
+    }
+    pub(crate) fn weights(&self) -> [u64; LANES] {
+        self.weights
+    }
     pub(crate) fn len(&self) -> usize {
         self.pending.len()
     }
@@ -806,7 +825,7 @@ impl CandidateLanes {
         }
     }
 
-    /// The next entry by weighted deficit round robin (`LANE_WDRR_START_WEIGHTS`): a lane with
+    /// The next entry by weighted deficit round robin (`weights`): a lane with
     /// work is served up to its weight per round, an empty lane yields its turn (and its unused
     /// credit) at once, so every non-empty lane is reached within one round.
     pub(crate) fn next(&mut self) -> Option<PendingCandidate> {
@@ -822,7 +841,7 @@ impl CandidateLanes {
                 continue;
             };
             if self.credit[lane] == 0 {
-                self.credit[lane] = LANE_WDRR_START_WEIGHTS[lane];
+                self.credit[lane] = self.weights[lane];
             }
             self.credit[lane] -= 1;
             if self.credit[lane] == 0 {
@@ -1011,7 +1030,7 @@ mod mt3_lane_tests {
                 lanes.admit(Pubkey::new_unique(), adm(t, Lane::L1, 1, 0));
             }
         };
-        let round: u64 = LANE_WDRR_START_WEIGHTS.iter().sum();
+        let round: u64 = lanes.weights().iter().sum();
         let mut worst_wait = 0u64;
         let mut served = [0u64; LANES];
         let mut t = 0u64;
@@ -1087,6 +1106,20 @@ mod mt3_lane_tests {
             250,
             "FIX-21: newest t_rx to the detect"
         );
+    }
+
+    /// D01: the WDRR start weights are configured, not literals — with 1:1:1 every lane is served
+    /// once per round.
+    #[test]
+    fn d01_lane_weights_come_from_the_configuration() {
+        let mut lanes = CandidateLanes::with_weights([1, 1, 1]);
+        assert_eq!(lanes.weights(), [1, 1, 1]);
+        for (lane, t) in [(Lane::L0, 1), (Lane::L0, 2), (Lane::L1, 3), (Lane::L2, 4)] {
+            lanes.admit(Pubkey::new_unique(), adm(t, lane, 1, 0));
+        }
+        let served: Vec<_> = std::iter::from_fn(|| lanes.next().map(|p| p.lane)).collect();
+        assert_eq!(served, vec![Lane::L0, Lane::L1, Lane::L2, Lane::L0]);
+        assert_eq!(CandidateLanes::default().weights(), [8, 3, 1]);
     }
 
     /// V2-13: the repeat gate — a first admission and a newer revision pass; the same slot and
@@ -1553,7 +1586,7 @@ mod n3_n4_tests {
     }
 
     /// E9: projection re-requests no new trigger asked for are bounded per external trigger: the
-    /// consumption of an unusable cached projection re-requests at most `PROJECTION_REQUEUE_MAX`
+    /// consumption of an unusable cached projection re-requests at most `projection_requeue_max`
     /// times (then counted and refused), a queued requeue (already counted) proceeds, and an
     /// external trigger starts a fresh sequence.
     #[test]
@@ -1561,10 +1594,11 @@ mod n3_n4_tests {
         let mut requeues = HashMap::new();
         let mut stats = ProjectionStats::default();
         let a = Pubkey::new_unique();
+        let max = darkbot_solana::runtime_config::Limits::default().projection_requeue_max as u8;
         let mut allowed =
-            |trigger| projection_request_allowed(&mut requeues, &mut stats, a, trigger);
+            |trigger| projection_request_allowed(&mut requeues, &mut stats, a, trigger, max);
         assert!(allowed("account_update"));
-        for _ in 0..PROJECTION_REQUEUE_MAX {
+        for _ in 0..max {
             assert!(allowed("integration_projection"));
         }
         assert!(!allowed("integration_projection"), "bound reached");
@@ -1572,14 +1606,15 @@ mod n3_n4_tests {
         // After the bound the sequence ended; a new external trigger starts a fresh one.
         assert!(allowed("oracle_price"));
         assert!(allowed("integration_projection"));
-        assert_eq!(stats.requeued, u64::from(PROJECTION_REQUEUE_MAX) + 1);
+        assert_eq!(stats.requeued, u64::from(max) + 1);
         assert_eq!(stats.requeue_exhausted, 1);
         // An external trigger resets an unfinished sequence too.
         assert!(projection_request_allowed(
             &mut requeues,
             &mut stats,
             a,
-            "account_update"
+            "account_update",
+            max
         ));
         assert!(!requeues.contains_key(&a));
     }

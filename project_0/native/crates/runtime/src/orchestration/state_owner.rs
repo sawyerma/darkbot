@@ -104,6 +104,15 @@ pub(super) struct ShadowOwner {
     status_published: Option<std::time::Instant>,
     status_seq: u64,
     ledger_view: Option<Result<status_view::LedgerView, String>>,
+    /// C9/D01: the one blockhash freshness bound of the owner (detection gates and the pipeline's
+    /// build limit), from `blockhash_max_age_ms`; never a literal at one gate.
+    blockhash_max_age_ns: u64,
+    /// D01: FE-04 settlement retry and journal refresh cadence (`fe04_settle_retry_ms`,
+    /// `fe04_refresh_ms`).
+    fe04_settle_retry: Duration,
+    fe04_refresh: Duration,
+    /// D01: E9 requeues per external trigger (`projection_requeue_max`).
+    projection_requeue_max: u8,
     // Read once at setup, never from the environment on the owner thread.
     eval_slippage_bps: u64,
     zero_prefund_enabled: bool,
@@ -274,10 +283,6 @@ pub(super) struct ShadowOwner {
 /// A23-01: the owner's idle bound without an event: time-based housekeeping only (operational
 /// window, econ cutoff, FE-04 refresh). Every event ends the wait through the doorbell.
 const IDLE_TICK: Duration = Duration::from_millis(250);
-
-/// C9: the one blockhash freshness bound of the Shadow owner (detection gates and the pipeline's
-/// build limit); a change needs evidence, never a silent widening at one gate.
-const BLOCKHASH_MAX_AGE_NS: u64 = 30_000_000_000;
 
 enum OwnerStep<T> {
     Next(T),

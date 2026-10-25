@@ -135,6 +135,7 @@ export function toSystemView(m: SystemMessage): SystemView {
     activated: effective !== undefined,
     profile: effective?.profile ?? null,
     parameterCount: m.operational?.parameters.length ?? 0,
+    parameters: new Map((m.operational?.parameters ?? []).map((p) => [p.field, { value: p.value, unit: p.unit, source: p.source }])),
     liveAuthorized: effective ? effective.liveAuthorized : null,
     submissionAuthorized: effective ? effective.submissionAuthorized : null,
   };

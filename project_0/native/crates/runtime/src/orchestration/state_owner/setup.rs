@@ -113,7 +113,9 @@ pub(super) fn prepare(
             "live mode requires P8-LT qualification in MEASUREMENT_LEDGER; not enabled".into(),
         );
     }
-    let buffer_cap: usize = config::parsed_or("P0_INGRESS_BUFFER", 65_536)?;
+    // D01/D11: every operational bound from the typed limits (one default authority).
+    let operational = darkbot_solana::runtime_config::active().limits.clone();
+    let buffer_cap = usize::try_from(operational.ingress_queue)?;
 
     let group = Pubkey::from_str(&config::require("P0_GROUP_ID")?)?;
     let payer = tx::load_keypair_json(&config::require("P0_KEYPAIR_PATH")?)?;
@@ -316,10 +318,7 @@ pub(super) fn prepare(
     // Large, filtered Marginfi getProgramAccounts payloads regularly approach the
     // RpcClient::new() 30-second default. Keep a bounded, independently configurable
     // timeout for snapshot/dependency fetches; never weaken recovery/reconcile gates.
-    let snapshot_rpc_timeout_secs: u64 = config::parsed_or("P0_SNAPSHOT_RPC_TIMEOUT_SECS", 90)?;
-    if snapshot_rpc_timeout_secs == 0 {
-        return Err("P0_SNAPSHOT_RPC_TIMEOUT_SECS must be positive".into());
-    }
+    let snapshot_rpc_timeout_secs = operational.snapshot_timeout_seconds;
     eprintln!("snapshot: rpc_timeout_s={snapshot_rpc_timeout_secs}");
     let rpc = darkbot_solana::provider::rpc_client(
         rpc_url.clone(),
@@ -551,10 +550,7 @@ pub(super) fn prepare(
     }
 
     // [FIX-108][R4] All remote winner/reconciliation RPC is owned by bounded workers.
-    let remote_worker_capacity: usize = config::parsed_or("P0_REMOTE_WORKER_BUFFER", 256)?;
-    if remote_worker_capacity == 0 {
-        return Err("P0_REMOTE_WORKER_BUFFER must be > 0".into());
-    }
+    let remote_worker_capacity = usize::try_from(operational.worker_queue)?;
     let remote = RemoteWorkers::start(
         rpc_url.clone(),
         program,
@@ -610,23 +606,11 @@ pub(super) fn prepare(
     let ledger = ShadowLedger::new();
     // [F1] Bounded, deduplicated winner watches with TTL for Ok(None) and Err. PROVISIONAL defaults.
     let winner_watch_cfg = WinnerTrackerConfig {
-        capacity: config::parsed_or(
-            "P0_WINNER_WATCH_CAPACITY",
-            WinnerTrackerConfig::DEFAULT.capacity,
-        )?,
-        ttl_s: config::parsed_or("P0_WINNER_WATCH_TTL_S", WinnerTrackerConfig::DEFAULT.ttl_s)?,
-        initial_delay_s: config::parsed_or(
-            "P0_WINNER_WATCH_INITIAL_DELAY_S",
-            WinnerTrackerConfig::DEFAULT.initial_delay_s,
-        )?,
-        recheck_interval_s: config::parsed_or(
-            "P0_WINNER_WATCH_RECHECK_S",
-            WinnerTrackerConfig::DEFAULT.recheck_interval_s,
-        )?,
-        full_queue_backoff_s: config::parsed_or(
-            "P0_WINNER_WATCH_FULL_BACKOFF_S",
-            WinnerTrackerConfig::DEFAULT.full_queue_backoff_s,
-        )?,
+        capacity: usize::try_from(operational.winner_watch_capacity)?,
+        ttl_s: operational.winner_watch_ttl_seconds,
+        initial_delay_s: operational.winner_watch_initial_delay_seconds,
+        recheck_interval_s: operational.winner_watch_recheck_seconds,
+        full_queue_backoff_s: operational.winner_watch_full_backoff_seconds,
     }
     .validate()?;
     eprintln!(
@@ -972,6 +956,10 @@ pub(super) fn prepare(
         status_published: None,
         status_seq: 0,
         ledger_view: None,
+        blockhash_max_age_ns: operational.blockhash_max_age_ms.saturating_mul(1_000_000),
+        fe04_settle_retry: Duration::from_millis(operational.fe04_settle_retry_ms),
+        fe04_refresh: Duration::from_millis(operational.fe04_refresh_ms),
+        projection_requeue_max: u8::try_from(operational.projection_requeue_max)?,
         required_dependency_keys,
         mt0_reporter,
         optional_dependency_keys,
@@ -988,11 +976,11 @@ pub(super) fn prepare(
         inventory_targets,
         jit_funding_bank,
         prepared: std::cell::RefCell::new(crate::execution::prepared::PreparedCache::new(
-            PREPARED_CANDIDATES,
+            usize::try_from(operational.prepared_candidates)?,
             vec![program_data],
         )),
         route_cap: std::cell::RefCell::new(crate::execution::route_cap::RouteCapCache::new(
-            PREPARED_CANDIDATES,
+            usize::try_from(operational.prepared_candidates)?,
             crate::execution::builder::p0::RouteProvider::max_accounts(&routes),
         )),
         program_generation: 0,
@@ -1012,7 +1000,11 @@ pub(super) fn prepare(
         projection_stats: ProjectionStats::default(),
         detect_queue,
         bootstrap_probe_queue: VecDeque::new(),
-        oracle_lanes: CandidateLanes::default(),
+        oracle_lanes: CandidateLanes::with_weights([
+            operational.lane_weight_l0,
+            operational.lane_weight_l1,
+            operational.lane_weight_l2,
+        ]),
         oracle_bank_projection_pending,
         integration_probe_expected,
         integration_probe_queue,
@@ -1100,12 +1092,6 @@ pub(super) fn prepare(
     Ok((owner, fetch, ingress))
 }
 
-/// P8-RES-02: the owner's reservation book at start — rebuilt from the FE-04 journal of the
-/// liquidator in `P0_FE04_JOURNAL_DIR` (no directory: no FE-04 attempt, empty book); a journal
-/// that cannot be read is a start error (fail closed).
-/// P2-07: bound of the prepared candidate cache (templates with their dependency bytes).
-const PREPARED_CANDIDATES: usize = 1024;
-
 /// P8-RES-02/B3: what the durable FE-04 journal implies at startup — the reservation book, the
 /// journal directory it is refreshed from and the safety replay.
 pub(super) struct Fe04Start {
@@ -1178,6 +1164,9 @@ impl Fe04Start {
     }
 }
 
+/// P8-RES-02: the owner's reservation book at start — rebuilt from the FE-04 journal of the
+/// liquidator in `P0_FE04_JOURNAL_DIR` (no directory: no FE-04 attempt, empty book); a journal
+/// that cannot be read is a start error (fail closed).
 pub(super) fn reservation_book(
     get: &dyn Fn(&str) -> Option<String>,
     liquidator: &Pubkey,

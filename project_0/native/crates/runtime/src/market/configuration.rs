@@ -52,11 +52,11 @@ pub struct EnrichConfig {
 
 impl EnrichConfig {
     pub const DEFAULT: Self = Self {
-        max_pending: 4_096,
-        max_attempts: 5,
-        retry_ms: 2_000,
-        timeout_ms: 10_000,
-        phase_max_secs: 900,
+        max_pending: darkbot_solana::runtime_config::defaults::ENRICH_MAX_PENDING as usize,
+        max_attempts: darkbot_solana::runtime_config::defaults::ENRICH_MAX_ATTEMPTS as u32,
+        retry_ms: darkbot_solana::runtime_config::defaults::ENRICH_RETRY_MS,
+        timeout_ms: darkbot_solana::runtime_config::defaults::ENRICH_TIMEOUT_MS,
+        phase_max_secs: darkbot_solana::runtime_config::defaults::ENRICHMENT_SECONDS,
     };
 }
 
@@ -85,14 +85,16 @@ pub struct MarketConfig {
 }
 
 pub const DEFAULT_DURATION_SECS: u64 = 14_400;
-pub const DEFAULT_READY_TIMEOUT_SECS: u64 = 120;
+// D11: the defaults of the typed registry (`runtime_config::defaults`), never a second literal.
+use darkbot_solana::runtime_config::defaults;
+pub const DEFAULT_READY_TIMEOUT_SECS: u64 = defaults::STREAM_READY_SECONDS;
 /// Must exceed the ingress idle timeout (60 s) plus its maximum reconnect backoff (30 s).
-pub const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 120;
-pub const DEFAULT_INGRESS_BUFFER: usize = 65_536;
+pub const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = defaults::MARKET_DRAIN_SECONDS;
+pub const DEFAULT_INGRESS_BUFFER: usize = defaults::INGRESS_QUEUE as usize;
 /// Transport heartbeat interval; must stay below the ingress idle timeout.
-pub const DEFAULT_HEARTBEAT_SECS: u64 = 30;
+pub const DEFAULT_HEARTBEAT_SECS: u64 = defaults::MARKET_HEARTBEAT_SECONDS;
 /// PROVISIONAL minimum number of liquidation events for distribution statistics.
-pub const DEFAULT_MIN_SAMPLE_LIQUIDATIONS: u64 = 30;
+pub const DEFAULT_MIN_SAMPLE_LIQUIDATIONS: u64 = defaults::MARKET_MIN_SAMPLE;
 /// Helius endpoints used only when `HELIUS_API_KEY` is set and no explicit URL is given.
 /// `transactions` uses the Enhanced-WSS endpoint; acceptance of `transactionSubscribe` is never
 /// assumed and must be proven by the subscription ACK in the smoke run.

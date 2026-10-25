@@ -147,6 +147,7 @@ impl ShadowOwner {
                             &mut self.projection_stats,
                             acct,
                             trigger,
+                            self.projection_requeue_max,
                         )
                     {
                         let targets =
@@ -180,7 +181,7 @@ impl ShadowOwner {
 
                         let Some(bh) = self
                             .blockhash
-                            .fresh(self.clock.now_ns(), BLOCKHASH_MAX_AGE_NS)
+                            .fresh(self.clock.now_ns(), self.blockhash_max_age_ns)
                         else {
                             self.evidence.emit(OwnerEvidence::Record(
                                 RecordEvent::IntegrationSkip {
@@ -553,7 +554,7 @@ impl ShadowOwner {
             limits: TxLimits::default(),
             resources: self.resources,
             min_profit: self.min_profit,
-            blockhash_max_age_ns: BLOCKHASH_MAX_AGE_NS,
+            blockhash_max_age_ns: self.blockhash_max_age_ns,
             p7_passed: false,
             freshness: self.freshness,
             tip_account: None,
