@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
 import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 
 /**
  * B03/U-9: the analytics job commands (POST /api/v1/command → gateway → `darkbotctl p0 job` →
@@ -11,7 +12,7 @@ import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobComma
  * project0.analytics.jobs. A lost acknowledgement is looked up once, never posted again.
  */
 export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel"
-  | "project0.capture.verify.start";
+  | "project0.capture.verify.start" | "project0.source.set";
 interface Receipt { id: string; action: JobAction; phase: string; detail: string }
 interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
 export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
@@ -90,6 +91,12 @@ export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; 
       maxSeconds: seconds, maxRamBytes: mib * 1_048_576n,
     })),
   };
+}
+
+/** S1-02: a data source's mode (`p0ctl source set`); the running owner applies or refuses it. */
+export function sourceCommand(unit: string, mode: "off" | "observe" | "active"): { params: Uint8Array } | { problem: string } {
+  if (!/^(?:wss|geyser:[a-z0-9-]{1,32})$/.test(unit)) return { problem: "Unknown source unit." };
+  return { params: toBinary(SourceControlCommandSchema, message(SourceControlCommandSchema, { unit, mode })) };
 }
 
 async function csrf(): Promise<string> {

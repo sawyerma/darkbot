@@ -4,6 +4,8 @@ import type { CaptureMode, CaptureSource, VerificationMode, ReportMarker } from 
 import type { CaptureView } from "../model/status";
 import type { AnalyticsView } from "../model/analytics";
 import { RunsSection } from "../components/RunsSection";
+import { SourcesSection } from "../components/SourcesSection";
+import type { LiquidatorView } from "../model/owner";
 import type { TopicStatus } from "@/core/realtime";
 import { captureButtons, captureCommand, useCaptureControl, watchCaptureControl } from "@/core/realtime/captureControl";
 import { Section, DetailRow, TabStrip, Notice } from "../components/PanelPrimitives";
@@ -33,8 +35,9 @@ function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null;
   </Section>;
 }
 
-export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus }: {
+export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus, owner, ownerStatus }: {
   capture: CaptureView | null; topicStatus: TopicStatus; analytics: AnalyticsView | null; analyticsStatus: TopicStatus;
+  owner: LiquidatorView | null; ownerStatus: TopicStatus;
 }) {
   const [preset, setPreset] = useState<string>("4h"); const [amount, setAmount] = useState("75"); const [unit, setUnit] = useState("m");
   const [source, setSource] = useState<CaptureSource>("logs"); const [observation, setObservation] = useState<CaptureMode>("econ4h");
@@ -50,6 +53,7 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus 
   const preview = runStartPreview({ duration: preset === "custom" ? amount + unit : preset, source, mode: observation, verify, markers });
   return <><RunningCapture capture={capture} topicStatus={topicStatus}/>
   <RunsSection analytics={analytics} topicStatus={analyticsStatus}/>
+  <SourcesSection owner={owner} topicStatus={ownerStatus}/>
   <Section title="Raw data capture"><DetailRow title="Duration" value="Presets are optional"/>
     <div className="p0-pills">
       {PRESETS.map(d => <button key={d} className={preset === d ? "p0-selected" : ""} onClick={() => setPreset(d)}>{d === "custom" ? "Custom" : d}</button>)}

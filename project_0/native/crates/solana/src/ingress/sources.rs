@@ -555,6 +555,14 @@ impl SourceArbiter {
         self.controls.get(unit).map(|(c, _)| c)
     }
 
+    /// Every unit's applied control and its generation (1 at the start, +1 per applied change),
+    /// ordered by unit.
+    pub fn controls(&self) -> Vec<(&SourceControl, u64)> {
+        let mut all: Vec<_> = self.controls.values().map(|(c, g)| (c, *g)).collect();
+        all.sort_by(|a, b| a.0.unit.cmp(&b.0.unit));
+        all
+    }
+
     pub fn canonical(&self) -> Option<&SourceUnit> {
         self.canonical.as_ref()
     }

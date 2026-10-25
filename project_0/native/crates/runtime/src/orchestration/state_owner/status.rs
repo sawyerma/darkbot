@@ -61,7 +61,42 @@ impl ShadowOwner {
             wallets: self.wallets_status(),
             finance: self.finance_status(),
             rebalance: self.rebalance.projection(self.st.highest_slot()),
+            sources: self.sources_status(),
+            last_source_decision: self.sources.last_decision.clone(),
+            source_stats: crate::status_tap::OwnerSourceStats {
+                observed: self.sources.stats.observed,
+                rejected: self.sources.stats.rejected,
+                applied: self.sources.stats.controls_applied,
+                refused: self.sources.stats.controls_refused,
+            },
         }
+    }
+
+    /// S1-02: every unit of the arbiter with its applied control.
+    fn sources_status(&self) -> Vec<crate::status_tap::OwnerSource> {
+        use darkbot_solana::ingress::sources::{Qualification, SourceRole};
+        let canonical = self.sources.arbiter.canonical();
+        self.sources
+            .arbiter
+            .controls()
+            .into_iter()
+            .map(|(c, generation)| crate::status_tap::OwnerSource {
+                unit: super::sources::unit_name(&c.unit),
+                role: match c.unit.role() {
+                    SourceRole::Authoritative => "AUTHORITATIVE",
+                    SourceRole::PreExecutionSensor => "PRE_EXECUTION_SENSOR",
+                },
+                mode: crate::orchestration::source_control::mode_name(c.mode),
+                qualification: match &c.qualification {
+                    Qualification::NotRun => "NOT_RUN".into(),
+                    Qualification::LocalPass => "LOCAL_PASS".into(),
+                    Qualification::Qualified { evidence } => format!("QUALIFIED:{evidence}"),
+                    Qualification::Blocked(reason) => format!("BLOCKED:{reason}"),
+                },
+                generation,
+                canonical: canonical == Some(&c.unit),
+            })
+            .collect()
     }
 
     fn engine_status(&self) -> OwnerEngine {

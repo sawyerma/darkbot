@@ -2124,6 +2124,24 @@ fn s1_02_runtime_control_toggles_and_hands_canonical_authority_over() {
         o.sources.stats.controls_refused == 1
     });
     assert!(f.owner.sources.line().contains("canonical=wss"));
+    // P0-PROD-CTRL-04/07: the projection carries every unit's applied control (mode,
+    // qualification, generation, canonical) and the owner's last decision with its reason.
+    let s = f.owner.owner_snapshot(1);
+    let geyser = s
+        .sources
+        .iter()
+        .find(|u| u.unit == "geyser:loopback")
+        .unwrap();
+    assert_eq!((geyser.mode, geyser.canonical), ("off", false));
+    assert_eq!(geyser.generation, 2, "one applied change");
+    assert!(s
+        .sources
+        .iter()
+        .any(|u| u.unit == "wss" && u.canonical && u.mode == "active"));
+    let decision = s.last_source_decision.clone().unwrap();
+    assert_eq!((decision.seq, decision.applied), (2, false));
+    assert!(!decision.detail.is_empty());
+    assert_eq!((s.source_stats.applied, s.source_stats.refused), (1, 1));
     assert!(f.owner.st.run_state().is_tradable());
     assert!(control
         .try_push(apply(

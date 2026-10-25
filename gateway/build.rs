@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "darkbot/project0/v1/capture.proto",
         "darkbot/project0/v1/system.proto",
         "darkbot/project0/v1/analytics.proto",
+        "darkbot/project0/v1/owner.proto",
     ];
     for f in files {
         println!("cargo:rerun-if-changed={}", root.join(f).display());

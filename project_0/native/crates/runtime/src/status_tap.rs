@@ -228,6 +228,42 @@ pub fn operational_snapshot() -> OperationalSnapshot {
     )
 }
 
+/// S1-02 (CTRL-07): one controlled data source as the owner's arbiter holds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerSource {
+    /// `wss`, `geyser:<provider>`, …
+    pub unit: String,
+    /// AUTHORITATIVE or PRE_EXECUTION_SENSOR.
+    pub role: &'static str,
+    /// The applied mode: off | observe | active.
+    pub mode: &'static str,
+    /// NOT_RUN | LOCAL_PASS | QUALIFIED:<evidence> | BLOCKED:<reason>.
+    pub qualification: String,
+    /// 1 at the start, +1 per applied change.
+    pub generation: u64,
+    /// The unit feeds canonical state now.
+    pub canonical: bool,
+}
+
+/// The owner's last decision on a source-control request (`outcome_<seq>.p0j`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnerSourceDecision {
+    pub seq: u64,
+    pub request: String,
+    pub applied: bool,
+    /// The refusal reason, or the canonical handoff of an applied control.
+    pub detail: String,
+}
+
+/// Counters of the owner's sources.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OwnerSourceStats {
+    pub observed: u64,
+    pub rejected: u64,
+    pub applied: u64,
+    pub refused: u64,
+}
+
 /// B01: one planned rebalance trade (OBSERVE: planned, never sent).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RebalanceTrade {
@@ -277,6 +313,10 @@ pub struct OwnerSnapshot {
     pub finance: OwnerFinance,
     /// B01: the rebalancing observation; `None` while the mode is OFF.
     pub rebalance: Option<OwnerRebalance>,
+    /// S1-02: every controlled data source, the last control decision and the counters.
+    pub sources: Vec<OwnerSource>,
+    pub last_source_decision: Option<OwnerSourceDecision>,
+    pub source_stats: OwnerSourceStats,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

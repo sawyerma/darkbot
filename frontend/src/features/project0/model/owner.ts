@@ -90,6 +90,10 @@ export interface LiquidatorView {
   capabilities: readonly CapabilityView[];
   /** null while rebalancing is OFF. */
   rebalance: RebalanceView | null;
+  /** S1-02: every controlled data source with its applied control (the owner's arbiter). */
+  sources: ReadonlyArray<{ unit: string; role: string; mode: string; qualification: string; generation: bigint; canonical: boolean }>;
+  lastSourceDecision: { seq: bigint; request: string; applied: boolean; detail: string } | null;
+  sourceStats: { observed: bigint; rejected: bigint; applied: bigint; refused: bigint } | null;
 }
 
 export interface WalletsView {

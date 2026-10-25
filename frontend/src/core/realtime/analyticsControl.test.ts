@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, CommandLookupResponseSchema } from "../generated/darkbot/control/v1/commands_pb";
 import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
-import { analyticsCommand, backtestCommand, optimizeCommand, recheck, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
+import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
+import { analyticsCommand, backtestCommand, optimizeCommand, recheck, sourceCommand, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
 const accepted = (phase: CommandPhase, detail = "") => new Response(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, phase, detail })));
@@ -36,6 +37,15 @@ describe("Analytics job commands", () => {
     if (!("params" in off)) throw new Error(off.problem);
     expect(fromBinary(PostCaptureJobCommandSchema, off.params).offline).toBe(false);
     expect("problem" in verifyCommand({ runId: "run-a", mode: "off", resume: false, maxSeconds: "", maxRamMib: "1" })).toBe(true);
+  });
+
+  it("types a source mode request for known units only", () => {
+    const ok = sourceCommand("geyser:publicnode", "observe");
+    if (!("params" in ok)) throw new Error(ok.problem);
+    const c = fromBinary(SourceControlCommandSchema, ok.params);
+    expect([c.unit, c.mode]).toEqual(["geyser:publicnode", "observe"]);
+    expect("problem" in sourceCommand("geyser:../x", "off")).toBe(true);
+    expect("problem" in sourceCommand("", "off")).toBe(true);
   });
 
   it("posts one typed request whose id becomes the job id, and shows the native refusal", async () => {

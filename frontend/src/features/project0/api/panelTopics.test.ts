@@ -22,7 +22,7 @@ describe("Project 0 panel topics", () => {
     expect(held("liquidator").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_LIQUIDATOR_STATE, TopicId.PROJECT0_FINANCE_SUMMARY]));
     expect(held("wallets").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_WALLETS_STATE, TopicId.PROJECT0_FINANCE_SUMMARY]));
     expect(held("analytics").acquired).toEqual([TopicId.PROJECT0_ANALYTICS_JOBS]);
-    expect(held("capture").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_CAPTURE_STATE, TopicId.PROJECT0_ANALYTICS_JOBS]));
+    expect(held("capture").acquired).toEqual(expect.arrayContaining([TopicId.PROJECT0_CAPTURE_STATE, TopicId.PROJECT0_ANALYTICS_JOBS, TopicId.PROJECT0_LIQUIDATOR_STATE]));
     const w = held("wallets");
     expect(w.released).toBe(w.acquired.length);
   });

@@ -126,6 +126,7 @@
 - [darkbot/project0/v1/owner.proto](#darkbot_project0_v1_owner-proto)
     - [AssetAmount](#darkbot-project0-v1-AssetAmount)
     - [Capability](#darkbot-project0-v1-Capability)
+    - [DataSource](#darkbot-project0-v1-DataSource)
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
     - [LiquidatorState](#darkbot-project0-v1-LiquidatorState)
     - [LossCount](#darkbot-project0-v1-LossCount)
@@ -137,6 +138,9 @@
     - [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked)
     - [RebalancePlan](#darkbot-project0-v1-RebalancePlan)
     - [RebalanceTrade](#darkbot-project0-v1-RebalanceTrade)
+    - [SourceControlCommand](#darkbot-project0-v1-SourceControlCommand)
+    - [SourceDecision](#darkbot-project0-v1-SourceDecision)
+    - [SourceStats](#darkbot-project0-v1-SourceStats)
     - [StateCounters](#darkbot-project0-v1-StateCounters)
     - [WalletsState](#darkbot-project0-v1-WalletsState)
 
@@ -2237,6 +2241,26 @@ One switchable capability (P0-PROD-CTRL-03).
 
 
 
+<a name="darkbot-project0-v1-DataSource"></a>
+
+### DataSource
+One controlled data source (the owner&#39;s arbiter: at most one canonical unit).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| unit | [string](#string) |  | wss, geyser:&lt;provider&gt;, … |
+| role | [string](#string) |  | AUTHORITATIVE or PRE_EXECUTION_SENSOR. |
+| mode | [string](#string) |  | The applied mode: off | observe | active. |
+| qualification | [string](#string) |  | NOT_RUN | LOCAL_PASS | QUALIFIED:&lt;evidence&gt; | BLOCKED:&lt;reason&gt;. |
+| generation | [uint64](#uint64) |  | 1 at the start, &#43;1 per applied change. |
+| canonical | [bool](#bool) |  | The unit feeds canonical state now. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-FinanceSummary"></a>
 
 ### FinanceSummary
@@ -2278,6 +2302,9 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | safety | [OwnerSafety](#darkbot-project0-v1-OwnerSafety) |  | Safety layer: limits, capital in use, halts (liquidation/src/safety.rs). |
 | capabilities | [Capability](#darkbot-project0-v1-Capability) | repeated | Every switchable capability: requested, effective and why it is blocked. |
 | rebalance | [RebalancePlan](#darkbot-project0-v1-RebalancePlan) |  | B01: the rebalancing observation of the inventory bands; unset while OFF. |
+| sources | [DataSource](#darkbot-project0-v1-DataSource) | repeated | S1-02: every controlled data source of the owner with its applied control. |
+| last_source_decision | [SourceDecision](#darkbot-project0-v1-SourceDecision) |  | The owner&#39;s last source-control decision; unset before the first one. |
+| source_stats | [SourceStats](#darkbot-project0-v1-SourceStats) |  | Source counters of this run. |
 
 
 
@@ -2469,6 +2496,59 @@ One planned rebalance trade (ExactIn).
 | amount_in | [uint64](#uint64) |  | Amount sold (base units). |
 | minimum_out | [uint64](#uint64) |  | The on-chain enforced minimum output (base units). |
 | cost_usd_micro | [uint64](#uint64) |  | Conservative cost: value given minus value received plus the planned network fee. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-SourceControlCommand"></a>
+
+### SourceControlCommand
+Parameters (CommandRequest.params) of project0.source.set: the operands of
+`p0ctl source set UNIT MODE`; the running owner applies or refuses the request in order.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| unit | [string](#string) |  | wss or geyser:&lt;provider&gt;. |
+| mode | [string](#string) |  | off, observe or active (active needs a qualification record). |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-SourceDecision"></a>
+
+### SourceDecision
+The owner&#39;s decision on one source-control request.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| seq | [uint64](#uint64) |  | Request sequence number. |
+| request | [string](#string) |  | `&lt;unit&gt; &lt;mode&gt;` as requested. |
+| applied | [bool](#bool) |  | Applied, or refused (see detail). |
+| detail | [string](#string) |  | The refusal reason, or the canonical handoff of an applied control. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-SourceStats"></a>
+
+### SourceStats
+Source counters of the owner.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| observed | [uint64](#uint64) |  | Events observed by non-canonical units. |
+| rejected | [uint64](#uint64) |  | Events refused (stale stamp, OFF) or not observable. |
+| applied | [uint64](#uint64) |  | Control changes applied. |
+| refused | [uint64](#uint64) |  | Control changes refused. |
 
 
 

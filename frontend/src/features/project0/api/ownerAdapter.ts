@@ -111,6 +111,13 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           budgetUsdMicro: m.rebalance.budgetUsdMicro,
         }
       : null,
+    sources: m.sources.map((s) => ({ unit: s.unit, role: s.role, mode: s.mode, qualification: s.qualification, generation: s.generation, canonical: s.canonical })),
+    lastSourceDecision: m.lastSourceDecision
+      ? { seq: m.lastSourceDecision.seq, request: m.lastSourceDecision.request, applied: m.lastSourceDecision.applied, detail: m.lastSourceDecision.detail }
+      : null,
+    sourceStats: m.sourceStats
+      ? { observed: m.sourceStats.observed, rejected: m.sourceStats.rejected, applied: m.sourceStats.applied, refused: m.sourceStats.refused }
+      : null,
   };
 }
 

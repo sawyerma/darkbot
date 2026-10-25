@@ -20,6 +20,61 @@ message LiquidatorState {
   repeated Capability capabilities = 6;
   // B01: the rebalancing observation of the inventory bands; unset while OFF.
   RebalancePlan rebalance = 7;
+  // S1-02: every controlled data source of the owner with its applied control.
+  repeated DataSource sources = 8;
+  // The owner's last source-control decision; unset before the first one.
+  SourceDecision last_source_decision = 9;
+  // Source counters of this run.
+  SourceStats source_stats = 10;
+}
+
+// One controlled data source (the owner's arbiter: at most one canonical unit).
+message DataSource {
+  // wss, geyser:<provider>, …
+  string unit = 1;
+  // AUTHORITATIVE or PRE_EXECUTION_SENSOR.
+  string role = 2;
+  // The applied mode: off | observe | active.
+  string mode = 3;
+  // NOT_RUN | LOCAL_PASS | QUALIFIED:<evidence> | BLOCKED:<reason>.
+  string qualification = 4;
+  // 1 at the start, +1 per applied change.
+  uint64 generation = 5;
+  // The unit feeds canonical state now.
+  bool canonical = 6;
+}
+
+// The owner's decision on one source-control request.
+message SourceDecision {
+  // Request sequence number.
+  uint64 seq = 1;
+  // `<unit> <mode>` as requested.
+  string request = 2;
+  // Applied, or refused (see detail).
+  bool applied = 3;
+  // The refusal reason, or the canonical handoff of an applied control.
+  string detail = 4;
+}
+
+// Source counters of the owner.
+message SourceStats {
+  // Events observed by non-canonical units.
+  uint64 observed = 1;
+  // Events refused (stale stamp, OFF) or not observable.
+  uint64 rejected = 2;
+  // Control changes applied.
+  uint64 applied = 3;
+  // Control changes refused.
+  uint64 refused = 4;
+}
+
+// Parameters (CommandRequest.params) of project0.source.set: the operands of
+// `p0ctl source set UNIT MODE`; the running owner applies or refuses the request in order.
+message SourceControlCommand {
+  // wss or geyser:<provider>.
+  string unit = 1;
+  // off, observe or active (active needs a qualification record).
+  string mode = 2;
 }
 
 // B01 (P8-INV-01): the owner's rebalancing plan in OBSERVE — real balances, quotes and conservative

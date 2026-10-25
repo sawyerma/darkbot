@@ -40,7 +40,15 @@ const OPTIMIZE_START: &str = "project0.analytics.optimize.start";
 const JOB_CANCEL: &str = "project0.analytics.job.cancel";
 /// A08/F-02: the post-capture chain (verification, report, qualification) of a recorded run.
 const VERIFY_START: &str = "project0.capture.verify.start";
-const JOB_ACTIONS: [&str; 4] = [BACKTEST_START, OPTIMIZE_START, JOB_CANCEL, VERIFY_START];
+/// S1-02: a data source's operating mode (`p0ctl source set`); the running owner decides.
+const SOURCE_SET: &str = "project0.source.set";
+const JOB_ACTIONS: [&str; 5] = [
+    BACKTEST_START,
+    OPTIMIZE_START,
+    JOB_CANCEL,
+    VERIFY_START,
+    SOURCE_SET,
+];
 /// Online strict verification reads the chain with the operator's provider evidence: a terminal
 /// action (`p0ctl job start post-capture --provider-evidence`), never a GUI one.
 fn online_strict(req: &CommandRequest) -> bool {
@@ -153,7 +161,7 @@ fn valid_job_id(s: &str) -> bool {
 /// job id is the request id; a cancel names its job as the resource.
 fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
-        BacktestJobCommand, OptimizeJobCommand, PostCaptureJobCommand,
+        BacktestJobCommand, OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
     };
     if req.expected.is_some() {
         return None;
@@ -231,6 +239,23 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 args.push("--resume-verification".into());
             }
             Some(args)
+        }
+        SOURCE_SET if req.resource_id.is_empty() => {
+            let c = SourceControlCommand::decode(req.params.as_ref()).ok()?;
+            let unit_ok = c.unit == "wss"
+                || c.unit.strip_prefix("geyser:").is_some_and(|p| {
+                    (1..=32).contains(&p.len())
+                        && p.bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                });
+            if !unit_ok || !["off", "observe", "active"].contains(&c.mode.as_str()) {
+                return None;
+            }
+            Some(
+                ["p0", "source", "set", &c.unit, &c.mode]
+                    .map(String::from)
+                    .to_vec(),
+            )
         }
         JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
             ["p0", "job", "cancel", "--id", &req.resource_id]
@@ -865,6 +890,8 @@ impl Control {
                 record.phase = CommandPhase::Completed as i32;
                 record.detail = if action == JOB_CANCEL {
                     "Stop requested from the job's worker; it records CANCELLED in project0.analytics.jobs"
+                } else if action == SOURCE_SET {
+                    "Source request recorded and the runtime rung; the owner's decision follows in project0.liquidator.state"
                 } else if action == VERIFY_START {
                     "Post-capture job recorded and its worker started; the run's qualification follows in project0.analytics.jobs"
                 } else {
@@ -2066,6 +2093,17 @@ mod tests {
                 CommandRejectReason::GateBlocked as i32
             )
         );
+        // S1-02: a source mode request maps onto `p0ctl source set`.
+        use crate::proto::project0::v1::SourceControlCommand;
+        let source = SourceControlCommand {
+            unit: "geyser:publicnode".into(),
+            mode: "observe".into(),
+        };
+        let r = control
+            .execute(&request(7, SOURCE_SET, "", source.encode_to_vec()))
+            .await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert_eq!(argv(), "p0\nsource\nset\ngeyser:publicnode\nobserve\n");
         // Invalid parameters: rejected, no receipt, nothing dispatched.
         fs::remove_file(&log).unwrap();
         let bad = |c: BacktestJobCommand| c.encode_to_vec();
@@ -2203,6 +2241,32 @@ mod tests {
                 ),
             ),
             (9, request(9, JOB_CANCEL, "-job", vec![])),
+            (
+                1,
+                request(
+                    1,
+                    SOURCE_SET,
+                    "",
+                    SourceControlCommand {
+                        unit: "geyser:../x".into(),
+                        mode: "observe".into(),
+                    }
+                    .encode_to_vec(),
+                ),
+            ),
+            (
+                2,
+                request(
+                    2,
+                    SOURCE_SET,
+                    "",
+                    SourceControlCommand {
+                        unit: "wss".into(),
+                        mode: "on".into(),
+                    }
+                    .encode_to_vec(),
+                ),
+            ),
         ] {
             // Fresh ids: none of these may reuse a receipt of the dispatched commands above.
             let mut req = req;

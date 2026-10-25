@@ -58,6 +58,8 @@ pub(super) struct OwnerSources {
     control_dir: Option<std::path::PathBuf>,
     pub(super) health: SourceHealth,
     pub(super) stats: SourceStats,
+    /// The owner's last control decision (the applied state the status projection shows).
+    pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
 }
 
 impl OwnerSources {
@@ -82,6 +84,7 @@ impl OwnerSources {
             control_dir: None,
             health: SourceHealth::default(),
             stats: SourceStats::default(),
+            last_decision: None,
         }
     }
 
@@ -272,6 +275,12 @@ impl ShadowOwner {
     /// Records the owner's decision on request `seq` (the applied state of `p0ctl source
     /// status`); a failed write is journaled, the decision itself stands.
     fn record_source_decision(&mut self, seq: u64, request: String, applied: bool, detail: String) {
+        self.sources.last_decision = Some(crate::status_tap::OwnerSourceDecision {
+            seq,
+            request: request.clone(),
+            applied,
+            detail: detail.clone(),
+        });
         let Some(dir) = self.sources.control_dir.clone() else {
             return;
         };

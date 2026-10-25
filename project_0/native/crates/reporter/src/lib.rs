@@ -15,12 +15,12 @@ use proto::control::{
     StateWatermark, TopicId,
 };
 use proto::project0::{
-    AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, EffectiveRecord,
-    FinanceSummary, LiquidatorState, LossCount, MarketAssessment, MarketCounters,
+    AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
+    EffectiveRecord, FinanceSummary, LiquidatorState, LossCount, MarketAssessment, MarketCounters,
     OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
     OwnerTrigger, PhaseStatus, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan,
-    RebalanceTrade, ReceiverTotal, RunInfo, StateCounters, SystemStatus, TransportStatus,
-    WalletsState, WriterLane,
+    RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters,
+    SystemStatus, TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -271,6 +271,30 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
                 .collect(),
             quotes_pending: r.quotes_pending,
             budget_usd_micro: r.budget_usd_micro,
+        }),
+        sources: o
+            .sources
+            .iter()
+            .map(|s| DataSource {
+                unit: s.unit.clone(),
+                role: s.role.into(),
+                mode: s.mode.into(),
+                qualification: s.qualification.clone(),
+                generation: s.generation,
+                canonical: s.canonical,
+            })
+            .collect(),
+        last_source_decision: o.last_source_decision.as_ref().map(|d| SourceDecision {
+            seq: d.seq,
+            request: d.request.clone(),
+            applied: d.applied,
+            detail: d.detail.clone(),
+        }),
+        source_stats: Some(SourceStats {
+            observed: o.source_stats.observed,
+            rejected: o.source_stats.rejected,
+            applied: o.source_stats.applied,
+            refused: o.source_stats.refused,
         }),
     }
 }
@@ -1346,6 +1370,36 @@ mod contract_tests {
                 quotes_pending: 0,
                 budget_usd_micro: 5_000_000,
             }),
+            sources: vec![
+                darkbot_runner::status_tap::OwnerSource {
+                    unit: "geyser:publicnode".into(),
+                    role: "AUTHORITATIVE",
+                    mode: "observe",
+                    qualification: "NOT_RUN".into(),
+                    generation: 2,
+                    canonical: false,
+                },
+                darkbot_runner::status_tap::OwnerSource {
+                    unit: "wss".into(),
+                    role: "AUTHORITATIVE",
+                    mode: "active",
+                    qualification: "QUALIFIED:LONG_TAIL_WSS_BASELINE".into(),
+                    generation: 1,
+                    canonical: true,
+                },
+            ],
+            last_source_decision: Some(darkbot_runner::status_tap::OwnerSourceDecision {
+                seq: 3,
+                request: "geyser:publicnode active".into(),
+                applied: false,
+                detail: "SOURCE_ACTIVE_REQUIRES_QUALIFICATION".into(),
+            }),
+            source_stats: darkbot_runner::status_tap::OwnerSourceStats {
+                observed: 120,
+                rejected: 2,
+                applied: 1,
+                refused: 1,
+            },
         }
     }
 
@@ -1619,6 +1673,12 @@ mod contract_tests {
         let mut off = owner.clone();
         off.rebalance = None;
         assert_eq!(liquidator_state(&off).rebalance, None);
+        // S1-02: every unit's applied control, the last decision and the counters.
+        assert_eq!(l.sources.len(), 2);
+        assert!(l.sources[1].canonical && l.sources[1].mode == "active");
+        let d = l.last_source_decision.as_ref().unwrap();
+        assert_eq!((d.seq, d.applied), (3, false));
+        assert_eq!(l.source_stats.as_ref().unwrap().refused, 1);
         let mut unread = owner.clone();
         unread.wallets.journal_read = false;
         let w = wallets_state(&unread);
