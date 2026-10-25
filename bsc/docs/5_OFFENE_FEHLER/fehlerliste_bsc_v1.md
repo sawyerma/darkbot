@@ -247,7 +247,7 @@ Für jedes fachlich implementierte Ticket **genau die relevanten** Prüfungen; b
 - BSC-005: Frist/Disarm sind keine Invalidierung zuvor signierter Legacy-TXs; Egress-Authority muss Mehrhost-/Checkout-/Old-Binary-/UNKNOWN-Fälle konservativ sperren.
 - BSC-048: Aktive G0.7/G0.8-interne JSON-Pfade vor Live-Autorisierung minimal binär migrieren; andere historische Tools phasentreu, keine erzwungene vollständige Toolchain-Neuentwicklung vor SIGN.
 - BSC-050 vor Gate C als Vollinventur, davor nur Gate-A-Teilscan; BSC-051/053 gemeinsamem Gateway-Owner zuordnen, BSC-052 C1-Clock-/Gap-Fehler.
-- Maximal ein optionaler read-only Agent, standardmäßig keiner; Project_0-P0-PROD-CTRL-10 wurde ebenso geändert. Keine zwei Vetoprüfer.
+- Pro Ticket standardmäßig kein Prüfagent; pro vollständig abgeschlossenem Phasengate genau ein unabhängiger read-only Reviewer auf dem finalen SHA. Maximal ein zusätzlicher Agent gleichzeitig, keine Kaskaden und keine zwei Vetoprüfer. Nach bestandener Prüfung ohne neue Nutzerfrage zur nächsten offline freigegebenen Phase.
 
 ## Bindender Stand 25.10.2026 — technische Freigabe versus wirtschaftliche Autorisierung
 
@@ -255,7 +255,7 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 
 **BSC-008 = Option A**, **BSC-011 = Option B**, **BSC-049 = SELF_A** sind hiermit als **technische Profilentscheidungen** festgelegt; Providerwirkung, echte Erwerbs-Evidence und wirtschaftliche V5-/SIGN-/ARM-/G0.7-Approval bleiben **unqualifiziert bzw. nicht autorisiert**. Die bisherige „AWAITING_USER_DECISION“-Tabelle §7 ist insoweit überholt.
 
-**BSC-005 erneute sicherheitskritische Codeabweichung:** Die neu verbindliche strengere Regel verbraucht die Remote-Authority unwiderruflich ab erfolgreichem CAS, selbst vor Egress/bei lokalem Latch-Abbruch. Der derzeitige Runner kann über `attempt_authority::Claim::return_unsent` sowie `g07_mainnet_self_launch_buy/main.rs::release_unsent` eine AUTHORIZED-Ref nach einem nachgewiesenen Pre-Release-Abbruch zurückgeben. **STATUS = OPEN/CODE_GAP**, gezielte RED→GREEN-/Crash-/CAS-/GUI-Readiness-Tests und echte Rust-Codekorrektur nötig **vor jeglicher Echtgeldfreigabe**. Kein Ersatz durch Dokumentation oder Fake-Guard.
+**BSC-005 verbindliche T5-Semantik, korrigiert am 25.10.:** `Claim::return_unsent` ist **nur** für bytefrei bewiesenen PRE_EGRESS_ABORT vor der Release-Barriere vorgesehen und nicht zu entfernen. Derselbe Claim darf CONSUMED→AUTHORIZED per CAS zurückgeben, solange kein RELEASED-Marker/Byte-Egress möglich ist und Latch/Journal korrekt sind; danach, bei Crash/Kill, UNKNOWN, Remote-Unklarheit oder fremdem/stalem Claim nie. Kein automatischer Retry. **OPEN/CODE_GAP bleibt allein für die noch fehlende typisierte, beim Barrier-Übergang konsumierte `Unsent`-Capability und gezielte Abbruch-/Journal-/Crash-/Remote-CAS-/Release-Marker-/Guard-Proof-Regressionen**; bestehender CAS-Remote-Qualifikationsnachweis bleibt in seinem Scope erhalten. Keine wirtschaftliche Freigabe aus LOCAL_PASS.
 
 **Definition TECHNISCH FERTIG:** Alle konkret realisierbaren Anforderungen samt produktiven Aufrufern, native/Protobuf/Gateway/Frontend-End-to-End dort, wo relevant, positive/negative und Risiko-/Recovery-Tests, Release-/Format-/Build-/Regression-Nachweis und aktualisierte Evidence sind auf dem exakten gepushten SHA geprüft. Fehlt nur ausdrücklich externe Mainnet-/Producer-/Provider-Evidence, ist allein `TECHNISCH FERTIG — EXTERNAL_BLOCKED` mit Liste zulässig. `LOCAL_PASS` allein ist nie ein Vollabschluss.
 
@@ -267,7 +267,7 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 | BSC-002 | LOCAL_PASS | `c2267886`/`4ee72212`: EIP-1898-Pin aller DRY-EVM-States + Requal-Hashgleichheit + Re-Check vor Evidence |
 | BSC-003 | LOCAL_PASS | `2652e80d`: `execution::bundle_wire` einzige Definition; V5/Requal/Runner prüfen DRY-Projektion fail-closed |
 | BSC-004 | LOCAL_PASS | `34213bcf`: 24-h-Policy-Frische auch im Runner direkt vor dem Latch |
-| BSC-005 | LOCAL_PASS + REMOTE_QUALIFIED | `37344055`/`26b39c42`: Authority-Ref auf `origin` (CAS vor dem Latch); Guard verlangt `AttemptAuthorityProof`; alle je committeten Guard-Werte `UNARMED` (kein ARMED-Altbinary); GitHub-`selftest` 25.10. PASS (create-only, 4 Racer → 1 Gewinner, Lease-Delete); Readiness `ATTEMPT_AUTHORITY` + Overview; `13ef1ef5`: V5-Text bindet die Gates; `04078b6c` Review-Fixes: No-op-Push zählt nie als CAS, Claim-Nonce, Gate-Werte zur Laufzeit geprüft, Git-Prozessgruppe mit Frist, Selftest erneut 12/12 |
+| BSC-005 | LOCAL_PASS + REMOTE_QUALIFIED (Scope CAS) / TYPE_BARRIER_OPEN | `37344055`/`26b39c42`: Authority-Ref auf `origin` (CAS vor dem Latch); Guard verlangt `AttemptAuthorityProof`; alle je committeten Guard-Werte `UNARMED` (kein ARMED-Altbinary); GitHub-`selftest` 25.10. PASS (create-only, 4 Racer → 1 Gewinner, Lease-Delete); Readiness `ATTEMPT_AUTHORITY` + Overview; `13ef1ef5`: V5-Text bindet die Gates; `04078b6c` Review-Fixes: No-op-Push zählt nie als CAS, Claim-Nonce, Gate-Werte zur Laufzeit geprüft, Git-Prozessgruppe mit Frist, Selftest erneut 12/12 |
 | BSC-006 | LOCAL_PASS | `68862fbc`: `g06a_dry_handoff archive/restore` mit Manifest-Anker, Hygiene, V5-Reproduktion |
 | BSC-007 | LOCAL_PASS | `0b52d5c2`: Keys einmal gelesen, ENV geleert, Zeroizing, nach Signatur verworfen |
 | BSC-048 | LOCAL_PASS | `694264c2`: Reporter liest Builder-Probe nur nativ; `provenance.dbrec` (Typ 37) statt JSON als Import-Gate; Snapshot-Manifest `SOURCES.SHA256SUMS`. Rest außerhalb G0.7/G0.8: `darkbot-release.json` (BSC-051), Census-Generator (Frontend), Q5A-TLS-JSON (später) |
@@ -292,7 +292,7 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 | BSC-018–036, 043–047, 050 (voll), 051–053 | OFFLINE_IMPLEMENTATION_AUTHORIZED_BY_PHASE / LIVE_BLOCKED | Bindender PHASENPLAN 25.10.2026: BSC-050 Vollscan vor umfassender C1/C2-Arbeit; C0–I nach fachlichen Abhängigkeiten offline entwickeln und technisch abnehmen, E erst nach Four-G0.1-Vertragsfreeze; G0.7/G0.8 bleiben echte Geld-/Betriebsgates; Shared Gateway nur mit P0-Owner |
 | BSC-037–040, 042 | MEASUREMENT_DEPENDENT / NO_FAKE_PASS | Gezielte Offline-Optimierung erst nach real vergleichbarer Messbasis; keine künstliche µs-Gewinnangabe; operative Freischaltung separat |
 
-**Entscheidungen — AWAITING_USER_DECISION (vor der jeweiligen Freigabe):**
+**Technische Profilentscheidungen — getroffen am 25.10.2026 (keine wirtschaftliche Freigabe):**
 
 | Ticket | Frage | Optionen | Empfehlung |
 |---|---|---|---|
