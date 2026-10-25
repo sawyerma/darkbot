@@ -19,6 +19,8 @@
 
 ---
 
+2026-10-25 Fehlerliste V1 / Bug V2 (code, offline-tested, kein SIGN/ARM/Send): Gate A BSC-001–007 umgesetzt, BSC-048 internes JSON der Status-/Readiness-Kette binär, Gate B BSC-010/012–016 und BSC-041; Einzeiler und offene Entscheidungen (008/011/049, Authority-Medium) in `5_OFFENE_FEHLER/fehlerliste_bsc_v1.md` §7. Guard UNARMED.
+
 ## Current checkpoint — 2026-10-21: Portal v5.26.0 drift — readiness STOP; G0.7 not armable on the v5.25 DRY
 
 Read-only readiness 2026-10-21T20:17:33Z: `CURRENT_DEPLOYMENT_DRIFT=STOP` (Portal v5.25.0 → **v5.26.0**, implementation `0x7a94f37b61a82c395f9812cf266b444783cc5e8c`, upgrade block 128914179). The requalified DRY of 2026-10-20 and its signed bytes are bound to v5.25.0 and are not valid for current Mainnet. Evidence: `native/evidence/g07/readiness_20261021T201733Z/`; ledger entry 2026-10-21. A requalification against v5.26.0 needs a separate decision (salt choice A/B from E3-1 first, because B changes the candidate anyway; DRY-1 signing by the user). Guard **UNARMED**; G0.7/G0.8 **NOT_EXECUTED**. Offline bugfix packages of 2026-10-21 (E7-6…E2-4) are listed in `bsc_bug_v1.md`.

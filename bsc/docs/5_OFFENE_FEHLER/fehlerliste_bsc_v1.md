@@ -248,3 +248,44 @@ Für jedes fachlich implementierte Ticket **genau die relevanten** Prüfungen; b
 - BSC-048: Aktive G0.7/G0.8-interne JSON-Pfade vor Live-Autorisierung minimal binär migrieren; andere historische Tools phasentreu, keine erzwungene vollständige Toolchain-Neuentwicklung vor SIGN.
 - BSC-050 vor Gate C als Vollinventur, davor nur Gate-A-Teilscan; BSC-051/053 gemeinsamem Gateway-Owner zuordnen, BSC-052 C1-Clock-/Gap-Fehler.
 - Maximal ein optionaler read-only Agent, standardmäßig keiner; Project_0-P0-PROD-CTRL-10 wurde ebenso geändert. Keine zwei Vetoprüfer.
+
+## 7. Umsetzungsstand Gate A (Einzeiler, je Ticket)
+
+| Ticket | Status | Nachweis |
+|---|---|---|
+| BSC-001 | LOCAL_PASS | `644b6346`: kein Default-Modus; FULL/SIGN erst nach `DARKBOT_G06A_SIGN=YES` |
+| BSC-002 | LOCAL_PASS | `c2267886`/`4ee72212`: EIP-1898-Pin aller DRY-EVM-States + Requal-Hashgleichheit + Re-Check vor Evidence |
+| BSC-003 | LOCAL_PASS | `2652e80d`: `execution::bundle_wire` einzige Definition; V5/Requal/Runner prüfen DRY-Projektion fail-closed |
+| BSC-004 | LOCAL_PASS | `34213bcf`: 24-h-Policy-Frische auch im Runner direkt vor dem Latch |
+| BSC-005 | LOCAL_PASS | `37344055`: geteilte Authority-Ref auf `origin`, CAS vor dem Latch; Readiness-Zeile `ATTEMPT_AUTHORITY` offen (Frontend-Rundweg) |
+| BSC-006 | LOCAL_PASS | `68862fbc`: `g06a_dry_handoff archive/restore` mit Manifest-Anker, Hygiene, V5-Reproduktion |
+| BSC-007 | LOCAL_PASS | `0b52d5c2`: Keys einmal gelesen, ENV geleert, Zeroizing, nach Signatur verworfen |
+| BSC-048 | LOCAL_PASS | `694264c2`: Reporter liest Builder-Probe nur nativ; `provenance.dbrec` (Typ 37) statt JSON als Import-Gate; Snapshot-Manifest `SOURCES.SHA256SUMS`. Rest außerhalb G0.7/G0.8: `darkbot-release.json` (BSC-051), Census-Generator (Frontend), Q5A-TLS-JSON (später) |
+| BSC-050 (A-Teilscan) | TEILWEISE | Scan 25.10. (read-only): B5 behoben `de27eb79`; offen: GUI-Readiness im Snapshot kann V5 nicht bewerten (fehlende V5-/Witness-Inputs, kein Repo-Root/.git, keine CLOCK/BOOT-ID, fest verdrahteter RPC) → nie PASS_READ_ONLY; Uhr-Fehler→0 in DRY/Requal/Quote/Candidate-Provenienz (niedrig); Duplikate (Signer/Budget-Kopien) nur Wartungsrisiko |
+
+**Gate B (CODE_READY, ohne Mainnet):**
+
+| Ticket | Status | Nachweis |
+|---|---|---|
+| BSC-008 | AWAITING_USER_DECISION / EXTERNAL | Provider-Qualifikation braucht reale Provider-Evidenz |
+| BSC-009 | NOT_APPLICABLE | nur bei SELF_B-Änderung (heute SELF_A) |
+| BSC-010 | LOCAL_PASS | `1397fb60`: absolute 15-s-Builder-Antwortfrist (Watchdog), sonst UNKNOWN |
+| BSC-011 | AWAITING_USER_DECISION | Verdikt-Trennung erst nach Entscheidung |
+| BSC-012 | CODE_FIXED | `1b022678`: G0.8-State-Reads per EIP-1898-Blockhash; Endpunkt-Qualifikation vor G0.8 offen |
+| BSC-013 | LOCAL_PASS | `6a52f295`: späte UNRESOLVED-Abbrüche tragen bereits aufgelöste Receipts |
+| BSC-014 | LOCAL_PASS | `ae59bef3`: Provider-Widerspruch am Receipt-Index → UNRESOLVED statt STOP |
+| BSC-015 | CODE_FIXED | `1fef0cd6`: Rest-Unsicherheit ≥ max(Auflösung, Normierung); echter Witness EXTERNAL |
+| BSC-016 | LOCAL_PASS | `faeb05bc`: Crash nach Authority-Verbrauch gibt den Versuch nie frei (Reihenfolge gepinnt) |
+| BSC-017 | NOT_REQUIRED | keine fachlich neue G0.8-Recordstruktur |
+| BSC-041 | LOCAL_PASS | `19b49fa2`: Journal-SHA-256 gegen FIPS-/Padding-/Streaming-Referenzen |
+| BSC-018–036, 043–047, 050 (voll), 051–053 | FUTURE_PHASE_BLOCKED | Gate C erst nach echtem G0.7/G0.8-Verdikt |
+| BSC-037–040, 042 | FUTURE_PHASE_BLOCKED | Gate D nur nach Messnachweis |
+
+**Entscheidungen — AWAITING_USER_DECISION (vor der jeweiligen Freigabe):**
+
+| Ticket | Frage | Optionen | Empfehlung |
+|---|---|---|---|
+| BSC-008 | 48Club `noMerge`/`positionFirst`, Ablauf `+2` | A: unverändert (heutige DRY/V5-Projektion, Rest-Risiko PROVIDER_UNQUALIFIED ausdrücklich akzeptiert) · B: ändern → neue `bundle_wire`-Werte, neuer SIGN/Requal/V5/Probe-Plan | A, sofern keine Provider-Evidenz für B vorliegt |
+| BSC-011 | G0.8: Capture unvollständig vs. bewiesener Chain-STOP | A: heutige Matrix (UNRESOLVED vor STOP) · B: getrennt `chain_outcome` + `evidence_integrity`, nie PASS bei Lücke | B, Umsetzung in Gate B vor G0.8-Release |
+| BSC-049 | Profil SELF_A vs. SELF_B | A: öffentlicher Salt, eingefrorene Bytes, vorhersehbare Adresse (Kollision unbewiesen) · B: geheimer Salt, eigene Requal/V5 | Nutzerentscheidung (wirtschaftliches Risiko); heute A gewählt (Gen 1) |
+| BSC-005 | Authority-Medium | `origin`-Ref per CAS (umgesetzt) · Alternative nur betrieblich (ein Host) | `origin`-Ref; erster echter Grant auf GitHub ist Nutzeraktion |
