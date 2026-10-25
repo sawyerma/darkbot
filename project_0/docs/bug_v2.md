@@ -122,6 +122,7 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **Tests (RED):** Fee-Adapter mit Sleep X ⇒ `T_detect→T_ready < X` (heute ≥ X); `deadline_passed`-Parität (gleiche Entscheidung vor/nach Entkopplung); Known-nonactionable ⇒ `t_detect_ns == None`; Unknown/Safety-denied/fehlender Blockhash; Ledger-Intervallrichtung; `shadow_ledger`/`econ`-Reports tragen `None`.
 - **Restgefahr:** P6-MT.15-Shadow-Werte bis dahin nicht vertragsgemäß gemessen; Python-/Reporter-Konsumenten prüfen.
 
+- **Stand 25.10.: erledigt** `bbe50fbc` (T_detect nach dem Economic Gate, Deadline ab T_rx; Gate PASS `6d0e7ddc`).
 ### V2-05 — Fee-Quote, Simulation und Send teilen den `Workload::Simulation`-Slot ⇒ ≥ 500 ms Abstand je Hop (P8-02)
 - **Priorität/Phase:** **P1 LATENZ · P6-MT.7/MT1 · Cross-Ref P6MT-R1.** Gilt nur bei aktiviertem Budget — das sind alle `p0ctl`-Starts (Args ⇒ `startup.rs:51-79`) und jeder `run_econ4h` (`:192-195` unbedingt).
 - **Pfad:** `provider.rs:402-411` (`next_workload[idx] = now + 1/rate`), `:343-345` (`ready = max(token, next_workload, cooldown)`); Defaults `runtime_config.rs:27-28,43` (`rpc_rps=5`, `rpc_burst=1`, `simulation_rps=2`); `submit/rpc.rs:147` (Fee-Quote **und** Simulate auf `DeadlineRpc(Simulation)`), `:171-176` (Send-Client ebenfalls `Simulation`). `standard.conf` setzt nichts.
@@ -130,6 +131,7 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **Tests:** Muster `c5_paced_reconcile_never_blocks_live_reads` (`provider.rs:~1290`): zwei `acquire(Simulation)` bei rps=2 ⇒ ≥ 500 ms (RED-Beleg); nach Fix Fee→Sim ≥ 200 ms und < 500 ms mit Defaults — der globale Bucket zieht je Admission ein Token ab (`provider.rs:336/401`, `rpc_burst=1`, Refill 1/`rpc_rps` = 200 ms), < 100 ms nur in einer Testkonfiguration mit `rpc_burst ≥ 2`; Einsparung = 500 ms Workload-Abstand minus 200 ms globaler Mindestabstand; keine Burst-Erhöhung im Free-Profil; 429/Cooldown-Parität; Deadline 5 s; kein Doppel-Send.
 - **Restgefahr:** Provider-Sekundenlimit; nur innerhalb `rpc_rps` bleiben.
 
+- **Stand 25.10.: erledigt** `e286793e` (`Workload::FeeQuote`/`Send`, `fee_rps`/`send_rps`; Fee→Sim 559 → ~200 ms).
 ### V2-06 — Dependency-Fingerprint hasht ProgramData vollständig, 3× je Projektionszyklus; owner/lamports/write_version ungebunden (P5b-01 + P5b-04)
 - **Priorität/Phase:** **P2 LATENZ (ungemessen, strukturell größter lokaler Posten) · P6-MT.2/E9.**
 - **Pfad:** `candidates.rs:33-49` (`hash(&r.data)` je Dependency), `:75-96` (`program_data` fest im Set; N3-Test `:1264-1273` pinnt das), Aufrufe `detect.rs:108` (Cache-Consume), `:217` (Work-Erstellung), `remote_apply.rs:341` (Result); `state/mod.rs:52` `last_changed_epoch`, `:406/451` Bump bei jedem akzeptierten Write (auch Same-Slot owner/lamports), Re-Epoch bei Install, Cache-Clear bei Ready (`events.rs:293`).
@@ -137,6 +139,7 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **Tests:** `e9_dependency_fingerprint_tracks_every_dependency_revision` (`candidates.rs:1102-1170`) **muss umgebaut werden**: die `install`-Closure baut je Datenstand einen frischen `StateCore::new(1)`; gleiche Einfügereihenfolge ⇒ gleiche Epochen ⇒ ein rein epochenbasierter Fingerprint fiele im Gleich-Slot-Datenfall durch. Neuer Test mit In-place-Writes auf **einem** `StateCore`: gleicher Slot + Datenänderung ⇒ ≠; gleicher Slot, gleiche Daten, lamports 1→2 ⇒ ≠ (heute =); Snapshot-Install/Ready ⇒ alte Fingerprints ungültig; zusätzlich gezielter Test, ob `ProjectedState` (reicht owner/lamports an Health/Sizing) bei owner-/lamports-only-Revision dasselbe Ergebnis liefert (Owner-Wechsel ist on-chain nur bei genullten Daten möglich, Lamports gehen nicht in die Health-Rechnung ein — bis zum Test offen); N3 `program_data ∈ set`; `projection_stats` Stale/Ready-Parität; Vorher/Nachher-Messung SHA-Zeit über ProgramData-Größe (MT0).
 - **Restgefahr:** Rewrite identischer Bytes bumpt Epoch ⇒ konservative Verwerfung (mehr Rework, kein Fehlentscheid).
 
+- **Stand 25.10.: erledigt** `b99c7c31` (Fingerprint über `last_changed_epoch`; SHA-Zeitmessung NOT_RUN).
 ### V2-07 — Getrennte HTTP-Clients/Pools ohne Keepalive, 90 s Idle; Blocking-Thread 10 s (P6-01/P8-04)
 - **Priorität/Phase:** **P2 LATENZ (ungemessen) · MT1 Remote-Client-Hygiene · Cross-Ref P6MT-R1.**
 - **Pfad:** `route.rs:169-171` (Jupiter blocking Client), `jito.rs:54-56`, `provider.rs:688-695` (`rpc_client` eigener Client), `:999-1010` (`DeadlineRpc` eigener Client + eigene current-thread Runtime), `:1424`; `submit/rpc.rs:145-148,165-181` (zwei Pools je Submitter). Kein `pool_idle_timeout`/`tcp_keepalive` im Workspace; `reqwest 0.12.28` Default 90 s; `send_until` `spawn_blocking` (`provider.rs:785-800`), Tokio-Default `thread_keep_alive` 10 s.
@@ -144,16 +147,19 @@ Legende: **TXT** = Urteil zur TXT-Behauptung, **MD** = Urteil zum MD-Verdikt. De
 - **Tests:** Loopback-Server zählt TCP-Accepts über zwei aufeinanderfolgende Kandidaten (heute ≥ 2 Clients); Idle-A/B 0/30/90/120 s; Deadline-/Budget-Parität.
 - **Restgefahr:** LB/Server-Idle-Policies unbekannt; 50–200 ms nicht als erwiesen führen.
 
+- **Stand 25.10.: erledigt** `057daaed` (ein RPC-Transport, Keepalive/Idle aus `Limits`, Admission inline; Idle-A/B NOT_RUN).
 ### V2-08 — Sweep-/Burst-Parameter außerhalb des typisierten `Limits`-Vertrags (P3-08/P4-04)
 - **Priorität/Phase:** **P2 KONFIG/Manifest · P6-MT.13 · Regel „keine Literale, Tunables nur über Config“.**
 - **Pfad:** `setup.rs:716` (`P0_SWEEP_BATCH_MAX_EVENTS`=64), `:722` (`P0_SWEEP_BATCH_MAX_AGE_NS`=5 000 000), `:843-844` (`P0_INGRESS_BURST_BEFORE_DETECT`=64) via `parsed_or`; `runtime_config.rs:26-70 parameters!` ohne diese Felder; `standard.conf` kann sie nicht ausdrücken. Flush `sweep.rs:36-39` (`events ≥ max || age ≥ max_age || wake_due`) — keine feste 50-ms-Wartezeit (TXT-Ungleichung falsch).
 - **Fix:** drei Felder in `parameters!` (Einheit, Default, Min/Max), `setup.rs` liest `limits.*`, Manifest-Readback/CLI. **Test:** Profiltest `sweep_batch_max_events = 32` (heute ignoriert).
 
+- **Stand 25.10.: erledigt** `3e5a6b2a` (drei typisierte Parameter, Limits-Revision 6).
 ### V2-09 — Blockhash-Freshness erst nach Planung (P1-01)
 - **Priorität/Phase:** **P2 LATENZ nur im Degradationsfall (Blockhash-Cache > 30 s alt) · P6-MT.4.**
 - **Pfad:** `pipeline.rs:544` Freshness → `:550/558` Budget → `:565-567` `plans_with_health` → `:587` RpcDeadline → `:598-611` leere/Err-Pläne → `:613-620` `blockhash.fresh` (RwLock-Read, kein I/O, `blockhash.rs:53-60`).
 - **Fix nur mit Vertragsentscheid:** früher Check vor dem Budget-Decrement ändert Loss-Priorität (heute gewinnen RpcBudget/RpcDeadline/Routing/PlanError), lässt `candidates_created = None` und verbraucht kein Budget. Alternative: diagnostischer Preflight-Zähler + bestehender Spätcheck. **Test:** `TestBuilder` zählt `plans_with_health`; leerer Cache ⇒ 0 Aufrufe, `remaining` unverändert, `loss == Build` (heute: 1 Aufruf, Budget verbraucht). Kein Blockhash-Stale-Pipelinetest vorhanden.
 
+- **Stand 25.10.: TEILWEISE** `6d0e7ddc` (Diagnosezähler `blockhash_stale_before_planning`; Frühcheck wartet auf Loss-Prioritäts-Entscheid).
 ### V2-10 — Close-/Out-of-Filter-Updates entfernen ReverseIndex/Schedule nicht (P5a-02)
 - **Priorität/Phase:** P3 Messung/Latenz · S2/P6-MT.2.
 - **Pfad:** `events.rs:116-122` (`updated_marginfi_account` nur bei eingehender MarginfiAccount-Klassifikation), `:651-658` (Remove-Zweig läuft bei Close nie), `:283-291` Rebuild erst bei Ready; `state/mod.rs:514-524` `missing_remote` ⇒ ReconcileFailure ⇒ genau ein Retry je Close im A→B-Fenster (bounded).
