@@ -171,7 +171,7 @@ pub(crate) fn parse_http_response(buf: &[u8]) -> Result<Option<HttpResponse>, St
     }))
 }
 
-pub(crate) fn read_http_response(stream: &mut Tls) -> Result<HttpResponse, String> {
+pub(crate) fn read_http_response<R: Read>(stream: &mut R) -> Result<HttpResponse, String> {
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 8192];
     loop {
@@ -185,6 +185,44 @@ pub(crate) fn read_http_response(stream: &mut Tls) -> Result<HttpResponse, Strin
         if let Some(response) = parse_http_response(&buf)? {
             return Ok(response);
         }
+    }
+}
+
+/// The longest wait for a builder's complete response after the flush
+/// (BSC-010): one absolute deadline, not a per-read timeout.
+pub(crate) const BUILDER_RESPONSE_DEADLINE: Duration = Duration::from_secs(15);
+
+/// One HTTP response within an absolute `deadline`: a watchdog shuts the
+/// socket down when it passes, so a peer trickling bytes (even inside one
+/// TLS record) cannot stretch the wait. A late or partial response is an
+/// error; the caller records it as UNKNOWN (bytes may have left), never
+/// retries. Never panics.
+pub(crate) fn read_http_response_until<R: Read>(
+    stream: &mut R,
+    sock: &TcpStream,
+    deadline: Duration,
+) -> Result<HttpResponse, String> {
+    let watchdog = sock
+        .try_clone()
+        .map_err(|e| format!("response watchdog: {e}"))?;
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    let timer = std::thread::spawn(move || {
+        let expired =
+            finished.recv_timeout(deadline) == Err(std::sync::mpsc::RecvTimeoutError::Timeout);
+        if expired {
+            let _ = watchdog.shutdown(std::net::Shutdown::Both);
+        }
+        expired
+    });
+    let result = read_http_response(stream);
+    let _ = done.send(());
+    let expired = timer.join().unwrap_or(true);
+    match result {
+        Err(e) if expired => Err(format!(
+            "no complete response within the absolute {} ms deadline ({e})",
+            deadline.as_millis()
+        )),
+        other => other,
     }
 }
 
@@ -310,7 +348,13 @@ pub(crate) fn submit_provider(
         },
         Ok(()) => {
             let write_flushed_ns = clock.now_ns();
-            match read_http_response(&mut stream) {
+            let sock = stream.sock.try_clone();
+            let response = sock
+                .map_err(|e| format!("response watchdog: {e}"))
+                .and_then(|sock| {
+                    read_http_response_until(&mut stream, &sock, BUILDER_RESPONSE_DEADLINE)
+                });
+            match response {
                 Ok(response) => ProviderResult {
                     provider,
                     write_started_ns: Some(write_started_ns),
@@ -372,6 +416,52 @@ pub(crate) fn provider_record(r: &ProviderResult) -> darkbot_bsc_record::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BSC-010 (BSC_Bug_V2 P1-K5): a builder trickling its response, each
+    /// byte well inside any per-read timeout, ends at one absolute deadline;
+    /// a complete response in time is read as before.
+    #[test]
+    fn a_trickling_builder_response_ends_at_the_absolute_deadline() {
+        let serve = |trickle: bool| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let full = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+                if !trickle {
+                    let _ = s.write_all(full);
+                    thread::sleep(Duration::from_millis(500));
+                    return;
+                }
+                let head = b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n";
+                for b in head.iter().chain(std::iter::repeat_n(&b'x', 1000)) {
+                    if s.write_all(&[*b]).is_err() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+            });
+            let mut client = TcpStream::connect(addr).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(15)))
+                .unwrap();
+            let sock = client.try_clone().unwrap();
+            let started = Instant::now();
+            let result = read_http_response_until(&mut client, &sock, Duration::from_millis(400));
+            let elapsed = started.elapsed();
+            drop(client);
+            let _ = server.join();
+            (result, elapsed)
+        };
+        let (late, elapsed) = serve(true);
+        let Err(e) = late else {
+            panic!("a late response was accepted")
+        };
+        assert!(e.contains("deadline"), "{e}");
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+        let (on_time, _) = serve(false);
+        assert!(on_time.is_ok_and(|r| r.body == b"ok"));
+    }
 
     #[test]
     fn bundle_bodies_are_the_documented_wire_format() {

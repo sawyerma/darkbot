@@ -21,8 +21,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// D1 moved the root marker off the contract (was dd62ff52…). BSC-003: the
 /// wire bodies and expiry offset moved to execution::bundle_wire, now bound
 /// here too; the sent bytes are unchanged (golden tests) (was 06187594…).
+/// BSC-010: the builder response has one absolute deadline (was 6c279792…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "6c2797920ef49b3f3e9b04696b0235b304a3ee8658770797ef3460c59b36c461";
+const PINNED_PLAN_SHA256: &str = "8f8eb831dd5494ec3ee81830d68ec004ddd3ba6bff72260ed0b881195df101c6";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

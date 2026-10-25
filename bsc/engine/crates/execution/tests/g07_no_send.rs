@@ -223,6 +223,11 @@ fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
 
 #[test]
 fn nothing_after_the_release_can_panic() {
+    // BSC-010: the builder response is read within one absolute deadline.
+    assert!(
+        function_body(BIN_SOURCES[1], "pub(crate) fn submit_provider(")
+            .contains("read_http_response_until(&mut stream, &sock, BUILDER_RESPONSE_DEADLINE)")
+    );
     let release = pos("barrier.wait();");
     let end = pos("fn mark_released(");
     let after = &SOURCE[release..end];
@@ -232,7 +237,8 @@ fn nothing_after_the_release_can_panic() {
     let builder = BIN_SOURCES[1];
     for signature in [
         "pub(crate) fn submit_provider(",
-        "pub(crate) fn read_http_response(",
+        "pub(crate) fn read_http_response<R: Read>(",
+        "pub(crate) fn read_http_response_until<R: Read>(",
         "pub(crate) fn parse_http_response(",
         "pub(crate) fn decode_chunked_body(",
         "pub(crate) fn panicked_provider_result(",
