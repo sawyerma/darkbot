@@ -511,18 +511,6 @@ impl RouteProvider for JupiterV2RouteProvider {
             deadline,
         )
     }
-
-    fn quote_exact_out(
-        &self,
-        _from_mint: &Pubkey,
-        _to_mint: &Pubkey,
-        _amount_out: u64,
-        _deadline: Instant,
-    ) -> Result<Option<Route>, String> {
-        // Swap V2 /build docs currently specify amount as input amount and do not document an
-        // ExactOut request parameter. JIT remains fail-closed until an exact-output route is proven.
-        Ok(None)
-    }
 }
 
 #[derive(Debug, Deserialize)]

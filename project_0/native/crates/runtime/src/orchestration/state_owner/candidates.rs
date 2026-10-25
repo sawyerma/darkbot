@@ -147,18 +147,19 @@ pub(crate) fn bankruptcy_classification(
     equity_assets: i128,
 ) -> (Option<crate::analytics::record::LossReason>, Option<String>) {
     use crate::analytics::record::LossReason as L;
-    let follow_on = matches!(
-        loss,
-        Some(
-            L::Sizing
-                | L::Routing
-                | L::Funding
-                | L::Economics
-                | L::EconomicSkip
-                | L::ThresholdTooHigh
-        )
-    );
-    if !(bad_debt && equity_assets <= 0 && follow_on) {
+    // F-08: the follow-on cause is bound by the pattern itself — no invariant left to a panic.
+    let Some(
+        cause @ (L::Sizing
+        | L::Routing
+        | L::Funding
+        | L::Economics
+        | L::EconomicSkip
+        | L::ThresholdTooHigh),
+    ) = loss
+    else {
+        return (loss, reason);
+    };
+    if !(bad_debt && equity_assets <= 0) {
         return (loss, reason);
     }
     (
@@ -166,7 +167,7 @@ pub(crate) fn bankruptcy_classification(
         Some(format!(
             "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal \
              receivership opportunity (reported as {:?}: {})",
-            loss.expect("follow-on cause"),
+            cause,
             reason.as_deref().unwrap_or("-")
         )),
     )

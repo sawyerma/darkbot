@@ -564,14 +564,6 @@ pub mod p0 {
         ) -> Result<Option<Route>, String> {
             self.quote_exact_in(from_mint, to_mint, amount_in, prewarmed_atas, deadline)
         }
-        /// ExactOut bleibt Provider-Capability. Ein Provider ohne belegten ExactOut-Pfad liefert None.
-        fn quote_exact_out(
-            &self,
-            from_mint: &Pubkey,
-            to_mint: &Pubkey,
-            amount_out: u64,
-            deadline: Instant,
-        ) -> Result<Option<Route>, String>;
     }
 
     const ROUTE_DIAGNOSTICS_MAX: usize = 64;
@@ -2103,15 +2095,6 @@ pub mod p0 {
                     enforced_slippage_bps: None,
                 }))
             }
-            fn quote_exact_out(
-                &self,
-                _: &Pubkey,
-                _: &Pubkey,
-                _: u64,
-                _: Instant,
-            ) -> Result<Option<Route>, String> {
-                Ok(None)
-            }
         }
 
         /// A23-05: a reverse quote and a shortfall near `u64::MAX` with a tiny forward floor: the
@@ -2144,15 +2127,6 @@ pub mod p0 {
                         minimum_executable_out: Some(out),
                         enforced_slippage_bps: None,
                     }))
-                }
-                fn quote_exact_out(
-                    &self,
-                    _: &Pubkey,
-                    _: &Pubkey,
-                    _: u64,
-                    _: Instant,
-                ) -> Result<Option<Route>, String> {
-                    Ok(None)
                 }
             }
             let m = TinyFloor(std::cell::Cell::new(0));
@@ -2256,15 +2230,6 @@ pub mod p0 {
                 _: Instant,
             ) -> Result<Option<Route>, String> {
                 Ok(self.0.clone())
-            }
-            fn quote_exact_out(
-                &self,
-                _: &Pubkey,
-                _: &Pubkey,
-                _: u64,
-                _: Instant,
-            ) -> Result<Option<Route>, String> {
-                Ok(None)
             }
         }
         impl PlansFixture {
@@ -2482,15 +2447,6 @@ pub mod p0 {
                     minimum_executable_out: Some(amount_in * 99 / 100),
                     enforced_slippage_bps: Some(100),
                 }))
-            }
-            fn quote_exact_out(
-                &self,
-                _: &Pubkey,
-                _: &Pubkey,
-                _: u64,
-                _: Instant,
-            ) -> Result<Option<Route>, String> {
-                Ok(None)
             }
         }
 
@@ -3791,15 +3747,6 @@ pub mod p0 {
                     minimum_executable_out: Some(550),
                     enforced_slippage_bps: None,
                 }))
-            }
-            fn quote_exact_out(
-                &self,
-                _: &Pubkey,
-                _: &Pubkey,
-                _: u64,
-                _: Instant,
-            ) -> Result<Option<Route>, String> {
-                Ok(None)
             }
         }
 

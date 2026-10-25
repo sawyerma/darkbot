@@ -1,6 +1,6 @@
 //! Finalized chain accounting through the existing RPC reconciliation transport.
 //! No prices, assumed zero balances, exit qualification or realized-PnL claims.
-use super::{err, Journal, Phase, Transition};
+use super::err;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use solana_transaction_status::{
@@ -219,55 +219,9 @@ fn token_deltas(
     Ok(deltas)
 }
 
-impl Journal {
-    /// Observe every bound signature once. Partial landing/error is retained;
-    /// this NEVER finalizes an exit, releases holds or authorizes a retry.
-    pub fn observe_finalized(&mut self, rpc: &RpcClient) -> Result<Vec<String>, String> {
-        let mut saved = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
-        if saved.phase != Phase::HandoffUnknown {
-            return Err(err("NOT_UNKNOWN"));
-        }
-        let wallet = saved
-            .intent
-            .wallet
-            .parse()
-            .map_err(|_| err("WALLET_INVALID"))?;
-        let before = saved.observations.clone();
-        let mut unknown = Vec::new();
-        for signature in &saved.intent.signatures {
-            let sig = signature
-                .parse()
-                .map_err(|_| err("SIGNATURE_BINDING_INVALID"))?;
-            match fetch_finalized(
-                rpc,
-                &sig,
-                &wallet,
-                saved.intent.state_slot,
-                &saved.intent.expected_wallet_assets,
-            ) {
-                Ok(observation) => {
-                    unknown.extend(
-                        observation
-                            .unknown_reasons
-                            .iter()
-                            .map(|r| format!("{signature}:{r}")),
-                    );
-                    saved.observations.insert(signature.clone(), observation);
-                }
-                Err(reason) => unknown.push(format!("{signature}:{reason}")),
-            }
-        }
-        // Only a changed observation is a durable transition: a waiting UNKNOWN attempt does
-        // not grow the bounded wallet journal step by step.
-        if saved.observations != before {
-            self.persist(saved, Transition::Observe)?;
-        }
-        Ok(unknown)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::{Journal, Phase};
     use super::*;
     use serde_json::{json, Value};
     fn fixture() -> (Value, Signature, Pubkey, String, BTreeSet<String>) {
@@ -477,10 +431,15 @@ mod tests {
             j.reserve(a.clone(), i.clone(), &current).unwrap();
             j.handoff(&i.signed_wire_sha256, &current, || Ok(()))
                 .unwrap();
-            let unknown = j.observe_finalized(&rpc).unwrap();
-            assert!(!unknown.is_empty());
+            // C01: through the productive entry (the settlement read), not a second observer.
+            let step = j.settle_step(&rpc, &|_, _| None, 1_000).unwrap();
+            assert!(
+                matches!(step, super::super::settlement::SettleStep::Unknown(_)),
+                "{step:?}"
+            );
             if missing_tokens {
-                assert!(unknown
+                assert!(j.saved.as_ref().unwrap().observations[&sig.to_string()]
+                    .unknown_reasons
                     .iter()
                     .any(|r| r.contains("TOKEN_BALANCE_METADATA_MISSING")));
             }

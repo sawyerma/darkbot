@@ -405,7 +405,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
     ///
     /// Computes the candidate's Health itself (one computation, the `Pipeline` site): for
     /// callers without a detect consumer. The state owner's detection holds that Health
-    /// already and evaluates through `evaluate_prepared` (MT2).
+    /// already and evaluates through `evaluate_prepared` (MT2). C03: test seam only — production
+    /// evaluates through `evaluate_prepared`.
+    #[cfg(test)]
     pub fn evaluate(
         &mut self,
         account: Pubkey,

@@ -13,7 +13,6 @@
 
 use solana_sdk::pubkey::Pubkey;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::Bound::{Excluded, Included};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Side {
@@ -28,9 +27,7 @@ pub struct ReverseIndex {
     oracle_to_banks: HashMap<Pubkey, HashSet<Pubkey>>,
     bank_to_accounts: HashMap<Pubkey, HashSet<Pubkey>>,
     account_to_banks: HashMap<Pubkey, HashSet<Pubkey>>,
-    integration_to_banks: HashMap<Pubkey, HashSet<Pubkey>>,
     bank_oracles: HashMap<Pubkey, Vec<Pubkey>>,
-    bank_integration: HashMap<Pubkey, Pubkey>,
 }
 
 impl ReverseIndex {
@@ -54,22 +51,6 @@ impl ReverseIndex {
             self.oracle_to_banks.entry(*o).or_default().insert(bank);
         }
         self.bank_oracles.insert(bank, oracles.to_vec());
-    }
-
-    /// Ersetzt die Integration einer Bank; alte Zuordnung wird entfernt.
-    pub fn set_bank_integration(&mut self, bank: Pubkey, integration: Option<Pubkey>) {
-        if let Some(old) = self.bank_integration.remove(&bank) {
-            if let Some(set) = self.integration_to_banks.get_mut(&old) {
-                set.remove(&bank);
-                if set.is_empty() {
-                    self.integration_to_banks.remove(&old);
-                }
-            }
-        }
-        if let Some(i) = integration {
-            self.integration_to_banks.entry(i).or_default().insert(bank);
-            self.bank_integration.insert(bank, i);
-        }
     }
 
     /// Setzt die Bank-Menge eines Accounts (bei jedem Account-Update aufrufen;
@@ -125,25 +106,6 @@ impl ReverseIndex {
             .get(account)
             .into_iter()
             .flat_map(|s| s.iter())
-    }
-
-    pub fn banks_for_integration(&self, integration: &Pubkey) -> impl Iterator<Item = &Pubkey> {
-        self.integration_to_banks
-            .get(integration)
-            .into_iter()
-            .flat_map(|s| s.iter())
-    }
-
-    /// Oracle-Update → alle potenziell betroffenen Accounts (ohne Schwellen-Filter; Messgröße
-    /// `affected_accounts_per_update` für das Ledger).
-    pub fn accounts_for_oracle(&self, oracle: &Pubkey) -> HashSet<Pubkey> {
-        let mut out = HashSet::new();
-        for b in self.banks_for_oracle(oracle) {
-            for a in self.accounts_for_bank(b) {
-                out.insert(*a);
-            }
-        }
-        out
     }
 }
 
@@ -223,44 +185,6 @@ impl ThresholdIndex {
                 out.extend(set.iter().copied());
             }
         }
-        out.into_iter().collect()
-    }
-
-    /// Accounts whose liquidation boundary was crossed in the dangerous direction
-    /// between two consecutive effective Maintenance price observations.
-    ///
-    /// Asset risk increases only when Low falls: new <= threshold < previous.
-    /// Liability risk increases only when High rises: previous < threshold <= new.
-    /// Favorable price moves intentionally produce no threshold wakeup.
-    pub fn crossed_candidates(
-        &self,
-        bank: &Pubkey,
-        previous_asset_price: u128,
-        asset_price: u128,
-        previous_liability_price: u128,
-        liability_price: u128,
-    ) -> Vec<Pubkey> {
-        let mut out: HashSet<Pubkey> = HashSet::new();
-
-        if asset_price < previous_asset_price {
-            if let Some(m) = self.asset.get(bank) {
-                for (_, set) in m.range(asset_price..previous_asset_price) {
-                    out.extend(set.iter().copied());
-                }
-            }
-        }
-
-        if liability_price > previous_liability_price {
-            if let Some(m) = self.liability.get(bank) {
-                for (_, set) in m.range((
-                    Excluded(previous_liability_price),
-                    Included(liability_price),
-                )) {
-                    out.extend(set.iter().copied());
-                }
-            }
-        }
-
         out.into_iter().collect()
     }
 
@@ -352,7 +276,12 @@ mod tests {
         ix.set_bank_oracles(b2, &[o]);
         ix.set_account_banks(a1, &[b1]);
         ix.set_account_banks(a2, &[b1, b2]);
-        assert_eq!(ix.accounts_for_oracle(&o).len(), 2);
+        let fanout: HashSet<Pubkey> = ix
+            .banks_for_oracle(&o)
+            .flat_map(|b| ix.accounts_for_bank(b))
+            .copied()
+            .collect();
+        assert_eq!(fanout.len(), 2);
         ix.set_account_banks(a1, &[b2]);
         assert!(!ix.accounts_for_bank(&b1).any(|x| x == &a1));
         assert!(ix.accounts_for_bank(&b2).any(|x| x == &a1));
@@ -363,10 +292,6 @@ mod tests {
         ix.set_bank_oracles(b1, &[o2]);
         assert!(!ix.banks_for_oracle(&o).any(|x| x == &b1));
         assert!(ix.banks_for_oracle(&o2).any(|x| x == &b1));
-        let i1 = Pubkey::new_unique();
-        ix.set_bank_integration(b1, Some(i1));
-        ix.set_bank_integration(b1, None);
-        assert_eq!(ix.banks_for_integration(&i1).count(), 0);
     }
 
     #[test]
@@ -401,37 +326,5 @@ mod tests {
         assert_eq!(t.candidates(&bank, 40, 40, 0), vec![a_asset]);
         t.remove_account(&a_asset);
         assert_eq!(t.tracked_accounts(), 2);
-    }
-
-    #[test]
-    fn threshold_crossings_only_wake_newly_endangered_accounts() {
-        let mut t = ThresholdIndex::new();
-        let bank = Pubkey::new_unique();
-        let a100 = Pubkey::new_unique();
-        let a80 = Pubkey::new_unique();
-        let l200 = Pubkey::new_unique();
-        let l250 = Pubkey::new_unique();
-
-        t.set_account(a100, &[(bank, Side::Asset, 100)]);
-        t.set_account(a80, &[(bank, Side::Asset, 80)]);
-        t.set_account(l200, &[(bank, Side::Liability, 200)]);
-        t.set_account(l250, &[(bank, Side::Liability, 250)]);
-
-        let got: HashSet<_> = t
-            .crossed_candidates(&bank, 120, 90, 150, 220)
-            .into_iter()
-            .collect();
-        assert_eq!(got, HashSet::from([a100, l200]));
-
-        // Favorable moves cannot create a new liquidation through this Bank.
-        assert!(t.crossed_candidates(&bank, 90, 120, 220, 150).is_empty());
-
-        // Exact boundary semantics: an Account already on the old boundary is not re-woken;
-        // landing on the new boundary is a crossing.
-        let got: HashSet<_> = t
-            .crossed_candidates(&bank, 100, 80, 200, 250)
-            .into_iter()
-            .collect();
-        assert_eq!(got, HashSet::from([a80, l250]));
     }
 }

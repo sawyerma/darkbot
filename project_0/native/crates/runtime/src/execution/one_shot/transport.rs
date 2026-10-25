@@ -174,15 +174,9 @@ impl Journal {
             } else {
                 simulated.adapter.submit(&p.txs[0], t_handoff_ns)
             };
-            // M6: the adapter's typed class; whatever it is, the attempt stays UNKNOWN.
-            result.map_err(|e| {
-                err(match e {
-                    // Local or remote definitive refusal; the hold is kept all the same.
-                    SubmitError::Rejected(_) => "SUBMISSION_RESULT_UNKNOWN:REJECTED",
-                    SubmitError::Transport(_) => "SUBMISSION_RESULT_UNKNOWN:TRANSPORT_AMBIGUOUS",
-                    SubmitError::Serialize(_) => "SUBMISSION_RESULT_UNKNOWN:SERIALIZE",
-                })
-            })
+            // M6: the adapter's typed class; whatever it is (a local or remote definitive refusal
+            // included), the attempt stays UNKNOWN and keeps its hold. C06: one mapping.
+            result.map_err(unknown)
         })?;
         let returned: Vec<_> = ack.signatures.iter().map(ToString::to_string).collect();
         if ack.path != p.path
