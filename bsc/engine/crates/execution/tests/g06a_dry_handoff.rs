@@ -986,7 +986,7 @@ fn archive_refuses_unlisted_changed_linked_or_open_files_raw_bytes_wallet_keys_a
         private(d);
     };
     let key1 = format!("0x{}1", "0".repeat(63));
-    let cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+    let cases: Vec<Case> = vec![
         (
             "not in SHA256SUMS",
             Box::new(|d| std::fs::write(d.join("extra.txt"), "x").unwrap()),
@@ -1093,6 +1093,9 @@ fn archive_refuses_unlisted_changed_linked_or_open_files_raw_bytes_wallet_keys_a
         assert!(!backup.join(SIGN_RUN).exists(), "{needle}");
     }
 }
+
+/// A refusal case: the expected error text and the deviation it applies.
+type Case<'a> = (&'a str, Box<dyn Fn(&Path) + 'a>);
 
 fn hex_bytes(text: &str) -> Vec<u8> {
     (0..text.len())
