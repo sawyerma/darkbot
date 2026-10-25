@@ -479,6 +479,29 @@ impl ShadowOwner {
                 self.metrics.detect_health_ns_total.saturating_add(elapsed);
             self.metrics.detect_health_ns_max = self.metrics.detect_health_ns_max.max(elapsed);
         }
+        // V2-03 (P2-04): in the threshold mode this exact evaluation plans the account's premium
+        // wake-up — renewed or removed by every evaluation, exactly as the sweep plans it.
+        #[cfg(feature = "crate_health")]
+        if self.use_threshold_trigger {
+            let boundary = match &health_result {
+                Ok(h) if !h.liquidatable => engine
+                    .premium_decay_per_second(&acct, protocol_now as i64, protocol_slot)
+                    .ok()
+                    .and_then(|decay| {
+                        darkbot_project0::schedule::premium_boundary_unix_s(
+                            protocol_now,
+                            h.maintenance_health,
+                            decay,
+                        )
+                    }),
+                _ => None,
+            };
+            self.time_schedule.upsert(
+                acct,
+                darkbot_project0::schedule::Trigger::PremiumBoundary,
+                boundary,
+            );
+        }
         // Typed snapshot only; the evidence writer owns all JSON encoding.
         let health_evidence = match &health_result {
             Ok(h) => {

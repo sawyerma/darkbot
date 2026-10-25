@@ -2,14 +2,19 @@
 use super::*;
 
 impl ShadowOwner {
-    /// An R127 sweep batch is open: it flushes once full or older than its age bound.
+    /// An R127 sweep batch is open: it flushes once full or older than its age bound. V2-03: in
+    /// the threshold mode only a due time wake-up opens it (that mode fills no dirty banks and
+    /// arms no census), so time alone re-evaluates exactly in both modes.
     #[cfg(feature = "crate_health")]
     pub(super) fn sweep_batch_open(&self) -> bool {
-        !self.use_threshold_trigger
-            && self.st.run_state().is_tradable()
-            && (!self.sweep_dirty_banks.is_empty()
-                || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some())
-                || self.wake_due())
+        self.st.run_state().is_tradable()
+            && if self.use_threshold_trigger {
+                self.wake_due()
+            } else {
+                !self.sweep_dirty_banks.is_empty()
+                    || self.c0_census.as_ref().is_some_and(|c| c.armed.is_some())
+                    || self.wake_due()
+            }
     }
 
     /// P2-04/P2-05: a wake-up has passed on the chain clock.

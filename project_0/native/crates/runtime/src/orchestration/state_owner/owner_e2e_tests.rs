@@ -2779,8 +2779,44 @@ fn p2_state(f: &mut Fixture, liab: f64, t0: u64) -> Pubkey {
 /// liquidatable it is counted liquidatable and has no wake-up left.
 #[test]
 fn p2_04_premium_boundary_wakes_the_sweep_without_an_event() {
+    p2_04_case(false);
+}
+
+/// V2-03 (P5c-03): the opt-in threshold mode consumes the same premium wake-ups (exact
+/// re-evaluation on the chain clock alone, renewed wake-up, none once liquidatable).
+#[test]
+fn v2_03_threshold_mode_consumes_premium_wakeups() {
+    p2_04_case(true);
+}
+
+/// V2-03 (P5c-03): in the threshold mode the exact evaluation of a detection plans the
+/// account's premium wake-up (P2-04: every evaluation renews or removes it), so a healthy
+/// account with premium-active debt is woken without any sweep of the sweep mode.
+#[test]
+fn v2_03_threshold_detection_plans_the_premium_wakeup() {
+    let mut f = fixture("v2_03_detect");
+    f.owner.use_threshold_trigger = true;
+    f.owner.threshold_ready = true;
+    let t0 = 1_700_000_000u64;
+    let account = p2_state(&mut f, 85.0, t0);
+    assert!(f.owner.time_schedule.is_empty());
+    f.owner
+        .detect(Some((account, 0, 100, "oracle_threshold")))
+        .unwrap();
+    let at = f
+        .owner
+        .time_schedule
+        .next_due()
+        .expect("a healthy premium account is woken");
+    assert!(at > t0 + 30 * 86_400, "months away: {at}");
+    cleanup(f);
+}
+
+fn p2_04_case(threshold: bool) {
     use darkbot_project0::schedule::Trigger;
-    let mut f = fixture("p2_04");
+    let mut f = fixture(if threshold { "v2_03_p2_04" } else { "p2_04" });
+    f.owner.use_threshold_trigger = threshold;
+    f.owner.threshold_ready = true;
     let t0 = 1_700_000_000u64;
     // ≈ 10 %/year on 85 USD against a 5 USD maintenance margin: liquidatable in about 7 months.
     let account = p2_state(&mut f, 85.0, t0);
@@ -2825,8 +2861,21 @@ fn p2_04_premium_boundary_wakes_the_sweep_without_an_event() {
 /// wake-up of the same account is not a forced forward.
 #[test]
 fn p2_05_tag_wakeup_forwards_a_held_candidate_again() {
+    p2_05_case(false);
+}
+
+/// V2-03 (P5c-03): the opt-in threshold mode forwards a held candidate again when its tag
+/// wake-up is due (forced re-arm, lane L0), exactly as the sweep mode.
+#[test]
+fn v2_03_threshold_mode_consumes_tag_wakeups() {
+    p2_05_case(true);
+}
+
+fn p2_05_case(threshold: bool) {
     use darkbot_project0::schedule::Trigger;
-    let mut f = fixture("p2_05");
+    let mut f = fixture(if threshold { "v2_03_p2_05" } else { "p2_05" });
+    f.owner.use_threshold_trigger = threshold;
+    f.owner.threshold_ready = true;
     let t0 = 1_700_000_000u64;
     // 90 USD maintenance collateral against 95 USD debt: liquidatable now.
     let account = p2_state(&mut f, 95.0, t0);
