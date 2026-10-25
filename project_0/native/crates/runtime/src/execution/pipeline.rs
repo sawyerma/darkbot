@@ -457,6 +457,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         health: PreparedHealth<'_>,
     ) -> OpportunityRecord {
         let _trigger_slot = slot; // [FIX-40] Trigger-Slot ist nur Provenienz des Updates, nicht T_sign
+                                  // V2-15: the monotonic instant of `now_unix_s` — the admission ages it to the handoff.
+        let evaluated = Instant::now();
         let mut tl = Timeline::new();
         tl.mark(Stage::Rx, t_rx_ns);
         let mut rec = OpportunityRecord {
@@ -1281,6 +1283,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 slot,
                 last_valid_block_height: bh.last_valid_block_height,
                 now_unix_ms: now_unix_s.saturating_mul(1_000),
+                evaluated,
+                slot_now: &|| self.slot_watch.get(),
                 state_valid,
                 deadline,
                 t_handoff_ns,

@@ -51,6 +51,10 @@ pub struct Candidate<'a> {
     /// C12: `lastValidBlockHeight` of the blockhash the payload is signed with.
     pub last_valid_block_height: u64,
     pub now_unix_ms: u64,
+    /// V2-15: the monotonic instant at which `now_unix_ms` was read (the evaluation).
+    pub evaluated: std::time::Instant,
+    /// V2-15: the newest observed slot, read at the handoff.
+    pub slot_now: &'a dyn Fn() -> u64,
     pub state_valid: bool,
     pub deadline: std::time::Instant,
     pub t_handoff_ns: u64,
@@ -165,9 +169,18 @@ impl Fe04Admission {
                 Admission::Refused(e)
             };
         }
+        // V2-15 (P9-01b): the handoff is validated at the handoff — the evaluation's time advanced
+        // by the monotonic time since (one clock domain) and the newest observed slot; a state
+        // that aged past the approval during the simulation is never sent.
+        let elapsed_ms = u64::try_from(c.evaluated.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let at_handoff = Current {
+            now_unix_ms: c.now_unix_ms.saturating_add(elapsed_ms),
+            slot: c.slot.max((c.slot_now)()),
+            ..current
+        };
         match self
             .journal
-            .submit_payload(&simulated, &current, c.t_handoff_ns)
+            .submit_payload(&simulated, &at_handoff, c.t_handoff_ns)
         {
             Ok(ack) => Admission::Submitted(ack),
             Err(e) => Admission::Unknown(e),

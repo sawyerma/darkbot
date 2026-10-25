@@ -1415,6 +1415,8 @@ struct HandoffSubmitter {
     submits: Arc<AtomicU64>,
     sims: Arc<AtomicU64>,
     transport_fails: bool,
+    /// V2-15: how long the simulation takes.
+    simulate_delay: Duration,
 }
 impl SubmissionAdapter for HandoffSubmitter {
     fn path(&self) -> SubmissionPath {
@@ -1433,6 +1435,7 @@ impl SubmissionAdapter for HandoffSubmitter {
     }
     fn simulate(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
         assert!(tx.verify_and_hash_message().is_ok());
+        std::thread::sleep(self.simulate_delay);
         self.sims.fetch_add(1, Ordering::Relaxed);
         SimResult::Ok {
             units_consumed: Some(100),
@@ -1593,6 +1596,53 @@ fn admission(
         valid_until_slot: 160,
     }
 }
+/// V2-15 (P9-01b): the handoff is validated against the time and slot at the handoff, not at
+/// the evaluation — a state that aged past the approval's `max_state_age_ms` during the
+/// simulation is never sent (before: the evaluation's `Current` was reused and it was sent).
+#[test]
+fn v2_15_a_state_aged_during_the_simulation_is_never_handed_off() {
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let mut allow = Allow::default();
+    allow.execution_classes.insert("longtail");
+    let mut safety = Safety::new(
+        Limits {
+            max_total_capital: u64::MAX,
+            max_outstanding_inventory: u64::MAX,
+            max_concurrent_positions: u32::MAX,
+            max_exposure_per_attempt: u64::MAX,
+            max_daily_loss: u64::MAX,
+            max_failed_attempts_per_day: u32::MAX,
+            max_tip: u64::MAX,
+            max_slippage_bps: u64::MAX,
+            max_outstanding_attempts: u32::MAX,
+        },
+        allow,
+        true,
+    );
+    let adapter = HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails: false,
+        simulate_delay: Duration::from_millis(120),
+    };
+    let dir = std::env::temp_dir().join(format!("p0-v2-15-{}", Pubkey::new_unique()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    fe04.approval.max_state_age_ms = 50;
+    let r = live_evaluate(&adapter, &mut safety, Some(&mut fe04), &payer, target);
+    assert!(adapter.sims.load(Ordering::Relaxed) >= 1);
+    assert_eq!(adapter.submits.load(Ordering::Relaxed), 0, "{:?}", r.reason);
+    assert_ne!(r.decision, Decision::Submitted);
+    assert!(
+        r.reason.as_deref().unwrap_or("").contains("STALE"),
+        "{:?}",
+        r.reason
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// B4: a plan that creates the liquidation record carries its rent into the admission: above
 /// the approval's `max_rent_lamports` it is refused before anything durable or sent (and the
 /// Safety reservation released); approved, the intent binds the rent and the SOL hold covers fee +
@@ -1625,6 +1675,7 @@ fn b4_admission_binds_a_nonzero_record_rent() {
         submits: Arc::new(AtomicU64::new(0)),
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
+        simulate_delay: Duration::ZERO,
     };
     ADMISSION_RENT.with(|r| r.set(3_000));
     let dir = |n: &str| {
@@ -1700,6 +1751,7 @@ fn v9_safety_denials_are_their_own_cause() {
         submits: Arc::new(AtomicU64::new(0)),
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
+        simulate_delay: Duration::ZERO,
     };
     // Preview: no capital at all — the only plan is refused before the economics act.
     let mut s = safety(0, u64::MAX);
@@ -1779,6 +1831,7 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
         submits: Arc::new(AtomicU64::new(0)),
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails,
+        simulate_delay: Duration::ZERO,
     };
     let dir = |n: &str| {
         let d = std::env::temp_dir().join(format!("p0-fe04-adm-{n}-{}", Pubkey::new_unique()));
