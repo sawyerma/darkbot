@@ -940,6 +940,9 @@ fn session(
     stop: &AtomicBool,
     counters: &Counters,
 ) -> Result<(), String> {
+    // An accepted stream inherits the listener's non-blocking mode on macOS: writes block, up
+    // to the write timeout, never fail with EAGAIN on a frame larger than the socket buffer.
+    stream.set_nonblocking(false).map_err(|e| e.to_string())?;
     stream
         .set_write_timeout(Some(cfg.write_timeout))
         .map_err(|e| e.to_string())?;

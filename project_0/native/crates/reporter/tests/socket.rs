@@ -477,3 +477,28 @@ fn b03_analytics_jobs_reach_the_wire_from_the_job_store() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A frame larger than the socket's send buffer reaches a client that reads late: the session
+/// writes blocking up to its write timeout (an accepted stream inherits the listener's
+/// non-blocking mode on macOS, where a large write then failed with EAGAIN and dropped it).
+#[test]
+fn a_frame_beyond_the_socket_buffer_reaches_a_late_reader() {
+    use darkbot_runner::status_tap::operational_snapshot;
+    let dir = directory("large");
+    let tap = StatusTap::new();
+    tap.publish_operational(operational_snapshot());
+    let cfg = ReporterConfig::new(sock("large"), dir.join("generation"), "TEST_ONLY".into());
+    let handle = start(cfg.clone(), tap).unwrap();
+    let mut client = connect(&cfg);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(matches!(
+        next(&mut client).msg,
+        Some(engine_frame::Msg::Hello(_))
+    ));
+    let state = expect_state(&mut client);
+    assert_eq!(state.topic, TopicId::Project0Status as i32);
+    assert!(state.payload.len() > 8 * 1024, "{}", state.payload.len());
+    assert_eq!(handle.counters.write_errors.load(Ordering::Relaxed), 0);
+    handle.stop();
+    std::fs::remove_dir_all(dir).unwrap();
+}
