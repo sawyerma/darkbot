@@ -9,14 +9,14 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 0 | V2 abgelegt, V1 historisch, diese Tabelle | TECHNISCH FERTIG | dieser Commit | – | Paket 1 |
 | 1 | Gate A/B: BSC-005 T5, G0.8 UNRESOLVED-Rundweg, Schema-/Readiness-Regression | TECHNISCH FERTIG — EXTERNAL_BLOCKED: SIGN/V5/Grant/echter G0.7/G0.8 (Nutzerfreigabe) | `746fdf29`, `f91274bb`, `e9f88965`; Reviewer 25.10.: kein HIGH/CRITICAL, alle MEDIUM/LOW behoben | Readiness real: `BLOCKED` (kein V5 ohne SIGN) | – |
 | 2 | BSC-050 Vollinventur + Fixes | TECHNISCH FERTIG (Inventur + Gate-0/Gateway-Fixes); C1-Funde → Paket 3 | `0a10f0d5` (BSC-051/053), `e9f88965` (Uhr-Fixes) | Fehlerliste §8 | Paket 3 |
-| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN (3a C1-Fixes `6e9a357a`/`a55e73f7`, 3b Quellen-Owner `c41a27bc` fertig) | `a55e73f7` | WSS-Quellen + Runtime-Prozess (3c), BSC-033 + C1.9/C1.9b neu + C1.10-Freeze (3f); Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | 3c Runtime-Ingress |
+| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN (3a C1-Fixes `6e9a357a`/`a55e73f7`, 3b Quellen-Owner `c41a27bc`, 3c READ_ONLY-Runtime mit verifizierten WSS-Quellen `a28572ad` fertig) | `a28572ad` | kanonischer Follower (G0.4-Nenner), BSC-033 + C1.9/C1.9b neu + C1.10-Freeze (3f), BSC-023/025; Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | 3d kanonischer Follower |
 | 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | nach Paket 3 |
 | 5 | C3, D, G0.1-Four-Freeze, E | OFFEN | – | – | nach Paket 4 |
 | 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
 | 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
 | 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
 | 9 | Release-Kandidat | OFFEN | – | – | nach Paket 8 |
-| P | G0.4 Rohdaten (parallel) | OFFEN | – | Kriterienvorschlag, einmalige Nutzerbestätigung | parallel zu Paket 3 |
+| P | G0.4 Rohdaten (parallel) | OFFEN (Pending-Seite live: Runtime-Journal `a28572ad`) | – | kanonischer Nenner (3d); Kriterien vorgeschlagen 25.10., Nutzerbestätigung ausstehend | Bestätigung, dann 7-Tage-Lauf |
 
 ## Bindender neuer Umsetzungsstatus — 2026-10-25 (technische Offline-Freigabe, kein Geld)
 
