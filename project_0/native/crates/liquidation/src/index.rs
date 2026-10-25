@@ -113,6 +113,13 @@ impl ReverseIndex {
             .flat_map(|s| s.iter())
     }
 
+    /// V2-13: whether `account` holds `bank` — O(1), no bank-wide list.
+    pub fn bank_has_account(&self, bank: &Pubkey, account: &Pubkey) -> bool {
+        self.bank_to_accounts
+            .get(bank)
+            .is_some_and(|accounts| accounts.contains(account))
+    }
+
     pub fn banks_for_account(&self, account: &Pubkey) -> impl Iterator<Item = &Pubkey> {
         self.account_to_banks
             .get(account)
@@ -309,6 +316,26 @@ mod tests {
             }
         }
         assert!(idx.bank_to_accounts.len() <= 1);
+    }
+
+    /// V2-13: the O(1) membership agrees with the bank's account list, also after a replacement.
+    #[test]
+    fn bank_has_account_matches_the_bank_list() {
+        let (a, b, x, y) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let mut idx = ReverseIndex::new();
+        idx.set_account_banks(x, &[a, b]);
+        idx.set_account_banks(y, &[b]);
+        assert!(idx.bank_has_account(&a, &x) && idx.bank_has_account(&b, &y));
+        assert!(!idx.bank_has_account(&a, &y));
+        idx.set_account_banks(x, &[b]);
+        assert!(!idx.bank_has_account(&a, &x) && idx.bank_has_account(&b, &x));
+        idx.remove_account(&y);
+        assert!(!idx.bank_has_account(&b, &y));
     }
 
     #[test]

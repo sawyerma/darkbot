@@ -469,6 +469,65 @@ pub(crate) fn candidate_should_forward(
     forced || transition || revision_changed || (periodic_due && repeat_capacity)
 }
 
+/// V2-13 (P4-03/P5b-02): the repeat gate of the threshold trigger — the sweep's forward policy
+/// (`candidate_should_forward`) for a threshold hit or a bank re-check, which carries no health
+/// state yet: a first admission, a forced re-arm or a newer input revision always passes; a
+/// repeat only once `recheck_slots` passed and the repeat soft cap leaves room. Each pass is
+/// recorded as the account's forward; a refusal is counted suppressed.
+#[cfg(feature = "crate_health")]
+pub(crate) struct RepeatGate<'a> {
+    pub(crate) cache: &'a mut HashMap<Pubkey, CandidateCacheEntry>,
+    pub(crate) forced: &'a mut HashSet<Pubkey>,
+    pub(crate) recheck_slots: u64,
+    pub(crate) repeat_capacity: bool,
+    pub(crate) suppressed: &'a mut u64,
+    pub(crate) softcap_suppressed: &'a mut u64,
+}
+
+#[cfg(feature = "crate_health")]
+impl RepeatGate<'_> {
+    /// The accounts that pass, each with its previous forward slot (its L2 order key).
+    pub(crate) fn pass(
+        &mut self,
+        accounts: HashSet<Pubkey>,
+        slot: u64,
+        revision: u64,
+    ) -> HashMap<Pubkey, u64> {
+        let mut passed = HashMap::with_capacity(accounts.len());
+        for account in accounts {
+            let previous = self.cache.get(&account).copied();
+            let forced = self.forced.remove(&account);
+            let last = previous.map_or(0, |e| e.last_forwarded_slot);
+            if candidate_should_forward(
+                previous,
+                CandidateHealthState::Liquidatable,
+                slot,
+                revision,
+                self.recheck_slots,
+                forced,
+                self.repeat_capacity,
+            ) {
+                self.cache.insert(
+                    account,
+                    CandidateCacheEntry {
+                        state: CandidateHealthState::Liquidatable,
+                        last_forwarded_slot: slot.max(last),
+                        last_forwarded_revision: previous
+                            .map_or(revision, |e| e.last_forwarded_revision.max(revision)),
+                    },
+                );
+                passed.insert(account, last);
+            } else {
+                *self.suppressed = self.suppressed.saturating_add(1);
+                if slot.saturating_sub(last) >= self.recheck_slots {
+                    *self.softcap_suppressed = self.softcap_suppressed.saturating_add(1);
+                }
+            }
+        }
+        passed
+    }
+}
+
 /// Fairness/scheduling key of one sweep candidate (`candidate_fairness_key`).
 #[cfg(feature = "crate_health")]
 pub(crate) type FairnessKey = (u8, std::cmp::Reverse<u64>, [u8; 32]);
@@ -1028,6 +1087,37 @@ mod mt3_lane_tests {
             250,
             "FIX-21: newest t_rx to the detect"
         );
+    }
+
+    /// V2-13: the repeat gate — a first admission and a newer revision pass; the same slot and
+    /// revision is suppressed; a due repeat passes only with soft-cap room (else counted
+    /// soft-cap suppressed); a forced re-arm always passes and is consumed.
+    #[test]
+    fn v2_13_repeat_gate_passes_new_causes_and_due_repeats_only() {
+        let a = Pubkey::new_unique();
+        let (mut cache, mut forced) = (HashMap::new(), HashSet::new());
+        let (mut suppressed, mut softcap) = (0u64, 0u64);
+        let mut pass = |slot, revision, capacity, cache: &mut _, forced: &mut _| {
+            RepeatGate {
+                cache,
+                forced,
+                recheck_slots: 4,
+                repeat_capacity: capacity,
+                suppressed: &mut suppressed,
+                softcap_suppressed: &mut softcap,
+            }
+            .pass([a].into(), slot, revision)
+            .contains_key(&a)
+        };
+        assert!(pass(10, 1, true, &mut cache, &mut forced), "first");
+        assert!(!pass(11, 1, true, &mut cache, &mut forced), "no new cause");
+        assert!(pass(11, 2, true, &mut cache, &mut forced), "newer revision");
+        assert!(!pass(15, 2, false, &mut cache, &mut forced), "due, no room");
+        assert!(pass(15, 2, true, &mut cache, &mut forced), "due repeat");
+        forced.insert(a);
+        assert!(pass(15, 2, false, &mut cache, &mut forced), "forced");
+        assert!(forced.is_empty());
+        assert_eq!((suppressed, softcap), (2, 1));
     }
 
     /// V2-11 (P5b-05): an older trigger coalesced into a pending entry never replaces its newer

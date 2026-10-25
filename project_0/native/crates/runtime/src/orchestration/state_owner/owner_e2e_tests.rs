@@ -2920,6 +2920,50 @@ fn p2_state(f: &mut Fixture, liab: f64, t0: u64) -> Pubkey {
     account
 }
 
+/// V2-13 (P4-03/P5b-02): a bank-wide re-check without a new cause is not admitted again — a
+/// second failed price projection of the same bank input revision, after the detection consumed
+/// the first admission, admits nothing (counted suppressed); a newer bank revision admits the
+/// account again.
+#[test]
+fn v2_13_a_repeated_bank_recheck_without_a_new_cause_is_suppressed() {
+    use crate::orchestration::remote_workers::OraclePriceProjectionResultMessage;
+    let mut f = fixture_with("v2_13_repeat", None);
+    f.owner.use_threshold_trigger = true;
+    f.owner.threshold_ready = true;
+    let account = p2_state(&mut f, 85.0, 1_700_000_000);
+    let bank = Pubkey::new_unique();
+    f.owner.reverse_index.set_account_banks(account, &[bank]);
+    f.owner.bank_input_revision.insert(bank, 7);
+    let failed = || OraclePriceProjectionResultMessage {
+        bank,
+        base_slot: 100,
+        base_bank_hash: solana_sdk::hash::Hash::default(),
+        result: Err("RPC_TRANSPORT".into()),
+    };
+    let admitted = |f: &mut Fixture| {
+        assert!(f
+            .results
+            .as_ref()
+            .unwrap()
+            .oracle
+            .try_push(failed())
+            .is_ok());
+        f.owner.remote_apply().unwrap();
+        let mut accounts = vec![];
+        while let Some(p) = f.owner.oracle_lanes.next() {
+            accounts.push(p.work.0);
+        }
+        accounts
+    };
+    assert_eq!(admitted(&mut f), vec![account]);
+    let suppressed = f.owner.metrics.candidate_cache_suppressed;
+    assert_eq!(admitted(&mut f), Vec::<Pubkey>::new(), "no new cause");
+    assert_eq!(f.owner.metrics.candidate_cache_suppressed, suppressed + 1);
+    f.owner.bank_input_revision.insert(bank, 8);
+    assert_eq!(admitted(&mut f), vec![account], "a newer bank revision");
+    cleanup(f);
+}
+
 /// P2-04 (0.1.12): a healthy account with premium-active debt is re-evaluated when its premium
 /// boundary passes on the chain clock, with no bank or account event: the due wake-up alone opens
 /// and flushes the sweep batch (one second earlier nothing is due), a healthy evaluation renews

@@ -901,11 +901,6 @@ impl ShadowOwner {
                         let mut candidates: HashSet<Pubkey> = HashSet::new();
                         let mut fallback: HashSet<Pubkey> = HashSet::new();
                         for bank in banks {
-                            let all_accounts: Vec<Pubkey> = self
-                                .reverse_index
-                                .accounts_for_bank(&bank)
-                                .copied()
-                                .collect();
                             if self.threshold_ready {
                                 match clock
                                     .map_err(|e| {
@@ -925,11 +920,12 @@ impl ShadowOwner {
                                             liability_price,
                                             0,
                                         ));
+                                        // V2-13: the bank's unknown-threshold accounts, from the
+                                        // fallback set — the bank's list is never materialized.
                                         fallback.extend(
-                                            all_accounts
-                                                .iter()
-                                                .copied()
-                                                .filter(|a| self.threshold_fallback.contains(a)),
+                                            self.threshold_fallback.iter().copied().filter(|a| {
+                                                self.reverse_index.bank_has_account(&bank, a)
+                                            }),
                                         );
                                     }
                                     Err(e) => {
@@ -951,7 +947,11 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(
+                                                    self.reverse_index
+                                                        .accounts_for_bank(&bank)
+                                                        .copied(),
+                                                );
                                                 continue;
                                             };
                                             let Some(bank_state) =
@@ -961,7 +961,11 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(
+                                                    self.reverse_index
+                                                        .accounts_for_bank(&bank)
+                                                        .copied(),
+                                                );
                                                 continue;
                                             };
                                             let refreshes =
@@ -973,7 +977,7 @@ impl ShadowOwner {
                                             Ok(_) => {
                                                 self.metrics.oracle_price_fallbacks =
                                                     self.metrics.oracle_price_fallbacks.saturating_add(1);
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(self.reverse_index.accounts_for_bank(&bank).copied());
                                                 continue;
                                             }
                                             Err(refresh_error) => {
@@ -983,7 +987,7 @@ impl ShadowOwner {
                                                     "oracle_bank_projection_plan_fallback: dependency={} bank={} price_error={} refresh_error={}",
                                                     dependency, bank, e, refresh_error
                                                 );
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(self.reverse_index.accounts_for_bank(&bank).copied());
                                                 continue;
                                             }
                                         };
@@ -996,7 +1000,11 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(
+                                                    self.reverse_index
+                                                        .accounts_for_bank(&bank)
+                                                        .copied(),
+                                                );
                                                 continue;
                                             }
                                             let Some(bh) = self
@@ -1007,7 +1015,11 @@ impl ShadowOwner {
                                                     .metrics
                                                     .oracle_price_fallbacks
                                                     .saturating_add(1);
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(
+                                                    self.reverse_index
+                                                        .accounts_for_bank(&bank)
+                                                        .copied(),
+                                                );
                                                 continue;
                                             };
                                             let projection_plan = tx::TxPlan {
@@ -1032,7 +1044,11 @@ impl ShadowOwner {
                                                 "oracle_bank_projection_build_fallback: dependency={} bank={} error={}",
                                                 dependency, bank, build_error
                                             );
-                                                    fallback.extend(all_accounts);
+                                                    fallback.extend(
+                                                        self.reverse_index
+                                                            .accounts_for_bank(&bank)
+                                                            .copied(),
+                                                    );
                                                     continue;
                                                 }
                                             };
@@ -1047,7 +1063,11 @@ impl ShadowOwner {
                                             "oracle_bank_projection_sign_fallback: dependency={} bank={} error={}",
                                             dependency, bank, sign_error
                                         );
-                                                fallback.extend(all_accounts);
+                                                fallback.extend(
+                                                    self.reverse_index
+                                                        .accounts_for_bank(&bank)
+                                                        .copied(),
+                                                );
                                                 continue;
                                             }
                                             let work = OraclePriceProjectionWork {
@@ -1082,7 +1102,11 @@ impl ShadowOwner {
                                                         .metrics
                                                         .oracle_price_fallbacks
                                                         .saturating_add(1);
-                                                    fallback.extend(all_accounts);
+                                                    fallback.extend(
+                                                        self.reverse_index
+                                                            .accounts_for_bank(&bank)
+                                                            .copied(),
+                                                    );
                                                 }
                                                 Err(ChannelError::Disconnected(_)) => {
                                                     return Err(
@@ -1095,35 +1119,18 @@ impl ShadowOwner {
                                     }
                                 }
                             } else {
-                                fallback.extend(all_accounts);
+                                fallback
+                                    .extend(self.reverse_index.accounts_for_bank(&bank).copied());
                             }
                         }
 
-                        // Hits first (L0); a fallback account that is also a hit stays a hit.
-                        fallback.retain(|a| !candidates.contains(a));
-                        let mut count = 0usize;
-                        for (accounts, lane) in [(candidates, Lane::L0), (fallback, Lane::L2)] {
-                            count += enqueue_oracle_accounts(
-                                accounts,
-                                (t_rx_ns, event_slot, "oracle_threshold"),
-                                lane,
-                                |a| {
-                                    self.candidate_cache
-                                        .get(a)
-                                        .map_or(0, |e| e.last_forwarded_slot)
-                                },
-                                &mut self.oracle_lanes,
-                                (
-                                    &mut self.metrics.oracle_enqueued,
-                                    &mut self.metrics.oracle_coalesced,
-                                    &mut self.metrics.oracle_max_pending,
-                                ),
-                            );
-                        }
-                        self.metrics.oracle_candidate_hits = self
-                            .metrics
-                            .oracle_candidate_hits
-                            .saturating_add(count as u64);
+                        // This tick's input revision (FIX-134): a new cause for every hit.
+                        self.admit_oracle_accounts(
+                            candidates,
+                            fallback,
+                            (t_rx_ns, event_slot),
+                            self.candidate_input_epoch,
+                        );
                     }
                 }
             }

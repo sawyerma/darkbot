@@ -1,6 +1,11 @@
 //! Apply bounded worker results on the single state owner.
 use super::*;
 
+/// V2-13: one oracle admission — threshold hits (L0), re-checks (L2) and the trigger's
+/// `(t_rx_ns, slot)`.
+#[cfg(feature = "crate_health")]
+type OracleAdmission = (HashSet<Pubkey>, HashSet<Pubkey>, (u64, u64));
+
 impl ShadowOwner {
     /// A23-01: a worker result or the census outcome waits for `remote_apply`.
     pub(super) fn remote_pending(&self) -> bool {
@@ -98,183 +103,120 @@ impl ShadowOwner {
             let bank = done.bank;
             let base_slot = done.base_slot;
             let base_bank_hash = done.base_bank_hash;
-            let result = done.result;
             let latest = self.oracle_bank_projection_pending.remove(&bank);
-            let all_accounts: Vec<Pubkey> = self
-                .reverse_index
-                .accounts_for_bank(&bank)
-                .copied()
-                .collect();
-            let mut fallback_all =
-                |reason: &str,
-                 oracle_price_fallbacks: &mut u64,
-                 oracle_candidate_hits: &mut u64,
-                 oracle_enqueued: &mut u64,
-                 oracle_coalesced: &mut u64,
-                 oracle_max_pending: &mut usize,
-                 oracle_lanes: &mut CandidateLanes| {
-                    *oracle_price_fallbacks = oracle_price_fallbacks.saturating_add(1);
-                    let (t_rx_ns, event_slot) = latest.unwrap_or((self.clock.now_ns(), base_slot));
-                    // P6-MT.5 lane: a bank-wide re-check without a per-account signal (the
-                    // projection failed or was stale) is maintenance work → L2.
-                    let count = enqueue_oracle_accounts(
-                        all_accounts.iter().copied(),
-                        (t_rx_ns, event_slot, "oracle_threshold"),
-                        Lane::L2,
-                        |a| {
-                            self.candidate_cache
-                                .get(a)
-                                .map_or(0, |e| e.last_forwarded_slot)
-                        },
-                        oracle_lanes,
-                        (oracle_enqueued, oracle_coalesced, oracle_max_pending),
-                    );
-                    *oracle_candidate_hits = oracle_candidate_hits.saturating_add(count as u64);
-                    owner_log!(
-                        self,
-                        "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
-                        bank,
-                        reason,
-                        count
-                    );
-                };
-
-            match result {
+            // P6-MT.5 lanes: threshold-index hits from the projected price (potential
+            // transition) → L0; accounts with unknown thresholds → L2 (hits stay hits). A failed
+            // or stale projection re-checks the whole bank (L2, maintenance work without a
+            // per-account signal) — V2-13: only then is the bank's account list read.
+            let mut admission: Option<OracleAdmission> = None;
+            let mut fallback: Option<String> = None;
+            match done.result {
                 Ok((projection_slot, projection_unix_s, accounts, _units)) => {
                     let canonical_matches = self
                         .st
-                        .get(&done.bank)
+                        .get(&bank)
                         .map(|r| r.slot == base_slot && hash(&r.data) == base_bank_hash)
                         .unwrap_or(false);
                     let newest_event_slot = latest.map(|(_, slot)| slot).unwrap_or(base_slot);
                     if !canonical_matches || projection_slot < newest_event_slot {
                         self.metrics.oracle_bank_projection_stale =
                             self.metrics.oracle_bank_projection_stale.saturating_add(1);
-                        fallback_all(
-                            if !canonical_matches {
-                                "canonical bank changed"
-                            } else {
-                                "projection older than newest dependency update"
-                            },
-                            &mut self.metrics.oracle_price_fallbacks,
-                            &mut self.metrics.oracle_candidate_hits,
-                            &mut self.metrics.oracle_enqueued,
-                            &mut self.metrics.oracle_coalesced,
-                            &mut self.metrics.oracle_max_pending,
-                            &mut self.oracle_lanes,
-                        );
-                        continue;
-                    }
-
-                    let view = StateView(&self.st);
-                    match darkbot_project0::projection::ProjectedState::new(
-                        &view,
-                        projection_slot,
-                        projection_unix_s,
-                        accounts,
-                    ) {
-                        Ok(projected) => {
-                            let engine = darkbot_project0::health::crate_impl::CrateHealth {
-                                state: &projected,
-                                group: self.group,
-                            };
-                            match engine.maintenance_risk_price_bits(
-                                &bank,
-                                projection_unix_s,
-                                projection_slot,
-                            ) {
-                                Ok((asset_price, liability_price)) => {
-                                    // P6-MT.5 lanes: threshold-index hits from the projected
-                                    // price (potential transition) → L0; accounts with unknown
-                                    // thresholds re-checked bank-wide → L2 (hits stay hits).
-                                    let candidates: HashSet<Pubkey> = self
-                                        .threshold_index
-                                        .candidates(&bank, asset_price, liability_price, 0)
-                                        .into_iter()
-                                        .collect();
-                                    let fallback: HashSet<Pubkey> = all_accounts
-                                        .iter()
-                                        .copied()
-                                        .filter(|a| {
-                                            self.threshold_fallback.contains(a)
-                                                && !candidates.contains(a)
-                                        })
-                                        .collect();
-                                    let (t_rx_ns, event_slot) =
-                                        latest.unwrap_or((self.clock.now_ns(), projection_slot));
-                                    let mut count = 0usize;
-                                    for (accounts, lane) in
-                                        [(candidates, Lane::L0), (fallback, Lane::L2)]
-                                    {
-                                        count += enqueue_oracle_accounts(
-                                            accounts,
-                                            (t_rx_ns, event_slot, "oracle_threshold"),
-                                            lane,
-                                            |a| {
-                                                self.candidate_cache
-                                                    .get(a)
-                                                    .map_or(0, |e| e.last_forwarded_slot)
-                                            },
-                                            &mut self.oracle_lanes,
-                                            (
-                                                &mut self.metrics.oracle_enqueued,
-                                                &mut self.metrics.oracle_coalesced,
-                                                &mut self.metrics.oracle_max_pending,
-                                            ),
-                                        );
+                        fallback = Some(if !canonical_matches {
+                            "canonical bank changed".into()
+                        } else {
+                            "projection older than newest dependency update".into()
+                        });
+                    } else {
+                        let view = StateView(&self.st);
+                        match darkbot_project0::projection::ProjectedState::new(
+                            &view,
+                            projection_slot,
+                            projection_unix_s,
+                            accounts,
+                        ) {
+                            Ok(projected) => {
+                                let engine = darkbot_project0::health::crate_impl::CrateHealth {
+                                    state: &projected,
+                                    group: self.group,
+                                };
+                                match engine.maintenance_risk_price_bits(
+                                    &bank,
+                                    projection_unix_s,
+                                    projection_slot,
+                                ) {
+                                    Ok((asset_price, liability_price)) => {
+                                        let hits: HashSet<Pubkey> = self
+                                            .threshold_index
+                                            .candidates(&bank, asset_price, liability_price, 0)
+                                            .into_iter()
+                                            .collect();
+                                        let rechecks: HashSet<Pubkey> = self
+                                            .threshold_fallback
+                                            .iter()
+                                            .copied()
+                                            .filter(|a| {
+                                                self.reverse_index.bank_has_account(&bank, a)
+                                            })
+                                            .collect();
+                                        admission = Some((
+                                            hits,
+                                            rechecks,
+                                            latest
+                                                .unwrap_or((self.clock.now_ns(), projection_slot)),
+                                        ));
+                                        self.metrics.oracle_bank_projection_ready = self
+                                            .metrics
+                                            .oracle_bank_projection_ready
+                                            .saturating_add(1);
                                     }
-                                    self.metrics.oracle_candidate_hits = self
-                                        .metrics
-                                        .oracle_candidate_hits
-                                        .saturating_add(count as u64);
-                                    self.metrics.oracle_bank_projection_ready =
-                                        self.metrics.oracle_bank_projection_ready.saturating_add(1);
-                                }
-                                Err(e) => {
-                                    self.metrics.oracle_bank_projection_failed = self
-                                        .metrics
-                                        .oracle_bank_projection_failed
-                                        .saturating_add(1);
-                                    fallback_all(
-                                        &format!("projected price error: {e}"),
-                                        &mut self.metrics.oracle_price_fallbacks,
-                                        &mut self.metrics.oracle_candidate_hits,
-                                        &mut self.metrics.oracle_enqueued,
-                                        &mut self.metrics.oracle_coalesced,
-                                        &mut self.metrics.oracle_max_pending,
-                                        &mut self.oracle_lanes,
-                                    );
+                                    Err(e) => {
+                                        self.metrics.oracle_bank_projection_failed = self
+                                            .metrics
+                                            .oracle_bank_projection_failed
+                                            .saturating_add(1);
+                                        fallback = Some(format!("projected price error: {e}"));
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            self.metrics.oracle_bank_projection_failed =
-                                self.metrics.oracle_bank_projection_failed.saturating_add(1);
-                            fallback_all(
-                                &format!("projected state invalid: {e}"),
-                                &mut self.metrics.oracle_price_fallbacks,
-                                &mut self.metrics.oracle_candidate_hits,
-                                &mut self.metrics.oracle_enqueued,
-                                &mut self.metrics.oracle_coalesced,
-                                &mut self.metrics.oracle_max_pending,
-                                &mut self.oracle_lanes,
-                            );
+                            Err(e) => {
+                                self.metrics.oracle_bank_projection_failed =
+                                    self.metrics.oracle_bank_projection_failed.saturating_add(1);
+                                fallback = Some(format!("projected state invalid: {e}"));
+                            }
                         }
                     }
                 }
                 Err(e) => {
                     self.metrics.oracle_bank_projection_failed =
                         self.metrics.oracle_bank_projection_failed.saturating_add(1);
-                    fallback_all(
-                        &format!("simulation failed: {e}"),
-                        &mut self.metrics.oracle_price_fallbacks,
-                        &mut self.metrics.oracle_candidate_hits,
-                        &mut self.metrics.oracle_enqueued,
-                        &mut self.metrics.oracle_coalesced,
-                        &mut self.metrics.oracle_max_pending,
-                        &mut self.oracle_lanes,
-                    );
+                    fallback = Some(format!("simulation failed: {e}"));
                 }
+            }
+            if let Some(reason) = fallback {
+                self.metrics.oracle_price_fallbacks =
+                    self.metrics.oracle_price_fallbacks.saturating_add(1);
+                let all: HashSet<Pubkey> = self
+                    .reverse_index
+                    .accounts_for_bank(&bank)
+                    .copied()
+                    .collect();
+                owner_log!(
+                    self,
+                    "oracle_bank_projection_fallback: bank={} reason={} accounts={}",
+                    bank,
+                    reason,
+                    all.len()
+                );
+                admission = Some((
+                    HashSet::new(),
+                    all,
+                    latest.unwrap_or((self.clock.now_ns(), base_slot)),
+                ));
+            }
+            if let Some((hits, rechecks, at)) = admission {
+                // The bank's input revision of the trigger this projection was requested for.
+                let revision = self.bank_input_revision.get(&bank).copied().unwrap_or(0);
+                self.admit_oracle_accounts(hits, rechecks, at, revision);
             }
         }
 
@@ -469,6 +411,52 @@ impl ShadowOwner {
 }
 
 impl ShadowOwner {
+    /// V2-13: admits a threshold trigger's hits (L0) and re-checks (L2; a hit stays a hit)
+    /// through the repeat gate (`RepeatGate`) — an account passes with a new cause only (first
+    /// admission, forced re-arm, newer input `revision`) or as a due repeat within the soft cap.
+    /// Returns the distinct accounts admitted.
+    #[cfg(feature = "crate_health")]
+    pub(super) fn admit_oracle_accounts(
+        &mut self,
+        hits: HashSet<Pubkey>,
+        mut rechecks: HashSet<Pubkey>,
+        (t_rx_ns, event_slot): (u64, u64),
+        revision: u64,
+    ) -> usize {
+        rechecks.retain(|a| !hits.contains(a));
+        let repeat_capacity = self.oracle_lanes.len() < self.candidate_repeat_soft_cap;
+        let mut gate = RepeatGate {
+            cache: &mut self.candidate_cache,
+            forced: &mut self.candidate_force_rearm,
+            recheck_slots: self.candidate_recheck_slots,
+            repeat_capacity,
+            suppressed: &mut self.metrics.candidate_cache_suppressed,
+            softcap_suppressed: &mut self.metrics.candidate_cache_softcap_suppressed,
+        };
+        let hits = gate.pass(hits, event_slot, revision);
+        let rechecks = gate.pass(rechecks, event_slot, revision);
+        let mut count = 0usize;
+        for (accounts, lane) in [(hits, Lane::L0), (rechecks, Lane::L2)] {
+            count += enqueue_oracle_accounts(
+                accounts.keys().copied(),
+                (t_rx_ns, event_slot, "oracle_threshold"),
+                lane,
+                |a| accounts.get(a).copied().unwrap_or(0),
+                &mut self.oracle_lanes,
+                (
+                    &mut self.metrics.oracle_enqueued,
+                    &mut self.metrics.oracle_coalesced,
+                    &mut self.metrics.oracle_max_pending,
+                ),
+            );
+        }
+        self.metrics.oracle_candidate_hits = self
+            .metrics
+            .oracle_candidate_hits
+            .saturating_add(count as u64);
+        count
+    }
+
     /// E9: requests a candidate's projection again after a stale result or a lagging node —
     /// through the ordinary detect queue (behind waiting work, so neither it nor others starve),
     /// or parked until `after_slot` is processed (backoff), and within the candidate's bound
