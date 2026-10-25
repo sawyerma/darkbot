@@ -298,6 +298,32 @@ class Launchers(unittest.TestCase):
                 self.assertIn('shadow requires LIVE and submission disabled',p.stderr)
                 self.assertNotIn('p0-longtail: ',p.stderr)  # refused before cargo and the binary
 
+    def test_gap_smoke_accepts_only_the_native_qualification(self):
+        # F-10 (P0-PROD-CTRL-02): the smoke's acceptance reads the native master qualification text the launcher writes;
+        # JSON views alone never pass, and only the gates --chain-verify off cannot meet may fail.
+        with tempfile.TemporaryDirectory() as folder:
+            run=Path(folder)/'run';logs=run/'logs';logs.mkdir(parents=True)
+            axes={'capture_clock':'CAPTURE_CLOCK_COMPLETE','live_coverage':'LIVE_COVERAGE_COMPLETE','capture_journal':'CAPTURE_JOURNAL_COMPLETE',
+                  'deployment_continuity':'DEPLOYMENT_CONTINUITY_PROVEN','trading':'LIVE_DISABLED_NO_SUBMISSION','verdict':'C0_E1_NOT_QUALIFIED',
+                  'failed':'VERIFICATION_NOT_CANONICAL,ECONOMICS_NOT_REPLAYED'}
+            def check(report=None,disconnect=True):
+                (logs/'gap_proxy.log').write_text('GAP_PROXY_CONTROLLED_DISCONNECT\n' if disconnect else 'connected\n')
+                target=logs/'post_capture_report.txt'
+                if report is None:target.unlink(missing_ok=True)
+                else:target.write_text(''.join(f'{k}={v}\n' for k,v in report.items()))
+                return subprocess.run(['bash',str(SCRIPTS/'smoke.sh')],env={**clean_env(),'P0_SMOKE_CHECK_RUN':str(run)},
+                                      capture_output=True,text=True,timeout=30)
+            p=check(axes);self.assertEqual(p.returncode,0,p.stderr);self.assertIn('CONTROLLED_GAP_SMOKE_PASS',p.stdout)
+            p=check({**axes,'failed':'-','verdict':'C0_E1_MASTER_PASS'});self.assertEqual(p.returncode,0,p.stderr)
+            for change,reason in (({'failed':'VERIFICATION_NOT_CANONICAL,TECHNICAL_NO_EVALUATIONS'},'master gate failed: TECHNICAL_NO_EVALUATIONS'),
+                                  ({'live_coverage':'LIVE_COVERAGE_INCOMPLETE'},'axis not met: live_coverage=LIVE_COVERAGE_COMPLETE'),
+                                  ({'trading':'LIVE_OR_SUBMISSION_PRESENT'},'axis not met: trading=')):
+                p=check({**axes,**change});self.assertEqual(p.returncode,1);self.assertIn(reason,p.stderr)
+            p=check(axes,disconnect=False);self.assertEqual(p.returncode,1);self.assertIn('no controlled disconnect',p.stderr)
+            (run/'economics_final.json').write_text('{"technical_qualification":{"verdict":"PASS"}}')
+            p=check(None);self.assertEqual(p.returncode,1);self.assertIn('no post-capture report',p.stderr)
+            self.assertNotIn('CONTROLLED_GAP_SMOKE_PASS',p.stdout)
+
     def test_changed_launchers_parse(self):
         self.assertEqual(sorted(p.name for p in SCRIPTS.iterdir() if p.is_file()),
                          ['capture.sh','gate.sh','preflight.sh','report.sh','smoke.sh','test.sh','verify.sh'])

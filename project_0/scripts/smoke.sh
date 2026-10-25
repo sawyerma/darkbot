@@ -1,8 +1,43 @@
 #!/usr/bin/env bash
-# Project_0 smoke entry point (structure iteration 22): controlled C0-E1 reconnect through a market-only loopback
-# proxy. No firewall changes. Works from any working directory; repository paths are absolute.
+# Project_0 smoke entry point: controlled C0-E1 reconnect through a market-only loopback proxy. No firewall changes.
+# The run goes through the one controller (`capture.sh econ4h` -> `p0ctl run start`): boot audit, the operator's
+# `--network-audit FILE --mainnet-approved TOKEN` (passed through), owner lock. Its acceptance reads only native records
+# (F-10, P0-PROD-CTRL-02): the C0-E1 master qualification the launcher prints after the capture; no JSON, no export.
+#   smoke.sh --network-audit FILE --mainnet-approved TOKEN [more p0ctl run start options]
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Native acceptance of a finished smoke run: the master qualification over its .p0j records (written by the
+# launcher's post-capture chain). With --chain-verify off only the canonical verification and the economics replay
+# may fail; every capture, deployment, technical and trading gate must hold. `P0_SMOKE_CHECK_RUN=DIR` re-checks a run.
+accept() {
+  local logs="$1"
+  [[ -d "$1/logs" ]] && logs="$1/logs"
+  local report="$logs/post_capture_report.txt" failed code axis
+  fail() { echo "CONTROLLED_GAP_SMOKE_FAIL: $*" >&2; exit 1; }
+  grep -q 'GAP_PROXY_CONTROLLED_DISCONNECT' "$logs/gap_proxy.log" 2>/dev/null || fail 'no controlled disconnect in the proxy log'
+  [[ -f "$report" ]] || fail "no post-capture report: $report"
+  for axis in capture_clock=CAPTURE_CLOCK_COMPLETE live_coverage=LIVE_COVERAGE_COMPLETE \
+              capture_journal=CAPTURE_JOURNAL_COMPLETE deployment_continuity=DEPLOYMENT_CONTINUITY_PROVEN \
+              trading=LIVE_DISABLED_NO_SUBMISSION; do
+    grep -qx "$axis" "$report" || fail "qualification axis not met: $axis"
+  done
+  failed="$(sed -n 's/^failed=//p' "$report")"
+  [[ -n "$failed" ]] || fail 'no failed= line in the qualification'
+  if [[ "$failed" != - ]]; then
+    IFS=, read -r -a codes <<< "$failed"
+    for code in "${codes[@]}"; do
+      case "$code" in
+        VERIFICATION_NOT_CANONICAL|ECONOMICS_NOT_REPLAYED) ;;
+        *) fail "master gate failed: $code" ;;
+      esac
+    done
+  fi
+  echo 'CONTROLLED_GAP_SMOKE_PASS'
+}
+if [[ -n "${P0_SMOKE_CHECK_RUN:-}" ]]; then
+  accept "$P0_SMOKE_CHECK_RUN"
+  exit 0
+fi
 ENV_FILE="${P0_ENV_FILE:-$ROOT/project_0/.env}"
 if [[ -f "$ENV_FILE" ]]; then
   mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
@@ -21,13 +56,11 @@ case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
   *) echo 'LIVE and submission must be disabled' >&2; exit 2 ;;
 esac
 export P0_LIVE_ENABLED=false P0_SUBMISSION_ENABLED=false
-export P0_MARKET_SOURCE=logs
-export P0_ECON_DURATION_SECS="${P0_ECON_DURATION_SECS:-60}"
-export P0_ECON_DRAIN_SECS="${P0_ECON_DRAIN_SECS:-15}"
+SMOKE_DURATION="${P0_SMOKE_DURATION:-61s}"
 export P0_ECON_RUN_ID="${P0_ECON_RUN_ID:-c0e1_gap_smoke_$(date -u +%Y%m%dT%H%M%SZ)}"
+# The launcher's own run-store contract: an invalid store or an existing run id is refused before the proxy connects.
 P0_ECON_OUT_DIR="$(PYTHONPATH="$ROOT/project_0" python3 -m operations.capture.run_store root econ4h "${P0_ECON_OUT_DIR:-}")" || exit 2
 export P0_ECON_OUT_DIR
-# Reject an invalid or existing run id before the proxy connects upstream; capture.sh econ4h-launcher allocates it.
 PYTHONPATH="$ROOT/project_0" python3 -m operations.capture.run_store check "$P0_ECON_OUT_DIR" "$P0_ECON_RUN_ID" >/dev/null || exit 2
 # Proxy build log, readiness file and probe output are reconstructible working data (data/cache policy);
 # the proxy log that belongs to a run is copied into the run below.
@@ -57,38 +90,17 @@ if [[ "${P0_GAP_PROBE_ONLY:-false}" == true ]]; then
   echo "Short proxy qualification evidence: $scratch"
   exit 0
 fi
-# Environment was already sourced; preserve the proxy override in the inner launcher.
+# Environment was already sourced; preserve the proxy override in the inner launcher. The controller validates the
+# arguments, refuses a run without the operator's approval and allocates the run (an existing id is refused).
 status=0
-P0_ENV_FILE="$scratch/not-present.env" bash "$ROOT/project_0/scripts/capture.sh" econ4h-launcher || status=$?
+P0_ENV_FILE="$scratch/not-present.env" bash "$ROOT/project_0/scripts/capture.sh" econ4h \
+  --duration "$SMOKE_DURATION" --capture-source logs --chain-verify off "$@" || status=$?
 run="$P0_ECON_OUT_DIR/$P0_ECON_RUN_ID"
-if [[ -d "$run" ]]; then
-  # Layout V1 keeps the log at the run root, layout V2 under logs/ (run_store artifact gap_proxy_log).
-  layout="$(PYTHONPATH="$ROOT/project_0" python3 -m operations.capture.run_store layout econ4h "$P0_ECON_OUT_DIR")" || exit 2
-  cp "$scratch/proxy.log" "$(PYTHONPATH="$ROOT/project_0" python3 -m operations.capture.run_store path "$run" gap_proxy_log "$layout")"
+if [[ ! -d "$run" ]]; then
+  echo "CONTROLLED_GAP_SMOKE_NOT_RUN: no run $P0_ECON_RUN_ID (launcher status $status); proxy logs: $scratch" >&2
+  exit 2
 fi
-echo "Controlled interruption evidence: $scratch/proxy.log"
-[[ "$status" == 0 ]] || exit "$status"
-python3 - "$run" "$ROOT/project_0" <<'PY'
-import json, pathlib, sys
-sys.path.insert(0, sys.argv[2])
-from operations.capture import run_store
-p = pathlib.Path(sys.argv[1])
-f = json.loads(run_store.artifact(p, 'economics_final').read_text())
-m = json.loads(run_store.market_summary(p).read_text())
-events = [json.loads(line) for line in (run_store.market_dir(p) / 'coverage.jsonl').read_text().splitlines()]
-names = [e['event'] for e in events]
-assert 'GAP_PROXY_CONTROLLED_DISCONNECT' in run_store.artifact(p, 'gap_proxy_log').read_text()
-assert names.index('DRAINED') < names.index('SHADOW_RPC_QUIESCENT') < names.index('FULL_SLOT_RECONCILIATION_FINAL')
-assert names.index('DRAINED') < names.index('GAP_RECOVERY_STARTED') < names.index('GAP_RECOVERED')
-assert m['gap_count'] >= 1 and m['gap_recovered'] == m['gap_count'] and m['gap_unrecovered'] == 0
-assert m['full_slot_reconciliation_complete'] is True
-assert m['liquidation_path_coverage_complete'] is True
-assert m['market_capture_complete'] is True
-assert m['full_slot_reconciliation']['slots_unresolved'] == 0
-assert names.index('FULL_SLOT_RECONCILIATION_FINAL') < names.index('GAP_RECOVERED')
-assert f['canonical']['cumulative']['finalized'] is True
-t = f['technical_qualification']
-assert t['verdict'] == 'PASS' and t['submissions'] == 0 and t['analytics_queue_drops'] == 0
-assert all(run_store.artifact(p, 'hour_%02d' % i).is_file() for i in range(1, 5))
-print('CONTROLLED_GAP_SMOKE_PASS')
-PY
+logs="$run"; [[ -d "$run/logs" ]] && logs="$run/logs"
+cp "$scratch/proxy.log" "$logs/gap_proxy.log"
+echo "Controlled interruption evidence: $logs/gap_proxy.log"
+accept "$run"
