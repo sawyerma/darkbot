@@ -849,6 +849,32 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             }
             .into(),
         );
+        // BSC-011: the chain outcome and the evidence integrity next to the
+        // verdict (a result record only); anything unknown stays UNKNOWN.
+        if r.schema() == &schema::g08::result::SCHEMA {
+            for (name, prefix, vocabulary) in [
+                (
+                    "verdict_dimensions.chain_outcome",
+                    "CHAIN_",
+                    &["PASS", "ADAPT", "STOP", "UNKNOWN"][..],
+                ),
+                (
+                    "verdict_dimensions.evidence_integrity",
+                    "EVIDENCE_",
+                    &[
+                        "COMPLETE",
+                        "LOCAL_CAPTURE_INCOMPLETE",
+                        "CHAIN_CAPTURE_INCOMPLETE",
+                        "LOCAL_AND_CHAIN_CAPTURE_INCOMPLETE",
+                    ][..],
+                ),
+            ] {
+                let value = field(r, name)
+                    .filter(|v| vocabulary.contains(&v.as_str()))
+                    .unwrap_or_else(|| "UNKNOWN".into());
+                g08_reasons.push(format!("{prefix}{value}"));
+            }
+        }
     }
     {
         use schema::{g06a, g07, g08};

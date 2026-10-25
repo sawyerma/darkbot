@@ -196,6 +196,10 @@ pub mod result {
     pub const ATTEMPT_ID: u16 = 2;
     pub const VERDICT: u16 = 3;
     pub const G07_EVIDENCE_SHA256: u16 = 4;
+    /// v6 (BSC-011): the chain outcome and the evidence integrity, each on
+    /// its own next to the overall verdict.
+    pub const CHAIN_OUTCOME: u16 = 5;
+    pub const EVIDENCE_INTEGRITY: u16 = 6;
     pub const LAUNCH_TX: u16 = 10;
     pub const BUY_TX: u16 = 11;
     pub const LAUNCH_STATUS: u16 = 12;
@@ -301,14 +305,20 @@ pub mod result {
     }
 
     pub const SCHEMA: Schema = Schema {
-        name: "darkbot.g08.mainnet-acquisition-ordering.v5",
+        name: "darkbot.g08.mainnet-acquisition-ordering.v6",
         record_type: 14,
-        schema_version: 5,
+        schema_version: 6,
         fields: &[
             Field::req(GATE, "gate", Text),
             Field::req(ATTEMPT_ID, "attempt_id", Text),
             Field::req(VERDICT, "verdict", Text),
             Field::req(G07_EVIDENCE_SHA256, "g07_evidence_sha256", B256),
+            Field::req(CHAIN_OUTCOME, "verdict_dimensions.chain_outcome", Text),
+            Field::req(
+                EVIDENCE_INTEGRITY,
+                "verdict_dimensions.evidence_integrity",
+                Text,
+            ),
             Field::req(LAUNCH_TX, "transactions.launch_tx", B256),
             Field::req(BUY_TX, "transactions.buy_tx", B256),
             Field::req(LAUNCH_STATUS, "transactions.launch_status", U64),

@@ -731,14 +731,12 @@ fn g08_and_g07_belong_together_only_with_the_same_attempt_and_g07_hash() {
             .reason_codes
     };
     // Same attempt ID (fixture) and exactly the SHA-256 of the G0.7 record.
+    // (The verdict dimensions follow the binding code; BSC-011 tests them.)
     assert_eq!(
-        g08_gate(darkbot_bsc_record::sha256(&g07_bytes)),
-        vec!["G07_EVIDENCE_BOUND".to_string()]
+        g08_gate(darkbot_bsc_record::sha256(&g07_bytes))[0],
+        "G07_EVIDENCE_BOUND"
     );
-    assert_eq!(
-        g08_gate([0x55; 32]),
-        vec!["G07_EVIDENCE_UNBOUND".to_string()]
-    );
+    assert_eq!(g08_gate([0x55; 32])[0], "G07_EVIDENCE_UNBOUND");
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -856,5 +854,52 @@ fn legacy_builder_json_is_never_status_input_and_the_probe_is_native() {
         "{}",
         probe.path
     );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// BSC-011: the G0.8 gate shows the chain outcome and the evidence
+/// integrity next to the overall verdict; unknown values stay UNKNOWN.
+#[test]
+fn the_g08_gate_carries_the_chain_outcome_and_the_evidence_integrity() {
+    use darkbot_bsc_record::schema::g08::result as res;
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-g08-dims-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let dir = root.join("bsc/native/evidence/g08/fixture");
+    fs::create_dir_all(&dir).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    let write = |chain: &str, integrity: &str| {
+        let mut d = filled(&res::SCHEMA);
+        d.set(res::VERDICT, "UNRESOLVED")
+            .set(res::CHAIN_OUTCOME, chain)
+            .set(res::EVIDENCE_INTEGRITY, integrity);
+        fs::write(dir.join("result.dbrec"), d.encode().unwrap()).unwrap();
+        let s = projection::project(&root, &root.join("run"));
+        s.status
+            .gates
+            .into_iter()
+            .find(|g| g.gate_id == "G0.8")
+            .unwrap()
+    };
+    let g08 = write("STOP", "LOCAL_CAPTURE_INCOMPLETE");
+    assert_eq!(g08.state, "UNRESOLVED");
+    assert!(
+        g08.reason_codes.contains(&"CHAIN_STOP".to_string()),
+        "{:?}",
+        g08.reason_codes
+    );
+    assert!(
+        g08.reason_codes
+            .contains(&"EVIDENCE_LOCAL_CAPTURE_INCOMPLETE".to_string())
+    );
+    let g08 = write("MAYBE", "FINE");
+    assert!(
+        g08.reason_codes.contains(&"CHAIN_UNKNOWN".to_string()),
+        "{:?}",
+        g08.reason_codes
+    );
+    assert!(g08.reason_codes.contains(&"EVIDENCE_UNKNOWN".to_string()));
     fs::remove_dir_all(root).unwrap();
 }

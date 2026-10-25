@@ -205,6 +205,32 @@ fn verdict(f: &VerdictFacts) -> &'static str {
     }
 }
 
+/// BSC-011 (BSC_Bug_V2 P4-G1): the canonically proven chain outcome on its
+/// own, independent of both captures: UNKNOWN while the chain facts are
+/// unresolved (non-canonical/reorg, incomplete acquisition reads, unknown
+/// competitors), else STOP/ADAPT/PASS by the verdict's own rules. It never
+/// lifts the verdict: missing evidence still makes the overall UNRESOLVED.
+fn chain_outcome(f: &VerdictFacts) -> &'static str {
+    if !f.canonical || !f.acquisition_evidence_complete || f.competitor_count.is_none() {
+        return "UNKNOWN";
+    }
+    verdict(&VerdictFacts {
+        local_capture_complete: true,
+        chain_capture_complete: true,
+        ..*f
+    })
+}
+
+/// BSC-011: which evidence is incomplete, independent of the chain outcome.
+fn evidence_integrity(f: &VerdictFacts) -> &'static str {
+    match (f.local_capture_complete, f.chain_capture_complete) {
+        (true, true) => "COMPLETE",
+        (false, true) => "LOCAL_CAPTURE_INCOMPLETE",
+        (true, false) => "CHAIN_CAPTURE_INCOMPLETE",
+        (false, false) => "LOCAL_AND_CHAIN_CAPTURE_INCOMPLETE",
+    }
+}
+
 fn req_env(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
 }
@@ -1651,7 +1677,7 @@ fn main() {
         && launch_receipt.to == Some(PORTAL)
         && buy_receipt.from == buyer
         && buy_receipt.to == Some(PORTAL);
-    let verdict = verdict(&VerdictFacts {
+    let facts = VerdictFacts {
         receipt_identity,
         launch_succeeded: launch_status == 1,
         buy_succeeded: buy_status == 1,
@@ -1670,13 +1696,16 @@ fn main() {
         competitor_count,
         local_capture_complete,
         chain_capture_complete,
-    });
+    };
+    let verdict = verdict(&facts);
 
     let head = resolved!(read_rpc(wire::block_number));
     let mut r = Draft::new(&result::SCHEMA);
     r.set(result::GATE, "G0.8")
         .set(result::ATTEMPT_ID, attempt_id.as_str())
         .set(result::VERDICT, verdict)
+        .set(result::CHAIN_OUTCOME, chain_outcome(&facts))
+        .set(result::EVIDENCE_INTEGRITY, evidence_integrity(&facts))
         .set(
             result::G07_EVIDENCE_SHA256,
             Value::B256(darkbot_bsc_record::sha256(&g07_bytes)),
@@ -2524,6 +2553,93 @@ mod tests {
                 x.buy_succeeded = false
             }),
             "UNRESOLVED"
+        );
+    }
+
+    /// BSC-011 (BSC_Bug_V2 P4-G1): a proven chain outcome stays visible
+    /// next to missing evidence; the overall verdict keeps its priority and
+    /// is never PASS with incomplete evidence.
+    #[test]
+    fn the_chain_outcome_and_the_evidence_integrity_are_separate_dimensions() {
+        let pass = VerdictFacts {
+            receipt_identity: true,
+            launch_succeeded: true,
+            buy_succeeded: true,
+            launch_scope_ok: true,
+            buy_scope_ok: true,
+            buy_calldata_ok: true,
+            canonical: true,
+            launch_at_index: true,
+            buy_at_index: true,
+            acquisition_evidence_complete: true,
+            acquisition_positive: true,
+            ordered: true,
+            within_budget: true,
+            same_block: true,
+            adjacent: true,
+            competitor_count: Some(0),
+            local_capture_complete: true,
+            chain_capture_complete: true,
+        };
+        let dims = |f: &dyn Fn(&mut VerdictFacts)| {
+            let mut x = pass;
+            f(&mut x);
+            (verdict(&x), chain_outcome(&x), evidence_integrity(&x))
+        };
+        assert_eq!(dims(&|_| {}), ("PASS", "PASS", "COMPLETE"));
+        // Journal defect + BUY revert / budget overrun: the STOP stays visible.
+        let journal = |x: &mut VerdictFacts| x.local_capture_complete = false;
+        assert_eq!(
+            dims(&|x| {
+                journal(x);
+                x.buy_succeeded = false
+            }),
+            ("UNRESOLVED", "STOP", "LOCAL_CAPTURE_INCOMPLETE")
+        );
+        assert_eq!(
+            dims(&|x| {
+                journal(x);
+                x.within_budget = false
+            }),
+            ("UNRESOLVED", "STOP", "LOCAL_CAPTURE_INCOMPLETE")
+        );
+        // Journal defect + a canonically proven acquisition: never an overall PASS.
+        assert_eq!(
+            dims(&journal),
+            ("UNRESOLVED", "PASS", "LOCAL_CAPTURE_INCOMPLETE")
+        );
+        // Journal defect + reorg / incomplete chain capture.
+        assert_eq!(
+            dims(&|x| {
+                journal(x);
+                x.canonical = false
+            }),
+            ("UNRESOLVED", "UNKNOWN", "LOCAL_CAPTURE_INCOMPLETE")
+        );
+        assert_eq!(
+            dims(&|x| {
+                journal(x);
+                x.chain_capture_complete = false
+            }),
+            ("UNRESOLVED", "PASS", "LOCAL_AND_CHAIN_CAPTURE_INCOMPLETE")
+        );
+        assert_eq!(
+            dims(&|x| x.chain_capture_complete = false),
+            ("UNRESOLVED", "PASS", "CHAIN_CAPTURE_INCOMPLETE")
+        );
+        // Unresolved chain facts stay UNKNOWN, placement stays ADAPT.
+        assert_eq!(dims(&|x| x.competitor_count = None).1, "UNKNOWN");
+        assert_eq!(
+            dims(&|x| x.acquisition_evidence_complete = false).1,
+            "UNKNOWN"
+        );
+        assert_eq!(
+            dims(&|x| {
+                journal(x);
+                x.adjacent = false
+            })
+            .1,
+            "ADAPT"
         );
     }
 
