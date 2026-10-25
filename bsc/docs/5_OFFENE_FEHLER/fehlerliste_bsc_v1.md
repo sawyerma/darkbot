@@ -288,6 +288,9 @@ Verbindliche aktuelle Autorität: `bsc/docs/1_PLAN/PHASENPLAN.md`, neuester Absc
 | BSC-016 | LOCAL_PASS | `faeb05bc`: Crash nach Authority-Verbrauch gibt den Versuch nie frei (Reihenfolge gepinnt) |
 | BSC-017 | LOCAL_PASS | `0f325e06`: G0.8-Result v6 nur um die zwei BSC-011-Felder (In-place-Bump wie v4→v5; kein G0.8-Record existiert) |
 | BSC-041 | LOCAL_PASS | `19b49fa2`: Journal-SHA-256 gegen FIPS-/Padding-/Streaming-Referenzen |
+| BSC-023 | TECHNISCH FERTIG — EXTERNAL_BLOCKED: Mainnet-Messung braucht synchronisierten geth | Producer trennt T_packet_decoded (aux)/T_ingress/L1-Commit/Txpool-Lane; C1.9-Report (Segmente, Clock, Boundary) binär `3892ebf4`, Analytics §3 `b3df0205` |
+| BSC-025 | EXTERNAL_BLOCKED: synchronisierter Mainnet-geth | MaxPeers/Churn per Env, 256 nur obere Lane-Pool-Schranke; Peer-/Churn-/Footprint-Qualifikation nur mit Mainnet-Peers |
+| BSC-033 | TECHNISCH FERTIG | `3892ebf4`: Hostprofil DBREC (Typ 42), Fingerprint-ID erhalten (`0xfc5501a8`), C1.9/C1.9b/C1.10-Kette binär, Python/JSON entfernt |
 | Gate-Regression | LOCAL_PASS | `1519adcd`: Gateway-Testisolation (`gw-ledger-open` kollidierte); clippy `-D warnings` execution/qualification/record sauber (`26b39c42`) |
 | BSC-018–036, 043–047, 050 (voll), 051–053 | OFFLINE_IMPLEMENTATION_AUTHORIZED_BY_PHASE / LIVE_BLOCKED | Bindender PHASENPLAN 25.10.2026: BSC-050 Vollscan vor umfassender C1/C2-Arbeit; C0–I nach fachlichen Abhängigkeiten offline entwickeln und technisch abnehmen, E erst nach Four-G0.1-Vertragsfreeze; G0.7/G0.8 bleiben echte Geld-/Betriebsgates; Shared Gateway nur mit P0-Owner |
 | BSC-037–040, 042 | MEASUREMENT_DEPENDENT / NO_FAKE_PASS | Gezielte Offline-Optimierung erst nach real vergleichbarer Messbasis; keine künstliche µs-Gewinnangabe; operative Freischaltung separat |
@@ -317,7 +320,7 @@ Umfang: produktive Pfade von `bsc/engine` (Bins/Libs ohne Tests), `bsc/geth/over
 | Veränderlicher Testseam im Hotpath (BSC-043) | `ingress.go::serializeTxV2` | C1-Ingress | BUG | `a55e73f7` direkt `MarshalBinary`, Tests mit echten unserialisierbaren TX |
 | Öffentlicher Test-Clock-Setter (BSC-044) | `hot0.rs::set_clock` | HOT0 | BUG | `6e9a357a` nur `cfg(test)` (compile_fail) |
 | V1-Ring ohne produktiven Rust-Aufrufer (BSC-045) | `geth_ipc::protocol_v1` (`pub use *`) | nur `RecordKind`/`HASH_LEN`/`PEER_LEN` genutzt | BUG (toter Pfad) | `6e9a357a` Rust-Ring, `a55e73f7` Go-API entfernt; `RecordKind`/Längen geteilt; c13/c14-Interop PASS |
-| Hostprofil als JSON (BSC-033) | `geth_ipc::host::to_json` | `c16_host_profile` (C1.6-Evidence) | BUG | Paket 3 → DBREC-Record |
+| Hostprofil als JSON (BSC-033) | `geth_ipc::host::to_json` | `c16_host_profile` (C1.6-Evidence) | BUG | `3892ebf4` DBREC-Record, C1-Kette binär |
 | `test-support` in Release-Builds (BSC-046) | `cargo tree` Release-Features | `darkbotctl build` | KEIN_BUG | nur `default`/`runner-startup` |
 | Panics im Dauerprozess | `status/*`, `bsc-status-reporter` | Reporter (launchd) | KEIN_BUG | keine `unwrap/expect/panic` außerhalb Tests |
 | `*_legacy_v2.sh` | `bsc/tools` | kein Aufrufer | KEIN_BUG | historisch isoliert |
