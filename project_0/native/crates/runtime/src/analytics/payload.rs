@@ -820,6 +820,8 @@ macro_rules! typed_kinds {
             k::OPTIMIZE_RESULT => $f::<super::backtest::OptimizeResult>($kind, $schema, $bytes),
             k::BACKTEST_PROFILE => $f::<super::backtest::Profile>($kind, $schema, $bytes),
             k::BACKTEST_ATTEMPT => $f::<super::backtest::Attempt>($kind, $schema, $bytes),
+            k::ANALYTICS_JOB_REQUEST => $f::<super::jobs::JobRequest>($kind, $schema, $bytes),
+            k::ANALYTICS_JOB_OUTCOME => $f::<super::jobs::JobOutcome>($kind, $schema, $bytes),
             k::C0E1_QUALIFICATION => {
                 $f::<super::qualification::QualificationRecord>($kind, $schema, $bytes)
             }

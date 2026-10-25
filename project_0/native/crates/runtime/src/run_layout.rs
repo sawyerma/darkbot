@@ -81,6 +81,40 @@ impl RunPaths {
     }
 }
 
+/// The run roots of a project directory (`p0ctl`, the analytics job controller and its
+/// projection read the same ones).
+pub const RUN_ROOTS: [&str; 4] = ["data/runs", "data/econ4h", "data/market", "data/shadow"];
+
+/// A run directory given as a path, or the one run named `run_id` under the roots of `project`
+/// (`None`: missing or ambiguous).
+pub fn find_run(project: &Path, run_id: &str) -> Option<PathBuf> {
+    let direct = Path::new(run_id);
+    if direct.is_dir() {
+        return Some(direct.to_path_buf());
+    }
+    let found: Vec<_> = RUN_ROOTS
+        .iter()
+        .map(|r| project.join(r).join(run_id))
+        .filter(|p| p.is_dir())
+        .collect();
+    (found.len() == 1).then(|| found[0].clone())
+}
+
+/// A run with native records (a typed run manifest).
+pub fn native_run(run: &Path) -> bool {
+    run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()
+}
+
+/// The native readers read layout V2 (`capture/…`). A native run in layout V1 (its typed
+/// manifest at the run root) has no native reader and is refused with its own code, never
+/// misread as unfinished; new econ4h runs are always written in layout V2.
+pub fn native_layout(run: &Path) -> Result<(), String> {
+    if run.join("run_manifest.p0j").is_file() && !run.join("capture/run_manifest.p0j").is_file() {
+        return Err("NATIVE_LAYOUT_V1_UNSUPPORTED: a native run in layout V1 has no native reader (new econ4h runs are layout V2)".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

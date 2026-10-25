@@ -67,11 +67,28 @@ pub const ORIGIN_OPTIMIZER: &str = "OPTIMIZER_CANDIDATE";
 pub const ORIGIN_OPERATOR: &str = "OPERATOR";
 
 /// Explicit resource budget of one job (STARTUP §4 B `resource_budget`); no hidden default.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug)]
 pub struct Budget {
     pub max_seconds: u64,
     /// Bytes held in memory: events, joined rows, receipts, rows and attempts (fail closed).
     pub max_ram_bytes: u64,
+    /// B03: the operator cancellation of a job worker (`p0ctl job cancel`); `None`: a
+    /// foreground run, ended only by its process.
+    pub cancelled: Option<fn() -> bool>,
+}
+
+/// The refusal of a cancelled job.
+pub const CANCELLED: &str = "JOB_CANCELLED";
+
+/// A job's cancellation, then its deadline.
+fn due(deadline: Instant, cancelled: Option<fn() -> bool>) -> Result<(), String> {
+    if cancelled.is_some_and(|c| c()) {
+        return Err(CANCELLED.into());
+    }
+    if Instant::now() >= deadline {
+        return Err("BACKTEST_TIME_BUDGET".into());
+    }
+    Ok(())
 }
 
 impl Budget {
@@ -90,14 +107,12 @@ struct Meter {
     deadline: Instant,
     held: u64,
     max: u64,
+    cancelled: Option<fn() -> bool>,
 }
 
 impl Meter {
     fn time(&self) -> Result<(), String> {
-        if Instant::now() >= self.deadline {
-            return Err("BACKTEST_TIME_BUDGET".into());
-        }
-        Ok(())
+        due(self.deadline, self.cancelled)
     }
     fn charge<T: Serialize>(&mut self, v: &T) -> Result<(), String> {
         use bincode::Options;
@@ -661,6 +676,7 @@ pub fn load(
         deadline: budget.deadline()?,
         held: 0,
         max: budget.max_ram_bytes,
+        cancelled: budget.cancelled,
     };
     let capture = strict_driver::bind_capture(run)?;
     meter.time()?;
@@ -678,13 +694,8 @@ pub fn load(
         return Err(format!("BACKTEST_BLOCKED: VERIFICATION_{status}"));
     }
     meter.time()?;
-    let deadline = meter.deadline;
-    let (events, _) = report::verified_events(&selected, &mut |_| {
-        if Instant::now() >= deadline {
-            return Err("BACKTEST_TIME_BUDGET".into());
-        }
-        Ok(())
-    })?;
+    let (deadline, cancelled) = (meter.deadline, meter.cancelled);
+    let (events, _) = report::verified_events(&selected, &mut |_| due(deadline, cancelled))?;
     for e in &events {
         meter.charge(e)?;
     }
@@ -1001,13 +1012,12 @@ pub fn search(
     train: (&[&BacktestRow], &[&Attempt]),
     model: &str,
     deadline: Instant,
+    cancelled: Option<fn() -> bool>,
 ) -> Result<(Vec<Score>, Option<usize>), String> {
     let mut scores: Vec<Score> = Vec::with_capacity(points.len());
     let mut chosen: Option<usize> = None;
     for (i, p) in points.iter().enumerate() {
-        if Instant::now() >= deadline {
-            return Err("BACKTEST_TIME_BUDGET".into());
-        }
+        due(deadline, cancelled)?;
         let s = score(train.0, train.1, p, model);
         if s.objective_bps.is_some() && chosen.is_none_or(|c| better(&s, &scores[c])) {
             chosen = Some(i);
@@ -1163,7 +1173,13 @@ pub fn optimize(
     )?;
     let train = (parts.train.0.as_slice(), parts.train.1.as_slice());
     let holdout = (parts.holdout.0.as_slice(), parts.holdout.1.as_slice());
-    let (scores, chosen) = search(&points, train, model, inputs.meter.deadline)?;
+    let (scores, chosen) = search(
+        &points,
+        train,
+        model,
+        inputs.meter.deadline,
+        inputs.meter.cancelled,
+    )?;
     let binary = binary_sha256()?;
     let mut result = OptimizeResult {
         job_id: journal::hex(&sha256(&(
@@ -1287,6 +1303,7 @@ pub fn parse_budget(args: &[String]) -> Result<Budget, String> {
     Ok(Budget {
         max_seconds: number(args, "--max-seconds")?,
         max_ram_bytes: number(args, "--max-ram-bytes")?,
+        cancelled: None,
     })
 }
 

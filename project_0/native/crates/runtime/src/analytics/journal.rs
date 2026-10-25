@@ -87,6 +87,10 @@ pub mod kind {
     pub const BACKTEST_PROFILE: u16 = 354;
     /// A backtest's false positive: an executable evaluation without a verified liquidation.
     pub const BACKTEST_ATTEMPT: u16 = 355;
+    /// B03/U-9 analytics job controller: a job's typed request and its terminal outcome, each a
+    /// sealed single-value journal under `data/analytics-jobs/<id>/`.
+    pub const ANALYTICS_JOB_REQUEST: u16 = 356;
+    pub const ANALYTICS_JOB_OUTCOME: u16 = 357;
     /// C0-E1 shadow evaluation `{previous_target_offset, record}`; the per-target chain of
     /// in-window frames is the bounded-memory index of the analytics worker.
     pub const ECON_SHADOW_EVALUATION: u16 = 400;
@@ -177,6 +181,8 @@ pub mod kind {
         OPTIMIZE_RESULT,
         BACKTEST_PROFILE,
         BACKTEST_ATTEMPT,
+        ANALYTICS_JOB_REQUEST,
+        ANALYTICS_JOB_OUTCOME,
         ECON_SHADOW_EVALUATION,
         ECON_SNAPSHOT,
         ECON_FINAL,
@@ -224,7 +230,7 @@ pub mod source {
     pub const REPORT: u32 = 12;
     /// S1-02 operator source control (`p0ctl source set`).
     pub const SOURCE_CONTROL: u32 = 13;
-    /// Native backtest, optimizer and their profiles.
+    /// Native backtest, optimizer, their profiles and the analytics job controller.
     pub const BACKTEST: u32 = 14;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),

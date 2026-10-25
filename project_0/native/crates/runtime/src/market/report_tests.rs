@@ -810,6 +810,7 @@ mod report_e2e {
         crate::analytics::backtest::Budget {
             max_seconds: 60,
             max_ram_bytes: 1 << 20,
+            cancelled: None,
         };
 
     /// Every file under `dir` (relative path) — for the no-JSON and unchanged-evidence checks.
@@ -910,6 +911,89 @@ mod report_e2e {
                 "{file}"
             );
         }
+        let _ = std::fs::remove_dir_all(f.d);
+    }
+
+    /// B03/U-9: a backtest and an optimization as jobs of the analytics job controller (the
+    /// action of `p0ctl job start` and the GUI): the worker body runs the existing backtest once,
+    /// records COMPLETED with the result identity of the direct run, refuses to run the job again
+    /// and keeps the id; a cancelled job records CANCELLED without a result; the store lists both.
+    #[test]
+    fn b03_jobs_run_the_existing_backtest_once_and_record_the_outcome() {
+        use crate::analytics::{backtest, jobs};
+        let f = canonical_run(line!(), true);
+        let project = f.d.join("project");
+        let p = backtest_params();
+        let request = |id: &str, spec| jobs::JobRequest {
+            job_id: id.into(),
+            run: f.run.display().to_string(),
+            verification_result: None,
+            max_seconds: BACKTEST_BUDGET.max_seconds,
+            max_ram_bytes: BACKTEST_BUDGET.max_ram_bytes,
+            spec,
+            requested_unix_ms: Some(1),
+        };
+        let bt = request("bt-1", jobs::JobSpec::Backtest { params: p.clone() });
+        jobs::submit(&project, &bt).unwrap();
+        assert_eq!(jobs::status(&project, "bt-1").unwrap().state, jobs::JobState::Queued);
+        assert_eq!(jobs::submit(&project, &bt).err().as_deref(), Some("JOB_EXISTS"));
+        let (outcome, executed) = jobs::run(&project, "bt-1", None).unwrap();
+        let direct = backtest::backtest(&f.run, None, &p, BACKTEST_BUDGET).unwrap();
+        assert_eq!((outcome.state.as_str(), outcome.code.as_str()), (jobs::COMPLETED, ""));
+        match &outcome.result {
+            Some(jobs::JobResult::Backtest {
+                result_id, summary, ..
+            }) => {
+                assert_eq!(result_id, &direct.header.job_id);
+                assert_eq!(**summary, direct.summary);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(executed, Some(jobs::Executed::Backtest(_))));
+        match jobs::status(&project, "bt-1").unwrap().state {
+            jobs::JobState::Done(o) => assert_eq!(*o, outcome),
+            s => panic!("{s:?}"),
+        }
+        assert!(jobs::run(&project, "bt-1", None)
+            .err()
+            .unwrap()
+            .starts_with("JOB_DONE"));
+        let space = backtest::Space {
+            min_profit_usd_micro: vec![0, 1],
+            funding: vec![vec![]],
+            capital_usd_micro: vec![1_000_000_000],
+        };
+        let mut opt = request(
+            "opt-1",
+            jobs::JobSpec::Optimize {
+                baseline: p.clone(),
+                space,
+                holdout_bps: 5_000,
+                max_points: 2,
+                save_profile: true,
+            },
+        );
+        opt.requested_unix_ms = Some(2);
+        jobs::submit(&project, &opt).unwrap();
+        let (cancelled, none) = jobs::run(&project, "opt-1", Some(|| true)).unwrap();
+        assert!(none.is_none());
+        assert_eq!(
+            (cancelled.state.as_str(), cancelled.code.as_str(), &cancelled.result),
+            (jobs::CANCELLED, backtest::CANCELLED, &None)
+        );
+        let listed: Vec<_> = jobs::list(&project, 10)
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.request.job_id, s.state.name().to_string()))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("opt-1".to_string(), jobs::CANCELLED.to_string()),
+                ("bt-1".to_string(), jobs::COMPLETED.to_string())
+            ]
+        );
+        assert_eq!(jobs::list(&project, 1).unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(f.d);
     }
 

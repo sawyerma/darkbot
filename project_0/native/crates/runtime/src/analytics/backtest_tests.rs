@@ -292,7 +292,7 @@ fn optimizer_chooses_on_training_rows_only() {
     };
     let choose = |rows: &[BacktestRow]| {
         let s = split(rows, &fps, window, window, 4_000).unwrap();
-        search(&space.points(), (&s.train.0, &s.train.1), "M", far()).map(|(_, c)| c)
+        search(&space.points(), (&s.train.0, &s.train.1), "M", far(), None).map(|(_, c)| c)
     };
     // Training: min 0 / all classes earns 5 USD minus 1 USD-micro on 1 USD capital.
     assert_eq!(choose(&rows), Ok(Some(0)));
@@ -313,7 +313,7 @@ fn optimizer_chooses_on_training_rows_only() {
         assert!(split(&rows, &fps, window, window, bad).is_err());
     }
     // An expired deadline stops the search.
-    assert!(search(&space.points(), (&[], &[]), "M", Instant::now()).is_err());
+    assert!(search(&space.points(), (&[], &[]), "M", Instant::now(), None).is_err());
 }
 
 /// False positives cost money: with them the loosest grid point is no longer chosen by default.
@@ -330,7 +330,7 @@ fn failed_attempts_keep_the_optimizer_from_the_loosest_point() {
         funding: vec![vec![]],
         capital_usd_micro: vec![MICRO_U],
     };
-    let (scores, chosen) = search(&space.points(), (&refs, &fps), "M", far()).unwrap();
+    let (scores, chosen) = search(&space.points(), (&refs, &fps), "M", far(), None).unwrap();
     // min 0: 6 USD win minus three 3 USD failures = -3 USD; min 5: the 1 USD attempts are below.
     assert_eq!(scores[0].objective_bps, Some(-30_000));
     assert_eq!(scores[1].objective_bps, Some(60_000));

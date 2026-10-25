@@ -17,6 +17,9 @@
 //! p0ctl [--project DIR] backtest --run RUN_ID (--profile FILE | --capital-usd LIST [--min-profit-usd X] [--funding all|A,B]) --max-seconds N --max-ram-bytes N [--verification-result ID]
 //! p0ctl [--project DIR] optimize --run RUN_ID --capital-usd LIST [--min-profit-usd X] [--funding …] --min-profit-usd-grid X,Y --funding-sets all;A,B --holdout-bps N --max-points N --max-seconds N --max-ram-bytes N [--save-profile]
 //! p0ctl [--project DIR] profiles compare --run RUN_ID --baseline FILE --candidate FILE --max-seconds N --max-ram-bytes N
+//! p0ctl [--project DIR] job start backtest|optimize [--id ID] (the backtest|optimize options)
+//! p0ctl [--project DIR] job cancel --id ID
+//! p0ctl [--project DIR] job status [--id ID]
 //! p0ctl [--project DIR] verify  --run RUN_ID --mode off|strict [--resume-verification] [--offline] [--provider-evidence FILE] [--verify-* N] …
 //! p0ctl [--project DIR] verify  --run RUN_ID --historical --mode index|crosscheck …   (pinned reader, runs without native records only)
 //! p0ctl [--project DIR] report  --run RUN_ID [--report-* …] [--verification-result ID] [--format table|csv]
@@ -63,7 +66,10 @@
 //! `.p0j` evidence through the production join and admission (`analytics::backtest`): the job's
 //! sealed typed result lands under `reports/backtests|optimize/`; counterfactual Shadow results
 //! are never realized profit; a saved profile (`data/profiles/`) is an offline Shadow candidate,
-//! never a LIVE setting. No JSON, no Python, no network.
+//! never a LIVE setting. No JSON, no Python, no network. Both are jobs of the analytics job
+//! controller (`analytics::jobs`, B03): `backtest|optimize` run one in the foreground, `job
+//! start` records the same request and runs it in a detached worker (`job run`, internal) — the
+//! action the GUI starts — `job cancel` stops a running one, `job status` shows the store.
 //!
 //! `report` and `verify` read runs with native capture records natively (B7, strict/off); the
 //! pinned Python readers serve only runs without native records and only on `--historical`
@@ -72,18 +78,17 @@
 //! and the owners' end, persists an immutable result and exits 0 only for `C0_E1_MASTER_PASS`.
 use darkbot_runner::analytics::journal;
 use darkbot_runner::analytics::measurement::RunHorizon;
-use darkbot_runner::analytics::{backtest, qualification, report};
+use darkbot_runner::analytics::{backtest, jobs, qualification, report};
 use darkbot_runner::orchestration::boot_audit::{self, AuditVerdict, OfflineInputs, SafetyFlags};
 use darkbot_runner::orchestration::control::{self, OwnerState};
 use darkbot_runner::orchestration::source_control;
+use darkbot_runner::run_layout::{find_run, native_layout, native_run, RUN_ROOTS};
 use darkbot_runner::storage::preflight;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::Duration;
-
-const RUN_ROOTS: [&str; 4] = ["data/runs", "data/econ4h", "data/market", "data/shadow"];
 
 fn project_dir(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
     let dir = explicit
@@ -440,19 +445,6 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-fn find_run(project: &Path, run_id: &str) -> Option<PathBuf> {
-    let direct = Path::new(run_id);
-    if direct.is_dir() {
-        return Some(direct.to_path_buf());
-    }
-    let found: Vec<_> = RUN_ROOTS
-        .iter()
-        .map(|r| project.join(r).join(run_id))
-        .filter(|p| p.is_dir())
-        .collect();
-    (found.len() == 1).then(|| found[0].clone())
-}
-
 /// Last occurrence of each status tag in the bounded tail of the runtime log.
 fn log_tail(path: &Path) -> Vec<String> {
     const TAIL: u64 = 256 * 1024;
@@ -766,21 +758,6 @@ fn manifest_line(dir: &Path) -> Result<String, String> {
     ))
 }
 
-/// A run with native records (a typed run manifest).
-fn native_run(run: &Path) -> bool {
-    run.join("capture/run_manifest.p0j").is_file() || run.join("run_manifest.p0j").is_file()
-}
-
-/// The native readers read layout V2 (`capture/…`). A native run in layout V1 (its typed
-/// manifest at the run root) has no native reader and is refused with its own code, never
-/// misread as unfinished; new econ4h runs are always written in layout V2.
-fn native_layout(run: &Path) -> Result<(), String> {
-    if run.join("run_manifest.p0j").is_file() && !run.join("capture/run_manifest.p0j").is_file() {
-        return Err("NATIVE_LAYOUT_V1_UNSUPPORTED: a native run in layout V1 has no native reader (new econ4h runs are layout V2)".into());
-    }
-    Ok(())
-}
-
 /// JFI-01/03: the pinned Python readers serve historical runs (no native records) only, and only
 /// on the explicit `--historical` request — never a fallback for a native run.
 fn historical(project: &Path, script: &str, args: &[String]) -> Result<bool, String> {
@@ -972,52 +949,79 @@ fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {
     Ok(run)
 }
 
-fn backtest_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
-    let run = run_of(project, args)?;
-    let params = backtest::parse_params(&run, args)?;
-    let b = backtest::backtest(
-        &run,
-        given(args, "--verification-result")?.as_deref(),
-        &params,
-        backtest::parse_budget(args)?,
-    )?;
-    print!("{}", backtest::render_backtest(&b));
+/// `backtest|optimize`: one analytics job in the foreground (the same request and worker body as
+/// `job start`), its result rendered in full.
+fn foreground_job(project: &Path, kind: &str, args: &[String]) -> Result<bool, String> {
+    let request = jobs::request_of(project, kind, args)?;
+    jobs::submit(project, &request)?;
+    let (outcome, executed) = jobs::run(project, &request.job_id, None)?;
+    match executed {
+        Some(jobs::Executed::Backtest(b)) => print!("{}", backtest::render_backtest(&b)),
+        Some(jobs::Executed::Optimize {
+            result,
+            path,
+            profile,
+        }) => {
+            print!("{}", backtest::render_optimize(&result, &path));
+            if let jobs::JobSpec::Optimize {
+                save_profile: true, ..
+            } = request.spec
+            {
+                match profile {
+                    Some(saved) => println!(
+                        "offline Shadow candidate profile (never a LIVE setting): {}",
+                        saved.display()
+                    ),
+                    None => println!("no profile saved: no point chosen (NO_SAMPLE)"),
+                }
+            }
+        }
+        None => return Err(outcome.code),
+    }
+    println!("job {} {}", outcome.job_id, outcome.state);
     Ok(true)
 }
 
-fn optimize_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
-    let run = run_of(project, args)?;
-    let baseline = backtest::parse_params(&run, args)?;
-    let space = backtest::parse_space(args, &baseline)?;
-    let (holdout_bps, max_points) = backtest::parse_search(args)?;
-    let (result, path) = backtest::optimize(
-        &run,
-        given(args, "--verification-result")?.as_deref(),
-        &baseline,
-        &space,
-        holdout_bps,
-        max_points,
-        backtest::parse_budget(args)?,
-    )?;
-    print!("{}", backtest::render_optimize(&result, &path));
-    if args.iter().any(|a| a == "--save-profile") {
-        match result.chosen {
-            Some(i) => {
-                let profile = backtest::Profile {
-                    params: space.points()[i as usize].clone(),
-                    origin: backtest::ORIGIN_OPTIMIZER.into(),
-                    optimize_job_id: Some(result.job_id.clone()),
-                };
-                let saved = profile.save(&project.join(backtest::PROFILE_DIR))?;
-                println!(
-                    "offline Shadow candidate profile (never a LIVE setting): {}",
-                    saved.display()
-                );
-            }
-            None => println!("no profile saved: no point chosen (NO_SAMPLE)"),
+const JOB_USAGE: &str = "usage: p0ctl job start backtest|optimize [--id ID] … | job cancel --id ID | job status [--id ID]";
+
+/// `job start|cancel|status|run` (B03, P0-PROD-CTRL-03): the analytics job controller.
+fn job_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let id = || given(args, "--id")?.ok_or_else(|| "--id ID required".to_string());
+    match args.first().map(String::as_str) {
+        Some("start") => {
+            let kind = args.get(1).ok_or(JOB_USAGE)?;
+            let request = jobs::request_of(project, kind, &args[2..])?;
+            let worker = std::env::current_exe().map_err(|e| format!("JOB_WORKER: {e}"))?;
+            jobs::start(project, &request, &worker)?;
+            println!("job {} started ({})", request.job_id, request.spec.kind());
+            Ok(true)
         }
+        Some("cancel") => {
+            let pid = jobs::cancel(project, &id()?)?;
+            println!("job cancel requested (worker pid {pid})");
+            Ok(true)
+        }
+        Some("status") => {
+            let all = match given(args, "--id")? {
+                Some(one) => vec![jobs::status(project, &one)?],
+                None => jobs::list(project, usize::MAX)?,
+            };
+            if all.is_empty() {
+                println!("no analytics jobs");
+            }
+            for s in &all {
+                println!("{}", jobs::render(s));
+            }
+            Ok(true)
+        }
+        Some("run") => {
+            control::install_stop_handler()?;
+            let (outcome, _) = jobs::run(project, &id()?, Some(control::stop_requested))?;
+            println!("job {} {} {}", outcome.job_id, outcome.state, outcome.code);
+            Ok(outcome.state == jobs::COMPLETED)
+        }
+        _ => Err(JOB_USAGE.into()),
     }
-    Ok(true)
 }
 
 /// `profiles compare`: both profiles backtested on the same run (same inputs, same engine).
@@ -1291,12 +1295,13 @@ fn main() -> ExitCode {
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
-            (Some("backtest"), _) => backtest_cmd(&project, &rest),
-            (Some("optimize"), _) => optimize_cmd(&project, &rest),
+            (Some("backtest"), _) => foreground_job(&project, "backtest", &rest),
+            (Some("optimize"), _) => foreground_job(&project, "optimize", &rest),
+            (Some("job"), _) => job_cmd(&project, &rest),
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|backtest|optimize|profiles|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|backtest|optimize|job|profiles|approval|fe04 …".into()),
         }
     });
     match result {
@@ -1456,7 +1461,11 @@ mod tests {
         )));
         assert!(refused(qualify_cmd(&project, &args)));
         assert!(refused(post_capture_cmd(&project, &args)));
-        assert!(refused(backtest_cmd(&project, &args)));
+        assert!(refused(foreground_job(&project, "backtest", &args)));
+        assert!(refused(job_cmd(
+            &project,
+            &strings(&["start", "optimize", "--run", "v1run"])
+        )));
         let _ = std::fs::remove_dir_all(&project);
     }
 
