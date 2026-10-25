@@ -334,14 +334,24 @@ pub(super) fn prepare(
     // [FIX-96] Production recovery waits for confirmed WSS/root catch-up before
     // Snapshot-B reconciliation. This prevents false dirty reconciles when RPC Snapshot B
     // is ahead of account notifications still in flight on the same confirmed stream.
-    let root_catchup_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_CATCHUP_SECS", 30)?;
+    use darkbot_solana::runtime_config::defaults;
+    let root_catchup_secs: u64 = config::parsed_or(
+        "P0_RECOVERY_ROOT_CATCHUP_SECS",
+        defaults::RECOVERY_ROOT_CATCHUP_SECS,
+    )?;
     if !(30..=300).contains(&root_catchup_secs) {
         return Err("P0_RECOVERY_ROOT_CATCHUP_SECS must be 30..=300".into());
     }
     // Adaptive root-only stall extension. All limits are bounded and the hard
     // deadline is independent of progress, with no impact on trading hot paths.
-    let root_stall_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_STALL_SECS", 60)?;
-    let root_hard_secs: u64 = config::parsed_or("P0_RECOVERY_ROOT_HARD_MAX_SECS", 300)?;
+    let root_stall_secs: u64 = config::parsed_or(
+        "P0_RECOVERY_ROOT_STALL_SECS",
+        defaults::RECOVERY_ROOT_STALL_SECS,
+    )?;
+    let root_hard_secs: u64 = config::parsed_or(
+        "P0_RECOVERY_ROOT_HARD_MAX_SECS",
+        defaults::RECOVERY_ROOT_HARD_MAX_SECS,
+    )?;
     if !(5..=180).contains(&root_stall_secs)
         || !(30..=900).contains(&root_hard_secs)
         || root_hard_secs < root_catchup_secs

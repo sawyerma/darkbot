@@ -216,13 +216,8 @@ case "${P0_LIVE_ENABLED:-false}:${P0_SUBMISSION_ENABLED:-false}" in
   false:false|0:0|false:0|0:false) ;;
   *) echo "econ4h requires LIVE and submission disabled" >&2; exit 2 ;;
 esac
-# Allow provider WSS backlog to reach the unchanged finalized-root barrier.
-# The 2026-10-10 smoke exceeded the old 30s wait; this never skips reconciliation.
-export P0_RECOVERY_ROOT_CATCHUP_SECS="${P0_RECOVERY_ROOT_CATCHUP_SECS:-120}"
-# Soft deadline 120s, real finalized-root stall 60s, absolute phase cap 300s.
-# Startup wait includes snapshot A+B and may be longer than the 60s measurement.
-export P0_RECOVERY_ROOT_STALL_SECS="${P0_RECOVERY_ROOT_STALL_SECS:-60}"
-export P0_RECOVERY_ROOT_HARD_MAX_SECS="${P0_RECOVERY_ROOT_HARD_MAX_SECS:-300}"
+# D11: the recovery root waits (P0_RECOVERY_ROOT_*) have one default, the runtime's
+# (runtime_config::defaults: catch-up 120s, stall 60s, cap 300s); an operator value passes through.
 export P0_MODE=econ4h
 export P0_LIVE_ENABLED=false
 export P0_SUBMISSION_ENABLED=false
@@ -277,7 +272,6 @@ export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
 export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
-export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
 export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
 export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"
@@ -354,7 +348,6 @@ export P0_MARKET_RUN_ID="${P0_MARKET_RUN_ID:-market_$(date -u +%Y%m%dT%H%M%SZ)}"
 P0_MARKET_OUT_DIR="$(py operations.capture.run_store root market "${P0_MARKET_OUT_DIR:-}")" || exit 2
 export P0_MARKET_OUT_DIR
 export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_MARKET_OUT_DIR")/.p0-runtime.lock}"
-export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 
 py operations.capture.run_store allocate "$P0_MARKET_OUT_DIR" "$P0_MARKET_RUN_ID" >/dev/null || exit 2
 
@@ -430,7 +423,6 @@ export P0_MIN_PROFIT="${P0_MIN_PROFIT:-0}"
 export P0_ZERO_PREFUND_QUALIFIED=false
 export P0_ZERO_PREFUND_SHADOW_PROBE=true
 export P0_JUPITER_MAX_ACCOUNTS="${P0_JUPITER_MAX_ACCOUNTS:-64}"
-export P0_INGRESS_BUFFER="${P0_INGRESS_BUFFER:-65536}"
 export P0_MAX_CONCURRENT="${P0_MAX_CONCURRENT:-1}"
 export P0_MAX_OUTSTANDING="${P0_MAX_OUTSTANDING:-1}"
 export P0_MAX_AGE_NS="${P0_MAX_AGE_NS:-2000000000}"

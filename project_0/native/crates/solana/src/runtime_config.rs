@@ -8,6 +8,12 @@ use std::{collections::BTreeMap, path::Path, sync::OnceLock};
 /// literal).
 pub mod defaults {
     pub const INGRESS_QUEUE: u64 = 65_536;
+    /// D11: the owner's recovery waits for the finalized-root catch-up before Snapshot B (the
+    /// 2026-10-10 smoke exceeded 30 s; the wait never skips reconciliation), the real root stall
+    /// and the absolute phase cap — the one default of every launcher (`P0_RECOVERY_ROOT_*`).
+    pub const RECOVERY_ROOT_CATCHUP_SECS: u64 = 120;
+    pub const RECOVERY_ROOT_STALL_SECS: u64 = 60;
+    pub const RECOVERY_ROOT_HARD_MAX_SECS: u64 = 300;
     pub const STREAM_READY_SECONDS: u64 = 600;
     pub const MARKET_DRAIN_SECONDS: u64 = 120;
     pub const ENRICHMENT_SECONDS: u64 = 900;
