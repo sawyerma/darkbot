@@ -1,5 +1,5 @@
 //! Read-only local evidence publisher. Never reads secret environment files or sends chain RPC.
-use darkbot_bsc_qualification::status::{census, projection, publisher};
+use darkbot_bsc_qualification::status::{census, gui_readiness, projection, publisher};
 use prost::Message;
 use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,6 +30,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err("unknown readiness status or mode".into());
         }
         println!("status={status}\nmode={mode}");
+        return Ok(());
+    }
+    // BSC-048: the typed provenance of a GUI readiness result (no JSON).
+    if std::env::args().nth(1).as_deref() == Some("--seal-readiness-provenance") {
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        let [dir, launch_id, relative] = args.as_slice() else {
+            return Err(
+                "usage: --seal-readiness-provenance <dir> <launch_id> <relative_path>".into(),
+            );
+        };
+        gui_readiness::seal(&root, std::path::Path::new(dir), launch_id, relative)?;
+        return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("--check-readiness-provenance") {
+        let dir = std::env::args().nth(2).ok_or("missing directory")?;
+        use darkbot_bsc_record::schema::g07::gui_readiness_provenance as p;
+        let r = gui_readiness::check(std::path::Path::new(&dir))?;
+        println!(
+            "kind={}\nlaunch_id={}\nresult_sha256={}",
+            r.text(p::KIND)?,
+            r.text(p::LAUNCH_ID)?,
+            darkbot_bsc_record::hex(&r.b256(p::RESULT_SHA256)?)
+        );
         return Ok(());
     }
     if std::env::args().nth(1).as_deref() == Some("--snapshot") {

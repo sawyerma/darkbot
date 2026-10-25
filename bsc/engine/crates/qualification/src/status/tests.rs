@@ -809,3 +809,52 @@ fn an_oversized_topic_is_declared_too_large_and_the_next_topic_still_arrives() {
     assert_eq!((s.topic, s.seq), (TopicId::BscStatus as i32, 4));
     assert_eq!(BscStatus::decode(s.payload.as_slice()).unwrap(), small);
 }
+
+/// BSC-048: the builder probe and refresh come from native records only; the
+/// legacy 2026-10-16 probe/refresh JSON is historical evidence, never status
+/// input.
+#[test]
+fn legacy_builder_json_is_never_status_input_and_the_probe_is_native() {
+    use darkbot_bsc_record::schema::g07::probe as p;
+    let root = std::env::temp_dir().join(format!(
+        "darkbot-bsc-probe-{}-{}",
+        std::process::id(),
+        projection::now()
+    ));
+    let g06a = root.join("bsc/native/evidence/g06a");
+    fs::create_dir_all(g06a.join("builder_probe_legacy")).unwrap();
+    fs::create_dir_all(root.join("run")).unwrap();
+    fs::write(
+        g06a.join("builder_probe_legacy/probe.evidence.json"),
+        r#"{"cases":[{"answer_unix_ms":4102444800000}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        g06a.join("builder_requirements_refresh_20991231T000000Z.json"),
+        r#"{"schema":"darkbot.g07.builder-requirements-refresh.v1","fetched_at_utc":"2099-12-31T00:00:00Z"}"#,
+    )
+    .unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    let builder = s.status.builder.clone().unwrap();
+    assert!(builder.probe.is_none(), "{:?}", builder.probe);
+    assert_eq!(builder.refresh_observed_unix_s, 0);
+    // A native probe record is the probe, timed by its latest answer.
+    let mut case = filled(&p::case::SCHEMA);
+    case.set(p::case::ANSWER_MS, 1_800_000_123_456u64);
+    let mut d = filled(&p::SCHEMA);
+    d.push(p::CASES, case.into_nested());
+    let dir = g06a.join("builder_probe_native");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("probe.evidence.dbrec"), d.encode().unwrap()).unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    let probe = s.status.builder.unwrap().probe.unwrap();
+    assert_eq!(probe.observed_unix_s, 1_800_000_123);
+    assert!(
+        probe
+            .path
+            .ends_with("builder_probe_native/probe.evidence.dbrec"),
+        "{}",
+        probe.path
+    );
+    fs::remove_dir_all(root).unwrap();
+}

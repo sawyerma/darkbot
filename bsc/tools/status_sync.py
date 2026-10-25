@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Explicit desktop-to-runtime public snapshot. Never copy secrets or rewrite evidence.
 GUI results retain bsc/native/evidence/g07/gui_readiness_<UUID>/ paths on import.
-Their provenance declares READ_ONLY_OPERATIONAL, not gate qualification.
+Their typed provenance (provenance.dbrec, checked by the native reporter) declares
+READ_ONLY_OPERATIONAL, not gate qualification. No internal JSON (BSC-048).
 GUI candidate requests are applied or rejected by the native store first; only the
 public candidate/selection records are mirrored, never a salt record.
 """
-import hashlib, json, os, pathlib, shutil, subprocess, sys, time, uuid
+import hashlib, os, pathlib, shutil, subprocess, sys, time, uuid
 
 def digest(data): return hashlib.sha256(data).hexdigest()
 def regular(path):
@@ -32,17 +33,20 @@ def sync(root, app, run):
     operational=run/'bsc-operational'
     for directory in sorted((operational/'bsc/native/evidence/g07').glob('gui_readiness_*')):
         if directory.is_symlink(): raise ValueError('symlink result')
-        meta=json.loads(regular(directory/'provenance.json'))
+        reporter=root/'bsc/engine/target/release/bsc-status-reporter'
+        if not reporter.is_file(): raise ValueError('pending GUI readiness result but bsc-status-reporter is not built')
+        # The native import gate: the result and exactly its own read-only provenance.
+        checked=subprocess.run([str(reporter),'--check-readiness-provenance',str(directory)],env={'PATH':'/usr/bin:/bin','DARKBOT_BSC_ROOT':str(root),'DARKBOT_RUNDIR':str(run)},capture_output=True,timeout=10)
+        if checked.returncode!=0: raise ValueError('invalid result provenance')
         raw=regular(directory/'readiness.dbrec')
-        if meta['kind']!='READ_ONLY_OPERATIONAL' or meta['result_sha256']!=digest(raw): raise ValueError('invalid result provenance')
         target=root/directory.relative_to(operational)
         if target.exists():
-            if regular(target/'readiness.dbrec')!=raw or regular(target/'provenance.json')!=regular(directory/'provenance.json'): raise ValueError('immutable evidence conflict')
+            if regular(target/'readiness.dbrec')!=raw or regular(target/'provenance.dbrec')!=regular(directory/'provenance.dbrec'): raise ValueError('immutable evidence conflict')
         else:
             target.parent.mkdir(parents=True,exist_ok=True)
             staging=target.with_name('.'+target.name+'.'+uuid.uuid4().hex)
             staging.mkdir(mode=0o700)
-            for name in ['readiness.dbrec','provenance.json']: (staging/name).write_bytes(regular(directory/name))
+            for name in ['readiness.dbrec','provenance.dbrec']: (staging/name).write_bytes(regular(directory/name))
             os.rename(staging,target)
     dest=base/uuid.uuid4().hex; dest.mkdir(mode=0o700)
     files=[]
@@ -50,8 +54,6 @@ def sync(root, app, run):
         for path in sorted((root/parent).rglob('*.dbrec')):
             if any(p.is_symlink() for p in path.parents if p!=root): raise ValueError('symlink source')
             files.append(path)
-    for pattern in ['builder_requirements_refresh_*.json','*/probe.evidence.json']:
-        files.extend(sorted((root/'bsc/native/evidence/g06a').glob(pattern)))
     for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
@@ -69,8 +71,9 @@ def sync(root, app, run):
     commit=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()
     if subprocess.check_output(['git','-C',str(root),'status','--porcelain','--','bsc'],text=True).strip(): commit+='-dirty'
     (dest/'COMMIT').write_text(commit+'\n'); (dest/'SYNCED_AT').write_text(str(int(time.time())))
-    raw=json.dumps(manifest,sort_keys=True,separators=(',',':')).encode()
-    (dest/'sources.json').write_bytes(raw); (dest/'SNAPSHOT_SHA256').write_text(digest(raw))
+    # The snapshot manifest in the evidence SHA256SUMS format (BSC-048: no JSON); its hash is the snapshot identity.
+    raw=''.join(f'{manifest[name]}  ./{name}\n' for name in sorted(manifest)).encode()
+    (dest/'SOURCES.SHA256SUMS').write_bytes(raw); (dest/'SNAPSHOT_SHA256').write_text(digest(raw))
     link=app/('.bsc-source-'+uuid.uuid4().hex); link.symlink_to(dest); os.replace(link,app/'bsc-source')
     print('BSC snapshot synced:',len(files),'public files; source',commit)
 if __name__=='__main__':

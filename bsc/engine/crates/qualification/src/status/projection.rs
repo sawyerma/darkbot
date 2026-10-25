@@ -753,43 +753,24 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             builder.refresh_expires_unix_s = builder.refresh_observed_unix_s.saturating_add(86400);
         }
     }
-    // Legacy external observations are read at this reporting boundary only; never return request bodies.
-    let mut json_paths = Vec::new();
-    json_walk(&root.join("bsc/native/evidence/g06a"), 4, &mut json_paths);
-    for p in json_paths {
-        let Some(bytes) = read(&p) else { continue };
-        let Ok(j) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
-        };
-        if j.get("schema").and_then(|v| v.as_str())
-            == Some("darkbot.g07.builder-requirements-refresh.v1")
-        {
-            let mut times = Vec::new();
-            fetch_times(&j, &mut times);
-            if let Some(oldest) = times.into_iter().min() {
-                if oldest > builder.refresh_observed_unix_s {
-                    builder.refresh_observed_unix_s = oldest;
-                    builder.refresh_expires_unix_s = oldest.saturating_add(86400);
-                }
-            }
-        }
-        if p.file_name().is_some_and(|n| n == "probe.evidence.json") {
-            let t = j
-                .get("cases")
-                .and_then(|v| v.as_array())
-                .and_then(|rows| {
-                    rows.iter()
-                        .filter_map(|v| v.get("answer_unix_ms")?.as_u64())
-                        .max()
-                })
-                .unwrap_or(0)
-                / 1000;
-            if builder.probe.as_ref().is_none_or(|e| t > e.observed_unix_s) {
-                let mut e = evidence(root, &p, None);
-                e.observed_unix_s = t;
-                builder.probe = Some(e);
-            }
-        }
+    // BSC-048: the builder probe from its native record only, timed by its
+    // latest answer; the legacy probe/refresh JSON stays historical evidence,
+    // never status input.
+    if let Some((p, r)) = latest(&records, &[schema::g07::probe::SCHEMA.name]) {
+        let answered = r
+            .nested_all(schema::g07::probe::CASES)
+            .ok()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .filter_map(|c| c.u64(schema::g07::probe::case::ANSWER_MS).ok())
+                    .max()
+            })
+            .unwrap_or(0)
+            / 1000;
+        let mut e = evidence(root, p, Some(r));
+        e.observed_unix_s = answered;
+        builder.probe = Some(e);
     }
     if builder.refresh_expires_unix_s < now() {
         warnings.push("BUILDER_REFRESH_EXPIRED_OR_UNQUALIFIED".into());
@@ -967,98 +948,6 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         monitoring,
         wallets,
     }
-}
-
-fn json_walk(root: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-    if depth == 0 || out.len() >= 128 {
-        return;
-    }
-    if let Ok(entries) = fs::read_dir(root) {
-        for e in entries.flatten() {
-            let Ok(t) = e.file_type() else { continue };
-            if t.is_symlink() {
-                continue;
-            }
-            if t.is_dir() {
-                json_walk(&e.path(), depth - 1, out);
-            } else if t.is_file()
-                && (e
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("builder_requirements_refresh_")
-                    || e.file_name() == "probe.evidence.json")
-            {
-                out.push(e.path());
-            }
-        }
-    }
-}
-fn fetch_times(v: &serde_json::Value, out: &mut Vec<u64>) {
-    match v {
-        serde_json::Value::Object(m) => {
-            for (k, v) in m {
-                if k == "fetched_at_utc" {
-                    if let Some(t) = v.as_str().and_then(utc_seconds) {
-                        out.push(t);
-                    }
-                } else {
-                    fetch_times(v, out);
-                }
-            }
-        }
-        serde_json::Value::Array(a) => {
-            for v in a {
-                fetch_times(v, out)
-            }
-        }
-        _ => {}
-    }
-}
-fn utc_seconds(s: &str) -> Option<u64> {
-    // Strict UTC format emitted by the archived fetcher. Never parse a filename or mtime.
-    if s.len() < 20 || !s.ends_with('Z') {
-        return None;
-    }
-    let d: Vec<u64> = s
-        .get(..19)?
-        .split(['-', 'T', ':'])
-        .map(str::parse)
-        .collect::<Result<_, _>>()
-        .ok()?;
-    if d.len() != 6
-        || !(1970..=2100).contains(&d[0])
-        || !(1..=12).contains(&d[1])
-        || !(1..=31).contains(&d[2])
-        || d[3] > 23
-        || d[4] > 59
-        || d[5] > 59
-    {
-        return None;
-    }
-    let leap = |y: u64| y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let mut days = 0;
-    for y in 1970..d[0] {
-        days += if leap(y) { 366 } else { 365 };
-    }
-    let months = [
-        31,
-        if leap(d[0]) { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if d[2] > months[(d[1] - 1) as usize] {
-        return None;
-    }
-    days += months[..(d[1] - 1) as usize].iter().sum::<u64>() + d[2] - 1;
-    Some(days * 86400 + d[3] * 3600 + d[4] * 60 + d[5])
 }
 
 #[cfg(test)]

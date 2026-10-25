@@ -1128,8 +1128,41 @@ pub mod readiness {
     };
 }
 
+/// BSC-048: the provenance of one GUI readiness result (was an internal
+/// `provenance.json`): what was run, on which snapshot, with which result.
+/// Read-only operational evidence, never a qualification or authorization.
+pub mod gui_readiness_provenance {
+    use super::*;
+    pub const KIND: u16 = 1;
+    pub const LAUNCH_ID: u16 = 2;
+    pub const SOURCE_SNAPSHOT_SHA256: u16 = 3;
+    pub const RESULT_SHA256: u16 = 4;
+    pub const SOURCE_COMMIT: u16 = 5;
+    pub const RELATIVE_PATH: u16 = 6;
+    pub const OBSERVED_UNIX_MS: u16 = 7;
+    pub const QUALIFICATION_AUTHORITY: u16 = 8;
+    /// The only kind: a read-only operational run.
+    pub const KIND_TEXT: &str = "READ_ONLY_OPERATIONAL";
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.g07.gui-readiness-provenance",
+        record_type: 37,
+        schema_version: 1,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(LAUNCH_ID, "launch_id", Text),
+            Field::req(SOURCE_SNAPSHOT_SHA256, "source_snapshot_sha256", B256),
+            Field::req(RESULT_SHA256, "result_sha256", B256),
+            Field::req(SOURCE_COMMIT, "source_commit", Text),
+            Field::req(RELATIVE_PATH, "relative_path", Text),
+            Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
+            Field::req(QUALIFICATION_AUTHORITY, "qualification_authority", Bool),
+        ],
+    };
+}
+
 pub const ALL: &[&Schema] = &[
     &readiness::SCHEMA,
+    &gui_readiness_provenance::SCHEMA,
     &probe::SCHEMA,
     &witness_source::SCHEMA,
     &contract::SCHEMA,

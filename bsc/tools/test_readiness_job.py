@@ -17,7 +17,13 @@ def job(exit_code):
   env={'PATH':'/usr/bin:/bin','DARKBOT_BSC_ROOT':str(root),'DARKBOT_RUNDIR':str(run),'DARKBOT_BSC_LAUNCH_ID':'job-1','DARKBOT_BSC_READINESS_BIN':str(runner)}
   process=subprocess.run([sys.executable,str(WRAPPER)],env=env,capture_output=True,text=True,timeout=60)
   result=dict(l.split('=',1) for l in (run/'bsc.readiness.result').read_text().splitlines())
-  published=(run/'bsc-operational/bsc/native/evidence/g07/gui_readiness_job-1/readiness.dbrec').is_file()
+  out=run/'bsc-operational/bsc/native/evidence/g07/gui_readiness_job-1'
+  published=(out/'readiness.dbrec').is_file()
+  if published:
+   # BSC-048: the provenance is the typed record the sync's import gate accepts; no JSON.
+   assert not (out/'provenance.json').exists()
+   checked=subprocess.run([str(REPORTER),'--check-readiness-provenance',str(out)],env={'PATH':'/usr/bin:/bin','DARKBOT_BSC_ROOT':str(root),'DARKBOT_RUNDIR':str(run)},capture_output=True,text=True)
+   assert checked.returncode==0 and 'launch_id=job-1' in checked.stdout, checked.stderr
   return process.returncode,result,published
 @unittest.skipUnless(REPORTER.is_file(),'build bsc-status-reporter first')
 class WrapperTests(unittest.TestCase):

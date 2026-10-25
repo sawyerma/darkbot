@@ -2,7 +2,7 @@
 """One read-only native readiness run. TERM forwards to its own child process group.
 No key loading, signing, dry run, builder call, forced kill or implicit retry.
 """
-import hashlib, json, os, pathlib, signal, subprocess, sys, time
+import os, pathlib, signal, subprocess, sys, time
 
 root = pathlib.Path(os.environ['DARKBOT_BSC_ROOT']).resolve()
 rundir = pathlib.Path(os.environ['DARKBOT_RUNDIR'])
@@ -55,14 +55,11 @@ try:
             directory = final_directory.with_name('.' + final_directory.name)
             directory.mkdir(parents=True, exist_ok=False)
             os.replace(temporary, directory / 'readiness.dbrec')
-            provenance = {'kind':'READ_ONLY_OPERATIONAL', 'launch_id':launch,
-                          'source_snapshot_sha256':(root/'SNAPSHOT_SHA256').read_text().strip(),
-                          'result_sha256':hashlib.sha256((directory/'readiness.dbrec').read_bytes()).hexdigest(),
-                          'source_commit':(root/'COMMIT').read_text().strip(),
-                          'relative_path':str(final_directory.relative_to(rundir/'bsc-operational')),
-                          'observed_unix_s':int(time.time()), 'qualification_authority':False}
-            with (directory/'provenance.json').open('x') as meta:
-                json.dump(provenance,meta,sort_keys=True); meta.flush(); os.fsync(meta.fileno())
+            # BSC-048: the native reporter seals the typed provenance (provenance.dbrec, no JSON).
+            sealed=subprocess.run([str(validator),'--seal-readiness-provenance',str(directory),launch,
+                                   str(final_directory.relative_to(rundir/'bsc-operational'))],
+                                  env={'PATH':'/usr/bin:/bin','DARKBOT_BSC_ROOT':str(root),'DARKBOT_RUNDIR':str(rundir)},capture_output=True,timeout=10)
+            if sealed.returncode!=0: raise ValueError('provenance not sealed')
             fd=os.open(directory,os.O_RDONLY)
             try: os.fsync(fd)
             finally: os.close(fd)
