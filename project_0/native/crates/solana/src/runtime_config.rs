@@ -57,6 +57,9 @@ parameters! {
     workers = 1, "threads", "RAYON_NUM_THREADS";
     ingress_queue = 65536, "events", "P0_INGRESS_BUFFER";
     worker_queue = 256, "jobs", "P0_REMOTE_WORKER_BUFFER";
+    sweep_batch_max_events = 64, "events", "P0_SWEEP_BATCH_MAX_EVENTS";
+    sweep_batch_max_age_ns = 5000000, "ns", "P0_SWEEP_BATCH_MAX_AGE_NS";
+    ingress_burst_before_detect = 64, "events", "P0_INGRESS_BURST_BEFORE_DETECT";
     bootstrap_seconds = 600, "s", "P0_ECON_BOOTSTRAP_SECS";
     stream_ready_seconds = 600, "s", "P0_MARKET_READY_TIMEOUT_SECS";
     drain_seconds = 180, "s", "P0_ECON_DRAIN_SECS";
@@ -102,8 +105,9 @@ parameters! {
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
 /// payload schema with it. 1: up to `econ_retention_mib`; 2: `boot_calls`, `boot_seconds` (N1);
 /// 3: `owner_evidence_sync_ms` (M2); 4: `wss_ack_ms_per_subscription` (N8); 5: `fee_rps`,
-/// `send_rps` (V2-05).
-pub const LIMITS_REVISION: u16 = 5;
+/// `send_rps` (V2-05); 6: `sweep_batch_max_events`, `sweep_batch_max_age_ns`,
+/// `ingress_burst_before_detect` (V2-08).
+pub const LIMITS_REVISION: u16 = 6;
 /// Typed metadata of one numeric operational parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameter {
@@ -1106,11 +1110,44 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                5,
-                73,
-                "55b2EdjzNQY8ApfHA14oGAWBCee8QfswdvN93UPeBTDY".to_string()
+                6,
+                76,
+                "HWSViav76NEfVQFFag8JXYnTWwxWYUsnNNsciahpwmaq".to_string()
             )
         );
+    }
+    /// V2-08 (P3-08/P4-04): the owner's sweep batch and ingress burst bounds are typed
+    /// parameters — a profile/CLI/config value reaches `Limits` (before: unknown parameter, only
+    /// a bare environment read with literal defaults in the owner setup).
+    #[test]
+    fn v2_08_sweep_and_burst_bounds_are_typed_parameters() {
+        let r = parse(&[
+            "--sweep-batch-max-events",
+            "32",
+            "--sweep-batch-max-age-ns",
+            "2000000",
+            "--ingress-burst-before-detect",
+            "16",
+        ])
+        .unwrap();
+        let l = &r.config.limits;
+        assert_eq!(
+            (
+                l.sweep_batch_max_events,
+                l.sweep_batch_max_age_ns,
+                l.ingress_burst_before_detect
+            ),
+            (32, 2_000_000, 16)
+        );
+        let env = r.config.environment();
+        for (k, v) in [
+            ("P0_SWEEP_BATCH_MAX_EVENTS", "32"),
+            ("P0_SWEEP_BATCH_MAX_AGE_NS", "2000000"),
+            ("P0_INGRESS_BURST_BEFORE_DETECT", "16"),
+        ] {
+            assert!(env.iter().any(|(ek, ev)| ek == k && ev == v), "{k}");
+        }
+        assert!(parse(&["--sweep-batch-max-events", "0"]).is_err());
     }
     #[test]
     fn explicit_endpoint_beats_legacy_audit_alias() {

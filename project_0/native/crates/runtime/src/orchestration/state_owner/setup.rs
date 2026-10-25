@@ -712,18 +712,17 @@ pub(super) fn prepare(
     // [R127c] Dependency/Bank updates are first coalesced at Bank level. Only after the
     // current ingress burst is drained (or this hard event cap is reached) do we fan out
     // once to unique accounts and run exact Health in parallel.
+    // V2-08: typed operational parameters (`Limits`, validated 1..=u32::MAX), no literals here.
     #[cfg(feature = "crate_health")]
-    let sweep_batch_max_events: usize = config::parsed_or("P0_SWEEP_BATCH_MAX_EVENTS", 64)?;
+    let sweep_batch_max_events = usize::try_from(
+        darkbot_solana::runtime_config::active()
+            .limits
+            .sweep_batch_max_events,
+    )?;
     #[cfg(feature = "crate_health")]
-    if sweep_batch_max_events == 0 {
-        return Err("P0_SWEEP_BATCH_MAX_EVENTS must be > 0".into());
-    }
-    #[cfg(feature = "crate_health")]
-    let sweep_batch_max_age_ns: u64 = config::parsed_or("P0_SWEEP_BATCH_MAX_AGE_NS", 5_000_000)?;
-    #[cfg(feature = "crate_health")]
-    if sweep_batch_max_age_ns == 0 {
-        return Err("P0_SWEEP_BATCH_MAX_AGE_NS must be > 0".into());
-    }
+    let sweep_batch_max_age_ns = darkbot_solana::runtime_config::active()
+        .limits
+        .sweep_batch_max_age_ns;
     #[cfg(feature = "crate_health")]
     let sweep_dirty_banks: HashMap<Pubkey, (u64, u64)> = HashMap::new();
     #[cfg(feature = "crate_health")]
@@ -839,13 +838,13 @@ pub(super) fn prepare(
     // [R126b] Preserve canonical ingress under detection bursts. When both ingress and
     // detection work are available, drain at most this many ingress events before forcing
     // one detection item. This prevents either side from starving the other.
+    // V2-08: typed operational parameter (`Limits`).
     #[cfg(feature = "crate_health")]
-    let ingress_burst_before_detect: usize =
-        config::parsed_or("P0_INGRESS_BURST_BEFORE_DETECT", 64)?;
-    #[cfg(feature = "crate_health")]
-    if ingress_burst_before_detect == 0 {
-        return Err("P0_INGRESS_BURST_BEFORE_DETECT must be > 0".into());
-    }
+    let ingress_burst_before_detect = usize::try_from(
+        darkbot_solana::runtime_config::active()
+            .limits
+            .ingress_burst_before_detect,
+    )?;
     #[cfg(feature = "crate_health")]
     let ingress_since_detect: usize = 0;
     // B6: at most this many candidates use the network (routes, fee quote, simulation) until
