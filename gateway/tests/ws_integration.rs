@@ -616,12 +616,30 @@ async fn a_stalled_client_on_a_flapping_too_large_topic_is_evicted_while_a_reade
     publisher.abort();
     assert!(evicted.is_ok(), "stalled client still holds its slot");
     assert!(errors > 0 && states > 0, "errors {errors}, states {states}");
-    // The reader keeps its subscription: a new publisher generation still arrives.
+    // The reader keeps its subscription: a new publisher generation still arrives. A
+    // FRAME_TOO_LARGE notice of the flapping phase may still be queued ahead of it (published
+    // before the abort; seen on Linux CI): it is skipped, anything else fails the test.
     s.hub.publish(update(2, 1)).unwrap();
     loop {
-        let f = state(&mut reader).await;
-        if f.generation == 2 {
-            break;
+        match recv(&mut reader).await {
+            Some(server_message::Msg::StateFull(f)) if f.generation == 2 => break,
+            Some(server_message::Msg::StateFull(f)) => {
+                assert!(f.payload.len() <= 1024, "never an oversized frame")
+            }
+            Some(server_message::Msg::Error(e)) => assert_eq!(
+                e.code,
+                darkbot_gateway::proto::ErrorCode::FrameTooLarge as i32
+            ),
+            Some(server_message::Msg::Heartbeat(h)) => {
+                send(
+                    &mut reader,
+                    client_message::Msg::Pong(darkbot_gateway::proto::Pong {
+                        heartbeat_id: h.heartbeat_id,
+                    }),
+                )
+                .await
+            }
+            other => panic!("reader must stay subscribed: {other:?}"),
         }
     }
     drop(stalled);
