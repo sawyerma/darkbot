@@ -186,8 +186,8 @@ fn requested_stop_is_ok_without_fatal_in_every_session_phase() {
 }
 
 /// R1 rest: a requested stop stays bounded, `Ok` and without `Fatal` when the peer stops reading
-/// (the source's own writes stall: Pong replies to a Ping flood fill the socket buffers, so it no
-/// longer reads either) and while a TLS handshake stalls (the peer reads the ClientHello of the
+/// (the source's Pong replies to a Ping flood are blocked, its reader keeps reading: V2-14 P3-04)
+/// and while a TLS handshake stalls (the peer reads the ClientHello of the
 /// production rustls connector and never answers). Loopback only, never Mainnet. An established
 /// TLS session cannot be built offline (the connector trusts only the webpki roots); no stop path
 /// awaits a WebSocket close or TLS shutdown — the session future is dropped.
@@ -197,11 +197,15 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
     use std::sync::Arc;
     let mut latencies = Vec::new();
 
-    // Peer that acknowledges the subscription, then floods Pings and never reads again.
-    let stalled = Arc::new(AtomicBool::new(false));
+    // V2-14 P3-04: a peer that acknowledges the subscription, then floods Pings and never reads
+    // again. The source's Pong writes are blocked (more Pong bytes, 131 each, than its autotuned
+    // send buffer of at most 4 MiB and the peer's 4 KiB receive buffer hold), its reader is not:
+    // every Ping is taken without a stalled send of the peer.
+    const FLOOD_PINGS: usize = 48 * 1024;
+    let (flooded, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let release = Shutdown::new();
     let (addr_tx, addr_rx) = std::sync::mpsc::channel();
-    let (flag, hold) = (stalled.clone(), release.clone());
+    let (flag, finished, hold) = (flooded.clone(), done.clone(), release.clone());
     let server = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -209,7 +213,7 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
             .unwrap();
         rt.block_on(async move {
             let socket = tokio::net::TcpSocket::new_v4().unwrap();
-            // Small buffers of the accepted socket: the client's writes stall quickly.
+            // Small buffers of the accepted socket: the client's writes are blocked quickly.
             socket.set_recv_buffer_size(4096).unwrap();
             socket.set_send_buffer_size(4096).unwrap();
             socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
@@ -233,33 +237,35 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
             .await
             .unwrap();
             let until = tokio::time::Instant::now() + limit;
-            while tokio::time::Instant::now() < until {
+            let mut sent = 0usize;
+            while sent < FLOOD_PINGS && tokio::time::Instant::now() < until {
                 let ping = ws.send(Message::Ping(vec![0x5A; 125]));
                 match tokio::time::timeout(Duration::from_millis(500), ping).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(_)) => break,
-                    // Our own send stalled: the client no longer reads.
-                    Err(_) => {
-                        flag.store(true, Ordering::Release);
-                        break;
-                    }
+                    Ok(Ok(())) => sent += 1,
+                    // A stalled send: the client stopped reading.
+                    _ => break,
                 }
             }
-            // Keep the stalled connection open until the test is done with it.
+            flag.store(sent == FLOOD_PINGS, Ordering::Release);
+            finished.store(true, Ordering::Release);
+            // Keep the connection open (and unread) until the test is done with it.
             while !hold.is_requested() && tokio::time::Instant::now() < until {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         });
     });
     let addr = addr_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let ready = stalled.clone();
+    let ready = done.clone();
     let (r, ended, ev) = r10_run_until(
         r10_cfg(format!("ws://{addr}")),
         Some(&move || ready.load(Ordering::Acquire)),
     );
     release.request();
     server.join().unwrap();
-    assert!(stalled.load(Ordering::Acquire), "the peer's writes stalled");
+    assert!(
+        flooded.load(Ordering::Acquire),
+        "the reader kept reading while its Pong writes were blocked"
+    );
     assert!(r.is_ok() && r10_fatals(&ev) == 0, "peer stops reading: {r:?}");
     assert!(
         ev.iter().any(|e| matches!(e, IngressEvent::Reconnected { .. })),
@@ -267,7 +273,7 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
     );
     assert!(
         !ev.iter().any(|e| matches!(e, IngressEvent::Gap { .. })),
-        "the stop hit the stalled session, not a reconnect"
+        "the stop hit the flooded session, not a reconnect"
     );
     latencies.push(("peer_stops_reading", ended));
 
@@ -317,6 +323,64 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
         println!("R1_STOP_LATENCY phase={phase} ms={}", ended.as_millis());
         assert!(*ended < Duration::from_secs(2), "{phase}: {ended:?}");
     }
+}
+
+/// V2-14 P3-04 loopback proof: the source answers a Ping with the identical Pong although it
+/// writes nothing itself (no heartbeat) — tungstenite queues the Pong and the next read poll
+/// flushes it. Loopback only, never Mainnet.
+#[test]
+fn p3_04_a_ping_is_answered_by_the_read_poll() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::Arc;
+    // 0: pending, 1: the identical Pong, 2: anything else or nothing within the bound.
+    let answer = Arc::new(AtomicU8::new(0));
+    let (addr_tx, addr_rx) = std::sync::mpsc::channel();
+    let (seen, release) = (answer.clone(), Shutdown::new());
+    let hold = release.clone();
+    let server = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            addr_tx.send(listener.local_addr().unwrap()).unwrap();
+            let limit = Duration::from_secs(10);
+            let (s, _) = tokio::time::timeout(limit, listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
+            let request = tokio::time::timeout(limit, ws.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let id = serde_json::from_str::<Value>(request.to_text().unwrap()).unwrap()["id"].clone();
+            ws.send(Message::Text(
+                json!({"jsonrpc": "2.0", "result": 7, "id": id}).to_string(),
+            ))
+            .await
+            .unwrap();
+            ws.send(Message::Ping(b"p3-04".to_vec())).await.unwrap();
+            let next = tokio::time::timeout(Duration::from_secs(2), ws.next()).await;
+            let identical = matches!(&next, Ok(Some(Ok(Message::Pong(p)))) if p == b"p3-04");
+            seen.store(if identical { 1 } else { 2 }, Ordering::Release);
+            while !hold.is_requested() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+    });
+    let addr = addr_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let ready = answer.clone();
+    let (r, _, ev) = r10_run_until(
+        r10_cfg(format!("ws://{addr}")),
+        Some(&move || ready.load(Ordering::Acquire) != 0),
+    );
+    release.request();
+    server.join().unwrap();
+    assert_eq!(answer.load(Ordering::Acquire), 1, "the identical Pong reached the peer");
+    assert!(r.is_ok() && r10_fatals(&ev) == 0, "{r:?}");
 }
 
 /// Z19: a silent stream (no frame after the last application frame, idle timeout not reached)

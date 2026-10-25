@@ -631,8 +631,13 @@ impl WsRpcControlSource {
                 &self.cfg.ws_url
             };
         let mut wire = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
-        wire.max_message_size = Some((runtime.limits.wss_message_mib * 1024 * 1024) as usize);
+        let message_bytes = (runtime.limits.wss_message_mib * 1024 * 1024) as usize;
+        wire.max_message_size = Some(message_bytes);
         wire.max_frame_size = wire.max_message_size;
+        // V2-14 P3-04: unsent writes (the Pongs to a peer that stops reading) stay bounded by one
+        // message of `wss_message_mib` on top of the write buffer; beyond it the newest Pong
+        // replaces the queued one (tungstenite) and the reader goes on.
+        wire.max_write_buffer_size = wire.write_buffer_size.saturating_add(message_bytes);
         let (ws, _) = tokio::time::timeout(
             connect_budget,
             tokio_tungstenite::connect_async_with_config(endpoint, Some(wire), false),
@@ -752,10 +757,15 @@ impl WsRpcControlSource {
             );
             let wait = wait.min(Duration::from_millis(250));
             let frame = tokio::time::timeout(wait, rx.next()).await;
-            let t_rx_ns = self.clock.now_ns(); // T_rx: vor Parse
-                                               // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt. Z19:
-                                               // also while the stream is silent (no frame before the wake-up), so the frame age
-                                               // keeps rising in the event stream until the idle timeout ends the session.
+            // V2-14 P3-02, measurement contract: T_rx is the userland dequeue of the frame from
+            // the WebSocket stream (after TLS and framing, before the parse) — not the socket
+            // arrival. In a burst, later frames wait in the stream's buffers and their T_rx
+            // includes that wait; a `T_rx_first` (a reader task stamping the arrival) needs its
+            // own measurement contract first and is not built.
+            let t_rx_ns = self.clock.now_ns();
+            // Health-Event alle 5 s (Ledger: stream health), unabhängig vom Frame-Inhalt. Z19:
+            // also while the stream is silent (no frame before the wake-up), so the frame age
+            // keeps rising in the event stream until the idle timeout ends the session.
             let health_interval_ns =
                 self.cfg.health_interval.as_nanos().min(u64::MAX as u128) as u64;
             if t_rx_ns.saturating_sub(last_health_ns) >= health_interval_ns {
@@ -789,13 +799,10 @@ impl WsRpcControlSource {
                 Message::Binary(b) => {
                     String::from_utf8(b).map_err(|_| IngressError::Protocol("WSS_UTF8".into()))?
                 }
-                Message::Ping(p) => {
-                    tokio::time::timeout(Duration::from_secs(5), tx.send(Message::Pong(p)))
-                        .await
-                        .map_err(|_| IngressError::Connect("WSS_PONG_TIMEOUT".into()))?
-                        .map_err(|_| IngressError::Connect("WSS_PONG_FAILED".into()))?;
-                    continue;
-                }
+                // V2-14 P3-04: tungstenite queues the Pong itself and the next read poll flushes
+                // it (loopback proof `p3_04_a_ping_is_answered_by_the_read_poll`); a blocked
+                // write never stops this reader.
+                Message::Ping(_) => continue,
                 Message::Close(_) => return Err(IngressError::Connect("close frame".into())),
                 _ => continue,
             };
