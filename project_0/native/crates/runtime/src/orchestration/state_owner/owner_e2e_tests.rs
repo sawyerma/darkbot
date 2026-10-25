@@ -362,6 +362,19 @@ fn owner_projection_carries_real_engine_safety_and_unknown_finance() {
     assert_eq!(cap("LIVE"), ("OFF", "BLOCKED"));
     assert_eq!(cap("SUBMISSION"), ("OFF", "NOT_AUTHORIZED"));
     assert_eq!(cap("JITO_BUNDLE"), ("OFF", "BLOCKED"));
+    assert_eq!(cap("JIT_EXACT_IN"), ("OFF", "OFF"));
+    // A JIT plan is a bundle (buy + liquidation): without a bundle path the owner rejects every
+    // one before simulation, so a configured JIT bank is BLOCKED, never a fake OBSERVE.
+    f.owner.jit_funding_bank = Some(Pubkey::new_unique());
+    let jit = f.owner.owner_snapshot(1_760_000_000_000);
+    let jit = jit
+        .capabilities
+        .iter()
+        .find(|c| c.name == "JIT_EXACT_IN")
+        .unwrap();
+    assert_eq!((jit.requested, jit.effective), ("ACTIVE", "BLOCKED"));
+    assert!(jit.block_reason.contains("bundle"), "{}", jit.block_reason);
+    f.owner.jit_funding_bank = None;
     assert!(s
         .capabilities
         .iter()

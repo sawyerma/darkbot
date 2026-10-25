@@ -123,6 +123,10 @@ impl ShadowOwner {
         };
         let on = |b: bool| if b { "ACTIVE" } else { "OFF" };
         let jit = self.jit_funding_bank.is_some();
+        let bundles = {
+            use darkbot_solana::submit::SubmissionAdapter;
+            self.submitter.supports_bundle()
+        };
         let rebalancing = !self.inventory_targets.is_empty();
         vec![
             cap(
@@ -148,14 +152,21 @@ impl ShadowOwner {
             } else {
                 cap("V1_MESSAGES", "OFF", "UNSUPPORTED", "built without txv1")
             },
+            // A JIT plan is a bundle (buy + liquidation): only a bundle path simulates it.
             cap(
                 "JIT_EXACT_IN",
                 on(jit),
-                if jit { "OBSERVE" } else { "OFF" },
-                if jit {
-                    "Shadow: JIT plans are simulated, never sent"
-                } else {
-                    ""
+                match (jit, bundles) {
+                    (false, _) => "OFF",
+                    (true, true) => "OBSERVE",
+                    (true, false) => "BLOCKED",
+                },
+                match (jit, bundles) {
+                    (false, _) => "",
+                    (true, true) => "Shadow: JIT bundles are simulated, never sent",
+                    (true, false) => {
+                        "JIT plans are bundles; no qualified Jito bundle simulator (B02/B05/F-20), every JIT plan is refused before simulation"
+                    }
                 },
             ),
             cap(
