@@ -333,7 +333,8 @@ pub fn geyser_source(
         },
         subscription,
         transport,
-        clock: Clock::new(),
+        // D08: a source starts only with a wall clock (CLOCK_UNAVAILABLE, never time 0).
+        clock: Clock::try_new().map_err(|code| vec![code])?,
     }))
 }
 

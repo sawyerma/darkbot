@@ -139,15 +139,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("BOOT admission refused: {e}");
         super::boot_audit::admission_code(&e)
     });
-    let refused = |code| Box::new(super::state_owner::OwnerTerminal(code));
+    // The terminal code itself, never a boxed box (whose report would lose the code).
+    let refused =
+        |code| Box::new(super::state_owner::OwnerTerminal(code)) as Box<dyn std::error::Error>;
+    // D08: no owner starts without a wall clock (CLOCK_UNAVAILABLE, never time 0).
+    let clock = Clock::try_new().map_err(refused)?;
     if mode == "econ4h" {
         let code = admission.as_ref().err().copied();
-        return run_econ4h(admission).map_err(|e| match code {
-            Some(code) => refused(code) as Box<dyn std::error::Error>,
+        return run_econ4h(admission, clock).map_err(|e| match code {
+            Some(code) => refused(code),
             None => e.into(),
         });
     }
-    run_shadow(Clock::new(), None, admission.map_err(refused)?)
+    run_shadow(clock, None, admission.map_err(refused)?)
 }
 
 /// The Shadow owner of an econ run has ended. An owner error (e.g. an `OwnerTerminal` such as
@@ -199,10 +203,10 @@ pub fn shadow_failure_code(error: &(dyn std::error::Error + 'static)) -> &'stati
 
 fn run_econ4h(
     admission: Result<Option<super::boot_audit::NetworkAudit>, &'static str>,
+    clock: Clock,
 ) -> Result<(), String> {
     use crate::analytics::econ;
     use crate::market::observer as market_observer;
-    let clock = Clock::new();
     let now_s = (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64;
     let cfg = econ::EconConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;
     let mut market = market_observer::MarketConfig::from_lookup(&|k| std::env::var(k).ok(), now_s)?;

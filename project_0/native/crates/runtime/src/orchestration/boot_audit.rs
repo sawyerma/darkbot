@@ -340,10 +340,9 @@ fn writer_probe(dir: &Path) -> Result<String, String> {
 
 fn writer_probe_with(dir: &Path, fault: &dyn Fn(&mut journal::Writer)) -> Result<String, String> {
     let started = std::time::Instant::now();
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let unique = darkbot_common::timing::wall_now()
+        .map_err(String::from)?
+        .as_nanos();
     let path = dir.join(format!(
         ".p0-boot-probe-{}-{unique}.p0j",
         std::process::id()
@@ -699,18 +698,23 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             e,
         ),
     }
-    let wall = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // D08: an unavailable wall clock is named, never shown as unix 0.
+    let wall = darkbot_common::timing::wall_now().map(|d| d.as_secs());
     // 2026-10-01T00:00:00Z: a wall clock before this cannot be the host's real time.
     add(
         "BOOT-02",
         "clock",
         true,
-        if wall >= 1_790_812_800 { Pass } else { Blocked },
+        if wall.is_ok_and(|w| w >= 1_790_812_800) {
+            Pass
+        } else {
+            Blocked
+        },
         "OS",
-        format!("unix {wall}; monotonic clock is the process Clock"),
+        match wall {
+            Ok(w) => format!("unix {w}; monotonic clock is the process Clock"),
+            Err(code) => format!("{code}; monotonic clock is the process Clock"),
+        },
     );
     // BOOT-03…08 need Mainnet reads.
     for (id_, name, what) in [

@@ -18,14 +18,14 @@ use solana_sdk::{hash::Hash, pubkey::Pubkey};
 use std::{
     path::Path,
     str::FromStr,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
-pub fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+/// D08: the audit's wall clock (`CLOCK_UNAVAILABLE`, never 0).
+pub fn now() -> Result<u64, String> {
+    darkbot_common::timing::wall_now()
         .map(|v| v.as_secs())
-        .unwrap_or(0)
+        .map_err(String::from)
 }
 fn hash(bytes: &[u8]) -> String {
     fe::sha(bytes)
@@ -623,7 +623,7 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
         c,
         c.rpc_endpoints.first().ok_or("BOOT_RPC_REQUIRED")?,
         &proof,
-        now() as f64,
+        now()? as f64,
     )?;
     if proof.wss_provider_binding.as_deref()
         != c.wss_endpoints
@@ -646,7 +646,7 @@ pub fn execute(project: &Path, args: &[String]) -> Result<bool, String> {
         c,
         &spec,
         &mut io,
-        now(),
+        now()?,
         hash(&data),
         boot_audit::binary_identity()?,
     )?;

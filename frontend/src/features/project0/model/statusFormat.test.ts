@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderView } from "./status";
-import { fmtAgeNs, fmtBytesExact, fmtEtaS, fmtProvider, formatField } from "./statusFormat";
+import { fmtAgeNs, fmtBytesExact, fmtClockMs, fmtEtaS, fmtProvider, formatField } from "./statusFormat";
 
 describe("status units and missing measurements", () => {
   it("keeps uint64 values exact", () => {
@@ -31,5 +31,12 @@ describe("provider budget (F-01)", () => {
     expect(fmtProvider(halted)).toContain("halted PROVIDER_BUDGET_POISONED");
     expect(fmtProvider({ ...budget, cooldownCause: "SERVER_RETRY_AFTER", cooldownRemainingMs: 1500n })).toContain("cooldown SERVER_RETRY_AFTER 1500 ms");
     expect(fmtProvider(null)).toBe("Not reported");
+  });
+});
+
+describe("engine clock stamps (D08)", () => {
+  it("never shows an unavailable engine clock as 1970", () => {
+    expect(fmtClockMs(0n)).toBe("clock unavailable");
+    expect(fmtClockMs(1_760_000_000_123n)).toMatch(/\.123$/);
   });
 });

@@ -247,11 +247,11 @@ pub struct DriverOutcome {
     pub terminal: String,
 }
 
-fn now_unix_ns() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+/// D08: attempt and gate times never fall back to 0 (`CLOCK_UNAVAILABLE`).
+fn now_unix_ns() -> Result<u64, String> {
+    darkbot_common::timing::wall_now()
         .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
+        .map_err(String::from)
 }
 
 fn sha_file(path: &Path) -> Result<[u8; 32], String> {
@@ -442,7 +442,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         let url = config
             .rpc_url(&|k| std::env::var(k).ok())
             .ok_or("RPC_URL_MISSING")?;
-        strict_provider_gate(config, &url, evidence, now_unix_ns() as f64 / 1e9)?;
+        strict_provider_gate(config, &url, evidence, now_unix_ns()? as f64 / 1e9)?;
         Some(solana_sdk::hash::hash(url.as_bytes()).to_bytes())
     };
     let spec = VerificationSpec {
@@ -492,7 +492,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
     let mut record = AttemptRecord {
         verification_spec_id: spec_id.clone(),
         verification_attempt_id: attempt_id.clone(),
-        at_unix_ns: now_unix_ns(),
+        at_unix_ns: now_unix_ns()?,
         offline: req.offline,
         resume: req.resume,
         verification_result_id: None,
@@ -504,7 +504,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         .map_err(|e| format!("ATTEMPT: {e}"))?;
     if req.mode == VerifyMode::Off {
         // Off: the evidence stays bound and identified, no chain proof is attempted.
-        record.at_unix_ns = now_unix_ns();
+        record.at_unix_ns = now_unix_ns()?;
         record.status = Some("NOT_RUN".into());
         record.reason = Some("VERIFICATION_OFF".into());
         journal::write_typed_value(&attempt_dir.join("end.p0j"), source::STRICT, &record)
@@ -537,7 +537,7 @@ pub fn drive(req: &DriverRequest) -> Result<DriverOutcome, String> {
         offline: req.offline,
     };
     let outcome: Result<StrictResult, String> = run_strict(job);
-    record.at_unix_ns = now_unix_ns();
+    record.at_unix_ns = now_unix_ns()?;
     match &outcome {
         Ok(result) => {
             let bytes = payload::encode(result).map_err(|e| e.to_string())?;

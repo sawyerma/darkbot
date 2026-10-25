@@ -1,5 +1,4 @@
 //! UTC formatting for capture and persisted evidence.
-use super::*;
 
 // ------------------------------------------------------------------------------------------
 // UTC formatting (no extra dependency)
@@ -37,9 +36,7 @@ pub fn utc_compact(unix_s: u64) -> String {
     format!("{y:04}{m:02}{d:02}T{hh:02}{mm:02}{ss:02}Z")
 }
 
-pub(super) fn unix_now_s() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+/// The host wall clock in whole seconds (D08: `CLOCK_UNAVAILABLE`, never 0).
+pub(super) fn unix_now_s() -> Result<u64, &'static str> {
+    darkbot_common::timing::wall_now().map(|d| d.as_secs())
 }

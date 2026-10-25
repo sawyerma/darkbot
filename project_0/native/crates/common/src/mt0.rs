@@ -954,9 +954,12 @@ pub fn spawn_reporter(
             let mut last_write = Instant::now();
             let mut complete = true;
             let mut store = |sink: &mut dyn SnapshotSink, duty: &Hist| {
-                let unix = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
+                // D08: without a wall clock no snapshot is stored (never time 0); the run's MT0
+                // journal is then incomplete.
+                let Ok(unix) = crate::timing::wall_now() else {
+                    complete = false;
+                    return;
+                };
                 let now = mono_ns();
                 let snapshot = MT0.snapshot(unix.as_secs(), now, &duty.snapshot());
                 let unix_ns = u64::try_from(unix.as_nanos()).unwrap_or(u64::MAX);

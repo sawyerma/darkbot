@@ -886,7 +886,12 @@ pub(super) fn prepare(
         settle_due: fe04_settle_due,
         unbooked: fe04_unbooked,
     } = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?
-        .start(&mut safety, wall_unix_s().unwrap_or(0))?;
+        // D07/F-06: the replay books into the current day; without a wall clock the start is
+        // refused (never day 0, where today's limits would not see the booking).
+        .start(
+            &mut safety,
+            wall_unix_s().map_err(|e| format!("CLOCK_UNAVAILABLE: {e}"))?,
+        )?;
     let inventory_targets = crate::execution::inventory::parse_targets(
         &std::env::var("P0_INVENTORY_TARGETS").unwrap_or_default(),
     )?;
@@ -1121,6 +1126,11 @@ impl Fe04Start {
     /// once, by the booking of its settlement); a settled attempt is booked by this replay (its
     /// day, open inventory); an UNKNOWN or unbooked attempt is settled at once.
     pub(super) fn start(self, safety: &mut Safety, now_unix_s: u64) -> Result<Fe04Owner, String> {
+        if now_unix_s == 0 {
+            return Err(
+                "CLOCK_UNAVAILABLE: no wall clock for the FE-04 replay's booking day".into(),
+            );
+        }
         let unbooked = self
             .replay
             .as_ref()

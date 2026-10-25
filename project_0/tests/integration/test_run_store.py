@@ -279,7 +279,7 @@ class Launchers(unittest.TestCase):
                    'P0_WS_URL':'ws://private:SECRET@127.0.0.1:1/PRIVATE_KEY?q=QUERY_SECRET'})
             out=p.stdout+p.stderr
             self.assertEqual(p.returncode,2,out[-2000:]);self.assertIn('p0-longtail: ',p.stderr)  # real binary started from the repository
-            self.assertIn('BOOT_NETWORK_AUDIT_MISSING',p.stderr)  # a controller child needs the approved network audit
+            self.assertIn('p0-longtail: BOOT_NETWORK_AUDIT_MISSING',p.stderr)  # a controller child needs the approved network audit; its code is the terminal report
             self.assertNotIn('could not find `Cargo.toml`',out);self.assertNotIn('missing required env',out)
             for secret in ('private:','SECRET','PRIVATE_KEY'):
                 self.assertNotIn(secret,out)

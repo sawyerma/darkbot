@@ -10,11 +10,13 @@ pub use darkbot_solana::provider::{
 use darkbot_solana::runtime_config;
 pub use darkbot_solana::runtime_config::{EffectiveConfig, Limits, Profile};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
+/// Wall clock of a status publication (display only, never evidence). D08: 0 exactly when the
+/// host clock is unavailable — the capture then refuses to start or ends with
+/// `CLOCK_UNAVAILABLE`, and the frontend shows such a stamp as "clock unavailable".
 pub fn unix_ms_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    darkbot_common::timing::wall_now()
         .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
         .unwrap_or(0)
 }

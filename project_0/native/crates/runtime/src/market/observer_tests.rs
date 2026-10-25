@@ -877,7 +877,7 @@ fn finalize_writes_summary_report_and_unenriched_rows() {
     let dir = std::env::temp_dir().join(format!(
         "c0mo_finalize_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -1141,7 +1141,7 @@ fn enrichment_init_failure_still_produces_summary_and_report() {
     let dir = std::env::temp_dir().join(format!(
         "c0mo_enrich_init_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -1276,7 +1276,7 @@ fn logs_without_rpc_url_still_reaches_finalize_and_report() {
     let root = std::env::temp_dir().join(format!(
         "c0mo_norpc_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&root);
     let root_s = root.to_string_lossy().to_string();
@@ -1963,7 +1963,7 @@ fn capture_operator_stop_seals_incomplete() {
     let root = std::env::temp_dir().join(format!(
         "c0mo_d1_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&root);
     let root_s = root.to_string_lossy().to_string();
@@ -2032,7 +2032,7 @@ fn ingress_panic_after_last_event_never_seals_complete() {
     let root = std::env::temp_dir().join(format!(
         "c0mo_r2_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&root);
     let root_s = root.to_string_lossy().to_string();
@@ -2137,7 +2137,7 @@ fn r1_full_and_half_full_queue_drain_completely_before_the_seal() {
     let root = std::env::temp_dir().join(format!(
         "c0mo_r1_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&root);
     let root_s = root.to_string_lossy().to_string();
@@ -2254,7 +2254,7 @@ fn r1_ingress_alive_past_the_drain_deadline_seals_incomplete() {
     let root = std::env::temp_dir().join(format!(
         "c0mo_r1d_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&root);
     let root_s = root.to_string_lossy().to_string();
@@ -2419,7 +2419,7 @@ fn r1_capture_run_end_to_end_over_a_loopback_websocket() {
     let root = std::env::temp_dir().join(format!(
         "c0mo_r1e2e_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&root);
     let root_s = root.to_string_lossy().to_string();
@@ -2438,7 +2438,7 @@ fn r1_capture_run_end_to_end_over_a_loopback_websocket() {
             ("P0_MARKET_DRAIN_TIMEOUT_SECS", "5"),
             ("P0_MARKET_HEARTBEAT_SECS", "1"),
         ]),
-        unix_now_s(),
+        unix_now_s().unwrap(),
     )
     .unwrap();
     let run_dir = cfg.run_dir.clone();
@@ -2514,7 +2514,7 @@ fn journal_sink_flush_reports_a_failed_writer_without_a_new_row() {
     let dir = std::env::temp_dir().join(format!(
         "c0mo_r9_{}_{}",
         std::process::id(),
-        utc_compact(unix_now_s())
+        utc_compact(unix_now_s().unwrap())
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();

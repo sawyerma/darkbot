@@ -125,10 +125,10 @@ pub fn acquire_owner(path: &Path, run_id: &str, mode: &str) -> Result<OwnerLock,
         }
         Err(e) => return Err(format!("RUNTIME_OWNER_LOCK_IO {}: {e}", path.display())),
     }
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // D08: the owner record never carries a start time of 0.
+    let started = darkbot_common::timing::wall_now()
+        .map_err(|code| format!("RUNTIME_OWNER_LOCK {code}"))?
+        .as_secs();
     let line = format!(
         "pid={} run_id={} mode={} started_unix_s={}\n",
         std::process::id(),

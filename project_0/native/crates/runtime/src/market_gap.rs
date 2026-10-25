@@ -237,12 +237,16 @@ impl ObserverCore {
             );
             self.stats.enrichment_requested += 1;
             self.stats.enrichment_succeeded += 1;
+            // D08: a gap row never gets time 0; the gap stays unrecovered instead.
+            let Ok(now_s) = unix_now_s() else {
+                return Ok(Err(darkbot_common::timing::CLOCK_UNAVAILABLE));
+            };
             self.write_liquidation_rows(
                 sink,
                 signature,
                 slot,
                 None,
-                unix_now_s(),
+                now_s,
                 &decoded.events,
                 Some(tx),
                 "GAP_BLOCK_PAYLOAD",

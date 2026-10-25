@@ -6,6 +6,20 @@
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+/// D08 (P0-PROD-CTRL-08): the code of a host wall clock before the Unix epoch. A wall time is
+/// never folded into 0: callers refuse the start or end with this code.
+pub const CLOCK_UNAVAILABLE: &str = "CLOCK_UNAVAILABLE";
+
+/// Time since the Unix epoch of `t`; `CLOCK_UNAVAILABLE` before the epoch.
+pub fn since_epoch(t: SystemTime) -> Result<std::time::Duration, &'static str> {
+    t.duration_since(UNIX_EPOCH).map_err(|_| CLOCK_UNAVAILABLE)
+}
+
+/// The host wall clock since the Unix epoch (`CLOCK_UNAVAILABLE`, never 0).
+pub fn wall_now() -> Result<std::time::Duration, &'static str> {
+    since_epoch(SystemTime::now())
+}
+
 /// Messpunkte in der verbindlichen Reihenfolge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Stage {
@@ -60,15 +74,25 @@ pub struct Clock {
 }
 
 impl Clock {
+    /// A clock whose wall origin is the host clock now; production entries use it and refuse
+    /// to start with `CLOCK_UNAVAILABLE` (D08).
+    pub fn try_new() -> Result<Self, &'static str> {
+        Self::at(Instant::now(), SystemTime::now())
+    }
+
+    /// Test and fixture clock: `try_new` that never yields an origin of 0 (it panics on a host
+    /// clock before the Unix epoch instead). Production entries call `try_new`.
     pub fn new() -> Self {
-        let origin_unix_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        Clock {
-            origin: Instant::now(),
-            origin_unix_ns,
-        }
+        Self::try_new().expect(CLOCK_UNAVAILABLE)
+    }
+
+    /// The clock of a monotonic `origin` whose wall time is `wall`; `CLOCK_UNAVAILABLE` before
+    /// the Unix epoch (never an origin of 0).
+    pub fn at(origin: Instant, wall: SystemTime) -> Result<Self, &'static str> {
+        Ok(Clock {
+            origin,
+            origin_unix_ns: since_epoch(wall)?.as_nanos(),
+        })
     }
 
     /// Nanosekunden seit Clock-Erzeugung, monoton.
@@ -148,6 +172,22 @@ impl Timeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D08 (P0-PROD-CTRL-08): a host clock before the Unix epoch is CLOCK_UNAVAILABLE — never a
+    /// clock whose wall origin is 0 (every timestamp derived from it would be invented).
+    #[test]
+    fn d08_a_clock_before_the_epoch_is_refused_never_zero() {
+        let before = UNIX_EPOCH - std::time::Duration::from_secs(1);
+        assert_eq!(
+            Clock::at(Instant::now(), before).err(),
+            Some(CLOCK_UNAVAILABLE)
+        );
+        assert_eq!(since_epoch(before), Err(CLOCK_UNAVAILABLE));
+        let later = UNIX_EPOCH + std::time::Duration::from_secs(5);
+        assert_eq!(since_epoch(later), Ok(std::time::Duration::from_secs(5)));
+        let c = Clock::at(Instant::now(), later).unwrap();
+        assert!(c.unix_ns(c.now_ns()) >= 5_000_000_000);
+    }
 
     #[test]
     fn clock_is_monotonic() {

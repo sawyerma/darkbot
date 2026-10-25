@@ -3110,3 +3110,34 @@ fn f01_operator_stop_ends_a_standalone_shadow_owner() {
     f.owner.stop_poll = || true;
     assert!(!f.owner.lifecycle(), "the operator stop ends the loop");
 }
+
+/// D07/F-06: a start without a wall clock refuses the FE-04 replay instead of booking a settled
+/// attempt into day 0, where today's loss and failure limits would never see it.
+#[test]
+fn d07_fe04_replay_without_a_wall_clock_is_refused() {
+    let (mut f, _, _) = fe04_fixture("fe04_d07", "finalized");
+    run_until(&mut f, fe04_settled);
+    f.owner.fe04_held = None;
+    let dir_s = f.dir.join("fe04").display().to_string();
+    let liquidator = f.owner.liquidator;
+    let book = || {
+        setup::reservation_book(
+            &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
+            &liquidator,
+        )
+        .unwrap()
+    };
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    let refused = book().start(&mut safety, 0).err();
+    assert!(
+        refused
+            .as_deref()
+            .is_some_and(|e| e.starts_with("CLOCK_UNAVAILABLE")),
+        "{refused:?}"
+    );
+    assert_eq!(safety.day().failed_attempts, 0, "nothing booked");
+    let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
+    book().start(&mut safety, wall_unix_s().unwrap()).unwrap();
+    assert_eq!(safety.day().failed_attempts, 1, "booked into today");
+    cleanup(f);
+}

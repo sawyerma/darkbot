@@ -51,9 +51,11 @@ export function fmtProvider(p: ProviderView | null | undefined): string {
     + ` · ${p.effectiveRps.toFixed(1)} / ${p.maxRps} rps · ${cooldown} · ${p.haltCode ? `halted ${p.haltCode}` : "admitting"}`;
 }
 
-/** Wall-clock time with milliseconds, local time zone. */
+/** Wall-clock time with milliseconds, local time zone. The engine stamps 0 only when its host
+ *  clock is unavailable (D08, CLOCK_UNAVAILABLE): never shown as 1970. */
 export function fmtClockMs(unixMs: bigint | number): string {
   const ms = Number(unixMs);
+  if (ms === 0) return "clock unavailable";
   const t = new Date(ms).toLocaleTimeString("en-GB", { hour12: false });
   return `${t}.${String(ms % 1000).padStart(3, "0")}`;
 }

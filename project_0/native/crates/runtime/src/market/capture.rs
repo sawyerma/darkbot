@@ -206,7 +206,14 @@ pub(super) fn drain_after_stop(
     let mut drain_complete = false;
     let mut end_error = None;
     while write_error.is_none() {
-        let now_s = unix_now_s();
+        // D08: no event time falls back to 0; the drain ends with CLOCK_UNAVAILABLE instead.
+        let now_s = match unix_now_s() {
+            Ok(now_s) => now_s,
+            Err(code) => {
+                end_error = Some(code);
+                break;
+            }
+        };
         match consumer.pop_timeout(Duration::from_millis(100)) {
             Some(ev) => {
                 let event_unix_s = (clock.unix_ns(ev.t_rx_ns()) / 1_000_000_000) as u64;
@@ -300,7 +307,7 @@ pub fn finish_capture(
         sink,
         &ctx,
         &cfg.run_dir,
-        unix_now_s(),
+        unix_now_s()?,
         WindowEvent::Stopped {
             reason: outcome.stop_reason.into(),
             drain_complete: outcome.drain_complete,
@@ -317,13 +324,31 @@ pub fn run_from_env_with(
     status_tap: Option<StatusTap>,
     before_start: impl FnOnce(&str, &Path) -> Result<(), String>,
 ) -> Result<(), String> {
-    let cfg = MarketConfig::from_lookup(&|k| std::env::var(k).ok(), unix_now_s())?;
+    // D08: the capture starts only with a wall clock (CLOCK_UNAVAILABLE, never time 0); the
+    // refusal is the capture's terminal result in the Capture tab.
+    let clock = match Clock::try_new() {
+        Ok(clock) => clock,
+        Err(code) => return refuse_start(code, status_tap.as_ref()),
+    };
+    let cfg = MarketConfig::from_lookup(&|k| std::env::var(k).ok(), unix_now_s()?)?;
     before_start(&cfg.run_id, &cfg.run_dir)?;
-    run_embedded_with(cfg, Clock::new(), None, status_tap)
+    run_embedded_with(cfg, clock, None, status_tap)
 }
 
 pub fn run(cfg: MarketConfig) -> Result<(), String> {
-    run_embedded_with(cfg, Clock::new(), None, None)
+    run_embedded_with(cfg, Clock::try_new()?, None, None)
+}
+
+/// A start refused before the capture exists: the code is the terminal result (ENDED).
+fn refuse_start(code: &'static str, status_tap: Option<&StatusTap>) -> Result<(), String> {
+    if let Some(tap) = status_tap {
+        tap.publish_phase(|p| {
+            p.phase = CapturePhase::Ended;
+            p.end_result = code.into();
+        });
+        let _ = tap.flush(STATUS_FLUSH_TIMEOUT);
+    }
+    Err(code.into())
 }
 
 /// Existing C0-MO capture/drain/enrichment with an optional typed evidence tap.
@@ -367,7 +392,7 @@ fn run_embedded_inner(
     econ: Option<crate::analytics::econ::Handle>,
     status_tap: Option<StatusTap>,
 ) -> Result<(), String> {
-    let process_started = unix_now_s();
+    let process_started = unix_now_s()?;
     fs::create_dir_all(&cfg.run_dir)
         .map_err(|e| format!("create {}: {e}", cfg.run_dir.display()))?;
     let mut sink = JournalSink::create(&cfg.run_dir)?;
@@ -383,7 +408,7 @@ fn run_embedded_inner(
             h.cfg.plan.budgets.bootstrap_seconds
         );
         sink.coverage(&MarketCoverage::ShadowWarmupWait {
-            observed_unix_s: unix_now_s(),
+            observed_unix_s: unix_now_s()?,
         })
         .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
         if let Err(e) =
@@ -396,7 +421,7 @@ fn run_embedded_inner(
         }
         sink.coverage(&MarketCoverage::ShadowWarmupReady {
             at_ns: clock.now_ns(),
-            observed_unix_s: unix_now_s(),
+            observed_unix_s: unix_now_s()?,
         })
         .map_err(|_| "WARMUP_EVIDENCE_WRITE".to_string())?;
         crate::analytics::measurement::journal(
@@ -538,13 +563,18 @@ fn run_embedded_inner(
             break;
         }
         if ingress.as_ref().is_some_and(|t| t.is_finished()) {
-            if let Err(e) = core.coverage(
-                &mut sink,
-                unix_now_s(),
-                Some(clock.now_ns()),
-                WindowEvent::IngressThreadEnded,
-            ) {
-                write_error = Some(e.to_string());
+            match unix_now_s() {
+                Ok(now_s) => {
+                    if let Err(e) = core.coverage(
+                        &mut sink,
+                        now_s,
+                        Some(clock.now_ns()),
+                        WindowEvent::IngressThreadEnded,
+                    ) {
+                        write_error = Some(e.to_string());
+                    }
+                }
+                Err(code) => write_error = Some(code.into()),
             }
             stop_reason = "INGRESS_THREAD_ENDED";
             break;
@@ -553,7 +583,15 @@ fn run_embedded_inner(
             .map(|(_, cutoff)| Duration::from_nanos(cutoff.saturating_sub(clock.now_ns())))
             .unwrap_or(Duration::from_secs(1))
             .min(Duration::from_millis(250));
-        let now_s = unix_now_s();
+        // D08: no event time falls back to 0; the capture ends with CLOCK_UNAVAILABLE instead.
+        let now_s = match unix_now_s() {
+            Ok(now_s) => now_s,
+            Err(code) => {
+                write_error = Some(code.into());
+                stop_reason = "WRITE_ERROR";
+                break;
+            }
+        };
         let step = match consumer.pop_timeout(wait) {
             Some(IngressEvent::Reconnected {
                 attempt, t_rx_ns, ..
@@ -693,7 +731,8 @@ fn run_embedded_inner(
     }
     let observation_end_s = window
         .map(|(_, cutoff)| (clock.unix_ns(capture_end_ns.min(cutoff)) / 1_000_000_000) as u64)
-        .unwrap_or_else(unix_now_s);
+        // Without a window: now on the capture's validated clock (D08, never 0).
+        .unwrap_or_else(|| (clock.unix_ns(clock.now_ns()) / 1_000_000_000) as u64);
 
     // ---- phase 2: STOP ingress + DRAIN (events with t_rx <= cutoff still count) ----
     let _ = core.coverage(
@@ -724,15 +763,20 @@ fn run_embedded_inner(
     }
     core.stop_observation();
     let events_after_cutoff = core.stats.events_after_cutoff;
-    let _ = core.coverage(
-        &mut sink,
-        unix_now_s(),
-        None,
-        WindowEvent::Drained {
-            drain_complete,
-            events_after_cutoff,
-        },
-    );
+    match unix_now_s() {
+        Ok(now_s) => {
+            let _ = core.coverage(
+                &mut sink,
+                now_s,
+                None,
+                WindowEvent::Drained {
+                    drain_complete,
+                    events_after_cutoff,
+                },
+            );
+        }
+        Err(code) => write_error = Some(code.into()),
+    }
 
     // A separate capture drain is insufficient: Shadow keeps winner RPCs alive
     // through its own drain. Release the heavy scan only after ALL workers exit.
@@ -748,8 +792,13 @@ fn run_embedded_inner(
                 error: e.clone(),
             },
         };
-        if let Err(e) = core.coverage(&mut sink, unix_now_s(), None, event) {
-            write_error = Some(e.to_string());
+        match unix_now_s() {
+            Ok(now_s) => {
+                if let Err(e) = core.coverage(&mut sink, now_s, None, event) {
+                    write_error = Some(e.to_string());
+                }
+            }
+            Err(code) => write_error = Some(code.into()),
         }
         if let Err(e) = barrier {
             write_error = Some(e);
@@ -863,6 +912,22 @@ mod status_tests {
         assert_eq!(phase.end_result, error);
         assert!(state.operational.is_some());
         fs::remove_file(path).unwrap();
+    }
+
+    /// D08: a capture refused for an unavailable wall clock ends with exactly that code in the
+    /// Capture projection (phase ENDED), and starts nothing.
+    #[test]
+    fn d08_clock_refusal_is_the_terminal_capture_result() {
+        let tap = StatusTap::new();
+        let code = darkbot_common::timing::CLOCK_UNAVAILABLE;
+        assert_eq!(refuse_start(code, Some(&tap)), Err(code.to_string()));
+        let state = tap.reader().wait_changed(Duration::ZERO).unwrap();
+        let phase = state.phase.unwrap();
+        assert_eq!(
+            (phase.phase, phase.end_result.as_str()),
+            (CapturePhase::Ended, code)
+        );
+        assert!(state.run.is_none() && state.market.is_none());
     }
 
     #[test]

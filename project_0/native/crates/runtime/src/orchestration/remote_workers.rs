@@ -329,6 +329,8 @@ impl RemoteWorkers {
         );
 
         let reconcile_shutdown = shutdown.clone();
+        // D08: the reconcile worker's times come from a validated wall clock (never 0).
+        let reconcile_clock = Clock::try_new().map_err(std::io::Error::other)?;
         let reconcile_space = space.clone();
         let reconcile_rpc_url = rpc_url.clone();
         threads.push(
@@ -342,7 +344,7 @@ impl RemoteWorkers {
                         // C5: own prioritized workload inside the same global provider budget.
                         darkbot_solana::provider::Workload::Reconcile,
                     );
-                    let clock = Clock::new();
+                    let clock = reconcile_clock;
                     while !reconcile_shutdown.is_requested() {
                         let Some(work) = reconcile_job_rx.pop_timeout(Duration::from_millis(250))
                         else {
