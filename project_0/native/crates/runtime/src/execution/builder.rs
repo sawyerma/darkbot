@@ -936,6 +936,12 @@ pub mod p0 {
         })
     }
 
+    #[cfg(test)]
+    thread_local! {
+        /// V2-14 P1-04 test seam: receivership instruction builds on this thread.
+        static RECEIVERSHIP_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
     impl<'a, S: AccountSource + ?Sized, Z: SizingProvider, R: RouteProvider>
         P0ReceivershipBuilder<'a, S, Z, R>
     {
@@ -1225,6 +1231,8 @@ pub mod p0 {
             sz: &Sizing,
             swaps: Vec<Instruction>,
         ) -> Result<Vec<Instruction>, String> {
+            #[cfg(test)]
+            RECEIVERSHIP_BUILDS.with(|n| n.set(n.get() + 1));
             let (_asset_vault, asset_mint, asset_tp) = self.bank(&sz.asset_bank)?;
             let (liab_vault, liab_mint, liab_tp) = self.bank(&sz.liab_bank)?;
 
@@ -1526,6 +1534,9 @@ pub mod p0 {
                     route_available: false,
                 };
 
+                // V2-14 P1-04: the no-swap receivership instructions are identical for every
+                // class that uses them (inventory and JIT): built once per pair.
+                let mut no_swap_ixs: Option<Result<Vec<Instruction>, String>> = None;
                 for class in funding::feasible_classes(&base_ctx) {
                     let capital = funding::capital_required(class, &base_ctx);
                     let plan = match class {
@@ -1533,8 +1544,14 @@ pub mod p0 {
                         // separately below after its own ExactIn quote.
                         FundingClass::ZeroPrefundSameTx => continue,
                         FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
-                            let ixs =
-                                pair_try!('pairs, self.receivership(account, &prep, &sz, vec![]));
+                            let ixs = pair_try!(
+                                'pairs,
+                                no_swap_ixs
+                                    .get_or_insert_with(|| {
+                                        self.receivership(account, &prep, &sz, vec![])
+                                    })
+                                    .clone()
+                            );
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -1597,8 +1614,14 @@ pub mod p0 {
                             ) else {
                                 continue;
                             };
-                            let ixs =
-                                pair_try!('pairs, self.receivership(account, &prep, &sz, vec![]));
+                            let ixs = pair_try!(
+                                'pairs,
+                                no_swap_ixs
+                                    .get_or_insert_with(|| {
+                                        self.receivership(account, &prep, &sz, vec![])
+                                    })
+                                    .clone()
+                            );
                             ReceivershipPlan {
                                 market_identity: Some(
                                     crate::analytics::record::MarketPlanIdentity {
@@ -2565,6 +2588,26 @@ pub mod p0 {
                     assert_eq!((sz.funding_bank, sz.funding_available_value), (None, 0));
                 }
             }
+        }
+
+        /// V2-14 P1-04: the inventory classes share one receivership build per pair (their
+        /// instructions are identical: no swap); the plans keep their own classes.
+        #[test]
+        fn p1_04_inventory_classes_build_the_receivership_once() {
+            let f = PlansFixture::new();
+            let price = |l: u64| Some(l);
+            let src = f.state(Pubkey::default(), true);
+            RECEIVERSHIP_BUILDS.with(|n| n.set(0));
+            let plans = f.plans(&src, &price, &TestRoutes(None), false);
+            assert_eq!(
+                plans.iter().map(|p| p.input.funding).collect::<Vec<_>>(),
+                [
+                    FundingClass::NoSwapInventory,
+                    FundingClass::PreheldInventory
+                ]
+            );
+            assert_eq!(plans[0].instructions, plans[1].instructions);
+            assert_eq!(RECEIVERSHIP_BUILDS.with(|n| n.get()), 1);
         }
 
         /// B4 through the production `plans()` path: every plan of an account whose record is

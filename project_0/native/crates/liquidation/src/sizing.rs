@@ -516,14 +516,14 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
             .ok_or_else(|| format!("missing state account {key}"))
     }
 
-    fn bank(&self, key: &Pubkey) -> Result<Bank, String> {
+    /// V2-14 P2-02: the bank borrowed from the state's bytes (a copy only when they are not
+    /// aligned for a direct view).
+    fn bank(&self, key: &Pubkey) -> Result<std::borrow::Cow<'a, Bank>, String> {
         let (owner, _, data) = self.raw(key)?;
         if owner != self.program {
             return Err(format!("UNKNOWN_LAYOUT: bank {key} owner {owner}"));
         }
-        protocol::decode_bank(data)
-            .map(std::borrow::Cow::into_owned)
-            .map_err(|e| format!("{e}: {key}"))
+        protocol::decode_bank(data).map_err(|e| format!("{e}: {key}"))
     }
 
     /// B12: the maintenance EMODE configuration exactly as Health computes it — every active
@@ -543,7 +543,7 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
         let banks = emode_liability_balances(account)
             .map(|b| self.bank(&b.bank_pk))
             .collect::<Result<Vec<_>, _>>()?;
-        let refs: Vec<&Bank> = banks.iter().collect();
+        let refs: Vec<&Bank> = banks.iter().map(|b| &**b).collect();
         Ok(maintenance_emode_config_of(&refs, &group))
     }
 
@@ -972,7 +972,8 @@ impl<'a, S: AccountSource + ?Sized> ProtocolSizer<'a, S> {
                     .map_err(|e| format!("maintenance value: {e}"))?;
             let p = Position {
                 bank_pk: balance.bank_pk,
-                bank,
+                // A position owns its bank (it outlives the state view).
+                bank: bank.into_owned(),
                 amount,
                 opposite_amount,
                 equity_value,

@@ -676,6 +676,9 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             solana_sdk::hash::Hash,
             Result<submit::MessageFeeQuote, submit::FeeQuoteError>,
         )> = Vec::new();
+        // V2-14 P1-04: plans with identical instructions, version and lookup tables (NoSwap and
+        // Preheld inventory) share one compiled and signed transaction of this evaluation.
+        let mut built_txs: Vec<(TxPlan, darkbot_solana::tx::BuiltTx)> = Vec::new();
         for mut plan in plans {
             // E2: the gate decides on the steps of the actually built instructions (receivership
             // TX and every prerequisite TX), immediately before they are signed.
@@ -795,7 +798,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 lookup_tables: plan.lookup_tables.clone(),
                 resources: self.resources,
             };
-            let built = match tx::build(&txplan, bh.hash, &self.limits) {
+            let same = |(p, _): &&(TxPlan, darkbot_solana::tx::BuiltTx)| {
+                p.version == txplan.version
+                    && p.instructions == txplan.instructions
+                    && *p.lookup_tables == *txplan.lookup_tables
+            };
+            let built = match built_txs.iter().find(same).map(|(_, b)| b.clone()) {
+                Some(b) => Ok(b),
+                None => tx::build(&txplan, bh.hash, &self.limits).inspect(|b| {
+                    built_txs.push((txplan.clone(), b.clone()));
+                }),
+            };
+            let built = match built {
                 Ok(b) => b,
                 Err(e) => {
                     note_stage(&mut furthest_technical, 4, LossReason::Build);
@@ -878,9 +892,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                         return rec.with_timeline(&tl);
                     }
                     Err(_) => None,
-                    Ok(q) => {
-                        Some(q).filter(|q| q.message_hash == built.tx.message.hash().to_string())
-                    }
+                    // V2-14 P1-02: compared with the hash computed above, typed (an unreadable
+                    // quote hash is no match); the quote's persisted text form stays (layout).
+                    Ok(q) => Some(q).filter(|q| {
+                        q.message_hash.parse::<solana_sdk::hash::Hash>().ok() == Some(message_hash)
+                    }),
                 }
             } else {
                 None
