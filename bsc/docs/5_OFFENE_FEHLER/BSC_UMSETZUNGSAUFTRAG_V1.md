@@ -1,5 +1,7 @@
 # BSC – VERBINDLICHER UMSETZUNGSAUFTRAG: Fehlstellen V1 + Bug V2
 
+> **HISTORISCH — abgelöst am 25.10.2026 durch [BSC_UMSETZUNGSAUFTRAG_V2.md](BSC_UMSETZUNGSAUFTRAG_V2.md).** Gilt nur noch, soweit V2 nicht widerspricht.
+
 **25.10.2026 · Untergeordneter Ausführungsauftrag, kein neuer Phasenplan und keine wirtschaftliche Freigabe.**
 
 Claude, arbeite sämtliche noch offenen und am aktuellen Code bestätigten Fehler ab: `bsc/docs/5_OFFENE_FEHLER/fehlerliste_bsc_v1.md`, `bsc/docs/5_OFFENE_FEHLER/BSC_Bug_V2.md`, unter Berücksichtigung des älteren, bereits teilweise erledigten `bsc/docs/5_OFFENE_FEHLER/bsc_bug_v1.md`. Ein widerlegter, bereits nachgewiesen geschlossener oder fremder phasenblockierter Punkt ist **kein** erneut zu fixender Bug.

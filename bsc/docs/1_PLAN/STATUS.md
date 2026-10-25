@@ -1,5 +1,23 @@
 # BSC Status — Code, Nachweise und LIVE getrennt
 
+## Fortschritt Auftrag V2 (verbindlich: [BSC_UMSETZUNGSAUFTRAG_V2.md](../5_OFFENE_FEHLER/BSC_UMSETZUNGSAUFTRAG_V2.md))
+
+Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prüfen, erstes offenes Paket fortsetzen. Basis: `87c064ba`.
+
+| Paket | Phase/Tickets | Technischer Status | Geprüfter SHA | Fehlende Nachweise | Nächster Schritt |
+|---|---|---|---|---|---|
+| 0 | V2 abgelegt, V1 historisch, diese Tabelle | TECHNISCH FERTIG | dieser Commit | – | Paket 1 |
+| 1 | Gate A/B: BSC-005 T5-Barrier-Typ, G0.8 UNRESOLVED-Rundweg, Schema-/Readiness-Regression | OFFEN | – | `Unsent`-Capability + Abbruch-/Journal-/RELEASED-/Kill-/Stale-Tests; UNRESOLVED bis Frontend | BSC-005 Barrier-Typ |
+| 2 | BSC-050 Vollinventur + Fixes | OFFEN | – | Inventur | nach Paket 1 |
+| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN | – | Mainnet-geth-Sync-Prüfung, C1.10 auf neuer Source | nach Paket 2 |
+| 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | nach Paket 3 |
+| 5 | C3, D, G0.1-Four-Freeze, E | OFFEN | – | – | nach Paket 4 |
+| 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
+| 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
+| 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
+| 9 | Release-Kandidat | OFFEN | – | – | nach Paket 8 |
+| P | G0.4 Rohdaten (parallel) | OFFEN | – | Kriterienvorschlag, einmalige Nutzerbestätigung | parallel zu Paket 3 |
+
 ## Bindender neuer Umsetzungsstatus — 2026-10-25 (technische Offline-Freigabe, kein Geld)
 
 **Autorität:** aktueller `bsc/docs/1_PLAN/PHASENPLAN.md` (neuester Abschnitt „GELTENDE REGELN“); BSC-Fehlerregister §7. Seit 25.10. sind C0/C1/C2 und anschließend C3/D/F/G/H/I **für vollständige technische Offline-Implementierung, native Integration, Regression und technischen Phasenabschluss freigegeben**; E ausschließlich nach G0.1-Freeze qualifizierter Four-Verträge. J/KB/K wirtschaftlich/operativ nicht freigegeben. Ein unabhängiger read-only Prüfer nimmt den finalen Phasen-SHA mit technischem Gate ab; nach bestandenem Gate geht es ohne Nutzer-Nachfrage weiter. Bei HIGH/CRITICAL vorher Fehler beheben. Alte Phase-Status-Stopps in historischen Abschnitten sind keine aktuelle Einschränkung für genehmigungsfreie Codearbeit.
