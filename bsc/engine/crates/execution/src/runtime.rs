@@ -30,7 +30,6 @@ use crate::chain_follower::{
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
-use darkbot_bsc_geth_ipc::protocol_v2::CLOCK_ID_MONOTONIC;
 use crate::runtime_journal::{
     EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
     later_sighting_payload, orphaned_launch_payload, paper_handoff_payload, pending_launch_payload,
@@ -39,6 +38,7 @@ use crate::runtime_journal::{
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
 use crate::wss::{DisconnectReason, WssEvent, WssLimits, WssSource, run_source};
+use darkbot_bsc_geth_ipc::protocol_v2::CLOCK_ID_MONOTONIC;
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{Draft, observed_now};
@@ -715,7 +715,9 @@ fn spawn_adapter(
                 name: source.name(),
                 url,
             };
-            let mut sink = |event: WssEvent| {
+            // T_ingress of a pending transaction is the receipt of its frame,
+            // before the JSON parse and the signer recovery.
+            let mut sink = |event: WssEvent, received: Instant| {
                 let event = match event {
                     WssEvent::Connected => Event::Connected,
                     WssEvent::Full(tx) => Event::Full {
@@ -730,14 +732,19 @@ fn spawn_adapter(
                         rate_limited: matches!(reason, DisconnectReason::RateLimited(_)),
                     },
                 };
-                if let Err(TrySendError::Full(_)) = tx.try_send((source, clock.now_ns(), event)) {
+                if let Err(TrySendError::Full(_)) =
+                    tx.try_send((source, clock.ns_at(received), event))
+                {
                     dropped.fetch_add(1, Ordering::Relaxed);
                 }
             };
             if let Err(e) = run_source(&wss, &limits, &flag, &mut sink) {
                 // Refused before any connect: visible in the log and as a disconnect.
                 eprintln!("{}: source refused its configuration: {e:?}", source.name());
-                sink(WssEvent::Disconnected(DisconnectReason::Stopped));
+                sink(
+                    WssEvent::Disconnected(DisconnectReason::Stopped),
+                    Instant::now(),
+                );
             }
         })
         .map_err(|e| format!("spawn {} adapter: {e}", source.name()))?;

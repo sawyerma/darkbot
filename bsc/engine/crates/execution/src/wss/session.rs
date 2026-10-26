@@ -76,7 +76,7 @@ pub(super) fn ws_handshake<S: Read + Write>(
 pub(super) fn run_loop<S, C>(
     limits: &WssLimits,
     stop: &AtomicBool,
-    sink: &mut dyn FnMut(WssEvent),
+    sink: &mut dyn FnMut(WssEvent, Instant),
     mut connect: C,
 ) where
     S: Read + Write,
@@ -89,7 +89,7 @@ pub(super) fn run_loop<S, C>(
             Ok(mut ws) => session(&mut ws, limits, stop, started, sink),
             Err(reason) => (reason, None),
         };
-        sink(WssEvent::Disconnected(reason));
+        sink(WssEvent::Disconnected(reason), Instant::now());
         if reason == DisconnectReason::Stopped {
             return;
         }
@@ -127,7 +127,7 @@ fn session<S: Read + Write>(
     limits: &WssLimits,
     stop: &AtomicBool,
     started: Instant,
-    sink: &mut dyn FnMut(WssEvent),
+    sink: &mut dyn FnMut(WssEvent, Instant),
 ) -> (DisconnectReason, Option<Duration>) {
     let mut subscription: Option<(String, Instant)> = None;
     let held = |s: &Option<(String, Instant)>| s.as_ref().map(|(_, at)| at.elapsed());
@@ -156,6 +156,8 @@ fn session<S: Read + Write>(
             Err(tungstenite::Error::Io(e)) if is_tick(&e) => continue,
             Err(e) => return (classify_ws(e), held(&subscription)),
         };
+        // The frame's receipt: before it is parsed or verified.
+        let received = Instant::now();
         let inbound = match &message {
             Message::Text(text) => parse_inbound(text.as_bytes()),
             Message::Binary(bytes) => parse_inbound(bytes),
@@ -183,7 +185,7 @@ fn session<S: Read + Write>(
             ) if id == SUBSCRIBE_ID => {
                 subscription = Some((sub, Instant::now()));
                 last_notification = Instant::now();
-                sink(WssEvent::Connected);
+                sink(WssEvent::Connected, received);
                 continue;
             }
             (
@@ -197,7 +199,7 @@ fn session<S: Read + Write>(
                     DisconnectReason::Protocol(ProtocolFault::UnknownSubscription)
                 } else {
                     last_notification = Instant::now();
-                    sink(event_of(item));
+                    sink(event_of(item), received);
                     continue;
                 }
             }

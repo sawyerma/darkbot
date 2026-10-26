@@ -25,7 +25,7 @@
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use darkbot_bsc_trading::signer::SignerError;
 
@@ -296,14 +296,17 @@ pub enum DisconnectReason {
 
 /// Runs the source until `stop` is set: connect, subscribe, read; after
 /// each ended attempt wait the backoff (interruptible by `stop`) and
-/// reconnect. Every event goes to `sink` on the calling thread.
+/// reconnect. Every event goes to `sink` on the calling thread, with the
+/// instant the frame that carried it was read (before it was parsed or
+/// verified; for a disconnect, when it happened): the `T_ingress` of a
+/// pending transaction.
 ///
 /// Returns `Err` only for a configuration refused before any connect.
 pub fn run_source(
     source: &WssSource,
     limits: &WssLimits,
     stop: &AtomicBool,
-    sink: &mut dyn FnMut(WssEvent),
+    sink: &mut dyn FnMut(WssEvent, Instant),
 ) -> Result<(), WssConfigError> {
     let endpoint = endpoint::Endpoint::parse(&source.url).map_err(WssConfigError::Url)?;
     limits.validate().map_err(WssConfigError::Limits)?;

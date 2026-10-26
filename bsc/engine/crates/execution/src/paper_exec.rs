@@ -1209,6 +1209,57 @@ mod tests {
         fs::remove_dir_all(&d).unwrap();
     }
 
+    /// V2 §7.4 and gate review L7: the modules that hold signed PAPER bytes
+    /// (the executor, the runtime controller, the sink) name no socket,
+    /// stream, TLS connection, release dispatch or provider client; the
+    /// executor's only transport is the sink. The controller's probe thread
+    /// is given the endpoint, the bounds and the sender address only.
+    #[test]
+    fn no_module_with_paper_bytes_reaches_a_transport() {
+        let code = |source: &'static str| &source[..source.find("#[cfg(test)]").unwrap()];
+        let common = [
+            "TcpStream",
+            "UdpSocket",
+            "UnixStream",
+            "std::net",
+            "tungstenite",
+            "rustls",
+            "Command::new",
+            "WarmTlsConnection",
+            "TlsConnectionOwner",
+            "TlsTransport",
+            "qualify_transport",
+            "QualifiedTransport",
+            "DiagnosticStreamTransport",
+            "dispatch_release",
+            "rpc_wire",
+            "crate::wss",
+        ];
+        let executor = code(include_str!("paper_exec.rs"));
+        let controller = code(include_str!("runtime_exec.rs"));
+        let sink = code(include_str!("paper.rs"));
+        for (name, source) in [
+            ("paper_exec", executor),
+            ("runtime_exec", controller),
+            ("paper", sink),
+        ] {
+            for forbidden in common {
+                assert!(!source.contains(forbidden), "{name}: {forbidden}");
+            }
+        }
+        // The executor implements exactly one transport: the sink.
+        assert_eq!(executor.matches("impl Transport for").count(), 1);
+        assert!(executor.contains("impl Transport for SinkTransport"));
+        // The controller dispatches nothing and its probe thread sees no
+        // signed bytes.
+        assert!(!controller.contains("crate::submission::send"));
+        let probe = &controller[controller.find("fn spawn_probe").unwrap()..];
+        let probe = &probe[..probe.find("\n    }\n").unwrap()];
+        for forbidden in ["raw", "PaperBuy", "executor", "signer"] {
+            assert!(!probe.contains(forbidden), "probe thread: {forbidden}");
+        }
+    }
+
     /// Gate review L3: keys that could never admit a BUY are refused at
     /// arming (before: the path showed ARMED and refused every launch).
     #[test]

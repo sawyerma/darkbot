@@ -120,7 +120,7 @@ fn spawn_client(
     let (tx, rx) = mpsc::channel();
     let handle = thread::spawn(move || {
         let url = format!("ws://{addr}/");
-        let mut sink = |event: WssEvent| tx.send(event).unwrap();
+        let mut sink = |event: WssEvent, _: Instant| tx.send(event).unwrap();
         run_loop(&limits, &stop, &mut sink, |started| {
             let tcp = TcpStream::connect_timeout(&addr, limits.connect_timeout)
                 .map_err(|e| DisconnectReason::Io(e.kind()))?;
@@ -366,7 +366,7 @@ fn configuration_is_refused_before_any_connect() {
             name: "TEST",
             url: url.to_owned(),
         };
-        let mut sink = |e| events.push(e);
+        let mut sink = |e, _| events.push(e);
         let result = run_source(&source, limits, &stop, &mut sink);
         assert!(events.is_empty(), "{url}: {events:?}");
         result
@@ -432,7 +432,7 @@ fn configuration_is_refused_before_any_connect() {
     };
     let mut events = Vec::new();
     assert_eq!(
-        run_source(&source, &limits(), &stop, &mut |e| events.push(e)),
+        run_source(&source, &limits(), &stop, &mut |e, _| events.push(e)),
         Ok(())
     );
     assert!(events.is_empty());

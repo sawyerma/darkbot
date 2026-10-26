@@ -43,7 +43,7 @@ fn live_publicnode_pending_transactions_verify() {
     let mut disconnects = Vec::new();
     let mut types = [0usize; 3];
     let started = Instant::now();
-    let mut sink = |event: WssEvent| match event {
+    let mut sink = |event: WssEvent, _: Instant| match event {
         WssEvent::Connected => connected += 1,
         WssEvent::Full(tx) => {
             // Re-check what verification guarantees, independently.

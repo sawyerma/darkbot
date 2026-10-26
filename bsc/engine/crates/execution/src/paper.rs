@@ -69,8 +69,46 @@ impl core::fmt::Debug for PaperIdentity {
     }
 }
 
-/// `path` must be absolute and outside `repo_root` (also through links of
-/// its directory).
+/// `path` as the file system will resolve it: its nearest existing
+/// ancestor canonicalized (links resolved), the rest appended with `.` and
+/// `..` applied. No directory is created.
+fn resolved(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    while !existing.exists() {
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_owned());
+                existing = parent;
+            }
+            // A `..` or `.` tail: resolve it from its parent.
+            (Some(parent), None) => {
+                rest.push(
+                    existing
+                        .components()
+                        .next_back()
+                        .map_or_else(std::ffi::OsString::new, |c| c.as_os_str().to_owned()),
+                );
+                existing = parent;
+            }
+            (None, _) => break,
+        }
+    }
+    let mut out = fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    for part in rest.iter().rev() {
+        match part.to_str() {
+            Some("..") => {
+                out.pop();
+            }
+            Some(".") => {}
+            _ => out.push(part),
+        }
+    }
+    out
+}
+
+/// `path` must be absolute and outside `repo_root` (also through links or
+/// `..` of its directories, existing or not).
 fn check_location(path: &Path, repo_root: &Path) -> Result<(), IdentityError> {
     if !path.is_absolute() {
         return Err(IdentityError::Location(format!(
@@ -79,9 +117,7 @@ fn check_location(path: &Path, repo_root: &Path) -> Result<(), IdentityError> {
         )));
     }
     let root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
-    let dir = path.parent().unwrap_or(Path::new("/"));
-    let dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    if dir.starts_with(&root) || path.starts_with(repo_root) {
+    if resolved(path).starts_with(&root) || path.starts_with(repo_root) {
         return Err(IdentityError::Location(format!(
             "{} is inside the repository",
             path.display()
@@ -107,6 +143,8 @@ impl PaperIdentity {
                 .recursive(true)
                 .create(dir)
                 .map_err(io)?;
+            // Once the directory exists, its real location is checked again.
+            check_location(path, repo_root)?;
             if !private(&fs::metadata(dir).map_err(io)?) {
                 return Err(IdentityError::Permissions(format!(
                     "{} is accessible to others",
@@ -350,6 +388,31 @@ mod tests {
             Err(IdentityError::Location(_))
         ));
         fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    /// Gate review L1: a path that leaves the repository and returns to it
+    /// through `..` of directories that do not exist yet is refused before
+    /// anything is created (before: the key was written inside it).
+    #[test]
+    fn a_path_back_into_the_repository_is_refused_before_creation() {
+        let base = std::env::temp_dir().join(format!("bsc-paper-l1-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        // A sibling that leads back: its text does not start with the
+        // repository, its resolution does.
+        let sneaky = base.join("other/../repo/newdir/paper.key");
+        assert!(matches!(
+            PaperIdentity::create(&sneaky, &repo),
+            Err(IdentityError::Location(_))
+        ));
+        assert!(!repo.join("newdir").exists());
+        assert!(!base.join("other").exists());
+        // Outside it is fine.
+        let outside = base.join("keys/../keys2/paper.key");
+        PaperIdentity::create(&outside, &repo).unwrap();
+        assert!(base.join("keys2/paper.key").exists());
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
