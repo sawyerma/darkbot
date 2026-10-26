@@ -173,7 +173,7 @@ fn fastlane_and_journal_bytes_decode_like_the_original() {
         assert!(journal.record(
             JournalKind::RawSignedTx,
             2_000 + i as u64,
-            &first_sighting_payload(SourceId::PublicNode, &f.hash, &f.raw),
+            first_sighting_payload(SourceId::PublicNode, &f.hash, &f.raw),
         ));
     }
     let path = journal.path().to_path_buf();

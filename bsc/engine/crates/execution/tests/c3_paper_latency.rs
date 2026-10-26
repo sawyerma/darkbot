@@ -436,7 +436,7 @@ fn c3_paper_path_latency() {
                 let mut payload = Vec::with_capacity(64);
                 payload.extend_from_slice(&buy.handoff.tx_hash);
                 payload.extend_from_slice(&buy.handoff.sequence.to_le_bytes());
-                assert!(journal.record(JournalKind::Runtime, buy.times.sink_ns, &payload));
+                assert!(journal.record(JournalKind::Runtime, buy.times.sink_ns, payload));
                 let journal_ns = now();
                 let used = allocations() - allocs;
                 let t = buy.times;

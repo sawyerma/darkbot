@@ -474,9 +474,9 @@ mod tests {
         };
         let mut j = RuntimeJournal::open(dir, started, 1, s).unwrap();
         for i in 0..=100u64 {
-            assert!(j.record(RecordKind::Runtime, i * 10_000_000, &[7u8; 64]));
+            assert!(j.record(RecordKind::Runtime, i * 10_000_000, vec![7u8; 64]));
         }
-        assert!(j.record(RecordKind::Runtime, 1_000_000_000, &EXIT_PAYLOAD));
+        assert!(j.record(RecordKind::Runtime, 1_000_000_000, EXIT_PAYLOAD.to_vec()));
         j.finish().unwrap();
     }
 

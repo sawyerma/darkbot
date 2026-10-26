@@ -135,7 +135,7 @@ fn fastlane_and_journal_bytes_decode_like_the_original() {
     assert!(journal.record(
         JournalKind::RawSignedTx,
         2_000,
-        &first_sighting_payload(SourceId::PublicNode, &hash, &raw),
+        first_sighting_payload(SourceId::PublicNode, &hash, &raw),
     ));
     let path = journal.path().to_path_buf();
     journal.finish().unwrap();

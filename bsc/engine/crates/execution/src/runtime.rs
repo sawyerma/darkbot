@@ -47,7 +47,6 @@ use darkbot_bsc_journal::storage::writer::SyncPolicy;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{Draft, observed_now};
 use darkbot_bsc_trading::chain_state::engine::StateLimits;
-use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -566,7 +565,7 @@ impl Canonical {
     fn orphan(&mut self, orphaned: &[(u64, [u8; 32])], at: u64, journal: &mut RuntimeJournal) {
         let hashes: Vec<[u8; 32]> = orphaned.iter().map(|(_, h)| *h).collect();
         for l in self.ledger.orphan(&hashes) {
-            journal.record(RecordKind::Canonical, at, &orphaned_launch_payload(&l));
+            journal.record(RecordKind::Canonical, at, orphaned_launch_payload(&l));
         }
         let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.reverted_recent)
             .into_iter()
@@ -577,7 +576,7 @@ impl Canonical {
             journal.record(
                 RecordKind::Canonical,
                 at,
-                &launch_id_payload(b'O', venue, number, &block, &tx),
+                launch_id_payload(b'O', venue, number, &block, &tx),
             );
         }
     }
@@ -606,7 +605,7 @@ impl Canonical {
                     journal.record(
                         RecordKind::Canonical,
                         at,
-                        &window_payload(b'H', number, &hash),
+                        window_payload(b'H', number, &hash),
                     );
                 }
                 self.blocks += 1;
@@ -631,7 +630,7 @@ impl Canonical {
                 journal.record(
                     RecordKind::Canonical,
                     at,
-                    &launch_id_payload(b'V', venue, block_number, &block_hash, &tx_hash),
+                    launch_id_payload(b'V', venue, block_number, &block_hash, &tx_hash),
                 );
             }
             CanonicalEvent::Reorg { .. }
@@ -664,7 +663,7 @@ impl Canonical {
                     block_seen_ns: self.head_seen_ns.filter(|_| same).unwrap_or(at),
                     block_seen_unix_ms: self.head_seen_unix_ms.filter(|_| same),
                 };
-                journal.record(RecordKind::Canonical, at, &pending_launch_payload(&launch));
+                journal.record(RecordKind::Canonical, at, pending_launch_payload(&launch));
                 self.ledger.push(launch);
             }
             CanonicalEvent::Reorg { orphaned, new_head } => {
@@ -673,7 +672,7 @@ impl Canonical {
                 journal.record(
                     RecordKind::Reorg,
                     at,
-                    &reorg_payload(depth, new_head.0, &new_head.1),
+                    reorg_payload(depth, new_head.0, &new_head.1),
                 );
                 self.orphan(&orphaned, at, journal);
             }
@@ -687,7 +686,7 @@ impl Canonical {
                     .max(self.window_first_block);
                 if new_head.0 > from {
                     self.blocks_skipped += new_head.0 - from;
-                    journal.record(RecordKind::Reorg, at, &resync_payload(from, new_head.0 - 1));
+                    journal.record(RecordKind::Reorg, at, resync_payload(from, new_head.0 - 1));
                 }
                 self.orphan(&orphaned, at, journal);
             }
@@ -697,7 +696,7 @@ impl Canonical {
                 let from = from.max(self.window_first_block);
                 if to >= from {
                     self.blocks_skipped += to - from + 1;
-                    journal.record(RecordKind::Reorg, at, &resync_payload(from, to));
+                    journal.record(RecordKind::Reorg, at, resync_payload(from, to));
                 }
             }
             // The C2 owner's reconciliation input; no G0.4 count.
@@ -724,7 +723,7 @@ impl Canonical {
             journal.record(
                 RecordKind::Canonical,
                 j.launch.block_seen_ns,
-                &canonical_launch_payload(&j),
+                canonical_launch_payload(&j),
             );
         }
     }
@@ -870,7 +869,7 @@ fn journal_drops(
             journal.record(
                 RecordKind::Runtime,
                 at,
-                &ingress_drop_payload(SourceId::ALL[i], total),
+                ingress_drop_payload(SourceId::ALL[i], total),
             );
             journaled[i] = total;
         }
@@ -1103,8 +1102,6 @@ pub fn run(
     let mut journaled_drops = [0u64; 5];
     // The periodic census in flight, if any.
     let mut census_job: Option<std::thread::JoinHandle<()>> = None;
-    // The venue contracts the pending capture's VENUES scope keeps.
-    let four_deployment = bsc_mainnet_g01_129842711();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     let mut generation = store.current()?;
@@ -1220,7 +1217,7 @@ pub fn run(
                         journal.record(
                             RecordKind::Runtime,
                             clock.now_ns(),
-                            &source_event_payload(source, SourceEvent::Started),
+                            source_event_payload(source, SourceEvent::Started),
                         );
                     }
                     (false, true) => {
@@ -1232,7 +1229,7 @@ pub fn run(
                         journal.record(
                             RecordKind::Runtime,
                             clock.now_ns(),
-                            &source_event_payload(source, SourceEvent::Stopped),
+                            source_event_payload(source, SourceEvent::Stopped),
                         );
                     }
                     (true, true) if adapters.get(&i).is_some_and(|a| a.handle.is_finished()) => {
@@ -1252,7 +1249,7 @@ pub fn run(
                         journal.record(
                             RecordKind::Runtime,
                             clock.now_ns(),
-                            &source_event_payload(source, SourceEvent::Stopped),
+                            source_event_payload(source, SourceEvent::Stopped),
                         );
                     }
                     _ => {}
@@ -1277,7 +1274,7 @@ pub fn run(
                     journal.record(
                         RecordKind::Runtime,
                         at,
-                        &source_event_payload(source, SourceEvent::Connected),
+                        source_event_payload(source, SourceEvent::Connected),
                     );
                     Observation::Connected
                 }
@@ -1288,7 +1285,7 @@ pub fn run(
                     } else {
                         SourceEvent::Disconnected
                     };
-                    journal.record(RecordKind::Runtime, at, &source_event_payload(source, kind));
+                    journal.record(RecordKind::Runtime, at, source_event_payload(source, kind));
                     Observation::Disconnected {
                         rate_limited: *rate_limited,
                     }
@@ -1332,7 +1329,7 @@ pub fn run(
                 journal.record(
                     RecordKind::Runtime,
                     buy.times.sink_ns,
-                    &paper_handoff_payload(&buy),
+                    paper_handoff_payload(&buy),
                 );
             }
             match decided {
@@ -1341,7 +1338,7 @@ pub fn run(
                         journal.record(
                             RecordKind::RawSignedTx,
                             at,
-                            &first_sighting_payload(source, &hash, raw),
+                            first_sighting_payload(source, &hash, raw),
                         );
                     }
                 }
@@ -1354,19 +1351,19 @@ pub fn run(
                     journal.record(
                         RecordKind::Runtime,
                         at,
-                        &later_sighting_payload(source, &hash, lag_ns),
+                        later_sighting_payload(source, &hash, lag_ns),
                     );
                 }
                 // Not a launch: the pending capture scope decides.
                 None => {
                     if let Event::Full { raw, hash, .. } = &event
                         && core.last_first_full()
-                        && config.capture_pending.keeps(&four_deployment, raw)
+                        && config.capture_pending.keeps(core.last_venue_target())
                     {
                         journal.record(
                             RecordKind::TxpoolAccepted,
                             at,
-                            &first_sighting_payload(source, hash, raw),
+                            first_sighting_payload(source, hash, raw),
                         );
                     }
                 }
@@ -1406,7 +1403,7 @@ pub fn run(
                     journal.record(
                         RecordKind::Canonical,
                         clock.now_ns(),
-                        &window_payload(b'E', n, &h),
+                        window_payload(b'E', n, &h),
                     );
                 }
                 c.state = "STOPPED";
@@ -1477,7 +1474,7 @@ pub fn run(
                 journal.record(
                     RecordKind::Canonical,
                     clock.now_ns(),
-                    &window_payload(b'K', n, &h),
+                    window_payload(b'K', n, &h),
                 );
             }
             // The census replays every journal: on its own thread, one at a
@@ -1510,7 +1507,7 @@ pub fn run(
                 x.shutdown();
             }
             journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
-            journal.record(RecordKind::Runtime, clock.now_ns(), &EXIT_PAYLOAD);
+            journal.record(RecordKind::Runtime, clock.now_ns(), EXIT_PAYLOAD.to_vec());
             journal.finish()?;
             // The last periodic census ends before the final one.
             if let Some(done) = census_job.take() {
@@ -1744,7 +1741,7 @@ mod tests {
         journal.record(
             RecordKind::Runtime,
             1,
-            &source_event_payload(SourceId::PublicNode, SourceEvent::Connected),
+            source_event_payload(SourceId::PublicNode, SourceEvent::Connected),
         );
         // Mined before the process started (a C2 resume backfill): its
         // launch, the gap before it and the block are outside the window.

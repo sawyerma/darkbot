@@ -136,6 +136,8 @@ pub struct IngressCore {
     four: FourDeployment,
     /// The last observation was the first full sighting of its hash.
     last_first_full: bool,
+    /// The last observation was a full transaction to a venue contract.
+    last_venue_target: bool,
 }
 
 fn index(source: SourceId) -> usize {
@@ -172,36 +174,42 @@ fn flap_launch_target(
 }
 
 /// The venue of canonical signed bytes that are a launch: the Flap C1 scope
-/// first, then a Four.meme `createToken` of either family of `four`. One
-/// envelope decode serves both decoders.
+/// first, then a Four.meme `createToken` of either family of `four`.
 pub fn launch_venue(four: &FourDeployment, raw: &[u8], max_calldata: usize) -> Option<Venue> {
-    let target = decode_tx_target(raw).ok()?;
+    classify(four, raw, max_calldata).0
+}
+
+/// The launch venue of canonical signed bytes (`launch_venue`) and whether
+/// they address a venue contract (`venue_target`), from one envelope decode
+/// that serves both decoders and the address check.
+pub fn classify(four: &FourDeployment, raw: &[u8], max_calldata: usize) -> (Option<Venue>, bool) {
+    let Ok(target) = decode_tx_target(raw) else {
+        return (None, false);
+    };
+    let to = target.to.map(Address::from);
+    let addressed = addresses_venue(four, to);
     if flap_launch_target(&target, max_calldata) {
-        return Some(Venue::Flap);
+        return (Some(Venue::Flap), addressed);
     }
-    match four::recognize(
-        four,
-        target.to.map(Address::from),
-        target.data,
-        max_calldata,
-    ) {
+    let launch = match four::recognize(four, to, target.data, max_calldata) {
         four::Recognized::ClassicLaunch(_) => Some(Venue::Four),
         four::Recognized::OpenFourLaunch(_) => Some(Venue::OpenFour),
         _ => None,
-    }
+    };
+    (launch, addressed)
 }
 
 /// Whether canonical signed bytes are addressed to a frozen venue contract
 /// (the Flap Portal, TokenManager2, OpenFour Core): the venues' pending
 /// flow, launches or not (competitor BUYs and SELLs).
 pub fn venue_target(four: &FourDeployment, raw: &[u8]) -> bool {
-    let Ok(target) = decode_tx_target(raw) else {
-        return false;
-    };
-    let Some(to) = target.to.map(Address::from) else {
-        return false;
-    };
-    to == Address::from(C14_FLAP_SCOPE.addresses[0]) || four.family_of(to).is_some()
+    decode_tx_target(raw).is_ok_and(|target| addresses_venue(four, target.to.map(Address::from)))
+}
+
+fn addresses_venue(four: &FourDeployment, to: Option<Address>) -> bool {
+    to.is_some_and(|to| {
+        to == Address::from(C14_FLAP_SCOPE.addresses[0]) || four.family_of(to).is_some()
+    })
 }
 
 /// The pre-execution token of canonical signed bytes that the production
@@ -241,6 +249,7 @@ impl IngressCore {
             max_launch_calldata,
             four: bsc_mainnet_g01_129842711(),
             last_first_full: false,
+            last_venue_target: false,
         }
     }
 
@@ -248,6 +257,12 @@ impl IngressCore {
     /// its hash (a launch or not): what a pending capture journals.
     pub fn last_first_full(&self) -> bool {
         self.last_first_full
+    }
+
+    /// Whether the last observation was a full transaction addressed to a
+    /// venue contract (`venue_target`, from the observation's own decode).
+    pub fn last_venue_target(&self) -> bool {
+        self.last_venue_target
     }
 
     pub fn stats(&self, source: SourceId) -> SourceStats {
@@ -296,6 +311,7 @@ impl IngressCore {
         let bit = 1u8 << i;
         self.stats[i].last_event_ns = Some(now_ns);
         self.last_first_full = false;
+        self.last_venue_target = false;
         match observation {
             Observation::Connected => {
                 self.stats[i].connected = true;
@@ -340,7 +356,8 @@ impl IngressCore {
             }
             Observation::Full { hash, raw } => {
                 self.stats[i].full += 1;
-                let launch = launch_venue(&self.four, raw, self.max_launch_calldata);
+                let (launch, venue_target) = classify(&self.four, raw, self.max_launch_calldata);
+                self.last_venue_target = venue_target;
                 // The per-source launch counters stay the Flap C1 scope.
                 let flap = launch == Some(Venue::Flap);
                 if flap {
@@ -630,13 +647,28 @@ mod tests {
             core.observe(SourceId::PublicNode, full([1; 32]), 2, None),
             None
         );
-        assert!(core.last_first_full());
+        assert!(core.last_first_full() && core.last_venue_target());
+        // One decode tells the venue and the target alike.
+        for raw in [
+            &buy[..],
+            &legacy(PORTAL, LAUNCH),
+            &legacy([7; 20], LAUNCH),
+            b"not a transaction",
+        ] {
+            assert_eq!(
+                classify(&four, raw, MAX_CALLDATA),
+                (
+                    launch_venue(&four, raw, MAX_CALLDATA),
+                    venue_target(&four, raw)
+                )
+            );
+        }
         core.observe(SourceId::Drpc, full([1; 32]), 3, None);
         assert!(!core.last_first_full());
         core.observe(SourceId::Drpc, full([2; 32]), 4, None);
         assert!(core.last_first_full());
         core.observe(SourceId::Drpc, Observation::Connected, 5, None);
-        assert!(!core.last_first_full());
+        assert!(!core.last_first_full() && !core.last_venue_target());
     }
 
     /// Phase E review M1: an OpenFour launch of a preset outside the frozen

@@ -380,6 +380,28 @@ mod tests {
         assert_eq!(stats.rejected_oversize, 1);
     }
 
+    /// Phase F gate L5: an owned payload moves into the record (the same
+    /// allocation reaches the drain) under the same refusals and sequence.
+    #[test]
+    fn an_owned_payload_moves_into_the_record() {
+        let (mut recorder, drain) = Recorder::bounded(1, 4).unwrap();
+        let payload = vec![1u8, 2, 3];
+        let at = payload.as_ptr();
+        assert_eq!(recorder.try_record_owned(RecordKind::Runtime, 1, payload), Ok(0));
+        assert_eq!(
+            recorder.try_record_owned(RecordKind::Runtime, 2, vec![0; 5]),
+            Err(RecordError::PayloadTooLarge { len: 5, max: 4 })
+        );
+        assert_eq!(
+            recorder.try_record_owned(RecordKind::Runtime, 3, vec![4]),
+            Err(RecordError::QueueFull { sequence: 1 })
+        );
+        let record = drain.try_recv().unwrap().unwrap();
+        assert_eq!((record.sequence, &record.payload[..]), (0, &[1u8, 2, 3][..]));
+        assert_eq!(record.payload.as_ptr(), at);
+        assert_eq!(recorder.stats().next_sequence, 2);
+    }
+
     #[test]
     fn reader_enforces_payload_bound_before_allocating_payload() {
         let record = CaptureRecord {

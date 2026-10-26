@@ -1032,7 +1032,7 @@ mod tests {
         };
         let mut j = RuntimeJournal::open(dir, started, 1, setup).unwrap();
         for (kind, at, payload) in records {
-            assert!(j.record(*kind, *at, payload));
+            assert!(j.record(*kind, *at, payload.clone()));
         }
         let path = j.path().to_path_buf();
         j.finish().unwrap();

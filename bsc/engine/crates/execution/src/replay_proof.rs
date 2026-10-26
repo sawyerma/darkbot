@@ -571,7 +571,7 @@ mod tests {
         let mut at = 0;
         let mut put = |j: &mut RuntimeJournal, kind, payload: &[u8]| {
             at += 1;
-            assert!(j.record(kind, at, payload));
+            assert!(j.record(kind, at, payload.to_vec()));
         };
         put(
             &mut j,
@@ -746,19 +746,19 @@ mod tests {
             j.record(
                 RecordKind::Canonical,
                 1,
-                &window_payload(b'H', 10, &[10; 32]),
+                window_payload(b'H', 10, &[10; 32]),
             );
             j.record(
                 RecordKind::TxpoolAccepted,
                 2,
-                &first_sighting_payload(SourceId::Drpc, &[1; 32], &flap_launch()),
+                first_sighting_payload(SourceId::Drpc, &[1; 32], &flap_launch()),
             );
             j.record(
                 RecordKind::Canonical,
                 3,
-                &window_payload(b'E', 11, &[11; 32]),
+                window_payload(b'E', 11, &[11; 32]),
             );
-            j.record(RecordKind::Runtime, 4, &EXIT_PAYLOAD);
+            j.record(RecordKind::Runtime, 4, EXIT_PAYLOAD.to_vec());
             j.finish().unwrap();
         }
         let p = prove(&b, "7", Some(&status(7, 0)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
@@ -788,12 +788,12 @@ mod tests {
             j.record(
                 RecordKind::Canonical,
                 1,
-                &window_payload(b'H', 10, &[10; 32]),
+                window_payload(b'H', 10, &[10; 32]),
             );
             j.record(
                 RecordKind::Canonical,
                 3,
-                &crate::runtime_journal::canonical_launch_payload(&Joined {
+                crate::runtime_journal::canonical_launch_payload(&Joined {
                     launch,
                     visibility: Visibility::FullBefore {
                         source: SourceId::Drpc,
@@ -804,9 +804,9 @@ mod tests {
             j.record(
                 RecordKind::Canonical,
                 4,
-                &window_payload(b'E', 11, &[11; 32]),
+                window_payload(b'E', 11, &[11; 32]),
             );
-            j.record(RecordKind::Runtime, 5, &EXIT_PAYLOAD);
+            j.record(RecordKind::Runtime, 5, EXIT_PAYLOAD.to_vec());
             j.finish().unwrap();
         }
         let p = prove(&c, "7", Some(&status(7, 0)), MAX + 64, MAX, CONFIG, BUILD).unwrap();

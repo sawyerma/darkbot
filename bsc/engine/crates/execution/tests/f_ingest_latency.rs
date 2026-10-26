@@ -208,10 +208,14 @@ fn f_ingest_latency() {
         JournalSetup::whole(WARMUP + N, payload.len().max(MAX_CALLDATA + 64)),
     )
     .unwrap();
+    // As the runtime does: the sighting payload is built (the one copy of
+    // the signed bytes) and moves into the record.
     stages.push((
         "recorder_enqueue",
         measure(|i| {
-            black_box(journal.record(RecordKind::RawSignedTx, i as u64, black_box(&payload)));
+            let payload =
+                first_sighting_payload(SourceId::PublicNode, &[7; 32], black_box(&flap_launch));
+            black_box(journal.record(RecordKind::RawSignedTx, i as u64, payload));
         }),
     ));
     let lost = journal.lost();

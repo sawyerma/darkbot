@@ -131,12 +131,34 @@ impl Recorder {
         timestamp_ns: u64,
         payload: &[u8],
     ) -> Result<u64, RecordError> {
-        if payload.len() > self.max_payload {
+        self.enqueue(kind, timestamp_ns, payload.len(), || payload.to_vec().into_boxed_slice())
+    }
+
+    /// `try_record` of a payload the caller built and gives up: its bytes
+    /// move into the record (no copy when the vector is exactly full).
+    pub fn try_record_owned(
+        &mut self,
+        kind: RecordKind,
+        timestamp_ns: u64,
+        payload: Vec<u8>,
+    ) -> Result<u64, RecordError> {
+        let len = payload.len();
+        self.enqueue(kind, timestamp_ns, len, move || payload.into_boxed_slice())
+    }
+
+    fn enqueue(
+        &mut self,
+        kind: RecordKind,
+        timestamp_ns: u64,
+        len: usize,
+        bytes: impl FnOnce() -> Box<[u8]>,
+    ) -> Result<u64, RecordError> {
+        if len > self.max_payload {
             self.counters
                 .rejected_oversize
                 .fetch_add(1, Ordering::Relaxed);
             return Err(RecordError::PayloadTooLarge {
-                len: payload.len(),
+                len,
                 max: self.max_payload,
             });
         }
@@ -149,7 +171,7 @@ impl Recorder {
         // consumes the sequence: replay shows the loss as a gap.
         let permit = match &self.budget {
             None => None,
-            Some(budget) => match budget.try_reserve(RECORD_OVERHEAD.saturating_add(payload.len())) {
+            Some(budget) => match budget.try_reserve(RECORD_OVERHEAD.saturating_add(len)) {
                 Some(permit) => Some(permit),
                 None => {
                     self.counters.next_sequence.store(next, Ordering::Release);
@@ -160,7 +182,7 @@ impl Recorder {
         };
         // Allocate before consuming a sequence: allocation failure cannot
         // fabricate a queue-loss span after a caught unwind.
-        let payload = payload.to_vec().into_boxed_slice();
+        let payload = bytes();
         self.counters.next_sequence.store(next, Ordering::Release);
         let record = CaptureRecord {
             sequence,

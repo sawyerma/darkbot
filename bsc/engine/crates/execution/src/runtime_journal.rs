@@ -311,15 +311,12 @@ impl CaptureScope {
     }
 
     /// Whether the first full sighting of a pending transaction that is no
-    /// launch is journaled.
-    pub fn keeps(
-        self,
-        four: &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
-        raw: &[u8],
-    ) -> bool {
+    /// launch is journaled; `venue_target` is the ingress decode's own
+    /// verdict (`IngressCore::last_venue_target`), never a second decode.
+    pub fn keeps(self, venue_target: bool) -> bool {
         match self {
             Self::Launches => false,
-            Self::Venues => crate::ingress::venue_target(four, raw),
+            Self::Venues => venue_target,
             Self::All => true,
         }
     }
@@ -514,11 +511,12 @@ impl RuntimeJournal {
     }
 
     /// Enqueues without waiting; `false` when the record was lost (counted).
-    pub fn record(&mut self, kind: RecordKind, timestamp_ns: u64, payload: &[u8]) -> bool {
+    /// The payload moves into the record, never copied again.
+    pub fn record(&mut self, kind: RecordKind, timestamp_ns: u64, payload: Vec<u8>) -> bool {
         let ok = self
             .recorder
             .as_mut()
-            .is_some_and(|r| r.try_record(kind, timestamp_ns, payload).is_ok());
+            .is_some_and(|r| r.try_record_owned(kind, timestamp_ns, payload).is_ok());
         if !ok {
             self.lost += 1;
         }
@@ -757,7 +755,11 @@ mod tests {
             .collect();
         let venue = alloy_primitives::hex::decode(row[10]).unwrap();
         let other = b"not a venue transaction";
-        let keeps = |s: &str, raw: &[u8]| CaptureScope::parse(s).unwrap().keeps(&four, raw);
+        let keeps = |s: &str, raw: &[u8]| {
+            CaptureScope::parse(s)
+                .unwrap()
+                .keeps(crate::ingress::venue_target(&four, raw))
+        };
         assert!(!keeps("LAUNCHES", &venue));
         assert!(keeps("VENUES", &venue) && !keeps("VENUES", other));
         assert!(keeps("ALL", other));
@@ -809,17 +811,17 @@ mod tests {
         assert!(j.record(
             RecordKind::Runtime,
             1,
-            &source_event_payload(SourceId::Drpc, SourceEvent::Connected)
+            source_event_payload(SourceId::Drpc, SourceEvent::Connected)
         ));
         assert!(j.record(
             RecordKind::RawSignedTx,
             2,
-            &first_sighting_payload(SourceId::Drpc, &h, b"raw")
+            first_sighting_payload(SourceId::Drpc, &h, b"raw")
         ));
         assert!(j.record(
             RecordKind::Runtime,
             3,
-            &later_sighting_payload(SourceId::PublicNode, &h, 40)
+            later_sighting_payload(SourceId::PublicNode, &h, 40)
         ));
         let path = j.path().to_path_buf();
         assert_eq!(path, dir.join("7"));
@@ -942,7 +944,7 @@ mod tests {
         };
         let mut j = RuntimeJournal::open(&dir, 1, 1, setup).unwrap();
         let run = j.path().to_path_buf();
-        assert!(j.record(RecordKind::Runtime, 1, &[1u8; 80]));
+        assert!(j.record(RecordKind::Runtime, 1, vec![1u8; 80]));
         let started = std::time::Instant::now();
         while j.appended() < 1 {
             assert!(started.elapsed() < std::time::Duration::from_secs(5));
@@ -950,14 +952,14 @@ mod tests {
         }
         fs::set_permissions(&run, fs::Permissions::from_mode(0o500)).unwrap();
         // The next record makes the writer rotate: it cannot seal.
-        assert!(j.record(RecordKind::Runtime, 2, &[2u8; 80]));
+        assert!(j.record(RecordKind::Runtime, 2, vec![2u8; 80]));
         while j.healthy() {
             assert!(started.elapsed() < std::time::Duration::from_secs(5));
             std::thread::yield_now();
         }
         assert!(j.capture().writer.failed);
         // Queued into a dead writer or refused: never sealed either way.
-        j.record(RecordKind::Runtime, 3, &[3u8; 8]);
+        j.record(RecordKind::Runtime, 3, vec![3u8; 8]);
         fs::set_permissions(&run, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(j.finish().is_err());
         let m = cr::decode_run(&fs::read(run.join(RUN_MANIFEST)).unwrap()).unwrap();
@@ -993,7 +995,7 @@ mod tests {
         assert!(j.record(
             RecordKind::Runtime,
             1,
-            &ingress_drop_payload(SourceId::Drpc, 3)
+            ingress_drop_payload(SourceId::Drpc, 3)
         ));
         j.set_ingress_dropped(3);
         let path = j.path().to_path_buf();
@@ -1035,7 +1037,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let mut j = RuntimeJournal::open(&dir, 1, 1, JournalSetup::whole(1, 64)).unwrap();
         // Oversize payloads are refused by the bounded recorder: counted.
-        assert!(!j.record(RecordKind::Runtime, 1, &[0u8; 65]));
+        assert!(!j.record(RecordKind::Runtime, 1, vec![0u8; 65]));
         assert_eq!(j.lost(), 1);
         let path = j.path().to_path_buf();
         let run = j.finish().unwrap();

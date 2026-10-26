@@ -353,22 +353,22 @@ mod tests {
         j.record(
             RecordKind::Canonical,
             1,
-            &window_payload(b'H', 10, &[10; 32]),
+            window_payload(b'H', 10, &[10; 32]),
         );
         if drops > 0 {
             j.record(
                 RecordKind::Runtime,
                 2,
-                &ingress_drop_payload(SourceId::Geth, drops),
+                ingress_drop_payload(SourceId::Geth, drops),
             );
             j.set_ingress_dropped(drops);
         }
         j.record(
             RecordKind::Canonical,
             end,
-            &window_payload(b'E', 11, &[11; 32]),
+            window_payload(b'E', 11, &[11; 32]),
         );
-        j.record(RecordKind::Runtime, end, &EXIT_PAYLOAD);
+        j.record(RecordKind::Runtime, end, EXIT_PAYLOAD.to_vec());
         let _ = j.finish();
     }
 
