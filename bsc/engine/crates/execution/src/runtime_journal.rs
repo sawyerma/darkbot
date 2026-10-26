@@ -971,9 +971,7 @@ mod tests {
         );
         // Records 1 (in the open segment), 2 and 3.
         assert!(
-            reasons
-                .iter()
-                .any(|r| *r == "3 records never reached a sealed segment"),
+            reasons.contains(&"3 records never reached a sealed segment"),
             "{reasons:?}"
         );
         assert_eq!(
