@@ -34,10 +34,13 @@ mod util;
 
 /// Every tunable bound and its default (each overridable by its flag).
 mod defaults {
+    /// `--samples` (1..=10000000).
     pub const SAMPLES: usize = 100_000;
+    /// `--warmup` (0..=1000000).
     pub const WARMUP: usize = 1_000;
     pub const OUT_ROOT: &str = "bsc/native/evidence/g";
-    /// The policy slippage of the admission's minimum output, in bps.
+    /// The policy slippage of the admission's minimum output, in bps
+    /// (`--slippage-bps`, 0..=9999).
     pub const SLIPPAGE_BPS: u16 = 100;
 }
 
@@ -59,12 +62,9 @@ fn run() -> Result<(), String> {
     if cfg!(debug_assertions) {
         return Err("a debug build measures nothing: build with --release".into());
     }
-    let samples: usize = util::number(&args, "samples", defaults::SAMPLES)?;
-    let warmup: usize = util::number(&args, "warmup", defaults::WARMUP)?;
-    let slippage: u16 = util::number(&args, "slippage-bps", defaults::SLIPPAGE_BPS)?;
-    if samples == 0 {
-        return Err("--samples must be positive".into());
-    }
+    let samples: usize = util::bounded(&args, "samples", defaults::SAMPLES, 1, 10_000_000)?;
+    let warmup: usize = util::bounded(&args, "warmup", defaults::WARMUP, 0, 1_000_000)?;
+    let slippage: u16 = util::bounded(&args, "slippage-bps", defaults::SLIPPAGE_BPS, 0, 9_999)?;
     let root = Path::new(".");
     let text = std::fs::read_to_string(root.join(PARITY)).map_err(|e| format!("{PARITY}: {e}"))?;
     // The parity set's states in the production scope (its SUPPORTED

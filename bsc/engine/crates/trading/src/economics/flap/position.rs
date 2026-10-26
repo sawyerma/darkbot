@@ -7,9 +7,9 @@
 //! approval (unless already given) and SELL network fees. Never a guessed
 //! percentage: whatever a quote refuses (holding cap, DEX threshold,
 //! unwitnessed branch) or a path class without gas evidence fails closed.
-//! The network fee is the class's largest observed gas used (an assumption) at the
-//! given gas price (`network::GasEvidence`), an assumption labeled as such,
-//! not a measurement of the trade.
+//! The network fee is the class's largest observed gas used at the given
+//! gas price (`network::GasEvidence`), an assumption labeled as such, not a
+//! measurement of the trade.
 
 use alloy_primitives::U256;
 

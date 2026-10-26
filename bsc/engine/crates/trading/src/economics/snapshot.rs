@@ -107,7 +107,7 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "REVERTED BUY, REVERTED SELL",
         support: Support::Unsupported,
-        rule: "no reverted-trade outcome in flap::position and no reverted Portal swap in the gas sample; reverts are keyed by the attempted action (network::Action), so a reverted launch is no evidence of one",
+        rule: "no reverted-trade outcome in flap::position; the gas sample's reverted swaps are a cost class only; reverts are keyed by the attempted action (network::Action), so a reverted launch is no evidence of one",
     },
     Scope {
         venue: "FLAP",
@@ -187,7 +187,7 @@ pub const POLICIES: &[(&str, &str)] = &[
     ),
     (
         "migration",
-        "a BUY whose supply after it reaches the token's dexSupplyThresh is refused",
+        "a BUY whose supply after it reaches the token's dexSupplyThresh is refused, and a BUY or SELL of a token at or past it (QuoteError::Migrated): a migrated token is never quoted",
     ),
     (
         "gas_evidence",

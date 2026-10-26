@@ -38,8 +38,6 @@ use crate::venues::flap::abi::{
 /// Reason a quote is not available for the given inputs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuoteError {
-    /// The curve id is not the witnessed one.
-    UnsupportedCurve,
     /// The BUY input amount is zero.
     ZeroInput,
     /// The tax-disabled branch has no witness and is not quoted.
@@ -86,7 +84,6 @@ impl From<FeeError> for QuoteError {
 impl core::fmt::Display for QuoteError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::UnsupportedCurve => f.write_str("quote: unsupported curve id"),
             Self::ZeroInput => f.write_str("quote: input amount is zero"),
             Self::UnwitnessedTaxDisabled => f.write_str("quote: tax-disabled branch unwitnessed"),
             Self::UnwitnessedExemptCaller => f.write_str("quote: exempt-caller branch unwitnessed"),

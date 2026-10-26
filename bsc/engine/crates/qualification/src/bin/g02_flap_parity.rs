@@ -182,6 +182,12 @@ fn run() -> Result<(), String> {
         let CallOutcome::Returned(raw) =
             rpc.call_at(portal, &getTokenV8SafeCall { token }.abi_encode(), &pin)?
         else {
+            let line = format!(
+                "# skipped {token} at {}: getTokenV8Safe reverted",
+                pin.number
+            );
+            println!("{line}");
+            skipped.push(line);
             continue;
         };
         let s = getTokenV8SafeCall::abi_decode_returns(&raw).map_err(|e| e.to_string())?;
