@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/project0/v1/analytics.proto.
  */
 export const file_darkbot_project0_v1_analytics: GenFile = /*@__PURE__*/
-  fileDesc("CiNkYXJrYm90L3Byb2plY3QwL3YxL2FuYWx5dGljcy5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSLMAQoNQW5hbHl0aWNzSm9icxIZChFwdWJsaXNoZWRfdW5peF9tcxgBIAEoBBITCgtydW5uZXJfYnVzeRgCIAEoCBIvCgRydW5zGAMgAygLMiEuZGFya2JvdC5wcm9qZWN0MC52MS5BbmFseXRpY3NSdW4SLwoEam9icxgEIAMoCzIhLmRhcmtib3QucHJvamVjdDAudjEuQW5hbHl0aWNzSm9iEhMKC3N0b3JlX2Vycm9yGAUgASgJEhQKDHJ1bm5lcl9lcnJvchgGIAEoCSLZAQoMQW5hbHl0aWNzUnVuEg4KBnJ1bl9pZBgBIAEoCRIMCgRyb290GAIgASgJEg4KBmxheW91dBgDIAEoCRIYChBjYXB0dXJlX2NvbXBsZXRlGAQgASgIEjwKDXF1YWxpZmljYXRpb24YBSABKAsyJS5kYXJrYm90LnByb2plY3QwLnYxLlJ1blF1YWxpZmljYXRpb24SHQoQbW9kaWZpZWRfdW5peF9tcxgGIAEoBEgAiAEBEg8KB3J1bm5pbmcYByABKAhCEwoRX21vZGlmaWVkX3VuaXhfbXMicgoQUnVuUXVhbGlmaWNhdGlvbhIPCgd2ZXJkaWN0GAEgASgJEhQKDHZlcmlmaWNhdGlvbhgCIAEoCRIOCgZmYWlsZWQYAyADKAkSGAoQcXVhbGlmaWNhdGlvbl9pZBgEIAEoCRINCgVlcnJvchgFIAEoCSKUBQoMQW5hbHl0aWNzSm9iEg4KBmpvYl9pZBgBIAEoCRIMCgRraW5kGAIgASgJEgsKA3J1bhgDIAEoCRINCgVzdGF0ZRgEIAEoCRIMCgRjb2RlGAUgASgJEh4KEXJlcXVlc3RlZF91bml4X21zGAYgASgESAGIAQESHAoPc3RhcnRlZF91bml4X21zGAcgASgESAKIAQESHQoQZmluaXNoZWRfdW5peF9tcxgIIAEoBEgDiAEBEhMKC21heF9zZWNvbmRzGAkgASgEEhUKDW1heF9yYW1fYnl0ZXMYCiABKAQSLgoGcGFyYW1zGAsgASgLMh4uZGFya2JvdC5wcm9qZWN0MC52MS5Kb2JQYXJhbXMSKgoEZ3JpZBgMIAEoCzIcLmRhcmtib3QucHJvamVjdDAudjEuSm9iR3JpZBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GA0gASgJEjcKCGJhY2t0ZXN0GA4gASgLMiMuZGFya2JvdC5wcm9qZWN0MC52MS5CYWNrdGVzdFJlc3VsdEgAEjcKCG9wdGltaXplGA8gASgLMiMuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVJlc3VsdEgAEj4KDHBvc3RfY2FwdHVyZRgRIAEoCzImLmRhcmtib3QucHJvamVjdDAudjEuUG9zdENhcHR1cmVSZXN1bHRIABI/ChFwb3N0X2NhcHR1cmVfc3BlYxgQIAEoCzIkLmRhcmtib3QucHJvamVjdDAudjEuUG9zdENhcHR1cmVTcGVjQggKBnJlc3VsdEIUChJfcmVxdWVzdGVkX3VuaXhfbXNCEgoQX3N0YXJ0ZWRfdW5peF9tc0ITChFfZmluaXNoZWRfdW5peF9tcyJjCg9Qb3N0Q2FwdHVyZVNwZWMSFAoMY2hhaW5fdmVyaWZ5GAEgASgJEg8KB29mZmxpbmUYAiABKAgSDgoGcmVzdW1lGAMgASgIEhkKEXByb3ZpZGVyX2V2aWRlbmNlGAQgASgIIlAKEVBvc3RDYXB0dXJlUmVzdWx0EhcKD3ZlcmlmaWNhdGlvbl9vaxgBIAEoCBIRCglyZXBvcnRfb2sYAiABKAgSDwoHdmVyZGljdBgDIAEoCSJ/CglKb2JQYXJhbXMSRgobbWluX3Byb2ZpdF91c2RfbWljcm9fc2lnbmVkGAEgASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwSGQoRY2FwaXRhbF91c2RfbWljcm8YAiADKAQSDwoHZnVuZGluZxgDIAMoCSLHAQoHSm9iR3JpZBJGChttaW5fcHJvZml0X3VzZF9taWNyb19zaWduZWQYASADKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBI1CgxmdW5kaW5nX3NldHMYAiADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLkZ1bmRpbmdTZXQSEwoLaG9sZG91dF9icHMYAyABKAQSEgoKbWF4X3BvaW50cxgEIAEoBBIUCgxzYXZlX3Byb2ZpbGUYBSABKAgiHQoKRnVuZGluZ1NldBIPCgdjbGFzc2VzGAEgAygJIt0BCg5CYWNrdGVzdFJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDAoEcm93cxgDIAEoBBIQCghhdHRlbXB0cxgEIAEoBBIUCgxsaXF1aWRhdGlvbnMYBSABKAQSQQoOY291bnRlcmZhY3R1YWwYBiABKAsyKS5kYXJrYm90LnByb2plY3QwLnYxLlNoYWRvd0NvdW50ZXJmYWN0dWFsEhAKCHJlYWxpemVkGAcgASgJEhUKDXJlc3VsdF9zaGEyNTYYCCABKAwi/QEKFFNoYWRvd0NvdW50ZXJmYWN0dWFsEg8KB21hdGNoZWQYASABKAQSDwoHdW5rbm93bhgCIAEoBBIYChBmdW5kaW5nX2V4Y2x1ZGVkGAMgASgEEhUKDWJlbG93X21pbmltdW0YBCABKAQSDAoEd2lucxgFIAEoBBISCgpsb3N0X3JhY2VzGAYgASgEEhYKDm5vX2NoYWluX2V2ZW50GAcgASgEEjcKCXNjZW5hcmlvcxgIIAMoCzIkLmRhcmtib3QucHJvamVjdDAudjEuQ2FwaXRhbFNjZW5hcmlvEg8KB2xhbmRpbmcYCSABKAkSDgoGc2FmZXR5GAogASgJItMCCg9DYXBpdGFsU2NlbmFyaW8SGQoRY2FwaXRhbF91c2RfbWljcm8YASABKAQSDAoEd2lucxgCIAEoBBJDChh3aW5fbmV0X3VzZF9taWNyb19zaWduZWQYAyABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbBIXCg9mYWlsZWRfYXR0ZW1wdHMYBCABKAQSRgoZZmFpbGVkX2Nvc3RfdXNkX21pY3JvX3N1bRgFIAEoCzIjLmRhcmtib3QuY29udHJvbC52MS5VbnNpZ25lZERlY2ltYWwSGwoTZmFpbGVkX2Nvc3RfdW5rbm93bhgGIAEoBBITCgtvdmVyX2J1ZGdldBgHIAEoBBI/ChRuZXRfdXNkX21pY3JvX3NpZ25lZBgIIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIp0CCg5PcHRpbWl6ZVJlc3VsdBIRCglyZXN1bHRfaWQYASABKAkSFgoOY2FwdHVyZV9ydW5faWQYAiABKAkSDgoGcG9pbnRzGAMgASgEEi4KBmNob3NlbhgEIAEoCzIeLmRhcmtib3QucHJvamVjdDAudjEuSm9iUGFyYW1zEjoKDmNob3Nlbl9ob2xkb3V0GAUgASgLMiIuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVNjb3JlEjwKEGJhc2VsaW5lX2hvbGRvdXQYBiABKAsyIi5kYXJrYm90LnByb2plY3QwLnYxLk9wdGltaXplU2NvcmUSFQoNcmVzdWx0X3NoYTI1NhgHIAEoDBIPCgdwcm9maWxlGAggASgJIpMBCg1PcHRpbWl6ZVNjb3JlEkEKDmNvdW50ZXJmYWN0dWFsGAEgASgLMikuZGFya2JvdC5wcm9qZWN0MC52MS5TaGFkb3dDb3VudGVyZmFjdHVhbBI/ChRvYmplY3RpdmVfYnBzX3NpZ25lZBgCIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsIqsBChJCYWNrdGVzdEpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhYKDm1pbl9wcm9maXRfdXNkGAIgASgJEhMKC2NhcGl0YWxfdXNkGAMgAygEEg8KB2Z1bmRpbmcYBCADKAkSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBBIbChN2ZXJpZmljYXRpb25fcmVzdWx0GAcgASgJIuIBChJPcHRpbWl6ZUpvYkNvbW1hbmQSOQoIYmFzZWxpbmUYASABKAsyJy5kYXJrYm90LnByb2plY3QwLnYxLkJhY2t0ZXN0Sm9iQ29tbWFuZBIbChNtaW5fcHJvZml0X3VzZF9ncmlkGAIgAygJEjUKDGZ1bmRpbmdfc2V0cxgDIAMoCzIfLmRhcmtib3QucHJvamVjdDAudjEuRnVuZGluZ1NldBITCgtob2xkb3V0X2JwcxgEIAEoBBISCgptYXhfcG9pbnRzGAUgASgEEhQKDHNhdmVfcHJvZmlsZRgGIAEoCCKXAQoVUG9zdENhcHR1cmVKb2JDb21tYW5kEg4KBnJ1bl9pZBgBIAEoCRIUCgxjaGFpbl92ZXJpZnkYAiABKAkSDwoHb2ZmbGluZRgDIAEoCBIbChNyZXN1bWVfdmVyaWZpY2F0aW9uGAQgASgIEhMKC21heF9zZWNvbmRzGAUgASgEEhUKDW1heF9yYW1fYnl0ZXMYBiABKARClwEKF2NvbS5kYXJrYm90LnByb2plY3QwLnYxQg5BbmFseXRpY3NQcm90b1ABogIDRFBYqgITRGFya2JvdC5Qcm9qZWN0MC5WMcoCE0Rhcmtib3RcUHJvamVjdDBcVjHiAh9EYXJrYm90XFByb2plY3QwXFYxXEdQQk1ldGFkYXRh6gIVRGFya2JvdDo6UHJvamVjdDA6OlYxYgZwcm90bzM", [file_darkbot_control_v1_numeric]);
+  fileDesc("CiNkYXJrYm90L3Byb2plY3QwL3YxL2FuYWx5dGljcy5wcm90bxITZGFya2JvdC5wcm9qZWN0MC52MSL5AQoNQW5hbHl0aWNzSm9icxIZChFwdWJsaXNoZWRfdW5peF9tcxgBIAEoBBITCgtydW5uZXJfYnVzeRgCIAEoCBIvCgRydW5zGAMgAygLMiEuZGFya2JvdC5wcm9qZWN0MC52MS5BbmFseXRpY3NSdW4SLwoEam9icxgEIAMoCzIhLmRhcmtib3QucHJvamVjdDAudjEuQW5hbHl0aWNzSm9iEhMKC3N0b3JlX2Vycm9yGAUgASgJEhQKDHJ1bm5lcl9lcnJvchgGIAEoCRIrCgRib290GAcgASgLMh0uZGFya2JvdC5wcm9qZWN0MC52MS5Cb290RmxvdyKGBAoIQm9vdEZsb3cSDwoHZmxvd19pZBgBIAEoCRIMCgRtb2RlGAIgASgJEhwKD2NyZWF0ZWRfdW5peF9tcxgDIAEoBEgAiAEBEhcKD29mZmxpbmVfdmVyZGljdBgEIAEoCRIVCg1vZmZsaW5lX3Rva2VuGAUgASgJEhcKD29mZmxpbmVfYmxvY2tlZBgGIAMoCRITCgt0dGxfc2Vjb25kcxgHIAEoBBISCgp0dGxfc291cmNlGAggASgJEi4KB25ldHdvcmsYCSABKAsyHS5kYXJrYm90LnByb2plY3QwLnYxLkJvb3RTdGVwEhwKD25ldHdvcmtfdmVyZGljdBgKIAEoCUgBiAEBEhoKDW5ldHdvcmtfdG9rZW4YCyABKAlIAogBARIXCg9uZXR3b3JrX2Jsb2NrZWQYDCADKAkSHAoPb2JzZXJ2ZWRfdW5peF9zGA0gASgESAOIAQESGwoOZXhwaXJlc191bml4X3MYDiABKARIBIgBARIsCgVzdGFydBgPIAEoCzIdLmRhcmtib3QucHJvamVjdDAudjEuQm9vdFN0ZXBCEgoQX2NyZWF0ZWRfdW5peF9tc0ISChBfbmV0d29ya192ZXJkaWN0QhAKDl9uZXR3b3JrX3Rva2VuQhIKEF9vYnNlcnZlZF91bml4X3NCEQoPX2V4cGlyZXNfdW5peF9zIq0BCghCb290U3RlcBINCgVzdGF0ZRgBIAEoCRIMCgRjb2RlGAIgASgJEhMKBnJ1bl9pZBgDIAEoCUgAiAEBEhwKD3N0YXJ0ZWRfdW5peF9tcxgEIAEoBEgBiAEBEh0KEGZpbmlzaGVkX3VuaXhfbXMYBSABKARIAogBAUIJCgdfcnVuX2lkQhIKEF9zdGFydGVkX3VuaXhfbXNCEwoRX2ZpbmlzaGVkX3VuaXhfbXMi2QEKDEFuYWx5dGljc1J1bhIOCgZydW5faWQYASABKAkSDAoEcm9vdBgCIAEoCRIOCgZsYXlvdXQYAyABKAkSGAoQY2FwdHVyZV9jb21wbGV0ZRgEIAEoCBI8Cg1xdWFsaWZpY2F0aW9uGAUgASgLMiUuZGFya2JvdC5wcm9qZWN0MC52MS5SdW5RdWFsaWZpY2F0aW9uEh0KEG1vZGlmaWVkX3VuaXhfbXMYBiABKARIAIgBARIPCgdydW5uaW5nGAcgASgIQhMKEV9tb2RpZmllZF91bml4X21zInIKEFJ1blF1YWxpZmljYXRpb24SDwoHdmVyZGljdBgBIAEoCRIUCgx2ZXJpZmljYXRpb24YAiABKAkSDgoGZmFpbGVkGAMgAygJEhgKEHF1YWxpZmljYXRpb25faWQYBCABKAkSDQoFZXJyb3IYBSABKAkilAUKDEFuYWx5dGljc0pvYhIOCgZqb2JfaWQYASABKAkSDAoEa2luZBgCIAEoCRILCgNydW4YAyABKAkSDQoFc3RhdGUYBCABKAkSDAoEY29kZRgFIAEoCRIeChFyZXF1ZXN0ZWRfdW5peF9tcxgGIAEoBEgBiAEBEhwKD3N0YXJ0ZWRfdW5peF9tcxgHIAEoBEgCiAEBEh0KEGZpbmlzaGVkX3VuaXhfbXMYCCABKARIA4gBARITCgttYXhfc2Vjb25kcxgJIAEoBBIVCg1tYXhfcmFtX2J5dGVzGAogASgEEi4KBnBhcmFtcxgLIAEoCzIeLmRhcmtib3QucHJvamVjdDAudjEuSm9iUGFyYW1zEioKBGdyaWQYDCABKAsyHC5kYXJrYm90LnByb2plY3QwLnYxLkpvYkdyaWQSGwoTdmVyaWZpY2F0aW9uX3Jlc3VsdBgNIAEoCRI3CghiYWNrdGVzdBgOIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuQmFja3Rlc3RSZXN1bHRIABI3CghvcHRpbWl6ZRgPIAEoCzIjLmRhcmtib3QucHJvamVjdDAudjEuT3B0aW1pemVSZXN1bHRIABI+Cgxwb3N0X2NhcHR1cmUYESABKAsyJi5kYXJrYm90LnByb2plY3QwLnYxLlBvc3RDYXB0dXJlUmVzdWx0SAASPwoRcG9zdF9jYXB0dXJlX3NwZWMYECABKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLlBvc3RDYXB0dXJlU3BlY0IICgZyZXN1bHRCFAoSX3JlcXVlc3RlZF91bml4X21zQhIKEF9zdGFydGVkX3VuaXhfbXNCEwoRX2ZpbmlzaGVkX3VuaXhfbXMiYwoPUG9zdENhcHR1cmVTcGVjEhQKDGNoYWluX3ZlcmlmeRgBIAEoCRIPCgdvZmZsaW5lGAIgASgIEg4KBnJlc3VtZRgDIAEoCBIZChFwcm92aWRlcl9ldmlkZW5jZRgEIAEoCCJQChFQb3N0Q2FwdHVyZVJlc3VsdBIXCg92ZXJpZmljYXRpb25fb2sYASABKAgSEQoJcmVwb3J0X29rGAIgASgIEg8KB3ZlcmRpY3QYAyABKAkifwoJSm9iUGFyYW1zEkYKG21pbl9wcm9maXRfdXNkX21pY3JvX3NpZ25lZBgBIAEoCzIhLmRhcmtib3QuY29udHJvbC52MS5TaWduZWREZWNpbWFsEhkKEWNhcGl0YWxfdXNkX21pY3JvGAIgAygEEg8KB2Z1bmRpbmcYAyADKAkixwEKB0pvYkdyaWQSRgobbWluX3Byb2ZpdF91c2RfbWljcm9fc2lnbmVkGAEgAygLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwSNQoMZnVuZGluZ19zZXRzGAIgAygLMh8uZGFya2JvdC5wcm9qZWN0MC52MS5GdW5kaW5nU2V0EhMKC2hvbGRvdXRfYnBzGAMgASgEEhIKCm1heF9wb2ludHMYBCABKAQSFAoMc2F2ZV9wcm9maWxlGAUgASgIIh0KCkZ1bmRpbmdTZXQSDwoHY2xhc3NlcxgBIAMoCSLdAQoOQmFja3Rlc3RSZXN1bHQSEQoJcmVzdWx0X2lkGAEgASgJEhYKDmNhcHR1cmVfcnVuX2lkGAIgASgJEgwKBHJvd3MYAyABKAQSEAoIYXR0ZW1wdHMYBCABKAQSFAoMbGlxdWlkYXRpb25zGAUgASgEEkEKDmNvdW50ZXJmYWN0dWFsGAYgASgLMikuZGFya2JvdC5wcm9qZWN0MC52MS5TaGFkb3dDb3VudGVyZmFjdHVhbBIQCghyZWFsaXplZBgHIAEoCRIVCg1yZXN1bHRfc2hhMjU2GAggASgMIv0BChRTaGFkb3dDb3VudGVyZmFjdHVhbBIPCgdtYXRjaGVkGAEgASgEEg8KB3Vua25vd24YAiABKAQSGAoQZnVuZGluZ19leGNsdWRlZBgDIAEoBBIVCg1iZWxvd19taW5pbXVtGAQgASgEEgwKBHdpbnMYBSABKAQSEgoKbG9zdF9yYWNlcxgGIAEoBBIWCg5ub19jaGFpbl9ldmVudBgHIAEoBBI3CglzY2VuYXJpb3MYCCADKAsyJC5kYXJrYm90LnByb2plY3QwLnYxLkNhcGl0YWxTY2VuYXJpbxIPCgdsYW5kaW5nGAkgASgJEg4KBnNhZmV0eRgKIAEoCSLTAgoPQ2FwaXRhbFNjZW5hcmlvEhkKEWNhcGl0YWxfdXNkX21pY3JvGAEgASgEEgwKBHdpbnMYAiABKAQSQwoYd2luX25ldF91c2RfbWljcm9fc2lnbmVkGAMgASgLMiEuZGFya2JvdC5jb250cm9sLnYxLlNpZ25lZERlY2ltYWwSFwoPZmFpbGVkX2F0dGVtcHRzGAQgASgEEkYKGWZhaWxlZF9jb3N0X3VzZF9taWNyb19zdW0YBSABKAsyIy5kYXJrYm90LmNvbnRyb2wudjEuVW5zaWduZWREZWNpbWFsEhsKE2ZhaWxlZF9jb3N0X3Vua25vd24YBiABKAQSEwoLb3Zlcl9idWRnZXQYByABKAQSPwoUbmV0X3VzZF9taWNyb19zaWduZWQYCCABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbCKdAgoOT3B0aW1pemVSZXN1bHQSEQoJcmVzdWx0X2lkGAEgASgJEhYKDmNhcHR1cmVfcnVuX2lkGAIgASgJEg4KBnBvaW50cxgDIAEoBBIuCgZjaG9zZW4YBCABKAsyHi5kYXJrYm90LnByb2plY3QwLnYxLkpvYlBhcmFtcxI6Cg5jaG9zZW5faG9sZG91dBgFIAEoCzIiLmRhcmtib3QucHJvamVjdDAudjEuT3B0aW1pemVTY29yZRI8ChBiYXNlbGluZV9ob2xkb3V0GAYgASgLMiIuZGFya2JvdC5wcm9qZWN0MC52MS5PcHRpbWl6ZVNjb3JlEhUKDXJlc3VsdF9zaGEyNTYYByABKAwSDwoHcHJvZmlsZRgIIAEoCSKTAQoNT3B0aW1pemVTY29yZRJBCg5jb3VudGVyZmFjdHVhbBgBIAEoCzIpLmRhcmtib3QucHJvamVjdDAudjEuU2hhZG93Q291bnRlcmZhY3R1YWwSPwoUb2JqZWN0aXZlX2Jwc19zaWduZWQYAiABKAsyIS5kYXJrYm90LmNvbnRyb2wudjEuU2lnbmVkRGVjaW1hbCKrAQoSQmFja3Rlc3RKb2JDb21tYW5kEg4KBnJ1bl9pZBgBIAEoCRIWCg5taW5fcHJvZml0X3VzZBgCIAEoCRITCgtjYXBpdGFsX3VzZBgDIAMoBBIPCgdmdW5kaW5nGAQgAygJEhMKC21heF9zZWNvbmRzGAUgASgEEhUKDW1heF9yYW1fYnl0ZXMYBiABKAQSGwoTdmVyaWZpY2F0aW9uX3Jlc3VsdBgHIAEoCSLiAQoST3B0aW1pemVKb2JDb21tYW5kEjkKCGJhc2VsaW5lGAEgASgLMicuZGFya2JvdC5wcm9qZWN0MC52MS5CYWNrdGVzdEpvYkNvbW1hbmQSGwoTbWluX3Byb2ZpdF91c2RfZ3JpZBgCIAMoCRI1CgxmdW5kaW5nX3NldHMYAyADKAsyHy5kYXJrYm90LnByb2plY3QwLnYxLkZ1bmRpbmdTZXQSEwoLaG9sZG91dF9icHMYBCABKAQSEgoKbWF4X3BvaW50cxgFIAEoBBIUCgxzYXZlX3Byb2ZpbGUYBiABKAgiTAoSQm9vdE9mZmxpbmVDb21tYW5kEgwKBG1vZGUYASABKAkSGAoLdHRsX3NlY29uZHMYAiABKARIAIgBAUIOCgxfdHRsX3NlY29uZHMihgEKEkJvb3ROZXR3b3JrQ29tbWFuZBIPCgdmbG93X2lkGAEgASgJEhYKDmFwcHJvdmVkX3Rva2VuGAIgASgJEhQKDGdlbmVzaXNfaGFzaBgDIAEoCRIZChFwcm92aWRlcl9ldmlkZW5jZRgEIAEoCRIWCg5jYXB0dXJlX3NvdXJjZRgFIAEoCSJ7ChBCb290U3RhcnRDb21tYW5kEg8KB2Zsb3dfaWQYASABKAkSFgoOYXBwcm92ZWRfdG9rZW4YAiABKAkSEAoIZHVyYXRpb24YAyABKAkSFgoOY2FwdHVyZV9zb3VyY2UYBCABKAkSFAoMY2hhaW5fdmVyaWZ5GAUgASgJIpcBChVQb3N0Q2FwdHVyZUpvYkNvbW1hbmQSDgoGcnVuX2lkGAEgASgJEhQKDGNoYWluX3ZlcmlmeRgCIAEoCRIPCgdvZmZsaW5lGAMgASgIEhsKE3Jlc3VtZV92ZXJpZmljYXRpb24YBCABKAgSEwoLbWF4X3NlY29uZHMYBSABKAQSFQoNbWF4X3JhbV9ieXRlcxgGIAEoBEKXAQoXY29tLmRhcmtib3QucHJvamVjdDAudjFCDkFuYWx5dGljc1Byb3RvUAGiAgNEUFiqAhNEYXJrYm90LlByb2plY3QwLlYxygITRGFya2JvdFxQcm9qZWN0MFxWMeICH0Rhcmtib3RcUHJvamVjdDBcVjFcR1BCTWV0YWRhdGHqAhVEYXJrYm90OjpQcm9qZWN0MDo6VjFiBnByb3RvMw", [file_darkbot_control_v1_numeric]);
 
 /**
  * project0.analytics.jobs (topic 15, STATE; B03/U-9, STARTUP §4 B/C/E): the runs of the project a
@@ -66,6 +66,15 @@ export type AnalyticsJobs = Message<"darkbot.project0.v1.AnalyticsJobs"> & {
    * @generated from field: string runner_error = 6;
    */
   runnerError: string;
+
+  /**
+   * DEC-07: the boot controller's newest flow (data/boot, `p0ctl boot …`), shown on the Capture
+   * tab: this always-on feed is the controller's projection while no capture runs. Unset
+   * without a flow.
+   *
+   * @generated from field: darkbot.project0.v1.BootFlow boot = 7;
+   */
+  boot?: BootFlow;
 };
 
 /**
@@ -74,6 +83,177 @@ export type AnalyticsJobs = Message<"darkbot.project0.v1.AnalyticsJobs"> & {
  */
 export const AnalyticsJobsSchema: GenMessage<AnalyticsJobs> = /*@__PURE__*/
   messageDesc(file_darkbot_project0_v1_analytics, 0);
+
+/**
+ * DEC-07 (N7): one boot flow — offline preflight, the operator's network approval, the network
+ * audit, the operator's start approval and the start; each step runs once (a new attempt is a
+ * new flow). Tokens are the 16-character content hashes an approval names, never keys.
+ *
+ * @generated from message darkbot.project0.v1.BootFlow
+ */
+export type BootFlow = Message<"darkbot.project0.v1.BootFlow"> & {
+  /**
+   * The flow's id (data/boot/<flow_id>).
+   *
+   * @generated from field: string flow_id = 1;
+   */
+  flowId: string;
+
+  /**
+   * The mode the start launches: econ4h | shadow.
+   *
+   * @generated from field: string mode = 2;
+   */
+  mode: string;
+
+  /**
+   * Wall clock of the offline step; unset when it was not readable.
+   *
+   * @generated from field: optional uint64 created_unix_ms = 3;
+   */
+  createdUnixMs?: bigint;
+
+  /**
+   * READY | OFFLINE_READY_NETWORK_NOT_RUN | BLOCKED
+   *
+   * @generated from field: string offline_verdict = 4;
+   */
+  offlineVerdict: string;
+
+  /**
+   * What the network approval names.
+   *
+   * @generated from field: string offline_token = 5;
+   */
+  offlineToken: string;
+
+  /**
+   * `id: reason` of every critical offline check that did not pass.
+   *
+   * @generated from field: repeated string offline_blocked = 6;
+   */
+  offlineBlocked: string[];
+
+  /**
+   * The flow's TTL (registry boot_token_ttl_seconds, 10..=120 s, fixed at its offline step) and
+   * the source of that value (builtin_default | environment | config_file | cli).
+   *
+   * @generated from field: uint64 ttl_seconds = 7;
+   */
+  ttlSeconds: bigint;
+
+  /**
+   * Where ttl_seconds came from.
+   *
+   * @generated from field: string ttl_source = 8;
+   */
+  ttlSource: string;
+
+  /**
+   * The network audit step.
+   *
+   * @generated from field: darkbot.project0.v1.BootStep network = 9;
+   */
+  network?: BootStep;
+
+  /**
+   * The network record's verdict and what the start approval names; unset before the record.
+   *
+   * @generated from field: optional string network_verdict = 10;
+   */
+  networkVerdict?: string;
+
+  /**
+   * What the start approval names.
+   *
+   * @generated from field: optional string network_token = 11;
+   */
+  networkToken?: string;
+
+  /**
+   * `id: reason` of every critical network check that did not pass.
+   *
+   * @generated from field: repeated string network_blocked = 12;
+   */
+  networkBlocked: string[];
+
+  /**
+   * The record's TTL window: its oldest network read and its expiry (unix seconds).
+   *
+   * @generated from field: optional uint64 observed_unix_s = 13;
+   */
+  observedUnixS?: bigint;
+
+  /**
+   * observed_unix_s + ttl_seconds; a start is admitted only before it.
+   *
+   * @generated from field: optional uint64 expires_unix_s = 14;
+   */
+  expiresUnixS?: bigint;
+
+  /**
+   * The start step.
+   *
+   * @generated from field: darkbot.project0.v1.BootStep start = 15;
+   */
+  start?: BootStep;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.BootFlow.
+ * Use `create(BootFlowSchema)` to create a new message.
+ */
+export const BootFlowSchema: GenMessage<BootFlow> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 1);
+
+/**
+ * One step of a boot flow.
+ *
+ * @generated from message darkbot.project0.v1.BootStep
+ */
+export type BootStep = Message<"darkbot.project0.v1.BootStep"> & {
+  /**
+   * NOT_RUN | QUEUED | RUNNING | INTERRUPTED | COMPLETED | FAILED | CANCELLED
+   *
+   * @generated from field: string state = 1;
+   */
+  state: string;
+
+  /**
+   * The refusal code of a failed or cancelled step; empty otherwise.
+   *
+   * @generated from field: string code = 2;
+   */
+  code: string;
+
+  /**
+   * The run a completed start launched.
+   *
+   * @generated from field: optional string run_id = 3;
+   */
+  runId?: string;
+
+  /**
+   * When its worker took the step.
+   *
+   * @generated from field: optional uint64 started_unix_ms = 4;
+   */
+  startedUnixMs?: bigint;
+
+  /**
+   * When the step ended.
+   *
+   * @generated from field: optional uint64 finished_unix_ms = 5;
+   */
+  finishedUnixMs?: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.BootStep.
+ * Use `create(BootStepSchema)` to create a new message.
+ */
+export const BootStepSchema: GenMessage<BootStep> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 2);
 
 /**
  * One run directory under the project's run roots.
@@ -136,7 +316,7 @@ export type AnalyticsRun = Message<"darkbot.project0.v1.AnalyticsRun"> & {
  * Use `create(AnalyticsRunSchema)` to create a new message.
  */
 export const AnalyticsRunSchema: GenMessage<AnalyticsRun> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 1);
+  messageDesc(file_darkbot_project0_v1_analytics, 3);
 
 /**
  * The newest C0-E1 master qualification record of a run.
@@ -185,7 +365,7 @@ export type RunQualification = Message<"darkbot.project0.v1.RunQualification"> &
  * Use `create(RunQualificationSchema)` to create a new message.
  */
 export const RunQualificationSchema: GenMessage<RunQualification> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 2);
+  messageDesc(file_darkbot_project0_v1_analytics, 4);
 
 /**
  * One analytics job of the controller's store.
@@ -328,7 +508,7 @@ export type AnalyticsJob = Message<"darkbot.project0.v1.AnalyticsJob"> & {
  * Use `create(AnalyticsJobSchema)` to create a new message.
  */
 export const AnalyticsJobSchema: GenMessage<AnalyticsJob> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 3);
+  messageDesc(file_darkbot_project0_v1_analytics, 5);
 
 /**
  * The verification request of a post-capture job (A08/F-02).
@@ -370,7 +550,7 @@ export type PostCaptureSpec = Message<"darkbot.project0.v1.PostCaptureSpec"> & {
  * Use `create(PostCaptureSpecSchema)` to create a new message.
  */
 export const PostCaptureSpecSchema: GenMessage<PostCaptureSpec> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 4);
+  messageDesc(file_darkbot_project0_v1_analytics, 6);
 
 /**
  * A completed post-capture chain: each stage's outcome (the qualification record is the run's).
@@ -405,7 +585,7 @@ export type PostCaptureResult = Message<"darkbot.project0.v1.PostCaptureResult">
  * Use `create(PostCaptureResultSchema)` to create a new message.
  */
 export const PostCaptureResultSchema: GenMessage<PostCaptureResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 5);
+  messageDesc(file_darkbot_project0_v1_analytics, 7);
 
 /**
  * Economic parameters of a backtest point.
@@ -440,7 +620,7 @@ export type JobParams = Message<"darkbot.project0.v1.JobParams"> & {
  * Use `create(JobParamsSchema)` to create a new message.
  */
 export const JobParamsSchema: GenMessage<JobParams> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 6);
+  messageDesc(file_darkbot_project0_v1_analytics, 8);
 
 /**
  * The bounded explicit grid of an optimization.
@@ -489,7 +669,7 @@ export type JobGrid = Message<"darkbot.project0.v1.JobGrid"> & {
  * Use `create(JobGridSchema)` to create a new message.
  */
 export const JobGridSchema: GenMessage<JobGrid> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 7);
+  messageDesc(file_darkbot_project0_v1_analytics, 9);
 
 /**
  * Admitted funding classes; empty: every class.
@@ -510,7 +690,7 @@ export type FundingSet = Message<"darkbot.project0.v1.FundingSet"> & {
  * Use `create(FundingSetSchema)` to create a new message.
  */
 export const FundingSetSchema: GenMessage<FundingSet> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 8);
+  messageDesc(file_darkbot_project0_v1_analytics, 10);
 
 /**
  * A completed backtest (OBSERVED_MARKET and COUNTERFACTUAL_SHADOW).
@@ -580,7 +760,7 @@ export type BacktestResult = Message<"darkbot.project0.v1.BacktestResult"> & {
  * Use `create(BacktestResultSchema)` to create a new message.
  */
 export const BacktestResultSchema: GenMessage<BacktestResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 9);
+  messageDesc(file_darkbot_project0_v1_analytics, 11);
 
 /**
  * Counterfactual Shadow executions: hypothetical, landing UNPROVEN, safety NOT_EVALUATED.
@@ -664,7 +844,7 @@ export type ShadowCounterfactual = Message<"darkbot.project0.v1.ShadowCounterfac
  * Use `create(ShadowCounterfactualSchema)` to create a new message.
  */
 export const ShadowCounterfactualSchema: GenMessage<ShadowCounterfactual> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 10);
+  messageDesc(file_darkbot_project0_v1_analytics, 12);
 
 /**
  * One capital scenario of the counterfactual.
@@ -734,7 +914,7 @@ export type CapitalScenario = Message<"darkbot.project0.v1.CapitalScenario"> & {
  * Use `create(CapitalScenarioSchema)` to create a new message.
  */
 export const CapitalScenarioSchema: GenMessage<CapitalScenario> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 11);
+  messageDesc(file_darkbot_project0_v1_analytics, 13);
 
 /**
  * A completed optimization: the point chosen on the training part and its holdout score.
@@ -804,7 +984,7 @@ export type OptimizeResult = Message<"darkbot.project0.v1.OptimizeResult"> & {
  * Use `create(OptimizeResultSchema)` to create a new message.
  */
 export const OptimizeResultSchema: GenMessage<OptimizeResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 12);
+  messageDesc(file_darkbot_project0_v1_analytics, 14);
 
 /**
  * The score of one point on one part of the window.
@@ -832,7 +1012,7 @@ export type OptimizeScore = Message<"darkbot.project0.v1.OptimizeScore"> & {
  * Use `create(OptimizeScoreSchema)` to create a new message.
  */
 export const OptimizeScoreSchema: GenMessage<OptimizeScore> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 13);
+  messageDesc(file_darkbot_project0_v1_analytics, 15);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.backtest.start: the options of
@@ -897,7 +1077,7 @@ export type BacktestJobCommand = Message<"darkbot.project0.v1.BacktestJobCommand
  * Use `create(BacktestJobCommandSchema)` to create a new message.
  */
 export const BacktestJobCommandSchema: GenMessage<BacktestJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 14);
+  messageDesc(file_darkbot_project0_v1_analytics, 16);
 
 /**
  * Parameters (CommandRequest.params) of project0.analytics.optimize.start: the options of
@@ -954,7 +1134,135 @@ export type OptimizeJobCommand = Message<"darkbot.project0.v1.OptimizeJobCommand
  * Use `create(OptimizeJobCommandSchema)` to create a new message.
  */
 export const OptimizeJobCommandSchema: GenMessage<OptimizeJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 15);
+  messageDesc(file_darkbot_project0_v1_analytics, 17);
+
+/**
+ * Parameters (CommandRequest.params) of project0.boot.offline: `p0ctl boot offline` — a new
+ * flow; its TTL is fixed here (between runs).
+ *
+ * @generated from message darkbot.project0.v1.BootOfflineCommand
+ */
+export type BootOfflineCommand = Message<"darkbot.project0.v1.BootOfflineCommand"> & {
+  /**
+   * econ4h | shadow
+   *
+   * @generated from field: string mode = 1;
+   */
+  mode: string;
+
+  /**
+   * 10..=120 s; unset: the registry's value.
+   *
+   * @generated from field: optional uint64 ttl_seconds = 2;
+   */
+  ttlSeconds?: bigint;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.BootOfflineCommand.
+ * Use `create(BootOfflineCommandSchema)` to create a new message.
+ */
+export const BootOfflineCommandSchema: GenMessage<BootOfflineCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 18);
+
+/**
+ * Parameters of project0.boot.network: the operator's approval of exactly this offline token;
+ * the network audit reads Mainnet read-only with the operator's provider evidence.
+ *
+ * @generated from message darkbot.project0.v1.BootNetworkCommand
+ */
+export type BootNetworkCommand = Message<"darkbot.project0.v1.BootNetworkCommand"> & {
+  /**
+   * The flow whose offline step is approved.
+   *
+   * @generated from field: string flow_id = 1;
+   */
+  flowId: string;
+
+  /**
+   * The flow's offline token (16 characters) as the operator saw it.
+   *
+   * @generated from field: string approved_token = 2;
+   */
+  approvedToken: string;
+
+  /**
+   * The operator's genesis pin (an independent source; must equal the checked-in pin).
+   *
+   * @generated from field: string genesis_hash = 3;
+   */
+  genesisHash: string;
+
+  /**
+   * Absolute path of the imported PROVIDER_EVIDENCE record (`p0-journal import-provider-evidence`).
+   *
+   * @generated from field: string provider_evidence = 4;
+   */
+  providerEvidence: string;
+
+  /**
+   * logs | transactions
+   *
+   * @generated from field: string capture_source = 5;
+   */
+  captureSource: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.BootNetworkCommand.
+ * Use `create(BootNetworkCommandSchema)` to create a new message.
+ */
+export const BootNetworkCommandSchema: GenMessage<BootNetworkCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 19);
+
+/**
+ * Parameters of project0.boot.start: the operator's approval of exactly this network token.
+ *
+ * @generated from message darkbot.project0.v1.BootStartCommand
+ */
+export type BootStartCommand = Message<"darkbot.project0.v1.BootStartCommand"> & {
+  /**
+   * The flow whose network audit is approved.
+   *
+   * @generated from field: string flow_id = 1;
+   */
+  flowId: string;
+
+  /**
+   * The flow's network token (16 characters) as the operator saw it.
+   *
+   * @generated from field: string approved_token = 2;
+   */
+  approvedToken: string;
+
+  /**
+   * 10m | 1h | 5h | 24h (`run start --duration`)
+   *
+   * @generated from field: string duration = 3;
+   */
+  duration: string;
+
+  /**
+   * logs | transactions
+   *
+   * @generated from field: string capture_source = 4;
+   */
+  captureSource: string;
+
+  /**
+   * off | strict
+   *
+   * @generated from field: string chain_verify = 5;
+   */
+  chainVerify: string;
+};
+
+/**
+ * Describes the message darkbot.project0.v1.BootStartCommand.
+ * Use `create(BootStartCommandSchema)` to create a new message.
+ */
+export const BootStartCommandSchema: GenMessage<BootStartCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_project0_v1_analytics, 20);
 
 /**
  * Parameters (CommandRequest.params) of project0.capture.verify.start: the options of
@@ -1012,4 +1320,4 @@ export type PostCaptureJobCommand = Message<"darkbot.project0.v1.PostCaptureJobC
  * Use `create(PostCaptureJobCommandSchema)` to create a new message.
  */
 export const PostCaptureJobCommandSchema: GenMessage<PostCaptureJobCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_project0_v1_analytics, 16);
+  messageDesc(file_darkbot_project0_v1_analytics, 21);

@@ -420,11 +420,11 @@ _gateway_down() {
 }
 
 # ---------------------------------------------------------------- project 0 controller
-# B03/U-9, S1-02, DEC-13: the GUI's analytics jobs, source modes and capability requests run the
-# deployed p0ctl (the same `p0ctl job|source|capability` a terminal runs) on the app's data home;
-# a started job's worker outlives this call.
+# B03/U-9, S1-02, DEC-13, DEC-07: the GUI's analytics jobs, source modes, capability requests and
+# boot flow run the deployed p0ctl (the same `p0ctl job|source|capability|boot` a terminal runs)
+# on the app's data home; a started job's or boot step's worker outlives this call.
 cmd_p0() {
-  case "${1:-}" in job|source|capability) ;; *) die "p0 job start|cancel|status … | p0 source set UNIT MODE [--expect-version N] | p0 source status | p0 capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | p0 capability status" ;; esac
+  case "${1:-}" in job|source|capability|boot) ;; *) die "p0 job start|cancel|status … | p0 source set UNIT MODE [--expect-version N] | p0 source status | p0 capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | p0 capability status | p0 boot offline|network|start|cancel|status …" ;; esac
   [ -x "$P0CTL_BIN" ] || die "p0ctl nicht deployed: darkbotctl build && darkbotctl deploy"
   P0_PROJECT_DIR="$APP_HOME" exec "$P0CTL_BIN" "$@"
 }

@@ -60,13 +60,24 @@ const SOURCE_SET: &str = "project0.source.set";
 /// DEC-13: a capability request (`p0ctl capability set`, LIVE); the running owner decides what
 /// is effective — LIVE stays BLOCKED until a separate FE-06 authorization.
 const CAPABILITY_SET: &str = "project0.capability.set";
-const JOB_ACTIONS: [&str; 6] = [
+/// DEC-07: the boot controller (`p0ctl boot …`): a new flow's offline preflight, the operator's
+/// network approval, the start approval (each naming the token it approves) and a step's stop.
+const BOOT_OFFLINE: &str = "project0.boot.offline";
+const BOOT_NETWORK: &str = "project0.boot.network";
+const BOOT_START: &str = "project0.boot.start";
+const BOOT_CANCEL: &str = "project0.boot.cancel";
+const BOOT_ACTIONS: [&str; 4] = [BOOT_OFFLINE, BOOT_NETWORK, BOOT_START, BOOT_CANCEL];
+const JOB_ACTIONS: [&str; 10] = [
     BACKTEST_START,
     OPTIMIZE_START,
     JOB_CANCEL,
     VERIFY_START,
     SOURCE_SET,
     CAPABILITY_SET,
+    BOOT_OFFLINE,
+    BOOT_NETWORK,
+    BOOT_START,
+    BOOT_CANCEL,
 ];
 /// Online strict verification reads the chain with the operator's provider evidence: a terminal
 /// action (`p0ctl job start post-capture --provider-evidence`), never a GUI one.
@@ -189,13 +200,40 @@ fn valid_job_id(s: &str) -> bool {
         && !s.starts_with('-')
         && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
+/// DEC-07: an approval names 16 lowercase hex characters of a readiness token.
+fn token_ok(s: &str) -> bool {
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+/// A base58 genesis pin (`p0ctl` compares it with the checked-in pin).
+fn genesis_ok(s: &str) -> bool {
+    (32..=44).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+/// An absolute path without a parent step or a control character (the imported evidence).
+fn evidence_path_ok(s: &str) -> bool {
+    (2..=1024).contains(&s.len())
+        && s.starts_with('/')
+        && !s.split('/').any(|part| part == "..")
+        && !s.chars().any(char::is_control)
+}
+/// A `run start --duration` value: digits and one unit (`p0ctl` checks it is a supported one).
+fn duration_ok(s: &str) -> bool {
+    let (digits, unit) = s.split_at(s.len().saturating_sub(1));
+    (1..=6).contains(&digits.len())
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && ["s", "m", "h", "d"].contains(&unit)
+}
+fn capture_source_ok(s: &str) -> bool {
+    s == "logs" || s == "transactions"
+}
 /// B03/U-9: the `darkbotctl p0 job …` arguments of an analytics job action — the typed
 /// parameters mapped 1:1 onto the options of `p0ctl job`, which validates them again. A start's
 /// job id is the request id; a cancel names its job as the resource.
 fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
-        BacktestJobCommand, CapabilityControlCommand, OptimizeJobCommand, PostCaptureJobCommand,
-        SourceControlCommand,
+        BacktestJobCommand, BootNetworkCommand, BootOfflineCommand, BootStartCommand,
+        CapabilityControlCommand, OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
     };
     // CTRL-03: a source change carries its CAS — the configuration version its view showed
     // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
@@ -320,6 +358,98 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         }
         JOB_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
             ["p0", "job", "cancel", "--id", &req.resource_id]
+                .map(String::from)
+                .to_vec(),
+        ),
+        // DEC-07: a new flow is the request id; its TTL is fixed here (the registry checks the
+        // bounds), every later step names that flow and the token it approves.
+        BOOT_OFFLINE if req.resource_id.is_empty() => {
+            let c = BootOfflineCommand::decode(req.params.as_ref()).ok()?;
+            if !["econ4h", "shadow"].contains(&c.mode.as_str()) {
+                return None;
+            }
+            let mut args: Vec<String> = [
+                "p0",
+                "boot",
+                "offline",
+                "--flow",
+                &req.request_id,
+                "--mode",
+                &c.mode,
+            ]
+            .map(String::from)
+            .to_vec();
+            if let Some(ttl) = c.ttl_seconds {
+                args.extend([
+                    "--".into(),
+                    "--boot-token-ttl-seconds".into(),
+                    ttl.to_string(),
+                ]);
+            }
+            Some(args)
+        }
+        BOOT_NETWORK if req.resource_id.is_empty() => {
+            let c = BootNetworkCommand::decode(req.params.as_ref()).ok()?;
+            if !valid_job_id(&c.flow_id)
+                || !token_ok(&c.approved_token)
+                || !genesis_ok(&c.genesis_hash)
+                || !evidence_path_ok(&c.provider_evidence)
+                || !capture_source_ok(&c.capture_source)
+            {
+                return None;
+            }
+            Some(
+                [
+                    "p0",
+                    "boot",
+                    "network",
+                    "--flow",
+                    &c.flow_id,
+                    "--approve",
+                    &c.approved_token,
+                    "--genesis-hash",
+                    &c.genesis_hash,
+                    "--provider-evidence",
+                    &c.provider_evidence,
+                    "--capture-source",
+                    &c.capture_source,
+                ]
+                .map(String::from)
+                .to_vec(),
+            )
+        }
+        BOOT_START if req.resource_id.is_empty() => {
+            let c = BootStartCommand::decode(req.params.as_ref()).ok()?;
+            if !valid_job_id(&c.flow_id)
+                || !token_ok(&c.approved_token)
+                || !duration_ok(&c.duration)
+                || !capture_source_ok(&c.capture_source)
+                || !["off", "strict"].contains(&c.chain_verify.as_str())
+            {
+                return None;
+            }
+            Some(
+                [
+                    "p0",
+                    "boot",
+                    "start",
+                    "--flow",
+                    &c.flow_id,
+                    "--approve",
+                    &c.approved_token,
+                    "--duration",
+                    &c.duration,
+                    "--capture-source",
+                    &c.capture_source,
+                    "--chain-verify",
+                    &c.chain_verify,
+                ]
+                .map(String::from)
+                .to_vec(),
+            )
+        }
+        BOOT_CANCEL if req.params.is_empty() && valid_job_id(&req.resource_id) => Some(
+            ["p0", "boot", "cancel", "--flow", &req.resource_id]
                 .map(String::from)
                 .to_vec(),
         ),
@@ -805,6 +935,8 @@ impl Control {
                         CommandRejectReason::InvalidParams,
                         if req.action == CAPABILITY_SET {
                             "Capability request invalid (LIVE OFF|LIVE, HOLD_B or JITO_BUNDLE OFF|OBSERVE|ACTIVE, and the configuration version)"
+                        } else if BOOT_ACTIONS.contains(&req.action.as_str()) {
+                            "Boot request invalid (mode econ4h|shadow, flow id, 16-character token, genesis pin, absolute evidence path, capture source, duration, chain verify off|strict)"
                         } else {
                             "Analytics job parameters invalid (run id, exact USD, capital, funding classes, budget, grid or job id)"
                         },
@@ -1089,6 +1221,14 @@ impl Control {
                     "Capability request recorded and the runtime rung; the owner's decision follows in project0.liquidator.state (LIVE stays BLOCKED until FE-06)"
                 } else if action == VERIFY_START {
                     "Post-capture job recorded and its worker started; the run's qualification follows in project0.analytics.jobs"
+                } else if action == BOOT_OFFLINE {
+                    "Boot flow recorded with its offline preflight; verdict, token and TTL follow in project0.analytics.jobs (boot)"
+                } else if action == BOOT_NETWORK {
+                    "Network audit approved and its worker started; record and TTL window follow in project0.analytics.jobs (boot)"
+                } else if action == BOOT_START {
+                    "Start approved and its worker started; the run follows in project0.analytics.jobs (boot)"
+                } else if action == BOOT_CANCEL {
+                    "Stop requested from the boot step's worker; it records CANCELLED in project0.analytics.jobs (boot)"
                 } else {
                     "Job recorded and its worker started; progress in project0.analytics.jobs"
                 }
@@ -1101,6 +1241,8 @@ impl Control {
             _ => {
                 record.detail = if action == CAPABILITY_SET {
                     "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
+                } else if BOOT_ACTIONS.contains(&action) {
+                    "Controller outcome unknown; inspect the boot flow in project0.analytics.jobs before a new approval"
                 } else {
                     "Controller outcome unknown; inspect project0.analytics.jobs before a new action"
                 }
@@ -2254,6 +2396,136 @@ mod tests {
         assert!(allowed(ProjectId::Bsc as i32, BSC_CANDIDATE));
         assert!(!allowed(ProjectId::Project0 as i32, BSC_CANDIDATE));
         assert!(!allowed(ProjectId::Solana as i32, BSC_START));
+    }
+    /// DEC-07: the boot actions map 1:1 onto `p0ctl boot`: a new flow is the request id with its
+    /// mode and TTL; the approvals need a flow id, a 16-character token and their typed options;
+    /// the stop names its flow; anything else is refused before the controller.
+    #[test]
+    fn dec07_boot_actions_map_onto_p0ctl_boot_and_refuse_malformed_requests() {
+        use crate::proto::project0::v1::{
+            BootNetworkCommand, BootOfflineCommand, BootStartCommand,
+        };
+        use expected_version::Version::ConfigVersion;
+        let req =
+            |action: &str, resource: &str, params: Vec<u8>, version: Option<u64>| CommandRequest {
+                project: ProjectId::Project0 as i32,
+                request_id: "12345678-1234-1234-1234-123456789abc".into(),
+                action: action.into(),
+                resource_id: resource.into(),
+                expected: version.map(|v| crate::proto::ExpectedVersion {
+                    version: Some(ConfigVersion(v)),
+                }),
+                params: params.into(),
+                issued_at_unix_ns: 0,
+            };
+        let offline = |mode: &str, ttl| {
+            BootOfflineCommand {
+                mode: mode.into(),
+                ttl_seconds: ttl,
+            }
+            .encode_to_vec()
+        };
+        assert_eq!(
+            job_args(&req(BOOT_OFFLINE, "", offline("econ4h", Some(90)), None)).unwrap(),
+            [
+                "p0",
+                "boot",
+                "offline",
+                "--flow",
+                "12345678-1234-1234-1234-123456789abc",
+                "--mode",
+                "econ4h",
+                "--",
+                "--boot-token-ttl-seconds",
+                "90"
+            ]
+        );
+        assert_eq!(
+            job_args(&req(BOOT_OFFLINE, "", offline("shadow", None), None))
+                .unwrap()
+                .len(),
+            7
+        );
+        assert_eq!(
+            job_args(&req(BOOT_OFFLINE, "", offline("live", None), None)),
+            None
+        );
+        assert_eq!(
+            job_args(&req(BOOT_OFFLINE, "", offline("econ4h", None), Some(1))),
+            None,
+            "a boot request takes no configuration version"
+        );
+        let network = |token: &str, evidence: &str| {
+            BootNetworkCommand {
+                flow_id: "flow-1".into(),
+                approved_token: token.into(),
+                genesis_hash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d".into(),
+                provider_evidence: evidence.into(),
+                capture_source: "logs".into(),
+            }
+            .encode_to_vec()
+        };
+        let ok = job_args(&req(
+            BOOT_NETWORK,
+            "",
+            network("0123456789abcdef", "/data/evidence.p0j"),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(
+            ok[..7],
+            [
+                "p0",
+                "boot",
+                "network",
+                "--flow",
+                "flow-1",
+                "--approve",
+                "0123456789abcdef"
+            ]
+        );
+        for (token, evidence) in [
+            ("0123456789ABCDEF", "/e.p0j"),
+            ("0123", "/e.p0j"),
+            ("0123456789abcdef", "relative.p0j"),
+            ("0123456789abcdef", "/a/../b.p0j"),
+        ] {
+            assert_eq!(
+                job_args(&req(BOOT_NETWORK, "", network(token, evidence), None)),
+                None,
+                "{token} {evidence}"
+            );
+        }
+        let start = |duration: &str, verify: &str| {
+            BootStartCommand {
+                flow_id: "flow-1".into(),
+                approved_token: "fedcba9876543210".into(),
+                duration: duration.into(),
+                capture_source: "transactions".into(),
+                chain_verify: verify.into(),
+            }
+            .encode_to_vec()
+        };
+        assert_eq!(
+            job_args(&req(BOOT_START, "", start("10m", "off"), None)).unwrap()[..3],
+            ["p0", "boot", "start"]
+        );
+        for (duration, verify) in [("10x", "off"), ("", "off"), ("10m", "index")] {
+            assert_eq!(
+                job_args(&req(BOOT_START, "", start(duration, verify), None)),
+                None,
+                "{duration} {verify}"
+            );
+        }
+        assert_eq!(
+            job_args(&req(BOOT_CANCEL, "flow-1", vec![], None)).unwrap(),
+            ["p0", "boot", "cancel", "--flow", "flow-1"]
+        );
+        assert_eq!(job_args(&req(BOOT_CANCEL, "../x", vec![], None)), None);
+        for action in BOOT_ACTIONS {
+            assert!(allowed(ProjectId::Project0 as i32, action));
+            assert!(!allowed(ProjectId::Bsc as i32, action));
+        }
     }
     #[test]
     fn only_a_source_change_carries_the_configuration_version_cas() {

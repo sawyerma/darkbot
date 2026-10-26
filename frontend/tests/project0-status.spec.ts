@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/project0/v1/capture_pb";
 import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
-import { AnalyticsJobsSchema, BacktestJobCommandSchema } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
+import { AnalyticsJobsSchema, BacktestJobCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
@@ -16,6 +16,10 @@ const schemaId = readFileSync(new URL("../../protocol/schema_id.txt", import.met
 function ownerTopics(wallets = "wallets_state"): Map<TopicId, { wireName: string; payloadType: string; payload: Uint8Array }> {
   const analytics = fromBinary(AnalyticsJobsSchema, golden("analytics_jobs"));
   analytics.runnerBusy = false;
+  // DEC-07: the golden flow's network audit is READY now, within its 90 s TTL window.
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  analytics.boot!.observedUnixS = now;
+  analytics.boot!.expiresUnixS = now + 90n;
   return new Map([
     [TopicId.PROJECT0_LIQUIDATOR_STATE, { wireName: "project0.liquidator.state", payloadType: "darkbot.project0.v1.LiquidatorState", payload: golden("liquidator_state") }],
     [TopicId.PROJECT0_FINANCE_SUMMARY, { wireName: "project0.finance.summary", payloadType: "darkbot.project0.v1.FinanceSummary", payload: golden("finance_summary") }],
@@ -382,4 +386,39 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
   expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
+});
+
+test("DEC-07: the boot flow on the Capture tab — TTL, tokens and window; each approval names its own token", async ({ page }) => {
+  await feed(page, true, true);
+  const sent: CommandRequest[] = [];
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/session", (r) => r.fulfill({ status: 204, headers: { "x-csrf-token": "csrf" } }));
+  await page.route("**/api/v1/command**", async (r) => {
+    const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+    sent.push(req);
+    return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema,
+      { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
+  });
+  await tab(page, "Capture");
+  const row = (title: string) => page.locator(".p0-line", { hasText: title }).first();
+  // The registry's TTL with its bounds and source; the flow's own TTL, tokens and window.
+  await expect(row("TTL · registry")).toContainText("60 s · 10…120 s · builtin_default");
+  await expect(row("Offline preflight")).toContainText("OFFLINE_READY_NETWORK_NOT_RUN · token 0123456789abcdef · TTL 90 s (cli)");
+  await expect(row("Network audit")).toContainText("COMPLETED · READY · token fedcba9876543210");
+  await expect(row("TTL window")).toContainText("s left");
+  // The network step ran: its approval is closed (a new attempt is a new offline preflight).
+  await expect(page.getByRole("button", { name: /Approve network reads/ })).toBeDisabled();
+  await page.getByLabel("Boot duration").selectOption("1h");
+  await page.getByRole("button", { name: "Approve start · token fedcba9876543210" }).click();
+  await expect(page.getByTestId("p0-boot-command-receipt")).toContainText("COMPLETED");
+  const start = sent.at(-1)!;
+  expect(start.action).toBe("project0.boot.start");
+  const s = fromBinary(BootStartCommandSchema, start.params);
+  expect([s.flowId, s.approvedToken, s.duration, s.captureSource, s.chainVerify]).toEqual(["flow-1", "fedcba9876543210", "1h", "logs", "off"]);
+  // A new flow: its offline preflight carries the TTL (the controller checks the bounds).
+  await page.getByLabel("TTL · seconds").fill("90");
+  await page.getByRole("button", { name: "Run offline preflight" }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  const o = fromBinary(BootOfflineCommandSchema, sent.at(-1)!.params);
+  expect([sent.at(-1)!.action, o.mode, o.ttlSeconds]).toEqual(["project0.boot.offline", "econ4h", 90n]);
 });

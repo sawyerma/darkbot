@@ -69,7 +69,7 @@ export default function Project0Page() {
     {healthOpen ? <HealthSection/> : null}
     {tab === "overview" ? <OverviewPanel monitor={monitor} financeStatus={finance.topicStatus} capture={capture.value} topicStatus={capture.topicStatus} authorization={authorization} analytics={analytics.value} analyticsStatus={analytics.topicStatus} goto={setTab}/> : null}
     {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab} owner={liquidator.value} ownerStatus={liquidator.topicStatus} finance={liveFinance} system={system.value}/> : null}
-    {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus} analytics={analytics.value} analyticsStatus={analytics.topicStatus} owner={liquidator.value} ownerStatus={liquidator.topicStatus}/> : null}
+    {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus} analytics={analytics.value} analyticsStatus={analytics.topicStatus} owner={liquidator.value} ownerStatus={liquidator.topicStatus} system={system.value}/> : null}
     {tab === "analytics" ? <AnalyticsPanel analytics={analytics.value} topicStatus={analytics.topicStatus} createDraft={fleet.create} goto={setTab}/> : null}
     {tab === "wallets" ? <><WalletsPanel finance={liveFinance}/><NonLandingSection wallets={wallets.value} topicStatus={wallets.topicStatus}/><HoldsSection wallets={wallets.value} topicStatus={wallets.topicStatus}/></> : null}
     <footer className="p0-footer">Graphite V0 · Read-only status via gateway · No live submissions or transfers</footer>

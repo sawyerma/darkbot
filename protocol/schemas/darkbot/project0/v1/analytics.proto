@@ -23,6 +23,61 @@ message AnalyticsJobs {
   string store_error = 5;
   // Why the runner state is unknown (runner_busy is then not a fact); empty when known.
   string runner_error = 6;
+  // DEC-07: the boot controller's newest flow (data/boot, `p0ctl boot …`), shown on the Capture
+  // tab: this always-on feed is the controller's projection while no capture runs. Unset
+  // without a flow.
+  BootFlow boot = 7;
+}
+
+// DEC-07 (N7): one boot flow — offline preflight, the operator's network approval, the network
+// audit, the operator's start approval and the start; each step runs once (a new attempt is a
+// new flow). Tokens are the 16-character content hashes an approval names, never keys.
+message BootFlow {
+  // The flow's id (data/boot/<flow_id>).
+  string flow_id = 1;
+  // The mode the start launches: econ4h | shadow.
+  string mode = 2;
+  // Wall clock of the offline step; unset when it was not readable.
+  optional uint64 created_unix_ms = 3;
+  // READY | OFFLINE_READY_NETWORK_NOT_RUN | BLOCKED
+  string offline_verdict = 4;
+  // What the network approval names.
+  string offline_token = 5;
+  // `id: reason` of every critical offline check that did not pass.
+  repeated string offline_blocked = 6;
+  // The flow's TTL (registry boot_token_ttl_seconds, 10..=120 s, fixed at its offline step) and
+  // the source of that value (builtin_default | environment | config_file | cli).
+  uint64 ttl_seconds = 7;
+  // Where ttl_seconds came from.
+  string ttl_source = 8;
+  // The network audit step.
+  BootStep network = 9;
+  // The network record's verdict and what the start approval names; unset before the record.
+  optional string network_verdict = 10;
+  // What the start approval names.
+  optional string network_token = 11;
+  // `id: reason` of every critical network check that did not pass.
+  repeated string network_blocked = 12;
+  // The record's TTL window: its oldest network read and its expiry (unix seconds).
+  optional uint64 observed_unix_s = 13;
+  // observed_unix_s + ttl_seconds; a start is admitted only before it.
+  optional uint64 expires_unix_s = 14;
+  // The start step.
+  BootStep start = 15;
+}
+
+// One step of a boot flow.
+message BootStep {
+  // NOT_RUN | QUEUED | RUNNING | INTERRUPTED | COMPLETED | FAILED | CANCELLED
+  string state = 1;
+  // The refusal code of a failed or cancelled step; empty otherwise.
+  string code = 2;
+  // The run a completed start launched.
+  optional string run_id = 3;
+  // When its worker took the step.
+  optional uint64 started_unix_ms = 4;
+  // When the step ended.
+  optional uint64 finished_unix_ms = 5;
 }
 
 // One run directory under the project's run roots.
@@ -277,6 +332,44 @@ message OptimizeJobCommand {
   uint64 max_points = 5;
   // Save the chosen point as an offline Shadow candidate profile (never a LIVE setting).
   bool save_profile = 6;
+}
+
+// Parameters (CommandRequest.params) of project0.boot.offline: `p0ctl boot offline` — a new
+// flow; its TTL is fixed here (between runs).
+message BootOfflineCommand {
+  // econ4h | shadow
+  string mode = 1;
+  // 10..=120 s; unset: the registry's value.
+  optional uint64 ttl_seconds = 2;
+}
+
+// Parameters of project0.boot.network: the operator's approval of exactly this offline token;
+// the network audit reads Mainnet read-only with the operator's provider evidence.
+message BootNetworkCommand {
+  // The flow whose offline step is approved.
+  string flow_id = 1;
+  // The flow's offline token (16 characters) as the operator saw it.
+  string approved_token = 2;
+  // The operator's genesis pin (an independent source; must equal the checked-in pin).
+  string genesis_hash = 3;
+  // Absolute path of the imported PROVIDER_EVIDENCE record (`p0-journal import-provider-evidence`).
+  string provider_evidence = 4;
+  // logs | transactions
+  string capture_source = 5;
+}
+
+// Parameters of project0.boot.start: the operator's approval of exactly this network token.
+message BootStartCommand {
+  // The flow whose network audit is approved.
+  string flow_id = 1;
+  // The flow's network token (16 characters) as the operator saw it.
+  string approved_token = 2;
+  // 10m | 1h | 5h | 24h (`run start --duration`)
+  string duration = 3;
+  // logs | transactions
+  string capture_source = 4;
+  // off | strict
+  string chain_verify = 5;
 }
 
 // Parameters (CommandRequest.params) of project0.capture.verify.start: the options of

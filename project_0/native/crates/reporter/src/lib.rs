@@ -1370,6 +1370,36 @@ mod contract_tests {
                 },
             ],
             error: None,
+            // DEC-07: a flow whose network audit is READY, awaiting the start approval.
+            boot: Some(darkbot_runner::orchestration::boot_control::BootView {
+                flow_id: "flow-1".into(),
+                mode: "econ4h".into(),
+                created_unix_ms: Some(1_760_000_001_000),
+                offline_verdict: "OFFLINE_READY_NETWORK_NOT_RUN",
+                offline_token: "0123456789abcdef".into(),
+                offline_blocked: vec![],
+                ttl_seconds: 90,
+                ttl_source: "cli".into(),
+                network: darkbot_runner::orchestration::boot_control::StepView {
+                    state: "COMPLETED".into(),
+                    code: String::new(),
+                    run_id: None,
+                    started_unix_ms: Some(1_760_000_001_100),
+                    finished_unix_ms: Some(1_760_000_001_900),
+                },
+                network_verdict: Some("READY"),
+                network_token: Some("fedcba9876543210".into()),
+                network_blocked: vec![],
+                observed_unix_s: Some(1_760_000_001),
+                expires_unix_s: Some(1_760_000_091),
+                start: darkbot_runner::orchestration::boot_control::StepView {
+                    state: "NOT_RUN".into(),
+                    code: String::new(),
+                    run_id: None,
+                    started_unix_ms: None,
+                    finished_unix_ms: None,
+                },
+            }),
         }
     }
 

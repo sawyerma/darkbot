@@ -95,6 +95,11 @@
     - [AnalyticsRun](#darkbot-project0-v1-AnalyticsRun)
     - [BacktestJobCommand](#darkbot-project0-v1-BacktestJobCommand)
     - [BacktestResult](#darkbot-project0-v1-BacktestResult)
+    - [BootFlow](#darkbot-project0-v1-BootFlow)
+    - [BootNetworkCommand](#darkbot-project0-v1-BootNetworkCommand)
+    - [BootOfflineCommand](#darkbot-project0-v1-BootOfflineCommand)
+    - [BootStartCommand](#darkbot-project0-v1-BootStartCommand)
+    - [BootStep](#darkbot-project0-v1-BootStep)
     - [CapitalScenario](#darkbot-project0-v1-CapitalScenario)
     - [FundingSet](#darkbot-project0-v1-FundingSet)
     - [JobGrid](#darkbot-project0-v1-JobGrid)
@@ -1599,6 +1604,7 @@ i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
 | jobs | [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob) | repeated | Newest requests first, at most analytics_jobs_listed. |
 | store_error | [string](#string) |  | Why the job store was not readable (jobs is then empty); empty when read. |
 | runner_error | [string](#string) |  | Why the runner state is unknown (runner_busy is then not a fact); empty when known. |
+| boot | [BootFlow](#darkbot-project0-v1-BootFlow) |  | DEC-07: the boot controller&#39;s newest flow (data/boot, `p0ctl boot …`), shown on the Capture tab: this always-on feed is the controller&#39;s projection while no capture runs. Unset without a flow. |
 
 
 
@@ -1665,6 +1671,112 @@ A completed backtest (OBSERVED_MARKET and COUNTERFACTUAL_SHADOW).
 | counterfactual | [ShadowCounterfactual](#darkbot-project0-v1-ShadowCounterfactual) |  | The counterfactual Shadow executions. |
 | realized | [string](#string) |  | REALIZED_ONCHAIN is not part of a capture: realized results come from the FE-04 journals. |
 | result_sha256 | [bytes](#bytes) |  | Hash over the parameters, rows, attempts and summary. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-BootFlow"></a>
+
+### BootFlow
+DEC-07 (N7): one boot flow — offline preflight, the operator&#39;s network approval, the network
+audit, the operator&#39;s start approval and the start; each step runs once (a new attempt is a
+new flow). Tokens are the 16-character content hashes an approval names, never keys.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flow_id | [string](#string) |  | The flow&#39;s id (data/boot/&lt;flow_id&gt;). |
+| mode | [string](#string) |  | The mode the start launches: econ4h | shadow. |
+| created_unix_ms | [uint64](#uint64) | optional | Wall clock of the offline step; unset when it was not readable. |
+| offline_verdict | [string](#string) |  | READY | OFFLINE_READY_NETWORK_NOT_RUN | BLOCKED |
+| offline_token | [string](#string) |  | What the network approval names. |
+| offline_blocked | [string](#string) | repeated | `id: reason` of every critical offline check that did not pass. |
+| ttl_seconds | [uint64](#uint64) |  | The flow&#39;s TTL (registry boot_token_ttl_seconds, 10..=120 s, fixed at its offline step) and the source of that value (builtin_default | environment | config_file | cli). |
+| ttl_source | [string](#string) |  | Where ttl_seconds came from. |
+| network | [BootStep](#darkbot-project0-v1-BootStep) |  | The network audit step. |
+| network_verdict | [string](#string) | optional | The network record&#39;s verdict and what the start approval names; unset before the record. |
+| network_token | [string](#string) | optional | What the start approval names. |
+| network_blocked | [string](#string) | repeated | `id: reason` of every critical network check that did not pass. |
+| observed_unix_s | [uint64](#uint64) | optional | The record&#39;s TTL window: its oldest network read and its expiry (unix seconds). |
+| expires_unix_s | [uint64](#uint64) | optional | observed_unix_s &#43; ttl_seconds; a start is admitted only before it. |
+| start | [BootStep](#darkbot-project0-v1-BootStep) |  | The start step. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-BootNetworkCommand"></a>
+
+### BootNetworkCommand
+Parameters of project0.boot.network: the operator&#39;s approval of exactly this offline token;
+the network audit reads Mainnet read-only with the operator&#39;s provider evidence.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flow_id | [string](#string) |  | The flow whose offline step is approved. |
+| approved_token | [string](#string) |  | The flow&#39;s offline token (16 characters) as the operator saw it. |
+| genesis_hash | [string](#string) |  | The operator&#39;s genesis pin (an independent source; must equal the checked-in pin). |
+| provider_evidence | [string](#string) |  | Absolute path of the imported PROVIDER_EVIDENCE record (`p0-journal import-provider-evidence`). |
+| capture_source | [string](#string) |  | logs | transactions |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-BootOfflineCommand"></a>
+
+### BootOfflineCommand
+Parameters (CommandRequest.params) of project0.boot.offline: `p0ctl boot offline` — a new
+flow; its TTL is fixed here (between runs).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [string](#string) |  | econ4h | shadow |
+| ttl_seconds | [uint64](#uint64) | optional | 10..=120 s; unset: the registry&#39;s value. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-BootStartCommand"></a>
+
+### BootStartCommand
+Parameters of project0.boot.start: the operator&#39;s approval of exactly this network token.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| flow_id | [string](#string) |  | The flow whose network audit is approved. |
+| approved_token | [string](#string) |  | The flow&#39;s network token (16 characters) as the operator saw it. |
+| duration | [string](#string) |  | 10m | 1h | 5h | 24h (`run start --duration`) |
+| capture_source | [string](#string) |  | logs | transactions |
+| chain_verify | [string](#string) |  | off | strict |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-BootStep"></a>
+
+### BootStep
+One step of a boot flow.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| state | [string](#string) |  | NOT_RUN | QUEUED | RUNNING | INTERRUPTED | COMPLETED | FAILED | CANCELLED |
+| code | [string](#string) |  | The refusal code of a failed or cancelled step; empty otherwise. |
+| run_id | [string](#string) | optional | The run a completed start launched. |
+| started_unix_ms | [uint64](#uint64) | optional | When its worker took the step. |
+| finished_unix_ms | [uint64](#uint64) | optional | When the step ended. |
 
 
 

@@ -2,10 +2,12 @@ import { fromBinary } from "@bufbuild/protobuf";
 import {
   AnalyticsJobsSchema,
   type AnalyticsJobs,
+  type BootFlow,
+  type BootStep,
   type JobParams,
   type ShadowCounterfactual,
 } from "@/core/generated/darkbot/project0/v1/analytics_pb";
-import type { CounterfactualView, JobParamsView, AnalyticsView } from "../model/analytics";
+import type { BootFlowView, BootStepView, CounterfactualView, JobParamsView, AnalyticsView } from "../model/analytics";
 
 /** Throws on invalid bytes, so the registry never acknowledges a broken state. */
 export function decodeAnalyticsJobs(bytes: Uint8Array): AnalyticsJobs {
@@ -95,5 +97,35 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
               ? { kind: "POST_CAPTURE", verificationOk: j.result.value.verificationOk, reportOk: j.result.value.reportOk, verdict: j.result.value.verdict || null }
               : null,
     })),
+    boot: m.boot ? boot(m.boot) : null,
+  };
+}
+
+const step = (s: BootStep | undefined): BootStepView => ({
+  state: s?.state || "NOT_RUN",
+  code: s?.code ?? "",
+  runId: s?.runId ?? null,
+  startedUnixMs: s?.startedUnixMs ?? null,
+  finishedUnixMs: s?.finishedUnixMs ?? null,
+});
+
+/** DEC-07: the boot controller's flow as it holds it (an absent step is NOT_RUN). */
+function boot(b: BootFlow): BootFlowView {
+  return {
+    flowId: b.flowId,
+    mode: b.mode,
+    createdUnixMs: b.createdUnixMs ?? null,
+    offlineVerdict: b.offlineVerdict,
+    offlineToken: b.offlineToken,
+    offlineBlocked: [...b.offlineBlocked],
+    ttlSeconds: b.ttlSeconds,
+    ttlSource: b.ttlSource,
+    network: step(b.network),
+    networkVerdict: b.networkVerdict ?? null,
+    networkToken: b.networkToken ?? null,
+    networkBlocked: [...b.networkBlocked],
+    observedUnixS: b.observedUnixS ?? null,
+    expiresUnixS: b.expiresUnixS ?? null,
+    start: step(b.start),
   };
 }

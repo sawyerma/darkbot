@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 jobs:
   contract-and-ui:
-    runs-on: ubuntu-latest
+    # P0-011: pinned — ubuntu-latest rolls to 26.04, where Playwright 1.56 installs no Chromium.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +49,8 @@ jobs:
       - run: npm run test:project0 && npm run test:code-split
         working-directory: frontend
   native:
-    runs-on: ubuntu-latest
+    # P0-011: pinned — ubuntu-latest rolls to 26.04, where Playwright 1.56 installs no Chromium.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -67,7 +69,8 @@ jobs:
   # jobs by step; every step runs exactly as locally (--locked, -D warnings, pinned toolchain).
   project0-gate:
     name: project0-gate (${{ matrix.steps }})
-    runs-on: ubuntu-latest
+    # P0-011: pinned — ubuntu-latest rolls to 26.04, where Playwright 1.56 installs no Chromium.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

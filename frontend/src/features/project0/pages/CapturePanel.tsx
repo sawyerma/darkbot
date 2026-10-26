@@ -5,6 +5,8 @@ import type { CaptureView } from "../model/status";
 import type { AnalyticsView } from "../model/analytics";
 import { RunsSection } from "../components/RunsSection";
 import { SourcesSection } from "../components/SourcesSection";
+import { BootSection } from "../components/BootSection";
+import type { SystemView } from "../model/status";
 import type { LiquidatorView } from "../model/owner";
 import type { TopicStatus } from "@/core/realtime";
 import { captureButtons, captureCommand, useCaptureControl, watchCaptureControl } from "@/core/realtime/captureControl";
@@ -35,9 +37,9 @@ function RunningCapture({ capture, topicStatus }: { capture: CaptureView | null;
   </Section>;
 }
 
-export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus, owner, ownerStatus }: {
+export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus, owner, ownerStatus, system }: {
   capture: CaptureView | null; topicStatus: TopicStatus; analytics: AnalyticsView | null; analyticsStatus: TopicStatus;
-  owner: LiquidatorView | null; ownerStatus: TopicStatus;
+  owner: LiquidatorView | null; ownerStatus: TopicStatus; system: SystemView | null;
 }) {
   const [preset, setPreset] = useState<string>("4h"); const [amount, setAmount] = useState("75"); const [unit, setUnit] = useState("m");
   const [source, setSource] = useState<CaptureSource>("logs"); const [observation, setObservation] = useState<CaptureMode>("econ4h");
@@ -53,6 +55,7 @@ export function CapturePanel({ capture, topicStatus, analytics, analyticsStatus,
   const preview = runStartPreview({ duration: preset === "custom" ? amount + unit : preset, source, mode: observation, verify, markers });
   return <><RunningCapture capture={capture} topicStatus={topicStatus}/>
   <RunsSection analytics={analytics} topicStatus={analyticsStatus}/>
+  <BootSection analytics={analytics} topicStatus={analyticsStatus} ttl={system?.parameters.get("boot_token_ttl_seconds") ?? null}/>
   <SourcesSection owner={owner} topicStatus={ownerStatus}/>
   <Section title="Raw data capture"><DetailRow title="Duration" value="Presets are optional"/>
     <div className="p0-pills">

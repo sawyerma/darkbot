@@ -2,7 +2,10 @@ import { create as message, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
-import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import {
+  BacktestJobCommandSchema, BootNetworkCommandSchema, BootOfflineCommandSchema, BootStartCommandSchema, OptimizeJobCommandSchema,
+  PostCaptureJobCommandSchema,
+} from "../generated/darkbot/project0/v1/analytics_pb";
 import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 
 /**
@@ -12,7 +15,8 @@ import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../g
  * project0.analytics.jobs. A lost acknowledgement is looked up once, never posted again.
  */
 export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel"
-  | "project0.capture.verify.start" | "project0.source.set" | "project0.capability.set";
+  | "project0.capture.verify.start" | "project0.source.set" | "project0.capability.set"
+  | "project0.boot.offline" | "project0.boot.network" | "project0.boot.start" | "project0.boot.cancel";
 interface Receipt { id: string; action: JobAction; phase: string; detail: string }
 interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
 export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
@@ -89,6 +93,39 @@ export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; 
     params: toBinary(PostCaptureJobCommandSchema, message(PostCaptureJobCommandSchema, {
       runId: v.runId, chainVerify: v.mode === "off" ? "off" : "strict", offline: v.mode === "strict-cache", resumeVerification: v.resume,
       maxSeconds: seconds, maxRamBytes: mib * 1_048_576n,
+    })),
+  };
+}
+
+/** DEC-07: a new boot flow's offline preflight; its TTL is fixed here (empty: the registry's value;
+ *  the registry checks the bounds). */
+export function bootOfflineCommand(mode: "econ4h" | "shadow", ttlSeconds: string): { params: Uint8Array } | { problem: string } {
+  const ttl = ttlSeconds.trim() === "" ? undefined : positive(ttlSeconds);
+  if (ttl === null) return { problem: "TTL: whole seconds within the registry bounds, or empty for its value." };
+  return { params: toBinary(BootOfflineCommandSchema, message(BootOfflineCommandSchema, { mode, ttlSeconds: ttl })) };
+}
+
+const TOKEN = /^[0-9a-f]{16}$/;
+
+/** DEC-07: the operator's approval of exactly this offline token — the network audit reads Mainnet
+ *  read-only with the operator's imported provider evidence. */
+export function bootNetworkCommand(v: { flowId: string; token: string; genesisHash: string; providerEvidence: string; captureSource: "logs" | "transactions" }): { params: Uint8Array } | { problem: string } {
+  if (!TOKEN.test(v.token)) return { problem: "No offline token to approve." };
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v.genesisHash.trim())) return { problem: "Genesis hash: the base58 Mainnet genesis pin." };
+  if (!v.providerEvidence.trim().startsWith("/")) return { problem: "Provider evidence: the absolute path of the imported record." };
+  return {
+    params: toBinary(BootNetworkCommandSchema, message(BootNetworkCommandSchema, {
+      flowId: v.flowId, approvedToken: v.token, genesisHash: v.genesisHash.trim(), providerEvidence: v.providerEvidence.trim(), captureSource: v.captureSource,
+    })),
+  };
+}
+
+/** DEC-07: the operator's approval of exactly this network token — the start. */
+export function bootStartCommand(v: { flowId: string; token: string; duration: string; captureSource: "logs" | "transactions"; chainVerify: "off" | "strict" }): { params: Uint8Array } | { problem: string } {
+  if (!TOKEN.test(v.token)) return { problem: "No READY network audit to approve." };
+  return {
+    params: toBinary(BootStartCommandSchema, message(BootStartCommandSchema, {
+      flowId: v.flowId, approvedToken: v.token, duration: v.duration, captureSource: v.captureSource, chainVerify: v.chainVerify,
     })),
   };
 }

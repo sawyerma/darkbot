@@ -77,6 +77,40 @@ export interface AnalyticsView {
   runs: readonly AnalyticsRunView[];
   jobs: readonly AnalyticsJobView[];
   storeError: string;
+  /** DEC-07: the boot controller's newest flow; null without one. */
+  boot: BootFlowView | null;
+}
+
+/** DEC-07: one step of a boot flow (NOT_RUN, QUEUED, RUNNING, INTERRUPTED, COMPLETED, FAILED,
+ *  CANCELLED). */
+export interface BootStepView {
+  state: string;
+  code: string;
+  runId: string | null;
+  startedUnixMs: bigint | null;
+  finishedUnixMs: bigint | null;
+}
+
+/** DEC-07 (N7): offline preflight → network approval → network audit → start approval → start;
+ *  tokens are the 16 characters an approval names. */
+export interface BootFlowView {
+  flowId: string;
+  mode: string;
+  createdUnixMs: bigint | null;
+  offlineVerdict: string;
+  offlineToken: string;
+  offlineBlocked: readonly string[];
+  /** The flow's TTL (fixed at its offline step) and that value's source. */
+  ttlSeconds: bigint;
+  ttlSource: string;
+  network: BootStepView;
+  networkVerdict: string | null;
+  networkToken: string | null;
+  networkBlocked: readonly string[];
+  /** The network record's TTL window (unix seconds): its oldest read and its expiry. */
+  observedUnixS: bigint | null;
+  expiresUnixS: bigint | null;
+  start: BootStepView;
 }
 
 /** The Overview's one-line job summary from topic 15: the runner state is unknown when the

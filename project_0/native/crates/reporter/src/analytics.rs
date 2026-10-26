@@ -3,9 +3,9 @@
 //! job store holds them; i128/u128 amounts stay exact decimals, unknown stays unset.
 use crate::proto::control::{SignedDecimal, UnsignedDecimal};
 use crate::proto::project0::{
-    analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, BacktestResult, CapitalScenario,
-    FundingSet, JobGrid, JobParams, OptimizeResult, OptimizeScore, PostCaptureResult,
-    PostCaptureSpec, RunQualification, ShadowCounterfactual,
+    analytics_job, AnalyticsJob, AnalyticsJobs, AnalyticsRun, BacktestResult, BootFlow, BootStep,
+    CapitalScenario, FundingSet, JobGrid, JobParams, OptimizeResult, OptimizeScore,
+    PostCaptureResult, PostCaptureSpec, RunQualification, ShadowCounterfactual,
 };
 use darkbot_runner::analytics::backtest::{Counterfactual, Params, Score};
 use darkbot_runner::analytics::jobs::{
@@ -222,5 +222,34 @@ pub fn analytics_jobs(s: &AnalyticsSnapshot) -> AnalyticsJobs {
         runs: s.runs.iter().map(run).collect(),
         jobs: s.jobs.iter().map(job).collect(),
         store_error: s.error.clone().unwrap_or_default(),
+        boot: s.boot.as_ref().map(boot),
+    }
+}
+
+/// DEC-07: the boot controller's newest flow, values copied as the controller holds them.
+fn boot(v: &darkbot_runner::orchestration::boot_control::BootView) -> BootFlow {
+    let step = |s: &darkbot_runner::orchestration::boot_control::StepView| BootStep {
+        state: s.state.clone(),
+        code: s.code.clone(),
+        run_id: s.run_id.clone(),
+        started_unix_ms: s.started_unix_ms,
+        finished_unix_ms: s.finished_unix_ms,
+    };
+    BootFlow {
+        flow_id: v.flow_id.clone(),
+        mode: v.mode.clone(),
+        created_unix_ms: v.created_unix_ms,
+        offline_verdict: v.offline_verdict.into(),
+        offline_token: v.offline_token.clone(),
+        offline_blocked: v.offline_blocked.clone(),
+        ttl_seconds: v.ttl_seconds,
+        ttl_source: v.ttl_source.clone(),
+        network: Some(step(&v.network)),
+        network_verdict: v.network_verdict.map(Into::into),
+        network_token: v.network_token.clone(),
+        network_blocked: v.network_blocked.clone(),
+        observed_unix_s: v.observed_unix_s,
+        expires_unix_s: v.expires_unix_s,
+        start: Some(step(&v.start)),
     }
 }
