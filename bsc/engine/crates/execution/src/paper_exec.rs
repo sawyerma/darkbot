@@ -24,7 +24,9 @@
 
 use crate::paper::{PaperHandoff, PaperIdentity, PaperSink};
 use crate::submission::club48;
-use crate::submission::send::{Armed, DispatchContext, SendOutcome, dispatch_diagnostic};
+use crate::submission::send::{
+    Armed, DispatchContext, DispatchError, SendOutcome, dispatch_diagnostic,
+};
 use crate::submission::tls::{CLUB48_DOCUMENTED_HOST, HTTPS_PORT, ProviderTarget, TlsEndpoint};
 use crate::submission::transport::{Clock, ConnectionState, Transport};
 use alloy_primitives::{Address, B256, U256};
@@ -175,8 +177,9 @@ pub enum Refusal {
     Build,
     /// The submission plan or its request frame was refused.
     Plan,
-    /// The transport start deadline after `T_ingress` passed before the
-    /// permit (nothing consumed).
+    /// The transport start deadline after `T_ingress` passed: before the
+    /// economic admission (only the lane and the token are used) or at the
+    /// pre-permit check after it (the exposure counts as well).
     Deadline,
     /// The dispatch did not hand the request to the sink.
     Dispatch,
@@ -639,6 +642,9 @@ impl PaperExecutor {
         // The lane is consumed by this attempt, whatever happens next.
         self.used += 1;
         let ticket = lane.reserve(admitted.token()).map_err(|_| Refusal::Lane)?;
+        // The token is taken at the reservation, as the production lane
+        // burns it there: a replacement launch of it is refused.
+        self.bought.push(token);
         let sender = Address::from(self.identity.address());
         let expected = ExpectedBuy::from_admitted(
             &self.deployment,
@@ -711,7 +717,7 @@ impl PaperExecutor {
             state: ConnectionState::Ready,
             handoff: None,
         };
-        let report = dispatch_diagnostic(
+        let dispatched = dispatch_diagnostic(
             lane,
             &plan,
             &DispatchContext {
@@ -726,15 +732,20 @@ impl PaperExecutor {
                 transport: &mut transport,
                 frame: &mut frame,
             }],
-        )
-        .map_err(|_| Refusal::Dispatch)?;
+        );
         let handoff = transport.handoff;
-        if report.admitted() {
-            // The session's exposure and token are taken once the economic
-            // admission is consumed, as the production lane reserves them.
+        // The exposure is the session's once the economic admission was
+        // consumed (`begin_send`), whatever followed.
+        let admitted = match &dispatched {
+            Ok(report) => report.admitted(),
+            Err(DispatchError::DispatchBinding(_)) => true,
+            Err(_) => false,
+        };
+        if admitted {
             self.spent_wei += exposure;
-            self.bought.push(token);
         }
+        let report = dispatched.map_err(|_| Refusal::Dispatch)?;
+
         match report.adapter(adapter).map(|r| r.outcome) {
             Some(SendOutcome::HandedOff) => {}
             Some(SendOutcome::SkippedDeadline(_)) => return Err(Refusal::Deadline),
@@ -778,6 +789,13 @@ impl PaperExecutor {
     /// Exposure dispatched in this session.
     pub fn spent_wei(&self) -> U256 {
         self.spent_wei
+    }
+
+    /// No further BUY can be admitted: every lane is used, or the session
+    /// cap has no room for one more BUY.
+    pub fn exhausted(&self) -> bool {
+        self.used == self.lanes.len()
+            || self.spent_wei + self.budget.max_total_wei > U256::from(self.config.session_cap_wei)
     }
 
     pub fn sink(&self) -> &PaperSink {

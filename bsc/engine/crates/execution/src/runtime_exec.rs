@@ -12,10 +12,13 @@
 //! 4. every C1-scope launch then runs the production path to the PAPER
 //!    sink;
 //! 5. while armed, the deployment and terms are probed again every
-//!    `BSC_EXEC_REPROBE_MS`: a drift, other terms, a funded sender or a
-//!    probe that fails disarms the path, visibly. Nothing is retried or
-//!    re-armed automatically: switching the component off and on again
-//!    starts over (with a new fence).
+//!    `BSC_EXEC_REPROBE_MS`: a drift, other terms or a funded sender
+//!    disarms the path, visibly, and so does a re-probe that fails more
+//!    than `BSC_EXEC_REPROBE_FAILURES` times in a row (a PAPER BUY never
+//!    leaves the process, so a bounded run of transient read failures keeps
+//!    the observation going; each is visible). Nothing is re-armed
+//!    automatically: switching the component off and on again starts over
+//!    (with a new fence); a clean runtime stop disarms.
 
 use crate::chain_follower::FollowerLimits;
 use crate::paper::PaperIdentity;
@@ -50,6 +53,8 @@ pub struct ExecSetup {
     pub exec: ExecConfig,
     /// How often an armed path probes the deployment again.
     pub reprobe: Duration,
+    /// Consecutive failed re-probes an armed path tolerates.
+    pub reprobe_failures: u32,
 }
 
 impl ExecSetup {
@@ -134,6 +139,9 @@ pub struct ExecRuntime {
     probes: u64,
     /// Disarms whose fence could not be removed.
     disarm_errors: u64,
+    /// Consecutive failed re-probes of the armed path, and the last error.
+    reprobe_failed: u32,
+    last_probe_error: Option<String>,
     prober: Prober,
 }
 
@@ -166,6 +174,8 @@ impl ExecRuntime {
             last_probe: None,
             probes: 0,
             disarm_errors: 0,
+            reprobe_failed: 0,
+            last_probe_error: None,
             prober,
         }
     }
@@ -173,6 +183,12 @@ impl ExecRuntime {
     /// The PAPER sender, when its identity loaded.
     pub fn sender(&self) -> Option<[u8; 20]> {
         self.sender
+    }
+
+    /// A clean runtime stop: the armed path ends and its fence goes.
+    pub fn shutdown(&mut self) {
+        self.probe = None;
+        self.stop(Phase::Off);
     }
 
     fn disarm(&mut self) {
@@ -220,8 +236,18 @@ impl ExecRuntime {
     fn observed(&mut self, result: Result<VenueObservation, String>) {
         let observation = match result {
             Ok(o) => o,
+            // An armed path tolerates a bounded run of failed re-probes.
+            Err(e)
+                if self.executor.is_some() && self.reprobe_failed < self.setup.reprobe_failures =>
+            {
+                self.reprobe_failed += 1;
+                self.last_probe_error = Some(e);
+                return;
+            }
             Err(e) => return self.stop(Phase::ProbeFailed(e)),
         };
+        self.reprobe_failed = 0;
+        self.last_probe_error = None;
         let generation = self.codehash_generation + 1;
         let validated = bsc_mainnet_v5_27_0().validate(&observation.deployment(), generation);
         let terms = observation.terms;
@@ -415,10 +441,20 @@ impl ExecRuntime {
             Phase::Funded(r) => ("FUNDED", Some(r.clone())),
             Phase::WaitingNonce => ("WAITING_NONCE", None),
             Phase::ArmFailed(r) => ("ARM_FAILED", Some(r.clone())),
-            Phase::Armed => match self.executor.as_ref().map(PaperExecutor::lanes) {
-                Some((_, 0)) => ("EXHAUSTED", None),
-                _ => ("ARMED", None),
-            },
+            Phase::Armed => {
+                let failing = self.last_probe_error.as_ref().map(|e| {
+                    format!(
+                        "re-probe failed {}/{} in a row: {e}",
+                        self.reprobe_failed, self.setup.reprobe_failures
+                    )
+                });
+                match self.executor.as_ref().map(PaperExecutor::exhausted) {
+                    // Every lane used, or no room for one more BUY under the
+                    // session cap.
+                    Some(true) => ("EXHAUSTED", failing),
+                    _ => ("ARMED", failing),
+                }
+            }
         };
         let mut d = Draft::new(&e::SCHEMA);
         d.set(e::STATE, state);
@@ -515,6 +551,7 @@ mod tests {
                 max_frame: 65_536,
             },
             reprobe,
+            reprobe_failures: 1,
         }
     }
 
@@ -609,6 +646,15 @@ mod tests {
         _: Address,
     ) -> Result<VenueObservation, String> {
         Ok(observation("v5.27.2", Address::repeat_byte(0x6f)))
+    }
+
+    fn unreachable(
+        _: &str,
+        _: &FollowerLimits,
+        _: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        Err("node unreachable".into())
     }
 
     /// The witnessed self-launch, really signed by a third party.
@@ -789,11 +835,26 @@ mod tests {
             buy.times.sink_ns - buy.times.ingress_ns
         );
 
+        // The shipped cap holds one BUY: no room for another (pass-2 LOW 3).
+        assert_eq!(record(&x).text(e::STATE).unwrap(), "EXHAUSTED");
+        // One failed re-probe is tolerated and visible (pass-2 LOW 2).
+        x.prober = unreachable;
+        x.last_probe = None;
+        let lim = limits();
+        for _ in 0..200 {
+            x.tick(true, Some(&owner), Some(("https://probe.invalid", &lim)), 7);
+            if state(&x).1.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (s, reason) = state(&x);
+        assert_eq!(s, "EXHAUSTED");
+        assert!(reason.unwrap().contains("re-probe failed 1/1"));
         // The Portal is upgraded: the next probe disarms (M3).
         x.prober = upgraded;
         x.last_probe = None;
         settle(&mut x, &owner, "https://probe.invalid");
-        let lim = limits();
         for _ in 0..200 {
             x.tick(true, Some(&owner), Some(("https://probe.invalid", &lim)), 7);
             if state(&x).0 != "ARMED" {
@@ -814,7 +875,10 @@ mod tests {
         settle(&mut x, &owner, "https://probe.invalid");
         assert_eq!(state(&x), ("ARMED".to_owned(), None));
         assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 1);
-        x.tick(false, Some(&owner), None, 7);
+        // A clean runtime stop disarms and removes the fence (pass-2 LOW 5).
+        x.shutdown();
+        assert_eq!(state(&x).0, "OFF");
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

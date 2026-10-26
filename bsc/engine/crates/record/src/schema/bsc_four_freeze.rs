@@ -476,6 +476,41 @@ pub mod four_freeze {
                 Field::req(INDIRECT_LAUNCHES_SEEN, "indirect_launches_seen", U64),
             ],
         };
+
+        /// v2 (Phase E review): the SELL scan, every OpenFour preset in use
+        /// and the bounded lifecycle-event scan.
+        pub const SELL_FIXTURE: u16 = 14;
+        /// Successful SELL events of the family in the fetched receipts.
+        pub const SELL_EVENTS_SEEN: u16 = 15;
+        /// `preset <id>: <n> launches (<d> direct), fixture <yes|no>`.
+        pub const PRESETS: u16 = 16;
+        /// `<signature>: <n> logs, fixture <tx|none>`.
+        pub const LIFECYCLE: u16 = 17;
+
+        pub const V2: Schema = Schema {
+            name: "darkbot.g01.four-freeze.scan",
+            record_type: 0,
+            schema_version: 2,
+            fields: &[
+                Field::req(METHOD, "method", Text),
+                Field::req(FROM_BLOCK, "from_block", U64),
+                Field::req(SEARCH_TO_BLOCK, "search_to_block", U64),
+                Field::req(LINKED_TO_BLOCK, "linked_to_block", U64),
+                Field::req(HEADERS, "headers", U64),
+                Field::req(PARENT_LINKED, "parent_linked", Bool),
+                Field::req(BLOOM_CANDIDATE_BLOCKS, "bloom_candidate_blocks", U64),
+                Field::req(RECEIPT_BLOCKS_FETCHED, "receipt_blocks_fetched", U64),
+                Field::req(RECEIPT_BLOCK_BUDGET, "receipt_block_budget", U64),
+                Field::req(LAUNCH_FIXTURE, "launch_fixture", Text),
+                Field::req(BUY_FIXTURE, "buy_fixture", Text),
+                Field::req(LAUNCH_EVENTS_SEEN, "launch_events_seen", U64),
+                Field::req(INDIRECT_LAUNCHES_SEEN, "indirect_launches_seen", U64),
+                Field::req(SELL_FIXTURE, "sell_fixture", Text),
+                Field::req(SELL_EVENTS_SEEN, "sell_events_seen", U64),
+                Field::rep(PRESETS, "presets", Text),
+                Field::rep(LIFECYCLE, "lifecycle", Text),
+            ],
+        };
     }
 
     /// One required G0.1 property and its proof status.
@@ -593,9 +628,76 @@ pub mod four_freeze {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    /// v2 (Phase E review): the scan carries SELL, presets and lifecycle.
+    pub const V2: Schema = Schema {
+        name: "darkbot.g01.four-freeze.v2",
+        record_type: 51,
+        schema_version: 2,
+        fields: &[
+            Field::req(FAMILY, "family", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(REFERENCE_BLOCK, "reference_block", U64),
+            Field::req(REFERENCE_BLOCK_HASH, "reference_block_hash", B256),
+            Field::req(REFERENCE_TIMESTAMP, "reference_timestamp", U64),
+            Field::req(PIN_RECHECKED, "pin_rechecked", Bool),
+            Field::req(ENDPOINT_HOST, "endpoint_host", Text),
+            Field::opt(SOURCIFY_HOST, "sourcify_host", Text),
+            Field::req(TOOL_SHA256, "tool_sha256", B256),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(ARCHIVE_ROOT, "archive_root", Text),
+            Field::nested(
+                ARCHIVE_INPUTS,
+                "archive_inputs",
+                Presence::Repeated,
+                &archive_input::SCHEMA,
+            ),
+            Field::nested(
+                CONTRACTS,
+                "contracts",
+                Presence::Repeated,
+                &contract::SCHEMA,
+            )
+            .max(8 * 1024 * 1024),
+            Field::nested(
+                SELECTORS,
+                "selectors",
+                Presence::Repeated,
+                &selector::SCHEMA,
+            ),
+            Field::nested(
+                STATE_READS,
+                "state_reads",
+                Presence::Repeated,
+                &state_read::SCHEMA,
+            ),
+            Field::nested(FIXTURES, "fixtures", Presence::Repeated, &fixture::SCHEMA),
+            Field::nested(
+                DERIVATION,
+                "derivation",
+                Presence::Required,
+                &derivation::SCHEMA,
+            ),
+            Field::nested(SCAN, "scan", Presence::Required, &scan::V2),
+            Field::nested(
+                PROPERTIES,
+                "properties",
+                Presence::Repeated,
+                &property::SCHEMA,
+            ),
+            Field::req(FREEZE_STATUS, "freeze_status", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+        ],
+    };
 }
 
-pub const ALL: &[&Schema] = &[&four_freeze::SCHEMA];
+pub const ALL: &[&Schema] = &[&four_freeze::SCHEMA, &four_freeze::V2];
 
 #[cfg(test)]
 mod tests {

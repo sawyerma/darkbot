@@ -230,6 +230,7 @@ impl RuntimeConfig {
             Some(path) => Some(ExecSetup {
                 identity_path: ExecSetup::expand_home(path)?,
                 reprobe: ms(take("BSC_EXEC_REPROBE_MS", 1_000, 3_600_000)?),
+                reprobe_failures: take("BSC_EXEC_REPROBE_FAILURES", 0, 100)? as u32,
                 refused_accounts: StateConfig::parse_watched(
                     refused_accounts.ok_or("BSC_EXEC_REFUSED_ACCOUNTS is required")?,
                 )
@@ -1252,6 +1253,10 @@ pub fn run(
         }
         if stopping && adapters.is_empty() {
             drop(tx);
+            // A clean stop disarms the PAPER path (its fence goes).
+            if let Some(x) = exec.as_mut() {
+                x.shutdown();
+            }
             journal.record(RecordKind::Runtime, clock.now_ns(), &EXIT_PAYLOAD);
             journal.finish()?;
             if let Err(e) = write_census(config, rundir, None) {

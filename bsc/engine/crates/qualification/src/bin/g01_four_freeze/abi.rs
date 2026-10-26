@@ -281,6 +281,42 @@ pub fn buy_topic(family: Family) -> B256 {
     }
 }
 
+/// The SELL event topic of a family (OpenFour: `TradeExecuted` with
+/// `isBuy` false, the same topic as its BUY).
+pub fn sell_topic(family: Family) -> B256 {
+    match family {
+        Family::Classic => C::TokenSale::SIGNATURE_HASH,
+        Family::OpenFour => OC::TradeExecuted::SIGNATURE_HASH,
+    }
+}
+
+/// The lifecycle (liquidity, graduation, migration, phase) events of the
+/// published ABIs: family, signature and topic.
+pub fn lifecycle_events() -> [(Family, &'static str, B256); 4] {
+    [
+        (
+            Family::Classic,
+            C::LiquidityAdded::SIGNATURE,
+            C::LiquidityAdded::SIGNATURE_HASH,
+        ),
+        (
+            Family::Classic,
+            C::TradeStop::SIGNATURE,
+            C::TradeStop::SIGNATURE_HASH,
+        ),
+        (
+            Family::OpenFour,
+            OC::MigrateExecuted::SIGNATURE,
+            OC::MigrateExecuted::SIGNATURE_HASH,
+        ),
+        (
+            Family::OpenFour,
+            OC::PhaseTransition::SIGNATURE,
+            OC::PhaseTransition::SIGNATURE_HASH,
+        ),
+    ]
+}
+
 // ---- calldata --------------------------------------------------------------------
 
 fn word(bytes: &[u8], index: usize) -> Option<B256> {
@@ -607,6 +643,146 @@ pub fn openfour_buy(input: &[u8]) -> Result<Buy, String> {
     })
 }
 
+/// A decoded SELL call: its signature, parameters, token and the account
+/// the tokens come from (`from`), if the variant names one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sell {
+    pub signature: &'static str,
+    pub token: Address,
+    pub from: Option<Address>,
+    pub params: Vec<(String, String)>,
+}
+
+pub fn classic_sell(input: &[u8]) -> Result<Sell, String> {
+    let selector: [u8; 4] = input
+        .get(..4)
+        .and_then(|s| s.try_into().ok())
+        .ok_or("calldata shorter than a selector")?;
+    let e = |e: alloy_sol_types::Error| e.to_string();
+    Ok(match selector {
+        C::sellToken_0Call::SELECTOR => {
+            let c = C::sellToken_0Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_0Call::SIGNATURE,
+                token: c.token,
+                from: None,
+                params: vec![p("token", addr(c.token)), p("amount", c.amount)],
+            }
+        }
+        C::sellToken_1Call::SELECTOR => {
+            let c = C::sellToken_1Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_1Call::SIGNATURE,
+                token: c.token,
+                from: None,
+                params: vec![
+                    p("token", addr(c.token)),
+                    p("amount", c.amount),
+                    p("minFunds", c.minFunds),
+                ],
+            }
+        }
+        C::sellToken_2Call::SELECTOR => {
+            let c = C::sellToken_2Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_2Call::SIGNATURE,
+                token: c.token,
+                from: None,
+                params: vec![
+                    p("origin", c.origin),
+                    p("token", addr(c.token)),
+                    p("amount", c.amount),
+                ],
+            }
+        }
+        C::sellToken_3Call::SELECTOR => {
+            let c = C::sellToken_3Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_3Call::SIGNATURE,
+                token: c.token,
+                from: None,
+                params: vec![
+                    p("origin", c.origin),
+                    p("token", addr(c.token)),
+                    p("amount", c.amount),
+                    p("minFunds", c.minFunds),
+                ],
+            }
+        }
+        C::sellToken_4Call::SELECTOR => {
+            let c = C::sellToken_4Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_4Call::SIGNATURE,
+                token: c.token,
+                from: None,
+                params: vec![
+                    p("origin", c.origin),
+                    p("token", addr(c.token)),
+                    p("amount", c.amount),
+                    p("minFunds", c.minFunds),
+                    p("feeRate", c.feeRate),
+                    p("feeRecipient", addr(c.feeRecipient)),
+                ],
+            }
+        }
+        C::sellToken_5Call::SELECTOR => {
+            let c = C::sellToken_5Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_5Call::SIGNATURE,
+                token: c.token,
+                from: Some(c.from),
+                params: vec![
+                    p("origin", c.origin),
+                    p("token", addr(c.token)),
+                    p("from", addr(c.from)),
+                    p("to", addr(c.to)),
+                    p("amount", c.amount),
+                    p("minFunds", c.minFunds),
+                ],
+            }
+        }
+        C::sellToken_6Call::SELECTOR => {
+            let c = C::sellToken_6Call::abi_decode(input).map_err(e)?;
+            Sell {
+                signature: C::sellToken_6Call::SIGNATURE,
+                token: c.token,
+                from: Some(c.from),
+                params: vec![
+                    p("origin", c.origin),
+                    p("token", addr(c.token)),
+                    p("from", addr(c.from)),
+                    p("amount", c.amount),
+                    p("minFunds", c.minFunds),
+                    p("feeRate", c.feeRate),
+                    p("feeRecipient", addr(c.feeRecipient)),
+                ],
+            }
+        }
+        other => {
+            return Err(format!(
+                "selector {} is not a Classic SELL",
+                hex_bytes(&other)
+            ));
+        }
+    })
+}
+
+pub fn openfour_sell(input: &[u8]) -> Result<Sell, String> {
+    let c = OC::sellCall::abi_decode(input).map_err(|e| format!("not sell(...): {e}"))?;
+    Ok(Sell {
+        signature: OC::sellCall::SIGNATURE,
+        token: c.token,
+        from: None,
+        params: vec![
+            p("token", addr(c.token)),
+            p("amount", c.amount),
+            p("minReceiveAmount", c.minReceiveAmount),
+            p("options", c.options),
+            p("proof.len", c.proof.len()),
+        ],
+    })
+}
+
 // ---- events ----------------------------------------------------------------------
 
 /// The facts of a create event the freeze checks.
@@ -695,6 +871,72 @@ pub fn bought(family: Family, topics: &[B256], data: &[u8]) -> Result<Bought, St
                 is_buy: ev.isBuy,
             })
         }
+    }
+}
+
+/// A SELL event: token and seller.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sold {
+    pub signature: &'static str,
+    pub token: Address,
+    pub account: Address,
+}
+
+/// A SELL event of `family`; an OpenFour `TradeExecuted` must have
+/// `isBuy` false.
+pub fn sold(family: Family, topics: &[B256], data: &[u8]) -> Result<Sold, String> {
+    match family {
+        Family::Classic => {
+            let ev = C::TokenSale::decode_raw_log(topics.iter().copied(), data)
+                .map_err(|e| format!("TokenSale: {e}"))?;
+            Ok(Sold {
+                signature: C::TokenSale::SIGNATURE,
+                token: ev.token,
+                account: ev.account,
+            })
+        }
+        Family::OpenFour => {
+            let ev = OC::TradeExecuted::decode_raw_log(topics.iter().copied(), data)
+                .map_err(|e| format!("TradeExecuted: {e}"))?;
+            if ev.isBuy {
+                return Err("TradeExecuted is a BUY".into());
+            }
+            Ok(Sold {
+                signature: OC::TradeExecuted::SIGNATURE,
+                token: ev.token,
+                account: ev.trader,
+            })
+        }
+    }
+}
+
+/// Whether a lifecycle log decodes under its published layout; a summary
+/// of the decoded fields.
+pub fn lifecycle_decodes(family: Family, topics: &[B256], data: &[u8]) -> Result<String, String> {
+    let t = topics.iter().copied();
+    let topic = topics.first().copied().unwrap_or_default();
+    match family {
+        Family::Classic if topic == C::LiquidityAdded::SIGNATURE_HASH => {
+            C::LiquidityAdded::decode_raw_log(t, data)
+                .map(|e| format!("base {} quote {}", addr(e.base), addr(e.quote)))
+                .map_err(|e| e.to_string())
+        }
+        Family::Classic if topic == C::TradeStop::SIGNATURE_HASH => {
+            C::TradeStop::decode_raw_log(t, data)
+                .map(|e| format!("token {}", addr(e.token)))
+                .map_err(|e| e.to_string())
+        }
+        Family::OpenFour if topic == OC::MigrateExecuted::SIGNATURE_HASH => {
+            OC::MigrateExecuted::decode_raw_log(t, data)
+                .map(|e| format!("token {} preset {}", addr(e.token), e.presetId))
+                .map_err(|e| e.to_string())
+        }
+        Family::OpenFour if topic == OC::PhaseTransition::SIGNATURE_HASH => {
+            OC::PhaseTransition::decode_raw_log(t, data)
+                .map(|e| format!("token {} phase {} -> {}", addr(e.token), e.from, e.to))
+                .map_err(|e| e.to_string())
+        }
+        _ => Err("not a lifecycle event of the family".into()),
     }
 }
 

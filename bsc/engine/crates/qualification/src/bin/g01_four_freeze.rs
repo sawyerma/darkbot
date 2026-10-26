@@ -345,6 +345,31 @@ const FAMILIES: [Family; 2] = [Family::Classic, Family::OpenFour];
 enum Kind {
     Launch,
     Buy,
+    /// A direct SELL call with its SELL event.
+    Sell,
+    /// A SELL event of a call through another contract: the event's layout
+    /// only.
+    SellEvent,
+    /// A liquidity, graduation, migration or phase event.
+    Lifecycle,
+}
+
+/// Launches of one OpenFour preset in the scanned receipts.
+#[derive(Clone, Copy, Debug, Default)]
+struct PresetSeen {
+    launches: u64,
+    direct: u64,
+    fixture: bool,
+}
+
+/// One lifecycle event of the published ABIs in the scanned receipts.
+#[derive(Clone, Debug)]
+struct LifecycleSeen {
+    family: Family,
+    signature: &'static str,
+    topic: B256,
+    logs: u64,
+    fixture: Option<Found>,
 }
 
 /// A canonical receipt log with its transaction.
@@ -371,6 +396,12 @@ struct ScanOutcome {
     buys: [Option<Found>; 2],
     launch_events: [u64; 2],
     indirect: [u64; 2],
+    sells: [Option<Found>; 2],
+    sell_events_only: [Option<Found>; 2],
+    sell_events: [u64; 2],
+    /// OpenFour presets of every launch seen (direct or not).
+    presets: BTreeMap<U256, PresetSeen>,
+    lifecycle: Vec<LifecycleSeen>,
     error: Option<String>,
 }
 
@@ -381,6 +412,16 @@ fn scan(rpc: &Endpoint, cfg: &Config, headers: &[Header], targets: [Address; 2])
         from: headers.first().map_or(0, |h| h.number),
         search_to: headers.last().map_or(0, |h| h.number),
         headers: headers.len() as u64,
+        lifecycle: abi::lifecycle_events()
+            .into_iter()
+            .map(|(family, signature, topic)| LifecycleSeen {
+                family,
+                signature,
+                topic,
+                logs: 0,
+                fixture: None,
+            })
+            .collect(),
         ..ScanOutcome::default()
     };
     if let Err(e) = scan_into(rpc, cfg, headers, targets, &mut out) {
@@ -397,25 +438,31 @@ fn scan_into(
     out: &mut ScanOutcome,
 ) -> Result<(), String> {
     for header in headers.iter().rev() {
-        let done = FAMILIES.iter().all(|f| {
-            out.launches[fi(*f)].len() >= cfg.launch_fixtures && out.buys[fi(*f)].is_some()
-        });
-        if done || out.fetched >= cfg.receipt_budget {
+        if out.fetched >= cfg.receipt_budget {
             break;
         }
         let mut wants = Vec::new();
         for family in FAMILIES {
             let c = targets[fi(family)];
-            if out.launches[fi(family)].len() < cfg.launch_fixtures
-                && bloom_has(header, c, abi::launch_topic(family))
-            {
+            // OpenFour launches are followed through the whole window: every
+            // preset in use needs its own fixture.
+            let launches_open =
+                family == Family::OpenFour || out.launches[fi(family)].len() < cfg.launch_fixtures;
+            if launches_open && bloom_has(header, c, abi::launch_topic(family)) {
                 wants.push((family, Kind::Launch));
             }
             if out.buys[fi(family)].is_none() && bloom_has(header, c, abi::buy_topic(family)) {
                 wants.push((family, Kind::Buy));
             }
+            if out.sells[fi(family)].is_none() && bloom_has(header, c, abi::sell_topic(family)) {
+                wants.push((family, Kind::Sell));
+            }
         }
-        if wants.is_empty() {
+        let lifecycle_open = out
+            .lifecycle
+            .iter()
+            .any(|l| l.fixture.is_none() && bloom_has(header, targets[fi(l.family)], l.topic));
+        if wants.is_empty() && !lifecycle_open {
             continue;
         }
         out.candidates += 1;
@@ -424,21 +471,58 @@ fn scan_into(
         receipts.sort_by_key(|r| std::cmp::Reverse(r.transaction_index));
         for r in receipts.iter().filter(|r| r.status == 1) {
             for log in r.logs.iter().rev() {
+                let topic = log.topics.first().copied();
+                // Lifecycle events: counted in every fetched receipt, one
+                // fixture each.
+                for i in 0..out.lifecycle.len() {
+                    let l = &out.lifecycle[i];
+                    if log.address != targets[fi(l.family)] || topic != Some(l.topic) {
+                        continue;
+                    }
+                    out.lifecycle[i].logs += 1;
+                    if out.lifecycle[i].fixture.is_none() && out.tx_fetched < cfg.receipt_budget {
+                        let tx = rpc.transaction(r.transaction_hash)?;
+                        out.tx_fetched += 1;
+                        edge::require_tx_at(&tx, r)?;
+                        out.lifecycle[i].fixture = Some(Found {
+                            family: out.lifecycle[i].family,
+                            kind: Kind::Lifecycle,
+                            source: "RECEIPT_SCAN",
+                            block_hash: header.hash,
+                            receipt: r.clone(),
+                            log: log.clone(),
+                            tx,
+                        });
+                    }
+                }
                 for &(family, kind) in &wants {
                     let c = targets[fi(family)];
                     if log.address != c {
                         continue;
                     }
-                    let topic = log.topics.first().copied();
                     match kind {
                         Kind::Launch if topic == Some(abi::launch_topic(family)) => {
                             out.launch_events[fi(family)] += 1;
+                            let preset = match family {
+                                Family::OpenFour => {
+                                    log.topics.get(1).map(|t| U256::from_be_bytes(t.0))
+                                }
+                                Family::Classic => None,
+                            };
+                            if let Some(p) = preset {
+                                out.presets.entry(p).or_default().launches += 1;
+                            }
                             if r.to != Some(c) {
                                 out.indirect[fi(family)] += 1;
                                 continue;
                             }
+                            if let Some(p) = preset {
+                                out.presets.entry(p).or_default().direct += 1;
+                            }
+                            let new_preset = preset
+                                .is_some_and(|p| out.presets.get(&p).is_some_and(|s| !s.fixture));
                             let list = &out.launches[fi(family)];
-                            if list.len() >= cfg.launch_fixtures
+                            if (list.len() >= cfg.launch_fixtures && !new_preset)
                                 || list
                                     .iter()
                                     .any(|f| f.receipt.transaction_hash == r.transaction_hash)
@@ -449,6 +533,11 @@ fn scan_into(
                             edge::require_tx_at(&tx, r)?;
                             if tx.input.get(..4) != Some(&abi::launch_selector(family)[..]) {
                                 continue;
+                            }
+                            if let Some(p) = preset
+                                && let Some(seen) = out.presets.get_mut(&p)
+                            {
+                                seen.fixture = true;
                             }
                             out.launches[fi(family)].push(Found {
                                 family,
@@ -488,6 +577,46 @@ fn scan_into(
                                     log: log.clone(),
                                     tx,
                                 });
+                            }
+                        }
+                        Kind::Sell if topic == Some(abi::sell_topic(family)) => {
+                            if abi::sold(family, &log.topics, &log.data).is_err() {
+                                continue;
+                            }
+                            out.sell_events[fi(family)] += 1;
+                            if out.sells[fi(family)].is_some()
+                                || out.tx_fetched >= cfg.receipt_budget
+                            {
+                                continue;
+                            }
+                            let direct = r.to == Some(c);
+                            if !direct && out.sell_events_only[fi(family)].is_some() {
+                                continue;
+                            }
+                            let tx = rpc.transaction(r.transaction_hash)?;
+                            out.tx_fetched += 1;
+                            edge::require_tx_at(&tx, r)?;
+                            let decoded = match family {
+                                Family::Classic => abi::classic_sell(&tx.input),
+                                Family::OpenFour => abi::openfour_sell(&tx.input),
+                            };
+                            let found = Found {
+                                family,
+                                kind: if direct && decoded.is_ok() {
+                                    Kind::Sell
+                                } else {
+                                    Kind::SellEvent
+                                },
+                                source: "RECEIPT_SCAN",
+                                block_hash: header.hash,
+                                receipt: r.clone(),
+                                log: log.clone(),
+                                tx,
+                            };
+                            if found.kind == Kind::Sell {
+                                out.sells[fi(family)] = Some(found);
+                            } else if out.sell_events_only[fi(family)].is_none() {
+                                out.sell_events_only[fi(family)] = Some(found);
                             }
                         }
                         _ => {}
@@ -1057,6 +1186,124 @@ fn view_buy(f: Found, contract: Address, role: &str) -> FixtureView {
     }
 }
 
+/// A SELL: a direct call (`Kind::Sell`: calldata, event, token and seller
+/// checked) or an event of a call through another contract
+/// (`Kind::SellEvent`: the event's layout and emitter only).
+fn view_sell(f: Found, contract: Address, role: &str) -> FixtureView {
+    let mut checks = Vec::new();
+    check(
+        &mut checks,
+        "receipt_status_success",
+        f.receipt.status == 1,
+        format!("status {}", f.receipt.status),
+    );
+    check(
+        &mut checks,
+        &format!("event_emitted_by_{role}"),
+        f.log.address == contract,
+        addr(f.log.address),
+    );
+    let event = abi::sold(f.family, &f.log.topics, &f.log.data);
+    check(
+        &mut checks,
+        "event_decodes_as_SELL",
+        event.is_ok(),
+        event.as_ref().err().cloned().unwrap_or_default(),
+    );
+    let (mut token, mut account, mut call_signature, mut event_signature) =
+        (Address::ZERO, Address::ZERO, String::new(), String::new());
+    let mut params = Vec::new();
+    if let Ok(e) = &event {
+        token = e.token;
+        account = e.account;
+        event_signature = e.signature.to_string();
+    }
+    if f.kind == Kind::Sell {
+        check(
+            &mut checks,
+            &format!("top_level_call_to_{role}"),
+            f.tx.to == Some(contract),
+            format!("to {:?}", f.tx.to.map(addr)),
+        );
+        let decoded = match f.family {
+            Family::Classic => abi::classic_sell(&f.tx.input),
+            Family::OpenFour => abi::openfour_sell(&f.tx.input),
+        };
+        check(
+            &mut checks,
+            "calldata_decodes_as_SELL",
+            decoded.is_ok(),
+            decoded
+                .as_ref()
+                .map(|b| b.signature.to_string())
+                .unwrap_or_else(|e| e.clone()),
+        );
+        if let (Ok(c), Ok(e)) = (&decoded, &event) {
+            call_signature = c.signature.to_string();
+            params = c.params.clone();
+            check(
+                &mut checks,
+                "calldata_token_equals_event_token",
+                c.token == e.token,
+                format!("calldata {} event {}", addr(c.token), addr(e.token)),
+            );
+            let expected = c.from.unwrap_or(f.tx.from);
+            check(
+                &mut checks,
+                "event_seller_equals_from_or_sender",
+                e.account == expected,
+                format!("event {} expected {}", addr(e.account), addr(expected)),
+            );
+        }
+    } else {
+        call_signature = format!("via {}", f.tx.to.map_or("creation".into(), addr));
+    }
+    FixtureView {
+        call_signature,
+        event_signature,
+        token,
+        account,
+        params,
+        checks,
+        launch: None,
+        found: f,
+    }
+}
+
+/// A lifecycle event: emitter, topic and the published layout.
+fn view_lifecycle(f: Found, contract: Address, role: &str, signature: &str) -> FixtureView {
+    let mut checks = Vec::new();
+    check(
+        &mut checks,
+        "receipt_status_success",
+        f.receipt.status == 1,
+        format!("status {}", f.receipt.status),
+    );
+    check(
+        &mut checks,
+        &format!("event_emitted_by_{role}"),
+        f.log.address == contract,
+        addr(f.log.address),
+    );
+    let decoded = abi::lifecycle_decodes(f.family, &f.log.topics, &f.log.data);
+    check(
+        &mut checks,
+        "event_decodes",
+        decoded.is_ok(),
+        decoded.as_ref().map_or_else(Clone::clone, Clone::clone),
+    );
+    FixtureView {
+        call_signature: format!("via {}", f.tx.to.map_or("creation".into(), addr)),
+        event_signature: signature.to_string(),
+        token: Address::ZERO,
+        account: f.tx.from,
+        params: Vec::new(),
+        checks,
+        launch: None,
+        found: f,
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Attempt {
     tx: B256,
@@ -1381,6 +1628,27 @@ impl FamilyEval<'_> {
 
     fn buy_fixture(&self) -> Option<&FixtureView> {
         self.fixtures.iter().find(|f| f.found.kind == Kind::Buy)
+    }
+
+    fn fixture_of(&self, kind: Kind) -> Option<&FixtureView> {
+        self.fixtures.iter().find(|f| f.found.kind == kind)
+    }
+
+    fn sell_status(&self) -> String {
+        match (
+            self.fixture_of(Kind::Sell),
+            self.fixture_of(Kind::SellEvent),
+        ) {
+            (Some(f), _) => format!("FOUND direct {}", f.found.receipt.transaction_hash),
+            (None, Some(f)) => format!(
+                "EVENT_ONLY {} ({}); no direct SELL call in the scanned receipts",
+                f.found.receipt.transaction_hash, f.call_signature
+            ),
+            (None, None) => format!(
+                "UNKNOWN: no SELL event within blocks {}..={} (receipt blocks fetched {})",
+                self.scan.from, self.scan.search_to, self.scan.fetched
+            ),
+        }
     }
 
     fn launch_status(&self, budget: u64) -> String {
@@ -1760,6 +2028,114 @@ impl FamilyEval<'_> {
                 }
             ),
         ));
+        // 7b. SELL: the event's layout (any caller) and the direct call.
+        let sell_sel = self.selectors_with("SELL");
+        let sell_present = sell_sel
+            .iter()
+            .filter(|s| s.dispatcher.ends_with("_PRESENT"))
+            .count();
+        let sell_call = self.fixture_of(Kind::Sell);
+        let sell_event = sell_call.or(self.fixture_of(Kind::SellEvent));
+        out.push((
+            "sell_event".into(),
+            proven(sell_event.is_some_and(FixtureView::passed)),
+            format!(
+                "{}; SELL events seen in the fetched receipts: {}; layout from the published ABI, token and seller positions checked, amount semantics UNKNOWN (Phase G)",
+                self.sell_status(),
+                self.scan.sell_events[fi(self.family)]
+            ),
+        ));
+        out.push((
+            "sell_call".into(),
+            proven(
+                sell_present == sell_sel.len()
+                    && !sell_sel.is_empty()
+                    && sell_call.is_some_and(FixtureView::passed),
+            ),
+            format!(
+                "{sell_present}/{} SELL selectors in the dispatcher; canonical direct SELL: {}",
+                sell_sel.len(),
+                match sell_call {
+                    Some(f) => format!(
+                        "{} tx {} block {} checks {}",
+                        f.call_signature,
+                        f.found.receipt.transaction_hash,
+                        f.found.receipt.block_number,
+                        if f.passed() { "PASS" } else { "FAIL" }
+                    ),
+                    None => "none in the scanned receipts".into(),
+                }
+            ),
+        ));
+        // 7c. Lifecycle events: a witnessed log each, or UNKNOWN within the
+        // recorded scan bounds.
+        let lifecycle: Vec<&LifecycleSeen> = self
+            .scan
+            .lifecycle
+            .iter()
+            .filter(|l| l.family == self.family)
+            .collect();
+        let lifecycle_ok = !lifecycle.is_empty()
+            && lifecycle.iter().all(|l| {
+                self.fixtures.iter().any(|f| {
+                    f.found.kind == Kind::Lifecycle
+                        && f.event_signature == l.signature
+                        && f.passed()
+                })
+            });
+        out.push((
+            "lifecycle_events".into(),
+            proven(lifecycle_ok),
+            format!(
+                "within blocks {}..={} ({} receipt blocks fetched): {}",
+                self.scan.from,
+                self.scan.search_to,
+                self.scan.fetched,
+                lifecycle
+                    .iter()
+                    .map(|l| format!(
+                        "{}: {} logs, fixture {}",
+                        l.signature,
+                        l.logs,
+                        l.fixture
+                            .as_ref()
+                            .map_or("none".into(), |f| f.receipt.transaction_hash.to_string())
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+        ));
+        // 7d. OpenFour: every preset of the scanned launches has a direct
+        // launch whose derivation reproduced.
+        if self.family == Family::OpenFour {
+            let presets = &self.scan.presets;
+            let reproduced = |preset: &U256| {
+                self.launch_fixtures().iter().any(|f| {
+                    f.launch.as_ref().and_then(|l| l.preset_id) == Some(*preset)
+                        && self
+                            .derivation
+                            .attempts
+                            .iter()
+                            .any(|a| a.tx == f.found.receipt.transaction_hash && a.matched)
+                })
+            };
+            out.push((
+                "presets_in_use".into(),
+                proven(!presets.is_empty() && presets.keys().all(reproduced)),
+                presets
+                    .iter()
+                    .map(|(p, s)| {
+                        format!(
+                            "preset {p}: {} launches ({} direct), derivation reproduced {}",
+                            s.launches,
+                            s.direct,
+                            reproduced(p)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ));
+        }
         // 8. Token address derivation.
         out.push((
             "token_address_derivation".into(),
@@ -1806,9 +2182,9 @@ impl FamilyEval<'_> {
             "PROVEN",
             format!(
                 "this record: {} (type {} v{}); archive inputs SHA-256-bound; Sourcify responses SHA-256-bound; tool SHA-256 {}; git HEAD {}",
-                ff::SCHEMA.name,
-                ff::SCHEMA.record_type,
-                ff::SCHEMA.schema_version,
+                ff::V2.name,
+                ff::V2.record_type,
+                ff::V2.schema_version,
                 B256::from(common.tool_sha256),
                 common.git_head.as_deref().unwrap_or("UNKNOWN")
             ),
@@ -1957,6 +2333,9 @@ fn fixture_draft(f: &FixtureView) -> Draft {
         match f.found.kind {
             Kind::Launch => "LAUNCH",
             Kind::Buy => "BUY",
+            Kind::Sell => "SELL",
+            Kind::SellEvent => "SELL_EVENT",
+            Kind::Lifecycle => "LIFECYCLE",
         },
     )
     .set(k::SOURCE, f.found.source)
@@ -2043,7 +2422,7 @@ fn family_draft(
     common: &Common,
     archive: &Archive,
 ) -> (Draft, Vec<(String, &'static str, String)>) {
-    let mut d = Draft::new(&ff::SCHEMA);
+    let mut d = Draft::new(&ff::V2);
     d.set(ff::FAMILY, eval.family.label())
         .set(ff::CHAIN_ID, common.chain_id)
         .set(ff::PROVENANCE_TOOL, TOOL)
@@ -2120,8 +2499,8 @@ fn family_draft(
     {
         use ff::scan as k;
         let s = eval.scan;
-        let mut e = Draft::new(&k::SCHEMA);
-        e.set(k::METHOD, "HEADER_LOGSBLOOM(contract, topic0) THEN eth_getBlockReceipts(blockHash), NEWEST FIRST; direct top-level calls only")
+        let mut e = Draft::new(&k::V2);
+        e.set(k::METHOD, "HEADER_LOGSBLOOM(contract, topic0) THEN eth_getBlockReceipts(blockHash), NEWEST FIRST; launch/BUY/SELL fixtures direct top-level calls only; OpenFour launches through the whole window")
             .set(k::FROM_BLOCK, s.from)
             .set(k::SEARCH_TO_BLOCK, s.search_to)
             .set(k::LINKED_TO_BLOCK, common.linked_to)
@@ -2133,7 +2512,35 @@ fn family_draft(
             .set(k::LAUNCH_FIXTURE, eval.launch_status(common.receipt_budget))
             .set(k::BUY_FIXTURE, eval.buy_status())
             .set(k::LAUNCH_EVENTS_SEEN, s.launch_events[fi(eval.family)])
-            .set(k::INDIRECT_LAUNCHES_SEEN, s.indirect[fi(eval.family)]);
+            .set(k::INDIRECT_LAUNCHES_SEEN, s.indirect[fi(eval.family)])
+            .set(k::SELL_FIXTURE, eval.sell_status())
+            .set(k::SELL_EVENTS_SEEN, s.sell_events[fi(eval.family)]);
+        if eval.family == Family::OpenFour {
+            for (p, seen) in &s.presets {
+                e.push(
+                    k::PRESETS,
+                    format!(
+                        "preset {p}: {} launches ({} direct), fixture {}",
+                        seen.launches,
+                        seen.direct,
+                        if seen.fixture { "yes" } else { "no" }
+                    ),
+                );
+            }
+        }
+        for l in s.lifecycle.iter().filter(|l| l.family == eval.family) {
+            e.push(
+                k::LIFECYCLE,
+                format!(
+                    "{}: {} logs, fixture {}",
+                    l.signature,
+                    l.logs,
+                    l.fixture
+                        .as_ref()
+                        .map_or("none".into(), |f| f.receipt.transaction_hash.to_string())
+                ),
+            );
+        }
         d.set(ff::SCAN, e.into_nested());
     }
     let properties = eval.properties(common);
@@ -2387,6 +2794,25 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         if let Some(b) = scanned.buys[fi(family)].clone() {
             fixtures.push(view_buy(b, surface, surface_role(family)));
         }
+        for f in [
+            scanned.sells[fi(family)].clone(),
+            scanned.sell_events_only[fi(family)].clone(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            fixtures.push(view_sell(f, surface, surface_role(family)));
+        }
+        for l in scanned.lifecycle.iter().filter(|l| l.family == family) {
+            if let Some(f) = l.fixture.clone() {
+                fixtures.push(view_lifecycle(
+                    f,
+                    surface,
+                    surface_role(family),
+                    l.signature,
+                ));
+            }
+        }
         let launches: Vec<FixtureView> = fixtures
             .iter()
             .filter(|f| f.found.kind == Kind::Launch)
@@ -2621,7 +3047,8 @@ mod tests {
             sourcify_enabled: false,
         };
         let (draft, properties) = family_draft(&eval, &common, &a);
-        assert_eq!(properties.len(), 10);
+        // v2: SELL event and call, lifecycle events, OpenFour presets.
+        assert_eq!(properties.len(), 14);
         for (name, status, _) in &properties {
             let expected = if name == "versioned_evidence" {
                 "PROVEN"
@@ -2631,7 +3058,7 @@ mod tests {
             assert_eq!(*status, expected, "{name}");
         }
         let bytes = draft.encode().unwrap();
-        let record = decode(&ff::SCHEMA, &bytes).unwrap();
+        let record = decode(&ff::V2, &bytes).unwrap();
         assert_eq!(record.text(ff::FREEZE_STATUS).unwrap(), "PARTIAL");
         assert!(
             record
