@@ -2720,3 +2720,22 @@ fn inclusion_visits_only_open_records_of_its_sender() {
     assert_eq!(s.tx(&t(1_001)).unwrap().state, TxState::Candidate);
     check_invariants(&s);
 }
+
+/// Phase I: the canonical snapshot needs no pending candidate; every
+/// accepted block moves it, and an incoherent state has none.
+#[test]
+fn the_canonical_snapshot_follows_every_applied_block() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[])));
+    let first = s.canonical_snapshot_id(1, 1).unwrap();
+    assert_eq!(first.pending_candidate, B256::ZERO);
+    assert_eq!(first.canonical_block_hash, bh(BASE + 1, 0));
+    accepted(&s.apply(&block(BASE + 2, 0, 0, &[(t(1), foreign(), 0)])));
+    let second = s.canonical_snapshot_id(1, 1).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(second.canonical_block_hash, bh(BASE + 2, 0));
+    // A conflict makes the state incoherent: no snapshot.
+    s.apply(&block(BASE + 3, 0, 0, &[(t(1), foreign(), 0)]));
+    assert_eq!(s.canonical_snapshot_id(1, 1), None);
+    check_invariants(&s);
+}

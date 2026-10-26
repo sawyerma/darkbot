@@ -32,11 +32,15 @@
 
 use alloy_primitives::{Address, B256, U256};
 
-use super::abi::{AbiError, decode_swap_exact_input_native, encode_swap_exact_input_native};
+use super::abi::{
+    AbiError, decode_approve, decode_swap_exact_input_native, encode_approve,
+    encode_swap_exact_input_native,
+};
 use super::deployment::ValidatedDeployment;
+use super::recognize::decode_swap_exact_input;
 use crate::chain_state::SnapshotId;
-use crate::economics::flap::AdmittedBuy;
-use crate::economics::policy::BuyPolicy;
+use crate::economics::flap::{AdmittedBuy, AdmittedSell};
+use crate::economics::policy::{BuyPolicy, ExitPolicy};
 use crate::signer::{Signer, SignerError, recover_legacy_sender};
 use crate::transactions::legacy::{LegacyDecodeError, LegacyTx, decode_signed, tx_hash};
 
@@ -262,8 +266,11 @@ pub enum BindingError {
     WrongValue,
     /// The calldata is not a canonical native-input BUY.
     Calldata(AbiError),
-    /// The calldata buys another token.
+    /// The calldata buys another token (or approves on another token
+    /// contract, or sells another token).
     WrongToken,
+    /// The approval names another spender than the Portal.
+    WrongSpender,
     /// Calldata input amount differs from the intended amount.
     WrongInputAmount,
     /// Calldata minimum output differs from the intended minimum.
@@ -284,6 +291,7 @@ impl core::fmt::Display for BindingError {
             Self::WrongValue => f.write_str("buy binding: value differs from the input amount"),
             Self::Calldata(e) => write!(f, "buy binding: {e}"),
             Self::WrongToken => f.write_str("buy binding: calldata buys another token"),
+            Self::WrongSpender => f.write_str("binding: the approval names another spender"),
             Self::WrongInputAmount => f.write_str("buy binding: unexpected input amount"),
             Self::WrongMinOutput => f.write_str("buy binding: unexpected minimum output"),
         }
@@ -332,6 +340,357 @@ pub fn verify_final_buy(
         return Err(BindingError::WrongToken);
     }
     if call.input_amount != expected.input_amount {
+        return Err(BindingError::WrongInputAmount);
+    }
+    if call.min_output_amount != expected.min_output_amount {
+        return Err(BindingError::WrongMinOutput);
+    }
+    Ok(tx_hash(raw_signed))
+}
+
+/// The two transactions an exit signs (Phase I), bound to one admitted
+/// SELL: `approve(Portal, tokens)` on the token contract at `nonce`, then
+/// the native-output SELL of exactly those tokens at `nonce + 1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpectedExit {
+    chain_id: u64,
+    portal: Address,
+    sender: Address,
+    nonce: u64,
+    gas_price: u64,
+    approve_gas_limit: u64,
+    sell_gas_limit: u64,
+    token: Address,
+    input_tokens: U256,
+    min_output_amount: U256,
+    snapshot: SnapshotId,
+}
+
+impl ExpectedExit {
+    /// The expectation of an admitted SELL under the exit policy it was
+    /// admitted with; `nonce` is the approval's, the SELL takes the next.
+    pub fn from_admitted(
+        deployment: &ValidatedDeployment,
+        admitted: &AdmittedSell,
+        policy: &ExitPolicy,
+        sender: Address,
+        nonce: u64,
+    ) -> Result<Self, IntentError> {
+        let snapshot = admitted.snapshot();
+        if deployment.codehash_generation() != snapshot.codehash_generation {
+            return Err(IntentError::GenerationMismatch);
+        }
+        if policy.generation() != snapshot.policy_generation {
+            return Err(IntentError::PolicyGenerationMismatch);
+        }
+        if policy.slippage_bps() != admitted.slippage_bps() || nonce == u64::MAX {
+            return Err(IntentError::PolicyMismatch);
+        }
+        Ok(Self {
+            chain_id: deployment.deployment().chain_id,
+            portal: deployment.deployment().portal,
+            sender,
+            nonce,
+            gas_price: policy.gas_price(),
+            approve_gas_limit: policy.approve_gas_limit(),
+            sell_gas_limit: policy.sell_gas_limit(),
+            token: admitted.token(),
+            input_tokens: admitted.input_tokens(),
+            min_output_amount: admitted.min_output_amount(),
+            snapshot,
+        })
+    }
+
+    #[inline]
+    pub fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+
+    #[inline]
+    pub fn sender(&self) -> Address {
+        self.sender
+    }
+
+    /// The approval's nonce; the SELL's is the next.
+    #[inline]
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn input_tokens(&self) -> U256 {
+        self.input_tokens
+    }
+
+    #[inline]
+    pub fn min_output_amount(&self) -> U256 {
+        self.min_output_amount
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+
+    /// The most native both transactions can cost: gas only (no value).
+    pub fn max_gas_wei(&self) -> U256 {
+        U256::from(self.gas_price)
+            * (U256::from(self.approve_gas_limit) + U256::from(self.sell_gas_limit))
+    }
+
+    /// Signs the approval into `out`; returns its hash.
+    pub fn sign_approve(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        if signer.address() != self.sender {
+            return Err(BuildError::WrongSigner);
+        }
+        let calldata =
+            encode_approve(self.portal, self.input_tokens).map_err(BuildError::Calldata)?;
+        let tx = LegacyTx {
+            chain_id: self.chain_id,
+            nonce: self.nonce,
+            gas_price: self.gas_price,
+            gas_limit: self.approve_gas_limit,
+            to: self.token,
+            value: U256::ZERO,
+            input: &calldata,
+        };
+        signer
+            .sign_legacy(&tx, scratch, out)
+            .map_err(BuildError::Sign)
+    }
+
+    /// Signs the SELL into `out`; returns its hash.
+    pub fn sign_sell(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        if signer.address() != self.sender {
+            return Err(BuildError::WrongSigner);
+        }
+        let calldata = super::abi::encode_swap_exact_input_sell(
+            self.token,
+            self.input_tokens,
+            self.min_output_amount,
+        )
+        .map_err(BuildError::Calldata)?;
+        let tx = LegacyTx {
+            chain_id: self.chain_id,
+            nonce: self.nonce + 1,
+            gas_price: self.gas_price,
+            gas_limit: self.sell_gas_limit,
+            to: self.portal,
+            value: U256::ZERO,
+            input: &calldata,
+        };
+        signer
+            .sign_legacy(&tx, scratch, out)
+            .map_err(BuildError::Sign)
+    }
+}
+
+/// One signed transaction of an intent (Phase I): the BUY, or the
+/// approval or SELL of an exit. Lane and plan take this: its identity
+/// (chain, sender, nonce, token), the snapshot it is bound to, its value
+/// and gas, and its final binding check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpectedTx<'a> {
+    Buy(&'a ExpectedBuy),
+    Approve(&'a ExpectedExit),
+    Sell(&'a ExpectedExit),
+}
+
+impl<'a> From<&'a ExpectedBuy> for ExpectedTx<'a> {
+    fn from(b: &'a ExpectedBuy) -> Self {
+        Self::Buy(b)
+    }
+}
+
+impl ExpectedTx<'_> {
+    pub fn chain_id(&self) -> u64 {
+        match self {
+            Self::Buy(b) => b.chain_id,
+            Self::Approve(e) | Self::Sell(e) => e.chain_id,
+        }
+    }
+
+    pub fn sender(&self) -> Address {
+        match self {
+            Self::Buy(b) => b.sender,
+            Self::Approve(e) | Self::Sell(e) => e.sender,
+        }
+    }
+
+    /// The transaction's own nonce (the SELL's is the approval's + 1).
+    pub fn nonce(&self) -> u64 {
+        match self {
+            Self::Buy(b) => b.nonce,
+            Self::Approve(e) => e.nonce,
+            Self::Sell(e) => e.nonce + 1,
+        }
+    }
+
+    pub fn token(&self) -> Address {
+        match self {
+            Self::Buy(b) => b.token,
+            Self::Approve(e) | Self::Sell(e) => e.token,
+        }
+    }
+
+    pub fn snapshot(&self) -> SnapshotId {
+        match self {
+            Self::Buy(b) => b.snapshot,
+            Self::Approve(e) | Self::Sell(e) => e.snapshot,
+        }
+    }
+
+    /// The Portal the intent trades on.
+    pub fn portal(&self) -> Address {
+        match self {
+            Self::Buy(b) => b.portal,
+            Self::Approve(e) | Self::Sell(e) => e.portal,
+        }
+    }
+
+    /// Native value the transaction carries (the BUY's input; zero for an
+    /// exit's transactions).
+    pub fn value_wei(&self) -> U256 {
+        match self {
+            Self::Buy(b) => b.input_amount,
+            Self::Approve(_) | Self::Sell(_) => U256::ZERO,
+        }
+    }
+
+    /// The most gas the transaction can cost, in wei.
+    pub fn gas_wei(&self) -> U256 {
+        match self {
+            Self::Buy(b) => U256::from(b.gas_price) * U256::from(b.gas_limit),
+            Self::Approve(e) => U256::from(e.gas_price) * U256::from(e.approve_gas_limit),
+            Self::Sell(e) => U256::from(e.gas_price) * U256::from(e.sell_gas_limit),
+        }
+    }
+
+    /// The final binding check of `raw_signed` against this intent.
+    pub fn verify_final(
+        &self,
+        raw_signed: &[u8],
+        current: &SnapshotId,
+        scratch: &mut Vec<u8>,
+    ) -> Result<B256, BindingError> {
+        match self {
+            Self::Buy(b) => verify_final_buy(raw_signed, b, current, scratch),
+            Self::Approve(e) => verify_final_approve(raw_signed, e, current, scratch),
+            Self::Sell(e) => verify_final_sell(raw_signed, e, current, scratch),
+        }
+    }
+}
+
+/// The common envelope checks of an exit transaction.
+fn exit_envelope<'a>(
+    raw_signed: &'a [u8],
+    expected: &ExpectedExit,
+    current: &SnapshotId,
+    nonce: u64,
+    to: Address,
+    gas_limit: u64,
+    scratch: &mut Vec<u8>,
+) -> Result<&'a [u8], BindingError> {
+    if expected.snapshot != *current {
+        return Err(BindingError::StaleSnapshot);
+    }
+    let signed = decode_signed(raw_signed).map_err(BindingError::Envelope)?;
+    let sender = recover_legacy_sender(&signed, expected.chain_id, scratch)
+        .map_err(BindingError::Signature)?;
+    if sender != expected.sender {
+        return Err(BindingError::WrongSender);
+    }
+    if signed.tx.nonce != nonce {
+        return Err(BindingError::WrongNonce);
+    }
+    if signed.tx.to != to {
+        return Err(if to == expected.portal {
+            BindingError::WrongPortal
+        } else {
+            BindingError::WrongToken
+        });
+    }
+    if signed.tx.gas_price != expected.gas_price {
+        return Err(BindingError::WrongGasPrice);
+    }
+    if signed.tx.gas_limit != gas_limit {
+        return Err(BindingError::WrongGasLimit);
+    }
+    if !signed.tx.value.is_zero() {
+        return Err(BindingError::WrongValue);
+    }
+    Ok(signed.tx.input)
+}
+
+/// Verifies, at the send boundary, that `raw_signed` is exactly the exit's
+/// approval: on the token contract, of the Portal, for the tokens sold.
+pub fn verify_final_approve(
+    raw_signed: &[u8],
+    expected: &ExpectedExit,
+    current: &SnapshotId,
+    scratch: &mut Vec<u8>,
+) -> Result<B256, BindingError> {
+    let input = exit_envelope(
+        raw_signed,
+        expected,
+        current,
+        expected.nonce,
+        expected.token,
+        expected.approve_gas_limit,
+        scratch,
+    )?;
+    let (spender, amount) = decode_approve(input).map_err(BindingError::Calldata)?;
+    if spender != expected.portal {
+        return Err(BindingError::WrongSpender);
+    }
+    if amount != expected.input_tokens {
+        return Err(BindingError::WrongInputAmount);
+    }
+    Ok(tx_hash(raw_signed))
+}
+
+/// Verifies, at the send boundary, that `raw_signed` is exactly the exit's
+/// native-output SELL.
+pub fn verify_final_sell(
+    raw_signed: &[u8],
+    expected: &ExpectedExit,
+    current: &SnapshotId,
+    scratch: &mut Vec<u8>,
+) -> Result<B256, BindingError> {
+    let input = exit_envelope(
+        raw_signed,
+        expected,
+        current,
+        expected.nonce + 1,
+        expected.portal,
+        expected.sell_gas_limit,
+        scratch,
+    )?;
+    let call = decode_swap_exact_input(input).map_err(BindingError::Calldata)?;
+    if !call.permit.is_empty() || !call.is_sell() {
+        return Err(BindingError::Calldata(AbiError::UnsupportedInputToken));
+    }
+    if call.input_token != expected.token {
+        return Err(BindingError::WrongToken);
+    }
+    if call.input_amount != expected.input_tokens {
         return Err(BindingError::WrongInputAmount);
     }
     if call.min_output_amount != expected.min_output_amount {
@@ -736,6 +1095,116 @@ mod tests {
         assert_eq!(
             ExpectedBuy::from_admitted(&deployment, &admitted, &other_slippage, sender, 1),
             Err(IntentError::PolicyMismatch)
+        );
+    }
+
+    /// Phase I: the exit of a tracked curve state signs exactly its
+    /// approval (token contract, Portal, the tokens sold) and its SELL (the
+    /// next nonce); every bound field is enforced at the send boundary.
+    #[test]
+    fn the_exit_signs_and_binds_its_approval_and_sell() {
+        use crate::economics::flap::native_curve20::{
+            CurveState, HoldingCap, NativeBuyInputs, PricedToken, WITNESSED_MAINNET_TERMS,
+            admit_curve_sell, profile_terms, quote_native_buy,
+        };
+        let signer = Signer::from_secret_bytes(&[0x61; 32]).unwrap();
+        let deployment = validated_mainnet(7);
+        let token = Address::from([0xAB; 20]);
+        let snap = snapshot(7);
+        // A consistent curve state: one BUY of 2 BNB from the fresh curve.
+        let priced = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let bought = quote_native_buy(&NativeBuyInputs {
+            token: priced,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(2_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let state = CurveState::tracked(
+            token,
+            priced,
+            bought.reserve_after,
+            bought.supply_after,
+            &WITNESSED_MAINNET_TERMS,
+            snap,
+        )
+        .unwrap();
+        let policy = ExitPolicy::new(POLICY_GENERATION, 100, GAS_PRICE, 60_000, 900_000).unwrap();
+        let tokens = U256::from(1_000_000u64) * U256::from(10u64).pow(U256::from(18u8));
+        let admitted = admit_curve_sell(&state, tokens, &policy).unwrap();
+        let exit =
+            ExpectedExit::from_admitted(&deployment, &admitted, &policy, signer.address(), 9)
+                .unwrap();
+        assert_eq!(
+            exit.max_gas_wei(),
+            U256::from(GAS_PRICE) * U256::from(960_000u64)
+        );
+        let (mut scratch, mut approve, mut sell) = (Vec::new(), Vec::new(), Vec::new());
+        let a = exit
+            .sign_approve(&signer, &mut scratch, &mut approve)
+            .unwrap();
+        let b = exit.sign_sell(&signer, &mut scratch, &mut sell).unwrap();
+        assert_eq!(
+            verify_final_approve(&approve, &exit, &snap, &mut scratch),
+            Ok(a)
+        );
+        assert_eq!(verify_final_sell(&sell, &exit, &snap, &mut scratch), Ok(b));
+        // Each is only itself: swapped, stale, another signer.
+        assert!(verify_final_approve(&sell, &exit, &snap, &mut scratch).is_err());
+        assert_eq!(
+            verify_final_sell(&approve, &exit, &snap, &mut scratch),
+            Err(BindingError::WrongNonce)
+        );
+        let mut later = snap;
+        later.ordered_state_cursor += 1;
+        assert_eq!(
+            verify_final_sell(&sell, &exit, &later, &mut scratch),
+            Err(BindingError::StaleSnapshot)
+        );
+        let other = Signer::from_secret_bytes(&[0x62; 32]).unwrap();
+        assert_eq!(
+            exit.sign_sell(&other, &mut scratch, &mut sell),
+            Err(BuildError::WrongSigner)
+        );
+        // A forged approval: another spender or amount, the same nonce.
+        let forged = |spender: Address, amount: U256| {
+            let calldata = encode_approve(spender, amount).unwrap();
+            let tx = LegacyTx {
+                chain_id: exit.chain_id,
+                nonce: 9,
+                gas_price: GAS_PRICE,
+                gas_limit: 60_000,
+                to: token,
+                value: U256::ZERO,
+                input: &calldata,
+            };
+            let mut out = Vec::new();
+            signer.sign_legacy(&tx, &mut Vec::new(), &mut out).unwrap();
+            out
+        };
+        assert_eq!(
+            verify_final_approve(
+                &forged(Address::from([1; 20]), tokens),
+                &exit,
+                &snap,
+                &mut scratch
+            ),
+            Err(BindingError::WrongSpender)
+        );
+        assert_eq!(
+            verify_final_approve(&forged(exit.portal, U256::MAX), &exit, &snap, &mut scratch),
+            Err(BindingError::WrongInputAmount)
+        );
+        // Another policy generation forms no expectation.
+        let newer =
+            ExitPolicy::new(POLICY_GENERATION + 1, 100, GAS_PRICE, 60_000, 900_000).unwrap();
+        assert_eq!(
+            ExpectedExit::from_admitted(&deployment, &admitted, &newer, signer.address(), 9),
+            Err(IntentError::PolicyGenerationMismatch)
         );
     }
 }

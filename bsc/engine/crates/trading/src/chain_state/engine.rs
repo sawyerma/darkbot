@@ -1220,6 +1220,29 @@ impl ChainState {
         })
     }
 
+    /// The snapshot of the canonical state alone (Phase I: a decision on a
+    /// curve replayed from canonical blocks, with no pending candidate
+    /// assumed; `pending_candidate` is zero). `None` unless coherent. Any
+    /// later block, reorg, gap or other applied effect gives another
+    /// identity, so prepared bytes become unsendable.
+    pub fn canonical_snapshot_id(
+        &self,
+        policy_generation: u64,
+        codehash_generation: u64,
+    ) -> Option<SnapshotId> {
+        if !self.coherent() {
+            return None;
+        }
+        let (_, canonical_block_hash) = self.head?;
+        Some(SnapshotId {
+            canonical_block_hash,
+            ordered_state_cursor: self.counters.effects,
+            pending_candidate: B256::ZERO,
+            policy_generation,
+            codehash_generation,
+        })
+    }
+
     /// The head of the retained canonical chain, if anchored.
     pub fn high_water(&self) -> Option<(u64, B256)> {
         self.head

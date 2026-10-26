@@ -111,9 +111,95 @@ impl BuyPolicy {
     }
 }
 
+/// The signature-bound operating values of an exit (Phase I): the
+/// approval of the Portal and the native-output SELL, and their generation
+/// (the BUY policy's generation discipline).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExitPolicy {
+    generation: u64,
+    slippage_bps: u16,
+    gas_price: u64,
+    approve_gas_limit: u64,
+    sell_gas_limit: u64,
+}
+
+impl ExitPolicy {
+    /// Validates the exit values of generation `generation`.
+    pub fn new(
+        generation: u64,
+        slippage_bps: u16,
+        gas_price: u64,
+        approve_gas_limit: u64,
+        sell_gas_limit: u64,
+    ) -> Result<Self, PolicyError> {
+        if slippage_bps >= BPS_DENOMINATOR {
+            return Err(PolicyError::InvalidSlippageBps);
+        }
+        if gas_price == 0 {
+            return Err(PolicyError::ZeroGasPrice);
+        }
+        if approve_gas_limit == 0 || sell_gas_limit == 0 {
+            return Err(PolicyError::ZeroGasLimit);
+        }
+        Ok(Self {
+            generation,
+            slippage_bps,
+            gas_price,
+            approve_gas_limit,
+            sell_gas_limit,
+        })
+    }
+
+    #[inline]
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[inline]
+    pub fn slippage_bps(&self) -> u16 {
+        self.slippage_bps
+    }
+
+    #[inline]
+    pub fn gas_price(&self) -> u64 {
+        self.gas_price
+    }
+
+    #[inline]
+    pub fn approve_gas_limit(&self) -> u64 {
+        self.approve_gas_limit
+    }
+
+    #[inline]
+    pub fn sell_gas_limit(&self) -> u64 {
+        self.sell_gas_limit
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exit_policy_refuses_what_could_not_sell() {
+        let p = ExitPolicy::new(2, 100, 50_000_000, 60_000, 900_000).unwrap();
+        assert_eq!(
+            (p.generation(), p.slippage_bps(), p.gas_price()),
+            (2, 100, 50_000_000)
+        );
+        assert_eq!(
+            (p.approve_gas_limit(), p.sell_gas_limit()),
+            (60_000, 900_000)
+        );
+        for bad in [
+            ExitPolicy::new(2, 10_000, 1, 1, 1),
+            ExitPolicy::new(2, 100, 0, 1, 1),
+            ExitPolicy::new(2, 100, 1, 0, 1),
+            ExitPolicy::new(2, 100, 1, 1, 0),
+        ] {
+            assert!(bad.is_err());
+        }
+    }
 
     #[test]
     fn valid_policy_keeps_its_values_and_generation() {

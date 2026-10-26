@@ -36,7 +36,7 @@ use super::features::{Observation, Value};
 use super::filters::{Rule, Verdict, evaluate};
 use super::fixed::scale;
 use crate::economics::flap::QuoteError;
-use crate::economics::flap::native_curve20::quote_native_sell;
+use crate::economics::flap::native_curve20::{PricedToken, quote_native_sell};
 use crate::economics::flap::position::{Entry, Exit, Outcome, PositionError, entry, exit, outcome};
 use crate::economics::network::{CostError, GasEvidence};
 
@@ -225,6 +225,27 @@ impl Engine {
             .values()
             .filter(|t| matches!(t.stage, Stage::Open { .. } | Stage::Exiting { .. }))
             .count()
+    }
+
+    /// The exact curve a PAPER intent of `token` is admitted on (Phase I):
+    /// its validated terms, reserve and circulating supply, on the
+    /// position's shadow curve once one is open. `None` when the token is
+    /// not followed or no longer tracked.
+    pub fn curve_of(&self, token: &[u8; 20]) -> Option<(PricedToken, U256, U256)> {
+        let t = self.tokens.values().find(|t| t.token == *token)?;
+        let book = match &t.stage {
+            Stage::Open { shadow, .. } | Stage::Exiting { shadow, .. } => shadow.as_ref(),
+            Stage::Observing(_) | Stage::Entering { .. } => &t.book,
+        };
+        Some((book.priced().ok()?, book.reserve, book.circulating))
+    }
+
+    /// The tokens an open position holds (what its exit sells).
+    pub fn position_tokens(&self, token: &[u8; 20]) -> Option<U256> {
+        match &self.tokens.values().find(|t| t.token == *token)?.stage {
+            Stage::Open { entry, .. } | Stage::Exiting { entry, .. } => Some(entry.tokens),
+            Stage::Observing(_) | Stage::Entering { .. } => None,
+        }
     }
 
     fn token_mut(&mut self, token: &[u8; 20]) -> Option<&mut Token> {

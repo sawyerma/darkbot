@@ -69,7 +69,7 @@ use crate::economics::arith::add;
 use crate::intent::{AdapterId, AdapterSet, Dispatch, MAX_ADAPTERS, SubmissionState, Ticket};
 use crate::signer::recover_legacy_sender;
 use crate::transactions::legacy::{decode_signed, tx_hash};
-use crate::venues::flap::binding::ExpectedBuy;
+use crate::venues::flap::binding::ExpectedTx;
 
 /// Reference to one signed transaction: its hash and its encoded length.
 /// Made from the bytes only.
@@ -612,12 +612,13 @@ impl SubmissionPlan {
     /// consistent, every selected adapter has the mode and every requested
     /// option enabled, and every cost component and the total fit the
     /// budget.
-    pub fn new(
+    pub fn new<'e>(
         table: &AdapterTable,
-        expected: &ExpectedBuy,
+        expected: impl Into<ExpectedTx<'e>>,
         budget: &BudgetEnvelope,
         inputs: PlanInputs,
     ) -> Result<Self, PlanError> {
+        let expected: ExpectedTx<'e> = expected.into();
         let ticket = inputs.ticket;
         if table.chain_id() != ticket.chain_id() {
             return Err(PlanError::WrongChain);
@@ -742,8 +743,9 @@ impl SubmissionPlan {
         }
 
         // Budget, by component and in total.
-        let buy_input_wei = expected.input_amount();
-        let buy_gas_wei = U256::from(expected.gas_price()) * U256::from(expected.gas_limit());
+        // An exit's approval or SELL carries no value: gas only.
+        let buy_input_wei = expected.value_wei();
+        let buy_gas_wei = expected.gas_wei();
         let provider_payment_wei = inputs.provider_payment_wei;
         let total_wei = add(buy_input_wei, buy_gas_wei)
             .and_then(|sum| add(sum, own_launch_wei))

@@ -34,6 +34,12 @@ pub const TOKEN_VERSION_TAXED_V3: u8 = 6;
 /// Exact size of a native-input `swapExactInput` call with an empty permit.
 pub const SWAP_EXACT_INPUT_NATIVE_LEN: usize = 4 + 7 * WORD;
 
+/// Selector of ERC-20 `approve(address,uint256)`.
+pub const APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
+
+/// Exact size of an `approve` call.
+pub const APPROVE_LEN: usize = 4 + 2 * WORD;
+
 const WORD: usize = 32;
 const LAUNCH_FIELDS: usize = 26;
 const LAUNCH_HEAD: usize = LAUNCH_FIELDS * WORD;
@@ -478,6 +484,70 @@ pub fn encode_swap_exact_input_native(
     Ok(out)
 }
 
+/// Returns the calldata of a direct native-output SELL of `input_token`:
+/// the same `swapExactInput` layout as the BUY with the tokens swapped
+/// (witnessed, `fixtures/flap/exit_calls_witnessed.txt`). The Portal takes
+/// the tokens from the caller, so an approval of at least `input_amount`
+/// precedes it; the native output goes to the caller. Zero amounts are
+/// rejected.
+pub fn encode_swap_exact_input_sell(
+    input_token: Address,
+    input_amount: U256,
+    min_output_amount: U256,
+) -> Result<[u8; SWAP_EXACT_INPUT_NATIVE_LEN], AbiError> {
+    if input_token == Address::ZERO {
+        return Err(AbiError::UnsupportedInputToken);
+    }
+    if input_amount.is_zero() {
+        return Err(AbiError::ZeroInputAmount);
+    }
+    if min_output_amount.is_zero() {
+        return Err(AbiError::ZeroMinOutput);
+    }
+    let mut out = [0u8; SWAP_EXACT_INPUT_NATIVE_LEN];
+    out[..4].copy_from_slice(&SWAP_EXACT_INPUT_SELECTOR);
+    // Word 0: offset of the tuple. Word 1: inputToken. Word 2: outputToken
+    // = native (zero).
+    out[4 + WORD - 1] = 0x20;
+    out[4 + WORD + 12..4 + 2 * WORD].copy_from_slice(input_token.as_slice());
+    out[4 + 3 * WORD..4 + 4 * WORD].copy_from_slice(&input_amount.to_be_bytes::<32>());
+    out[4 + 4 * WORD..4 + 5 * WORD].copy_from_slice(&min_output_amount.to_be_bytes::<32>());
+    out[4 + 6 * WORD - 1] = 0xa0;
+    Ok(out)
+}
+
+/// Returns the calldata of ERC-20 `approve(spender, amount)` (witnessed for
+/// the Portal as spender). A zero amount is rejected (it revokes).
+pub fn encode_approve(spender: Address, amount: U256) -> Result<[u8; APPROVE_LEN], AbiError> {
+    if amount.is_zero() {
+        return Err(AbiError::ZeroInputAmount);
+    }
+    let mut out = [0u8; APPROVE_LEN];
+    out[..4].copy_from_slice(&APPROVE_SELECTOR);
+    out[4 + 12..4 + WORD].copy_from_slice(spender.as_slice());
+    out[4 + WORD..].copy_from_slice(&amount.to_be_bytes::<32>());
+    Ok(out)
+}
+
+/// Decodes a canonical `approve(address,uint256)` call.
+pub fn decode_approve(calldata: &[u8]) -> Result<(Address, U256), AbiError> {
+    let body = calldata
+        .strip_prefix(&APPROVE_SELECTOR)
+        .ok_or(AbiError::WrongSelector)?;
+    match body.len().cmp(&(2 * WORD)) {
+        core::cmp::Ordering::Less => return Err(AbiError::Truncated),
+        core::cmp::Ordering::Greater => return Err(AbiError::TrailingBytes),
+        core::cmp::Ordering::Equal => {}
+    }
+    if body[..12].iter().any(|b| *b != 0) {
+        return Err(AbiError::ValueOutOfRange);
+    }
+    Ok((
+        Address::from_slice(&body[12..WORD]),
+        U256::from_be_slice(&body[WORD..]),
+    ))
+}
+
 /// Decodes a canonical native-input `swapExactInput` call with an empty
 /// permit. Amounts are returned as found, including zero. The one
 /// `swapExactInput` decoder is [`super::recognize::decode_swap_exact_input`];
@@ -495,6 +565,72 @@ pub fn decode_swap_exact_input_native(calldata: &[u8]) -> Result<SwapExactInputN
         input_amount: swap.input_amount,
         min_output_amount: swap.min_output_amount,
     })
+}
+
+#[cfg(test)]
+mod exit_tests {
+    //! Phase I: the exit calls against the witnessed SELL and approval.
+    use super::*;
+    use crate::venues::flap::recognize::decode_swap_exact_input;
+
+    const WITNESSED: &str = include_str!("../../../fixtures/flap/exit_calls_witnessed.txt");
+
+    fn call(kind: &str) -> (Address, Vec<u8>) {
+        let f: Vec<&str> = WITNESSED
+            .lines()
+            .find(|l| l.starts_with(kind))
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        (
+            f[3].parse().unwrap(),
+            alloy_primitives::hex::decode(f[4]).unwrap(),
+        )
+    }
+
+    /// The SELL encoder reproduces the witnessed SELL byte for byte from
+    /// its decoded members; the one decoder reads it as a SELL.
+    #[test]
+    fn the_sell_is_the_witnessed_call() {
+        let (portal, bytes) = call("SELL");
+        assert_eq!(
+            portal,
+            super::super::deployment::bsc_mainnet_v5_27_0().portal
+        );
+        let swap = decode_swap_exact_input(&bytes).unwrap();
+        assert!(swap.is_sell() && swap.permit.is_empty());
+        let ours = encode_swap_exact_input_sell(
+            swap.input_token,
+            swap.input_amount,
+            swap.min_output_amount,
+        )
+        .unwrap();
+        assert_eq!(ours[..], bytes[..]);
+        for (token, amount, min) in [
+            (Address::ZERO, U256::from(1u8), U256::from(1u8)),
+            (swap.input_token, U256::ZERO, U256::from(1u8)),
+            (swap.input_token, U256::from(1u8), U256::ZERO),
+        ] {
+            assert!(encode_swap_exact_input_sell(token, amount, min).is_err());
+        }
+    }
+
+    /// The approval encoder reproduces the witnessed approve of the Portal.
+    #[test]
+    fn the_approval_is_the_witnessed_call() {
+        let (_token, bytes) = call("APPROVE");
+        let (spender, amount) = decode_approve(&bytes).unwrap();
+        assert_eq!(
+            spender,
+            super::super::deployment::bsc_mainnet_v5_27_0().portal
+        );
+        assert_eq!(encode_approve(spender, amount).unwrap()[..], bytes[..]);
+        assert!(encode_approve(spender, U256::ZERO).is_err());
+        assert_eq!(decode_approve(&bytes[..67]), Err(AbiError::Truncated));
+        let mut dirty = bytes.clone();
+        dirty[5] = 1;
+        assert_eq!(decode_approve(&dirty), Err(AbiError::ValueOutOfRange));
+    }
 }
 
 #[cfg(test)]

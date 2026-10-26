@@ -20,7 +20,7 @@ export interface CanonicalView { state: string; head: string; headAgeMs: string;
 /** The C2 chain-state owner (component BSC_STATE_C2 effective SHADOW); absent while it does not run. */
 export interface ChainStateView { coherent: string; head: string; held: string; effects: string; faults: string; checkpoint: string }
 /** The C3 PAPER path (component BSC_EXEC effective SHADOW): ends at the PAPER sink, never sends. */
-export interface ExecView { state: string; detail: string; path: string; latency: string }
+export interface ExecView { state: string; detail: string; path: string; latency: string; strategy: string }
 export interface CaptureView { state: string; detail: string }
 /** Strategy C (component BSC_STRATEGY_C effective SHADOW): a PAPER ledger on canonical Flap events, never signed or sent. */
 export interface StrategyView { state: string; detail: string; decisions: string; paper: string }
@@ -67,10 +67,16 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     checkpoint: `restore ${s("checkpoint_restore")} (${s("restored_blocks")} blocks) · quarantines ${s("quarantines")} · writes ${s("checkpoint_writes")} · errors ${s("checkpoint_errors")}`,
   } : undefined;
   const x = (k: string) => f.get(`exec[0].${k}`) ?? "?";
+  const refusals = (prefix: string) => {
+    const list: string[] = [];
+    for (let i = 0; f.has(`${prefix}[${i}]`); i++) list.push(f.get(`${prefix}[${i}]`) ?? "");
+    return list.length ? ` (${list.join(", ")})` : "";
+  };
   const exec: ExecView | undefined = f.has("exec[0].state") ? {
     state: fresh ? x("state") : "STALE",
     detail: [f.get("exec[0].reason"), f.get("exec[0].paper_sender") && `PAPER sender ${x("paper_sender")}${f.has("exec[0].paper_balance_wei") ? ` (balance ${x("paper_balance_wei")} wei at the probe block)` : " (balance not probed yet)"}`, f.get("exec[0].portal_version") && `Portal ${x("portal_version")} probed at block ${x("probe_block")} (${x("probes")} probes)`].filter(Boolean).join(" · ") || "—",
     path: `lanes ${x("lanes_left")}/${x("lanes_armed")} · launches ${x("launches")} · to the PAPER sink ${x("handoffs")} · refused: not decoded ${x("refused_not_decoded")}, profile ${x("refused_profile")}, no C2 snapshot ${x("refused_no_snapshot")}, admission ${x("refused_admission")}, intent ${x("refused_intent")}, lanes exhausted ${x("refused_lanes_exhausted")}, lane ${x("refused_lane")}, build ${x("refused_build")}, same token ${x("refused_duplicate_token")}, session cap ${x("refused_session_cap")}, plan/frame ${x("refused_plan")}, start deadline ${x("refused_deadline")}, dispatch ${x("refused_dispatch")} · session spent ${x("session_spent_wei")} wei`,
+    strategy: `Strategy C intents ${x("strategy_intents")} · at the PAPER sink ${x("strategy_handoffs")} (an exit is its approval and SELL) · refused ${x("strategy_refused")}${refusals("exec[0].strategy_refusals")} · lanes left ${x("strategy_lanes_left")} (SELL ${x("strategy_sell_lanes_left")}) · exposure ${x("strategy_spent_wei")} wei`,
     latency: f.has("exec[0].latency_p50_ns") ? `T_ingress → T_shadow_sink p50 ${x("latency_p50_ns")} ns · p99 ${x("latency_p99_ns")} ns · max ${x("latency_max_ns")} ns (${x("latency_samples")} samples; not T_send)` : "no PAPER BUY yet",
   } : undefined;
   // Phase F: the segmented capture's writer, durability watermark and byte budget.
@@ -85,7 +91,7 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
     state: fresh ? y("state") : "STALE",
     detail: [f.get("strategy[0].reason"), `following ${y("followed")} · observation ${y("observation_ms")} ms · open at most ${y("max_open")} · PAPER input ${y("input_wei")} wei`].filter(Boolean).join(" · "),
     decisions: `launches ${y("launches")} · passed ${y("passed")} · rejected ${y("rejected")} · data incomplete ${y("data_incomplete")} · not tracked ${y("not_tracked")} · slot limit ${y("slot_limit")} · creator sold before the entry ${y("creator_sold")} · inputs: trades ${y("trades")}, terms ${y("terms")}, migrations ${y("migrations")}, incomplete ${y("incomplete")}`,
-    paper: `entered ${y("entered")} · cancelled ${y("cancelled")} · exits creator sell ${y("exits_creator_sell")}, target ${y("exits_target")}, stop ${y("exits_stop")}, timeout ${y("exits_timeout")} · gains ${y("gains")} (${y("gain_wei")} wei) · losses ${y("losses")} (${y("loss_wei")} wei) · unresolved ${y("unresolved")} · open ${y("open")} (not valued)`,
+    paper: `entered ${y("entered")} · cancelled ${y("cancelled")} · exits creator sell ${y("exits_creator_sell")}, target ${y("exits_target")}, stop ${y("exits_stop")}, timeout ${y("exits_timeout")} · gains ${y("gains")} (${y("gain_wei")} wei) · losses ${y("losses")} (${y("loss_wei")} wei) · unresolved ${y("unresolved")} · open ${y("open")} (not valued) · decisions without an armed C3 path ${y("paper_unarmed")}`,
   } : undefined;
   return { view: { state: fresh ? "RUNNING" : "STALE", mode: f.get("mode") ?? "UNKNOWN", launches: f.get("launches") ?? "UNKNOWN", journal: f.get("journal_path") ?? "UNKNOWN", observedMs: Number.isFinite(observed) ? observed : undefined, canonical, chainState, exec, capture, strategy }, health };
 }

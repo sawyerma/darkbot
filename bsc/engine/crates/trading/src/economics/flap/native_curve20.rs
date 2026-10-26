@@ -46,11 +46,11 @@
 use alloy_primitives::{Address, U256};
 
 use super::curve::{Curve, reserve, supply};
-use super::{AdmissionError, AdmittedBuy, QuoteError};
+use super::{AdmissionError, AdmittedBuy, AdmittedSell, QuoteError};
 use crate::chain_state::SnapshotId;
 use crate::economics::arith::{add, sub};
 use crate::economics::fees::split_fee;
-use crate::economics::policy::BuyPolicy;
+use crate::economics::policy::{BuyPolicy, ExitPolicy};
 use crate::economics::slippage::min_output;
 use crate::venues::flap::abi::TOKEN_VERSION_TAXED_V3;
 use crate::venues::flap::profile::{ClassifiedLaunch, LaunchProfile};
@@ -524,6 +524,113 @@ pub fn admit_native_buy(
     ))
 }
 
+/// A curve state replayed exactly from canonical events (Phase I,
+/// Strategy C): every trade of the token since its launch reproduced to the
+/// unit by this quote (`strategy::book`), its terms in the priced scope, at
+/// a C2 snapshot of canonical state. Admission prices against it with the
+/// witnessed venue terms; a holding-capped or NFT-gated token is never
+/// tracked, so no cap applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CurveState {
+    token: Address,
+    terms: PricedToken,
+    reserve: U256,
+    circulating: U256,
+    snapshot: SnapshotId,
+}
+
+impl CurveState {
+    /// Binds the tracked state of `token` to `snapshot`; the venue terms
+    /// must be the witnessed ones.
+    pub fn tracked(
+        token: Address,
+        terms: PricedToken,
+        reserve: U256,
+        circulating: U256,
+        venue: &VenueBuyTerms,
+        snapshot: SnapshotId,
+    ) -> Result<Self, AdmissionError> {
+        if *venue != WITNESSED_MAINNET_TERMS {
+            return Err(AdmissionError::VenueTerms);
+        }
+        Ok(Self {
+            token,
+            terms,
+            reserve,
+            circulating,
+            snapshot,
+        })
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+}
+
+/// Admits a native BUY of the policy's input on a tracked curve state.
+pub fn admit_curve_buy(
+    state: &CurveState,
+    policy: &BuyPolicy,
+) -> Result<AdmittedBuy, AdmissionError> {
+    if policy.generation() != state.snapshot.policy_generation {
+        return Err(AdmissionError::PolicyGenerationMismatch);
+    }
+    let quote = quote_native_buy(&NativeBuyInputs {
+        token: state.terms,
+        reserve_before: state.reserve,
+        circulating_before: state.circulating,
+        input_amount: policy.input_amount(),
+        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+        tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
+        caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
+        holding_cap: HoldingCap::None,
+    })?;
+    let min_output_amount = min_output(quote.output_amount, policy.slippage_bps())?;
+    Ok(AdmittedBuy::new(
+        state.token,
+        policy.input_amount(),
+        quote.output_amount,
+        min_output_amount,
+        policy.slippage_bps(),
+        state.snapshot,
+    ))
+}
+
+/// Admits a native-output SELL of `tokens` on a tracked curve state.
+pub fn admit_curve_sell(
+    state: &CurveState,
+    tokens: U256,
+    policy: &ExitPolicy,
+) -> Result<AdmittedSell, AdmissionError> {
+    if policy.generation() != state.snapshot.policy_generation {
+        return Err(AdmissionError::PolicyGenerationMismatch);
+    }
+    let quote = quote_native_sell(&NativeSellInputs {
+        token: state.terms,
+        reserve_before: state.reserve,
+        circulating_before: state.circulating,
+        input_amount: tokens,
+        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+        tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
+        caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
+    })?;
+    let min_output_amount = min_output(quote.output_amount, policy.slippage_bps())?;
+    Ok(AdmittedSell::new(
+        state.token,
+        tokens,
+        quote.output_amount,
+        min_output_amount,
+        policy.slippage_bps(),
+        state.snapshot,
+    ))
+}
+
 #[cfg(test)]
 mod parity_tests {
     //! Phase G (Economics gate §6 level 2): the production BUY and SELL
@@ -713,6 +820,92 @@ mod parity_tests {
     }
 
     const PARITY_V3: &str = include_str!("../../../fixtures/flap/quote_parity_g02_v3.txt");
+
+    /// Phase I: admission on a tracked curve state is the Portal's quote at
+    /// the same state (parity v3), the minimum the policy's slippage.
+    #[test]
+    fn curve_admission_is_the_parity_quote() {
+        use alloy_primitives::B256;
+        let snap = |policy_generation| SnapshotId {
+            canonical_block_hash: B256::from([7u8; 32]),
+            ordered_state_cursor: 1,
+            pending_candidate: B256::ZERO,
+            policy_generation,
+            codehash_generation: 1,
+        };
+        let (mut buys, mut sells) = (0, 0);
+        for line in PARITY_V3
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            // The production scope, no cap (a capped token is never tracked).
+            if f[18] != "SUPPORTED" || f[9] == "REVERT" || f[10] != "0" {
+                continue;
+            }
+            let n = |i: usize| U256::from_str_radix(f[i], 10).unwrap();
+            let (buy_tax, sell_tax): (u16, u16) = (f[5].parse().unwrap(), f[6].parse().unwrap());
+            let token: Address = format!("0x{}", f[2]).parse().unwrap();
+            let state = CurveState::tracked(
+                token,
+                priced_at(buy_tax, sell_tax, n(17)),
+                n(3),
+                n(4),
+                &WITNESSED_MAINNET_TERMS,
+                snap(4),
+            )
+            .unwrap();
+            if f[7] == "BUY" {
+                let policy = BuyPolicy::new(4, n(8), 100, 1, 1).unwrap();
+                let a = admit_curve_buy(&state, &policy).unwrap();
+                assert_eq!(a.expected_output(), n(9), "{line}");
+                assert_eq!(a.min_output_amount(), min_output(n(9), 100).unwrap());
+                assert_eq!((a.token(), a.input_amount()), (token, n(8)));
+                buys += 1;
+            } else {
+                let policy = ExitPolicy::new(4, 100, 1, 1, 1).unwrap();
+                let a = admit_curve_sell(&state, n(8), &policy).unwrap();
+                assert_eq!(a.expected_output(), n(9), "{line}");
+                assert_eq!(a.min_output_amount(), min_output(n(9), 100).unwrap());
+                assert_eq!(
+                    &a.calldata().unwrap()[4 + 32 + 12..4 + 64],
+                    token.as_slice()
+                );
+                sells += 1;
+            }
+        }
+        assert!(buys > 100 && sells > 50, "{buys} {sells}");
+        // Another policy generation or other venue terms are refused.
+        let state = CurveState::tracked(
+            Address::ZERO,
+            priced(100, 100),
+            U256::ZERO,
+            U256::ZERO,
+            &WITNESSED_MAINNET_TERMS,
+            snap(4),
+        )
+        .unwrap();
+        let other = BuyPolicy::new(5, U256::from(1u8), 100, 1, 1).unwrap();
+        assert_eq!(
+            admit_curve_buy(&state, &other),
+            Err(AdmissionError::PolicyGenerationMismatch)
+        );
+        let terms = VenueBuyTerms {
+            protocol_buy_fee_bps: 200,
+            ..WITNESSED_MAINNET_TERMS
+        };
+        assert_eq!(
+            CurveState::tracked(
+                Address::ZERO,
+                priced(100, 100),
+                U256::ZERO,
+                U256::ZERO,
+                &terms,
+                snap(4)
+            ),
+            Err(AdmissionError::VenueTerms)
+        );
+    }
 
     /// The v3 parity set (each token's own DEX threshold, the production
     /// scope `PricedToken::new`, skipped launches recorded): every

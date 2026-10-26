@@ -428,6 +428,43 @@ impl ExecRuntime {
             .ok()
     }
 
+    /// Phase I: one Strategy C decision on the PAPER path, when armed:
+    /// the intents that reached the sink (none when refused, counted by the
+    /// executor). `None` when the executor is not armed.
+    pub fn on_strategy(
+        &mut self,
+        action: &crate::runtime_strategy::StrategyAction,
+        owner: &StateOwner,
+        clock: &dyn Clock,
+        at: u64,
+    ) -> Option<Vec<crate::paper_exec::PaperIntent>> {
+        use crate::paper_exec::CanonicalContext;
+        use crate::runtime_strategy::StrategyAction;
+        let executor = self.executor.as_mut()?;
+        let c2 = CanonicalContext {
+            snapshot: &|policy, codehash| owner.canonical_snapshot(policy, codehash),
+            head: owner.head(),
+        };
+        Some(match *action {
+            StrategyAction::Buy {
+                token,
+                curve,
+                input_wei,
+            } => executor
+                .on_strategy_buy(token, curve, input_wei, &c2, clock, at)
+                .map(|i| vec![i])
+                .unwrap_or_default(),
+            StrategyAction::Exit {
+                token,
+                tokens,
+                curve,
+            } => executor
+                .on_strategy_exit(token, tokens, curve, &c2, clock, at)
+                .map(|[a, b]| vec![a, b])
+                .unwrap_or_default(),
+        })
+    }
+
     pub fn draft(&self) -> Draft {
         let (state, reason) = match &self.phase {
             Phase::Off => ("OFF", None),
@@ -505,6 +542,37 @@ impl ExecRuntime {
             )
             .set(e::PROBES, self.probes)
             .set(e::DISARM_ERRORS, self.disarm_errors);
+        let strategy = self
+            .executor
+            .as_ref()
+            .map(|x| x.strategy_counters().clone());
+        let (_, lanes_left, sells_left, strategy_spent) = self
+            .executor
+            .as_ref()
+            .map_or((0, 0, 0, U256::ZERO), PaperExecutor::strategy_lanes);
+        d.set(
+            e::STRATEGY_INTENTS,
+            strategy.as_ref().map_or(0, |c| c.launches),
+        )
+        .set(
+            e::STRATEGY_HANDOFFS,
+            strategy.as_ref().map_or(0, |c| c.handoffs),
+        )
+        .set(
+            e::STRATEGY_REFUSED,
+            strategy
+                .as_ref()
+                .map_or(0, |c| c.refusals.iter().map(|(_, n)| n).sum::<u64>()),
+        )
+        .set(e::STRATEGY_LANES_LEFT, lanes_left as u64)
+        .set(e::STRATEGY_SELL_LANES_LEFT, sells_left as u64)
+        .set(
+            e::STRATEGY_SPENT_WEI,
+            darkbot_bsc_record::Value::U256(strategy_spent.to_be_bytes()),
+        );
+        for (r, n) in strategy.iter().flat_map(|c| c.refusals.iter()) {
+            d.push(e::STRATEGY_REFUSALS, format!("{}={n}", r.name()).as_str());
+        }
         let latencies = self.executor.as_ref().map(PaperExecutor::latencies);
         d.set(e::LATENCY_SAMPLES, latencies.map_or(0, |l| l.len() as u64));
         if let Some((p50, p99, max)) = latencies.and_then(|l| l.quantiles()) {
@@ -549,6 +617,10 @@ mod tests {
                 validity_blocks: 2,
                 start_limit_ns: 1_000_000,
                 max_frame: 65_536,
+                strategy_lanes: 2,
+                strategy_session_cap_wei: 100_000_000_000_000_000,
+                approve_gas_limit: 100_000,
+                sell_gas_limit: 1_500_000,
             },
             reprobe,
             reprobe_failures: 1,
@@ -771,6 +843,102 @@ mod tests {
     /// a real C1-scope launch goes to the sink (status counters, latency);
     /// a re-probe that finds the Portal upgraded disarms visibly (fence
     /// gone, nothing armed); OFF and SHADOW again arm a new fence.
+    #[test]
+    fn a_strategy_action_reaches_the_sink_only_when_armed() {
+        use crate::paper_exec::{IntentKind, StrategyCurve};
+        use crate::runtime_strategy::StrategyAction;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, profile_terms, quote_native_buy,
+        };
+        let dir = std::env::temp_dir().join(format!("bsc-exec-strategy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            dir.join("fences"),
+            witnessed,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        let now = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                now.set(now.get() + 3);
+                now.get()
+            },
+        };
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let q = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(1_000_000_000_000_000_000u128),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        let curve = StrategyCurve {
+            terms,
+            reserve: q.reserve_after,
+            circulating: q.supply_after,
+        };
+        let buy = StrategyAction::Buy {
+            token: [0xAB; 20],
+            curve,
+            input_wei: U256::from(10_000_000_000_000_000u64),
+        };
+        // Not armed: nothing is executed.
+        assert!(x.on_strategy(&buy, &owner, &clock, 10).is_none());
+        settle(&mut x, &owner, "https://probe.invalid");
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "ARMED");
+        let intents = x.on_strategy(&buy, &owner, &clock, 20).unwrap();
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].kind, IntentKind::Buy);
+        let exit = StrategyAction::Exit {
+            token: [0xAB; 20],
+            tokens: U256::from(1_000_000u64) * U256::from(10u64).pow(U256::from(18u8)),
+            curve,
+        };
+        let intents = x.on_strategy(&exit, &owner, &clock, 30).unwrap();
+        assert_eq!(
+            intents.iter().map(|i| i.kind).collect::<Vec<_>>(),
+            [IntentKind::Approve, IntentKind::Sell]
+        );
+        // A second exit of the token is refused and counted, not executed.
+        assert!(x.on_strategy(&exit, &owner, &clock, 40).unwrap().is_empty());
+        let r = record(&x);
+        assert_eq!(r.u64(e::STRATEGY_INTENTS).unwrap(), 3);
+        assert_eq!(r.u64(e::STRATEGY_HANDOFFS).unwrap(), 3);
+        assert_eq!(r.u64(e::STRATEGY_REFUSED).unwrap(), 1);
+        // C3's own launch path is untouched.
+        assert_eq!(r.u64(e::LAUNCHES).unwrap(), 0);
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn an_armed_path_takes_a_launch_to_the_sink_and_disarms_on_drift() {
         let dir = std::env::temp_dir().join(format!("bsc-exec-int-{}", std::process::id()));

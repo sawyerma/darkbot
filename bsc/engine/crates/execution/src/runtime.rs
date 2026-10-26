@@ -362,6 +362,14 @@ impl RuntimeConfig {
                         PAPER_PROFILE.max_transport_start_limit_ns(),
                     )?,
                     max_frame: take("BSC_EXEC_MAX_FRAME_BYTES", 4_096, 1 << 20)? as usize,
+                    strategy_lanes: take("BSC_EXEC_STRATEGY_LANES", 1, 65_536)? as usize,
+                    strategy_session_cap_wei: u128::from(take(
+                        "BSC_EXEC_STRATEGY_SESSION_CAP_WEI",
+                        1,
+                        u64::MAX,
+                    )?),
+                    approve_gas_limit: take("BSC_EXEC_APPROVE_GAS_LIMIT", 21_000, 100_000_000)?,
+                    sell_gas_limit: take("BSC_EXEC_SELL_GAS_LIMIT", 21_000, 100_000_000)?,
                 },
             }),
         };
@@ -529,6 +537,49 @@ enum Event {
 struct Adapter {
     stop: Arc<AtomicBool>,
     handle: JoinHandle<()>,
+}
+
+/// Phase I: Strategy C's decisions of the records just applied go to the
+/// armed C3 executor (`BSC_EXEC` ARMED), on C2's canonical snapshot; each
+/// PAPER transaction at the sink is journaled (`J`). Without an armed
+/// executor they are counted (`paper_unarmed`), never executed.
+fn strategy_to_paper(
+    c: &mut Canonical,
+    exec: &mut Option<ExecRuntime>,
+    owner: &Option<StateOwner>,
+    clock: Clock,
+    journal: &mut RuntimeJournal,
+    at: u64,
+) {
+    let Some(s) = c.strategy.as_mut() else {
+        return;
+    };
+    for action in s.take_actions() {
+        let handed = match (exec.as_mut(), owner.as_ref()) {
+            (Some(x), Some(o)) => x.on_strategy(
+                &action,
+                o,
+                &FnClock {
+                    id: CLOCK_ID_MONOTONIC,
+                    now: || clock.now_ns(),
+                },
+                at,
+            ),
+            _ => None,
+        };
+        match handed {
+            Some(intents) => {
+                for i in &intents {
+                    journal.record(
+                        RecordKind::Runtime,
+                        i.times.sink_ns,
+                        crate::runtime_strategy::paper_intent_payload(i),
+                    );
+                }
+            }
+            None => s.counters.paper_unarmed += 1,
+        }
+    }
 }
 
 /// Monotonic nanoseconds since the runtime started (one epoch for all).
@@ -1674,7 +1725,8 @@ pub fn run(
                             if let Some(o) = owner.as_mut() {
                                 o.canonical(&event);
                             }
-                            c.event(at, event, &mut journal)
+                            c.event(at, event, &mut journal);
+                            strategy_to_paper(c, &mut exec, &owner, clock, &mut journal, at);
                         }
                         Err(RecvTimeoutError::Timeout) if !f.handle.is_finished() => {}
                         Err(_) => break,
@@ -1687,6 +1739,7 @@ pub fn run(
                     o.canonical(&event);
                 }
                 c.event(at, event, &mut journal);
+                strategy_to_paper(c, &mut exec, &owner, clock, &mut journal, at);
             }
             let now = if stopping { u64::MAX } else { clock.now_ns() };
             c.join(now, &core, &mut journal);

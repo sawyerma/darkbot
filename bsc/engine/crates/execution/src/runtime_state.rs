@@ -190,6 +190,17 @@ impl StateOwner {
             .snapshot_id(candidate, policy_generation, codehash_generation)
     }
 
+    /// The coherent snapshot of the canonical state alone (Phase I: a
+    /// Strategy C intent on a curve replayed from canonical blocks).
+    pub fn canonical_snapshot(
+        &self,
+        policy_generation: u64,
+        codehash_generation: u64,
+    ) -> Option<darkbot_bsc_trading::chain_state::SnapshotId> {
+        self.state
+            .canonical_snapshot_id(policy_generation, codehash_generation)
+    }
+
     /// The canonical head as a submission plan sees it: number and
     /// timestamp in unix seconds.
     pub fn head(&self) -> Option<darkbot_bsc_trading::submission_policy::plan::ChainHead> {

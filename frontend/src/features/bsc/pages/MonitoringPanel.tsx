@@ -75,6 +75,7 @@ export function MonitoringPanel() {
         hint={sources.runtime.exec ? sources.runtime.exec.detail : "No BSC_EXEC_PAPER_IDENTITY in the runtime configuration"} />
       {sources.runtime.exec && <Line label="C3 path to the PAPER sink" value={sources.runtime.exec.path} hint="Production decoder, C2 snapshot, admission, build/sign and lane; the sink has no transport, the signed bytes stay local" />}
       {sources.runtime.exec && <Line label="C3 local latency" value={sources.runtime.exec.latency} hint="Local production-code cost on this host (T_shadow_sink), never the transport boundary T_send" />}
+      {sources.runtime.exec && <Line label="Strategy C PAPER path" value={sources.runtime.exec.strategy} hint="Phase I: a PASS is a BUY, an exit trigger an approval and SELL, admitted on the strategy's exact curve and C2's canonical snapshot, signed by the PAPER identity, through lanes and the local node's single-raw plan to the PAPER sink; nothing is sent" />}
       <Line label="Strategy C" value={<ValueState state={sources.runtime.strategy?.state ?? "NOT_RUNNING"} />}
         hint={sources.runtime.strategy ? sources.runtime.strategy.detail : "BSC_STRATEGY_C is not effective SHADOW (or no canonical endpoint): no strategy runs"} />
       {sources.runtime.strategy && <Line label="Strategy C decisions" value={sources.runtime.strategy.decisions} hint="Typed filters over the observation window of each canonical Flap launch; a gap is DATA_INCOMPLETE, never a pass" />}

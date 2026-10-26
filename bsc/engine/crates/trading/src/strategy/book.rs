@@ -188,6 +188,12 @@ impl TokenBook {
     /// NFT gate (a `FlapNFTGated` or holding-cap log of the token, in the
     /// launch receipt or later, ends the tracking before any quote), on the
     /// curve while tracked.
+    /// The validated terms while tracked (Phase I: what a PAPER intent is
+    /// admitted with).
+    pub fn priced(&self) -> Result<PricedToken, Untracked> {
+        self.ready()
+    }
+
     fn ready(&self) -> Result<PricedToken, Untracked> {
         self.status?;
         self.scope()?;

@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 /// The model version: raised with every semantic change of a rule here.
-pub const MODEL_VERSION: &str = "bsc-economics-3";
+pub const MODEL_VERSION: &str = "bsc-economics-4";
 
 /// The chain every scope belongs to.
 pub const CHAIN_ID: u64 = 56;
@@ -73,6 +73,20 @@ pub const SCOPES: &[Scope] = &[
         path: "ADMITTED BUY",
         support: Support::Priced,
         rule: "admit_native_buy: a classified newTokenV6 launch without extension, the state directly after it, witnessed venue terms, 0.001 BNB (G0.6a EVM execution), no holding cap, the profile's DEX threshold 8e26, minOutput the slippage floor",
+    },
+    Scope {
+        venue: "FLAP",
+        surface: FLAP_V6,
+        path: "CURVE BUY (Strategy C)",
+        support: Support::Priced,
+        rule: "admit_curve_buy: a curve replayed exactly from canonical trades (strategy::book), in the PricedToken scope, witnessed venue terms, the policy's input, no holding cap (a capped or NFT-gated token is never tracked), minOutput the slippage floor; equal to the Portal's quote at the parity v3 states (curve_admission_is_the_parity_quote)",
+    },
+    Scope {
+        venue: "FLAP",
+        surface: FLAP_V6,
+        path: "CURVE SELL (Strategy C exit)",
+        support: Support::Priced,
+        rule: "admit_curve_sell: the position's tokens on its shadow curve, the witnessed sell fee, minOutput the ExitPolicy's slippage floor; approve(Portal, exactly those tokens) at the nonce before it; both calls as witnessed (fixtures/flap/exit_calls_witnessed.txt)",
     },
     Scope {
         venue: "FLAP",
@@ -219,6 +233,7 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02_v2.txt",
+    "bsc/engine/crates/trading/fixtures/flap/exit_calls_witnessed.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v2.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v3.txt",
@@ -285,6 +300,8 @@ mod tests {
                 ("FLAP", "BUY"),
                 ("FLAP", "SELL"),
                 ("FLAP", "ADMITTED BUY"),
+                ("FLAP", "CURVE BUY (Strategy C)"),
+                ("FLAP", "CURVE SELL (Strategy C exit)"),
                 ("FLAP", "ROUND TRIP")
             ]
         );
@@ -337,7 +354,7 @@ mod tests {
     fn the_manifest_binds_every_file() {
         let files: Vec<(&str, [u8; 32])> = BOUND_FILES.iter().map(|p| (*p, [0u8; 32])).collect();
         let a = manifest(&files);
-        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-3\n"));
+        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-4\n"));
         assert_eq!(a.matches("\nfile ").count(), BOUND_FILES.len());
         let mut other = files.clone();
         other[3].1[0] = 1;

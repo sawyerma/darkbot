@@ -128,6 +128,7 @@ describe("BSC source control", () => {
     expect(v?.detail).toContain("decode-only");
     expect(v?.path).toContain("to the PAPER sink 0");
     expect(v?.latency).toBe("no PAPER BUY yet");
+    expect(v?.strategy).toContain("Strategy C intents ? · at the PAPER sink ?");
     expect(runtimeView([status(10_000, true, true)], 11_000).view.exec?.latency).toContain("not T_send");
     expect(runtimeView([status(10_000, true)], 20_000).view.exec?.state).toBe("STALE");
   });

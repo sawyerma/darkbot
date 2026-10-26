@@ -162,6 +162,9 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> {const t=await strategyLine().innerText();return t.includes('SHADOW')&&t.includes('following ')&&t.includes('PAPER input 10000000000000000 wei');},'Strategy C SHADOW with its configured limits');
  assert(/launches \d+ · passed \d+ · rejected \d+/.test(await p.locator('.g-line',{hasText:'Strategy C decisions'}).first().innerText()),'Strategy C decisions line');
  assert(/entered \d+ · cancelled \d+/.test(await p.locator('.g-line',{hasText:'Strategy C PAPER ledger'}).first().innerText()),'Strategy C PAPER ledger line');
+ // Phase I: the strategy's decisions take the C3 PAPER path only when BSC_EXEC is ARMED; otherwise they are counted.
+ assert(/decisions without an armed C3 path \d+/.test(await p.locator('.g-line',{hasText:'Strategy C PAPER ledger'}).first().innerText()),'Strategy C unarmed decisions counted');
+ assert(/Strategy C intents \d+ · at the PAPER sink \d+/.test(await p.locator('.g-line',{hasText:'Strategy C PAPER path'}).first().innerText()),'Strategy C PAPER path line under C3');
  await requestSource('BSC_STRATEGY_C','LIVE','effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED','bsc-component-receipt');
  await until(async()=> {const t=await strategyComp().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_NOT_AUTHORIZED');},'BSC_STRATEGY_C LIVE stays BLOCKED');
  await until(async()=> (await strategyLine().innerText()).includes('NOT_RUNNING'),'Strategy C stopped on LIVE→BLOCKED');

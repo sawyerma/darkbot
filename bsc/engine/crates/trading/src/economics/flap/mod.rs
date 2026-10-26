@@ -33,6 +33,7 @@ use super::slippage::SlippageError;
 use crate::chain_state::SnapshotId;
 use crate::venues::flap::abi::{
     AbiError, SWAP_EXACT_INPUT_NATIVE_LEN, encode_swap_exact_input_native,
+    encode_swap_exact_input_sell,
 };
 
 /// Reason a quote is not available for the given inputs.
@@ -234,5 +235,77 @@ impl AdmittedBuy {
     /// Calldata of the direct native-input BUY.
     pub fn calldata(&self) -> Result<[u8; SWAP_EXACT_INPUT_NATIVE_LEN], AbiError> {
         encode_swap_exact_input_native(self.token, self.input_amount, self.min_output_amount)
+    }
+}
+
+/// A SELL that passed admission (Phase I): the tokens, the native output
+/// the quote expects, the minimum bound into the calldata and the state it
+/// is valid for. Only the admission functions here create one.
+///
+/// Invariants: `input_tokens > 0`, `0 < min_output_amount <= expected_output`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdmittedSell {
+    token: Address,
+    input_tokens: U256,
+    expected_output: U256,
+    min_output_amount: U256,
+    slippage_bps: u16,
+    snapshot: SnapshotId,
+}
+
+impl AdmittedSell {
+    fn new(
+        token: Address,
+        input_tokens: U256,
+        expected_output: U256,
+        min_output_amount: U256,
+        slippage_bps: u16,
+        snapshot: SnapshotId,
+    ) -> Self {
+        Self {
+            token,
+            input_tokens,
+            expected_output,
+            min_output_amount,
+            slippage_bps,
+            snapshot,
+        }
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    /// Tokens to sell (the approval covers exactly these).
+    #[inline]
+    pub fn input_tokens(&self) -> U256 {
+        self.input_tokens
+    }
+
+    /// Native output the quote expects, in wei.
+    #[inline]
+    pub fn expected_output(&self) -> U256 {
+        self.expected_output
+    }
+
+    #[inline]
+    pub fn min_output_amount(&self) -> U256 {
+        self.min_output_amount
+    }
+
+    #[inline]
+    pub fn slippage_bps(&self) -> u16 {
+        self.slippage_bps
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+
+    /// Calldata of the direct native-output SELL.
+    pub fn calldata(&self) -> Result<[u8; SWAP_EXACT_INPUT_NATIVE_LEN], AbiError> {
+        encode_swap_exact_input_sell(self.token, self.input_tokens, self.min_output_amount)
     }
 }

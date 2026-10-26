@@ -20,6 +20,7 @@ use darkbot_bsc_trading::strategy::engine::{
 };
 
 use crate::chain_follower::FlapTerm;
+use crate::paper_exec::{IntentKind, PaperIntent, StrategyCurve};
 use crate::runtime_journal::{RuntimeJournal, flap_term_of, flap_trade_of};
 
 /// A canonical block (`B | number u64 | hash [32] | time_ms u64`).
@@ -364,12 +365,65 @@ pub struct Counters {
     pub terms: u64,
     pub migrations: u64,
     pub incomplete: u64,
+    /// Phase I: decisions for the PAPER path that found no armed C3
+    /// executor (`BSC_EXEC` not ARMED): counted, never executed.
+    pub paper_unarmed: u64,
+}
+
+/// A Strategy C decision for the PAPER path (Phase I): a PASS is a BUY of
+/// the configured input on the token's exact curve, an exit trigger the
+/// SELL of the position's tokens on its shadow curve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrategyAction {
+    Buy {
+        token: [u8; 20],
+        curve: StrategyCurve,
+        input_wei: U256,
+    },
+    Exit {
+        token: [u8; 20],
+        tokens: U256,
+        curve: StrategyCurve,
+    },
+}
+
+/// A Strategy C PAPER transaction at the sink (Phase I), a `Runtime`
+/// record: `J | kind u8 (1 BUY, 2 approval, 3 SELL) | sink sequence u64 |
+/// tx_hash [32] | token [20] | decided, admitted, signed, sink ns u64 |
+/// the signed bytes` (a local artefact, never sent).
+pub fn paper_intent_payload(i: &PaperIntent) -> Vec<u8> {
+    let t = i.times;
+    let mut out = Vec::with_capacity(1 + 1 + 8 + 32 + 20 + 4 * 8 + i.raw.len());
+    out.push(b'J');
+    out.push(i.kind.code());
+    out.extend_from_slice(&i.handoff.sequence.to_le_bytes());
+    out.extend_from_slice(&i.handoff.tx_hash);
+    out.extend_from_slice(&i.token);
+    for ns in [t.ingress_ns, t.admitted_ns, t.signed_ns, t.sink_ns] {
+        out.extend_from_slice(&ns.to_le_bytes());
+    }
+    out.extend_from_slice(&i.raw);
+    out
+}
+
+/// The kind of a `J` record, if it is one.
+pub fn paper_intent_kind(p: &[u8]) -> Option<IntentKind> {
+    match (p.first()?, p.get(1)?) {
+        (b'J', 1) => Some(IntentKind::Buy),
+        (b'J', 2) => Some(IntentKind::Approve),
+        (b'J', 3) => Some(IntentKind::Sell),
+        _ => None,
+    }
 }
 
 /// The strategy component of one run.
 pub struct StrategyRuntime {
     engine: Engine,
     pub counters: Counters,
+    input_wei: U256,
+    /// Decisions for the PAPER path since the last `take_actions`
+    /// (collected on the runtime path only, not in a replay).
+    actions: Vec<StrategyAction>,
 }
 
 /// The status section of a strategy that runs, or of one refused (no
@@ -420,7 +474,8 @@ pub fn status_draft(
     .set(
         st::OPEN,
         strategy.map_or(0, |s| s.engine.open_positions() as u64),
-    );
+    )
+    .set(st::PAPER_UNARMED, c.paper_unarmed);
     if let (None, Some(why)) = (strategy, refused) {
         d.set(st::REASON, why);
     }
@@ -430,8 +485,46 @@ pub fn status_draft(
 impl StrategyRuntime {
     pub fn new(config: Config, gas: GasEvidence) -> Self {
         Self {
+            input_wei: config.input_wei,
             engine: Engine::new(config, gas),
             counters: Counters::default(),
+            actions: Vec::new(),
+        }
+    }
+
+    /// The decisions for the PAPER path since the last call (Phase I).
+    pub fn take_actions(&mut self) -> Vec<StrategyAction> {
+        std::mem::take(&mut self.actions)
+    }
+
+    /// The PAPER action of one output, on the engine's state right after
+    /// the record that produced it.
+    fn action_of(&self, o: &Output) -> Option<StrategyAction> {
+        let curve = |token: &[u8; 20]| {
+            self.engine
+                .curve_of(token)
+                .map(|(terms, reserve, circulating)| StrategyCurve {
+                    terms,
+                    reserve,
+                    circulating,
+                })
+        };
+        match o {
+            Output::Decided {
+                token,
+                decision: Decision::Pass,
+                ..
+            } => Some(StrategyAction::Buy {
+                token: *token,
+                curve: curve(token)?,
+                input_wei: self.input_wei,
+            }),
+            Output::ExitTriggered { token, .. } => Some(StrategyAction::Exit {
+                token: *token,
+                tokens: self.engine.position_tokens(token)?,
+                curve: curve(token)?,
+            }),
+            _ => None,
         }
     }
 
@@ -460,15 +553,19 @@ impl StrategyRuntime {
             Input::Incomplete => c.incomplete += 1,
             Input::Block { .. } => {}
         }
-        let outputs: Vec<Vec<u8>> = self
-            .engine
-            .step(input)
+        let typed = self.engine.step(input);
+        let outputs: Vec<Vec<u8>> = typed
             .iter()
             .map(|o| {
                 self.count(o);
                 output_payload(o)
             })
             .collect();
+        if journal.is_some() {
+            let actions: Vec<StrategyAction> =
+                typed.iter().filter_map(|o| self.action_of(o)).collect();
+            self.actions.extend(actions);
+        }
         if let Some(j) = journal {
             for p in &outputs {
                 j.record(RecordKind::Runtime, at, p.clone());
@@ -1020,6 +1117,8 @@ mod tests {
             .collect();
         assert_eq!(kinds, [(DECIDED, 105, 0), (ENTERED, 106, 0)]);
         assert_eq!((out[0].len(), out[1].len()), (DECIDED_LEN, OUTPUT_LEN));
+        // Without a journal (a replay) no PAPER action is collected.
+        assert!(s.take_actions().is_empty());
         assert!(out.iter().all(|p| p[0] == b'Y'));
         assert_eq!(&out[0][10..30], &TOKEN);
         assert_eq!(
@@ -1121,6 +1220,17 @@ mod tests {
             assert!(j.record(k, 3, p.clone()));
             s.record(k, &p, 3, Some(&mut j));
         }
+        // Phase I: the PASS is one BUY action of the configured input on
+        // the token's curve at the decision.
+        let actions = s.take_actions();
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [StrategyAction::Buy { token, input_wei, .. }]
+                    if *token == TOKEN && *input_wei == config().input_wei
+            ),
+            "{actions:?}"
+        );
         assert!(j.record(RecordKind::Runtime, 4, switch_payload(false)));
         // After it: journaled only.
         assert!(j.record(RecordKind::Canonical, 5, block_payload(108, &HASH, 6_000)));

@@ -21,21 +21,32 @@
 //! pool: one session exposure cap for all of it, and one BUY per token.
 //! Each PAPER BUY is the next BUY from the same canonical state, so every
 //! lane starts at the same canonical nonce.
+//!
+//! Phase I: Strategy C's decisions take the same path. A PASS is a BUY of
+//! the policy's input on the exact curve the strategy replayed
+//! (`CurveState`, the C2 canonical snapshot), an exit trigger the approval
+//! of the Portal and the native-output SELL of the position's tokens on its
+//! shadow curve; each is admitted, signed by the PAPER identity, bound in a
+//! lane and planned as the single raw transaction of the local node's
+//! adapter (`SingleRawBuy`), whose transport is the sink. Their lanes are
+//! their own pool behind the same fence: BUYs and approvals at the next
+//! nonce, SELLs at the one after.
 
 use crate::paper::{PaperHandoff, PaperIdentity, PaperSink};
-use crate::submission::club48;
 use crate::submission::send::{
     Armed, DispatchContext, DispatchError, SendOutcome, dispatch_diagnostic,
 };
 use crate::submission::tls::{CLUB48_DOCUMENTED_HOST, HTTPS_PORT, ProviderTarget, TlsEndpoint};
 use crate::submission::transport::{Clock, ConnectionState, Transport};
+use crate::submission::{club48, local_geth};
 use alloy_primitives::{Address, B256, U256};
 use darkbot_bsc_trading::chain_state::SnapshotId;
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, VenueBuyTerms, admit_native_buy,
+    CurveState, PricedToken, QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, VenueBuyTerms,
+    admit_curve_buy, admit_curve_sell, admit_native_buy,
 };
-use darkbot_bsc_trading::economics::policy::BuyPolicy;
-use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, ArmedFence, IntentLane};
+use darkbot_bsc_trading::economics::policy::{BuyPolicy, ExitPolicy};
+use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, ArmedFence, IntentLane, Ticket};
 use darkbot_bsc_trading::submission_policy::capability::{
     AdapterBinding, AdapterTable, CapabilityId, SubmissionMode,
 };
@@ -44,7 +55,7 @@ use darkbot_bsc_trading::submission_policy::plan::{
     PreSubmission, ProviderValidity, SubmissionPlan, TransportStartDeadline, TxRef,
 };
 use darkbot_bsc_trading::submission_policy::release::ReleaseProfile;
-use darkbot_bsc_trading::venues::flap::binding::ExpectedBuy;
+use darkbot_bsc_trading::venues::flap::binding::{ExpectedBuy, ExpectedExit, ExpectedTx};
 use darkbot_bsc_trading::venues::flap::deployment::ValidatedDeployment;
 use darkbot_bsc_trading::venues::flap::profile::{UnsupportedLaunch, classify_launch};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
@@ -84,6 +95,16 @@ pub struct ExecConfig {
     pub start_limit_ns: u64,
     /// Largest adapter request, in bytes.
     pub max_frame: usize,
+    /// Phase I: single-intent lanes for Strategy C's PAPER intents (a BUY
+    /// or an exit's approval at the sender's next nonce), and as many for
+    /// an exit's SELL at the nonce after it.
+    pub strategy_lanes: usize,
+    /// The exposure cap of Strategy C's PAPER intents in one session (no
+    /// money is involved; the strategy's own limits bound its entries).
+    pub strategy_session_cap_wei: u128,
+    /// Gas limits of an exit's approval and SELL.
+    pub approve_gas_limit: u64,
+    pub sell_gas_limit: u64,
 }
 
 impl ExecConfig {
@@ -125,6 +146,14 @@ impl ExecConfig {
         }
         if self.capability_generation == 0 || self.policy_generation == 0 {
             return Err("BSC_EXEC generations start at 1".into());
+        }
+        if self.strategy_lanes == 0 {
+            return Err("BSC_EXEC_STRATEGY_LANES must be at least 1".into());
+        }
+        if self.approve_gas_limit == 0 || self.sell_gas_limit == 0 {
+            return Err(
+                "BSC_EXEC_APPROVE_GAS_LIMIT and BSC_EXEC_SELL_GAS_LIMIT must be positive".into(),
+            );
         }
         Ok(())
     }
@@ -203,6 +232,59 @@ impl Refusal {
             Self::Dispatch => "DISPATCH",
         }
     }
+}
+
+/// The local node's adapter slot of the PAPER table (Phase I): the single
+/// raw transaction of a Strategy C intent, whose transport is the sink.
+pub fn paper_raw_adapter() -> AdapterId {
+    // Slot 1 exists in every lane (`MAX_ADAPTERS` > 1).
+    AdapterId::new(1).unwrap_or_else(|| unreachable!("adapter slot 1"))
+}
+
+/// What a Strategy C PAPER transaction is (Phase I).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntentKind {
+    Buy,
+    Approve,
+    Sell,
+}
+
+impl IntentKind {
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Buy => 1,
+            Self::Approve => 2,
+            Self::Sell => 3,
+        }
+    }
+}
+
+/// The exact curve a Strategy C intent is admitted on
+/// (`strategy::engine::Engine::curve_of`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StrategyCurve {
+    pub terms: PricedToken,
+    pub reserve: U256,
+    pub circulating: U256,
+}
+
+/// The C2 facts of a Strategy C intent: the canonical snapshot under
+/// (policy, codehash) generations, and the head.
+pub struct CanonicalContext<'a> {
+    pub snapshot: &'a dyn Fn(u64, u64) -> Option<SnapshotId>,
+    pub head: Option<ChainHead>,
+}
+
+/// One Strategy C PAPER transaction that reached the sink (Phase I). Its
+/// `times.ingress_ns` is the decision's record time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaperIntent {
+    pub kind: IntentKind,
+    pub token: [u8; 20],
+    pub handoff: PaperHandoff,
+    pub times: StageTimes,
+    /// The signed transaction (a local test artefact, never sent).
+    pub raw: Vec<u8>,
 }
 
 /// The stage times of one PAPER BUY on the runtime's monotonic clock.
@@ -369,6 +451,17 @@ pub struct PaperExecutor {
     raw: Vec<u8>,
     counters: ExecCounters,
     latencies: Latencies,
+    /// Phase I: Strategy C's lane pools (BUYs and approvals at the next
+    /// nonce, SELLs at the one after), their exposure and dedup.
+    strategy_lanes: Vec<IntentLane>,
+    sell_lanes: Vec<IntentLane>,
+    strategy_used: usize,
+    sell_used: usize,
+    strategy_spent_wei: U256,
+    strategy_bought: Vec<[u8; 20]>,
+    exited: Vec<[u8; 20]>,
+    exit_policy: ExitPolicy,
+    strategy_counters: ExecCounters,
 }
 
 /// Why the executor could not be armed.
@@ -409,6 +502,129 @@ fn durable_fence(path: &Path, bytes: &[u8]) -> Result<(), ArmError> {
         fs::File::open(dir).and_then(|d| d.sync_all()).map_err(e)?;
     }
     Ok(())
+}
+
+/// The executor parts one single raw transaction needs (Phase I).
+struct RawSink<'a> {
+    lane: &'a mut IntentLane,
+    sink: &'a mut PaperSink,
+    table: &'a AdapterTable,
+    config: &'a ExecConfig,
+    scratch: &'a mut Vec<u8>,
+}
+
+/// Binds a signed transaction in its lane, plans it as the single raw
+/// transaction of the local node's adapter and dispatches it to the sink.
+/// Returns the handoff, the prepared and planned times, and whether the
+/// economic admission was consumed (`begin_send`): its exposure counts
+/// whatever followed.
+#[allow(clippy::too_many_arguments)]
+fn raw_to_sink(
+    parts: RawSink<'_>,
+    ticket: Ticket,
+    raw: &[u8],
+    expected: ExpectedTx<'_>,
+    budget: &BudgetEnvelope,
+    snapshot: &SnapshotId,
+    head: ChainHead,
+    clock: &dyn Clock,
+    start_ns: u64,
+) -> (Result<PaperHandoff, Refusal>, u64, u64, bool) {
+    let RawSink {
+        lane,
+        sink,
+        table,
+        config,
+        scratch,
+    } = parts;
+    let tx_hash = match lane.prepare(ticket, raw, expected, snapshot, scratch) {
+        Ok(h) => h,
+        Err(_) => return (Err(Refusal::Lane), 0, 0, false),
+    };
+    let prepared_ns = clock.now_ns();
+    let adapter = paper_raw_adapter();
+    let planned = (|| {
+        let adapters = AdapterSet::new(&[adapter]).ok_or(Refusal::Plan)?;
+        let last_block = head
+            .number
+            .checked_add(config.validity_blocks)
+            .ok_or(Refusal::Plan)?;
+        let plan = SubmissionPlan::new(
+            table,
+            expected,
+            budget,
+            PlanInputs {
+                ticket,
+                buy: TxRef::of(raw),
+                launch: Launch::None,
+                mode: SubmissionMode::SingleRawBuy,
+                profile: PAPER_PROFILE,
+                adapters,
+                local_block_deadline: LocalBlockStartDeadline {
+                    last_head_block: last_block,
+                },
+                provider_validity: None,
+                merge: MergePolicy::ProviderDefault,
+                pre_submission: PreSubmission::No,
+                provider_payment_wei: U256::ZERO,
+            },
+        )
+        .map_err(|_| Refusal::Plan)?;
+        let frame = local_geth::frame(&plan, table, adapter, config.max_frame)
+            .map_err(|_| Refusal::Plan)?;
+        let deadline = TransportStartDeadline::for_profile(
+            PAPER_PROFILE,
+            clock.id(),
+            start_ns,
+            config.start_limit_ns,
+        )
+        .map_err(|_| Refusal::Plan)?;
+        Ok((plan, frame, deadline))
+    })();
+    let (plan, mut frame, deadline) = match planned {
+        Ok(p) => p,
+        Err(r) => return (Err(r), prepared_ns, 0, false),
+    };
+    let planned_ns = clock.now_ns();
+    let mut transport = SinkTransport {
+        sink,
+        clock,
+        tx_hash: tx_hash.0,
+        max_request_len: config.max_frame,
+        state: ConnectionState::Ready,
+        handoff: None,
+    };
+    let dispatched = dispatch_diagnostic(
+        lane,
+        &plan,
+        &DispatchContext {
+            table,
+            current: snapshot,
+            head,
+        },
+        clock,
+        &deadline,
+        &mut [Armed {
+            adapter,
+            transport: &mut transport,
+            frame: &mut frame,
+        }],
+    );
+    let handoff = transport.handoff;
+    let admitted = match &dispatched {
+        Ok(report) => report.admitted(),
+        Err(DispatchError::DispatchBinding(_)) => true,
+        Err(_) => false,
+    };
+    let result = match dispatched {
+        Err(_) => Err(Refusal::Dispatch),
+        Ok(report) => match report.adapter(adapter).map(|r| r.outcome) {
+            Some(SendOutcome::HandedOff) => handoff.ok_or(Refusal::Dispatch),
+            Some(SendOutcome::SkippedDeadline(_)) => Err(Refusal::Deadline),
+            _ => Err(Refusal::Dispatch),
+        },
+    };
+    (result, prepared_ns, planned_ns, admitted)
 }
 
 /// A runtime clock reading as a submission [`Clock`].
@@ -486,14 +702,29 @@ impl PaperExecutor {
             config.gas_limit,
         )
         .map_err(|e| ArmError::Policy(format!("{e:?}")))?;
+        let exit_policy = ExitPolicy::new(
+            config.policy_generation,
+            config.slippage_bps,
+            config.gas_price_wei,
+            config.approve_gas_limit,
+            config.sell_gas_limit,
+        )
+        .map_err(|e| ArmError::Policy(format!("{e:?}")))?;
         let chain_id = deployment.deployment().chain_id;
         let table = AdapterTable::new(
             chain_id,
             config.capability_generation,
-            &[AdapterBinding {
-                adapter: paper_adapter(),
-                capability: CapabilityId::Club48BuilderV1,
-            }],
+            &[
+                AdapterBinding {
+                    adapter: paper_adapter(),
+                    capability: CapabilityId::Club48BuilderV1,
+                },
+                // Phase I: Strategy C's single raw transactions.
+                AdapterBinding {
+                    adapter: paper_raw_adapter(),
+                    capability: CapabilityId::LocalGethV1,
+                },
+            ],
         )
         .map_err(|e| ArmError::Config(e.to_string()))?;
         let target = ProviderTarget::club48(
@@ -506,8 +737,11 @@ impl PaperExecutor {
             .create(fence_dir)
             .map_err(|e| ArmError::Fence(format!("{}: {e}", fence_dir.display())))?;
         let sender = Address::from(identity.address());
-        let mut body = Vec::with_capacity(8 + 8 + 20 + 8 + 16 + 8 + 8 + 8);
-        body.extend_from_slice(b"DBPAPFN2");
+        let sell_nonce = next_nonce
+            .checked_add(1)
+            .ok_or_else(|| ArmError::Config("the next nonce has no successor".into()))?;
+        let mut body = Vec::with_capacity(8 + 8 + 20 + 8 + 16 + 8 + 8 + 8 + 8 + 16);
+        body.extend_from_slice(b"DBPAPFN3");
         body.extend_from_slice(&chain_id.to_le_bytes());
         body.extend_from_slice(sender.as_slice());
         body.extend_from_slice(&next_nonce.to_le_bytes());
@@ -515,24 +749,39 @@ impl PaperExecutor {
         body.extend_from_slice(&(config.lanes as u64).to_le_bytes());
         body.extend_from_slice(&config.policy_generation.to_le_bytes());
         body.extend_from_slice(&config.capability_generation.to_le_bytes());
+        body.extend_from_slice(&(config.strategy_lanes as u64).to_le_bytes());
+        body.extend_from_slice(&config.strategy_session_cap_wei.to_le_bytes());
         let fence = fence_dir.join(format!("paper-{session}-{arm}.fence"));
         durable_fence(&fence, &body)?;
-        let mut lanes = Vec::with_capacity(config.lanes);
-        for _ in 0..config.lanes {
-            let armed = ArmedFence::from_durable_startup(
-                chain_id,
-                sender,
+        let pool = |count: usize, nonce: u64, cap: u128| -> Result<Vec<IntentLane>, ArmError> {
+            (0..count)
+                .map(|_| {
+                    let armed =
+                        ArmedFence::from_durable_startup(chain_id, sender, nonce, U256::from(cap));
+                    IntentLane::armed(armed, 1).map_err(|e| ArmError::Lane(format!("{e:?}")))
+                })
+                .collect()
+        };
+        let pools = (
+            pool(config.lanes, next_nonce, config.session_cap_wei),
+            pool(
+                config.strategy_lanes,
                 next_nonce,
-                U256::from(config.session_cap_wei),
-            );
-            match IntentLane::armed(armed, 1) {
-                Ok(lane) => lanes.push(lane),
-                Err(e) => {
-                    let _ = fs::remove_file(&fence);
-                    return Err(ArmError::Lane(format!("{e:?}")));
-                }
+                config.strategy_session_cap_wei,
+            ),
+            pool(
+                config.strategy_lanes,
+                sell_nonce,
+                config.strategy_session_cap_wei,
+            ),
+        );
+        let (lanes, strategy_lanes, sell_lanes) = match pools {
+            (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                let _ = fs::remove_file(&fence);
+                return Err(e);
             }
-        }
+        };
         let samples = config.latency_samples;
         let budget = config.budget();
         Ok(PaperExecutor {
@@ -553,6 +802,15 @@ impl PaperExecutor {
             raw: Vec::with_capacity(512),
             counters: ExecCounters::default(),
             latencies: Latencies::new(samples),
+            strategy_used: 0,
+            sell_used: 0,
+            strategy_spent_wei: U256::ZERO,
+            strategy_bought: Vec::with_capacity(strategy_lanes.len()),
+            exited: Vec::with_capacity(sell_lanes.len()),
+            strategy_lanes,
+            sell_lanes,
+            exit_policy,
+            strategy_counters: ExecCounters::default(),
             config,
         })
     }
@@ -769,6 +1027,314 @@ impl PaperExecutor {
         })
     }
 
+    /// Phase I: a Strategy C PASS on `token` at the decision (`decided_ns`,
+    /// the decision record's time on `clock`): a BUY of `input_wei` on the
+    /// strategy's exact curve, through admission, the PAPER signature, a
+    /// strategy lane and the single-raw plan to the sink.
+    pub fn on_strategy_buy(
+        &mut self,
+        token: [u8; 20],
+        curve: StrategyCurve,
+        input_wei: U256,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+        decided_ns: u64,
+    ) -> Result<PaperIntent, Refusal> {
+        self.strategy_counters.launches += 1;
+        let result = self.strategy_buy(token, curve, input_wei, c2, clock, decided_ns);
+        self.strategy_outcome(&result);
+        result
+    }
+
+    /// Phase I: a Strategy C exit trigger on `token`: the approval of the
+    /// Portal and the native-output SELL of `tokens` on the position's
+    /// shadow curve, each through its own lane (the approval at the next
+    /// nonce, the SELL at the one after) and the single-raw plan to the
+    /// sink.
+    pub fn on_strategy_exit(
+        &mut self,
+        token: [u8; 20],
+        tokens: U256,
+        curve: StrategyCurve,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+        triggered_ns: u64,
+    ) -> Result<[PaperIntent; 2], Refusal> {
+        self.strategy_counters.launches += 1;
+        let result = self.strategy_exit(token, tokens, curve, c2, clock, triggered_ns);
+        match &result {
+            Ok(_) => self.strategy_counters.handoffs += 2,
+            Err(r) => self.strategy_counters.refuse(*r),
+        }
+        result
+    }
+
+    fn strategy_outcome(&mut self, result: &Result<PaperIntent, Refusal>) {
+        match result {
+            Ok(_) => self.strategy_counters.handoffs += 1,
+            Err(r) => self.strategy_counters.refuse(*r),
+        }
+    }
+
+    fn strategy_buy(
+        &mut self,
+        token: [u8; 20],
+        curve: StrategyCurve,
+        input_wei: U256,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+        decided_ns: u64,
+    ) -> Result<PaperIntent, Refusal> {
+        let policy = BuyPolicy::new(
+            self.config.policy_generation,
+            input_wei,
+            self.config.slippage_bps,
+            self.config.gas_price_wei,
+            self.config.gas_limit,
+        )
+        .map_err(|_| Refusal::Admission)?;
+        let snapshot = (c2.snapshot)(
+            self.config.policy_generation,
+            self.deployment.codehash_generation(),
+        )
+        .ok_or(Refusal::NoSnapshot)?;
+        let head = c2.head.ok_or(Refusal::NoSnapshot)?;
+        let state = CurveState::tracked(
+            Address::from(token),
+            curve.terms,
+            curve.reserve,
+            curve.circulating,
+            &self.terms,
+            snapshot,
+        )
+        .map_err(|_| Refusal::Admission)?;
+        let admitted = admit_curve_buy(&state, &policy).map_err(|_| Refusal::Admission)?;
+        let admitted_ns = clock.now_ns();
+        if self.strategy_bought.contains(&token) {
+            return Err(Refusal::DuplicateToken);
+        }
+        let gas = U256::from(self.config.gas_price_wei) * U256::from(self.config.gas_limit);
+        let budget = BudgetEnvelope {
+            max_buy_input_wei: input_wei,
+            max_buy_gas_wei: gas,
+            max_own_launch_wei: U256::ZERO,
+            max_provider_payment_wei: U256::ZERO,
+            max_total_wei: input_wei + gas,
+        };
+        if self.strategy_spent_wei + budget.max_total_wei
+            > U256::from(self.config.strategy_session_cap_wei)
+        {
+            return Err(Refusal::SessionCap);
+        }
+        let Some(lane) = self.strategy_lanes.get_mut(self.strategy_used) else {
+            return Err(Refusal::LanesExhausted);
+        };
+        self.strategy_used += 1;
+        let ticket = lane.reserve(admitted.token()).map_err(|_| Refusal::Lane)?;
+        self.strategy_bought.push(token);
+        let sender = Address::from(self.identity.address());
+        let expected = ExpectedBuy::from_admitted(
+            &self.deployment,
+            &admitted,
+            &policy,
+            sender,
+            ticket.nonce(),
+        )
+        .map_err(|_| Refusal::Intent)?;
+        expected
+            .sign(self.identity.signer(), &mut self.scratch, &mut self.raw)
+            .map_err(|_| Refusal::Build)?;
+        let signed_ns = clock.now_ns();
+        let (handoff, prepared_ns, planned_ns, admitted_exposure) = raw_to_sink(
+            RawSink {
+                lane,
+                sink: &mut self.sink,
+                table: &self.table,
+                config: &self.config,
+                scratch: &mut self.scratch,
+            },
+            ticket,
+            &self.raw,
+            ExpectedTx::Buy(&expected),
+            &budget,
+            &snapshot,
+            head,
+            clock,
+            decided_ns,
+        );
+        if admitted_exposure {
+            self.strategy_spent_wei += budget.max_total_wei;
+        }
+        let handoff = handoff?;
+        Ok(PaperIntent {
+            kind: IntentKind::Buy,
+            token,
+            handoff,
+            times: StageTimes {
+                ingress_ns: decided_ns,
+                decoded_ns: decided_ns,
+                admitted_ns,
+                signed_ns,
+                prepared_ns,
+                planned_ns,
+                sink_ns: handoff.at_ns,
+            },
+            raw: self.raw.clone(),
+        })
+    }
+
+    fn strategy_exit(
+        &mut self,
+        token: [u8; 20],
+        tokens: U256,
+        curve: StrategyCurve,
+        c2: &CanonicalContext<'_>,
+        clock: &dyn Clock,
+        triggered_ns: u64,
+    ) -> Result<[PaperIntent; 2], Refusal> {
+        let snapshot = (c2.snapshot)(
+            self.config.policy_generation,
+            self.deployment.codehash_generation(),
+        )
+        .ok_or(Refusal::NoSnapshot)?;
+        let head = c2.head.ok_or(Refusal::NoSnapshot)?;
+        let state = CurveState::tracked(
+            Address::from(token),
+            curve.terms,
+            curve.reserve,
+            curve.circulating,
+            &self.terms,
+            snapshot,
+        )
+        .map_err(|_| Refusal::Admission)?;
+        let admitted =
+            admit_curve_sell(&state, tokens, &self.exit_policy).map_err(|_| Refusal::Admission)?;
+        let admitted_ns = clock.now_ns();
+        if self.exited.contains(&token) {
+            return Err(Refusal::DuplicateToken);
+        }
+        let price = U256::from(self.config.gas_price_wei);
+        let approve_gas = price * U256::from(self.config.approve_gas_limit);
+        let sell_gas = price * U256::from(self.config.sell_gas_limit);
+        let budget = |gas: U256| BudgetEnvelope {
+            max_buy_input_wei: U256::ZERO,
+            max_buy_gas_wei: gas,
+            max_own_launch_wei: U256::ZERO,
+            max_provider_payment_wei: U256::ZERO,
+            max_total_wei: gas,
+        };
+        if self.strategy_spent_wei + approve_gas + sell_gas
+            > U256::from(self.config.strategy_session_cap_wei)
+        {
+            return Err(Refusal::SessionCap);
+        }
+        let (Some(approve_lane), Some(sell_lane)) = (
+            self.strategy_lanes.get_mut(self.strategy_used),
+            self.sell_lanes.get_mut(self.sell_used),
+        ) else {
+            return Err(Refusal::LanesExhausted);
+        };
+        self.strategy_used += 1;
+        self.sell_used += 1;
+        let approve_ticket = approve_lane
+            .reserve(admitted.token())
+            .map_err(|_| Refusal::Lane)?;
+        let sell_ticket = sell_lane
+            .reserve(admitted.token())
+            .map_err(|_| Refusal::Lane)?;
+        self.exited.push(token);
+        let sender = Address::from(self.identity.address());
+        let expected = ExpectedExit::from_admitted(
+            &self.deployment,
+            &admitted,
+            &self.exit_policy,
+            sender,
+            approve_ticket.nonce(),
+        )
+        .map_err(|_| Refusal::Intent)?;
+        if sell_ticket.nonce() != approve_ticket.nonce() + 1 {
+            return Err(Refusal::Lane);
+        }
+        let mut out = Vec::with_capacity(2);
+        for (kind, lane, ticket, gas) in [
+            (
+                IntentKind::Approve,
+                approve_lane,
+                approve_ticket,
+                approve_gas,
+            ),
+            (IntentKind::Sell, sell_lane, sell_ticket, sell_gas),
+        ] {
+            let built = match kind {
+                IntentKind::Approve => {
+                    expected.sign_approve(self.identity.signer(), &mut self.scratch, &mut self.raw)
+                }
+                _ => expected.sign_sell(self.identity.signer(), &mut self.scratch, &mut self.raw),
+            };
+            built.map_err(|_| Refusal::Build)?;
+            let signed_ns = clock.now_ns();
+            let tx = match kind {
+                IntentKind::Approve => ExpectedTx::Approve(&expected),
+                _ => ExpectedTx::Sell(&expected),
+            };
+            let (handoff, prepared_ns, planned_ns, admitted_exposure) = raw_to_sink(
+                RawSink {
+                    lane,
+                    sink: &mut self.sink,
+                    table: &self.table,
+                    config: &self.config,
+                    scratch: &mut self.scratch,
+                },
+                ticket,
+                &self.raw,
+                tx,
+                &budget(gas),
+                &snapshot,
+                head,
+                clock,
+                triggered_ns,
+            );
+            if admitted_exposure {
+                self.strategy_spent_wei += gas;
+            }
+            let handoff = handoff?;
+            out.push(PaperIntent {
+                kind,
+                token,
+                handoff,
+                times: StageTimes {
+                    ingress_ns: triggered_ns,
+                    decoded_ns: triggered_ns,
+                    admitted_ns,
+                    signed_ns,
+                    prepared_ns,
+                    planned_ns,
+                    sink_ns: handoff.at_ns,
+                },
+                raw: self.raw.clone(),
+            });
+        }
+        let [a, b]: [PaperIntent; 2] = out.try_into().map_err(|_| Refusal::Dispatch)?;
+        Ok([a, b])
+    }
+
+    /// Strategy C's PAPER counters (Phase I): intents asked for, handed
+    /// off, refused by stage.
+    pub fn strategy_counters(&self) -> &ExecCounters {
+        &self.strategy_counters
+    }
+
+    /// Strategy lanes armed and left, SELL lanes left, and the strategy
+    /// exposure dispatched.
+    pub fn strategy_lanes(&self) -> (usize, usize, usize, U256) {
+        (
+            self.strategy_lanes.len(),
+            self.strategy_lanes.len() - self.strategy_used,
+            self.sell_lanes.len() - self.sell_used,
+            self.strategy_spent_wei,
+        )
+    }
+
     pub fn sender(&self) -> [u8; 20] {
         self.identity.address()
     }
@@ -866,6 +1432,10 @@ mod tests {
             validity_blocks: 2,
             start_limit_ns: 1_000_000,
             max_frame: 16_384,
+            strategy_lanes: lanes,
+            strategy_session_cap_wei: 100_000_000_000_000_000,
+            approve_gas_limit: 100_000,
+            sell_gas_limit: 1_500_000,
         }
     }
 
@@ -1342,6 +1912,211 @@ mod tests {
         let again = arm(1).unwrap();
         assert_eq!(fs::read_dir(d.join("fences")).unwrap().count(), 1);
         again.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// The canonical snapshot of C2 (Phase I: no pending candidate).
+    fn canonical(policy: u64, codehash: u64) -> Option<SnapshotId> {
+        snapshot(B256::ZERO, policy, codehash)
+    }
+
+    fn strategy_c2(head: Option<ChainHead>) -> CanonicalContext<'static> {
+        CanonicalContext {
+            snapshot: &canonical,
+            head,
+        }
+    }
+
+    /// A curve after real BUYs of `wei` from the fresh curve, and the
+    /// quote of a BUY of `input` on it.
+    fn curve_after(wei: u128) -> StrategyCurve {
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, profile_terms, quote_native_buy,
+        };
+        let terms = PricedToken::new(&profile_terms(100, 100)).unwrap();
+        let q = quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: U256::from(wei),
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        StrategyCurve {
+            terms,
+            reserve: q.reserve_after,
+            circulating: q.supply_after,
+        }
+    }
+
+    /// Phase I: a Strategy C PASS runs the production path to the sink: the
+    /// curve admission, the BUY build and PAPER signature, a strategy lane,
+    /// the local node's single-raw plan, its frame and the dispatch. The
+    /// exit then signs the approval of the Portal (next nonce) and the
+    /// native-output SELL of the position's tokens (the nonce after); both
+    /// reach the sink. Nothing is sent.
+    #[test]
+    fn a_strategy_entry_and_exit_reach_the_sink() {
+        use darkbot_bsc_trading::venues::flap::abi::decode_approve;
+        use darkbot_bsc_trading::venues::flap::recognize::decode_swap_exact_input;
+        let (mut exec, d) = armed("strategy", config(2, 2));
+        let portal = bsc_mainnet_v5_27_0().portal;
+        let token = [0xAB; 20];
+        let input = U256::from(10_000_000_000_000_000u64);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let buy = exec
+            .on_strategy_buy(
+                token,
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(500, 3),
+                500,
+            )
+            .unwrap();
+        assert_eq!((buy.kind, buy.token), (IntentKind::Buy, token));
+        let signed = decode_signed(&buy.raw).unwrap();
+        assert_eq!((signed.tx.chain_id, signed.tx.nonce), (56, 0));
+        assert_eq!((signed.tx.to, signed.tx.value), (portal, input));
+        let call = decode_swap_exact_input_native(signed.tx.input).unwrap();
+        assert_eq!(call.output_token.into_array(), token);
+        // The single raw transaction is the whole request.
+        assert!(buy.handoff.raw_len >= buy.raw.len());
+        let t = buy.times;
+        assert!(t.ingress_ns <= t.admitted_ns && t.admitted_ns < t.signed_ns);
+        assert!(t.signed_ns < t.prepared_ns && t.prepared_ns < t.planned_ns);
+        assert!(t.planned_ns < t.sink_ns);
+        // One BUY per token.
+        assert_eq!(
+            exec.on_strategy_buy(
+                token,
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(600, 3),
+                600
+            ),
+            Err(Refusal::DuplicateToken)
+        );
+        // The exit of the tokens bought, on the curve with them in it.
+        let tokens = call.min_output_amount;
+        let after = StrategyCurve {
+            reserve: curve.reserve + input,
+            circulating: curve.circulating + tokens,
+            ..curve
+        };
+        let curve_with_buy = {
+            use darkbot_bsc_trading::economics::flap::native_curve20::{
+                HoldingCap, NativeBuyInputs, quote_native_buy,
+            };
+            let q = quote_native_buy(&NativeBuyInputs {
+                token: curve.terms,
+                reserve_before: curve.reserve,
+                circulating_before: curve.circulating,
+                input_amount: input,
+                protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+                holding_cap: HoldingCap::None,
+            })
+            .unwrap();
+            StrategyCurve {
+                reserve: q.reserve_after,
+                circulating: q.supply_after,
+                ..after
+            }
+        };
+        let [approve, sell] = exec
+            .on_strategy_exit(
+                token,
+                tokens,
+                curve_with_buy,
+                &strategy_c2(Some(HEAD)),
+                &clock(900, 3),
+                900,
+            )
+            .unwrap();
+        let a = decode_signed(&approve.raw).unwrap();
+        assert_eq!(
+            (approve.kind, a.tx.nonce, a.tx.to.into_array()),
+            (IntentKind::Approve, 0, token)
+        );
+        assert_eq!(a.tx.value, U256::ZERO);
+        assert_eq!(decode_approve(a.tx.input).unwrap(), (portal, tokens));
+        let s = decode_signed(&sell.raw).unwrap();
+        assert_eq!(
+            (sell.kind, s.tx.nonce, s.tx.to),
+            (IntentKind::Sell, 1, portal)
+        );
+        let swap = decode_swap_exact_input(s.tx.input).unwrap();
+        assert!(swap.is_sell());
+        assert_eq!(
+            (swap.input_token.into_array(), swap.input_amount),
+            (token, tokens)
+        );
+        assert!(sell.handoff.sequence > approve.handoff.sequence);
+        // One exit per token; the counters and lanes say so.
+        assert_eq!(
+            exec.on_strategy_exit(
+                token,
+                tokens,
+                curve_with_buy,
+                &strategy_c2(Some(HEAD)),
+                &clock(990, 3),
+                990
+            ),
+            Err(Refusal::DuplicateToken)
+        );
+        assert_eq!(exec.strategy_counters().handoffs, 3);
+        assert_eq!(exec.strategy_counters().refused("DUPLICATE_TOKEN"), 2);
+        let (armed_lanes, left, sells_left, spent) = exec.strategy_lanes();
+        assert_eq!((armed_lanes, left, sells_left), (2, 0, 1));
+        assert!(spent > input);
+        // C3's own pool is untouched.
+        assert_eq!(exec.lanes(), (2, 2));
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Phase I: without a coherent canonical snapshot or a head nothing is
+    /// admitted; an entry above the strategy's session cap is refused.
+    #[test]
+    fn a_strategy_entry_needs_a_snapshot_and_room_in_its_cap() {
+        let mut cfg = config(2, 2);
+        cfg.strategy_session_cap_wei = 10_000_000_000_000_000;
+        let (mut exec, d) = armed("strategy-refusals", cfg);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let input = U256::from(10_000_000_000_000_000u64);
+        let none = CanonicalContext {
+            snapshot: &|_, _| None,
+            head: Some(HEAD),
+        };
+        assert_eq!(
+            exec.on_strategy_buy([1; 20], curve, input, &none, &clock(1, 1), 1),
+            Err(Refusal::NoSnapshot)
+        );
+        assert_eq!(
+            exec.on_strategy_buy([1; 20], curve, input, &strategy_c2(None), &clock(1, 1), 1),
+            Err(Refusal::NoSnapshot)
+        );
+        // Input plus gas is above the cap.
+        assert_eq!(
+            exec.on_strategy_buy(
+                [1; 20],
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(1, 1),
+                1
+            ),
+            Err(Refusal::SessionCap)
+        );
+        assert_eq!(exec.strategy_counters().handoffs, 0);
+        assert_eq!(exec.strategy_lanes().1, 2);
+        exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
     }
 }

@@ -14,7 +14,7 @@ use crate::chain_state::canonical::{
 };
 use crate::transactions::legacy::max_signed_len;
 use crate::venues::flap::abi::SWAP_EXACT_INPUT_NATIVE_LEN;
-use crate::venues::flap::binding::{ExpectedBuy, verify_final_buy};
+use crate::venues::flap::binding::ExpectedTx;
 
 /// Size of the per-intent buffer for the signed BUY.
 const SIGNED_SLOT_LEN: usize = max_signed_len(SWAP_EXACT_INPUT_NATIVE_LEN);
@@ -318,7 +318,8 @@ impl IntentLane {
         })
     }
 
-    /// Binds the signed BUY of a reserved intent.
+    /// Binds the signed transaction of a reserved intent (a BUY, or an
+    /// exit's approval or SELL).
     ///
     /// The bytes are accepted only if `expected` describes this ticket on
     /// this lane and the final binding check passes for the current
@@ -327,14 +328,15 @@ impl IntentLane {
     ///
     /// `scratch` must have a capacity of at least
     /// [`PREPARE_SCRATCH_CAPACITY`]; it is cleared and reused, never grown.
-    pub fn prepare(
+    pub fn prepare<'e>(
         &mut self,
         ticket: Ticket,
         raw_signed: &[u8],
-        expected: &ExpectedBuy,
+        expected: impl Into<ExpectedTx<'e>>,
         current: &SnapshotId,
         scratch: &mut Vec<u8>,
     ) -> Result<B256, LaneError> {
+        let expected: ExpectedTx<'e> = expected.into();
         if self.halt.is_some() {
             return Err(LaneError::Halted);
         }
@@ -356,10 +358,10 @@ impl IntentLane {
             // Refused rather than grown: this call must not allocate.
             return Err(LaneError::ScratchTooSmall);
         }
-        let tx_hash =
-            verify_final_buy(raw_signed, expected, current, scratch).map_err(LaneError::Binding)?;
-        // u64 * u64 always fits a U256.
-        let buy_gas_wei = U256::from(expected.gas_price()) * U256::from(expected.gas_limit());
+        let tx_hash = expected
+            .verify_final(raw_signed, current, scratch)
+            .map_err(LaneError::Binding)?;
+        let buy_gas_wei = expected.gas_wei();
 
         let start = index * SIGNED_SLOT_LEN;
         self.signed[start..start + raw_signed.len()].copy_from_slice(raw_signed);
@@ -367,7 +369,7 @@ impl IntentLane {
         entry.tx_hash = tx_hash;
         entry.snapshot = Some(*current);
         entry.signed_len = raw_signed.len();
-        entry.buy_input_wei = expected.input_amount();
+        entry.buy_input_wei = expected.value_wei();
         entry.buy_gas_wei = buy_gas_wei;
         entry.state = IntentState::Prepared;
         Ok(tx_hash)
