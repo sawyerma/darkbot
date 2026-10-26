@@ -2713,6 +2713,9 @@ struct Outcome {
 }
 
 fn run(cfg: &Config) -> Result<Outcome, String> {
+    // The commit this run is of, read before the long scan: a commit made
+    // while it runs must not rename it (Phase E review pass 2).
+    let git_head = c1_common::git_head(Path::new("."));
     let archive = Archive::load(&cfg.archive)?;
     let rpc = Endpoint::new(&cfg.rpc_url, cfg.limits, cfg.attempts, cfg.retry_pause);
     let chain_id = rpc.chain_id()?;
@@ -2838,7 +2841,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         endpoint_host: rpc.host(),
         sourcify_host: cfg.sourcify.as_deref().map(edge::host),
         tool_sha256: c1_common::own_sha256()?,
-        git_head: c1_common::git_head(Path::new(".")),
+        git_head,
         archive_root: cfg.archive.display().to_string(),
         observed_ms,
         receipt_budget: cfg.receipt_budget,
