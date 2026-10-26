@@ -1,6 +1,6 @@
 //! Phase G (Economics gate §16): the latency of the local deterministic
 //! quote on this machine, over the real curve states of the Portal parity
-//! set (`fixtures/flap/quote_parity_g02_v2.txt`), bound to the economics
+//! set (`fixtures/flap/quote_parity_g02_v3.txt`), bound to the economics
 //! snapshot of the tree. Offline; run from the repository root, release
 //! build (a debug build measures nothing and writes no evidence).
 //!
@@ -41,7 +41,7 @@ mod defaults {
     pub const SLIPPAGE_BPS: u16 = 100;
 }
 
-const PARITY: &str = "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v2.txt";
+const PARITY: &str = "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v3.txt";
 
 fn main() -> ExitCode {
     match run() {
@@ -67,10 +67,12 @@ fn run() -> Result<(), String> {
     }
     let root = Path::new(".");
     let text = std::fs::read_to_string(root.join(PARITY)).map_err(|e| format!("{PARITY}: {e}"))?;
-    // The parity set's states are version-6 curve-20 native tokens (its
-    // SUPPORTED rows); the profile's terms with each sample's taxes.
-    let token = |buy: u16, sell: u16| {
-        PricedToken::new(&profile_terms(buy, sell)).map_err(|e| format!("{e:?}"))
+    // The parity set's states in the production scope (its SUPPORTED
+    // rows): the profile's terms with each sample's taxes and threshold.
+    let token = |buy: u16, sell: u16, threshold: U256| {
+        let mut terms = profile_terms(buy, sell);
+        terms.dex_supply_threshold = threshold;
+        PricedToken::new(&terms).map_err(|e| format!("{e:?}"))
     };
     let (mut buys, mut sells) = (Vec::new(), Vec::new());
     for line in text
@@ -78,14 +80,14 @@ fn run() -> Result<(), String> {
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
     {
         let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() != 18 || f[17] != "SUPPORTED" {
+        if f.len() != 19 || f[18] != "SUPPORTED" {
             continue;
         }
         let n = |i: usize| U256::from_str_radix(f[i], 10).map_err(|e| format!("{line}: {e}"));
         let tax = |i: usize| f[i].parse::<u16>().map_err(|e| format!("{line}: {e}"));
         match f[7] {
             "BUY" => buys.push(NativeBuyInputs {
-                token: token(tax(5)?, tax(6)?)?,
+                token: token(tax(5)?, tax(6)?, n(17)?)?,
                 reserve_before: n(3)?,
                 circulating_before: n(4)?,
                 input_amount: n(8)?,
@@ -95,7 +97,7 @@ fn run() -> Result<(), String> {
                 holding_cap: HoldingCap::None,
             }),
             "SELL" => sells.push(NativeSellInputs {
-                token: token(tax(5)?, tax(6)?)?,
+                token: token(tax(5)?, tax(6)?, n(17)?)?,
                 reserve_before: n(3)?,
                 circulating_before: n(4)?,
                 input_amount: n(8)?,
@@ -110,7 +112,7 @@ fn run() -> Result<(), String> {
         return Err(format!("{PARITY}: no supported BUY or SELL state"));
     }
     let fresh = NativeBuyInputs {
-        token: token(100, 100)?,
+        token: token(100, 100, profile_terms(100, 100).dex_supply_threshold)?,
         reserve_before: U256::ZERO,
         circulating_before: U256::ZERO,
         input_amount: U256::from(QUALIFIED_MAINNET_INPUT_WEI),
