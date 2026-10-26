@@ -150,6 +150,12 @@ pub mod kind {
     /// S1-02: the state owner's decision on one request, a sealed single-value journal
     /// `data/source-control/outcome_<seq>.p0j`.
     pub const SOURCE_CONTROL_OUTCOME: u16 = 1101;
+    /// DEC-13: one operator capability request (`p0ctl capability set`), a sealed single-value
+    /// journal `data/capability-control/request_<seq>.p0j`.
+    pub const CAPABILITY_CONTROL_REQUEST: u16 = 1102;
+    /// DEC-13: the state owner's decision on one capability request (requested and effective),
+    /// a sealed single-value journal `data/capability-control/outcome_<seq>.p0j`.
+    pub const CAPABILITY_CONTROL_OUTCOME: u16 = 1103;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -212,6 +218,8 @@ pub mod kind {
         OWNER_RECOVERY,
         SOURCE_CONTROL_REQUEST,
         SOURCE_CONTROL_OUTCOME,
+        CAPABILITY_CONTROL_REQUEST,
+        CAPABILITY_CONTROL_OUTCOME,
         super::MANIFEST,
     ];
 }
@@ -237,6 +245,8 @@ pub mod source {
     pub const SOURCE_CONTROL: u32 = 13;
     /// Native backtest, optimizer, their profiles and the analytics job controller.
     pub const BACKTEST: u32 = 14;
+    /// DEC-13 operator capability control (`p0ctl capability set`).
+    pub const CAPABILITY_CONTROL: u32 = 15;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never

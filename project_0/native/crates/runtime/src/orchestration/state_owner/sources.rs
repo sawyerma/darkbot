@@ -63,6 +63,36 @@ pub(super) struct OwnerSources {
     /// CTRL-03: the source configuration version the owner has decided up to (the request
     /// log's head at its start, then every decided request); `None` without source control.
     pub(super) config_version: Option<u64>,
+    /// DEC-13: the operator's capability requests and the owner's decisions on them.
+    pub(super) capabilities: OwnerCapabilities,
+}
+
+/// DEC-13: the requested capability values (`p0ctl capability set`) and the owner's decisions;
+/// what is effective is `capability_control::live_effective`'s alone.
+#[derive(Debug)]
+pub(super) struct OwnerCapabilities {
+    /// Where the owner records its decisions; `None`: no capability control in this runtime.
+    pub(super) dir: Option<std::path::PathBuf>,
+    /// CTRL-03: the capability configuration version decided up to; `None` without control.
+    pub(super) config_version: Option<u64>,
+    /// The requested LIVE value: `OFF` at every start (a run never inherits a LIVE request).
+    pub(super) live_requested: &'static str,
+    pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
+    pub(super) applied: u64,
+    pub(super) refused: u64,
+}
+
+impl Default for OwnerCapabilities {
+    fn default() -> Self {
+        Self {
+            dir: None,
+            config_version: None,
+            live_requested: crate::orchestration::capability_control::LIVE_OFF,
+            last_decision: None,
+            applied: 0,
+            refused: 0,
+        }
+    }
 }
 
 impl OwnerSources {
@@ -89,6 +119,7 @@ impl OwnerSources {
             stats: SourceStats::default(),
             last_decision: None,
             config_version: None,
+            capabilities: OwnerCapabilities::default(),
         }
     }
 
@@ -96,6 +127,14 @@ impl OwnerSources {
     pub(super) fn record_decisions_in(mut self, dir: std::path::PathBuf, baseline: u64) -> Self {
         self.control_dir = Some(dir);
         self.config_version = Some(baseline);
+        self
+    }
+
+    /// DEC-13: the owner decides capability requests from `baseline` on and records them in
+    /// `dir` (`p0ctl capability status`).
+    pub(super) fn capability_control_in(mut self, dir: std::path::PathBuf, baseline: u64) -> Self {
+        self.capabilities.dir = Some(dir);
+        self.capabilities.config_version = Some(baseline);
         self
     }
 
@@ -188,6 +227,9 @@ impl ShadowOwner {
                     );
                     self.record_source_decision(seq, request, false, reason);
                 }
+                ControlMessage::Capability { seq, request } => {
+                    self.apply_capability_control(seq, request)
+                }
             }
         }
         let OwnerSources {
@@ -275,6 +317,75 @@ impl ShadowOwner {
         );
         self.record_source_decision(seq, request, true, handoff.into());
         Ok(())
+    }
+
+    /// DEC-13: one capability request: a valid one becomes the requested value; the effective
+    /// one is decided by `capability_control::live_effective` alone (BLOCKED without FE-06).
+    /// Recorded like a source decision (`outcome_<seq>.p0j`, the projection's last decision).
+    pub(super) fn apply_capability_control(
+        &mut self,
+        seq: u64,
+        request: Result<crate::analytics::payload::CapabilityControlRequest, String>,
+    ) {
+        use crate::orchestration::capability_control as cap;
+        let (text, valid) = match request {
+            Ok(r) => (
+                cap::shown(&r.capability, &r.requested),
+                cap::validate(&r.capability, &r.requested).map(|()| r.requested),
+            ),
+            Err(reason) => ("unreadable".to_string(), Err(reason)),
+        };
+        let c = &mut self.sources.capabilities;
+        let applied = valid.is_ok();
+        if let Ok(requested) = &valid {
+            c.live_requested = cap::LIVE_VALUES
+                .into_iter()
+                .find(|v| v == requested)
+                .unwrap_or(cap::LIVE_OFF);
+            c.applied = c.applied.saturating_add(1);
+        } else {
+            c.refused = c.refused.saturating_add(1);
+        }
+        let requested = c.live_requested;
+        let (effective, block_reason) = cap::live_effective(requested);
+        let detail = match valid {
+            Ok(_) => format!("requested {requested} · effective {effective} · {block_reason}"),
+            Err(reason) => reason,
+        };
+        owner_log!(
+            self,
+            "capability_control: {} seq={seq} request={text} {detail}",
+            if applied { "applied" } else { "refused" }
+        );
+        let c = &mut self.sources.capabilities;
+        if let Some(version) = &mut c.config_version {
+            *version = (*version).max(seq);
+        }
+        c.last_decision = Some(crate::status_tap::OwnerSourceDecision {
+            seq,
+            request: text.clone(),
+            applied,
+            detail: detail.clone(),
+        });
+        let Some(dir) = c.dir.clone() else {
+            return;
+        };
+        let outcome = crate::analytics::payload::CapabilityControlOutcome {
+            seq,
+            request: text,
+            applied,
+            requested: requested.into(),
+            effective: effective.into(),
+            detail,
+            owner_pid: std::process::id(),
+            decided_unix_s: super::accounts::wall_unix_s().ok(),
+        };
+        if let Err(e) = cap::write_outcome(&dir, &outcome) {
+            owner_log!(
+                self,
+                "capability_control: decision seq={seq} not recorded: {e}"
+            );
+        }
     }
 
     /// Records the owner's decision on request `seq` (the applied state of `p0ctl source

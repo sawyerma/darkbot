@@ -1579,7 +1579,28 @@ fn live_evaluate_within(
     target: Pubkey,
     deadline_ns: u64,
 ) -> crate::analytics::record::OpportunityRecord {
-    use crate::execution::pipeline::{Mode, Pipeline};
+    evaluate_in(
+        crate::execution::pipeline::Mode::Live,
+        (adapter, safety, fe04),
+        payer,
+        target,
+        deadline_ns,
+    )
+}
+
+/// The admission candidate's evaluation in `mode` (DEC-13: the controller gate's).
+fn evaluate_in(
+    mode: crate::execution::pipeline::Mode,
+    (adapter, safety, fe04): (
+        &HandoffSubmitter,
+        &mut darkbot_project0::safety::Safety,
+        Option<&mut crate::execution::one_shot::admission::Fe04Admission>,
+    ),
+    payer: &solana_sdk::signature::Keypair,
+    target: Pubkey,
+    deadline_ns: u64,
+) -> crate::analytics::record::OpportunityRecord {
+    use crate::execution::pipeline::Pipeline;
     use darkbot_project0::{execution::Freshness, planner::Allowlist};
     use darkbot_solana::{
         state::blockhash::{BlockhashCache, CachedBlockhash},
@@ -1598,7 +1619,7 @@ fn live_evaluate_within(
     slots.observe(10);
     let mut network = crate::execution::pipeline::NetworkBudget::new(usize::MAX, deadline_ns);
     let mut p = Pipeline {
-        mode: Mode::Live,
+        mode,
         clock: &clock,
         health: &TestHealth,
         builder: &AdmissionBuilder,
@@ -4666,4 +4687,75 @@ fn dec02_the_handoff_reuses_the_bound_simulation_or_simulates_again_or_refuses()
         }
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// DEC-13: whatever the operator requests, the controller gate evaluates a candidate in Shadow —
+/// LIVE is effective only with FE-06, which this build holds none of. Even with LIVE requested,
+/// an FE-04 admission at hand and a counting adapter, the candidate is built, signed and
+/// simulated and not a single submit call happens; nothing is reserved or journaled.
+#[test]
+fn dec13_without_fe06_a_live_request_reaches_no_submit() {
+    use crate::orchestration::capability_control;
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let mut allow = Allow::default();
+    allow.execution_classes.insert("longtail");
+    let mut safety = Safety::new(
+        Limits {
+            max_total_capital: u64::MAX,
+            max_outstanding_inventory: u64::MAX,
+            max_concurrent_positions: u32::MAX,
+            max_exposure_per_attempt: u64::MAX,
+            max_daily_loss: u64::MAX,
+            max_failed_attempts_per_day: u32::MAX,
+            max_tip: u64::MAX,
+            max_slippage_bps: u64::MAX,
+            max_outstanding_attempts: u32::MAX,
+        },
+        allow,
+        true,
+    );
+    let counting = HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails: false,
+        simulate_delay: Duration::ZERO,
+        context_slot: Some(10),
+        context_slot_again: Some(10),
+    };
+    let dir = std::env::temp_dir().join(format!("p0-dec13-{}", Pubkey::new_unique()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    let mode = capability_control::pipeline_mode("LIVE");
+    let r = evaluate_in(
+        mode,
+        (&counting, &mut safety, Some(&mut fe04)),
+        &payer,
+        target,
+        u64::MAX,
+    );
+    assert_eq!(mode, crate::execution::pipeline::Mode::Shadow);
+    assert!(
+        matches!(
+            r.decision,
+            Decision::ShadowReady | Decision::ShadowTechnicalReady
+        ),
+        "{:?} {:?}",
+        r.decision,
+        r.reason
+    );
+    assert_eq!(
+        counting.submits.load(Ordering::Relaxed),
+        0,
+        "no submit call"
+    );
+    assert_eq!(
+        counting.sims.load(Ordering::Relaxed),
+        1,
+        "built, signed, simulated"
+    );
+    assert!(fe04.journal.active_hold().is_none(), "nothing reserved");
+    assert_eq!(safety.capital_in_use(), 0);
+    let _ = std::fs::remove_dir_all(dir);
 }

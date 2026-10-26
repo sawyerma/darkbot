@@ -132,6 +132,10 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
       ? { seq: m.lastSourceDecision.seq, request: m.lastSourceDecision.request, applied: m.lastSourceDecision.applied, detail: m.lastSourceDecision.detail }
       : null,
     sourceConfigVersion: m.sourceConfigVersion ?? null,
+    capabilityConfigVersion: m.capabilityConfigVersion ?? null,
+    lastCapabilityDecision: m.lastCapabilityDecision
+      ? { seq: m.lastCapabilityDecision.seq, request: m.lastCapabilityDecision.request, applied: m.lastCapabilityDecision.applied, detail: m.lastCapabilityDecision.detail }
+      : null,
     approval: m.approval
       ? {
           state: m.approval.state, reason: m.approval.reason, kind: m.approval.kind, approvalId: m.approval.approvalId,

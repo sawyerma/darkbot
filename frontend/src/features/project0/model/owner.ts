@@ -124,6 +124,11 @@ export interface LiquidatorView {
   sourceConfigVersion: bigint | null;
   /** DEC-10: the configured FE-04 approval, secret-free (never a LIVE authorization). */
   approval: ApprovalView | null;
+  /** DEC-13: the capability configuration version decided up to — the CAS a capability request
+   * states; null without capability control. */
+  capabilityConfigVersion: bigint | null;
+  /** DEC-13: the owner's last capability-control decision. */
+  lastCapabilityDecision: { seq: bigint; request: string; applied: boolean; detail: string } | null;
 }
 
 /** DEC-10: status of the FE-04 approval file the runtime is configured with. */

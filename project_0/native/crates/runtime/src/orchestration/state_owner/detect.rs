@@ -546,8 +546,12 @@ impl ShadowOwner {
             self.network.drained();
         }
         // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
+        // DEC-13: the mode is the controller gate's — LIVE only while LIVE is effective, which
+        // without an FE-06 authorization it never is (no FE-04 admission is handed over either).
         let mut pipe = Pipeline {
-            mode: Mode::Shadow,
+            mode: crate::orchestration::capability_control::pipeline_mode(
+                self.sources.capabilities.live_requested,
+            ),
             clock: &self.clock,
             health: &engine,
             builder: &builder,

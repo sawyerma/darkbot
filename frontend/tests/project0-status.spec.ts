@@ -4,7 +4,7 @@ import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/p
 import { CapturePhase, CaptureStateSchema } from "../src/core/generated/darkbot/project0/v1/capture_pb";
 import { EffectiveRecordSchema, SystemStatusSchema } from "../src/core/generated/darkbot/project0/v1/system_pb";
 import { AnalyticsJobsSchema, BacktestJobCommandSchema } from "../src/core/generated/darkbot/project0/v1/analytics_pb";
-import { SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
+import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../src/core/generated/darkbot/project0/v1/owner_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, type CommandRequest } from "../src/core/generated/darkbot/control/v1/commands_pb";
@@ -292,6 +292,16 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await expect(page.locator(".p0-line", { hasText: "FE-04 approval" })).toContainText("LIVE not authorized (FE-06)");
   // DEC-01: the early blockhash refusals (loss Build, cause BLOCKHASH_STALE) and their restarts.
   await expect(page.locator(".p0-line", { hasText: "BLOCKHASH_STALE before planning" })).toContainText("6 · 1 / 4 / 1 · 2");
+  // DEC-13: LIVE requested by the operator stays effective BLOCKED (FE-06); the request goes
+  // through the one controller with the capability configuration version this view showed.
+  await expect(page.locator(".p0-line", { hasText: /^LIVE/ }).first()).toContainText("BLOCKED (requested LIVE) · FE-06/P8-LT");
+  await page.getByRole("button", { name: "Withdraw LIVE request" }).click();
+  await expect(page.getByTestId("p0-capability-command-receipt")).toContainText("COMPLETED");
+  const capability = sent.at(-1)!;
+  expect(capability.action).toBe("project0.capability.set");
+  const c = fromBinary(CapabilityControlCommandSchema, capability.params);
+  expect([c.capability, c.requested]).toEqual(["LIVE", "OFF"]);
+  expect(capability.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();
@@ -317,6 +327,6 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual(["project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });

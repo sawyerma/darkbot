@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus } from "../generated/darkbot/control/v1/commands_pb";
 import { ProjectId } from "../generated/darkbot/control/v1/topics_pb";
 import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
-import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
+import { CapabilityControlCommandSchema, SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
 
 /**
  * B03/U-9: the analytics job commands (POST /api/v1/command → gateway → `darkbotctl p0 job` →
@@ -12,7 +12,7 @@ import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/own
  * project0.analytics.jobs. A lost acknowledgement is looked up once, never posted again.
  */
 export type JobAction = "project0.analytics.backtest.start" | "project0.analytics.optimize.start" | "project0.analytics.job.cancel"
-  | "project0.capture.verify.start" | "project0.source.set";
+  | "project0.capture.verify.start" | "project0.source.set" | "project0.capability.set";
 interface Receipt { id: string; action: JobAction; phase: string; detail: string }
 interface AnalyticsControlState { busy: boolean; receipt: Receipt | null }
 export const useAnalyticsControl = create<AnalyticsControlState>(() => ({ busy: false, receipt: null }));
@@ -97,6 +97,12 @@ export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; 
 export function sourceCommand(unit: string, mode: "off" | "observe" | "active"): { params: Uint8Array } | { problem: string } {
   if (!/^(?:wss|geyser:[a-z0-9-]{1,32})$/.test(unit)) return { problem: "Unknown source unit." };
   return { params: toBinary(SourceControlCommandSchema, message(SourceControlCommandSchema, { unit, mode })) };
+}
+
+/** DEC-13: the operands of `p0ctl capability set LIVE OFF|LIVE`; the owner decides what is
+ * effective (LIVE stays BLOCKED until a separate FE-06 authorization). */
+export function capabilityCommand(requested: "OFF" | "LIVE"): { params: Uint8Array } {
+  return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability: "LIVE", requested })) };
 }
 
 async function csrf(): Promise<string> {

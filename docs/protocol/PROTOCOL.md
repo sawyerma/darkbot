@@ -126,6 +126,7 @@
 - [darkbot/project0/v1/owner.proto](#darkbot_project0_v1_owner-proto)
     - [AssetAmount](#darkbot-project0-v1-AssetAmount)
     - [Capability](#darkbot-project0-v1-Capability)
+    - [CapabilityControlCommand](#darkbot-project0-v1-CapabilityControlCommand)
     - [DataSource](#darkbot-project0-v1-DataSource)
     - [Fe04Approval](#darkbot-project0-v1-Fe04Approval)
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
@@ -2243,6 +2244,24 @@ One switchable capability (P0-PROD-CTRL-03).
 
 
 
+<a name="darkbot-project0-v1-CapabilityControlCommand"></a>
+
+### CapabilityControlCommand
+DEC-13: parameters (CommandRequest.params) of project0.capability.set: the operands of
+`p0ctl capability set CAPABILITY REQUESTED`; the running owner decides what is effective
+(LIVE stays BLOCKED until a separate FE-06 authorization).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| capability | [string](#string) |  | LIVE. |
+| requested | [string](#string) |  | OFF or LIVE. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-DataSource"></a>
 
 ### DataSource
@@ -2336,6 +2355,8 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | source_stats | [SourceStats](#darkbot-project0-v1-SourceStats) |  | Source counters of this run. |
 | source_config_version | [uint64](#uint64) | optional | CTRL-03: the source configuration version the owner has decided up to — the ExpectedVersion.config_version a source change states; unset without source control. |
 | approval | [Fe04Approval](#darkbot-project0-v1-Fe04Approval) |  | DEC-10: the configured FE-04 approval, secret-free; it never authorizes LIVE (FE-06). |
+| capability_config_version | [uint64](#uint64) | optional | DEC-13: the capability configuration version the owner has decided up to — the ExpectedVersion.config_version a capability change states; unset without capability control. |
+| last_capability_decision | [SourceDecision](#darkbot-project0-v1-SourceDecision) |  | DEC-13: the owner&#39;s last capability-control decision; unset before the first one. |
 
 
 
@@ -2587,7 +2608,7 @@ The owner&#39;s decision on one source-control request.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | seq | [uint64](#uint64) |  | Request sequence number. |
-| request | [string](#string) |  | `&lt;unit&gt; &lt;mode&gt;` as requested. |
+| request | [string](#string) |  | `&lt;unit&gt; &lt;mode&gt;` (source) or `&lt;capability&gt; &lt;requested&gt;` (DEC-13 capability) as requested. |
 | applied | [bool](#bool) |  | Applied, or refused (see detail). |
 | detail | [string](#string) |  | The refusal reason, or the canonical handoff of an applied control. |
 

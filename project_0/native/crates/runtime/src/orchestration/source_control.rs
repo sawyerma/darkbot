@@ -12,7 +12,9 @@
 //! * The handler is installed at runtime start, before the owner lock exists, so a signal from
 //!   `p0ctl` never meets the default action (terminate).
 use crate::analytics::journal;
-use crate::analytics::payload::{SourceControlOutcome, SourceControlRequest};
+use crate::analytics::payload::{
+    CapabilityControlRequest, SourceControlOutcome, SourceControlRequest,
+};
 use darkbot_common::channel::{ChannelError, Producer};
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_solana::ingress::sources::{OperatingMode, Qualification, SourceControl, SourceUnit};
@@ -39,8 +41,9 @@ fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
     numbered(dir, "request_")
 }
 
-/// The sequence numbers of `<prefix><8 digits>.p0j` files, ascending.
-fn numbered(dir: &Path, prefix: &str) -> Result<Vec<u64>, String> {
+/// The sequence numbers of `<prefix><8 digits>.p0j` files, ascending (DEC-13: also the
+/// capability request log).
+pub(crate) fn numbered(dir: &Path, prefix: &str) -> Result<Vec<u64>, String> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
@@ -213,6 +216,11 @@ pub enum ControlMessage {
         request: String,
         reason: String,
     },
+    /// DEC-13: a capability request (`p0ctl capability set`) as written, or why it is unreadable.
+    Capability {
+        seq: u64,
+        request: Result<CapabilityControlRequest, String>,
+    },
 }
 
 /// The message of `request` (validated), or `None` when it is not newer than `applied`.
@@ -318,13 +326,15 @@ pub fn spawn(
     owner: Producer<ControlMessage>,
     shutdown: Shutdown,
     baseline: u64,
+    capabilities: Option<(PathBuf, u64)>,
 ) -> Result<std::thread::JoinHandle<()>, String> {
     install_signal()?;
     let mut handed = baseline;
+    let mut capabilities = capabilities;
     std::thread::Builder::new()
         .name("p0-source-control".into())
         .spawn(move || {
-            let mut behind = false;
+            let (mut behind, mut capabilities_behind) = (false, false);
             while !shutdown.is_requested() {
                 // Review 5353cdcb: a lost doorbell (p0ctl killed between the publish and its
                 // signal) never strands a request — every tick also compares the log's head.
@@ -332,9 +342,35 @@ pub fn spawn(
                 if rang || behind || head(&dir).is_ok_and(|h| h > handed) {
                     behind = hand_over(&dir, &mut handed, &owner);
                 }
+                // DEC-13: the capability log rides on the same doorbell and queue.
+                if let Some((dir, handed)) = capabilities.as_mut() {
+                    if rang
+                        || capabilities_behind
+                        || super::capability_control::head(dir).is_ok_and(|h| h > *handed)
+                    {
+                        capabilities_behind = hand_over_capabilities(dir, handed, &owner);
+                    }
+                }
             }
         })
         .map_err(|e| format!("SOURCE_CONTROL_THREAD: {e}"))
+}
+
+/// DEC-13: hands every capability request after `handed` to the owner in sequence order, like
+/// `hand_over` (a full queue delays the rest, nothing is skipped or dropped).
+fn hand_over_capabilities(dir: &Path, handed: &mut u64, owner: &Producer<ControlMessage>) -> bool {
+    let Ok(seqs) = super::capability_control::requests_after(dir, *handed) else {
+        return true;
+    };
+    for seq in seqs {
+        let request = super::capability_control::request_at(dir, seq);
+        match owner.try_push(ControlMessage::Capability { seq, request }) {
+            Ok(()) => *handed = seq,
+            Err(ChannelError::Full(_)) => return true,
+            Err(ChannelError::Disconnected(_)) => return false,
+        }
+    }
+    false
 }
 
 /// Hands every request after `handed` to the owner in sequence order, advancing `handed` past
@@ -472,7 +508,9 @@ mod tests {
         let seqs: Vec<_> = got
             .iter()
             .map(|m| match m {
-                ControlMessage::Apply { seq, .. } | ControlMessage::Refused { seq, .. } => *seq,
+                ControlMessage::Apply { seq, .. }
+                | ControlMessage::Refused { seq, .. }
+                | ControlMessage::Capability { seq, .. } => *seq,
             })
             .collect();
         assert_eq!(seqs, [1, 2, 3, 4]);
@@ -515,7 +553,7 @@ mod tests {
         let d = dir("lost-doorbell");
         let (tx, rx) = bounded::<ControlMessage>("source-control", 4);
         let shutdown = Shutdown::new();
-        let thread = spawn(d.clone(), tx, shutdown.clone(), head(&d).unwrap()).unwrap();
+        let thread = spawn(d.clone(), tx, shutdown.clone(), head(&d).unwrap(), None).unwrap();
         write_request(&d, "geyser:publicnode", "off", 1).unwrap();
         let started = std::time::Instant::now();
         let got = loop {
@@ -564,7 +602,7 @@ mod tests {
         write_request(&d, "geyser:publicnode", "observe", 1).unwrap();
         let (tx, rx) = bounded::<ControlMessage>("source-control", 4);
         let shutdown = Shutdown::new();
-        let thread = spawn(d.clone(), tx, shutdown.clone(), head(&d).unwrap()).unwrap();
+        let thread = spawn(d.clone(), tx, shutdown.clone(), head(&d).unwrap(), None).unwrap();
         // SAFETY: the handler is installed; SIGUSR1 only writes to the self-pipe.
         unsafe { libc::raise(libc::SIGUSR1) };
         std::thread::sleep(std::time::Duration::from_millis(50));

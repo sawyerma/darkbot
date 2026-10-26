@@ -329,6 +329,10 @@ pub struct OwnerSnapshot {
     /// CTRL-03: the source configuration version decided up to (the CAS a change states);
     /// `None` without source control.
     pub source_config_version: Option<u64>,
+    /// DEC-13: the capability configuration version the owner has decided up to (`None`: no
+    /// capability control) and its last capability decision.
+    pub capability_config_version: Option<u64>,
+    pub last_capability_decision: Option<OwnerSourceDecision>,
     /// DEC-10: the configured FE-04 approval, secret-free (never a LIVE authorization).
     pub approval: crate::execution::one_shot::approval_file::ApprovalStatus,
 }

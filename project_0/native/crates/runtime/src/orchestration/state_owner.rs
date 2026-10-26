@@ -2,7 +2,7 @@ use crate::analytics::record::Decision;
 use crate::analytics::shadow_ledger::ShadowLedger;
 #[cfg(feature = "crate_health")]
 use crate::execution::builder::p0::{P0ReceivershipBuilder, ProtocolSizingProvider};
-use crate::execution::pipeline::{pipeline_timing_snapshot, Mode, NetworkBudget, Pipeline};
+use crate::execution::pipeline::{pipeline_timing_snapshot, NetworkBudget, Pipeline};
 #[cfg(feature = "crate_health")]
 use crate::execution::route::JupiterV2RouteProvider;
 use crate::market::winner::{race_outcome, RaceOutcome};

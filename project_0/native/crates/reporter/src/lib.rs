@@ -312,6 +312,13 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
         }),
         source_config_version: o.source_config_version,
         approval: Some(fe04_approval(&o.approval)),
+        capability_config_version: o.capability_config_version,
+        last_capability_decision: o.last_capability_decision.as_ref().map(|d| SourceDecision {
+            seq: d.seq,
+            request: d.request.clone(),
+            applied: d.applied,
+            detail: d.detail.clone(),
+        }),
     }
 }
 
@@ -1381,9 +1388,10 @@ mod contract_tests {
                 day_failed_attempts: 0,
                 day_attempts: 0,
             },
+            // DEC-13: LIVE requested by the operator, still not effective without FE-06.
             capabilities: vec![OwnerCapability {
                 name: "LIVE",
-                requested: "OFF",
+                requested: "LIVE",
                 effective: "BLOCKED",
                 block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)",
             }],
@@ -1458,6 +1466,15 @@ mod contract_tests {
                 refused: 1,
             },
             source_config_version: Some(3),
+            capability_config_version: Some(1),
+            last_capability_decision: Some(darkbot_runner::status_tap::OwnerSourceDecision {
+                seq: 1,
+                request: "LIVE LIVE".into(),
+                applied: true,
+                detail:
+                    "requested LIVE · effective BLOCKED · FE-06/P8-LT: LIVE is not authorized (B10)"
+                        .into(),
+            }),
             approval: darkbot_runner::execution::one_shot::approval_file::ApprovalStatus {
                 state: "BINDING_MISMATCH",
                 reason: "code_sha".into(),

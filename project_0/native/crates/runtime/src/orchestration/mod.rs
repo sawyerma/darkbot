@@ -1,6 +1,7 @@
 //! Single state-owner lifecycle and bounded worker coordination.
 
 pub mod boot_audit;
+pub mod capability_control;
 pub mod control;
 #[cfg(feature = "crate_health")]
 pub mod fe_freeze;

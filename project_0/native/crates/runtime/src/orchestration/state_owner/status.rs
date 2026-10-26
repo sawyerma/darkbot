@@ -70,6 +70,8 @@ impl ShadowOwner {
             sources: self.sources_status(),
             last_source_decision: self.sources.last_decision.clone(),
             source_config_version: self.sources.config_version,
+            capability_config_version: self.sources.capabilities.config_version,
+            last_capability_decision: self.sources.capabilities.last_decision.clone(),
             source_stats: crate::status_tap::OwnerSourceStats {
                 observed: self.sources.stats.observed,
                 rejected: self.sources.stats.rejected,
@@ -174,12 +176,13 @@ impl ShadowOwner {
         let rebalancing = !self.inventory_targets.is_empty();
         let observing = self.rebalance.mode == crate::execution::inventory::RebalanceMode::Observe;
         vec![
-            cap(
-                "LIVE",
-                "OFF",
-                "BLOCKED",
-                "FE-06/P8-LT: LIVE is not authorized (B10)",
-            ),
+            {
+                // DEC-13: the operator's request and the one effective decision (FE-06).
+                let requested = self.sources.capabilities.live_requested;
+                let (effective, block_reason) =
+                    crate::orchestration::capability_control::live_effective(requested);
+                cap("LIVE", requested, effective, block_reason)
+            },
             cap(
                 "SUBMISSION",
                 "OFF",

@@ -31,6 +31,11 @@ message LiquidatorState {
   optional uint64 source_config_version = 11;
   // DEC-10: the configured FE-04 approval, secret-free; it never authorizes LIVE (FE-06).
   Fe04Approval approval = 12;
+  // DEC-13: the capability configuration version the owner has decided up to — the
+  // ExpectedVersion.config_version a capability change states; unset without capability control.
+  optional uint64 capability_config_version = 13;
+  // DEC-13: the owner's last capability-control decision; unset before the first one.
+  SourceDecision last_capability_decision = 14;
 }
 
 // One controlled data source (the owner's arbiter: at most one canonical unit).
@@ -53,7 +58,7 @@ message DataSource {
 message SourceDecision {
   // Request sequence number.
   uint64 seq = 1;
-  // `<unit> <mode>` as requested.
+  // `<unit> <mode>` (source) or `<capability> <requested>` (DEC-13 capability) as requested.
   string request = 2;
   // Applied, or refused (see detail).
   bool applied = 3;
@@ -80,6 +85,16 @@ message SourceControlCommand {
   string unit = 1;
   // off, observe or active (active needs a qualification record).
   string mode = 2;
+}
+
+// DEC-13: parameters (CommandRequest.params) of project0.capability.set: the operands of
+// `p0ctl capability set CAPABILITY REQUESTED`; the running owner decides what is effective
+// (LIVE stays BLOCKED until a separate FE-06 authorization).
+message CapabilityControlCommand {
+  // LIVE.
+  string capability = 1;
+  // OFF or LIVE.
+  string requested = 2;
 }
 
 // B01 (P8-INV-01): the owner's rebalancing plan in OBSERVE — real balances, quotes and conservative

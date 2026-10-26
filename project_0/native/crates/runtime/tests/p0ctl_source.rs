@@ -55,6 +55,7 @@ fn p0ctl_source_set_reaches_the_runtime_owner_queue() {
         tx,
         shutdown.clone(),
         source_control::head(&dir).unwrap(),
+        None,
     )
     .unwrap();
     let next = || {

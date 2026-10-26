@@ -26,6 +26,7 @@
 //! p0ctl [--project DIR] qualify --run RUN_ID [--verification-result ID]
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
+//! p0ctl [--project DIR] capability set LIVE OFF|LIVE [--expect-version N] | capability status
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
@@ -57,6 +58,8 @@
 //! history, cumulative realized net and verdict are shown). It changes nothing, reads no network and does not
 //! enable LIVE (FE-06 stays a separate explicit approval).
 //!
+//! `capability set` (DEC-13) records a typed capability request the same way; the owner decides
+//! the effective value (LIVE stays BLOCKED until a separate FE-06 authorization).
 //! `source set` (S1-02) records a typed source-control request and rings the running runtime;
 //! the state owner applies or refuses every request in order and records its decision
 //! (`outcome_<seq>.p0j`, journal `source_control: applied|refused seq=N`); `source status` shows
@@ -942,6 +945,89 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
+const CAPABILITY_USAGE: &str =
+    "usage: p0ctl capability set LIVE OFF|LIVE [--expect-version N] | p0ctl capability status";
+
+/// DEC-13: the operator's capability request (`set`), the same controller path as `source`:
+/// written only for a running owner of this project, CAS-versioned, then its doorbell rung; the
+/// owner decides the effective value (LIVE stays BLOCKED without FE-06).
+fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::capability_control;
+    let dir = capability_control::request_dir(project);
+    match args {
+        [set, capability, requested, cas @ ..] if set == "set" => {
+            let expected = match cas {
+                [] => None,
+                [flag, v] if flag == "--expect-version" => {
+                    Some(v.parse::<u64>().map_err(|_| {
+                        format!(
+                            "CAPABILITY_VERSION_INVALID: --expect-version {v}; {CAPABILITY_USAGE}"
+                        )
+                    })?)
+                }
+                _ => return Err(CAPABILITY_USAGE.into()),
+            };
+            capability_control::validate(capability, requested)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "CAPABILITY_CONTROL_CLOCK")?
+                .as_secs();
+            let OwnerState::Running { pid, run_id, .. } =
+                control::owner_state(&lock_path(project))?
+            else {
+                return Err("CAPABILITY_NO_RUNTIME: no runtime owner runs for this project; nothing would decide the request".into());
+            };
+            let seq = capability_control::write_request_expecting(
+                &dir, capability, requested, now, expected,
+            )?;
+            source_control::signal(pid)?;
+            println!("[p0ctl] capability request seq={seq} {capability} {requested} sent to runtime pid {pid} (run {run_id}); the owner journals `capability_control: applied|refused seq={seq}`; LIVE stays effective BLOCKED until FE-06");
+            Ok(true)
+        }
+        [status] if status == "status" => {
+            let request = capability_control::latest_request(&dir)?;
+            match &request {
+                Some(r) => println!(
+                    "last capability request: seq={} {} requested_unix_s={}",
+                    r.seq,
+                    capability_control::shown(&r.capability, &r.requested),
+                    r.requested_unix_s
+                ),
+                None => println!("no capability request"),
+            }
+            // What applies is the owner's decision, not the request; every run starts OFF.
+            let decision = capability_control::latest_outcome(&dir)?;
+            match &decision {
+                Some(d) => println!(
+                    "last owner decision: seq={} {} request=\"{}\" requested={} effective={} detail={} owner_pid={} decided_unix_s={}",
+                    d.seq,
+                    if d.applied { "APPLIED" } else { "REFUSED" },
+                    d.request,
+                    d.requested,
+                    d.effective,
+                    d.detail,
+                    d.owner_pid,
+                    d.decided_unix_s.map_or("UNKNOWN".into(), |s| s.to_string())
+                ),
+                None => println!("no owner decision"),
+            }
+            let decided = decision.as_ref().map_or(0, |d| d.seq);
+            if let Some(r) = request.filter(|r| r.seq > decided) {
+                println!("undecided: requests after seq={decided} up to seq={} (no runtime has decided them yet)", r.seq);
+            }
+            match control::owner_state(&lock_path(project))? {
+                OwnerState::Running { pid, run_id, .. } => println!(
+                    "runtime: running pid={pid} run_id={run_id}; last decision from this runtime: {} (a run starts with LIVE requested OFF; the version to state is the owner's projected capability_config_version)",
+                    decision.is_some_and(|d| d.owner_pid == pid)
+                ),
+                OwnerState::NotRunning { .. } => println!("runtime: not running (the next run starts with LIVE requested OFF)"),
+            }
+            Ok(true)
+        }
+        _ => Err(CAPABILITY_USAGE.into()),
+    }
+}
+
 fn run_of(project: &Path, args: &[String]) -> Result<PathBuf, String> {
     let wanted = given(args, "--run")?.ok_or("--run ID|PATH required")?;
     let run = find_run(project, &wanted).ok_or("RUN_NOT_FOUND_OR_AMBIGUOUS")?;
@@ -1351,6 +1437,7 @@ fn main() -> ExitCode {
             (Some("qualify"), _) => qualify_cmd(&project, &rest),
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
+            (Some("capability"), _) => capability_cmd(&project, &rest),
             (Some("backtest"), _) => foreground_job(&project, "backtest", &rest),
             (Some("optimize"), _) => foreground_job(&project, "optimize", &rest),
             (Some("job"), _) => job_cmd(&project, &rest),

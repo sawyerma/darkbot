@@ -284,6 +284,42 @@ impl Payload for SourceControlOutcome {
     const KIND: u16 = journal::kind::SOURCE_CONTROL_OUTCOME;
 }
 
+/// DEC-13: one operator request for a capability (`p0ctl capability set`): what the operator
+/// asks for; only the state owner decides what is effective.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityControlRequest {
+    pub seq: u64,
+    /// `LIVE`.
+    pub capability: String,
+    /// `OFF` or `LIVE`.
+    pub requested: String,
+    pub requested_unix_s: u64,
+}
+impl Payload for CapabilityControlRequest {
+    const KIND: u16 = journal::kind::CAPABILITY_CONTROL_REQUEST;
+}
+
+/// DEC-13: the state owner's decision on one capability request — the requested value it took
+/// over and the effective one with its block reason (`p0ctl capability status`).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityControlOutcome {
+    pub seq: u64,
+    /// `<capability> <requested>` as requested (`unreadable` when the file was not readable).
+    pub request: String,
+    /// The request was valid and its value is now the requested one.
+    pub applied: bool,
+    pub requested: String,
+    pub effective: String,
+    /// Why the effective value differs from the requested one (or why the request was refused).
+    pub detail: String,
+    pub owner_pid: u32,
+    /// `None`: the wall clock was not readable.
+    pub decided_unix_s: Option<u64>,
+}
+impl Payload for CapabilityControlOutcome {
+    const KIND: u16 = journal::kind::CAPABILITY_CONTROL_OUTCOME;
+}
+
 /// C0 census row: one debtor (or undecodable member) of the configured group, evaluated against
 /// one canonical state view and chain clock; `class` under the result frame's model.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -841,6 +877,8 @@ macro_rules! typed_kinds {
             k::OWNER_RECOVERY => $f::<super::evidence::OwnerRecovery>($kind, $schema, $bytes),
             k::SOURCE_CONTROL_REQUEST => $f::<SourceControlRequest>($kind, $schema, $bytes),
             k::SOURCE_CONTROL_OUTCOME => $f::<SourceControlOutcome>($kind, $schema, $bytes),
+            k::CAPABILITY_CONTROL_REQUEST => $f::<CapabilityControlRequest>($kind, $schema, $bytes),
+            k::CAPABILITY_CONTROL_OUTCOME => $f::<CapabilityControlOutcome>($kind, $schema, $bytes),
             k::C0_CENSUS_ROW => $f::<C0CensusAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_ACCOUNT => $f::<C0CensusImportAccount>($kind, $schema, $bytes),
             k::C0_CENSUS_GROUP_ACCOUNT => $f::<C0CensusImportGroupAccount>($kind, $schema, $bytes),

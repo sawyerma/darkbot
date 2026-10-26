@@ -4082,3 +4082,72 @@ fn dec01_a_stale_newer_blockhash_rearms_nothing_and_an_unevaluated_detection_kee
     assert_eq!(f.owner.oracle_lanes.get(&a).map(|e| e.lane), Some(Lane::L0));
     cleanup(f);
 }
+
+/// DEC-13: the owner decides capability requests: a valid LIVE request becomes the requested
+/// value while LIVE stays effective BLOCKED (FE-06) in the projection, the outcome record and the
+/// detection's pipeline mode (Shadow); an unknown or unreadable request is refused and changes
+/// nothing; OFF withdraws the request.
+#[test]
+fn dec13_a_live_request_is_recorded_and_never_effective() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::capability_control;
+    let mut f = fixture_with("dec13_live", None);
+    let dir = f.dir.join("capability-control");
+    f.owner.sources.capabilities.dir = Some(dir.clone());
+    f.owner.sources.capabilities.config_version = Some(0);
+    let request = |seq, capability: &str, requested: &str| {
+        Ok(CapabilityControlRequest {
+            seq,
+            capability: capability.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+        })
+    };
+    f.owner
+        .apply_capability_control(1, request(1, "LIVE", "LIVE"));
+    let snapshot = f.owner.owner_snapshot(0);
+    let live = snapshot
+        .capabilities
+        .iter()
+        .find(|c| c.name == "LIVE")
+        .unwrap();
+    assert_eq!(
+        (live.requested, live.effective, live.block_reason),
+        ("LIVE", "BLOCKED", capability_control::LIVE_BLOCK_REASON)
+    );
+    assert_eq!(snapshot.capability_config_version, Some(1));
+    assert!(snapshot.last_capability_decision.unwrap().applied);
+    let outcome = capability_control::latest_outcome(&dir).unwrap().unwrap();
+    assert_eq!(
+        (
+            outcome.seq,
+            outcome.requested.as_str(),
+            outcome.effective.as_str(),
+            outcome.applied
+        ),
+        (1, "LIVE", "BLOCKED", true)
+    );
+    assert_eq!(
+        capability_control::pipeline_mode(f.owner.sources.capabilities.live_requested),
+        crate::execution::pipeline::Mode::Shadow
+    );
+    f.owner
+        .apply_capability_control(2, request(2, "JITO", "LIVE"));
+    f.owner
+        .apply_capability_control(3, Err("CAPABILITY_CONTROL_REQUEST_INVALID: x".into()));
+    let c = &f.owner.sources.capabilities;
+    assert_eq!(
+        (c.live_requested, c.applied, c.refused, c.config_version),
+        ("LIVE", 1, 2, Some(3))
+    );
+    assert!(
+        !capability_control::latest_outcome(&dir)
+            .unwrap()
+            .unwrap()
+            .applied
+    );
+    f.owner
+        .apply_capability_control(4, request(4, "LIVE", "OFF"));
+    assert_eq!(f.owner.sources.capabilities.live_requested, "OFF");
+    cleanup(f);
+}

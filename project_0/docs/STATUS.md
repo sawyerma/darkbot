@@ -76,6 +76,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`ac3fec1f`** (2026-10-26) | DEC-02: FE-04-Handoff verwendet die gebundene Simulation wieder (oder simuliert neu/lehnt ab) | TEILWEISE · CI `40274176837` grün; Status/produktiv mit DEC-13b (BUGS §22.5) |
 | **`b499a68c`** (2026-10-26) | DEC-12: typisierte Rejection (Text im Writer), nativer `message_hash`, Handoff-Deadline durch Jito/RPC/FE-04 | OFFLINE_VERIFIED · CI `40271427720` grün (BUGS §22.5) |
 | **`8dc56608`** (2026-10-26) | DEC-01: Blockhash-Frühabbruch vor der Planung, Parken/Wiederanlauf in die Original-Lane | OFFLINE_VERIFIED · CI `40265453370`/`40265453367` grün (BUGS §22.5) |
 | **`abfadb30`** (2026-10-26) | DEC-10: FE-04-Approval natives `key = value`, Single-Use, Bindungen; Status Liquidator-Reiter/`p0ctl` | OFFLINE_VERIFIED · CI `40260695972`/`40260696049` grün (BUGS §22.5) |

@@ -1,0 +1,223 @@
+//! DEC-13 operator capability control (`p0ctl capability set LIVE LIVE|OFF`): typed,
+//! append-only request files beside the source-control log, rung by the same doorbell and handed
+//! to the state owner by the same control thread (`source_control::spawn`). The operator's value
+//! is the *requested* one; only the owner decides the *effective* one and records it
+//! (`outcome_<seq>.p0j`). LIVE stays BLOCKED until a separate FE-06 authorization exists — this
+//! build holds none (`live_effective`), so no request ever makes a candidate reach a send.
+use crate::analytics::journal;
+use crate::analytics::payload::{CapabilityControlOutcome, CapabilityControlRequest};
+use std::path::{Path, PathBuf};
+
+/// The one controllable capability of this build.
+pub const LIVE: &str = "LIVE";
+/// LIVE not requested — the value of every start.
+pub const LIVE_OFF: &str = "OFF";
+/// The values LIVE may be requested with.
+pub const LIVE_VALUES: [&str; 2] = [LIVE_OFF, LIVE];
+/// Why LIVE is not effective (B10).
+pub const LIVE_BLOCK_REASON: &str = "FE-06/P8-LT: LIVE is not authorized (B10)";
+
+pub fn request_dir(project: &Path) -> PathBuf {
+    project.join("data").join("capability-control")
+}
+
+fn request_path(dir: &Path, seq: u64) -> PathBuf {
+    dir.join(format!("request_{seq:08}.p0j"))
+}
+
+fn outcome_path(dir: &Path, seq: u64) -> PathBuf {
+    dir.join(format!("outcome_{seq:08}.p0j"))
+}
+
+fn sequences(dir: &Path) -> Result<Vec<u64>, String> {
+    super::source_control::numbered(dir, "request_")
+        .map_err(|e| e.replace("SOURCE_CONTROL_IO", "CAPABILITY_CONTROL_IO"))
+}
+
+/// A request names a known capability and one of its values.
+pub fn validate(capability: &str, requested: &str) -> Result<(), String> {
+    if capability != LIVE {
+        return Err(format!("CAPABILITY_UNKNOWN: {capability} (only {LIVE})"));
+    }
+    if !LIVE_VALUES.contains(&requested) {
+        return Err(format!(
+            "CAPABILITY_VALUE_INVALID: {capability} {requested} (OFF|LIVE)"
+        ));
+    }
+    Ok(())
+}
+
+/// The capability configuration's version: the request log's head (0 before the first request).
+pub fn head(dir: &Path) -> Result<u64, String> {
+    Ok(sequences(dir)?.last().copied().unwrap_or(0))
+}
+
+/// A request, written only when the log's head is exactly `expected` (CTRL-03 CAS) and published
+/// without overwriting (of two writers of one version exactly one wins).
+pub fn write_request_expecting(
+    dir: &Path,
+    capability: &str,
+    requested: &str,
+    now_unix_s: u64,
+    expected: Option<u64>,
+) -> Result<u64, String> {
+    validate(capability, requested)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("CAPABILITY_CONTROL_IO: {e}"))?;
+    let current = head(dir)?;
+    let conflict = |current: u64| {
+        format!(
+            "CAPABILITY_VERSION_CONFLICT: expected {}, current {current}; reload and retry",
+            expected.map_or("none".into(), |e| e.to_string())
+        )
+    };
+    if expected.is_some_and(|e| e != current) {
+        return Err(conflict(current));
+    }
+    let seq = current + 1;
+    let request = CapabilityControlRequest {
+        seq,
+        capability: capability.into(),
+        requested: requested.into(),
+        requested_unix_s: now_unix_s,
+    };
+    journal::create_typed_value(
+        &request_path(dir, seq),
+        journal::source::CAPABILITY_CONTROL,
+        &request,
+    )
+    .map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            conflict(head(dir).unwrap_or(seq))
+        } else {
+            format!("CAPABILITY_CONTROL_IO: {e}")
+        }
+    })?;
+    Ok(seq)
+}
+
+/// Request `seq` as written (the control thread's input).
+pub fn request_at(dir: &Path, seq: u64) -> Result<CapabilityControlRequest, String> {
+    match journal::read_typed_value::<CapabilityControlRequest>(&request_path(dir, seq)) {
+        Ok(r) if r.seq == seq => Ok(r),
+        Ok(_) => Err("CAPABILITY_CONTROL_REQUEST_SEQ".into()),
+        Err(e) => Err(format!("CAPABILITY_CONTROL_REQUEST_INVALID: {e}")),
+    }
+}
+
+/// The sequence numbers of the requests after `handed`, ascending.
+pub fn requests_after(dir: &Path, handed: u64) -> Result<Vec<u64>, String> {
+    Ok(sequences(dir)?
+        .into_iter()
+        .filter(|s| *s > handed)
+        .collect())
+}
+
+/// The newest request, if any.
+pub fn latest_request(dir: &Path) -> Result<Option<CapabilityControlRequest>, String> {
+    match sequences(dir)?.last() {
+        None => Ok(None),
+        Some(seq) => request_at(dir, *seq).map(Some),
+    }
+}
+
+/// The owner: records its decision on request `outcome.seq`.
+pub fn write_outcome(dir: &Path, outcome: &CapabilityControlOutcome) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("CAPABILITY_CONTROL_IO: {e}"))?;
+    journal::write_typed_value(
+        &outcome_path(dir, outcome.seq),
+        journal::source::CAPABILITY_CONTROL,
+        outcome,
+    )
+    .map_err(|e| format!("CAPABILITY_CONTROL_IO: {e}"))
+}
+
+/// The newest decision of an owner, if any.
+pub fn latest_outcome(dir: &Path) -> Result<Option<CapabilityControlOutcome>, String> {
+    match super::source_control::numbered(dir, "outcome_")
+        .map_err(|e| e.replace("SOURCE_CONTROL_IO", "CAPABILITY_CONTROL_IO"))?
+        .last()
+    {
+        None => Ok(None),
+        Some(seq) => journal::read_typed_value(&outcome_path(dir, *seq))
+            .map(Some)
+            .map_err(|e| format!("CAPABILITY_CONTROL_OUTCOME_INVALID: {e}")),
+    }
+}
+
+/// DEC-13: the one decision of LIVE's effective value — BLOCKED whatever is requested. FE-06 is a
+/// separate authorization that no request, FE-04 approval or configuration grants, and this
+/// build holds none; the owner therefore evaluates every candidate in Shadow and hands no FE-04
+/// admission to the pipeline (no submit call can exist).
+pub fn live_effective(_requested: &str) -> (&'static str, &'static str) {
+    ("BLOCKED", LIVE_BLOCK_REASON)
+}
+
+/// A request's operands as they may be shown (log, GUI): bounded, control characters escaped —
+/// the request file is operator input, valid or not.
+pub fn shown(capability: &str, requested: &str) -> String {
+    let text = format!("{capability} {requested}");
+    let mut shown: String = text
+        .chars()
+        .take(64)
+        .flat_map(char::escape_default)
+        .collect();
+    if text.chars().count() > 64 {
+        shown.push('…');
+    }
+    shown
+}
+
+/// DEC-13: the pipeline mode of a detection — LIVE only while LIVE is effective, so a candidate
+/// reaches no send boundary in this build, whatever was requested.
+pub fn pipeline_mode(requested: &str) -> crate::execution::pipeline::Mode {
+    if live_effective(requested).0 == LIVE {
+        crate::execution::pipeline::Mode::Live
+    } else {
+        crate::execution::pipeline::Mode::Shadow
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DEC-13: requests are validated, CAS-versioned and never overwritten; LIVE is effective
+    /// for no request (BLOCKED with the FE-06 reason).
+    #[test]
+    fn dec13_live_requests_are_versioned_and_never_effective() {
+        let dir = std::env::temp_dir().join(format!("p0-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(head(&dir).unwrap(), 0);
+        assert!(validate("JITO", "LIVE")
+            .unwrap_err()
+            .starts_with("CAPABILITY_UNKNOWN"));
+        assert!(validate(LIVE, "ON")
+            .unwrap_err()
+            .starts_with("CAPABILITY_VALUE_INVALID"));
+        assert_eq!(
+            write_request_expecting(&dir, LIVE, "LIVE", 1, Some(0)).unwrap(),
+            1
+        );
+        assert!(write_request_expecting(&dir, LIVE, "OFF", 2, Some(0))
+            .unwrap_err()
+            .starts_with("CAPABILITY_VERSION_CONFLICT"));
+        assert_eq!(
+            write_request_expecting(&dir, LIVE, "OFF", 3, Some(1)).unwrap(),
+            2
+        );
+        assert_eq!(requests_after(&dir, 0).unwrap(), vec![1, 2]);
+        assert_eq!(request_at(&dir, 1).unwrap().requested, "LIVE");
+        assert_eq!(latest_request(&dir).unwrap().unwrap().requested, "OFF");
+        assert_eq!(shown("LIVE", "LIVE"), "LIVE LIVE");
+        assert_eq!(shown("LIVE\nX", "OFF"), "LIVE\\nX OFF");
+        assert_eq!(shown(&"A".repeat(80), "OFF").chars().count(), 65);
+        for requested in LIVE_VALUES {
+            assert_eq!(live_effective(requested), ("BLOCKED", LIVE_BLOCK_REASON));
+            assert_eq!(
+                pipeline_mode(requested),
+                crate::execution::pipeline::Mode::Shadow
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

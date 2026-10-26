@@ -4,7 +4,8 @@ import type { SystemView } from "../model/status";
 import { nsToMs, programPinStatus } from "../model/owner";
 import { usdMicroDisplay } from "../model/format";
 import { orDash, parameterText } from "../model/statusFormat";
-import { DetailRow, Section } from "./PanelPrimitives";
+import { DetailRow, Notice, Section } from "./PanelPrimitives";
+import { analyticsCommand, capabilityCommand, useAnalyticsControl } from "@/core/realtime/analyticsControl";
 
 const ms = (ns: bigint | null) => {
   const v = nsToMs(ns);
@@ -84,6 +85,33 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
           + ` · slippage ≤ ${owner.approval.maxSlippageBps} bps · expires ${new Date(Number(owner.approval.expiresUnixS) * 1000).toISOString()} · LIVE not authorized (FE-06)`}/> : null}
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
+    <LiveRequest owner={owner} live={live}/>
     {params}
   </Section>;
+}
+
+/**
+ * DEC-13 (N-5): the LIVE request through the one controller (`p0ctl capability set LIVE …`, CAS
+ * on the capability configuration version this view showed). It records what the operator asks
+ * for; LIVE stays effective BLOCKED until a separate FE-06 authorization — no request makes the
+ * owner send anything.
+ */
+function LiveRequest({ owner, live }: { owner: LiquidatorView; live: boolean }) {
+  const { busy, receipt } = useAnalyticsControl();
+  const requested = owner.capabilities.find((c) => c.name === "LIVE")?.requested ?? null;
+  const version = owner.capabilityConfigVersion;
+  const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
+    : version == null ? "Capability configuration version unknown (no capability control in this runtime)" : "";
+  const next = requested === "LIVE" ? "OFF" : "LIVE";
+  const d = owner.lastCapabilityDecision;
+  return <>
+    {d ? <DetailRow title={`Capability decision · #${d.seq}`} value={`${d.applied ? "APPLIED" : "REFUSED"} · ${d.request} · ${d.detail}`}/> : null}
+    <div className="p0-actions">
+      <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
+        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand(next).params, configVersion: version ?? undefined })}>
+        {next === "LIVE" ? "Request LIVE (stays BLOCKED until FE-06)" : "Withdraw LIVE request"}
+      </button>
+    </div>
+    {receipt?.action === "project0.capability.set" ? <Notice><span data-testid="p0-capability-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""}</span></Notice> : null}
+  </>;
 }

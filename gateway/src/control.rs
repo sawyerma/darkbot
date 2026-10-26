@@ -56,12 +56,16 @@ const JOB_CANCEL: &str = "project0.analytics.job.cancel";
 const VERIFY_START: &str = "project0.capture.verify.start";
 /// S1-02: a data source's operating mode (`p0ctl source set`); the running owner decides.
 const SOURCE_SET: &str = "project0.source.set";
-const JOB_ACTIONS: [&str; 5] = [
+/// DEC-13: a capability request (`p0ctl capability set`, LIVE); the running owner decides what
+/// is effective — LIVE stays BLOCKED until a separate FE-06 authorization.
+const CAPABILITY_SET: &str = "project0.capability.set";
+const JOB_ACTIONS: [&str; 6] = [
     BACKTEST_START,
     OPTIMIZE_START,
     JOB_CANCEL,
     VERIFY_START,
     SOURCE_SET,
+    CAPABILITY_SET,
 ];
 /// Online strict verification reads the chain with the operator's provider evidence: a terminal
 /// action (`p0ctl job start post-capture --provider-evidence`), never a GUI one.
@@ -189,14 +193,17 @@ fn valid_job_id(s: &str) -> bool {
 /// job id is the request id; a cancel names its job as the resource.
 fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::project0::v1::{
-        BacktestJobCommand, OptimizeJobCommand, PostCaptureJobCommand, SourceControlCommand,
+        BacktestJobCommand, CapabilityControlCommand, OptimizeJobCommand, PostCaptureJobCommand,
+        SourceControlCommand,
     };
     // CTRL-03: a source change carries its CAS — the configuration version its view showed
     // (`LiquidatorState.source_config_version`), required here (review 5353cdcb); `p0ctl source
     // set --expect-version` checks it. No other action takes an expectation.
     let expect_version = match req.expected.as_ref().map(|e| e.version) {
         None => None,
-        Some(Some(expected_version::Version::ConfigVersion(v))) if req.action == SOURCE_SET => {
+        Some(Some(expected_version::Version::ConfigVersion(v)))
+            if req.action == SOURCE_SET || req.action == CAPABILITY_SET =>
+        {
             Some(v)
         }
         Some(_) => return None,
@@ -287,6 +294,18 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 return None;
             }
             let mut args: Vec<String> = ["p0", "source", "set", &c.unit, &c.mode]
+                .map(String::from)
+                .to_vec();
+            args.extend(["--expect-version".into(), expect_version?.to_string()]);
+            Some(args)
+        }
+        // DEC-13: the capability and its requested value, with the version the view showed.
+        CAPABILITY_SET if req.resource_id.is_empty() => {
+            let c = CapabilityControlCommand::decode(req.params.as_ref()).ok()?;
+            if c.capability != "LIVE" || !["OFF", "LIVE"].contains(&c.requested.as_str()) {
+                return None;
+            }
+            let mut args: Vec<String> = ["p0", "capability", "set", &c.capability, &c.requested]
                 .map(String::from)
                 .to_vec();
             args.extend(["--expect-version".into(), expect_version?.to_string()]);
@@ -777,7 +796,11 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        "Analytics job parameters invalid (run id, exact USD, capital, funding classes, budget, grid or job id)",
+                        if req.action == CAPABILITY_SET {
+                            "Capability request invalid (LIVE with OFF|LIVE and the configuration version)"
+                        } else {
+                            "Analytics job parameters invalid (run id, exact USD, capital, funding classes, budget, grid or job id)"
+                        },
                     )
                 }
             }
@@ -1055,6 +1078,8 @@ impl Control {
                     "Stop requested from the job's worker; it records CANCELLED in project0.analytics.jobs"
                 } else if action == SOURCE_SET {
                     "Source request recorded and the runtime rung; the owner's decision follows in project0.liquidator.state"
+                } else if action == CAPABILITY_SET {
+                    "Capability request recorded and the runtime rung; the owner's decision follows in project0.liquidator.state (LIVE stays BLOCKED until FE-06)"
                 } else if action == VERIFY_START {
                     "Post-capture job recorded and its worker started; the run's qualification follows in project0.analytics.jobs"
                 } else {
@@ -1067,9 +1092,12 @@ impl Control {
                 record.detail = refusal(&out.stderr);
             }
             _ => {
-                record.detail =
+                record.detail = if action == CAPABILITY_SET {
+                    "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
+                } else {
                     "Controller outcome unknown; inspect project0.analytics.jobs before a new action"
-                        .into();
+                }
+                .into();
             }
         }
         if self.persist(id, &record).is_err() {
@@ -2252,6 +2280,45 @@ mod tests {
             job_args(&req(SOURCE_SET, "", source, Some(ProfileVersion(4)))),
             None
         );
+        // DEC-13: a capability request carries its version; only LIVE and OFF|LIVE pass.
+        let capability = |capability: &str, requested: &str| {
+            crate::proto::project0::v1::CapabilityControlCommand {
+                capability: capability.into(),
+                requested: requested.into(),
+            }
+            .encode_to_vec()
+        };
+        let live = job_args(&req(
+            CAPABILITY_SET,
+            "",
+            capability("LIVE", "LIVE"),
+            Some(ConfigVersion(2)),
+        ))
+        .unwrap();
+        assert_eq!(
+            live,
+            [
+                "p0",
+                "capability",
+                "set",
+                "LIVE",
+                "LIVE",
+                "--expect-version",
+                "2"
+            ]
+        );
+        for (c, v, expected) in [
+            ("LIVE", "LIVE", None),
+            ("JITO", "LIVE", Some(ConfigVersion(2))),
+            ("LIVE", "ON", Some(ConfigVersion(2))),
+        ] {
+            assert_eq!(
+                job_args(&req(CAPABILITY_SET, "", capability(c, v), expected)),
+                None
+            );
+        }
+        assert!(allowed(ProjectId::Project0 as i32, CAPABILITY_SET));
+        assert!(!allowed(ProjectId::Bsc as i32, CAPABILITY_SET));
         assert_eq!(
             job_args(&req(JOB_CANCEL, "job-1", vec![], None))
                 .unwrap()
