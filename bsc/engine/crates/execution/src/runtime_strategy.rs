@@ -888,6 +888,10 @@ pub fn replay(
             (e.3, e.4) = (*at, true);
         }
     }
+    // One position per PASS: a BUY at the PAPER sink (its J record)
+    // replaces the PASS's SHADOW entry (gate pass-4 LOW: counted twice).
+    let paper: Vec<[u8; 20]> = entries.iter().filter(|e| e.0).map(|e| e.1).collect();
+    entries.retain(|e| e.0 || !paper.contains(&e.1));
     out.positions = positions(&entries, run_id.parse().ok(), &blocks, &buys);
     if let Some(s) = strategy {
         add(&mut out.counters, &s.counters);
@@ -1689,6 +1693,58 @@ mod tests {
             (None, None, None)
         );
         assert_eq!(unplaced[0].first_buy_gap_blocks, Some(1));
+    }
+
+    /// Phase I gate pass-4 LOW: a PASS whose BUY reached the PAPER sink is
+    /// placed once, from its J record (before: also as SHADOW, counted
+    /// twice in the totals).
+    #[test]
+    fn a_paper_buy_replaces_its_shadow_position() {
+        use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RunIdentity};
+        let base =
+            std::env::temp_dir().join(format!("bsc-strategy-paper-pos-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let max = 16_384;
+        let mut j = RuntimeJournal::open(&base, 7, 1, JournalSetup::whole(64, max)).unwrap();
+        j.set_identity(RunIdentity {
+            host: "test".into(),
+            build: "test".into(),
+            config_sha256: [0xC0; 32],
+            build_sha256: None,
+            build_dirty: None,
+            capture_pending: "VENUES",
+        });
+        assert!(j.record(RecordKind::Runtime, 2, switch_payload(true)));
+        let mut records = launch_records(100);
+        records.extend((101..=107).map(block));
+        for (k, p) in records {
+            assert!(j.record(k, 3, p));
+        }
+        // The PASS's BUY at the sink: J | BUY | sequence | hash | token |
+        // head block 105 | times | bytes.
+        let mut paper = vec![b'J', 1];
+        paper.extend([0u8; 40]);
+        paper.extend(TOKEN);
+        paper.extend(105u64.to_le_bytes());
+        paper.extend([0u8; 32]);
+        paper.extend([0xAA; 8]);
+        assert!(j.record(RecordKind::Runtime, 5_000_000, paper));
+        assert!(j.record(RecordKind::Runtime, 6_000_000, switch_payload(false)));
+        assert!(j.record(RecordKind::Runtime, 7_000_000, EXIT_PAYLOAD.to_vec()));
+        j.finish().unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        assert_eq!(r.positions.len(), 1, "{:?}", r.positions);
+        let p = &r.positions[0];
+        assert_eq!(
+            (
+                p.paper,
+                p.decided_block,
+                p.decided_unix_us,
+                p.time_lower_bound
+            ),
+            (true, 105, Some(12_000), false)
+        );
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     /// H gate L7: a token outside the scope keeps which term put it there.
