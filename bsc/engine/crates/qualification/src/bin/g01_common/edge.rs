@@ -865,6 +865,22 @@ pub fn archived_slot_reads(
     Ok(out)
 }
 
+/// The archived decoded Flap launch (`flap_v6_fixture_decoded.json`):
+/// transaction hash, `newTokenV6` salt and `tokenVersion`.
+pub fn archived_flap_launch(bytes: &[u8]) -> Result<(B256, B256, u64), String> {
+    let v: Json = serde_json::from_slice(bytes).map_err(|e| format!("archived launch: {e}"))?;
+    let params = field(&v, "params")?;
+    let version = params
+        .get("tokenVersion")
+        .and_then(Json::as_u64)
+        .ok_or("archived tokenVersion missing")?;
+    Ok((
+        req(&v, "txHash", b256_of)?,
+        req(params, "salt", b256_of)?,
+        version,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

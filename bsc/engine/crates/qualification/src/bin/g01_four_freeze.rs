@@ -35,13 +35,17 @@
 
 #[path = "g01_four_freeze/abi.rs"]
 mod abi;
+#[path = "g01_common/mod.rs"]
+mod common;
 #[path = "g01_four_freeze/contracts.rs"]
 mod contracts;
-#[path = "g01_four_freeze/edge.rs"]
-mod edge;
 
 use abi::{CodeScan, Spec, SpecKind, addr, hex_bytes};
-use alloy_primitives::{Address, B256, BloomInput, U256, keccak256};
+use alloy_primitives::{Address, B256, U256, keccak256};
+use common::chain::{bloom_has, linked_headers};
+use common::edge;
+use common::sourcify::{SourcifyObs, lookup_sourcify};
+use common::util::{bounded_text, number, rpc_from_config, utc_stamp};
 use contracts::{
     CLASSIC_TOKEN_DEPLOYER, CLASSIC_TOKEN_TEMPLATE, CONTRACTS, CORE, CREATE_DEPLOYER,
     ContractInput, Family, HELPER3, REGISTRY, Resolution, Scope, TOKEN_MANAGER2,
@@ -50,7 +54,7 @@ use darkbot_bsc_execution::rpc_wire::Limits;
 use darkbot_bsc_qualification::c1_common::{self, Args};
 use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze as ff;
 use darkbot_bsc_record::{Draft, Value, decode, sha256};
-use edge::{CallOutcome, Endpoint, Header, Log, Pin, Receipt, SourcifyFacts, Tx};
+use edge::{CallOutcome, Endpoint, Header, Log, Pin, Receipt, Tx};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -58,34 +62,17 @@ use std::time::Duration;
 
 const TOOL: &str = "g01_four_freeze";
 
-/// Every tunable bound and its default (each overridable by its flag).
+/// Every tunable bound and its default (each overridable by its flag). The
+/// network bounds are shared with the other G0.1 freeze (`common::util::net`).
 mod defaults {
-    /// `--rpc-config`: the public readiness configuration (never a secret file).
-    pub const RPC_CONFIG: &str = "bsc/config/readiness.public.env";
-    pub const RPC_CONFIG_KEY: &str = "BSC_READINESS_RPC_HTTPS";
-    /// `--out-root`.
-    pub const OUT_ROOT: &str = "bsc/native/evidence/g01";
-    /// `--confirmations`: the reference block is this far below the head.
-    pub const CONFIRMATIONS: u64 = 5;
+    pub use crate::common::util::net::*;
     /// `--scan-blocks`: blocks searched for canonical fixtures.
     pub const SCAN_BLOCKS: u64 = 5000;
-    /// `--header-batch`: headers per JSON-RPC batch (the public dataseed
-    /// answers 100).
-    pub const HEADER_BATCH: u64 = 100;
     /// `--receipt-block-budget`: blocks whose receipts may be fetched, and
     /// BUY candidate transactions that may be fetched.
     pub const RECEIPT_BLOCK_BUDGET: u64 = 300;
     /// `--launch-fixtures`: canonical launches kept per family.
     pub const LAUNCH_FIXTURES: usize = 3;
-    /// `--rpc-connect-timeout-s`, `--rpc-max-time-s`, `--rpc-attempts`,
-    /// `--rpc-retry-pause-ms`.
-    pub const CONNECT_TIMEOUT_S: u32 = 5;
-    pub const MAX_TIME_S: u32 = 30;
-    pub const ATTEMPTS: u32 = 3;
-    pub const RETRY_PAUSE_MS: u64 = 500;
-    /// `--sourcify-base`, `--sourcify-max-bytes` (the record bound).
-    pub const SOURCIFY_BASE: &str = "https://sourcify.dev/server";
-    pub const SOURCIFY_MAX_BYTES: u64 = 1024 * 1024;
     /// `--probe-funds-wei`: the quote amount the read probes pass (0.001 BNB).
     pub const PROBE_FUNDS_WEI: u128 = 1_000_000_000_000_000;
 }
@@ -115,33 +102,6 @@ struct Config {
     sourcify: Option<String>,
     sourcify_max_bytes: u64,
     probe_funds: U256,
-}
-
-fn number<T: std::str::FromStr>(args: &Args, flag: &str, default: T) -> Result<T, String> {
-    match args.opt(flag)? {
-        Some(v) => v
-            .parse()
-            .map_err(|_| format!("--{flag}: not a number: {v}")),
-        None => Ok(default),
-    }
-}
-
-/// `BSC_READINESS_RPC_HTTPS` of a public `KEY=VALUE` file.
-fn rpc_from_config(path: &Path) -> Result<String, String> {
-    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase());
-    if name.is_none_or(|n| n.contains("secret")) {
-        return Err(format!(
-            "refusing {}: not a public configuration",
-            path.display()
-        ));
-    }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    text.lines()
-        .filter_map(|l| l.trim().split_once('='))
-        .find(|(k, _)| k.trim() == defaults::RPC_CONFIG_KEY)
-        .map(|(_, v)| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .ok_or_else(|| format!("{} has no {}", path.display(), defaults::RPC_CONFIG_KEY))
 }
 
 impl Config {
@@ -414,37 +374,6 @@ struct ScanOutcome {
     error: Option<String>,
 }
 
-fn bloom_has(header: &Header, contract: Address, topic: B256) -> bool {
-    header
-        .logs_bloom
-        .contains_input(BloomInput::Raw(contract.as_slice()))
-        && header
-            .logs_bloom
-            .contains_input(BloomInput::Raw(topic.as_slice()))
-}
-
-/// Headers `from..=to`, batched, contiguous and parent-linked.
-fn linked_headers(rpc: &Endpoint, from: u64, to: u64, batch: u64) -> Result<Vec<Header>, String> {
-    let mut out: Vec<Header> = Vec::new();
-    let mut start = from;
-    while start <= to {
-        let end = to.min(start + batch - 1);
-        for h in rpc.headers(start, end)? {
-            if let Some(prev) = out.last()
-                && h.parent_hash != prev.hash
-            {
-                return Err(format!(
-                    "header {} does not link to {}",
-                    h.number, prev.number
-                ));
-            }
-            out.push(h);
-        }
-        start = end + 1;
-    }
-    Ok(out)
-}
-
 /// Newest first: the receipts of every block whose bloom can hold a still
 /// missing launch or BUY event of a family, within the budget.
 fn scan(rpc: &Endpoint, cfg: &Config, headers: &[Header], targets: [Address; 2]) -> ScanOutcome {
@@ -571,20 +500,6 @@ fn scan_into(
 }
 
 // ---- observations at the reference block -------------------------------------------
-
-#[derive(Clone, Debug)]
-struct SourcifyObs {
-    address: Address,
-    response: Option<Vec<u8>>,
-    facts: Result<SourcifyFacts, String>,
-    deployment_receipt: String,
-}
-
-impl SourcifyObs {
-    fn verified(&self) -> bool {
-        matches!(&self.facts, Ok(f) if f.status != "NO_MATCH")
-    }
-}
 
 #[derive(Clone, Debug)]
 struct ContractObs {
@@ -930,60 +845,6 @@ fn observe(
         reads: [classic_reads, openfour_reads],
         core_version,
     })
-}
-
-fn lookup_sourcify(rpc: &Endpoint, cfg: &Config, base: &str, address: Address) -> SourcifyObs {
-    let url = edge::sourcify_url(base, edge::BSC_CHAIN_ID, address);
-    let limits = Limits {
-        compressed: false,
-        ..cfg.limits
-    };
-    match edge::get(&url, limits, cfg.sourcify_max_bytes) {
-        Err(e) => SourcifyObs {
-            address,
-            response: None,
-            facts: Err(e),
-            deployment_receipt: "NOT_CHECKED".into(),
-        },
-        Ok((_, raw)) if raw.len() as u64 > cfg.sourcify_max_bytes => SourcifyObs {
-            address,
-            response: None,
-            facts: Err(format!(
-                "answer of {} bytes exceeds --sourcify-max-bytes {}",
-                raw.len(),
-                cfg.sourcify_max_bytes
-            )),
-            deployment_receipt: "NOT_CHECKED".into(),
-        },
-        Ok((status, raw)) => {
-            // Sourcify answers an unverified contract with 404 and a body
-            // whose `match` is null.
-            let facts = match status {
-                200 | 404 => edge::sourcify_facts(&raw),
-                other => Err(format!("HTTP {other}")),
-            };
-            let deployment_receipt = match facts.as_ref().ok().and_then(|f| f.deployment_tx) {
-                None => "NOT_CHECKED".into(),
-                Some(tx) => match rpc.receipt(tx) {
-                    Ok(r) if r.contract_address == Some(address) && r.status == 1 => {
-                        format!("CONTRACT_ADDRESS_MATCH block {}", r.block_number)
-                    }
-                    Ok(r) => format!(
-                        "CONTRACT_ADDRESS_MISMATCH: receipt contractAddress {:?}, status {}",
-                        r.contract_address.map(addr),
-                        r.status
-                    ),
-                    Err(e) => format!("READ_FAILED: {e}"),
-                },
-            };
-            SourcifyObs {
-                address,
-                response: Some(raw),
-                facts,
-                deployment_receipt,
-            }
-        }
-    }
 }
 
 // ---- fixtures and derivation -------------------------------------------------------
@@ -2294,46 +2155,11 @@ fn family_draft(
     (d, properties)
 }
 
-/// Text fields are bounded by the record format.
-fn bounded_text(text: &str) -> String {
-    let max = darkbot_bsc_record::DEFAULT_MAX_LEN as usize;
-    if text.len() <= max {
-        return text.to_string();
-    }
-    let mut end = max - 20;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{} [... truncated]", &text[..end])
-}
-
 // ---- the run --------------------------------------------------------------------------
 
 struct Outcome {
     dir: PathBuf,
     summary: String,
-}
-
-/// `YYYYMMDDTHHMMSSZ` of a Unix time in milliseconds (proleptic Gregorian).
-fn utc_stamp(unix_ms: u64) -> String {
-    let secs = unix_ms / 1000;
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
-        rem / 3600,
-        (rem / 60) % 60,
-        rem % 60
-    )
 }
 
 fn run(cfg: &Config) -> Result<Outcome, String> {
@@ -2442,7 +2268,13 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
     if let Some(base) = &cfg.sourcify {
         for c in &mut obs.contracts {
             for a in [Some(c.address), c.implementation].into_iter().flatten() {
-                c.sourcify.push(lookup_sourcify(&rpc, cfg, base, a));
+                c.sourcify.push(lookup_sourcify(
+                    &rpc,
+                    cfg.limits,
+                    cfg.sourcify_max_bytes,
+                    base,
+                    a,
+                ));
             }
         }
     }
@@ -2826,11 +2658,12 @@ mod tests {
             ("main", include_str!("g01_four_freeze.rs")),
             ("abi", include_str!("g01_four_freeze/abi.rs")),
             ("contracts", include_str!("g01_four_freeze/contracts.rs")),
+            ("common", include_str!("g01_common/mod.rs")),
         ] {
             assert!(!source.contains(&["serde", "_json"].concat()), "{name}");
             assert!(!source.contains(&["json", "!"].concat()), "{name}");
         }
-        let edge = include_str!("g01_four_freeze/edge.rs");
+        let edge = include_str!("g01_common/edge.rs");
         for line in edge.lines() {
             if line.trim_start().starts_with("pub ") {
                 assert!(!line.contains("Json"), "{line}");
