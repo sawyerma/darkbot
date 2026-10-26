@@ -712,6 +712,103 @@ mod parity_tests {
         );
     }
 
+    const PARITY_V3: &str = include_str!("../../../fixtures/flap/quote_parity_g02_v3.txt");
+
+    /// The v3 parity set (each token's own DEX threshold, the production
+    /// scope `PricedToken::new`, skipped launches recorded): every
+    /// supported sample is the Portal's quote to the unit; the version-7
+    /// token is charged differently on every sample (so it is refused, not
+    /// priced); the NFT-gated token is refused by name; each skipped launch
+    /// names its reason.
+    #[test]
+    fn v3_parity_holds_and_the_scope_refuses_what_differs() {
+        let (mut supported, mut v7, mut gated, mut skipped) = (0, 0, 0, 0);
+        for line in PARITY_V3.lines().filter(|l| !l.trim().is_empty()) {
+            if let Some(rest) = line.strip_prefix("# skipped ") {
+                assert!(rest.contains(": QuoteToken"), "{line}");
+                skipped += 1;
+                continue;
+            }
+            if line.starts_with('#') {
+                continue;
+            }
+            let f: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(f.len(), 19, "{line}");
+            let n = |i: usize| U256::from_str_radix(f[i], 10).unwrap();
+            let (reserve, supply, amount, chain) = (n(3), n(4), n(8), n(9));
+            let (buy_tax, sell_tax): (u16, u16) = (f[5].parse().unwrap(), f[6].parse().unwrap());
+            let version: u8 = f[16].parse().unwrap();
+            let gate = alloy_primitives::hex::decode(f[12]).unwrap();
+            let terms = TokenTerms {
+                version,
+                nft_gate: gate.as_slice().try_into().unwrap(),
+                dex_supply_threshold: n(17),
+                ..profile_terms(buy_tax, sell_tax)
+            };
+            let as_v6 = PricedToken::new(&TokenTerms {
+                version: 6,
+                nft_gate: [0; 20],
+                ..terms
+            })
+            .unwrap();
+            let cap_bps: u16 = f[10].parse().unwrap();
+            let local = match f[7] {
+                "BUY" => quote_native_buy(&NativeBuyInputs {
+                    token: as_v6,
+                    reserve_before: reserve,
+                    circulating_before: supply,
+                    input_amount: amount,
+                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                    tax_on_bonding_curve_enabled: true,
+                    caller_fee_exempt: false,
+                    holding_cap: if cap_bps == 0 {
+                        HoldingCap::None
+                    } else {
+                        HoldingCap::Remaining(n(11))
+                    },
+                }),
+                _ => quote_native_sell(&NativeSellInputs {
+                    token: as_v6,
+                    reserve_before: reserve,
+                    circulating_before: supply,
+                    input_amount: amount,
+                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
+                    tax_on_bonding_curve_enabled: true,
+                    caller_fee_exempt: false,
+                })
+                .map(|q| NativeBuyQuote {
+                    protocol_fee: q.protocol_fee,
+                    bonding_curve_tax: q.bonding_curve_tax,
+                    combined_fee: q.combined_fee,
+                    net_reserve_input: U256::ZERO,
+                    reserve_after: q.reserve_after,
+                    supply_after: q.supply_after,
+                    output_amount: q.output_amount,
+                }),
+            };
+            match (f[18], PricedToken::new(&terms)) {
+                ("SUPPORTED", Ok(_)) => {
+                    match local {
+                        Ok(q) => assert_eq!(q.output_amount, chain, "{line}"),
+                        Err(QuoteError::HoldingCapExceeded) => {
+                            assert_eq!(HoldingCap::Remaining(chain), HoldingCap::Remaining(n(11)))
+                        }
+                        Err(e) => panic!("{e}: {line}"),
+                    }
+                    supported += 1;
+                }
+                ("UNSUPPORTED_VERSION", Err(Unpriced::Version(7))) => {
+                    // Charged more than the version-6 rule: less out.
+                    assert!(local.unwrap().output_amount > chain, "{line}");
+                    v7 += 1;
+                }
+                ("UNSUPPORTED_NFT_GATE", Err(Unpriced::NftGate)) => gated += 1,
+                other => panic!("{other:?}: {line}"),
+            }
+        }
+        assert_eq!((supported, v7, gated, skipped), (215, 10, 5, 6));
+    }
+
     const EXECUTED: &str = include_str!("../../../fixtures/flap/executed_parity_g02.txt");
 
     /// Phase G (Economics gate §6 level 3, §14): executed curve trades, each
@@ -721,8 +818,27 @@ mod parity_tests {
     /// tokens the event's native amount and protocol fee, to the unit.
     #[test]
     fn executed_trades_equal_the_local_quote_at_their_pre_state() {
+        // Four state windows (fixture header): 52 BUYs and 16 SELLs equal to
+        // the unit; one version-2 BUY recorded outside the supported scope.
+        assert_eq!(executed_parity(EXECUTED), (52, 16, 1));
+    }
+
+    const EXECUTED_V2: &str = include_str!("../../../fixtures/flap/executed_parity_g02_v2.txt");
+
+    /// The same at five later windows under the production scope (gate
+    /// pass 2, the sell fee from the witnessed terms): 33 BUYs and 21 SELLs
+    /// equal to the unit; one SELL of a version outside the scope recorded,
+    /// not compared.
+    #[test]
+    fn executed_trades_v2_equal_the_local_quote_at_their_pre_state() {
+        assert_eq!(executed_parity(EXECUTED_V2), (33, 21, 1));
+    }
+
+    /// Every supported trade of an executed-parity fixture equals the
+    /// local quote; the counts of BUYs, SELLs and trades outside the scope.
+    fn executed_parity(text: &str) -> (usize, usize, usize) {
         let (mut buys, mut sells, mut outside) = (0, 0, 0);
-        for line in EXECUTED
+        for line in text
             .lines()
             .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         {
@@ -776,9 +892,7 @@ mod parity_tests {
                 other => panic!("side {other}"),
             }
         }
-        // Four state windows (fixture header): 52 BUYs and 16 SELLs equal to
-        // the unit; one version-2 BUY recorded outside the supported scope.
-        assert_eq!((buys, sells, outside), (52, 16, 1));
+        (buys, sells, outside)
     }
 
     /// The SELL fees are floored each on its own; the BUY's tax is the

@@ -213,3 +213,18 @@ fn counterfactual_cost_uses_the_class_evidence_or_fails_closed() {
         );
     }
 }
+
+/// The production parser takes the receipts fixture whole and refuses a
+/// line whose status does not fit its class or whose gas exceeds its limit.
+#[test]
+fn the_evidence_parser_checks_every_line() {
+    let e = GasEvidence::parse(RECEIPTS).unwrap();
+    let total: u32 = e.classes().iter().map(|c| c.receipts).sum();
+    assert_eq!(total, 34);
+    let bad_status = "FLAP REVERTED_BUY 1 aa bb 1 100 50 1 2 cc dd";
+    assert!(GasEvidence::parse(bad_status).is_err());
+    let over = "FLAP BUY 1 aa bb 1 100 150 1 2 cc dd";
+    assert!(GasEvidence::parse(over).is_err());
+    let migrating = "FLAP BUY_MIGRATING 1 aa bb 1 900000 800000 1 2 cc dd";
+    assert!(GasEvidence::parse(migrating).unwrap().classes().is_empty());
+}

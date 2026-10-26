@@ -174,6 +174,61 @@ impl GasEvidence {
         Ok(())
     }
 
+    /// The receipts of a frozen evidence file (`fixtures/bsc/*.txt`: `venue
+    /// class block block-hash tx-hash status gas-limit gas-used
+    /// effective-gas-price tx-type to selector`, `#` comments). Every line
+    /// is checked: a known venue and class, a status that fits the class
+    /// (a `REVERTED_*` class reverted, the others succeeded) and gas used
+    /// within the limit; `BUY_MIGRATING` (a BUY that graduated its token,
+    /// the refused migration path) is kept out of every class.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut e = Self::default();
+        for (n, line) in text
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            let bad = |why: &str| format!("line {}: {why}: {line}", n + 1);
+            if f.len() != 12 {
+                return Err(bad("not 12 fields"));
+            }
+            let venue = match f[0] {
+                "FLAP" => Venue::Flap,
+                "CLASSIC" => Venue::FourClassic,
+                "OPENFOUR" => Venue::OpenFour,
+                _ => return Err(bad("venue")),
+            };
+            let (action, reverted) = match f[1] {
+                "LAUNCH" => (Action::Launch, false),
+                "BUY" => (Action::Buy, false),
+                "SELL" => (Action::Sell, false),
+                "APPROVE" => (Action::Approve, false),
+                "REVERTED_LAUNCH" => (Action::RevertedLaunch, true),
+                "REVERTED_BUY" => (Action::RevertedBuy, true),
+                "REVERTED_SELL" => (Action::RevertedSell, true),
+                "BUY_MIGRATING" => continue,
+                _ => return Err(bad("class")),
+            };
+            let status = match f[5] {
+                "1" => false,
+                "0" => true,
+                _ => return Err(bad("status")),
+            };
+            if status != reverted {
+                return Err(bad("status does not fit the class"));
+            }
+            let limit: u64 = f[6].parse().map_err(|_| bad("gas limit"))?;
+            let used: u64 = f[7].parse().map_err(|_| bad("gas used"))?;
+            if used > limit {
+                return Err(bad("gas used above the limit"));
+            }
+            e.add(PathClass { venue, action }, used)
+                .map_err(|_| bad("overflow"))?;
+        }
+        Ok(e)
+    }
+
     pub fn class(&self, class: PathClass) -> Option<&ClassEvidence> {
         self.classes.iter().find(|c| c.class == class)
     }
