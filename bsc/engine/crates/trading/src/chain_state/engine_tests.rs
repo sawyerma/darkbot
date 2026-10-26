@@ -193,6 +193,14 @@ fn check_invariants(s: &ChainState) {
             );
         }
     }
+    // The open index is exactly the set of open records (review 4c L-1).
+    let open: BTreeSet<(Address, u64, B256)> = s
+        .txs
+        .iter()
+        .filter(|(_, r)| matches!(r.state, TxState::Candidate | TxState::Uncertain { .. }))
+        .map(|(h, r)| (r.sender, r.nonce, *h))
+        .collect();
+    assert_eq!(s.open, open);
     for (sender, record) in &s.senders {
         assert_eq!(record.refs, refs.get(sender).copied().unwrap_or(0));
         assert!(record.watched || record.refs > 0);
@@ -2614,4 +2622,101 @@ fn sighting_epoch_gates_snapshots_after_a_dropped_chain() {
     }));
     assert_eq!(s.tx(&t(2)).unwrap().state, TxState::Candidate);
     assert_eq!(s.snapshot_id(t(2), 1, 1), None);
+}
+
+/// Mean `apply` time per block of the last 200 blocks, for blocks of
+/// `block_txs` transactions of which `hot_txs` come from one sender, on a
+/// table of 262144 transactions that the blocks saturate.
+fn hot_sender_block_apply(block_txs: u32, hot_txs: u32, blocks: u64) -> std::time::Duration {
+    let lim = StateLimits {
+        max_txs: 262_144,
+        max_candidates_per_nonce: 16,
+        max_watched_senders: 1,
+        reorg_window: 64,
+        finality_depth: 16,
+    };
+    let mut s = ChainState::new(CHAIN, lim, &[]).unwrap();
+    let hot = Address::repeat_byte(0x99);
+    let mut hot_nonce = 0u64;
+    let mut uid = 0u64;
+    let mut late = std::time::Duration::ZERO;
+    for n in 0..blocks {
+        let mut txs = Vec::new();
+        for i in 0..block_txs {
+            uid += 1;
+            if i < hot_txs {
+                txs.push((t(uid), hot, hot_nonce));
+                hot_nonce += 1;
+            } else {
+                let mut a = [0u8; 20];
+                a[..8].copy_from_slice(&uid.to_be_bytes());
+                a[19] = 1;
+                txs.push((t(uid), Address::from(a), 0));
+            }
+        }
+        let b = block(BASE + n, 0, 0, &txs);
+        let t0 = std::time::Instant::now();
+        let out = s.apply(&b);
+        let dt = t0.elapsed();
+        assert!(
+            out.conflicts.iter().all(|c| !c.refused()),
+            "{:?}",
+            out.conflicts
+        );
+        if n >= blocks - 200 {
+            late += dt;
+        }
+    }
+    assert_eq!(s.counters().held_txs, 262_144);
+    late / 200
+}
+
+/// Review 4c L-1 benchmark (the reviewer's `r4c_bench_hot_sender`, plus his
+/// 300-transaction shape with one sender at 10%): `apply` per block on a
+/// saturated table. Timing only, hence ignored; run with
+/// `cargo test --release -p darkbot-bsc-trading bench_hot_sender -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn bench_hot_sender_block_apply() {
+    let fixture = hot_sender_block_apply(50, 3, 6000);
+    eprintln!("BENCH hot sender 50 tx/3 hot: mean apply per block (last 200): {fixture:?}");
+    let concentrated = hot_sender_block_apply(300, 30, 1200);
+    eprintln!("BENCH hot sender 300 tx/30 hot: mean apply per block (last 200): {concentrated:?}");
+}
+
+/// Review 4c L-1, without timing: an inclusion examines only its sender's
+/// open records below its nonce (`resolve_consumed`), never the sender's
+/// included or settled history, however long.
+#[test]
+fn inclusion_visits_only_open_records_of_its_sender() {
+    let small = StateLimits {
+        max_txs: 4096,
+        max_candidates_per_nonce: 4,
+        max_watched_senders: 1,
+        reorg_window: 2,
+        finality_depth: 1,
+    };
+    let hot = Address::repeat_byte(0x99);
+    let mut s = state_with(small);
+    accepted(&s.apply(&block(BASE, 0, 0, &[])));
+    for n in 0..300u64 {
+        accepted(&s.apply(&block(BASE + 1 + n, 0, 0, &[(t(n), hot, n)])));
+    }
+    assert_eq!(s.resolve_visits, 0, "a long history is never visited");
+    assert!(s.txs[&t(0)].settled);
+
+    // Two open candidates: one below the next inclusion, one above.
+    s.apply(&pending(t(1_000), hot, 305, 1, 1));
+    s.apply(&pending(t(1_001), hot, 400, 1, 2));
+    accepted(&s.apply(&block(BASE + 301, 0, 0, &[(t(300), hot, 300)])));
+    assert_eq!(s.resolve_visits, 0);
+    // A skip to 310 (EIP-7702): exactly the one open record below it.
+    accepted(&s.apply(&block(BASE + 302, 0, 0, &[(t(310), hot, 310)])));
+    assert_eq!(s.resolve_visits, 1);
+    assert!(matches!(
+        s.tx(&t(1_000)).unwrap().state,
+        TxState::NonceConsumedNotSeen { .. }
+    ));
+    assert_eq!(s.tx(&t(1_001)).unwrap().state, TxState::Candidate);
+    check_invariants(&s);
 }

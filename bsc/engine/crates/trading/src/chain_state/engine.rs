@@ -941,6 +941,13 @@ pub struct ChainState {
     /// Resolutions (rules 2 and 8) by the evidence block they rest on, while
     /// that block is retained.
     resolutions: BTreeMap<B256, Vec<B256>>,
+    /// The open records (`Candidate`, `Uncertain`) by sender and nonce: what
+    /// an inclusion or a nonce fact may resolve, without visiting a
+    /// sender's settled history.
+    open: BTreeSet<(Address, u64, B256)>,
+    /// Records `resolve_consumed` examined; a test-only cost probe.
+    #[cfg(test)]
+    resolve_visits: u64,
     counters: StateCounters,
 }
 
@@ -979,6 +986,9 @@ impl ChainState {
             settle_queue: VecDeque::new(),
             epoch: 0,
             resolutions: BTreeMap::new(),
+            open: BTreeSet::new(),
+            #[cfg(test)]
+            resolve_visits: 0,
             counters: StateCounters::default(),
         })
     }
@@ -1547,6 +1557,7 @@ impl ChainState {
                     out.orphans
                         .push(OrphanProof::new(chain_id, tx.sender, tx.nonce, old));
                 }
+                self.sync_open(*hash);
             }
         }
 
@@ -1580,6 +1591,7 @@ impl ChainState {
                 status: tx.status,
                 finalized: false,
             };
+            self.sync_open(tx.hash);
         }
 
         for hash in self.slot(tx.sender, tx.nonce).to_vec() {
@@ -1599,6 +1611,7 @@ impl ChainState {
                         winner: tx.hash,
                     });
                 }
+                self.sync_open(hash);
             }
         }
 
@@ -1754,6 +1767,7 @@ impl ChainState {
                     status,
                 };
                 bump(&mut self.counters.uncertain_marked);
+                self.sync_open(tx.hash);
             }
             self.reopen_losers(tx.sender, tx.nonce, tx.hash);
         }
@@ -1806,6 +1820,7 @@ impl ChainState {
                 _ => TxState::Candidate,
             };
             bump(&mut self.counters.resolutions_reverted);
+            self.sync_open(hash);
         }
     }
 
@@ -1923,6 +1938,7 @@ impl ChainState {
                 if watched {
                     orphans.push(OrphanProof::new(chain_id, tx.sender, tx.nonce, block.hash));
                 }
+                self.sync_open(tx.hash);
             }
             bump(&mut self.counters.orphaned_txs);
             self.reopen_losers(tx.sender, tx.nonce, tx.hash);
@@ -2135,31 +2151,31 @@ impl ChainState {
         out: &mut Applied,
     ) {
         let chain_id = self.chain_id;
-        let keys: Vec<(Address, u64)> = self
-            .slots
-            .range((sender, next_nonce)..=(sender, u64::MAX))
-            .map(|(key, _)| *key)
+        let open: Vec<(u64, B256)> = self
+            .open
+            .range((sender, next_nonce, B256::ZERO)..)
+            .take_while(|(s, _, _)| *s == sender)
+            .map(|(_, nonce, hash)| (*nonce, *hash))
             .collect();
         let mut resolved = false;
-        for key in keys {
-            for hash in self.slot(key.0, key.1).to_vec() {
-                let Some(record) = self.txs.get_mut(&hash) else {
-                    continue;
-                };
-                if let TxState::Uncertain {
-                    block_number,
-                    block_hash,
-                    ..
-                } = record.state
-                    && block_number <= fact_block
-                {
-                    record.state = TxState::Candidate;
-                    bump(&mut record.orphaned);
-                    bump(&mut self.counters.orphaned_txs);
-                    out.orphans
-                        .push(OrphanProof::new(chain_id, sender, key.1, block_hash));
-                    resolved = true;
-                }
+        for (nonce, hash) in open {
+            let Some(record) = self.txs.get_mut(&hash) else {
+                continue;
+            };
+            if let TxState::Uncertain {
+                block_number,
+                block_hash,
+                ..
+            } = record.state
+                && block_number <= fact_block
+            {
+                // Uncertain to candidate: open either way.
+                record.state = TxState::Candidate;
+                bump(&mut record.orphaned);
+                bump(&mut self.counters.orphaned_txs);
+                out.orphans
+                    .push(OrphanProof::new(chain_id, sender, nonce, block_hash));
+                resolved = true;
             }
         }
         if resolved {
@@ -2184,11 +2200,17 @@ impl ChainState {
         evidence_retained: bool,
     ) {
         let (evidence_block_number, evidence_block_hash) = evidence_block;
+        // Only the sender's open records below `below`: O(log n + k), never
+        // its settled history (review 4c L-1).
         let hashes: Vec<B256> = self
-            .slots
-            .range((sender, 0)..(sender, below))
-            .flat_map(|(_, hashes)| hashes.iter().copied())
+            .open
+            .range((sender, 0, B256::ZERO)..(sender, below, B256::ZERO))
+            .map(|(_, _, hash)| *hash)
             .collect();
+        #[cfg(test)]
+        {
+            self.resolve_visits = self.resolve_visits.saturating_add(len_u64(hashes.len()));
+        }
         let mut resolved = Vec::new();
         for hash in hashes {
             let Some(record) = self.txs.get_mut(&hash) else {
@@ -2225,6 +2247,7 @@ impl ChainState {
             if matches!(evidence, ConsumptionEvidence::LaterInclusion { .. }) {
                 bump(&mut self.counters.resolved_by_later_inclusion);
             }
+            self.sync_open(hash);
             resolved.push(hash);
         }
         if resolved.is_empty() {
@@ -2260,16 +2283,11 @@ impl ChainState {
     }
 
     fn min_unresolved_nonce(&self, sender: Address) -> Option<u64> {
-        self.slots
-            .range((sender, 0)..=(sender, u64::MAX))
-            .find(|(_, hashes)| {
-                hashes.iter().any(|h| {
-                    self.txs.get(h).is_some_and(|r| {
-                        matches!(r.state, TxState::Candidate | TxState::Uncertain { .. })
-                    })
-                })
-            })
-            .map(|((_, nonce), _)| *nonce)
+        self.open
+            .range((sender, 0, B256::ZERO)..)
+            .next()
+            .filter(|(s, _, _)| *s == sender)
+            .map(|(_, nonce, _)| *nonce)
     }
 
     // -----------------------------------------------------------------
@@ -2312,6 +2330,7 @@ impl ChainState {
         for loser in self.losers_of(sender, nonce, winner) {
             if let Some(record) = self.txs.get_mut(&loser) {
                 record.state = TxState::Candidate;
+                self.sync_open(loser);
             }
         }
     }
@@ -2320,12 +2339,27 @@ impl ChainState {
         let sender = record.sender;
         let nonce = record.nonce;
         self.txs.insert(hash, record);
+        self.sync_open(hash);
         self.slots.entry((sender, nonce)).or_default().push(hash);
         let sender_record = self
             .senders
             .entry(sender)
             .or_insert_with(|| SenderRecord::new(false));
         sender_record.refs = sender_record.refs.saturating_add(1);
+    }
+
+    /// Keeps the open index in step with the record of `hash` after its
+    /// state changed: `Candidate` and `Uncertain` are open.
+    fn sync_open(&mut self, hash: B256) {
+        let Some(record) = self.txs.get(&hash) else {
+            return;
+        };
+        let key = (record.sender, record.nonce, hash);
+        if matches!(record.state, TxState::Candidate | TxState::Uncertain { .. }) {
+            self.open.insert(key);
+        } else {
+            self.open.remove(&key);
+        }
     }
 
     fn settle(&mut self, hash: B256) {
@@ -2357,6 +2391,7 @@ impl ChainState {
         let Some(record) = self.txs.remove(&hash) else {
             return;
         };
+        self.open.remove(&(record.sender, record.nonce, hash));
         let key = (record.sender, record.nonce);
         if let Some(slot) = self.slots.get_mut(&key) {
             slot.retain(|h| *h != hash);
