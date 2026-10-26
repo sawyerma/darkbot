@@ -73,6 +73,9 @@ mod defaults {
     pub const RECEIPT_BLOCK_BUDGET: u64 = 300;
     /// `--launch-fixtures`: canonical launches kept per family.
     pub const LAUNCH_FIXTURES: usize = 3;
+    /// `--launch-receipt-block-budget`: blocks whose receipts the OpenFour
+    /// launch-only pass may fetch over the whole window.
+    pub const LAUNCH_RECEIPT_BLOCK_BUDGET: u64 = 1000;
     /// `--probe-funds-wei`: the quote amount the read probes pass (0.001 BNB).
     pub const PROBE_FUNDS_WEI: u128 = 1_000_000_000_000_000;
 }
@@ -80,7 +83,8 @@ mod defaults {
 fn usage() -> &'static str {
     "usage: g01_four_freeze [--rpc <url> | --rpc-config <file>] [--archive <dir>] [--out-root <dir>] \
      [--block <n>] [--confirmations <n>] [--scan-blocks <n>] [--header-batch <n>] \
-     [--receipt-block-budget <n>] [--launch-fixtures <n>] [--rpc-connect-timeout-s <s>] \
+     [--receipt-block-budget <n>] [--launch-receipt-block-budget <n>] [--launch-fixtures <n>] \
+     [--rpc-connect-timeout-s <s>] \
      [--rpc-max-time-s <s>] [--rpc-attempts <n>] [--rpc-retry-pause-ms <ms>] \
      [--sourcify-base <url> | --no-sourcify] [--sourcify-max-bytes <n>] [--probe-funds-wei <n>]"
 }
@@ -95,6 +99,7 @@ struct Config {
     scan_blocks: u64,
     header_batch: u64,
     receipt_budget: u64,
+    launch_budget: u64,
     launch_fixtures: usize,
     limits: Limits,
     attempts: u32,
@@ -116,6 +121,7 @@ impl Config {
             "scan-blocks",
             "header-batch",
             "receipt-block-budget",
+            "launch-receipt-block-budget",
             "launch-fixtures",
             "rpc-connect-timeout-s",
             "rpc-max-time-s",
@@ -158,6 +164,11 @@ impl Config {
             scan_blocks: number(args, "scan-blocks", defaults::SCAN_BLOCKS)?,
             header_batch: number(args, "header-batch", defaults::HEADER_BATCH)?,
             receipt_budget: number(args, "receipt-block-budget", defaults::RECEIPT_BLOCK_BUDGET)?,
+            launch_budget: number(
+                args,
+                "launch-receipt-block-budget",
+                defaults::LAUNCH_RECEIPT_BLOCK_BUDGET,
+            )?,
             launch_fixtures: number(args, "launch-fixtures", defaults::LAUNCH_FIXTURES)?,
             limits: Limits {
                 connect_timeout_s: number(
@@ -384,6 +395,16 @@ struct Found {
     tx: Tx,
 }
 
+/// The OpenFour launch-only pass over the whole window.
+#[derive(Default)]
+struct LaunchPass {
+    /// Blocks whose bloom can hold an OpenFour launch.
+    candidates: u64,
+    fetched: u64,
+    /// The newest candidate block not fetched (budget exhausted).
+    missed_from: Option<u64>,
+}
+
 #[derive(Default)]
 struct ScanOutcome {
     from: u64,
@@ -391,6 +412,12 @@ struct ScanOutcome {
     headers: u64,
     candidates: u64,
     fetched: u64,
+    /// The newest block the main scan wanted but could not fetch (receipt
+    /// budget exhausted): it and every older block are not examined.
+    stopped_at: Option<u64>,
+    /// Blocks of the whole window whose bloom can hold any scanned event.
+    window_candidates: u64,
+    launch_pass: LaunchPass,
     tx_fetched: u64,
     launches: [Vec<Found>; 2],
     buys: [Option<Found>; 2],
@@ -405,8 +432,60 @@ struct ScanOutcome {
     error: Option<String>,
 }
 
+impl ScanOutcome {
+    /// Every block from here to `search_to` was examined by the main scan.
+    fn examined_from(&self) -> u64 {
+        self.stopped_at.map_or(self.from, |b| b + 1)
+    }
+
+    fn stop_reason(&self) -> &'static str {
+        if self.stopped_at.is_some() {
+            "RECEIPT_BUDGET_EXHAUSTED"
+        } else {
+            "WINDOW_COMPLETE"
+        }
+    }
+
+    /// The main scan's examined range, as every statement scopes it.
+    fn coverage(&self) -> String {
+        let mut c = format!(
+            "blocks {}..={} ({} receipt blocks fetched",
+            self.examined_from(),
+            self.search_to,
+            self.fetched
+        );
+        if self.stopped_at.is_some() {
+            c.push_str(&format!(
+                "; receipt budget exhausted: blocks {}..{} of the window not examined",
+                self.from,
+                self.examined_from()
+            ));
+        }
+        c.push(')');
+        c
+    }
+
+    /// The OpenFour launch pass: its range, candidates, fetches, stop.
+    fn launch_coverage(&self, budget: u64) -> String {
+        let p = &self.launch_pass;
+        format!(
+            "OpenFour launch pass blocks {}..={}: {} bloom candidate blocks, {} receipt blocks fetched of budget {budget}, {}",
+            p.missed_from.map_or(self.from, |b| b + 1),
+            self.search_to,
+            p.candidates,
+            p.fetched,
+            if p.missed_from.is_some() {
+                "RECEIPT_BUDGET_EXHAUSTED"
+            } else {
+                "WINDOW_COMPLETE"
+            }
+        )
+    }
+}
+
 /// Newest first: the receipts of every block whose bloom can hold a still
-/// missing launch or BUY event of a family, within the budget.
+/// missing event of a family, within the budget; OpenFour launches first
+/// in their own pass over the whole window.
 fn scan(rpc: &Endpoint, cfg: &Config, headers: &[Header], targets: [Address; 2]) -> ScanOutcome {
     let mut out = ScanOutcome {
         from: headers.first().map_or(0, |h| h.number),
@@ -430,6 +509,18 @@ fn scan(rpc: &Endpoint, cfg: &Config, headers: &[Header], targets: [Address; 2])
     out
 }
 
+/// Whether `header`'s bloom can hold any event the scans look for.
+fn any_scanned(header: &Header, targets: [Address; 2], lifecycle: &[LifecycleSeen]) -> bool {
+    FAMILIES.into_iter().any(|f| {
+        let c = targets[fi(f)];
+        [abi::launch_topic(f), abi::buy_topic(f), abi::sell_topic(f)]
+            .into_iter()
+            .any(|t| bloom_has(header, c, t))
+    }) || lifecycle
+        .iter()
+        .any(|l| bloom_has(header, targets[fi(l.family)], l.topic))
+}
+
 fn scan_into(
     rpc: &Endpoint,
     cfg: &Config,
@@ -437,17 +528,37 @@ fn scan_into(
     targets: [Address; 2],
     out: &mut ScanOutcome,
 ) -> Result<(), String> {
+    // 1. OpenFour launches through the whole window, on their own budget:
+    // every preset in use needs its own fixture.
+    let open = targets[fi(Family::OpenFour)];
+    let launch = [(Family::OpenFour, Kind::Launch)];
     for header in headers.iter().rev() {
-        if out.fetched >= cfg.receipt_budget {
-            break;
+        if !bloom_has(header, open, abi::launch_topic(Family::OpenFour)) {
+            continue;
+        }
+        out.launch_pass.candidates += 1;
+        if out.launch_pass.fetched >= cfg.launch_budget {
+            out.launch_pass.missed_from.get_or_insert(header.number);
+            continue;
+        }
+        let receipts = rpc.block_receipts(header)?;
+        out.launch_pass.fetched += 1;
+        take_receipts(rpc, cfg, header, receipts, &launch, false, targets, out)?;
+    }
+    // 2. Everything else, newest first, until the receipt budget: the
+    // first block it cannot fetch ends the examined range.
+    for header in headers.iter().rev() {
+        if any_scanned(header, targets, &out.lifecycle) {
+            out.window_candidates += 1;
+        }
+        if out.stopped_at.is_some() {
+            continue;
         }
         let mut wants = Vec::new();
         for family in FAMILIES {
             let c = targets[fi(family)];
-            // OpenFour launches are followed through the whole window: every
-            // preset in use needs its own fixture.
             let launches_open =
-                family == Family::OpenFour || out.launches[fi(family)].len() < cfg.launch_fixtures;
+                family == Family::Classic && out.launches[fi(family)].len() < cfg.launch_fixtures;
             if launches_open && bloom_has(header, c, abi::launch_topic(family)) {
                 wants.push((family, Kind::Launch));
             }
@@ -465,28 +576,106 @@ fn scan_into(
         if wants.is_empty() && !lifecycle_open {
             continue;
         }
+        if out.fetched >= cfg.receipt_budget {
+            out.stopped_at = Some(header.number);
+            continue;
+        }
         out.candidates += 1;
-        let mut receipts = rpc.block_receipts(header)?;
+        let receipts = rpc.block_receipts(header)?;
         out.fetched += 1;
-        receipts.sort_by_key(|r| std::cmp::Reverse(r.transaction_index));
-        for r in receipts.iter().filter(|r| r.status == 1) {
-            for log in r.logs.iter().rev() {
-                let topic = log.topics.first().copied();
-                // Lifecycle events: counted in every fetched receipt, one
-                // fixture each.
-                for i in 0..out.lifecycle.len() {
-                    let l = &out.lifecycle[i];
-                    if log.address != targets[fi(l.family)] || topic != Some(l.topic) {
-                        continue;
-                    }
-                    out.lifecycle[i].logs += 1;
-                    if out.lifecycle[i].fixture.is_none() && out.tx_fetched < cfg.receipt_budget {
+        take_receipts(rpc, cfg, header, receipts, &wants, true, targets, out)?;
+    }
+    Ok(())
+}
+
+/// The fixtures and counts of one block's receipts for `wants`; lifecycle
+/// events too when `lifecycle`.
+#[allow(clippy::too_many_arguments)]
+fn take_receipts(
+    rpc: &Endpoint,
+    cfg: &Config,
+    header: &Header,
+    mut receipts: Vec<Receipt>,
+    wants: &[(Family, Kind)],
+    lifecycle: bool,
+    targets: [Address; 2],
+    out: &mut ScanOutcome,
+) -> Result<(), String> {
+    receipts.sort_by_key(|r| std::cmp::Reverse(r.transaction_index));
+    for r in receipts.iter().filter(|r| r.status == 1) {
+        for log in r.logs.iter().rev() {
+            let topic = log.topics.first().copied();
+            // Lifecycle events: counted in every receipt of the main
+            // scan, one fixture each.
+            for i in 0..out.lifecycle.len() {
+                if !lifecycle {
+                    break;
+                }
+                let l = &out.lifecycle[i];
+                if log.address != targets[fi(l.family)] || topic != Some(l.topic) {
+                    continue;
+                }
+                out.lifecycle[i].logs += 1;
+                if out.lifecycle[i].fixture.is_none() && out.tx_fetched < cfg.receipt_budget {
+                    let tx = rpc.transaction(r.transaction_hash)?;
+                    out.tx_fetched += 1;
+                    edge::require_tx_at(&tx, r)?;
+                    out.lifecycle[i].fixture = Some(Found {
+                        family: out.lifecycle[i].family,
+                        kind: Kind::Lifecycle,
+                        source: "RECEIPT_SCAN",
+                        block_hash: header.hash,
+                        receipt: r.clone(),
+                        log: log.clone(),
+                        tx,
+                    });
+                }
+            }
+            for &(family, kind) in wants {
+                let c = targets[fi(family)];
+                if log.address != c {
+                    continue;
+                }
+                match kind {
+                    Kind::Launch if topic == Some(abi::launch_topic(family)) => {
+                        out.launch_events[fi(family)] += 1;
+                        let preset = match family {
+                            Family::OpenFour => log.topics.get(1).map(|t| U256::from_be_bytes(t.0)),
+                            Family::Classic => None,
+                        };
+                        if let Some(p) = preset {
+                            out.presets.entry(p).or_default().launches += 1;
+                        }
+                        if r.to != Some(c) {
+                            out.indirect[fi(family)] += 1;
+                            continue;
+                        }
+                        if let Some(p) = preset {
+                            out.presets.entry(p).or_default().direct += 1;
+                        }
+                        let new_preset =
+                            preset.is_some_and(|p| out.presets.get(&p).is_some_and(|s| !s.fixture));
+                        let list = &out.launches[fi(family)];
+                        if (list.len() >= cfg.launch_fixtures && !new_preset)
+                            || list
+                                .iter()
+                                .any(|f| f.receipt.transaction_hash == r.transaction_hash)
+                        {
+                            continue;
+                        }
                         let tx = rpc.transaction(r.transaction_hash)?;
-                        out.tx_fetched += 1;
                         edge::require_tx_at(&tx, r)?;
-                        out.lifecycle[i].fixture = Some(Found {
-                            family: out.lifecycle[i].family,
-                            kind: Kind::Lifecycle,
+                        if tx.input.get(..4) != Some(&abi::launch_selector(family)[..]) {
+                            continue;
+                        }
+                        if let Some(p) = preset
+                            && let Some(seen) = out.presets.get_mut(&p)
+                        {
+                            seen.fixture = true;
+                        }
+                        out.launches[fi(family)].push(Found {
+                            family,
+                            kind,
                             source: "RECEIPT_SCAN",
                             block_hash: header.hash,
                             receipt: r.clone(),
@@ -494,52 +683,26 @@ fn scan_into(
                             tx,
                         });
                     }
-                }
-                for &(family, kind) in &wants {
-                    let c = targets[fi(family)];
-                    if log.address != c {
-                        continue;
-                    }
-                    match kind {
-                        Kind::Launch if topic == Some(abi::launch_topic(family)) => {
-                            out.launch_events[fi(family)] += 1;
-                            let preset = match family {
-                                Family::OpenFour => {
-                                    log.topics.get(1).map(|t| U256::from_be_bytes(t.0))
-                                }
-                                Family::Classic => None,
-                            };
-                            if let Some(p) = preset {
-                                out.presets.entry(p).or_default().launches += 1;
-                            }
-                            if r.to != Some(c) {
-                                out.indirect[fi(family)] += 1;
-                                continue;
-                            }
-                            if let Some(p) = preset {
-                                out.presets.entry(p).or_default().direct += 1;
-                            }
-                            let new_preset = preset
-                                .is_some_and(|p| out.presets.get(&p).is_some_and(|s| !s.fixture));
-                            let list = &out.launches[fi(family)];
-                            if (list.len() >= cfg.launch_fixtures && !new_preset)
-                                || list
-                                    .iter()
-                                    .any(|f| f.receipt.transaction_hash == r.transaction_hash)
-                            {
-                                continue;
-                            }
-                            let tx = rpc.transaction(r.transaction_hash)?;
-                            edge::require_tx_at(&tx, r)?;
-                            if tx.input.get(..4) != Some(&abi::launch_selector(family)[..]) {
-                                continue;
-                            }
-                            if let Some(p) = preset
-                                && let Some(seen) = out.presets.get_mut(&p)
-                            {
-                                seen.fixture = true;
-                            }
-                            out.launches[fi(family)].push(Found {
+                    Kind::Buy if topic == Some(abi::buy_topic(family)) => {
+                        if out.buys[fi(family)].is_some()
+                            || r.to != Some(c)
+                            || out.tx_fetched >= cfg.receipt_budget
+                        {
+                            continue;
+                        }
+                        match abi::bought(family, &log.topics, &log.data) {
+                            Ok(ev) if ev.is_buy => {}
+                            _ => continue,
+                        }
+                        let tx = rpc.transaction(r.transaction_hash)?;
+                        out.tx_fetched += 1;
+                        edge::require_tx_at(&tx, r)?;
+                        let decoded = match family {
+                            Family::Classic => abi::classic_buy(&tx.input),
+                            Family::OpenFour => abi::openfour_buy(&tx.input),
+                        };
+                        if decoded.is_ok() {
+                            out.buys[fi(family)] = Some(Found {
                                 family,
                                 kind,
                                 source: "RECEIPT_SCAN",
@@ -549,78 +712,46 @@ fn scan_into(
                                 tx,
                             });
                         }
-                        Kind::Buy if topic == Some(abi::buy_topic(family)) => {
-                            if out.buys[fi(family)].is_some()
-                                || r.to != Some(c)
-                                || out.tx_fetched >= cfg.receipt_budget
-                            {
-                                continue;
-                            }
-                            match abi::bought(family, &log.topics, &log.data) {
-                                Ok(ev) if ev.is_buy => {}
-                                _ => continue,
-                            }
-                            let tx = rpc.transaction(r.transaction_hash)?;
-                            out.tx_fetched += 1;
-                            edge::require_tx_at(&tx, r)?;
-                            let decoded = match family {
-                                Family::Classic => abi::classic_buy(&tx.input),
-                                Family::OpenFour => abi::openfour_buy(&tx.input),
-                            };
-                            if decoded.is_ok() {
-                                out.buys[fi(family)] = Some(Found {
-                                    family,
-                                    kind,
-                                    source: "RECEIPT_SCAN",
-                                    block_hash: header.hash,
-                                    receipt: r.clone(),
-                                    log: log.clone(),
-                                    tx,
-                                });
-                            }
-                        }
-                        Kind::Sell if topic == Some(abi::sell_topic(family)) => {
-                            if abi::sold(family, &log.topics, &log.data).is_err() {
-                                continue;
-                            }
-                            out.sell_events[fi(family)] += 1;
-                            if out.sells[fi(family)].is_some()
-                                || out.tx_fetched >= cfg.receipt_budget
-                            {
-                                continue;
-                            }
-                            let direct = r.to == Some(c);
-                            if !direct && out.sell_events_only[fi(family)].is_some() {
-                                continue;
-                            }
-                            let tx = rpc.transaction(r.transaction_hash)?;
-                            out.tx_fetched += 1;
-                            edge::require_tx_at(&tx, r)?;
-                            let decoded = match family {
-                                Family::Classic => abi::classic_sell(&tx.input),
-                                Family::OpenFour => abi::openfour_sell(&tx.input),
-                            };
-                            let found = Found {
-                                family,
-                                kind: if direct && decoded.is_ok() {
-                                    Kind::Sell
-                                } else {
-                                    Kind::SellEvent
-                                },
-                                source: "RECEIPT_SCAN",
-                                block_hash: header.hash,
-                                receipt: r.clone(),
-                                log: log.clone(),
-                                tx,
-                            };
-                            if found.kind == Kind::Sell {
-                                out.sells[fi(family)] = Some(found);
-                            } else if out.sell_events_only[fi(family)].is_none() {
-                                out.sell_events_only[fi(family)] = Some(found);
-                            }
-                        }
-                        _ => {}
                     }
+                    Kind::Sell if topic == Some(abi::sell_topic(family)) => {
+                        if abi::sold(family, &log.topics, &log.data).is_err() {
+                            continue;
+                        }
+                        out.sell_events[fi(family)] += 1;
+                        if out.sells[fi(family)].is_some() || out.tx_fetched >= cfg.receipt_budget {
+                            continue;
+                        }
+                        let direct = r.to == Some(c);
+                        if !direct && out.sell_events_only[fi(family)].is_some() {
+                            continue;
+                        }
+                        let tx = rpc.transaction(r.transaction_hash)?;
+                        out.tx_fetched += 1;
+                        edge::require_tx_at(&tx, r)?;
+                        let decoded = match family {
+                            Family::Classic => abi::classic_sell(&tx.input),
+                            Family::OpenFour => abi::openfour_sell(&tx.input),
+                        };
+                        let found = Found {
+                            family,
+                            kind: if direct && decoded.is_ok() {
+                                Kind::Sell
+                            } else {
+                                Kind::SellEvent
+                            },
+                            source: "RECEIPT_SCAN",
+                            block_hash: header.hash,
+                            receipt: r.clone(),
+                            log: log.clone(),
+                            tx,
+                        };
+                        if found.kind == Kind::Sell {
+                            out.sells[fi(family)] = Some(found);
+                        } else if out.sell_events_only[fi(family)].is_none() {
+                            out.sell_events_only[fi(family)] = Some(found);
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1590,6 +1721,7 @@ struct Common {
     archive_root: String,
     observed_ms: u64,
     receipt_budget: u64,
+    launch_budget: u64,
     linked_to: u64,
 }
 
@@ -1644,14 +1776,11 @@ impl FamilyEval<'_> {
                 "EVENT_ONLY {} ({}); no direct SELL call in the scanned receipts",
                 f.found.receipt.transaction_hash, f.call_signature
             ),
-            (None, None) => format!(
-                "UNKNOWN: no SELL event within blocks {}..={} (receipt blocks fetched {})",
-                self.scan.from, self.scan.search_to, self.scan.fetched
-            ),
+            (None, None) => format!("UNKNOWN: no SELL event within {}", self.scan.coverage()),
         }
     }
 
-    fn launch_status(&self, budget: u64) -> String {
+    fn launch_status(&self, common: &Common) -> String {
         let n = self
             .launch_fixtures()
             .iter()
@@ -1663,8 +1792,11 @@ impl FamilyEval<'_> {
             format!("UNKNOWN: scan stopped: {e}")
         } else {
             format!(
-                "UNKNOWN: no direct canonical launch within blocks {}..={} (receipt blocks fetched {}/{})",
-                self.scan.from, self.scan.search_to, self.scan.fetched, budget
+                "UNKNOWN: no direct canonical launch within {}",
+                match self.family {
+                    Family::OpenFour => self.scan.launch_coverage(common.launch_budget),
+                    Family::Classic => self.scan.coverage(),
+                }
             )
         }
     }
@@ -1674,8 +1806,8 @@ impl FamilyEval<'_> {
             (Some(_), _) => "FOUND".into(),
             (None, Some(e)) => format!("UNKNOWN: scan stopped: {e}"),
             (None, None) => format!(
-                "UNKNOWN: no direct canonical BUY within blocks {}..={}",
-                self.scan.from, self.scan.search_to
+                "UNKNOWN: no direct canonical BUY within {}",
+                self.scan.coverage()
             ),
         }
     }
@@ -1991,7 +2123,7 @@ impl FamilyEval<'_> {
                     .map(|f| format!("{} block {} ({})", f.found.receipt.transaction_hash, f.found.receipt.block_number, f.found.source))
                     .collect::<Vec<_>>()
                     .join(", "),
-                self.launch_status(common.receipt_budget),
+                self.launch_status(common),
                 match self.family {
                     Family::Classic => "outer (bytes args, bytes signature); args word 0 = 0x20, word 1 = requestId (= event), word 2 = CREATE2 salt (reproduced); other args fields UNKNOWN",
                     Family::OpenFour => "outer (bytes createArgs, bytes signature); head: requestId, presetId (= event), five unnamed static words, TokenInitParams offset 0x100; TokenInitParams equal the TokenCreated fields; tokenSalt = CREATE2 salt (reproduced)",
@@ -2087,10 +2219,8 @@ impl FamilyEval<'_> {
             "lifecycle_events".into(),
             proven(lifecycle_ok),
             format!(
-                "within blocks {}..={} ({} receipt blocks fetched): {}",
-                self.scan.from,
-                self.scan.search_to,
-                self.scan.fetched,
+                "within {}: {}",
+                self.scan.coverage(),
                 lifecycle
                     .iter()
                     .map(|l| format!(
@@ -2119,21 +2249,28 @@ impl FamilyEval<'_> {
                             .any(|a| a.tx == f.found.receipt.transaction_hash && a.matched)
                 })
             };
+            // Only a launch pass over the whole window can name every
+            // preset in use.
+            let complete = self.scan.launch_pass.missed_from.is_none() && self.scan.error.is_none();
             out.push((
                 "presets_in_use".into(),
-                proven(!presets.is_empty() && presets.keys().all(reproduced)),
-                presets
-                    .iter()
-                    .map(|(p, s)| {
-                        format!(
-                            "preset {p}: {} launches ({} direct), derivation reproduced {}",
-                            s.launches,
-                            s.direct,
-                            reproduced(p)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("; "),
+                proven(complete && !presets.is_empty() && presets.keys().all(reproduced)),
+                format!(
+                    "{}; {}",
+                    self.scan.launch_coverage(common.launch_budget),
+                    presets
+                        .iter()
+                        .map(|(p, s)| {
+                            format!(
+                                "preset {p}: {} launches ({} direct), derivation reproduced {}",
+                                s.launches,
+                                s.direct,
+                                reproduced(p)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
             ));
         }
         // 8. Token address derivation.
@@ -2182,9 +2319,9 @@ impl FamilyEval<'_> {
             "PROVEN",
             format!(
                 "this record: {} (type {} v{}); archive inputs SHA-256-bound; Sourcify responses SHA-256-bound; tool SHA-256 {}; git HEAD {}",
-                ff::V2.name,
-                ff::V2.record_type,
-                ff::V2.schema_version,
+                ff::V3.name,
+                ff::V3.record_type,
+                ff::V3.schema_version,
                 B256::from(common.tool_sha256),
                 common.git_head.as_deref().unwrap_or("UNKNOWN")
             ),
@@ -2422,7 +2559,7 @@ fn family_draft(
     common: &Common,
     archive: &Archive,
 ) -> (Draft, Vec<(String, &'static str, String)>) {
-    let mut d = Draft::new(&ff::V2);
+    let mut d = Draft::new(&ff::V3);
     d.set(ff::FAMILY, eval.family.label())
         .set(ff::CHAIN_ID, common.chain_id)
         .set(ff::PROVENANCE_TOOL, TOOL)
@@ -2499,8 +2636,8 @@ fn family_draft(
     {
         use ff::scan as k;
         let s = eval.scan;
-        let mut e = Draft::new(&k::V2);
-        e.set(k::METHOD, "HEADER_LOGSBLOOM(contract, topic0) THEN eth_getBlockReceipts(blockHash), NEWEST FIRST; launch/BUY/SELL fixtures direct top-level calls only; OpenFour launches through the whole window")
+        let mut e = Draft::new(&k::V3);
+        e.set(k::METHOD, "HEADER_LOGSBLOOM(contract, topic0) THEN eth_getBlockReceipts(blockHash), NEWEST FIRST, until the receipt budget (examined_from_block, stop_reason); launch/BUY/SELL fixtures direct top-level calls only; OpenFour launches in a separate launch-only pass over the whole window on its own budget (launch_pass)")
             .set(k::FROM_BLOCK, s.from)
             .set(k::SEARCH_TO_BLOCK, s.search_to)
             .set(k::LINKED_TO_BLOCK, common.linked_to)
@@ -2509,12 +2646,18 @@ fn family_draft(
             .set(k::BLOOM_CANDIDATE_BLOCKS, s.candidates)
             .set(k::RECEIPT_BLOCKS_FETCHED, s.fetched)
             .set(k::RECEIPT_BLOCK_BUDGET, common.receipt_budget)
-            .set(k::LAUNCH_FIXTURE, eval.launch_status(common.receipt_budget))
+            .set(k::LAUNCH_FIXTURE, eval.launch_status(common))
             .set(k::BUY_FIXTURE, eval.buy_status())
             .set(k::LAUNCH_EVENTS_SEEN, s.launch_events[fi(eval.family)])
             .set(k::INDIRECT_LAUNCHES_SEEN, s.indirect[fi(eval.family)])
             .set(k::SELL_FIXTURE, eval.sell_status())
-            .set(k::SELL_EVENTS_SEEN, s.sell_events[fi(eval.family)]);
+            .set(k::SELL_EVENTS_SEEN, s.sell_events[fi(eval.family)])
+            .set(k::EXAMINED_FROM_BLOCK, s.examined_from())
+            .set(k::STOP_REASON, s.stop_reason())
+            .set(k::WINDOW_BLOOM_CANDIDATES, s.window_candidates);
+        if eval.family == Family::OpenFour {
+            e.set(k::LAUNCH_PASS, s.launch_coverage(common.launch_budget));
+        }
         if eval.family == Family::OpenFour {
             for (p, seen) in &s.presets {
                 e.push(
@@ -2699,6 +2842,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         archive_root: cfg.archive.display().to_string(),
         observed_ms,
         receipt_budget: cfg.receipt_budget,
+        launch_budget: cfg.launch_budget,
         linked_to: reference,
     };
 
@@ -2860,7 +3004,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         let bytes = draft
             .encode()
             .map_err(|e| format!("{}: {e}", family.label()))?;
-        decode(&ff::V2, &bytes).map_err(|e| format!("{}: {e}", family.label()))?;
+        decode(&ff::V3, &bytes).map_err(|e| format!("{}: {e}", family.label()))?;
         encoded.push((family.label().to_lowercase(), bytes));
     }
     std::fs::create_dir_all(&cfg.out_root)
@@ -3031,6 +3175,7 @@ mod tests {
             archive_root: "archive".into(),
             observed_ms: 1,
             receipt_budget: 1,
+            launch_budget: 1,
             linked_to: 2,
         };
         let eval = FamilyEval {
@@ -3058,7 +3203,7 @@ mod tests {
             assert_eq!(*status, expected, "{name}");
         }
         let bytes = draft.encode().unwrap();
-        let record = decode(&ff::V2, &bytes).unwrap();
+        let record = decode(&ff::V3, &bytes).unwrap();
         assert_eq!(record.text(ff::FREEZE_STATUS).unwrap(), "PARTIAL");
         assert!(
             record
@@ -3077,6 +3222,106 @@ mod tests {
             "UNKNOWN"
         );
         assert_eq!(draft.encode().unwrap(), bytes);
+    }
+
+    /// Phase E review pass 2, N1: a scan that ran out of receipt budget
+    /// states the range it really examined; an OpenFour launch pass that
+    /// ran out cannot prove the presets in use.
+    #[test]
+    fn an_exhausted_scan_states_its_real_coverage() {
+        let a = archive();
+        let mut scan = ScanOutcome {
+            from: 100,
+            search_to: 199,
+            headers: 100,
+            fetched: 3,
+            stopped_at: Some(150),
+            window_candidates: 90,
+            launch_pass: LaunchPass {
+                candidates: 10,
+                fetched: 1,
+                missed_from: Some(170),
+            },
+            ..ScanOutcome::default()
+        };
+        scan.presets.insert(
+            U256::from(7u64),
+            PresetSeen {
+                launches: 1,
+                direct: 1,
+                fixture: false,
+            },
+        );
+        let obs = Observed {
+            contracts: Vec::new(),
+            token_codes: BTreeMap::new(),
+            preset_templates: BTreeMap::new(),
+            helper_info: BTreeMap::new(),
+            reads: [Vec::new(), Vec::new()],
+            core_version: None,
+        };
+        let common = Common {
+            chain_id: 56,
+            pin: Pin {
+                number: 200,
+                hash: B256::repeat_byte(2),
+            },
+            timestamp: 1,
+            pin_rechecked: true,
+            endpoint_host: "bsc-dataseed.bnbchain.org".into(),
+            sourcify_host: None,
+            tool_sha256: [7; 32],
+            git_head: None,
+            archive_root: "archive".into(),
+            observed_ms: 1,
+            receipt_budget: 3,
+            launch_budget: 1,
+            linked_to: 200,
+        };
+        let eval = FamilyEval {
+            family: Family::OpenFour,
+            archive: &a,
+            contracts: Vec::new(),
+            selectors: selectors(Family::OpenFour, &a, &obs, &[]),
+            reads: &[],
+            fixtures: Vec::new(),
+            derivation: derive(Family::OpenFour, &[], &obs),
+            scan: &scan,
+            helper_info: Vec::new(),
+            core_version: None,
+            sourcify_enabled: false,
+        };
+        let (draft, properties) = family_draft(&eval, &common, &a);
+        let property = |name: &str| {
+            properties
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .map(|(_, status, evidence)| (*status, evidence.clone()))
+                .unwrap()
+        };
+        let (status, evidence) = property("presets_in_use");
+        assert_eq!(status, "UNKNOWN");
+        assert!(evidence.starts_with(
+            "OpenFour launch pass blocks 171..=199: 10 bloom candidate blocks, 1 receipt blocks fetched of budget 1, RECEIPT_BUDGET_EXHAUSTED"
+        ));
+        let (_, lifecycle) = property("lifecycle_events");
+        assert!(lifecycle.starts_with(
+            "within blocks 151..=199 (3 receipt blocks fetched; receipt budget exhausted: blocks 100..151 of the window not examined)"
+        ));
+        let record = decode(&ff::V3, &draft.encode().unwrap()).unwrap();
+        let s = record.nested(ff::SCAN).unwrap();
+        assert_eq!(s.u64(ff::scan::EXAMINED_FROM_BLOCK).unwrap(), 151);
+        assert_eq!(
+            s.text(ff::scan::STOP_REASON).unwrap(),
+            "RECEIPT_BUDGET_EXHAUSTED"
+        );
+        assert_eq!(s.u64(ff::scan::WINDOW_BLOOM_CANDIDATES).unwrap(), 90);
+        assert!(s.text(ff::scan::LAUNCH_PASS).unwrap().contains("171..=199"));
+        assert!(
+            s.text(ff::scan::SELL_FIXTURE)
+                .unwrap()
+                .contains("within blocks 151..=199")
+        );
     }
 
     #[test]
@@ -3139,7 +3384,7 @@ mod tests {
         let outcome = run(&cfg).unwrap();
         for name in ["classic", "openfour"] {
             let bytes = std::fs::read(outcome.dir.join(format!("{name}.dbrec"))).unwrap();
-            let record = decode(&ff::V2, &bytes).unwrap();
+            let record = decode(&ff::V3, &bytes).unwrap();
             assert_eq!(record.u64(ff::CHAIN_ID).unwrap(), 56);
             assert!(record.bool(ff::PIN_RECHECKED).unwrap());
         }

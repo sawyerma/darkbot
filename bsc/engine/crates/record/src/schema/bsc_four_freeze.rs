@@ -511,6 +511,50 @@ pub mod four_freeze {
                 Field::rep(LIFECYCLE, "lifecycle", Text),
             ],
         };
+
+        /// v3 (Phase E review pass 2, N1): the coverage the scan really
+        /// had. Every block from `examined_from_block` to `search_to_block`
+        /// was examined; older blocks of the window were not when the
+        /// receipt budget ran out.
+        pub const EXAMINED_FROM_BLOCK: u16 = 18;
+        /// `WINDOW_COMPLETE` or `RECEIPT_BUDGET_EXHAUSTED`.
+        pub const STOP_REASON: u16 = 19;
+        /// Blocks of the whole window whose bloom can hold any scanned
+        /// event, fetched or not.
+        pub const WINDOW_BLOOM_CANDIDATES: u16 = 20;
+        /// OpenFour: the launch-only pass over the whole window (its range,
+        /// bloom candidates, receipt blocks fetched of its budget, stop
+        /// reason).
+        pub const LAUNCH_PASS: u16 = 21;
+
+        pub const V3: Schema = Schema {
+            name: "darkbot.g01.four-freeze.scan",
+            record_type: 0,
+            schema_version: 3,
+            fields: &[
+                Field::req(METHOD, "method", Text),
+                Field::req(FROM_BLOCK, "from_block", U64),
+                Field::req(SEARCH_TO_BLOCK, "search_to_block", U64),
+                Field::req(LINKED_TO_BLOCK, "linked_to_block", U64),
+                Field::req(HEADERS, "headers", U64),
+                Field::req(PARENT_LINKED, "parent_linked", Bool),
+                Field::req(BLOOM_CANDIDATE_BLOCKS, "bloom_candidate_blocks", U64),
+                Field::req(RECEIPT_BLOCKS_FETCHED, "receipt_blocks_fetched", U64),
+                Field::req(RECEIPT_BLOCK_BUDGET, "receipt_block_budget", U64),
+                Field::req(LAUNCH_FIXTURE, "launch_fixture", Text),
+                Field::req(BUY_FIXTURE, "buy_fixture", Text),
+                Field::req(LAUNCH_EVENTS_SEEN, "launch_events_seen", U64),
+                Field::req(INDIRECT_LAUNCHES_SEEN, "indirect_launches_seen", U64),
+                Field::req(SELL_FIXTURE, "sell_fixture", Text),
+                Field::req(SELL_EVENTS_SEEN, "sell_events_seen", U64),
+                Field::rep(PRESETS, "presets", Text),
+                Field::rep(LIFECYCLE, "lifecycle", Text),
+                Field::req(EXAMINED_FROM_BLOCK, "examined_from_block", U64),
+                Field::req(STOP_REASON, "stop_reason", Text),
+                Field::req(WINDOW_BLOOM_CANDIDATES, "window_bloom_candidates", U64),
+                Field::opt(LAUNCH_PASS, "launch_pass", Text),
+            ],
+        };
     }
 
     /// One required G0.1 property and its proof status.
@@ -695,9 +739,77 @@ pub mod four_freeze {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    /// v3 (Phase E review pass 2): the scan states its real coverage and
+    /// the OpenFour launch pass.
+    pub const V3: Schema = Schema {
+        name: "darkbot.g01.four-freeze.v3",
+        record_type: 51,
+        schema_version: 3,
+        fields: &[
+            Field::req(FAMILY, "family", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(REFERENCE_BLOCK, "reference_block", U64),
+            Field::req(REFERENCE_BLOCK_HASH, "reference_block_hash", B256),
+            Field::req(REFERENCE_TIMESTAMP, "reference_timestamp", U64),
+            Field::req(PIN_RECHECKED, "pin_rechecked", Bool),
+            Field::req(ENDPOINT_HOST, "endpoint_host", Text),
+            Field::opt(SOURCIFY_HOST, "sourcify_host", Text),
+            Field::req(TOOL_SHA256, "tool_sha256", B256),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(ARCHIVE_ROOT, "archive_root", Text),
+            Field::nested(
+                ARCHIVE_INPUTS,
+                "archive_inputs",
+                Presence::Repeated,
+                &archive_input::SCHEMA,
+            ),
+            Field::nested(
+                CONTRACTS,
+                "contracts",
+                Presence::Repeated,
+                &contract::SCHEMA,
+            )
+            .max(8 * 1024 * 1024),
+            Field::nested(
+                SELECTORS,
+                "selectors",
+                Presence::Repeated,
+                &selector::SCHEMA,
+            ),
+            Field::nested(
+                STATE_READS,
+                "state_reads",
+                Presence::Repeated,
+                &state_read::SCHEMA,
+            ),
+            Field::nested(FIXTURES, "fixtures", Presence::Repeated, &fixture::SCHEMA),
+            Field::nested(
+                DERIVATION,
+                "derivation",
+                Presence::Required,
+                &derivation::SCHEMA,
+            ),
+            Field::nested(SCAN, "scan", Presence::Required, &scan::V3),
+            Field::nested(
+                PROPERTIES,
+                "properties",
+                Presence::Repeated,
+                &property::SCHEMA,
+            ),
+            Field::req(FREEZE_STATUS, "freeze_status", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+        ],
+    };
 }
 
-pub const ALL: &[&Schema] = &[&four_freeze::SCHEMA, &four_freeze::V2];
+pub const ALL: &[&Schema] = &[&four_freeze::SCHEMA, &four_freeze::V2, &four_freeze::V3];
 
 #[cfg(test)]
 mod tests {
