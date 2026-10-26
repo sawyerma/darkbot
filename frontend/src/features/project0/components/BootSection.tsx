@@ -80,7 +80,7 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
       {flow.offlineBlocked.map(b => <DetailRow key={`o${b}`} title="Offline · not passed" value={b}/>)}
       <div className="p0-formgrid">
         <label>Genesis hash<input value={genesis} onChange={e => setGenesis(e.target.value)} placeholder="Mainnet genesis pin"/></label>
-        <label>Provider evidence<input value={evidence} onChange={e => setEvidence(e.target.value)} placeholder="/…/provider_evidence.p0j"/></label>
+        <label>Provider evidence · record id<input value={evidence} onChange={e => setEvidence(e.target.value)} placeholder="16 hex digits (p0ctl boot evidence import)"/></label>
         <label>Boot capture source<select value={source} disabled={flow.mode === "shadow"} onChange={e => setSource(e.target.value as "logs" | "transactions")}>
           <option value="logs">Logs</option><option value="transactions">Transactions</option></select></label>
       </div>

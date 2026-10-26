@@ -292,3 +292,125 @@ fn dec07_a_raw_capture_flow_starts_through_its_launcher_with_its_admission() {
     }
     let _ = std::fs::remove_dir_all(&d);
 }
+
+#[test]
+fn dec07_provider_evidence_is_named_by_its_imported_record_id() {
+    let d = std::env::temp_dir().join(format!("p0ctl_boot_evidence_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(d.join("operator")).unwrap();
+    let store = d.join("data/provider_evidence");
+    // The operator's typed record: a measured JSON through p0-journal's explicit import.
+    let (json, record) = (
+        d.join("operator/measured.json"),
+        d.join("operator/evidence.p0j"),
+    );
+    std::fs::write(&json, br#"{"policy":"FREE_ONLY","passed":true,"provider_binding":"b","measured_at_unix_s":1.0,"evidence_sha256":null,"allowed_rps":1.0,"available_calls":1}"#).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_p0-journal"))
+        .arg("import-provider-evidence")
+        .args([&json, &record])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for flow in ["n1", "n2", "n3", "n4"] {
+        let _ = p0ctl(&d, &offline(flow, "10m", None));
+    }
+    // An unapproved step imports nothing.
+    let network = |flow: &str, evidence: &str| {
+        p0ctl(
+            &d,
+            &[
+                "boot",
+                "network",
+                "--flow",
+                flow,
+                "--approve",
+                "0000000000000000",
+                "--genesis-hash",
+                "unused",
+                "--provider-evidence",
+                evidence,
+            ],
+        )
+    };
+    let (code, _, err) = network("n4", record.to_str().unwrap());
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("BOOT_NETWORK_APPROVAL_MISMATCH") || err.contains("BOOT_OFFLINE_BLOCKED"),
+        "{err}"
+    );
+    assert!(!store.exists(), "nothing imported for an unapproved step");
+    // The import: the id names the record's bytes; a second import is the same record.
+    let import =
+        |file: &std::path::Path| p0ctl(&d, &["boot", "evidence", "import", file.to_str().unwrap()]);
+    let (code, out, err) = import(&record);
+    assert_eq!(code, 0, "{err}");
+    let id = out.split_whitespace().nth(1).unwrap().to_string();
+    assert!(
+        out.starts_with("PROVIDER_EVIDENCE_ID ") && id.len() == 16,
+        "{out}"
+    );
+    let stored = store.join(format!("{id}.p0j"));
+    assert_eq!(
+        std::fs::read(&stored).unwrap(),
+        std::fs::read(&record).unwrap()
+    );
+    assert_eq!(import(&record).1, out);
+    // A file that is no PROVIDER_EVIDENCE record is refused and leaves nothing behind.
+    let (code, _, err) = import(&json);
+    assert_eq!(code, 2);
+    assert!(err.contains("BOOT_PROVIDER_EVIDENCE_FORMAT"), "{err}");
+    assert_eq!(std::fs::read_dir(&store).unwrap().count(), 1);
+    // The worker resolves ids only: a path, an id never imported and a changed record are each
+    // refused before any read (the step's outcome names it).
+    let worker = |flow: &str, evidence: &str| {
+        p0ctl(
+            &d,
+            &[
+                "boot",
+                "run",
+                "--flow",
+                flow,
+                "--step",
+                "NETWORK",
+                "--approve",
+                "0000000000000000",
+                "--genesis-hash",
+                "unused",
+                "--provider-evidence",
+                evidence,
+                "--capture-source",
+                "logs",
+            ],
+        )
+    };
+    let failed = |flow: &str| match boot_control::status(&d, flow).unwrap().network {
+        boot_control::StepState::Done(o) => (o.state, o.code),
+        other => panic!("{other:?}"),
+    };
+    let _ = worker("n1", stored.to_str().unwrap());
+    let (state, code) = failed("n1");
+    assert!(
+        state == "FAILED" && code.starts_with("BOOT_PROVIDER_EVIDENCE_ID_INVALID"),
+        "{code}"
+    );
+    let _ = worker("n2", "0123456789abcdef");
+    assert_eq!(
+        failed("n2"),
+        ("FAILED".into(), "BOOT_PROVIDER_EVIDENCE_UNKNOWN".into())
+    );
+    std::fs::write(&stored, b"other bytes").unwrap();
+    let _ = worker("n3", &id);
+    assert_eq!(
+        failed("n3"),
+        ("FAILED".into(), "BOOT_PROVIDER_EVIDENCE_CHANGED".into())
+    );
+    // A stored id never takes other bytes.
+    let (code, _, err) = import(&record);
+    assert_eq!(code, 2);
+    assert!(err.contains("BOOT_PROVIDER_EVIDENCE_ID_COLLISION"), "{err}");
+    let _ = std::fs::remove_dir_all(&d);
+}

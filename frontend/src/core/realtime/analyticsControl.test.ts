@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, CommandLookupResponseSchema } from "../generated/darkbot/control/v1/commands_pb";
-import { BacktestJobCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
+import { BacktestJobCommandSchema, BootNetworkCommandSchema, OptimizeJobCommandSchema, PostCaptureJobCommandSchema } from "../generated/darkbot/project0/v1/analytics_pb";
 import { SourceControlCommandSchema } from "../generated/darkbot/project0/v1/owner_pb";
-import { analyticsCommand, backtestCommand, optimizeCommand, recheck, sourceCommand, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
+import { analyticsCommand, backtestCommand, bootNetworkCommand, optimizeCommand, recheck, sourceCommand, useAnalyticsControl, verifyCommand, type PointInput } from "./analyticsControl";
 
 const session = () => new Response(null, { status: 200, headers: { "x-csrf-token": "csrf" } });
 const accepted = (phase: CommandPhase, detail = "") => new Response(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, phase, detail })));
@@ -39,6 +39,15 @@ describe("Analytics job commands", () => {
     expect("problem" in verifyCommand({ runId: "run-a", mode: "off", resume: false, maxSeconds: "", maxRamMib: "1" })).toBe(true);
   });
 
+  it("DEC-07: names the network audit's provider evidence by its record id, never by a path", () => {
+    const v = { flowId: "flow-1", token: "0123456789abcdef", genesisHash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", captureSource: "logs" as const };
+    for (const providerEvidence of ["/data/provider_evidence/89abcdef01234567.p0j", "relative.p0j", "89ABCDEF01234567", "89abcdef0123456", ""]) {
+      expect(bootNetworkCommand({ ...v, providerEvidence })).toHaveProperty("problem");
+    }
+    const ok = bootNetworkCommand({ ...v, providerEvidence: " 89abcdef01234567 " });
+    if (!("params" in ok)) throw Error(ok.problem);
+    expect(fromBinary(BootNetworkCommandSchema, ok.params).providerEvidence).toBe("89abcdef01234567");
+  });
   it("types a source mode request for known units only", () => {
     const ok = sourceCommand("geyser:publicnode", "observe");
     if (!("params" in ok)) throw new Error(ok.problem);

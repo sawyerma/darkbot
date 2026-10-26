@@ -342,7 +342,7 @@ message OptimizeJobCommand {
 // Parameters (CommandRequest.params) of project0.boot.offline: `p0ctl boot offline` — a new
 // flow; its TTL is fixed here (between runs).
 message BootOfflineCommand {
-  // econ4h | shadow
+  // econ4h | shadow | market (the desktop raw capture)
   string mode = 1;
   // 10..=120 s; unset: the registry's value.
   optional uint64 ttl_seconds = 2;
@@ -359,7 +359,9 @@ message BootNetworkCommand {
   string approved_token = 2;
   // The operator's genesis pin (an independent source; must equal the checked-in pin).
   string genesis_hash = 3;
-  // Absolute path of the imported PROVIDER_EVIDENCE record (`p0-journal import-provider-evidence`).
+  // The record id (16 lowercase hex digits) of the PROVIDER_EVIDENCE imported into the boot
+  // controller's store (`p0ctl boot evidence import`); never a path: the controller resolves it
+  // and refuses an unknown one.
   string provider_evidence = 4;
   // logs | transactions
   string capture_source = 5;

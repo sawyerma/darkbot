@@ -106,13 +106,15 @@ export function bootOfflineCommand(mode: "econ4h" | "shadow" | "market", ttlSeco
 }
 
 const TOKEN = /^[0-9a-f]{16}$/;
+/** DEC-07: an imported PROVIDER_EVIDENCE is named by its record id; the controller resolves it. */
+const EVIDENCE_ID = /^[0-9a-f]{16}$/;
 
 /** DEC-07: the operator's approval of exactly this offline token — the network audit reads Mainnet
- *  read-only with the operator's imported provider evidence. */
+ *  read-only with the operator's imported provider evidence (its record id). */
 export function bootNetworkCommand(v: { flowId: string; token: string; genesisHash: string; providerEvidence: string; captureSource: "logs" | "transactions" }): { params: Uint8Array } | { problem: string } {
   if (!TOKEN.test(v.token)) return { problem: "No offline token to approve." };
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v.genesisHash.trim())) return { problem: "Genesis hash: the base58 Mainnet genesis pin." };
-  if (!v.providerEvidence.trim().startsWith("/")) return { problem: "Provider evidence: the absolute path of the imported record." };
+  if (!EVIDENCE_ID.test(v.providerEvidence.trim())) return { problem: "Provider evidence: the record id printed by p0ctl boot evidence import (16 hex digits), never a path." };
   return {
     params: toBinary(BootNetworkCommandSchema, message(BootNetworkCommandSchema, {
       flowId: v.flowId, approvedToken: v.token, genesisHash: v.genesisHash.trim(), providerEvidence: v.providerEvidence.trim(), captureSource: v.captureSource,

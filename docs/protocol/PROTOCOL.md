@@ -1722,7 +1722,7 @@ the network audit reads Mainnet read-only with the operator&#39;s provider evide
 | flow_id | [string](#string) |  | The flow whose offline step is approved. |
 | approved_token | [string](#string) |  | The flow&#39;s offline token (16 characters) as the operator saw it. |
 | genesis_hash | [string](#string) |  | The operator&#39;s genesis pin (an independent source; must equal the checked-in pin). |
-| provider_evidence | [string](#string) |  | Absolute path of the imported PROVIDER_EVIDENCE record (`p0-journal import-provider-evidence`). |
+| provider_evidence | [string](#string) |  | The record id (16 lowercase hex digits) of the PROVIDER_EVIDENCE imported into the boot controller&#39;s store (`p0ctl boot evidence import`); never a path: the controller resolves it and refuses an unknown one. |
 | capture_source | [string](#string) |  | logs | transactions |
 
 
@@ -1739,7 +1739,7 @@ flow; its TTL is fixed here (between runs).
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| mode | [string](#string) |  | econ4h | shadow |
+| mode | [string](#string) |  | econ4h | shadow | market (the desktop raw capture) |
 | ttl_seconds | [uint64](#uint64) | optional | 10..=120 s; unset: the registry&#39;s value. |
 | duration | [string](#string) |  | The run&#39;s --duration (10m | 1h | 5h | 24h): part of the audited configuration. |
 

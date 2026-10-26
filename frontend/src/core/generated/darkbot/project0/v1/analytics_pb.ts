@@ -1159,7 +1159,7 @@ export const OptimizeJobCommandSchema: GenMessage<OptimizeJobCommand> = /*@__PUR
  */
 export type BootOfflineCommand = Message<"darkbot.project0.v1.BootOfflineCommand"> & {
   /**
-   * econ4h | shadow
+   * econ4h | shadow | market (the desktop raw capture)
    *
    * @generated from field: string mode = 1;
    */
@@ -1216,7 +1216,9 @@ export type BootNetworkCommand = Message<"darkbot.project0.v1.BootNetworkCommand
   genesisHash: string;
 
   /**
-   * Absolute path of the imported PROVIDER_EVIDENCE record (`p0-journal import-provider-evidence`).
+   * The record id (16 lowercase hex digits) of the PROVIDER_EVIDENCE imported into the boot
+   * controller's store (`p0ctl boot evidence import`); never a path: the controller resolves it
+   * and refuses an unknown one.
    *
    * @generated from field: string provider_evidence = 4;
    */

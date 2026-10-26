@@ -101,6 +101,89 @@ impl ProviderEvidence {
     }
 }
 
+/// The size bound of a typed `PROVIDER_EVIDENCE` record (its format: a few proofs).
+pub const RECORD_LIMIT: usize = 65536;
+/// DEC-07: the controller's store of imported records, content-addressed — each at
+/// `<id>.p0j`, its id the first 16 hex digits of the record's SHA-256. Commands name a record by
+/// its id, never by a path; the controller resolves it here.
+pub const STORE: &str = "data/provider_evidence";
+
+/// Whether `s` has the form of a record id (16 lowercase hex digits).
+pub fn is_id(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// A record's bytes within [`RECORD_LIMIT`]; a missing file is `missing`.
+fn read_limited(path: &std::path::Path, missing: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => missing.to_string(),
+            _ => format!("BOOT_PROVIDER_EVIDENCE_IO: {e}"),
+        })?
+        .take(RECORD_LIMIT as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|e| format!("BOOT_PROVIDER_EVIDENCE_IO: {e}"))?;
+    if data.len() > RECORD_LIMIT {
+        return Err("BOOT_PROVIDER_EVIDENCE_LIMIT".into());
+    }
+    Ok(data)
+}
+
+/// Imports a typed `PROVIDER_EVIDENCE` record (`p0-journal import-provider-evidence`) into the
+/// store under its id: the record must decode, and an existing id holds the same bytes (an
+/// import is idempotent, never an overwrite).
+pub fn import(project: &std::path::Path, record: &std::path::Path) -> Result<String, String> {
+    let io = |e: std::io::Error| format!("BOOT_PROVIDER_EVIDENCE_IO: {e}");
+    let data = read_limited(record, "BOOT_PROVIDER_EVIDENCE_IO: no such file")?;
+    let id = sha(&data)[..16].to_string();
+    let store = project.join(STORE);
+    std::fs::create_dir_all(&store).map_err(io)?;
+    let temp = store.join(format!(".{id}.{}.tmp", std::process::id()));
+    let staged = (|| {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(io)?;
+        f.write_all(&data).map_err(io)?;
+        f.sync_all().map_err(io)?;
+        // The bytes stored are the bytes checked.
+        crate::analytics::journal::read_typed_value::<ProviderEvidence>(&temp)
+            .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT".to_string())?;
+        let target = store.join(format!("{id}.p0j"));
+        match std::fs::hard_link(&temp, &target) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if read_limited(&target, "BOOT_PROVIDER_EVIDENCE_IO: no such file")? != data {
+                    return Err("BOOT_PROVIDER_EVIDENCE_ID_COLLISION".to_string());
+                }
+            }
+            Err(e) => return Err(io(e)),
+        }
+        std::fs::File::open(&store)
+            .and_then(|d| d.sync_all())
+            .map_err(io)
+    })();
+    let _ = std::fs::remove_file(&temp);
+    staged.map(|()| id)
+}
+
+/// The stored record of `id`: a malformed id or one never imported is refused, and the bytes
+/// must still be the ones the id names.
+pub fn resolve(project: &std::path::Path, id: &str) -> Result<std::path::PathBuf, String> {
+    if !is_id(id) {
+        return Err("BOOT_PROVIDER_EVIDENCE_ID_INVALID: a record id is 16 lowercase hex digits (p0ctl boot evidence import FILE.p0j)".into());
+    }
+    let path = project.join(STORE).join(format!("{id}.p0j"));
+    if sha(&read_limited(&path, "BOOT_PROVIDER_EVIDENCE_UNKNOWN")?)[..16] != *id {
+        return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
+    }
+    Ok(path)
+}
+
 /// Validate the measured FREE_ONLY evidence for every usable endpoint (a proof per endpoint
 /// binding). This checks supplied evidence, not the provider's current quota availability.
 pub fn validate_provider_evidence(

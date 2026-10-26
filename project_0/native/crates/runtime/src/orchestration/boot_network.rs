@@ -646,17 +646,18 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
     )?;
     spec.validate()?;
     // X2: the typed PROVIDER_EVIDENCE record of the explicit offline import
-    // (`p0-journal import-provider-evidence`); its bytes are bound into the audit record.
+    // (`p0-journal import-provider-evidence`); its bytes are bound into the audit record. A boot
+    // flow passes the controller's stored record its id resolves to (DEC-07).
     let proof_path = val("--provider-evidence").ok_or("BOOT_PROVIDER_EVIDENCE_REQUIRED")?;
     let read_bounded = || -> Result<Vec<u8>, String> {
         let mut data = Vec::new();
         use std::io::Read;
         std::fs::File::open(&proof_path)
             .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?
-            .take(65537)
+            .take(super::provider_evidence::RECORD_LIMIT as u64 + 1)
             .read_to_end(&mut data)
             .map_err(|_| "BOOT_PROVIDER_EVIDENCE_IO")?;
-        if data.len() > 65536 {
+        if data.len() > super::provider_evidence::RECORD_LIMIT {
             return Err("BOOT_PROVIDER_EVIDENCE_LIMIT".into());
         }
         Ok(data)

@@ -211,12 +211,10 @@ fn token_ok(s: &str) -> bool {
 fn genesis_ok(s: &str) -> bool {
     (32..=44).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
 }
-/// An absolute path without a parent step or a control character (the imported evidence).
-fn evidence_path_ok(s: &str) -> bool {
-    (2..=1024).contains(&s.len())
-        && s.starts_with('/')
-        && !s.split('/').any(|part| part == "..")
-        && !s.chars().any(char::is_control)
+/// DEC-07: the record id of an imported PROVIDER_EVIDENCE (16 lowercase hex digits); the boot
+/// controller resolves it in its store and refuses an unknown one — a path is never passed on.
+fn evidence_id_ok(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 /// A `run start --duration` value: digits and one unit (`p0ctl` checks it is a supported one).
 fn duration_ok(s: &str) -> bool {
@@ -401,7 +399,7 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
             if !valid_job_id(&c.flow_id)
                 || !token_ok(&c.approved_token)
                 || !genesis_ok(&c.genesis_hash)
-                || !evidence_path_ok(&c.provider_evidence)
+                || !evidence_id_ok(&c.provider_evidence)
                 || !capture_source_ok(&c.capture_source)
             {
                 return None;
@@ -2096,6 +2094,41 @@ mod tests {
             1,
             "the boot controller's start step, once"
         );
+        // The network approval names its provider evidence by record id: a path in the command
+        // is refused before any controller call.
+        use crate::proto::project0::v1::BootNetworkCommand;
+        let network = |n: usize, evidence: &str| CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: uuid(n),
+            action: BOOT_NETWORK.into(),
+            resource_id: String::new(),
+            expected: None,
+            params: BootNetworkCommand {
+                flow_id: "flow-2".into(),
+                approved_token: "0123456789abcdef".into(),
+                genesis_hash: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d".into(),
+                provider_evidence: evidence.into(),
+                capture_source: "logs".into(),
+            }
+            .encode_to_vec()
+            .into(),
+            issued_at_unix_ns: now(),
+        };
+        assert!(refused(
+            &control
+                .execute(&network(9_403, "/etc/provider_evidence.p0j"))
+                .await,
+            CommandRejectReason::InvalidParams
+        ));
+        assert_eq!(env.executions(), 1, "a path reaches no controller");
+        let by_id = control.execute(&network(9_404, "89abcdef01234567")).await;
+        assert_eq!(
+            by_id.status,
+            CommandStatus::Accepted as i32,
+            "{}",
+            by_id.detail
+        );
+        assert_eq!(env.executions(), 2);
     }
     #[tokio::test]
     async fn a_damaged_ledger_record_refuses_instead_of_running_again() {
@@ -2573,10 +2606,11 @@ mod tests {
         let ok = job_args(&req(
             BOOT_NETWORK,
             "",
-            network("0123456789abcdef", "/data/evidence.p0j"),
+            network("0123456789abcdef", "89abcdef01234567"),
             None,
         ))
         .unwrap();
+        assert_eq!(ok[9..11], ["--provider-evidence", "89abcdef01234567"]);
         assert_eq!(
             ok[..7],
             [
@@ -2590,10 +2624,15 @@ mod tests {
             ]
         );
         for (token, evidence) in [
-            ("0123456789ABCDEF", "/e.p0j"),
-            ("0123", "/e.p0j"),
+            ("0123456789ABCDEF", "89abcdef01234567"),
+            ("0123", "89abcdef01234567"),
+            // DEC-07: the evidence is a record id, never a path.
+            ("0123456789abcdef", "/data/evidence.p0j"),
             ("0123456789abcdef", "relative.p0j"),
             ("0123456789abcdef", "/a/../b.p0j"),
+            ("0123456789abcdef", "89ABCDEF01234567"),
+            ("0123456789abcdef", "89abcdef0123456"),
+            ("0123456789abcdef", "/89abcdef0123456"),
         ] {
             assert_eq!(
                 job_args(&req(BOOT_NETWORK, "", network(token, evidence), None)),

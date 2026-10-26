@@ -947,13 +947,38 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow|market] --duration D [-- OPERATIONAL_ARGS...]
-  | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence FILE.p0j [--capture-source logs|transactions]
-  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence FILE.p0j]
+  | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence RECORD_ID|FILE.p0j [--capture-source logs|transactions]
+  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence RECORD_ID|FILE.p0j]
+  | p0ctl boot evidence import FILE.p0j
   | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]
 The flow's duration, mode and operational arguments are fixed at its offline step and its capture
 source at the network step: the audited identity is exactly the started one. Mode market is the
 desktop raw capture (its environment files, no operational arguments), started through its
-launcher with the admission of exactly the approved record.";
+launcher with the admission of exactly the approved record. Provider evidence is named by the
+record id of its import into the controller's store (`boot evidence import`, the typed record of
+p0-journal import-provider-evidence); a local file given here is imported first.";
+
+/// DEC-07: a boot step names provider evidence by its record id; a local record file (the
+/// terminal) is imported into the controller's store first. An id never imported is refused.
+fn evidence_id(project: &Path, value: &str) -> Result<String, String> {
+    use darkbot_runner::orchestration::provider_evidence as pe;
+    if pe::is_id(value) {
+        pe::resolve(project, value)?;
+        return Ok(value.to_string());
+    }
+    let path = Path::new(value);
+    if !path.is_file() {
+        return Err(format!("BOOT_PROVIDER_EVIDENCE_UNKNOWN: {value} is neither an imported record id nor a local record file"));
+    }
+    let id = pe::import(project, path)?;
+    println!("[p0ctl] provider evidence {value} imported as record {id}");
+    Ok(id)
+}
+/// The stored record a worker's evidence id names (the worker takes ids only).
+fn evidence_path(project: &Path, id: &str) -> Result<String, String> {
+    darkbot_runner::orchestration::provider_evidence::resolve(project, id)
+        .map(|p| p.display().to_string())
+}
 
 /// DEC-07: the modes a boot flow starts — the runtime's (`run start`: econ4h, shadow) and the
 /// desktop raw capture's (market).
@@ -1112,7 +1137,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             if blocked {
                 println!("[p0ctl] boot flow {flow_id}: offline BLOCKED; nothing to approve");
             } else {
-                println!("[p0ctl] boot flow {flow_id}: TTL {ttl_seconds} s [source {ttl_source}]; approve the network audit: p0ctl boot network --flow {flow_id} --approve {token} --genesis-hash HASH --provider-evidence FILE.p0j");
+                println!("[p0ctl] boot flow {flow_id}: TTL {ttl_seconds} s [source {ttl_source}]; approve the network audit: p0ctl boot network --flow {flow_id} --approve {token} --genesis-hash HASH --provider-evidence RECORD_ID|FILE.p0j");
             }
             Ok(!blocked)
         }
@@ -1135,13 +1160,15 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 if s.flow.mode == RunMode::Shadow.name() && source != "logs" {
                     return Err("BOOT_CAPTURE_SOURCE_SHADOW: a Shadow run captures logs".into());
                 }
+                // The approval first: nothing is imported for an unapproved step.
+                bc::check_approval(&s, bc::NETWORK, &token)?;
                 worker_args.extend([
                     "--capture-source".to_string(),
                     source,
                     "--genesis-hash".to_string(),
                     need("--genesis-hash")?,
                     "--provider-evidence".to_string(),
-                    need("--provider-evidence")?,
+                    evidence_id(project, &need("--provider-evidence")?)?,
                 ]);
                 bc::NETWORK
             } else {
@@ -1169,12 +1196,16 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 worker_args.extend(["--chain-verify".to_string(), verify.clone()]);
                 match verify.as_str() {
                     "off" => {}
-                    "strict" => worker_args.extend([
-                        "--provider-evidence".to_string(),
-                        given(options, "--provider-evidence")?.ok_or(
+                    "strict" => {
+                        let evidence = given(options, "--provider-evidence")?.ok_or(
                             "STRICT_PROVIDER_EVIDENCE_REQUIRED: online strict verification needs the operator's --provider-evidence",
-                        )?,
-                    ]),
+                        )?;
+                        bc::check_approval(&s, bc::START, &token)?;
+                        worker_args.extend([
+                            "--provider-evidence".to_string(),
+                            evidence_id(project, &evidence)?,
+                        ])
+                    }
                     other => return Err(format!("CHAIN_VERIFY_{other}_BLOCKED: off|strict")),
                 }
                 bc::START
@@ -1206,7 +1237,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             "--genesis-hash".into(),
                             need("--genesis-hash")?,
                             "--provider-evidence".into(),
-                            need("--provider-evidence")?,
+                            evidence_path(project, &need("--provider-evidence")?)?,
                             "--capture-source".into(),
                             capture_source()?,
                             "--duration".into(),
@@ -1266,8 +1297,11 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             "--chain-verify".into(),
                             need("--chain-verify")?,
                         ]);
-                        if let Some(evidence) = given(options, "--provider-evidence")? {
-                            call.extend(["--provider-evidence".into(), evidence]);
+                        if let Some(id) = given(options, "--provider-evidence")? {
+                            call.extend([
+                                "--provider-evidence".into(),
+                                evidence_path(project, &id)?,
+                            ]);
                         }
                     }
                     call.push("--".into());
@@ -1283,6 +1317,15 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 outcome.state, outcome.code
             );
             Ok(outcome.state == bc::COMPLETED)
+        }
+        Some("evidence") if options.get(1).map(String::as_str) == Some("import") => {
+            let file = options
+                .get(2)
+                .ok_or_else(|| format!("FILE.p0j required\n{BOOT_USAGE}"))?;
+            let id =
+                darkbot_runner::orchestration::provider_evidence::import(project, Path::new(file))?;
+            println!("PROVIDER_EVIDENCE_ID {id} (p0ctl boot network … --provider-evidence {id})");
+            Ok(true)
         }
         Some("cancel") => {
             let pid = bc::cancel(project, &need("--flow")?)?;
