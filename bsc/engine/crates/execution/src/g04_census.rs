@@ -133,8 +133,11 @@ fn flag(byte: u8) -> Option<bool> {
 }
 
 fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
+    if p.len() != CANONICAL_LAUNCH_LEN || p[0] != b'C' {
+        return None;
+    }
     // Every venue the writer knows (Phase E: OpenFour is byte 3).
-    let venue = venue_of_byte(p[1]).filter(|_| p.len() == CANONICAL_LAUNCH_LEN && p[0] == b'C')?;
+    let venue = venue_of_byte(p[1])?;
     let buys_known = flag(p[103])?;
     let class = p[108];
     if !(1..=5).contains(&class) {
@@ -262,10 +265,12 @@ fn replay(
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
             (RecordKind::Canonical, Some(b'P')) if p.len() == 74 => {
-                if let (Some(block), Some(tx), Some(_)) =
-                    (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1]))
-                {
-                    received.insert((block, tx));
+                match (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1])) {
+                    (Some(block), Some(tx), Some(_)) => {
+                        received.insert((block, tx));
+                    }
+                    // An unknown venue: counted, never silently skipped.
+                    _ => window.unparsed_records += 1,
                 }
             }
             (RecordKind::Canonical, Some(b'C')) => match launch_record(p, record.timestamp_ns) {
@@ -276,8 +281,12 @@ fn replay(
                 None => window.unparsed_records += 1,
             },
             (RecordKind::Canonical, Some(b'O')) if p.len() == 74 => {
-                if let (Some(block), Some(tx), Some(venue)) =
+                let (Some(block), Some(tx), Some(venue)) =
                     (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1]))
+                else {
+                    window.unparsed_records += 1;
+                    continue;
+                };
                 {
                     resolved.insert((block, tx));
                     launches.retain(|l| !(l.block_hash == block && l.tx_hash == tx));
@@ -638,6 +647,44 @@ mod tests {
         let path = j.path().to_path_buf();
         j.finish().unwrap();
         path
+    }
+
+    /// Phase E review L1: a short `C` record and launch records of an
+    /// unknown venue are counted as unparsed, never a panic and never
+    /// silently skipped (before: a one-byte `C` payload indexed past its end
+    /// and panicked the census; unknown-venue `P`/`O` records vanished).
+    #[test]
+    fn short_and_unknown_venue_launch_records_are_unparsed() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-short-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut pending = pending_launch_payload(&launch(Venue::Flap, 10, 1, None, 100));
+        pending[1] = 9;
+        let mut orphan = orphaned_launch_payload(&launch(Venue::Flap, 10, 2, None, 100));
+        orphan[1] = 9;
+        let records = vec![
+            (
+                RecordKind::Canonical,
+                1,
+                window_payload(b'H', 10, &[10; 32]),
+            ),
+            (RecordKind::Canonical, 2, vec![b'C']),
+            (RecordKind::Canonical, 3, pending),
+            (RecordKind::Canonical, 4, orphan),
+            (
+                RecordKind::Canonical,
+                5,
+                window_payload(b'E', 10, &[10; 32]),
+            ),
+            (RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()),
+        ];
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(c.windows[0].unparsed_records, 3);
+        assert_eq!(
+            (c.flap_launches, c.four_launches, c.orphaned_launches),
+            (0, 0, 0)
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Phase E: OpenFour launches (journal venue byte 3) replay with the

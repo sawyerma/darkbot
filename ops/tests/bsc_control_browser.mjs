@@ -110,7 +110,7 @@ try{
  assert(!(await srcLine('BSC_INGRESS_GETH').innerText()).includes('HEALTHY'),'GETH not connected (OFF)');
  // The canonical follower (free public RPC) follows real Mainnet blocks: Monitoring §6.
  await until(async()=> {const t=await p.locator('.g-line',{hasText:'Canonical follower'}).first().innerText();return t.includes('FOLLOWING')&&/head \d+/.test(t)&&/blocks [1-9]/.test(t);},'canonical follower FOLLOWING real blocks');
- assert((await p.locator('.g-line',{hasText:'Canonical launches (G0.4 denominator)'}).first().innerText()).includes('Flap'),'G0.4 denominator line');
+ {const t=await p.locator('.g-line',{hasText:'Canonical launches (G0.4 denominator)'}).first().innerText();assert(t.includes('Flap')&&/Four \d+ \(token derived pending \d+\)/.test(t),'G0.4 denominator line with the Phase E Four count: '+t);}
  await requestSource('BSC_INGRESS_DRPC','LIVE','effective=BLOCKED block_reason=ECONOMIC_LIVE_NOT_AUTHORIZED');
  await until(async()=> {const t=await srcLine('BSC_INGRESS_DRPC').innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('ECONOMIC_LIVE_NOT_AUTHORIZED');},'DRPC LIVE stays BLOCKED');
  await requestSource('BSC_INGRESS_48CLUB','SHADOW','effective=BLOCKED block_reason=SOURCE_ACCESS_UNQUALIFIED');
