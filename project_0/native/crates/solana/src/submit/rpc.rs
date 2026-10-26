@@ -552,6 +552,7 @@ fn sim_result_of(value: serde_json::Value) -> SimResult {
     match r.value.err {
         None => SimResult::Ok {
             units_consumed: r.value.units_consumed,
+            context_slot: Some(r.context.slot),
         },
         Some(e) => {
             // F1: bounded, redacted logs for the native journal only.
@@ -931,7 +932,8 @@ mod q3_error_text_tests {
         assert!(matches!(
             sim_result_of(ok),
             SimResult::Ok {
-                units_consumed: Some(3)
+                units_consumed: Some(3),
+                context_slot: Some(5)
             }
         ));
         use solana_sdk::instruction::InstructionError as I;

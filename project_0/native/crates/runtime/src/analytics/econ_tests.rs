@@ -753,6 +753,7 @@ impl SubmissionAdapter for CountingSubmitter {
         self.sims.fetch_add(1, Ordering::Relaxed);
         SimResult::Ok {
             units_consumed: Some(100),
+            context_slot: None,
         }
     }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -1456,6 +1457,10 @@ struct HandoffSubmitter {
     transport_fails: bool,
     /// V2-15: how long the simulation takes.
     simulate_delay: Duration,
+    /// DEC-02: the slot the first simulation reports (`live_evaluate` evaluates at slot 10),
+    /// and every later one.
+    context_slot: Option<u64>,
+    context_slot_again: Option<u64>,
 }
 impl SubmissionAdapter for HandoffSubmitter {
     fn path(&self) -> SubmissionPath {
@@ -1475,9 +1480,14 @@ impl SubmissionAdapter for HandoffSubmitter {
     fn simulate(&self, tx: &VersionedTransaction, _: std::time::Instant) -> SimResult {
         assert!(tx.verify_and_hash_message().is_ok());
         std::thread::sleep(self.simulate_delay);
-        self.sims.fetch_add(1, Ordering::Relaxed);
+        let earlier = self.sims.fetch_add(1, Ordering::Relaxed);
         SimResult::Ok {
             units_consumed: Some(100),
+            context_slot: if earlier == 0 {
+                self.context_slot
+            } else {
+                self.context_slot_again
+            },
         }
     }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -1660,6 +1670,7 @@ fn admission(
         reserved_elsewhere: Default::default(),
         policy_reserve: Default::default(),
         valid_until_slot: 160,
+        simulation: Default::default(),
     }
 }
 /// V2-15 (P9-01b): the handoff is validated against the time and slot at the handoff, not at
@@ -1692,6 +1703,8 @@ fn v2_15_a_state_aged_during_the_simulation_is_never_handed_off() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::from_millis(120),
+        context_slot: Some(10),
+        context_slot_again: Some(10),
     };
     let dir = std::env::temp_dir().join(format!("p0-v2-15-{}", Pubkey::new_unique()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -1742,6 +1755,8 @@ fn b4_admission_binds_a_nonzero_record_rent() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::ZERO,
+        context_slot: Some(10),
+        context_slot_again: Some(10),
     };
     ADMISSION_RENT.with(|r| r.set(3_000));
     let dir = |n: &str| {
@@ -1818,6 +1833,8 @@ fn v9_safety_denials_are_their_own_cause() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::ZERO,
+        context_slot: Some(10),
+        context_slot_again: Some(10),
     };
     // Preview: no capital at all — the only plan is refused before the economics act.
     let mut s = safety(0, u64::MAX);
@@ -1898,6 +1915,8 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails,
         simulate_delay: Duration::ZERO,
+        context_slot: Some(10),
+        context_slot_again: Some(10),
     };
     let dir = |n: &str| {
         let d = std::env::temp_dir().join(format!("p0-fe04-adm-{n}-{}", Pubkey::new_unique()));
@@ -1914,8 +1933,12 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     assert_eq!(ok.submits.load(Ordering::Relaxed), 1);
     assert_eq!(
         ok.sims.load(Ordering::Relaxed),
-        2,
-        "pipeline + exact payload simulation"
+        1,
+        "DEC-02: the pipeline's simulation of the exact payload is reused at the handoff"
+    );
+    assert_eq!(
+        (fe04.simulation.reused, fe04.simulation.resimulated),
+        (1, 0)
     );
     assert!(r.timing.t_handoff_ns.is_some());
     let hold = fe04.journal.active_hold().unwrap();
@@ -2321,6 +2344,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
         fn simulate(&self, _: &VersionedTransaction, _: std::time::Instant) -> SimResult {
             SimResult::Ok {
                 units_consumed: Some(100),
+                context_slot: None,
             }
         }
         fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -3123,6 +3147,7 @@ impl SubmissionAdapter for SlowSubmitter {
         std::thread::sleep(self.delay);
         SimResult::Ok {
             units_consumed: Some(100),
+            context_slot: None,
         }
     }
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
@@ -4457,11 +4482,14 @@ fn dec12_the_fe04_handoff_is_bounded_by_the_candidate_deadline() {
             true,
         )
     };
+    // A node behind the state slot: the handoff simulates again (DEC-02), past the deadline.
     let slow = HandoffSubmitter {
         submits: Arc::new(AtomicU64::new(0)),
         sims: Arc::new(AtomicU64::new(0)),
         transport_fails: false,
         simulate_delay: Duration::from_millis(100),
+        context_slot: Some(5),
+        context_slot_again: Some(10),
     };
     for (deadline_ns, sent) in [(150_000_000u64, false), (60_000_000_000, true)] {
         let dir = std::env::temp_dir().join(format!("p0-dec12-{}", Pubkey::new_unique()));
@@ -4494,6 +4522,147 @@ fn dec12_the_fe04_handoff_is_bounded_by_the_candidate_deadline() {
             assert_eq!(submits, 0);
             assert!(fe04.journal.active_hold().is_none(), "nothing reserved");
             assert_eq!(safety.capital_in_use(), 0, "Safety released");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// DEC-02 (V2-15/P7-03): the FE-04 handoff reuses the pipeline's simulation of the exact signed
+/// payload — exactly one simulation (before: two) — while every binding holds; a node behind the
+/// state slot is simulated again within the deadline; without time left it is refused before
+/// anything is reserved, sent or held (the Safety reservation released).
+#[test]
+fn dec02_the_handoff_reuses_the_bound_simulation_or_simulates_again_or_refuses() {
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let open_safety = || {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    // (context slots of the first and every later simulation, simulation time, deadline) ->
+    // (simulations, handed off, reused/new/refused, last reuse refusal, refusal of the handoff)
+    type Case = (
+        (Option<u64>, Option<u64>),
+        u64,
+        u64,
+        u64,
+        bool,
+        (u64, u64, u64),
+        Option<&'static str>,
+        Option<&'static str>,
+    );
+    let cases: [Case; 5] = [
+        (
+            (Some(10), Some(10)),
+            0,
+            u64::MAX,
+            1,
+            true,
+            (1, 0, 0),
+            None,
+            None,
+        ),
+        (
+            (Some(5), Some(10)),
+            0,
+            u64::MAX,
+            2,
+            true,
+            (0, 1, 0),
+            Some("SIM_REUSE_CONTEXT_SLOT"),
+            None,
+        ),
+        (
+            (None, Some(10)),
+            0,
+            u64::MAX,
+            2,
+            true,
+            (0, 1, 0),
+            Some("SIM_REUSE_CONTEXT_SLOT"),
+            None,
+        ),
+        (
+            (Some(5), Some(9)),
+            0,
+            u64::MAX,
+            2,
+            false,
+            (0, 1, 1),
+            Some("SIM_REUSE_CONTEXT_SLOT"),
+            Some("FE04_SIMULATION_CONTEXT_BEHIND"),
+        ),
+        (
+            (Some(5), Some(10)),
+            160,
+            150_000_000,
+            1,
+            false,
+            (0, 0, 1),
+            Some("SIM_REUSE_CONTEXT_SLOT"),
+            Some("FE04_SIMULATION_NOT_REUSABLE_NO_TIME"),
+        ),
+    ];
+    for (
+        (context_slot, context_slot_again),
+        delay_ms,
+        deadline_ns,
+        sims,
+        submitted,
+        stats,
+        refusal,
+        refused,
+    ) in cases
+    {
+        let adapter = HandoffSubmitter {
+            submits: Arc::new(AtomicU64::new(0)),
+            sims: Arc::new(AtomicU64::new(0)),
+            transport_fails: false,
+            simulate_delay: Duration::from_millis(delay_ms),
+            context_slot,
+            context_slot_again,
+        };
+        let dir = std::env::temp_dir().join(format!("p0-dec02-{}", Pubkey::new_unique()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut safety = open_safety();
+        let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+        let r = live_evaluate_within(
+            &adapter,
+            &mut safety,
+            Some(&mut fe04),
+            &payer,
+            target,
+            deadline_ns,
+        );
+        let case = format!("{context_slot:?} {delay_ms} ms");
+        assert_eq!(adapter.sims.load(Ordering::Relaxed), sims, "{case}");
+        let s = fe04.simulation;
+        assert_eq!((s.reused, s.resimulated, s.refused), stats, "{case}");
+        assert_eq!(s.last_reuse_refusal, refusal, "{case}");
+        if submitted {
+            assert_eq!(r.decision, Decision::Submitted, "{case}: {:?}", r.reason);
+            assert_eq!(adapter.submits.load(Ordering::Relaxed), 1, "{case}");
+        } else {
+            assert_eq!(r.reason_text().as_deref(), refused, "{case}");
+            assert_eq!(adapter.submits.load(Ordering::Relaxed), 0, "{case}");
+            assert!(fe04.journal.active_hold().is_none(), "{case}: nothing held");
+            assert_eq!(safety.capital_in_use(), 0, "{case}: Safety released");
         }
         let _ = std::fs::remove_dir_all(dir);
     }

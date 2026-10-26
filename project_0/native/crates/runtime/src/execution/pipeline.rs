@@ -2,6 +2,7 @@
 
 use crate::analytics::record::{Decision, LossReason, OpportunityRecord};
 use crate::analytics::rejection::{PlanCause, PlanInvalid, PlanRejection, Rejection};
+use crate::execution::one_shot::transport::{SignedPayload, SimulationBinding};
 use darkbot_common::timing::{Clock, Stage, Timeline};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
@@ -1184,11 +1185,40 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(Rejection::RpcDeadlineBeforeSimulation);
             return rec.with_timeline(&tl);
         }
+        // DEC-02: a LIVE candidate with an FE-04 admission simulates its exact signed payload
+        // once — the typed token the admission reuses at the handoff while it stays bound. A
+        // payload that cannot be formed is simulated as before (the admission refuses it).
+        let live_payload = match (self.mode, self.fe04.as_deref()) {
+            (Mode::Live, Some(fe04)) => {
+                let (path, txs) = if use_bundle {
+                    (SubmissionPath::JitoBundle, bundle_txs.clone())
+                } else {
+                    (self.submitter.path(), vec![built.tx.clone()])
+                };
+                SignedPayload::new(txs, path, tx::payer_of(self.payer))
+                    .ok()
+                    .map(|payload| {
+                        let binding = SimulationBinding {
+                            state_generation: fe04.state_generation,
+                            program_data_hash: fe04.program_data_hash.clone(),
+                            state_valid,
+                        };
+                        (payload, binding)
+                    })
+            }
+            _ => None,
+        };
+        let mut simulated_payload = None;
         let simulation_started = Instant::now();
-        let sim = if use_bundle {
-            self.submitter.simulate_bundle(&bundle_txs, deadline)
-        } else {
-            self.submitter.simulate(&built.tx, deadline)
+        let sim = match live_payload
+            .map(|(payload, binding)| payload.simulate_bound(self.submitter, deadline, binding))
+        {
+            Some(Ok((result, token))) => {
+                simulated_payload = token;
+                result
+            }
+            _ if use_bundle => self.submitter.simulate_bundle(&bundle_txs, deadline),
+            _ => self.submitter.simulate(&built.tx, deadline),
         };
         record_timing(
             &SIMULATION_CALLS,
@@ -1200,7 +1230,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .min(u64::MAX as u128) as u64,
         );
         match sim {
-            SimResult::Ok { units_consumed } => {
+            SimResult::Ok { units_consumed, .. } => {
                 rec.simulation_result = Some("PASS".into());
                 rec.simulated_cu = units_consumed;
             }
@@ -1325,6 +1355,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 state_valid,
                 deadline,
                 t_handoff_ns,
+                simulated: simulated_payload,
             },
             self.submitter,
         );

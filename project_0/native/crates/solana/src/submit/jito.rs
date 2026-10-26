@@ -311,7 +311,10 @@ impl SubmissionAdapter for JitoAdapter {
                                 .filter_map(|t| t.get("unitsConsumed").and_then(|u| u.as_u64()))
                                 .sum()
                         });
-                    super::SimResult::Ok { units_consumed: cu }
+                    super::SimResult::Ok {
+                        units_consumed: cu,
+                        context_slot: v.pointer("/context/slot").and_then(Value::as_u64),
+                    }
                 } else {
                     super::SimResult::Failed("BUNDLE_SIMULATION_FAILED".into())
                 }

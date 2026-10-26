@@ -27,6 +27,18 @@ pub struct Fe04Admission {
     pub policy_reserve: BTreeMap<String, u64>,
     /// The last slot at which the signed blockhash is valid.
     pub valid_until_slot: u64,
+    /// DEC-02: what became of the pipeline's simulations at the handoff.
+    pub simulation: SimulationStats,
+}
+
+/// DEC-02: the pipeline simulation reused, a new simulation, or a refusal without one (no
+/// time left), and the condition that last prevented a reuse.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SimulationStats {
+    pub reused: u64,
+    pub resimulated: u64,
+    pub refused: u64,
+    pub last_reuse_refusal: Option<&'static str>,
 }
 
 /// FE-02: the economics an intent binds are complete — a realizable value and the rent/token
@@ -58,6 +70,8 @@ pub struct Candidate<'a> {
     pub state_valid: bool,
     pub deadline: std::time::Instant,
     pub t_handoff_ns: u64,
+    /// DEC-02: the pipeline's simulation of exactly `txs`, when it passed (`None`: none).
+    pub simulated: Option<super::transport::SimulatedPayload<'a>>,
 }
 
 #[derive(Debug)]
@@ -114,9 +128,41 @@ impl Fe04Admission {
             payload.signatures().to_vec(),
             payload.wire_sha256().to_string(),
         );
-        let simulated = match payload.simulate(adapter, c.deadline) {
-            Ok(s) => s,
-            Err(e) => return Admission::Refused(e),
+        // DEC-02: the pipeline's simulation stands for the handoff only while every binding
+        // condition holds; otherwise a new one within the deadline, or a refusal without a hold.
+        let binding = super::transport::SimulationBinding {
+            state_generation: self.state_generation,
+            program_data_hash: self.program_data_hash.clone(),
+            state_valid: c.state_valid,
+        };
+        let max_age = std::time::Duration::from_millis(a.max_state_age_ms);
+        let refusal = c.simulated.as_ref().map_or(Some("SIM_REUSE_NONE"), |s| {
+            s.reuse_refusal(&payload, c.slot, &binding, max_age)
+        });
+        let simulated = match (refusal, c.simulated) {
+            (None, Some(simulated)) => {
+                self.simulation.reused = self.simulation.reused.saturating_add(1);
+                simulated
+            }
+            (refusal, _) => {
+                self.simulation.last_reuse_refusal = refusal;
+                if std::time::Instant::now() >= c.deadline {
+                    self.simulation.refused = self.simulation.refused.saturating_add(1);
+                    return refuse("FE04_SIMULATION_NOT_REUSABLE_NO_TIME");
+                }
+                self.simulation.resimulated = self.simulation.resimulated.saturating_add(1);
+                let simulated = match payload.simulate(adapter, c.deadline, binding) {
+                    Ok(s) => s,
+                    Err(e) => return Admission::Refused(e),
+                };
+                // The new simulation is bound like a reused one: a node still behind the state
+                // slot is refused before anything is reserved.
+                if !simulated.context_reaches(c.slot) {
+                    self.simulation.refused = self.simulation.refused.saturating_add(1);
+                    return refuse("FE04_SIMULATION_CONTEXT_BEHIND");
+                }
+                simulated
+            }
         };
         // DEC-12: the handoff is bounded by the candidate's deadline; past it nothing is reserved.
         if std::time::Instant::now() >= c.deadline {
@@ -159,8 +205,8 @@ impl Fe04Admission {
             policy_reserve: self.policy_reserve.clone(),
             health_funding_route_fee_exit_known: economics_known(&c.plan.input),
             canonical_fresh_no_gap_or_fork: c.state_valid,
-            exact_signed_payload_simulated: true,
-            bundle_simulated: c.path == SubmissionPath::JitoBundle,
+            exact_signed_payload_simulated: simulated.exact_signed_payload_simulated(),
+            bundle_simulated: simulated.bundle_simulated(),
         };
         if let Err(e) = self
             .journal

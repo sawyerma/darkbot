@@ -2046,7 +2046,16 @@ mod tests {
             simulated: Default::default(),
             simulation: darkbot_solana::submit::SimResult::Ok {
                 units_consumed: Some(10),
+                context_slot: None,
             },
+        }
+    }
+    /// DEC-02: the binding of a test simulation (the generations of `setup`'s `Current`).
+    fn test_binding() -> transport::SimulationBinding {
+        transport::SimulationBinding {
+            state_generation: 1,
+            program_data_hash: "pd".into(),
+            state_valid: true,
         }
     }
     fn signed(
@@ -2089,7 +2098,9 @@ mod tests {
                 i.signed_wire_sha256 = payload.wire_sha256().into();
                 c.bundle_simulated = path_kind == SubmissionPath::JitoBundle;
                 let adapter = adapter(path_kind, failure);
-                let simulated = payload.simulate(&adapter, test_deadline()).unwrap();
+                let simulated = payload
+                    .simulate(&adapter, test_deadline(), test_binding())
+                    .unwrap();
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
                 j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
                     .unwrap();
@@ -2132,7 +2143,9 @@ mod tests {
         i.signatures = payload.signatures().to_vec();
         i.signed_wire_sha256 = payload.wire_sha256().into();
         let adapter = adapter(SubmissionPath::Rpc, 0);
-        let simulated = payload.simulate(&adapter, test_deadline()).unwrap();
+        let simulated = payload
+            .simulate(&adapter, test_deadline(), test_binding())
+            .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
             .unwrap();
@@ -2149,6 +2162,101 @@ mod tests {
         assert_eq!(adapter.calls.get(), 1);
         drop(j);
         fs::remove_dir_all(dir).unwrap();
+    }
+    /// DEC-02: a simulation stands for a handoff only while every condition holds — the exact
+    /// payload (another transaction, or the same one on another path, is another wire digest),
+    /// a context slot at or after the state slot (unknown is not after), the binding unchanged
+    /// (state generation, ProgramData, fresh state without gap), an age within the approval —
+    /// and only a typed `Ok` makes a token, a bundle only from a bundle simulation; the token's
+    /// `exact_signed_payload_simulated` is derived from it.
+    #[test]
+    fn dec02_a_simulation_is_reused_only_while_every_binding_holds() {
+        use darkbot_solana::submit::{SimResult, SubmissionPath};
+        use solana_sdk::signature::{Keypair, Signer};
+        use std::time::Duration;
+        let payer = Keypair::new();
+        let tx = signed(&payer);
+        let payload =
+            |txs: Vec<_>, path| transport::SignedPayload::new(txs, path, payer.pubkey()).unwrap();
+        let mut sim = adapter(SubmissionPath::Rpc, 0);
+        sim.simulation = SimResult::Ok {
+            units_consumed: Some(10),
+            context_slot: Some(10),
+        };
+        let token = payload(vec![tx.clone()], SubmissionPath::Rpc)
+            .simulate_bound(&sim, test_deadline(), test_binding())
+            .unwrap()
+            .1
+            .unwrap();
+        assert!(token.exact_signed_payload_simulated());
+        let same = payload(vec![tx.clone()], SubmissionPath::Rpc);
+        let minute = Duration::from_secs(60);
+        assert_eq!(
+            token.reuse_refusal(&same, 10, &test_binding(), minute),
+            None
+        );
+        let other = payload(vec![signed(&payer)], SubmissionPath::Rpc);
+        let bundled = payload(vec![tx.clone()], SubmissionPath::JitoBundle);
+        for p in [&other, &bundled] {
+            assert_eq!(
+                token.reuse_refusal(p, 10, &test_binding(), minute),
+                Some("SIM_REUSE_WIRE_DIGEST")
+            );
+        }
+        assert_eq!(
+            token.reuse_refusal(&same, 11, &test_binding(), minute),
+            Some("SIM_REUSE_CONTEXT_SLOT")
+        );
+        let changed = |edit: fn(&mut transport::SimulationBinding)| {
+            let mut b = test_binding();
+            edit(&mut b);
+            b
+        };
+        for b in [
+            changed(|b| b.state_generation += 1),
+            changed(|b| b.program_data_hash = "other".into()),
+            changed(|b| b.state_valid = false),
+        ] {
+            assert_eq!(
+                token.reuse_refusal(&same, 10, &b, minute),
+                Some("SIM_REUSE_STATE_CHANGED")
+            );
+        }
+        std::thread::sleep(Duration::from_millis(2));
+        assert_eq!(
+            token.reuse_refusal(&same, 10, &test_binding(), Duration::from_millis(1)),
+            Some("SIM_REUSE_AGE")
+        );
+        // An unknown context slot is never at or after the state slot.
+        sim.simulation = SimResult::Ok {
+            units_consumed: None,
+            context_slot: None,
+        };
+        let unknown = payload(vec![tx.clone()], SubmissionPath::Rpc)
+            .simulate_bound(&sim, test_deadline(), test_binding())
+            .unwrap()
+            .1
+            .unwrap();
+        assert_eq!(
+            unknown.reuse_refusal(&same, 0, &test_binding(), minute),
+            Some("SIM_REUSE_CONTEXT_SLOT")
+        );
+        // No token without a typed Ok; a bundle is simulated only as a bundle.
+        for result in [
+            SimResult::Failed("X".into()),
+            SimResult::Unavailable("u".into()),
+            SimResult::Deadline,
+            SimResult::BudgetRejected("RPS"),
+        ] {
+            sim.simulation = result.clone();
+            let (back, token) = payload(vec![tx.clone()], SubmissionPath::Rpc)
+                .simulate_bound(&sim, test_deadline(), test_binding())
+                .unwrap();
+            assert_eq!((back, token.is_none()), (result, true));
+        }
+        assert!(payload(vec![tx], SubmissionPath::JitoBundle)
+            .simulate_bound(&sim, test_deadline(), test_binding())
+            .is_err());
     }
     /// L1: an owner taking the wallet while the previous one drops sees the complete durable
     /// journal (the writer closes before the lock is released), never a half-closed one.
@@ -2295,8 +2403,12 @@ mod tests {
         i.signatures = original.signatures().to_vec();
         i.signed_wire_sha256 = original.wire_sha256().into();
         let adapter = adapter(SubmissionPath::JitoBundle, 0);
-        let original = original.simulate(&adapter, test_deadline()).unwrap();
-        let reversed = reversed.simulate(&adapter, test_deadline()).unwrap();
+        let original = original
+            .simulate(&adapter, test_deadline(), test_binding())
+            .unwrap();
+        let reversed = reversed
+            .simulate(&adapter, test_deadline(), test_binding())
+            .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         assert!(j
             .reserve_payload(a.clone(), i.clone(), &c, &reversed)
@@ -2324,7 +2436,7 @@ mod tests {
                 payer.pubkey(),
             )
             .unwrap();
-            assert!(p.simulate(&a, test_deadline()).is_err());
+            assert!(p.simulate(&a, test_deadline(), test_binding()).is_err());
             assert_eq!(a.calls.get(), 0);
         }
         let a = adapter(SubmissionPath::Rpc, 0);
@@ -2334,7 +2446,7 @@ mod tests {
             payer.pubkey(),
         )
         .unwrap();
-        assert!(p.simulate(&a, test_deadline()).is_err());
+        assert!(p.simulate(&a, test_deadline(), test_binding()).is_err());
         assert!(a.simulated.borrow().is_empty());
     }
     #[cfg(feature = "historical")]

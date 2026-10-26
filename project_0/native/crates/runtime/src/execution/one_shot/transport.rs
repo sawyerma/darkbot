@@ -98,7 +98,23 @@ impl SignedPayload {
         self,
         adapter: &dyn SubmissionAdapter,
         deadline: std::time::Instant,
+        binding: SimulationBinding,
     ) -> Result<SimulatedPayload<'_>, String> {
+        match self.simulate_bound(adapter, deadline, binding)? {
+            (_, Some(simulated)) => Ok(simulated),
+            (_, None) => Err(err("EXACT_PAYLOAD_SIMULATION_NOT_PASSED")),
+        }
+    }
+
+    /// DEC-02: the one simulation of these exact bytes through the production adapter — its
+    /// typed result, and the token only for a typed `Ok` (with the context slot, the time and
+    /// what it was bound to). A path the adapter cannot simulate is refused before any call.
+    pub fn simulate_bound(
+        self,
+        adapter: &dyn SubmissionAdapter,
+        deadline: std::time::Instant,
+        binding: SimulationBinding,
+    ) -> Result<(SimResult, Option<SimulatedPayload<'_>>), String> {
         let compatible = match self.path {
             SubmissionPath::JitoBundle => {
                 adapter.supports_bundle()
@@ -112,25 +128,101 @@ impl SignedPayload {
         if !compatible {
             return Err(err("SUBMISSION_PATH_MISMATCH"));
         }
+        // The simulation's age counts from its request (never younger than it is).
+        let at = std::time::Instant::now();
         let result = if self.path == SubmissionPath::JitoBundle {
             adapter.simulate_bundle(&self.txs, deadline)
         } else {
             adapter.simulate(&self.txs[0], deadline)
         };
-        if !matches!(result, SimResult::Ok { .. }) {
-            return Err(err("EXACT_PAYLOAD_SIMULATION_NOT_PASSED"));
-        }
-        Ok(SimulatedPayload {
+        let SimResult::Ok { context_slot, .. } = result else {
+            return Ok((result, None));
+        };
+        let simulated = SimulatedPayload {
             payload: self,
             adapter,
-        })
+            evidence: Evidence {
+                result: result.clone(),
+                context_slot,
+                at,
+                binding,
+            },
+        };
+        Ok((result, Some(simulated)))
     }
+}
+
+/// DEC-02: what a simulation was bound to when it ran — the FE-04 state generation (a recovery
+/// changes it), the observed ProgramData and whether the canonical state was fresh without gap
+/// or fork. A simulation is reused only while all of them are unchanged at the handoff. They are
+/// the owner's state: the handoff runs in the same owner step as the simulation (no ingress
+/// event is applied in between), so a gap, a recovery, a ProgramData or lookup-table change
+/// becomes visible only to a later step, which simulates anew; the chain's progress meanwhile is
+/// bounded by the context slot, the age and the handoff's newest observed slot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimulationBinding {
+    pub state_generation: u64,
+    pub program_data_hash: String,
+    pub state_valid: bool,
+}
+
+/// DEC-02: the evidence of the one simulation behind a token.
+struct Evidence {
+    result: SimResult,
+    context_slot: Option<u64>,
+    at: std::time::Instant,
+    binding: SimulationBinding,
 }
 
 /// Cannot be deserialized or constructed from an asserted boolean/hash.
 pub struct SimulatedPayload<'a> {
     payload: SignedPayload,
     adapter: &'a dyn SubmissionAdapter,
+    evidence: Evidence,
+}
+
+impl SimulatedPayload<'_> {
+    /// DEC-02 (7): derived from the token — only a typed `Ok` simulation of these exact signed
+    /// bytes makes one; never a literal.
+    pub fn exact_signed_payload_simulated(&self) -> bool {
+        matches!(self.evidence.result, SimResult::Ok { .. })
+    }
+
+    /// DEC-02 (2): a bundle's token comes only from the bundle simulation of these bytes.
+    pub fn bundle_simulated(&self) -> bool {
+        self.exact_signed_payload_simulated() && self.payload.path == SubmissionPath::JitoBundle
+    }
+
+    /// DEC-02 (4): the node simulated at or after `state_slot` (unknown is not after).
+    pub fn context_reaches(&self, state_slot: u64) -> bool {
+        self.evidence.context_slot.is_some_and(|s| s >= state_slot)
+    }
+
+    /// DEC-02: why this simulation may not stand for a handoff of `payload` now (`None`: every
+    /// condition holds) — the identical wire digest (every signature and message byte, their
+    /// order, the transport path and count are framed into it, so another path is another
+    /// digest), a context slot at or after the intent's state slot, the binding unchanged since
+    /// the simulation, an age within the approval's `max_state_age_ms`. A typed `Ok` (and a
+    /// bundle simulation for a bundle) holds by construction: no other simulation makes a token.
+    pub fn reuse_refusal(
+        &self,
+        payload: &SignedPayload,
+        state_slot: u64,
+        binding: &SimulationBinding,
+        max_age: std::time::Duration,
+    ) -> Option<&'static str> {
+        if self.payload.digest != payload.digest {
+            Some("SIM_REUSE_WIRE_DIGEST")
+        } else if !self.context_reaches(state_slot) {
+            Some("SIM_REUSE_CONTEXT_SLOT")
+        } else if &self.evidence.binding != binding {
+            Some("SIM_REUSE_STATE_CHANGED")
+        } else if self.evidence.at.elapsed() > max_age {
+            Some("SIM_REUSE_AGE")
+        } else {
+            None
+        }
+    }
 }
 
 impl Journal {

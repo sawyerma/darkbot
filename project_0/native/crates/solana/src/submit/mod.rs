@@ -78,6 +78,8 @@ impl std::error::Error for SubmitError {}
 pub enum SimResult {
     Ok {
         units_consumed: Option<u64>,
+        /// DEC-02: the slot the node simulated at (`context.slot`); `None` unknown.
+        context_slot: Option<u64>,
     },
     Failed(SimulationFailure),
     Unavailable(String),

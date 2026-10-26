@@ -90,7 +90,13 @@ pub fn admit_exit(
         payload.signatures().to_vec(),
         payload.wire_sha256().to_string(),
     );
-    let simulated = match payload.simulate(adapter, c.deadline) {
+    // The exit simulates its own payload once (no pipeline simulation exists for it).
+    let binding = super::transport::SimulationBinding {
+        state_generation: 0,
+        program_data_hash: String::new(),
+        state_valid: c.state_valid,
+    };
+    let simulated = match payload.simulate(adapter, c.deadline, binding) {
         Ok(s) => s,
         Err(e) => return Admission::Refused(e),
     };
@@ -120,7 +126,7 @@ pub fn admit_exit(
         policy_reserve: c.policy_reserve,
         health_funding_route_fee_exit_known: true,
         canonical_fresh_no_gap_or_fork: c.state_valid,
-        exact_signed_payload_simulated: true,
+        exact_signed_payload_simulated: simulated.exact_signed_payload_simulated(),
         bundle_simulated: false,
     };
     // DEC-12: the handoff is bounded by the deadline; past it nothing is reserved.

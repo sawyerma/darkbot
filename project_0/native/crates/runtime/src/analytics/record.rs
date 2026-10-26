@@ -680,7 +680,8 @@ mod tests {
         assert_eq!(
             [
                 SimResult::Ok {
-                    units_consumed: Some(1)
+                    units_consumed: Some(1),
+                    context_slot: None,
                 },
                 SimResult::Failed(failure),
                 SimResult::Unavailable("RPC_SIMULATION_DECODE".into()),
