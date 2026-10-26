@@ -68,6 +68,48 @@ use std::path::{Path, PathBuf};
 /// The release profile whose rules the PAPER plan follows.
 pub const PAPER_PROFILE: ReleaseProfile = ReleaseProfile::BirthEntryV1;
 
+/// Which PAPER paths take the PAPER sender's nonce sequence in one arm
+/// (`BSC_EXEC_SENDER_PATHS`, Phase I gate M2). C3's BUYs are alternatives
+/// at the next nonce n; Strategy C's intents are a sequence from n. With
+/// both, the first to disclose n owns it: after a C3 BUY the strategy
+/// starts at n+1; after a strategy intent every later C3 BUY of the arm is
+/// refused NONCE_TAKEN. A path left out is refused PATH_OFF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SenderPaths {
+    C3,
+    StrategyC,
+    Both,
+}
+
+impl SenderPaths {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "C3" => Ok(Self::C3),
+            "STRATEGY_C" => Ok(Self::StrategyC),
+            "C3+STRATEGY_C" => Ok(Self::Both),
+            other => Err(format!(
+                "BSC_EXEC_SENDER_PATHS {other:?}: C3, STRATEGY_C or C3+STRATEGY_C"
+            )),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::C3 => "C3",
+            Self::StrategyC => "STRATEGY_C",
+            Self::Both => "C3+STRATEGY_C",
+        }
+    }
+
+    fn c3(self) -> bool {
+        self != Self::StrategyC
+    }
+
+    fn strategy(self) -> bool {
+        self != Self::C3
+    }
+}
+
 /// The operating values of the PAPER path (`BSC_EXEC_*`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecConfig {
@@ -108,6 +150,8 @@ pub struct ExecConfig {
     /// now) a strategy intent is formed on; a follower catching up does
     /// not act on old blocks as if they were fresh.
     pub strategy_max_head_age_ms: u64,
+    /// Phase I gate M2: the PAPER paths that take the sender.
+    pub sender_paths: SenderPaths,
 }
 
 impl ExecConfig {
@@ -230,6 +274,9 @@ pub enum Refusal {
     /// Phase I gate L-d: a C3 BUY at the next nonce while a strategy
     /// intent holds it.
     NonceTaken,
+    /// Phase I gate M2: the path does not take the sender in this arm
+    /// (`BSC_EXEC_SENDER_PATHS`).
+    PathOff,
 }
 
 impl Refusal {
@@ -252,6 +299,7 @@ impl Refusal {
             Self::NonceGap => "NONCE_GAP",
             Self::StaleHead => "STALE_HEAD",
             Self::NonceTaken => "NONCE_TAKEN",
+            Self::PathOff => "PATH_OFF",
         }
     }
 }
@@ -517,6 +565,8 @@ pub struct PaperExecutor {
     strategy_skipped_first: bool,
     strategy_spent_wei: U256,
     strategy_bought: Vec<Held>,
+    /// Approvals at the sink and the token amounts they approved.
+    approved: Vec<([u8; 20], U256)>,
     exited: Vec<[u8; 20]>,
     exit_policy: ExitPolicy,
     strategy_counters: ExecCounters,
@@ -574,11 +624,10 @@ struct RawSink<'a> {
 /// What one dispatch to the sink consumed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Consumed {
-    /// The economic admission (`begin_send`): its exposure counts
-    /// whatever followed.
-    admission: bool,
     /// A permit's write was started (or the dispatch broke after the
-    /// admission): the bytes may be out, their nonce is taken.
+    /// economic admission): the bytes may be out, their nonce is taken and
+    /// their exposure counts. Otherwise the nonce is taken again (gate N1)
+    /// and nothing is spent (gate L2).
     disclosed: bool,
 }
 
@@ -681,13 +730,9 @@ fn raw_to_sink(
     let handoff = transport.handoff;
     let consumed = match &dispatched {
         Ok(report) => Consumed {
-            admission: report.admitted(),
             disclosed: report.admitted() && !report.admitted_without_disclosure,
         },
-        Err(DispatchError::DispatchBinding(_)) => Consumed {
-            admission: true,
-            disclosed: true,
-        },
+        Err(DispatchError::DispatchBinding(_)) => Consumed { disclosed: true },
         Err(_) => Consumed::default(),
     };
     let result = match dispatched {
@@ -884,6 +929,7 @@ impl PaperExecutor {
             strategy_skipped_first: false,
             strategy_spent_wei: U256::ZERO,
             strategy_bought: Vec::with_capacity(strategy_lanes.len()),
+            approved: Vec::with_capacity(strategy_lanes.len()),
             exited: Vec::with_capacity(strategy_lanes.len()),
             strategy_lanes,
             exit_policy,
@@ -931,6 +977,9 @@ impl PaperExecutor {
         c2: &LaunchContext<'_>,
         clock: &dyn Clock,
     ) -> Result<PaperBuy, Refusal> {
+        if !self.config.sender_paths.c3() {
+            return Err(Refusal::PathOff);
+        }
         let PendingLaunch {
             hash,
             raw: launch_raw,
@@ -1223,15 +1272,6 @@ impl PaperExecutor {
         self.strategy_used = from;
     }
 
-    /// An exit refused at the lane `from`; with nothing of it out (`none_out`
-    /// and not `disclosed`) the token can be exited later.
-    fn exit_refused(&mut self, token: [u8; 20], from: usize, disclosed: bool, none_out: bool) {
-        self.strategy_refused(from, disclosed);
-        if none_out && !disclosed {
-            self.exited.retain(|t| *t != token);
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn strategy_buy(
         &mut self,
@@ -1243,6 +1283,9 @@ impl PaperExecutor {
         decided_ns: u64,
         start_ns: u64,
     ) -> Result<PaperIntent, Refusal> {
+        if !self.config.sender_paths.strategy() {
+            return Err(Refusal::PathOff);
+        }
         let policy = BuyPolicy::new(
             self.config.policy_generation,
             input_wei,
@@ -1329,7 +1372,9 @@ impl PaperExecutor {
             clock,
             start_ns,
         );
-        if consumed.admission {
+        // Gate L2: the exposure counts once the BUY may be out; a nonce
+        // taken again (nothing disclosed) spends nothing.
+        if consumed.disclosed {
             self.strategy_spent_wei += budget.max_total_wei;
         }
         let handoff = match handoff {
@@ -1374,6 +1419,9 @@ impl PaperExecutor {
         start_ns: u64,
         out: &mut Vec<PaperIntent>,
     ) -> Result<(), Refusal> {
+        if !self.config.sender_paths.strategy() {
+            return Err(Refusal::PathOff);
+        }
         let held = self
             .strategy_bought
             .iter()
@@ -1383,6 +1431,13 @@ impl PaperExecutor {
         if self.exited.contains(&token) {
             return Err(Refusal::DuplicateToken);
         }
+        // Gate L2: an approval already out (its SELL refused before) is not
+        // signed again; the SELL sells at most what it approved.
+        let approved = self
+            .approved
+            .iter()
+            .find(|(t, _)| *t == token)
+            .map(|(_, amount)| *amount);
         let snapshot = (c2.snapshot)(
             self.config.policy_generation,
             self.deployment.codehash_generation(),
@@ -1399,11 +1454,17 @@ impl PaperExecutor {
         )
         .map_err(|_| Refusal::Admission)?;
         // At most what the handed-off BUY is bound to have bought.
-        let admitted = admit_curve_sell(&state, tokens.min(held.min_tokens), &self.exit_policy)
-            .map_err(|_| Refusal::Admission)?;
+        let amount = tokens.min(held.min_tokens);
+        let amount = approved.map_or(amount, |a| amount.min(a));
+        let admitted =
+            admit_curve_sell(&state, amount, &self.exit_policy).map_err(|_| Refusal::Admission)?;
         let admitted_ns = clock.now_ns();
         let price = U256::from(self.config.gas_price_wei);
-        let approve_gas = price * U256::from(self.config.approve_gas_limit);
+        let approve_gas = if approved.is_some() {
+            U256::ZERO
+        } else {
+            price * U256::from(self.config.approve_gas_limit)
+        };
         let sell_gas = price * U256::from(self.config.sell_gas_limit);
         let budget = |gas: U256| BudgetEnvelope {
             max_buy_input_wei: U256::ZERO,
@@ -1417,52 +1478,60 @@ impl PaperExecutor {
         {
             return Err(Refusal::SessionCap);
         }
-        if self.strategy_lanes.len() - self.strategy_used < 2 {
+        let needed = if approved.is_some() { 1 } else { 2 };
+        if self.strategy_lanes.len() - self.strategy_used < needed {
             return Err(Refusal::LanesExhausted);
         }
-        let approve_index = self.next_strategy_lane()?;
+        let approve_index = match approved {
+            Some(_) => None,
+            None => Some(self.next_strategy_lane()?),
+        };
         let sell_index = self.next_strategy_lane()?;
+        let first = approve_index.unwrap_or(sell_index);
         let mut tickets = [None, None];
-        for (slot, index) in [approve_index, sell_index].into_iter().enumerate() {
+        for (slot, index) in [approve_index, Some(sell_index)].into_iter().enumerate() {
+            let Some(index) = index else { continue };
             match self.strategy_lanes[index].reserve(admitted.token()) {
                 Ok(t) => tickets[slot] = Some(t),
                 Err(_) => {
-                    self.strategy_refused(approve_index, true);
+                    self.strategy_refused(first, true);
                     return Err(Refusal::Lane);
                 }
             }
         }
-        let [Some(approve_ticket), Some(sell_ticket)] = tickets else {
-            self.strategy_refused(approve_index, true);
+        let [approve_ticket, Some(sell_ticket)] = tickets else {
+            self.strategy_refused(first, true);
             return Err(Refusal::Lane);
         };
-        if sell_ticket.nonce() != approve_ticket.nonce() + 1 {
-            self.strategy_refused(approve_index, true);
+        // The approval at n, the SELL at n+1 (a SELL alone: n is its own
+        // nonce minus one, the approval already out).
+        let base = match approve_ticket {
+            Some(a) if sell_ticket.nonce() == a.nonce() + 1 => Some(a.nonce()),
+            Some(_) => None,
+            None => sell_ticket.nonce().checked_sub(1),
+        };
+        let Some(base) = base else {
+            self.strategy_refused(first, true);
             return Err(Refusal::Intent);
-        }
+        };
         let sender = Address::from(self.identity.address());
         let Ok(expected) = ExpectedExit::from_admitted(
             &self.deployment,
             &admitted,
             &self.exit_policy,
             sender,
-            approve_ticket.nonce(),
+            base,
         ) else {
-            self.strategy_refused(approve_index, false);
+            self.strategy_refused(first, false);
             return Err(Refusal::Intent);
         };
-        // Taken from here: a refusal before the approval is out frees
-        // the token for a later exit as well as its nonces.
-        self.exited.push(token);
-        for (kind, index, ticket, gas) in [
-            (
-                IntentKind::Approve,
-                approve_index,
-                approve_ticket,
-                approve_gas,
-            ),
-            (IntentKind::Sell, sell_index, sell_ticket, sell_gas),
-        ] {
+        let steps = [
+            approve_index
+                .zip(approve_ticket)
+                .map(|(i, t)| (IntentKind::Approve, i, t, approve_gas)),
+            Some((IntentKind::Sell, sell_index, sell_ticket, sell_gas)),
+        ];
+        for (kind, index, ticket, gas) in steps.into_iter().flatten() {
             let built = match kind {
                 IntentKind::Approve => {
                     expected.sign_approve(self.identity.signer(), &mut self.scratch, &mut self.raw)
@@ -1470,7 +1539,7 @@ impl PaperExecutor {
                 _ => expected.sign_sell(self.identity.signer(), &mut self.scratch, &mut self.raw),
             };
             if built.is_err() {
-                self.exit_refused(token, index, false, out.is_empty());
+                self.strategy_refused(index, false);
                 return Err(Refusal::Build);
             }
             let signed_ns = clock.now_ns();
@@ -1495,16 +1564,25 @@ impl PaperExecutor {
                 clock,
                 start_ns,
             );
-            if consumed.admission {
+            // Gate L2: gas counts once something may be out; a nonce taken
+            // again spends nothing.
+            if consumed.disclosed {
                 self.strategy_spent_wei += gas;
             }
             let handoff = match handoff {
                 Ok(h) => h,
                 Err(r) => {
-                    self.exit_refused(token, index, consumed.disclosed, out.is_empty());
+                    self.strategy_refused(index, consumed.disclosed);
+                    // A SELL that may be out ends the position's exits.
+                    if kind == IntentKind::Sell && consumed.disclosed {
+                        self.exited.push(token);
+                    }
                     return Err(r);
                 }
             };
+            if kind == IntentKind::Approve {
+                self.approved.push((token, admitted.input_tokens()));
+            }
             out.push(PaperIntent {
                 kind,
                 token,
@@ -1522,6 +1600,7 @@ impl PaperExecutor {
                 raw: self.raw.clone(),
             });
         }
+        self.exited.push(token);
         // The position is closed: its input leaves the open exposure, the
         // gas spent stays (gate L1).
         self.strategy_spent_wei = self.strategy_spent_wei.saturating_sub(held.input_wei);
@@ -1649,6 +1728,7 @@ mod tests {
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
             strategy_max_head_age_ms: 30_000,
+            sender_paths: SenderPaths::Both,
         }
     }
 
@@ -2434,6 +2514,116 @@ mod tests {
         assert_eq!(c3(&mut exec, 0), Err(Refusal::NonceTaken));
         assert_eq!(exec.counters().refused("NONCE_TAKEN"), 1);
         assert_eq!(exec.lanes(), (2, 2));
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Phase I gate M2: a PAPER path left out of `sender_paths` is refused
+    /// PATH_OFF and counted; it takes no lane and no nonce.
+    #[test]
+    fn a_path_left_out_does_not_take_the_sender() {
+        let portal = bsc_mainnet_v5_27_0().portal.into_array();
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let input = U256::from(10_000_000_000_000_000u64);
+        let mut cfg = config(2, 2);
+        cfg.sender_paths = SenderPaths::C3;
+        let (mut exec, d) = armed("paths-c3", cfg.clone());
+        assert_eq!(
+            exec.on_strategy_buy(
+                [1; 20],
+                curve,
+                input,
+                &strategy_c2(Some(HEAD)),
+                &clock(1, 1),
+                1
+            ),
+            Err(Refusal::PathOff)
+        );
+        assert_eq!(exec.strategy_counters().refused("PATH_OFF"), 1);
+        assert_eq!(exec.strategy_lanes().2, 0);
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+        cfg.sender_paths = SenderPaths::StrategyC;
+        let (mut exec, d) = armed("paths-strategy", cfg);
+        let (hash, raw, call) = launch(0, 7);
+        let launch = PendingLaunch {
+            hash,
+            raw: &raw,
+            to: Some(portal),
+            input: &call,
+            ingress_ns: 100,
+        };
+        assert_eq!(
+            exec.on_launch(launch, &c2(Some(HEAD)), &clock(100, 7)),
+            Err(Refusal::PathOff)
+        );
+        assert_eq!(exec.counters().refused("PATH_OFF"), 1);
+        assert_eq!(exec.lanes(), (2, 2));
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+        assert_eq!(SenderPaths::parse("C3+STRATEGY_C"), Ok(SenderPaths::Both));
+        assert!(SenderPaths::parse("C3,STRATEGY_C").is_err());
+    }
+
+    /// Phase I gate L2: an exit whose approval reached the sink and whose
+    /// SELL missed its start deadline before the permit (the 15th clock
+    /// reading) keeps the position: a later exit signs only the SELL, at
+    /// the freed nonce, up to the approved amount, and closes it (before:
+    /// exited for good, its input never released). Gas counts only for
+    /// what may be out.
+    #[test]
+    fn a_refused_sell_after_its_approval_can_still_close_the_position() {
+        use darkbot_bsc_trading::venues::flap::recognize::decode_swap_exact_input;
+        let mut cfg = config(2, 2);
+        cfg.strategy_lanes = 6;
+        let gas = |limit: u64| U256::from(cfg.gas_price_wei) * U256::from(limit);
+        let (approve_gas, sell_gas) = (gas(cfg.approve_gas_limit), gas(cfg.sell_gas_limit));
+        let (mut exec, d) = armed("strategy-sell-retry", cfg.clone());
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let input = U256::from(10_000_000_000_000_000u64);
+        let c2 = strategy_c2(Some(HEAD));
+        let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
+        let buy = exec
+            .on_strategy_buy([1; 20], curve, input, &c2, &clock(1, 1), 1)
+            .unwrap();
+        let after_buy = exec.strategy_lanes().3;
+        let tokens = decode_swap_exact_input_native(decode_signed(&buy.raw).unwrap().tx.input)
+            .unwrap()
+            .min_output_amount;
+        let exit_curve = curve_after(1_010_000_000_000_000_000);
+        let (out, refused) = exec.on_strategy_exit(
+            [1; 20],
+            tokens,
+            exit_curve,
+            &c2,
+            &clock_jump(1, 1, 15, 2_000_000),
+            1,
+        );
+        assert_eq!(refused, Some(Refusal::Deadline));
+        let [approve]: [PaperIntent; 1] = out.try_into().unwrap();
+        assert_eq!(
+            (approve.kind, nonce(&approve.raw)),
+            (IntentKind::Approve, 1)
+        );
+        let (_, _, next_nonce, spent, gap) = exec.strategy_lanes();
+        assert_eq!((next_nonce, gap), (2, false));
+        assert_eq!(spent, after_buy + approve_gas);
+        let (out, refused) =
+            exec.on_strategy_exit([1; 20], tokens, exit_curve, &c2, &clock(1, 1), 1);
+        assert_eq!(refused, None);
+        let [sell]: [PaperIntent; 1] = out.try_into().unwrap();
+        assert_eq!((sell.kind, nonce(&sell.raw)), (IntentKind::Sell, 2));
+        let swap = decode_swap_exact_input(decode_signed(&sell.raw).unwrap().tx.input).unwrap();
+        assert!(swap.is_sell() && swap.input_amount == tokens);
+        // Closed: the input left the exposure, the gas of what went out stays.
+        let (_, _, next_nonce, spent, _) = exec.strategy_lanes();
+        assert_eq!(next_nonce, 3);
+        assert_eq!(spent, after_buy - input + approve_gas + sell_gas);
+        assert_eq!(
+            exec.on_strategy_exit([1; 20], tokens, exit_curve, &c2, &clock(1, 1), 1)
+                .1,
+            Some(Refusal::DuplicateToken)
+        );
         exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
     }

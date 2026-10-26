@@ -903,6 +903,7 @@ fn boundaries_are_measured_but_no_unqualified_one_is_a_send_time() {
 /// signed BUY with the write check's clock read, records the commit as
 /// `T_queue` (not a send), and the node's coordinator reads it once. The
 /// egress transport takes no frame.
+#[cfg(feature = "runtime")] // the egress lane is the runtime's (geth_ipc)
 #[test]
 fn local_geth_commits_the_raw_buy_to_the_egress_lane() {
     use darkbot_bsc_execution::submission::egress::EgressTransport;
@@ -960,6 +961,7 @@ fn local_geth_commits_the_raw_buy_to_the_egress_lane() {
 /// Phase I gate L-b: the egress lane armed on a builder's slot of a bundle
 /// plan is refused before anything is consumed (before: the bundle's BUY
 /// alone was committed to the node's lane).
+#[cfg(feature = "runtime")] // the egress lane is the runtime's (geth_ipc)
 #[test]
 fn the_egress_lane_takes_no_builder_slot() {
     use darkbot_bsc_execution::submission::egress::EgressTransport;

@@ -421,6 +421,17 @@ pub fn paper_intent_payload(i: &PaperIntent) -> Vec<u8> {
     out
 }
 
+/// Decisions acted on at block `block`'s complete state (Phase I gate M1),
+/// a `Runtime` record: `A | block u64`, journaled when the action is taken.
+pub fn action_payload(block: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ACTION_LEN);
+    out.push(b'A');
+    out.extend_from_slice(&block.to_le_bytes());
+    out
+}
+
+pub const ACTION_LEN: usize = 9;
+
 /// The kind of a `J` record, if it is one.
 pub fn paper_intent_kind(p: &[u8]) -> Option<IntentKind> {
     match (p.first()?, p.get(1)?) {
@@ -558,6 +569,11 @@ impl StrategyRuntime {
         self.engine.followed()
     }
 
+    /// Decisions wait for their block's completion.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// One journaled record: its input to the engine, the outputs journaled
     /// (when a journal is given) and counted.
     pub fn record(
@@ -669,10 +685,11 @@ pub struct Replay {
     pub positions: Vec<Position>,
 }
 
-/// Phase I (PHASENPLAN §17 J input): one entry, a strategy entry (SHADOW)
-/// or a BUY at the PAPER sink, against the foreign BUYs of its token. The
-/// decision's time is a wall-clock estimate (the run's start plus the
-/// deciding record's monotonic time), compared with the headers'
+/// Phase I (PHASENPLAN §17 J input): one entry, a strategy PASS (SHADOW,
+/// at its decided block and the journaled time it is acted on) or a BUY at
+/// the PAPER sink, against the foreign BUYs of its token. The action's
+/// time is a wall-clock estimate (the run's start plus the record's
+/// monotonic time), compared with the headers'
 /// millisecond block times: nothing is sent, no inclusion is shown, and a
 /// header's time is not the producer's cut-off.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -696,21 +713,24 @@ pub struct Position {
     pub buys_in_eligible: u64,
     /// Blocks from the decided block to the first foreign BUY after it.
     pub first_buy_gap_blocks: Option<u64>,
+    /// The action time was not journaled (an older journal): the deciding
+    /// record's time stands in, a lower bound.
+    pub time_lower_bound: bool,
 }
 
-/// The positions of `entries` (paper, token, decided block, deciding
-/// record's time) in a run started at `started_ms`, against the journaled
-/// block times and the foreign BUYs (token, block): none of the run's own
-/// transactions is ever on chain.
+/// The positions of `entries` (paper, token, decided block, action time,
+/// whether that time is the action's own) in a run started at
+/// `started_ms`, against the journaled block times and the foreign BUYs
+/// (token, block): none of the run's own transactions is ever on chain.
 fn positions(
-    entries: &[(bool, [u8; 20], u64, u64)],
+    entries: &[(bool, [u8; 20], u64, u64, bool)],
     started_ms: Option<u64>,
     blocks: &std::collections::BTreeMap<u64, u64>,
     buys: &[([u8; 20], u64)],
 ) -> Vec<Position> {
     entries
         .iter()
-        .map(|&(paper, token, decided_block, at_ns)| {
+        .map(|&(paper, token, decided_block, at_ns, exact)| {
             let decided_unix_us =
                 started_ms.and_then(|ms| ms.checked_mul(1_000)?.checked_add(at_ns / 1_000));
             let eligible_block = decided_unix_us.and_then(|t| {
@@ -748,6 +768,7 @@ fn positions(
                 buys_before: before,
                 buys_in_eligible: within,
                 first_buy_gap_blocks: foreign.map(|(_, b)| b - decided_block).min(),
+                time_lower_bound: !exact,
             }
         })
         .collect()
@@ -787,10 +808,12 @@ pub fn replay(
     let mut strategy: Option<StrategyRuntime> = None;
     let mut journaled: Vec<Vec<u8>> = Vec::new();
     let mut replayed: Vec<Vec<u8>> = Vec::new();
-    // Phase I positioning: block times, foreign BUYs, entries.
+    // Phase I positioning: block times, foreign BUYs, entries (PASS
+    // decisions and PAPER BUYs), the journaled action times by block.
     let mut blocks = std::collections::BTreeMap::new();
     let mut buys = Vec::new();
     let mut entries = Vec::new();
+    let mut acted = std::collections::BTreeMap::new();
     loop {
         let r = match reader.next_record() {
             Ok(Some(r)) => r,
@@ -819,7 +842,12 @@ pub fn replay(
                     p.get(42..62).and_then(|t| <[u8; 20]>::try_from(t).ok()),
                     u64_at(p, 62),
                 ) {
-                    entries.push((true, token, block, r.timestamp_ns));
+                    entries.push((true, token, block, r.timestamp_ns, true));
+                }
+            }
+            (RecordKind::Runtime, p) if p.len() == ACTION_LEN && p[0] == b'A' => {
+                if let Some(block) = u64_at(p, 1) {
+                    acted.entry(block).or_insert(r.timestamp_ns);
                 }
             }
             (kind, p) => {
@@ -834,19 +862,30 @@ pub fn replay(
                 }
                 if let Some(s) = strategy.as_mut() {
                     let outputs = s.record(kind, p, r.timestamp_ns, None);
+                    // A PASS (gate M1: the decision's block, not the fill's).
                     for o in &outputs {
-                        if o.get(1) == Some(&ENTERED)
+                        if o.get(1) == Some(&DECIDED)
+                            && o.get(30..32) == Some(&[0, 0][..])
                             && let (Some(block), Some(token)) = (
                                 u64_at(o, 2),
                                 o.get(10..30).and_then(|t| <[u8; 20]>::try_from(t).ok()),
                             )
                         {
-                            entries.push((false, token, block, r.timestamp_ns));
+                            entries.push((false, token, block, r.timestamp_ns, false));
                         }
                     }
                     replayed.extend(outputs);
                 }
             }
+        }
+    }
+    // A PASS is acted on at its block's completion: the journaled action
+    // time, else (an older journal) the deciding record's, a lower bound.
+    for e in &mut entries {
+        if !e.0
+            && let Some(at) = acted.get(&e.2)
+        {
+            (e.3, e.4) = (*at, true);
         }
     }
     out.positions = positions(&entries, run_id.parse().ok(), &blocks, &buys);
@@ -995,6 +1034,9 @@ impl Replay {
             }
             if let Some(v) = p.first_buy_gap_blocks {
                 e.set(sp::FIRST_BUY_GAP_BLOCKS, v);
+            }
+            if p.time_lower_bound {
+                e.set(sp::TIME_LOWER_BOUND, true);
             }
             d.push(sr::POSITIONS, e.into_nested());
         }
@@ -1495,7 +1537,9 @@ mod tests {
         }
         // Phase I: the PASS is one BUY action of the configured input on
         // the token's curve at the decision.
+        assert!(s.has_pending());
         let actions = s.take_actions();
+        assert!(!s.has_pending());
         assert!(
             matches!(
                 actions.as_slice(),
@@ -1504,6 +1548,9 @@ mod tests {
             ),
             "{actions:?}"
         );
+        // Gate M1: the action at the PASS block's completion (105, fill
+        // delay 1: the fill is 106), journaled as the runtime does.
+        assert!(j.record(RecordKind::Runtime, 3, action_payload(105)));
         assert!(j.record(RecordKind::Runtime, 4, switch_payload(false)));
         // After it: journaled only.
         assert!(j.record(RecordKind::Canonical, 5, block_payload(108, &HASH, 6_000)));
@@ -1517,17 +1564,18 @@ mod tests {
         // H gate L10: the position entered at 106 was still open at the
         // switch.
         assert_eq!(r.open_at_end, 1);
-        // Phase I: its position, decided at 7 ms after the run's start
-        // (run 7, record at 3 ns) on block 106, eligible for 107 (5.25 s).
+        // Phase I gate M1: its position is the PASS's, decided on block 105
+        // (not the fill's 106) and acted on at 7 ms after the run's start
+        // (run 7, the action record at 3 ns): eligible for 106 (4.5 s).
         assert_eq!(
             r.positions,
             [Position {
                 paper: false,
                 token: TOKEN,
-                decided_block: 106,
+                decided_block: 105,
                 decided_unix_us: Some(7_000),
-                eligible_block: Some(107),
-                lead_us: Some(5_243_000),
+                eligible_block: Some(106),
+                lead_us: Some(4_493_000),
                 ..Position::default()
             }]
         );
@@ -1589,9 +1637,9 @@ mod tests {
             (TOKEN, 104),
         ];
         let entries = [
-            (false, TOKEN, 100, 1_500_000_000),
-            (true, TOKEN, 100, 1_100_000_000),
-            (false, other, 103, 3_000_000_000),
+            (false, TOKEN, 100, 1_500_000_000, true),
+            (true, TOKEN, 100, 1_100_000_000, true),
+            (false, other, 103, 3_000_000_000, false),
         ];
         let p = positions(&entries, Some(0), &blocks, &buys);
         assert_eq!(
@@ -1606,8 +1654,11 @@ mod tests {
                 buys_before: 1,
                 buys_in_eligible: 1,
                 first_buy_gap_blocks: Some(1),
+                time_lower_bound: false,
             }
         );
+        // An older journal's PASS: its record's time, a lower bound.
+        assert!(p[2].time_lower_bound);
         assert_eq!(
             (
                 p[1].paper,

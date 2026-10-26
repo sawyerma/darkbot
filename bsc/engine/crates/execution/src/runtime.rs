@@ -232,6 +232,7 @@ impl RuntimeConfig {
         let watched = values.remove("BSC_STATE_WATCHED");
         let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
+        let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
         let capture_pending = CaptureScope::parse(
             values
                 .remove("BSC_RUNTIME_CAPTURE_PENDING")
@@ -326,6 +327,9 @@ impl RuntimeConfig {
                 if refused_accounts.is_some() {
                     return Err("BSC_EXEC_REFUSED_ACCOUNTS needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if sender_paths.is_some() {
+                    return Err("BSC_EXEC_SENDER_PATHS needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -377,6 +381,9 @@ impl RuntimeConfig {
                         "BSC_EXEC_STRATEGY_MAX_HEAD_AGE_MS",
                         1_000,
                         600_000,
+                    )?,
+                    sender_paths: crate::paper_exec::SenderPaths::parse(
+                        sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                     )?,
                 },
             }),
@@ -575,10 +582,20 @@ fn strategy_to_paper(
     owner: &Option<StateOwner>,
     clock: Clock,
     journal: &mut RuntimeJournal,
+    block: u64,
 ) {
     let Some(s) = c.strategy.as_mut() else {
         return;
     };
+    // Phase I gate M1: the moment decisions are acted on at the block's
+    // complete state (SHADOW or PAPER), so a replay places them there.
+    if s.has_pending() {
+        journal.record(
+            RecordKind::Runtime,
+            clock.now_ns(),
+            crate::runtime_strategy::action_payload(block),
+        );
+    }
     // Gate L-a: the head's age against the wall clock now; unreadable, every
     // head is too old.
     let now_unix_ms = std::time::SystemTime::now()
@@ -630,13 +647,16 @@ fn apply_canonical(
     at: u64,
     event: CanonicalEvent,
 ) {
-    let complete = matches!(event, CanonicalEvent::BlockComplete { .. });
+    let complete = match event {
+        CanonicalEvent::BlockComplete { number, .. } => Some(number),
+        _ => None,
+    };
     if let Some(o) = owner.as_mut() {
         o.canonical(&event);
     }
     c.event(at, event, journal);
-    if complete {
-        strategy_to_paper(c, exec, owner, clock, journal);
+    if let Some(block) = complete {
+        strategy_to_paper(c, exec, owner, clock, journal, block);
     }
 }
 
@@ -2080,6 +2100,9 @@ mod tests {
             CONFIG.replace("MAX_LAUNCH_CALLDATA=16384", "MAX_LAUNCH_CALLDATA=1023"),
             CONFIG.replace("BSC_EXEC_REFUSED_ACCOUNTS=\n", ""),
             CONFIG.replace("BSC_EXEC_REFUSED_ACCOUNTS=\n", "BSC_EXEC_REFUSED_ACCOUNTS=0x12\n"),
+            // Gate M2: the paths that take the sender, required and exact.
+            CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C\n", ""),
+            CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C", "BSC_EXEC_SENDER_PATHS=C3+C2"),
             CONFIG.replace("BSC_EXEC_SLIPPAGE_BPS=100", "BSC_EXEC_SLIPPAGE_BPS=10000"),
             CONFIG.replace("BSC_EXEC_GAS_LIMIT=3000000", "BSC_EXEC_GAS_LIMIT=20999"),
             CONFIG.replace("BSC_STATE_WATCHED=\n", ""),

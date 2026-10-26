@@ -120,13 +120,17 @@ describe("BSC source control", () => {
     const status = (observed: number, exec: boolean, latency = false): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
       { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
       ...(exec ? [{ name: "exec[0].state", value: "ECONOMICS_UNQUALIFIED", kind: 7, unit: "" }, { name: "exec[0].reason", value: "Portal v5.27.0 is decode-only", kind: 7, unit: "" },
-        { name: "exec[0].lanes_armed", value: "64", kind: 2, unit: "" }, { name: "exec[0].handoffs", value: "0", kind: 2, unit: "" }] : []),
+        { name: "exec[0].lanes_armed", value: "64", kind: 2, unit: "" }, { name: "exec[0].handoffs", value: "0", kind: 2, unit: "" },
+        { name: "exec[0].sender_paths", value: "C3+STRATEGY_C", kind: 7, unit: "" }, { name: "exec[0].refusals[0]", value: "NONCE_TAKEN=1", kind: 7, unit: "" }] : []),
       ...(latency ? [{ name: "exec[0].latency_p50_ns", value: "116250", kind: 2, unit: "" }] : [])] });
     expect(runtimeView([status(10_000, false)], 11_000).view.exec).toBeUndefined();
     const v = runtimeView([status(10_000, true)], 11_000).view.exec;
     expect(v?.state).toBe("ECONOMICS_UNQUALIFIED");
     expect(v?.detail).toContain("decode-only");
     expect(v?.path).toContain("to the PAPER sink 0");
+    // Phase I gate M2: every C3 refusal and the paths on the PAPER sender.
+    expect(v?.path).toContain("every refusal (NONCE_TAKEN=1)");
+    expect(v?.path).toContain("paths on the PAPER sender C3+STRATEGY_C");
     expect(v?.latency).toBe("no PAPER BUY yet");
     expect(v?.strategy).toContain("Strategy C intents ? · at the PAPER sink ?");
     expect(runtimeView([status(10_000, true, true)], 11_000).view.exec?.latency).toContain("not T_send");

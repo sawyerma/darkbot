@@ -671,11 +671,16 @@ pub mod runtime_status {
         /// (field 35, the v3 SELL lanes, is retired).
         pub const STRATEGY_NEXT_NONCE: u16 = 38;
         pub const STRATEGY_NONCE_GAP: u16 = 39;
+        /// v5 (Phase I gate M2): the PAPER paths that take the sender
+        /// (`BSC_EXEC_SENDER_PATHS`), and every C3 refusal by stage,
+        /// `STAGE=n` each (NONCE_TAKEN, PATH_OFF included).
+        pub const SENDER_PATHS: u16 = 40;
+        pub const REFUSALS: u16 = 41;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.exec",
             record_type: 0,
-            schema_version: 4,
+            schema_version: 5,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -715,6 +720,8 @@ pub mod runtime_status {
                 Field::rep(STRATEGY_REFUSALS, "strategy_refusals", Text),
                 Field::req(STRATEGY_NEXT_NONCE, "strategy_next_nonce", U64),
                 Field::req(STRATEGY_NONCE_GAP, "strategy_nonce_gap", Bool),
+                Field::opt(SENDER_PATHS, "sender_paths", Text),
+                Field::rep(REFUSALS, "refusals", Text),
             ],
         };
     }
@@ -751,7 +758,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 16,
+        schema_version: 17,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -869,6 +876,9 @@ pub mod strategy_replay {
         pub const BUYS_IN_ELIGIBLE: u16 = 8;
         /// Blocks from the decided block to the first foreign BUY after it.
         pub const FIRST_BUY_GAP_BLOCKS: u16 = 9;
+        /// The action time was not journaled (an older journal): the
+        /// deciding record's time stands in, a lower bound.
+        pub const TIME_LOWER_BOUND: u16 = 10;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.strategy-position",
@@ -884,6 +894,7 @@ pub mod strategy_replay {
                 Field::req(BUYS_BEFORE, "buys_before", U64),
                 Field::req(BUYS_IN_ELIGIBLE, "buys_in_eligible", U64),
                 Field::opt(FIRST_BUY_GAP_BLOCKS, "first_buy_gap_blocks", U64),
+                Field::opt(TIME_LOWER_BOUND, "time_lower_bound", Bool),
             ],
         };
     }

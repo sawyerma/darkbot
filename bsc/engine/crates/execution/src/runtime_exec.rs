@@ -578,6 +578,11 @@ impl ExecRuntime {
         for (r, n) in strategy.iter().flat_map(|c| c.refusals.iter()) {
             d.push(e::STRATEGY_REFUSALS, format!("{}={n}", r.name()).as_str());
         }
+        // Gate M2: the paths that take the sender, and every C3 refusal.
+        d.set(e::SENDER_PATHS, self.setup.exec.sender_paths.name());
+        for (r, n) in counters.iter().flat_map(|c| c.refusals.iter()) {
+            d.push(e::REFUSALS, format!("{}={n}", r.name()).as_str());
+        }
         let latencies = self.executor.as_ref().map(PaperExecutor::latencies);
         d.set(e::LATENCY_SAMPLES, latencies.map_or(0, |l| l.len() as u64));
         if let Some((p50, p99, max)) = latencies.and_then(|l| l.quantiles()) {
@@ -627,6 +632,7 @@ mod tests {
                 approve_gas_limit: 100_000,
                 sell_gas_limit: 1_500_000,
                 strategy_max_head_age_ms: 30_000,
+                sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,
             reprobe_failures: 1,
@@ -963,6 +969,16 @@ mod tests {
         assert_eq!(r.u64(e::STRATEGY_NEXT_NONCE).unwrap(), 3);
         // C3's own launch path is untouched.
         assert_eq!(r.u64(e::LAUNCHES).unwrap(), 0);
+        // Gate M2: with the strategy holding nonce 0, a C3 BUY of this arm
+        // is refused NONCE_TAKEN, and the status says so (before: counted
+        // under no projected name); the paths that take the sender too.
+        let (hash, raw, launcher) = launch();
+        owner.pending(hash, launcher, 3, 0, 10);
+        assert!(x.on_launch(hash, &raw, 10, &owner, &clock).is_none());
+        let r = record(&x);
+        assert_eq!(r.u64(e::LAUNCHES).unwrap(), 1);
+        assert_eq!(r.texts(e::REFUSALS).unwrap(), ["NONCE_TAKEN=1"]);
+        assert_eq!(r.text(e::SENDER_PATHS).unwrap(), "C3+STRATEGY_C");
         x.shutdown();
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1051,9 +1067,11 @@ mod tests {
         x.prober = upgraded;
         x.last_probe = None;
         settle(&mut x, &owner, "https://probe.invalid");
+        // Until the drift is seen (the state before it is EXHAUSTED, not
+        // ARMED: waiting for "not ARMED" raced the probe).
         for _ in 0..200 {
             x.tick(true, Some(&owner), Some(("https://probe.invalid", &lim)), 7);
-            if state(&x).0 != "ARMED" {
+            if state(&x).0 == "DEPLOYMENT_DRIFT" {
                 break;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -1357,8 +1375,15 @@ mod tests {
         journal.finish().unwrap();
         let mut reader =
             RunReader::open(&dir.join("journal").join("7"), journal_max_payload(&config)).unwrap();
-        let mut intents = 0;
+        let (mut intents, mut acted) = (0, 0);
         while let Some(rec) = reader.next_record().unwrap() {
+            // Gate M1: the action at the PASS block's completion is journaled.
+            if rec.kind == RecordKind::Runtime
+                && rec.payload.len() == crate::runtime_strategy::ACTION_LEN
+                && rec.payload[0] == b'A'
+            {
+                acted += 1;
+            }
             if rec.kind == RecordKind::Runtime
                 && crate::runtime_strategy::paper_intent_kind(&rec.payload)
                     == Some(crate::paper_exec::IntentKind::Buy)
@@ -1369,7 +1394,7 @@ mod tests {
                 intents += 1;
             }
         }
-        assert_eq!(intents, 1);
+        assert_eq!((intents, acted), (1, 1));
         exec.unwrap().shutdown();
         std::fs::remove_dir_all(&dir).unwrap();
     }
