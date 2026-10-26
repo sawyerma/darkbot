@@ -988,6 +988,39 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             Err(_) => warnings.push("G04_CENSUS_INVALID".into()),
         }
     }
+    // Phase F: the capacity preflight of a scoped capture and the newest
+    // capture→replay identity proof (both written by bsc_runtime).
+    let preflight = rundir.join("bsc-runtime/capture-preflight.dbrec");
+    if let Some(bytes) = read(&preflight) {
+        match record::decode(&schema::bsc_capture::capture_preflight::SCHEMA, &bytes) {
+            Ok(r) => monitoring
+                .records
+                .push(native_record(rundir, &preflight, &r)),
+            Err(_) => warnings.push("CAPTURE_PREFLIGHT_INVALID".into()),
+        }
+    }
+    let newest_proof = std::fs::read_dir(rundir.join("bsc-runtime"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let run: u64 = name
+                .strip_prefix("replay-proof-")?
+                .strip_suffix(".dbrec")?
+                .parse()
+                .ok()?;
+            Some((run, e.path()))
+        })
+        .max_by_key(|(run, _)| *run);
+    if let Some((_, proof)) = newest_proof
+        && let Some(bytes) = read(&proof)
+    {
+        match record::decode(&schema::bsc_capture::replay_proof::SCHEMA, &bytes) {
+            Ok(r) => monitoring.records.push(native_record(rundir, &proof, &r)),
+            Err(_) => warnings.push("REPLAY_PROOF_INVALID".into()),
+        }
+    }
     let gates = vec![
         gate(
             "G0.6a",

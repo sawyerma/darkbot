@@ -1048,6 +1048,91 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
                 .contains(&"RUNTIME_STATUS_INVALID".to_string())
         );
     }
+    // Phase F: the capacity preflight and the newest replay proof reach
+    // monitoring; a broken one is a warning, never a record.
+    {
+        use darkbot_bsc_record::schema::bsc_capture::{
+            capture_preflight as cp, replay_proof as rp,
+        };
+        let proof = |run_id: &str| {
+            let mut d = Draft::new(&rp::SCHEMA);
+            d.set(rp::RUN_ID, run_id)
+                .set(rp::CHAIN_ID, 56u64)
+                .set(rp::PROVENANCE_TOOL, "bsc_runtime replay-proof")
+                .set(rp::PROVENANCE_OBSERVED_UNIX_MS, 5u64)
+                .set(rp::SEGMENTS, 1u64)
+                .set(rp::RECORDS, 3u64)
+                .set(rp::MANIFEST_MATCH, true)
+                .set(rp::FLAP_SIGHTINGS, 1u64)
+                .set(rp::FOUR_SIGHTINGS, 0u64)
+                .set(rp::OPENFOUR_SIGHTINGS, 0u64)
+                .set(rp::UNDECODABLE_SIGHTINGS, 0u64)
+                .set(rp::PENDING_SIGHTINGS, 0u64)
+                .set(rp::PENDING_TO_VENUES, 0u64)
+                .set(rp::CENSUS_STATE, "COMPLETE")
+                .set(rp::CENSUS_DETERMINISTIC, true)
+                .set(rp::VERDICT, "PASS");
+            d.encode().unwrap()
+        };
+        fs::write(run.join("bsc-runtime/replay-proof-5.dbrec"), proof("5")).unwrap();
+        fs::write(run.join("bsc-runtime/replay-proof-9.dbrec"), proof("9")).unwrap();
+        let mut d = Draft::new(&cp::SCHEMA);
+        d.set(cp::DURATION_S, 1_800u64)
+            .set(cp::CHAIN_ID, 56u64)
+            .set(cp::PROVENANCE_TOOL, "bsc_runtime capture-preflight")
+            .set(cp::PROVENANCE_OBSERVED_UNIX_MS, 5u64)
+            .set(cp::AVERAGE_BYTES_PER_S, 0u64)
+            .set(cp::PEAK_BYTES_PER_S, 0u64)
+            .set(cp::BURST_S, 0u64)
+            .set(cp::OVERHEAD_PPM, 0u64)
+            .set(cp::PROBE_BYTES, 0u64)
+            .set(cp::WRITER_BYTES_PER_S, 0u64)
+            .set(cp::FREE_DISK_BYTES, 1u64)
+            .set(cp::DISK_RESERVE_BYTES, 0u64)
+            .set(cp::MEMORY_BUDGET_BYTES, 1u64)
+            .set(cp::VERDICT, "BLOCKED")
+            .set(cp::BLOCKING_RESOURCE, "UNMEASURED")
+            .set(cp::ACHIEVABLE_S, 0u64);
+        fs::write(
+            run.join("bsc-runtime/capture-preflight.dbrec"),
+            d.encode().unwrap(),
+        )
+        .unwrap();
+        let snap = projection::project(&root, &run);
+        let all = names(&snap);
+        assert!(all.contains(&"darkbot.bsc.capture-preflight.v1".to_string()));
+        let proofs: Vec<_> = snap
+            .monitoring
+            .records
+            .iter()
+            .filter(|r| r.schema == "darkbot.bsc.replay-proof.v1")
+            .collect();
+        assert_eq!(proofs.len(), 1);
+        assert!(
+            proofs[0]
+                .fields
+                .iter()
+                .any(|f| f.name == "run_id" && f.value == "9")
+        );
+        fs::write(
+            run.join("bsc-runtime/replay-proof-9.dbrec"),
+            b"DBREC001 broken",
+        )
+        .unwrap();
+        fs::write(
+            run.join("bsc-runtime/capture-preflight.dbrec"),
+            b"DBREC001 broken",
+        )
+        .unwrap();
+        let snap = projection::project(&root, &run);
+        assert!(!names(&snap).contains(&"darkbot.bsc.capture-preflight.v1".to_string()));
+        for w in ["REPLAY_PROOF_INVALID", "CAPTURE_PREFLIGHT_INVALID"] {
+            assert!(snap.status.warnings.contains(&w.to_string()), "{w}");
+        }
+        fs::remove_file(run.join("bsc-runtime/replay-proof-5.dbrec")).unwrap();
+        fs::remove_file(run.join("bsc-runtime/replay-proof-9.dbrec")).unwrap();
+        fs::remove_file(run.join("bsc-runtime/capture-preflight.dbrec")).unwrap();
+    }
     // A tampered generation: no record, a warning.
     let generations = run.join("bsc-sources/generations");
     let newest = fs::read_dir(&generations)
