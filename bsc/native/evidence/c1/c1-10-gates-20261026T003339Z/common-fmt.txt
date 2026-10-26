@@ -1,0 +1,3 @@
+HEAD 995a2a2710c3ab408941c941c8ea3368f919dc52
+workspace-wide fmt check (informational; C1 crates checked in common-rust.txt):
+exit=1

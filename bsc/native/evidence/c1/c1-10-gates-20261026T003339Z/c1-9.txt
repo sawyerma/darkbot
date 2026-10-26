@@ -1,0 +1,108 @@
+$ cargo test -p darkbot-bsc-qualification --locked --offline -j 2 --lib c1_
+   Compiling zeroize v1.9.0
+   Compiling find-msvc-tools v0.1.14
+   Compiling generic-array v0.14.9
+   Compiling der v0.7.10
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling shlex v2.0.1
+   Compiling cc v1.5.1
+   Compiling libc v0.2.189
+   Compiling spki v0.7.3
+   Compiling zerocopy v0.8.59
+   Compiling bytes v1.12.1
+   Compiling ring v0.17.14
+   Compiling sec1 v0.7.3
+   Compiling pkcs8 v0.10.2
+   Compiling hmac v0.12.1
+   Compiling crypto-bigint v0.5.5
+   Compiling elliptic-curve v0.13.8
+   Compiling rfc6979 v0.4.0
+   Compiling cpufeatures v0.3.1
+   Compiling sha2 v0.10.9
+   Compiling signature v2.2.0
+   Compiling alloy-primitives v1.7.3
+   Compiling ecdsa v0.16.9
+   Compiling keccak v0.2.2
+   Compiling rustls-pki-types v1.15.1
+   Compiling syn-solidity v1.7.3
+   Compiling ppv-lite86 v0.2.21
+   Compiling macro-string v0.2.0
+   Compiling proc-macro-error-attr3 v3.0.1
+   Compiling const-hex v1.19.3
+   Compiling dunce v1.0.5
+   Compiling untrusted v0.9.0
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling httparse v1.10.1
+   Compiling heck v0.5.0
+   Compiling thiserror v1.0.69
+   Compiling zmij v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling alloy-sol-macro-input v1.7.3
+   Compiling indexmap v2.14.2
+   Compiling proc-macro-error3 v3.0.1
+   Compiling rand_chacha v0.3.1
+   Compiling sha3 v0.11.0
+   Compiling k256 v0.13.4
+   Compiling thiserror-impl v1.0.69
+   Compiling errno v0.3.14
+   Compiling rustls v0.23.45
+   Compiling signal-hook v0.3.18
+   Compiling serde_json v1.0.151
+   Compiling darkbot-bsc-trading v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/trading)
+   Compiling signal-hook-registry v1.4.8
+   Compiling alloy-sol-macro-expander v1.7.3
+   Compiling rustls-webpki v0.103.15
+   Compiling rand v0.8.8
+   Compiling darkbot-bsc-record v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/record)
+   Compiling http v1.5.0
+   Compiling sha1 v0.10.7
+   Compiling memchr v2.8.3
+   Compiling data-encoding v2.11.1
+   Compiling utf-8 v0.7.6
+   Compiling byteorder v1.5.0
+   Compiling log v0.4.34
+   Compiling tungstenite v0.24.0
+   Compiling darkbot-bsc-geth-ipc v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/geth_ipc)
+   Compiling alloy-sol-macro v1.7.3
+   Compiling webpki-roots v1.0.9
+   Compiling darkbot-bsc-qualification v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/qualification)
+   Compiling darkbot-bsc-journal v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/journal)
+   Compiling darkbot-bsc-execution v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/execution)
+   Compiling alloy-sol-types v1.7.3
+   Compiling hex v0.4.3
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.53s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_qualification-e232df12686b24e4)
+
+running 25 tests
+test c1_common::tests::max_is_reported_and_a_miss_starts_at_exactly_one_millisecond ... ok
+test c1_common::tests::no_samples_is_stated ... ok
+test c1_common::tests::arguments_and_hex_parse_strictly ... ok
+test c1_hook_path::tests::a_launch_seen_before_its_handoff_is_excluded_not_measured ... ok
+test c1_latency::tests::a_consistent_run_yields_the_fixed_window ... ok
+test c1_latency::tests::a_failed_peer_is_a_partial_handoff_not_a_missing_sample ... ok
+test c1_latency::tests::first_each_and_all_handoffs_are_separate_measurements ... ok
+test c1_hook_path::tests::mainnet_and_incomparable_clocks_are_refused ... ok
+test c1_latency::tests::a_gap_a_moved_window_and_a_reordered_boundary_fail ... ok
+test c1_common::tests::extreme_percentiles_need_enough_samples ... ok
+test c1_latency::tests::the_go_snapshot_is_read_strictly ... ok
+test c1_latency::tests::missing_evidence_is_an_integrity_failure ... ok
+test c1_hook_path::tests::sources_are_compared_and_misses_are_counted ... ok
+test c1_latency::tests::the_report_record_is_typed_and_states_its_rules ... ok
+test c1_hook_path::tests::the_launches_record_is_built_by_the_command_line ... ok
+test c1_freeze::tests::a_later_gate_cannot_be_accepted_before_an_earlier_one ... ok
+test c1_freeze::tests::complete_inputs_are_ready_and_bind_every_artifact ... ok
+test c1_freeze::tests::a_template_is_never_evidence ... ok
+test c1_freeze::tests::source_change_detected_even_if_git_is_told_to_ignore_it ... ok
+test c1_freeze::tests::loopback_cannot_qualify_c19_for_freeze ... ok
+test c1_freeze::tests::the_binding_changes_with_any_bound_file ... ok
+test c1_freeze::tests::source_binding_refuses_missing_head_dirty_and_missing_hash ... ok
+test c1_freeze::tests::the_inputs_are_built_by_subcommands_in_gate_order ... ok
+test c1_freeze::tests::missing_or_unaccepted_inputs_leave_it_incomplete ... ok
+test c1_freeze::tests::the_command_line_freezes_only_complete_inputs_and_verifies_them ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+
+exit=0

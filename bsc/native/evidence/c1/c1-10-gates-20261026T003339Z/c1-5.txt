@@ -1,0 +1,440 @@
+$ cargo test -p darkbot-bsc-geth-ipc --locked --offline -j 2
+   Compiling libc v0.2.189
+   Compiling crypto-common v0.1.6
+   Compiling digest v0.10.7
+   Compiling hmac v0.12.1
+   Compiling rfc6979 v0.4.0
+   Compiling getrandom v0.2.17
+   Compiling cpufeatures v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling cpufeatures v0.3.1
+   Compiling keccak v0.2.2
+   Compiling ff v0.13.1
+   Compiling crypto-bigint v0.5.5
+   Compiling group v0.13.0
+   Compiling signature v2.2.0
+   Compiling sha2 v0.10.9
+   Compiling sha3 v0.11.0
+   Compiling alloy-primitives v1.7.3
+   Compiling elliptic-curve v0.13.8
+   Compiling ecdsa v0.16.9
+   Compiling k256 v0.13.4
+   Compiling darkbot-bsc-record v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/record)
+   Compiling darkbot-bsc-trading v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/trading)
+   Compiling darkbot-bsc-geth-ipc v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/geth_ipc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.99s
+     Running unittests src/lib.rs (target/debug/deps/darkbot_bsc_geth_ipc-f26214ac1f7002cc)
+
+running 128 tests
+test host::tests::qos_class_names_and_raw_values_round_trip ... ok
+test host::tests::the_hint_follows_topology_and_qualifies_nothing ... ok
+test host::tests::qos_on_a_permanent_thread_is_applied_or_explicitly_unsupported ... ok
+test host::tests::profile_p_is_refused_not_downgraded_without_parallel_builders ... ok
+test host::tests::apple_performance_levels_and_caches_are_recorded ... ok
+test host::tests::a_host_without_sysctl_degrades_explicitly ... ok
+test host::tests::preimage_strings_are_escaped ... ok
+test host::tests::the_recorded_c19_host_keeps_its_fingerprint_0xfc5501a8 ... ok
+test host::tests::the_report_is_reproducible_for_the_same_host ... ok
+test host::tests::the_host_report_captures_this_host_without_guessing ... ok
+test host::tests::the_host_profile_record_is_typed_reproducible_and_keeps_the_id ... ok
+test hot0::tests::oversize_and_empty_buys_are_refused ... ok
+test hot0::tests::a_closing_lane_is_drained_acknowledged_and_unlisted ... ok
+test hot0::tests::a_faulted_chain_lane_refuses_admission ... ok
+test hot0::tests::a_launch_seen_on_several_peer_lanes_is_decided_once ... ok
+test hot0::tests::the_dedup_window_is_bounded_and_counts_evictions ... ok
+test ingress::tests::a_consumer_error_never_passes ... ok
+test ingress::tests::a_corrupt_or_quarantined_txpool_lane_never_passes ... ok
+test ingress::tests::a_false_negative_never_passes ... ok
+test ingress::tests::a_foreign_record_on_a_peer_lane_never_passes ... ok
+test ingress::tests::a_foreign_record_on_the_txpool_lane_never_passes ... ok
+test ingress::tests::a_peer_observation_after_the_txpool_acceptance_is_a_false_negative ... ok
+test ingress::tests::a_peer_observation_before_or_at_the_txpool_acceptance_is_observed ... ok
+test hot0::tests::chain_evidence_is_serviced_before_peer_records ... ok
+test ingress::tests::a_recorded_txpool_quarantine_reason_never_passes ... ok
+test ingress::tests::a_sealed_txpool_lane_that_is_not_bound_never_passes ... ok
+test ingress::tests::a_txpool_record_with_a_nonzero_peer_never_passes ... ok
+test ingress::tests::a_txpool_record_with_nonzero_aux_never_passes ... ok
+test ingress::tests::an_invalid_peer_record_never_passes ... ok
+test ingress::tests::an_open_txpool_producer_window_never_passes ... ok
+test ingress::tests::an_unread_txpool_record_never_passes ... ok
+test ingress::tests::every_supported_envelope_yields_destination_and_calldata ... ok
+test hot0::tests::an_intent_is_sealed_once_and_released_explicitly ... ok
+test ingress::tests::interop_c14_rust_phase_1 ... ignored, C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh
+test ingress::tests::interop_c14_rust_phase_2 ... ignored, C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh
+test ingress::tests::ingress_aux_and_times_follow_the_c14_wire_semantics ... ok
+test ingress::tests::malformed_and_unsupported_envelopes_are_explicit ... ok
+test ingress::tests::missing_txpool_producer_counters_never_pass ... ok
+test ingress::tests::only_completely_closed_and_drained_evidence_can_yield_pass ... ok
+test hot0::tests::a_reorg_record_decodes_on_the_borrowed_bytes ... ok
+test hot0::tests::a_corrupt_peer_lane_is_retired_and_the_others_continue ... ok
+test hot0::tests::idle_polls_discover_lanes_bound_later ... ok
+test hot0::tests::a_chain_gap_record_refuses_admission ... ok
+test ingress::tests::producer_counters_that_disagree_with_the_lane_never_pass ... ok
+test ingress::tests::records_outside_the_c14_contract_are_invalid_evidence ... ok
+test ingress::tests::the_earliest_peer_observation_wins ... ok
+test ingress::tests::the_lane_plan_matches_the_geth_plan ... ok
+test ingress::tests::the_audit_judges_every_kind_of_txpool_record ... ok
+test ingress::tests::the_scope_mirror_is_the_golden_committed_launch_scope ... ok
+test hot0::tests::e72_a_contiguous_head_history_with_a_reorg_keeps_admission ... ok
+test ingress::tests::the_observation_window_is_bounded ... ok
+test ingress::tests::the_scope_passes_every_committed_launch_and_filters_buy ... ok
+test ingress::tests::txpool_lane_drops_and_oversize_refusals_never_pass ... ok
+test ingress::tests::txpool_producer_clock_errors_never_pass ... ok
+test ingress::tests::txpool_producer_refusals_never_pass ... ok
+test ingress::tests::txpool_producer_serialize_errors_never_pass ... ok
+test ingress::tests::txpool_records_read_but_not_judged_never_pass ... ok
+test ingress::tests::undecodable_txpool_records_never_pass ... ok
+test hot0::tests::a_sealed_lane_ends_without_a_fault ... ok
+test hot0::tests::a_noisy_lane_does_not_starve_another_lane ... ok
+test outbound::tests::the_lane_plan_matches_the_geth_overlay ... ok
+test ingress::tests::a_consumer_error_during_poll_is_invalid_evidence ... ok
+test hot0::tests::records_outside_the_peer_contract_are_released_undecided ... ok
+test hot0::tests::e72_head_reset_and_loss_gaps_decode_and_stay_broken ... ok
+test hot0::tests::an_admitted_launch_is_copied_once_and_survives_slot_reuse ... ok
+test hot0::tests::round_robin_starts_after_the_last_successful_lane ... ok
+test outbound::tests::evidence_that_contradicts_itself_is_refused ... ok
+test outbound::tests::the_egress_lane_is_written_only_against_a_consumed_permit ... ok
+test protocol_v2::c15_tests::a_visible_commit_change_under_the_guard_quarantines_and_is_not_released ... ok
+test protocol_v2::c15_tests::copy_payload_copies_once_and_refuses_a_small_buffer ... ok
+test protocol_v2::c15_tests::a_lane_set_reads_several_lanes_through_one_mapping ... ok
+test protocol_v2::c15_tests::a_corrupt_record_is_refused_and_never_released ... ok
+test protocol_v2::c15_tests::a_held_slot_cannot_be_reused_and_a_released_slot_can ... ok
+test protocol_v2::c15_tests::a_sealed_lane_delivers_its_records_and_then_ends ... ok
+test outbound::tests::handoff_evidence_decodes_and_keeps_its_provenance ... ok
+test ingress::tests::poll_on_empty_sealed_lanes_returns_nothing_without_error ... ok
+test ingress::tests::a_txpool_backlog_left_by_poll_is_incomplete_until_drained ... ok
+test protocol_v2::c15_tests::dropping_the_guard_releases_the_record ... ok
+test protocol_v2::c15_tests::the_guard_stays_correct_across_wraparound ... ok
+test ingress::tests::only_shutdown_closes_the_txpool_observation_window ... ok
+test protocol_v2::tests::crc32c_standard_and_cross_language_vectors ... ok
+test protocol_v2::tests::a_stale_lease_never_acts_on_a_reused_lane_even_with_the_same_owner ... ok
+test protocol_v2::tests::an_unread_record_prevents_reuse_until_it_is_consumed ... ok
+test protocol_v2::tests::close_requires_the_owner_and_the_epoch_of_the_binding ... ok
+test protocol_v2::c15_tests::the_borrowed_record_is_exactly_the_published_record ... ok
+test protocol_v2::tests::an_empty_closing_lane_drains_at_once ... ok
+test protocol_v2::tests::double_bind_is_rejected_without_side_effects ... ok
+test ingress::tests::poll_reads_a_sealed_lane_to_its_end_without_error ... ok
+test protocol_v2::tests::a_record_of_another_epoch_quarantines_the_lane_once ... ok
+test protocol_v2::tests::a_wrong_arena_or_lane_generation_is_rejected ... ok
+test protocol_v2::tests::full_lane_never_overwrites_unread_records ... ok
+test protocol_v2::tests::interop_rust_phase_1 ... ignored, C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+test protocol_v2::tests::interop_rust_phase_2 ... ignored, C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+test ingress::tests::poll_judges_a_peer_record_drained_late_by_its_timestamp ... ok
+test protocol_v2::tests::arena_roundtrip_wrap_and_directory_validation ... ok
+test protocol_v2::tests::a_write_after_close_quarantines_the_lane ... ok
+test protocol_v2::tests::free_peer_lane_refuses_publish_and_wrong_generation_is_quarantined ... ok
+test protocol_v2::tests::churn_keeps_epochs_monotonic_owners_apart_and_sequences_continuous ... ok
+test protocol_v2::tests::peer_lane_lifecycle_requires_drain_before_reuse ... ok
+test protocol_v2::tests::an_undefined_lifecycle_state_quarantines_even_an_empty_lane ... ok
+test protocol_v2::tests::lane_epoch_exhaustion_fails_closed ... ok
+test protocol_v2::tests::publish_after_close_is_rejected ... ok
+test protocol_v2::tests::publish_while_free_is_rejected_and_writes_nothing ... ok
+test protocol_v2::tests::role_lease_child_holder ... ignored, helper process of role_lease_is_released_when_the_holder_process_dies
+test protocol_v2::tests::peer_lane_lifecycle_rejects_wrong_owner_and_wrong_state ... ok
+test protocol_v2::tests::records_outside_a_binding_quarantine_as_late_writes_without_counting_corruption ... ok
+test protocol_v2::tests::lifecycle_free_bound_closing_drained_free_and_second_bind ... ok
+test protocol_v2::tests::release_before_the_drain_is_rejected ... ok
+test protocol_v2::tests::release_requires_the_owner_and_the_epoch_of_the_binding ... ok
+test protocol_v2::tests::quarantine_is_terminal_and_a_restart_quarantines_the_old_generation ... ok
+test protocol_v2::tests::header_and_payload_corruption_are_both_detected ... ok
+test hot0::tests::e72_unreported_head_changes_refuse_admission ... ok
+test protocol_v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles ... ok
+test wire::tests::record_kinds_are_the_wire_numbers ... ok
+test protocol_v2::tests::e75_linked_lock_files_are_refused_and_never_truncated ... ok
+test protocol_v2::tests::the_pool_never_takes_bound_closing_or_quarantined_lanes ... ok
+test protocol_v2::tests::the_pool_binds_only_free_lanes_and_reports_exhaustion_without_waiting ... ok
+test protocol_v2::tests::shutdown_refuses_binds_and_publishes_while_live_handles_stay_valid ... ok
+test protocol_v2::tests::e63_a_lane_has_one_producer_and_one_consumer_per_process ... ok
+test protocol_v2::tests::independent_lanes_support_parallel_single_producers ... ok
+test protocol_v2::tests::the_pool_bounds_must_match_the_arena ... ok
+test protocol_v2::tests::role_lease_is_released_when_the_holder_process_dies ... ok
+test protocol_v2::tests::independent_peer_lanes_cycle_concurrently ... ok
+test protocol_v2::tests::existing_arenas_are_detected_never_attached_and_never_overwritten ... ok
+test protocol_v2::tests::slots_of_an_earlier_binding_are_never_accepted_after_reuse ... ok
+test protocol_v2::tests::e75_untrusted_directories_and_arena_links_fail_closed ... ok
+test protocol_v2::tests::every_structural_defect_quarantines_once_and_is_never_skipped ... ok
+test trust::tests::directory_and_file_rules_fail_closed ... ok
+
+test result: ok. 123 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/c15_hot0_alloc.rs (target/debug/deps/c15_hot0_alloc-f00a780ce41569cd)
+
+running 1 test
+test the_hot0_receive_path_allocates_nothing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/c18_stress.rs (target/debug/deps/c18_stress-59e459688276374d)
+
+running 8 tests
+test oversize_records_are_refused_with_evidence ... ok
+test a_wrong_generation_is_refused_by_every_endpoint ... ok
+test a_stalled_consumer_causes_counted_refusals_and_no_overwrite ... ok
+test torn_and_corrupt_records_are_never_accepted ... ok
+test consumer_and_producer_restarts_keep_the_sequence ... ok
+test lane_churn_never_reuses_a_lane_before_its_drain ... ok
+test hot0_accounts_for_every_record_under_burst_and_background_load ... ok
+test simultaneous_peer_producers_lose_nothing_and_keep_lane_order ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+   Doc-tests darkbot_bsc_geth_ipc
+
+running 1 test
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 97) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 78) - compile fail ... ok
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 86) - compile fail ... ok
+test crates/geth_ipc/src/hot0.rs - hot0::Hot0Poller (line 850) - compile fail ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+all doctests ran in 0.29s; merged doctests compilation took 0.12s
+exit=0
+$ cargo test -p darkbot-bsc-geth-ipc --release --locked --offline -j 2
+   Compiling typenum v1.20.1
+   Compiling libc v0.2.189
+   Compiling zeroize v1.9.0
+   Compiling version_check v0.9.5
+   Compiling generic-array v0.14.9
+   Compiling cfg-if v1.0.5
+   Compiling subtle v2.6.1
+   Compiling const-oid v0.9.6
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling proc-macro2 v1.0.107
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling der v0.7.10
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.26
+   Compiling hybrid-array v0.4.15
+   Compiling spki v0.7.3
+   Compiling ff v0.13.1
+   Compiling base16ct v0.2.0
+   Compiling unicode-segmentation v1.13.3
+   Compiling sec1 v0.7.3
+   Compiling convert_case v0.10.0
+   Compiling group v0.13.0
+   Compiling pkcs8 v0.10.2
+   Compiling syn v2.0.119
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+   Compiling hmac v0.12.1
+   Compiling crypto-bigint v0.5.5
+   Compiling cpufeatures v0.3.1
+   Compiling cpufeatures v0.2.17
+   Compiling unicode-xid v0.2.6
+   Compiling paste v1.0.15
+   Compiling derive_more-impl v2.1.1
+   Compiling sha2 v0.10.9
+   Compiling keccak v0.2.2
+   Compiling elliptic-curve v0.13.8
+   Compiling rfc6979 v0.4.0
+   Compiling digest v0.11.3
+   Compiling signature v2.2.0
+   Compiling foldhash v0.2.0
+   Compiling ruint-macro v1.2.1
+   Compiling ruint v1.20.1
+   Compiling derive_more v2.1.1
+   Compiling hashbrown v0.17.1
+   Compiling ecdsa v0.16.9
+   Compiling sha3 v0.11.0
+   Compiling const-hex v1.19.3
+   Compiling bytes v1.12.1
+   Compiling once_cell v1.21.4
+   Compiling itoa v1.0.18
+   Compiling alloy-primitives v1.7.3
+   Compiling k256 v0.13.4
+   Compiling darkbot-bsc-tx-encoding v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/tx_encoding)
+   Compiling darkbot-bsc-trading v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/trading)
+   Compiling darkbot-bsc-record v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/record)
+   Compiling darkbot-bsc-geth-ipc v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/geth_ipc)
+    Finished `release` profile [optimized] target(s) in 13.95s
+     Running unittests src/lib.rs (target/release/deps/darkbot_bsc_geth_ipc-1180124748d87ade)
+
+running 128 tests
+test host::tests::preimage_strings_are_escaped ... ok
+test host::tests::a_host_without_sysctl_degrades_explicitly ... ok
+test host::tests::profile_p_is_refused_not_downgraded_without_parallel_builders ... ok
+test host::tests::apple_performance_levels_and_caches_are_recorded ... ok
+test host::tests::the_hint_follows_topology_and_qualifies_nothing ... ok
+test host::tests::qos_class_names_and_raw_values_round_trip ... ok
+test host::tests::the_recorded_c19_host_keeps_its_fingerprint_0xfc5501a8 ... ok
+test host::tests::qos_on_a_permanent_thread_is_applied_or_explicitly_unsupported ... ok
+test host::tests::the_report_is_reproducible_for_the_same_host ... ok
+test host::tests::the_host_profile_record_is_typed_reproducible_and_keeps_the_id ... ok
+test host::tests::the_host_report_captures_this_host_without_guessing ... ok
+test hot0::tests::oversize_and_empty_buys_are_refused ... ok
+test hot0::tests::a_reorg_record_decodes_on_the_borrowed_bytes ... ok
+test hot0::tests::a_chain_gap_record_refuses_admission ... ok
+test hot0::tests::a_faulted_chain_lane_refuses_admission ... ok
+test hot0::tests::the_dedup_window_is_bounded_and_counts_evictions ... ok
+test hot0::tests::a_noisy_lane_does_not_starve_another_lane ... ok
+test ingress::tests::a_consumer_error_never_passes ... ok
+test ingress::tests::a_corrupt_or_quarantined_txpool_lane_never_passes ... ok
+test ingress::tests::a_false_negative_never_passes ... ok
+test ingress::tests::a_foreign_record_on_a_peer_lane_never_passes ... ok
+test ingress::tests::a_foreign_record_on_the_txpool_lane_never_passes ... ok
+test hot0::tests::e72_head_reset_and_loss_gaps_decode_and_stay_broken ... ok
+test ingress::tests::a_peer_observation_after_the_txpool_acceptance_is_a_false_negative ... ok
+test ingress::tests::a_peer_observation_before_or_at_the_txpool_acceptance_is_observed ... ok
+test ingress::tests::a_recorded_txpool_quarantine_reason_never_passes ... ok
+test ingress::tests::a_sealed_txpool_lane_that_is_not_bound_never_passes ... ok
+test ingress::tests::a_txpool_record_with_a_nonzero_peer_never_passes ... ok
+test ingress::tests::a_txpool_record_with_nonzero_aux_never_passes ... ok
+test ingress::tests::an_invalid_peer_record_never_passes ... ok
+test ingress::tests::an_open_txpool_producer_window_never_passes ... ok
+test ingress::tests::an_unread_txpool_record_never_passes ... ok
+test ingress::tests::ingress_aux_and_times_follow_the_c14_wire_semantics ... ok
+test ingress::tests::every_supported_envelope_yields_destination_and_calldata ... ok
+test ingress::tests::interop_c14_rust_phase_1 ... ignored, C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh
+test ingress::tests::interop_c14_rust_phase_2 ... ignored, C1.4 Go<->Rust ingress interop phase; run by bsc/tools/c14_ingress_interop.sh
+test ingress::tests::malformed_and_unsupported_envelopes_are_explicit ... ok
+test ingress::tests::missing_txpool_producer_counters_never_pass ... ok
+test ingress::tests::only_completely_closed_and_drained_evidence_can_yield_pass ... ok
+test hot0::tests::a_launch_seen_on_several_peer_lanes_is_decided_once ... ok
+test hot0::tests::an_intent_is_sealed_once_and_released_explicitly ... ok
+test hot0::tests::a_closing_lane_is_drained_acknowledged_and_unlisted ... ok
+test ingress::tests::producer_counters_that_disagree_with_the_lane_never_pass ... ok
+test ingress::tests::records_outside_the_c14_contract_are_invalid_evidence ... ok
+test ingress::tests::the_audit_judges_every_kind_of_txpool_record ... ok
+test ingress::tests::the_earliest_peer_observation_wins ... ok
+test ingress::tests::the_lane_plan_matches_the_geth_plan ... ok
+test ingress::tests::the_observation_window_is_bounded ... ok
+test ingress::tests::the_scope_mirror_is_the_golden_committed_launch_scope ... ok
+test ingress::tests::the_scope_passes_every_committed_launch_and_filters_buy ... ok
+test ingress::tests::txpool_lane_drops_and_oversize_refusals_never_pass ... ok
+test ingress::tests::txpool_producer_clock_errors_never_pass ... ok
+test ingress::tests::txpool_producer_refusals_never_pass ... ok
+test ingress::tests::txpool_producer_serialize_errors_never_pass ... ok
+test ingress::tests::txpool_records_read_but_not_judged_never_pass ... ok
+test ingress::tests::undecodable_txpool_records_never_pass ... ok
+test hot0::tests::a_sealed_lane_ends_without_a_fault ... ok
+test hot0::tests::records_outside_the_peer_contract_are_released_undecided ... ok
+test hot0::tests::a_corrupt_peer_lane_is_retired_and_the_others_continue ... ok
+test outbound::tests::the_lane_plan_matches_the_geth_overlay ... ok
+test hot0::tests::an_admitted_launch_is_copied_once_and_survives_slot_reuse ... ok
+test hot0::tests::idle_polls_discover_lanes_bound_later ... ok
+test hot0::tests::round_robin_starts_after_the_last_successful_lane ... ok
+test hot0::tests::chain_evidence_is_serviced_before_peer_records ... ok
+test ingress::tests::a_consumer_error_during_poll_is_invalid_evidence ... ok
+test ingress::tests::poll_on_empty_sealed_lanes_returns_nothing_without_error ... ok
+test protocol_v2::c15_tests::a_sealed_lane_delivers_its_records_and_then_ends ... ok
+test outbound::tests::the_egress_lane_is_written_only_against_a_consumed_permit ... ok
+test ingress::tests::a_txpool_backlog_left_by_poll_is_incomplete_until_drained ... ok
+test protocol_v2::c15_tests::a_held_slot_cannot_be_reused_and_a_released_slot_can ... ok
+test hot0::tests::e72_a_contiguous_head_history_with_a_reorg_keeps_admission ... ok
+test outbound::tests::evidence_that_contradicts_itself_is_refused ... ok
+test protocol_v2::c15_tests::a_visible_commit_change_under_the_guard_quarantines_and_is_not_released ... ok
+test protocol_v2::c15_tests::a_corrupt_record_is_refused_and_never_released ... ok
+test protocol_v2::c15_tests::the_borrowed_record_is_exactly_the_published_record ... ok
+test protocol_v2::tests::a_stale_lease_never_acts_on_a_reused_lane_even_with_the_same_owner ... ok
+test protocol_v2::c15_tests::dropping_the_guard_releases_the_record ... ok
+test ingress::tests::poll_judges_a_peer_record_drained_late_by_its_timestamp ... ok
+test outbound::tests::handoff_evidence_decodes_and_keeps_its_provenance ... ok
+test protocol_v2::c15_tests::copy_payload_copies_once_and_refuses_a_small_buffer ... ok
+test protocol_v2::tests::crc32c_standard_and_cross_language_vectors ... ok
+test protocol_v2::c15_tests::a_lane_set_reads_several_lanes_through_one_mapping ... ok
+test protocol_v2::tests::double_bind_is_rejected_without_side_effects ... ok
+test protocol_v2::tests::close_requires_the_owner_and_the_epoch_of_the_binding ... ok
+test protocol_v2::tests::an_empty_closing_lane_drains_at_once ... ok
+test ingress::tests::only_shutdown_closes_the_txpool_observation_window ... ok
+test protocol_v2::tests::a_write_after_close_quarantines_the_lane ... ok
+test ingress::tests::poll_reads_a_sealed_lane_to_its_end_without_error ... ok
+test protocol_v2::tests::an_unread_record_prevents_reuse_until_it_is_consumed ... ok
+test protocol_v2::tests::a_record_of_another_epoch_quarantines_the_lane_once ... ok
+test protocol_v2::c15_tests::the_guard_stays_correct_across_wraparound ... ok
+test protocol_v2::tests::interop_rust_phase_1 ... ignored, C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+test protocol_v2::tests::interop_rust_phase_2 ... ignored, C1.3 Go<->Rust interop phase; run by bsc/tools/c13_lifecycle_interop.sh
+test protocol_v2::tests::a_wrong_arena_or_lane_generation_is_rejected ... ok
+test protocol_v2::tests::an_undefined_lifecycle_state_quarantines_even_an_empty_lane ... ok
+test protocol_v2::tests::arena_roundtrip_wrap_and_directory_validation ... ok
+test protocol_v2::tests::churn_keeps_epochs_monotonic_owners_apart_and_sequences_continuous ... ok
+test protocol_v2::tests::lane_epoch_exhaustion_fails_closed ... ok
+test protocol_v2::tests::full_lane_never_overwrites_unread_records ... ok
+test protocol_v2::tests::peer_lane_lifecycle_rejects_wrong_owner_and_wrong_state ... ok
+test protocol_v2::tests::free_peer_lane_refuses_publish_and_wrong_generation_is_quarantined ... ok
+test protocol_v2::tests::publish_while_free_is_rejected_and_writes_nothing ... ok
+test protocol_v2::tests::lifecycle_free_bound_closing_drained_free_and_second_bind ... ok
+test protocol_v2::tests::role_lease_child_holder ... ignored, helper process of role_lease_is_released_when_the_holder_process_dies
+test protocol_v2::tests::peer_lane_lifecycle_requires_drain_before_reuse ... ok
+test protocol_v2::tests::independent_lanes_support_parallel_single_producers ... ok
+test protocol_v2::tests::publish_after_close_is_rejected ... ok
+test protocol_v2::tests::release_before_the_drain_is_rejected ... ok
+test protocol_v2::tests::e75_linked_lock_files_are_refused_and_never_truncated ... ok
+test protocol_v2::tests::independent_peer_lanes_cycle_concurrently ... ok
+test protocol_v2::tests::e63_a_lane_has_one_producer_and_one_consumer_per_process ... ok
+test protocol_v2::tests::header_and_payload_corruption_are_both_detected ... ok
+test wire::tests::record_kinds_are_the_wire_numbers ... ok
+test protocol_v2::tests::release_requires_the_owner_and_the_epoch_of_the_binding ... ok
+test protocol_v2::tests::shutdown_refuses_binds_and_publishes_while_live_handles_stay_valid ... ok
+test protocol_v2::tests::the_pool_bounds_must_match_the_arena ... ok
+test protocol_v2::tests::records_outside_a_binding_quarantine_as_late_writes_without_counting_corruption ... ok
+test protocol_v2::tests::quarantine_is_terminal_and_a_restart_quarantines_the_old_generation ... ok
+test protocol_v2::tests::the_pool_never_takes_bound_closing_or_quarantined_lanes ... ok
+test protocol_v2::tests::the_pool_binds_only_free_lanes_and_reports_exhaustion_without_waiting ... ok
+test protocol_v2::tests::e75_untrusted_directories_and_arena_links_fail_closed ... ok
+test protocol_v2::tests::role_leases_are_exclusive_per_role_and_coexist_across_roles ... ok
+test protocol_v2::tests::slots_of_an_earlier_binding_are_never_accepted_after_reuse ... ok
+test protocol_v2::tests::role_lease_is_released_when_the_holder_process_dies ... ok
+test hot0::tests::e72_unreported_head_changes_refuse_admission ... ok
+test protocol_v2::tests::existing_arenas_are_detected_never_attached_and_never_overwritten ... ok
+test trust::tests::directory_and_file_rules_fail_closed ... ok
+test protocol_v2::tests::every_structural_defect_quarantines_once_and_is_never_skipped ... ok
+
+test result: ok. 123 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/c15_hot0_alloc.rs (target/release/deps/c15_hot0_alloc-6867eec620f95c07)
+
+running 1 test
+test the_hot0_receive_path_allocates_nothing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/c18_stress.rs (target/release/deps/c18_stress-a2bc89c0b0e496d0)
+
+running 8 tests
+test oversize_records_are_refused_with_evidence ... ok
+test a_stalled_consumer_causes_counted_refusals_and_no_overwrite ... ok
+test torn_and_corrupt_records_are_never_accepted ... ok
+test a_wrong_generation_is_refused_by_every_endpoint ... ok
+test hot0_accounts_for_every_record_under_burst_and_background_load ... ok
+test consumer_and_producer_restarts_keep_the_sequence ... ok
+test simultaneous_peer_producers_lose_nothing_and_keep_lane_order ... ok
+test lane_churn_never_reuses_a_lane_before_its_drain ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+   Doc-tests darkbot_bsc_geth_ipc
+
+running 1 test
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 97) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 78) - compile fail ... ok
+test crates/geth_ipc/src/protocol_v2/guards.rs - protocol_v2::RecordGuardV2 (line 86) - compile fail ... ok
+test crates/geth_ipc/src/hot0.rs - hot0::Hot0Poller (line 850) - compile fail ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+all doctests ran in 0.30s; merged doctests compilation took 0.13s
+exit=0
+$ cargo test -p darkbot-bsc-geth-ipc --locked --offline -j 2 --test c15_hot0_alloc -- --nocapture
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running tests/c15_hot0_alloc.rs (target/debug/deps/c15_hot0_alloc-f00a780ce41569cd)
+
+running 1 test
+test the_hot0_receive_path_allocates_nothing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+exit=0

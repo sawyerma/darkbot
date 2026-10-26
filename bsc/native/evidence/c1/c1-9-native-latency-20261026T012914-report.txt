@@ -1,0 +1,21 @@
+C1.9 native latency: integrity=PASS eligible=true mode=production_devp2p_selected_peer_handoff purpose=qualification samples=10000 (warmup retained 128)
+  T_packet_decoded_to_T_ingress: n=10000 p50=0 p95=1000 p99=1000 p99.9=1000 p99.99=5000 max=5000 misses_ge_1ms=0
+  T_ingress_to_L1_pre_commit_lower_bound: n=10000 p50=2000 p95=4000 p99=7000 p99.9=15000 p99.99=53000 max=57000 misses_ge_1ms=0
+  T_ingress_to_L1_post_commit_upper_bound: n=10000 p50=2000 p95=5000 p99=7000 p99.9=15000 p99.99=53000 max=57000 misses_ge_1ms=0
+  L1_commit_bracket_width: n=10000 p50=0 p95=1000 p99=1000 p99.9=1000 p99.99=6000 max=8000 misses_ge_1ms=0
+  L1_to_L2_lower_bound: n=10000 p50=80000 p95=103000 p99=116000 p99.9=217000 p99.99=259000 max=282000 misses_ge_1ms=0
+  L1_to_L2_upper_bound: n=10000 p50=81000 p95=103000 p99=116000 p99.9=217000 p99.99=260000 max=282000 misses_ge_1ms=0
+  T_ingress_to_L2: n=10000 p50=83000 p95=106000 p99=119000 p99.9=220000 p99.99=264000 max=286000 misses_ge_1ms=0
+  ingress queue_depth_max=1
+  egress_commit_to_coordinator_observed: n=10000 p50=3000 p95=9000 p99=15000 p99.9=23000 p99.99=41000 max=42000 misses_ge_1ms=0
+  egress_commit_to_first_selected_peer_handoff: n=10000 p50=15000 p95=24000 p99=30000 p99.9=50000 p99.99=122000 max=161000 misses_ge_1ms=0
+  egress_commit_to_each_selected_peer_handoff: n=20000 p50=17000 p95=28000 p99=35000 p99.9=58000 p99.99=161000 max=171000 misses_ge_1ms=0
+  egress_commit_to_all_selected_peer_handoffs: n=10000 p50=19000 p95=30000 p99=37000 p99.9=60000 p99.99=166000 max=171000 misses_ge_1ms=0
+  worker_send_call_duration: n=20000 p50=6000 p95=10000 p99=14000 p99.9=26000 p99.99=56000 max=94000 misses_ge_1ms=0
+  T_ingress_to_egress_commit: n=10000 p50=83000 p95=106000 p99=120000 p99.9=220000 p99.99=264000 max=286000 misses_ge_1ms=0
+  T_ingress_to_first_selected_peer_handoff: n=10000 p50=99000 p95=124000 p99=140000 p99.9=256000 p99.99=308000 max=338000 misses_ge_1ms=0
+  worker slots: HANDED_OFF=20000 buys_without_all_selected=0
+  counters: peer_published=10128 peer_queue_full=0 peer_oversize=0 peer_refused=0 uncovered_candidates=0 gap_total=0 chain_published=488 chain_lost=0 chain_ownership_violations=0 outbound_queue_full_hol=0 outbound_invalid_egress=0 outbound_evidence_lost=0 hot0_lane_faults=0 hot0_invalid_records=0 hot0_dropped=0 hot0_chain_gaps=0 hot0_allocations_in_qualification_window=0
+  identity: darkbot 995a2a2710c3ab408941c941c8ea3368f919dc52 (clean) geth cdb7548b5baacfdae92f9f63437d6456411665f3 topology 0xfc5501a8 profile S (configured)
+  gate: NOT_DECIDED_BY_THIS_TOOL
+report=/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/native/evidence/c1/c1-9-native-latency-20261026T012914.dbrec sha256=8600c0f543d45a36a8698296d2a07f9554f83974990db171ecc28d774f6ff36d

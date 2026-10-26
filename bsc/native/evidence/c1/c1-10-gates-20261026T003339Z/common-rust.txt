@@ -1,0 +1,120 @@
+$ cargo fmt -p darkbot-bsc-geth-ipc -p darkbot-bsc-trading -- --check
+exit=0
+$ cargo clippy -p darkbot-bsc-geth-ipc --all-targets --locked --offline -j 2 -- -D warnings
+    Checking typenum v1.20.1
+   Compiling libc v0.2.189
+    Checking zeroize v1.9.0
+   Compiling version_check v0.9.5
+   Compiling generic-array v0.14.9
+    Checking cfg-if v1.0.5
+    Checking subtle v2.6.1
+    Checking const-oid v0.9.6
+    Checking getrandom v0.2.17
+    Checking rand_core v0.6.4
+   Compiling proc-macro2 v1.0.107
+    Checking crypto-common v0.1.6
+    Checking block-buffer v0.10.4
+    Checking digest v0.10.7
+    Checking der v0.7.10
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.26
+    Checking hybrid-array v0.4.15
+    Checking spki v0.7.3
+    Checking ff v0.13.1
+    Checking base16ct v0.2.0
+   Compiling unicode-segmentation v1.13.3
+    Checking group v0.13.0
+    Checking sec1 v0.7.3
+    Checking pkcs8 v0.10.2
+   Compiling convert_case v0.10.0
+    Checking block-buffer v0.12.1
+    Checking crypto-common v0.2.2
+   Compiling syn v2.0.119
+    Checking hmac v0.12.1
+    Checking crypto-bigint v0.5.5
+    Checking cpufeatures v0.2.17
+    Checking cpufeatures v0.3.1
+   Compiling paste v1.0.15
+   Compiling unicode-xid v0.2.6
+    Checking keccak v0.2.2
+    Checking sha2 v0.10.9
+    Checking elliptic-curve v0.13.8
+    Checking rfc6979 v0.4.0
+    Checking digest v0.11.3
+    Checking signature v2.2.0
+   Compiling ruint-macro v1.2.1
+    Checking foldhash v0.2.0
+    Checking hashbrown v0.17.1
+    Checking ruint v1.20.1
+   Compiling derive_more-impl v2.1.1
+    Checking ecdsa v0.16.9
+    Checking sha3 v0.11.0
+    Checking const-hex v1.19.3
+    Checking bytes v1.12.1
+    Checking itoa v1.0.18
+    Checking once_cell v1.21.4
+    Checking k256 v0.13.4
+    Checking darkbot-bsc-tx-encoding v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/tx_encoding)
+    Checking darkbot-bsc-record v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/record)
+    Checking derive_more v2.1.1
+    Checking alloy-primitives v1.7.3
+    Checking darkbot-bsc-trading v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/trading)
+    Checking darkbot-bsc-geth-ipc v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/geth_ipc)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.04s
+exit=0
+$ cargo test -p darkbot-bsc-trading --test c14_prefilter_scope --locked --offline -j 2
+   Compiling typenum v1.20.1
+   Compiling libc v0.2.189
+   Compiling zeroize v1.9.0
+   Compiling cfg-if v1.0.5
+   Compiling generic-array v0.14.9
+   Compiling const-oid v0.9.6
+   Compiling subtle v2.6.1
+   Compiling crypto-common v0.1.6
+   Compiling block-buffer v0.10.4
+   Compiling getrandom v0.2.17
+   Compiling digest v0.10.7
+   Compiling rand_core v0.6.4
+   Compiling der v0.7.10
+   Compiling hybrid-array v0.4.15
+   Compiling ff v0.13.1
+   Compiling base16ct v0.2.0
+   Compiling spki v0.7.3
+   Compiling pkcs8 v0.10.2
+   Compiling sec1 v0.7.3
+   Compiling group v0.13.0
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling crypto-bigint v0.5.5
+   Compiling hmac v0.12.1
+   Compiling cpufeatures v0.3.1
+   Compiling elliptic-curve v0.13.8
+   Compiling keccak v0.2.2
+   Compiling rfc6979 v0.4.0
+   Compiling digest v0.11.3
+   Compiling signature v2.2.0
+   Compiling cpufeatures v0.2.17
+   Compiling foldhash v0.2.0
+   Compiling sha2 v0.10.9
+   Compiling hashbrown v0.17.1
+   Compiling ruint v1.20.1
+   Compiling ecdsa v0.16.9
+   Compiling sha3 v0.11.0
+   Compiling derive_more v2.1.1
+   Compiling const-hex v1.19.3
+   Compiling bytes v1.12.1
+   Compiling itoa v1.0.18
+   Compiling once_cell v1.21.4
+   Compiling k256 v0.13.4
+   Compiling alloy-primitives v1.7.3
+   Compiling darkbot-bsc-tx-encoding v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/tx_encoding)
+   Compiling darkbot-bsc-trading v0.1.0 (/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c19run/repo/bsc/engine/crates/trading)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.45s
+     Running tests/c14_prefilter_scope.rs (target/debug/deps/c14_prefilter_scope-c759bdaa9cba5795)
+
+running 1 test
+test the_c14_prefilter_scope_is_the_committed_launch_scope ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit=0

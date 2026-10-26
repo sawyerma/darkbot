@@ -1,0 +1,14 @@
+$ env DARKBOT_BSC_GETH_DIR=/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates2/geth bash bsc/tools/c13_lifecycle_interop.sh
+phase geth-1: OK
+phase rust-1: OK
+phase geth-2: OK
+phase rust-2: OK
+C1_3_GO_RUST_LIFECYCLE_INTEROP_PASS
+exit=0
+$ env DARKBOT_BSC_GETH_DIR=/private/tmp/claude-501/-Users-sawyer-ma-Desktop-Firma-2-DarkMa-6-DarkBot-DarkBot/cb129474-4d1b-4d79-b89c-5091d2f40cb5/scratchpad/c1gates2/geth bash bsc/tools/c14_ingress_interop.sh
+phase geth-1: OK
+phase rust-1: OK
+phase geth-2: OK
+phase rust-2: OK
+C1_4_GO_RUST_INGRESS_INTEROP_PASS
+exit=0

@@ -1,0 +1,67 @@
+C1.9b controlled Testnet ETH/68 hook/path - run 20261026T003211Z (UTC), reproducible binaries of 995a2a27
+
+source: fresh clean clone of DarkBot at 995a2a2710c3ab408941c941c8ea3368f919dc52 (git status --porcelain empty)
+geth: pristine --shared clone of the Backup bsc-geth at pin cdb7548b5baacfdae92f9f63437d6456411665f3 (v1.7.8),
+  overlay by the clone's bsc/tools/c1_apply_geth_overlay.py (marker DARKBOT_C1_FASTLANE_C1_7_E72; darkbot/fastlane
+  byte-identical to the clone's bsc/geth/overlay), go build -trimpath -buildvcs=false (Go 1.25.0, GOPROXY=off)
+  geth sha256 f010faa6cebb7033a47c944762ff05d9a5a6ef551a91fc2bdbce32fbe400a622
+rust (in the clone's bsc/engine, RUSTFLAGS=--remap-path-prefix=$(pwd -P)=bsc/engine -C link-arg=-Wl,-S, rustc 1.93.1,
+  cargo build --release --locked --offline):
+  c19b_capture sha256 a8c746b5d66cf8c881781205e38eccdc4aa6a217503408ffaef2a89c16972c11
+  c19b_report  sha256 3b9958059b83e05922cd8e2f185067a0027d1e724c74f4bce86a3d2ba61cba32 (= report analyzer_sha256)
+harness (not measured, not frozen): replay peer sha256 8b2dd1820551619a3e816f705c100faa73250627dd3ddc6718ca48670486f441
+chapel: built-in --chapel (genesis 0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34), unsynced at genesis
+fast lane: DARKBOT_FASTLANE_V2_SCOPE=c19b-testnet, DARKBOT_C19B_ACCEPT_TXS_UNSYNCED=YES, MAX_PEERS=2, CHURN_RESERVE=2,
+  generation 202610260032, boot id 38D19A2D-0569-4BB7-9D35-910441C5E6DB
+
+isolation: --nodiscover, --bootnodes "", no static/trusted nodes, --maxpeers 2, --netrestrict 127.0.0.0/8, --nat none,
+  --ipcdisable, P2P ListenAddr 127.0.0.1 (TOML), HTTP 127.0.0.1 only
+  peer id=70ef606787c34a16b0d98b0b931098437d84c8d5a0cfe6fb116590f42a8e1e71 remote=127.0.0.1:52150 local=127.0.0.1:30397 inbound=True trusted=False static=False caps=eth/68 name=darkbot-c19b-replay
+  admin_peers_count=1
+  net_peerCount=1
+  replay_self_id=70ef606787c34a16b0d98b0b931098437d84c8d5a0cfe6fb116590f42a8e1e71
+  geth sockets: 127.0.0.1:30397 LISTEN, 127.0.0.1:18597 LISTEN, one ESTABLISHED 127.0.0.1<->127.0.0.1; after run net_peerCount=0
+
+launches: the same 25 already-mined public Chapel newTokenV6 txs to Portal 0x5beacaf7abcbb3ab280e80d007fd31fce26510e9
+  as run c1-9b-hook-path-20261025T233848Z (blocks 137809555..138760701; raw bytes re-verified at load: keccak, decode,
+  chain 97, to/selector, sender recovery); no new signatures; one Transactions packet each; spacing 250.2..251.2 ms; write return 44..163 us after handoff
+
+result (c19b_report, gate NOT_DECIDED_BY_THIS_TOOL): launches=25 observed=25 missed=0 excluded_before_handoff=0
+  capture: rows=25 invalid_records=0 lane_faults=0; eth-broadcast first for 25, eth-pooled 0
+  peer 70ef606787c34a16b0d98b0b931098437d84c8d5a0cfe6fb116590f42a8e1e71 (eth-broadcast): observed 25, not observed 0
+  handoff_to_packet_decode: n=25 min=140000 p50=276000 p95=350000 p99=350000 max=350000 misses_ge_1ms=0 (ns)
+  packet_decode_to_T_ingress: n=25 min=11000 p50=20000 p95=28000 p99=35000 max=35000 misses_ge_1ms=0 (ns)
+  handoff_to_T_ingress: n=25 min=151000 p50=297000 p95=370000 p99=378000 max=378000 misses_ge_1ms=0 (ns)
+  T_ingress_behind_first_source: n=25 min=0 p50=0 p95=0 p99=0 max=0 misses_ge_1ms=0 (ns)
+  host load average shortly after the run: { 1.71 2.79 3.15 } (other processes active); darwin CLOCK_MONOTONIC 1 us
+  report sha256 ea659e1a6d9139de3697dfeef45d6063020299d44a29e14a40dcf68d7b1aeae2
+
+non-claims: MAINNET_INGRESS_COVERAGE = NOT_PROVEN; T0_TO_T_BUY_LT_1MS = NOT_PROVEN;
+  PROVIDER_ORDERING/PLACEMENT = UNQUALIFIED; private-flow visibility not measured; LIVE = BLOCKED
+
+launch list (block tx_hash handoff_ns):
+  138760701 0xfafb9f2a6dfe75b22910fce2eb78cdc4ccab983eba9bde41188d21e1b93d05ab 2176111404172000
+  138664335 0xd72c9f0bf252f5bab73d0b99930c6c7cd6094ff16b4017ab90169abdd959e0f3 2176111655287000
+  138641380 0x357b329c39817f759af50b3ad4b1b9fe1304f4b1a0cda5085fdfc85130b136b1 2176111906409000
+  138467316 0xc8c53b7a5221a98731dd18ec569e8882ea0475a5f1cf9ca5e92395b20fd6ff4c 2176112157552000
+  138467307 0xdca71f6dfaca6a3eed3431477e750c7ff881f4c844dbdd174b35a9510d0abcb6 2176112408740000
+  138467294 0xd749173fcaea8d1eaf6975e10ff2bf9f322096cb53cc71aed9784655cde1b4ac 2176112659893000
+  138234625 0xa96da7a84bf5de244eb1253ff10745f5de7774fb5bbed7be381467e24b9394a4 2176112910278000
+  138232944 0xdb52c65bb75cb4a27621a780df63d0a5878e9321f7b874c24fe1fa1182fa67e3 2176113160484000
+  138183417 0x0ec44e4751b14ca880b62b15e773a8f7758a0fca761927508bb56478fee50d24 2176113411657000
+  138058318 0xfcc998dff8aa14038a220048a89b8fd2973979415a1d16a5dd5e17d0278d1dbc 2176113662457000
+  138001543 0x7e50d6bbc8f777e77b00e54b862fa8185cbb441ba9d92e3423bf6e9cc30d0d4b 2176113912918000
+  137995866 0x38a0abeda7c5fb3f661cea4d83ab84e8a0df57e3136f8489048312c3c8bf704e 2176114163128000
+  137917288 0x47e74d2be766e49d9085fce3b8e5eb292a04341b4a697d6a0b52dc0420a40677 2176114414315000
+  137917069 0x42c9d955fbac59d224d4e317e6ed10e86326c7acf6ba753a4c024546da59e0c2 2176114665457000
+  137916864 0xf9fd93418ca941170d35a4c391eb831e9773f52dd9138fd20e731c20b030bc51 2176114916569000
+  137916576 0x4e0eb197df7807f078aa079c9efdfb8cbafe9ed16bff6b02551c657c9b1df31c 2176115167700000
+  137909160 0x850d886a0bba9305bea97557e6b881f521400f88ccd4abd9ea376c4a27e4ae98 2176115418814000
+  137906605 0x335ebd5fe7bae23eeec7abca8fda36749d59a0f556e70fa9f979ef5d39db38fd 2176115670006000
+  137858314 0x93b69b9744404613e1f8fa4bb0101e4ae015642b520e800914505cb25e359a54 2176115920613000
+  137852798 0x9ba0686f3cc545e18bcb86afc608d24d9cc86061dc689a206dd7c38892b68761 2176116171711000
+  137839656 0x945a683c62ca1d86c4f5dab52329b86ed5bf3b8974d4acf2ec37438ee242a85e 2176116422073000
+  137838673 0x735f984d40f4c66fb00cf2ebed9498ad983f4d5daa11db44458291d3444ee546 2176116673246000
+  137813152 0x42a279b60a202072a4040572daed6f09e6e589996caa98a9339a9ef225c08639 2176116924435000
+  137812932 0x727afb34aa749610a58ba7263925721858a276470b8d78f8bfa7d8a7ebbdc162 2176117175564000
+  137809555 0x6ae4148e1ad1a2b278e85fd410a6969892b89a2d81ca50f890c02459bbf92184 2176117426735000
