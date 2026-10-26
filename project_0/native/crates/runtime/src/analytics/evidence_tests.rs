@@ -248,6 +248,40 @@ fn typed_payload_round_trip_all_structured_record_variants() {
         None,
         None,
     );
+    // DEC-01: the parking records; a park carries its entry's trigger slot and receive time.
+    let entry = BlockhashParkEntry {
+        account,
+        trigger: "oracle_health_ready".into(),
+        slot: 12,
+        t_rx_ns: 5,
+        t_rx_first_ns: 3,
+        lane: "L1".into(),
+        revision: 7,
+        generation: 2,
+    };
+    for event in [
+        BlockhashParkEvent::Parked,
+        BlockhashParkEvent::Merged,
+        BlockhashParkEvent::Superseded,
+    ] {
+        parity(
+            RecordEvent::BlockhashPark {
+                event,
+                entry: entry.clone(),
+                cache_generation: 3,
+            },
+            Some(12),
+            Some(5),
+        );
+    }
+    parity(
+        RecordEvent::BlockhashRearm {
+            cache_generation: 3,
+            entries: vec![entry.clone(), entry],
+        },
+        None,
+        None,
+    );
 }
 #[test]
 fn health_full_i128_and_unknown_variants_round_trip_exactly() {

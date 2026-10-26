@@ -290,6 +290,8 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await expect(page.locator(".p0-line", { hasText: "FE-04 approval" }))
     .toContainText("BINDING_MISMATCH (code_sha) · attempt pilot-1 · ZERO_PREFUND_SAME_TX");
   await expect(page.locator(".p0-line", { hasText: "FE-04 approval" })).toContainText("LIVE not authorized (FE-06)");
+  // DEC-01: the early blockhash refusals (loss Build, cause BLOCKHASH_STALE) and their restarts.
+  await expect(page.locator(".p0-line", { hasText: "BLOCKHASH_STALE before planning" })).toContainText("6 · 1 / 4 / 1 · 2");
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();

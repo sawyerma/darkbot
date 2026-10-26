@@ -12,7 +12,12 @@ impl ShadowOwner {
         if let Some(ev) = self.consumer.try_pop() {
             return Some(ev);
         }
-        if self.remote_pending() || self.stop_pending() || self.sources.pending() {
+        // DEC-01: a newer blockhash for parked candidates is applied by the next pass.
+        if self.remote_pending()
+            || self.stop_pending()
+            || self.sources.pending()
+            || self.blockhash_parking.pending(self.blockhash.generation())
+        {
             return None;
         }
         // Deadlines that end the wait without an event: the open sweep batch's age bound
@@ -1145,6 +1150,9 @@ impl ShadowOwner {
             {
                 // E9: parked projection work whose slot is now processed.
                 self.release_parked_projections();
+                // DEC-01: candidates parked on a stale blockhash return to their lanes once a
+                // newer blockhash is stored (nothing is scanned before).
+                self.rearm_blockhash_parked()?;
                 self.detect_origin = None;
                 detect = self
                     .detect_queue
@@ -1164,6 +1172,8 @@ impl ShadowOwner {
                         self.detect_origin = Some(generations::DetectOrigin {
                             lane: entry.lane,
                             t_rx_first_ns: entry.t_rx_first,
+                            revision: entry.revision,
+                            last_forwarded_slot: entry.last_forwarded_slot,
                         });
                         Some(entry.work)
                     })

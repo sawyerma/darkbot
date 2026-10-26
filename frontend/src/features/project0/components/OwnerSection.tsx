@@ -63,6 +63,8 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
     <DetailRow title="Same-slot updates · unversioned refused / unordered" value={e ? `${orDash(e.counters.get("same_slot_unversioned_refused"))} / ${orDash(e.counters.get("same_slot_no_wv"))}` : "—"}/>
     <DetailRow title="Trigger · lanes L0/L1/L2 · detect" value={t ? `${t.mode} · ${t.lanes.join("/")} · ${t.detectQueue}` : "—"}/>
     <DetailRow title="Repeats suppressed · soft cap" value={t ? `${t.suppressed} · ${t.softcapSuppressed}` : "—"}/>
+    <DetailRow title="Loss Build · BLOCKHASH_STALE before planning · parked / re-armed / superseded · refresh wake-ups"
+      value={t ? `${t.blockhashRefused} · ${t.blockhashParked} / ${t.blockhashRearmed} / ${t.blockhashSuperseded} · ${t.blockhashRefreshRequests}` : "—"}/>
     <DetailRow title="Day · health / liquidatable / plans" value={p ? `${p.healthChecked} / ${p.liquidatable} / ${p.plansBuilt} built, ${p.plansRejected} rejected` : "—"}/>
     <DetailRow title="Day · simulations pass / fail · shadow ready / wins" value={p ? `${p.simulationsPassed} / ${p.simulationsFailed} · ${p.shadowReady} / ${p.shadowWins}` : "—"}/>
     <DetailRow title="Latency p95 · decision (rx→ready) / fee quote / simulation" value={p ? `${ms(p.decisionP95Ns)} / ${ms(p.feeQuoteP95Ns)} / ${ms(p.simulationP95Ns)}` : "—"}/>

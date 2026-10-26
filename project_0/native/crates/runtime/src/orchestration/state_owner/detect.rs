@@ -33,9 +33,15 @@ impl ShadowOwner {
             return Ok(false);
         }
         let outcome = self.detect_owned((acct, t_rx, slot, trigger), now, identity);
+        let early = self.blockhash_early.take();
         // RELEASED by the owning candidate, whatever the outcome (a ShadowReady went through
         // SIGNED; Shadow never submits — MT9 adds the virtual reservations).
         self.release_candidate(acct, candidate_id);
+        // DEC-01: a lane candidate refused on a stale blockhash is parked; an evaluation of the
+        // account past a fresh blockhash supersedes its parked entry.
+        if outcome.is_ok() {
+            self.blockhash_after_detect((acct, t_rx, slot, trigger), origin, early)?;
+        }
         outcome
     }
 
@@ -563,6 +569,12 @@ impl ShadowOwner {
             slot_watch: &self.slot_watch,
             network: &mut self.network,
             simulation_failure: None,
+            // DEC-01: only a lane candidate can be parked and returned to its lane.
+            blockhash_park: if identity.lane.is_some() {
+                crate::execution::pipeline::BlockhashPark::Armed
+            } else {
+                crate::execution::pipeline::BlockhashPark::Off
+            },
             fe04: None,
         };
         #[cfg(feature = "crate_health")]
@@ -583,6 +595,7 @@ impl ShadowOwner {
             health_result.as_ref(),
         );
         let simulation_failure = pipe.simulation_failure.take();
+        self.blockhash_early = Some(pipe.blockhash_park);
         // P6-MT.1 (MT5b): a ShadowReady (built, signed and simulated; never submitted in
         // Shadow) moves the ownership EXECUTING → SIGNED; every other outcome stays EXECUTING.
         // Both are RELEASED by the owning candidate in `detect`.

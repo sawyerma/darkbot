@@ -79,6 +79,7 @@ mod lifecycle;
 mod remote_apply;
 mod setup;
 use ingress::{IngressSession, IngressSessions, RetiredEvents};
+mod blockhash_park;
 mod fe04;
 mod generations;
 mod ownership;
@@ -192,6 +193,12 @@ pub(super) struct ShadowOwner {
     /// P6-MT.2 (MT5a): lane and `t_rx_first` of the detection selected from the lanes, handed
     /// to the next `detect` step (`None` for an immediate detection).
     detect_origin: Option<generations::DetectOrigin>,
+    /// DEC-01: lane candidates refused before planning on a stale blockhash, one per account,
+    /// waiting for a newer blockhash (`blockhash_park.rs`).
+    blockhash_parking: blockhash_park::BlockhashParking,
+    /// DEC-01: the early blockhash check of this detection's evaluation (`Refused`/`Passed`;
+    /// `None`: no evaluation reached it), taken by `detect`.
+    blockhash_early: Option<crate::execution::pipeline::BlockhashPark>,
     /// P6-MT.1 (MT5b): the per-account ownership table — EXECUTING/SIGNED by a candidate of
     /// this run, SUBMITTED synchronized from the reservation book (`ownership.rs`).
     ownership: crate::execution::ownership::AccountOwnership,

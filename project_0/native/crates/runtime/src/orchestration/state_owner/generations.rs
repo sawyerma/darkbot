@@ -6,11 +6,14 @@ use crate::execution::identity::{
     POLICY_GENERATION,
 };
 
-/// Lane and first receive time of a detection selected from the lanes.
+/// Lane and first receive time of a detection selected from the lanes; DEC-01: with the
+/// entry's input revision and L2 order key, so a parked candidate returns to its lane unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct DetectOrigin {
     pub(super) lane: Lane,
     pub(super) t_rx_first_ns: u64,
+    pub(super) revision: u64,
+    pub(super) last_forwarded_slot: u64,
 }
 
 impl ShadowOwner {

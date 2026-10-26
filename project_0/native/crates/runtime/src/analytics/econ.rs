@@ -200,14 +200,15 @@ pub struct ShadowEvaluation {
 }
 impl crate::analytics::payload::Payload for ShadowEvaluation {
     const KIND: u16 = kind::ECON_SHADOW_EVALUATION;
-    /// V9/V17: 3 — the record is attributed under EXHAUSTIVE_V2 (`LossReason::Plan`/`Safety`).
-    const SCHEMA: u16 = 3;
-    /// Schema 2 has the identical layout (`LossReason` only gained variants at its end) and was
-    /// written under the earlier attribution, so it cannot carry a cause added since.
+    /// V9/V17: 3 — attributed under EXHAUSTIVE_V2 (`LossReason::Plan`/`Safety`); DEC-01: 4 —
+    /// under EXHAUSTIVE_V3 (a stale blockhash is `Build` decided before planning).
+    const SCHEMA: u16 = 4;
+    /// Schemas 2 and 3 have the identical layout (`LossReason` only gained variants at its end)
+    /// and were written under an earlier attribution, so they cannot carry a cause added since.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == 2).then(|| {
+        (schema == 2 || schema == 3).then(|| {
             crate::analytics::payload::decode_wire::<Self>(bytes).and_then(|v| {
-                if v.record.loss.is_some_and(LossReason::since_exhaustive_v2) {
+                if schema == 2 && v.record.loss.is_some_and(LossReason::since_exhaustive_v2) {
                     Err(crate::analytics::journal::coded("PAYLOAD_DECODE"))
                 } else {
                     Ok(v)

@@ -71,6 +71,11 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           indexedAccounts: trigger.indexedAccounts,
           suppressed: trigger.suppressed,
           softcapSuppressed: trigger.softcapSuppressed,
+          blockhashRefused: trigger.blockhashRefused,
+          blockhashParked: trigger.blockhashParked,
+          blockhashRearmed: trigger.blockhashRearmed,
+          blockhashSuperseded: trigger.blockhashSuperseded,
+          blockhashRefreshRequests: trigger.blockhashRefreshRequests,
         }
       : null,
     pipeline: pipeline

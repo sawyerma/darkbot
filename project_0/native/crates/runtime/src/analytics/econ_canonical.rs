@@ -304,15 +304,17 @@ fn slot_margin(row: &Joined) -> Option<i128> {
 /// undetermined cause. Reports of ECON schema ≤ 3 carry `LOSS_ATTRIBUTION_PRE_N1`; a report
 /// keeps the model it was made under (before V9/V17: "EXHAUSTIVE_V1: one bucket per
 /// LossReason; UNKNOWN only for an undetermined cause").
-pub const LOSS_ATTRIBUTION_MODEL: &str = "EXHAUSTIVE_V2: one bucket per LossReason; PLAN and \
-     SAFETY are causes of their own; UNKNOWN only for an undetermined cause";
-/// V9/V17: an offline replay that joined shadow evaluations written before V9/V17 (schema ≤ 2
-/// or JSONL): their causes were recorded under the earlier attribution, which no replay can
-/// split afterwards.
-pub const LOSS_ATTRIBUTION_EARLIER_RECORDS: &str = "EXHAUSTIVE_V1_RECORDS: evaluations written \
-     before V9/V17 joined; their ROUTING includes planning failures without a cause of their own \
-     and a missing health engine, their ECONOMIC_SKIP/THRESHOLD_TOO_HIGH include LIVE Safety \
-     preview denials";
+pub const LOSS_ATTRIBUTION_MODEL: &str = "EXHAUSTIVE_V3: one bucket per LossReason; PLAN and \
+     SAFETY are causes of their own; a stale blockhash is BUILD (cause BLOCKHASH_STALE), decided \
+     before RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN for a lane candidate (DEC-01) and in the late \
+     check before the build for any other detection; UNKNOWN only for an undetermined cause";
+/// V9/V17, DEC-01: an offline replay that joined shadow evaluations written under an earlier
+/// attribution (schema ≤ 3): their causes and priority cannot be redone afterwards.
+pub const LOSS_ATTRIBUTION_EARLIER_RECORDS: &str = "EARLIER_ATTRIBUTION_RECORDS: evaluations \
+     written under an earlier attribution joined — before V9/V17 (EXHAUSTIVE_V1) their ROUTING \
+     includes planning failures without a cause of their own and a missing health engine, their \
+     ECONOMIC_SKIP/THRESHOLD_TOO_HIGH include LIVE Safety preview denials; before DEC-01 \
+     (EXHAUSTIVE_V2) a stale blockhash is BUILD only after RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN";
 pub const LOSS_ATTRIBUTION_PRE_N1: &str = "PRE_N1 (ECON schema <= 3): UNKNOWN includes the \
      LossReasons Ingress, State, CircuitBreaker, IntegrationRefresh, UnsupportedIntegration, \
      Sizing, Submission, Tip, RpcBudget and RpcDeadline; ECONOMICS includes EconomicSkip, \
@@ -561,7 +563,8 @@ fn assign_record(rows: &mut [Joined], rec: &OpportunityRecord) {
         if row
             .diagnostic
             .as_ref()
-            .is_none_or(|old| rec.timing.t_rx_ns > old.timing.t_rx_ns)
+            // DEC-01: a re-armed evaluation keeps its trigger's T_rx; the later one wins.
+            .is_none_or(|old| rec.timing.t_rx_ns >= old.timing.t_rx_ns)
         {
             row.diagnostic = Some(rec.clone());
         }
@@ -1254,6 +1257,110 @@ mod regression {
             Some("SHADOW_HISTORICAL_JSONL_INPUT")
         );
         let _ = fs::remove_dir_all(run);
+    }
+    /// DEC-01: the loss statistic carries its policy version and never mixes them. A shadow
+    /// evaluation of the writer before DEC-01 (schema 3, EXHAUSTIVE_V2: a stale blockhash is
+    /// BUILD only after RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN) stays readable with every cause
+    /// and a replay joining it carries the earlier label; the same record written now
+    /// (schema 4, EXHAUSTIVE_V3) carries the current model.
+    #[test]
+    fn dec01_evaluations_of_both_loss_policies_are_never_mixed() {
+        use crate::analytics::payload;
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("src/analytics/fixtures/shadow_evaluations_schema2.p0j");
+        let mut reader = journal::Reader::open(&fixture).unwrap();
+        let mut v: super::super::ShadowEvaluation = loop {
+            let f = reader.next_frame().unwrap().unwrap();
+            if f.kind != journal::MANIFEST {
+                break payload::decode(f.kind, f.schema, &f.payload).unwrap();
+            }
+        };
+        v.record.loss = Some(LossReason::Build);
+        v.record.reason = Some("blockhash stale".into());
+        let bytes = payload::encode_wire(&v).unwrap();
+        let mut event = row(&v.record, 10, 0).market;
+        event.block_time = Some(101);
+        let ctx = JoinContext {
+            market_commitment: "UNKNOWN",
+            slot_first_seen: None,
+            capture: None,
+            capital: &CAPITAL_USD,
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        for (schema, earlier, model) in [
+            (3u16, 1u64, LOSS_ATTRIBUTION_EARLIER_RECORDS),
+            (4, 0, LOSS_ATTRIBUTION_MODEL),
+        ] {
+            let run = std::env::temp_dir()
+                .join(format!("p0-dec01-policy-{}-{schema}", std::process::id()));
+            let _ = fs::remove_dir_all(&run);
+            fs::create_dir_all(&run).unwrap();
+            let shadow = run.join("shadow_evaluations.p0j");
+            let mut w = journal::Writer::create(&shadow).unwrap();
+            w.test_append_raw(journal::kind::ECON_SHADOW_EVALUATION, schema, &bytes)
+                .unwrap();
+            w.seal(true).unwrap();
+            let joined = join(vec![event.clone()], &shadow, deadline, &ctx).unwrap();
+            assert_eq!(
+                joined.rows[0].our.as_ref().unwrap().loss,
+                Some(LossReason::Build)
+            );
+            assert_eq!(
+                joined.earlier_attribution_records, earlier,
+                "schema {schema}"
+            );
+            assert_eq!(
+                crate::analytics::backtest::loss_model(joined.earlier_attribution_records),
+                model
+            );
+            let _ = fs::remove_dir_all(run);
+        }
+        // Both policies in one journal are refused, never added into the same buckets.
+        let run = std::env::temp_dir().join(format!("p0-dec01-mixed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&run);
+        fs::create_dir_all(&run).unwrap();
+        let shadow = run.join("shadow_evaluations.p0j");
+        let mut w = journal::Writer::create(&shadow).unwrap();
+        for schema in [4u16, 3] {
+            w.test_append_raw(journal::kind::ECON_SHADOW_EVALUATION, schema, &bytes)
+                .unwrap();
+        }
+        w.seal(true).unwrap();
+        assert_eq!(
+            join(vec![event.clone()], &shadow, deadline, &ctx)
+                .err()
+                .as_deref(),
+            Some("SHADOW_LOSS_POLICY_MIXED")
+        );
+        let _ = fs::remove_dir_all(run);
+        assert!(LOSS_ATTRIBUTION_MODEL.starts_with("EXHAUSTIVE_V3"));
+        assert!(LOSS_ATTRIBUTION_MODEL.contains("for a lane candidate"));
+        assert!(LOSS_ATTRIBUTION_EARLIER_RECORDS.contains("before DEC-01 (EXHAUSTIVE_V2)"));
+    }
+    /// DEC-01: a re-armed evaluation keeps its trigger's T_rx; of two evaluations of the same
+    /// trigger the later one is the episode's diagnostic (before: the refusal stayed).
+    #[test]
+    fn dec01_the_later_evaluation_of_the_same_trigger_is_the_diagnostic() {
+        let refused = OpportunityRecord {
+            loss: Some(LossReason::Build),
+            reason: Some(crate::execution::pipeline::BLOCKHASH_STALE_EARLY.into()),
+            market_plan_identity: None,
+            ..rec()
+        };
+        let later = OpportunityRecord {
+            loss: Some(LossReason::StateRace),
+            reason: Some("opportunity stale before planning".into()),
+            market_plan_identity: None,
+            ..rec()
+        };
+        assert_eq!(refused.timing.t_rx_ns, later.timing.t_rx_ns);
+        let mut rows = vec![row(&refused, 10, 0)];
+        assign_record(&mut rows, &refused);
+        assign_record(&mut rows, &later);
+        assert_eq!(
+            rows[0].diagnostic.as_ref().map(|d| d.loss),
+            Some(Some(LossReason::StateRace))
+        );
     }
     #[cfg(feature = "historical")]
     /// JFI-FIX-05: a typed `ECON_CANONICAL` frame round-trips losslessly and renders the
@@ -1995,15 +2102,18 @@ pub fn join(
         return Err("SHADOW_HISTORICAL_JSONL_INPUT".into());
     }
     let available = binary.exists();
-    // V9/V17: an earlier writer never wrote a cause added since; such a record is forged.
-    let earlier = |rec: &OpportunityRecord| {
-        if rec.loss.is_some_and(LossReason::since_exhaustive_v2) {
+    // V9/V17: a writer before them never wrote a cause added since; such a record is forged.
+    let earlier = |rec: &OpportunityRecord, schema: u16| {
+        if schema <= 2 && rec.loss.is_some_and(LossReason::since_exhaustive_v2) {
             Err("SHADOW_DECODE".to_string())
         } else {
             Ok(())
         }
     };
     let mut earlier_attribution_records = 0u64;
+    // DEC-01: evaluations of different loss policies are never joined together; a journal
+    // mixing the current schema with an earlier one is refused (earlier ones alone are labelled).
+    let (mut current_frames, mut earlier_frames) = (0u64, 0u64);
     if count > 0 && !available {
         return Err("SHADOW_JOURNAL_MISSING".into());
     }
@@ -2028,7 +2138,13 @@ pub fn join(
                     let from_earlier_writer = frame.schema
                         < <super::ShadowEvaluation as crate::analytics::payload::Payload>::SCHEMA;
                     if from_earlier_writer {
-                        earlier(&rec)?;
+                        earlier(&rec, frame.schema)?;
+                        earlier_frames += 1;
+                    } else {
+                        current_frames += 1;
+                    }
+                    if current_frames > 0 && earlier_frames > 0 {
+                        return Err("SHADOW_LOSS_POLICY_MIXED".into());
                     }
                     if ctx.capture.is_some_and(|c| !c.admits(&rec)) {
                         continue;

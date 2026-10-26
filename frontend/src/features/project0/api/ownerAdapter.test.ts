@@ -30,6 +30,9 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.engine?.reconnects).toBe(1n);
     expect(liquidator.engine?.counters.get("same_slot_unversioned_refused")).toBe(2n);
     expect(liquidator.trigger?.lanes).toEqual([1n, 2n, 3n]);
+    // DEC-01: early blockhash refusals and the parking of their candidates.
+    expect(liquidator.trigger).toMatchObject({ blockhashRefused: 6n, blockhashParked: 1n, blockhashRearmed: 4n,
+      blockhashSuperseded: 1n, blockhashRefreshRequests: 2n });
     expect(liquidator.pipeline?.losses).toEqual([{ reason: "ROUTING", count: 2n }]);
     expect(liquidator.pipeline?.simulationP95Ns).toBeNull();
     expect(liquidator.safety?.maxTotalCapitalUsdMicro).toBe("100000000");

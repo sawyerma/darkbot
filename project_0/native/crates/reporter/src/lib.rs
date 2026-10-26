@@ -209,6 +209,11 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             indexed_accounts: o.trigger.indexed_accounts,
             suppressed: o.trigger.suppressed,
             softcap_suppressed: o.trigger.softcap_suppressed,
+            blockhash_refused: o.trigger.blockhash_refused,
+            blockhash_parked: o.trigger.blockhash_parked,
+            blockhash_rearmed: o.trigger.blockhash_rearmed,
+            blockhash_superseded: o.trigger.blockhash_superseded,
+            blockhash_refresh_requests: o.trigger.blockhash_refresh_requests,
         }),
         pipeline: Some(OwnerPipeline {
             evaluations: o.pipeline.evaluations,
@@ -1350,6 +1355,11 @@ mod contract_tests {
                 indexed_accounts: 83_274,
                 suppressed: 5,
                 softcap_suppressed: 1,
+                blockhash_refused: 6,
+                blockhash_parked: 1,
+                blockhash_rearmed: 4,
+                blockhash_superseded: 1,
+                blockhash_refresh_requests: 2,
             },
             pipeline: P {
                 evaluations: 7,

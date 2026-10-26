@@ -143,6 +143,41 @@ pub enum RecordEvent {
         base_slot: u64,
         error: String,
     },
+    /// DEC-01: a lane candidate refused before planning (loss `Build`, cause BLOCKHASH_STALE)
+    /// was parked or coalesced into its parked entry, or a later evaluation of the account
+    /// with a fresh blockhash superseded the entry; `cache_generation` is the blockhash
+    /// cache's at the event.
+    BlockhashPark {
+        event: BlockhashParkEvent,
+        entry: BlockhashParkEntry,
+        cache_generation: u64,
+    },
+    /// DEC-01: the parked candidates a newer fresh blockhash (`cache_generation`) returned to
+    /// their lanes, in one record per re-arm.
+    BlockhashRearm {
+        cache_generation: u64,
+        entries: Vec<BlockhashParkEntry>,
+    },
+}
+/// DEC-01: what happened to a parked candidate (`RecordEvent::BlockhashPark`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlockhashParkEvent {
+    Parked,
+    Merged,
+    Superseded,
+}
+/// DEC-01: a parked candidate's lane entry: work (`trigger`, `slot`, `t_rx_ns`), first receive
+/// time, lane, input revision and the cache generation it waits beyond.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockhashParkEntry {
+    pub account: Pubkey,
+    pub trigger: Cow<'static, str>,
+    pub slot: u64,
+    pub t_rx_ns: u64,
+    pub t_rx_first_ns: u64,
+    pub lane: Cow<'static, str>,
+    pub revision: u64,
+    pub generation: u64,
 }
 pub type OwnerRecord = RecordEvent;
 impl Payload for RecordEvent {
@@ -156,6 +191,7 @@ impl RecordEvent {
                 (Some(*slot), None)
             }
             Self::Health { slot, t_rx_ns, .. } => (Some(*slot), Some(*t_rx_ns)),
+            Self::BlockhashPark { entry, .. } => (Some(entry.slot), Some(entry.t_rx_ns)),
             _ => (None, None),
         }
     }

@@ -366,6 +366,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
     };
     let started = std::time::Instant::now();

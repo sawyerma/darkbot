@@ -378,6 +378,12 @@ pub struct OwnerTrigger {
     pub indexed_accounts: u64,
     pub suppressed: u64,
     pub softcap_suppressed: u64,
+    /// DEC-01: early blockhash refusals, parked now, re-armed, superseded, refresh wake-ups.
+    pub blockhash_refused: u64,
+    pub blockhash_parked: u64,
+    pub blockhash_rearmed: u64,
+    pub blockhash_superseded: u64,
+    pub blockhash_refresh_requests: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

@@ -955,6 +955,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
@@ -1100,6 +1101,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
     };
     let account = Pubkey::new_unique();
@@ -1297,6 +1299,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
             slot_watch: &slots,
             network: &mut network,
             simulation_failure: None,
+            blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
         };
         p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true)
@@ -1405,6 +1408,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
@@ -1565,6 +1569,7 @@ fn live_evaluate(
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04,
     };
     p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
@@ -2088,6 +2093,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
     };
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
@@ -2210,6 +2216,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             slot_watch: &slots,
             network: &mut network,
             simulation_failure: None,
+            blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
@@ -2360,6 +2367,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
             slot_watch: &slots,
             network: &mut network,
             simulation_failure: None,
+            blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
             fe04: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
@@ -2636,10 +2644,10 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
         if frame.kind == journal::MANIFEST {
             continue;
         }
-        // V9/V17: written under EXHAUSTIVE_V2 (schema 3).
+        // DEC-01: written under EXHAUSTIVE_V3 (schema 4).
         assert_eq!(
             (frame.kind, frame.schema),
-            (kind::ECON_SHADOW_EVALUATION, 3)
+            (kind::ECON_SHADOW_EVALUATION, 4)
         );
         count += 1;
     }
@@ -3143,6 +3151,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
         slot_watch: &slots,
         network: &mut network,
         simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
         fe04: None,
     };
     // One owner run: 24 queued candidates, 64 ingress events drained before each, 1,000
@@ -3345,16 +3354,7 @@ fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
     rx_age: Duration,
     blockhash: bool,
 ) -> OpportunityRecord {
-    use crate::execution::pipeline::{Mode, NetworkBudget, Pipeline};
-    use darkbot_project0::{
-        planner::Allowlist,
-        safety::{Allow, Limits, Safety},
-    };
-    use darkbot_solana::{
-        state::blockhash::{BlockhashCache, CachedBlockhash},
-        tx::{Resources, TxLimits},
-    };
-    let prereq_program = [Pubkey::new_from_array([8; 32])];
+    use darkbot_solana::state::blockhash::{BlockhashCache, CachedBlockhash};
     let clock = Clock::new();
     let bh = BlockhashCache::new();
     if blockhash {
@@ -3364,6 +3364,39 @@ fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
             refreshed_ns: clock.now_ns(),
         });
     }
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    evaluate_parked(
+        builder,
+        submitter,
+        (min_profit, freshness, rx_age),
+        (&clock, &bh, u64::MAX),
+        crate::execution::pipeline::BlockhashPark::Off,
+        &mut network,
+    )
+    .0
+}
+
+/// `evaluate_shadow` on a given clock, blockhash cache and maximum age, with the DEC-01 early
+/// refusal `park` and the owner's network budget; returns the record and the park result.
+fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: SubmissionAdapter>(
+    builder: &B,
+    submitter: &S,
+    (min_profit, freshness, rx_age): (i128, darkbot_project0::execution::Freshness, Duration),
+    (clock, bh, blockhash_max_age_ns): (
+        &Clock,
+        &darkbot_solana::state::blockhash::BlockhashCache,
+        u64,
+    ),
+    park: crate::execution::pipeline::BlockhashPark,
+    network: &mut crate::execution::pipeline::NetworkBudget,
+) -> (OpportunityRecord, crate::execution::pipeline::BlockhashPark) {
+    use crate::execution::pipeline::{Mode, Pipeline};
+    use darkbot_project0::{
+        planner::Allowlist,
+        safety::{Allow, Limits, Safety},
+    };
+    use darkbot_solana::tx::{Resources, TxLimits};
+    let prereq_program = [Pubkey::new_from_array([8; 32])];
     let zero = Limits {
         max_total_capital: 0,
         max_outstanding_inventory: 0,
@@ -3380,15 +3413,14 @@ fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
     let allow = Allowlist::default();
     let failed = FailedCostMatrix::default();
     let slots = darkbot_solana::ingress::SlotWatch::new();
-    let mut network = NetworkBudget::unbounded();
     let mut p = Pipeline {
         mode: Mode::Shadow,
-        clock: &clock,
+        clock,
         health: &TestHealth,
         builder,
         submitter,
         safety: &mut safety,
-        blockhash: &bh,
+        blockhash: bh,
         payer: &payer,
         allowlist: &allow,
         failed_costs: &failed,
@@ -3399,20 +3431,22 @@ fn evaluate_shadow<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
             loaded_accounts_data_size: None,
         },
         min_profit,
-        blockhash_max_age_ns: u64::MAX,
+        blockhash_max_age_ns,
         p7_passed: false,
         freshness,
         tip_account: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &prereq_program,
         slot_watch: &slots,
-        network: &mut network,
+        network,
         simulation_failure: None,
+        blockhash_park: park,
         fe04: None,
     };
     let t_rx = clock.now_ns();
     std::thread::sleep(rx_age);
-    p.evaluate(Pubkey::new_unique(), "test", t_rx, 100, 10, true)
+    let rec = p.evaluate(Pubkey::new_unique(), "test", t_rx, 100, 10, true);
+    (rec, p.blockhash_park)
 }
 
 /// V2-04: the counting adapter whose fee quote takes `delay`.
@@ -3531,6 +3565,181 @@ fn v2_09_stale_blockhash_before_planning_is_counted_and_the_late_check_decides()
     );
     assert_eq!(builder.0.get(), 1, "planning unchanged");
     assert!(MT0.get(Counter::BlockhashStaleBeforePlanning) > before);
+}
+
+/// A builder counting its planning calls; `stale_during` replaces the cached blockhash with an
+/// expired one while planning (a refresh racing the evaluation the other way round).
+struct CountedPlans<'c> {
+    calls: std::cell::Cell<u32>,
+    stale_during: Option<&'c darkbot_solana::state::blockhash::BlockhashCache>,
+}
+impl crate::execution::pipeline::ReceivershipBuilder for CountedPlans<'_> {
+    fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+        TestBuilder.native_cost_usd_micro(n)
+    }
+    fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+        test_table()
+    }
+    fn plans(
+        &self,
+        a: &Pubkey,
+        n: u64,
+        s: u64,
+        d: std::time::Instant,
+    ) -> Result<
+        Vec<crate::execution::pipeline::ReceivershipPlan>,
+        crate::execution::pipeline::PlanError,
+    > {
+        self.calls.set(self.calls.get() + 1);
+        if let Some(bh) = self.stale_during {
+            bh.set(darkbot_solana::state::blockhash::CachedBlockhash {
+                hash: solana_sdk::hash::Hash::new_unique(),
+                last_valid_block_height: 100,
+                refreshed_ns: 0,
+            });
+        }
+        TestBuilder.plans(a, n, s, d)
+    }
+}
+
+/// DEC-01 (V2-09): for a caller that parks (`Armed`), a stale or missing blockhash is refused
+/// before planning — no builder call, no network budget, loss `Build` with the cause
+/// BLOCKHASH_STALE, the routing/plan progress not run stays unset — and the refusal carries the
+/// cache generation read before the check (before: planned once, budget spent, decided late).
+/// `Off` keeps the V2-09 behaviour; a stale opportunity still falls out as StateRace first.
+#[test]
+fn dec01_a_stale_blockhash_is_refused_before_planning_without_budget() {
+    use crate::execution::pipeline::{BlockhashPark, NetworkBudget, BLOCKHASH_STALE_EARLY};
+    use darkbot_solana::state::blockhash::{BlockhashCache, CachedBlockhash};
+    let unbounded = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: u64::MAX,
+    };
+    // The clock runs from its creation: an entry refreshed at 0 is older than 1 ms after 2 ms.
+    let clock = Clock::new();
+    std::thread::sleep(Duration::from_millis(2));
+    for stale in [false, true] {
+        let bh = BlockhashCache::new();
+        if stale {
+            bh.set(CachedBlockhash {
+                hash: solana_sdk::hash::Hash::new_unique(),
+                last_valid_block_height: 100,
+                refreshed_ns: 0,
+            });
+        }
+        let generation = bh.generation();
+        let builder = CountedPlans {
+            calls: std::cell::Cell::new(0),
+            stale_during: None,
+        };
+        let mut network = NetworkBudget::new(3, u64::MAX);
+        let (r, park) = evaluate_parked(
+            &builder,
+            &counting_submitter(),
+            (0, unbounded, Duration::ZERO),
+            (&clock, &bh, 1_000_000),
+            BlockhashPark::Armed,
+            &mut network,
+        );
+        assert_eq!(
+            (r.loss, r.reason.as_deref()),
+            (Some(LossReason::Build), Some(BLOCKHASH_STALE_EARLY))
+        );
+        assert_eq!(park, BlockhashPark::Refused { generation });
+        assert_eq!(builder.calls.get(), 0, "no planning call");
+        assert_eq!(network.remaining, 3, "no network budget");
+        assert_eq!(
+            (r.progress.candidates_created, r.progress.plan_validated),
+            (None, None),
+            "checks not run are neither passed nor failed"
+        );
+        // Off: the late check decides after one planning call and one budget unit.
+        let builder = CountedPlans {
+            calls: std::cell::Cell::new(0),
+            stale_during: None,
+        };
+        let (r, park) = evaluate_parked(
+            &builder,
+            &counting_submitter(),
+            (0, unbounded, Duration::ZERO),
+            (&clock, &bh, 1_000_000),
+            BlockhashPark::Off,
+            &mut network,
+        );
+        assert_eq!(
+            (r.loss, r.reason.as_deref(), park),
+            (
+                Some(LossReason::Build),
+                Some("blockhash stale"),
+                BlockhashPark::Off
+            )
+        );
+        assert_eq!((builder.calls.get(), network.remaining), (1, 2));
+    }
+    // An expired opportunity falls out regularly before the blockhash is looked at.
+    let expired = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: 1,
+        execution_deadline_ns: u64::MAX,
+    };
+    let bh = BlockhashCache::new();
+    let mut network = NetworkBudget::new(3, u64::MAX);
+    let (r, park) = evaluate_parked(
+        &TestBuilder,
+        &counting_submitter(),
+        (0, expired, Duration::from_millis(2)),
+        (&clock, &bh, 1_000_000),
+        BlockhashPark::Armed,
+        &mut network,
+    );
+    assert_eq!(
+        (r.loss, park),
+        (Some(LossReason::StateRace), BlockhashPark::Armed)
+    );
+}
+
+/// DEC-01: the late check before the build stays — a blockhash fresh at the early check
+/// (`Passed`) that expires during planning is refused there (`Build` "blockhash stale"), never
+/// parked.
+#[test]
+fn dec01_the_late_check_before_the_build_stays() {
+    use crate::execution::pipeline::{BlockhashPark, NetworkBudget};
+    use darkbot_solana::state::blockhash::{BlockhashCache, CachedBlockhash};
+    let unbounded = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: u64::MAX,
+    };
+    // The clock runs from its creation: an entry refreshed at 0 is older than 1 ms after 2 ms.
+    let clock = Clock::new();
+    std::thread::sleep(Duration::from_millis(2));
+    let bh = BlockhashCache::new();
+    // Fresh at the early check (stored ahead of the clock), expired by the builder.
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns() + 60_000_000_000,
+    });
+    let builder = CountedPlans {
+        calls: std::cell::Cell::new(0),
+        stale_during: Some(&bh),
+    };
+    let mut network = NetworkBudget::unbounded();
+    let (r, park) = evaluate_parked(
+        &builder,
+        &counting_submitter(),
+        (0, unbounded, Duration::ZERO),
+        (&clock, &bh, 1_000_000),
+        BlockhashPark::Armed,
+        &mut network,
+    );
+    assert_eq!(
+        (r.loss, r.reason.as_deref(), park),
+        (
+            Some(LossReason::Build),
+            Some("blockhash stale"),
+            BlockhashPark::Passed
+        )
+    );
+    assert_eq!(builder.calls.get(), 1);
 }
 
 /// V2-04: the execution deadline counts from T_rx, not from the later T_detect mark: 300 ms

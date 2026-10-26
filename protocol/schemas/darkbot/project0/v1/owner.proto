@@ -230,6 +230,17 @@ message OwnerTrigger {
   uint64 suppressed = 8;
   // Due repeats suppressed by the repeat soft cap.
   uint64 softcap_suppressed = 9;
+  // DEC-01: lane candidates refused before planning on a stale or missing blockhash (loss Build,
+  // cause BLOCKHASH_STALE) in this run.
+  uint64 blockhash_refused = 10;
+  // DEC-01: candidates parked now, waiting for a newer blockhash (at most one per account).
+  uint64 blockhash_parked = 11;
+  // DEC-01: parked candidates returned to their lane after a newer blockhash in this run.
+  uint64 blockhash_rearmed = 12;
+  // DEC-01: parked candidates covered by a later evaluation of the account in this run.
+  uint64 blockhash_superseded = 13;
+  // DEC-01: refresh wake-ups sent to the blockhash worker in this run (pending ones coalesced).
+  uint64 blockhash_refresh_requests = 14;
 }
 
 // Pipeline evaluations and decisions of the current day (Shadow ledger) and this process (MT0).

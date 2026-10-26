@@ -76,6 +76,8 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`abfadb30`** (2026-10-26) | DEC-10: FE-04-Approval natives `key = value`, Single-Use, Bindungen; Status Liquidator-Reiter/`p0ctl` | OFFLINE_VERIFIED · CI `40260695972`/`40260696049` grün (BUGS §22.5) |
+| **`bc33567e`** (2026-10-26) | DEC-09: Standardbinary ohne historische JSON-Leser (Feature `historical`) | OFFLINE_VERIFIED · CI `40257127289` grün (BUGS §22.5) |
 | **`96baf387`** (2026-10-26) | DEC-05: eine typisierte Konfigurationsautorität — jede Betriebsart über ihr Profil (econ4h ohne Argumente `performance`), 28 Owner-Parameter in der Registry, wertgleich; Status-Hinweg Liquidator/Health | OFFLINE_VERIFIED · Gate 981/979/453/453, CI `40252813830`/`40252813869` grün (BUGS §22.5) |
 | `8bd462e` | Runtime refactor: four crates; orchestration/execution/market/analytics domains | Local tests reported; no economic GO |
 | `bb26313` | Initial typed owner writer and binary journal WIP | Intermediate version; superseded by `4a27a1c` |

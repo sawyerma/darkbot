@@ -132,6 +132,8 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),
         detect_origin: None,
+        blockhash_parking: Default::default(),
+        blockhash_early: None,
         ownership: Default::default(),
         atas: accounts::LiquidatorAtas::new(liquidator),
         min_profit: 0,
@@ -3756,4 +3758,327 @@ fn dec10_projection_shows_the_configured_approval_status() {
         s.state == "INVALID" && s.reason.starts_with("APPROVAL_JSON_REFUSED"),
         "{s:?}"
     );
+}
+
+/// DEC-01: a blockhash the refresh worker would store now (`fresh`) or one already older than
+/// the owner's maximum age (the tests set it to 1 ms after the clock passed 2 ms).
+fn dec01_blockhash(f: &Fixture, fresh: bool) -> darkbot_solana::state::blockhash::CachedBlockhash {
+    darkbot_solana::state::blockhash::CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 1,
+        refreshed_ns: if fresh {
+            f.owner.clock.now_ns() + 60_000_000_000
+        } else {
+            0
+        },
+    }
+}
+
+fn dec01_fixture(tag: &str) -> Fixture {
+    let mut f = fixture_with(tag, None);
+    f.owner.blockhash_max_age_ns = 1_000_000;
+    std::thread::sleep(Duration::from_millis(2));
+    f
+}
+
+fn dec01_origin(
+    lane: super::candidates::Lane,
+    t_rx_first_ns: u64,
+    revision: u64,
+) -> super::generations::DetectOrigin {
+    super::generations::DetectOrigin {
+        lane,
+        t_rx_first_ns,
+        revision,
+        last_forwarded_slot: 4,
+    }
+}
+
+fn dec01_refused(generation: u64) -> Option<crate::execution::pipeline::BlockhashPark> {
+    Some(crate::execution::pipeline::BlockhashPark::Refused { generation })
+}
+
+/// DEC-01 (V2-09) on the owner: a lane candidate refused before planning wakes the refresh
+/// worker once (later refusals coalesce) and is parked — one entry per account, a second
+/// refusal coalesced (never demoted: L1 stays L1); a detection without a lane origin is never
+/// parked. Nothing returns before a newer blockhash however often the owner passes (no busy
+/// loop); after one, each returns once to its original lane with its original work, first
+/// receive time, revision and L2 key, never as a second entry. Every step is a typed `.p0j`
+/// record (the re-arm one record), the Liquidator projection counts it and the shutdown journal
+/// carries the counters.
+#[test]
+fn dec01_a_refused_lane_candidate_is_parked_and_returns_to_its_lane_after_a_newer_blockhash() {
+    use super::candidates::Lane;
+    use crate::analytics::evidence::{BlockhashParkEvent, RecordEvent};
+    use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
+    let mut f = dec01_fixture("dec01_park");
+    let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let g = f.owner.blockhash.generation();
+    for (work, origin) in [
+        (
+            (a, 5, 12, "oracle_health_ready"),
+            Some(dec01_origin(Lane::L1, 3, 7)),
+        ),
+        (
+            (a, 9, 13, "account_update"),
+            Some(dec01_origin(Lane::L2, 9, 8)),
+        ),
+        (
+            (b, 6, 12, "oracle_health_ready"),
+            Some(dec01_origin(Lane::L0, 6, 2)),
+        ),
+        (
+            (Pubkey::new_unique(), 7, 12, "integration_projection"),
+            None,
+        ),
+    ] {
+        f.owner
+            .blockhash_after_detect(work, origin, dec01_refused(g))
+            .unwrap();
+    }
+    let s = f.owner.blockhash_parking.stats;
+    assert_eq!(
+        (
+            f.owner.blockhash_parking.len(),
+            s.refused,
+            s.merged,
+            s.refresh_requests,
+            s.refresh_coalesced
+        ),
+        (2, 3, 1, 1, 2)
+    );
+    assert!(
+        f.owner.blockhash.take_refresh_request(),
+        "the worker was woken"
+    );
+    let trigger = f.owner.owner_snapshot(0).trigger;
+    assert_eq!(
+        (
+            trigger.blockhash_refused,
+            trigger.blockhash_parked,
+            trigger.blockhash_refresh_requests
+        ),
+        (3, 2, 1)
+    );
+    for _ in 0..3 {
+        f.owner.rearm_blockhash_parked().unwrap();
+    }
+    assert!(
+        f.owner.oracle_lanes.is_empty(),
+        "nothing before a newer blockhash"
+    );
+    let fresh = dec01_blockhash(&f, true);
+    f.owner.blockhash.set(fresh);
+    f.owner.rearm_blockhash_parked().unwrap();
+    let entry = f.owner.oracle_lanes.get(&a).copied().expect("re-armed");
+    assert_eq!(
+        (
+            entry.lane,
+            entry.work,
+            entry.t_rx_first,
+            entry.revision,
+            entry.last_forwarded_slot
+        ),
+        (Lane::L1, (a, 9, 13, "account_update"), 3, 8, 4)
+    );
+    assert_eq!(f.owner.oracle_lanes.get(&b).map(|e| e.lane), Some(Lane::L0));
+    f.owner.rearm_blockhash_parked().unwrap();
+    assert_eq!(f.owner.oracle_lanes.len(), 2, "never a second entry");
+    assert_eq!(
+        (
+            f.owner.blockhash_parking.len(),
+            f.owner.blockhash_parking.stats.rearmed
+        ),
+        (0, 2)
+    );
+    assert_eq!(f.owner.owner_snapshot(0).trigger.blockhash_rearmed, 2);
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let (mut events, mut rearms, mut lines) = (vec![], vec![], vec![]);
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == RecordEvent::KIND {
+            match decode(frame.kind, frame.schema, &frame.payload).unwrap() {
+                RecordEvent::BlockhashPark { event, entry, .. } => events.push((
+                    entry.account,
+                    event,
+                    entry.lane.into_owned(),
+                    entry.t_rx_ns,
+                    entry.generation,
+                )),
+                RecordEvent::BlockhashRearm {
+                    cache_generation,
+                    entries,
+                } => rearms.push((
+                    cache_generation,
+                    entries
+                        .into_iter()
+                        .map(|e| (e.account, e.lane.into_owned(), e.t_rx_first_ns))
+                        .collect::<Vec<_>>(),
+                )),
+                _ => {}
+            }
+        } else if frame.kind == OwnerDiagnostic::KIND {
+            let d: OwnerDiagnostic = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            lines.push(d.line);
+        }
+    }
+    use BlockhashParkEvent::{Merged, Parked};
+    assert_eq!(
+        events,
+        [
+            (a, Parked, "L1".to_string(), 5, g),
+            (a, Merged, "L1".to_string(), 9, g),
+            (b, Parked, "L0".to_string(), 6, g),
+        ]
+    );
+    assert_eq!(
+        rearms,
+        [(
+            g + 1,
+            vec![(a, "L1".to_string(), 3), (b, "L0".to_string(), 6)]
+        )]
+    );
+    assert!(
+        lines.iter().any(|l| l
+            == "blockhash_park: refused=3 merged=1 rearmed=2 superseded=0 parked_at_end=0 \
+                refresh_requests=1 refresh_coalesced=2"),
+        "{lines:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-01: a refresh that lands between the refusal's freshness check and the parking still
+/// returns the candidate (the refusal carries the generation read before its check); a
+/// candidate refused on the newest blockhash waits for the next one; only an evaluation past a
+/// fresh blockhash with work at least as new supersedes a parked entry — one that never reached
+/// the check, saw a stale blockhash without parking or carried older work leaves it parked
+/// (never evaluated twice, never lost).
+#[test]
+fn dec01_a_racing_refresh_is_never_missed_and_only_a_fresh_evaluation_supersedes() {
+    use super::candidates::Lane;
+    use crate::execution::pipeline::BlockhashPark;
+    let mut f = dec01_fixture("dec01_race");
+    let (a, b, c, d) = (
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    );
+    let g = f.owner.blockhash.generation();
+    let fresh = dec01_blockhash(&f, true);
+    f.owner.blockhash.set(fresh);
+    f.owner
+        .blockhash_after_detect(
+            (a, 5, 12, "oracle_health_ready"),
+            Some(dec01_origin(Lane::L1, 5, 1)),
+            dec01_refused(g),
+        )
+        .unwrap();
+    // Refused on the newest blockhash: it waits for the next one.
+    let newest = f.owner.blockhash.generation();
+    f.owner
+        .blockhash_after_detect(
+            (c, 6, 12, "oracle_health_ready"),
+            Some(dec01_origin(Lane::L2, 6, 1)),
+            dec01_refused(newest),
+        )
+        .unwrap();
+    f.owner.rearm_blockhash_parked().unwrap();
+    assert_eq!(f.owner.oracle_lanes.get(&a).map(|e| e.lane), Some(Lane::L1));
+    assert!(
+        f.owner.oracle_lanes.get(&c).is_none(),
+        "waits for a newer blockhash"
+    );
+    let fresh = dec01_blockhash(&f, true);
+    f.owner.blockhash.set(fresh);
+    f.owner.rearm_blockhash_parked().unwrap();
+    assert_eq!(f.owner.oracle_lanes.get(&c).map(|e| e.lane), Some(Lane::L2));
+    let g = f.owner.blockhash.generation();
+    for (account, slot) in [(b, 12), (d, 14)] {
+        f.owner
+            .blockhash_after_detect(
+                (account, 5, slot, "oracle_health_ready"),
+                Some(dec01_origin(Lane::L2, 5, 1)),
+                dec01_refused(g),
+            )
+            .unwrap();
+    }
+    for (early, work) in [
+        (None, (d, 9, 15, "account_update")),
+        (Some(BlockhashPark::Off), (d, 9, 15, "account_update")),
+        (Some(BlockhashPark::Passed), (d, 9, 13, "account_update")),
+    ] {
+        f.owner.blockhash_after_detect(work, None, early).unwrap();
+        assert!(
+            f.owner.blockhash_parking.get(&d).is_some(),
+            "{early:?} {work:?}"
+        );
+    }
+    f.owner
+        .blockhash_after_detect(
+            (b, 8, 14, "account_update"),
+            None,
+            Some(BlockhashPark::Passed),
+        )
+        .unwrap();
+    let s = f.owner.blockhash_parking.stats;
+    assert_eq!((f.owner.blockhash_parking.len(), s.superseded), (1, 1));
+    let fresh = dec01_blockhash(&f, true);
+    f.owner.blockhash.set(fresh);
+    f.owner.rearm_blockhash_parked().unwrap();
+    assert!(
+        f.owner.oracle_lanes.get(&b).is_none(),
+        "covered, not evaluated twice"
+    );
+    assert!(f.owner.oracle_lanes.get(&d).is_some(), "never lost");
+    cleanup(f);
+}
+
+/// DEC-01: a newer blockhash ends the owner's idle wait while candidates are parked; one that
+/// is already stale on arrival re-arms nothing, asks the worker again and is not looked at
+/// again (no spin); the next fresh one re-arms. A lane detection that ends before the
+/// pipeline (here: no state, the integration plan) reaches no blockhash check and leaves the
+/// account's parked entry in place.
+#[test]
+fn dec01_a_stale_newer_blockhash_rearms_nothing_and_an_unevaluated_detection_keeps_the_entry() {
+    use super::candidates::Lane;
+    let mut f = dec01_fixture("dec01_stale_newer");
+    let a = Pubkey::new_unique();
+    let g = f.owner.blockhash.generation();
+    f.owner
+        .blockhash_after_detect(
+            (a, 5, 12, "oracle_health_ready"),
+            Some(dec01_origin(Lane::L0, 5, 1)),
+            dec01_refused(g),
+        )
+        .unwrap();
+    assert!(f.owner.blockhash.take_refresh_request());
+    assert!(!f
+        .owner
+        .blockhash_parking
+        .pending(f.owner.blockhash.generation()));
+    let stale = dec01_blockhash(&f, false);
+    f.owner.blockhash.set(stale);
+    assert!(f
+        .owner
+        .blockhash_parking
+        .pending(f.owner.blockhash.generation()));
+    f.owner.rearm_blockhash_parked().unwrap();
+    assert!(f.owner.oracle_lanes.is_empty());
+    assert!(f.owner.blockhash.take_refresh_request(), "asked again");
+    assert!(!f
+        .owner
+        .blockhash_parking
+        .pending(f.owner.blockhash.generation()));
+    f.owner.detect_origin = Some(dec01_origin(Lane::L0, 9, 2));
+    f.owner.detect(Some((a, 9, 13, "account_update"))).unwrap();
+    assert_eq!(f.owner.blockhash_early, None);
+    assert!(f.owner.blockhash_parking.get(&a).is_some(), "kept");
+    let fresh = dec01_blockhash(&f, true);
+    f.owner.blockhash.set(fresh);
+    f.owner.rearm_blockhash_parked().unwrap();
+    assert_eq!(f.owner.oracle_lanes.get(&a).map(|e| e.lane), Some(Lane::L0));
+    cleanup(f);
 }

@@ -348,6 +348,27 @@ pub trait ReceivershipBuilder {
 /// state at the protocol clock — the pipeline evaluates on this value and computes none.
 pub type PreparedHealth<'h> = Result<&'h HealthView, &'h HealthError>;
 
+/// DEC-01: the explicit cause of a candidate refused before planning (loss `Build`).
+pub const BLOCKHASH_STALE_EARLY: &str = "BLOCKHASH_STALE: refused before planning";
+
+/// DEC-01 (V2-09): the early blockhash refusal of one evaluation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockhashPark {
+    /// The caller cannot park a refused candidate: no early refusal (a restart is not proven),
+    /// only the diagnostic counter and the late check before the build apply.
+    Off,
+    /// The caller parks a refused candidate: a stale or missing blockhash is refused before
+    /// planning.
+    Armed,
+    /// Refused before planning. `generation` is the cache generation read before the check: a
+    /// blockhash stored after it re-arms the parked candidate (a refresh racing the check is
+    /// never missed).
+    Refused { generation: u64 },
+    /// The early check found a fresh blockhash (either mode): this evaluation covers a parked
+    /// candidate of the account.
+    Passed,
+}
+
 /// B6: the Shadow owner's bound on synchronous network work (routes, fee quotes, simulation)
 /// while its ingress queue is behind. At most `per_drain` candidates use the network until the
 /// owner has drained its queue again (`drained`); each stops calling the provider once
@@ -407,6 +428,9 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub network: &'a mut NetworkBudget,
     /// F1: logs of the last failed simulation, taken by the owner for its journal.
     pub simulation_failure: Option<darkbot_solana::submit::SimulationFailure>,
+    /// DEC-01: whether a stale blockhash is refused before planning (`Armed`); the evaluation
+    /// leaves `Refused` for the owner to park the candidate.
+    pub blockhash_park: BlockhashPark,
     /// B1/FE-04: the one durable admission of a LIVE candidate (the one-shot owner's journal and
     /// approval). `None`: LIVE stops at the send boundary, no submit call exists.
     pub fe04: Option<&'a mut crate::execution::one_shot::admission::Fe04Admission>,
@@ -563,9 +587,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some("opportunity stale before planning".into());
             return rec.with_timeline(&tl);
         }
-        // V2-09 (P1-01): a blockhash already stale here makes the planning budget below a loss;
-        // counted for the evidence. The late check after planning stays the verdict — moving it
-        // ahead changes the loss priority (RpcBudget/RpcDeadline/Routing/Plan before Build).
+        // V2-09 (P1-01): a blockhash already stale here is counted. DEC-01: for a caller that
+        // parks the candidate it is refused here — no builder call, no network budget, the
+        // routing/deadline/plan checks not run stay unrecorded (progress unset); the loss is
+        // `Build` with the cause BLOCKHASH_STALE, decided before RpcBudget/RpcDeadline/Routing/
+        // Plan (EXHAUSTIVE_V3). The late check before the build stays.
+        let generation = self.blockhash.generation();
         if self
             .blockhash
             .fresh(self.clock.now_ns(), self.blockhash_max_age_ns)
@@ -575,6 +602,14 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 darkbot_common::mt0::Counter::BlockhashStaleBeforePlanning,
                 1,
             );
+            if self.blockhash_park == BlockhashPark::Armed {
+                rec.loss = Some(LossReason::Build);
+                rec.reason = Some(BLOCKHASH_STALE_EARLY.into());
+                self.blockhash_park = BlockhashPark::Refused { generation };
+                return rec.with_timeline(&tl);
+            }
+        } else {
+            self.blockhash_park = BlockhashPark::Passed;
         }
         // B6: routes, fee quotes and simulation only within the owner's network budget.
         if self.network.remaining == 0 {

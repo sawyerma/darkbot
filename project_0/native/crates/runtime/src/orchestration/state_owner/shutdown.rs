@@ -51,6 +51,9 @@ impl ShadowOwner {
             .projection_stats
             .line(self.projection_pending.len(), self.projection_cache.len());
         owner_log!(self, "{projection}");
+        // DEC-01: the blockhash parking once at shutdown (parked entries end like lane entries).
+        let parking = self.blockhash_park_line();
+        owner_log!(self, "{parking}");
         // S1-02: the observing source ends with the owner; its measurement once.
         let observer = self.stop_observer();
         let sources = self.sources.line();

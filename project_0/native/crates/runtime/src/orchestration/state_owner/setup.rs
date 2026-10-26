@@ -446,10 +446,13 @@ pub(super) fn prepare(
         darkbot_solana::provider::Workload::LiveRead,
     );
     let bh_cache = blockhash.clone();
+    let bh_requests = blockhash.clone();
+    let bh_retry = Duration::from_millis(operational.rpc_backoff_ms);
     let bh_clock = clock;
     let bh_econ = econ.clone();
     let bh_shutdown = shutdown.clone();
     let bh_interval = Duration::from_millis(operational.blockhash_refresh_ms);
+    let bh_wake = wake.clone();
     let blockhash_thread =
         std::thread::Builder::new()
             .name("blockhash".into())
@@ -461,6 +464,9 @@ pub(super) fn prepare(
                     &admission_closed,
                     || bh_cache.refresh(&bh_rpc, bh_clock.now_ns()).map(|_| ()),
                     bh_interval,
+                    &bh_requests,
+                    bh_retry,
+                    &|| bh_wake.notify(),
                 )
             })?;
     // DEC-05: the Safety limits are parameters of the operational config (validated ranges).
@@ -1005,6 +1011,8 @@ pub(super) fn prepare(
         next_candidate_id: 1,
         candidate_revisions: HashMap::new(),
         detect_origin: None,
+        blockhash_parking: Default::default(),
+        blockhash_early: None,
         ownership: Default::default(),
         atas: LiquidatorAtas::new(liquidator),
         min_profit,
@@ -1270,16 +1278,26 @@ pub(super) fn check_cluster(observed: &solana_sdk::hash::Hash) -> Result<(), &'s
 
 /// Blockhash refresh loop of the Shadow owner (M3). Shutdown and closed admission are checked
 /// before every refresh and at least every 250 ms of the wait, so no refresh starts after either;
-/// a refresh already in flight is bounded by its RPC timeout (30 s).
+/// a refresh already in flight is bounded by its RPC timeout (30 s). DEC-01: the owner's
+/// coalesced request (`BlockhashCache::request_refresh`) starts the next refresh at once — after a
+/// failed refresh (HTTP 429, timeout) never sooner than `retry_after_failure`; a successful
+/// refresh satisfies every request made before it.
 pub(super) fn run_blockhash_refresh(
     shutdown: &Shutdown,
     admission_closed: &dyn Fn() -> bool,
     mut refresh: impl FnMut() -> Result<(), String>,
     interval: Duration,
+    requests: &BlockhashCache,
+    retry_after_failure: Duration,
+    stored: &dyn Fn(),
 ) {
     const STEP: Duration = Duration::from_millis(250);
     let stop = || shutdown.is_requested() || admission_closed();
     let mut degraded = false;
+    // DEC-01: the running refresh serves an owner request; if it fails, it is retried after
+    // the retry spacing instead of waiting for the interval.
+    let mut requested = false;
+    requests.register_worker(std::thread::current());
     while !stop() {
         let mt0_start = std::time::Instant::now(); // [MT0]
         let refreshed = refresh();
@@ -1292,8 +1310,12 @@ pub(super) fn run_blockhash_refresh(
             mt0_start.elapsed(),
             mt0_outcome,
         );
+        let retry = refreshed.is_err() && requested;
         match refreshed {
             Ok(_) => {
+                requests.take_refresh_request();
+                // DEC-01: a stored blockhash wakes the owner (parked candidates).
+                stored();
                 if degraded {
                     crate::console::line("blockhash refresh: recovered".into());
                     degraded = false;
@@ -1309,12 +1331,27 @@ pub(super) fn run_blockhash_refresh(
             }
         }
         let waiting = std::time::Instant::now();
+        let earliest_request = if degraded {
+            retry_after_failure
+        } else {
+            Duration::ZERO
+        };
+        requested = false;
         while !stop() {
-            let left = interval.saturating_sub(waiting.elapsed());
-            if left.is_zero() {
+            let elapsed = waiting.elapsed();
+            if elapsed >= interval {
                 break;
             }
-            std::thread::sleep(left.min(STEP));
+            if elapsed >= earliest_request && (retry || requests.take_refresh_request()) {
+                requested = true;
+                break;
+            }
+            let until = if elapsed < earliest_request {
+                earliest_request - elapsed
+            } else {
+                interval - elapsed
+            };
+            std::thread::park_timeout(until.min(interval - elapsed).min(STEP));
         }
     }
 }
@@ -1406,9 +1443,41 @@ mod blockhash_tests {
         closed_from_check: Option<u64>,
         refresh_ms: u64,
     ) -> (Arc<AtomicU64>, mpsc::Receiver<()>) {
+        start_with(
+            shutdown,
+            closed_from_check,
+            refresh_ms,
+            &BlockhashCache::new(),
+            &[],
+        )
+    }
+    /// `start` with the cache whose requests the loop serves and the outcomes of its refreshes
+    /// (`Err` = a provider refusal such as HTTP 429; beyond the list every refresh succeeds).
+    fn start_with(
+        shutdown: &Shutdown,
+        closed_from_check: Option<u64>,
+        refresh_ms: u64,
+        requests: &BlockhashCache,
+        outcomes: &[Result<(), &'static str>],
+    ) -> (Arc<AtomicU64>, mpsc::Receiver<()>) {
+        let (calls, _, rx) =
+            start_stored(shutdown, closed_from_check, refresh_ms, requests, outcomes);
+        (calls, rx)
+    }
+    /// `start_with` that also counts the owner wake-ups after a stored blockhash.
+    fn start_stored(
+        shutdown: &Shutdown,
+        closed_from_check: Option<u64>,
+        refresh_ms: u64,
+        requests: &BlockhashCache,
+        outcomes: &[Result<(), &'static str>],
+    ) -> (Arc<AtomicU64>, Arc<AtomicU64>, mpsc::Receiver<()>) {
         let calls = Arc::new(AtomicU64::new(0));
+        let stored = Arc::new(AtomicU64::new(0));
         let (done, rx) = mpsc::channel();
-        let (s, c) = (shutdown.clone(), calls.clone());
+        let (s, c, r) = (shutdown.clone(), calls.clone(), requests.clone());
+        let outcomes = outcomes.to_vec();
+        let woken = stored.clone();
         std::thread::spawn(move || {
             let checks = AtomicU64::new(0);
             let closed =
@@ -1417,15 +1486,115 @@ mod blockhash_tests {
                 &s,
                 &closed,
                 || {
-                    c.fetch_add(1, SeqCst);
+                    let n = c.fetch_add(1, SeqCst) as usize;
                     std::thread::sleep(Duration::from_millis(refresh_ms));
-                    Ok(())
+                    outcomes
+                        .get(n)
+                        .copied()
+                        .unwrap_or(Ok(()))
+                        .map_err(String::from)
                 },
                 Duration::from_secs(10),
+                &r,
+                Duration::from_millis(400),
+                &|| {
+                    woken.fetch_add(1, SeqCst);
+                },
             );
             let _ = done.send(());
         });
-        (calls, rx)
+        (calls, stored, rx)
+    }
+    fn calls_reach(calls: &AtomicU64, n: u64, within: Duration) -> bool {
+        let t0 = Instant::now();
+        while calls.load(SeqCst) < n {
+            if t0.elapsed() > within {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
+    }
+    /// DEC-01: the owner's request starts a refresh at once instead of after the 10 s interval;
+    /// requests made while one is pending coalesce into one refresh.
+    #[test]
+    fn dec01_a_refresh_request_wakes_the_worker_at_once_and_coalesces() {
+        let shutdown = Shutdown::new();
+        let cache = BlockhashCache::new();
+        let (calls, done) = start_with(&shutdown, None, 0, &cache, &[]);
+        first_refresh(&calls);
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(cache.request_refresh());
+        assert!(!cache.request_refresh(), "coalesced");
+        assert!(
+            calls_reach(&calls, 2, Duration::from_secs(2)),
+            "request not served at once"
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(calls.load(SeqCst), 2, "one refresh per coalesced request");
+        shutdown.request();
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+    /// DEC-01 (HTTP 429): after a failed refresh a request is served no sooner than the retry
+    /// spacing (400 ms here), then the refresh succeeds.
+    #[test]
+    fn dec01_after_a_refusal_a_request_waits_for_the_retry_spacing() {
+        let shutdown = Shutdown::new();
+        let cache = BlockhashCache::new();
+        let (calls, done) = start_with(
+            &shutdown,
+            None,
+            0,
+            &cache,
+            &[Err("HTTP 429 Too Many Requests")],
+        );
+        first_refresh(&calls);
+        let failed_at = Instant::now();
+        cache.request_refresh();
+        assert!(calls_reach(&calls, 2, Duration::from_secs(2)));
+        assert!(
+            failed_at.elapsed() >= Duration::from_millis(350),
+            "{:?}",
+            failed_at.elapsed()
+        );
+        shutdown.request();
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+    /// DEC-01 (HTTP 429 on a requested refresh): the request a failed refresh consumed is
+    /// retried after the retry spacing (400 ms), not after the 10 s interval, without a new
+    /// request; every stored blockhash wakes the owner, a failed refresh does not.
+    #[test]
+    fn dec01_a_requested_refresh_that_fails_is_retried_after_the_spacing() {
+        let shutdown = Shutdown::new();
+        let cache = BlockhashCache::new();
+        let (calls, stored, done) = start_stored(
+            &shutdown,
+            None,
+            0,
+            &cache,
+            &[Ok(()), Err("HTTP 429 Too Many Requests")],
+        );
+        first_refresh(&calls);
+        assert!(
+            calls_reach(&stored, 1, Duration::from_secs(1)),
+            "owner woken"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(cache.request_refresh());
+        assert!(
+            calls_reach(&calls, 2, Duration::from_secs(1)),
+            "request served"
+        );
+        let failed_at = Instant::now();
+        assert!(
+            calls_reach(&calls, 3, Duration::from_secs(2)),
+            "the failed requested refresh is retried before the interval"
+        );
+        assert!(failed_at.elapsed() >= Duration::from_millis(350));
+        assert!(calls_reach(&stored, 2, Duration::from_secs(1)));
+        assert_eq!(stored.load(SeqCst), 2, "a failed refresh wakes nobody");
+        shutdown.request();
+        done.recv_timeout(Duration::from_secs(1)).unwrap();
     }
     fn first_refresh(calls: &AtomicU64) {
         let t0 = Instant::now();

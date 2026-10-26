@@ -51,6 +51,12 @@ export interface OwnerTriggerView {
   indexedAccounts: bigint;
   suppressed: bigint;
   softcapSuppressed: bigint;
+  /** DEC-01: early refusals (Build · BLOCKHASH_STALE), parked now, re-armed, superseded, refresh wake-ups. */
+  blockhashRefused: bigint;
+  blockhashParked: bigint;
+  blockhashRearmed: bigint;
+  blockhashSuperseded: bigint;
+  blockhashRefreshRequests: bigint;
 }
 
 export interface OwnerPipelineView {

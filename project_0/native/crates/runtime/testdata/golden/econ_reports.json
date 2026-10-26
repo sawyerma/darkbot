@@ -1757,7 +1757,7 @@
             "our_edge_unknown_count": 0
           }
         },
-        "loss_attribution_model": "EXHAUSTIVE_V2: one bucket per LossReason; PLAN and SAFETY are causes of their own; UNKNOWN only for an undetermined cause",
+        "loss_attribution_model": "EXHAUSTIVE_V3: one bucket per LossReason; PLAN and SAFETY are causes of their own; a stale blockhash is BUILD (cause BLOCKHASH_STALE), decided before RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN for a lane candidate (DEC-01) and in the late check before the build for any other detection; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 4,
@@ -3545,7 +3545,7 @@
             "our_edge_unknown_count": 0
           }
         },
-        "loss_attribution_model": "EXHAUSTIVE_V2: one bucket per LossReason; PLAN and SAFETY are causes of their own; UNKNOWN only for an undetermined cause",
+        "loss_attribution_model": "EXHAUSTIVE_V3: one bucket per LossReason; PLAN and SAFETY are causes of their own; a stale blockhash is BUILD (cause BLOCKHASH_STALE), decided before RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN for a lane candidate (DEC-01) and in the late check before the build for any other detection; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 1,
@@ -8085,7 +8085,7 @@
             "our_edge_unknown_count": 0
           }
         },
-        "loss_attribution_model": "EXHAUSTIVE_V2: one bucket per LossReason; PLAN and SAFETY are causes of their own; UNKNOWN only for an undetermined cause",
+        "loss_attribution_model": "EXHAUSTIVE_V3: one bucket per LossReason; PLAN and SAFETY are causes of their own; a stale blockhash is BUILD (cause BLOCKHASH_STALE), decided before RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN for a lane candidate (DEC-01) and in the late check before the build for any other detection; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 0,
@@ -9781,7 +9781,7 @@
             "our_edge_unknown_count": 0
           }
         },
-        "loss_attribution_model": "EXHAUSTIVE_V2: one bucket per LossReason; PLAN and SAFETY are causes of their own; UNKNOWN only for an undetermined cause",
+        "loss_attribution_model": "EXHAUSTIVE_V3: one bucket per LossReason; PLAN and SAFETY are causes of their own; a stale blockhash is BUILD (cause BLOCKHASH_STALE), decided before RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN for a lane candidate (DEC-01) and in the late check before the build for any other detection; UNKNOWN only for an undetermined cause",
         "market": {
           "ALL": {
             "events": 0,

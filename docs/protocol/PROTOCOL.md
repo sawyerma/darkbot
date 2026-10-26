@@ -2471,6 +2471,11 @@ Candidate trigger and its lanes.
 | indexed_accounts | [uint64](#uint64) |  | Accounts in the reverse index. |
 | suppressed | [uint64](#uint64) |  | Repeats suppressed by the forward policy (no new cause). |
 | softcap_suppressed | [uint64](#uint64) |  | Due repeats suppressed by the repeat soft cap. |
+| blockhash_refused | [uint64](#uint64) |  | DEC-01: lane candidates refused before planning on a stale or missing blockhash (loss Build, cause BLOCKHASH_STALE) in this run. |
+| blockhash_parked | [uint64](#uint64) |  | DEC-01: candidates parked now, waiting for a newer blockhash (at most one per account). |
+| blockhash_rearmed | [uint64](#uint64) |  | DEC-01: parked candidates returned to their lane after a newer blockhash in this run. |
+| blockhash_superseded | [uint64](#uint64) |  | DEC-01: parked candidates covered by a later evaluation of the account in this run. |
+| blockhash_refresh_requests | [uint64](#uint64) |  | DEC-01: refresh wake-ups sent to the blockhash worker in this run (pending ones coalesced). |
 
 
 
