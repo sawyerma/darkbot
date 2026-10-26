@@ -2514,7 +2514,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -2528,7 +2528,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -2542,7 +2542,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -2556,7 +2556,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -2570,7 +2570,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -2584,7 +2584,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "ended_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -2598,7 +2598,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "clock_id",
     "type": "U64",
     "unit": "integer"
@@ -2612,7 +2612,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "git_head",
     "type": "Text",
     "unit": "text"
@@ -2626,7 +2626,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "budget_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2640,7 +2640,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "queue_records",
     "type": "U64",
     "unit": "integer"
@@ -2654,7 +2654,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segment_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2668,7 +2668,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segment_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -2682,7 +2682,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sync_records",
     "type": "U64",
     "unit": "integer"
@@ -2696,7 +2696,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sync_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -2710,7 +2710,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].index",
     "type": "U64",
     "unit": "integer"
@@ -2724,7 +2724,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].file",
     "type": "Text",
     "unit": "text"
@@ -2738,7 +2738,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].records",
     "type": "U64",
     "unit": "count"
@@ -2752,7 +2752,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].first_sequence",
     "type": "U64",
     "unit": "integer"
@@ -2766,7 +2766,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -2780,7 +2780,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -2794,7 +2794,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2808,7 +2808,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -2822,7 +2822,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].first_timestamp_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -2836,7 +2836,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].last_timestamp_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -2850,7 +2850,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -2864,7 +2864,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "lost_records",
     "type": "U64",
     "unit": "integer"
@@ -2878,7 +2878,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -2892,7 +2892,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "peak_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -2906,7 +2906,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "budget_refused",
     "type": "U64",
     "unit": "integer"
@@ -2920,7 +2920,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "write_errors",
     "type": "U64",
     "unit": "integer"
@@ -2934,7 +2934,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "state",
     "type": "Text",
     "unit": "text"
@@ -2948,7 +2948,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -2962,7 +2962,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"
@@ -2976,7 +2976,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -2990,7 +2990,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -3004,7 +3004,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -3018,7 +3018,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3032,7 +3032,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3046,7 +3046,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "ended_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3060,7 +3060,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "clock_id",
     "type": "U64",
     "unit": "integer"
@@ -3074,7 +3074,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "git_head",
     "type": "Text",
     "unit": "text"
@@ -3088,7 +3088,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "budget_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3102,7 +3102,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "queue_records",
     "type": "U64",
     "unit": "integer"
@@ -3116,7 +3116,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segment_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3130,7 +3130,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segment_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -3144,7 +3144,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sync_records",
     "type": "U64",
     "unit": "integer"
@@ -3158,7 +3158,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sync_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -3172,7 +3172,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].index",
     "type": "U64",
     "unit": "integer"
@@ -3186,7 +3186,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].file",
     "type": "Text",
     "unit": "text"
@@ -3200,7 +3200,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].records",
     "type": "U64",
     "unit": "count"
@@ -3214,7 +3214,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].first_sequence",
     "type": "U64",
     "unit": "integer"
@@ -3228,7 +3228,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -3242,7 +3242,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -3256,7 +3256,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3270,7 +3270,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3284,7 +3284,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].first_timestamp_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -3298,7 +3298,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].last_timestamp_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -3312,7 +3312,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -3326,7 +3326,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "lost_records",
     "type": "U64",
     "unit": "integer"
@@ -3340,7 +3340,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -3354,7 +3354,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "peak_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3368,7 +3368,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "budget_refused",
     "type": "U64",
     "unit": "integer"
@@ -3382,7 +3382,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "write_errors",
     "type": "U64",
     "unit": "integer"
@@ -3396,7 +3396,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "state",
     "type": "Text",
     "unit": "text"
@@ -3410,7 +3410,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -3424,7 +3424,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"
@@ -3438,7 +3438,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "host",
     "type": "Text",
     "unit": "text"
@@ -3452,7 +3452,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "build",
     "type": "Text",
     "unit": "text"
@@ -3466,7 +3466,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "config_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3480,7 +3480,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -3494,7 +3494,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -3508,7 +3508,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -3522,7 +3522,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3536,7 +3536,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "started_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3550,7 +3550,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "ended_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -3564,7 +3564,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "clock_id",
     "type": "U64",
     "unit": "integer"
@@ -3578,7 +3578,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "git_head",
     "type": "Text",
     "unit": "text"
@@ -3592,7 +3592,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "budget_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3606,7 +3606,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "queue_records",
     "type": "U64",
     "unit": "integer"
@@ -3620,7 +3620,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segment_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3634,7 +3634,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segment_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -3648,7 +3648,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sync_records",
     "type": "U64",
     "unit": "integer"
@@ -3662,7 +3662,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sync_ms",
     "type": "U64",
     "unit": "milliseconds"
@@ -3676,7 +3676,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].index",
     "type": "U64",
     "unit": "integer"
@@ -3690,7 +3690,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].file",
     "type": "Text",
     "unit": "text"
@@ -3704,7 +3704,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].records",
     "type": "U64",
     "unit": "count"
@@ -3718,7 +3718,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].first_sequence",
     "type": "U64",
     "unit": "integer"
@@ -3732,7 +3732,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -3746,7 +3746,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].lost_records",
     "type": "U64",
     "unit": "integer"
@@ -3760,7 +3760,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3774,7 +3774,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3788,7 +3788,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].first_timestamp_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -3802,7 +3802,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments[].last_timestamp_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -3816,7 +3816,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -3830,7 +3830,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "lost_records",
     "type": "U64",
     "unit": "integer"
@@ -3844,7 +3844,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -3858,7 +3858,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "peak_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -3872,7 +3872,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "budget_refused",
     "type": "U64",
     "unit": "integer"
@@ -3886,7 +3886,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "write_errors",
     "type": "U64",
     "unit": "integer"
@@ -3900,7 +3900,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "state",
     "type": "Text",
     "unit": "text"
@@ -3914,7 +3914,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -3928,7 +3928,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"
@@ -3942,7 +3942,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "host",
     "type": "Text",
     "unit": "text"
@@ -3956,7 +3956,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "build",
     "type": "Text",
     "unit": "text"
@@ -3970,7 +3970,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "config_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -3984,7 +3984,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "ingress_dropped",
     "type": "U64",
     "unit": "integer"
@@ -3998,7 +3998,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "build_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -4012,7 +4012,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "build_dirty",
     "type": "Bool",
     "unit": "boolean"
@@ -4026,7 +4026,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "capture_pending",
     "type": "Text",
     "unit": "text"
@@ -4040,7 +4040,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -4054,7 +4054,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -4068,7 +4068,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -4082,7 +4082,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -4096,7 +4096,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "manifest_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -4110,7 +4110,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "manifest_state",
     "type": "Text",
     "unit": "text"
@@ -4124,7 +4124,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments",
     "type": "U64",
     "unit": "integer"
@@ -4138,7 +4138,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -4152,7 +4152,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -4166,7 +4166,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "manifest_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4180,7 +4180,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "read_error",
     "type": "Text",
     "unit": "text"
@@ -4194,7 +4194,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "flap_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4208,7 +4208,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "four_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4222,7 +4222,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "openfour_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4236,7 +4236,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "undecodable_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4250,7 +4250,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "census_state",
     "type": "Text",
     "unit": "text"
@@ -4264,7 +4264,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "census_deterministic",
     "type": "Bool",
     "unit": "boolean"
@@ -4278,7 +4278,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "status_launches",
     "type": "U64",
     "unit": "integer"
@@ -4292,7 +4292,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "status_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4306,7 +4306,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -4320,7 +4320,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -4334,7 +4334,7 @@
     "schema_version": 2,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"
@@ -4348,7 +4348,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "pending_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4362,7 +4362,7 @@
     "schema_version": 2,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "pending_to_venues",
     "type": "U64",
     "unit": "integer"
@@ -4376,7 +4376,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "run_id",
     "type": "Text",
     "unit": "text"
@@ -4390,7 +4390,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -4404,7 +4404,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -4418,7 +4418,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -4432,7 +4432,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "manifest_sha256",
     "type": "B256",
     "unit": "hash_32_bytes"
@@ -4446,7 +4446,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "manifest_state",
     "type": "Text",
     "unit": "text"
@@ -4460,7 +4460,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "segments",
     "type": "U64",
     "unit": "integer"
@@ -4474,7 +4474,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "records",
     "type": "U64",
     "unit": "count"
@@ -4488,7 +4488,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "last_sequence",
     "type": "U64",
     "unit": "integer"
@@ -4502,7 +4502,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "manifest_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4516,7 +4516,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "read_error",
     "type": "Text",
     "unit": "text"
@@ -4530,7 +4530,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "flap_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4544,7 +4544,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "four_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4558,7 +4558,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "openfour_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4572,7 +4572,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "undecodable_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4586,7 +4586,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "census_state",
     "type": "Text",
     "unit": "text"
@@ -4600,7 +4600,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "census_deterministic",
     "type": "Bool",
     "unit": "boolean"
@@ -4614,7 +4614,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "status_launches",
     "type": "U64",
     "unit": "integer"
@@ -4628,7 +4628,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "status_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4642,7 +4642,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -4656,7 +4656,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "reasons",
     "type": "Text",
     "unit": "text"
@@ -4670,7 +4670,7 @@
     "schema_version": 3,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"
@@ -4684,7 +4684,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "pending_sightings",
     "type": "U64",
     "unit": "integer"
@@ -4698,7 +4698,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "pending_to_venues",
     "type": "U64",
     "unit": "integer"
@@ -4712,7 +4712,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "status_counters_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4726,7 +4726,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "sightings_missing",
     "type": "U64",
     "unit": "integer"
@@ -4740,7 +4740,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "pending_as_launch",
     "type": "U64",
     "unit": "integer"
@@ -4754,7 +4754,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "config_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4768,7 +4768,7 @@
     "schema_version": 3,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "build_match",
     "type": "Bool",
     "unit": "boolean"
@@ -4782,7 +4782,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "duration_s",
     "type": "U64",
     "unit": "seconds"
@@ -4796,7 +4796,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "chain_id",
     "type": "U64",
     "unit": "chain_id"
@@ -4810,7 +4810,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -4824,7 +4824,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -4838,7 +4838,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "rates_run_id",
     "type": "Text",
     "unit": "text"
@@ -4852,7 +4852,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "average_bytes_per_s",
     "type": "U64",
     "unit": "seconds"
@@ -4866,7 +4866,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "peak_bytes_per_s",
     "type": "U64",
     "unit": "seconds"
@@ -4880,7 +4880,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "burst_s",
     "type": "U64",
     "unit": "seconds"
@@ -4894,7 +4894,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "overhead_ppm",
     "type": "U64",
     "unit": "integer"
@@ -4908,7 +4908,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "probe_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -4922,7 +4922,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "writer_bytes_per_s",
     "type": "U64",
     "unit": "seconds"
@@ -4936,7 +4936,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "free_disk_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -4950,7 +4950,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "disk_reserve_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -4964,7 +4964,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "memory_budget_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -4978,7 +4978,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "verdict",
     "type": "Text",
     "unit": "text"
@@ -4992,7 +4992,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "expected_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -5006,7 +5006,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "burst_backlog_bytes",
     "type": "U64",
     "unit": "byte_count"
@@ -5020,7 +5020,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "blocking_resource",
     "type": "Text",
     "unit": "text"
@@ -5034,7 +5034,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "achievable_s",
     "type": "U64",
     "unit": "seconds"
@@ -5048,7 +5048,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"
@@ -5062,7 +5062,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "host",
     "type": "Text",
     "unit": "text"
@@ -5076,7 +5076,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "build",
     "type": "Text",
     "unit": "text"
@@ -5090,7 +5090,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.tool",
     "type": "Text",
     "unit": "text"
@@ -5104,7 +5104,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "_provenance.observed_unix_ms",
     "type": "U64",
     "unit": "unix_milliseconds"
@@ -5118,7 +5118,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "git_head",
     "type": "Text",
     "unit": "text"
@@ -5132,7 +5132,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "warmup",
     "type": "U64",
     "unit": "integer"
@@ -5146,7 +5146,7 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].name",
     "type": "Text",
     "unit": "text"
@@ -5160,7 +5160,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].samples",
     "type": "U64",
     "unit": "integer"
@@ -5174,7 +5174,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].min_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5188,7 +5188,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].mean_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5202,7 +5202,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].p50_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5216,7 +5216,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].p95_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5230,7 +5230,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].p99_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5244,7 +5244,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].p99_9_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5258,7 +5258,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].p99_99_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5272,7 +5272,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].max_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5286,7 +5286,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].ge_500us",
     "type": "U64",
     "unit": "integer"
@@ -5300,7 +5300,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].ge_1ms",
     "type": "U64",
     "unit": "integer"
@@ -5314,7 +5314,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "stages[].ge_3ms",
     "type": "U64",
     "unit": "integer"
@@ -5328,7 +5328,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "clock_overhead_p50_ns",
     "type": "U64",
     "unit": "nanoseconds"
@@ -5342,7 +5342,7 @@
     "schema_version": 1,
     "sensitivity": "PUBLIC",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "recorder_lost",
     "type": "U64",
     "unit": "integer"
@@ -5356,7 +5356,385 @@
     "schema_version": 1,
     "sensitivity": "TEXT_PUBLIC_REDACTED",
     "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
-    "source_sha": "4b41b1c4e9eee1236e01c573c23b9370c6afcf60d0335ea50378217fd4a403bd",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "non_claims",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "run_id",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "chain_id",
+    "type": "U64",
+    "unit": "chain_id"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "_provenance.tool",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "_provenance.observed_unix_ms",
+    "type": "U64",
+    "unit": "unix_milliseconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "verdict",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "reasons",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "phase_f_acceptance",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "acceptance_reasons",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "duration_s",
+    "type": "U64",
+    "unit": "seconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "target_s",
+    "type": "U64",
+    "unit": "seconds"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "native_source",
+    "type": "Bool",
+    "unit": "boolean"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Optional",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "manifest_state",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "census_state",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "proof_verdict",
+    "type": "Text",
+    "unit": "text"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "lost_records",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "ingress_dropped",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "write_errors",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "reorgs",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "resyncs",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "blocks_skipped",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "unjoined",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "unparsed_records",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "clock_suspect",
+    "type": "Bool",
+    "unit": "boolean"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "undecodable",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "four_mismatch",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Required",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "PUBLIC",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
+    "symbol": "four_no_derivation",
+    "type": "U64",
+    "unit": "integer"
+  },
+  {
+    "owner": "BSC",
+    "presence": "Repeated",
+    "record_type": 59,
+    "required_gate": "READ_ONLY_OBSERVATION",
+    "schema": "darkbot.bsc.capture-quality.v1",
+    "schema_version": 1,
+    "sensitivity": "TEXT_PUBLIC_REDACTED",
+    "source_path": "bsc/engine/crates/record/src/schema/bsc_capture.rs",
+    "source_sha": "8f8fb15d9541bf90f3af5f0e883d4e0c8cddc9d31a24618bb56c224f1c637036",
     "symbol": "non_claims",
     "type": "Text",
     "unit": "text"

@@ -999,26 +999,38 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             Err(_) => warnings.push("CAPTURE_PREFLIGHT_INVALID".into()),
         }
     }
-    let newest_proof = std::fs::read_dir(rundir.join("bsc-runtime"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let run: u64 = name
-                .strip_prefix("replay-proof-")?
-                .strip_suffix(".dbrec")?
-                .parse()
-                .ok()?;
-            Some((run, e.path()))
-        })
-        .max_by_key(|(run, _)| *run);
-    if let Some((_, proof)) = newest_proof
+    // The newest replay proof and capture-quality verdict (by run id).
+    let newest = |prefix: &str| {
+        std::fs::read_dir(rundir.join("bsc-runtime"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let run: u64 = name
+                    .strip_prefix(prefix)?
+                    .strip_suffix(".dbrec")?
+                    .parse()
+                    .ok()?;
+                Some((run, e.path()))
+            })
+            .max_by_key(|(run, _)| *run)
+            .map(|(_, path)| path)
+    };
+    if let Some(proof) = newest("replay-proof-")
         && let Some(bytes) = read(&proof)
     {
         match schema::bsc_capture::replay_proof::decode_proof(&bytes) {
             Ok(r) => monitoring.records.push(native_record(rundir, &proof, &r)),
             Err(_) => warnings.push("REPLAY_PROOF_INVALID".into()),
+        }
+    }
+    if let Some(quality) = newest("capture-quality-")
+        && let Some(bytes) = read(&quality)
+    {
+        match record::decode(&schema::bsc_capture::capture_quality::SCHEMA, &bytes) {
+            Ok(r) => monitoring.records.push(native_record(rundir, &quality, &r)),
+            Err(_) => warnings.push("CAPTURE_QUALITY_INVALID".into()),
         }
     }
     let gates = vec![

@@ -9,7 +9,13 @@
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! bsc_runtime capture-preflight --rundir <dir> --config <ingress.public.env>
+//! bsc_runtime capture-quality --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! ```
+//!
+//! `capture-quality` writes the Phase F quality verdict of one finished run
+//! (the newest without `--run`; contract §11/§13) into
+//! `bsc-runtime/capture-quality-<run>.dbrec` and prints it; exit 0 only when
+//! CLEAN.
 //!
 //! `capture-preflight` measures this host for a scoped capture of
 //! `BSC_RUNTIME_CAPTURE_DURATION_S` (master plan §11) into
@@ -35,7 +41,7 @@ use darkbot_bsc_execution::runtime::{
     write_census,
 };
 use darkbot_bsc_execution::sources::{Entity, Mode, Store};
-use darkbot_bsc_execution::{capture_preflight, replay_proof};
+use darkbot_bsc_execution::{capture_preflight, capture_quality, replay_proof};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::process::ExitCode;
@@ -114,6 +120,34 @@ fn run(args: &[String]) -> Result<bool, String> {
             )?;
             println!("{}", proof.summary());
             Ok(proof.verdict == "PASS")
+        }
+        [cmd, rest @ ..] if cmd == "capture-quality" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let dir = std::path::Path::new(flag(rest, "--rundir")?).join("bsc-runtime");
+            let journal = dir.join("journal");
+            let run = match rest.iter().any(|a| a == "--run") {
+                true => flag(rest, "--run")?.to_string(),
+                false => replay_proof::latest_run(&journal)?,
+            };
+            let status = std::fs::read(dir.join("status.dbrec")).ok();
+            let q = capture_quality::assess(
+                &journal,
+                &run,
+                status.as_deref(),
+                journal_max_payload(&config),
+                config.max_launch_calldata,
+                Some(config.source_sha256),
+                darkbot_bsc_execution::runtime_journal::own_binary_sha256(),
+                config.capture_duration_s,
+            )?;
+            replay_proof::write(
+                &dir.join(format!("capture-quality-{run}.dbrec")),
+                &q.encode(darkbot_bsc_record::observed_now()?)?,
+            )?;
+            println!("{}", q.summary());
+            Ok(q.clean)
         }
         [cmd, rest @ ..] if cmd == "capture-preflight" => {
             let config_path = flag(rest, "--config")?;

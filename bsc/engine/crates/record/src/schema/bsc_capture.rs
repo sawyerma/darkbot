@@ -505,6 +505,89 @@ pub mod ingest_latency {
     };
 }
 
+/// The Phase F quality verdict of one finished run (contract §11, §13): the
+/// run manifest, the census of the run, the replay proof and the runtime's
+/// last status combined. `CLEAN` only without losses, damage, canonical
+/// uncertainty, clock or decoder ambiguity and with a passing replay;
+/// `PHASE_F_ACCEPTANCE` additionally needs the native geth source and the
+/// planned duration.
+pub mod capture_quality {
+    use super::*;
+
+    pub const RUN_ID: u16 = 1;
+    pub const CHAIN_ID: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// `CLEAN` or `NOT_CLEAN`, with the reasons.
+    pub const VERDICT: u16 = 5;
+    pub const REASONS: u16 = 6;
+    /// `MET` or `NOT_MET` (contract §13), with what is missing.
+    pub const PHASE_F_ACCEPTANCE: u16 = 7;
+    pub const ACCEPTANCE_REASONS: u16 = 8;
+    pub const DURATION_S: u16 = 9;
+    pub const TARGET_S: u16 = 10;
+    /// The native geth source delivered this run's pending transactions.
+    pub const NATIVE_SOURCE: u16 = 11;
+    pub const MANIFEST_STATE: u16 = 12;
+    pub const CENSUS_STATE: u16 = 13;
+    pub const PROOF_VERDICT: u16 = 14;
+    /// Losses: gap spans and oversize records, ingress drops.
+    pub const LOST_RECORDS: u16 = 15;
+    pub const INGRESS_DROPPED: u16 = 16;
+    pub const WRITE_ERRORS: u16 = 17;
+    /// Canonical quality.
+    pub const REORGS: u16 = 18;
+    pub const RESYNCS: u16 = 19;
+    pub const BLOCKS_SKIPPED: u16 = 20;
+    pub const UNJOINED: u16 = 21;
+    pub const UNPARSED_RECORDS: u16 = 22;
+    pub const CLOCK_SUSPECT: u16 = 23;
+    /// Decoder ambiguity and unsupported modes.
+    pub const UNDECODABLE: u16 = 24;
+    pub const FOUR_MISMATCH: u16 = 25;
+    pub const FOUR_NO_DERIVATION: u16 = 26;
+    pub const NON_CLAIMS: u16 = 27;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.capture-quality.v1",
+        record_type: 59,
+        schema_version: 1,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::req(PHASE_F_ACCEPTANCE, "phase_f_acceptance", Text),
+            Field::rep(ACCEPTANCE_REASONS, "acceptance_reasons", Text),
+            Field::req(DURATION_S, "duration_s", U64),
+            Field::req(TARGET_S, "target_s", U64),
+            Field::req(NATIVE_SOURCE, "native_source", Bool),
+            Field::opt(MANIFEST_STATE, "manifest_state", Text),
+            Field::req(CENSUS_STATE, "census_state", Text),
+            Field::req(PROOF_VERDICT, "proof_verdict", Text),
+            Field::req(LOST_RECORDS, "lost_records", U64),
+            Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
+            Field::req(WRITE_ERRORS, "write_errors", U64),
+            Field::req(REORGS, "reorgs", U64),
+            Field::req(RESYNCS, "resyncs", U64),
+            Field::req(BLOCKS_SKIPPED, "blocks_skipped", U64),
+            Field::req(UNJOINED, "unjoined", U64),
+            Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
+            Field::req(CLOCK_SUSPECT, "clock_suspect", Bool),
+            Field::req(UNDECODABLE, "undecodable", U64),
+            Field::req(FOUR_MISMATCH, "four_mismatch", U64),
+            Field::req(FOUR_NO_DERIVATION, "four_no_derivation", U64),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+        ],
+    };
+}
+
 pub const ALL: &[&Schema] = &[
     &capture_run::SCHEMA,
     &capture_run::V2,
@@ -513,6 +596,7 @@ pub const ALL: &[&Schema] = &[
     &replay_proof::V3,
     &capture_preflight::SCHEMA,
     &ingest_latency::SCHEMA,
+    &capture_quality::SCHEMA,
 ];
 
 #[cfg(test)]

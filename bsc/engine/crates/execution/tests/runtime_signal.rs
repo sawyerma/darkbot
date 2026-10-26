@@ -105,5 +105,17 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
     assert_eq!(pre.status.code(), Some(2), "{pre:?}");
     assert!(String::from_utf8_lossy(&pre.stdout).contains("BLOCKED by UNMEASURED"));
     assert!(base.join("bsc-runtime/capture-preflight.dbrec").exists());
+    // The Phase F quality verdict of the same run: clean, but no native
+    // source and far shorter than planned, so not a Phase F acceptance.
+    let quality = Command::new(bin)
+        .args(["capture-quality", "--rundir"])
+        .arg(&base)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&quality.stdout);
+    assert!(quality.status.success(), "{quality:?}");
+    assert!(out.contains(": CLEAN (Phase F acceptance NOT_MET"), "{out}");
     fs::remove_dir_all(&base).unwrap();
 }

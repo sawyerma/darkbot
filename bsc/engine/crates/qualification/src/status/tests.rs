@@ -1098,9 +1098,46 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
             d.encode().unwrap(),
         )
         .unwrap();
+        {
+            use darkbot_bsc_record::schema::bsc_capture::capture_quality as cq;
+            let mut q = Draft::new(&cq::SCHEMA);
+            q.set(cq::RUN_ID, "9")
+                .set(cq::CHAIN_ID, 56u64)
+                .set(cq::PROVENANCE_TOOL, "bsc_runtime capture-quality")
+                .set(cq::PROVENANCE_OBSERVED_UNIX_MS, 5u64)
+                .set(cq::VERDICT, "CLEAN")
+                .set(cq::PHASE_F_ACCEPTANCE, "NOT_MET")
+                .set(cq::DURATION_S, 300u64)
+                .set(cq::TARGET_S, 1_800u64)
+                .set(cq::NATIVE_SOURCE, false)
+                .set(cq::CENSUS_STATE, "COMPLETE")
+                .set(cq::PROOF_VERDICT, "PASS")
+                .set(cq::CLOCK_SUSPECT, false);
+            for tag in [
+                cq::LOST_RECORDS,
+                cq::INGRESS_DROPPED,
+                cq::WRITE_ERRORS,
+                cq::REORGS,
+                cq::RESYNCS,
+                cq::BLOCKS_SKIPPED,
+                cq::UNJOINED,
+                cq::UNPARSED_RECORDS,
+                cq::UNDECODABLE,
+                cq::FOUR_MISMATCH,
+                cq::FOUR_NO_DERIVATION,
+            ] {
+                q.set(tag, 0u64);
+            }
+            fs::write(
+                run.join("bsc-runtime/capture-quality-9.dbrec"),
+                q.encode().unwrap(),
+            )
+            .unwrap();
+        }
         let snap = projection::project(&root, &run);
         let all = names(&snap);
         assert!(all.contains(&"darkbot.bsc.capture-preflight.v1".to_string()));
+        assert!(all.contains(&"darkbot.bsc.capture-quality.v1".to_string()));
         let proofs: Vec<_> = snap
             .monitoring
             .records
@@ -1124,14 +1161,24 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
             b"DBREC001 broken",
         )
         .unwrap();
+        fs::write(
+            run.join("bsc-runtime/capture-quality-9.dbrec"),
+            b"DBREC001 broken",
+        )
+        .unwrap();
         let snap = projection::project(&root, &run);
         assert!(!names(&snap).contains(&"darkbot.bsc.capture-preflight.v1".to_string()));
-        for w in ["REPLAY_PROOF_INVALID", "CAPTURE_PREFLIGHT_INVALID"] {
+        for w in [
+            "REPLAY_PROOF_INVALID",
+            "CAPTURE_PREFLIGHT_INVALID",
+            "CAPTURE_QUALITY_INVALID",
+        ] {
             assert!(snap.status.warnings.contains(&w.to_string()), "{w}");
         }
         fs::remove_file(run.join("bsc-runtime/replay-proof-5.dbrec")).unwrap();
         fs::remove_file(run.join("bsc-runtime/replay-proof-9.dbrec")).unwrap();
         fs::remove_file(run.join("bsc-runtime/capture-preflight.dbrec")).unwrap();
+        fs::remove_file(run.join("bsc-runtime/capture-quality-9.dbrec")).unwrap();
     }
     // A tampered generation: no record, a warning.
     let generations = run.join("bsc-sources/generations");
