@@ -251,6 +251,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             sender: Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464")),
             nonce: Some(13),
             c1_scope: true,
+            venue_target: true,
             four_token: FourToken::NotApplicable,
             unverifiable: None,
         },
@@ -267,6 +268,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             sender: Some(hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34")),
             nonce: Some(1592),
             c1_scope: false,
+            venue_target: false,
             four_token: FourToken::NotApplicable,
             unverifiable: None,
         },
@@ -317,6 +319,7 @@ fn flap_block_with_one_launch_and_no_external_buy() {
         sender: Some(hex!("1b4ebe73585b94578dc055c6ac7e89333fdadcf7")),
         nonce: Some(4297),
         c1_scope: false,
+        venue_target: false,
         four_token: FourToken::NotApplicable,
         unverifiable: None,
     };
@@ -351,6 +354,7 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         // deployer and template, salt from the calldata) is this token: a
         // launch outside the freeze's fixtures confirms the derivation.
         c1_scope: true,
+        venue_target: true,
         four_token: FourToken::Matched,
         unverifiable: None,
     };
@@ -405,6 +409,7 @@ fn openfour_block_launch_has_token_creator_and_a_derived_pending_token() {
         sender: Some(hex!("a26cc5fd86def0050de3ef43dd4796dae89ca25c")),
         nonce: Some(u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap()),
         c1_scope: true,
+        venue_target: true,
         four_token: FourToken::Matched,
         unverifiable: None,
     };

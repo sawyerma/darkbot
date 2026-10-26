@@ -164,22 +164,21 @@ impl ReceiptLaunch {
         tx: Result<&VerifiedTx, RejectReason>,
         max_launch_calldata: usize,
     ) -> CanonicalLaunch {
+        let four = bsc_mainnet_g01_129842711();
         let four_token = match (self.venue, tx) {
             (Venue::Flap, _) => FourToken::NotApplicable,
             (_, Err(_)) => FourToken::NotRecognized,
-            (_, Ok(t)) => {
-                match four_launch_token(&bsc_mainnet_g01_129842711(), &t.raw, max_launch_calldata) {
-                    None => FourToken::NotRecognized,
-                    Some(PendingToken::Unknown) => FourToken::Unknown,
-                    Some(PendingToken::Derived(token) | PendingToken::Unconfirmed(token)) => {
-                        if Some(token.into_array()) == self.token {
-                            FourToken::Matched
-                        } else {
-                            FourToken::Mismatch
-                        }
+            (_, Ok(t)) => match four_launch_token(&four, &t.raw, max_launch_calldata) {
+                None => FourToken::NotRecognized,
+                Some(PendingToken::Unknown) => FourToken::Unknown,
+                Some(PendingToken::Derived(token) | PendingToken::Unconfirmed(token)) => {
+                    if Some(token.into_array()) == self.token {
+                        FourToken::Matched
+                    } else {
+                        FourToken::Mismatch
                     }
                 }
-            }
+            },
         };
         CanonicalLaunch {
             venue: self.venue,
@@ -197,6 +196,7 @@ impl ReceiptLaunch {
                 Venue::Flap => tx.is_ok_and(|t| is_flap_launch(&t.raw, max_launch_calldata)),
                 Venue::Four | Venue::OpenFour => four_token == FourToken::Matched,
             },
+            venue_target: tx.is_ok_and(|t| crate::ingress::venue_target(&four, &t.raw)),
             four_token,
             unverifiable: tx.err(),
         }

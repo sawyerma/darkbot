@@ -195,12 +195,15 @@ pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
     out.push(u8::from(lag.is_some()));
     out.extend_from_slice(&lag.unwrap_or(0).to_le_bytes());
     out.push(four_token_byte(l.four_token));
+    out.push(u8::from(l.venue_target));
     out
 }
 
 /// The length of a `C` record…
-pub const CANONICAL_LAUNCH_LEN: usize = 137;
-/// …and of one of an older build (without the Four verdict).
+pub const CANONICAL_LAUNCH_LEN: usize = 138;
+/// …of one of an older build without the venue-target flag…
+pub const CANONICAL_LAUNCH_LEN_V2: usize = 137;
+/// …and of one without the Four verdict either.
 pub const CANONICAL_LAUNCH_LEN_V1: usize = 136;
 
 pub fn four_token_byte(t: FourToken) -> u8 {
@@ -877,6 +880,7 @@ mod tests {
             token: Some([4; 20]),
             external_buys: Some(5),
             c1_scope: true,
+            venue_target: true,
             four_token: crate::canonical_join::FourToken::NotApplicable,
             tx: LaunchTx::Verified,
             block_ms: 1_000,
@@ -892,6 +896,11 @@ mod tests {
         };
         let c = canonical_launch_payload(&joined);
         assert_eq!(c.len(), CANONICAL_LAUNCH_LEN);
+        assert_eq!(
+            c[CANONICAL_LAUNCH_LEN - 1],
+            1,
+            "the venue-target flag is last"
+        );
         assert_eq!(&c[..2], &[b'C', 1]);
         assert_eq!(&c[2..10], &7u64.to_le_bytes());
         assert_eq!(&c[42..50], &3u64.to_le_bytes());

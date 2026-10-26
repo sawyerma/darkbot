@@ -33,7 +33,8 @@
 use crate::canonical_join::FourToken;
 use crate::canonical_join::Venue;
 use crate::runtime_journal::{
-    CANONICAL_LAUNCH_LEN, CANONICAL_LAUNCH_LEN_V1, RUN_MANIFEST, four_token_of_byte, venue_of_byte,
+    CANONICAL_LAUNCH_LEN, CANONICAL_LAUNCH_LEN_V1, CANONICAL_LAUNCH_LEN_V2, RUN_MANIFEST,
+    four_token_of_byte, venue_of_byte,
 };
 use crate::sources::SourceId;
 use darkbot_bsc_journal::storage::run::{RunReader, SegmentRead};
@@ -174,6 +175,8 @@ pub(crate) struct LaunchRecord {
     fetch_lag_ms: Option<i64>,
     /// `None` in a record of an older build.
     four: Option<FourToken>,
+    /// Addressed to a venue contract; `None` in a record of an older build.
+    pub(crate) venue_target: Option<bool>,
     seen_ns: u64,
 }
 
@@ -194,9 +197,20 @@ fn flag(byte: u8) -> Option<bool> {
 }
 
 pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
-    if !(p.len() == CANONICAL_LAUNCH_LEN || p.len() == CANONICAL_LAUNCH_LEN_V1) || p[0] != b'C' {
+    if ![
+        CANONICAL_LAUNCH_LEN,
+        CANONICAL_LAUNCH_LEN_V2,
+        CANONICAL_LAUNCH_LEN_V1,
+    ]
+    .contains(&p.len())
+        || p[0] != b'C'
+    {
         return None;
     }
+    let venue_target = match p.get(CANONICAL_LAUNCH_LEN_V2) {
+        Some(b) => Some(flag(*b)?),
+        None => None,
+    };
     let four = match p.get(CANONICAL_LAUNCH_LEN_V1) {
         Some(b) => Some(four_token_of_byte(*b)?),
         None => None,
@@ -246,6 +260,7 @@ pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
             None
         },
         four,
+        venue_target,
         seen_ns,
     })
 }
@@ -512,6 +527,7 @@ fn replay(
                         tx_answer_refused: false,
                         fetch_lag_ms: None,
                         four: None,
+                        venue_target: None,
                         seen_ns: record.timestamp_ns,
                     });
                 }
@@ -1057,6 +1073,7 @@ mod tests {
             token: None,
             external_buys: buys,
             c1_scope: tx != 3,
+            venue_target: true,
             four_token: if venue == Venue::Flap {
                 crate::canonical_join::FourToken::NotApplicable
             } else {
@@ -1179,9 +1196,12 @@ mod tests {
             })
         };
         let mut old = c(with(Venue::Four, 5, FourToken::Matched));
-        old.pop();
+        old.truncate(CANONICAL_LAUNCH_LEN_V1);
+        // A record of the build before the venue-target flag: still read.
+        let mut v2 = c(with(Venue::Four, 9, FourToken::Matched));
+        v2.truncate(CANONICAL_LAUNCH_LEN_V2);
         let mut bad = c(with(Venue::Four, 6, FourToken::Matched));
-        *bad.last_mut().unwrap() = 9;
+        bad[CANONICAL_LAUNCH_LEN_V1] = 9;
         // Venue and verdict disagree: a Flap record with a Four verdict, a
         // Four record without one.
         let flap_with = c(with(Venue::Flap, 7, FourToken::Matched));
@@ -1197,6 +1217,7 @@ mod tests {
             c(with(Venue::OpenFour, 3, FourToken::Mismatch)),
             c(with(Venue::Four, 4, FourToken::NotRecognized)),
             old,
+            v2,
             bad,
             flap_with,
             four_without,
@@ -1233,21 +1254,21 @@ mod tests {
                 c.four_verdict_unrecorded,
                 c.unparsed_records
             ),
-            (5, 1, 1, 1, 1, 1, 3)
+            (6, 2, 1, 1, 1, 1, 3)
         );
-        // Phase F §10: Four coverage per class (all five missed here).
+        // Phase F §10: Four coverage per class (all six missed here).
         assert_eq!(
             (c.four_full_before, c.four_missed, c.full_before, c.missed),
-            (0, 5, 0, 0)
+            (0, 6, 0, 0)
         );
         assert_eq!(
             (c.later_sightings, c.later_lag_p50_us, c.later_lag_max_us),
             (2, Some(1_000), Some(3_000))
         );
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
-        assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 1);
-        assert_eq!(record.u64(cs::FOUR_MISSED).unwrap(), 5);
-        assert!(c.summary().contains("derived=1 no_derivation=1 mismatch=1"));
+        assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 2);
+        assert_eq!(record.u64(cs::FOUR_MISSED).unwrap(), 6);
+        assert!(c.summary().contains("derived=2 no_derivation=1 mismatch=1"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

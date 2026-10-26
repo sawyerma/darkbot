@@ -131,6 +131,9 @@ pub struct LaunchRef {
     /// The launch transaction is a direct call of the C1 scope (Portal
     /// `newTokenV6`): what the pending path can act on.
     pub c1_scope: bool,
+    /// The launch transaction is addressed to a venue contract (what the
+    /// VENUES pending scope journals).
+    pub venue_target: bool,
     /// Four.meme: the pending decoder's token against the canonical one.
     pub four_token: FourToken,
     /// What the launch transaction is (verified, or why not).
@@ -375,6 +378,7 @@ mod tests {
             token: None,
             external_buys: buys,
             c1_scope: tx % 2 == 1,
+            venue_target: true,
             four_token: match (venue, tx % 2 == 1) {
                 (Venue::Flap, _) => FourToken::NotApplicable,
                 (_, true) => FourToken::Matched,

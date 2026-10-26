@@ -159,7 +159,8 @@ pub fn prove(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(format!("{}: {e}", run.join(RUN_MANIFEST).display())),
     };
-    let mut venues_or_all = false;
+    // The pending capture scope the run journaled under.
+    let mut scope: Option<&'static str> = None;
     match manifest.as_deref().map(cr::decode_run) {
         Some(Ok(m)) => {
             p.manifest_sha256 = m.file_sha256();
@@ -169,10 +170,11 @@ pub fn prove(
                 .zip(config_sha256)
                 .map(|(a, b)| a == b);
             p.build_match = field(cr::BUILD_SHA256).zip(own_build).map(|(a, b)| a == b);
-            venues_or_all = matches!(
-                m.opt_text(cr::CAPTURE_PENDING).ok().flatten(),
-                Some("VENUES" | "ALL")
-            );
+            scope = match m.opt_text(cr::CAPTURE_PENDING).ok().flatten() {
+                Some("VENUES") => Some("VENUES"),
+                Some("ALL") => Some("ALL"),
+                _ => None,
+            };
         }
         Some(Err(e)) => p.reasons.push(format!("run manifest does not decode: {e}")),
         None => p
@@ -182,7 +184,7 @@ pub fn prove(
     let four = bsc_mainnet_g01_129842711();
     // Hashes of every journaled first sighting, and the joined launches.
     let mut sighted: HashSet<[u8; 32]> = HashSet::new();
-    let mut joined: Vec<([u8; 32], u8, bool)> = Vec::new();
+    let mut joined: Vec<([u8; 32], u8, bool, Option<bool>)> = Vec::new();
     match RunReader::open(&run, max_payload) {
         Ok(mut reader) => {
             loop {
@@ -222,7 +224,7 @@ pub fn prove(
                             },
                             RecordKind::Canonical if r.payload.first() == Some(&b'C') => {
                                 if let Some(l) = launch_record(&r.payload, r.timestamp_ns) {
-                                    joined.push((l.tx_hash, l.class, l.c1_scope));
+                                    joined.push((l.tx_hash, l.class, l.c1_scope, l.venue_target));
                                 }
                             }
                             _ => {}
@@ -243,10 +245,22 @@ pub fn prove(
         }
         Err(e) => p.read_error = Some(e.to_string()),
     }
-    // Class 1: the first full sighting came before the block time.
+    // Class 1: the first full sighting came before the block time. The
+    // scope decides which of those the journal must hold: the C1 scope
+    // always; under VENUES every launch addressed to a venue contract (a
+    // launch through another contract is no venue flow; an older record
+    // without the flag is required); under ALL every one (Phase F gate N2).
     p.sightings_missing = joined
         .iter()
-        .filter(|(tx, class, c1)| *class == 1 && (venues_or_all || *c1) && !sighted.contains(tx))
+        .filter(|(tx, class, c1, venue_target)| {
+            let required = *c1
+                || match scope {
+                    Some("ALL") => true,
+                    Some("VENUES") => *venue_target != Some(false),
+                    _ => false,
+                };
+            *class == 1 && required && !sighted.contains(tx)
+        })
         .count() as u64;
     let alone = census_of_run(journal_dir, run_id, max_payload)?;
     let all = census(journal_dir, max_payload, None)?;
@@ -790,6 +804,7 @@ mod tests {
                 token: Some([4; 20]),
                 external_buys: Some(0),
                 c1_scope: true,
+                venue_target: true,
                 four_token: FourToken::NotApplicable,
                 tx: LaunchTx::Verified,
                 block_ms: 1_000,
@@ -825,6 +840,66 @@ mod tests {
         }
         let p = prove(&c, "7", Some(&status(7, 0)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
         fail(&p, "have no journaled sighting");
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Phase F gate N2: under VENUES a Four launch seen in full before its
+    /// block needs its journaled sighting only when it was addressed to a
+    /// venue contract; one made through another contract is no venue flow.
+    #[test]
+    fn venues_requires_only_venue_addressed_launches() {
+        use crate::canonical_join::{FourToken, Joined, LaunchRef, LaunchTx, Visibility};
+        let base = std::env::temp_dir().join(format!("bsc-replay-proof-n2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let run = |dir: &Path, venue_target: bool| {
+            let launch = LaunchRef {
+                venue: Venue::Four,
+                block_number: 10,
+                block_hash: [10; 32],
+                tx_index: 0,
+                tx_hash: [0x66; 32],
+                token: Some([4; 20]),
+                external_buys: None,
+                c1_scope: false,
+                venue_target,
+                four_token: FourToken::NotRecognized,
+                tx: LaunchTx::Verified,
+                block_ms: 1_000,
+                block_seen_ns: 3,
+                block_seen_unix_ms: Some(1_100),
+            };
+            let mut j = RuntimeJournal::open(dir, 7, 1, JournalSetup::whole(64, MAX + 64)).unwrap();
+            j.set_identity(identity());
+            j.record(
+                RecordKind::Canonical,
+                1,
+                window_payload(b'H', 10, &[10; 32]),
+            );
+            j.record(
+                RecordKind::Canonical,
+                3,
+                crate::runtime_journal::canonical_launch_payload(&Joined {
+                    launch,
+                    visibility: Visibility::FullBefore {
+                        source: SourceId::Drpc,
+                        lead_us: 9,
+                    },
+                }),
+            );
+            j.record(
+                RecordKind::Canonical,
+                4,
+                window_payload(b'E', 11, &[11; 32]),
+            );
+            j.record(RecordKind::Runtime, 5, EXIT_PAYLOAD.to_vec());
+            j.finish().unwrap();
+            prove(dir, "7", None, MAX + 64, MAX, CONFIG, BUILD).unwrap()
+        };
+        let routed = run(&base.join("routed"), false);
+        assert_eq!(routed.sightings_missing, 0, "{}", routed.summary());
+        let direct = run(&base.join("direct"), true);
+        assert_eq!(direct.sightings_missing, 1);
+        assert_eq!(direct.verdict, "FAIL");
         fs::remove_dir_all(&base).unwrap();
     }
 

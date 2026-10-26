@@ -309,6 +309,11 @@ pub struct CanonicalLaunch {
     /// of its verified signed bytes: a direct Portal `newTokenV6` call);
     /// false when unverifiable (the pending path rejects it the same way).
     pub c1_scope: bool,
+    /// The launch transaction is addressed to a venue contract
+    /// (`ingress::venue_target` of its verified signed bytes: what the
+    /// VENUES pending scope journals); false for a launch through another
+    /// contract or an unverifiable one.
+    pub venue_target: bool,
     /// Four.meme: the pending decoder's token against the canonical one.
     pub four_token: FourToken,
     /// Why the node's transaction object could not be rebuilt and verified

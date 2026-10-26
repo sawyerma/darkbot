@@ -83,8 +83,13 @@ fn rate_of(bytes: u64, span_ns: u64) -> u64 {
 }
 
 /// The rates of the newest run of `journal_dir` sealed by a `COMPLETE`
-/// manifest whose records span time; `None` when there is none.
-pub fn rates(journal_dir: &Path, max_payload: usize) -> Result<Option<Rates>, String> {
+/// manifest whose records span at least `min_span_s`; `None` when there is
+/// none (a smoke run is no basis for a planned capture).
+pub fn rates(
+    journal_dir: &Path,
+    max_payload: usize,
+    min_span_s: u64,
+) -> Result<Option<Rates>, String> {
     let mut runs: Vec<u64> = Vec::new();
     for entry in fs::read_dir(journal_dir).map_err(|e| format!("{}: {e}", journal_dir.display()))? {
         let entry = entry.map_err(|e| format!("{}: {e}", journal_dir.display()))?;
@@ -129,6 +134,9 @@ pub fn rates(journal_dir: &Path, max_payload: usize) -> Result<Option<Rates>, St
         let (Some(first), Some(last)) = (first, last) else {
             continue;
         };
+        if last - first < min_span_s.saturating_mul(1_000_000_000) {
+            continue;
+        }
         if journal == 0 || records == 0 {
             continue;
         }
@@ -262,12 +270,14 @@ pub fn free_disk(path: &Path) -> Result<u64, String> {
 }
 
 /// The bounds of one preflight (`BSC_RUNTIME_CAPTURE_DURATION_S`,
-/// `BSC_RUNTIME_PREFLIGHT_PROBE_BYTES`, `BSC_RUNTIME_DISK_RESERVE_BYTES`,
-/// `BSC_RUNTIME_JOURNAL_BUDGET_BYTES`).
+/// `BSC_RUNTIME_PREFLIGHT_PROBE_BYTES`, `BSC_RUNTIME_PREFLIGHT_MIN_RATES_S`,
+/// `BSC_RUNTIME_DISK_RESERVE_BYTES`, `BSC_RUNTIME_JOURNAL_BUDGET_BYTES`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PreflightSetup {
     pub duration_s: u64,
     pub probe_bytes: u64,
+    /// The shortest record span of a run that measures the rates.
+    pub min_rates_s: u64,
     pub disk_reserve_bytes: u64,
     pub memory_budget_bytes: u64,
     /// The recorder's queue in records, the journal's payload bound and its
@@ -291,7 +301,7 @@ pub struct Report {
 /// Measures and checks the planned capture into `journal_dir`.
 pub fn check(journal_dir: &Path, setup: PreflightSetup) -> Result<Report, String> {
     fs::create_dir_all(journal_dir).map_err(|e| format!("{}: {e}", journal_dir.display()))?;
-    let rates = rates(journal_dir, setup.max_payload)?;
+    let rates = rates(journal_dir, setup.max_payload, setup.min_rates_s)?;
     // Without a sealed run nothing is measured; the probe would have no
     // record size either.
     // The probe writes next to the journal directory, never inside it (the
@@ -452,6 +462,7 @@ mod tests {
         PreflightSetup {
             duration_s,
             probe_bytes: 1 << 20,
+            min_rates_s: 1,
             disk_reserve_bytes: reserve,
             memory_budget_bytes: 64 << 20,
             queue_records: 256,
@@ -499,7 +510,9 @@ mod tests {
         write(&dir, 5);
         // A newer run without a manifest is not a measurement.
         fs::create_dir_all(dir.join("9")).unwrap();
-        let rates = rates(&dir, 4096).unwrap().unwrap();
+        // A run shorter than the minimum span measures nothing.
+        assert_eq!(rates(&dir, 4096, 2).unwrap(), None);
+        let rates = rates(&dir, 4096, 1).unwrap().unwrap();
         assert_eq!(rates.run_id, "5");
         // 101 frames of 64 payload bytes and the 1-byte end record, each
         // with its frame header, in 1 s.

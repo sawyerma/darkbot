@@ -89,6 +89,8 @@ pub struct RuntimeConfig {
     /// the writer probe's bytes and the disk reserve.
     pub capture_duration_s: u64,
     pub preflight_probe_bytes: u64,
+    /// The shortest sealed run whose rates the preflight measures.
+    pub preflight_min_rates_s: u64,
     pub disk_reserve_bytes: u64,
     pub status_ms: u64,
     /// Every bound of the WSS adapters, validated by `WssLimits::validate`.
@@ -327,6 +329,7 @@ impl RuntimeConfig {
             capture_pending,
             capture_duration_s: take("BSC_RUNTIME_CAPTURE_DURATION_S", 60, 604_800)?,
             preflight_probe_bytes: take("BSC_RUNTIME_PREFLIGHT_PROBE_BYTES", 1 << 20, 1 << 32)?,
+            preflight_min_rates_s: take("BSC_RUNTIME_PREFLIGHT_MIN_RATES_S", 1, 604_800)?,
             disk_reserve_bytes: take("BSC_RUNTIME_DISK_RESERVE_BYTES", 0, 1 << 40)?,
             status_ms: take("BSC_RUNTIME_STATUS_MS", 100, 60_000)?,
             wss,
@@ -649,6 +652,7 @@ impl Canonical {
                     token: l.token,
                     external_buys: l.external_buys_after,
                     c1_scope: l.c1_scope,
+                    venue_target: l.venue_target,
                     four_token: l.four_token,
                     tx: match l.unverifiable {
                         None => LaunchTx::Verified,
@@ -915,6 +919,7 @@ pub fn preflight_setup(config: &RuntimeConfig) -> crate::capture_preflight::Pref
     crate::capture_preflight::PreflightSetup {
         duration_s: config.capture_duration_s,
         probe_bytes: config.preflight_probe_bytes,
+        min_rates_s: config.preflight_min_rates_s,
         disk_reserve_bytes: config.disk_reserve_bytes,
         memory_budget_bytes: config.journal_budget_bytes as u64,
         queue_records: config.journal_queue as u64,
@@ -1726,6 +1731,7 @@ mod tests {
                 sender: Some([tx; 20]),
                 nonce: Some(u64::from(tx)),
                 c1_scope,
+                venue_target: c1_scope,
                 four_token: crate::chain_follower::FourToken::NotApplicable,
                 unverifiable: None,
             })
