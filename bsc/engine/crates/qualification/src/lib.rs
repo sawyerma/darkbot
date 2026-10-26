@@ -27,6 +27,7 @@ pub mod c1_common;
 pub mod c1_freeze;
 pub mod c1_hook_path;
 pub mod c1_latency;
+pub mod economics_snapshot;
 pub mod evidence;
 pub mod identity;
 pub mod json;

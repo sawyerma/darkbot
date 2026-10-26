@@ -11,6 +11,7 @@ use crate::{Record, RecordError, Schema, decode, header};
 pub mod bsc_c3_latency;
 pub mod bsc_capture;
 pub mod bsc_census;
+pub mod bsc_economics;
 pub mod bsc_flap_econ;
 pub mod bsc_flap_freeze;
 pub mod bsc_four_freeze;
@@ -39,6 +40,7 @@ pub fn all() -> Vec<&'static Schema> {
         .chain(bsc_c3_latency::ALL)
         .chain(bsc_capture::ALL)
         .chain(bsc_census::ALL)
+        .chain(bsc_economics::ALL)
         .chain(bsc_flap_econ::ALL)
         .chain(bsc_flap_freeze::ALL)
         .chain(bsc_four_freeze::ALL)

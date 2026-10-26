@@ -509,6 +509,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         "bsc/native/evidence/g07",
         "bsc/native/evidence/g08",
         "bsc/native/evidence/c1",
+        "bsc/native/evidence/g",
         "bsc/data/g06a_final_dry",
     ] {
         walk(&root.join(dir), 5, &mut paths);
@@ -914,7 +915,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
         }
     }
     {
-        use schema::{c1_qualification as c1, g06a, g07, g08};
+        use schema::{bsc_economics as econ, c1_qualification as c1, g06a, g07, g08};
         launch.records = latest_records(
             root,
             &records,
@@ -931,6 +932,8 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 &[&g06a::portal_upgrade::SCHEMA],
                 &[&g06a::requalification::SCHEMA],
                 &[&g06a::prepare_handoff::SCHEMA],
+                // Phase G: the frozen economics snapshot.
+                &[&econ::economics_snapshot::SCHEMA],
                 // Typed in ReadinessStatus; the record carries the remaining leaves.
                 &[&g07::readiness::SCHEMA],
             ],
@@ -958,6 +961,8 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
                 &[&c1::host_profile::SCHEMA],
                 &[&c1::c19_rust_summary::SCHEMA],
                 &[&c1::hook_path::SCHEMA],
+                // Phase G: the local quote latency.
+                &[&econ::quote_latency::SCHEMA],
             ],
         );
     }

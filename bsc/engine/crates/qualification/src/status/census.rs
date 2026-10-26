@@ -146,9 +146,10 @@ pub fn public(sensitivity: &str) -> bool {
 /// native verdict on what may ever leave the reporter; which public fields reach the browser,
 /// and where, is decided per field in `frontend/contracts/bsc-fields.json`.
 pub fn inventory(root: &Path) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
-    let files: [(&str, &[&Schema]); 8] = [
+    let files: [(&str, &[&Schema]); 9] = [
         ("bsc_runtime", schema::bsc_runtime::ALL),
         ("bsc_capture", schema::bsc_capture::ALL),
+        ("bsc_economics", schema::bsc_economics::ALL),
         ("bsc_census", schema::bsc_census::ALL),
         ("c1_qualification", schema::c1_qualification::ALL),
         ("g06a", schema::g06a::ALL),

@@ -10,3 +10,4 @@ pub mod flap;
 pub mod network;
 pub mod policy;
 pub mod slippage;
+pub mod snapshot;
