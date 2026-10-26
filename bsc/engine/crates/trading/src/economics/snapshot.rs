@@ -77,6 +77,13 @@ pub const SCOPES: &[Scope] = &[
     Scope {
         venue: "FLAP",
         surface: FLAP_V6,
+        path: "ROUND TRIP",
+        support: Support::Priced,
+        rule: "flap::position: entry = BUY input + BUY network fee for the quoted tokens; exit = SELL of exactly those tokens, its quoted native amount less the approval (unless given) and SELL network fees; the network fees the classes' adverse counterfactual bound at the given gas price",
+    },
+    Scope {
+        venue: "FLAP",
+        surface: FLAP_V6,
         path: "APPROVE BEFORE SELL",
         support: Support::Costed,
         rule: "network: the approval receipt class of fixtures/bsc/receipts_20261026.txt",
@@ -185,6 +192,7 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/economics/flap/curve.rs",
     "bsc/engine/crates/trading/src/economics/flap/mod.rs",
     "bsc/engine/crates/trading/src/economics/flap/native_curve20.rs",
+    "bsc/engine/crates/trading/src/economics/flap/position.rs",
     "bsc/engine/crates/trading/src/economics/network.rs",
     "bsc/engine/crates/trading/src/economics/policy.rs",
     "bsc/engine/crates/trading/src/economics/slippage.rs",
@@ -240,7 +248,12 @@ mod tests {
             .collect();
         assert_eq!(
             priced,
-            [("FLAP", "BUY"), ("FLAP", "SELL"), ("FLAP", "ADMITTED BUY")]
+            [
+                ("FLAP", "BUY"),
+                ("FLAP", "SELL"),
+                ("FLAP", "ADMITTED BUY"),
+                ("FLAP", "ROUND TRIP")
+            ]
         );
         for venue in ["FOUR", "OPENFOUR"] {
             assert!(

@@ -600,6 +600,78 @@ mod parity_tests {
         );
     }
 
+    const EXECUTED: &str = include_str!("../../../fixtures/flap/executed_parity_g02.txt");
+
+    /// Phase G (Economics gate §6 level 3, §14): executed curve trades, each
+    /// the first Portal trade of its token in its block, against the local
+    /// quote at the parent block's state: a BUY of the event's native amount
+    /// gives the event's tokens and protocol fee, a SELL of the event's
+    /// tokens the event's native amount and protocol fee, to the unit.
+    #[test]
+    fn executed_trades_equal_the_local_quote_at_their_pre_state() {
+        let (mut buys, mut sells, mut outside) = (0, 0, 0);
+        for line in EXECUTED
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(f.len(), 19, "{line}");
+            if f[17] != "SUPPORTED" {
+                assert_eq!(f[18], "NOT_COMPARED", "{line}");
+                outside += 1;
+                continue;
+            }
+            assert_eq!(f[18], "MATCH", "{line}");
+            let n = |i: usize| U256::from_str_radix(f[i], 10).unwrap();
+            let (reserve, supply) = (n(5), n(6));
+            let (buy_tax, sell_tax): (u16, u16) = (f[7].parse().unwrap(), f[8].parse().unwrap());
+            let (amount, eth, fee) = (n(9), n(10), n(11));
+            match f[4] {
+                "BUY" => {
+                    let cap_bps: u16 = f[12].parse().unwrap();
+                    let q = quote_native_buy(&NativeBuyInputs {
+                        curve_id: CURVE_ID_RH_BNB,
+                        reserve_before: reserve,
+                        circulating_before: supply,
+                        input_amount: eth,
+                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                        buy_tax_bps: buy_tax,
+                        tax_on_bonding_curve_enabled: true,
+                        caller_fee_exempt: false,
+                        holding_cap: if cap_bps == 0 {
+                            HoldingCap::None
+                        } else {
+                            HoldingCap::Remaining(n(13))
+                        },
+                        dex_supply_threshold: n(16),
+                    })
+                    .unwrap();
+                    assert_eq!((q.output_amount, q.protocol_fee), (amount, fee), "{line}");
+                    buys += 1;
+                }
+                "SELL" => {
+                    let q = quote_native_sell(&NativeSellInputs {
+                        curve_id: CURVE_ID_RH_BNB,
+                        reserve_before: reserve,
+                        circulating_before: supply,
+                        input_amount: amount,
+                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                        sell_tax_bps: sell_tax,
+                        tax_on_bonding_curve_enabled: true,
+                        caller_fee_exempt: false,
+                    })
+                    .unwrap();
+                    assert_eq!((q.output_amount, q.protocol_fee), (eth, fee), "{line}");
+                    sells += 1;
+                }
+                other => panic!("side {other}"),
+            }
+        }
+        // Four state windows (fixture header): 52 BUYs and 16 SELLs equal to
+        // the unit; one version-7 BUY recorded outside the supported scope.
+        assert_eq!((buys, sells, outside), (52, 16, 1));
+    }
+
     /// The SELL fees are floored each on its own; the BUY's tax is the
     /// remainder of the combined floor: on one amount they can differ by one.
     #[test]

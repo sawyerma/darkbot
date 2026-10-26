@@ -23,6 +23,7 @@
 pub mod curve;
 pub mod doge_v3;
 pub mod native_curve20;
+pub mod position;
 
 use alloy_primitives::{Address, U256};
 
