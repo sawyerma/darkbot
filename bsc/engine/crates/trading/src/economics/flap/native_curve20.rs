@@ -491,6 +491,97 @@ mod parity_tests {
         assert_eq!((buys, sells, capped), (39, 35, 1));
     }
 
+    const PARITY_V2: &str = include_str!("../../../fixtures/flap/quote_parity_g02_v2.txt");
+
+    /// The v2 parity set (24 tokens, each at its own pin, with the holding
+    /// cap, the NFT gate and the launch facts): every supported sample is
+    /// the Portal's quote to the unit, the BUY quoted under the origin's
+    /// allowance; the NFT-gated token's curve agrees too and its capped BUY
+    /// is refused exactly where the Portal answers the allowance. No
+    /// scanned launch set a cap or an NFT gate in its receipt, the direct
+    /// `newTokenV6` launches of the profile among them
+    /// (`FRESH_LAUNCH_HOLDING_CAP`).
+    #[test]
+    fn v2_parity_holds_under_the_holding_cap_and_launches_set_none() {
+        let (mut supported, mut gated, mut refused, mut profile_launches) = (0, 0, 0, 0);
+        for line in PARITY_V2
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            assert_eq!(f.len(), 18, "{line}");
+            let n = |i: usize| U256::from_str_radix(f[i], 10).unwrap();
+            let (reserve, supply, amount, chain) = (n(3), n(4), n(8), n(9));
+            let (buy_tax, sell_tax): (u16, u16) = (f[5].parse().unwrap(), f[6].parse().unwrap());
+            let cap_bps: u16 = f[10].parse().unwrap();
+            let holding_cap = if cap_bps == 0 {
+                HoldingCap::None
+            } else {
+                HoldingCap::Remaining(n(11))
+            };
+            assert_eq!(f[16], "6", "{line}");
+            match (f[13], f[14], f[15]) {
+                (_, "UNKNOWN", "UNKNOWN") => assert_eq!(f[13], "unscanned"),
+                (launch, "NONE", "NONE") => {
+                    profile_launches += usize::from(launch == "portal:8cb5772c");
+                }
+                other => panic!("a launch set a cap or gate {other:?}: {line}"),
+            }
+            let local = match f[7] {
+                "BUY" => quote_native_buy(&NativeBuyInputs {
+                    curve_id: CURVE_ID_RH_BNB,
+                    reserve_before: reserve,
+                    circulating_before: supply,
+                    input_amount: amount,
+                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                    buy_tax_bps: buy_tax,
+                    tax_on_bonding_curve_enabled: true,
+                    caller_fee_exempt: false,
+                    holding_cap,
+                })
+                .map(|q| q.output_amount),
+                "SELL" => quote_native_sell(&NativeSellInputs {
+                    curve_id: CURVE_ID_RH_BNB,
+                    reserve_before: reserve,
+                    circulating_before: supply,
+                    input_amount: amount,
+                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                    sell_tax_bps: sell_tax,
+                    tax_on_bonding_curve_enabled: true,
+                    caller_fee_exempt: false,
+                })
+                .map(|q| q.output_amount),
+                other => panic!("side {other}"),
+            };
+            match local {
+                Ok(out) => assert_eq!(out, chain, "{line}"),
+                Err(QuoteError::HoldingCapExceeded) => {
+                    assert_eq!(HoldingCap::Remaining(chain), holding_cap, "{line}");
+                    refused += 1;
+                }
+                Err(e) => panic!("{e}: {line}"),
+            }
+            match f[17] {
+                "SUPPORTED" => {
+                    assert_eq!(
+                        (f[12], cap_bps),
+                        ("0000000000000000000000000000000000000000", 0)
+                    );
+                    supported += 1;
+                }
+                "UNSUPPORTED_NFT_GATE" => {
+                    assert_ne!(f[12], "0000000000000000000000000000000000000000");
+                    gated += 1;
+                }
+                other => panic!("scope {other}"),
+            }
+        }
+        assert_eq!(
+            (supported, gated, refused, profile_launches),
+            (215, 5, 1, 10)
+        );
+    }
+
     /// The SELL fees are floored each on its own; the BUY's tax is the
     /// remainder of the combined floor: on one amount they can differ by one.
     #[test]
