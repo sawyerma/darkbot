@@ -95,11 +95,16 @@ pub(super) fn request(id: u64, call: Call) -> String {
         Call::Receipts(n) => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockReceipts","params":["0x{n:x}"]}}"#
         ),
+        Call::TransactionCount { sender, block_hash } => format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getTransactionCount","params":["0x{}",{{"blockHash":"0x{}"}}]}}"#,
+            alloy_primitives::hex::encode(sender),
+            alloy_primitives::hex::encode(block_hash)
+        ),
     }
 }
 
-/// The answer to `eth_blockNumber`.
-pub(super) fn parse_block_number(body: &[u8], id: u64) -> Result<u64, RequestError> {
+/// The answer to `eth_blockNumber` or `eth_getTransactionCount`: one quantity.
+pub(super) fn parse_quantity(body: &[u8], id: u64) -> Result<u64, RequestError> {
     match envelope(body, id)? {
         Value::String(s) => quantity_u64(&s).ok_or(RequestError::Shape(Field::Result)),
         _ => Err(RequestError::Shape(Field::Result)),

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::http::{Bounds, Response, round_trip};
 use super::jsonrpc::{
-    BlockHead, data_fixed, parse_block, parse_block_number, parse_receipts, quantity_u64, request,
+    BlockHead, data_fixed, parse_block, parse_quantity, parse_receipts, quantity_u64, request,
 };
 use super::*;
 
@@ -226,7 +226,7 @@ fn quantities_and_data_are_canonical_lowercase() {
 #[test]
 fn envelope_id_and_errors() {
     assert_eq!(
-        parse_block_number(br#"{"jsonrpc":"2.0","id":3,"result":"0x10"}"#, 3),
+        parse_quantity(br#"{"jsonrpc":"2.0","id":3,"result":"0x10"}"#, 3),
         Ok(16)
     );
     let cases: [(&[u8], RequestError); 8] = [
@@ -259,7 +259,7 @@ fn envelope_id_and_errors() {
     ];
     for (body, expected) in cases {
         assert_eq!(
-            parse_block_number(body, 3),
+            parse_quantity(body, 3),
             Err(expected),
             "{}",
             String::from_utf8_lossy(body)
@@ -517,13 +517,27 @@ fn limits_and_endpoint_are_refused_before_any_connect() {
     ];
     for (url, expected) in refused {
         assert_eq!(
-            run_follower(url, &limits(), None, &stop, &mut sink),
+            run_follower(
+                url,
+                &limits(),
+                &[],
+                &NonceWatch::default(),
+                &stop,
+                &mut sink
+            ),
             Err(expected),
             "{url}"
         );
     }
     assert_eq!(
-        run_follower("https://node.example", &zero_poll, None, &stop, &mut sink),
+        run_follower(
+            "https://node.example",
+            &zero_poll,
+            &[],
+            &NonceWatch::default(),
+            &stop,
+            &mut sink
+        ),
         Err(FollowerConfigError::Limits(LimitsError::ZeroDuration(
             "poll"
         )))

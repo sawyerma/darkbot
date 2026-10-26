@@ -125,8 +125,15 @@ try{
  await requestSource('BSC_STATE_C2','SHADOW','source=BSC_STATE_C2 requested=SHADOW effective=SHADOW','bsc-component-receipt');
  // The CAS of the next request is the pushed generation 4 (the hint text names SHADOW too).
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('4')&&(await compLine().innerText()).includes('requested SHADOW'),'C2 component SHADOW pushed (generation 4)');
+ // The runtime starts the C2 owner on the pushed generation: real canonical blocks anchor it
+ // (no own account in READ_ONLY, so an anchored head is coherent).
+ const stateLine=()=>p.locator('.g-line',{hasText:'C2 chain state'}).first();
+ await until(async()=> {const t=await stateLine().innerText();return t.includes('COHERENT')&&!t.includes('NOT_COHERENT')&&/head \d+/.test(t)&&/retained blocks [1-9]/.test(t);},'C2 owner SHADOW: coherent on real canonical blocks');
+ await until(async()=> /blocks [1-9]/.test(await p.locator('.g-line',{hasText:'C2 canonical and pending effects'}).first().innerText()),'C2 effects counted');
  await requestSource('BSC_STATE_C2','LIVE','effective=BLOCKED block_reason=C2_OPERATIONAL_NOT_AUTHORIZED','bsc-component-receipt');
  await until(async()=> {const t=await compLine().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('C2_OPERATIONAL_NOT_AUTHORIZED');},'C2 LIVE stays BLOCKED');
+ // BLOCKED is not SHADOW: the owner stops (its window checkpointed for the next start).
+ await until(async()=> (await stateLine().innerText()).includes('NOT_RUNNING'),'C2 owner stopped on LIVE→BLOCKED');
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
  // The G0.4 census, replayed by the runtime from its journals: Analytics §2, no verdict.
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
@@ -193,5 +200,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

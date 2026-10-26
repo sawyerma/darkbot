@@ -11,7 +11,7 @@ use super::http::Client;
 use super::jsonrpc::{self, BlockHead, FullBlock, Receipt};
 use super::launches;
 use super::{
-    Call, CanonicalEvent, CanonicalTx, FollowerFault, FollowerLimits, RequestError,
+    Call, CanonicalEvent, CanonicalTx, FollowerFault, FollowerLimits, NonceWatch, RequestError,
     is_unrebuildable, stopped,
 };
 use crate::wss::DisconnectReason;
@@ -44,8 +44,18 @@ where
     fn block_number(&mut self, stop: &AtomicBool) -> Result<u64, FollowerFault> {
         let call = Call::BlockNumber;
         let (answer, id) = self.post(call, stop)?;
-        jsonrpc::parse_block_number(&answer, id)
-            .map_err(|error| FollowerFault::Request { call, error })
+        jsonrpc::parse_quantity(&answer, id).map_err(|error| FollowerFault::Request { call, error })
+    }
+
+    fn transaction_count(
+        &mut self,
+        sender: [u8; 20],
+        block_hash: [u8; 32],
+        stop: &AtomicBool,
+    ) -> Result<u64, FollowerFault> {
+        let call = Call::TransactionCount { sender, block_hash };
+        let (answer, id) = self.post(call, stop)?;
+        jsonrpc::parse_quantity(&answer, id).map_err(|error| FollowerFault::Request { call, error })
     }
 
     fn block(&mut self, number: u64, stop: &AtomicBool) -> Result<FullBlock, FollowerFault> {
@@ -91,14 +101,15 @@ impl FirstHeld {
 pub(super) fn run<S, C>(
     rpc: &mut Rpc<S, C>,
     limits: &FollowerLimits,
-    resume_after: Option<(u64, [u8; 32])>,
+    resume: &[(u64, [u8; 32])],
+    watch: &NonceWatch,
     stop: &AtomicBool,
     sink: &mut dyn FnMut(CanonicalEvent),
 ) where
     S: Read + Write,
     C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
 {
-    let mut follower = Follower::new(limits, resume_after);
+    let mut follower = Follower::new(limits, resume, watch);
     let mut next_wait = limits.backoff_initial;
     while !stopped(stop) {
         let wait = match follower.step(rpc, stop, sink) {
@@ -166,20 +177,44 @@ pub(super) struct Follower {
     /// Refused answers per launch transaction of the block being accepted;
     /// cleared when a block is accepted (bounded by one block's launches).
     refusals: Vec<([u8; 32], u32)>,
+    watch: NonceWatch,
+    /// The next followed block carries nonce facts regardless of its number.
+    facts_due: bool,
 }
 
 impl Follower {
-    /// `resume_after`: the block the caller applied last, kept as the
-    /// window until its successor proves it canonical (or orphans it).
-    pub(super) fn new(limits: &FollowerLimits, resume_after: Option<(u64, [u8; 32])>) -> Self {
+    /// `resume`: the blocks the caller applied last (ascending, consecutive
+    /// heights), kept as the window until the next block proves them
+    /// canonical or orphans some of them. Only the last `reorg_depth + 1`
+    /// are kept; a list with a height step other than one keeps only its
+    /// last block.
+    pub(super) fn new(
+        limits: &FollowerLimits,
+        resume: &[(u64, [u8; 32])],
+        watch: &NonceWatch,
+    ) -> Self {
+        let consecutive = resume
+            .windows(2)
+            .all(|w| w[0].0.checked_add(1) == Some(w[1].0));
+        let keep = if consecutive {
+            usize::try_from(limits.reorg_depth.saturating_add(1)).unwrap_or(usize::MAX)
+        } else {
+            1
+        };
+        let kept: VecDeque<_> = resume[resume.len().saturating_sub(keep)..]
+            .iter()
+            .copied()
+            .collect();
         Self {
             reorg_depth: limits.reorg_depth,
             max_catch_up: limits.max_catch_up,
-            kept: resume_after.into_iter().collect(),
-            next: resume_after.map(|(number, _)| number.saturating_add(1)),
+            next: kept.back().map(|(number, _)| number.saturating_add(1)),
+            kept,
             seen: VecDeque::new(),
             tx_attempts: limits.tx_attempts,
             refusals: Vec::new(),
+            watch: watch.clone(),
+            facts_due: true,
         }
     }
 
@@ -238,6 +273,7 @@ impl Follower {
                     to: head - 1,
                 });
                 self.next = Some(head);
+                self.facts_due = true;
             }
         }
         let (block, observed) = self.fetch_block(rpc, head, stop)?;
@@ -314,10 +350,12 @@ impl Follower {
                     self.kept.pop_back();
                 }
                 orphaned.reverse();
+                self.facts_due = true;
                 sink(CanonicalEvent::Reorg { orphaned, new_head });
             }
             None => {
                 let orphaned = self.kept.drain(..).collect();
+                self.facts_due = true;
                 sink(CanonicalEvent::ReorgTooDeep { orphaned, new_head });
                 chain.truncate(1);
             }
@@ -417,6 +455,39 @@ impl Follower {
         self.next = Some(header.number.saturating_add(1));
         self.seen.retain(|(number, _, _)| *number > header.number);
         self.refusals.clear();
+        self.nonce_facts(rpc, header.number, header.hash, stop, sink)
+    }
+
+    /// The watched senders' next nonces at the block just reported, when
+    /// due. A failed read is a fault; the next block carries the facts.
+    fn nonce_facts<S, C>(
+        &mut self,
+        rpc: &mut Rpc<S, C>,
+        number: u64,
+        hash: [u8; 32],
+        stop: &AtomicBool,
+        sink: &mut dyn FnMut(CanonicalEvent),
+    ) -> Result<(), FollowerFault>
+    where
+        S: Read + Write,
+        C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+    {
+        let every = self.watch.every_blocks.max(1);
+        if self.watch.senders.is_empty() || !(self.facts_due || number.is_multiple_of(every)) {
+            return Ok(());
+        }
+        self.facts_due = true;
+        for i in 0..self.watch.senders.len() {
+            let sender = self.watch.senders[i];
+            let next_nonce = rpc.transaction_count(sender, hash, stop)?;
+            sink(CanonicalEvent::NonceFact {
+                sender,
+                next_nonce,
+                block_number: number,
+                block_hash: hash,
+            });
+        }
+        self.facts_due = false;
         Ok(())
     }
 

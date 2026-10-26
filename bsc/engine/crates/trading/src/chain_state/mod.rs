@@ -1,12 +1,13 @@
-//! Chain-state identities shared by quotes, preparations and intents.
-//!
-//! The state engine itself — canonical, pending and reorg ownership — is
-//! phase C2 and does not live here yet. This module only fixes the identity
-//! that every state-dependent value carries, so that a quote, a prepared BUY
-//! and the state it was computed from can be checked for compatibility
-//! (master plan §5).
+//! Chain state: the single C2 canonical/pending/reorg owner
+//! ([`engine::ChainState`]), its typed inputs ([`input`]), the proofs it
+//! alone constructs ([`canonical`]) and the identity that every
+//! state-dependent value carries, so that a quote, a prepared BUY and the
+//! state it was computed from can be checked for compatibility (master plan
+//! §5, §12).
 
 pub mod canonical;
+pub mod engine;
+pub mod input;
 
 use alloy_primitives::B256;
 

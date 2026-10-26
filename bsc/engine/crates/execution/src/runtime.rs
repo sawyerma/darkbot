@@ -15,10 +15,17 @@
 //! waiting, commits the journal and writes a final status and census.
 //! A source without a configured endpoint, or without an adapter in this
 //! build (the local geth Fast Lane needs a synced node), is `UNQUALIFIED`.
+//!
+//! With the component `BSC_STATE_C2` effective `SHADOW` (and a canonical
+//! endpoint) the C2 chain-state owner ([`state`]) applies the canonical
+//! inputs and the pending sightings of launch candidates and watched
+//! senders. G0.4 counts only blocks mined after this process started; the
+//! blocks a C2 resume backfills are counted apart.
 
 use crate::canonical_join::{LaunchRef, LaunchTx, Ledger};
 use crate::chain_follower::{
-    CanonicalEvent, FollowerFault, FollowerLimits, RequestError, is_unrebuildable, run_follower,
+    CanonicalEvent, FollowerFault, FollowerLimits, NonceWatch, RequestError, is_unrebuildable,
+    run_follower,
 };
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
@@ -27,12 +34,13 @@ use crate::runtime_journal::{
     later_sighting_payload, orphaned_launch_payload, pending_launch_payload, reorg_payload,
     resync_payload, source_event_payload, window_payload,
 };
-use crate::sources::{Effective, Generation, SourceId, Store};
+use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
 use crate::wss::{DisconnectReason, WssEvent, WssLimits, WssSource, run_source};
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{Draft, observed_now};
+use darkbot_bsc_trading::chain_state::engine::StateLimits;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -42,6 +50,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+#[path = "runtime_state.rs"]
+pub mod state;
+
+use state::{StateConfig, StateOwner};
 
 /// The validated runtime configuration (`bsc/config/ingress.public.env`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +90,8 @@ pub struct CanonicalConfig {
     /// A launch is joined this long after its block was seen, so sightings
     /// still queued behind the block count.
     pub join_delay_ms: u64,
+    /// The C2 chain-state owner's bounds (it needs the follower).
+    pub state: StateConfig,
 }
 
 fn bounded(name: &str, value: &str, min: u64, max: u64) -> Result<u64, String> {
@@ -115,6 +130,7 @@ impl RuntimeConfig {
             }
         }
         let canonical_rpc = values.remove("BSC_CANONICAL_RPC");
+        let watched = values.remove("BSC_STATE_WATCHED");
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -153,13 +169,39 @@ impl RuntimeConfig {
                 limits
                     .validate()
                     .map_err(|e| format!("canonical bounds: {e:?}"))?;
+                let state = StateConfig {
+                    limits: StateLimits {
+                        max_txs: take("BSC_STATE_MAX_TXS", 1_024, 1 << 24)? as usize,
+                        max_candidates_per_nonce: take(
+                            "BSC_STATE_MAX_CANDIDATES_PER_NONCE",
+                            1,
+                            1_024,
+                        )? as usize,
+                        max_watched_senders: take("BSC_STATE_MAX_WATCHED_SENDERS", 1, 1_024)?
+                            as usize,
+                        // The follower's kept window: what it reports exactly
+                        // is applied exactly.
+                        reorg_window: limits.reorg_depth,
+                        finality_depth: take("BSC_STATE_FINALITY_DEPTH", 1, 10_000)?,
+                    },
+                    watched: StateConfig::parse_watched(
+                        watched.ok_or("BSC_STATE_WATCHED is required")?,
+                    )?,
+                    checkpoint_ms: take("BSC_STATE_CHECKPOINT_MS", 1_000, 3_600_000)?,
+                    nonce_fact_blocks: take("BSC_STATE_NONCE_FACT_BLOCKS", 1, 100_000)?,
+                };
+                state.validate()?;
                 Some(CanonicalConfig {
                     endpoint: url.to_string(),
                     limits,
                     join_delay_ms: take("BSC_CANONICAL_JOIN_DELAY_MS", 0, 600_000)?,
+                    state,
                 })
             }
         };
+        if canonical.is_none() && watched.is_some() {
+            return Err("BSC_STATE_WATCHED needs BSC_CANONICAL_RPC".into());
+        }
         let wss = WssLimits {
             connect_timeout: ms(take("BSC_RUNTIME_CONNECT_TIMEOUT_MS", 100, 60_000)?),
             handshake_timeout: ms(take("BSC_RUNTIME_HANDSHAKE_TIMEOUT_MS", 100, 120_000)?),
@@ -229,11 +271,21 @@ impl RuntimeConfig {
 
 /// One source event as it crosses from an adapter thread to the runtime.
 enum Event {
-    Full { hash: [u8; 32], raw: Vec<u8> },
-    HashOnly { hash: [u8; 32] },
+    Full {
+        hash: [u8; 32],
+        raw: Vec<u8>,
+        /// The verified signer and nonce (the C2 pending input).
+        from: [u8; 20],
+        nonce: u64,
+    },
+    HashOnly {
+        hash: [u8; 32],
+    },
     Rejected,
     Connected,
-    Disconnected { rate_limited: bool },
+    Disconnected {
+        rate_limited: bool,
+    },
 }
 
 struct Adapter {
@@ -296,7 +348,7 @@ struct Follower {
 /// send blocks: the follower falls behind rather than losing an event.
 fn spawn_follower(
     config: CanonicalConfig,
-    resume_after: Option<(u64, [u8; 32])>,
+    resume: Vec<(u64, [u8; 32])>,
     tx: SyncSender<(u64, CanonicalEvent)>,
     clock: Clock,
 ) -> Result<Follower, String> {
@@ -313,10 +365,17 @@ fn spawn_follower(
                 // Err only once the runtime dropped the receiver at stop.
                 let _ = tx.send((at, event));
             };
+            // The watched senders' nonce facts (the C2 owner may be switched
+            // on at any time; without it they are not applied).
+            let watch = NonceWatch {
+                senders: config.state.watched.clone(),
+                every_blocks: config.state.nonce_fact_blocks,
+            };
             if let Err(e) = run_follower(
                 &config.endpoint,
                 &config.limits,
-                resume_after,
+                &resume,
+                &watch,
                 &flag,
                 &mut sink,
             ) {
@@ -336,7 +395,14 @@ struct Canonical {
     /// follower first held it.
     head_block_ms: Option<u64>,
     head_seen_unix_ms: Option<u64>,
+    /// The observation window starts with the first block mined at or
+    /// after this wall time (ms): this process's start. Earlier blocks (a
+    /// C2 resume backfill, or a head mined before the sources connected)
+    /// and their launches, reorgs and gaps are outside it.
+    window_from_ms: u64,
     first_journaled: bool,
+    backfill_blocks: u64,
+    backfill_launches: u64,
     blocks_skipped: u64,
     blocks: u64,
     reorgs: u64,
@@ -347,14 +413,17 @@ struct Canonical {
 }
 
 impl Canonical {
-    fn new(config: &CanonicalConfig) -> Self {
+    fn new(config: &CanonicalConfig, window_from_ms: u64) -> Self {
         Canonical {
             state: "CONNECTING",
             head: None,
             head_seen_ns: None,
             head_block_ms: None,
             head_seen_unix_ms: None,
+            window_from_ms,
             first_journaled: false,
+            backfill_blocks: 0,
+            backfill_launches: 0,
             blocks_skipped: 0,
             blocks: 0,
             reorgs: 0,
@@ -384,7 +453,16 @@ impl Canonical {
                 observed_unix_ms,
                 ..
             } => {
+                self.state = "FOLLOWING";
+                self.head = Some((number, hash));
+                self.head_seen_ns = Some(at);
+                self.head_block_ms = Some(timestamp_ms);
+                self.head_seen_unix_ms = observed_unix_ms;
                 if !self.first_journaled {
+                    if timestamp_ms < self.window_from_ms {
+                        self.backfill_blocks += 1;
+                        return;
+                    }
                     self.first_journaled = true;
                     journal.record(
                         RecordKind::Canonical,
@@ -392,13 +470,15 @@ impl Canonical {
                         &window_payload(b'H', number, &hash),
                     );
                 }
-                self.state = "FOLLOWING";
-                self.head = Some((number, hash));
-                self.head_seen_ns = Some(at);
-                self.head_block_ms = Some(timestamp_ms);
-                self.head_seen_unix_ms = observed_unix_ms;
                 self.blocks += 1;
             }
+            // Before the window: not part of the G0.4 counts (the C2 owner
+            // has applied them already).
+            CanonicalEvent::Launch(_) if !self.first_journaled => self.backfill_launches += 1,
+            CanonicalEvent::Reorg { .. }
+            | CanonicalEvent::ReorgTooDeep { .. }
+            | CanonicalEvent::Gap { .. }
+                if !self.first_journaled => {}
             CanonicalEvent::Launch(l) => {
                 // Its block is the last one reported (launches follow it).
                 let same = self.head.is_some_and(|(_, h)| h == l.block_hash);
@@ -455,6 +535,8 @@ impl Canonical {
                 }
                 journal.record(RecordKind::Reorg, at, &resync_payload(from, to));
             }
+            // The C2 owner's reconciliation input; no G0.4 count.
+            CanonicalEvent::NonceFact { .. } => {}
             CanonicalEvent::Fault(fault) => {
                 self.rpc_errors += 1;
                 let limited = matches!(
@@ -507,7 +589,9 @@ impl Canonical {
             .set(e::C1_SCOPE_LAUNCHES, c.c1_scope_launches)
             .set(e::C1_SCOPE_FULL_BEFORE, c.c1_scope_full_before)
             .set(e::BLOCKS_SKIPPED, self.blocks_skipped)
-            .set(e::WAITING, self.ledger.waiting() as u64);
+            .set(e::WAITING, self.ledger.waiting() as u64)
+            .set(e::BACKFILL_BLOCKS, self.backfill_blocks)
+            .set(e::BACKFILL_LAUNCHES, self.backfill_launches);
         if let Some((n, _)) = self.head {
             d.set(e::HEAD, n);
         }
@@ -552,6 +636,8 @@ fn spawn_adapter(
                     WssEvent::Full(tx) => Event::Full {
                         hash: tx.hash,
                         raw: tx.raw,
+                        from: tx.from,
+                        nonce: tx.nonce,
                     },
                     WssEvent::HashOnly(hash) => Event::HashOnly { hash },
                     WssEvent::Rejected(_) => Event::Rejected,
@@ -621,6 +707,7 @@ fn status_bytes(
     journal_records: u64,
     journal_lost: u64,
     canonical: Option<&Canonical>,
+    owner: Option<&StateOwner>,
     status_interval_ms: u64,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
@@ -660,6 +747,9 @@ fn status_bytes(
     }
     if let Some(c) = canonical {
         d.set(rs::CANONICAL, c.draft(now).into_nested());
+    }
+    if let Some(o) = owner {
+        d.set(rs::STATE, o.draft().into_nested());
     }
     d.encode().map_err(|e| e.to_string())
 }
@@ -707,15 +797,40 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
     let mut generation = store.current()?;
     let (canonical_tx, canonical_rx) = sync_channel::<(u64, CanonicalEvent)>(config.queue_events);
     let canonical_rx = Some(canonical_rx);
-    let mut canonical = config.canonical.as_ref().map(Canonical::new);
+    let mut canonical = config
+        .canonical
+        .as_ref()
+        .map(|c| Canonical::new(c, started_ms));
+    let checkpoint_path = dir.join("c2-checkpoint.bin");
+    let c2_wanted =
+        |g: &Generation| g.component(ComponentId::StateC2).effective == Effective::Shadow;
+    // The C2 owner restores its window at start; the follower resumes after it.
+    let mut owner = match &config.canonical {
+        Some(c) if c2_wanted(&generation) => {
+            Some(StateOwner::restore(&c.state, checkpoint_path.clone())?)
+        }
+        _ => None,
+    };
     let mut follower = match &config.canonical {
-        // No persisted canonical window yet (C2 checkpoint): start at the head.
-        Some(c) => Some(spawn_follower(c.clone(), None, canonical_tx, clock)?),
+        Some(c) => {
+            let resume = owner
+                .as_ref()
+                .map(StateOwner::resume_window)
+                .unwrap_or_default();
+            Some(spawn_follower(c.clone(), resume, canonical_tx, clock)?)
+        }
         None => {
             drop(canonical_tx);
             None
         }
     };
+    let mut next_checkpoint = Instant::now()
+        + Duration::from_millis(
+            config
+                .canonical
+                .as_ref()
+                .map_or(0, |c| c.state.checkpoint_ms),
+        );
     let mut next_census = Instant::now() + Duration::from_millis(config.census_ms);
     let mut next_status = Instant::now();
     let mut next_reconcile = Instant::now();
@@ -740,6 +855,20 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
             next_reconcile = Instant::now() + reconcile_every;
             if !stopping {
                 generation = store.current()?;
+                if let Some(c) = &config.canonical {
+                    match (c2_wanted(&generation), owner.is_some()) {
+                        (true, false) => {
+                            owner = Some(StateOwner::fresh(&c.state, checkpoint_path.clone())?);
+                        }
+                        (false, true) => {
+                            // Its last window stays the checkpoint for the next start.
+                            if let Some(mut o) = owner.take() {
+                                o.checkpoint(replace);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             for source in SourceId::ALL {
                 let i = index(source);
@@ -810,7 +939,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 Err(RecvTimeoutError::Disconnected) => break,
             };
             let observation = match &event {
-                Event::Full { hash, raw } => Observation::Full { hash: *hash, raw },
+                Event::Full { hash, raw, .. } => Observation::Full { hash: *hash, raw },
                 Event::HashOnly { hash } => Observation::HashOnly { hash: *hash },
                 Event::Rejected => Observation::Rejected,
                 Event::Connected => {
@@ -835,7 +964,19 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                     }
                 }
             };
-            match core.observe(source, observation, at, wall.wall_us(at)) {
+            let decided = core.observe(source, observation, at, wall.wall_us(at));
+            if let (
+                Some(o),
+                Event::Full {
+                    hash, from, nonce, ..
+                },
+            ) = (owner.as_mut(), &event)
+                && (decided.is_some() || o.watches(from))
+            {
+                // Source lanes are indexed as in `SourceId::ALL` (five).
+                o.pending(*hash, *from, *nonce, index(source) as u8, at);
+            }
+            match decided {
                 Some(Launch::First { hash, source, .. }) => {
                     if let Event::Full { raw, .. } = &event {
                         journal.record(
@@ -867,7 +1008,12 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 f.stop.store(true, Ordering::Release);
                 loop {
                     match crx.recv_timeout(reconcile_every) {
-                        Ok((at, event)) => c.event(at, event, &mut journal),
+                        Ok((at, event)) => {
+                            if let Some(o) = owner.as_mut() {
+                                o.canonical(&event);
+                            }
+                            c.event(at, event, &mut journal)
+                        }
                         Err(RecvTimeoutError::Timeout) if !f.handle.is_finished() => {}
                         Err(_) => break,
                     }
@@ -875,12 +1021,16 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 let _ = f.handle.join();
             }
             while let Ok((at, event)) = crx.try_recv() {
+                if let Some(o) = owner.as_mut() {
+                    o.canonical(&event);
+                }
                 c.event(at, event, &mut journal);
             }
             let now = if stopping { u64::MAX } else { clock.now_ns() };
             c.join(now, &core, &mut journal);
             if stopping && c.state != "STOPPED" {
-                if let Some((n, h)) = c.head {
+                // A window ends only if it started (a block mined after the start).
+                if let Some((n, h)) = c.head.filter(|_| c.first_journaled) {
                     journal.record(
                         RecordKind::Canonical,
                         clock.now_ns(),
@@ -924,14 +1074,32 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 journal.appended(),
                 journal.lost(),
                 canonical.as_ref(),
+                owner.as_ref(),
                 config.status_ms,
             )?;
             replace(&status_path, &bytes)?;
         }
+        if let Some(o) = owner.as_mut()
+            && (stopping || Instant::now() >= next_checkpoint)
+        {
+            // At stop after the follower's last events (processed above).
+            next_checkpoint = Instant::now()
+                + Duration::from_millis(
+                    config
+                        .canonical
+                        .as_ref()
+                        .map_or(0, |c| c.state.checkpoint_ms),
+                );
+            o.checkpoint(replace);
+        }
         if Instant::now() >= next_census && !stopping {
             next_census = Instant::now() + Duration::from_millis(config.census_ms);
             // A checkpoint of the head: a killed process's window still ends here.
-            if let Some((n, h)) = canonical.as_ref().and_then(|c| c.head) {
+            if let Some((n, h)) = canonical
+                .as_ref()
+                .filter(|c| c.first_journaled)
+                .and_then(|c| c.head)
+            {
                 journal.record(
                     RecordKind::Canonical,
                     clock.now_ns(),
@@ -980,14 +1148,33 @@ mod tests {
         let canonical = c.canonical.as_ref().unwrap();
         assert_eq!(canonical.endpoint, "https://bsc-dataseed.bnbchain.org");
         assert_eq!(canonical.limits.reorg_depth, 64);
-        // Without the endpoint the canonical bounds are unknown keys.
+        // The C2 window is the follower's; no own account in READ_ONLY.
+        assert_eq!(canonical.state.limits.reorg_window, 64);
+        assert_eq!(canonical.state.limits.finality_depth, 16);
+        assert!(canonical.state.watched.is_empty());
+        let one = CONFIG.replace(
+            "BSC_STATE_WATCHED=\n",
+            "BSC_STATE_WATCHED=0x00000000000000000000000000000000000000aB, 0x0000000000000000000000000000000000000001\n",
+        );
+        let watched = RuntimeConfig::parse(&one)
+            .unwrap()
+            .canonical
+            .unwrap()
+            .state
+            .watched;
+        assert_eq!(
+            (watched.len(), watched[0][19], watched[1][19]),
+            (2, 0xab, 1)
+        );
+        // Without the endpoint the canonical and C2 bounds are unknown keys.
         assert!(RuntimeConfig::parse(&CONFIG.replace("BSC_CANONICAL_RPC=", "#")).is_err());
         let without: String = CONFIG
             .lines()
-            .filter(|l| !l.starts_with("BSC_CANONICAL_"))
+            .filter(|l| !l.starts_with("BSC_CANONICAL_") && !l.starts_with("BSC_STATE_"))
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(RuntimeConfig::parse(&without).unwrap().canonical, None);
+        assert!(RuntimeConfig::parse(&format!("{without}BSC_STATE_WATCHED=\n")).is_err());
         for bad in [
             CONFIG.replace("wss://bsc-rpc", "ws://bsc-rpc"),
             CONFIG.replace("wss://bsc-rpc", "wss://user:pw@bsc-rpc"),
@@ -1014,6 +1201,32 @@ mod tests {
             // A stop wait below the derived stop path.
             CONFIG.replace("STOP_TIMEOUT_MS=15000", "STOP_TIMEOUT_MS=1000"),
             CONFIG.replace("BSC_RUNTIME_RECONCILE_MS=500\n", ""),
+            // C2: final only inside the reorg window; a slot no larger than
+            // the table; every key required; watched accounts exact, once.
+            CONFIG.replace("BSC_STATE_FINALITY_DEPTH=16", "BSC_STATE_FINALITY_DEPTH=65"),
+            CONFIG.replace("BSC_STATE_MAX_TXS=262144", "BSC_STATE_MAX_TXS=1024")
+                .replace("CANDIDATES_PER_NONCE=16", "CANDIDATES_PER_NONCE=1024")
+                .replace("BSC_STATE_MAX_TXS=1024", "BSC_STATE_MAX_TXS=1023"),
+            CONFIG.replace("BSC_STATE_CHECKPOINT_MS=30000\n", ""),
+            CONFIG.replace("NONCE_FACT_BLOCKS=20", "NONCE_FACT_BLOCKS=0"),
+            CONFIG.replace("BSC_STATE_WATCHED=\n", ""),
+            CONFIG.replace("BSC_STATE_WATCHED=\n", "BSC_STATE_WATCHED=0x12\n"),
+            CONFIG.replace(
+                "BSC_STATE_WATCHED=\n",
+                "BSC_STATE_WATCHED=00000000000000000000000000000000000000000001\n",
+            ),
+            CONFIG.replace(
+                "BSC_STATE_WATCHED=\n",
+                "BSC_STATE_WATCHED=0x000000000000000000000000000000000000000g\n",
+            ),
+            CONFIG.replace(
+                "BSC_STATE_WATCHED=\n",
+                "BSC_STATE_WATCHED=0x0000000000000000000000000000000000000001,0x0000000000000000000000000000000000000001\n",
+            ),
+            CONFIG.replace("MAX_WATCHED_SENDERS=8", "MAX_WATCHED_SENDERS=1").replace(
+                "BSC_STATE_WATCHED=\n",
+                "BSC_STATE_WATCHED=0x0000000000000000000000000000000000000001,0x0000000000000000000000000000000000000002\n",
+            ),
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
@@ -1031,11 +1244,12 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         let config = RuntimeConfig::parse(CONFIG).unwrap();
         let cc = config.canonical.clone().unwrap();
-        let mut c = Canonical::new(&cc);
+        let block_ms = |n: u8| BLOCK_MS + u64::from(n) * 450;
+        // The process started at block 10's time.
+        let mut c = Canonical::new(&cc, block_ms(10));
         let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
         let mut core = IngressCore::new(64);
         let clock = Clock(Instant::now());
-        let block_ms = |n: u8| BLOCK_MS + u64::from(n) * 450;
         let block = |n: u8| CanonicalEvent::Block {
             number: u64::from(n),
             hash: [n; 32],
@@ -1084,6 +1298,22 @@ mod tests {
             1,
             &source_event_payload(SourceId::PublicNode, SourceEvent::Connected),
         );
+        // Mined before the process started (a C2 resume backfill): its
+        // launch, the gap before it and the block are outside the window.
+        c.event(9, CanonicalEvent::Gap { from: 5, to: 8 }, &mut journal);
+        c.event(9, block(9), &mut journal);
+        c.event(9, launch(9, 9, Some(0), true), &mut journal);
+        assert_eq!(
+            (
+                c.backfill_blocks,
+                c.backfill_launches,
+                c.blocks,
+                c.resyncs,
+                c.blocks_skipped
+            ),
+            (1, 1, 0, 0, 0)
+        );
+        assert_eq!(c.ledger.waiting(), 0);
         c.event(10, block(10), &mut journal);
         c.event(10, launch(10, 1, Some(2), true), &mut journal);
         // A launch whose transaction the verifier refuses (e.g. a type it
@@ -1183,10 +1413,15 @@ mod tests {
             0,
             0,
             Some(&c),
+            None,
             config.status_ms,
         )
         .unwrap();
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
+        assert!(
+            r.opt_nested(rs::STATE).unwrap().is_none(),
+            "no C2 owner, no state record"
+        );
         assert_eq!(r.u64(rs::STATUS_INTERVAL_MS).unwrap(), config.status_ms);
         let n = r.nested(rs::CANONICAL).unwrap();
         assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 2);
@@ -1196,6 +1431,8 @@ mod tests {
         assert_eq!(n.u64(rs::canonical::BLOCKS_SKIPPED).unwrap(), 87);
         assert_eq!(n.u64(rs::canonical::C1_SCOPE_LAUNCHES).unwrap(), 1);
         assert_eq!(n.i64(rs::canonical::HEAD_FETCH_LAG_MS).unwrap(), 300);
+        assert_eq!(n.u64(rs::canonical::BACKFILL_BLOCKS).unwrap(), 1);
+        assert_eq!(n.u64(rs::canonical::BACKFILL_LAUNCHES).unwrap(), 1);
         journal.finish().unwrap();
         let census = census(&base, journal_max_payload(&config), None).unwrap();
         assert_eq!(
@@ -1232,7 +1469,7 @@ mod tests {
         let text: String = CONFIG
             .replace("STATUS_MS=1000", "STATUS_MS=100")
             .lines()
-            .filter(|l| !l.starts_with("BSC_CANONICAL_"))
+            .filter(|l| !l.starts_with("BSC_CANONICAL_") && !l.starts_with("BSC_STATE_"))
             .map(|l| format!("{l}\n"))
             .collect();
         let config = RuntimeConfig::parse(&text).unwrap();

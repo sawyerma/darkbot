@@ -90,4 +90,20 @@ describe("BSC source control", () => {
     expect(c?.join).toContain("full before block time 2");
     expect(runtimeView([status(10_000, true)], 20_000).view.canonical?.state).toBe("STALE");
   });
+
+  it("shows the C2 chain state only while its owner runs, coherent from the native bool, stale as STALE", () => {
+    const status = (observed: number, state: boolean, coherent = "true"): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      ...(state ? [{ name: "state[0].coherent", value: coherent, kind: 1, unit: "" }, { name: "state[0].retained_blocks", value: "64", kind: 2, unit: "" },
+        { name: "state[0].last_conflict", value: "NOT_ON_HEAD", kind: 7, unit: "" }, { name: "state[0].checkpoint_restore", value: "RESTORED", kind: 7, unit: "" }] : [])] });
+    expect(runtimeView([status(10_000, false)], 11_000).view.chainState).toBeUndefined();
+    const v = runtimeView([status(10_000, true)], 11_000).view.chainState;
+    expect(v?.coherent).toBe("COHERENT");
+    expect(v?.head).toBe("UNANCHORED");
+    expect(v?.held).toContain("retained blocks 64");
+    expect(v?.faults).toContain("last NOT_ON_HEAD");
+    expect(v?.checkpoint).toContain("restore RESTORED");
+    expect(runtimeView([status(10_000, true, "false")], 11_000).view.chainState?.coherent).toBe("NOT_COHERENT");
+    expect(runtimeView([status(10_000, true)], 20_000).view.chainState?.coherent).toBe("STALE");
+  });
 });

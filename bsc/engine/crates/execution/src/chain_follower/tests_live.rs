@@ -45,6 +45,14 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     let mut faults = Vec::new();
     // Wall clock when first held minus the block's millisecond timestamp.
     let mut lags_ms: Vec<i64> = Vec::new();
+    // A busy public account (exchange hot wallet): its nonce read pinned to
+    // the hash of each reported block (EIP-1898), every 5 blocks.
+    let watched: [u8; 20] =
+        alloy_primitives::hex::decode("8894e0a0c962cb723c1976a4421c95949be2d4e3")
+            .unwrap()
+            .try_into()
+            .unwrap();
+    let mut facts: Vec<(u64, u64)> = Vec::new();
     let mut tx_counts: Vec<usize> = Vec::new();
     let started = Instant::now();
     let mut sink = |event: CanonicalEvent| match event {
@@ -96,12 +104,30 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
             last = None;
             gaps.push((from, to));
         }
+        CanonicalEvent::NonceFact {
+            sender,
+            next_nonce,
+            block_number,
+            block_hash,
+        } => {
+            assert_eq!(sender, watched);
+            assert_eq!(
+                chain.get(&block_number),
+                Some(&block_hash),
+                "pinned to the reported block"
+            );
+            facts.push((block_number, next_nonce));
+        }
         CanonicalEvent::Fault(fault) => faults.push(fault),
     };
     run_follower(
         "https://bsc-dataseed.bnbchain.org",
         &limits,
-        None,
+        &[],
+        &NonceWatch {
+            senders: vec![watched],
+            every_blocks: 5,
+        },
         &stop,
         &mut sink,
     )
@@ -162,7 +188,15 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
             launch.unverifiable
         );
     }
+    println!("nonce facts (block, next nonce): {facts:?}");
     assert!(blocks >= 10, "followed only {blocks} blocks");
+    assert!(facts.len() >= 2, "nonce facts {facts:?}");
+    assert!(
+        facts
+            .windows(2)
+            .all(|w| w[0].0 < w[1].0 && w[0].1 <= w[1].1),
+        "facts follow the chain, nonces never decrease"
+    );
     assert!(
         linked + 1 + reorgs.len() + gaps.len() >= blocks,
         "parent links checked"

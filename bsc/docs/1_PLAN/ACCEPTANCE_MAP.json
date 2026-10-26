@@ -497,7 +497,7 @@
         "darkbot-core::intent::tests::repeated_evidence_of_a_foreign_transaction_ignores_its_status"
       ],
       "result": "PASS on the user's target system of the combined Unit 1-4 tree on 2026-10-04: cargo fmt --all -- --check, cargo test --workspace --locked --offline, cargo test --workspace --release --locked --offline, and cargo clippy --workspace --all-targets --locked --offline -- -D warnings. Full bsc/native SHA256 manifest verification also PASS. Unit 4 implementation commit: c745d92305ee24b0bff76621df0e83e09c9353b8. Raw terminal log is not committed.",
-      "not_proven": "every canonical, pending, replacement and reorg counterexample of the retirement contract (C2 owns them); the proofs have no production constructor yet"
+      "not_proven": "every canonical, pending, replacement and reorg counterexample of the retirement contract (C2 owns them); the proofs are constructed only by the C2 owner (trading::chain_state::engine::ChainState, Paket 4), whose production consumer lanes are C3+"
     },
     {
       "matrix_id": "S2",

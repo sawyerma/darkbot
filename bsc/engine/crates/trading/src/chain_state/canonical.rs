@@ -6,11 +6,11 @@
 //! such facts itself; it only consumes the proofs defined here and moves
 //! its intents accordingly (master plan §7, §12).
 //!
-//! The proofs have no public constructor. C2 will construct them inside
-//! this module tree once it exists; until then no runtime code can create
-//! one, so no intent can be marked included, final or reconciled by
-//! anything but tests. In particular an adapter ACK cannot be turned into
-//! an inclusion.
+//! The proofs have no public constructor. Only the C2 chain-state owner
+//! ([`super::engine::ChainState`]) constructs them, inside this module tree,
+//! from applied canonical inputs; no other runtime code can create one, so
+//! no intent can be marked included, final or reconciled by anything else.
+//! In particular an adapter ACK cannot be turned into an inclusion.
 
 use alloy_primitives::{Address, B256};
 
@@ -70,6 +70,25 @@ impl InclusionProof {
     #[inline]
     pub fn status(&self) -> ExecutionStatus {
         self.status
+    }
+
+    /// Constructed only by the chain-state owner ([`super::engine`]).
+    pub(super) fn new(
+        chain_id: u64,
+        sender: Address,
+        nonce: u64,
+        tx_hash: B256,
+        block_hash: B256,
+        status: ExecutionStatus,
+    ) -> Self {
+        Self {
+            chain_id,
+            sender,
+            nonce,
+            tx_hash,
+            block_hash,
+            status,
+        }
     }
 
     #[cfg(test)]
@@ -136,6 +155,16 @@ impl FinalityProof {
             block_hash,
         }
     }
+
+    /// Constructed only by the chain-state owner ([`super::engine`]).
+    pub(super) fn new(chain_id: u64, sender: Address, nonce: u64, block_hash: B256) -> Self {
+        Self {
+            chain_id,
+            sender,
+            nonce,
+            block_hash,
+        }
+    }
 }
 
 /// The block that consumed `nonce` of `sender` left the canonical chain.
@@ -181,6 +210,16 @@ impl OrphanProof {
             block_hash,
         }
     }
+
+    /// Constructed only by the chain-state owner ([`super::engine`]).
+    pub(super) fn new(chain_id: u64, sender: Address, nonce: u64, block_hash: B256) -> Self {
+        Self {
+            chain_id,
+            sender,
+            nonce,
+            block_hash,
+        }
+    }
 }
 
 /// Result of a completed canonical, pending and nonce reconciliation for
@@ -214,6 +253,15 @@ impl ReconciliationProof {
 
     #[cfg(test)]
     pub(crate) fn for_tests(chain_id: u64, sender: Address, next_nonce: u64) -> Self {
+        Self {
+            chain_id,
+            sender,
+            next_nonce,
+        }
+    }
+
+    /// Constructed only by the chain-state owner ([`super::engine`]).
+    pub(super) fn new(chain_id: u64, sender: Address, next_nonce: u64) -> Self {
         Self {
             chain_id,
             sender,

@@ -32,8 +32,8 @@
 //! head. Heights that are never followed are always reported
 //! ([`CanonicalEvent::Gap`], [`CanonicalEvent::ReorgTooDeep`]); nothing is
 //! skipped silently. Following starts at the head first reported, or after
-//! a block the caller had applied before (`resume_after`): that block is the
-//! kept window until the next one proves it is still canonical.
+//! the blocks the caller had applied before (`resume`): they are the kept
+//! window until the next block proves them canonical or orphans some.
 //!
 //! Launches: exactly the venues of [`launches::LAUNCH_EVENTS`], each by
 //! contract address and event topic, in successful receipts only. Each
@@ -83,6 +83,18 @@ pub use launches::Venue;
 /// Every bound of the follower. The caller fills all of them; there are no
 /// compiled-in operating values. [`FollowerLimits::validate`] states the
 /// rules.
+/// Own accounts whose next nonce the follower reads at canonical blocks
+/// (`eth_getTransactionCount` pinned to the block hash, EIP-1898) for the
+/// C2 reconciliation. Without senders no request is made.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NonceWatch {
+    pub senders: Vec<[u8; 20]>,
+    /// A fact per sender at every followed block whose number is a multiple
+    /// of this, and at the first block after a start, a reorg, a resync or
+    /// a failed read (at least 1).
+    pub every_blocks: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FollowerLimits {
     /// The interval of `eth_blockNumber` once the follower has caught up.
@@ -243,6 +255,14 @@ pub enum CanonicalEvent {
         from: u64,
         to: u64,
     },
+    /// The next nonce of a watched sender after the block just reported
+    /// (read pinned to that block's hash).
+    NonceFact {
+        sender: [u8; 20],
+        next_nonce: u64,
+        block_number: u64,
+        block_hash: [u8; 32],
+    },
     /// A step failed; the follower waits its backoff and tries again.
     Fault(FollowerFault),
 }
@@ -303,6 +323,11 @@ pub enum Call {
     /// transaction refused by the verifier (its object came with it).
     Block(u64),
     Receipts(u64),
+    /// `eth_getTransactionCount(sender, {blockHash})`.
+    TransactionCount {
+        sender: [u8; 20],
+        block_hash: [u8; 32],
+    },
 }
 
 /// Why one request failed.
@@ -390,19 +415,22 @@ pub enum Field {
 /// the caller supplies it, no endpoint is compiled in) until `stop` is
 /// set. Every event goes to `sink` on the calling thread.
 ///
-/// `resume_after` is the last block (number, hash) the caller had applied
-/// before, or `None` to start at the head. With `Some((n, h))` the follower
-/// follows `n + 1, n + 2, ...` while the head is at most `max_catch_up`
-/// ahead of `n` (otherwise [`CanonicalEvent::Gap`] from `n + 1` and the
-/// head is followed); if block `n + 1` does not have the parent `h`, block
-/// `n` left the chain: [`CanonicalEvent::ReorgTooDeep`] with `(n, h)`
-/// orphaned comes first, then the new chain from `n + 1`.
+/// `resume` is the window of blocks (number, hash; ascending, consecutive)
+/// the caller had applied last, or empty to start at the head. Ending at
+/// `(n, h)` the follower follows `n + 1, n + 2, ...` while the head is at
+/// most `max_catch_up` ahead of `n` (otherwise [`CanonicalEvent::Gap`] from
+/// `n + 1` and the head is followed); if block `n + 1` does not have the
+/// parent `h`, the walk back down the new chain reaches a block of the
+/// window ([`CanonicalEvent::Reorg`]) or none of them
+/// ([`CanonicalEvent::ReorgTooDeep`] with the whole window orphaned), then
+/// the new chain follows.
 ///
 /// Returns `Err` only for a configuration refused before any connect.
 pub fn run_follower(
     endpoint: &str,
     limits: &FollowerLimits,
-    resume_after: Option<(u64, [u8; 32])>,
+    resume: &[(u64, [u8; 32])],
+    watch: &NonceWatch,
     stop: &AtomicBool,
     sink: &mut dyn FnMut(CanonicalEvent),
 ) -> Result<(), FollowerConfigError> {
@@ -421,7 +449,8 @@ pub fn run_follower(
     follow::run(
         &mut follow::Rpc::new(client),
         limits,
-        resume_after,
+        resume,
+        watch,
         stop,
         sink,
     );

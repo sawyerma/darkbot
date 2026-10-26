@@ -35,6 +35,7 @@ enum Req {
     BlockNumber,
     Block(u64),
     Receipts(u64),
+    Nonce([u8; 20], [u8; 32]),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -133,6 +134,14 @@ impl State {
                 }
                 receipts
             }
+            // A served block's number stands for the sender's next nonce
+            // there; an unknown hash is the node's error (as a real node).
+            Req::Nonce(_, hash) => self
+                .current()
+                .blocks
+                .iter()
+                .find(|(_, b)| b.block["hash"] == json!(hx(&hash)))
+                .map_or(Value::Null, |(n, _)| json!(format!("0x{n:x}"))),
         }
     }
 
@@ -151,6 +160,15 @@ impl State {
                     Req::Block(number(&request["params"][0]))
                 }
                 "eth_getBlockReceipts" => Req::Receipts(number(&request["params"][0])),
+                "eth_getTransactionCount" => {
+                    let fixed = |v: &Value| hex::decode(&v.as_str().unwrap()[2..]).unwrap();
+                    Req::Nonce(
+                        fixed(&request["params"][0]).try_into().unwrap(),
+                        fixed(&request["params"][1]["blockHash"])
+                            .try_into()
+                            .unwrap(),
+                    )
+                }
                 other => panic!("unexpected method {other}"),
             };
             let chunk = matches!(req, Req::Receipts(_)).then_some(self.script.chunk);
@@ -389,7 +407,17 @@ struct Outcome {
 fn follow_script(
     script: Script,
     limits: FollowerLimits,
-    resume_after: Option<(u64, [u8; 32])>,
+    resume: &[(u64, [u8; 32])],
+    stop_after: Option<Duration>,
+) -> Outcome {
+    follow_watching(script, limits, resume, &NonceWatch::default(), stop_after)
+}
+
+fn follow_watching(
+    script: Script,
+    limits: FollowerLimits,
+    resume: &[(u64, [u8; 32])],
+    watch: &NonceWatch,
     stop_after: Option<Duration>,
 ) -> Outcome {
     let stop = Arc::new(AtomicBool::new(false));
@@ -414,7 +442,8 @@ fn follow_script(
     run(
         &mut Rpc::new(client),
         &limits,
-        resume_after,
+        resume,
+        watch,
         &stop,
         &mut sink,
     );
@@ -730,6 +759,16 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
             format!("too deep {} -> {}", list(orphaned), list(&[*new_head]))
         }
         CanonicalEvent::Gap { from, to } => format!("gap {from}..={to}"),
+        CanonicalEvent::NonceFact {
+            sender,
+            next_nonce,
+            block_number,
+            block_hash,
+        } => {
+            let label = name(block_hash);
+            assert!(label.starts_with(&block_number.to_string()), "{label}");
+            format!("nonce {:02x} at {label} = {next_nonce}", sender[0])
+        }
         CanonicalEvent::Fault(fault) => format!("fault {fault:?}"),
     }
 }
@@ -834,7 +873,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
     names.insert(hash_of(&tx_four()), "tx:four".to_owned());
 
     let limits = limits();
-    let outcome = follow_script(script, limits, None, None);
+    let outcome = follow_script(script, limits, &[], None);
     let lines: Vec<String> = outcome
         .events
         .iter()
@@ -955,7 +994,7 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
         chunk: 64,
     };
     let limits = limits();
-    let outcome = follow_script(script, limits, None, Some(Duration::from_millis(300)));
+    let outcome = follow_script(script, limits, &[], Some(Duration::from_millis(300)));
     assert_eq!(outcome.events.len(), 1, "only block 100A, no fault");
     let after = outcome.returned - outcome.stop_set_at.unwrap();
     assert!(after < bound(&limits), "hanging request: {after:?}");
@@ -970,7 +1009,7 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
         poll: Duration::from_secs(60),
         ..limits
     };
-    let outcome = follow_script(script, long_poll, None, Some(Duration::from_millis(300)));
+    let outcome = follow_script(script, long_poll, &[], Some(Duration::from_millis(300)));
     assert_eq!(outcome.events.len(), 1);
     let after = outcome.returned - outcome.stop_set_at.unwrap();
     assert!(after < bound(&long_poll), "poll wait: {after:?}");
@@ -985,7 +1024,7 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
         request_timeout: Duration::from_millis(150),
         ..limits
     };
-    let outcome = follow_script(script, short_deadline, None, None);
+    let outcome = follow_script(script, short_deadline, &[], None);
     let names = BTreeMap::from([
         (named("100A"), "100A".to_owned()),
         (named("99"), "99".to_owned()),
@@ -1033,7 +1072,7 @@ fn a_real_launch_block_through_the_whole_path() {
         inject: vec![],
         chunk: 4096,
     };
-    let outcome = follow_script(script, limits(), None, None);
+    let outcome = follow_script(script, limits(), &[], None);
     let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Block {
@@ -1122,7 +1161,7 @@ fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
         inject: vec![],
         chunk: 4096,
     };
-    let outcome = follow_script(script, limits(), None, None);
+    let outcome = follow_script(script, limits(), &[], None);
     let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Block { number, .. },
@@ -1161,7 +1200,7 @@ fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
     };
     let limits = limits();
     assert_eq!(limits.tx_attempts, 2);
-    let outcome = follow_script(script, limits, None, None);
+    let outcome = follow_script(script, limits, &[], None);
     let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Fault(FollowerFault::Request {
@@ -1185,12 +1224,13 @@ fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
     assert!(is_unrebuildable(RejectReason::UnsupportedType(4)));
 }
 
-/// C2 restart: the follower resumes after the block the caller applied
-/// last. It backfills in order when that block is still canonical, reports
-/// it orphaned when it left the chain, and reports the exact gap when the
-/// head is more than `max_catch_up` (5) ahead.
+/// C2 restart: the follower resumes after the window of blocks the caller
+/// applied last. It backfills in order when the window is still canonical,
+/// reports exactly the orphaned part when the fork point is in the window,
+/// all of it when the fork is below, and the exact gap when the head is
+/// more than `max_catch_up` (5) ahead.
 #[test]
-fn resume_after_the_last_applied_block() {
+fn resume_after_the_last_applied_window() {
     let chain: Vec<Synth> = (100..=110u64)
         .map(|n| {
             let parent = if n == 100 {
@@ -1208,14 +1248,14 @@ fn resume_after_the_last_applied_block() {
     {
         names.insert(named(&label), label);
     }
-    let lines = |head: u64, resume: (u64, [u8; 32])| -> Vec<String> {
+    let lines = |head: u64, resume: &[(u64, [u8; 32])]| -> Vec<String> {
         let blocks: Vec<&Synth> = chain.iter().filter(|b| b.number <= head).collect();
         let script = Script {
             phases: vec![phase(head, &blocks)],
             inject: vec![],
             chunk: 64,
         };
-        follow_script(script, limits(), Some(resume), None)
+        follow_script(script, limits(), resume, None)
             .events
             .iter()
             .map(|(e, _)| describe(e, &names))
@@ -1223,7 +1263,7 @@ fn resume_after_the_last_applied_block() {
     };
     // Still canonical: 101..=103 in order, no gap.
     assert_eq!(
-        lines(103, (100, named("100A"))),
+        lines(103, &[(100, named("100A"))]),
         [
             "block 101A <- 100A txs 0",
             "block 102A <- 101A txs 0",
@@ -1232,7 +1272,7 @@ fn resume_after_the_last_applied_block() {
     );
     // Left the chain while the process was down: reported before 101.
     assert_eq!(
-        lines(102, (100, named("100X"))),
+        lines(102, &[(100, named("100X"))]),
         [
             "too deep 100X -> 101A",
             "block 101A <- 100A txs 0",
@@ -1241,7 +1281,109 @@ fn resume_after_the_last_applied_block() {
     );
     // Too far behind: the skipped heights, exactly, then the head.
     assert_eq!(
-        lines(110, (100, named("100A"))),
+        lines(110, &[(100, named("100A"))]),
         ["gap 101..=109", "block 110A <- 109A txs 0"]
+    );
+    // The fork point is in the window: only the block above it is orphaned
+    // and the new chain follows from the fork point on.
+    let window = [(99, named("99")), (100, named("100X"))];
+    assert_eq!(
+        lines(102, &window),
+        [
+            "reorg 100X -> 101A",
+            "block 100A <- 99 txs 0",
+            "block 101A <- 100A txs 0",
+            "block 102A <- 101A txs 0",
+        ]
+    );
+    // A window with a height step other than one keeps only its last block.
+    assert_eq!(
+        lines(102, &[(98, named("99")), (100, named("100X"))]),
+        [
+            "too deep 100X -> 101A",
+            "block 101A <- 100A txs 0",
+            "block 102A <- 101A txs 0",
+        ]
+    );
+}
+
+/// C2 reconciliation input: the watched senders' next nonces, read pinned
+/// to the hash of the block just reported, at the first block and then at
+/// every `every_blocks`-th; a failed read is a fault and the next block
+/// carries the facts. Without senders nothing is read (every other test).
+#[test]
+fn nonce_facts_of_the_watched_senders_at_due_blocks() {
+    let chain: Vec<Synth> = (100..=105u64)
+        .map(|n| {
+            let parent = if n == 100 {
+                "99".to_owned()
+            } else {
+                format!("{}A", n - 1)
+            };
+            block(&format!("{n}A"), n, &parent, vec![])
+        })
+        .collect();
+    let mut names = BTreeMap::new();
+    for label in (100..=105)
+        .map(|n| format!("{n}A"))
+        .chain(["99".to_owned()])
+    {
+        names.insert(named(&label), label);
+    }
+    let watch = NonceWatch {
+        senders: vec![[0xAA; 20], [0xBB; 20]],
+        every_blocks: 3,
+    };
+    let blocks: Vec<&Synth> = chain.iter().collect();
+    let run = |inject: Vec<(Req, usize, Reply)>| -> Vec<String> {
+        let script = Script {
+            phases: vec![phase(105, &blocks)],
+            inject,
+            chunk: 64,
+        };
+        follow_watching(script, limits(), &[(100, named("100A"))], &watch, None)
+            .events
+            .iter()
+            .map(|(e, _)| describe(e, &names))
+            .filter(|l| !l.starts_with("fault"))
+            .collect()
+    };
+    assert_eq!(
+        run(vec![]),
+        [
+            "block 101A <- 100A txs 0",
+            "nonce aa at 101A = 101",
+            "nonce bb at 101A = 101",
+            "block 102A <- 101A txs 0",
+            "nonce aa at 102A = 102",
+            "nonce bb at 102A = 102",
+            "block 103A <- 102A txs 0",
+            "block 104A <- 103A txs 0",
+            "block 105A <- 104A txs 0",
+            "nonce aa at 105A = 105",
+            "nonce bb at 105A = 105",
+        ]
+    );
+    // The second sender's read at 102A fails: 103A carries both facts.
+    assert_eq!(
+        run(vec![(
+            Req::Nonce([0xBB; 20], named("102A")),
+            0,
+            Reply::RpcError(-32000)
+        )]),
+        [
+            "block 101A <- 100A txs 0",
+            "nonce aa at 101A = 101",
+            "nonce bb at 101A = 101",
+            "block 102A <- 101A txs 0",
+            "nonce aa at 102A = 102",
+            "block 103A <- 102A txs 0",
+            "nonce aa at 103A = 103",
+            "nonce bb at 103A = 103",
+            "block 104A <- 103A txs 0",
+            "block 105A <- 104A txs 0",
+            "nonce aa at 105A = 105",
+            "nonce bb at 105A = 105",
+        ]
     );
 }

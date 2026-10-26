@@ -258,11 +258,16 @@ pub mod runtime_status {
         /// Launches (any venue) whose provider answers were refused every
         /// time they were fetched: unknown, not counted as C1 scope.
         pub const TX_ANSWER_REFUSED: u16 = 25;
+        /// Blocks followed after a restart that were mined before this
+        /// process started (the C2 resume backfill), and their launches:
+        /// outside the observation window, never part of the counts above.
+        pub const BACKFILL_BLOCKS: u16 = 26;
+        pub const BACKFILL_LAUNCHES: u16 = 27;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 4,
+            schema_version: 5,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -289,6 +294,124 @@ pub mod runtime_status {
                 Field::opt(HEAD_FETCH_LAG_MS, "head_fetch_lag_ms", I64),
                 Field::req(TX_UNVERIFIABLE, "tx_unverifiable", U64),
                 Field::req(TX_ANSWER_REFUSED, "tx_answer_refused", U64),
+                Field::req(BACKFILL_BLOCKS, "backfill_blocks", U64),
+                Field::req(BACKFILL_LAUNCHES, "backfill_launches", U64),
+            ],
+        };
+    }
+
+    /// The C2 chain-state owner (component `BSC_STATE_C2` effective
+    /// SHADOW): canonical effects, pending candidates and per-sender
+    /// confidence. Every applied, refused, overflowed, late or unknown item
+    /// is a counter here; nothing is dropped silently.
+    pub mod state {
+        use super::*;
+
+        /// The retained canonical head; absent while unanchored.
+        pub const HEAD: u16 = 1;
+        /// A snapshot can be issued: head known, no refused canonical input
+        /// since the last accepted one, every watched sender clean.
+        pub const COHERENT: u16 = 2;
+        pub const WATCHED: u16 = 3;
+        pub const RETAINED_BLOCKS: u16 = 4;
+        pub const HELD_TXS: u16 = 5;
+        pub const HELD_CANDIDATES: u16 = 6;
+        pub const HELD_UNCERTAIN: u16 = 7;
+        pub const HELD_SENDERS: u16 = 8;
+        pub const UNKNOWN_SENDERS: u16 = 9;
+        pub const QUARANTINED_SENDERS: u16 = 10;
+        pub const INPUTS: u16 = 11;
+        pub const EFFECTS: u16 = 12;
+        pub const PENDING_OBSERVATIONS: u16 = 13;
+        pub const REPEAT_SIGHTINGS: u16 = 14;
+        pub const EARLIER_FIRST_SEEN: u16 = 15;
+        pub const LATE_SIGHTINGS: u16 = 16;
+        pub const STALE_PENDING: u16 = 17;
+        pub const COMPETING_CANDIDATES: u16 = 18;
+        pub const BLOCKS: u16 = 19;
+        pub const INCLUDED: u16 = 20;
+        pub const REVERTED: u16 = 21;
+        pub const REPLACED: u16 = 22;
+        pub const REORGS: u16 = 23;
+        pub const REORGS_BEYOND_WINDOW: u16 = 24;
+        pub const REORGS_TOO_DEEP: u16 = 25;
+        pub const UNMATCHED_ORPHANED_BLOCKS: u16 = 26;
+        pub const ORPHANED_TXS: u16 = 27;
+        pub const GAPS: u16 = 28;
+        pub const UNCERTAIN_MARKED: u16 = 29;
+        pub const FINALIZED_BLOCKS: u16 = 30;
+        pub const FINALIZED_TXS: u16 = 31;
+        pub const NONCE_FACTS: u16 = 32;
+        pub const IGNORED_NONCE_FACTS: u16 = 33;
+        pub const RECONCILIATIONS: u16 = 34;
+        pub const RECONCILIATION_REFUSALS: u16 = 35;
+        pub const QUARANTINES: u16 = 36;
+        pub const CONFLICTS: u16 = 37;
+        pub const REFUSED_INPUTS: u16 = 38;
+        pub const OVERFLOW_TXS: u16 = 39;
+        pub const OVERFLOW_CANDIDATES: u16 = 40;
+        pub const EVICTED: u16 = 41;
+        /// Blocks replayed from the checkpoint at start.
+        pub const RESTORED_BLOCKS: u16 = 42;
+        /// `NONE` (no checkpoint), `RESTORED` or `REFUSED` (unreadable or
+        /// contradicting checkpoint: started empty).
+        pub const CHECKPOINT_RESTORE: u16 = 43;
+        pub const CHECKPOINT_WRITES: u16 = 44;
+        pub const CHECKPOINT_ERRORS: u16 = 45;
+        /// The latest conflict, as its kind.
+        pub const LAST_CONFLICT: u16 = 46;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.runtime-status.state",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::opt(HEAD, "head", U64),
+                Field::req(COHERENT, "coherent", Bool),
+                Field::req(WATCHED, "watched", U64),
+                Field::req(RETAINED_BLOCKS, "retained_blocks", U64),
+                Field::req(HELD_TXS, "held_txs", U64),
+                Field::req(HELD_CANDIDATES, "held_candidates", U64),
+                Field::req(HELD_UNCERTAIN, "held_uncertain", U64),
+                Field::req(HELD_SENDERS, "held_senders", U64),
+                Field::req(UNKNOWN_SENDERS, "unknown_senders", U64),
+                Field::req(QUARANTINED_SENDERS, "quarantined_senders", U64),
+                Field::req(INPUTS, "inputs", U64),
+                Field::req(EFFECTS, "effects", U64),
+                Field::req(PENDING_OBSERVATIONS, "pending_observations", U64),
+                Field::req(REPEAT_SIGHTINGS, "repeat_sightings", U64),
+                Field::req(EARLIER_FIRST_SEEN, "earlier_first_seen", U64),
+                Field::req(LATE_SIGHTINGS, "late_sightings", U64),
+                Field::req(STALE_PENDING, "stale_pending", U64),
+                Field::req(COMPETING_CANDIDATES, "competing_candidates", U64),
+                Field::req(BLOCKS, "blocks", U64),
+                Field::req(INCLUDED, "included", U64),
+                Field::req(REVERTED, "reverted", U64),
+                Field::req(REPLACED, "replaced", U64),
+                Field::req(REORGS, "reorgs", U64),
+                Field::req(REORGS_BEYOND_WINDOW, "reorgs_beyond_window", U64),
+                Field::req(REORGS_TOO_DEEP, "reorgs_too_deep", U64),
+                Field::req(UNMATCHED_ORPHANED_BLOCKS, "unmatched_orphaned_blocks", U64),
+                Field::req(ORPHANED_TXS, "orphaned_txs", U64),
+                Field::req(GAPS, "gaps", U64),
+                Field::req(UNCERTAIN_MARKED, "uncertain_marked", U64),
+                Field::req(FINALIZED_BLOCKS, "finalized_blocks", U64),
+                Field::req(FINALIZED_TXS, "finalized_txs", U64),
+                Field::req(NONCE_FACTS, "nonce_facts", U64),
+                Field::req(IGNORED_NONCE_FACTS, "ignored_nonce_facts", U64),
+                Field::req(RECONCILIATIONS, "reconciliations", U64),
+                Field::req(RECONCILIATION_REFUSALS, "reconciliation_refusals", U64),
+                Field::req(QUARANTINES, "quarantines", U64),
+                Field::req(CONFLICTS, "conflicts", U64),
+                Field::req(REFUSED_INPUTS, "refused_inputs", U64),
+                Field::req(OVERFLOW_TXS, "overflow_txs", U64),
+                Field::req(OVERFLOW_CANDIDATES, "overflow_candidates", U64),
+                Field::req(EVICTED, "evicted", U64),
+                Field::req(RESTORED_BLOCKS, "restored_blocks", U64),
+                Field::req(CHECKPOINT_RESTORE, "checkpoint_restore", Text),
+                Field::req(CHECKPOINT_WRITES, "checkpoint_writes", U64),
+                Field::req(CHECKPOINT_ERRORS, "checkpoint_errors", U64),
+                Field::opt(LAST_CONFLICT, "last_conflict", Text),
             ],
         };
     }
@@ -313,11 +436,13 @@ pub mod runtime_status {
     pub const CANONICAL: u16 = 11;
     /// How often this record is rewritten; a reader derives staleness from it.
     pub const STATUS_INTERVAL_MS: u16 = 12;
+    /// Present while the C2 chain-state owner runs.
+    pub const STATE: u16 = 13;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 4,
+        schema_version: 5,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -340,6 +465,7 @@ pub mod runtime_status {
                 &canonical::SCHEMA,
             ),
             Field::req(STATUS_INTERVAL_MS, "status_interval_ms", U64),
+            Field::nested(STATE, "state", Presence::Optional, &state::SCHEMA),
         ],
     };
 }

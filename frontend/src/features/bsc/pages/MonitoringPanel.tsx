@@ -58,6 +58,11 @@ export function MonitoringPanel() {
         hint={sources.runtime.canonical ? `head ${sources.runtime.canonical.head} · age ${sources.runtime.canonical.headAgeMs} ms · ${sources.runtime.canonical.chain}` : "No canonical endpoint in the runtime configuration: no G0.4 denominator"} />
       {sources.runtime.canonical && <Line label="Canonical launches (G0.4 denominator)" value={sources.runtime.canonical.launches} hint="Orphaned launches are taken out; Four token fields only where the event layout is proven" />}
       {sources.runtime.canonical && <Line label="Pending sighting vs. block time (Flap)" value={sources.runtime.canonical.join} hint="First verified sighting (local wall-clock estimate) vs. the block's own ms time; header fetch lag bounds the clock offset; no evaluation before the G0.4 criteria are confirmed" />}
+      <Line label="C2 chain state" value={<ValueState state={sources.runtime.chainState?.coherent ?? "NOT_RUNNING"} />}
+        hint={sources.runtime.chainState ? `head ${sources.runtime.chainState.head} · ${sources.runtime.chainState.held}` : "BSC_STATE_C2 is not effective SHADOW (or no canonical endpoint): no canonical/pending state owner runs"} />
+      {sources.runtime.chainState && <Line label="C2 canonical and pending effects" value={sources.runtime.chainState.effects} hint="Applied by the one native owner from the follower's complete blocks and the launch/own-account sightings; proofs only for watched own accounts" />}
+      {sources.runtime.chainState && <Line label="C2 refused, overflowed, unknown" value={sources.runtime.chainState.faults} hint="Every refused or overflowed input is counted; unknown never becomes zero" />}
+      {sources.runtime.chainState && <Line label="C2 restart" value={sources.runtime.chainState.checkpoint} hint="The retained canonical window is checkpointed in the runtime pass; at start it is restored and own accounts stay quarantined until a nonce fact reconciles them" />}
     </PlacedSection>
     <PlacedSection panel="monitoring" section={7} records={records}>
       <Line label="Producer witness source ready" value={s?.witness?.sourceReady === undefined ? "UNKNOWN" : String(s.witness.sourceReady)} />

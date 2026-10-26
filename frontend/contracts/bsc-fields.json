@@ -3675,7 +3675,19 @@
       "status": "IST_CONNECTED",
       "wire": "NativeRecord · bsc.monitoring.state",
       "topic": "bsc.monitoring.state",
-      "reason": "canonical chain follower: head, header fetch lag, reorgs, skipped blocks, canonical Flap/Four launches (C1 scope) joined with pending sightings against the block time (G0.4 denominator)"
+      "reason": "canonical chain follower: head, header fetch lag, reorgs, skipped blocks, canonical Flap/Four launches (C1 scope) joined with pending sightings against the block time (G0.4 denominator); C2 resume backfill counted apart"
+    },
+    {
+      "schemas": [
+        "darkbot.bsc.runtime-status.v1"
+      ],
+      "match": "prefix:state[].",
+      "panel": "monitoring",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state",
+      "reason": "C2 chain-state owner (BSC_STATE_C2 SHADOW): coherence, retained window, held candidates/uncertain, per-sender confidence, canonical/pending effects, conflicts, overflow, checkpoint restore"
     },
     {
       "schemas": [
