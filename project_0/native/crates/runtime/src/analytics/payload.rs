@@ -932,6 +932,9 @@ macro_rules! typed_kinds {
             }
             k::SEGMENT_LINK => $f::<crate::storage::segments::SegmentLink>($kind, $schema, $bytes),
             k::SEGMENT_NEXT => $f::<crate::storage::segments::SegmentNext>($kind, $schema, $bytes),
+            k::SEGMENT_RECOVERY => {
+                $f::<crate::storage::segments::SegmentRecovery>($kind, $schema, $bytes)
+            }
             k::MT0_SNAPSHOT => $f::<super::econ::Mt0Telemetry>($kind, $schema, $bytes),
             _ => Err(bad("PAYLOAD_KIND_UNTYPED")),
         }

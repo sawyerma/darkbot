@@ -14,6 +14,13 @@
 //! segment or physically torn tail (crash/power loss) is reported as such (`sealed = false`): INCOMPLETE, never repaired.
 //! A reader that does not know segments stops at the first segment's control frame or kind
 //! filter; every market reader of this crate goes through the chain reader.
+//!
+//! Recovery (DEC-16, unbounded runs): a run restarted after a crash continues its chain without
+//! touching the crashed segment — it is never sealed, appended to or truncated afterwards. The
+//! successor's first frame is a typed `SEGMENT_RECOVERY` binding the crashed segment's readable
+//! frames, their chain head and the unreadable tail bytes; the chain reader accepts an unsealed
+//! segment only so continued and reports every recovery (`ChainSummary::recovered`). A rotation
+//! interrupted after its seal is finished with the announced successor and its normal link.
 use crate::analytics::journal::{self, kind, Frame, Provenance, Writer};
 use crate::analytics::payload::Payload;
 use serde::{Deserialize, Serialize};
@@ -57,6 +64,29 @@ pub struct SegmentNext {
 }
 impl Payload for SegmentNext {
     const KIND: u16 = kind::SEGMENT_NEXT;
+}
+
+/// First frame of the segment that continues a chain after a crash (DEC-16): `previous` names
+/// the crashed segment's readable frames (`frames`, `root_sha256` = chain head after them) and
+/// `torn_bytes` its unreadable tail; the crashed file itself stays unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegmentRecovery {
+    pub set_id: [u8; 16],
+    pub index: u32,
+    pub previous: SegmentRef,
+    pub torn_bytes: u64,
+}
+impl Payload for SegmentRecovery {
+    const KIND: u16 = kind::SEGMENT_RECOVERY;
+}
+
+/// How [`SegmentedWriter::recover`] continued a chain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Recovered {
+    /// The crashed (unsealed) segment `segment` is continued by a `SEGMENT_RECOVERY` successor.
+    Crash { segment: u32, torn_bytes: u64 },
+    /// A rotation interrupted after sealing `segment` is finished with its announced successor.
+    Rotation { segment: u32 },
 }
 
 /// Path of segment `index` (1-based) of the chain starting at `first`.
@@ -123,6 +153,86 @@ impl SegmentedWriter {
             max_segment_bytes,
         })
     }
+    /// DEC-16: continues the chain at `first` after a crash (see the module docs). A chain that
+    /// ended in order (its last segment sealed) is refused: a new run is a new chain.
+    pub fn recover(first: &Path, max_segment_bytes: u64) -> io::Result<(Self, Recovered)> {
+        let mut r = ChainReader::open(first)?;
+        while r.next_frame()?.is_some() {}
+        let index = r.segments();
+        let crashed = segment_path(first, index);
+        let control = Provenance {
+            source: journal::source::STORAGE,
+            ..Default::default()
+        };
+        let previous = SegmentRef {
+            file: file_name(&crashed),
+            index,
+            frames: r.reader.frames(),
+            root_sha256: r.reader.root(),
+            events_through: r.events,
+        };
+        let next_path = segment_path(first, index + 1);
+        let (set_id, recovered, mut next) = if r.reader.sealed {
+            // Sealed with an announced, missing successor: the interrupted rotation.
+            let (Some(set_id), true) = (r.set_id, r.announced_missing) else {
+                return Err(bad("SEGMENT_CHAIN_SEALED"));
+            };
+            let mut next = Writer::create(&next_path)?;
+            next.append_typed(
+                control,
+                &SegmentLink {
+                    set_id,
+                    index: index + 1,
+                    previous,
+                },
+            )?;
+            (set_id, Recovered::Rotation { segment: index }, next)
+        } else {
+            let torn_bytes = std::fs::metadata(&crashed)?
+                .len()
+                .saturating_sub(r.reader.position());
+            let set_id = match r.set_id {
+                Some(id) => id,
+                None => journal::random16()?,
+            };
+            let mut next = Writer::create(&next_path)?;
+            next.append_typed(
+                control,
+                &SegmentRecovery {
+                    set_id,
+                    index: index + 1,
+                    previous,
+                    torn_bytes,
+                },
+            )?;
+            (
+                set_id,
+                Recovered::Crash {
+                    segment: index,
+                    torn_bytes,
+                },
+                next,
+            )
+        };
+        next.sync()?;
+        let mut sealed_bytes = 0;
+        for i in 1..=index {
+            sealed_bytes += std::fs::metadata(segment_path(first, i))?.len();
+        }
+        Ok((
+            Self {
+                first: first.into(),
+                writer: next,
+                index: index + 1,
+                set_id,
+                events_current: 0,
+                events_sealed: r.events,
+                sealed_bytes,
+                max_segment_bytes,
+            },
+            recovered,
+        ))
+    }
     pub fn segments(&self) -> u32 {
         self.index
     }
@@ -158,6 +268,10 @@ impl SegmentedWriter {
     }
     pub fn sync(&mut self) -> io::Result<journal::Durable> {
         self.writer.sync()
+    }
+    /// DEC-16: rotates now (a rolling window's boundary; between batches only).
+    pub fn rotate_now(&mut self) -> io::Result<()> {
+        self.rotate()
     }
     /// Rotates when the current segment reached the size limit (between batches only).
     pub fn rotate_if_due(&mut self) -> io::Result<bool> {
@@ -227,6 +341,11 @@ pub struct ChainReader {
     set_id: Option<[u8; 16]>,
     next_file: Option<String>,
     events: u64,
+    /// The last segment announced a successor that does not exist (an interrupted rotation).
+    announced_missing: bool,
+    /// Segments continued after a crash and the unreadable tail bytes they left (DEC-16).
+    pub recovered: u32,
+    pub torn_bytes: u64,
     /// Seal state of the last segment read (meaningful after `next_frame` returned `None`).
     pub sealed: bool,
     pub complete: bool,
@@ -242,6 +361,9 @@ impl ChainReader {
             set_id: None,
             next_file: None,
             events: 0,
+            announced_missing: false,
+            recovered: 0,
+            torn_bytes: 0,
             sealed: false,
             complete: false,
         })
@@ -294,29 +416,30 @@ impl ChainReader {
                 None => {
                     self.sealed = self.reader.sealed;
                     self.complete = self.reader.complete;
-                    let Some(next_file) = self.next_file.take() else {
-                        self.check_no_orphans()?;
-                        self.ended = true;
-                        return Ok(None);
-                    };
-                    let path = self.first.with_file_name(&next_file);
-                    match std::fs::symlink_metadata(&path) {
-                        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                            self.check_no_orphans()
-                                .map_err(|_| bad("SEGMENT_SUCCESSOR_MISSING"))?;
-                            self.sealed = false;
-                            self.complete = false;
-                            self.ended = true;
-                            return Ok(None);
-                        }
+                    let announced = self.next_file.take();
+                    let path = segment_path(&self.first, self.index + 1);
+                    let successor = match std::fs::symlink_metadata(&path) {
+                        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
                         Err(e) => return Err(e),
                         Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
                             return Err(bad("SEGMENT_NOT_REGULAR"))
                         }
-                        Ok(_) => {}
-                    }
-                    if !self.reader.sealed || !self.reader.complete {
-                        return Err(bad("SEGMENT_INTERMEDIATE_UNSEALED"));
+                        Ok(_) => Some(()),
+                    };
+                    // Without an announced successor only a crashed segment may continue (by
+                    // its recovery successor); everything else ends the chain here.
+                    if successor.is_none() || (announced.is_none() && self.reader.sealed) {
+                        if announced.is_some() {
+                            self.check_no_orphans()
+                                .map_err(|_| bad("SEGMENT_SUCCESSOR_MISSING"))?;
+                            self.announced_missing = true;
+                            self.sealed = false;
+                            self.complete = false;
+                        } else {
+                            self.check_no_orphans()?;
+                        }
+                        self.ended = true;
+                        return Ok(None);
                     }
                     let previous = SegmentRef {
                         file: file_name(&segment_path(&self.first, self.index)),
@@ -326,15 +449,36 @@ impl ChainReader {
                         events_through: self.events,
                     };
                     let mut next = journal::Reader::open_capture(&path)?;
-                    let link = match next.next_frame()? {
-                        Some(f) if f.kind == kind::SEGMENT_LINK => f.typed::<SegmentLink>()?,
+                    match next.next_frame()? {
+                        Some(f) if f.kind == kind::SEGMENT_RECOVERY && !self.reader.sealed => {
+                            let rec = f.typed::<SegmentRecovery>()?;
+                            let crashed =
+                                std::fs::metadata(segment_path(&self.first, self.index))?.len();
+                            if rec.index != self.index + 1
+                                || self.set_id.is_some_and(|s| s != rec.set_id)
+                                || rec.previous != previous
+                                || rec.torn_bytes != crashed.saturating_sub(self.reader.position())
+                            {
+                                return Err(bad("SEGMENT_RECOVERY_MISMATCH"));
+                            }
+                            self.set_id = Some(rec.set_id);
+                            self.recovered += 1;
+                            self.torn_bytes += rec.torn_bytes;
+                        }
+                        _ if announced.is_none() => return Err(bad("SEGMENT_ORPHAN")),
+                        _ if !self.reader.sealed || !self.reader.complete => {
+                            return Err(bad("SEGMENT_INTERMEDIATE_UNSEALED"))
+                        }
+                        Some(f) if f.kind == kind::SEGMENT_LINK => {
+                            let link = f.typed::<SegmentLink>()?;
+                            if link.index != self.index + 1
+                                || Some(link.set_id) != self.set_id
+                                || link.previous != previous
+                            {
+                                return Err(bad("SEGMENT_LINK_MISMATCH"));
+                            }
+                        }
                         _ => return Err(bad("SEGMENT_LINK_MISSING")),
-                    };
-                    if link.index != self.index + 1
-                        || Some(link.set_id) != self.set_id
-                        || link.previous != previous
-                    {
-                        return Err(bad("SEGMENT_LINK_MISMATCH"));
                     }
                     self.reader = next;
                     self.index += 1;
@@ -382,6 +526,9 @@ pub struct ChainSummary {
     pub events: u64,
     pub sealed: bool,
     pub complete: bool,
+    /// DEC-16: segments continued after a crash and the unreadable tail bytes they left.
+    pub recovered: u32,
+    pub torn_bytes: u64,
 }
 
 pub fn verify_chain(first: &Path) -> Result<ChainSummary, String> {
@@ -398,6 +545,8 @@ pub fn verify_chain(first: &Path) -> Result<ChainSummary, String> {
         events: r.events(),
         sealed: r.sealed,
         complete: r.complete,
+        recovered: r.recovered,
+        torn_bytes: r.torn_bytes,
     })
 }
 
@@ -671,6 +820,168 @@ mod tests {
         })
         .contains("SEGMENT_ORPHAN"));
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    fn append_rows(w: &mut SegmentedWriter, rows: &[(Provenance, Vec<u8>)]) {
+        for chunk in rows.chunks(4) {
+            w.append_batch(chunk.iter().map(|(p, b)| {
+                (
+                    MarketCoverage::KIND,
+                    MarketCoverage::SCHEMA,
+                    p,
+                    b.as_slice(),
+                )
+            }))
+            .unwrap();
+        }
+    }
+
+    /// DEC-16 (SK-07 recovery): a run restarted after a crash continues its chain by a recovery
+    /// successor; the crashed segment (readable frames plus a torn tail) is never changed, the
+    /// chain replays every readable frame in order and reports the recovery and the torn bytes.
+    /// A window boundary rotates on request.
+    #[test]
+    fn dec16_a_crashed_chain_continues_by_its_recovery_link_and_stays_unchanged() {
+        for max in [4096, 0] {
+            let d = dir("recover");
+            let first = d.join("market.p0j");
+            let before = rows(40);
+            let n = write(&first, max, &before, false);
+            let crashed = segment_path(&first, n);
+            // A torn tail: the last frame's write never completed (row 39 is lost).
+            let mut bytes = std::fs::read(&crashed).unwrap();
+            bytes.truncate(bytes.len() - 5);
+            std::fs::write(&crashed, &bytes).unwrap();
+            let (mut w, how) = SegmentedWriter::recover(&first, max).unwrap();
+            let Recovered::Crash {
+                segment,
+                torn_bytes,
+            } = how
+            else {
+                panic!("{how:?}")
+            };
+            assert!(segment == n && torn_bytes > 0, "{how:?}");
+            let after: Vec<_> = rows(50)[40..].to_vec();
+            append_rows(&mut w, &after[..4]);
+            w.rotate_now().unwrap();
+            append_rows(&mut w, &after[4..]);
+            w.seal(true).unwrap();
+            assert_eq!(
+                std::fs::read(&crashed).unwrap(),
+                bytes,
+                "the crashed segment is unchanged"
+            );
+            let s = verify_chain(&first).unwrap();
+            assert_eq!(
+                (
+                    s.segments,
+                    s.events,
+                    s.sealed,
+                    s.complete,
+                    s.recovered,
+                    s.torn_bytes
+                ),
+                (n + 2, 49, true, true, 1, torn_bytes),
+                "{max}"
+            );
+            let replayed: Vec<u64> = replay(&first).unwrap().iter().map(|r| r.0).collect();
+            assert_eq!(replayed, (0..39).chain(40..50).collect::<Vec<_>>());
+            std::fs::remove_dir_all(d).unwrap();
+        }
+    }
+
+    /// DEC-16: nothing is recovered from a chain that ended in order, and a recovery link fails
+    /// closed when the crashed segment it binds changed afterwards.
+    #[test]
+    fn dec16_recovery_refuses_a_sealed_chain_and_fails_closed_on_a_changed_crash() {
+        let d = dir("recover_refused");
+        let sealed = d.join("s/market.p0j");
+        std::fs::create_dir_all(sealed.parent().unwrap()).unwrap();
+        write(&sealed, 4096, &rows(20), true);
+        assert_eq!(
+            SegmentedWriter::recover(&sealed, 4096)
+                .err()
+                .unwrap()
+                .to_string(),
+            "SEGMENT_CHAIN_SEALED"
+        );
+        let first = d.join("c/market.p0j");
+        std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+        let n = write(&first, 4096, &rows(20), false);
+        let (mut w, _) = SegmentedWriter::recover(&first, 4096).unwrap();
+        append_rows(&mut w, &rows(24)[20..]);
+        w.seal(true).unwrap();
+        assert_eq!(verify_chain(&first).unwrap().recovered, 1);
+        let crashed = segment_path(&first, n);
+        let original = std::fs::read(&crashed).unwrap();
+        // More bytes behind the crash than the link binds.
+        let mut grown = original.clone();
+        grown.push(0);
+        std::fs::write(&crashed, &grown).unwrap();
+        assert!(verify_chain(&first)
+            .unwrap_err()
+            .contains("SEGMENT_RECOVERY_MISMATCH"));
+        // A changed readable frame.
+        let mut flipped = original.clone();
+        let at = flipped.len() - 3;
+        flipped[at] ^= 0xff;
+        std::fs::write(&crashed, &flipped).unwrap();
+        assert!(verify_chain(&first).is_err());
+        std::fs::write(&crashed, &original).unwrap();
+        assert!(verify_chain(&first).is_ok());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: a rotation interrupted after its seal is finished with the announced successor
+    /// (its normal link, no recovery); interrupted before the seal it is a crash.
+    #[test]
+    fn dec16_an_interrupted_rotation_is_finished_with_its_announced_successor() {
+        for sealed in [true, false] {
+            let d = dir("rotation");
+            let p = d.join("market.p0j");
+            let mut w = Writer::create(&p).unwrap();
+            w.append_typed(
+                Provenance::default(),
+                &MarketCoverage::SlotFailed {
+                    slot: 1,
+                    error: "x".into(),
+                },
+            )
+            .unwrap();
+            w.append_typed(
+                Provenance::default(),
+                &SegmentNext {
+                    set_id: [1; 16],
+                    index: 1,
+                    next_file: "market.000002.p0j".into(),
+                },
+            )
+            .unwrap();
+            if sealed {
+                w.seal(true).unwrap();
+            } else {
+                w.sync().unwrap();
+            }
+            drop(w);
+            let (mut w, how) = SegmentedWriter::recover(&p, 0).unwrap();
+            let expected = if sealed {
+                Recovered::Rotation { segment: 1 }
+            } else {
+                Recovered::Crash {
+                    segment: 1,
+                    torn_bytes: 0,
+                }
+            };
+            assert_eq!(how, expected);
+            append_rows(&mut w, &rows(4));
+            w.seal(true).unwrap();
+            let s = verify_chain(&p).unwrap();
+            assert_eq!(
+                (s.segments, s.events, s.complete, s.recovered),
+                (2, 5, true, u32::from(!sealed))
+            );
+            std::fs::remove_dir_all(d).unwrap();
+        }
     }
 }
 

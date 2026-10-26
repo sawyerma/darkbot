@@ -21,7 +21,14 @@ fn verify(path: &Path) -> Result<String, String> {
     let (mut frames, mut root) = (0u64, [0u8; 32]);
     for index in 1..=chain.segments {
         let segment = darkbot_runner::storage::segments::segment_path(path, index);
-        let mut reader = Reader::open(&segment).map_err(|e| e.to_string())?;
+        // DEC-16: an intermediate segment is sealed or a crashed one its recovery link binds
+        // (checked above); its torn tail ends its readable frames.
+        let mut reader = if index < chain.segments {
+            Reader::open_capture(&segment)
+        } else {
+            Reader::open(&segment)
+        }
+        .map_err(|e| e.to_string())?;
         while let Some(frame) = reader.next_frame().map_err(|e| e.to_string())? {
             *kinds.entry(frame.kind).or_default() += 1;
             if frame.kind != MANIFEST && !journal::kind::ALL.contains(&frame.kind) {
@@ -40,11 +47,13 @@ fn verify(path: &Path) -> Result<String, String> {
     };
     let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{k}:{n}")).collect();
     Ok(format!(
-        "JOURNAL status={status} frames={frames} segments={} sealed={} root_sha256={} kinds={}",
+        "JOURNAL status={status} frames={frames} segments={} sealed={} root_sha256={} kinds={} recovered={} torn_bytes={}",
         chain.segments,
         chain.sealed,
         journal::hex(&root),
-        kinds.join(",")
+        kinds.join(","),
+        chain.recovered,
+        chain.torn_bytes
     ))
 }
 /// Explicit offline import of one row stream (the C0 census). Only kinds listed as importable
@@ -188,5 +197,46 @@ fn main() {
     if let Err(error) = result {
         eprintln!("JOURNAL_INVALID: {error}");
         std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use darkbot_runner::analytics::journal::Provenance;
+    use darkbot_runner::market_observer::rows::MarketCoverage;
+    use darkbot_runner::storage::segments::{segment_path, SegmentedWriter};
+
+    /// DEC-16: a chain continued after a crash (its crashed segment with a torn tail) verifies
+    /// with its recovery reported; the crashed segment's readable frames are counted.
+    #[test]
+    fn dec16_verify_reports_a_recovered_chain() {
+        let d = std::env::temp_dir().join(format!("p0_journal_recovered_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let first = d.join("market.p0j");
+        let row = |slot| MarketCoverage::SlotFailed {
+            slot,
+            error: "x".into(),
+        };
+        let mut w = SegmentedWriter::create(&first, 0).unwrap();
+        for slot in 0..3 {
+            w.append_typed(Provenance::default(), &row(slot)).unwrap();
+        }
+        w.sync().unwrap();
+        drop(w); // crash: never sealed
+        let crashed = segment_path(&first, 1);
+        let bytes = std::fs::read(&crashed).unwrap();
+        std::fs::write(&crashed, &bytes[..bytes.len() - 3]).unwrap();
+        let (mut w, _) = SegmentedWriter::recover(&first, 0).unwrap();
+        w.append_typed(Provenance::default(), &row(9)).unwrap();
+        w.seal(true).unwrap();
+        let line = super::verify(&first).unwrap();
+        assert!(line.starts_with("JOURNAL status=COMPLETE "), "{line}");
+        assert!(
+            line.contains(" segments=2 ") && line.contains(" recovered=1 "),
+            "{line}"
+        );
+        assert!(!line.contains(" torn_bytes=0"), "{line}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

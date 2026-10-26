@@ -74,6 +74,8 @@ pub mod kind {
     /// SK-07 segment chain control frames (first frame of a continuation / last before seal).
     pub const SEGMENT_LINK: u16 = 330;
     pub const SEGMENT_NEXT: u16 = 331;
+    /// SK-07 recovery (DEC-16): first frame of the segment that continues a chain after a crash.
+    pub const SEGMENT_RECOVERY: u16 = 332;
     /// Native C0-E1 report (B7): normalized dataset identity and one reproducible query
     /// (`report_query_identity`), each a sealed single-value journal under `reports/native/`.
     pub const REPORT_DATASET: u16 = 340;
@@ -189,6 +191,7 @@ pub mod kind {
         CAPACITY_PREFLIGHT,
         SEGMENT_LINK,
         SEGMENT_NEXT,
+        SEGMENT_RECOVERY,
         REPORT_DATASET,
         REPORT_QUERY,
         C0E1_QUALIFICATION,
@@ -1004,6 +1007,10 @@ impl Reader {
     /// Chain head after the frames read so far: the header hash before the first frame.
     pub fn root(&self) -> [u8; 32] {
         self.last
+    }
+    /// Byte position after the frames read so far (the readable prefix of a torn file).
+    pub fn position(&self) -> u64 {
+        self.position
     }
     pub fn next_frame(&mut self) -> io::Result<Option<Frame>> {
         if self.tail_truncated {
