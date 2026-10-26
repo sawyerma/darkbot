@@ -1374,6 +1374,7 @@ mod contract_tests {
             boot: Some(darkbot_runner::orchestration::boot_control::BootView {
                 flow_id: "flow-1".into(),
                 mode: "econ4h".into(),
+                duration: "1h".into(),
                 created_unix_ms: Some(1_760_000_001_000),
                 offline_verdict: "OFFLINE_READY_NETWORK_NOT_RUN",
                 offline_token: "0123456789abcdef".into(),
@@ -1400,6 +1401,7 @@ mod contract_tests {
                     finished_unix_ms: None,
                 },
             }),
+            boot_error: None,
         }
     }
 

@@ -809,8 +809,10 @@ pub struct AnalyticsSnapshot {
     pub jobs: Vec<JobStatus>,
     /// Why the job store was not readable (the job list is then empty, never a guess).
     pub error: Option<String>,
-    /// DEC-07: the boot controller's newest flow (`None`: no flow yet).
+    /// DEC-07: the boot controller's flow (the active one, else the newest; `None`: no flow).
     pub boot: Option<crate::orchestration::boot_control::BootView>,
+    /// DEC-07: why the boot store was not (completely) readable; `None` when read.
+    pub boot_error: Option<String>,
 }
 
 fn layout_of(run: &Path) -> &'static str {
@@ -863,6 +865,7 @@ pub fn projection(
         Ok(busy) => (busy, None),
         Err(e) => (false, Some(e)),
     };
+    let (boot, boot_error) = crate::orchestration::boot_control::projection(project);
     AnalyticsSnapshot {
         at_unix_ms: 0,
         runner_busy,
@@ -870,7 +873,8 @@ pub fn projection(
         runs,
         jobs,
         error,
-        boot: crate::orchestration::boot_control::projection(project),
+        boot,
+        boot_error,
     }
 }
 

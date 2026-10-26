@@ -219,6 +219,9 @@ fn evidence_path_ok(s: &str) -> bool {
 }
 /// A `run start --duration` value: digits and one unit (`p0ctl` checks it is a supported one).
 fn duration_ok(s: &str) -> bool {
+    if !s.is_ascii() {
+        return false;
+    }
     let (digits, unit) = s.split_at(s.len().saturating_sub(1));
     (1..=6).contains(&digits.len())
         && digits.bytes().all(|b| b.is_ascii_digit())
@@ -365,7 +368,7 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
         // bounds), every later step names that flow and the token it approves.
         BOOT_OFFLINE if req.resource_id.is_empty() => {
             let c = BootOfflineCommand::decode(req.params.as_ref()).ok()?;
-            if !["econ4h", "shadow"].contains(&c.mode.as_str()) {
+            if !["econ4h", "shadow"].contains(&c.mode.as_str()) || !duration_ok(&c.duration) {
                 return None;
             }
             let mut args: Vec<String> = [
@@ -376,6 +379,8 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 &req.request_id,
                 "--mode",
                 &c.mode,
+                "--duration",
+                &c.duration,
             ]
             .map(String::from)
             .to_vec();
@@ -424,7 +429,10 @@ fn job_args(req: &CommandRequest) -> Option<Vec<String>> {
                 || !token_ok(&c.approved_token)
                 || !duration_ok(&c.duration)
                 || !capture_source_ok(&c.capture_source)
-                || !["off", "strict"].contains(&c.chain_verify.as_str())
+                // Online strict verification needs the operator's provider evidence: a terminal
+                // action (`p0ctl boot start --chain-verify strict --provider-evidence`), as for
+                // project0.capture.verify.start.
+                || c.chain_verify != "off"
             {
                 return None;
             }
@@ -2422,6 +2430,7 @@ mod tests {
             BootOfflineCommand {
                 mode: mode.into(),
                 ttl_seconds: ttl,
+                duration: "1h".into(),
             }
             .encode_to_vec()
         };
@@ -2435,6 +2444,8 @@ mod tests {
                 "12345678-1234-1234-1234-123456789abc",
                 "--mode",
                 "econ4h",
+                "--duration",
+                "1h",
                 "--",
                 "--boot-token-ttl-seconds",
                 "90"
@@ -2444,8 +2455,20 @@ mod tests {
             job_args(&req(BOOT_OFFLINE, "", offline("shadow", None), None))
                 .unwrap()
                 .len(),
-            7
+            9
         );
+        for duration in ["", "1é", "10x"] {
+            let c = BootOfflineCommand {
+                mode: "econ4h".into(),
+                ttl_seconds: None,
+                duration: duration.into(),
+            };
+            assert_eq!(
+                job_args(&req(BOOT_OFFLINE, "", c.encode_to_vec(), None)),
+                None,
+                "{duration}"
+            );
+        }
         assert_eq!(
             job_args(&req(BOOT_OFFLINE, "", offline("live", None), None)),
             None
@@ -2510,7 +2533,13 @@ mod tests {
             job_args(&req(BOOT_START, "", start("10m", "off"), None)).unwrap()[..3],
             ["p0", "boot", "start"]
         );
-        for (duration, verify) in [("10x", "off"), ("", "off"), ("10m", "index")] {
+        for (duration, verify) in [
+            ("10x", "off"),
+            ("", "off"),
+            ("1é", "off"),
+            ("10m", "index"),
+            ("10m", "strict"),
+        ] {
             assert_eq!(
                 job_args(&req(BOOT_START, "", start(duration, verify), None)),
                 None,

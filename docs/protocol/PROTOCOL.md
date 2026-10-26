@@ -1604,7 +1604,8 @@ i128 as SignedDecimal (*_signed), u128 sums as UnsignedDecimal (*_sum).
 | jobs | [AnalyticsJob](#darkbot-project0-v1-AnalyticsJob) | repeated | Newest requests first, at most analytics_jobs_listed. |
 | store_error | [string](#string) |  | Why the job store was not readable (jobs is then empty); empty when read. |
 | runner_error | [string](#string) |  | Why the runner state is unknown (runner_busy is then not a fact); empty when known. |
-| boot | [BootFlow](#darkbot-project0-v1-BootFlow) |  | DEC-07: the boot controller&#39;s newest flow (data/boot, `p0ctl boot …`), shown on the Capture tab: this always-on feed is the controller&#39;s projection while no capture runs. Unset without a flow. |
+| boot | [BootFlow](#darkbot-project0-v1-BootFlow) |  | DEC-07: the boot controller&#39;s flow (data/boot, `p0ctl boot …`) — the one with an active step, else the newest — shown on the Capture tab: this always-on feed is the controller&#39;s projection while no capture runs. Unset without a flow. |
+| boot_error | [string](#string) |  | DEC-07: why the boot store was not (completely) readable; empty when read. |
 
 
 
@@ -1693,7 +1694,7 @@ new flow). Tokens are the 16-character content hashes an approval names, never k
 | offline_verdict | [string](#string) |  | READY | OFFLINE_READY_NETWORK_NOT_RUN | BLOCKED |
 | offline_token | [string](#string) |  | What the network approval names. |
 | offline_blocked | [string](#string) | repeated | `id: reason` of every critical offline check that did not pass. |
-| ttl_seconds | [uint64](#uint64) |  | The flow&#39;s TTL (registry boot_token_ttl_seconds, 10..=120 s, fixed at its offline step) and the source of that value (builtin_default | environment | config_file | cli). |
+| ttl_seconds | [uint64](#uint64) |  | The flow&#39;s TTL (registry boot_token_ttl_seconds, 10..=120 s, fixed at its offline step) and the source of that value as the resolution names it (profile:&lt;name&gt; | environment | config_file | cli). |
 | ttl_source | [string](#string) |  | Where ttl_seconds came from. |
 | network | [BootStep](#darkbot-project0-v1-BootStep) |  | The network audit step. |
 | network_verdict | [string](#string) | optional | The network record&#39;s verdict and what the start approval names; unset before the record. |
@@ -1702,6 +1703,7 @@ new flow). Tokens are the 16-character content hashes an approval names, never k
 | observed_unix_s | [uint64](#uint64) | optional | The record&#39;s TTL window: its oldest network read and its expiry (unix seconds). |
 | expires_unix_s | [uint64](#uint64) | optional | observed_unix_s &#43; ttl_seconds; a start is admitted only before it. |
 | start | [BootStep](#darkbot-project0-v1-BootStep) |  | The start step. |
+| duration | [string](#string) |  | The run&#39;s --duration the flow audits and starts (fixed at its offline step). |
 
 
 
@@ -1739,6 +1741,7 @@ flow; its TTL is fixed here (between runs).
 | ----- | ---- | ----- | ----------- |
 | mode | [string](#string) |  | econ4h | shadow |
 | ttl_seconds | [uint64](#uint64) | optional | 10..=120 s; unset: the registry&#39;s value. |
+| duration | [string](#string) |  | The run&#39;s --duration (10m | 1h | 5h | 24h): part of the audited configuration. |
 
 
 
@@ -1755,7 +1758,7 @@ Parameters of project0.boot.start: the operator&#39;s approval of exactly this n
 | ----- | ---- | ----- | ----------- |
 | flow_id | [string](#string) |  | The flow whose network audit is approved. |
 | approved_token | [string](#string) |  | The flow&#39;s network token (16 characters) as the operator saw it. |
-| duration | [string](#string) |  | 10m | 1h | 5h | 24h (`run start --duration`) |
+| duration | [string](#string) |  | Must equal the flow&#39;s duration (`p0ctl boot start` refuses another one). |
 | capture_source | [string](#string) |  | logs | transactions |
 | chain_verify | [string](#string) |  | off | strict |
 

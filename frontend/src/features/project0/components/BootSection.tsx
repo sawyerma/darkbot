@@ -34,17 +34,19 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
   const [ttlInput, setTtl] = useState("");
   const [genesis, setGenesis] = useState("");
   const [evidence, setEvidence] = useState("");
-  const [source, setSource] = useState<"logs" | "transactions">("logs");
+  const [chosenSource, setSource] = useState<"logs" | "transactions">("logs");
   const [duration, setDuration] = useState<string>(DURATIONS[0]);
-  const [verify, setVerify] = useState<"off" | "strict">("off");
   const [nowS, setNow] = useState(() => BigInt(Math.floor(Date.now() / 1000)));
   useEffect(() => {
     const t = setInterval(() => setNow(BigInt(Math.floor(Date.now() / 1000))), 1000);
     return () => clearInterval(t);
   }, []);
   const blocked = busy ? "Command in progress" : !live ? "Boot controller projection not current" : "";
-  const offline = bootOfflineCommand(mode, ttlInput);
+  const offline = bootOfflineCommand(mode, ttlInput, duration);
   const left = flow ? ttlLeft(flow, nowS) : null;
+  // A Shadow run captures logs (`run start` passes no source for it).
+  const source = flow?.mode === "shadow" ? "logs" : chosenSource;
+  const active = flow != null && [flow.network.state, flow.start.state].some(s => s === "QUEUED" || s === "RUNNING");
   const network = flow
     ? bootNetworkCommand({ flowId: flow.flowId, token: flow.offlineToken, genesisHash: genesis, providerEvidence: evidence, captureSource: source })
     : { problem: "Run the offline preflight first." };
@@ -52,8 +54,9 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
     : flow.network.state !== "NOT_RUN" ? `Network audit ${flow.network.state}; a new attempt is a new offline preflight`
       : "problem" in network ? network.problem : "";
   const start = flow
-    ? bootStartCommand({ flowId: flow.flowId, token: flow.networkToken ?? "", duration, captureSource: source, chainVerify: verify })
+    ? bootStartCommand({ flowId: flow.flowId, token: flow.networkToken ?? "", duration: flow.duration, captureSource: source, chainVerify: "off" })
     : { problem: "No flow." };
+  const offlineWhy = active ? "A boot step of this flow is active" : "problem" in offline ? offline.problem : "";
   const startWhy = !flow ? "" : flow.network.state !== "COMPLETED" || flow.networkVerdict !== "READY" ? "No READY network audit"
     : flow.start.state !== "NOT_RUN" ? `Start ${flow.start.state}; a new attempt is a new offline preflight`
       : left === 0n ? "The network audit's TTL has expired; a new attempt is a new offline preflight"
@@ -66,16 +69,18 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
         <option value="econ4h">Market + Shadow (econ4h)</option><option value="shadow">Shadow only</option></select></label>
       <label>TTL · seconds<input type="number" min={ttl ? String(ttl.minimum) : undefined} max={ttl ? String(ttl.maximum) : undefined}
         placeholder={ttl ? `${ttl.value} (registry)` : "registry value"} value={ttlInput} onChange={e => setTtl(e.target.value)}/></label>
+      <label>Boot duration<select value={duration} onChange={e => setDuration(e.target.value)}>{DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
     </div>
-    <div className="p0-actions"><button className="p0-secondary" disabled={blocked !== "" || "problem" in offline} title={blocked || ("problem" in offline ? offline.problem : undefined)}
+    {live && analytics?.bootError ? <DetailRow title="Boot store" value={analytics.bootError}/> : null}
+    <div className="p0-actions"><button className="p0-secondary" disabled={blocked !== "" || offlineWhy !== ""} title={blocked || offlineWhy || undefined}
       onClick={() => { if ("params" in offline) void analyticsCommand("project0.boot.offline", { params: offline.params }); }}>Run offline preflight</button></div>
     {flow ? <>
-      <DetailRow title="Offline preflight" value={`${flow.offlineVerdict} · token ${flow.offlineToken} · TTL ${flow.ttlSeconds} s (${flow.ttlSource})`}/>
+      <DetailRow title="Offline preflight" value={`${flow.offlineVerdict} · token ${flow.offlineToken} · TTL ${flow.ttlSeconds} s (${flow.ttlSource}) · duration ${flow.duration}`}/>
       {flow.offlineBlocked.map(b => <DetailRow key={`o${b}`} title="Offline · not passed" value={b}/>)}
       <div className="p0-formgrid">
         <label>Genesis hash<input value={genesis} onChange={e => setGenesis(e.target.value)} placeholder="Mainnet genesis pin"/></label>
         <label>Provider evidence<input value={evidence} onChange={e => setEvidence(e.target.value)} placeholder="/…/provider_evidence.p0j"/></label>
-        <label>Boot capture source<select value={source} onChange={e => setSource(e.target.value as "logs" | "transactions")}>
+        <label>Boot capture source<select value={source} disabled={flow.mode === "shadow"} onChange={e => setSource(e.target.value as "logs" | "transactions")}>
           <option value="logs">Logs</option><option value="transactions">Transactions</option></select></label>
       </div>
       <div className="p0-actions"><button className="p0-secondary" disabled={blocked !== "" || networkWhy !== ""} title={blocked || networkWhy || undefined}
@@ -85,19 +90,14 @@ export function BootSection({ analytics, topicStatus, ttl }: { analytics: Analyt
       {flow.networkBlocked.map(b => <DetailRow key={`n${b}`} title="Network · not passed" value={b}/>)}
       {flow.observedUnixS != null && flow.expiresUnixS != null
         ? <DetailRow title="TTL window" value={`${iso(flow.observedUnixS)}–${iso(flow.expiresUnixS)} UTC · ${left === 0n ? "expired" : `${left} s left`}`}/> : null}
-      <div className="p0-formgrid">
-        <label>Boot duration<select value={duration} onChange={e => setDuration(e.target.value)}>{DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
-        <label>Boot chain verification<select value={verify} onChange={e => setVerify(e.target.value as "off" | "strict")}>
-          <option value="off">Off</option><option value="strict">Strict</option></select></label>
-      </div>
       <div className="p0-actions"><button className="p0-primary" disabled={blocked !== "" || startWhy !== ""} title={blocked || startWhy || undefined}
         onClick={() => { if ("params" in start) void analyticsCommand("project0.boot.start", { params: start.params }); }}>
-        Approve start · token {flow.networkToken ?? "—"}</button>
+        Approve start · token {flow.networkToken ?? "—"} · {flow.duration}</button>
         {running ? <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
           onClick={() => void analyticsCommand("project0.boot.cancel", { resourceId: flow.flowId })}>Stop boot step</button> : null}</div>
       <DetailRow title="Start" value={step(flow.start)}/>
     </> : <p className="p0-quiet">{live ? "No boot flow yet." : `Boot controller projection ${topicStatus}; not current.`}</p>}
     {receipt && BOOT_ACTIONS.has(receipt.action) ? <Notice><span data-testid="p0-boot-command-receipt">Command {receipt.phase}{receipt.detail ? ` · ${receipt.detail}` : ""}</span></Notice> : null}
-    <p className="p0-note">The network audit reads Mainnet read-only only after its approval; the start reads Mainnet for the run's duration after its own approval, within the record's TTL. A new attempt is a new offline preflight; nothing is approved or repeated automatically.</p>
+    <p className="p0-note">The network audit reads Mainnet read-only only after its approval; the start reads Mainnet for the flow's duration after its own approval, within the record's TTL, with chain verification off (online strict is a terminal action: p0ctl boot start --chain-verify strict --provider-evidence). A new attempt is a new offline preflight; nothing is approved or repeated automatically.</p>
   </Section>;
 }

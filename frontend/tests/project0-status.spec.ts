@@ -403,22 +403,24 @@ test("DEC-07: the boot flow on the Capture tab — TTL, tokens and window; each 
   const row = (title: string) => page.locator(".p0-line", { hasText: title }).first();
   // The registry's TTL with its bounds and source; the flow's own TTL, tokens and window.
   await expect(row("TTL · registry")).toContainText("60 s · 10…120 s · builtin_default");
-  await expect(row("Offline preflight")).toContainText("OFFLINE_READY_NETWORK_NOT_RUN · token 0123456789abcdef · TTL 90 s (cli)");
+  await expect(row("Offline preflight")).toContainText("OFFLINE_READY_NETWORK_NOT_RUN · token 0123456789abcdef · TTL 90 s (cli) · duration 1h");
   await expect(row("Network audit")).toContainText("COMPLETED · READY · token fedcba9876543210");
   await expect(row("TTL window")).toContainText("s left");
   // The network step ran: its approval is closed (a new attempt is a new offline preflight).
   await expect(page.getByRole("button", { name: /Approve network reads/ })).toBeDisabled();
-  await page.getByLabel("Boot duration").selectOption("1h");
-  await page.getByRole("button", { name: "Approve start · token fedcba9876543210" }).click();
+  // The start is the flow's audited duration (never a selection of its own).
+  await page.getByRole("button", { name: "Approve start · token fedcba9876543210 · 1h" }).click();
   await expect(page.getByTestId("p0-boot-command-receipt")).toContainText("COMPLETED");
   const start = sent.at(-1)!;
   expect(start.action).toBe("project0.boot.start");
   const s = fromBinary(BootStartCommandSchema, start.params);
   expect([s.flowId, s.approvedToken, s.duration, s.captureSource, s.chainVerify]).toEqual(["flow-1", "fedcba9876543210", "1h", "logs", "off"]);
-  // A new flow: its offline preflight carries the TTL (the controller checks the bounds).
+  // A new flow: its offline preflight carries the TTL (the controller checks the bounds) and the
+  // run's duration, both part of what is audited.
   await page.getByLabel("TTL · seconds").fill("90");
+  await page.getByLabel("Boot duration").selectOption("5h");
   await page.getByRole("button", { name: "Run offline preflight" }).click();
   await expect.poll(() => sent.length).toBe(2);
   const o = fromBinary(BootOfflineCommandSchema, sent.at(-1)!.params);
-  expect([sent.at(-1)!.action, o.mode, o.ttlSeconds]).toEqual(["project0.boot.offline", "econ4h", 90n]);
+  expect([sent.at(-1)!.action, o.mode, o.ttlSeconds, o.duration]).toEqual(["project0.boot.offline", "econ4h", 90n, "5h"]);
 });

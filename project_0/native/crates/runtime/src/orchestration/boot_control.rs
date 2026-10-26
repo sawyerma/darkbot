@@ -14,6 +14,8 @@
 //! * `network.p0j`: the network audit record; `network.outcome.p0j` the step's outcome.
 //! * `start.outcome.p0j`: the start step's outcome (the run it launched).
 //! * `<step>.lock`: held by the step's one worker, its pid inside; `<step>.spawn` its spawner.
+//! * `.probe.lock` serializes every check-then-act of the store (a new flow, a step's request);
+//!   `.runner.lock` is held by the one running step of the project for its whole run.
 use super::boot_audit::{AuditVerdict, BootAudit, CheckState, NetworkAudit};
 use crate::analytics::jobs::{alive, flock_nb, held, open_lock, valid_id, worker_record};
 use crate::analytics::journal;
@@ -26,6 +28,8 @@ use std::path::{Path, PathBuf};
 /// The boot flows of a project.
 pub const BOOT_DIR: &str = "data/boot";
 const FLOW: &str = "flow.p0j";
+const PROBE_LOCK: &str = ".probe.lock";
+const RUNNER_LOCK: &str = ".runner.lock";
 /// The network audit record of a flow (`p0ctl boot network` writes it, `boot start` reads it).
 pub const NETWORK_RECORD: &str = "network.p0j";
 /// The network audit step.
@@ -46,6 +50,9 @@ pub struct BootFlow {
     pub mode: String,
     /// The operational arguments (after `--`) of every step of the flow.
     pub operational: Vec<String>,
+    /// The run's `--duration`: part of the audited configuration, so the flow audits and starts
+    /// exactly this duration (`boot_audit::start_config`).
+    pub duration: String,
     pub offline: BootAudit,
     pub ttl_seconds: u64,
     pub ttl_source: String,
@@ -140,6 +147,35 @@ fn file(step: &str, suffix: &str) -> Result<String, String> {
     }
 }
 
+/// The project's probe guard (held for a check-then-act only).
+fn probe_guard(project: &Path) -> Result<std::fs::File, String> {
+    std::fs::create_dir_all(store(project)).map_err(io)?;
+    let guard = open_lock(&store(project).join(PROBE_LOCK)).map_err(io)?;
+    // SAFETY: flock on an owned, open file descriptor.
+    if unsafe { libc::flock(guard.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(io(std::io::Error::last_os_error()));
+    }
+    Ok(guard)
+}
+
+/// Whether a boot step of the project is requested or running.
+fn busy(project: &Path) -> Result<bool, String> {
+    Ok(held(&store(project).join(RUNNER_LOCK))?
+        || list(project)?
+            .iter()
+            .any(|f| f.network.active() || f.start.active()))
+}
+
+/// `boot offline`: records a new flow — refused while a boot step of the project is active (a
+/// running flow never disappears behind a newer one).
+pub fn create_guarded(project: &Path, flow: &BootFlow) -> Result<(), String> {
+    let _guard = probe_guard(project)?;
+    if busy(project)? {
+        return Err("BOOT_BUSY: a boot step of this project is active".into());
+    }
+    create(project, flow)
+}
+
 /// Records a flow's offline step (an existing id is refused, never overwritten).
 pub fn create(project: &Path, flow: &BootFlow) -> Result<(), String> {
     let dir = flow_dir(project, &flow.flow_id)?;
@@ -216,21 +252,34 @@ pub fn status(project: &Path, flow_id: &str) -> Result<FlowStatus, String> {
 
 /// Every readable flow, newest first (ids break ties).
 pub fn list(project: &Path) -> Result<Vec<FlowStatus>, String> {
+    Ok(list_all(project)?.0)
+}
+
+/// Every readable flow, newest first, and the ids of the flow directories that were not.
+fn list_all(project: &Path) -> Result<(Vec<FlowStatus>, Vec<String>), String> {
     let entries = match std::fs::read_dir(store(project)) {
         Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((vec![], vec![])),
         Err(e) => return Err(io(e)),
     };
+    let mut unreadable = Vec::new();
     let mut flows: Vec<FlowStatus> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().to_str().map(String::from))
         .filter(|id| valid_id(id))
-        .filter_map(|id| status(project, &id).ok())
+        .filter_map(|id| match status(project, &id) {
+            Ok(s) => Some(s),
+            Err(_) => {
+                unreadable.push(id);
+                None
+            }
+        })
         .collect();
+    unreadable.sort();
     flows.sort_by(|a, b| {
         (b.flow.created_unix_ms, &b.flow.flow_id).cmp(&(a.flow.created_unix_ms, &a.flow.flow_id))
     });
-    Ok(flows)
+    Ok((flows, unreadable))
 }
 
 /// The step of `flow` the operator approves with `token`: the network step the offline audit's
@@ -276,6 +325,8 @@ pub fn begin(
     args: &[String],
 ) -> Result<(), String> {
     let dir = flow_dir(project, flow_id)?;
+    // The check and the spawn under the probe guard: two requests never both pass.
+    let _guard = probe_guard(project)?;
     let s = status(project, flow_id)?;
     let state = match step {
         NETWORK => &s.network,
@@ -288,10 +339,7 @@ pub fn begin(
             state.name()
         ));
     }
-    if list(project)?
-        .iter()
-        .any(|f| f.network.active() || f.start.active())
-    {
+    if busy(project)? {
         return Err("BOOT_BUSY: another boot step of this project is active".into());
     }
     check_approval(&s, step, token)?;
@@ -375,6 +423,23 @@ pub fn run_step(
         Ok(f) => f,
         Err(e) => return finish(FAILED, e, None, None),
     };
+    // One running boot step per project, for its whole run.
+    let runner = match open_lock(&store(project).join(RUNNER_LOCK)) {
+        Ok(r) => r,
+        Err(e) => return finish(FAILED, io(e), None, None),
+    };
+    match flock_nb(&runner, libc::LOCK_EX) {
+        Ok(true) => {}
+        Ok(false) => {
+            return finish(
+                FAILED,
+                "BOOT_BUSY: another boot step of this project runs".into(),
+                None,
+                None,
+            )
+        }
+        Err(e) => return finish(FAILED, io(e), None, None),
+    }
     let mut lock = match open_lock(&dir.join(file(step, "lock")?)) {
         Ok(l) => l,
         Err(e) => return finish(FAILED, io(e), None, None),
@@ -406,8 +471,11 @@ pub fn run_step(
         Err(code) if cancelled() => finish(CANCELLED, code, None, started)?,
         Err(code) => finish(FAILED, code, None, started)?,
     };
-    // SAFETY: flock on an owned, open file descriptor (released by the drop anyway).
-    unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
+    // SAFETY: flock on owned, open file descriptors (released by the drop anyway).
+    unsafe {
+        libc::flock(lock.as_raw_fd(), libc::LOCK_UN);
+        libc::flock(runner.as_raw_fd(), libc::LOCK_UN);
+    }
     Ok(outcome)
 }
 
@@ -438,6 +506,8 @@ pub fn cancel(project: &Path, flow_id: &str) -> Result<u32, String> {
 pub struct BootView {
     pub flow_id: String,
     pub mode: String,
+    /// The run's duration the flow audits and starts.
+    pub duration: String,
     pub created_unix_ms: Option<u64>,
     pub offline_verdict: &'static str,
     /// The 16 characters the network approval names.
@@ -508,6 +578,7 @@ impl BootView {
         Self {
             flow_id: s.flow.flow_id.clone(),
             mode: s.flow.mode.clone(),
+            duration: s.flow.duration.clone(),
             created_unix_ms: s.flow.created_unix_ms,
             offline_verdict: verdict(s.flow.offline.verdict),
             offline_token: token(&s.flow.offline.readiness_token),
@@ -525,9 +596,22 @@ impl BootView {
     }
 }
 
-/// The newest flow of the project as the Capture tab shows it (`None`: no flow yet).
-pub fn projection(project: &Path) -> Option<BootView> {
-    list(project).ok()?.first().map(BootView::of)
+/// The flow the Capture tab shows — the one with an active step, else the newest (`None`: no
+/// flow yet) — and why the store was not (completely) readable.
+pub fn projection(project: &Path) -> (Option<BootView>, Option<String>) {
+    match list_all(project) {
+        Ok((flows, unreadable)) => {
+            let shown = flows
+                .iter()
+                .find(|f| f.network.active() || f.start.active())
+                .or(flows.first())
+                .map(BootView::of);
+            let error = (!unreadable.is_empty())
+                .then(|| format!("BOOT_FLOW_UNREADABLE: {}", unreadable.join(",")));
+            (shown, error)
+        }
+        Err(e) => (None, Some(e)),
+    }
 }
 
 #[cfg(test)]

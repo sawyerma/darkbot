@@ -20,6 +20,7 @@ fn flow(id: &str) -> BootFlow {
         flow_id: id.into(),
         mode: "econ4h".into(),
         operational: vec!["--boot-token-ttl-seconds".into(), "90".into()],
+        duration: "1h".into(),
         offline,
         ttl_seconds: 90,
         ttl_source: "cli".into(),
@@ -174,12 +175,61 @@ fn dec07_no_step_is_requested_twice_and_one_boot_step_runs_per_project() {
     drop(lock);
 }
 
+/// A new flow is refused while a boot step of the project is active (the running flow never
+/// disappears behind a newer one), and the Capture tab shows the flow with the active step, not
+/// the newest; an unreadable flow is reported, never hidden.
+#[test]
+fn dec07_a_running_flow_stays_shown_and_blocks_a_new_one() {
+    let p = project("active");
+    create_guarded(&p, &flow("running")).unwrap();
+    let dir = flow_dir(&p, "running").unwrap();
+    std::fs::write(dir.join("start.spawn"), "pid=1\n").unwrap();
+    let lock = open_lock(&dir.join("start.lock")).unwrap();
+    assert!(flock_nb(&lock, libc::LOCK_EX).unwrap());
+    let mut newer = flow("newer");
+    newer.created_unix_ms = Some(9);
+    assert!(create_guarded(&p, &newer)
+        .unwrap_err()
+        .starts_with("BOOT_BUSY"));
+    create(&p, &newer).unwrap();
+    let (shown, error) = projection(&p);
+    assert_eq!(shown.unwrap().flow_id, "running", "the active flow first");
+    assert_eq!(error, None);
+    drop(lock);
+    std::fs::create_dir_all(store(&p).join("broken")).unwrap();
+    std::fs::write(store(&p).join("broken").join(FLOW), b"not a journal").unwrap();
+    let (_, error) = projection(&p);
+    assert_eq!(error.as_deref(), Some("BOOT_FLOW_UNREADABLE: broken"));
+}
+
+/// One running step per project even when two workers race: the runner lock refuses the second.
+#[test]
+fn dec07_two_workers_never_run_two_steps() {
+    let p = project("runner");
+    create(&p, &flow("a")).unwrap();
+    create(&p, &flow("b")).unwrap();
+    let runner = open_lock(&store(&p).join(RUNNER_LOCK)).unwrap();
+    assert!(flock_nb(&runner, libc::LOCK_EX).unwrap());
+    let refused = run_step(&p, "b", NETWORK, never, |_, _| Ok(None)).unwrap();
+    assert_eq!(
+        (refused.state.as_str(), refused.code.as_str()),
+        (FAILED, "BOOT_BUSY: another boot step of this project runs")
+    );
+    drop(runner);
+    assert_eq!(
+        run_step(&p, "a", NETWORK, never, |_, _| Ok(None))
+            .unwrap()
+            .state,
+        COMPLETED
+    );
+}
+
 /// The Capture tab's view of the newest flow: verdicts, the 16-character tokens each approval
 /// names, the flow's TTL and source, the network record's TTL window and every step's state.
 #[test]
 fn dec07_the_capture_view_shows_ttl_tokens_window_and_steps() {
     let p = project("view");
-    assert_eq!(projection(&p), None);
+    assert_eq!(projection(&p), (None, None));
     create(&p, &flow("old")).unwrap();
     let mut newer = flow("new");
     newer.created_unix_ms = Some(2);
@@ -187,8 +237,8 @@ fn dec07_the_capture_view_shows_ttl_tokens_window_and_steps() {
     newer.offline.checks[0].reason = "BOOT_X".into();
     create(&p, &newer).unwrap();
     let record = network_done(&p, "new");
-    let v = projection(&p).unwrap();
-    assert_eq!(v.flow_id, "new");
+    let v = projection(&p).0.unwrap();
+    assert_eq!((v.flow_id.as_str(), v.duration.as_str()), ("new", "1h"));
     assert_eq!(
         (v.offline_verdict, v.offline_token.as_str()),
         ("OFFLINE_READY_NETWORK_NOT_RUN", "aaaaaaaaaaaaaaaa")

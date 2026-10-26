@@ -47,7 +47,7 @@ fn check(id: &str, name: &str, result: Result<String, &str>, slot: u64) -> BootC
     }
 }
 /// Actual expectations: supplied genesis pin; immutable checked-in ProgramData pin, never re-pinned.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Spec {
     pub genesis: String,
     pub transactions: bool,
@@ -55,7 +55,33 @@ pub struct Spec {
     pub ttl_seconds: u64,
     pub ttl_source: String,
 }
+/// DEC-07: the source of the TTL as a resolution names it (`sources` of a `Resolved`).
+pub fn ttl_source(sources: &std::collections::BTreeMap<String, String>) -> String {
+    sources
+        .get("boot_token_ttl_seconds")
+        .cloned()
+        .unwrap_or_else(|| "builtin_default".into())
+}
 impl Spec {
+    /// DEC-07: the audit's expectations — the operator's genesis pin and capture source — with
+    /// the registry TTL of `c` and that value's source.
+    pub fn of(
+        c: &RuntimeConfig,
+        ttl_source: String,
+        genesis: Option<String>,
+        capture_source: Option<&str>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            genesis: genesis.ok_or("BOOT_GENESIS_PIN_REQUIRED")?,
+            transactions: match capture_source {
+                None | Some("logs") => false,
+                Some("transactions") => true,
+                _ => return Err("BOOT_CAPTURE_SOURCE".into()),
+            },
+            ttl_seconds: c.limits.boot_token_ttl_seconds,
+            ttl_source,
+        })
+    }
     pub fn validate(&self) -> Result<(), String> {
         Hash::from_str(&self.genesis).map_err(|_| "BOOT_GENESIS_PIN_REQUIRED")?;
         // BOOT-12: operator input and the checked-in pin are independent sources and must agree.
@@ -94,6 +120,8 @@ pub struct NetworkReads {
     end: Instant,
     calls: u64,
     limit: u64,
+    /// DEC-07: whether the operator stopped the boot step (`p0ctl boot cancel`).
+    cancelled: fn() -> bool,
 }
 /// RPC reads of `cluster`: genesis hash, version, health, finalized and confirmed slot.
 pub const CLUSTER_READS: u64 = 5;
@@ -166,6 +194,7 @@ impl NetworkReads {
             call_timeout,
             wss,
             end: Instant::now() + budget,
+            cancelled: super::control::stop_requested,
             calls: 0,
             limit,
         }
@@ -188,6 +217,10 @@ impl NetworkReads {
                 | RpcRequest::GetMultipleAccounts
         ) {
             return Err("BOOT_METHOD_REFUSED".into());
+        }
+        // DEC-07: a cancelled boot step (`p0ctl boot cancel`) makes no further read.
+        if (self.cancelled)() {
+            return Err("BOOT_CANCELLED".into());
         }
         if self.end.saturating_duration_since(Instant::now()) < self.call_timeout {
             return Err("BOOT_TIME_BUDGET".into());
@@ -257,6 +290,9 @@ impl Reads for NetworkReads {
         })
     }
     fn wss(&mut self, program: Pubkey, transactions: bool) -> Result<(u64, u64), String> {
+        if (self.cancelled)() {
+            return Err("BOOT_CANCELLED".into());
+        }
         let remaining = self
             .end
             .saturating_duration_since(Instant::now())
@@ -583,15 +619,15 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
             .cloned()
     };
     let operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]);
-    let resolved = darkbot_solana::runtime_config::Resolved::for_mode(mode, operational, &|k| {
-        std::env::var(k).ok()
-    })?;
-    // DEC-07: the TTL's source, as the status projection names it.
-    let ttl_source = resolved
-        .sources
-        .get("boot_token_ttl_seconds")
-        .cloned()
-        .unwrap_or_else(|| "builtin_default".into());
+    let env = |k: &str| std::env::var(k).ok();
+    // DEC-07: with the run's `--duration` exactly the configuration `run start` resolves (X1),
+    // so the audited identity is the started one; without it the mode's profile default (valid
+    // only for a start of that default duration).
+    let resolved = match val("--duration") {
+        Some(duration) => boot_audit::start_config(mode, operational, &duration, &env)?,
+        None => darkbot_solana::runtime_config::Resolved::for_mode(mode, operational, &env)?,
+    };
+    let ttl_source = ttl_source(&resolved.sources);
     resolved.activate()?;
     let c = darkbot_solana::runtime_config::active();
     let offline = boot_audit::offline(&boot_audit::OfflineInputs::for_project(project))?;
@@ -602,16 +638,12 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
     if offline.verdict == AuditVerdict::Blocked {
         return Err("BOOT_OFFLINE_BLOCKED".into());
     }
-    let spec = Spec {
-        genesis: val("--genesis-hash").ok_or("BOOT_GENESIS_PIN_REQUIRED")?,
-        transactions: match val("--capture-source").as_deref() {
-            None | Some("logs") => false,
-            Some("transactions") => true,
-            _ => return Err("BOOT_CAPTURE_SOURCE".into()),
-        },
-        ttl_seconds: c.limits.boot_token_ttl_seconds,
+    let spec = Spec::of(
+        c,
         ttl_source,
-    };
+        val("--genesis-hash"),
+        val("--capture-source").as_deref(),
+    )?;
     spec.validate()?;
     // X2: the typed PROVIDER_EVIDENCE record of the explicit offline import
     // (`p0-journal import-provider-evidence`); its bytes are bound into the audit record.
@@ -666,6 +698,10 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
         hash(&data),
         boot_audit::binary_identity()?,
     )?;
+    // DEC-07: an audit that outlasted its own TTL is never sealed as READY (nothing is written).
+    if result.audit.verdict == AuditVerdict::Ready && now()? >= result.expires_at {
+        return Err("BOOT_NETWORK_OUTLASTED_TTL: the audit took longer than its TTL; a new attempt is a new approval".into());
+    }
     writer
         .append_typed(journal::Provenance::default(), &result)
         .map_err(|_| "BOOT_EVIDENCE_WRITE")?;
@@ -949,6 +985,20 @@ mod tests {
         );
         assert_eq!(tight.call_timeout, Duration::from_secs(1));
         assert_eq!(tight.slot(true).unwrap(), 100);
+        // DEC-07: a cancelled boot step makes no further read (RPC or WSS).
+        let mut cancelled = NetworkReads::open(
+            url.clone(),
+            "wss://unused.invalid".into(),
+            Duration::from_secs(2),
+            limit,
+            seconds,
+        );
+        cancelled.cancelled = || true;
+        assert_eq!(cancelled.slot(true).unwrap_err(), "BOOT_CANCELLED");
+        assert_eq!(
+            cancelled.wss(Pubkey::new_unique(), false).unwrap_err(),
+            "BOOT_CANCELLED"
+        );
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
         server.join().unwrap();
         // `need` budgeted reads plus the one of the tight-deadline instance.
@@ -1124,6 +1174,43 @@ mod tests {
         let (_, missing, genesis) = decode(json!({"context":{"slot":100},"value":[null]}));
         assert!(missing.err().unwrap().starts_with("FE_ACCOUNT_MISSING"));
         assert_eq!(genesis.unwrap_err(), "BOOT_GENESIS_UNKNOWN");
+    }
+    /// DEC-07: the audit's spec carries the registry TTL of its configuration and that value's
+    /// source (never a literal), the operator's pin and capture source.
+    #[test]
+    fn dec07_the_spec_takes_the_registry_ttl_and_its_source() {
+        let mut c = RuntimeConfig::default();
+        c.limits.boot_token_ttl_seconds = 45;
+        let sources = [(
+            "boot_token_ttl_seconds".to_string(),
+            "environment".to_string(),
+        )]
+        .into();
+        let s = Spec::of(
+            &c,
+            ttl_source(&sources),
+            Some("pin".into()),
+            Some("transactions"),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                s.ttl_seconds,
+                s.ttl_source.as_str(),
+                s.transactions,
+                s.genesis.as_str()
+            ),
+            (45, "environment", true, "pin")
+        );
+        assert_eq!(ttl_source(&Default::default()), "builtin_default");
+        assert_eq!(
+            Spec::of(&c, "x".into(), None, None).unwrap_err(),
+            "BOOT_GENESIS_PIN_REQUIRED"
+        );
+        assert_eq!(
+            Spec::of(&c, "x".into(), Some("pin".into()), Some("blocks")).unwrap_err(),
+            "BOOT_CAPTURE_SOURCE"
+        );
     }
     /// DEC-07: the registry's TTL is the record's — 10 s and 120 s are issued, 9 s and 121 s are
     /// refused before any read. The TTL counts from the oldest network read (`observed_at`, taken

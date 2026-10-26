@@ -98,6 +98,7 @@ export function toAnalyticsView(m: AnalyticsJobs): AnalyticsView {
               : null,
     })),
     boot: m.boot ? boot(m.boot) : null,
+    bootError: m.bootError,
   };
 }
 
@@ -114,6 +115,7 @@ function boot(b: BootFlow): BootFlowView {
   return {
     flowId: b.flowId,
     mode: b.mode,
+    duration: b.duration,
     createdUnixMs: b.createdUnixMs ?? null,
     offlineVerdict: b.offlineVerdict,
     offlineToken: b.offlineToken,

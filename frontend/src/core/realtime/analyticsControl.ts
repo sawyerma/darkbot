@@ -97,12 +97,12 @@ export function verifyCommand(v: { runId: string; mode: "off" | "strict-cache"; 
   };
 }
 
-/** DEC-07: a new boot flow's offline preflight; its TTL is fixed here (empty: the registry's value;
- *  the registry checks the bounds). */
-export function bootOfflineCommand(mode: "econ4h" | "shadow", ttlSeconds: string): { params: Uint8Array } | { problem: string } {
+/** DEC-07: a new boot flow's offline preflight; its TTL and the run's duration are fixed here
+ *  (empty TTL: the registry's value; the registry checks the bounds). */
+export function bootOfflineCommand(mode: "econ4h" | "shadow", ttlSeconds: string, duration: string): { params: Uint8Array } | { problem: string } {
   const ttl = ttlSeconds.trim() === "" ? undefined : positive(ttlSeconds);
   if (ttl === null) return { problem: "TTL: whole seconds within the registry bounds, or empty for its value." };
-  return { params: toBinary(BootOfflineCommandSchema, message(BootOfflineCommandSchema, { mode, ttlSeconds: ttl })) };
+  return { params: toBinary(BootOfflineCommandSchema, message(BootOfflineCommandSchema, { mode, ttlSeconds: ttl, duration })) };
 }
 
 const TOKEN = /^[0-9a-f]{16}$/;
@@ -120,8 +120,9 @@ export function bootNetworkCommand(v: { flowId: string; token: string; genesisHa
   };
 }
 
-/** DEC-07: the operator's approval of exactly this network token — the start. */
-export function bootStartCommand(v: { flowId: string; token: string; duration: string; captureSource: "logs" | "transactions"; chainVerify: "off" | "strict" }): { params: Uint8Array } | { problem: string } {
+/** DEC-07: the operator's approval of exactly this network token — the start of the flow's
+ *  duration and capture source (online strict verification is a terminal action). */
+export function bootStartCommand(v: { flowId: string; token: string; duration: string; captureSource: "logs" | "transactions"; chainVerify: "off" }): { params: Uint8Array } | { problem: string } {
   if (!TOKEN.test(v.token)) return { problem: "No READY network audit to approve." };
   return {
     params: toBinary(BootStartCommandSchema, message(BootStartCommandSchema, {

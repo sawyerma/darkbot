@@ -946,10 +946,12 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow] [-- OPERATIONAL_ARGS...]
+const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow] --duration D [-- OPERATIONAL_ARGS...]
   | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence FILE.p0j [--capture-source logs|transactions]
-  | p0ctl boot start --flow ID --approve NETWORK_TOKEN --duration D [--capture-source logs|transactions] [--chain-verify off|strict]
-  | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]";
+  | p0ctl boot start --flow ID --approve NETWORK_TOKEN [--duration D] [--capture-source S] [--chain-verify off|strict --provider-evidence FILE.p0j]
+  | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]
+The flow's duration, mode and operational arguments are fixed at its offline step and its capture
+source at the network step: the audited identity is exactly the started one.";
 
 /// DEC-07 (N7): the boot controller (`orchestration::boot_control`), the terminal's and the
 /// Capture tab's one path: `offline` audits locally and records a new flow with its mode,
@@ -979,12 +981,15 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 None => jobs::new_id()?,
             };
             let mode = RunMode::of(&options[1..])?;
-            let resolved = darkbot_solana::runtime_config::Resolved::for_mode(
-                mode.name(),
-                operational,
-                &|k| std::env::var(k).ok(),
-            )?;
-            // DEC-07: the TTL and its source, as the status projection names it.
+            // DEC-07: the run's duration is part of the audited configuration: the flow audits
+            // and starts exactly `run start`'s resolution (X1 `start_config`).
+            let duration = need("--duration")?;
+            darkbot_solana::runtime_config::duration_seconds(&duration)
+                .map_err(|e| format!("--duration {duration}: {e}"))?;
+            let resolved = boot_audit::start_config(mode.name(), operational, &duration, &|k| {
+                std::env::var(k).ok()
+            })?;
+            // The TTL and its source, as the resolution names it.
             let ttl_source = resolved
                 .sources
                 .get("boot_token_ttl_seconds")
@@ -998,12 +1003,13 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             print!("{}", audit.terminal());
             let blocked = audit.verdict == AuditVerdict::Blocked;
             let token = audit.readiness_token[..16].to_string();
-            bc::create(
+            bc::create_guarded(
                 project,
                 &bc::BootFlow {
                     flow_id: flow_id.clone(),
                     mode: mode.name().into(),
                     operational: operational.to_vec(),
+                    duration,
                     offline: audit,
                     ttl_seconds,
                     ttl_source: ttl_source.clone(),
@@ -1020,11 +1026,17 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
         Some(step @ ("network" | "start")) => {
             let flow_id = need("--flow")?;
             let token = need("--approve")?;
-            let source = capture_source()?;
+            let s = bc::status(project, &flow_id)?;
             let mut worker_args = vec!["--approve".to_string(), token.clone()];
-            worker_args.extend(["--capture-source".to_string(), source]);
             let step = if step == "network" {
+                let source = capture_source()?;
+                // A Shadow run captures logs (`run start` passes no source for it).
+                if s.flow.mode == RunMode::Shadow.name() && source != "logs" {
+                    return Err("BOOT_CAPTURE_SOURCE_SHADOW: a Shadow run captures logs".into());
+                }
                 worker_args.extend([
+                    "--capture-source".to_string(),
+                    source,
                     "--genesis-hash".to_string(),
                     need("--genesis-hash")?,
                     "--provider-evidence".to_string(),
@@ -1032,19 +1044,38 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 ]);
                 bc::NETWORK
             } else {
-                let duration = need("--duration")?;
-                darkbot_solana::runtime_config::duration_seconds(&duration)
-                    .map_err(|e| format!("--duration {duration}: {e}"))?;
-                let verify = given(options, "--chain-verify")?.unwrap_or_else(|| "off".into());
-                if !matches!(verify.as_str(), "off" | "strict") {
-                    return Err(format!("CHAIN_VERIFY_{verify}_BLOCKED: off|strict"));
+                // The start is exactly what was audited: the flow's duration and the record's
+                // capture source; a different one is refused, never a drifted start.
+                if let Some(d) = given(options, "--duration")? {
+                    if d != s.flow.duration {
+                        return Err(format!(
+                            "BOOT_DURATION_MISMATCH: the flow audits --duration {}",
+                            s.flow.duration
+                        ));
+                    }
                 }
-                worker_args.extend([
-                    "--duration".to_string(),
-                    duration,
-                    "--chain-verify".to_string(),
-                    verify,
-                ]);
+                let recorded = s.network_record.as_ref().map(|r| r.capture_source.clone());
+                if let (Some(asked), Some(recorded)) =
+                    (given(options, "--capture-source")?, recorded.as_ref())
+                {
+                    if &asked != recorded {
+                        return Err(format!(
+                            "BOOT_CAPTURE_SOURCE_MISMATCH: the network audit recorded {recorded}"
+                        ));
+                    }
+                }
+                let verify = given(options, "--chain-verify")?.unwrap_or_else(|| "off".into());
+                worker_args.extend(["--chain-verify".to_string(), verify.clone()]);
+                match verify.as_str() {
+                    "off" => {}
+                    "strict" => worker_args.extend([
+                        "--provider-evidence".to_string(),
+                        given(options, "--provider-evidence")?.ok_or(
+                            "STRICT_PROVIDER_EVIDENCE_REQUIRED: online strict verification needs the operator's --provider-evidence",
+                        )?,
+                    ]),
+                    other => return Err(format!("CHAIN_VERIFY_{other}_BLOCKED: off|strict")),
+                }
                 bc::START
             };
             bc::begin(project, &flow_id, step, &token, &worker()?, &worker_args)?;
@@ -1055,7 +1086,6 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             control::install_stop_handler()?;
             let (flow_id, step) = (need("--flow")?, need("--step")?);
             let token = need("--approve")?;
-            let source = capture_source()?;
             let outcome = bc::run_step(
                 project,
                 &flow_id,
@@ -1073,7 +1103,9 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             "--provider-evidence".into(),
                             need("--provider-evidence")?,
                             "--capture-source".into(),
-                            source.clone(),
+                            capture_source()?,
+                            "--duration".into(),
+                            flow.duration.clone(),
                             "--output".into(),
                             record,
                             "--".into(),
@@ -1106,11 +1138,14 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     );
                     // The worker is single-threaded here: the run id `run start` launches with.
                     std::env::set_var(mode.run_id_env(), &run_id);
+                    let audited: boot_audit::NetworkAudit =
+                        journal::read_typed_value(Path::new(&record))
+                            .map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
                     call.extend([
                         "--mode".into(),
                         flow.mode.clone(),
                         "--duration".into(),
-                        need("--duration")?,
+                        flow.duration.clone(),
                         "--network-audit".into(),
                         record,
                         "--mainnet-approved".into(),
@@ -1119,10 +1154,13 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     if mode == RunMode::Econ4h {
                         call.extend([
                             "--capture-source".into(),
-                            source.clone(),
+                            audited.capture_source.clone(),
                             "--chain-verify".into(),
                             need("--chain-verify")?,
                         ]);
+                        if let Some(evidence) = given(options, "--provider-evidence")? {
+                            call.extend(["--provider-evidence".into(), evidence]);
+                        }
                     }
                     call.push("--".into());
                     call.extend(flow.operational.iter().cloned());

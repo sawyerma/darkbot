@@ -10,12 +10,13 @@ describe("project0.analytics.jobs (golden frame written by the Rust reporter)", 
 
   it("DEC-07: maps the boot controller's newest flow — tokens, the flow's TTL and source, the TTL window, every step", () => {
     expect(view.boot).toMatchObject({
-      flowId: "flow-1", mode: "econ4h", offlineVerdict: "OFFLINE_READY_NETWORK_NOT_RUN", offlineToken: "0123456789abcdef",
+      flowId: "flow-1", mode: "econ4h", duration: "1h", offlineVerdict: "OFFLINE_READY_NETWORK_NOT_RUN", offlineToken: "0123456789abcdef",
       ttlSeconds: 90n, ttlSource: "cli", networkVerdict: "READY", networkToken: "fedcba9876543210",
       observedUnixS: 1_760_000_001n, expiresUnixS: 1_760_000_091n,
     });
     expect([view.boot?.network.state, view.boot?.start.state]).toEqual(["COMPLETED", "NOT_RUN"]);
     expect(view.boot?.start.runId).toBeNull();
+    expect(view.bootError).toBe("");
   });
 
   it("decodes runs, jobs and their states as the store holds them", () => {

@@ -77,8 +77,10 @@ export interface AnalyticsView {
   runs: readonly AnalyticsRunView[];
   jobs: readonly AnalyticsJobView[];
   storeError: string;
-  /** DEC-07: the boot controller's newest flow; null without one. */
+  /** DEC-07: the boot controller's flow (the active one, else the newest); null without one. */
   boot: BootFlowView | null;
+  /** DEC-07: why the boot store was not (completely) readable; empty when read. */
+  bootError: string;
 }
 
 /** DEC-07: one step of a boot flow (NOT_RUN, QUEUED, RUNNING, INTERRUPTED, COMPLETED, FAILED,
@@ -96,6 +98,8 @@ export interface BootStepView {
 export interface BootFlowView {
   flowId: string;
   mode: string;
+  /** The run's duration the flow audits and starts (fixed at its offline step). */
+  duration: string;
   createdUnixMs: bigint | null;
   offlineVerdict: string;
   offlineToken: string;

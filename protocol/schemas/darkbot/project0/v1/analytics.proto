@@ -23,10 +23,12 @@ message AnalyticsJobs {
   string store_error = 5;
   // Why the runner state is unknown (runner_busy is then not a fact); empty when known.
   string runner_error = 6;
-  // DEC-07: the boot controller's newest flow (data/boot, `p0ctl boot …`), shown on the Capture
-  // tab: this always-on feed is the controller's projection while no capture runs. Unset
-  // without a flow.
+  // DEC-07: the boot controller's flow (data/boot, `p0ctl boot …`) — the one with an active step,
+  // else the newest — shown on the Capture tab: this always-on feed is the controller's
+  // projection while no capture runs. Unset without a flow.
   BootFlow boot = 7;
+  // DEC-07: why the boot store was not (completely) readable; empty when read.
+  string boot_error = 8;
 }
 
 // DEC-07 (N7): one boot flow — offline preflight, the operator's network approval, the network
@@ -46,7 +48,8 @@ message BootFlow {
   // `id: reason` of every critical offline check that did not pass.
   repeated string offline_blocked = 6;
   // The flow's TTL (registry boot_token_ttl_seconds, 10..=120 s, fixed at its offline step) and
-  // the source of that value (builtin_default | environment | config_file | cli).
+  // the source of that value as the resolution names it (profile:<name> | environment |
+  // config_file | cli).
   uint64 ttl_seconds = 7;
   // Where ttl_seconds came from.
   string ttl_source = 8;
@@ -64,6 +67,8 @@ message BootFlow {
   optional uint64 expires_unix_s = 14;
   // The start step.
   BootStep start = 15;
+  // The run's --duration the flow audits and starts (fixed at its offline step).
+  string duration = 16;
 }
 
 // One step of a boot flow.
@@ -341,6 +346,8 @@ message BootOfflineCommand {
   string mode = 1;
   // 10..=120 s; unset: the registry's value.
   optional uint64 ttl_seconds = 2;
+  // The run's --duration (10m | 1h | 5h | 24h): part of the audited configuration.
+  string duration = 3;
 }
 
 // Parameters of project0.boot.network: the operator's approval of exactly this offline token;
@@ -364,7 +371,7 @@ message BootStartCommand {
   string flow_id = 1;
   // The flow's network token (16 characters) as the operator saw it.
   string approved_token = 2;
-  // 10m | 1h | 5h | 24h (`run start --duration`)
+  // Must equal the flow's duration (`p0ctl boot start` refuses another one).
   string duration = 3;
   // logs | transactions
   string capture_source = 4;

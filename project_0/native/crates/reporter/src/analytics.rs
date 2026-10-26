@@ -223,6 +223,7 @@ pub fn analytics_jobs(s: &AnalyticsSnapshot) -> AnalyticsJobs {
         jobs: s.jobs.iter().map(job).collect(),
         store_error: s.error.clone().unwrap_or_default(),
         boot: s.boot.as_ref().map(boot),
+        boot_error: s.boot_error.clone().unwrap_or_default(),
     }
 }
 
@@ -238,6 +239,7 @@ fn boot(v: &darkbot_runner::orchestration::boot_control::BootView) -> BootFlow {
     BootFlow {
         flow_id: v.flow_id.clone(),
         mode: v.mode.clone(),
+        duration: v.duration.clone(),
         created_unix_ms: v.created_unix_ms,
         offline_verdict: v.offline_verdict.into(),
         offline_token: v.offline_token.clone(),
