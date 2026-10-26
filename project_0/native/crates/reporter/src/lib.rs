@@ -17,10 +17,11 @@ use proto::control::{
 use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
     EffectiveRecord, Fe04Approval, FinanceSummary, LiquidatorState, LossCount, MarketAssessment,
-    MarketCounters, OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun,
-    OwnerSafety, OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget, ReasonCount,
-    RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision,
-    SourceStats, StateCounters, SystemStatus, TransportStatus, WalletsState, WriterLane,
+    MarketCounters, NonLanding, NonLandingSource, OperationalConfig, OperationalParameter,
+    OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety, OwnerTrigger, PhaseStatus, ProgramPin,
+    ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal,
+    RunInfo, SourceDecision, SourceStats, StateCounters, SystemStatus, TransportStatus,
+    WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -354,6 +355,24 @@ pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
         holds: amounts(&w.holds),
         policy_reserves: amounts(&w.policy_reserves),
         held_attempt: w.held_attempt.into(),
+        non_landing: w.non_landing.as_ref().map(|n| NonLanding {
+            subject: n.subject.into(),
+            result_class: n.result_class.into(),
+            alarm: n.alarm,
+            sources: n
+                .sources
+                .iter()
+                .map(|(operator, class)| NonLandingSource {
+                    operator: operator.clone(),
+                    class: class.clone(),
+                })
+                .collect(),
+            c_result: n.c_result.into(),
+            hold_ms: n.hold_ms,
+            calls: n.calls,
+            bytes: n.bytes,
+            reads: n.reads,
+        }),
     }
 }
 
@@ -1409,6 +1428,7 @@ mod contract_tests {
                 holds: [("SOL".to_string(), 0)].into(),
                 policy_reserves: [("SOL".to_string(), 50_000_000)].into(),
                 held_attempt: "NONE",
+                non_landing: None,
             },
             finance: OwnerFinance {
                 as_of_slot: 400_000_200,
@@ -1627,6 +1647,27 @@ mod contract_tests {
             &liquidator_state(owner).encode_to_vec(),
         );
         check_golden("wallets_state.hex", &wallets_state(owner).encode_to_vec());
+        // DEC-03: an UNKNOWN attempt with an open non-landing contradiction (N-2).
+        let mut held = owner.clone();
+        held.wallets.held_attempt = "UNKNOWN";
+        held.wallets.non_landing = Some(darkbot_runner::status_tap::OwnerNonLanding {
+            subject: "ATTEMPT",
+            result_class: "VETO_CONTRADICTION_OPEN",
+            alarm: true,
+            sources: vec![
+                ("op-a".into(), "SIGHTING".into()),
+                ("op-b".into(), "UNUSABLE_RATE_LIMITED".into()),
+            ],
+            c_result: "NEGATIVE",
+            hold_ms: Some(42_000),
+            calls: Some(20),
+            bytes: Some(1_234_567),
+            reads: 3,
+        });
+        check_golden(
+            "wallets_state_non_landing.hex",
+            &wallets_state(&held).encode_to_vec(),
+        );
         check_golden(
             "finance_summary.hex",
             &finance_summary(owner).encode_to_vec(),

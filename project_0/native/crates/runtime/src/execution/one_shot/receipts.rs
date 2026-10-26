@@ -432,7 +432,11 @@ mod tests {
             j.handoff(&i.signed_wire_sha256, &current, || Ok(()))
                 .unwrap();
             // C01: through the productive entry (the settlement read), not a second observer.
-            let step = j.settle_step(&rpc, &|_, _| None, 1_000).unwrap();
+            let sources = super::super::non_landing::loopback::sources(
+                super::super::non_landing::loopback::closed(),
+                vec![],
+            );
+            let step = j.settle_step(&rpc, &sources, &|_, _| None, 1_000).unwrap();
             assert!(
                 matches!(step, super::super::settlement::SettleStep::Unknown(_)),
                 "{step:?}"

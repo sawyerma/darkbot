@@ -171,6 +171,8 @@ pub(super) struct ShadowOwner {
     fe04_settle_due: Option<std::time::Instant>,
     /// What Safety has still to book for that attempt (`None`: nothing, or booked).
     fe04_unbooked: Option<fe04::Fe04Unbooked>,
+    /// DEC-03: the latest non-landing read of this run (the Wallets projection).
+    fe04_non_landing: fe04::Fe04NonLanding,
     /// P8-INV-01: inventory bands (`P0_INVENTORY_TARGETS`); offers never spend a band's reserve.
     inventory_targets: std::collections::BTreeMap<String, crate::execution::inventory::Target>,
     /// P5-JIT-01: the bank whose inventory funds a JIT buy (`P0_JIT_FUNDING_BANK`, empty: none).

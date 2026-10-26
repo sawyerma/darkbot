@@ -299,7 +299,56 @@ impl ShadowOwner {
                 .as_ref()
                 .and_then(|j| j.step_state())
                 .map_or("NONE", |s| s.name()),
+            non_landing: self.non_landing_projection(),
         }
+    }
+
+    /// DEC-03: the Wallets non-landing status from the held journal and this run's latest read
+    /// of the same subject; without a read in this run, a released subject shows its persisted
+    /// release (its usable B operators, C negative).
+    fn non_landing_projection(&self) -> Option<crate::status_tap::OwnerNonLanding> {
+        use crate::execution::one_shot::non_landing::Verdict;
+        let s = self.fe04_non_landing_status()?;
+        let read = self
+            .fe04_non_landing
+            .latest
+            .as_ref()
+            .filter(|(exit, _)| *exit == s.exit)
+            .map(|(_, r)| r);
+        let now_ms = (self.clock.unix_ns(self.clock.now_ns()) / 1_000_000) as u64;
+        Some(crate::status_tap::OwnerNonLanding {
+            subject: if s.exit.is_some() { "EXIT" } else { "ATTEMPT" },
+            result_class: s.class.map_or("NONE", Verdict::code),
+            alarm: s.class == Some(Verdict::VetoContradiction),
+            sources: match (read, &s.release) {
+                (Some(r), _) => {
+                    r.b.iter()
+                        .map(|b| (b.operator.clone(), b.class.code()))
+                        .collect()
+                }
+                (None, Some(release)) => release
+                    .usable_operators
+                    .iter()
+                    .map(|op| (op.clone(), "USABLE".to_string()))
+                    .collect(),
+                (None, None) => vec![],
+            },
+            c_result: match (read, &s.release) {
+                (Some(r), _) => r.c.code(),
+                (None, Some(_)) => "NEGATIVE",
+                (None, None) => "",
+            },
+            hold_ms: s
+                .held_since_unix_ms
+                .map(|since| now_ms.saturating_sub(since)),
+            calls: read.map(|r| r.calls),
+            bytes: read.map(|r| r.bytes),
+            reads: if read.is_some() {
+                self.fe04_non_landing.reads
+            } else {
+                0
+            },
+        })
     }
 
     /// DEC-10: the configured approval at this instant (expiry moves with the clock); without an

@@ -167,6 +167,19 @@ export function toWalletsView(m: WalletsState): WalletsView {
     holds: amounts(m.holds),
     policyReserves: amounts(m.policyReserves),
     heldAttempt: m.heldAttempt,
+    nonLanding: m.nonLanding
+      ? {
+        subject: m.nonLanding.subject,
+        resultClass: m.nonLanding.resultClass,
+        alarm: m.nonLanding.alarm,
+        sources: m.nonLanding.sources.map((s) => ({ operator: s.operator, class: s.class })),
+        cResult: m.nonLanding.cResult,
+        holdMs: optional(m.nonLanding.holdMs),
+        calls: optional(m.nonLanding.calls),
+        bytes: optional(m.nonLanding.bytes),
+        reads: m.nonLanding.reads,
+      }
+      : null,
   };
 }
 

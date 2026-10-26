@@ -162,6 +162,47 @@ export interface WalletsView {
   holds: ReadonlyArray<{ asset: string; units: bigint }>;
   policyReserves: ReadonlyArray<{ asset: string; units: bigint }>;
   heldAttempt: string;
+  /** DEC-03: null without a held FE-04 journal (no attempt, nothing to classify). */
+  nonLanding: NonLandingView | null;
+}
+
+/** DEC-03 (N-2): the non-landing status of the held FE-04 attempt or its latest exit. */
+export interface NonLandingView {
+  /** ATTEMPT | EXIT. */
+  subject: string;
+  /** One of the five N-2 classes; NONE before the handoff. */
+  resultClass: string;
+  /** An open contradiction: holds stay, read again. */
+  alarm: boolean;
+  /** The latest read's B sources (operator, USABLE | UNUSABLE_<reason> | SIGHTING). */
+  sources: ReadonlyArray<{ operator: string; class: string }>;
+  /** The latest read's C result; empty without a read. */
+  cResult: string;
+  /** Unknown (null) without a hold or a read in this run. */
+  holdMs: bigint | null;
+  calls: bigint | null;
+  bytes: bigint | null;
+  reads: bigint;
+}
+
+/** The five N-2 result classes as the Wallets view names them. */
+export const NON_LANDING_CLASSES: Readonly<Record<string, string>> = {
+  B_C_CONFIRMED: "B+C confirmed",
+  C_ALONE_QUALIFIED: "C alone qualified",
+  VETO_LANDING_CONFIRMED: "Veto · landing confirmed",
+  VETO_CONTRADICTION_OPEN: "Veto · contradiction open",
+  UNKNOWN_INCOMPLETE: "UNKNOWN · incomplete",
+};
+
+/** Unusable B sources counted per reason (`UNUSABLE_<reason>`), in reason order. */
+export function unusableByReason(sources: NonLandingView["sources"]): ReadonlyArray<{ reason: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const s of sources) {
+    if (!s.class.startsWith("UNUSABLE_")) continue;
+    const reason = s.class.slice("UNUSABLE_".length);
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([reason, count]) => ({ reason, count }));
 }
 
 /** Nanoseconds to whole milliseconds for the existing latency slots; null stays null. */

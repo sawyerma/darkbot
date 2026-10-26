@@ -117,6 +117,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_approval: None,
         fe04_settle_due: None,
         fe04_unbooked: None,
+        fe04_non_landing: Default::default(),
         inventory_targets: Default::default(),
         jit_funding_bank: None,
         rebalance: super::rebalance::Observer::new(
@@ -2260,23 +2261,24 @@ fn s1_02_runtime_control_toggles_and_hands_canonical_authority_over() {
 
 /// C3: the detached fixture started from an FE-04 journal in `phase` (`"unknown"`: handed off;
 /// `"finalized"`: proven not landed, not yet booked) through the production startup replay; the
-/// attempt's intent and the non-landing proof that fits it.
+/// attempt's intent and a DEC-03 non-landing read (B+C) that proves it.
 fn fe04_fixture(
     tag: &str,
     phase: &str,
 ) -> (
     Fixture,
     crate::execution::one_shot::Intent,
-    crate::execution::one_shot::settlement::NonLandingProof,
+    crate::execution::one_shot::non_landing::NonLandingRead,
 ) {
     let mut f = fixture_with(tag, None);
     let (wallet, dir) = (f.owner.liquidator.to_string(), f.dir.join("fe04"));
     let intent = crate::execution::one_shot::test_unknown_attempt(&dir, &wallet);
-    let proof = crate::execution::one_shot::settlement::NonLandingProof {
-        finalized_block_height: intent.last_valid_block_height.unwrap() + 1,
-        history_from_slot: intent.state_slot,
-        absent_signatures: intent.signatures.iter().cloned().collect(),
-    };
+    let proof = crate::execution::one_shot::non_landing::loopback::proving(
+        &crate::execution::one_shot::settlement::SettlementSubject::from(&intent)
+            .non_landing()
+            .unwrap(),
+        true,
+    );
     if phase == "finalized" {
         let mut j = crate::execution::one_shot::Journal::open(&dir, &wallet).unwrap();
         j.reconcile_not_landed(&proof).unwrap();
@@ -2349,7 +2351,7 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     assert_eq!(job.observed, Default::default());
     let evidence = SettlementEvidence {
         observations: vec![],
-        proof: Some(Ok(proof)),
+        non_landing: Some(Ok(proof)),
     };
     fe04_answer(&f, evidence.clone());
     run_until(&mut f, fe04_settled);
@@ -2385,6 +2387,105 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     cleanup(f);
 }
 
+/// DEC-03 (N-2) in the running owner: a read with a B sighting and no landing is an open
+/// contradiction — UNKNOWN, the hold kept, an alarm, and the Wallets projection shows its class,
+/// sources, C result, hold duration, calls and bytes; the next read proves B+C and settles (no
+/// hold, the persisted class). Every applied read is one typed `NonLanding` record.
+#[test]
+fn dec03_owner_records_alarms_and_projects_the_non_landing_class() {
+    use crate::analytics::payload::{decode, OwnerDiagnostic, Payload};
+    use crate::execution::one_shot::non_landing::{BClass, Verdict};
+    use crate::execution::one_shot::settlement::SettlementEvidence;
+    let (mut f, intent, proof) = fe04_fixture("dec03_owner", "unknown");
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some());
+    let mut seeing = proof.clone();
+    seeing.b[0].class = BClass::Sighting(intent.signatures[0].clone());
+    seeing.calls = 7;
+    seeing.bytes = 1_234;
+    fe04_answer(
+        &f,
+        SettlementEvidence {
+            observations: vec![],
+            non_landing: Some(Ok(seeing)),
+        },
+    );
+    run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
+    assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
+    let n = f.owner.owner_snapshot(0).wallets.non_landing.unwrap();
+    assert_eq!(
+        (n.subject, n.result_class, n.alarm, n.c_result),
+        ("ATTEMPT", "VETO_CONTRADICTION_OPEN", true, "NEGATIVE")
+    );
+    assert_eq!(
+        n.sources,
+        [
+            ("op-a".to_string(), "SIGHTING".to_string()),
+            ("op-b".to_string(), "USABLE".to_string())
+        ]
+    );
+    assert_eq!((n.calls, n.bytes, n.reads), (Some(7), Some(1_234), 1));
+    assert!(n.hold_ms.is_some());
+    f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(fe04_job(&f).is_some(), "read again");
+    fe04_answer(
+        &f,
+        SettlementEvidence {
+            observations: vec![],
+            non_landing: Some(Ok(proof)),
+        },
+    );
+    run_until(&mut f, fe04_settled);
+    let n = f.owner.owner_snapshot(0).wallets.non_landing.unwrap();
+    assert_eq!(
+        (n.result_class, n.alarm, n.hold_ms, n.reads),
+        ("B_C_CONFIRMED", false, None, 2)
+    );
+    // Without a read in this run (a restart), the persisted release is shown.
+    let latest = std::mem::take(&mut f.owner.fe04_non_landing);
+    let n = f.owner.owner_snapshot(0).wallets.non_landing.unwrap();
+    assert_eq!(
+        (n.result_class, n.c_result, n.calls, n.reads),
+        ("B_C_CONFIRMED", "NEGATIVE", None, 0)
+    );
+    assert_eq!(
+        n.sources,
+        [
+            ("op-a".to_string(), "USABLE".to_string()),
+            ("op-b".to_string(), "USABLE".to_string())
+        ]
+    );
+    f.owner.fe04_non_landing = latest;
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let (mut records, mut alarms) = (vec![], 0);
+    while let Some(frame) = reader.next_frame().unwrap() {
+        if frame.kind == RecordEvent::KIND {
+            if let RecordEvent::NonLanding {
+                exit, class, read, ..
+            } = decode(frame.kind, frame.schema, &frame.payload).unwrap()
+            {
+                records.push((exit, class, read.map(|r| r.calls)));
+            }
+        } else if frame.kind == OwnerDiagnostic::KIND {
+            let d: OwnerDiagnostic = decode(frame.kind, frame.schema, &frame.payload).unwrap();
+            alarms += usize::from(d.line.contains("ALARM VETO_CONTRADICTION_OPEN"));
+        }
+    }
+    assert_eq!(
+        records,
+        [
+            (None, Some(Verdict::VetoContradiction), Some(7)),
+            (None, Some(Verdict::BcConfirmed), Some(0))
+        ]
+    );
+    assert_eq!(alarms, 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// C02/F-04: the FE-04 settlement is the one landing-telemetry path — a settled attempt emits
 /// exactly one reconcile record (outcome, fee, the capital released), also when the answer is
 /// repeated; no separate RAM reconcile polls the signature.
@@ -2398,7 +2499,7 @@ fn c02_fe04_settlement_emits_the_one_landing_telemetry_record() {
     assert!(fe04_job(&f).is_some());
     let evidence = SettlementEvidence {
         observations: vec![],
-        proof: Some(Ok(proof)),
+        non_landing: Some(Ok(proof)),
     };
     fe04_answer(&f, evidence.clone());
     run_until(&mut f, fe04_settled);
@@ -2443,7 +2544,7 @@ fn c3_owner_keeps_unknown_holds_and_retries_after_the_backoff() {
             &f,
             SettlementEvidence {
                 observations: vec![],
-                proof: Some(Err(reason.into())),
+                non_landing: Some(Err(reason.into())),
             },
         );
         run_until(&mut f, |o| o.fe04_settle_due.is_some());
@@ -2496,7 +2597,7 @@ fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
     assert!(fe04_job(&f).is_some());
     let evidence = SettlementEvidence {
         observations: vec![],
-        proof: Some(Ok(proof)),
+        non_landing: Some(Ok(proof)),
     };
     fe04_answer(&f, evidence.clone());
     run_until(&mut f, fe04_settled);
@@ -2601,7 +2702,7 @@ fn c3_settlement_day_is_the_same_in_the_run_and_after_a_restart_across_midnight(
                             unknown_reasons: vec![],
                         }),
                     )],
-                    proof: None,
+                    non_landing: None,
                 },
                 &value,
                 booked,
@@ -2818,7 +2919,7 @@ fn exit_observation(
                 unknown_reasons: vec![],
             }),
         )],
-        proof: None,
+        non_landing: None,
     }
 }
 
@@ -3308,7 +3409,7 @@ fn mt5b_submitted_follows_the_fe04_journal_and_defers_the_targets_detection() {
         &f,
         SettlementEvidence {
             observations: vec![],
-            proof: Some(Ok(proof)),
+            non_landing: Some(Ok(proof)),
         },
     );
     f.owner.remote_apply().unwrap();

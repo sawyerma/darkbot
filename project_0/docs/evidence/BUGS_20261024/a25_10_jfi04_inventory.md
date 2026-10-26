@@ -2,7 +2,7 @@
 
 Source: live scan of `project_0/native/crates` at `72b74fc1` (the regression test `test_jfi04_json_inventory.py`; the scan equals the pin). Supersedes the table of `BUGS_20261024/a23_09_jfi04_inventory.md` for the current code (that file stays as the 24.10. evidence, unchanged).
 
-**292 occurrences in 32 files; open internal (I) list: empty.** By category (a file can carry several): C 1, H 161, R 28, W 170. DEC-12: +2 W (`sendTransaction` on the deadline-bound wire); DEC-02: +1 W (`simulateBundle` context slot). Update 26.10.: DEC-09 — every H use is compiled only with the `historical` feature (standard build: none, `test_dec09_historical_feature.py`); DEC-10 — the FE-04 approval is native `key = value`, its historical JSON reader is H.
+**305 occurrences in 33 files; open internal (I) list: empty.** By category (a file can carry several): C 1, H 161, R 28, W 183. DEC-12: +2 W (`sendTransaction` on the deadline-bound wire); DEC-02: +1 W (`simulateBundle` context slot); DEC-03: +13 W (B/C non-landing reads). Update 26.10.: DEC-09 — every H use is compiled only with the `historical` feature (standard build: none, `test_dec09_historical_feature.py`); DEC-10 — the FE-04 approval is native `key = value`, its historical JSON reader is H.
 
 W external wire · R offline render/stdout/export · H historical reader or explicit offline import · C operator config/approval file input · I internal candidate.
 
@@ -19,6 +19,7 @@ W external wire · R offline render/stdout/export · H historical reader or expl
 | runtime/src/bin/p0-parity.rs | 4 | H |  |
 | runtime/src/bin/p0-probe-costs.rs | 12 | WR |  |
 | runtime/src/execution/one_shot/approval_file.rs | 2 | H | DEC-10: historical JSON approval shown by the historical build only, never authorizing |
+| runtime/src/execution/one_shot/non_landing.rs | 13 | W | DEC-03: B/C non-landing reads (`getBlockHeight`, `minimumLedgerSlot`, `getSignatureStatuses`, `getTransaction`, `getBlocksWithLimit`, `getBlock`) on the deadline-bound JSON-RPC wire |
 | runtime/src/execution/one_shot.rs | 7 | H | <wallet>.json decoded only by the explicit migration (p0ctl fe04 migrate); open refuses it (F8, 25.10.) |
 | runtime/src/market/deployment.rs | 1 | W |  |
 | runtime/src/market/observer.rs | 1 | W |  |

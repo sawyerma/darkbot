@@ -6,6 +6,7 @@ pub mod archive;
 pub mod exit;
 #[cfg(feature = "crate_health")]
 pub mod exit_admission;
+pub mod non_landing;
 pub mod receipts;
 pub mod settlement;
 pub mod transport;
@@ -224,6 +225,10 @@ struct Saved {
     /// FE-04 exits of the settled attempt's open inventory (schema 5), in order.
     #[serde(default)]
     exits: Vec<exit::ExitAttempt>,
+    /// DEC-03 (schema 6): the class of a released non-landing (B+C or C alone); `None` while
+    /// not released that way, and for frames before N-2.
+    #[serde(default)]
+    non_landing: Option<non_landing::NonLandingRelease>,
 }
 /// Schema ≤ 3 layout of `Phase` (its settlement before the realized/unrealized split).
 #[derive(Deserialize)]
@@ -265,6 +270,7 @@ impl TryFrom<SavedV2> for Saved {
             finalized: v.finalized,
             observations: v.observations,
             exits: Vec::new(),
+            non_landing: None,
         })
     }
 }
@@ -288,6 +294,7 @@ impl TryFrom<SavedV3> for Saved {
             finalized: v.finalized,
             observations: v.observations,
             exits: Vec::new(),
+            non_landing: None,
         })
     }
 }
@@ -310,6 +317,31 @@ impl From<SavedV4> for Saved {
             finalized: v.finalized,
             observations: v.observations,
             exits: Vec::new(),
+            non_landing: None,
+        }
+    }
+}
+/// Schema-5 layout of `Saved` (exits, before the DEC-03 release class).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV5 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    exits: Vec<exit::ExitAttemptV5>,
+}
+impl From<SavedV5> for Saved {
+    fn from(v: SavedV5) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: v.observations,
+            exits: v.exits.into_iter().map(Into::into).collect(),
+            non_landing: None,
         }
     }
 }
@@ -392,8 +424,9 @@ struct VersionRef<'a> {
     state: &'a Saved,
 }
 /// F2: one durable transition of the wallet automaton as a typed binary frame
-/// (`FE04_TRANSITION`, schema 5 since exits, 4 since the realized/unrealized settlement, 3 since
-/// C12). Schema-4, -3, -2 and schema-1 JSON frames of older journals stay readable.
+/// (`FE04_TRANSITION`, schema 6 since the DEC-03 release class, 5 since exits, 4 since the
+/// realized/unrealized settlement, 3 since C12). Schema-5, -4, -3, -2 and schema-1 JSON frames of
+/// older journals stay readable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Version {
@@ -418,9 +451,15 @@ struct VersionV4 {
     transition: Transition,
     state: SavedV4,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV5 {
+    transition: Transition,
+    state: SavedV5,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
-    const SCHEMA: u16 = 5;
+    const SCHEMA: u16 = 6;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -437,6 +476,10 @@ impl crate::analytics::payload::Payload for Version {
                 })
             })),
             4 => Some(decode_wire::<VersionV4>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })),
+            5 => Some(decode_wire::<VersionV5>(bytes).map(|v| Self {
                 transition: v.transition,
                 state: v.state.into(),
             })),
@@ -467,9 +510,14 @@ struct LegacyImportV4 {
     legacy_sha256: String,
     state: SavedV4,
 }
+#[derive(Deserialize)]
+struct LegacyImportV5 {
+    legacy_sha256: String,
+    state: SavedV5,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 5;
+    const SCHEMA: u16 = 6;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -486,6 +534,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                 })
             })),
             4 => Some(decode_wire::<LegacyImportV4>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })),
+            5 => Some(decode_wire::<LegacyImportV5>(bytes).map(|v| Self {
                 legacy_sha256: v.legacy_sha256,
                 state: v.state.into(),
             })),
@@ -616,6 +668,21 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
         return false;
     }
     let same = |p: &Saved| p.approval == next.approval && p.intent == next.intent;
+    // DEC-03: only a non-landing writes a release class, and only a proving one.
+    let released = match (previous, transition) {
+        (None, _) => next.non_landing.is_none(),
+        (Some(p), Transition::NotLanded) => {
+            p.non_landing.is_none()
+                && next
+                    .non_landing
+                    .as_ref()
+                    .is_none_or(|r| r.class.proves_non_landing())
+        }
+        (Some(p), _) => next.non_landing == p.non_landing,
+    };
+    if !released {
+        return false;
+    }
     match (previous, transition) {
         (None, Transition::Reserve) => {
             next.phase == Phase::Reserved
@@ -913,6 +980,7 @@ impl Journal {
                 finalized: None,
                 observations: BTreeMap::new(),
                 exits: Vec::new(),
+                non_landing: None,
             },
             Transition::Reserve,
         )
@@ -1195,6 +1263,7 @@ mod tests {
             .into_iter()
             .collect(),
             exits: Vec::new(),
+            non_landing: None,
         };
         // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
         // read — with the expiry unknown (`None`), never a zero.
@@ -1363,7 +1432,8 @@ mod tests {
             (back.transition, back.state),
             (Transition::Settle, booked.clone())
         );
-        // Schema 5 (exits) is pinned with one settled exit of the open position.
+        // Schema 5 (exits, before the DEC-03 release class): the mirror reproduces the pinned
+        // bytes with one settled exit of the open position, which read without a class.
         let mut exited = booked;
         exited.exits.push(exit::ExitAttempt {
             approval: exit::ExitApproval {
@@ -1410,17 +1480,35 @@ mod tests {
             }),
             observations: BTreeMap::new(),
             finalized: Some(Vec::new()),
+            non_landing: None,
         });
-        let version = Version {
+        let v5 = VersionV5 {
             transition: Transition::ExitSettle,
-            state: exited.clone(),
+            state: SavedV5 {
+                approval: exited.approval.clone(),
+                intent: exited.intent.clone(),
+                phase: exited.phase.clone(),
+                finalized: exited.finalized.clone(),
+                observations: exited.observations.clone(),
+                exits: exited
+                    .exits
+                    .iter()
+                    .map(|e| exit::ExitAttemptV5 {
+                        approval: e.approval.clone(),
+                        intent: e.intent.clone(),
+                        phase: e.phase.clone(),
+                        observations: e.observations.clone(),
+                        finalized: e.finalized.clone(),
+                    })
+                    .collect(),
+            },
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let bytes = crate::analytics::payload::encode_wire(&v5).unwrap();
         let back: Version =
             crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 5, &bytes).unwrap();
         assert_eq!(
             (back.transition, back.state),
-            (Transition::ExitSettle, exited)
+            (Transition::ExitSettle, exited.clone())
         );
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
@@ -1430,9 +1518,38 @@ mod tests {
             ),
             "FE04_TRANSITION schema-5 layout changed"
         );
+        // Schema 6 (DEC-03) is pinned with the exit released as not landed, C alone.
+        let mut released = exited;
+        let e = released.exits.last_mut().unwrap();
+        e.phase = exit::ExitPhase::Finalized;
+        e.non_landing = Some(non_landing::NonLandingRelease {
+            class: non_landing::Verdict::CAloneQualified,
+            usable_operators: ["op-a".to_string()].into(),
+            c_blocks: 4,
+            c_through_slot: 960,
+        });
+        let version = Version {
+            transition: Transition::ExitNotLanded,
+            state: released.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 6, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitNotLanded, released)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2173,
+                "AcBexqVXe5JywXEdEuG3dMY31k2bY6Z3qwjVUqS8bYZr".to_string()
+            ),
+            "FE04_TRANSITION schema-6 layout changed"
+        );
     }
 
-    /// F2: every new wallet-journal frame is a typed binary frame (schema 5, no JSON value
+    /// F2: every new wallet-journal frame is a typed binary frame (schema 6, no JSON value
     /// tree); a journal written before F2 (schema-1 frames) still replays and continues with
     /// typed frames; a JSON write of an FE-04 kind is refused by the writer.
     #[test]
@@ -1448,10 +1565,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 5 since exits; schemas 4, 3 and 2 stay readable.
+        // Schema 6 since the DEC-03 release class; schemas 5, 4, 3 and 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 5)
+            (journal::kind::FE04_TRANSITION, 6)
         );
         assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -1498,7 +1615,7 @@ mod tests {
             let frames = frames_of(&file);
             assert_eq!(
                 frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-                [1, 5],
+                [1, 6],
                 "historical frame kept, the reopen transition is typed"
             );
         }
@@ -2462,6 +2579,45 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&wrapper).unwrap()).unwrap();
         path
     }
+    /// DEC-03: replay accepts a release class only from a non-landing and only a proving one
+    /// (none: a frame before N-2); every other transition keeps it unchanged.
+    #[test]
+    fn dec03_replay_accepts_a_release_class_only_from_a_non_landing() {
+        use non_landing::{NonLandingRelease, Verdict};
+        let (dir, a, i, _) = setup();
+        let release = |class| {
+            Some(NonLandingRelease {
+                class,
+                usable_operators: Default::default(),
+                c_blocks: 1,
+                c_through_slot: i.state_slot,
+            })
+        };
+        let mut reserve = reserved(&a, &i);
+        assert!(legal(None, Transition::Reserve, &reserve));
+        reserve.non_landing = release(Verdict::CAloneQualified);
+        assert!(!legal(None, Transition::Reserve, &reserve));
+        let mut unknown = reserved(&a, &i);
+        unknown.phase = Phase::HandoffUnknown;
+        let mut next = unknown.clone();
+        next.phase = Phase::HaltFinalized;
+        next.finalized = Some(Vec::new());
+        for (class, ok) in [
+            (None, true),
+            (release(Verdict::BcConfirmed), true),
+            (release(Verdict::CAloneQualified), true),
+            (release(Verdict::VetoContradiction), false),
+            (release(Verdict::VetoLandingConfirmed), false),
+            (release(Verdict::UnknownIncomplete), false),
+        ] {
+            next.non_landing = class;
+            assert_eq!(legal(Some(&unknown), Transition::NotLanded, &next), ok);
+        }
+        let mut observed = unknown.clone();
+        observed.non_landing = release(Verdict::CAloneQualified);
+        assert!(!legal(Some(&unknown), Transition::Observe, &observed));
+        let _ = fs::remove_dir_all(dir);
+    }
     fn reserved(a: &Approval, i: &Intent) -> Saved {
         Saved {
             approval: a.clone(),
@@ -2470,6 +2626,7 @@ mod tests {
             finalized: None,
             observations: BTreeMap::new(),
             exits: Vec::new(),
+            non_landing: None,
         }
     }
     pub(super) fn path_of(j: &Journal) -> PathBuf {

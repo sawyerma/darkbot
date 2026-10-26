@@ -436,6 +436,33 @@ pub struct OwnerWallets {
     pub policy_reserves: std::collections::BTreeMap<String, u64>,
     /// NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED.
     pub held_attempt: &'static str,
+    /// DEC-03: the non-landing status of the held attempt or its latest exit; `None` without
+    /// a held FE-04 journal.
+    pub non_landing: Option<OwnerNonLanding>,
+}
+
+/// DEC-03 (N-2 §6): one subject's non-landing status — its result class, the latest read's B
+/// sources and C result, the hold duration and the read's calls and bytes. No switch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerNonLanding {
+    /// ATTEMPT | EXIT.
+    pub subject: &'static str,
+    /// B_C_CONFIRMED | C_ALONE_QUALIFIED | VETO_LANDING_CONFIRMED | VETO_CONTRADICTION_OPEN |
+    /// UNKNOWN_INCOMPLETE; NONE before the handoff or for a release before N-2.
+    pub result_class: &'static str,
+    /// An open contradiction: holds stay, the subject is read again.
+    pub alarm: bool,
+    /// The latest read's B sources: operator and USABLE | UNUSABLE_<reason> | SIGHTING.
+    pub sources: Vec<(String, String)>,
+    /// The latest read's C result (NEGATIVE | SIGHTING | C_<reason>); empty without a read.
+    pub c_result: &'static str,
+    /// How long the hold has been held; `None` without a hold.
+    pub hold_ms: Option<u64>,
+    /// Calls and bytes of the latest read; `None` without a read in this run.
+    pub calls: Option<u64>,
+    pub bytes: Option<u64>,
+    /// Reads of this subject in this run.
+    pub reads: u64,
 }
 
 /// The finance summary (`FinanceSnapshot` of the frontend contract); unknown stays `None`.

@@ -158,6 +158,16 @@ pub enum RecordEvent {
         cache_generation: u64,
         entries: Vec<BlockhashParkEntry>,
     },
+    /// DEC-03 (N-2): one applied settlement read of the FE-04 attempt (`exit: None`) or an exit:
+    /// the subject's result class after it (`None`: not handed off, or released before N-2),
+    /// the non-landing read it carried (every B source, C, calls and bytes) or why none was
+    /// made. An open contradiction (`VetoContradiction`) is this record and an alarm.
+    NonLanding {
+        exit: Option<String>,
+        class: Option<crate::execution::one_shot::non_landing::Verdict>,
+        read: Option<crate::execution::one_shot::non_landing::NonLandingRead>,
+        read_error: Option<String>,
+    },
 }
 /// DEC-01: what happened to a parked candidate (`RecordEvent::BlockhashPark`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

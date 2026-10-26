@@ -424,6 +424,10 @@ pub struct RuntimeConfig {
     pub source_geyser: String,
     /// `P0_SOURCE_GEYSER_PROVIDER`: its provider.
     pub source_geyser_provider: String,
+    /// DEC-03: the FREE_ONLY B sources of the FE-04 non-landing proof, `operator=URL` each
+    /// (`P0_NON_LANDING_SOURCES`, comma separated; redacted like the endpoints). Two usable
+    /// sources of different operators confirm a non-landing with C; fewer leave C alone.
+    pub non_landing_sources: Vec<String>,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -432,6 +436,7 @@ impl Default for RuntimeConfig {
             limits: Limits::default(),
             rpc_endpoints: vec![],
             wss_endpoints: vec![],
+            non_landing_sources: vec![],
             fallback: false,
             adaptive: true,
             duration: "4h".into(),
@@ -626,6 +631,40 @@ impl RuntimeConfig {
             .or_else(|| env("P0_AUDIT_RPC_URL"))
             .or_else(|| env("P0_RPC_URL"))
     }
+    /// DEC-03: the configured non-landing B sources as `(operator, URL)` — an operator label of
+    /// 1–32 lowercase letters, digits or `-`, an `http(s)` URL with a host. Independence is by
+    /// operator, so one URL is configured once and one host belongs to one operator.
+    pub fn non_landing_source_list(&self) -> Result<Vec<(String, String)>, String> {
+        let mut hosts: BTreeMap<String, String> = BTreeMap::new();
+        let mut urls = std::collections::BTreeSet::new();
+        self.non_landing_sources
+            .iter()
+            .map(|entry| {
+                let (operator, url) = entry
+                    .split_once('=')
+                    .ok_or("non-landing source must be operator=URL")?;
+                let label = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
+                if operator.is_empty() || operator.len() > 32 || !operator.chars().all(label) {
+                    return Err("non-landing source operator invalid".to_string());
+                }
+                let u = reqwest::Url::parse(url).map_err(|_| "non-landing source URL invalid")?;
+                let Some(host) = u
+                    .host_str()
+                    .filter(|_| ["http", "https"].contains(&u.scheme()))
+                else {
+                    return Err("non-landing source URL invalid".into());
+                };
+                if !urls.insert(url.to_string())
+                    || hosts
+                        .insert(host.to_ascii_lowercase(), operator.to_string())
+                        .is_some_and(|other| other != operator)
+                {
+                    return Err("non-landing source repeated or host of two operators".into());
+                }
+                Ok((operator.to_string(), url.to_string()))
+            })
+            .collect()
+    }
     pub fn validate(&self) -> Result<(), String> {
         for p in PARAMETERS {
             if self
@@ -680,6 +719,7 @@ impl RuntimeConfig {
                 }
             }
         }
+        self.non_landing_source_list()?;
         if !["off", "index", "strict", "crosscheck"].contains(&self.verification.as_str()) {
             return Err("invalid verification mode".into());
         }
@@ -797,6 +837,7 @@ struct ConfigFile {
     limits: Option<BTreeMap<String, u64>>,
     rpc_endpoints: Option<Vec<String>>,
     wss_endpoints: Option<Vec<String>>,
+    non_landing_sources: Option<Vec<String>>,
     fallback: Option<bool>,
     adaptive: Option<bool>,
     duration: Option<String>,
@@ -845,6 +886,7 @@ impl ConfigFile {
                 "c0_census" => f.c0_census = Some(on_off(&value)?),
                 "rpc_endpoints" => f.rpc_endpoints = Some(list(&value)),
                 "wss_endpoints" => f.wss_endpoints = Some(list(&value)),
+                "non_landing_sources" => f.non_landing_sources = Some(list(&value)),
                 "fe_targets" => f.fe_targets = Some(list(&value)),
                 field if Limits::default().get(field).is_some() => {
                     f.limits
@@ -958,6 +1000,7 @@ impl Resolved {
             "profile",
             "rpc_endpoints",
             "wss_endpoints",
+            "non_landing_sources",
             "fallback",
             "adaptive",
             "duration",
@@ -998,6 +1041,10 @@ impl Resolved {
         if let Some(url) = env("P0_RPC_URL") {
             c.rpc_endpoints = vec![url];
             sources.insert("rpc_endpoints".into(), "environment".into());
+        }
+        if let Some(v) = env("P0_NON_LANDING_SOURCES").filter(|v| !v.trim().is_empty()) {
+            c.non_landing_sources = v.split(',').map(|e| e.trim().to_string()).collect();
+            sources.insert("non_landing_sources".into(), "environment".into());
         }
         if let Some(url) = env("P0_WS_URL") {
             c.wss_endpoints = vec![url];
@@ -1049,6 +1096,10 @@ impl Resolved {
             c.rpc_endpoints = v;
             sources.insert("rpc_endpoints".into(), "config_file".into());
         }
+        if let Some(v) = file.non_landing_sources.filter(|v| !v.is_empty()) {
+            c.non_landing_sources = v;
+            sources.insert("non_landing_sources".into(), "config_file".into());
+        }
         if let Some(v) = file.wss_endpoints.filter(|v| !v.is_empty()) {
             c.wss_endpoints = v;
             sources.insert("wss_endpoints".into(), "config_file".into());
@@ -1093,6 +1144,7 @@ impl Resolved {
                     "fe_mode" => c.fe_mode = val.clone(),
                     "fe_group" => c.fe_group = val.clone(),
                     "rpc_endpoints" => c.rpc_endpoints = list(&val),
+                    "non_landing_sources" => c.non_landing_sources = list(&val),
                     "wss_endpoints" => c.wss_endpoints = list(&val),
                     "fe_targets" => c.fe_targets = list(&val),
                     "fallback" => c.fallback = on_off(&val)?,
@@ -1157,7 +1209,7 @@ impl Resolved {
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1195,6 +1247,11 @@ impl Resolved {
             "wss-endpoints = {} configured (redacted) [source {}]\n",
             e.wss_endpoint_count,
             src("wss_endpoints")
+        );
+        s += &format!(
+            "non-landing-sources = {} configured (redacted) [source {}]\n",
+            self.config.non_landing_sources.len(),
+            src("non_landing_sources")
         );
         for (name, value) in [
             ("fallback", e.fallback.to_string()),
@@ -1403,6 +1460,63 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, 2);
+    }
+    /// DEC-03: the non-landing B sources (`operator=URL`) from environment and CLI in the common
+    /// precedence, validated (a lowercase operator label of at most 32, an http(s) URL with a
+    /// host) and printed only as a count.
+    #[test]
+    fn dec03_non_landing_sources_parse_validate_and_redact() {
+        let env = |k: &str| match k {
+            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_NON_LANDING_SOURCES" => {
+                Some("op-a=https://a.invalid/KEY, op-b=http://b.invalid".to_string())
+            }
+            _ => None,
+        };
+        let r = Resolved::parse(&[], &env).unwrap();
+        assert_eq!(
+            r.config.non_landing_source_list().unwrap(),
+            [
+                ("op-a".to_string(), "https://a.invalid/KEY".to_string()),
+                ("op-b".to_string(), "http://b.invalid".to_string())
+            ]
+        );
+        assert_eq!(r.sources["non_landing_sources"], "environment");
+        let printed = r.text();
+        assert!(!printed.contains("KEY"), "{printed}");
+        assert!(
+            printed.contains("non-landing-sources = 2 configured (redacted) [source environment]")
+        );
+        let r = Resolved::parse(
+            &[
+                "--non-landing-sources".into(),
+                "op-c=https://c.invalid".into(),
+            ],
+            &env,
+        )
+        .unwrap();
+        assert_eq!(r.config.non_landing_sources, ["op-c=https://c.invalid"]);
+        assert_eq!(r.sources["non_landing_sources"], "cli");
+        assert!(parse(&["--non-landing-sources", "op-1=https://a.invalid"]).is_ok());
+        // One operator may run several endpoints of one host.
+        assert!(parse(&[
+            "--non-landing-sources",
+            "op-a=https://a.invalid/1,op-a=https://a.invalid/2"
+        ])
+        .is_ok());
+        let long = format!("{}=https://a.invalid", "a".repeat(33));
+        for bad in [
+            "https://a.invalid",
+            "OP=https://a.invalid",
+            "=https://a.invalid",
+            "op=ftp://a.invalid",
+            "op=not a url",
+            long.as_str(),
+            "op-a=https://a.invalid,op-a=https://a.invalid",
+            "op-a=https://a.invalid/1,op-b=https://A.invalid/2",
+        ] {
+            assert!(parse(&["--non-landing-sources", bad]).is_err(), "{bad}");
+        }
     }
     #[test]
     fn rejects_invalid_types_unknown_financial_keys_and_resource_ranges() {

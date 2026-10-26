@@ -365,6 +365,42 @@ message WalletsState {
   repeated AssetAmount policy_reserves = 13;
   // State of the attempt held by this run: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED.
   string held_attempt = 14;
+  // DEC-03: the non-landing status of the held attempt or its latest exit; unset without a held
+  // FE-04 journal.
+  NonLanding non_landing = 15;
+}
+
+// DEC-03 (N-2): the non-landing status of one FE-04 subject — exactly one result class, the
+// latest read's B sources and C result, the hold duration and the read's calls and bytes. No
+// switch and no manual resolution.
+message NonLanding {
+  // ATTEMPT | EXIT.
+  string subject = 1;
+  // B_C_CONFIRMED | C_ALONE_QUALIFIED | VETO_LANDING_CONFIRMED | VETO_CONTRADICTION_OPEN |
+  // UNKNOWN_INCOMPLETE; NONE before the handoff or for a release before N-2.
+  string result_class = 2;
+  // An open contradiction (a sighting without a confirmed landing): holds stay, read again.
+  bool alarm = 3;
+  // The latest read's B sources.
+  repeated NonLandingSource sources = 4;
+  // The latest read's C result: NEGATIVE | SIGHTING | C_<reason>; empty without a read.
+  string c_result = 5;
+  // How long the hold has been held, milliseconds; unset without a hold.
+  optional uint64 hold_ms = 6;
+  // Calls of the latest read; unset without a read in this run.
+  optional uint64 calls = 7;
+  // Request and response bytes of the latest read; unset without a read in this run.
+  optional uint64 bytes = 8;
+  // Reads of this subject in this run.
+  uint64 reads = 9;
+}
+
+// One B source of a non-landing read.
+message NonLandingSource {
+  // Operator label of the source.
+  string operator = 1;
+  // USABLE | UNUSABLE_<reason> | SIGHTING.
+  string class = 2;
 }
 
 // DEC-10: secret-free status of the FE-04 approval file (native key = value) the runtime is

@@ -2,15 +2,16 @@
 //! wallet journal (the one financial record). An exit is its own explicitly approved one-shot
 //! action bound to the settled attempt: it sells the whole open position of one mint ExactIn for
 //! native SOL with a floor enforced by the signed swap, is durably reserved before its single
-//! handoff and UNKNOWN until finalized receipts or a strict non-landing proof settle it.
+//! handoff and UNKNOWN until finalized receipts or a proving DEC-03 non-landing read settle it.
 //!
 //! Only a settled successful exit realizes: its SOL proceeds become realized net and the
 //! position's mark leaves the open inventory. A failed exit realizes its fee as a loss and the
 //! position stays open; a proven non-landing pays nothing. Any other outcome — a partial or
 //! mismatched sale, foreign wallet activity, proceeds below the floor, an incomplete observation —
 //! is refused at finalization: the exit stays UNKNOWN with every hold.
+use super::non_landing::{NonLandingRead, NonLandingRelease};
 use super::receipts::FinalizedObservation;
-use super::settlement::{NonLandingProof, SettlementEvidence};
+use super::settlement::{SettlementEvidence, SettlementSubject};
 use super::{
     cause, err, hex, key, Current, Journal, Phase, Receipt, Saved, Transition, Version,
     EXIT_LIFECYCLE_VERSIONS, MAX_JOURNAL_BYTES,
@@ -112,6 +113,32 @@ pub struct ExitAttempt {
     pub(super) phase: ExitPhase,
     pub(super) observations: BTreeMap<String, FinalizedObservation>,
     pub(super) finalized: Option<Vec<Receipt>>,
+    /// DEC-03 (journal schema 6): the class of a released non-landing of this exit.
+    #[serde(default)]
+    pub(super) non_landing: Option<NonLandingRelease>,
+}
+
+/// Journal schema-5 layout of `ExitAttempt` (before the DEC-03 release class).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(super) struct ExitAttemptV5 {
+    pub(super) approval: ExitApproval,
+    pub(super) intent: ExitIntent,
+    pub(super) phase: ExitPhase,
+    pub(super) observations: BTreeMap<String, FinalizedObservation>,
+    pub(super) finalized: Option<Vec<Receipt>>,
+}
+impl From<ExitAttemptV5> for ExitAttempt {
+    fn from(v: ExitAttemptV5) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            observations: v.observations,
+            finalized: v.finalized,
+            non_landing: None,
+        }
+    }
 }
 
 /// The outcome of one exit settlement step.
@@ -175,6 +202,7 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
         || !matches!(p.phase, Phase::Settled(_))
         || p.finalized != next.finalized
         || p.observations != next.observations
+        || p.non_landing != next.non_landing
     {
         return false;
     }
@@ -184,7 +212,10 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
             && after[..before.len()] == before[..]
             && active(p).is_none()
             && after.last().is_some_and(|e| {
-                e.phase == ExitPhase::Reserved && e.observations.is_empty() && e.finalized.is_none()
+                e.phase == ExitPhase::Reserved
+                    && e.observations.is_empty()
+                    && e.finalized.is_none()
+                    && e.non_landing.is_none()
             });
     }
     let (Some(old), Some(new)) = (before.last(), after.last()) else {
@@ -195,6 +226,19 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
         || old.approval != new.approval
         || old.intent != new.intent
     {
+        return false;
+    }
+    // DEC-03: only a non-landing writes a release class, and only a proving one.
+    let released = if t == Transition::ExitNotLanded {
+        old.non_landing.is_none()
+            && new
+                .non_landing
+                .as_ref()
+                .is_none_or(|r| r.class.proves_non_landing())
+    } else {
+        new.non_landing == old.non_landing
+    };
+    if !released {
         return false;
     }
     match t {
@@ -468,6 +512,7 @@ impl Journal {
             phase: ExitPhase::Reserved,
             observations: BTreeMap::new(),
             finalized: None,
+            non_landing: None,
         });
         // A23-07: a new exit only while its whole lifecycle keeps the wallet journal reopenable
         // (the open check refuses a larger file); beyond, it is refused and the position stays
@@ -564,24 +609,24 @@ impl Journal {
         self.persist(s, Transition::ExitFinalize)
     }
 
-    /// Finalizes a proven non-landing of the open exit: nothing landed, nothing was paid.
-    pub fn exit_not_landed(&mut self, proof: &NonLandingProof) -> Result<(), String> {
+    /// Finalizes a proven non-landing of the open exit (DEC-03/N-2, as for the attempt):
+    /// nothing landed, nothing was paid; the release class is persisted with the exit.
+    pub fn exit_not_landed(&mut self, read: &NonLandingRead) -> Result<(), String> {
         let mut s = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
         let e = s
             .exits
             .last_mut()
             .filter(|e| e.phase == ExitPhase::HandoffUnknown)
             .ok_or_else(|| err("EXIT_NOT_UNKNOWN"))?;
-        let bound: BTreeSet<String> = e.intent.signatures.iter().cloned().collect();
-        if proof.finalized_block_height <= e.intent.last_valid_block_height
-            || proof.history_from_slot > e.intent.state_slot
-            || proof.absent_signatures != bound
-            || !e.observations.is_empty()
-        {
-            return Err(err("NON_LANDING_NOT_PROVEN_HOLD_RETAINED"));
-        }
+        let release = SettlementSubject::from(&e.intent)
+            .non_landing()
+            .ok()
+            .and_then(|subject| read.release(&subject))
+            .filter(|_| e.observations.is_empty())
+            .ok_or_else(|| err("NON_LANDING_NOT_PROVEN_HOLD_RETAINED"))?;
         e.phase = ExitPhase::Finalized;
         e.finalized = Some(Vec::new());
+        e.non_landing = Some(release);
         self.persist(s, Transition::ExitNotLanded)
     }
 
@@ -644,8 +689,8 @@ impl Journal {
 
     /// FE-04 exit settlement step from the worker's evidence (as `apply_settlement_evidence` for
     /// the attempt): observations are durable when changed; all observed and consistent ⇒ finalize
-    /// and book; nothing observed and a strict proof ⇒ finalized not landed and booked; anything
-    /// else stays UNKNOWN with its reasons. Idempotent across steps and restarts.
+    /// and book; nothing observed and a proving non-landing read ⇒ finalized not landed and
+    /// booked; anything else stays UNKNOWN with its reasons. Idempotent across steps and restarts.
     pub fn apply_exit_evidence(
         &mut self,
         evidence: SettlementEvidence,
@@ -691,11 +736,12 @@ impl Journal {
             };
         }
         if none {
-            match evidence.proof {
-                Some(Ok(proof)) => {
-                    self.exit_not_landed(&proof)?;
+            match evidence.non_landing {
+                Some(Ok(read)) if read.verdict().proves_non_landing() => {
+                    self.exit_not_landed(&read)?;
                     return self.settle_exit(value, now_unix_s).map(ExitStep::Settled);
                 }
+                Some(Ok(read)) => reasons.extend(super::settlement::non_landing_reasons(&read)),
                 Some(Err(reason)) => reasons.push(reason),
                 None => reasons.push(err("NON_LANDING_NOT_ATTEMPTED")),
             }
@@ -963,7 +1009,7 @@ pub(crate) mod tests {
     fn evidence(sig: &str, o: FinalizedObservation) -> SettlementEvidence {
         SettlementEvidence {
             observations: vec![(sig.to_string(), Ok(o))],
-            proof: None,
+            non_landing: None,
         }
     }
 
@@ -1099,13 +1145,12 @@ pub(crate) mod tests {
         let mut j = Journal::open(&path, &a.wallet).unwrap();
         j.reserve(a.clone(), i.clone(), &c).unwrap();
         j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        let subject = SettlementSubject::from(&i).non_landing().unwrap();
         let proven = SettlementEvidence {
             observations: vec![],
-            proof: Some(Ok(NonLandingProof {
-                finalized_block_height: i.last_valid_block_height.unwrap() + 1,
-                history_from_slot: i.state_slot,
-                absent_signatures: i.signatures.iter().cloned().collect(),
-            })),
+            non_landing: Some(Ok(super::super::non_landing::loopback::proving(
+                &subject, true,
+            ))),
         };
         j.apply_settlement_evidence(proven, &value, 1_000).unwrap();
         drop(j);
@@ -1265,6 +1310,58 @@ pub(crate) mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
+    /// DEC-03: an exit's replay accepts a release class only from its non-landing and only a
+    /// proving one; no exit transition changes the attempt's class. A stored observation of the
+    /// exit (a sighting) is never released by a proving read.
+    #[test]
+    fn dec03_exit_replay_accepts_a_release_class_only_from_a_non_landing() {
+        use super::super::non_landing::{loopback::proving, NonLandingRelease, Verdict};
+        let (path, mut j, mint, a) = settled(1_000);
+        let ei = handed_off_exit(&mut j, &a, &mint, "exit-1");
+        let p = j.saved.clone().unwrap();
+        let release = |class| {
+            Some(NonLandingRelease {
+                class,
+                usable_operators: Default::default(),
+                c_blocks: 1,
+                c_through_slot: 1,
+            })
+        };
+        let mut next = p.clone();
+        let e = next.exits.last_mut().unwrap();
+        e.phase = ExitPhase::Finalized;
+        e.finalized = Some(Vec::new());
+        for (class, ok) in [
+            (None, true),
+            (release(Verdict::CAloneQualified), true),
+            (release(Verdict::VetoContradiction), false),
+            (release(Verdict::UnknownIncomplete), false),
+        ] {
+            next.exits.last_mut().unwrap().non_landing = class;
+            assert_eq!(super::legal(&p, Transition::ExitNotLanded, &next), ok);
+        }
+        let mut observed = p.clone();
+        observed.exits.last_mut().unwrap().non_landing = release(Verdict::CAloneQualified);
+        assert!(!super::legal(&p, Transition::ExitObserve, &observed));
+        let mut attempt = p.clone();
+        attempt.non_landing = release(Verdict::CAloneQualified);
+        assert!(!super::legal(&p, Transition::ExitObserve, &attempt));
+        let sig = &ei.signatures[0];
+        let mut seen = observation(sig, true, -5_000, &[]);
+        seen.unknown_reasons = vec!["ARCHIVE_429".into()];
+        assert!(matches!(
+            j.apply_exit_evidence(evidence(sig, seen), &value, 2_000),
+            Ok(ExitStep::Unknown(_))
+        ));
+        let subject = SettlementSubject::from(&ei).non_landing().unwrap();
+        assert_eq!(
+            j.exit_not_landed(&proving(&subject, true)).unwrap_err(),
+            "NON_LANDING_NOT_PROVEN_HOLD_RETAINED"
+        );
+        drop(j);
+        fs::remove_dir_all(path).unwrap();
+    }
+
     /// FE-04 exit: a landed failure realizes its fee as a loss and sells nothing; a proven
     /// non-landing pays nothing — the position stays open in both; one approval is consumed once,
     /// a new one may exit again. A proof that does not reach the exit's expiry proves nothing.
@@ -1294,28 +1391,44 @@ pub(crate) mod tests {
             "EXIT_APPROVAL_ALREADY_CONSUMED"
         );
         let ei = handed_off_exit(&mut j, &a, &mint, "exit-2");
-        let proof = |height| NonLandingProof {
-            finalized_block_height: height,
-            history_from_slot: ei.state_slot,
-            absent_signatures: ei.signatures.iter().cloned().collect(),
-        };
-        let short = SettlementEvidence {
+        use super::super::non_landing::{loopback::proving, CIncomplete, CResult, Verdict};
+        let subject = SettlementSubject::from(&ei).non_landing().unwrap();
+        let read = |s: &super::super::non_landing::Subject| SettlementEvidence {
             observations: vec![],
-            proof: Some(Ok(proof(ei.last_valid_block_height))),
+            non_landing: Some(Ok(proving(s, false))),
         };
+        // DEC-03: a read of another subject (its expiry) proves nothing for this exit.
+        let mut other = subject.clone();
+        other.last_valid_block_height -= 1;
         assert_eq!(
-            j.apply_exit_evidence(short, &value, 2_100).unwrap_err(),
+            j.apply_exit_evidence(read(&other), &value, 2_100)
+                .unwrap_err(),
             "NON_LANDING_NOT_PROVEN_HOLD_RETAINED"
         );
-        assert!(j.active_hold().is_some());
-        let proven = SettlementEvidence {
+        let mut incomplete = proving(&subject, true);
+        incomplete.c = CResult::Incomplete(CIncomplete::NotExpired);
+        let waiting = SettlementEvidence {
             observations: vec![],
-            proof: Some(Ok(proof(ei.last_valid_block_height + 1))),
+            non_landing: Some(Ok(incomplete)),
         };
-        let ExitStep::Settled(x) = j.apply_exit_evidence(proven, &value, 2_200).unwrap() else {
+        let ExitStep::Unknown(reasons) = j.apply_exit_evidence(waiting, &value, 2_100).unwrap()
+        else {
+            panic!("unknown");
+        };
+        assert_eq!(reasons[0], "NON_LANDING_UNKNOWN_INCOMPLETE");
+        assert!(j.active_hold().is_some());
+        let ExitStep::Settled(x) = j
+            .apply_exit_evidence(read(&subject), &value, 2_200)
+            .unwrap()
+        else {
             panic!("settled");
         };
         assert_eq!((x.landed, x.realized_usd_micro), (false, 0));
+        let status = j.non_landing_status(None).unwrap();
+        assert_eq!(
+            (status.exit.as_deref(), status.class),
+            (Some("exit-2"), Some(Verdict::CAloneQualified))
+        );
         assert_eq!(j.open_inventory()[&mint].units, 1_000);
         assert_eq!(j.safety_replay().unwrap().exits.len(), 2);
         drop(j);
@@ -1342,11 +1455,10 @@ pub(crate) mod tests {
                 .unwrap();
             let proven = SettlementEvidence {
                 observations: vec![],
-                proof: Some(Ok(NonLandingProof {
-                    finalized_block_height: ei.last_valid_block_height + 1,
-                    history_from_slot: ei.state_slot,
-                    absent_signatures: ei.signatures.iter().cloned().collect(),
-                })),
+                non_landing: Some(Ok(super::super::non_landing::loopback::proving(
+                    &SettlementSubject::from(&ei).non_landing().unwrap(),
+                    true,
+                ))),
             };
             assert!(matches!(
                 j.apply_exit_evidence(proven, &value, 2_200).unwrap(),

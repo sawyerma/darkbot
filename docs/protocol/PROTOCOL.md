@@ -132,6 +132,8 @@
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
     - [LiquidatorState](#darkbot-project0-v1-LiquidatorState)
     - [LossCount](#darkbot-project0-v1-LossCount)
+    - [NonLanding](#darkbot-project0-v1-NonLanding)
+    - [NonLandingSource](#darkbot-project0-v1-NonLandingSource)
     - [OwnerEngine](#darkbot-project0-v1-OwnerEngine)
     - [OwnerPipeline](#darkbot-project0-v1-OwnerPipeline)
     - [OwnerRun](#darkbot-project0-v1-OwnerRun)
@@ -2379,6 +2381,47 @@ One loss reason with its count.
 
 
 
+<a name="darkbot-project0-v1-NonLanding"></a>
+
+### NonLanding
+DEC-03 (N-2): the non-landing status of one FE-04 subject — exactly one result class, the
+latest read&#39;s B sources and C result, the hold duration and the read&#39;s calls and bytes. No
+switch and no manual resolution.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| subject | [string](#string) |  | ATTEMPT | EXIT. |
+| result_class | [string](#string) |  | B_C_CONFIRMED | C_ALONE_QUALIFIED | VETO_LANDING_CONFIRMED | VETO_CONTRADICTION_OPEN | UNKNOWN_INCOMPLETE; NONE before the handoff or for a release before N-2. |
+| alarm | [bool](#bool) |  | An open contradiction (a sighting without a confirmed landing): holds stay, read again. |
+| sources | [NonLandingSource](#darkbot-project0-v1-NonLandingSource) | repeated | The latest read&#39;s B sources. |
+| c_result | [string](#string) |  | The latest read&#39;s C result: NEGATIVE | SIGHTING | C_&lt;reason&gt;; empty without a read. |
+| hold_ms | [uint64](#uint64) | optional | How long the hold has been held, milliseconds; unset without a hold. |
+| calls | [uint64](#uint64) | optional | Calls of the latest read; unset without a read in this run. |
+| bytes | [uint64](#uint64) | optional | Request and response bytes of the latest read; unset without a read in this run. |
+| reads | [uint64](#uint64) |  | Reads of this subject in this run. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-NonLandingSource"></a>
+
+### NonLandingSource
+One B source of a non-landing read.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| operator | [string](#string) |  | Operator label of the source. |
+| class | [string](#string) |  | USABLE | UNUSABLE_&lt;reason&gt; | SIGHTING. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-OwnerEngine"></a>
 
 ### OwnerEngine
@@ -2684,6 +2727,7 @@ wallet&#39;s FE-04 journals (execution/accounting.rs) and the reservation book.
 | holds | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Holds of every attempt in the reservation book, per asset (&#34;SOL&#34; lamports or mint units). |
 | policy_reserves | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Never-spent policy reserves of the inventory bands. |
 | held_attempt | [string](#string) |  | State of the attempt held by this run: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED. |
+| non_landing | [NonLanding](#darkbot-project0-v1-NonLanding) |  | DEC-03: the non-landing status of the held attempt or its latest exit; unset without a held FE-04 journal. |
 
 
 

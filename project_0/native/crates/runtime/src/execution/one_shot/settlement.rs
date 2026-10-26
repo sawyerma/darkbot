@@ -1,6 +1,7 @@
 //! C3/P8-05: finalized settlement of the one durable FE-04 attempt, in the same wallet journal
 //! (no second financial store). Receipts come from the durable finalized observations of every
-//! bound signature (`reconcile_observed`) or a strict non-landing proof (`reconcile_not_landed`);
+//! bound signature (`reconcile_observed`) or a DEC-03/N-2 non-landing read that proves it
+//! (`reconcile_not_landed`: B+C or C alone, the class persisted with the attempt);
 //! the realized i128 net PnL is booked exactly once as a journal transition (`Phase::Settled`).
 //! An incomplete bundle, an observation with unknown reasons, a missing proof or any delta without
 //! a conservative value stays UNKNOWN: holds and HALT remain.
@@ -10,10 +11,10 @@
 //! wallet — is open inventory: marked at its conservative (lower-bound) value, unrealized, never
 //! realized net PnL, since no receipt is evidence of its exit (sale). The attempt's expected edge
 //! stays the intent's `conservative_net_usd_micro`.
+use super::non_landing::{NonLandingRead, NonLandingSources, Subject, Verdict};
 use super::{err, Intent, Journal, Phase, Receipt, Transition};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
-use solana_commitment_config::CommitmentConfig;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The booked outcome of one attempt (USD micro where named so; lamports and base units else).
@@ -98,18 +99,6 @@ fn classify(
     Ok((realized, open, unrealized))
 }
 
-/// C12: a strict non-landing proof in the domain of blockhash validity, block height: a finalized
-/// block height beyond the signed blockhash's `lastValidBlockHeight` was observed first, then
-/// every bound signature was absent from a history that reaches back to the intent's state slot.
-/// (A slot bound proves nothing: skipped slots let a later slot carry a lower block height.)
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NonLandingProof {
-    pub finalized_block_height: u64,
-    /// The oldest slot the queried node's history covers (`minimumLedgerSlot`).
-    pub history_from_slot: u64,
-    pub absent_signatures: BTreeSet<String>,
-}
-
 /// What one settlement read is about — the attempt's or an exit's: the wallet and the assets its
 /// receipts carry, the bound signatures and the bounds of their non-landing proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,50 +139,18 @@ impl From<&super::exit::ExitIntent> for SettlementSubject {
         }
     }
 }
-
-/// C12: acquires the proof through the reconciliation RPC — the finalized block height first,
-/// then the history floor, then the bound signatures with history search. An unknown expiry (an
-/// intent before C12), an unexpired blockhash, a history starting after the intent, any status
-/// (landed or pending: it must be observed instead) or any failed call is no proof.
-pub fn non_landing_proof(
-    rpc: &RpcClient,
-    intent: &SettlementSubject,
-) -> Result<NonLandingProof, String> {
-    let expiry = intent
-        .last_valid_block_height
-        .ok_or_else(|| err("NON_LANDING_EXPIRY_UNKNOWN"))?;
-    let height = rpc
-        .get_block_height_with_commitment(CommitmentConfig::finalized())
-        .map_err(|_| err("NON_LANDING_HEIGHT_UNAVAILABLE"))?;
-    if height <= expiry {
-        return Err(err("NON_LANDING_BLOCKHASH_NOT_EXPIRED"));
+impl SettlementSubject {
+    /// DEC-03: what its non-landing read proves; an unknown expiry (an intent before C12) is
+    /// never provable.
+    pub fn non_landing(&self) -> Result<Subject, String> {
+        Ok(Subject {
+            signatures: self.signatures.clone(),
+            last_valid_block_height: self
+                .last_valid_block_height
+                .ok_or_else(|| err("NON_LANDING_EXPIRY_UNKNOWN"))?,
+            state_slot: self.state_slot,
+        })
     }
-    let floor = rpc
-        .minimum_ledger_slot()
-        .map_err(|_| err("NON_LANDING_HISTORY_UNAVAILABLE"))?;
-    if floor > intent.state_slot {
-        return Err(err("NON_LANDING_HISTORY_INCOMPLETE"));
-    }
-    let signatures = intent
-        .signatures
-        .iter()
-        .map(|s| s.parse().map_err(|_| err("SIGNATURE_BINDING_INVALID")))
-        .collect::<Result<Vec<solana_sdk::signature::Signature>, _>>()?;
-    let statuses = rpc
-        .get_signature_statuses_with_history(&signatures)
-        .map_err(|_| err("NON_LANDING_STATUS_UNAVAILABLE"))?
-        .value;
-    if statuses.len() != signatures.len() {
-        return Err(err("NON_LANDING_STATUS_UNAVAILABLE"));
-    }
-    if statuses.iter().any(Option::is_some) {
-        return Err(err("NON_LANDING_SIGNATURE_SEEN"));
-    }
-    Ok(NonLandingProof {
-        finalized_block_height: height,
-        history_from_slot: floor,
-        absent_signatures: intent.signatures.iter().cloned().collect(),
-    })
 }
 
 /// FE-04/C3: the conservative value of a signed settlement delta from a low and a high value of
@@ -215,14 +172,15 @@ pub fn conservative_value(
 
 /// What the settlement worker read for one UNKNOWN attempt, off the owner: each not yet observed
 /// bound signature's finalized observation or why it is missing, and — only while nothing at all
-/// is observed — the non-landing proof attempt. Evidence only; the journal decides.
+/// is observed — the DEC-03 non-landing read (B and C) or why none was made. Evidence only; the
+/// journal decides.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SettlementEvidence {
     pub observations: Vec<(
         String,
         Result<super::receipts::FinalizedObservation, String>,
     )>,
-    pub proof: Option<Result<NonLandingProof, String>>,
+    pub non_landing: Option<Result<NonLandingRead, String>>,
 }
 
 /// V2-01: the signatures whose observation is complete (final; never read again).
@@ -265,9 +223,10 @@ pub(super) fn keep_strongest(
 }
 
 /// The settlement worker's reads for `intent` (signatures with a complete observation are not
-/// read again).
+/// read again); the non-landing read over `sources` (unavailable: why).
 pub fn fetch_settlement_evidence(
     rpc: &RpcClient,
+    sources: Result<&NonLandingSources, &str>,
     intent: &SettlementSubject,
     observed: &Observed,
 ) -> SettlementEvidence {
@@ -293,9 +252,78 @@ pub fn fetch_settlement_evidence(
         .collect();
     let none_observed = !observed.stored && observations.iter().all(|(_, r)| r.is_err());
     SettlementEvidence {
-        proof: none_observed.then(|| non_landing_proof(rpc, intent)),
+        non_landing: none_observed.then(|| {
+            let subject = intent.non_landing()?;
+            Ok(sources.map_err(str::to_string)?.read(&subject))
+        }),
         observations,
     }
+}
+
+/// Why a non-landing read releases nothing: its class, then C's result and each B source that
+/// is not usable.
+pub(super) fn non_landing_reasons(read: &NonLandingRead) -> Vec<String> {
+    std::iter::once(format!("NON_LANDING_{}", read.verdict().code()))
+        .chain(std::iter::once(format!("NON_LANDING_C:{}", read.c.code())))
+        .chain(
+            read.b
+                .iter()
+                .filter(|s| s.class != super::non_landing::BClass::Usable)
+                .map(|s| format!("NON_LANDING_B:{}:{}", s.operator, s.class.code())),
+        )
+        .collect()
+}
+
+/// DEC-03 (N-2 §6): the result class of a subject from its journal state and the latest read
+/// made for it. Reserved (nothing handed off): none. Finalized from receipts: a sighting with
+/// the landing confirmed; finalized not landed: its persisted release class (none before N-2).
+/// UNKNOWN: any stored observation is a sighting without a confirmed landing (an open
+/// contradiction); else the read's class — a proving class the journal did not release, an
+/// unreadable subject or no read is incomplete.
+pub(super) fn non_landing_class(
+    handed_off: bool,
+    finalized: Option<(&[Receipt], Option<&super::non_landing::NonLandingRelease>)>,
+    observed: bool,
+    subject: Result<Subject, String>,
+    read: Option<&NonLandingRead>,
+) -> Option<Verdict> {
+    if let Some((receipts, release)) = finalized {
+        return if receipts.is_empty() {
+            release.map(|r| r.class)
+        } else {
+            Some(Verdict::VetoLandingConfirmed)
+        };
+    }
+    if !handed_off {
+        return None;
+    }
+    if observed {
+        return Some(Verdict::VetoContradiction);
+    }
+    Some(match (subject, read) {
+        (Ok(s), Some(r)) if r.subject == s => r.verdict(),
+        _ => Verdict::UnknownIncomplete,
+    })
+    .map(|v| {
+        if v.proves_non_landing() {
+            Verdict::UnknownIncomplete
+        } else {
+            v
+        }
+    })
+}
+
+/// DEC-03 (N-2 §6): the non-landing status of the journal's latest subject — its last exit,
+/// else the attempt: its result class and, while its hold is held, the evaluation it was
+/// reserved at (the hold duration's start).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NonLandingStatus {
+    /// The exit's approval id; `None`: the attempt.
+    pub exit: Option<String>,
+    pub class: Option<Verdict>,
+    pub held_since_unix_ms: Option<u64>,
+    /// The persisted release of a released non-landing (what proved it, after a restart too).
+    pub release: Option<super::non_landing::NonLandingRelease>,
 }
 
 /// The outcome of one settlement step.
@@ -344,26 +372,79 @@ impl Journal {
         self.reconcile(receipts)
     }
 
-    /// Finalizes a proven non-landing: nothing landed, nothing was paid.
-    pub fn reconcile_not_landed(&mut self, proof: &NonLandingProof) -> Result<(), String> {
+    /// Finalizes a proven non-landing (DEC-03/N-2: a read of exactly this intent that is B+C
+    /// confirmed or C alone qualified, nothing observed): nothing landed, nothing was paid; the
+    /// release class is persisted with the attempt.
+    pub fn reconcile_not_landed(&mut self, read: &NonLandingRead) -> Result<(), String> {
         let mut s = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
         if s.phase != Phase::HandoffUnknown {
             return Err(err("NOT_UNKNOWN"));
         }
-        let bound: BTreeSet<String> = s.intent.signatures.iter().cloned().collect();
         // C12: an intent without its blockhash expiry (schema 2) can never be proven absent.
-        if s.intent
-            .last_valid_block_height
-            .is_none_or(|expiry| proof.finalized_block_height <= expiry)
-            || proof.history_from_slot > s.intent.state_slot
-            || proof.absent_signatures != bound
-            || !s.observations.is_empty()
-        {
-            return Err(err("NON_LANDING_NOT_PROVEN_HOLD_RETAINED"));
-        }
+        let release = SettlementSubject::from(&s.intent)
+            .non_landing()
+            .ok()
+            .and_then(|subject| read.release(&subject))
+            .filter(|_| s.observations.is_empty())
+            .ok_or_else(|| err("NON_LANDING_NOT_PROVEN_HOLD_RETAINED"))?;
         s.phase = Phase::HaltFinalized;
         s.finalized = Some(Vec::new());
+        s.non_landing = Some(release);
         self.persist(s, Transition::NotLanded)
+    }
+
+    /// DEC-03: the non-landing status of the latest subject; `read`: the latest non-landing read
+    /// with the exit it was made for (`None`: the attempt), used only for that subject.
+    pub fn non_landing_status(
+        &self,
+        read: Option<(Option<&str>, &NonLandingRead)>,
+    ) -> Option<NonLandingStatus> {
+        use super::exit::ExitPhase;
+        let s = self.saved.as_ref()?;
+        let latest = |exit: Option<&str>| read.filter(|(e, _)| *e == exit).map(|(_, r)| r);
+        Some(match s.exits.last() {
+            Some(e) => {
+                let id = e.approval.approval_id.as_str();
+                let finalized = matches!(e.phase, ExitPhase::Finalized | ExitPhase::Settled(_));
+                NonLandingStatus {
+                    exit: Some(id.to_string()),
+                    class: non_landing_class(
+                        e.phase != ExitPhase::Reserved,
+                        finalized.then(|| {
+                            (
+                                e.finalized.as_deref().unwrap_or_default(),
+                                e.non_landing.as_ref(),
+                            )
+                        }),
+                        !e.observations.is_empty(),
+                        SettlementSubject::from(&e.intent).non_landing(),
+                        latest(Some(id)),
+                    ),
+                    held_since_unix_ms: (!finalized).then_some(e.intent.evaluated_unix_ms),
+                    release: e.non_landing.clone(),
+                }
+            }
+            None => {
+                let finalized = s.phase.finalized();
+                NonLandingStatus {
+                    exit: None,
+                    class: non_landing_class(
+                        s.phase != Phase::Reserved,
+                        finalized.then(|| {
+                            (
+                                s.finalized.as_deref().unwrap_or_default(),
+                                s.non_landing.as_ref(),
+                            )
+                        }),
+                        !s.observations.is_empty(),
+                        SettlementSubject::from(&s.intent).non_landing(),
+                        latest(None),
+                    ),
+                    held_since_unix_ms: (!finalized).then_some(s.intent.evaluated_unix_ms),
+                    release: s.non_landing.clone(),
+                }
+            }
+        })
     }
 
     /// The settlement worker's job: the intent and the already observed signatures of an
@@ -426,27 +507,28 @@ impl Journal {
     pub fn settle_step(
         &mut self,
         rpc: &RpcClient,
+        sources: &NonLandingSources,
         value: &dyn Fn(&str, i128) -> Option<i128>,
         now_unix_s: u64,
     ) -> Result<SettleStep, String> {
         let evidence = match self.settlement_job() {
-            Some((intent, observed)) => {
-                fetch_settlement_evidence(rpc, &SettlementSubject::from(&intent), &observed)
-            }
-            None => SettlementEvidence {
-                observations: vec![],
-                proof: None,
-            },
+            Some((intent, observed)) => fetch_settlement_evidence(
+                rpc,
+                Ok(sources),
+                &SettlementSubject::from(&intent),
+                &observed,
+            ),
+            None => SettlementEvidence::default(),
         };
         self.apply_settlement_evidence(evidence, value, now_unix_s)
     }
 
     /// FE-04/C3: applies the worker's evidence to the attempt. New observations are durable
     /// (only when something changed); every bound signature observed finalized without unknown
-    /// reasons ⇒ reconcile and book (`value`); nothing observed and a strict non-landing proof
-    /// ⇒ finalized and booked with nothing paid; anything partial or unproven stays UNKNOWN with
-    /// its reasons (holds retained). Idempotent across steps and restarts. A settlement made now
-    /// is booked at `now_unix_s`.
+    /// reasons ⇒ reconcile and book (`value`); nothing observed and a non-landing read that
+    /// proves it (DEC-03: B+C or C alone) ⇒ finalized and booked with nothing paid; anything
+    /// partial, vetoed or unproven stays UNKNOWN with its reasons (holds retained). Idempotent
+    /// across steps and restarts. A settlement made now is booked at `now_unix_s`.
     pub fn apply_settlement_evidence(
         &mut self,
         evidence: SettlementEvidence,
@@ -485,11 +567,12 @@ impl Journal {
             return self.settle(value, now_unix_s).map(SettleStep::Settled);
         }
         if none {
-            match evidence.proof {
-                Some(Ok(proof)) => {
-                    self.reconcile_not_landed(&proof)?;
+            match evidence.non_landing {
+                Some(Ok(read)) if read.verdict().proves_non_landing() => {
+                    self.reconcile_not_landed(&read)?;
                     return self.settle(value, now_unix_s).map(SettleStep::Settled);
                 }
+                Some(Ok(read)) => reasons.extend(non_landing_reasons(&read)),
                 Some(Err(reason)) => reasons.push(reason),
                 None => reasons.push(err("NON_LANDING_NOT_ATTEMPTED")),
             }
@@ -567,13 +650,49 @@ fn compute(
 
 #[cfg(test)]
 mod tests {
+    use super::super::non_landing::{loopback, NonLandingSources, Verdict};
     use super::super::receipts::FinalizedObservation;
     use super::super::tests::{path_of, setup};
     use super::super::*;
-    use super::{non_landing_proof, NonLandingProof, SettleStep, Settlement, SettlementEvidence};
+    use super::{SettleStep, Settlement, SettlementEvidence, SettlementSubject};
     use serde_json::{json, Value};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    /// The non-landing sources of the tests' intent (state slot 50, expiry height 60): C and two
+    /// B operators over one loopback chain of `n` blocks from slot 50, heights from 58 (four
+    /// blocks reach beyond the expiry); the methods in call order.
+    fn sources_of(
+        n: u64,
+        sighting: Option<(u64, String)>,
+    ) -> (NonLandingSources, Arc<Mutex<Vec<String>>>) {
+        let (url, calls) = loopback::endpoint(loopback::chain(50, n, 58, 0, sighting));
+        (
+            loopback::sources(url.clone(), vec![("op-a", url.clone()), ("op-b", url)]),
+            calls,
+        )
+    }
+
+    /// A finalized successful transaction of `i`'s first signature: 5 000 lamports fee.
+    fn landed_tx(i: &Intent) -> Value {
+        json!({"slot": 55, "blockTime": 123, "transaction": {
+            "signatures": [i.signatures[0]],
+            "message": {"header": {"numRequiredSignatures": 1, "numReadonlySignedAccounts": 0,
+                "numReadonlyUnsignedAccounts": 0},
+                "accountKeys": [i.wallet, solana_sdk::pubkey::Pubkey::new_unique().to_string()],
+                "recentBlockhash": solana_sdk::hash::Hash::new_unique().to_string(),
+                "instructions": []}},
+            "meta": {"err": null, "status": {"Ok": null}, "fee": 5000,
+                "preBalances": [100000, 0], "postBalances": [95000, 0],
+                "preTokenBalances": [], "postTokenBalances": [],
+                "loadedAddresses": {"writable": [], "readonly": []}}})
+    }
+
+    fn frames(f: &std::path::Path) -> usize {
+        let mut r = crate::analytics::journal::Reader::open(f).unwrap();
+        std::iter::from_fn(|| r.next_frame().unwrap()).count()
+    }
 
     /// The journal after reserve and handoff of `n` bound signatures.
     fn handed_off(n: usize) -> (PathBuf, Journal, Intent) {
@@ -646,7 +765,7 @@ mod tests {
         incomplete.unknown_reasons = vec!["ARCHIVE_429".into()];
         let ev = |o: &FinalizedObservation| SettlementEvidence {
             observations: vec![(s1.clone(), Ok(o.clone()))],
-            proof: None,
+            non_landing: None,
         };
         let journal = path.join(format!("{}.p0j", i.wallet));
         let step = j.apply_settlement_evidence(ev(&incomplete), &value, BOOKED);
@@ -664,8 +783,8 @@ mod tests {
     }
 
     /// Review E3 (V2-01): with an observation stored (here incomplete) a failed re-read reads no
-    /// non-landing proof — it could never be accepted (an observation exists), so its three
-    /// calls (block height, history floor, statuses) would only spend the Reconcile budget.
+    /// non-landing evidence — it could never be accepted (an observation exists), so its B and
+    /// C calls would only spend the Reconcile budget.
     #[test]
     fn v2_01_a_stored_observation_reads_no_non_landing_proof() {
         let (path, mut j, i) = handed_off(1);
@@ -681,18 +800,20 @@ mod tests {
         };
         let evidence = SettlementEvidence {
             observations: vec![(s1.clone(), Ok(incomplete))],
-            proof: None,
+            non_landing: None,
         };
         let step = j.apply_settlement_evidence(evidence, &value, BOOKED);
         assert!(matches!(step, Ok(SettleStep::Unknown(_))), "{step:?}");
         let (client, calls) = rpc(vec![]);
-        let step = j.settle_step(&client, &value, BOOKED);
+        let (sources, non_landing) = sources_of(4, None);
+        let step = j.settle_step(&client, &sources, &value, BOOKED);
         assert!(matches!(step, Ok(SettleStep::Unknown(_))), "{step:?}");
         let calls = calls.lock().unwrap().clone();
         assert!(
             calls.iter().all(|m| m == "getTransaction"),
             "only the re-read: {calls:?}"
         );
+        assert!(non_landing.lock().unwrap().is_empty(), "no B or C read");
         assert!(j.active_hold().is_some());
         fs::remove_dir_all(path).unwrap();
     }
@@ -718,7 +839,7 @@ mod tests {
         };
         let ev = |sig: &str, o: FinalizedObservation| SettlementEvidence {
             observations: vec![(sig.to_string(), Ok(o))],
-            proof: None,
+            non_landing: None,
         };
         let _ = j.apply_settlement_evidence(ev(&s1, obs(&s1, true)), &value, BOOKED);
         let _ = j.apply_settlement_evidence(ev(&s1, obs(&s1, false)), &value, BOOKED);
@@ -850,24 +971,31 @@ mod tests {
         fs::remove_dir_all(path).unwrap();
     }
 
-    /// C3/C12: a non-landing needs a finalized block height past the signed blockhash's
-    /// `lastValidBlockHeight`, a history reaching back to the intent's slot and every bound
-    /// signature absent; then it settles at zero (nothing paid). Anything less keeps the hold.
+    /// C3/DEC-03: a non-landing releases only through a read of exactly this intent that proves
+    /// it (B+C or C alone, nothing observed); then it settles at zero (nothing paid) with its
+    /// class persisted. A read of another subject, a read that does not prove it, an intent
+    /// without its expiry or a stored observation keeps the hold.
     #[test]
-    fn not_landed_settles_only_with_a_strict_proof() {
+    fn not_landed_settles_only_with_a_proving_read() {
         let (path, mut j, i) = handed_off(2);
-        let expiry = i.last_valid_block_height.unwrap();
-        let proof = |height, floor, sigs: &[String]| NonLandingProof {
-            finalized_block_height: height,
-            history_from_slot: floor,
-            absent_signatures: sigs.iter().cloned().collect(),
-        };
+        let subject = SettlementSubject::from(&i).non_landing().unwrap();
         let reject = "NON_LANDING_NOT_PROVEN_HOLD_RETAINED";
-        let all = &i.signatures[..];
+        let other = |f: fn(&mut super::Subject)| {
+            let mut s = subject.clone();
+            f(&mut s);
+            loopback::proving(&s, true)
+        };
+        let mut incomplete = loopback::proving(&subject, true);
+        incomplete.c = super::super::non_landing::CResult::Incomplete(
+            super::super::non_landing::CIncomplete::Gap,
+        );
         for bad in [
-            proof(expiry, 0, all),
-            proof(expiry + 1, 0, &all[..1]),
-            proof(expiry + 1, i.state_slot + 1, all),
+            other(|s| s.last_valid_block_height -= 1),
+            other(|s| s.state_slot += 1),
+            other(|s| {
+                s.signatures.pop();
+            }),
+            incomplete,
         ] {
             assert_eq!(j.reconcile_not_landed(&bad).unwrap_err(), reject);
         }
@@ -877,12 +1005,12 @@ mod tests {
         old.intent.last_valid_block_height = None;
         let saved = j.saved.replace(old);
         assert_eq!(
-            j.reconcile_not_landed(&proof(u64::MAX, 0, all))
+            j.reconcile_not_landed(&loopback::proving(&subject, true))
                 .unwrap_err(),
             reject
         );
         j.saved = saved;
-        j.reconcile_not_landed(&proof(expiry + 1, i.state_slot, all))
+        j.reconcile_not_landed(&loopback::proving(&subject, false))
             .unwrap();
         let s = j.settle(&value, BOOKED).unwrap();
         assert_eq!(
@@ -890,16 +1018,143 @@ mod tests {
             (false, 0, 0)
         );
         assert!(j.active_hold().is_none());
+        assert_eq!(
+            j.saved
+                .as_ref()
+                .unwrap()
+                .non_landing
+                .as_ref()
+                .unwrap()
+                .class,
+            Verdict::CAloneQualified
+        );
         // A landed signature can never be proven absent.
         let (path2, mut k, i2) = handed_off(1);
         observe(&mut k, &i2.signatures[0], true, -5_000, Some(("MINT", 1)));
+        let subject2 = SettlementSubject::from(&i2).non_landing().unwrap();
         assert_eq!(
-            k.reconcile_not_landed(&proof(u64::MAX, 0, &i2.signatures))
+            k.reconcile_not_landed(&loopback::proving(&subject2, true))
                 .unwrap_err(),
             reject
         );
         fs::remove_dir_all(path).unwrap();
         fs::remove_dir_all(path2).unwrap();
+    }
+
+    /// DEC-03 (N-2 §7) through the settlement step (loopback reconciliation RPC and sources):
+    /// two B and C negative ⇒ `B+C`, settled with nothing paid, the class persisted (a restart
+    /// reads it), the repeated read changes nothing; a B source rate limited and one
+    /// unreachable, C complete ⇒ C alone; C incomplete ⇒ UNKNOWN, hold kept; a B sighting
+    /// without a landing ⇒ open contradiction, hold kept; a C sighting is a veto until the
+    /// receipts confirm the landing, which settles through the regular reconciliation; a landing
+    /// with incomplete deltas stays UNKNOWN with the hold.
+    #[test]
+    fn dec03_n2_matrix_through_the_settlement_step() {
+        use loopback::{chain, closed, endpoint, Reply};
+        let class = |j: &Journal| j.non_landing_status(None).unwrap().class;
+        let unknown = |step: Result<SettleStep, String>| match step {
+            Ok(SettleStep::Unknown(reasons)) => reasons,
+            other => panic!("UNKNOWN expected: {other:?}"),
+        };
+        let (client, _) = rpc(vec![]);
+        // Two B negative, C negative.
+        let (path, mut j, i) = handed_off(1);
+        let (sources, _) = sources_of(4, None);
+        let SettleStep::Settled(s) = j.settle_step(&client, &sources, &value, BOOKED).unwrap()
+        else {
+            panic!("settled");
+        };
+        assert!(!s.landed && j.active_hold().is_none());
+        assert_eq!(class(&j), Some(Verdict::BcConfirmed));
+        let file = path_of(&j);
+        let before = frames(&file);
+        assert_eq!(
+            j.settle_step(&client, &sources, &value, BOOKED),
+            Ok(SettleStep::Settled(s))
+        );
+        assert_eq!(frames(&file), before, "no second settlement");
+        drop(j);
+        let reopened = Journal::open(&path, &i.wallet).unwrap();
+        assert_eq!(class(&reopened), Some(Verdict::BcConfirmed));
+        // One B rate limited, one unreachable, C complete and negative.
+        let (path2, mut k, _) = handed_off(1);
+        let (c_url, _) = endpoint(chain(50, 4, 58, 0, None));
+        let (limited, _) = endpoint(Arc::new(|_, _| Reply::Status(429)));
+        let alone = loopback::sources(c_url, vec![("op-a", limited), ("op-b", closed())]);
+        assert!(matches!(
+            k.settle_step(&client, &alone, &value, BOOKED),
+            Ok(SettleStep::Settled(_))
+        ));
+        assert_eq!(class(&k), Some(Verdict::CAloneQualified));
+        // C incomplete (the chain not beyond the expiry).
+        let (path3, mut l, _) = handed_off(1);
+        let (waiting, _) = sources_of(3, None);
+        let reasons = unknown(l.settle_step(&client, &waiting, &value, BOOKED));
+        assert!(
+            reasons.contains(&"NON_LANDING_UNKNOWN_INCOMPLETE".to_string())
+                && reasons.contains(&"NON_LANDING_C:C_NOT_EXPIRED".to_string()),
+            "{reasons:?}"
+        );
+        assert!(l.active_hold().is_some_and(|h| h.unknown_outcome));
+        assert_eq!(class(&l), Some(Verdict::UnknownIncomplete));
+        // A B source reports a bound signature finalized, C negative, no landing observed.
+        let (path4, mut m, _) = handed_off(1);
+        let base = chain(50, 4, 58, 0, None);
+        let (seeing, _) = endpoint(Arc::new(move |method, params| {
+            if method == "getSignatureStatuses" {
+                Reply::Result(json!({"context": {"slot": 1}, "value": [{"slot": 52,
+                    "confirmations": null, "err": null, "confirmationStatus": "finalized"}]}))
+            } else {
+                base(method, params)
+            }
+        }));
+        let (c_url, _) = endpoint(chain(50, 4, 58, 0, None));
+        let vetoed = loopback::sources(c_url.clone(), vec![("op-a", seeing), ("op-b", c_url)]);
+        let reasons = unknown(m.settle_step(&client, &vetoed, &value, BOOKED));
+        assert_eq!(
+            reasons[1], "NON_LANDING_VETO_CONTRADICTION_OPEN",
+            "{reasons:?}"
+        );
+        assert!(m.active_hold().is_some());
+        // C finds the signature: a veto while the receipts see nothing, then the landing is
+        // observed complete and settles through the regular reconciliation.
+        let (path5, mut n, i5) = handed_off(1);
+        let (c_seen, _) = sources_of(4, Some((52, i5.signatures[0].clone())));
+        let reasons = unknown(n.settle_step(&client, &c_seen, &value, BOOKED));
+        assert_eq!(
+            reasons[1], "NON_LANDING_VETO_CONTRADICTION_OPEN",
+            "{reasons:?}"
+        );
+        assert!(reasons.contains(&"NON_LANDING_C:SIGHTING".to_string()));
+        let (receipts, _) = rpc(vec![("getTransaction", landed_tx(&i5))]);
+        let SettleStep::Settled(s) = n.settle_step(&receipts, &c_seen, &value, BOOKED).unwrap()
+        else {
+            panic!("landed");
+        };
+        assert!(s.landed && n.active_hold().is_none());
+        assert_eq!(class(&n), Some(Verdict::VetoLandingConfirmed));
+        // The landing observed with incomplete deltas: UNKNOWN, the hold stays.
+        let (path6, mut o, i6) = handed_off(1);
+        let partial = FinalizedObservation {
+            signature: i6.signatures[0].clone(),
+            slot: 52,
+            success: true,
+            fee_lamports: 5_000,
+            wallet_sol_delta_lamports: -5_000,
+            wallet_token_deltas: None,
+            unknown_reasons: vec!["TOKEN_BALANCE_METADATA_MISSING".into()],
+        };
+        let evidence = SettlementEvidence {
+            observations: vec![(i6.signatures[0].clone(), Ok(partial))],
+            non_landing: None,
+        };
+        unknown(o.apply_settlement_evidence(evidence, &value, BOOKED));
+        assert!(o.active_hold().is_some());
+        assert_eq!(class(&o), Some(Verdict::VetoContradiction));
+        drop((reopened, k, l, m, n, o));
+        for p in [path, path2, path3, path4, path5, path6] {
+            fs::remove_dir_all(p).unwrap();
+        }
     }
 
     /// A loopback JSON-RPC endpoint answering each method with its scripted `result` (an
@@ -971,93 +1226,16 @@ mod tests {
         (solana_client::rpc_client::RpcClient::new(url), calls)
     }
 
-    fn statuses(status: Value) -> (&'static str, Value) {
-        (
-            "getSignatureStatuses",
-            json!({"context": {"slot": 100}, "value": [status]}),
-        )
-    }
-
-    /// C12: the proof is read in this order — the finalized block height past the expiry, then
-    /// the history floor, then the statuses — so absence is read only after the expiry is final;
-    /// an unexpired blockhash, a history starting after the intent, a seen signature, a failed
-    /// call or an unknown expiry is no proof.
-    #[test]
-    fn c12_non_landing_proof_comes_from_height_history_and_statuses() {
-        let (_, _, i, _) = setup();
-        let rpc_of = |height: u64, floor: u64, status: Value| {
-            rpc(vec![
-                ("getBlockHeight", json!(height)),
-                ("minimumLedgerSlot", json!(floor)),
-                statuses(status),
-            ])
-        };
-        let (client, calls) = rpc_of(61, 50, Value::Null);
-        assert_eq!(
-            non_landing_proof(&client, &(&i).into()),
-            Ok(NonLandingProof {
-                finalized_block_height: 61,
-                history_from_slot: 50,
-                absent_signatures: i.signatures.iter().cloned().collect(),
-            })
-        );
-        assert_eq!(
-            *calls.lock().unwrap(),
-            [
-                "getBlockHeight",
-                "minimumLedgerSlot",
-                "getSignatureStatuses"
-            ]
-        );
-        let (client, calls) = rpc_of(60, 0, Value::Null);
-        assert_eq!(
-            non_landing_proof(&client, &(&i).into()).unwrap_err(),
-            "NON_LANDING_BLOCKHASH_NOT_EXPIRED"
-        );
-        assert_eq!(
-            calls.lock().unwrap().len(),
-            1,
-            "nothing read before the expiry"
-        );
-        let (client, _) = rpc_of(61, 51, Value::Null);
-        assert_eq!(
-            non_landing_proof(&client, &(&i).into()).unwrap_err(),
-            "NON_LANDING_HISTORY_INCOMPLETE"
-        );
-        let seen = json!({"slot": 55, "confirmations": null, "err": null,
-            "status": {"Ok": null}, "confirmationStatus": "finalized"});
-        let (client, _) = rpc_of(61, 0, seen);
-        assert_eq!(
-            non_landing_proof(&client, &(&i).into()).unwrap_err(),
-            "NON_LANDING_SIGNATURE_SEEN"
-        );
-        let (client, _) = rpc(vec![]);
-        assert_eq!(
-            non_landing_proof(&client, &(&i).into()).unwrap_err(),
-            "NON_LANDING_HEIGHT_UNAVAILABLE"
-        );
-        let mut old = i.clone();
-        old.last_valid_block_height = None;
-        let (client, calls) = rpc_of(u64::MAX, 0, Value::Null);
-        assert_eq!(
-            non_landing_proof(&client, &(&old).into()).unwrap_err(),
-            "NON_LANDING_EXPIRY_UNKNOWN"
-        );
-        assert!(calls.lock().unwrap().is_empty());
-    }
-
-    /// C3: the settlement step through the reconciliation RPC (loopback). Never landed (no
-    /// finalized transaction, the blockhash expired, history complete, absent) books nothing
-    /// paid and releases the hold; still waiting (blockhash valid) stays UNKNOWN with both
-    /// reasons, keeps the hold and writes no frame; a finalized landing books its deltas once.
+    /// C3: the settlement step through the reconciliation RPC and the non-landing sources
+    /// (loopback). Never landed (no finalized transaction; two B operators and C negative beyond
+    /// the expiry) books nothing paid and releases the hold; still waiting (the chain not beyond
+    /// the expiry) stays UNKNOWN with its reasons, keeps the hold and writes no frame; a
+    /// finalized landing books its deltas once.
     #[test]
     fn c3_settle_step_books_landed_and_not_landed_and_keeps_unknown() {
         let (path, mut j, _) = handed_off(1);
-        let (client, _) = rpc(vec![
-            ("getBlockHeight", json!(61)),
-            ("minimumLedgerSlot", json!(0)),
-            statuses(Value::Null),
-        ]);
+        let (client, _) = rpc(vec![]);
+        let (sources, _) = sources_of(4, None);
         let none = Settlement {
             landed: false,
             landed_success: false,
@@ -1070,56 +1248,41 @@ mod tests {
             booked_unix_s: Some(BOOKED),
         };
         assert_eq!(
-            j.settle_step(&client, &value, BOOKED),
+            j.settle_step(&client, &sources, &value, BOOKED),
             Ok(SettleStep::Settled(none.clone()))
         );
         assert!(j.active_hold().is_none());
         assert_eq!(
-            j.settle_step(&client, &value, BOOKED),
+            j.settle_step(&client, &sources, &value, BOOKED),
             Ok(SettleStep::Settled(none))
         );
 
         let (path2, mut k, _) = handed_off(1);
         let file = path_of(&k);
-        let frames = |f: &std::path::Path| {
-            let mut r = crate::analytics::journal::Reader::open(f).unwrap();
-            std::iter::from_fn(|| r.next_frame().unwrap()).count()
-        };
         let before = frames(&file);
-        let (client, _) = rpc(vec![
-            ("getBlockHeight", json!(60)),
-            ("minimumLedgerSlot", json!(0)),
-            statuses(Value::Null),
-        ]);
-        let SettleStep::Unknown(reasons) = k.settle_step(&client, &value, BOOKED).unwrap() else {
+        let (waiting, _) = sources_of(3, None);
+        let SettleStep::Unknown(reasons) =
+            k.settle_step(&client, &waiting, &value, BOOKED).unwrap()
+        else {
             panic!("still waiting");
         };
         assert!(
             reasons
                 .iter()
                 .any(|r| r.ends_with("FINALIZED_TRANSACTION_UNAVAILABLE"))
+                && reasons.iter().any(|r| r == "NON_LANDING_C:C_NOT_EXPIRED")
                 && reasons
                     .iter()
-                    .any(|r| r == "NON_LANDING_BLOCKHASH_NOT_EXPIRED"),
+                    .any(|r| r == "NON_LANDING_B:op-a:UNUSABLE_NOT_EXPIRED"),
             "{reasons:?}"
         );
         assert!(k.active_hold().is_some_and(|h| h.unknown_outcome));
         assert_eq!(frames(&file), before, "a waiting step writes no frame");
 
         let (path3, mut l, i3) = handed_off(1);
-        let tx = json!({"slot": 55, "blockTime": 123, "transaction": {
-            "signatures": [i3.signatures[0]],
-            "message": {"header": {"numRequiredSignatures": 1, "numReadonlySignedAccounts": 0,
-                "numReadonlyUnsignedAccounts": 0},
-                "accountKeys": [i3.wallet, solana_sdk::pubkey::Pubkey::new_unique().to_string()],
-                "recentBlockhash": solana_sdk::hash::Hash::new_unique().to_string(),
-                "instructions": []}},
-            "meta": {"err": null, "status": {"Ok": null}, "fee": 5000,
-                "preBalances": [100000, 0], "postBalances": [95000, 0],
-                "preTokenBalances": [], "postTokenBalances": [],
-                "loadedAddresses": {"writable": [], "readonly": []}}});
-        let (client, _) = rpc(vec![("getTransaction", tx)]);
-        let SettleStep::Settled(s) = l.settle_step(&client, &value, BOOKED).unwrap() else {
+        let (client, _) = rpc(vec![("getTransaction", landed_tx(&i3))]);
+        let SettleStep::Settled(s) = l.settle_step(&client, &sources, &value, BOOKED).unwrap()
+        else {
             panic!("landed");
         };
         assert!(s.landed && s.landed_success);

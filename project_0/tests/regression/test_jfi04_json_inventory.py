@@ -38,6 +38,7 @@ PINNED = {
     'runtime/src/bin/p0-parity.rs': (4, 'H'),
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
     'runtime/src/execution/one_shot/approval_file.rs': (2, 'H'),  # DEC-10: historical JSON approval shown by the historical build only (never authorizes); the approval is native key = value
+    'runtime/src/execution/one_shot/non_landing.rs': (13, 'W'),  # DEC-03: B/C non-landing reads on the deadline-bound JSON-RPC wire
     'runtime/src/execution/one_shot.rs': (7, 'H'),  # <wallet>.json decoded only by the explicit migration (p0ctl fe04 migrate); open refuses it (F8, 25.10.)
     'runtime/src/market/deployment.rs': (1, 'W'),
     'runtime/src/market/observer.rs': (1, 'W'),
@@ -176,7 +177,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 292)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot)
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 305)  # DEC-12: 2 W (sendTransaction); DEC-02: 1 W (bundle context slot); DEC-03: 13 W (non-landing reads)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

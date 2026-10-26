@@ -11,14 +11,24 @@
 //! settled again (locally, no RPC) after the same wait. The one-shot HALT stays. An exit of the
 //! open inventory is read, applied and booked the same way (`apply_fe04_exit_evidence`): its
 //! booking is the restart replay's (its day, realized net, released mark); a read applies only
-//! to the exit it was made for.
+//! to the exit it was made for. DEC-03: every applied read is a typed `NonLanding` record with
+//! the subject's N-2 class; an open contradiction is also an alarm (holds stay, read again).
 use super::*;
 use crate::execution::one_shot::exit::ExitStep;
+use crate::execution::one_shot::non_landing::{NonLandingRead, Verdict};
 use crate::execution::one_shot::settlement::{
-    conservative_value, SettleStep, Settlement, SettlementEvidence,
+    conservative_value, NonLandingStatus, SettleStep, Settlement, SettlementEvidence,
 };
 use crate::orchestration::remote_workers::Fe04SettlementWork;
 use darkbot_project0::safety::{LedgerViolation, SettledAttempt};
+
+/// DEC-03: the latest non-landing read of this run with the exit it was made for (`None`: the
+/// attempt), and how many reads of that subject this run made.
+#[derive(Debug, Default)]
+pub(super) struct Fe04NonLanding {
+    pub(super) latest: Option<(Option<String>, NonLandingRead)>,
+    pub(super) reads: u64,
+}
 
 /// What Safety has still to book for the held attempt: the capital the startup replay reserved
 /// (`None`: finalized before the restart, none was reserved).
@@ -138,10 +148,15 @@ impl ShadowOwner {
         // One read in flight at most (capacity 1).
         if let Some(done) = self.remote.fe04_settlement_results.try_pop() {
             self.fe04_settle_due = Some(std::time::Instant::now() + self.fe04_settle_retry);
+            let read = done.evidence.non_landing.clone();
             match done.exit {
-                None => self.apply_fe04_evidence(done.evidence),
+                None => {
+                    self.apply_fe04_evidence(done.evidence);
+                    self.fe04_non_landing_step(None, read);
+                }
                 Some(id) if open_exit.as_ref() == Some(&id) => {
-                    self.apply_fe04_exit_evidence(done.evidence)
+                    self.apply_fe04_exit_evidence(done.evidence);
+                    self.fe04_non_landing_step(Some(id), read);
                 }
                 Some(id) => owner_log!(self, "fe04_settlement: read of exit {id} is stale"),
             }
@@ -183,6 +198,69 @@ impl ShadowOwner {
             self.apply_fe04_exit_evidence(Default::default());
         } else {
             self.fe04_settle_due = None;
+        }
+    }
+
+    /// DEC-03: the non-landing status of the held journal's latest subject with this run's
+    /// latest read of it.
+    pub(super) fn fe04_non_landing_status(&self) -> Option<NonLandingStatus> {
+        let latest = self
+            .fe04_non_landing
+            .latest
+            .as_ref()
+            .map(|(exit, read)| (exit.as_deref(), read));
+        self.fe04_held.as_ref()?.non_landing_status(latest)
+    }
+
+    /// DEC-03: after an applied read of `exit` (`None`: the attempt) — keeps its non-landing
+    /// read, writes the typed record with the subject's class and raises the alarm of an open
+    /// contradiction (holds stay; the next read follows after `fe04_settle_retry`).
+    fn fe04_non_landing_step(
+        &mut self,
+        exit: Option<String>,
+        read: Option<Result<NonLandingRead, String>>,
+    ) {
+        let (read, read_error) = match read {
+            Some(Ok(r)) => (Some(r), None),
+            Some(Err(e)) => (None, Some(e)),
+            None => (None, None),
+        };
+        if let Some(r) = &read {
+            let same = self
+                .fe04_non_landing
+                .latest
+                .as_ref()
+                .is_some_and(|(e, _)| *e == exit);
+            self.fe04_non_landing.reads = if same {
+                self.fe04_non_landing.reads.saturating_add(1)
+            } else {
+                1
+            };
+            self.fe04_non_landing.latest = Some((exit.clone(), r.clone()));
+        }
+        let class = self
+            .fe04_non_landing_status()
+            .filter(|s| s.exit == exit)
+            .and_then(|s| s.class);
+        if class == Some(Verdict::VetoContradiction) {
+            owner_log!(
+                self,
+                "fe04_settlement: ALARM {} subject={} holds_retained retry_ms={}",
+                Verdict::VetoContradiction.code(),
+                exit.as_deref().unwrap_or("attempt"),
+                self.fe04_settle_retry.as_millis()
+            );
+        }
+        if let Err(e) = self
+            .evidence
+            .emit(OwnerEvidence::Record(RecordEvent::NonLanding {
+                exit,
+                class,
+                read,
+                read_error,
+            }))
+        {
+            owner_log!(self, "fe04_settlement: non-landing record not written {e}");
         }
     }
 

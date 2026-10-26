@@ -13,19 +13,19 @@ const golden = (name: string) => Buffer.from(readFileSync(new URL(`../../protoco
 const schemaId = readFileSync(new URL("../../protocol/schema_id.txt", import.meta.url), "utf8").trim();
 
 /** The owner and analytics topics with their golden frames (the job runner idle, so a job may start). */
-function ownerTopics(): Map<TopicId, { wireName: string; payloadType: string; payload: Uint8Array }> {
+function ownerTopics(wallets = "wallets_state"): Map<TopicId, { wireName: string; payloadType: string; payload: Uint8Array }> {
   const analytics = fromBinary(AnalyticsJobsSchema, golden("analytics_jobs"));
   analytics.runnerBusy = false;
   return new Map([
     [TopicId.PROJECT0_LIQUIDATOR_STATE, { wireName: "project0.liquidator.state", payloadType: "darkbot.project0.v1.LiquidatorState", payload: golden("liquidator_state") }],
     [TopicId.PROJECT0_FINANCE_SUMMARY, { wireName: "project0.finance.summary", payloadType: "darkbot.project0.v1.FinanceSummary", payload: golden("finance_summary") }],
-    [TopicId.PROJECT0_WALLETS_STATE, { wireName: "project0.wallets.state", payloadType: "darkbot.project0.v1.WalletsState", payload: golden("wallets_state") }],
+    [TopicId.PROJECT0_WALLETS_STATE, { wireName: "project0.wallets.state", payloadType: "darkbot.project0.v1.WalletsState", payload: golden(wallets) }],
     [TopicId.PROJECT0_ANALYTICS_JOBS, { wireName: "project0.analytics.jobs", payloadType: "darkbot.project0.v1.AnalyticsJobs", payload: toBinary(AnalyticsJobsSchema, analytics) }],
   ]);
 }
 
-async function feed(page: Page, initiallyReported = true, owner = false, system: Uint8Array = golden("system_status")) {
-  const extra = owner ? ownerTopics() : new Map();
+async function feed(page: Page, initiallyReported = true, owner = false, system: Uint8Array = golden("system_status"), wallets = "wallets_state") {
+  const extra = owner ? ownerTopics(wallets) : new Map();
   let socket: WebSocketRoute;
   let seq = 1n;
   const subscriptions = new Set<TopicId>();
@@ -113,6 +113,28 @@ test("real binary contracts drive all panels and lifecycle states", async ({ pag
   await expect(page.getByRole("button", { name: "Until stopped · desktop control" })).toBeDisabled();
   for (const name of ["Liquidator", "Analytics", "Wallets", "Overview"]) await tab(page, name);
   expect(errors).toEqual([]);
+});
+
+test("DEC-03: Wallets shows the N-2 non-landing status beside the frozen panel, no switch", async ({ page }) => {
+  await feed(page, true, true, golden("system_status"), "wallets_state_non_landing");
+  await tab(page, "Wallets");
+  await expect(page.getByTestId("p0-non-landing-class")).toHaveText("Veto · contradiction open");
+  await expect(page.getByTestId("p0-non-landing-alarm")).toBeVisible();
+  const section = page.locator(".p0-section", { has: page.getByRole("heading", { name: "Non-landing · N-2" }) });
+  for (const text of ["NEGATIVE", "B unusable · RATE_LIMITED", "op-a", "42.0 s", "20 · 1234567"]) {
+    await expect(section).toContainText(text);
+  }
+  await expect(section.getByRole("button")).toHaveCount(0);
+  await expect(section.locator("input, select")).toHaveCount(0);
+  // The frozen panel keeps its rows.
+  await expect(page.getByText("Total capital", { exact: true })).toBeVisible();
+});
+
+test("DEC-03: without a held attempt the Wallets tab shows no non-landing section", async ({ page }) => {
+  await feed(page, true, true);
+  await tab(page, "Wallets");
+  await expect(page.getByText("Total capital", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Non-landing · N-2" })).toHaveCount(0);
 });
 
 test("missing and malformed data never become healthy or fabricated values", async ({ page }) => {

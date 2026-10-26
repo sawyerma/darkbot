@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import liquidatorHex from "../../../../../protocol/golden/project0/liquidator_state.hex?raw";
 import walletsHex from "../../../../../protocol/golden/project0/wallets_state.hex?raw";
+import walletsNonLandingHex from "../../../../../protocol/golden/project0/wallets_state_non_landing.hex?raw";
 import financeHex from "../../../../../protocol/golden/project0/finance_summary.hex?raw";
-import { ownerMonitor, programPinStatus } from "../model/owner";
+import { ownerMonitor, programPinStatus, unusableByReason } from "../model/owner";
 import {
   decodeFinanceSummary,
   decodeLiquidatorState,
@@ -65,6 +66,27 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.endResult).toBe("");
     expect(finance.snapshotId).toBe(wallets.financeSnapshotId);
     expect(wallets.policyReserves).toEqual([{ asset: "SOL", units: 50_000_000n }]);
+  });
+
+  it("DEC-03: decodes the N-2 non-landing status; none without a held attempt", () => {
+    expect(wallets.nonLanding).toBeNull();
+    const held = toWalletsView(decodeWalletsState(bytes(walletsNonLandingHex)));
+    expect(held.heldAttempt).toBe("UNKNOWN");
+    expect(held.nonLanding).toEqual({
+      subject: "ATTEMPT",
+      resultClass: "VETO_CONTRADICTION_OPEN",
+      alarm: true,
+      sources: [{ operator: "op-a", class: "SIGHTING" }, { operator: "op-b", class: "UNUSABLE_RATE_LIMITED" }],
+      cResult: "NEGATIVE",
+      holdMs: 42_000n,
+      calls: 20n,
+      bytes: 1_234_567n,
+      reads: 3n,
+    });
+    expect(unusableByReason([
+      { operator: "a", class: "UNUSABLE_RATE_LIMITED" }, { operator: "b", class: "USABLE" },
+      { operator: "c", class: "UNUSABLE_PRUNED" }, { operator: "d", class: "UNUSABLE_RATE_LIMITED" },
+    ])).toEqual([{ reason: "PRUNED", count: 1 }, { reason: "RATE_LIMITED", count: 2 }]);
   });
 
   it("fills the existing Overview monitor slots without inventing a sample", () => {

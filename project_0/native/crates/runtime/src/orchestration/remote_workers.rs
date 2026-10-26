@@ -266,7 +266,7 @@ impl RemoteWorkers {
                 .name("fe04-settlement-rpc".into())
                 .spawn(move || {
                     let rpc = darkbot_solana::provider::rpc_client(
-                        fe04_rpc_url,
+                        fe04_rpc_url.clone(),
                         Duration::from_millis(
                             darkbot_solana::runtime_config::active()
                                 .limits
@@ -276,6 +276,12 @@ impl RemoteWorkers {
                         // C5: financial reconciliation, the prioritized workload.
                         darkbot_solana::provider::Workload::Reconcile,
                     );
+                    // DEC-03: the non-landing sources (C on this endpoint, the configured B).
+                    let sources =
+                        crate::execution::one_shot::non_landing::NonLandingSources::configured(
+                            fe04_rpc_url,
+                            darkbot_solana::runtime_config::active(),
+                        );
                     while !fe04_shutdown.is_requested() {
                         let Some(work) =
                             fe04_settlement_job_rx.pop_timeout(Duration::from_millis(250))
@@ -285,6 +291,7 @@ impl RemoteWorkers {
                         let evidence =
                             crate::execution::one_shot::settlement::fetch_settlement_evidence(
                                 &rpc,
+                                sources.as_ref().map_err(String::as_str),
                                 &work.subject,
                                 &work.observed,
                             );

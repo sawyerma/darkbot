@@ -11,7 +11,10 @@ use solana_client::{
 use solana_commitment_config::CommitmentConfig;
 use std::{
     collections::VecDeque,
-    sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Condvar, Mutex, MutexGuard, OnceLock,
+    },
     time::{Duration, Instant, SystemTime},
 };
 
@@ -746,6 +749,7 @@ pub fn rpc_client_with(
             work,
             budget,
             stats: Arc::new(Mutex::new(RpcTransportStats::default())),
+            bytes: Arc::new(AtomicU64::new(0)),
         },
         RpcClientConfig::with_commitment(commitment),
     )
@@ -802,6 +806,8 @@ struct BudgetedSender {
     work: Workload,
     budget: Arc<Budget>,
     stats: Arc<Mutex<RpcTransportStats>>,
+    /// DEC-03: request and response bytes this transport sent and read.
+    bytes: Arc<AtomicU64>,
 }
 struct CallTimer<'a> {
     stats: &'a Mutex<RpcTransportStats>,
@@ -904,6 +910,8 @@ impl BudgetedSender {
             let request_bytes = serde_json::to_vec(&body)
                 .map_err(|_| CallError::Transport("RPC_ENCODE"))?
                 .len();
+            self.bytes
+                .fetch_add(request_bytes as u64, Ordering::Relaxed);
             self.budget
                 .account_bytes(request_bytes)
                 .map_err(CallError::Budget)?;
@@ -973,6 +981,7 @@ impl BudgetedSender {
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| late("RPC_BODY_READ"))? {
+                self.bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed);
                 self.budget
                     .account_bytes(chunk.len())
                     .map_err(CallError::Budget)?;
@@ -1074,6 +1083,7 @@ impl DeadlineRpc {
                 work,
                 budget,
                 stats: Arc::new(Mutex::new(RpcTransportStats::default())),
+                bytes: Arc::new(AtomicU64::new(0)),
             },
         }
     }
@@ -1109,6 +1119,10 @@ impl DeadlineRpc {
     /// Requests this transport sent so far.
     pub fn request_count(&self) -> usize {
         self.sender.get_transport_stats().request_count
+    }
+    /// DEC-03: request and response bytes this transport sent and read so far.
+    pub fn bytes(&self) -> u64 {
+        self.sender.bytes.load(Ordering::Relaxed)
     }
 }
 
@@ -1510,6 +1524,7 @@ mod http_tests {
             work: Workload::Simulation,
             budget: Arc::new(Budget::default()),
             stats: Arc::new(Mutex::new(RpcTransportStats::default())),
+            bytes: Arc::new(AtomicU64::new(0)),
         }
     }
     /// F-01/C07: every RPC client of the process is budgeted — no start path (an argument-less
@@ -1551,6 +1566,28 @@ mod http_tests {
         assert_eq!(rpc.get_slot().unwrap(), 7);
         served.join().unwrap();
         assert_eq!(budget.snapshot().requests, 1);
+    }
+    /// DEC-03: a transport counts the bytes it sent (the JSON-RPC request) and read (the
+    /// response body).
+    #[test]
+    fn dec03_deadline_transport_counts_request_and_response_bytes() {
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":42}"#;
+        let (url, t) = server(format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        config.limits.rpc_attempts = 1;
+        let budget = Arc::new(Budget::configured(&config));
+        let rpc = DeadlineRpc::with_budget(url, Workload::Reconcile, budget).unwrap();
+        let params = serde_json::json!([]);
+        let sent = serde_json::to_vec(&RpcRequest::GetSlot.build_request_json(1, params.clone()))
+            .unwrap()
+            .len() as u64;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert_eq!(rpc.call(RpcRequest::GetSlot, params, deadline).unwrap(), 42);
+        assert_eq!(rpc.bytes(), sent + body.len() as u64);
+        t.join().unwrap();
     }
     /// N2: the candidate deadline ends a hanging request of the (always budgeted) transport, and
     /// a cut by the caller's deadline before the transport's own limit is no provider failure —
