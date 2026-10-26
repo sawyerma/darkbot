@@ -45,7 +45,7 @@
 
 use alloy_primitives::{Address, U256};
 
-use super::curve::{Curve, supply};
+use super::curve::{Curve, reserve, supply};
 use super::{AdmissionError, AdmittedBuy, QuoteError};
 use crate::chain_state::SnapshotId;
 use crate::economics::arith::{add, sub};
@@ -146,6 +146,107 @@ pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, Quot
         bonding_curve_tax: fees.tax,
         combined_fee: fees.combined,
         net_reserve_input,
+        reserve_after,
+        supply_after,
+        output_amount,
+    })
+}
+
+/// Inputs of the native SELL arithmetic (tokens to native BNB on the curve).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeSellInputs {
+    /// Curve id of the token; must be [`CURVE_ID_RH_BNB`].
+    pub curve_id: u8,
+    /// Quote reserve of the token before this SELL, in wei.
+    pub reserve_before: U256,
+    /// Circulating token supply before this SELL.
+    pub circulating_before: U256,
+    /// Tokens sold.
+    pub input_amount: U256,
+    /// Protocol fee in basis points.
+    pub protocol_fee_bps: u16,
+    /// Sell tax of the token in basis points.
+    pub sell_tax_bps: u16,
+    /// Whether the venue applies the tax on the bonding curve.
+    pub tax_on_bonding_curve_enabled: bool,
+    /// Whether the caller is exempt from fees.
+    pub caller_fee_exempt: bool,
+}
+
+/// Result of a native SELL quote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeSellQuote {
+    /// Native amount the curve releases, before fees, in wei.
+    pub gross_output: U256,
+    pub protocol_fee: U256,
+    pub bonding_curve_tax: U256,
+    pub combined_fee: U256,
+    pub reserve_after: U256,
+    pub supply_after: U256,
+    /// Native amount received; strictly positive.
+    pub output_amount: U256,
+}
+
+/// The SELL's fees on `gross`: `floor(gross * protocol_bps / 10000)` and
+/// `floor(gross * tax_bps / 10000)`, each on its own.
+pub fn split_sell_fee(
+    gross: U256,
+    protocol_bps: u16,
+    tax_bps: u16,
+) -> Result<crate::economics::fees::FeeSplit, QuoteError> {
+    use crate::economics::arith::mul_div_down;
+    use crate::economics::fees::{BPS_DENOMINATOR, FeeError, FeeSplit};
+    if u32::from(protocol_bps) + u32::from(tax_bps) >= u32::from(BPS_DENOMINATOR) {
+        return Err(QuoteError::Fee(FeeError::RateTooHigh));
+    }
+    let d = U256::from(BPS_DENOMINATOR);
+    let protocol = mul_div_down(gross, U256::from(protocol_bps), d)?;
+    let tax = mul_div_down(gross, U256::from(tax_bps), d)?;
+    Ok(FeeSplit {
+        combined: add(protocol, tax)?,
+        protocol,
+        tax,
+    })
+}
+
+/// Arithmetic of a direct bonding-curve SELL to native BNB. Not an
+/// admission. The reserve after the SELL is `LibCurve::estimateReserve`
+/// (rounded up); the protocol fee and the sell tax come off the released
+/// amount, each floored on its own (unlike the BUY, whose tax is the
+/// remainder of one combined floor). Witnessed exactly against
+/// `Portal.quoteExactInput` (`fixtures/flap/quote_parity_*.txt`).
+pub fn quote_native_sell(inputs: &NativeSellInputs) -> Result<NativeSellQuote, QuoteError> {
+    if inputs.curve_id != CURVE_ID_RH_BNB {
+        return Err(QuoteError::UnsupportedCurve);
+    }
+    if inputs.input_amount.is_zero() {
+        return Err(QuoteError::ZeroInput);
+    }
+    if !inputs.tax_on_bonding_curve_enabled {
+        return Err(QuoteError::UnwitnessedTaxDisabled);
+    }
+    if inputs.caller_fee_exempt {
+        return Err(QuoteError::UnwitnessedExemptCaller);
+    }
+    if inputs.input_amount > inputs.circulating_before {
+        return Err(QuoteError::InvalidCurveState);
+    }
+    let supply_after = inputs.circulating_before - inputs.input_amount;
+    let reserve_after = reserve(curve20(), supply_after)?;
+    if reserve_after > inputs.reserve_before {
+        return Err(QuoteError::InvalidCurveState);
+    }
+    let gross_output = inputs.reserve_before - reserve_after;
+    let fees = split_sell_fee(gross_output, inputs.protocol_fee_bps, inputs.sell_tax_bps)?;
+    let output_amount = sub(gross_output, fees.combined)?;
+    if output_amount.is_zero() {
+        return Err(QuoteError::ZeroOutput);
+    }
+    Ok(NativeSellQuote {
+        gross_output,
+        protocol_fee: fees.protocol,
+        bonding_curve_tax: fees.tax,
+        combined_fee: fees.combined,
         reserve_after,
         supply_after,
         output_amount,
@@ -273,6 +374,93 @@ pub fn admit_native_buy(
         policy.slippage_bps(),
         state.snapshot,
     ))
+}
+
+#[cfg(test)]
+mod parity_tests {
+    //! Phase G (Economics gate §6 level 2): the production BUY and SELL
+    //! arithmetic against `Portal.quoteExactInput` at pinned states of live
+    //! curve-20 tokens (`fixtures/flap/quote_parity_g02.txt`, g02_flap_parity).
+    use super::*;
+
+    const PARITY: &str = include_str!("../../../fixtures/flap/quote_parity_g02.txt");
+
+    /// Every sample: the local quote is the Portal's, to the unit. The one
+    /// exception is a BUY the token's per-origin holding cap (2 % of the
+    /// supply) cuts: the Portal fills up to the cap and refunds the rest, a
+    /// partial fill the local quote does not model (it must refuse).
+    #[test]
+    fn buy_and_sell_equal_the_portal_quote_at_the_same_state() {
+        let (mut buys, mut sells, mut capped) = (0, 0, 0);
+        for line in PARITY
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            let n = |i: usize| U256::from_str_radix(f[i], 10).unwrap();
+            let (reserve, supply, amount) = (n(3), n(4), n(8));
+            let (buy_tax, sell_tax): (u16, u16) = (f[5].parse().unwrap(), f[6].parse().unwrap());
+            let chain = n(9);
+            match f[7] {
+                "BUY" => {
+                    let local = quote_native_buy(&NativeBuyInputs {
+                        curve_id: CURVE_ID_RH_BNB,
+                        reserve_before: reserve,
+                        circulating_before: supply,
+                        input_amount: amount,
+                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                        buy_tax_bps: buy_tax,
+                        tax_on_bonding_curve_enabled: true,
+                        caller_fee_exempt: false,
+                    })
+                    .unwrap()
+                    .output_amount;
+                    if local == chain {
+                        buys += 1;
+                    } else {
+                        // 2 % of the 1e9-token supply.
+                        assert_eq!(
+                            chain,
+                            U256::from(20_000_000u64) * U256::from(10u64).pow(U256::from(18u64)),
+                            "{line}"
+                        );
+                        assert!(local > chain, "{line}");
+                        capped += 1;
+                    }
+                }
+                "SELL" => {
+                    let local = quote_native_sell(&NativeSellInputs {
+                        curve_id: CURVE_ID_RH_BNB,
+                        reserve_before: reserve,
+                        circulating_before: supply,
+                        input_amount: amount,
+                        protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                        sell_tax_bps: sell_tax,
+                        tax_on_bonding_curve_enabled: true,
+                        caller_fee_exempt: false,
+                    })
+                    .unwrap()
+                    .output_amount;
+                    assert_eq!(local, chain, "{line}");
+                    sells += 1;
+                }
+                other => panic!("side {other}"),
+            }
+        }
+        assert_eq!((buys, sells, capped), (39, 35, 1));
+    }
+
+    /// The SELL fees are floored each on its own; the BUY's tax is the
+    /// remainder of the combined floor: on one amount they can differ by one.
+    #[test]
+    fn sell_and_buy_fee_rounding_differ_where_witnessed() {
+        let gross = U256::from(1_318_019_119u64);
+        let sell = split_sell_fee(gross, 100, 900).unwrap();
+        let buy = crate::economics::fees::split_fee(gross, 100, 900).unwrap();
+        assert_eq!(sell.protocol, buy.protocol);
+        assert!(buy.combined >= sell.combined && buy.combined - sell.combined <= U256::from(1u8));
+        assert!(split_sell_fee(gross, 5_000, 5_000).is_err());
+    }
 }
 
 #[cfg(test)]

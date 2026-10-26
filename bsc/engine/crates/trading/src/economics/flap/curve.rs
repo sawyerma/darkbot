@@ -5,7 +5,11 @@
 //!
 //! ```text
 //! supply(reserve) = TOTAL_SUPPLY + h - ceil(k * 1e18 / (r + reserve))
+//! reserve(supply) = ceil(k * 1e18 / (TOTAL_SUPPLY + h - supply)) - r
 //! ```
+//!
+//! (`LibCurve::estimateReserve` of the source-verified Portal v5.27.0,
+//! rounded up: a SELL receives the protocol-favourable side.)
 //!
 //! `reserve` is the quote reserve in 18-decimal units.
 
@@ -39,4 +43,17 @@ pub fn supply(curve: Curve, reserve_wad: U256) -> Result<U256, QuoteError> {
         return Err(QuoteError::InvalidCurveState);
     }
     Ok(total_plus_h - virtual_token_reserve)
+}
+
+/// Quote reserve at circulating supply `supply`, rounded up.
+pub fn reserve(curve: Curve, supply: U256) -> Result<U256, QuoteError> {
+    if supply > U256::from(TOTAL_SUPPLY) {
+        return Err(QuoteError::InvalidCurveState);
+    }
+    let denominator = add(U256::from(TOTAL_SUPPLY), curve.h)? - supply;
+    let virtual_reserve = mul_div_up(curve.k, U256::from(WAD), denominator)?;
+    if virtual_reserve < curve.r {
+        return Err(QuoteError::InvalidCurveState);
+    }
+    Ok(virtual_reserve - curve.r)
 }
