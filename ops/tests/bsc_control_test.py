@@ -24,6 +24,9 @@ try:
     paper_key=h.WORK/'paper/paper_identity.key'
     ingress=ingress.replace('BSC_EXEC_PAPER_IDENTITY=~/.darkbot/bsc/paper_identity.key\n',f'BSC_EXEC_PAPER_IDENTITY={paper_key}\n')
     (source/'bsc/config/ingress.public.env').write_text(ingress.replace('BSC_RUNTIME_CENSUS_MS=60000\n','BSC_RUNTIME_CENSUS_MS=5000\n'))
+    # Phase H: Strategy C's frozen gas evidence, as bsc_sync copies it into every snapshot.
+    for name in next(l.split('=',1)[1] for l in ingress.splitlines() if l.startswith('BSC_STRATEGY_C_GAS_EVIDENCE=')).split(','):
+        (source/name).parent.mkdir(parents=True,exist_ok=True);shutil.copy2(h.ROOT/name,source/name)
     paper=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/bsc_runtime'),'paper-identity','init','--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,check=True).stdout
     assert paper.startswith('paper_sender=0x') and len(paper.strip())==len('paper_sender=0x')+40, paper
     (source/'COMMIT').write_text('isolated-fixture');(source/'SYNCED_AT').write_text('1792232000');(source/'SNAPSHOT_SHA256').write_text('a'*64)
@@ -51,6 +54,11 @@ try:
     (h.WORK/'app/current').symlink_to(release,target_is_directory=True)
     h.run('up','--no-open')
     subprocess.run(['node',str(h.ROOT/'ops/tests/bsc_control_browser.mjs'),str(h.port),str(h.WORK),str(h.ROOT)],check=True,timeout=180,env=h.env)
+    # Phase H: the finished run replays through Strategy C to exactly its journaled outputs.
+    h.run('down')
+    replay=subprocess.run([str(h.ROOT/'bsc/engine/target/debug/bsc_runtime'),'strategy-replay','--rundir',str(h.WORK/'run'),'--config',str(source/'bsc/config/ingress.public.env')],capture_output=True,text=True,timeout=120)
+    print(replay.stdout,flush=True)
+    assert replay.returncode==0 and ': PASS (' in replay.stdout, replay.stdout+replay.stderr
 finally:
     h.run('down',ok=False)
     for kind in ('bsc.readiness','bsc.reporter','bsc.runtime','gateway'):

@@ -96,4 +96,24 @@ class SyncTests(unittest.TestCase):
     with self.assertRaises(ValueError,msg=escape):mod.sync(root,app,run)
    lister.unlink()
    with self.assertRaises(ValueError):mod.sync(root,app,run)
+ def test_the_snapshot_carries_the_strategy_gas_evidence_and_refuses_an_unsafe_one(self):
+  # Phase H: the runtime reads Strategy C's frozen gas evidence from the snapshot.
+  with tempfile.TemporaryDirectory(prefix='darkbot-sync-') as folder:
+   base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
+   subprocess.run(['git','init','-q',str(root)],check=True)
+   (root/'bsc/config').mkdir(parents=True)
+   gas=root/'bsc/engine/crates/trading/fixtures/bsc';gas.mkdir(parents=True)
+   (gas/'a.txt').write_text('# a\n');(gas/'b.txt').write_text('# b\n')
+   subprocess.run(['git','-C',str(root),'add','bsc/engine'],check=True)
+   subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
+   ingress=root/'bsc/config/ingress.public.env'
+   def config(value):ingress.write_text('BSC_RUNTIME_STATUS_MS=1000\nBSC_STRATEGY_C_GAS_EVIDENCE='+value+'\n')
+   config('bsc/engine/crates/trading/fixtures/bsc/a.txt,bsc/engine/crates/trading/fixtures/bsc/b.txt')
+   mod.sync(root,app,run)
+   snapshot=(app/'bsc-source').resolve()
+   self.assertEqual((snapshot/'bsc/engine/crates/trading/fixtures/bsc/b.txt').read_text(),'# b\n')
+   self.assertIn('./bsc/engine/crates/trading/fixtures/bsc/a.txt',(snapshot/'SOURCES.SHA256SUMS').read_text())
+   for unsafe in ['../outside.txt','/etc/hosts','bsc/missing.txt','']:
+    config(unsafe)
+    with self.assertRaises(ValueError,msg=unsafe):mod.sync(root,app,run)
 if __name__=='__main__':unittest.main()

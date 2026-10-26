@@ -16,6 +16,16 @@ def regular(path):
 CANDIDATE_STATE='bsc/.local/g07_candidates'
 CANDIDATE_MIRROR='bsc/native/state/g07_candidates'
 CANDIDATE_PUBLIC=['a.candidate.dbrec','b.candidate.dbrec','selection.dbrec','a.qualification.dbrec','b.qualification.dbrec']
+def repo_file(root, name, what):
+    """A repo-relative regular file, never absolute, escaping or linked."""
+    relative=pathlib.PurePosixPath(name)
+    if relative.is_absolute() or '..' in relative.parts or not name: raise ValueError('unsafe '+what+': '+name)
+    path=root
+    for part in relative.parts:
+        path=path/part
+        if path.is_symlink(): raise ValueError(what+' linked: '+name)
+    if not path.is_file(): raise ValueError(what+' missing: '+name)
+    return path
 def apply_candidate_requests(root, run):
     requests=run/'bsc-operational/g07_candidates/requests'
     pending=[p for p in sorted(requests.glob('*.request.dbrec')) if not p.with_name(p.name.replace('.request.','.result.')).exists()] if requests.is_dir() else []
@@ -57,6 +67,13 @@ def sync(root, app, run):
     for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/config/ingress.public.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
+    # Phase H: the frozen gas evidence Strategy C reads from the snapshot (BSC_STRATEGY_C_GAS_EVIDENCE).
+    ingress=root/'bsc/config/ingress.public.env'
+    if ingress.exists():
+        for line in regular(ingress).decode().splitlines():
+            if line.startswith('BSC_STRATEGY_C_GAS_EVIDENCE='):
+                for name in line.split('=',1)[1].split(','):
+                    files.append(repo_file(root,name.strip(),'gas evidence'))
     # BSC-050 A-scan: exactly the files the v5 contract binds, as the native readiness names them.
     if (root/'bsc/config/g07_attempt1_acceptance_v5.dbrec').exists():
         lister=root/'bsc/engine/target/release/g07_pre_live_readiness'
@@ -64,14 +81,7 @@ def sync(root, app, run):
         listed=subprocess.run([str(lister),'--bound-inputs'],cwd=root,env={'PATH':'/usr/bin:/bin'},capture_output=True,text=True,timeout=60)
         if listed.returncode!=0: raise ValueError('the v5-bound inputs cannot be listed: '+listed.stderr.strip()[-300:])
         for name in listed.stdout.splitlines():
-            relative=pathlib.PurePosixPath(name)
-            if relative.is_absolute() or '..' in relative.parts or not name: raise ValueError('unsafe bound input: '+name)
-            path=root
-            for part in relative.parts:
-                path=path/part
-                if path.is_symlink(): raise ValueError('bound input linked: '+name)
-            if not path.is_file(): raise ValueError('bound input missing: '+name)
-            files.append(path)
+            files.append(repo_file(root,name,'bound input'))
     files=list(dict.fromkeys(files))
     manifest={}
     for path in files:

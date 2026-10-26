@@ -2398,7 +2398,7 @@
     },
     {
       "source_path": "bsc/tools/status_sync.py",
-      "source_sha": "aa2c9f27d2ebd41a4cce5ea4d80d79b63902e140510c87fdcd57ba7c5ea073e5",
+      "source_sha": "7b9cc3329cb60d1318951fac10085886ebc51fbe7ae936fb256c1626d225a30c",
       "owner": "BSC lifecycle",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },
