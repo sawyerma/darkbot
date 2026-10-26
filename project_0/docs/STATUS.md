@@ -76,6 +76,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`65059ed6`** (2026-10-26) | DEC-07: Boot-Controller (Offline→Netzwerk→Audit→Start, TTL 10–120 s, Topic 15), alle Mainnet-Startwege nativ zugelassen (Modus `market`), Provider-Evidence per Record-ID; P0-009/011–014 (mit `3cb984dd`, `fdae3ce5`, `748bdc34`, `8200b045`, `5ef35e7c`, `16002ab2`, `d3ed33b2`, `0f430678`, `7ffa44be`, `f42afe94`, `65059ed6`) | OFFLINE_VERIFIED · CI `40410319544`/`40410345119` grün; zugelassener Ende-zu-Ende-Start NOT_RUN (P0-016); DEC-16 als Nächstes |
 | **`b95c53fc`** (2026-10-26) | DEC-11: Bundle-Pfad über JITO_BUNDLE, Fee je Transaktion plus Tip, Multi-TX-Holds, Bundle-Admission bis zur Simulationsgrenze, Befehlsweg (mit `5673aaf9`, `56af6185`, `f4b75213`, `4c813aaf`) | OFFLINE_VERIFIED · CI `40364297181` grün; Simulator/Jito real = Provider-Qualifikation (BUGS §22.5) |
 | **`c6b3b2e7`** (2026-10-26) | DEC-04: A verbindlich, B aus dem signierten Plan, HOLD_B mit Nachweis-Gate (N = B-8), Journal-Schema 7, `HoldFlows`-Record, Wallets-/Liquidator-Anzeige (mit `30d5b823`, `e6cbd319`, `65603ed7`) | OFFLINE_VERIFIED · CI `40327233793` grün; ACTIVE wartet auf B-8 (BUGS §22.5) |
 | **`386c3b39`** (2026-10-26) | DEC-03: Non-Landing nach N-2 (B je Betreiber, lückenlose C-Kette, fünf Klassen, Klasse im Journal, Record/Alarm, Wallets-Abschnitt) | OFFLINE_VERIFIED · CI `40288382331`/`40288382152` grün; echte Provider-Gates NOT_RUN (BUGS §22.5) |

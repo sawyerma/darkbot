@@ -207,12 +207,12 @@ Die in diesem Register geschlossenen H- und M-Punkte beruhen auf Fables Review d
 - **Abnahme:** ein Client pro Audit-Instanz, globale Zeitgrenze bleibt hart. **Commit/Evidence:** `e322869` (ein RPC-Client je Audit; Per-Call-Timeout min(rpc_timeout, Budget/4, ≥ 1 s), Call nur bei ausreichender Restzeit → harte Deadline); Test `network_reads_counts_only_boot_budget` Exit 0.
 
 ### N7 — 60-Sekunden-Boot-Audit-TTL operativ knapp
-- [ ] **MEDIUM · OPEN / DESIGN_DECISION · G-B.**
+- [x] **MEDIUM · ERLEDIGT_LOKAL (DEC-07).**
 - **Pfad:** `runtime/src/orchestration/boot_audit.rs::validate_start`, `boot_network.rs::Spec`, `bin/p0ctl.rs`.
 - **Ist:** Doctor und Start erfordern manuelles Tokenhandling in höchstens 60 s; Verspätung blockiert korrekt.
 - **Soll-Fix:** sichere kombinierte `doctor + run start`-Bedienung erwägen, **ohne** TTL/Safety still auf 300 s zu erhöhen. Jede etwaige Änderung der TTL bedarf gesonderter Freigabe; BOOT-12 muss ohnehin aktuelle Identitäten prüfen.
 - **Tests:** Token gültig/abgelaufen, Konfig-/Binär-/Programmdrift und doppelte Startversuche.
-- **Abnahme:** bedienbarer Workflow **ohne** längeres unsicheres Vertrauen in einen alten Token. **Commit/Evidence:** —.
+- **Abnahme:** bedienbarer Workflow **ohne** längeres unsicheres Vertrauen in einen alten Token. **Commit/Evidence:** DEC-07 `3cb984dd`, `fdae3ce5`, `748bdc34`, `8200b045`, `5ef35e7c`, `16002ab2`, `d3ed33b2`, `0f430678`, `7ffa44be`, `f42afe94`, `65059ed6`; CI `40410319544`/`40410345119`.
 - **Triage 18.10.2026:** `DESIGN/USABILITY`, kein fehlerhafter TTL-Safety-Check. Keine TTL-Aufweitung als vermeintlichen Bugfix autorisieren; kombinierte Doctor-Start-Bedienung nur separat testen.
 
 ### N8 — WSS-ACK-Deadline ignoriert Subscription-Anzahl
@@ -1299,7 +1299,7 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | `N4` | ERLEDIGT_LOKAL | BUGS §4 (Haken) | — | §4 · Drift fälschlich als Mutex-Poison gemeldet | `e322869` |
 | `N5` | ERLEDIGT_LOKAL | BUGS §4 (Haken) | — | §4 · lokale Runtime-Fehler durch globale Redaction unbrauchbar | `c83bd46` |
 | `N6` | ERLEDIGT_LOKAL | BUGS §4 (Haken) | — | §4 · neuer RPC-Client für jeden BOOT-Read | `e322869` |
-| `N7` | OFFEN | BUGS §4 (offen) | DEC-07: TTL 10–120 s, getrennte Netzwerk-/Startfreigabe, Receipts | §4 · 60-Sekunden-Boot-Audit-TTL operativ knapp | Ursprungsabschnitt |
+| `N7` | ERLEDIGT_LOKAL | BUGS §4 (Haken) | — (DEC-07 `65059ed6`) | §4 · 60-Sekunden-Boot-Audit-TTL operativ knapp | Ursprungsabschnitt |
 | `N8` | ERLEDIGT_LOKAL | BUGS §4 (Haken) | — | §4 · WSS-ACK-Deadline ignoriert Subscription-Anzahl | `4dc5de2` |
 | `P1B-T1` | ERLEDIGT_LOKAL | BUGS §20 (Haken) | — | §20 · Test teilt globalen Provider-Zähler (Isolation) | `88f45b19` |
 | `P6MT-J1` | BLOCKED_MESSUNG | BUGS §21 (offen) | MT8/MT10 erst nach C0-MO und gemessenem Engpass (B-6) | §21 · Jupiter `/build` sowie Fee-Quote- und Simulations-RPC laufen synchron | Ursprungsabschnitt |
@@ -1495,8 +1495,14 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | `P0-006` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `3d18f401`, `ee9a307a` · `gateway` Läufe `40243757542`, `40244250738` grün |
 | `P0-007` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `8eba756e` · Lauf `40244512659` grün (`test_all`) |
 | `P0-010` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `4c813aaf` · Lauf `40358635487` sieben Jobs grün |
-| `P0-009` | OFFEN | CI | Floodtest robust gegen Runner-Last | §23 | Lauf `40322048971` Versuch 1 rot, Versuch 2 grün (`30d5b823`) |
+| `P0-009` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `0f430678` (Urteil über die Reihenfolge, Commit nennt P0-015) · CI `40410319544`/`40410345119` |
 | `P0-008` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `289022b5` · Läufe `40253347330`, `40253347301` grün (`protocol` mit Token) |
+| `P0-011` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `748bdc34` (Runner `ubuntu-24.04`) · CI `40410319544`/`40410345119` |
+| `P0-012` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `d3ed33b2` · CI `40410319544`/`40410345119` |
+| `P0-013` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `5ef35e7c`, `0f430678`, `7ffa44be` · CI `40410319544`/`40410345119` |
+| `P0-014` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `d3ed33b2`, `0f430678` · CI `40410319544`/`40410345119` |
+| `P0-015` | DUPLIKAT | Commit | → P0-009 | §23 | `0f430678` |
+| `P0-016` | OFFEN | DEC-07-Review | zugelassener Rohdaten-Start Ende-zu-Ende | §23 | Reviewer-Befund 5 (MEDIUM) |
 
 ### 22.2 `bugs_b.md`: Z1–Z19 und Q1–Q14 — Zusammenführungen
 
@@ -1520,7 +1526,7 @@ Zusammenfassungen aus Auditblöcken §2–7 und Korrekturfortschritt §11.4; zus
 | 04 | Z7/V7, B15/C11, Q1 | **OFFLINE_VERIFIED** `30d5b823`, `e6cbd319`, `65603ed7`, `c6b3b2e7` (Gate PASS 1033/893/351/351, 21/22 Mutationen + 1 äquivalent, Reviewer-HIGH behoben, CI `40327233793` grün): A verbindlich (Wallet-Reservierung nur ausgebbare Einheiten je Asset, Inventarlimit = ganze Beschlagnahme, nie gegen Saldo); B aus den signierten Instruktionen (Withdraw/Repay-Parität, Kamino/Drift/JupLend neu gerechnet, Jupiter-ExactIn, JIT-Kauf; Token-2022/unbekannte Mints, Titan, FlashFunded → UNQUALIFIED); HOLD_B über den einen Controller, ACTIVE nur auf protokollierte Anfrage mit `hold_b_min_attempts` (kein Default) und N erfolgreichen Versuchen je Funding-Klasse/Art ohne Unterschätzung; Journal-Schema 7, `HoldFlows`-Record, Wallets-Abschnitt, Liquidator-Anfrage. Rest: ACTIVE BLOCKED_MESSUNG (B-8, echte Versuche erst mit FE-06/DEC-13b); Inventar-Freigabe/Replay beim Settlement mit DEC-13b; LOW: Bank/Mint-Parität aus Instruktions-Accounts, Record bei Neustart zwischen Settlement und Record |
 | 05 | FS-D11, FS-D01…FS-D06, FS-B11/FS-E10 | **OFFLINE_VERIFIED** `96baf387` (Gate PASS, CI `40252813830`/`40252813869` grün): 28 Owner-Parameter, Wertparität, Profil je Betriebsart mit Herkunft, Status-Hinweg Liquidator/Health; FS-B11/FS-E10 (CAS für Hot-Changes) mit DEC-06/07 |
 | 06 | FS-C08, V2-03/V2-13 | OFFEN: OFF/OBSERVE/ACTIVE, CAS, Fallback, qualifizierte Gegenprobe |
-| 07 | N7 (ursprüngliche BUGS-ID), FS-A06 | OFFEN: integrierte zwei Freigaben, TTL 10–120 s und native Receipts |
+| 07 | N7 (ursprüngliche BUGS-ID), FS-A06 | **OFFLINE_VERIFIED** `3cb984dd`, `fdae3ce5`, `748bdc34`, `8200b045`, `5ef35e7c`, `16002ab2`, `d3ed33b2`, `0f430678`, `7ffa44be`, `f42afe94`, `65059ed6` (Gate PASS 1059/919/369/369, Mutationen 38/39 getötet + 1 äquivalent (C4), Reviewer-HIGH behoben (3), CI `40410319544`/`40410345119` grün im ersten Versuch): Boot-Controller Offline→Netzwerkfreigabe→Audit→Startfreigabe, TTL 10–120 s aus der Registry, Status über Topic 15 im Capture-Reiter (Topic-Entscheidung 26.10. geschlossen); jeder Mainnet-Start nativ nur mit zugelassenem Record (Rohdaten-Capture Modus `market` einmalig und in der TTL, `p0-longtail` direkt, Autostart gesperrt; P0-013); Provider-Evidence per Record-ID; GUI-Start nur Chain-Verification `off` (DEC-08); zugelassener Ende-zu-Ende-Start offline NOT_RUN (P0-016) |
 | 08 | FS-A04/FS-A08/FS-F-02, C0-E1 | OFFEN: INDEX/CROSSCHECK/STRICT vollständig nativ und historisches Paritätsgate |
 | 09 | FS-A10/FS-A11, FS-A14/FS-A15, FS-U-3/FS-U-7 | **OFFLINE_VERIFIED** `bc33567e` (Gate PASS, CI `40257127289` grün): Feature `historical` (opt-in), Standardbinary ohne historische JSON-Leser (vorher 107 Verwendungen), native Seal-Prüfung historischer Journale; Marktbeobachter-/Econ-View-Tests im `historical`-Build (`test_all`) |
 | 10 | FS-F-13 (Migrationsteil), FE-04 Approval | **OFFLINE_VERIFIED** `abfadb30` (Gate PASS 987/847/322/322, CI `40260695972`/`40260696049` grün): natives `key = value`-Approval (Attempt/Exit), JSON abgelehnt, Single-Use über das FE-04-Ledger, Bindung Wallet/Programm/ProgramData/HEAD/Binaries/Safety-Decken, Lebensdauergrenze (Limits Rev. 12); Status Liquidator-Reiter und `p0ctl`. Offen (LOW): keine Registry-Decke für SOL-Debit/Rent/Exit-Fee, CLI prüft keine Safety-Decken |
@@ -1529,22 +1535,23 @@ Zusammenfassungen aus Auditblöcken §2–7 und Korrekturfortschritt §11.4; zus
 | 13 | B1/C3-Rest, FS-F-09, Q1 | **TEILWEISE** DEC-13a `777748e4` (Gate PASS 1014/874/339/339, CI `40278646493`/`40278646443` grün): LIVE-Anforderung über den einen Controller (`p0ctl capability`, Gateway, Liquidator-Reiter), requested/effective getrennt, effective BLOCKED in Code (`live_effective`, `pipeline_mode`) und Test (zählender Adapter: 0 Submits). Offen DEC-13b: produktive Owner-Admission (Versuch/Exit), In-Run-Settlement-Buchung, Ende-zu-Ende über `detect` mit Recording-Adapter, Wallets-Anzeige (Panel design-frozen). **Nutzerentscheidung nötig:** Format/Quelle der FE-06-Autorisierung, die Modus, Safety-LIVE, Asset-Allowlist und Submitter gemeinsam öffnet |
 | 14 | diese Konsolidierung | Register und ID-Test; **kein Bug- oder CI-Release-PASS durch Dokumentation** |
 | 15 | Git-/Session-Vertrag | Ein Integrator `main`, isolierte Worktrees |
+| 16 | neu: Nutzerentscheidung 26.10.2026 (Dauerbetrieb) | OFFEN: `UntilStopped` mit typisierten, persistenten, identitätsgebundenen Qualifikationen; ohne ⇒ `RUN_HORIZON_UNTIL_STOPPED_GATED`; Laufzeit-Gates mit sicherem HALT; reale Qualifikation NOT_RUN/BLOCKED_EXTERNAL |
 
 Die N-5-Reiter-/Commandzuordnung gilt exakt wie in `ENTSCHEIDUNGEN.md` §7: kein erfundener Schalter für `nein`. Ein lokaler Fix einer Unter-ID erklärt **nicht** die zugeordnete gesamte DEC für `OFFLINE_VERIFIED`.
 
 ### 22.6 Prüfbilanz je Git-SHA, CI und Archivregel
 
-**Zählung** (reproduzierbar: `python3 project_0/scripts/bugs_register.py`; Stand nach DEC-11 `b95c53fc`):
+**Zählung** (reproduzierbar: `python3 project_0/scripts/bugs_register.py`; Stand nach DEC-07 `65059ed6`):
 
 | Gruppe | IDs | ERLEDIGT_LOKAL | OFFEN | TEILWEISE | BLOCKED_EXTERNAL | BLOCKED_MESSUNG | REVIEW_REQUIRED | WIDERLEGT | DUPLIKAT | GEGENBELEG |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Ursprüngliche Tickets | 148 | 119 | 2 | 11 | 0 | 9 | 6 | 1 | 0 | 0 |
+| Ursprüngliche Tickets | 148 | 120 | 1 | 11 | 0 | 9 | 6 | 1 | 0 | 0 |
 | `bugs_b.md` Z/Q | 33 | 16 | 0 | 3 | 0 | 0 | 10 | 2 | 2 | 0 |
 | `fehlstellen_v1.md` FS | 85 | 68 | 4 | 1 | 3 | 1 | 1 | 1 | 0 | 6 |
 | `bug_v2.md` V2 | 15 | 13 | 0 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
-| neue P0 | 10 | 5 | 4 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| neue P0 | 16 | 10 | 4 | 0 | 0 | 0 | 1 | 0 | 1 | 0 |
 
-**CI-Nachweis (N-6, exakt geprüfte SHAs):** Commit B `935c3239`: Lauf `40242745414` (`Project 0 status contract`) — fünf `project0-gate`-Matrizen und `contract-and-ui` grün (Protokollbasis `0addbeee` = `event.before`, P0-003), `native` rot (CI-N1); Lauf `40242745481` (`gateway`) — `protocol` grün, `rust` rot (fmt, P0-006). Commit B2 `3d18f401`: Lauf `40243757365` — alles grün außer `native` (Linux-Testwettlauf `ws_integration`, Job `121320900336`); `gateway` `40243757542` grün. Commit B3 `ee9a307a`: Lauf `40244250752` alle sieben Jobs grün; `gateway` `40244250738` grün. Commit B4 `8eba756e`: Lauf `40244512659` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). Commit C `7ed4e192`: Lauf `40246730628` (`Project 0 status contract`) alle sieben Jobs grün, einschließlich ID-Test im Python-Schritt von `project0-gate (release bash_n python)` (Job `121329753529`). Commit D `b3cce8ee`: Lauf `40247971583` alle sieben Jobs grün. DEC-05 `96baf387`: Lauf `40252813830` alle sieben Jobs grün; `gateway` `40252813869` Versuch 1 `protocol` rot (Infrastruktur: `buf-setup-action` API-Ratenlimit ohne Token, P0-008), Versuch 2 auf demselben SHA `protocol` und `rust` grün. P0-008 `289022b5`: Läufe `40253347330` (sieben Jobs) und `40253347301` (`rust`, `protocol`) grün. DEC-09 `bc33567e`: Lauf `40257127289` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). DEC-10 `abfadb30`: Läufe `40260695972` (sieben Jobs) und `40260696049` (`rust`, `protocol`) grün. DEC-01 `8dc56608`: Läufe `40265453370` (sieben Jobs) und `40265453367` (`rust`, `protocol`) grün. DEC-12 `b499a68c`: Lauf `40271427720` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). DEC-02 `ac3fec1f`: Lauf `40274176837` alle sieben Jobs grün. DEC-13a `777748e4`: Läufe `40278646493` (sieben Jobs) und `40278646443` (`rust`, `protocol`) grün. DEC-03 `386c3b39`: Läufe `40288382331` (sieben Jobs) und `40288382152` (`rust`, `protocol`) grün. DEC-04 `30d5b823`: `40322048966` grün, `40322048971` Versuch 1 `test_default` rot (P0-009), Versuch 2 auf demselben SHA grün; `e6cbd319`: `40322551924`/`40322552967`, `65603ed7`: `40326349276`/`40326349201`, `c6b3b2e7`: `40327233793` (sieben Jobs) grün. DEC-11 `5673aaf9`: `40334540941` rot (Owner-e2e-Assertion, behoben in `56af6185`); `56af6185` `40338594600` und `f4b75213` `40340116009` Testjobs rot (P0-010), `gateway` `40340115898` grün; `4c813aaf`: `40358635487`, `b95c53fc`: `40364297181` (sieben Jobs) grün. Ältere Läufe ab 23.10. waren in `native` durchgehend rot (CI-N1); lokale `gate.sh`-PASS-Angaben jener Zeit sind keine CI-Freigabe (STATUS.md, Korrektur 26.10.).
+**CI-Nachweis (N-6, exakt geprüfte SHAs):** DEC-07 `65059ed6`: `Project 0 status contract` Lauf `40410319544` (sieben Jobs) und `gateway` Lauf `40410345119` (`rust`, `protocol`, Dispatch auf demselben SHA) grün im ersten Versuch; `f42afe94` rot (`contract-and-ui`, Importgrenze im P0-012-Test, behoben in `65059ed6`). Commit B `935c3239`: Lauf `40242745414` (`Project 0 status contract`) — fünf `project0-gate`-Matrizen und `contract-and-ui` grün (Protokollbasis `0addbeee` = `event.before`, P0-003), `native` rot (CI-N1); Lauf `40242745481` (`gateway`) — `protocol` grün, `rust` rot (fmt, P0-006). Commit B2 `3d18f401`: Lauf `40243757365` — alles grün außer `native` (Linux-Testwettlauf `ws_integration`, Job `121320900336`); `gateway` `40243757542` grün. Commit B3 `ee9a307a`: Lauf `40244250752` alle sieben Jobs grün; `gateway` `40244250738` grün. Commit B4 `8eba756e`: Lauf `40244512659` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). Commit C `7ed4e192`: Lauf `40246730628` (`Project 0 status contract`) alle sieben Jobs grün, einschließlich ID-Test im Python-Schritt von `project0-gate (release bash_n python)` (Job `121329753529`). Commit D `b3cce8ee`: Lauf `40247971583` alle sieben Jobs grün. DEC-05 `96baf387`: Lauf `40252813830` alle sieben Jobs grün; `gateway` `40252813869` Versuch 1 `protocol` rot (Infrastruktur: `buf-setup-action` API-Ratenlimit ohne Token, P0-008), Versuch 2 auf demselben SHA `protocol` und `rust` grün. P0-008 `289022b5`: Läufe `40253347330` (sieben Jobs) und `40253347301` (`rust`, `protocol`) grün. DEC-09 `bc33567e`: Lauf `40257127289` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). DEC-10 `abfadb30`: Läufe `40260695972` (sieben Jobs) und `40260696049` (`rust`, `protocol`) grün. DEC-01 `8dc56608`: Läufe `40265453370` (sieben Jobs) und `40265453367` (`rust`, `protocol`) grün. DEC-12 `b499a68c`: Lauf `40271427720` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). DEC-02 `ac3fec1f`: Lauf `40274176837` alle sieben Jobs grün. DEC-13a `777748e4`: Läufe `40278646493` (sieben Jobs) und `40278646443` (`rust`, `protocol`) grün. DEC-03 `386c3b39`: Läufe `40288382331` (sieben Jobs) und `40288382152` (`rust`, `protocol`) grün. DEC-04 `30d5b823`: `40322048966` grün, `40322048971` Versuch 1 `test_default` rot (P0-009), Versuch 2 auf demselben SHA grün; `e6cbd319`: `40322551924`/`40322552967`, `65603ed7`: `40326349276`/`40326349201`, `c6b3b2e7`: `40327233793` (sieben Jobs) grün. DEC-11 `5673aaf9`: `40334540941` rot (Owner-e2e-Assertion, behoben in `56af6185`); `56af6185` `40338594600` und `f4b75213` `40340116009` Testjobs rot (P0-010), `gateway` `40340115898` grün; `4c813aaf`: `40358635487`, `b95c53fc`: `40364297181` (sieben Jobs) grün. Ältere Läufe ab 23.10. waren in `native` durchgehend rot (CI-N1); lokale `gate.sh`-PASS-Angaben jener Zeit sind keine CI-Freigabe (STATUS.md, Korrektur 26.10.).
 
 **N-4/Z-1 CI-Gate:** Für reine `project_0/docs/**`-Änderungen lösen `Project 0 status contract` und `gateway` gemäß der festgelegten Pfad→Job-Matrix **keine automatische CI aus**. Daher hier **kein behauptetes `OFFLINE_VERIFIED`/Test-PASS**. Bei späteren Code-/Proto-/Gateway-/Frontend-Änderungen sämtliche pfadpflichtigen Jobs aus `ENTSCHEIDUNGEN.md` §7 prüfen; rote Pflichtjobs sperren `OFFLINE_VERIFIED`, enge BSC-Ausnahme nur mit separater dokumentierter Baseline und Ursache. Dokumentabschluss ist keine operative Freigabe.
 
@@ -1585,7 +1592,7 @@ Die N-5-Reiter-/Commandzuordnung gilt exakt wie in `ENTSCHEIDUNGEN.md` §7: kein
 - **Fix:** `project0-gate` baut mit `CARGO_PROFILE_DEV_DEBUG=line-tables-only` (Backtraces behalten Datei:Zeile).
 
 ### P0-009 — Flaky Linux-CI: P3-04-Floodtest erneut (Wiederkehr von P0-007)
-- **Status: OFFEN.** **Gate:** N-4 (Flaky Tests gesondert erfassen), `project0-gate (test_default)`.
+- **Status: ERLEDIGT_LOKAL** (`0f430678`, CI `40410319544`/`40410345119`): Urteil über die Reihenfolge (der Slot hinter der Ping-Flut erreicht die Quelle in derselben Session), keine Send-Latenz-Schwelle; RED mit dem Vor-P3-04-Leser. Lokal unter Last (Load 30) nicht reproduzierbar, Linux-Ursache der > 3-s-Sends nicht isoliert. **Gate:** N-4 (Flaky Tests gesondert erfassen), `project0-gate (test_default)`.
 - **Befund:** `requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls` scheiterte auf `30d5b823` (Lauf `40322048971` Versuch 1, Job `121569160804`, `darkbot-solana` 158/1/1) erneut an `the reader kept reading while its Pong writes were blocked`; Versuch 2 auf demselben SHA (Job `121572078517`) und die Folge-SHAs grün. Der Test verlangt 48 Ki Pings in 20 s ohne einen Send über 3 s; DEC-04 ändert den Ingress nicht.
 - **Soll:** Floodtest unter Runner-Last robust, ohne den RED-Nachweis aus P0-007 (manueller Pong blockiert den Leser) zu verlieren.
 
@@ -1593,6 +1600,24 @@ Die N-5-Reiter-/Commandzuordnung gilt exakt wie in `ENTSCHEIDUNGEN.md` §7: kein
 - **Status: ERLEDIGT_LOKAL** (Workflow-Fix `289022b5`; CI grün: Läufe `40253347330`, `40253347301`). **Gate:** N-6 (rote Jobs zählen nicht).
 - **Befund:** `gateway` Lauf `40252813869` Versuch 1, Job `121348177871`: `bufbuild/buf-setup-action@v1` ohne `github_token` → „API rate limit exceeded“; kein Code-Fehler (Versuch 2 auf demselben SHA grün).
 - **Fix:** beide Workflows übergeben `github_token: ${{ github.token }}`.
+
+### P0-011 — CI-Infrastruktur: Playwright auf `ubuntu-latest` (26.04) ohne Browser-Abhängigkeiten
+- **Status: ERLEDIGT_LOKAL** (`748bdc34`, CI `40410319544`/`40410345119`). **Fix:** Jobs von `project0-status.yml` auf `ubuntu-24.04` gepinnt.
+
+### P0-012 — Flaky Playwright „stream ages“: Frame-Batching verlor die Zählerbasis
+- **Status: ERLEDIGT_LOKAL** (`d3ed33b2`, CI `40410319544`/`40410345119`). **Ursache:** `frameBatcher` behält je Frame den neuesten Capture-Zustand, die Stream-Fortschrittsbuchung lief danach; Basis und Nachfolger im selben Frame ⇒ „Checking stream“. **Fix:** `observeStream` je empfangener Nachricht vor dem Batching. Test RED am alten Adapter.
+
+### P0-013 — Mainnet-Startwege ohne Boot-Gate
+- **Status: ERLEDIGT_LOKAL** (`5ef35e7c`, `0f430678`, `7ffa44be`, CI `40410319544`/`40410345119`). **Befund:** `project0.capture.start`, Autostart, `darkbotctl capture start` und ein direkter `p0-longtail`-econ4h-Start lasen Mainnet ohne zugelassenen Record. **Fix:** nativer Gate in Capture und Runtime (`BOOT_AUDIT_REQUIRED`/`BOOT_NETWORK_AUDIT_MISSING`), Boot-Modus `market` (eigene Uhr in der TTL, einmalig), `capture.sh market` lehnt ab; launchd-Lebenszyklus eines zugelassenen Laufs offline NOT_RUN (P0-016).
+
+### P0-014 — Flaky `shadow_session_stop_and_join_is_far_below_the_shutdown_budget`
+- **Status: ERLEDIGT_LOKAL** (`d3ed33b2`, `0f430678`, CI `40410319544`/`40410345119`). **Ursache:** fester 200-ms-Schlaf und 6-s-Listenerfenster. **Fix:** Stopp erst im beobachteten Zustand (DEGRADED-Event, Accept vor dem Start gezählt). RED mit 300 ms Startverzögerung.
+
+### P0-015 — Duplikat von P0-009
+- **Status: DUPLIKAT** → P0-009 (`0f430678` nannte den Floodtest P0-015).
+
+### P0-016 — Zugelassener Rohdaten-Start Ende-zu-Ende nicht offline prüfbar
+- **Status: OFFEN · MEDIUM** (DEC-07-Review Befund 5). Kein Test führt einen gültigen Record durch das echte Binary unter launchd; eine Abweichung zwischen p0ctl- und launchd-Umgebung wird sicher abgelehnt (`BOOT_IDENTITY_DRIFT` mit Feld), bliebe aber unentdeckt bis zum ersten echten Start. Voraussetzung: realer Network-Audit (C-04) oder ein Testfixture über Crate-Grenzen.
 
 ### P0-007 — Flaky Linux-CI: P3-04-Floodtest verlangte < 500 ms je Ping-Send
 - **Status: ERLEDIGT_LOKAL** (Fix Commit B4; CI-Nachweis auf exaktem SHA in Commit C). **Gate:** N-4 (Flaky Tests gesondert erfassen), `project0-gate (test_all)`.

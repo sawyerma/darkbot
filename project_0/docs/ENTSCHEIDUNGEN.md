@@ -226,6 +226,7 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
   - Crash/Restart,
   - „altes Token nach Konfigurationsänderung“.
 - **Ansatzpunkte:** `orchestration/boot_network.rs`, `orchestration/boot_audit.rs`, `bin/p0ctl.rs`. Register: `BUGS.md` N7.
+- **Nachtrag 26.10.2026 (Nutzer):** Boot-Status auf `project0.analytics.jobs` (15), Anzeige im Capture-Reiter; Rohdaten-Capture ist eigener Boot-Modus `market`; alle Startwege durch denselben nativen Boot-Controller, Autostart ohne Zulassung gesperrt; Provider-Evidence per Record-ID; GUI-Start vorerst nur Chain-Verification `off` (bei DEC-08 wieder aufgreifen).
 
 ### 8 — Native Verifikation: INDEX, CROSSCHECK, STRICT
 - **Beschluss:** Variante A. Alle drei Verfahren nativ in Rust. OFF bleibt bestehen.
@@ -330,6 +331,10 @@ Jede Entscheidung ist gleich aufgebaut: Beschluss · Pflichtanforderungen · Bed
   - BSC und Project_0 bleiben strikt getrennt.
 - **Gilt ab:** sofort.
 
+### 16 — Dauerbetrieb `UntilStopped` (Nutzerentscheidung 26.10.2026)
+- **Beschluss:** Dauerbetrieb `UntilStopped` (24/7) jetzt vollständig entwickeln, nach DEC-07 und vor DEC-06; keine neue Architektur, kein späterer Neuaufbau. `RunHorizon::admit()` bleibt der zentrale Admission-Prüfpunkt, aber nicht das einzige Gate; die bestehende Sperre wird nicht pauschal entfernt. Qualifikationen als typisierte, persistente, identitätsgebundene Nachweise: SK-07-Segmentierung und Recovery, rollierende Kapazität, Providerbudgets, verfügbare Provider-Evidence. Ohne vollständige Qualifikation `RUN_HORIZON_UNTIL_STOPPED_GATED`; mit ihr grundsätzlich zulässig, aber nur mit den Netzwerk-, Start- und Betriebsfreigaben. Ressourcen-, Provider- und Integritätsgates bleiben im Betrieb wirksam, Verstoß ⇒ sicherer HALT. Offline-Tests beider Fälle inkl. Crash, Restart, Recovery, Ressourcenerschöpfung; reale Mainnet-Qualifikation `NOT_RUN`/`BLOCKED_EXTERNAL`. Qualifizierter Dauerbetrieb ist **keine** Erlaubnis für unbeaufsichtigte Neustarts und **keine** LIVE-Freigabe.
+- **Reihenfolge:** nach 7, vor 6.
+
 ---
 
 ## 3. Messfragen (nicht entschieden; bis zur Messung gilt der heutige Wert)
@@ -379,6 +384,7 @@ Jede Freigabe wird einzeln und ausdrücklich erteilt, mit Umfang, Provider, Budg
 9. **4** – Holds.
 10. **11** – Bundle/JIT; baut auf der Admission auf.
 11. **7** – Boot-Audit.
+11a. **16** – Dauerbetrieb (Nutzerentscheidung 26.10.2026, vor 6).
 12. **6** – Threshold.
 13. **8** – Verifikation.
 
