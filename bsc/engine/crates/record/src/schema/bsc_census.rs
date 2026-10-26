@@ -148,11 +148,23 @@ pub mod census {
     pub const FOUR_MISMATCH: u16 = 38;
     pub const FOUR_NOT_RECOGNIZED: u16 = 39;
     pub const FOUR_VERDICT_UNRECORDED: u16 = 40;
+    /// Four.meme launches by pending coverage (Phase F §10, per venue).
+    pub const FOUR_FULL_BEFORE: u16 = 41;
+    pub const FOUR_HASH_ONLY_BEFORE: u16 = 42;
+    pub const FOUR_AFTER: u16 = 43;
+    pub const FOUR_MISSED: u16 = 44;
+    pub const FOUR_CLOCK_UNKNOWN: u16 = 45;
+    /// Later sightings of a launch by another source and their lag behind
+    /// the first (Phase F §7: the first-seen spread across sources).
+    pub const LATER_SIGHTINGS: u16 = 46;
+    pub const LATER_LAG_P50_US: u16 = 47;
+    pub const LATER_LAG_P95_US: u16 = 48;
+    pub const LATER_LAG_MAX_US: u16 = 49;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
-        schema_version: 5,
+        schema_version: 6,
         fields: &[
             Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
@@ -197,6 +209,15 @@ pub mod census {
             Field::req(FOUR_MISMATCH, "four_mismatch", U64),
             Field::req(FOUR_NOT_RECOGNIZED, "four_not_recognized", U64),
             Field::req(FOUR_VERDICT_UNRECORDED, "four_verdict_unrecorded", U64),
+            Field::req(FOUR_FULL_BEFORE, "four_full_before", U64),
+            Field::req(FOUR_HASH_ONLY_BEFORE, "four_hash_only_before", U64),
+            Field::req(FOUR_AFTER, "four_after", U64),
+            Field::req(FOUR_MISSED, "four_missed", U64),
+            Field::req(FOUR_CLOCK_UNKNOWN, "four_clock_unknown", U64),
+            Field::req(LATER_SIGHTINGS, "later_sightings", U64),
+            Field::opt(LATER_LAG_P50_US, "later_lag_p50_us", U64),
+            Field::opt(LATER_LAG_P95_US, "later_lag_p95_us", U64),
+            Field::opt(LATER_LAG_MAX_US, "later_lag_max_us", U64),
         ],
     };
 }

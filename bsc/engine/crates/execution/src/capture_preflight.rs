@@ -21,7 +21,7 @@ use darkbot_bsc_journal::storage::preflight::{CapacityInputs, Preflight, Resourc
 use darkbot_bsc_journal::storage::segments::{SegmentPolicy, SegmentWriter};
 use darkbot_bsc_journal::{CaptureRecord, RecordKind};
 use darkbot_bsc_record::schema::bsc_capture::{capture_preflight as cp, capture_run as cr};
-use darkbot_bsc_record::{Draft, decode};
+use darkbot_bsc_record::Draft;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -62,7 +62,7 @@ pub fn rates(journal_dir: &Path) -> Result<Option<Rates>, String> {
         let Ok(bytes) = fs::read(&path) else {
             continue;
         };
-        let Ok(m) = decode(&cr::SCHEMA, &bytes) else {
+        let Ok(m) = cr::decode_run(&bytes) else {
             continue;
         };
         if m.text(cr::STATE).ok() != Some("COMPLETE") {
@@ -352,7 +352,7 @@ fn resource_name(r: Resource) -> &'static str {
 mod tests {
     use super::*;
     use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RuntimeJournal};
-    use darkbot_bsc_record::schema::bsc_capture::capture_preflight as cp;
+    use darkbot_bsc_record::decode;
 
     fn setup(duration_s: u64, reserve: u64) -> PreflightSetup {
         PreflightSetup {

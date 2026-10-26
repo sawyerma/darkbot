@@ -110,6 +110,56 @@ pub mod capture_run {
             Field::rep(NON_CLAIMS, "non_claims", Text),
         ],
     };
+
+    /// v2 (Phase F contract §4): the host the run's latencies are of, the
+    /// build that wrote it and the SHA-256 of its runtime configuration.
+    pub const HOST: u16 = 25;
+    pub const BUILD: u16 = 26;
+    pub const CONFIG_SHA256: u16 = 27;
+
+    pub const V2: Schema = Schema {
+        name: "darkbot.bsc.capture-run.v1",
+        record_type: 55,
+        schema_version: 2,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(STARTED_UNIX_MS, "started_unix_ms", U64),
+            Field::opt(ENDED_UNIX_MS, "ended_unix_ms", U64),
+            Field::req(CLOCK_ID, "clock_id", U64),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(BUDGET_BYTES, "budget_bytes", U64),
+            Field::req(QUEUE_RECORDS, "queue_records", U64),
+            Field::req(SEGMENT_BYTES, "segment_bytes", U64),
+            Field::req(SEGMENT_NS, "segment_ns", U64),
+            Field::req(SYNC_RECORDS, "sync_records", U64),
+            Field::req(SYNC_MS, "sync_ms", U64),
+            Field::nested(SEGMENTS, "segments", Presence::Repeated, &segment::SCHEMA),
+            Field::req(RECORDS, "records", U64),
+            Field::req(LOST_RECORDS, "lost_records", U64),
+            Field::opt(LAST_SEQUENCE, "last_sequence", U64),
+            Field::req(PEAK_BYTES, "peak_bytes", U64),
+            Field::req(BUDGET_REFUSED, "budget_refused", U64),
+            Field::req(WRITE_ERRORS, "write_errors", U64),
+            Field::req(STATE, "state", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::opt(HOST, "host", Text),
+            Field::opt(BUILD, "build", Text),
+            Field::opt(CONFIG_SHA256, "config_sha256", B256),
+        ],
+    };
+
+    /// A run manifest of either version (v1 of the first segmented builds).
+    pub fn decode_run(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
+        crate::decode(&V2, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+    }
 }
 
 /// The capture→replay identity proof of one finished run (Phase F
@@ -256,6 +306,7 @@ pub mod capture_preflight {
 
 pub const ALL: &[&Schema] = &[
     &capture_run::SCHEMA,
+    &capture_run::V2,
     &replay_proof::SCHEMA,
     &capture_preflight::SCHEMA,
 ];
@@ -301,5 +352,7 @@ mod tests {
             "COMPLETE"
         );
         assert!(crate::schema::decode_any(&bytes).is_ok());
+        // A v1 manifest (the first segmented builds) still decodes.
+        assert_eq!(c::decode_run(&bytes).unwrap().schema().schema_version, 1);
     }
 }

@@ -65,7 +65,7 @@ pub fn prove(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(format!("{}: {e}", run.join(RUN_MANIFEST).display())),
     };
-    match manifest.as_deref().map(|b| decode(&cr::SCHEMA, b)) {
+    match manifest.as_deref().map(cr::decode_run) {
         Some(Ok(m)) => {
             p.manifest_sha256 = m.file_sha256();
             p.manifest_state = m.text(cr::STATE).ok().map(str::to_string);

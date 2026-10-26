@@ -40,7 +40,7 @@ use darkbot_bsc_journal::storage::run::{RunReader, SegmentRead};
 use darkbot_bsc_journal::{CaptureRecord, JournalError, JournalReader, RecordKind};
 use darkbot_bsc_record::schema::bsc_capture::capture_run as cr;
 use darkbot_bsc_record::schema::bsc_census::census as cs;
-use darkbot_bsc_record::{Draft, decode};
+use darkbot_bsc_record::Draft;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -92,6 +92,19 @@ pub struct Census {
     pub four_mismatch: u64,
     pub four_not_recognized: u64,
     pub four_verdict_unrecorded: u64,
+    /// Four.meme launches by pending coverage (Phase F §10, per venue),
+    /// with the same classes as the Flap ones above.
+    pub four_full_before: u64,
+    pub four_hash_only_before: u64,
+    pub four_after: u64,
+    pub four_missed: u64,
+    pub four_clock_unknown: u64,
+    /// Later sightings of a launch by another source (Phase F §7, the
+    /// first-seen spread across sources) and their lag behind the first.
+    pub later_sightings: u64,
+    pub later_lag_p50_us: Option<u64>,
+    pub later_lag_p95_us: Option<u64>,
+    pub later_lag_max_us: Option<u64>,
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
@@ -249,6 +262,8 @@ struct Replay {
     window: Window,
     launches: Vec<LaunchRecord>,
     connectivity: Connectivity,
+    /// The lag of every later sighting of a launch behind its first (`L`).
+    later_lags_ns: Vec<u64>,
 }
 
 /// One journal: a single file of an older build or a segmented run.
@@ -268,7 +283,7 @@ impl Reader {
 
 /// Whether the run manifest names exactly the sealed segments read.
 pub(crate) fn manifest_matches(bytes: &[u8], read: &[SegmentRead]) -> bool {
-    let Ok(segments) = decode(&cr::SCHEMA, bytes).and_then(|m| m.nested_all(cr::SEGMENTS)) else {
+    let Ok(segments) = cr::decode_run(bytes).and_then(|m| m.nested_all(cr::SEGMENTS)) else {
         return false;
     };
     let sealed: Vec<&SegmentRead> = read.iter().filter(|r| r.sealed).collect();
@@ -312,6 +327,7 @@ fn replay(
     };
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
+    let mut later_lags_ns: Vec<u64> = Vec::new();
     // Launches received (`P`) and resolved (`C`/`O`), by (block, tx).
     let mut received: HashSet<([u8; 32], [u8; 32])> = HashSet::new();
     let mut resolved: HashSet<([u8; 32], [u8; 32])> = HashSet::new();
@@ -342,6 +358,12 @@ fn replay(
                 connectivity.event(usize::from(p[1]), p[2], record.timestamp_ns);
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
+            // `L | source u8 | hash [32] | lag_ns u64`: the spread across sources.
+            (RecordKind::Runtime, Some(b'L')) if p.len() == 42 => {
+                if let Some(lag) = u64_at(p, 34) {
+                    later_lags_ns.push(lag);
+                }
+            }
             (RecordKind::Canonical, Some(b'P')) if p.len() == 74 => {
                 match (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1])) {
                     (Some(block), Some(tx), Some(_)) => {
@@ -427,6 +449,7 @@ fn replay(
         window.last_block = None;
         launches.clear();
         connectivity = Connectivity::default();
+        later_lags_ns.clear();
     } else {
         window.last_block = window.last_block.or(checkpoint);
         let open = received.difference(&resolved).count() as u64;
@@ -442,6 +465,7 @@ fn replay(
         window,
         launches,
         connectivity,
+        later_lags_ns,
     })
 }
 
@@ -485,6 +509,7 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
     names.sort();
     let mut out = Census::default();
     let mut leads: Vec<u64> = Vec::new();
+    let mut later: Vec<u64> = Vec::new();
     let mut lags: Vec<i64> = Vec::new();
     let mut firsts: HashMap<usize, u64> = HashMap::new();
     for (started, name) in names {
@@ -525,6 +550,13 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
                     None => &mut out.four_verdict_unrecorded,
                 };
                 *n += 1;
+                *match l.class {
+                    1 => &mut out.four_full_before,
+                    2 => &mut out.four_hash_only_before,
+                    3 => &mut out.four_after,
+                    4 => &mut out.four_missed,
+                    _ => &mut out.four_clock_unknown,
+                } += 1;
                 continue;
             }
             out.flap_launches += 1;
@@ -561,8 +593,14 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
                 None => out.buys_unknown += 1,
             }
         }
+        later.extend(r.later_lags_ns.iter().map(|ns| ns / 1_000));
         out.windows.push(r.window);
     }
+    later.sort_unstable();
+    out.later_sightings = later.len() as u64;
+    out.later_lag_p50_us = percentile(&later, 500);
+    out.later_lag_p95_us = percentile(&later, 950);
+    out.later_lag_max_us = later.last().copied();
     leads.sort_unstable();
     out.lead_p50_us = percentile(&leads, 500);
     out.lead_p95_us = percentile(&leads, 950);
@@ -616,6 +654,12 @@ impl Census {
             .set(cs::FOUR_MISMATCH, self.four_mismatch)
             .set(cs::FOUR_NOT_RECOGNIZED, self.four_not_recognized)
             .set(cs::FOUR_VERDICT_UNRECORDED, self.four_verdict_unrecorded)
+            .set(cs::FOUR_FULL_BEFORE, self.four_full_before)
+            .set(cs::FOUR_HASH_ONLY_BEFORE, self.four_hash_only_before)
+            .set(cs::FOUR_AFTER, self.four_after)
+            .set(cs::FOUR_MISSED, self.four_missed)
+            .set(cs::FOUR_CLOCK_UNKNOWN, self.four_clock_unknown)
+            .set(cs::LATER_SIGHTINGS, self.later_sightings)
             .set(cs::ORPHANED_LAUNCHES, self.orphaned_launches)
             .set(cs::OUTAGE_LAUNCHES, self.outage_launches)
             .set(cs::FULL_BEFORE, self.full_before)
@@ -629,6 +673,9 @@ impl Census {
             (cs::LEAD_P95_US, self.lead_p95_us),
             (cs::LEAD_P99_US, self.lead_p99_us),
             (cs::LEAD_MAX_US, self.lead_max_us),
+            (cs::LATER_LAG_P50_US, self.later_lag_p50_us),
+            (cs::LATER_LAG_P95_US, self.later_lag_p95_us),
+            (cs::LATER_LAG_MAX_US, self.later_lag_max_us),
         ] {
             if let Some(v) = v {
                 d.set(tag, v);
@@ -672,6 +719,8 @@ impl Census {
         let mut s = format!(
             "covered_ms={} windows={} flap_launches={} c1_scope={} tx_unverifiable={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={} between_windows={} unparsed={}\n\
              four pre-execution token: derived={} no_derivation={} mismatch={} not_recognized={} unrecorded={}\n\
+             four before the block time: full={} hash_only={} after={} missed={} clock_unknown={}\n\
+             later sightings={} lag_us p50={} p95={} max={}\n\
              before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
              fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
@@ -693,6 +742,15 @@ impl Census {
             self.four_mismatch,
             self.four_not_recognized,
             self.four_verdict_unrecorded,
+            self.four_full_before,
+            self.four_hash_only_before,
+            self.four_after,
+            self.four_missed,
+            self.four_clock_unknown,
+            self.later_sightings,
+            opt(self.later_lag_p50_us),
+            opt(self.later_lag_p95_us),
+            opt(self.later_lag_max_us),
             self.full_before,
             self.c1_scope_full_before,
             self.hash_only_before,
@@ -900,6 +958,18 @@ mod tests {
         ] {
             records.push((RecordKind::Canonical, 100, p));
         }
+        // Two later sightings: the spread across sources.
+        for (i, lag) in [3_000_000u64, 1_000_000].into_iter().enumerate() {
+            records.push((
+                RecordKind::Runtime,
+                200,
+                crate::runtime_journal::later_sighting_payload(
+                    SourceId::PublicNode,
+                    &[i as u8; 32],
+                    lag,
+                ),
+            ));
+        }
         records.push((
             RecordKind::Canonical,
             400,
@@ -920,8 +990,18 @@ mod tests {
             ),
             (5, 1, 1, 1, 1, 1, 3)
         );
+        // Phase F §10: Four coverage per class (all five missed here).
+        assert_eq!(
+            (c.four_full_before, c.four_missed, c.full_before, c.missed),
+            (0, 5, 0, 0)
+        );
+        assert_eq!(
+            (c.later_sightings, c.later_lag_p50_us, c.later_lag_max_us),
+            (2, Some(1_000), Some(3_000))
+        );
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 1);
+        assert_eq!(record.u64(cs::FOUR_MISSED).unwrap(), 5);
         assert!(c.summary().contains("derived=1 no_derivation=1 mismatch=1"));
         fs::remove_dir_all(&dir).unwrap();
     }

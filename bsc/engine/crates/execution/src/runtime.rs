@@ -31,7 +31,7 @@ use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
-    CaptureStatus, EXIT_PAYLOAD, JournalSetup, RuntimeJournal, SourceEvent,
+    CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal, SourceEvent,
     canonical_launch_payload, first_sighting_payload, later_sighting_payload,
     orphaned_launch_payload, paper_handoff_payload, pending_launch_payload, reorg_payload,
     resync_payload, source_event_payload, window_payload,
@@ -105,6 +105,8 @@ pub struct RuntimeConfig {
     /// The largest launch calldata the venue decoder accepts, at ingress
     /// and for the follower's C1 scope.
     pub max_launch_calldata: usize,
+    /// SHA-256 of the configuration text this was parsed from.
+    pub source_sha256: [u8; 32],
 }
 
 /// The canonical follower's endpoint and bounds (`BSC_CANONICAL_*`).
@@ -327,6 +329,7 @@ impl RuntimeConfig {
             stop_timeout_ms: take("BSC_RUNTIME_STOP_TIMEOUT_MS", 1_000, 300_000)?,
             exec,
             max_launch_calldata,
+            source_sha256: darkbot_bsc_record::sha256(text.as_bytes()),
         };
         config
             .wss
@@ -799,6 +802,16 @@ pub fn journal_max_payload(config: &RuntimeConfig) -> usize {
     config.wss.max_message_bytes + 64
 }
 
+/// The host a run's latencies are of: OS, architecture, logical CPUs.
+pub fn host_label() -> String {
+    format!(
+        "{} {} cpus={}",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::thread::available_parallelism().map_or(0, |n| n.get())
+    )
+}
+
 /// The bounds of a capacity preflight of the runtime's capture.
 pub fn preflight_setup(config: &RuntimeConfig) -> crate::capture_preflight::PreflightSetup {
     crate::capture_preflight::PreflightSetup {
@@ -957,6 +970,11 @@ pub fn run(
         u64::from(CLOCK_ID_MONOTONIC),
         journal_setup(config),
     )?;
+    journal.set_identity(RunIdentity {
+        host: host_label(),
+        build: format!("darkbot-bsc-execution {}", env!("CARGO_PKG_VERSION")),
+        config_sha256: config.source_sha256,
+    });
     let journal_rel: PathBuf = journal
         .path()
         .strip_prefix(rundir)
@@ -1611,6 +1629,8 @@ mod tests {
         four.sender = None;
         four.nonce = None;
         four.unverifiable = Some(crate::wss::RejectReason::HashMismatch);
+        // As the follower decides it: refused bytes are no decoded launch.
+        four.four_token = crate::chain_follower::FourToken::NotRecognized;
         c.event(10, CanonicalEvent::Launch(four), &mut journal);
         c.event(20, block(11), &mut journal);
         c.event(20, launch(11, 2, None, false), &mut journal);

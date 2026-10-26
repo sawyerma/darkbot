@@ -317,6 +317,15 @@ pub struct CaptureRun {
     pub complete: bool,
 }
 
+/// What wrote a run (Phase F contract §4): the host its latencies are of,
+/// the build and the SHA-256 of the runtime configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunIdentity {
+    pub host: String,
+    pub build: String,
+    pub config_sha256: [u8; 32],
+}
+
 /// The capture's storage health of this moment (runtime status).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CaptureStatus {
@@ -338,6 +347,7 @@ pub struct RuntimeJournal {
     metrics: Arc<StorageMetrics>,
     budget: Arc<MemoryBudget>,
     lost: u64,
+    identity: Option<RunIdentity>,
 }
 
 fn now_ms() -> u64 {
@@ -385,7 +395,13 @@ impl RuntimeJournal {
             metrics,
             budget,
             lost: 0,
+            identity: None,
         })
+    }
+
+    /// Names the host, build and configuration in the run manifest.
+    pub fn set_identity(&mut self, identity: RunIdentity) {
+        self.identity = Some(identity);
     }
 
     /// The run directory.
@@ -458,7 +474,7 @@ impl RuntimeJournal {
             reasons.push(format!("{oversize} oversize records refused"));
         }
         let complete = reasons.is_empty();
-        let mut d = Draft::new(&cr::SCHEMA);
+        let mut d = Draft::new(&cr::V2);
         d.set(cr::RUN_ID, self.started_ms.to_string())
             .set(cr::CHAIN_ID, 56u64)
             .set(cr::PROVENANCE_TOOL, "bsc_runtime")
@@ -485,6 +501,11 @@ impl RuntimeJournal {
                 cr::NON_CLAIMS,
                 "LOCAL_CAPTURE: a runtime journal of this host; no Phase-F quality verdict",
             );
+        if let Some(id) = &self.identity {
+            d.set(cr::HOST, id.host.as_str())
+                .set(cr::BUILD, id.build.as_str())
+                .set(cr::CONFIG_SHA256, Value::B256(id.config_sha256));
+        }
         if let Some(last) = sealed.iter().rev().find_map(|s| s.manifest.last_sequence) {
             d.set(cr::LAST_SEQUENCE, last);
         }
@@ -580,13 +601,17 @@ mod tests {
 
     use super::*;
     use darkbot_bsc_journal::storage::run::RunReader;
-    use darkbot_bsc_record::decode;
 
     #[test]
     fn sightings_and_transitions_replay_in_order_with_their_payloads() {
         let dir = std::env::temp_dir().join(format!("bsc-runtime-journal-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let mut j = RuntimeJournal::open(&dir, 7, 1, JournalSetup::whole(64, 4096)).unwrap();
+        j.set_identity(RunIdentity {
+            host: "test-host".into(),
+            build: "test-build".into(),
+            config_sha256: [3; 32],
+        });
         let h = [5u8; 32];
         assert!(j.record(
             RecordKind::Runtime,
@@ -621,8 +646,15 @@ mod tests {
         later.extend_from_slice(&40u64.to_le_bytes());
         assert_eq!(got[2], (RecordKind::Runtime, 3, later));
         // The run manifest names the sealed segment by its exact hash.
-        let m = decode(&cr::SCHEMA, &fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
+        let m = cr::decode_run(&fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
         assert_eq!(m.text(cr::STATE).unwrap(), "COMPLETE");
+        assert_eq!(
+            (
+                m.text(cr::HOST).unwrap(),
+                m.b256(cr::CONFIG_SHA256).unwrap()
+            ),
+            ("test-host", [3; 32])
+        );
         let segments = m.nested_all(cr::SEGMENTS).unwrap();
         assert_eq!(
             segments[0].b256(cr::segment::SHA256).unwrap(),
@@ -726,7 +758,7 @@ mod tests {
         let run = j.finish().unwrap();
         assert!(!run.complete);
         // The run manifest says why the capture is not complete.
-        let m = decode(&cr::SCHEMA, &fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
+        let m = cr::decode_run(&fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
         assert_eq!(m.text(cr::STATE).unwrap(), "INCOMPLETE");
         assert_eq!(m.u64(cr::LOST_RECORDS).unwrap(), 1);
         assert_eq!(
