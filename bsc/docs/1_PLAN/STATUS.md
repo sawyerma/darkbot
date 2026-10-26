@@ -9,14 +9,14 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 0 | V2 abgelegt, V1 historisch, diese Tabelle | TECHNISCH FERTIG | dieser Commit | – | Paket 1 |
 | 1 | Gate A/B: BSC-005 T5, G0.8 UNRESOLVED-Rundweg, Schema-/Readiness-Regression | TECHNISCH FERTIG — EXTERNAL_BLOCKED: SIGN/V5/Grant/echter G0.7/G0.8 (Nutzerfreigabe) | `746fdf29`, `f91274bb`, `e9f88965`; Reviewer 25.10.: kein HIGH/CRITICAL, alle MEDIUM/LOW behoben | Readiness real: `BLOCKED` (kein V5 ohne SIGN) | – |
 | 2 | BSC-050 Vollinventur + Fixes | TECHNISCH FERTIG (Inventur + Gate-0/Gateway-Fixes); C1-Funde → Paket 3 | `0a10f0d5` (BSC-051/053), `e9f88965` (Uhr-Fixes) | Fehlerliste §8 | Paket 3 |
-| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | OFFEN (Gate-Review `ee32acb8`: FAIL — alle Funde behoben: G0.4 gegen Blockzeit/C1-Scope/Abdeckung/SIGTERM `402393a6`, C17-Ursache + reproduzierbare Builds `995a2a27`; C1.9/C1.9b/Gates mit den eingefrorenen Binaries neu `818525b1`; C1.10 FROZEN neu `e6177bba`) | `e6177bba` | zweites Phase-Gate-Review; BSC-025 + Mainnet-geth EXTERNAL_BLOCKED (≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | Phase-Gate-Review |
-| 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | nach Paket 3 |
+| 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | TECHNISCH FERTIG — EXTERNAL_BLOCKED: synchronisierter Mainnet-geth (BSC-023 Mainnet-Messung, BSC-025 Peers; ≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | `aba025e3`; Phase-Gate PASS (Review 4 Durchgänge, alle Funde behoben: `402393a6`, `995a2a27`, `da860a66`, `aba025e3`); C1.10 FROZEN `818525b1` (`e6177bba`) | – | Paket 4 |
+| 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | C2-Kern (Tx-Identität, Sender+Nonce, kanonisch/orphan/unsicher, Recovery) |
 | 5 | C3, D, G0.1-Four-Freeze, E | OFFEN | – | – | nach Paket 4 |
 | 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
 | 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
 | 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
 | 9 | Release-Kandidat | OFFEN | – | – | nach Paket 8 |
-| P | G0.4 Rohdaten (parallel) | OFFEN (Nenner + Zensus `a79afb0e`, Messdefinition korrigiert `402393a6`: vor der Blockzeit, C1-Scope, Abdeckung) | `402393a6` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
+| P | G0.4 Rohdaten (parallel) | OFFEN (Nenner + Zensus `a79afb0e`, Messdefinition final `aba025e3`: vor der Blockzeit, C1-Scope, Abdeckung, Tx-Prüfung) | `aba025e3` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
 
 ## Bindender neuer Umsetzungsstatus — 2026-10-25 (technische Offline-Freigabe, kein Geld)
 
