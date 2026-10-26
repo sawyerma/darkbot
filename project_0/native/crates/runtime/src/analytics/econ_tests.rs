@@ -4902,12 +4902,15 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
 }
 
 /// DEC-11: `AdmissionBuilder`'s plan as a JIT bundle — one prerequisite swap TX before the
-/// receivership TX, and the funding (`.0`, 50 base units) its buy spends held and an asset of
-/// the plan (as the builder's JIT plan).
-struct BundleBuilder(Pubkey);
+/// receivership TX, and the `funding` (50 base units) its buy spends held and an asset of the
+/// plan (as the builder's JIT plan). `unpriced`: a lamport amount the price cannot convert.
+struct BundleBuilder {
+    funding: Pubkey,
+    unpriced: Option<u64>,
+}
 impl crate::execution::pipeline::ReceivershipBuilder for BundleBuilder {
     fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
-        Some(n)
+        (self.unpriced != Some(n)).then_some(n)
     }
     fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
         test_table()
@@ -4929,8 +4932,8 @@ impl crate::execution::pipeline::ReceivershipBuilder for BundleBuilder {
                 accounts: vec![],
                 data: vec![1],
             }]];
-            p.inventory_holds = vec![(self.0, 50)];
-            p.assets = vec![self.0];
+            p.inventory_holds = vec![(self.funding, 50)];
+            p.assets = vec![self.funding];
         }
         Ok(plans)
     }
@@ -5019,8 +5022,9 @@ fn bundle_evaluate<S: SubmissionAdapter>(
     adapter: &S,
     safety: &mut darkbot_project0::safety::Safety,
     fe04: &mut crate::execution::one_shot::admission::Fe04Admission,
-    (payer, target, mint): (&solana_sdk::signature::Keypair, Pubkey, Pubkey),
+    (payer, target): (&solana_sdk::signature::Keypair, Pubkey),
     tip: crate::execution::bundle_path::BundleTip,
+    builder: &BundleBuilder,
 ) -> OpportunityRecord {
     use crate::execution::pipeline::{Mode, Pipeline};
     use darkbot_project0::{execution::Freshness, planner::Allowlist};
@@ -5049,7 +5053,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         mode: Mode::Live,
         clock: &clock,
         health: &TestHealth,
-        builder: &BundleBuilder(mint),
+        builder,
         submitter: adapter,
         safety,
         blockhash: &bh,
@@ -5134,37 +5138,50 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         fe04
     };
 
-    // The production submitter: RPC fee quotes from a loopback, the Jito endpoints counted.
-    let (rpc_url, rpc_calls) = endpoint(Arc::new(|method, _| match method {
-        "getFeeForMessage" => Reply::Result(serde_json::json!({
-            "context": {"slot": 10}, "value": 5_000
-        })),
-        _ => Reply::Error,
-    }));
+    // The production submitter: RPC fee quotes from a loopback (the `fail`-th quote, counted
+    // from 0, unavailable), the Jito endpoints counted.
     let (jito_url, jito_calls) = endpoint(Arc::new(|_, _| Reply::Error));
-    let mut config = darkbot_solana::runtime_config::RuntimeConfig::default();
-    (config.limits.rpc_rps, config.limits.rpc_burst) = (1_000, 1_000);
-    let budget = Arc::new(darkbot_solana::provider::Budget::configured(&config));
-    let mut owner = OwnerSubmitter::new(
-        darkbot_solana::submit::rpc::RpcSubmitter::with_budget(rpc_url, true, budget).unwrap(),
-    );
-    let bundle_path = BundleConfig {
-        block_engine_url: jito_url.clone(),
-        bundle_sim_rpc_url: Some(jito_url),
-        tip,
+    let production = |fail: Option<u64>| {
+        let quotes = Arc::new(AtomicU64::new(0));
+        let (rpc_url, rpc_calls) = endpoint(Arc::new(move |method, _| match method {
+            "getFeeForMessage" if Some(quotes.fetch_add(1, Ordering::SeqCst)) == fail => {
+                Reply::Error
+            }
+            "getFeeForMessage" => Reply::Result(serde_json::json!({
+                "context": {"slot": 10}, "value": 5_000
+            })),
+            _ => Reply::Error,
+        }));
+        let mut config = darkbot_solana::runtime_config::RuntimeConfig::default();
+        (config.limits.rpc_rps, config.limits.rpc_burst) = (1_000, 1_000);
+        let budget = Arc::new(darkbot_solana::provider::Budget::configured(&config));
+        let mut owner = OwnerSubmitter::new(
+            darkbot_solana::submit::rpc::RpcSubmitter::with_budget(rpc_url, true, budget).unwrap(),
+        );
+        let bundle_path = BundleConfig {
+            block_engine_url: jito_url.clone(),
+            bundle_sim_rpc_url: Some(jito_url.clone()),
+            tip,
+        };
+        owner
+            .set_bundle_path(Some(&bundle_path), Duration::from_secs(1))
+            .unwrap();
+        (ObserveOnly::new(owner), rpc_calls)
     };
-    owner
-        .set_bundle_path(Some(&bundle_path), Duration::from_secs(1))
-        .unwrap();
-    let production = ObserveOnly::new(owner);
+    let priced = BundleBuilder {
+        funding: mint,
+        unpriced: None,
+    };
+    let (production_submitter, rpc_calls) = production(None);
     let mut safety = open_safety();
     let mut fe04 = journal("unqualified");
     let r = bundle_evaluate(
-        &production,
+        &production_submitter,
         &mut safety,
         &mut fe04,
-        (&payer, target, mint),
+        (&payer, target),
         tip,
+        &priced,
     );
     let costs = &r.candidate_costs[0];
     assert_eq!(costs.path, "JitoBundle");
@@ -5186,6 +5203,31 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
     assert!(jito_calls.lock().unwrap().is_empty(), "no Jito call");
     assert!(fe04.journal.active_hold().is_none(), "nothing is reserved");
     assert_eq!(safety.capital_in_use(), 0);
+    // An unknown part leaves the bundle's cost unknown, never 0: the tip TX's quote unavailable,
+    // or a tip the price cannot convert.
+    for (fail, unpriced) in [(Some(2), None), (None, Some(tip.lamports))] {
+        let (submitter, _) = production(fail);
+        let builder = BundleBuilder {
+            funding: mint,
+            unpriced,
+        };
+        let mut fe04 = journal("unknown");
+        let r = bundle_evaluate(
+            &submitter,
+            &mut open_safety(),
+            &mut fe04,
+            (&payer, target),
+            tip,
+            &builder,
+        );
+        let costs = &r.candidate_costs[0];
+        assert_eq!(
+            (costs.transaction_fee_usd_micro, costs.economics_known),
+            (None, false),
+            "{fail:?} {unpriced:?}"
+        );
+    }
+    assert!(jito_calls.lock().unwrap().is_empty(), "no Jito call");
 
     // A qualified bundle simulation: the admission binds and holds the whole bundle.
     let qualified = QualifiedBundleSim {
@@ -5198,8 +5240,9 @@ fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
         &qualified,
         &mut safety,
         &mut fe04,
-        (&payer, target, mint),
+        (&payer, target),
         tip,
+        &priced,
     );
     assert_eq!(r.decision, Decision::Submitted, "{:?}", r.reason_text());
     assert_eq!(

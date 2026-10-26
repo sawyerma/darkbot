@@ -2657,6 +2657,18 @@ mod tests {
         assert!(j
             .reserve_payload(a.clone(), i.clone(), &c, &reversed, None)
             .is_err());
+        // DEC-11: a bundle token is reserved only with current bundle evidence.
+        let stale = Current {
+            bundle_simulated: false,
+            ..c.clone()
+        };
+        let refused = j
+            .reserve_payload(a.clone(), i.clone(), &stale, &original, None)
+            .unwrap_err();
+        assert!(
+            refused.contains("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"),
+            "{refused}"
+        );
         j.reserve_payload(a, i, &c, &original, None).unwrap();
         assert!(j.submit_payload(&reversed, &c, 1, test_deadline()).is_err());
         assert_eq!(adapter.calls.get(), 0);

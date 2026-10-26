@@ -90,6 +90,9 @@ jobs:
       - name: gate.sh
         env:
           P6_GATE_STEPS: ${{ matrix.steps }}
+          # P0-010: full debug info of every runner binary exhausted the runner disk (the linker
+          # died with SIGBUS at < 100 MB free); line tables keep file:line in every backtrace.
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
         run: |
           logs="$RUNNER_TEMP/p6-gate"
           bash project_0/scripts/gate.sh "$logs" | tee "$RUNNER_TEMP/gate.out"

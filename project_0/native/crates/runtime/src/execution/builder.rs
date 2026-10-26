@@ -2584,6 +2584,38 @@ pub mod p0 {
             );
         }
 
+        /// DEC-11: a JIT buy funded from a bank of its own mint (neither the asset nor the
+        /// liability) names that mint as an asset of the plan — Safety's asset allowlist and
+        /// FE-04's expected wallet deltas cover what the buy spends.
+        #[test]
+        fn dec11_jit_funding_of_its_own_mint_is_an_asset_of_the_plan() {
+            let mut f = PlansFixture::new();
+            f.liability_inventory = 200;
+            let mut src = f.state(Pubkey::default(), true);
+            let (funding_bank, funding_mint) = (Pubkey::new_unique(), Pubkey::new_unique());
+            let (owner, data) = src.0[&f.banks[0].0].clone();
+            let mut bank: Bank =
+                bytemuck::pod_read_unaligned(&data[8..8 + std::mem::size_of::<Bank>()]);
+            bank.mint = funding_mint;
+            let bank = [&data[..8], bytemuck::bytes_of(&bank)].concat();
+            src.0.insert(funding_bank, (owner, bank));
+            src.0.insert(funding_mint, (f.token_program, vec![0; 82]));
+            let s = &mut f.sizing.0;
+            (s.liability_needed_value, s.liability_inventory_value) = (500, 200);
+            (s.funding_bank, s.funding_available_value) = (Some(funding_bank), 10_000);
+            let price = |l: u64| Some(l);
+            let plans = f.plans_with(&src, &price, &ProportionalRoutes, false, None, None);
+            let jit = plans
+                .iter()
+                .find(|p| p.input.funding == FundingClass::JitShortfall)
+                .expect("a JIT plan");
+            assert!(jit
+                .inventory_holds
+                .iter()
+                .any(|(mint, _)| *mint == funding_mint));
+            assert_eq!(jit.assets, vec![f.banks[0].1, f.banks[1].1, funding_mint]);
+        }
+
         /// P5-JIT-01: the production sizing names the configured funding bank and values its free
         /// inventory at its conservative cost; no bank or the liability's own bank funds no JIT.
         #[test]
