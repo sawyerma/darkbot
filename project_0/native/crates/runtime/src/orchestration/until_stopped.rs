@@ -725,6 +725,173 @@ pub fn newest_evidence(
     best.map(|(_, id, e)| (id, e))
 }
 
+/// The verdict recorded for a window a crash interrupted (the run resumed after it).
+pub const CRASH_RECOVERED: &str = "UNTIL_STOPPED_CRASH_RECOVERED";
+/// The journal of an unbounded run's windows, in its run directory.
+pub const WINDOWS_JOURNAL: &str = "windows.p0j";
+
+/// DEC-16: the rolling windows of an unbounded run, the one mode-neutral driver every mode's
+/// runtime calls: `due` tells a window's end; at it the runtime rotates its segmented journals
+/// (`SegmentedWriter::rotate_now`) and ends its provider window (`Budget::roll_window`), and
+/// `close` re-checks the gates ([`check_window`]), journals the verdict and opens the next
+/// window. A verdict other than `CONTINUE` is the run's safe HALT. After a crash `resume`
+/// continues the windows journal by its SK-07 recovery and records the interrupted window.
+pub struct RollingWindows {
+    binding: Binding,
+    journal: segments::SegmentedWriter,
+    window: u64,
+    started_unix_s: u64,
+    bytes_at_start: u64,
+}
+
+impl RollingWindows {
+    /// Opens the first window of a new run at `now` (`bytes` its journals' size so far).
+    pub fn start(run_dir: &Path, binding: Binding, now: u64, bytes: u64) -> std::io::Result<Self> {
+        Ok(Self {
+            binding,
+            journal: segments::SegmentedWriter::create(&run_dir.join(WINDOWS_JOURNAL), 0)?,
+            window: 1,
+            started_unix_s: now,
+            bytes_at_start: bytes,
+        })
+    }
+
+    /// Continues a run after a crash: the windows journal continues by its recovery link, the
+    /// window the crash interrupted is recorded (`CRASH_RECOVERED`, from the last recorded end
+    /// to `now`) and the next window opens.
+    pub fn resume(run_dir: &Path, binding: Binding, now: u64, bytes: u64) -> std::io::Result<Self> {
+        let first = run_dir.join(WINDOWS_JOURNAL);
+        let mut last: Option<WindowCheck> = None;
+        let mut r = segments::ChainReader::open(&first)?;
+        while let Some(f) = r.next_frame()? {
+            if f.kind == kind::UNTIL_STOPPED_WINDOW {
+                last = Some(f.typed()?);
+            }
+        }
+        let (mut journal, how) = segments::SegmentedWriter::recover(&first, 0)?;
+        let window = last.as_ref().map_or(1, |w| w.window + 1);
+        let started = last.as_ref().map_or(now, |w| w.ended_unix_s);
+        let interrupted = WindowCheck {
+            window,
+            started_unix_s: started,
+            ended_unix_s: now,
+            bytes_written: 0,
+            free_bytes: None,
+            runway_need_bytes: 0,
+            memory_pressure: None,
+            provider: darkbot_solana::provider::WindowUsage {
+                requests: 0,
+                bytes: 0,
+            },
+            evidence_id: None,
+            evidence_valid_until_unix_s: None,
+            sealed: None,
+            verdict: CRASH_RECOVERED.into(),
+            detail: format!("{how:?}"),
+        };
+        journal.append_typed(Self::provenance(window), &interrupted)?;
+        journal.sync()?;
+        Ok(Self {
+            binding,
+            journal,
+            window: window + 1,
+            started_unix_s: now,
+            bytes_at_start: bytes,
+        })
+    }
+
+    fn provenance(window: u64) -> Provenance {
+        Provenance {
+            source: journal::source::UNTIL_STOPPED,
+            source_seq: window,
+            ..Default::default()
+        }
+    }
+
+    /// The window now open.
+    pub fn window(&self) -> u64 {
+        self.window
+    }
+
+    /// Whether the open window ended at `now`.
+    pub fn due(&self, now: u64) -> bool {
+        now >= self
+            .started_unix_s
+            .saturating_add(self.binding.checkpoint_seconds)
+    }
+
+    /// Ends the open window at `now`: re-checks its gates, journals the verdict (durably) and
+    /// opens the next window. `bytes` is the run journals' size now.
+    #[allow(clippy::too_many_arguments)]
+    pub fn close(
+        &mut self,
+        config: &darkbot_solana::runtime_config::RuntimeConfig,
+        capture_source: &str,
+        run_volume: &Path,
+        now: u64,
+        bytes: u64,
+        provider: darkbot_solana::provider::WindowUsage,
+        evidence: Option<(String, provider_evidence::ProviderEvidence)>,
+        sealed: Option<(&Path, [u8; 32])>,
+    ) -> std::io::Result<WindowCheck> {
+        let environment = preflight::environment(run_volume);
+        self.close_measured(
+            config,
+            capture_source,
+            run_volume,
+            environment,
+            (now, bytes),
+            provider,
+            evidence,
+            sealed,
+        )
+    }
+
+    /// `close` with the host facts measured by the caller.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn close_measured(
+        &mut self,
+        config: &darkbot_solana::runtime_config::RuntimeConfig,
+        capture_source: &str,
+        run_volume: &Path,
+        environment: preflight::Environment,
+        (now, bytes): (u64, u64),
+        provider: darkbot_solana::provider::WindowUsage,
+        evidence: Option<(String, provider_evidence::ProviderEvidence)>,
+        sealed: Option<(&Path, [u8; 32])>,
+    ) -> std::io::Result<WindowCheck> {
+        let check = check_window(
+            config,
+            &self.binding,
+            capture_source,
+            WindowInputs {
+                window: self.window,
+                started_unix_s: self.started_unix_s,
+                ended_unix_s: now,
+                bytes_written: bytes.saturating_sub(self.bytes_at_start),
+                run_volume,
+                environment,
+                provider,
+                evidence,
+                sealed,
+            },
+        );
+        self.journal
+            .append_typed(Self::provenance(self.window), &check)?;
+        self.journal.sync()?;
+        self.window += 1;
+        self.started_unix_s = now;
+        self.bytes_at_start = bytes;
+        Ok(check)
+    }
+
+    /// Seals the windows journal at the run's end (`complete`: it ended by its operator stop,
+    /// not by a HALT).
+    pub fn finish(mut self, complete: bool) -> std::io::Result<()> {
+        self.journal.seal(complete).map(|_| ())
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1217,6 +1384,96 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(newest_evidence(&d, &c, 5_000).unwrap().0, older);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// DEC-16: the rolling windows of an unbounded run: due at their end, each verdict journaled
+    /// durably (CONTINUE or a HALT code), and after a crash the run resumes — the windows journal
+    /// continues by its SK-07 recovery and the interrupted window is recorded.
+    #[test]
+    fn dec16_rolling_windows_journal_every_verdict_and_resume_after_a_crash() {
+        let d = temp("windows");
+        let c = darkbot_solana::runtime_config::RuntimeConfig {
+            rpc_endpoints: vec!["https://rpc.invalid".into()],
+            ..Default::default()
+        };
+        let b = binding(60, 3_600);
+        let env = preflight::Environment {
+            free_disk_bytes: Some(u64::MAX / 4),
+            memory_pressure: Some(1),
+            ..Default::default()
+        };
+        let ev = || Some(("0123456789abcdef".to_string(), evidence_for(&c, 1_000.0)));
+        let usage = |requests| darkbot_solana::provider::WindowUsage { requests, bytes: 0 };
+        let mut w = RollingWindows::start(&d, b.clone(), 1_000, 0).unwrap();
+        assert!(!w.due(1_059) && w.due(1_060));
+        let first = w
+            .close_measured(
+                &c,
+                "logs",
+                &d,
+                env.clone(),
+                (1_060, 6_000),
+                usage(1),
+                ev(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            (first.window, first.verdict.as_str(), first.bytes_written),
+            (1, CONTINUE, 6_000)
+        );
+        let halted = w
+            .close_measured(
+                &c,
+                "logs",
+                &d,
+                env.clone(),
+                (1_120, 6_000),
+                usage(c.limits.max_requests),
+                ev(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(halted.verdict, "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED");
+        drop(w); // crash: the windows journal is never sealed
+        let mut w = RollingWindows::resume(&d, b.clone(), 1_300, 6_000).unwrap();
+        assert_eq!(w.window(), 4);
+        let after = w
+            .close_measured(&c, "logs", &d, env, (1_360, 9_000), usage(1), ev(), None)
+            .unwrap();
+        assert_eq!(
+            (after.window, after.verdict.as_str(), after.bytes_written),
+            (4, CONTINUE, 3_000)
+        );
+        w.finish(true).unwrap();
+        let journal = d.join(WINDOWS_JOURNAL);
+        let mut r = segments::ChainReader::open(&journal).unwrap();
+        let mut seen = Vec::new();
+        while let Some(f) = r.next_frame().unwrap() {
+            if f.kind == kind::UNTIL_STOPPED_WINDOW {
+                let w: WindowCheck = f.typed().unwrap();
+                seen.push((w.window, w.verdict, w.started_unix_s, w.ended_unix_s));
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                (1, CONTINUE.to_string(), 1_000, 1_060),
+                (
+                    2,
+                    "UNTIL_STOPPED_PROVIDER_BUDGET_EXHAUSTED".to_string(),
+                    1_060,
+                    1_120
+                ),
+                (3, CRASH_RECOVERED.to_string(), 1_120, 1_300),
+                (4, CONTINUE.to_string(), 1_300, 1_360),
+            ]
+        );
+        let s = segments::verify_chain(&journal).unwrap();
+        assert!(s.sealed && s.complete && s.recovered == 1, "{s:?}");
+        // A run that ended in order is never resumed.
+        assert!(RollingWindows::resume(&d, b, 1_400, 9_000).is_err());
         std::fs::remove_dir_all(d).unwrap();
     }
 }
