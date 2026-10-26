@@ -51,8 +51,8 @@ use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze as shared;
 use darkbot_bsc_record::schema::g06a::economics;
 use darkbot_bsc_record::{Draft, Record, Value, decode, sha256};
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    HoldingCap, NativeBuyInputs, NativeBuyQuote, QUALIFIED_MAINNET_INPUT_WEI,
-    WITNESSED_MAINNET_TERMS, quote_native_buy,
+    HoldingCap, NativeBuyInputs, NativeBuyQuote, PROFILE_DEX_SUPPLY_THRESHOLD,
+    QUALIFIED_MAINNET_INPUT_WEI, WITNESSED_MAINNET_TERMS, quote_native_buy,
 };
 use darkbot_bsc_trading::venues::flap::abi::{
     LaunchParamsV6, encode_new_token_v6, encode_swap_exact_input_native,
@@ -389,6 +389,7 @@ fn rust_quote(value: U256, buy_tax_bps: u16) -> Result<NativeBuyQuote, String> {
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
         caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
         holding_cap: HoldingCap::None,
+        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
     })
     .map_err(|e| format!("{e:?}"))
 }

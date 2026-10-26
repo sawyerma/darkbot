@@ -91,6 +91,10 @@ pub struct NativeBuyInputs {
     pub caller_fee_exempt: bool,
     /// The per-origin holding cap of the BUY's origin at this state.
     pub holding_cap: HoldingCap,
+    /// The circulating supply at which the token leaves the curve for its
+    /// DEX (`getTokenV8Safe.dexSupplyThresh`); a BUY reaching it migrates,
+    /// which the quote refuses.
+    pub dex_supply_threshold: U256,
 }
 
 /// The Portal's per-origin holding cap for one origin at a state (v5.27.0
@@ -152,6 +156,9 @@ pub fn quote_native_buy(inputs: &NativeBuyInputs) -> Result<NativeBuyQuote, Quot
     let output_amount = supply_after - inputs.circulating_before;
     if output_amount.is_zero() {
         return Err(QuoteError::ZeroOutput);
+    }
+    if supply_after >= inputs.dex_supply_threshold {
+        return Err(QuoteError::ReachesDexThreshold);
     }
     if let HoldingCap::Remaining(remaining) = inputs.holding_cap
         && output_amount > remaining
@@ -307,6 +314,11 @@ pub const WITNESSED_MAINNET_TERMS: VenueBuyTerms = VenueBuyTerms {
 /// cap is an input the quote enforces.
 pub const FRESH_LAUNCH_HOLDING_CAP: HoldingCap = HoldingCap::None;
 
+/// The DEX supply threshold of the qualified profile's tokens: 8e26 (80 %
+/// of the 1e9-token supply), what every sampled curve-20 version-6 token
+/// reports (`getTokenV8Safe.dexSupplyThresh`, g02_flap_parity).
+pub const PROFILE_DEX_SUPPLY_THRESHOLD: u128 = 800_000_000_000_000_000_000_000_000;
+
 /// The input amount covered by the independent EVM execution on mainnet
 /// state: 0.001 BNB, in wei.
 pub const QUALIFIED_MAINNET_INPUT_WEI: u64 = 1_000_000_000_000_000;
@@ -392,6 +404,7 @@ pub fn admit_native_buy(
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
         caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
         holding_cap: FRESH_LAUNCH_HOLDING_CAP,
+        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
     })?;
     let min_output_amount = min_output(quote.output_amount, policy.slippage_bps())?;
     Ok(AdmittedBuy::new(
@@ -441,6 +454,7 @@ mod parity_tests {
                         tax_on_bonding_curve_enabled: true,
                         caller_fee_exempt: false,
                         holding_cap: HoldingCap::None,
+                        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
                     })
                     .unwrap()
                     .output_amount;
@@ -464,6 +478,7 @@ mod parity_tests {
                             tax_on_bonding_curve_enabled: true,
                             caller_fee_exempt: false,
                             holding_cap: HoldingCap::Remaining(cap),
+                            dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
                         });
                         assert_eq!(refused, Err(QuoteError::HoldingCapExceeded), "{line}");
                         capped += 1;
@@ -538,6 +553,9 @@ mod parity_tests {
                     tax_on_bonding_curve_enabled: true,
                     caller_fee_exempt: false,
                     holding_cap,
+                    // Not recorded in v1/v2: the threshold every sampled
+                    // token reports (no sample comes near it).
+                    dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
                 })
                 .map(|q| q.output_amount),
                 "SELL" => quote_native_sell(&NativeSellInputs {
@@ -653,6 +671,7 @@ mod tests {
             tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
             caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
             holding_cap: HoldingCap::None,
+            dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
         }
     }
 
@@ -689,6 +708,27 @@ mod tests {
             min_output(quote.output_amount, 100),
             Ok(U256::from(174_898_315_381_323_502_112_040u128))
         );
+    }
+
+    /// A BUY whose supply after it reaches the DEX threshold is refused
+    /// (the token would migrate); one below it is quoted unchanged.
+    #[test]
+    fn a_buy_reaching_the_dex_threshold_is_refused() {
+        let free = quote_native_buy(&witnessed(1_000_000_000_000_000)).unwrap();
+        let at = |threshold: U256| {
+            let mut inputs = witnessed(1_000_000_000_000_000);
+            inputs.dex_supply_threshold = threshold;
+            quote_native_buy(&inputs).map(|q| q.output_amount)
+        };
+        assert_eq!(
+            at(free.supply_after + U256::from(1u8)),
+            Ok(free.output_amount)
+        );
+        assert_eq!(at(free.supply_after), Err(QuoteError::ReachesDexThreshold));
+        // Ten BNB into the fresh profile curve stays below its threshold.
+        let mut ten = witnessed(1_000_000_000_000_000);
+        ten.input_amount = U256::from(10_000_000_000_000_000_000u128);
+        assert!(quote_native_buy(&ten).is_ok());
     }
 
     /// A BUY above the origin's holding allowance is refused, never quoted

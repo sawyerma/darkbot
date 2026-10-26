@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 /// The model version: raised with every semantic change of a rule here.
-pub const MODEL_VERSION: &str = "bsc-economics-1";
+pub const MODEL_VERSION: &str = "bsc-economics-2";
 
 /// The chain every scope belongs to.
 pub const CHAIN_ID: u64 = 56;
@@ -58,21 +58,21 @@ pub const SCOPES: &[Scope] = &[
         surface: FLAP_V6,
         path: "BUY",
         support: Support::Priced,
-        rule: "native_curve20::quote_native_buy: combined fee floor(input*(protocol+tax)/1e4), tax the remainder; supply(reserve+net) with the ceil virtual reserve; the origin's holding allowance refuses a partial fill; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt)",
+        rule: "native_curve20::quote_native_buy: combined fee floor(input*(protocol+tax)/1e4), tax the remainder; supply(reserve+net) with the ceil virtual reserve; the origin's holding allowance refuses a partial fill and reaching dexSupplyThresh refuses a migration; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt) and executed TokenBought parity (fixtures/flap/executed_parity_g02.txt)",
     },
     Scope {
         venue: "FLAP",
         surface: FLAP_V6,
         path: "SELL",
         support: Support::Priced,
-        rule: "native_curve20::quote_native_sell: reserve ceil(k*1e18/(T+h-s))-r; protocol fee and tax each floored; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt)",
+        rule: "native_curve20::quote_native_sell: reserve ceil(k*1e18/(T+h-s))-r; protocol fee and tax each floored; Portal.quoteExactInput parity to the unit (fixtures/flap/quote_parity_g02*.txt) and executed TokenSold parity (fixtures/flap/executed_parity_g02.txt)",
     },
     Scope {
         venue: "FLAP",
         surface: FLAP_V6,
         path: "ADMITTED BUY",
         support: Support::Priced,
-        rule: "admit_native_buy: a classified newTokenV6 launch without extension, the state directly after it, witnessed venue terms, 0.001 BNB (G0.6a EVM execution), no holding cap, minOutput the slippage floor",
+        rule: "admit_native_buy: a classified newTokenV6 launch without extension, the state directly after it, witnessed venue terms, 0.001 BNB (G0.6a EVM execution), no holding cap, the profile's DEX threshold 8e26, minOutput the slippage floor",
     },
     Scope {
         venue: "FLAP",
@@ -121,7 +121,7 @@ pub const SCOPES: &[Scope] = &[
         surface: "Portal v5.27.0; any token",
         path: "MIGRATION, POST-DEX EXIT",
         support: Support::Unsupported,
-        rule: "graduation and the DEX venue after it are not modeled; a position that may graduate has no exit cost",
+        rule: "graduation and the DEX venue after it are not modeled: a BUY reaching dexSupplyThresh is refused, and a position whose token graduates has no exit cost",
     },
     Scope {
         venue: "FOUR",
@@ -165,6 +165,10 @@ pub const POLICIES: &[(&str, &str)] = &[
         "a BUY above the origin's allowance is refused, never quoted as the partial fill",
     ),
     (
+        "migration",
+        "a BUY whose supply after it reaches the token's dexSupplyThresh is refused",
+    ),
+    (
         "gas_evidence",
         "receipts only; no typical-gas constant; a class without evidence fails closed",
     ),
@@ -187,6 +191,7 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/economics/snapshot.rs",
     "bsc/engine/crates/trading/src/venues/flap/profile.rs",
     "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
+    "bsc/engine/crates/trading/fixtures/flap/executed_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v2.txt",
 ];
@@ -254,7 +259,7 @@ mod tests {
     fn the_manifest_binds_every_file() {
         let files: Vec<(&str, [u8; 32])> = BOUND_FILES.iter().map(|p| (*p, [0u8; 32])).collect();
         let a = manifest(&files);
-        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-1\n"));
+        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-2\n"));
         assert_eq!(a.matches("\nfile ").count(), BOUND_FILES.len());
         let mut other = files.clone();
         other[3].1[0] = 1;

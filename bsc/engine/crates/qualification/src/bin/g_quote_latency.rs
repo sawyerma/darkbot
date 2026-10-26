@@ -19,7 +19,8 @@ use darkbot_bsc_record::schema::bsc_economics::quote_latency as ql;
 use darkbot_bsc_record::{Draft, Value};
 use darkbot_bsc_trading::economics::flap::native_curve20::{
     CURVE_ID_RH_BNB, FRESH_LAUNCH_HOLDING_CAP, HoldingCap, NativeBuyInputs, NativeSellInputs,
-    QUALIFIED_MAINNET_INPUT_WEI, WITNESSED_MAINNET_TERMS, quote_native_buy, quote_native_sell,
+    PROFILE_DEX_SUPPLY_THRESHOLD, QUALIFIED_MAINNET_INPUT_WEI, WITNESSED_MAINNET_TERMS,
+    quote_native_buy, quote_native_sell,
 };
 use darkbot_bsc_trading::economics::slippage::min_output;
 use std::hint::black_box;
@@ -88,6 +89,9 @@ fn run() -> Result<(), String> {
                 tax_on_bonding_curve_enabled: true,
                 caller_fee_exempt: false,
                 holding_cap: HoldingCap::None,
+                // Not recorded in the v2 set: the threshold every sampled
+                // token reports.
+                dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
             }),
             "SELL" => sells.push(NativeSellInputs {
                 curve_id: CURVE_ID_RH_BNB,
@@ -115,6 +119,7 @@ fn run() -> Result<(), String> {
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
         caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
         holding_cap: FRESH_LAUNCH_HOLDING_CAP,
+        dex_supply_threshold: U256::from(PROFILE_DEX_SUPPLY_THRESHOLD),
     };
     let measure = |f: &mut dyn FnMut(usize)| -> Vec<u64> {
         for i in 0..warmup {

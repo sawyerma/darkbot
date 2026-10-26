@@ -252,17 +252,18 @@ fn run() -> Result<(), String> {
             "SUPPORTED"
         };
         let token_facts = format!(
-            "{} {} {} {selector} {launch_cap} {launch_nft} {} {scope}",
+            "{} {} {} {selector} {launch_cap} {launch_nft} {} {} {scope}",
             cap.bps,
             quota.remaining,
             alloy_primitives::hex::encode(nft),
             s.tokenVersion,
+            s.dexSupplyThresh,
         );
         let tax = |v: U256| u16::try_from(v).map_err(|_| format!("{token}: tax {v}"));
         let (buy_tax, sell_tax) = (tax(s.buyTaxRate)?, tax(s.sellTaxRate)?);
         println!(
-            "token {token} pin {} reserve {} supply {} buyTax {buy_tax} sellTax {sell_tax} version {} cap {token_facts}",
-            pin.number, s.reserve, s.circulatingSupply, s.tokenVersion
+            "token {token} pin {} reserve {} supply {} buyTax {buy_tax} sellTax {sell_tax} version {} dexSupplyThresh {} cap {token_facts}",
+            pin.number, s.reserve, s.circulatingSupply, s.tokenVersion, s.dexSupplyThresh
         );
         let quote =
             |input: Address, output: Address, amount: U256| -> Result<Option<U256>, String> {
@@ -293,6 +294,7 @@ fn run() -> Result<(), String> {
                 tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
                 caller_fee_exempt: false,
                 holding_cap,
+                dex_supply_threshold: s.dexSupplyThresh,
             })
             .map(|q| q.output_amount);
             // A BUY above the allowance fills only up to it: the local quote
@@ -343,7 +345,7 @@ fn run() -> Result<(), String> {
              # (curve-20 native-quote tokens on the bonding curve; bsc-dataseed, read-only; g02_flap_parity).\n\
              # maxBuyPerOrigin, buyQuotaOf(origin 0x0) and nftGate at the same pin; the launch selector and the cap / NFT gate set in the launch receipt;\n\
              # the token version and whether the production quote claims the token (SUPPORTED: version 6 without NFT gate).\n\
-             # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT> <cap-bps> <origin-allowance> <nft-gate> <launch-selector> <launch-cap-bps|NONE|UNKNOWN> <launch-nft|NONE|UNKNOWN> <token-version> <SUPPORTED|UNSUPPORTED_VERSION|UNSUPPORTED_NFT_GATE>\n{}\n",
+             # <block> <block-hash> <token> <reserve-wei> <circulating> <buy-tax-bps> <sell-tax-bps> <BUY|SELL> <input> <output|REVERT> <cap-bps> <origin-allowance> <nft-gate> <launch-selector> <launch-cap-bps|NONE|UNKNOWN> <launch-nft|NONE|UNKNOWN> <token-version> <dex-supply-threshold> <SUPPORTED|UNSUPPORTED_VERSION|UNSUPPORTED_NFT_GATE>\n{}\n",
             alloy_primitives::hex::encode(portal),
             lines.join("\n")
         );
