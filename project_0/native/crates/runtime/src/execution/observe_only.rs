@@ -50,11 +50,21 @@ impl<S: SubmissionAdapter> SubmissionAdapter for ObserveOnly<S> {
     ) -> SimResult {
         self.inner.simulate_bundle(txs, deadline)
     }
-    fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit(
+        &self,
+        _: &VersionedTransaction,
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         self.attempts.fetch_add(1, Ordering::Relaxed);
         Err(SubmitError::Rejected("C0-E1 submission prohibited".into()))
     }
-    fn submit_bundle(&self, _: &[VersionedTransaction], _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit_bundle(
+        &self,
+        _: &[VersionedTransaction],
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         self.attempts.fetch_add(1, Ordering::Relaxed);
         Err(SubmitError::Rejected(
             "C0-E1 bundle submission prohibited".into(),

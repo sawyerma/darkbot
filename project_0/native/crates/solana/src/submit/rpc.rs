@@ -68,8 +68,9 @@ fn submission_error(e: &solana_client::client_error::ClientError) -> SubmitError
 
 pub struct RpcSubmitter {
     rpc: RpcClient,
-    /// V2-05: `sendTransaction` in its own pacing slot (`Workload::Send`) of the same budget.
-    send: RpcClient,
+    /// V2-05: `sendTransaction` in its own pacing slot (`Workload::Send`) of the same budget;
+    /// DEC-12: deadline-bound (one attempt, never retried).
+    send: crate::provider::DeadlineRpc,
     /// N2: the deadline-bound transport of candidate fee quotes and simulations; only adapters of
     /// the candidate path have one (`for_candidates`), others answer those calls `Unavailable`
     /// without a network call.
@@ -182,7 +183,11 @@ impl RpcSubmitter {
         RpcSubmitter {
             rpc: client(crate::provider::Workload::Simulation),
             // V2-05: the send in its own pacing slot of the adapter's budget.
-            send: client(crate::provider::Workload::Send),
+            send: crate::provider::DeadlineRpc::over(
+                url.clone(),
+                crate::provider::Workload::Send,
+                budget.clone(),
+            ),
             candidate,
             skip_preflight,
             max_retries: Some(0),
@@ -345,7 +350,7 @@ impl SubmissionAdapter for RpcSubmitter {
             serde_json::from_value(sent.map_err(fee_error)?)
                 .map_err(|_| super::FeeQuoteError::Transport("RPC_FEE_DECODE"))?;
         Ok(super::MessageFeeQuote {
-            message_hash: tx.message.hash().to_string(),
+            message_hash: tx.message.hash(),
             context_slot: response.context.slot,
             lamports: response
                 .value
@@ -357,11 +362,16 @@ impl SubmissionAdapter for RpcSubmitter {
         SubmissionPath::Rpc
     }
 
+    /// DEC-12: the handoff is bounded by `deadline` — waiting for the send slot and the request
+    /// in flight included: past it nothing is sent (`Deadline { sent: false }`), a request in
+    /// flight ends at it (`Deadline { sent: true }`, ambiguous). One attempt, never retried.
     fn submit(
         &self,
         tx: &VersionedTransaction,
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
+        use base64::Engine;
         let cfg = RpcSendTransactionConfig {
             skip_preflight: self.skip_preflight,
             preflight_commitment: Some(CommitmentLevel::Confirmed),
@@ -369,15 +379,38 @@ impl SubmissionAdapter for RpcSubmitter {
             max_retries: self.max_retries,
             min_context_slot: None,
         };
-        let len = super::serialize_tx(tx)
-            .map(|b| b.len())
-            .map_err(|e| SubmitError::Serialize(e.to_string()))?;
+        let wire = super::serialize_tx(tx).map_err(|e| SubmitError::Serialize(e.to_string()))?;
+        let len = wire.len();
+        let params =
+            serde_json::json!([base64::engine::general_purpose::STANDARD.encode(&wire), cfg]);
         // [FIX-31] Eindeutige RPC-Ablehnung → Rejected (Kapital frei). Unklar nach dem Senden (Timeout,
         // Verbindungsabbruch, HTTP) → Transport (Ambiguous → Reconciliation). VERIFY Variantennamen 3.1.12.
-        let sig = self
+        // DEC-12: whether the request left is the transport's own count, never guessed.
+        let dispatched_before = self.send.request_count();
+        let sent = self
             .send
-            .send_transaction_with_config(tx, cfg)
-            .map_err(|e| submission_error(&e))?;
+            .call(
+                solana_client::rpc_request::RpcRequest::SendTransaction,
+                params,
+                deadline,
+            )
+            .map_err(|e| match e {
+                crate::provider::CallError::Deadline(_) => SubmitError::Deadline {
+                    sent: self.send.request_count() > dispatched_before,
+                },
+                crate::provider::CallError::Budget(code)
+                | crate::provider::CallError::Transport(code) => {
+                    SubmitError::Transport(code.into())
+                }
+                crate::provider::CallError::Remote(e) => submission_error(&e),
+            })?;
+        let sig = sent
+            .as_str()
+            .and_then(|s| s.parse::<Signature>().ok())
+            .ok_or_else(|| SubmitError::Transport("RPC_SEND_RESULT".into()))?;
+        if Some(&sig) != tx.signatures.first() {
+            return Err(SubmitError::Transport("RPC_SEND_SIGNATURE_MISMATCH".into()));
+        }
         Ok(SubmitAck {
             path: SubmissionPath::Rpc,
             signature: sig,
@@ -614,6 +647,63 @@ mod v2_05_pacing_tests {
         (url, handle)
     }
 
+    /// DEC-12: the RPC handoff is bounded by its deadline. With the budget's only slot held
+    /// past the deadline nothing is sent (`Deadline { sent: false }`, the node sees no request);
+    /// a node slower than the deadline ends the request at it (`Deadline { sent: true }`),
+    /// not at `rpc_timeout_ms` (before: the deadline was checked once, the send waited for its
+    /// slot and the node up to the client timeout).
+    #[test]
+    fn dec12_the_rpc_handoff_is_bounded_by_its_deadline() {
+        let mut config = crate::runtime_config::RuntimeConfig::default();
+        config.limits.rpc_concurrency = 1;
+        let budget = std::sync::Arc::new(crate::provider::Budget::configured(&config));
+        let payer = solana_sdk::signature::Keypair::new();
+        let message = solana_sdk::message::Message::new_with_blockhash(
+            &[],
+            Some(&solana_sdk::signer::Signer::pubkey(&payer)),
+            &solana_sdk::hash::Hash::new_unique(),
+        );
+        let tx = VersionedTransaction::try_new(
+            solana_sdk::message::VersionedMessage::Legacy(message),
+            &[&payer],
+        )
+        .unwrap();
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let adapter = RpcSubmitter::with_budget(url, true, budget.clone()).unwrap();
+        let held = budget
+            .acquire(
+                crate::provider::Workload::Simulation,
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+        let started = Instant::now();
+        let waited = adapter.submit(&tx, 0, started + Duration::from_millis(300));
+        assert!(
+            matches!(waited, Err(SubmitError::Deadline { sent: false })),
+            "{waited:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(1_500));
+        socket.set_nonblocking(true).unwrap();
+        assert!(socket.accept().is_err(), "nothing reached the node");
+        drop(held);
+        socket.set_nonblocking(false).unwrap();
+        let slow = std::thread::spawn(move || {
+            let (mut c, _) = socket.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = c.read(&mut request);
+            std::thread::sleep(Duration::from_secs(2));
+        });
+        let started = Instant::now();
+        let in_flight = adapter.submit(&tx, 0, started + Duration::from_millis(300));
+        assert!(
+            matches!(in_flight, Err(SubmitError::Deadline { sent: true })),
+            "{in_flight:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(1_500));
+        slow.join().unwrap();
+    }
+
     /// V2-05 (P8-02): fee quote, simulation and send each have their own pacing slot
     /// (`Workload::FeeQuote`/`fee_rps`, `Simulation`, `Send`/`send_rps`) inside the one global
     /// budget of the adapter. With the defaults (`rpc_rps` 5, `rpc_burst` 1 — unchanged,
@@ -648,7 +738,13 @@ mod v2_05_pacing_tests {
             adapter.simulate(&tx, deadline),
             SimResult::Ok { .. }
         ));
-        adapter.submit(&tx, 0).unwrap();
+        adapter
+            .submit(
+                &tx,
+                0,
+                std::time::Instant::now() + std::time::Duration::from_secs(60),
+            )
+            .unwrap();
         let seen = node.join().unwrap();
         let at = |m: &str| seen.iter().find(|(s, _)| s == m).map(|(_, t)| *t).unwrap();
         let (fee, sim, send) = (
@@ -790,7 +886,12 @@ mod v2_07_transport_tests {
         let b = RpcSubmitter::with_budget(node.url.clone(), true, budget.clone()).unwrap();
         assert!(a.fee_for_message(&tx, deadline).is_ok());
         assert!(matches!(a.simulate(&tx, deadline), SimResult::Ok { .. }));
-        a.submit(&tx, 0).unwrap();
+        a.submit(
+            &tx,
+            0,
+            std::time::Instant::now() + std::time::Duration::from_secs(60),
+        )
+        .unwrap();
         assert!(b.fee_for_message(&tx, deadline).is_ok());
         let rpc = crate::provider::rpc_client_with(
             node.url.clone(),

@@ -260,11 +260,16 @@ pub struct OpportunityRecord {
     pub bundle_id: Option<String>,
     pub submitted_tip: Option<crate::execution::pending::SubmittedTip>,
     pub intervals_ns: Vec<(String, Option<u64>)>,
-    pub reason: Option<String>,
+    /// DEC-12: typed at its source; its text is made by the writer (`Rejection::text`).
+    pub reason: Option<super::rejection::Rejection>,
     pub loss: Option<LossReason>,
 }
 
 impl OpportunityRecord {
+    /// DEC-12: the record text of the typed rejection (what the writer writes).
+    pub fn reason_text(&self) -> Option<String> {
+        self.reason.as_ref().map(|r| r.text().into_owned())
+    }
     pub fn with_timeline(mut self, t: &Timeline) -> Self {
         use darkbot_common::timing::Stage;
         self.timing = TimingEvidence {
@@ -286,6 +291,163 @@ impl OpportunityRecord {
 
 impl super::payload::Payload for OpportunityRecord {
     const KIND: u16 = super::journal::kind::OWNER_OPPORTUNITY;
+    /// DEC-12: 3 — the typed rejection and the native message hash.
+    const SCHEMA: u16 = 3;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == super::payload::TYPED).then(|| {
+            super::payload::decode_wire::<OpportunityRecordV2>(bytes).and_then(TryInto::try_into)
+        })
+    }
+}
+
+/// DEC-12: the record layout before DEC-12 (`OWNER_OPPORTUNITY` schema 2, embedded in
+/// `ECON_SHADOW_EVALUATION` ≤ 4, `ECON_CANONICAL` ≤ 4, `ECON_OPPORTUNITY` ≤ 3): the reason as
+/// its text, the quoted message hash as its base58 text. Read only; its text stays verbatim
+/// (`RejectionCode::Earlier`), the hash text must be a hash.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(crate) struct OpportunityRecordV2 {
+    #[serde(default)]
+    progress: PipelineProgress,
+    #[serde(default)]
+    market_plan_identity: Option<MarketPlanIdentity>,
+    timing: TimingEvidence,
+    rx_slot: Option<u64>,
+    detect_slot: Option<u64>,
+    selected_costs: Option<CandidateCostRecordV1>,
+    simulation_result: Option<String>,
+    account: String,
+    trigger: String,
+    decision: Decision,
+    net_profit: Option<i128>,
+    economics_known: bool,
+    premium_bps: Option<u64>,
+    t_profitable_unix_s: Option<u64>,
+    tx_version: Option<String>,
+    serialized_bytes: Option<usize>,
+    locked_accounts: Option<usize>,
+    path: Option<String>,
+    funding: Option<String>,
+    signature: Option<String>,
+    sign_slot: Option<u64>,
+    simulated_cu: Option<u64>,
+    candidate_costs: Vec<CandidateCostRecordV1>,
+    exposure: Option<u64>,
+    all_signatures: Vec<String>,
+    bundle_id: Option<String>,
+    submitted_tip: Option<crate::execution::pending::SubmittedTip>,
+    intervals_ns: Vec<(String, Option<u64>)>,
+    reason: Option<String>,
+    pub(crate) loss: Option<LossReason>,
+}
+
+/// DEC-12: `CandidateCostRecord` before DEC-12 (the message hash as text).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct CandidateCostRecordV1 {
+    required_working_capital_usd_micro: Option<u64>,
+    profit_per_capital_bps: Option<i128>,
+    gross_seized_realizable_usd_micro: Option<u64>,
+    repay_usd_micro: Option<u64>,
+    protocol_fees_usd_micro: Option<u64>,
+    flat_sol_fee_usd_micro: Option<u64>,
+    swap_fees_and_impact_usd_micro: Option<u64>,
+    jito_tip_usd_micro: Option<u64>,
+    funding: String,
+    path: String,
+    message_fee_quote: Option<MessageFeeQuoteV1>,
+    transaction_fee_usd_micro: Option<u64>,
+    failed_attempt_reserve_usd_micro: Option<u64>,
+    rent_and_token_usd_micro: Option<u64>,
+    economics_known: bool,
+    route_min_out_unknown: bool,
+    net_profit_usd_micro: Option<i128>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct MessageFeeQuoteV1 {
+    message_hash: String,
+    context_slot: u64,
+    lamports: u64,
+}
+
+impl TryFrom<CandidateCostRecordV1> for CandidateCostRecord {
+    type Error = std::io::Error;
+    fn try_from(v: CandidateCostRecordV1) -> std::io::Result<Self> {
+        let message_fee_quote = match v.message_fee_quote {
+            Some(q) => Some(darkbot_solana::submit::MessageFeeQuote {
+                message_hash: q
+                    .message_hash
+                    .parse()
+                    .map_err(|_| super::journal::coded("PAYLOAD_DECODE"))?,
+                context_slot: q.context_slot,
+                lamports: q.lamports,
+            }),
+            None => None,
+        };
+        Ok(Self {
+            required_working_capital_usd_micro: v.required_working_capital_usd_micro,
+            profit_per_capital_bps: v.profit_per_capital_bps,
+            gross_seized_realizable_usd_micro: v.gross_seized_realizable_usd_micro,
+            repay_usd_micro: v.repay_usd_micro,
+            protocol_fees_usd_micro: v.protocol_fees_usd_micro,
+            flat_sol_fee_usd_micro: v.flat_sol_fee_usd_micro,
+            swap_fees_and_impact_usd_micro: v.swap_fees_and_impact_usd_micro,
+            jito_tip_usd_micro: v.jito_tip_usd_micro,
+            funding: v.funding,
+            path: v.path,
+            message_fee_quote,
+            transaction_fee_usd_micro: v.transaction_fee_usd_micro,
+            failed_attempt_reserve_usd_micro: v.failed_attempt_reserve_usd_micro,
+            rent_and_token_usd_micro: v.rent_and_token_usd_micro,
+            economics_known: v.economics_known,
+            route_min_out_unknown: v.route_min_out_unknown,
+            net_profit_usd_micro: v.net_profit_usd_micro,
+        })
+    }
+}
+
+impl TryFrom<OpportunityRecordV2> for OpportunityRecord {
+    type Error = std::io::Error;
+    fn try_from(v: OpportunityRecordV2) -> std::io::Result<Self> {
+        Ok(Self {
+            progress: v.progress,
+            market_plan_identity: v.market_plan_identity,
+            timing: v.timing,
+            rx_slot: v.rx_slot,
+            detect_slot: v.detect_slot,
+            selected_costs: v.selected_costs.map(TryInto::try_into).transpose()?,
+            simulation_result: v.simulation_result,
+            account: v.account,
+            trigger: v.trigger,
+            decision: v.decision,
+            net_profit: v.net_profit,
+            economics_known: v.economics_known,
+            premium_bps: v.premium_bps,
+            t_profitable_unix_s: v.t_profitable_unix_s,
+            tx_version: v.tx_version,
+            serialized_bytes: v.serialized_bytes,
+            locked_accounts: v.locked_accounts,
+            path: v.path,
+            funding: v.funding,
+            signature: v.signature,
+            sign_slot: v.sign_slot,
+            simulated_cu: v.simulated_cu,
+            candidate_costs: v
+                .candidate_costs
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<std::io::Result<_>>()?,
+            exposure: v.exposure,
+            all_signatures: v.all_signatures,
+            bundle_id: v.bundle_id,
+            submitted_tip: v.submitted_tip,
+            intervals_ns: v.intervals_ns,
+            reason: v.reason.map(super::rejection::Rejection::earlier),
+            loss: v.loss,
+        })
+    }
 }
 
 /// F1: the simulation evidence of one failed candidate (journal only, never stderr/Display).
@@ -297,6 +459,122 @@ pub struct SimulationFailureRecord {
 }
 impl super::payload::Payload for SimulationFailureRecord {
     const KIND: u16 = super::journal::kind::OWNER_SIMULATION_FAILURE;
+}
+
+/// DEC-12 (tests): the record bytes of the writer before DEC-12 — the pinned schema-2 shadow
+/// evaluation (no previous offset, then the record).
+#[cfg(test)]
+pub(crate) fn earlier_writer_record_bytes() -> Vec<u8> {
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src/analytics/fixtures/shadow_evaluations_schema2.p0j");
+    let mut reader = super::journal::Reader::open(&fixture).unwrap();
+    let raw = loop {
+        let f = reader.next_frame().unwrap().unwrap();
+        if f.kind != super::journal::MANIFEST {
+            break f.payload;
+        }
+    };
+    assert_eq!(raw[0], 0, "no previous offset");
+    raw[1..].to_vec()
+}
+
+#[cfg(test)]
+mod dec12_tests {
+    use super::*;
+    use crate::analytics::journal::kind::OWNER_OPPORTUNITY;
+    use crate::analytics::payload;
+    use crate::analytics::rejection::RejectionCode;
+    use solana_sdk::hash::Hash;
+
+    /// DEC-12: records of the writer before DEC-12 stay readable. The mirror of the earlier
+    /// layout re-encodes the earlier writer's record byte for byte; its reason text stays
+    /// verbatim (`Earlier`); its quoted message hash text becomes the native hash and a text
+    /// that is no hash is refused; the current schema writes the hash as its 32 bytes and shows
+    /// the base58 text and the reason text in a human-readable view.
+    #[test]
+    fn dec12_records_of_the_earlier_writer_stay_readable() {
+        let bytes = earlier_writer_record_bytes();
+        let mut v2: OpportunityRecordV2 = payload::decode_wire(&bytes).unwrap();
+        assert_eq!(
+            payload::encode_wire(&v2).unwrap(),
+            bytes,
+            "mirror = earlier writer"
+        );
+        let rec: OpportunityRecord = payload::decode(OWNER_OPPORTUNITY, 2, &bytes).unwrap();
+        assert_eq!(
+            rec.reason
+                .as_ref()
+                .map(|r| (r.code(), r.text().into_owned())),
+            Some((RejectionCode::Earlier, "mint not in state".to_string()))
+        );
+        let hash = Hash::new_unique();
+        let quoted = |message_hash: String| CandidateCostRecordV1 {
+            required_working_capital_usd_micro: Some(1),
+            profit_per_capital_bps: None,
+            gross_seized_realizable_usd_micro: None,
+            repay_usd_micro: Some(2),
+            protocol_fees_usd_micro: Some(3),
+            flat_sol_fee_usd_micro: Some(4),
+            swap_fees_and_impact_usd_micro: Some(5),
+            jito_tip_usd_micro: Some(0),
+            funding: "ZERO_PREFUND_SAME_TX".into(),
+            path: "Rpc".into(),
+            message_fee_quote: Some(MessageFeeQuoteV1 {
+                message_hash,
+                context_slot: 7,
+                lamports: 5_000,
+            }),
+            transaction_fee_usd_micro: Some(6),
+            failed_attempt_reserve_usd_micro: None,
+            rent_and_token_usd_micro: Some(0),
+            economics_known: false,
+            route_min_out_unknown: true,
+            net_profit_usd_micro: None,
+        };
+        v2.candidate_costs = vec![quoted(hash.to_string())];
+        let earlier = payload::encode_wire(&v2).unwrap();
+        let rec: OpportunityRecord = payload::decode(OWNER_OPPORTUNITY, 2, &earlier).unwrap();
+        let quote = rec.candidate_costs[0].message_fee_quote.clone().unwrap();
+        assert_eq!((quote.message_hash, quote.context_slot), (hash, 7));
+        v2.candidate_costs = vec![quoted("not a hash".into())];
+        let forged = payload::encode_wire(&v2).unwrap();
+        assert!(payload::decode::<OpportunityRecord>(OWNER_OPPORTUNITY, 2, &forged).is_err());
+        // The current schema: 32 hash bytes, round trip, human-readable texts.
+        let current = payload::encode(&rec).unwrap();
+        let back: OpportunityRecord = payload::decode(OWNER_OPPORTUNITY, 3, &current).unwrap();
+        assert_eq!(
+            back.candidate_costs[0]
+                .message_fee_quote
+                .as_ref()
+                .unwrap()
+                .message_hash,
+            hash
+        );
+        assert_eq!(back.reason, rec.reason);
+        assert_eq!(
+            payload::encoded_len(&quote_only(hash)).unwrap(),
+            32 + 8 + 8,
+            "the hash is its 32 bytes"
+        );
+        let view = serde_json::to_value(&back).unwrap();
+        assert_eq!(
+            view["candidate_costs"][0]["message_fee_quote"]["message_hash"],
+            hash.to_string()
+        );
+        assert_eq!(view["reason"], "mint not in state");
+    }
+    fn quote_only(hash: Hash) -> QuoteOnly {
+        QuoteOnly(darkbot_solana::submit::MessageFeeQuote {
+            message_hash: hash,
+            context_slot: 7,
+            lamports: 5_000,
+        })
+    }
+    #[derive(Serialize, Deserialize)]
+    struct QuoteOnly(darkbot_solana::submit::MessageFeeQuote);
+    impl payload::Payload for QuoteOnly {
+        const KIND: u16 = OWNER_OPPORTUNITY;
+    }
 }
 
 #[cfg(test)]

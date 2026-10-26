@@ -43,6 +43,8 @@ pub struct JitoAdapter {
     bundle_sim_rpc: Option<String>,
     /// Für Single-TX über sendTransaction; Bundles über `submit_bundle`.
     path: SubmissionPath,
+    /// The client's configured request timeout (a handoff deadline only shortens it).
+    timeout: Duration,
 }
 
 impl JitoAdapter {
@@ -60,23 +62,43 @@ impl JitoAdapter {
             block_engine: block_engine_url.trim_end_matches('/').to_string(),
             bundle_sim_rpc: bundle_sim_rpc.map(|u| u.trim_end_matches('/').to_string()),
             path: SubmissionPath::JitoSingle,
+            timeout,
         })
     }
 
-    fn call(&self, route: &str, method: &str, params: Value) -> Result<Value, SubmitError> {
+    /// One block-engine call. DEC-12: with a `deadline` nothing starts after it and the request
+    /// (sending and reading the response) ends at it; a failure at the deadline is
+    /// `Deadline { sent: true }` (ambiguous), never a definitive refusal.
+    fn call(
+        &self,
+        route: &str,
+        method: &str,
+        params: Value,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Value, SubmitError> {
         let body = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
-        let resp = self
+        let mut request = self
             .http
             .post(format!("{}{}", self.block_engine, route))
-            .json(&body)
-            .send()
-            .map_err(|e| SubmitError::Transport(super::rpc::safe_http_error(&e).into()))?;
-        let resp = resp
-            .error_for_status()
-            .map_err(|e| SubmitError::Transport(super::rpc::safe_http_error(&e).into()))?;
-        let v: Value = resp
-            .json()
-            .map_err(|e| SubmitError::Transport(super::rpc::safe_http_error(&e).into()))?;
+            .json(&body);
+        if let Some(deadline) = deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(SubmitError::Deadline { sent: false });
+            }
+            // The client's configured timeout stays the upper bound.
+            request = request.timeout(remaining.min(self.timeout));
+        }
+        let transport = |e: &reqwest::Error| {
+            if deadline.is_some_and(|d| e.is_timeout() || std::time::Instant::now() >= d) {
+                SubmitError::Deadline { sent: true }
+            } else {
+                SubmitError::Transport(super::rpc::safe_http_error(e).into())
+            }
+        };
+        let resp = request.send().map_err(|e| transport(&e))?;
+        let resp = resp.error_for_status().map_err(|e| transport(&e))?;
+        let v: Value = resp.json().map_err(|e| transport(&e))?;
         if let Some(err) = v.get("error") {
             return Err(SubmitError::Rejected(super::rpc::safe_remote_error(err)));
         }
@@ -86,7 +108,7 @@ impl JitoAdapter {
     }
 
     pub fn tip_accounts(&self) -> Result<Vec<Pubkey>, SubmitError> {
-        let res = self.call("/api/v1/getTipAccounts", "getTipAccounts", json!([]))?;
+        let res = self.call("/api/v1/getTipAccounts", "getTipAccounts", json!([]), None)?;
         let arr = res
             .as_array()
             .ok_or_else(|| SubmitError::Transport("tip accounts not array".into()))?;
@@ -106,6 +128,7 @@ impl JitoAdapter {
         &self,
         txs: &[VersionedTransaction],
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
         if txs.is_empty() || txs.len() > 5 {
             return Err(SubmitError::Rejected(format!(
@@ -136,6 +159,7 @@ impl JitoAdapter {
             "/api/v1/bundles",
             "sendBundle",
             json!([encoded, {"encoding":"base64"}]),
+            Some(deadline),
         )?;
         let bundle_id = res.as_str().map(|s| s.to_string());
         Ok(SubmitAck {
@@ -154,6 +178,7 @@ impl JitoAdapter {
             "/api/v1/getInflightBundleStatuses",
             "getInflightBundleStatuses",
             json!([[bundle_id]]),
+            None,
         )?;
         let entry = res.pointer("/value/0").cloned().unwrap_or(Value::Null);
         Ok(inflight_entry_status(&entry))
@@ -166,6 +191,7 @@ impl JitoAdapter {
             "/api/v1/getBundleStatuses",
             "getBundleStatuses",
             json!([[bundle_id]]),
+            None,
         )?;
         let entry = res.pointer("/value/0").cloned().unwrap_or(Value::Null);
         if entry.is_null() {
@@ -208,8 +234,9 @@ impl SubmissionAdapter for JitoAdapter {
         &self,
         txs: &[VersionedTransaction],
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
-        JitoAdapter::submit_bundle(self, txs, t_handoff_ns)
+        JitoAdapter::submit_bundle(self, txs, t_handoff_ns, deadline)
     }
 
     /// The block-engine path quotes no message fee (no network call).
@@ -298,6 +325,7 @@ impl SubmissionAdapter for JitoAdapter {
         &self,
         tx: &VersionedTransaction,
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
         let b64 = super::encode_base64(tx)?;
         let len = super::serialize_tx(tx)
@@ -307,6 +335,7 @@ impl SubmissionAdapter for JitoAdapter {
             "/api/v1/transactions",
             "sendTransaction",
             json!([b64, {"encoding":"base64"}]),
+            Some(deadline),
         )?;
         let sig_s = res
             .as_str()
@@ -398,13 +427,66 @@ mod secret_tests {
             vec![signed.clone(), tx(vec![])],
             vec![tx(vec![]), signed.clone()],
         ] {
-            let error = a.submit_bundle(&bundle, 0).unwrap_err();
+            let error = a
+                .submit_bundle(
+                    &bundle,
+                    0,
+                    std::time::Instant::now() + std::time::Duration::from_secs(60),
+                )
+                .unwrap_err();
             assert!(
                 matches!(&error, SubmitError::Rejected(c) if c == "BUNDLE_SIGNATURE_MISSING"),
                 "{error:?}"
             );
         }
         assert!(socket.accept().is_err(), "no request may reach the network");
+    }
+    /// DEC-12 (V2-14/P6-04): the handoff deadline reaches the Jito submit. Past it nothing is
+    /// sent (no request reaches the block engine) for a single transaction or a bundle; a
+    /// block engine slower than the deadline ends the call at the deadline — not at the
+    /// client's 30 s timeout — as `Deadline { sent: true }` (ambiguous), never a definitive
+    /// refusal.
+    #[test]
+    fn dec12_the_handoff_deadline_bounds_the_jito_submit() {
+        use solana_sdk::message::{Message, VersionedMessage};
+        use std::io::Read;
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", socket.local_addr().unwrap());
+        let a = JitoAdapter::new(url, None, Duration::from_secs(30)).unwrap();
+        let tx = VersionedTransaction {
+            signatures: vec![Signature::from([7u8; 64])],
+            message: VersionedMessage::Legacy(Message::default()),
+        };
+        let past = std::time::Instant::now();
+        socket.set_nonblocking(true).unwrap();
+        assert!(matches!(
+            a.submit(&tx, 0, past),
+            Err(SubmitError::Deadline { sent: false })
+        ));
+        assert!(matches!(
+            a.submit_bundle(std::slice::from_ref(&tx), 0, past),
+            Err(SubmitError::Deadline { sent: false })
+        ));
+        assert!(socket.accept().is_err(), "no request may reach the network");
+        socket.set_nonblocking(false).unwrap();
+        let engine = std::thread::spawn(move || {
+            let (mut stream, _) = socket.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            std::thread::sleep(Duration::from_secs(2));
+        });
+        let started = std::time::Instant::now();
+        let slow = a.submit(&tx, 0, started + Duration::from_millis(300));
+        assert!(
+            matches!(slow, Err(SubmitError::Deadline { sent: true })),
+            "{slow:?}"
+        );
+        let took = started.elapsed();
+        assert!(
+            took >= Duration::from_millis(300) && took < Duration::from_millis(1_500),
+            "{took:?}"
+        );
+        engine.join().unwrap();
     }
     #[test]
     fn jito_transport_and_simulation_do_not_expose_endpoint() {

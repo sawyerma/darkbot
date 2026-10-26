@@ -27,12 +27,25 @@ pub struct Joined {
 }
 impl crate::analytics::payload::Payload for Joined {
     const KIND: u16 = journal::kind::ECON_CANONICAL;
-    const SCHEMA: u16 = 4;
-    /// Schema 2 (before A2) and 3 (before A6); their views used the default capital list.
+    /// DEC-12: 5 — the records with the typed rejection and the native message hash.
+    const SCHEMA: u16 = 5;
+    /// Schema 2 (before A2) and 3 (before A6) — their views used the default capital list —
+    /// and 4; all three carry the records before DEC-12.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::decode_wire;
+        use crate::analytics::record::OpportunityRecordV2 as V2;
+        if schema == 4 {
+            return Some(
+                decode_wire::<JoinedWire<V2>>(bytes)
+                    .and_then(JoinedWire::<V2>::current)
+                    .and_then(|v| {
+                        v.into_joined()
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    }),
+            );
+        }
         let wire = match schema {
-            2 => decode_wire::<JoinedWireV2>(bytes).map(|v| JoinedWireV3 {
+            2 => decode_wire::<JoinedWireV2<V2>>(bytes).map(|v| JoinedWireV3 {
                 market: v.market,
                 target_seen: v.target_seen,
                 target_seen_without_slot: v.target_seen_without_slot,
@@ -46,11 +59,11 @@ impl crate::analytics::payload::Payload for Joined {
                 market_commitment: "UNKNOWN".into(),
                 winner_slot_first_seen_ns: None,
             }),
-            3 => decode_wire::<JoinedWireV3>(bytes),
+            3 => decode_wire::<JoinedWireV3<V2>>(bytes),
             _ => return None,
         };
         Some(wire.and_then(|v| {
-            JoinedWire {
+            JoinedWire::<V2> {
                 market: v.market,
                 target_seen: v.target_seen,
                 target_seen_without_slot: v.target_seen_without_slot,
@@ -65,6 +78,7 @@ impl crate::analytics::payload::Payload for Joined {
                 winner_slot_first_seen_ns: v.winner_slot_first_seen_ns,
                 capital: CAPITAL_USD.to_vec(),
             }
+            .current()?
             .into_joined()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         }))
@@ -79,9 +93,11 @@ const IDENTITY_STATUS: [&str; 6] = [
     "MARKET_BANK_PAIR_UNKNOWN",
     "PLAN_TYPE_OR_BANK_PAIR_MISMATCH",
 ];
-/// Wire form of `Joined` (owned status string, mapped back onto the closed set).
+/// Wire form of `Joined` (owned status string, mapped back onto the closed set); `R` is the
+/// record layout (DEC-12: `OpportunityRecordV2` in schemas ≤ 4).
 #[derive(Deserialize)]
-struct JoinedWire {
+#[cfg_attr(test, derive(Serialize))]
+struct JoinedWire<R = OpportunityRecord> {
     market: TruthEvent,
     target_seen: bool,
     target_seen_without_slot: bool,
@@ -90,15 +106,15 @@ struct JoinedWire {
     plan_validated: Option<bool>,
     built: Option<bool>,
     identity_status: String,
-    our: Option<OpportunityRecord>,
-    diagnostic: Option<OpportunityRecord>,
+    our: Option<R>,
+    diagnostic: Option<R>,
     market_commitment: String,
     winner_slot_first_seen_ns: Option<u64>,
     capital: Vec<u64>,
 }
 /// Layout of schema 3 (A2, before A6): no capital list.
 #[derive(Deserialize)]
-struct JoinedWireV3 {
+struct JoinedWireV3<R> {
     market: TruthEvent,
     target_seen: bool,
     target_seen_without_slot: bool,
@@ -107,14 +123,14 @@ struct JoinedWireV3 {
     plan_validated: Option<bool>,
     built: Option<bool>,
     identity_status: String,
-    our: Option<OpportunityRecord>,
-    diagnostic: Option<OpportunityRecord>,
+    our: Option<R>,
+    diagnostic: Option<R>,
     market_commitment: String,
     winner_slot_first_seen_ns: Option<u64>,
 }
 /// Layout of schema 2 (before A2): no commitment, no winner-slot receipt.
 #[derive(Deserialize)]
-struct JoinedWireV2 {
+struct JoinedWireV2<R> {
     market: TruthEvent,
     target_seen: bool,
     target_seen_without_slot: bool,
@@ -123,8 +139,28 @@ struct JoinedWireV2 {
     plan_validated: Option<bool>,
     built: Option<bool>,
     identity_status: String,
-    our: Option<OpportunityRecord>,
-    diagnostic: Option<OpportunityRecord>,
+    our: Option<R>,
+    diagnostic: Option<R>,
+}
+impl JoinedWire<crate::analytics::record::OpportunityRecordV2> {
+    /// DEC-12: the records of an earlier layout in the current one.
+    fn current(self) -> std::io::Result<JoinedWire> {
+        Ok(JoinedWire {
+            market: self.market,
+            target_seen: self.target_seen,
+            target_seen_without_slot: self.target_seen_without_slot,
+            health_liquidatable: self.health_liquidatable,
+            candidates_created: self.candidates_created,
+            plan_validated: self.plan_validated,
+            built: self.built,
+            identity_status: self.identity_status,
+            our: self.our.map(TryInto::try_into).transpose()?,
+            diagnostic: self.diagnostic.map(TryInto::try_into).transpose()?,
+            market_commitment: self.market_commitment,
+            winner_slot_first_seen_ns: self.winner_slot_first_seen_ns,
+            capital: self.capital,
+        })
+    }
 }
 impl JoinedWire {
     fn into_joined(self) -> Result<Joined, &'static str> {
@@ -1191,23 +1227,25 @@ mod regression {
             );
             let v: super::super::ShadowEvaluation =
                 payload::decode(f.kind, f.schema, &f.payload).unwrap();
-            let mut forged = v.clone();
+            // The earlier layout (DEC-12: schemas 2–4) forged in place: the record's loss is
+            // the last field of the frame.
             for cause in [LossReason::Plan, LossReason::Safety] {
-                forged.record.loss = Some(cause);
-                let bytes = payload::encode_wire(&forged).unwrap();
+                let bytes = with_loss(&f.payload, cause);
                 assert!(
                     payload::decode::<super::super::ShadowEvaluation>(f.kind, 2, &bytes).is_err()
                 );
-                assert!(
-                    payload::decode::<super::super::ShadowEvaluation>(f.kind, 3, &bytes).is_ok()
-                );
+                for schema in [3, 4] {
+                    let back: super::super::ShadowEvaluation =
+                        payload::decode(f.kind, schema, &bytes).unwrap();
+                    assert_eq!(back.record.loss, Some(cause));
+                }
             }
             records.push(v.record);
         }
         assert_eq!(records.len(), 1);
         let r = records.remove(0);
         assert_eq!(
-            (r.loss, r.reason.as_deref()),
+            (r.loss, r.reason_text().as_deref()),
             (Some(LossReason::Routing), Some("mint not in state"))
         );
         let run = std::env::temp_dir().join(format!("p0-v17-earlier-{}", std::process::id()));
@@ -1258,6 +1296,16 @@ mod regression {
         );
         let _ = fs::remove_dir_all(run);
     }
+    /// An earlier-layout frame (`ShadowEvaluation` before DEC-12) with another loss: the record
+    /// ends with its `Option<LossReason>` (tag 1, then the variant index as u32 LE).
+    fn with_loss(payload: &[u8], loss: LossReason) -> Vec<u8> {
+        let index = LossReason::ALL.iter().position(|l| *l == loss).unwrap() as u32;
+        let mut bytes = payload.to_vec();
+        let at = bytes.len() - 5;
+        assert_eq!(bytes[at], 1, "Some(loss) ends the frame");
+        bytes[at + 1..].copy_from_slice(&index.to_le_bytes());
+        bytes
+    }
     /// DEC-01: the loss statistic carries its policy version and never mixes them. A shadow
     /// evaluation of the writer before DEC-01 (schema 3, EXHAUSTIVE_V2: a stale blockhash is
     /// BUILD only after RPC_BUDGET/RPC_DEADLINE/ROUTING/PLAN) stays readable with every cause
@@ -1269,15 +1317,26 @@ mod regression {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("src/analytics/fixtures/shadow_evaluations_schema2.p0j");
         let mut reader = journal::Reader::open(&fixture).unwrap();
-        let mut v: super::super::ShadowEvaluation = loop {
+        let raw = loop {
             let f = reader.next_frame().unwrap().unwrap();
             if f.kind != journal::MANIFEST {
-                break payload::decode(f.kind, f.schema, &f.payload).unwrap();
+                break f.payload;
             }
         };
+        let mut v: super::super::ShadowEvaluation =
+            payload::decode(journal::kind::ECON_SHADOW_EVALUATION, 2, &raw).unwrap();
         v.record.loss = Some(LossReason::Build);
-        v.record.reason = Some("blockhash stale".into());
-        let bytes = payload::encode_wire(&v).unwrap();
+        v.record.reason = Some(crate::analytics::rejection::Rejection::BlockhashStaleLate);
+        // Schemas 3 and 4 carry the record layout before DEC-12, schema 5 the current one.
+        let earlier_layout = with_loss(&raw, LossReason::Build);
+        let current_layout = payload::encode_wire(&v).unwrap();
+        let bytes = |schema: u16| {
+            if schema < 5 {
+                earlier_layout.clone()
+            } else {
+                current_layout.clone()
+            }
+        };
         let mut event = row(&v.record, 10, 0).market;
         event.block_time = Some(101);
         let ctx = JoinContext {
@@ -1290,6 +1349,7 @@ mod regression {
         for (schema, earlier, model) in [
             (3u16, 1u64, LOSS_ATTRIBUTION_EARLIER_RECORDS),
             (4, 0, LOSS_ATTRIBUTION_MODEL),
+            (5, 0, LOSS_ATTRIBUTION_MODEL),
         ] {
             let run = std::env::temp_dir()
                 .join(format!("p0-dec01-policy-{}-{schema}", std::process::id()));
@@ -1297,8 +1357,12 @@ mod regression {
             fs::create_dir_all(&run).unwrap();
             let shadow = run.join("shadow_evaluations.p0j");
             let mut w = journal::Writer::create(&shadow).unwrap();
-            w.test_append_raw(journal::kind::ECON_SHADOW_EVALUATION, schema, &bytes)
-                .unwrap();
+            w.test_append_raw(
+                journal::kind::ECON_SHADOW_EVALUATION,
+                schema,
+                &bytes(schema),
+            )
+            .unwrap();
             w.seal(true).unwrap();
             let joined = join(vec![event.clone()], &shadow, deadline, &ctx).unwrap();
             assert_eq!(
@@ -1315,27 +1379,77 @@ mod regression {
             );
             let _ = fs::remove_dir_all(run);
         }
-        // Both policies in one journal are refused, never added into the same buckets.
-        let run = std::env::temp_dir().join(format!("p0-dec01-mixed-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&run);
-        fs::create_dir_all(&run).unwrap();
-        let shadow = run.join("shadow_evaluations.p0j");
-        let mut w = journal::Writer::create(&shadow).unwrap();
-        for schema in [4u16, 3] {
-            w.test_append_raw(journal::kind::ECON_SHADOW_EVALUATION, schema, &bytes)
+        // Both policies in one journal are refused, never added into the same buckets; two
+        // layouts of the same policy (DEC-12: schemas 4 and 5) join.
+        for (schemas, mixed) in [([5u16, 3], true), ([4, 3], true), ([4, 5], false)] {
+            let run = std::env::temp_dir().join(format!(
+                "p0-dec01-mixed-{}-{}{}",
+                std::process::id(),
+                schemas[0],
+                schemas[1]
+            ));
+            let _ = fs::remove_dir_all(&run);
+            fs::create_dir_all(&run).unwrap();
+            let shadow = run.join("shadow_evaluations.p0j");
+            let mut w = journal::Writer::create(&shadow).unwrap();
+            for schema in schemas {
+                w.test_append_raw(
+                    journal::kind::ECON_SHADOW_EVALUATION,
+                    schema,
+                    &bytes(schema),
+                )
                 .unwrap();
+            }
+            w.seal(true).unwrap();
+            let joined = join(vec![event.clone()], &shadow, deadline, &ctx);
+            assert_eq!(
+                joined.err().as_deref(),
+                mixed.then_some("SHADOW_LOSS_POLICY_MIXED"),
+                "{schemas:?}"
+            );
+            let _ = fs::remove_dir_all(run);
         }
-        w.seal(true).unwrap();
-        assert_eq!(
-            join(vec![event.clone()], &shadow, deadline, &ctx)
-                .err()
-                .as_deref(),
-            Some("SHADOW_LOSS_POLICY_MIXED")
-        );
-        let _ = fs::remove_dir_all(run);
         assert!(LOSS_ATTRIBUTION_MODEL.starts_with("EXHAUSTIVE_V3"));
         assert!(LOSS_ATTRIBUTION_MODEL.contains("for a lane candidate"));
         assert!(LOSS_ATTRIBUTION_EARLIER_RECORDS.contains("before DEC-01 (EXHAUSTIVE_V2)"));
+    }
+    /// DEC-12: canonical rows written before DEC-12 (schema 4, the record layout of the earlier
+    /// writer) stay readable with their records' texts; the current schema round-trips them.
+    #[test]
+    fn dec12_canonical_rows_of_the_earlier_layout_stay_readable() {
+        use crate::analytics::payload::{self, Payload};
+        use crate::analytics::record::OpportunityRecordV2;
+        let bytes = crate::analytics::record::earlier_writer_record_bytes();
+        let rec: OpportunityRecord =
+            payload::decode(journal::kind::OWNER_OPPORTUNITY, 2, &bytes).unwrap();
+        let wire = JoinedWire::<OpportunityRecordV2> {
+            market: row(&rec, 10, 0).market,
+            target_seen: true,
+            target_seen_without_slot: false,
+            health_liquidatable: Some(true),
+            candidates_created: None,
+            plan_validated: None,
+            built: None,
+            identity_status: "TYPE_TARGET_BANK_PAIR_CANONICAL_EVENT".into(),
+            our: Some(payload::decode_wire(&bytes).unwrap()),
+            diagnostic: Some(payload::decode_wire(&bytes).unwrap()),
+            market_commitment: "confirmed".into(),
+            winner_slot_first_seen_ns: Some(5),
+            capital: vec![1_000],
+        };
+        let earlier = payload::encode_wire(&wire).unwrap();
+        let j: Joined = payload::decode(Joined::KIND, 4, &earlier).unwrap();
+        assert_eq!(
+            j.our.as_ref().unwrap().reason_text().as_deref(),
+            Some("mint not in state")
+        );
+        assert_eq!(
+            (j.capital.as_slice(), j.market_commitment.as_str()),
+            (&[1_000][..], "confirmed")
+        );
+        let current = payload::encode(&j).unwrap();
+        let back: Joined = payload::decode(Joined::KIND, Joined::SCHEMA, &current).unwrap();
+        assert_eq!(back.our.unwrap().reason, j.our.unwrap().reason);
     }
     /// DEC-01: a re-armed evaluation keeps its trigger's T_rx; of two evaluations of the same
     /// trigger the later one is the episode's diagnostic (before: the refusal stayed).
@@ -1343,13 +1457,13 @@ mod regression {
     fn dec01_the_later_evaluation_of_the_same_trigger_is_the_diagnostic() {
         let refused = OpportunityRecord {
             loss: Some(LossReason::Build),
-            reason: Some(crate::execution::pipeline::BLOCKHASH_STALE_EARLY.into()),
+            reason: Some(crate::analytics::rejection::Rejection::BlockhashStaleEarly),
             market_plan_identity: None,
             ..rec()
         };
         let later = OpportunityRecord {
             loss: Some(LossReason::StateRace),
-            reason: Some("opportunity stale before planning".into()),
+            reason: Some(crate::analytics::rejection::Rejection::OpportunityStale),
             market_plan_identity: None,
             ..rec()
         };
@@ -2135,8 +2249,7 @@ pub fn join(
                         .typed::<super::ShadowEvaluation>()
                         .map_err(|_| "SHADOW_DECODE")?
                         .record;
-                    let from_earlier_writer = frame.schema
-                        < <super::ShadowEvaluation as crate::analytics::payload::Payload>::SCHEMA;
+                    let from_earlier_writer = frame.schema < super::SHADOW_POLICY_V3_SCHEMA;
                     if from_earlier_writer {
                         earlier(&rec, frame.schema)?;
                         earlier_frames += 1;

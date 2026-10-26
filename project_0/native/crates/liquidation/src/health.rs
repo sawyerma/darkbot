@@ -43,7 +43,7 @@ pub struct AccountThresholds {
 /// for readers; classification uses `sizing::SizingErrorKind::IntegrationStale`.
 pub const INTEGRATION_STALE: &str = "INTEGRATION_STALE:";
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum HealthError {
     Unsupported(String),
     /// V19: a strict pinned decoder refused the account layout (discriminator, length or

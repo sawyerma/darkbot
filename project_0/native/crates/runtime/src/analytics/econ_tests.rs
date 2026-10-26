@@ -740,7 +740,7 @@ impl SubmissionAdapter for CountingSubmitter {
         _: std::time::Instant,
     ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
         Ok(MessageFeeQuote {
-            message_hash: tx.message.hash().to_string(),
+            message_hash: tx.message.hash(),
             context_slot: 1,
             lamports: 200,
         })
@@ -758,11 +758,21 @@ impl SubmissionAdapter for CountingSubmitter {
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
         SimResult::Unavailable("test adapter: no bundle simulation".into())
     }
-    fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit(
+        &self,
+        _: &VersionedTransaction,
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         panic!("must never broadcast")
     }
-    fn submit_bundle(&self, _: &[VersionedTransaction], _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit_bundle(
+        &self,
+        _: &[VersionedTransaction],
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         panic!("must never broadcast bundle")
     }
@@ -977,8 +987,20 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
             solana_sdk::message::Message::default(),
         ),
     };
-    assert!(adapter.submit(&tx, 0).is_err());
-    assert!(adapter.submit_bundle(&[tx], 0).is_err());
+    assert!(adapter
+        .submit(
+            &tx,
+            0,
+            std::time::Instant::now() + std::time::Duration::from_secs(60)
+        )
+        .is_err());
+    assert!(adapter
+        .submit_bundle(
+            &[tx],
+            0,
+            std::time::Instant::now() + std::time::Duration::from_secs(60)
+        )
+        .is_err());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
     assert_eq!(adapter.attempts.load(Ordering::Relaxed), 2);
 }
@@ -1154,7 +1176,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         unavailable.as_ref(),
     );
     assert_eq!(
-        (r.decision, r.loss, r.reason.as_deref()),
+        (r.decision, r.loss, r.reason_text().as_deref()),
         (
             Decision::Unavailable,
             Some(LossReason::Health),
@@ -1178,13 +1200,13 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
     };
     let r = p.evaluate_prepared(account, "test", clock.now_ns(), 100, 10, true, Ok(&healthy));
     assert_eq!(
-        (r.progress.health_liquidatable, r.reason.as_deref()),
+        (r.progress.health_liquidatable, r.reason_text().as_deref()),
         (Some(false), Some("not liquidatable"))
     );
     // An untradable state is refused before Health on both paths.
     let r = p.evaluate(account, "test", clock.now_ns(), 100, 10, false);
     assert_eq!(
-        (r.loss, r.reason.as_deref()),
+        (r.loss, r.reason_text().as_deref()),
         (Some(LossReason::State), Some("state not tradable"))
     );
     assert_eq!(health.calls.load(Ordering::Relaxed), 2);
@@ -1414,7 +1436,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
     let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
     assert_eq!(r.decision, Decision::Unavailable);
     assert!(r
-        .reason
+        .reason_text()
         .as_deref()
         .is_some_and(|x| x.starts_with(LIVE_SEND_REQUIRES_FE04)));
     assert_eq!(r.simulation_result.as_deref(), Some("PASS"));
@@ -1445,7 +1467,7 @@ impl SubmissionAdapter for HandoffSubmitter {
         _: std::time::Instant,
     ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
         Ok(MessageFeeQuote {
-            message_hash: tx.message.hash().to_string(),
+            message_hash: tx.message.hash(),
             context_slot: 1,
             lamports: 200,
         })
@@ -1461,7 +1483,16 @@ impl SubmissionAdapter for HandoffSubmitter {
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
         SimResult::Unavailable("no bundle".into())
     }
-    fn submit(&self, tx: &VersionedTransaction, t: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit(
+        &self,
+        tx: &VersionedTransaction,
+        t: u64,
+        deadline: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
+        // DEC-12: like every adapter, nothing is sent after the handoff deadline.
+        if std::time::Instant::now() >= deadline {
+            return Err(SubmitError::Deadline { sent: false });
+        }
         self.submits.fetch_add(1, Ordering::Relaxed);
         if self.transport_fails {
             return Err(SubmitError::Transport("lost".into()));
@@ -1475,7 +1506,12 @@ impl SubmissionAdapter for HandoffSubmitter {
             serialized_len: darkbot_solana::submit::serialize_tx(tx).unwrap().len(),
         })
     }
-    fn submit_bundle(&self, _: &[VersionedTransaction], _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit_bundle(
+        &self,
+        _: &[VersionedTransaction],
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         panic!("no bundle path")
     }
 }
@@ -1521,6 +1557,18 @@ fn live_evaluate(
     payer: &solana_sdk::signature::Keypair,
     target: Pubkey,
 ) -> crate::analytics::record::OpportunityRecord {
+    live_evaluate_within(adapter, safety, fe04, payer, target, u64::MAX)
+}
+
+/// `live_evaluate` with the owner's candidate network deadline (`deadline_ns`).
+fn live_evaluate_within(
+    adapter: &HandoffSubmitter,
+    safety: &mut darkbot_project0::safety::Safety,
+    fe04: Option<&mut crate::execution::one_shot::admission::Fe04Admission>,
+    payer: &solana_sdk::signature::Keypair,
+    target: Pubkey,
+    deadline_ns: u64,
+) -> crate::analytics::record::OpportunityRecord {
     use crate::execution::pipeline::{Mode, Pipeline};
     use darkbot_project0::{execution::Freshness, planner::Allowlist};
     use darkbot_solana::{
@@ -1538,7 +1586,7 @@ fn live_evaluate(
     let failed = FailedCostMatrix::default();
     let slots = darkbot_solana::ingress::SlotWatch::new();
     slots.observe(10);
-    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let mut network = crate::execution::pipeline::NetworkBudget::new(usize::MAX, deadline_ns);
     let mut p = Pipeline {
         mode: Mode::Live,
         clock: &clock,
@@ -1654,7 +1702,7 @@ fn v2_15_a_state_aged_during_the_simulation_is_never_handed_off() {
     assert_eq!(adapter.submits.load(Ordering::Relaxed), 0, "{:?}", r.reason);
     assert_ne!(r.decision, Decision::Submitted);
     assert!(
-        r.reason.as_deref().unwrap_or("").contains("STALE"),
+        r.reason_text().as_deref().unwrap_or("").contains("STALE"),
         "{:?}",
         r.reason
     );
@@ -1708,7 +1756,7 @@ fn b4_admission_binds_a_nonzero_record_rent() {
     let r = live_evaluate(&refused, &mut s, Some(&mut fe04), &payer, target);
     assert_eq!(r.decision, Decision::Unavailable, "{:?}", r.reason);
     assert!(
-        r.reason
+        r.reason_text()
             .as_deref()
             .unwrap_or("")
             .contains("APPROVAL_BUDGET_EXCEEDED"),
@@ -1781,7 +1829,7 @@ fn v9_safety_denials_are_their_own_cause() {
         r.reason
     );
     assert!(
-        r.reason
+        r.reason_text()
             .as_deref()
             .unwrap_or("")
             .contains("safety TotalCapital"),
@@ -1797,7 +1845,7 @@ fn v9_safety_denials_are_their_own_cause() {
     let mut s = safety(u64::MAX, 1);
     let r = live_evaluate(&adapter, &mut s, Some(&mut fe04), &payer, target);
     assert_eq!(
-        (r.decision, r.loss, r.reason.as_deref()),
+        (r.decision, r.loss, r.reason_text().as_deref()),
         (
             Decision::DeniedBySafety,
             Some(LossReason::Safety),
@@ -1887,7 +1935,10 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     // A second trigger never submits again (the one-shot is consumed) and releases its check.
     let again = run(&ok, &mut safety, Some(&mut fe04));
     assert_eq!(again.decision, Decision::Unavailable);
-    assert!(again.reason.unwrap().contains("ONE_SHOT_ALREADY_CONSUMED"));
+    assert!(again
+        .reason_text()
+        .unwrap()
+        .contains("ONE_SHOT_ALREADY_CONSUMED"));
     assert_eq!(ok.submits.load(Ordering::Relaxed), 1);
 
     // FE-02: the day's loss limit holds with this attempt's worst case (SOL debit 205 plus its
@@ -1915,7 +1966,7 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     };
     let r = run(&tight, &mut limited, Some(&mut fe04));
     assert_eq!(r.decision, Decision::DeniedBySafety, "{:?}", r.reason);
-    assert_eq!(r.reason.as_deref(), Some("DailyLoss"));
+    assert_eq!(r.reason_text().as_deref(), Some("DailyLoss"));
     assert_eq!(tight.submits.load(Ordering::Relaxed), 0);
     assert!(fe04.journal.active_hold().is_none());
     assert_eq!(limited.capital_in_use(), 0, "nothing reserved");
@@ -1948,7 +1999,10 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     let mut fe04 = admission(&refused_dir, &payer, target, "NO_SWAP_INVENTORY");
     let r = run(&none, &mut safety, Some(&mut fe04));
     assert_eq!(r.decision, Decision::Unavailable);
-    assert_eq!(r.reason.as_deref(), Some("FE04_FUNDING_CLASS_MISMATCH"));
+    assert_eq!(
+        r.reason_text().as_deref(),
+        Some("FE04_FUNDING_CLASS_MISMATCH")
+    );
     assert_eq!(none.submits.load(Ordering::Relaxed), 0);
     assert!(fe04.journal.active_hold().is_none());
     assert_eq!((safety.capital_in_use(), safety.halted()), (0, None));
@@ -1958,7 +2012,7 @@ fn fe04_admission_is_the_only_send_and_hands_off_exactly_once() {
     fe04.approval.max_total_sol_debit_lamports = 204;
     let r = run(&none, &mut safety, Some(&mut fe04));
     assert_eq!(
-        r.reason.as_deref(),
+        r.reason_text().as_deref(),
         Some("APPROVAL_BUDGET_EXCEEDED:SOL_DEBIT")
     );
     assert_eq!(
@@ -2220,7 +2274,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
             fe04: None,
         };
         let r = p.evaluate(Pubkey::new_unique(), "test", clock.now_ns(), 100, 10, true);
-        let reason = r.reason.clone().unwrap_or_default();
+        let reason = r.reason_text().unwrap_or_default();
         assert!(
             reason.contains(&format!("plan invalid: {expected}")),
             "{reason}"
@@ -2259,7 +2313,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
         ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
             self.0.fetch_add(1, Ordering::Relaxed);
             Ok(MessageFeeQuote {
-                message_hash: tx.message.hash().to_string(),
+                message_hash: tx.message.hash(),
                 context_slot: 1,
                 lamports: 5_000,
             })
@@ -2272,13 +2326,19 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
         fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
             SimResult::Unavailable("test adapter: no bundle simulation".into())
         }
-        fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
+        fn submit(
+            &self,
+            _: &VersionedTransaction,
+            _: u64,
+            _: std::time::Instant,
+        ) -> Result<SubmitAck, SubmitError> {
             panic!("must never broadcast")
         }
         fn submit_bundle(
             &self,
             _: &[VersionedTransaction],
             _: u64,
+            _: std::time::Instant,
         ) -> Result<SubmitAck, SubmitError> {
             panic!("must never broadcast bundle")
         }
@@ -2644,10 +2704,10 @@ fn million_revisions_stream_every_row_with_bounded_semantic_retention() {
         if frame.kind == journal::MANIFEST {
             continue;
         }
-        // DEC-01: written under EXHAUSTIVE_V3 (schema 4).
+        // DEC-01: written under EXHAUSTIVE_V3; DEC-12: the typed record layout (schema 5).
         assert_eq!(
             (frame.kind, frame.schema),
-            (kind::ECON_SHADOW_EVALUATION, 4)
+            (kind::ECON_SHADOW_EVALUATION, 5)
         );
         count += 1;
     }
@@ -2685,7 +2745,9 @@ fn late_winners_split_coalesced_groups_exactly_like_original_selection() {
         r.rx_slot = Some(1 + n % 3 * 10);
         r.timing.t_rx_ns = Some((n % 2) * 1_000_000_000 + 10);
         r.timing.t_sign_ns = Some(40 + n % 5);
-        r.reason = Some(format!("revision-{n}"));
+        r.reason = Some(crate::analytics::rejection::Rejection::Plan(format!(
+            "revision-{n}"
+        )));
         if n % 4 != 0 {
             r.decision = Decision::Skip;
         }
@@ -3052,7 +3114,7 @@ impl SubmissionAdapter for SlowSubmitter {
     ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
         std::thread::sleep(self.delay);
         Ok(MessageFeeQuote {
-            message_hash: tx.message.hash().to_string(),
+            message_hash: tx.message.hash(),
             context_slot: 1,
             lamports: 200,
         })
@@ -3066,10 +3128,20 @@ impl SubmissionAdapter for SlowSubmitter {
     fn simulate_bundle(&self, _: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
         SimResult::Unavailable("test adapter: no bundle simulation".into())
     }
-    fn submit(&self, _: &VersionedTransaction, _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit(
+        &self,
+        _: &VersionedTransaction,
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         panic!("must never broadcast")
     }
-    fn submit_bundle(&self, _: &[VersionedTransaction], _: u64) -> Result<SubmitAck, SubmitError> {
+    fn submit_bundle(
+        &self,
+        _: &[VersionedTransaction],
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
         panic!("must never broadcast bundle")
     }
 }
@@ -3472,15 +3544,21 @@ impl SubmissionAdapter for SlowFeeSubmitter {
     fn simulate_bundle(&self, txs: &[VersionedTransaction], d: std::time::Instant) -> SimResult {
         self.inner.simulate_bundle(txs, d)
     }
-    fn submit(&self, tx: &VersionedTransaction, n: u64) -> Result<SubmitAck, SubmitError> {
-        self.inner.submit(tx, n)
+    fn submit(
+        &self,
+        tx: &VersionedTransaction,
+        n: u64,
+        deadline: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
+        self.inner.submit(tx, n, deadline)
     }
     fn submit_bundle(
         &self,
         txs: &[VersionedTransaction],
         n: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
-        self.inner.submit_bundle(txs, n)
+        self.inner.submit_bundle(txs, n, deadline)
     }
 }
 
@@ -3560,7 +3638,7 @@ fn v2_09_stale_blockhash_before_planning_is_counted_and_the_late_check_decides()
         false,
     );
     assert_eq!(
-        (r.loss, r.reason.as_deref()),
+        (r.loss, r.reason_text().as_deref()),
         (Some(LossReason::Build), Some("blockhash stale"))
     );
     assert_eq!(builder.0.get(), 1, "planning unchanged");
@@ -3642,7 +3720,7 @@ fn dec01_a_stale_blockhash_is_refused_before_planning_without_budget() {
             &mut network,
         );
         assert_eq!(
-            (r.loss, r.reason.as_deref()),
+            (r.loss, r.reason_text().as_deref()),
             (Some(LossReason::Build), Some(BLOCKHASH_STALE_EARLY))
         );
         assert_eq!(park, BlockhashPark::Refused { generation });
@@ -3667,7 +3745,7 @@ fn dec01_a_stale_blockhash_is_refused_before_planning_without_budget() {
             &mut network,
         );
         assert_eq!(
-            (r.loss, r.reason.as_deref(), park),
+            (r.loss, r.reason_text().as_deref(), park),
             (
                 Some(LossReason::Build),
                 Some("blockhash stale"),
@@ -3732,7 +3810,7 @@ fn dec01_the_late_check_before_the_build_stays() {
         &mut network,
     );
     assert_eq!(
-        (r.loss, r.reason.as_deref(), park),
+        (r.loss, r.reason_text().as_deref(), park),
         (
             Some(LossReason::Build),
             Some("blockhash stale"),
@@ -3760,7 +3838,7 @@ fn v2_04_execution_deadline_counts_from_t_rx() {
         true,
     );
     assert_eq!(
-        (late.loss, late.reason.as_deref()),
+        (late.loss, late.reason_text().as_deref()),
         (Some(LossReason::Build), Some("execution deadline passed"))
     );
     let fresh = evaluate_shadow(
@@ -3837,7 +3915,7 @@ fn q5_evaluate_records_the_typed_plan_error() {
         let r = evaluate_once(&Failing(PlanError::new(kind, text)), 0);
         assert_eq!(r.decision, decision, "{text}");
         assert_eq!(r.loss, Some(loss), "{text}");
-        assert_eq!(r.reason.as_deref(), Some(text));
+        assert_eq!(r.reason_text().as_deref(), Some(text));
     }
 }
 
@@ -4271,4 +4349,152 @@ fn decision_latency_spans_rx_to_ready() {
     r.timing.t_ready_ns = None;
     l.on_record(&r, None);
     assert_eq!(l.rx_ready_p95_ns(), Some(p95));
+}
+
+/// DEC-12: opportunity rows written before DEC-12 (schema 3, the record layout of the earlier
+/// writer) stay readable with the record's text.
+#[test]
+fn dec12_opportunity_rows_of_the_earlier_layout_stay_readable() {
+    use crate::analytics::payload::{self, Payload};
+    let bytes = crate::analytics::record::earlier_writer_record_bytes();
+    let wire = OpportunityRowV3 {
+        rec: payload::decode_wire(&bytes).unwrap(),
+        winner: None,
+        market: None,
+        slot_seen: Some(3),
+        capital: vec![7],
+        market_commitment: "confirmed".into(),
+    };
+    let row: OpportunityRow = payload::decode(
+        OpportunityRow::KIND,
+        3,
+        &payload::encode_wire(&wire).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(row.rec.reason_text().as_deref(), Some("mint not in state"));
+    assert_eq!(
+        (
+            row.slot_seen,
+            row.capital.as_slice(),
+            row.market_commitment.as_str()
+        ),
+        (Some(3), &[7][..], "confirmed")
+    );
+}
+
+/// DEC-12 (V2-14/P1-05): the pipeline records its rejection typed at the source (the variant
+/// with its typed values, never a pre-made text); its text is made where it is written.
+#[test]
+fn dec12_the_pipeline_records_typed_rejections() {
+    use crate::analytics::rejection::Rejection;
+    use crate::execution::pipeline::{BlockhashPark, NetworkBudget};
+    use darkbot_solana::state::blockhash::BlockhashCache;
+    let unbounded = darkbot_project0::execution::Freshness {
+        max_opportunity_age_ns: u64::MAX,
+        execution_deadline_ns: u64::MAX,
+    };
+    let clock = Clock::new();
+    let (r, _) = evaluate_parked(
+        &TestBuilder,
+        &counting_submitter(),
+        (0, unbounded, Duration::ZERO),
+        (&clock, &BlockhashCache::new(), 1_000_000_000),
+        BlockhashPark::Armed,
+        &mut NetworkBudget::unbounded(),
+    );
+    assert!(
+        matches!(r.reason, Some(Rejection::BlockhashStaleEarly)),
+        "{:?}",
+        r.reason
+    );
+    let late = evaluate_shadow(
+        &TestBuilder,
+        &counting_submitter(),
+        0,
+        unbounded,
+        Duration::ZERO,
+        false,
+    );
+    assert!(
+        matches!(late.reason, Some(Rejection::BlockhashStaleLate)),
+        "{:?}",
+        late.reason
+    );
+    let below = evaluate_once(&TestBuilder, i128::MAX);
+    assert!(
+        matches!(&below.reason, Some(Rejection::PlansRejected(plans)) if !plans.is_empty()),
+        "{:?}",
+        below.reason
+    );
+}
+
+/// DEC-12 (V2-14/P6-04): the FE-04 handoff is bounded by the candidate's monotonic network
+/// deadline (`NetworkBudget::deadline_ns`, configured): an exact-payload simulation that ends
+/// past it reserves and sends nothing and releases the Safety reservation (before: handed off
+/// after the deadline); within it the candidate is handed off once.
+#[test]
+fn dec12_the_fe04_handoff_is_bounded_by_the_candidate_deadline() {
+    use crate::analytics::rejection::RejectionCode;
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let open_safety = || {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let slow = HandoffSubmitter {
+        submits: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+        transport_fails: false,
+        simulate_delay: Duration::from_millis(100),
+    };
+    for (deadline_ns, sent) in [(150_000_000u64, false), (60_000_000_000, true)] {
+        let dir = std::env::temp_dir().join(format!("p0-dec12-{}", Pubkey::new_unique()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = slow.submits.load(Ordering::Relaxed);
+        let mut safety = open_safety();
+        let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+        let r = live_evaluate_within(
+            &slow,
+            &mut safety,
+            Some(&mut fe04),
+            &payer,
+            target,
+            deadline_ns,
+        );
+        let submits = slow.submits.load(Ordering::Relaxed) - before;
+        if sent {
+            assert_eq!(
+                (r.decision, submits),
+                (Decision::Submitted, 1),
+                "{:?}",
+                r.reason
+            );
+        } else {
+            assert_eq!(r.reason_text().as_deref(), Some("FE04_HANDOFF_DEADLINE"));
+            assert_eq!(
+                r.reason.as_ref().map(|x| x.code()),
+                Some(RejectionCode::SubmissionRefused)
+            );
+            assert_eq!(submits, 0);
+            assert!(fe04.journal.active_hold().is_none(), "nothing reserved");
+            assert_eq!(safety.capital_in_use(), 0, "Safety released");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

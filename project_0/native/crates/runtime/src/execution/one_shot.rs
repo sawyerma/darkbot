@@ -1991,17 +1991,23 @@ mod tests {
             &self,
             tx: &solana_sdk::transaction::VersionedTransaction,
             t: u64,
+            deadline: std::time::Instant,
         ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError>
         {
-            self.submit_bundle(std::slice::from_ref(tx), t)
+            self.submit_bundle(std::slice::from_ref(tx), t, deadline)
         }
         fn submit_bundle(
             &self,
             txs: &[solana_sdk::transaction::VersionedTransaction],
             t: u64,
+            deadline: std::time::Instant,
         ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError>
         {
             self.calls.set(self.calls.get() + 1);
+            // DEC-12: like every adapter, nothing is sent after the handoff deadline.
+            if std::time::Instant::now() >= deadline {
+                return Err(darkbot_solana::submit::SubmitError::Deadline { sent: false });
+            }
             let bytes: Vec<_> = txs
                 .iter()
                 .map(|tx| darkbot_solana::submit::serialize_tx(tx).unwrap())
@@ -2087,20 +2093,62 @@ mod tests {
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
                 j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
                     .unwrap();
-                let result = j.submit_payload(&simulated, &c, 123);
+                let result = j.submit_payload(&simulated, &c, 123, test_deadline());
                 assert_eq!(result.is_ok(), failure == 0);
                 assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
                 assert_eq!(j.holds(), i.holds);
-                assert!(j.submit_payload(&simulated, &c, 124).is_err());
+                assert!(j
+                    .submit_payload(&simulated, &c, 124, test_deadline())
+                    .is_err());
                 assert_eq!(adapter.calls.get(), 1);
                 drop(j);
                 let mut reopened = Journal::open(&dir, &a.wallet).unwrap();
-                assert!(reopened.submit_payload(&simulated, &c, 125).is_err());
+                assert!(reopened
+                    .submit_payload(&simulated, &c, 125, test_deadline())
+                    .is_err());
                 assert_eq!(reopened.holds(), i.holds);
                 drop(reopened);
                 fs::remove_dir_all(dir).unwrap();
             }
         }
+    }
+    /// DEC-12: a handoff whose deadline passed after the durable reservation stays UNKNOWN with
+    /// its holds (the adapter sent nothing, but the fsynced handoff state is never released
+    /// here); the one-shot is consumed.
+    #[test]
+    fn dec12_a_handoff_past_its_deadline_stays_unknown_with_its_holds() {
+        use darkbot_solana::submit::SubmissionPath;
+        use solana_sdk::signature::{Keypair, Signer};
+        let (dir, mut a, mut i, c) = setup();
+        let payer = Keypair::new();
+        a.wallet = payer.pubkey().to_string();
+        i.wallet = a.wallet.clone();
+        let payload = transport::SignedPayload::new(
+            vec![signed(&payer)],
+            SubmissionPath::Rpc,
+            payer.pubkey(),
+        )
+        .unwrap();
+        i.signatures = payload.signatures().to_vec();
+        i.signed_wire_sha256 = payload.wire_sha256().into();
+        let adapter = adapter(SubmissionPath::Rpc, 0);
+        let simulated = payload.simulate(&adapter, test_deadline()).unwrap();
+        let mut j = Journal::open(&dir, &a.wallet).unwrap();
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated)
+            .unwrap();
+        let past = std::time::Instant::now();
+        assert_eq!(
+            j.submit_payload(&simulated, &c, 123, past).unwrap_err(),
+            err("SUBMISSION_RESULT_UNKNOWN:DEADLINE_NOT_SENT")
+        );
+        assert_eq!(j.saved.as_ref().unwrap().phase, Phase::HandoffUnknown);
+        assert_eq!(j.holds(), i.holds);
+        assert!(j
+            .submit_payload(&simulated, &c, 124, test_deadline())
+            .is_err());
+        assert_eq!(adapter.calls.get(), 1);
+        drop(j);
+        fs::remove_dir_all(dir).unwrap();
     }
     /// L1: an owner taking the wallet while the previous one drops sees the complete durable
     /// journal (the writer closes before the lock is released), never a half-closed one.
@@ -2254,7 +2302,7 @@ mod tests {
             .reserve_payload(a.clone(), i.clone(), &c, &reversed)
             .is_err());
         j.reserve_payload(a, i, &c, &original).unwrap();
-        assert!(j.submit_payload(&reversed, &c, 1).is_err());
+        assert!(j.submit_payload(&reversed, &c, 1, test_deadline()).is_err());
         assert_eq!(adapter.calls.get(), 0);
         drop(j);
         fs::remove_dir_all(dir).unwrap();

@@ -881,6 +881,7 @@ impl<A: darkbot_solana::submit::SubmissionAdapter> darkbot_solana::submit::Submi
         &self,
         tx: &solana_sdk::transaction::VersionedTransaction,
         t_handoff_ns: u64,
+        _deadline: std::time::Instant,
     ) -> Result<darkbot_solana::submit::SubmitAck, darkbot_solana::submit::SubmitError> {
         self.submits.set(self.submits.get() + 1);
         Ok(darkbot_solana::submit::SubmitAck {
@@ -1162,5 +1163,22 @@ fn fe04_exit_admission_refuses_before_anything_durable() {
         assert_eq!(adapter.submits.get(), 0, "{code}: no send");
         assert!(journal.open_exit_id().is_none(), "{code}: nothing durable");
     }
+    // DEC-12: past the handoff deadline nothing is reserved or sent.
+    let adapter = CountingAdapter {
+        inner: rpc_submitter(&ok_rpc.url, n2_budget(4)),
+        submits: std::cell::Cell::new(0),
+    };
+    let mut journal = crate::execution::one_shot::Journal::open(&dir, &taker.to_string()).unwrap();
+    let mut late = exit_candidate(&route, &payer, &mint_s, 0);
+    late.deadline = std::time::Instant::now();
+    let admitted = crate::execution::one_shot::exit_admission::admit_exit(
+        &mut journal,
+        crate::execution::one_shot::exit::tests::exit_approval(&taker.to_string(), &mint_s, jup),
+        late,
+        &adapter,
+    );
+    assert!(matches!(admitted, Admission::Refused(_)), "{admitted:?}");
+    assert_eq!(adapter.submits.get(), 0, "deadline: no send");
+    assert!(journal.open_exit_id().is_none(), "deadline: nothing durable");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,6 +1,7 @@
 //! Die Kette. Jede Stufe setzt ihren Timing-Punkt; Fehler sind Records, keine Panics.
 
 use crate::analytics::record::{Decision, LossReason, OpportunityRecord};
+use crate::analytics::rejection::{PlanCause, PlanInvalid, PlanRejection, Rejection};
 use darkbot_common::timing::{Clock, Stage, Timeline};
 use darkbot_project0::economics::{self, CandidateInput, Evaluation, FailedCostMatrix, Path};
 use darkbot_project0::execution::Freshness;
@@ -534,7 +535,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
         if !state_valid {
             rec.loss = Some(LossReason::State);
-            rec.reason = Some("state not tradable".into());
+            rec.reason = Some(Rejection::StateNotTradable);
             return rec.with_timeline(&tl);
         }
 
@@ -544,23 +545,23 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             Err(HealthError::Unavailable) => {
                 rec.decision = Decision::Unavailable;
                 rec.loss = Some(LossReason::Health);
-                rec.reason = Some("health engine unavailable".into());
+                rec.reason = Some(Rejection::HealthUnavailable);
                 return rec.with_timeline(&tl);
             }
             Err(e @ HealthError::IntegrationStale(_)) => {
                 rec.loss = Some(LossReason::IntegrationRefresh);
-                rec.reason = Some(e.to_string());
+                rec.reason = Some(Rejection::Health(e.clone()));
                 return rec.with_timeline(&tl);
             }
             Err(e) => {
                 rec.loss = Some(LossReason::Health);
-                rec.reason = Some(e.to_string());
+                rec.reason = Some(Rejection::Health(e.clone()));
                 return rec.with_timeline(&tl);
             }
         };
         rec.progress.health_liquidatable = Some(hv.liquidatable);
         if !hv.liquidatable {
-            rec.reason = Some("not liquidatable".into());
+            rec.reason = Some(Rejection::NotLiquidatable);
             return rec.with_timeline(&tl);
         }
 
@@ -572,7 +573,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             .receivership_eligibility(&account, now_unix_s as i64, slot)
         {
             rec.loss = Some(LossReason::CircuitBreaker);
-            rec.reason = Some(e.to_string());
+            rec.reason = Some(Rejection::CircuitBreaker(e));
             return rec.with_timeline(&tl);
         }
 
@@ -584,7 +585,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // [FIX-21] stale Opportunity vor teurem Quote/Build verwerfen (Drift-Muster).
         if self.freshness.is_stale(t_rx_ns, self.clock.now_ns()) {
             rec.loss = Some(LossReason::StateRace);
-            rec.reason = Some("opportunity stale before planning".into());
+            rec.reason = Some(Rejection::OpportunityStale);
             return rec.with_timeline(&tl);
         }
         // V2-09 (P1-01): a blockhash already stale here is counted. DEC-01: for a caller that
@@ -604,7 +605,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             );
             if self.blockhash_park == BlockhashPark::Armed {
                 rec.loss = Some(LossReason::Build);
-                rec.reason = Some(BLOCKHASH_STALE_EARLY.into());
+                rec.reason = Some(Rejection::BlockhashStaleEarly);
                 self.blockhash_park = BlockhashPark::Refused { generation };
                 return rec.with_timeline(&tl);
             }
@@ -614,10 +615,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // B6: routes, fee quotes and simulation only within the owner's network budget.
         if self.network.remaining == 0 {
             rec.loss = Some(LossReason::RpcBudget);
-            rec.reason = Some(
-                "RPC_BUDGET: owner ingress queue behind; no network evaluation in this drain window"
-                    .into(),
-            );
+            rec.reason = Some(Rejection::RpcBudgetDrain);
             return rec.with_timeline(&tl);
         }
         self.network.remaining -= 1;
@@ -651,26 +649,23 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // a planning error at the deadline is the deadline, not a routing verdict.
         if Instant::now() >= deadline {
             rec.loss = Some(LossReason::RpcDeadline);
-            rec.reason = Some(format!(
-                "RPC_DEADLINE: candidate network deadline during planning ({})",
-                match &planning_result {
-                    Ok(p) => format!("{} plan(s)", p.len()),
-                    Err(e) => e.text.clone(),
-                }
-            ));
+            rec.reason = Some(Rejection::RpcDeadlinePlanning(match planning_result {
+                Ok(p) => Ok(p.len()),
+                Err(e) => Err(e.text),
+            }));
             return rec.with_timeline(&tl);
         }
         let plans = match planning_result {
             Ok(p) if !p.is_empty() => p,
             Ok(_) => {
                 rec.loss = Some(LossReason::Routing);
-                rec.reason = Some("no feasible execution candidates".into());
+                rec.reason = Some(Rejection::NoFeasiblePlans);
                 return rec.with_timeline(&tl);
             }
             Err(e) => {
                 rec.decision = e.decision();
                 rec.loss = Some(e.loss());
-                rec.reason = Some(e.text);
+                rec.reason = Some(Rejection::Plan(e.text));
                 return rec.with_timeline(&tl);
             }
         };
@@ -680,7 +675,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             .fresh(self.clock.now_ns(), self.blockhash_max_age_ns)
         else {
             rec.loss = Some(LossReason::Build);
-            rec.reason = Some("blockhash stale".into());
+            rec.reason = Some(Rejection::BlockhashStaleLate);
             return rec.with_timeline(&tl);
         };
 
@@ -722,7 +717,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 planner::validate_receivership(&steps, self.allowlist, plan.route, self.p7_passed)?;
                 Ok(steps)
             });
-            let checked = checked.map_err(|e| e.record_text()).and_then(|steps| {
+            let checked = checked.map_err(PlanInvalid::Gate).and_then(|steps| {
                 if plan.prerequisite_txs.is_empty() {
                     return Ok(());
                 }
@@ -731,19 +726,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     .iter()
                     .map(|pre| planner::steps_of(pre, table))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| format!("prerequisite {}", e.record_text()))?;
+                    .map_err(PlanInvalid::Prerequisite)?;
                 txs.push(steps);
                 planner::validate_bundle(&txs)
                     .map(drop)
-                    .map_err(str::to_owned)
+                    .map_err(PlanInvalid::Bundle)
             });
             if let Err(e) = checked {
                 note_stage(&mut furthest_technical, 1, LossReason::Build);
-                rejected.push(format!(
-                    "{}: plan invalid: {}",
-                    plan.input.funding.as_str(),
-                    e
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::Invalid(e),
+                });
                 continue;
             }
 
@@ -757,11 +751,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .find(|ix| !self.global_allowed.contains(&ix.program_id))
             {
                 note_stage(&mut furthest_technical, 2, LossReason::Build);
-                rejected.push(format!(
-                    "{}: receivership program not allowlisted: {}",
-                    plan.input.funding.as_str(),
-                    bad.program_id
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::ProgramNotAllowlisted(bad.program_id),
+                });
                 continue;
             }
             if let Some(bad) = plan
@@ -771,11 +764,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 .find(|ix| !self.prereq_allowed.contains(&ix.program_id))
             {
                 note_stage(&mut furthest_technical, 2, LossReason::Build);
-                rejected.push(format!(
-                    "{}: prerequisite program not allowed: {}",
-                    plan.input.funding.as_str(),
-                    bad.program_id
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::PrerequisiteNotAllowed(bad.program_id),
+                });
                 continue;
             }
             // Shadow muss den finalen Pfad messen können, auch wenn LIVE absichtlich deaktiviert
@@ -795,11 +787,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 ) {
                     Ok(()) => true,
                     Err(deny) => {
-                        rejected.push(format!(
-                            "{}: safety {}",
-                            plan.input.funding.as_str(),
-                            deny.record_text()
-                        ));
+                        rejected.push(PlanRejection {
+                            funding: plan.input.funding,
+                            cause: PlanCause::Safety(deny),
+                        });
                         false
                     }
                 },
@@ -809,21 +800,22 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             if !self.submitter.supports_tx_version(plan.tx_version) {
                 // [FIX-38]
                 note_stage(&mut furthest_technical, 3, LossReason::Submission);
-                rejected.push(format!(
-                    "{}: tx version {} not supported on {}",
-                    plan.input.funding.as_str(),
-                    plan.tx_version.record_name(),
-                    self.submitter.path().as_str()
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::TxVersion {
+                        version: plan.tx_version,
+                        path: self.submitter.path(),
+                    },
+                });
                 continue;
             }
             if !plan.prerequisite_txs.is_empty() && !self.submitter.supports_bundle() {
                 // [FIX-14]
                 note_stage(&mut furthest_technical, 3, LossReason::Submission);
-                rejected.push(format!(
-                    "{}: needs bundle path",
-                    plan.input.funding.as_str()
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::NeedsBundle,
+                });
                 continue;
             }
             let txplan = TxPlan {
@@ -848,11 +840,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 Ok(b) => b,
                 Err(e) => {
                     note_stage(&mut furthest_technical, 4, LossReason::Build);
-                    rejected.push(format!(
-                        "{}: tx infeasible: {}",
-                        plan.input.funding.as_str(),
-                        e
-                    ));
+                    rejected.push(PlanRejection {
+                        funding: plan.input.funding,
+                        cause: PlanCause::Infeasible(e),
+                    });
                     continue;
                 }
             };
@@ -860,10 +851,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             // E2: the signed message is exactly the validated plan (with its compute budget).
             if let Err(code) = tx::message_matches_plan(&built.tx.message, &txplan) {
                 note_stage(&mut furthest_technical, 5, LossReason::Build);
-                rejected.push(format!(
-                    "{}: compiled message differs from the validated instructions ({code})",
-                    plan.input.funding.as_str()
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::MessageDiffers(code),
+                });
                 continue;
             }
             rec.progress.transaction_built = Some(true);
@@ -874,9 +865,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             {
                 if Instant::now() >= deadline {
                     rec.loss = Some(LossReason::RpcDeadline);
-                    rec.reason = Some(
-                        "RPC_DEADLINE: candidate network deadline before the fee quote".into(),
-                    );
+                    rec.reason = Some(Rejection::RpcDeadlineBeforeFeeQuote);
                     return rec.with_timeline(&tl);
                 }
                 let message_hash = built.tx.message.hash();
@@ -916,22 +905,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 match fee {
                     Err(submit::FeeQuoteError::Deadline) => {
                         rec.loss = Some(LossReason::RpcDeadline);
-                        rec.reason = Some(
-                            "RPC_DEADLINE: candidate network deadline in the fee quote".into(),
-                        );
+                        rec.reason = Some(Rejection::RpcDeadlineInFeeQuote);
                         return rec.with_timeline(&tl);
                     }
                     Err(submit::FeeQuoteError::BudgetRejected(code)) => {
                         rec.loss = Some(LossReason::RpcBudget);
-                        rec.reason = Some(format!("RPC_BUDGET: fee quote refused ({code})"));
+                        rec.reason = Some(Rejection::RpcBudgetFeeQuote(code));
                         return rec.with_timeline(&tl);
                     }
                     Err(_) => None,
                     // V2-14 P1-02: compared with the hash computed above, typed (an unreadable
                     // quote hash is no match); the quote's persisted text form stays (layout).
-                    Ok(q) => Some(q).filter(|q| {
-                        q.message_hash.parse::<solana_sdk::hash::Hash>().ok() == Some(message_hash)
-                    }),
+                    Ok(q) => Some(q).filter(|q| q.message_hash == message_hash),
                 }
             } else {
                 None
@@ -1011,11 +996,10 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     }
                 }
                 reached_economics = true;
-                rejected.push(format!(
-                    "{}: economics {}",
-                    plan.input.funding.as_str(),
-                    eval.record_text()
-                ));
+                rejected.push(PlanRejection {
+                    funding: plan.input.funding,
+                    cause: PlanCause::Economics(eval),
+                });
                 continue;
             }
             // V2-04: T_detect = valid and economic (PHASENPLAN §6) — the first plan that passes the
@@ -1075,11 +1059,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             } else {
                 LossReason::EconomicSkip
             });
-            rec.reason = Some(if rejected.is_empty() {
-                "no actionable execution candidate".into()
-            } else {
-                rejected.join(" | ")
-            });
+            rec.reason = Some(Rejection::PlansRejected(rejected));
             return rec.with_timeline(&tl);
         };
 
@@ -1093,8 +1073,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if let Evaluation::Known { net, .. } = eval {
             rec.net_profit = Some(net);
         } else if self.mode == Mode::Shadow {
-            rec.reason =
-                Some("technical shadow probe: cost or realization evidence incomplete".into());
+            rec.reason = Some(Rejection::TechnicalProbe);
         }
 
         rec.serialized_bytes = Some(built.serialized_len);
@@ -1104,7 +1083,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
 
         if let Err(e) = tx::sign(&mut built, &[self.payer]) {
             rec.loss = Some(LossReason::Build);
-            rec.reason = Some(e.to_string());
+            rec.reason = Some(Rejection::Sign(e));
             return rec.with_timeline(&tl);
         }
         // [FIX-4/FIX-15] Bundle = [prerequisite TXs…, receivership TX, tip TX], only on a bundle
@@ -1124,7 +1103,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // T_detect mark (stricter than the former T_detect anchor).
         if self.freshness.deadline_passed(t_rx_ns, self.clock.now_ns()) {
             rec.loss = Some(LossReason::Build);
-            rec.reason = Some("execution deadline passed".into());
+            rec.reason = Some(Rejection::ExecutionDeadline);
             return rec.with_timeline(&tl);
         }
         // [M1] Shadow baut und simuliert identisch zu LIVE. B1: this pipeline never reserves and
@@ -1137,7 +1116,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if use_bundle {
             let Some(tip_account) = self.tip_account else {
                 rec.loss = Some(LossReason::Submission);
-                rec.reason = Some("bundle path without tip account".into());
+                rec.reason = Some(Rejection::BundleWithoutTip);
                 return rec.with_timeline(&tl);
             };
             for pre in &plan.prerequisite_txs {
@@ -1152,20 +1131,18 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     Ok(b) => b,
                     Err(e) => {
                         rec.loss = Some(LossReason::Build);
-                        rec.reason = Some(format!("prerequisite build: {}", e));
+                        rec.reason = Some(Rejection::PrerequisiteBuild(e));
                         return rec.with_timeline(&tl);
                     }
                 };
                 if let Err(code) = tx::message_matches_plan(&b.tx.message, &pre_plan) {
                     rec.loss = Some(LossReason::Build);
-                    rec.reason = Some(format!(
-                        "prerequisite compiled message differs from the validated one ({code})"
-                    ));
+                    rec.reason = Some(Rejection::PrerequisiteMessage(code));
                     return rec.with_timeline(&tl);
                 }
                 if let Err(e) = tx::sign(&mut b, &[self.payer]) {
                     rec.loss = Some(LossReason::Build);
-                    rec.reason = Some(e.to_string());
+                    rec.reason = Some(Rejection::PrerequisiteSign(e));
                     return rec.with_timeline(&tl);
                 }
                 bundle_txs.push(b.tx);
@@ -1178,7 +1155,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                         submit::tip_matches(&t, &tx::payer_of(self.payer), &tip_account, plan.tip)
                     {
                         rec.loss = Some(LossReason::Build);
-                        rec.reason = Some(format!("tip tx differs from its plan ({code})"));
+                        rec.reason = Some(Rejection::TipMismatch(code));
                         return rec.with_timeline(&tl);
                     }
                     rec.submitted_tip =
@@ -1192,7 +1169,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 }
                 Err(e) => {
                     rec.loss = Some(LossReason::Build);
-                    rec.reason = Some(format!("tip tx: {}", e));
+                    rec.reason = Some(Rejection::TipBuild(e));
                     return rec.with_timeline(&tl);
                 }
             }
@@ -1204,8 +1181,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         }
         if Instant::now() >= deadline {
             rec.loss = Some(LossReason::RpcDeadline);
-            rec.reason =
-                Some("RPC_DEADLINE: candidate network deadline before the simulation".into());
+            rec.reason = Some(Rejection::RpcDeadlineBeforeSimulation);
             return rec.with_timeline(&tl);
         }
         let simulation_started = Instant::now();
@@ -1231,13 +1207,12 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             // N2: no simulation result exists; the cause is our own network bound.
             SimResult::Deadline => {
                 rec.loss = Some(LossReason::RpcDeadline);
-                rec.reason =
-                    Some("RPC_DEADLINE: candidate network deadline in the simulation".into());
+                rec.reason = Some(Rejection::RpcDeadlineSimulation);
                 return rec.with_timeline(&tl);
             }
             SimResult::BudgetRejected(code) => {
                 rec.loss = Some(LossReason::RpcBudget);
-                rec.reason = Some(format!("RPC_BUDGET: simulation refused ({code})"));
+                rec.reason = Some(Rejection::RpcBudgetSimulation(code));
                 return rec.with_timeline(&tl);
             }
             other => {
@@ -1246,7 +1221,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     self.simulation_failure = Some(f.clone());
                 }
                 rec.loss = Some(LossReason::Build);
-                rec.reason = Some(format!("simulation not ok: {}", other.record_text()));
+                rec.reason = Some(Rejection::Simulation(other.clone()));
                 rec.decision = if self.mode == Mode::Shadow {
                     if rec.economics_known {
                         Decision::ShadowSimFailed
@@ -1282,17 +1257,14 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         ) {
             rec.decision = Decision::DeniedBySafety;
             rec.loss = Some(LossReason::Safety);
-            rec.reason = Some(d.record_text());
+            rec.reason = Some(Rejection::Safety(d));
             return rec.with_timeline(&tl);
         }
         let Some(fe04) = self.fe04.as_deref_mut() else {
             // Not a Safety denial: the send capability is unavailable on this path.
             rec.decision = Decision::Unavailable;
             rec.loss = Some(LossReason::Submission);
-            rec.reason = Some(format!(
-                "{LIVE_SEND_REQUIRES_FE04}: simulated {} candidate is handed off only by the FE-04 one-shot owner",
-                if use_bundle { "bundle" } else { "single-TX" }
-            ));
+            rec.reason = Some(Rejection::LiveSendRequiresFe04 { bundle: use_bundle });
             return rec.with_timeline(&tl);
         };
         let fee_lamports = rec
@@ -1310,7 +1282,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             if let Err(d) = self.safety.admit_loss(now_unix_s, max_loss) {
                 rec.decision = Decision::DeniedBySafety;
                 rec.loss = Some(LossReason::Safety);
-                rec.reason = Some(d.record_text());
+                rec.reason = Some(Rejection::Safety(d));
                 return rec.with_timeline(&tl);
             }
         }
@@ -1326,7 +1298,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         ) {
             rec.decision = Decision::DeniedBySafety;
             rec.loss = Some(LossReason::Safety);
-            rec.reason = Some(d.record_text());
+            rec.reason = Some(Rejection::Safety(d));
             return rec.with_timeline(&tl);
         }
         let (path, txs) = if use_bundle {
@@ -1372,9 +1344,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     .safety
                     .release_without_outcome(plan.exposure, plan.inventory_hold_usd_micro)
                 {
-                    rec.reason = Some(format!("{reason}; {}", v.code()));
+                    rec.reason = Some(Rejection::SubmissionRefused {
+                        reason,
+                        release: Some(v.code()),
+                    });
                 } else {
-                    rec.reason = Some(reason);
+                    rec.reason = Some(Rejection::SubmissionRefused {
+                        reason,
+                        release: None,
+                    });
                 }
                 rec.decision = Decision::Unavailable;
                 rec.loss = Some(LossReason::Submission);
@@ -1386,7 +1364,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 rec.decision = Decision::AmbiguousSubmission;
                 rec.loss = Some(LossReason::Submission);
                 rec.exposure = Some(plan.exposure);
-                rec.reason = Some(reason);
+                rec.reason = Some(Rejection::SubmissionUnknown(reason));
             }
         }
         rec.with_timeline(&tl)

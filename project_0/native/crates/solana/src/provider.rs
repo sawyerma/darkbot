@@ -1062,7 +1062,12 @@ impl DeadlineRpc {
     /// Against an explicit budget (an isolated profile; tests that hold its permits).
     pub fn with_budget(url: String, work: Workload, budget: Arc<Budget>) -> Result<Self, String> {
         transport().map_err(String::from)?;
-        Ok(Self {
+        Ok(Self::over(url, work, budget))
+    }
+    /// DEC-12: the transport without the eager transport check; a missing transport is the
+    /// call's `Transport` error.
+    pub fn over(url: String, work: Workload, budget: Arc<Budget>) -> Self {
+        Self {
             sender: BudgetedSender {
                 url,
                 timeout: Duration::from_millis(budget.limits.rpc_timeout_ms),
@@ -1070,7 +1075,7 @@ impl DeadlineRpc {
                 budget,
                 stats: Arc::new(Mutex::new(RpcTransportStats::default())),
             },
-        })
+        }
     }
     /// One call in this transport's workload; an expired deadline starts nothing.
     pub fn call(

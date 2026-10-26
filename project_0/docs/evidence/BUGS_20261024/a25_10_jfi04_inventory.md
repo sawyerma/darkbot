@@ -2,7 +2,7 @@
 
 Source: live scan of `project_0/native/crates` at `72b74fc1` (the regression test `test_jfi04_json_inventory.py`; the scan equals the pin). Supersedes the table of `BUGS_20261024/a23_09_jfi04_inventory.md` for the current code (that file stays as the 24.10. evidence, unchanged).
 
-**289 occurrences in 32 files; open internal (I) list: empty.** By category (a file can carry several): C 1, H 161, R 28, W 167. Update 26.10.: DEC-09 — every H use is compiled only with the `historical` feature (standard build: none, `test_dec09_historical_feature.py`); DEC-10 — the FE-04 approval is native `key = value`, its historical JSON reader is H.
+**291 occurrences in 32 files; open internal (I) list: empty.** By category (a file can carry several): C 1, H 161, R 28, W 169. DEC-12: +2 W (`sendTransaction` on the deadline-bound wire). Update 26.10.: DEC-09 — every H use is compiled only with the `historical` feature (standard build: none, `test_dec09_historical_feature.py`); DEC-10 — the FE-04 approval is native `key = value`, its historical JSON reader is H.
 
 W external wire · R offline render/stdout/export · H historical reader or explicit offline import · C operator config/approval file input · I internal candidate.
 
@@ -39,7 +39,7 @@ W external wire · R offline render/stdout/export · H historical reader or expl
 | solana/src/provider.rs | 13 | W | V2-05: DeadlineRpc::call_as (JSON-RPC wire params/result) |
 | solana/src/state/snapshot.rs | 4 | W |  |
 | solana/src/submit/jito.rs | 17 | W |  |
-| solana/src/submit/rpc.rs | 9 | W |  |
+| solana/src/submit/rpc.rs | 11 | W | DEC-12: `sendTransaction` params/result on the deadline-bound JSON-RPC wire |
 
 ## Execution-path assertions (A10)
 

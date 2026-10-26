@@ -96,7 +96,7 @@ pub struct BuiltTx {
     pub blockhash: Hash,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum BuildError {
     TooManyAccounts { count: usize, max: usize },
     TooLarge { bytes: usize, max: usize },

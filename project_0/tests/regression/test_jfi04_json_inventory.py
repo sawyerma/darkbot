@@ -58,7 +58,7 @@ PINNED = {
     'solana/src/provider.rs': (13, 'W'),  # V2-05: DeadlineRpc::call_as (JSON-RPC wire params/result)
     'solana/src/state/snapshot.rs': (4, 'W'),
     'solana/src/submit/jito.rs': (17, 'W'),
-    'solana/src/submit/rpc.rs': (9, 'W'),
+    'solana/src/submit/rpc.rs': (11, 'W'),  # DEC-12: sendTransaction params/result on the deadline-bound wire
 }
 
 # JFI-04 is REOPENED (24.10.): productive internal JSON still exists in these files. Each migration
@@ -176,7 +176,7 @@ class JsonInventory(unittest.TestCase):
             self.assertTrue(cats and set(cats) <= set('WRHCI'), f)
         # JFI-04 is not closed: the open internal files are listed, never hidden (see above).
         self.assertEqual(OPEN_INTERNAL, EXPECTED_OPEN_INTERNAL)
-        self.assertEqual(sum(n for n, _ in PINNED.values()), 289)  # DEC-10: p0ctl's 2 C uses gone, 2 historical H in approval_file.rs
+        self.assertEqual(sum(n for n, _ in PINNED.values()), 291)  # DEC-12: 2 W uses (sendTransaction on the deadline-bound wire)
 
 
     def test_view_renders_reach_only_the_read_only_check(self):

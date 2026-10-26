@@ -123,6 +123,10 @@ pub fn admit_exit(
         exact_signed_payload_simulated: true,
         bundle_simulated: false,
     };
+    // DEC-12: the handoff is bounded by the deadline; past it nothing is reserved.
+    if std::time::Instant::now() >= c.deadline {
+        return Admission::Refused("FE04_HANDOFF_DEADLINE".into());
+    }
     if let Err(e) = journal.reserve_exit_payload(approval, intent, &current, &simulated) {
         // A failed write may still have reached the disk: never treated as nothing.
         return if e.starts_with("JOURNAL") {
@@ -131,7 +135,7 @@ pub fn admit_exit(
             Admission::Refused(e)
         };
     }
-    match journal.submit_exit_payload(&simulated, &current, c.t_handoff_ns) {
+    match journal.submit_exit_payload(&simulated, &current, c.t_handoff_ns, c.deadline) {
         Ok(ack) => Admission::Submitted(ack),
         Err(e) => Admission::Unknown(e),
     }

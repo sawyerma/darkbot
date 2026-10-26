@@ -201,21 +201,34 @@ pub struct ShadowEvaluation {
 impl crate::analytics::payload::Payload for ShadowEvaluation {
     const KIND: u16 = kind::ECON_SHADOW_EVALUATION;
     /// V9/V17: 3 — attributed under EXHAUSTIVE_V2 (`LossReason::Plan`/`Safety`); DEC-01: 4 —
-    /// under EXHAUSTIVE_V3 (a stale blockhash is `Build` decided before planning).
-    const SCHEMA: u16 = 4;
-    /// Schemas 2 and 3 have the identical layout (`LossReason` only gained variants at its end)
-    /// and were written under an earlier attribution, so they cannot carry a cause added since.
+    /// under EXHAUSTIVE_V3 (a stale blockhash is `Build` decided before planning); DEC-12: 5 —
+    /// the typed rejection and the native message hash (still EXHAUSTIVE_V3).
+    const SCHEMA: u16 = 5;
+    /// Schemas 2–4 have the record layout before DEC-12 (`LossReason` only gained variants at
+    /// its end); 2 and 3 were written under an earlier attribution, and schema 2 cannot carry a
+    /// cause added since.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == 2 || schema == 3).then(|| {
-            crate::analytics::payload::decode_wire::<Self>(bytes).and_then(|v| {
+        (2..=4).contains(&schema).then(|| {
+            crate::analytics::payload::decode_wire::<ShadowEvaluationV4>(bytes).and_then(|v| {
                 if schema == 2 && v.record.loss.is_some_and(LossReason::since_exhaustive_v2) {
                     Err(crate::analytics::journal::coded("PAYLOAD_DECODE"))
                 } else {
-                    Ok(v)
+                    Ok(Self {
+                        previous: v.previous,
+                        record: v.record.try_into()?,
+                    })
                 }
             })
         })
     }
+}
+/// DEC-01: the first schema written under EXHAUSTIVE_V3; earlier ones are earlier attribution.
+pub const SHADOW_POLICY_V3_SCHEMA: u16 = 4;
+/// DEC-12: `ShadowEvaluation` schemas 2–4 (the record before DEC-12).
+#[derive(Deserialize)]
+struct ShadowEvaluationV4 {
+    previous: Option<EvalRef>,
+    record: crate::analytics::record::OpportunityRecordV2,
 }
 
 /// Shadow owner counters at shutdown. Built on the owner thread without JSON (PERSIST-02);
@@ -657,29 +670,54 @@ pub struct OpportunityRow {
     /// A2: commitment of the market capture (decides whether the winner rx margin is valid).
     pub market_commitment: String,
 }
-/// Layout of schema 2 (before A2): no market commitment.
+/// Layout of schema 2 (before A2): no market commitment; the record before DEC-12.
 #[derive(Deserialize)]
 struct OpportunityRowV2 {
-    rec: OpportunityRecord,
+    rec: crate::analytics::record::OpportunityRecordV2,
     winner: Option<Winner>,
     market: Option<MarketEvent>,
     slot_seen: Option<u64>,
     capital: Vec<u64>,
 }
+/// Layout of schema 3 (before DEC-12): the record before DEC-12.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct OpportunityRowV3 {
+    rec: crate::analytics::record::OpportunityRecordV2,
+    winner: Option<Winner>,
+    market: Option<MarketEvent>,
+    slot_seen: Option<u64>,
+    capital: Vec<u64>,
+    market_commitment: String,
+}
 impl crate::analytics::payload::Payload for OpportunityRow {
     const KIND: u16 = kind::ECON_OPPORTUNITY;
-    const SCHEMA: u16 = 3;
+    /// DEC-12: 4 — the record with the typed rejection and the native message hash.
+    const SCHEMA: u16 = 4;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
-        (schema == crate::analytics::payload::TYPED).then(|| {
-            crate::analytics::payload::decode_wire::<OpportunityRowV2>(bytes).map(|v| Self {
+        use crate::analytics::payload::decode_wire;
+        let v = match schema {
+            2 => decode_wire::<OpportunityRowV2>(bytes).map(|v| OpportunityRowV3 {
                 rec: v.rec,
                 winner: v.winner,
                 market: v.market,
                 slot_seen: v.slot_seen,
                 capital: v.capital,
                 market_commitment: "UNKNOWN".into(),
+            }),
+            3 => decode_wire::<OpportunityRowV3>(bytes),
+            _ => return None,
+        };
+        Some(v.and_then(|v| {
+            Ok(Self {
+                rec: v.rec.try_into()?,
+                winner: v.winner,
+                market: v.market,
+                slot_seen: v.slot_seen,
+                capital: v.capital,
+                market_commitment: v.market_commitment,
             })
-        })
+        }))
     }
 }
 

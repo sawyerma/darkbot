@@ -48,11 +48,16 @@ pub struct SubmitAck {
     pub serialized_len: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum SubmitError {
     Transport(String),
     Rejected(String),
     Serialize(String),
+    /// DEC-12: the handoff deadline ended the call — before any request (`sent = false`) or
+    /// with the request in flight (`sent = true`, outcome ambiguous).
+    Deadline {
+        sent: bool,
+    },
 }
 
 impl fmt::Display for SubmitError {
@@ -61,6 +66,8 @@ impl fmt::Display for SubmitError {
             SubmitError::Transport(s) => write!(f, "submit transport: {}", s),
             SubmitError::Rejected(s) => write!(f, "submit rejected: {}", s),
             SubmitError::Serialize(s) => write!(f, "submit serialize: {}", s),
+            SubmitError::Deadline { sent: false } => write!(f, "submit deadline: not sent"),
+            SubmitError::Deadline { sent: true } => write!(f, "submit deadline: in flight"),
         }
     }
 }
@@ -334,14 +341,40 @@ pub fn bounded_simulation_logs(logs: Option<&[String]>) -> (Vec<String>, Option<
 /// RPC quote for the exact serialized message, not an observed landed fee.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MessageFeeQuote {
-    pub message_hash: String,
+    /// DEC-12 (V2-14/P1-02): the native hash of the quoted message (before: its base58 text).
+    #[serde(with = "message_hash_serde")]
+    pub message_hash: solana_sdk::hash::Hash,
     pub context_slot: u64,
     pub lamports: u64,
+}
+
+/// DEC-12: a message hash in a typed payload — its 32 bytes in the binary journal, its base58
+/// text in a human-readable view, so historical renders stay identical.
+pub mod message_hash_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use solana_sdk::hash::Hash;
+    pub fn serialize<S: Serializer>(hash: &Hash, s: S) -> Result<S::Ok, S::Error> {
+        if s.is_human_readable() {
+            s.serialize_str(&hash.to_string())
+        } else {
+            hash.to_bytes().serialize(s)
+        }
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Hash, D::Error> {
+        if d.is_human_readable() {
+            String::deserialize(d)?
+                .parse()
+                .map_err(|_| serde::de::Error::custom("MESSAGE_HASH_TEXT"))
+        } else {
+            <[u8; 32]>::deserialize(d).map(Hash::new_from_array)
+        }
+    }
 }
 
 /// N2: the network operations a candidate evaluation performs (`fee_for_message`, `simulate`,
 /// `simulate_bundle`) take the candidate's monotonic deadline and have no default: every adapter
 /// states how it honours it (nothing starts after the deadline; a call in flight ends at it).
+/// DEC-12: the handoff (`submit`, `submit_bundle`) takes the same deadline.
 pub trait SubmissionAdapter {
     fn path(&self) -> SubmissionPath;
     fn fee_for_message(
@@ -368,12 +401,14 @@ pub trait SubmissionAdapter {
         &self,
         tx: &VersionedTransaction,
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError>;
     /// [FIX-4] Atomares Bundle (Prerequisite-TXs, Receivership-TX, Tip-TX). Default: nicht unterstützt.
     fn submit_bundle(
         &self,
         txs: &[VersionedTransaction],
         _t_handoff_ns: u64,
+        _deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
         Err(SubmitError::Rejected(format!(
             "bundle of {} txs not supported by {}",

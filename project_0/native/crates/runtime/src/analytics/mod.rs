@@ -10,6 +10,7 @@ pub mod measurement;
 pub mod post_capture;
 pub mod qualification;
 pub mod record;
+pub mod rejection;
 pub mod report;
 pub mod shadow_ledger;
 

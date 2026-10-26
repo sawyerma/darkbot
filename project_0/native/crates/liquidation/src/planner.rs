@@ -46,7 +46,7 @@ pub enum RouteKind {
     PaidAllowed,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlanError {
     NoStart,
     NoEnd,

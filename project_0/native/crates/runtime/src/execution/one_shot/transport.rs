@@ -152,13 +152,15 @@ impl Journal {
         self.reserve(approval, intent, now)
     }
 
-    /// Exactly one adapter call, only after the UNKNOWN state was fsynced.
-    /// No error (including Rejected or a malformed ACK) releases the hold.
+    /// Exactly one adapter call, only after the UNKNOWN state was fsynced, bounded by the
+    /// candidate's monotonic `deadline` (DEC-12). No error (including Rejected, the deadline or
+    /// a malformed ACK) releases the hold.
     pub fn submit_payload(
         &mut self,
         simulated: &SimulatedPayload<'_>,
         now: &Current,
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, String> {
         let p = &simulated.payload;
         if p.path == SubmissionPath::JitoBundle && !now.bundle_simulated {
@@ -170,9 +172,11 @@ impl Journal {
         }
         let ack = self.handoff(&p.digest, now, || {
             let result = if p.path == SubmissionPath::JitoBundle {
-                simulated.adapter.submit_bundle(&p.txs, t_handoff_ns)
+                simulated
+                    .adapter
+                    .submit_bundle(&p.txs, t_handoff_ns, deadline)
             } else {
-                simulated.adapter.submit(&p.txs[0], t_handoff_ns)
+                simulated.adapter.submit(&p.txs[0], t_handoff_ns, deadline)
             };
             // M6: the adapter's typed class; whatever it is (a local or remote definitive refusal
             // included), the attempt stays UNKNOWN and keeps its hold. C06: one mapping.
@@ -199,6 +203,8 @@ fn unknown(e: SubmitError) -> String {
         SubmitError::Rejected(_) => "SUBMISSION_RESULT_UNKNOWN:REJECTED",
         SubmitError::Transport(_) => "SUBMISSION_RESULT_UNKNOWN:TRANSPORT_AMBIGUOUS",
         SubmitError::Serialize(_) => "SUBMISSION_RESULT_UNKNOWN:SERIALIZE",
+        SubmitError::Deadline { sent: false } => "SUBMISSION_RESULT_UNKNOWN:DEADLINE_NOT_SENT",
+        SubmitError::Deadline { sent: true } => "SUBMISSION_RESULT_UNKNOWN:DEADLINE_IN_FLIGHT",
     })
 }
 
@@ -221,13 +227,14 @@ impl Journal {
         self.reserve_exit(approval, intent, now)
     }
 
-    /// FE-04 exit: exactly one adapter call, only after the exit's UNKNOWN state was fsynced; no
-    /// error releases its hold; the ACK must be this payload's.
+    /// FE-04 exit: exactly one adapter call, only after the exit's UNKNOWN state was fsynced and
+    /// bounded by `deadline` (DEC-12); no error releases its hold; the ACK must be this payload's.
     pub fn submit_exit_payload(
         &mut self,
         simulated: &SimulatedPayload<'_>,
         now: &Current,
         t_handoff_ns: u64,
+        deadline: std::time::Instant,
     ) -> Result<SubmitAck, String> {
         let p = &simulated.payload;
         let (intent, _) = self
@@ -239,7 +246,7 @@ impl Journal {
         let ack = self.handoff_exit(&p.digest, now, || {
             simulated
                 .adapter
-                .submit(&p.txs[0], t_handoff_ns)
+                .submit(&p.txs[0], t_handoff_ns, deadline)
                 .map_err(unknown)
         })?;
         let returned: Vec<_> = ack.signatures.iter().map(ToString::to_string).collect();
@@ -252,5 +259,23 @@ impl Journal {
             return Err(err("SUBMISSION_ACK_MISMATCH_UNKNOWN"));
         }
         Ok(ack)
+    }
+}
+
+#[cfg(test)]
+mod dec12_tests {
+    use super::*;
+    /// DEC-12: every adapter error of a handoff keeps the attempt UNKNOWN; the deadline class
+    /// says whether a request left (in flight) or not, never a release.
+    #[test]
+    fn dec12_deadline_errors_stay_unknown_with_their_class() {
+        assert_eq!(
+            unknown(SubmitError::Deadline { sent: false }),
+            err("SUBMISSION_RESULT_UNKNOWN:DEADLINE_NOT_SENT")
+        );
+        assert_eq!(
+            unknown(SubmitError::Deadline { sent: true }),
+            err("SUBMISSION_RESULT_UNKNOWN:DEADLINE_IN_FLIGHT")
+        );
     }
 }

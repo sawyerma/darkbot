@@ -118,6 +118,10 @@ impl Fe04Admission {
             Ok(s) => s,
             Err(e) => return Admission::Refused(e),
         };
+        // DEC-12: the handoff is bounded by the candidate's deadline; past it nothing is reserved.
+        if std::time::Instant::now() >= c.deadline {
+            return refuse("FE04_HANDOFF_DEADLINE");
+        }
         let intent = Intent {
             code_sha: a.code_sha.clone(),
             binary_sha256: a.binary_sha256.clone(),
@@ -180,7 +184,7 @@ impl Fe04Admission {
         };
         match self
             .journal
-            .submit_payload(&simulated, &at_handoff, c.t_handoff_ns)
+            .submit_payload(&simulated, &at_handoff, c.t_handoff_ns, c.deadline)
         {
             Ok(ack) => Admission::Submitted(ack),
             Err(e) => Admission::Unknown(e),

@@ -142,10 +142,13 @@ pub(crate) fn health_fails_closed(e: &darkbot_project0::health::HealthError) -> 
 
 pub(crate) fn bankruptcy_classification(
     loss: Option<crate::analytics::record::LossReason>,
-    reason: Option<String>,
+    reason: Option<crate::analytics::rejection::Rejection>,
     bad_debt: bool,
     equity_assets: i128,
-) -> (Option<crate::analytics::record::LossReason>, Option<String>) {
+) -> (
+    Option<crate::analytics::record::LossReason>,
+    Option<crate::analytics::rejection::Rejection>,
+) {
     use crate::analytics::record::LossReason as L;
     // F-08: the follow-on cause is bound by the pattern itself — no invariant left to a panic.
     let Some(
@@ -164,12 +167,10 @@ pub(crate) fn bankruptcy_classification(
     }
     (
         Some(L::Bankruptcy),
-        Some(format!(
-            "bad debt with zero equity assets: bankruptcy/no-collateral case, not a normal \
-             receivership opportunity (reported as {:?}: {})",
+        Some(crate::analytics::rejection::Rejection::Bankruptcy {
             cause,
-            reason.as_deref().unwrap_or("-")
-        )),
+            reason: reason.map(Box::new),
+        }),
     )
 }
 
@@ -1744,8 +1745,17 @@ mod n3_n4_tests {
     #[test]
     fn z13_bankruptcy_keeps_independent_causes_and_their_provenance() {
         use crate::analytics::record::LossReason as L;
+        // DEC-12: the reason is typed; its text is compared.
         let classify = |loss: Option<L>, reason: &str| {
-            bankruptcy_classification(loss, Some(reason.to_string()), true, 0)
+            let (loss, reason) = bankruptcy_classification(
+                loss,
+                Some(crate::analytics::rejection::Rejection::Plan(
+                    reason.to_string(),
+                )),
+                true,
+                0,
+            );
+            (loss, reason.map(|r| r.text().into_owned()))
         };
         for follow_on in [
             L::Sizing,
