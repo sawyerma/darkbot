@@ -1173,6 +1173,13 @@ impl ChainState {
             })
     }
 
+    /// The canonical head: number, hash and timestamp (ms), when anchored.
+    pub fn head_block(&self) -> Option<(u64, B256, u64)> {
+        self.blocks
+            .back()
+            .map(|b| (b.number, b.hash, b.timestamp_ms))
+    }
+
     /// The retained canonical window, ascending: the follower's resume
     /// window after a restore.
     pub fn retained(&self) -> Vec<(u64, B256)> {

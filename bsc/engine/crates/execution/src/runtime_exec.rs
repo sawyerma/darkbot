@@ -7,16 +7,23 @@
 //!    deployment and venue terms are probed read-only on a helper thread,
 //!    pinned to one block (never assumed): a drift, other terms or a funded
 //!    PAPER sender stop here, visibly;
-//! 3. once C2 knows the PAPER sender's next nonce exactly, the executor arms
-//!    its fenced lanes;
+//! 3. once C2 knows the PAPER sender's next nonce exactly (zero: the
+//!    identity never sends), the executor arms its fenced lanes;
 //! 4. every C1-scope launch then runs the production path to the PAPER
-//!    sink. No automatic re-probe or re-arm: switching the component off
-//!    and on again starts over.
+//!    sink;
+//! 5. while armed, the deployment and terms are probed again every
+//!    `BSC_EXEC_REPROBE_MS`: a drift, other terms, a funded sender or a
+//!    probe that fails disarms the path, visibly. Nothing is retried or
+//!    re-armed automatically: switching the component off and on again
+//!    starts over (with a new fence).
 
 use crate::chain_follower::FollowerLimits;
 use crate::paper::PaperIdentity;
-use crate::paper_exec::{ExecConfig, PaperBuy, PaperExecutor};
+use crate::paper_exec::{
+    Arming, ExecConfig, LaunchContext, PaperBuy, PaperExecutor, PendingLaunch,
+};
 use crate::runtime::state::StateOwner;
+use crate::submission::transport::Clock;
 use crate::venue_probe::{VenueObservation, probe_flap};
 use alloy_primitives::{Address, U256};
 use darkbot_bsc_geth_ipc::ingress::decode_tx_target;
@@ -25,10 +32,13 @@ use darkbot_bsc_record::schema::bsc_runtime::runtime_status::exec as e;
 use darkbot_bsc_trading::economics::flap::native_curve20::{
     VenueBuyTerms, WITNESSED_MAINNET_TERMS,
 };
-use darkbot_bsc_trading::venues::flap::deployment::{ValidatedDeployment, bsc_mainnet_v5_27_0};
+use darkbot_bsc_trading::venues::flap::deployment::{
+    FlapDeployment, ValidatedDeployment, bsc_mainnet_v5_27_0,
+};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// The PAPER path's configuration (`BSC_EXEC_*`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +48,8 @@ pub struct ExecSetup {
     /// Accounts the PAPER identity must never be.
     pub refused_accounts: Vec<[u8; 20]>,
     pub exec: ExecConfig,
+    /// How often an armed path probes the deployment again.
+    pub reprobe: Duration,
 }
 
 impl ExecSetup {
@@ -50,6 +62,20 @@ impl ExecSetup {
             None => Ok(PathBuf::from(path)),
         }
     }
+}
+
+/// One read-only probe of the live deployment, venue terms and caller
+/// balance (`venue_probe::probe_flap` in production).
+pub type Prober =
+    fn(&str, &FollowerLimits, &FlapDeployment, Address) -> Result<VenueObservation, String>;
+
+fn live_probe(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    deployment: &FlapDeployment,
+    caller: Address,
+) -> Result<VenueObservation, String> {
+    probe_flap(endpoint, limits, deployment, caller).map_err(|e| e.to_string())
 }
 
 /// Where the PAPER path stands.
@@ -71,6 +97,22 @@ enum Phase {
     Armed,
 }
 
+impl Phase {
+    /// A state only switching the component off and on again leaves.
+    fn terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::IdentityRefused(_)
+                | Self::ProbeFailed(_)
+                | Self::DeploymentDrift(_)
+                | Self::TermsDrift(_)
+                | Self::EconomicsUnqualified(_)
+                | Self::Funded(_)
+                | Self::ArmFailed(_)
+        )
+    }
+}
+
 /// The runtime's PAPER path controller.
 pub struct ExecRuntime {
     setup: ExecSetup,
@@ -83,14 +125,26 @@ pub struct ExecRuntime {
     observation: Option<VenueObservation>,
     validated: Option<(ValidatedDeployment, VenueBuyTerms)>,
     executor: Option<PaperExecutor>,
-    /// Code generations issued by successful probes.
+    /// Code generations issued by successful first probes.
     codehash_generation: u64,
+    /// Arms of this process (each its own fence).
+    arms: u64,
+    /// When the last probe was started.
+    last_probe: Option<Instant>,
+    probes: u64,
+    /// Disarms whose fence could not be removed.
+    disarm_errors: u64,
+    prober: Prober,
 }
 
 impl ExecRuntime {
     /// At process start: loads the PAPER identity (outside the repository,
     /// owner-only, never a refused account) to learn its address.
     pub fn new(setup: ExecSetup, repo_root: &Path, fence_dir: PathBuf) -> Self {
+        Self::with_prober(setup, repo_root, fence_dir, live_probe)
+    }
+
+    fn with_prober(setup: ExecSetup, repo_root: &Path, fence_dir: PathBuf, prober: Prober) -> Self {
         let loaded = PaperIdentity::load(&setup.identity_path, repo_root, &setup.refused_accounts);
         let (sender, identity_error) = match loaded {
             Ok(identity) => (Some(identity.address()), None),
@@ -108,6 +162,11 @@ impl ExecRuntime {
             validated: None,
             executor: None,
             codehash_generation: 0,
+            arms: 0,
+            last_probe: None,
+            probes: 0,
+            disarm_errors: 0,
+            prober,
         }
     }
 
@@ -116,7 +175,87 @@ impl ExecRuntime {
         self.sender
     }
 
-    /// One reconcile step: `wanted` is the component effective SHADOW.
+    fn disarm(&mut self) {
+        if let Some(x) = self.executor.take()
+            && x.disarm().is_err()
+        {
+            self.disarm_errors += 1;
+        }
+    }
+
+    /// Ends the path in `phase`: the executor and the validation go.
+    fn stop(&mut self, phase: Phase) {
+        self.disarm();
+        self.validated = None;
+        self.phase = phase;
+    }
+
+    fn spawn_probe(&mut self, endpoint: &str, limits: &FollowerLimits, sender: [u8; 20]) {
+        let (tx, rx) = channel();
+        let endpoint = endpoint.to_string();
+        let limits = *limits;
+        let prober = self.prober;
+        let spawned = thread::Builder::new()
+            .name("bsc-exec-probe".into())
+            .spawn(move || {
+                let _ = tx.send(prober(
+                    &endpoint,
+                    &limits,
+                    &bsc_mainnet_v5_27_0(),
+                    Address::from(sender),
+                ));
+            });
+        match spawned {
+            Ok(_) => {
+                self.probe = Some(rx);
+                self.last_probe = Some(Instant::now());
+                self.probes += 1;
+            }
+            Err(e) => self.stop(Phase::ProbeFailed(format!("spawn: {e}"))),
+        }
+    }
+
+    /// The outcome of one probe: a refusal ends the path (armed or not);
+    /// a matching observation validates it, or keeps it armed.
+    fn observed(&mut self, result: Result<VenueObservation, String>) {
+        let observation = match result {
+            Ok(o) => o,
+            Err(e) => return self.stop(Phase::ProbeFailed(e)),
+        };
+        let generation = self.codehash_generation + 1;
+        let validated = bsc_mainnet_v5_27_0().validate(&observation.deployment(), generation);
+        let terms = observation.terms;
+        let balance = observation.caller_balance_wei;
+        let o = &observation.observed;
+        let seen = format!(
+            "observed {} implementation {} sha256 0x{}",
+            o.portal_version,
+            o.portal_implementation,
+            alloy_primitives::hex::encode(o.portal_implementation_code.sha256)
+        );
+        self.observation = Some(observation);
+        match validated {
+            Err(e) => self.stop(Phase::DeploymentDrift(format!("{e}: {seen}"))),
+            Ok(v) if !v.economics_witnessed() => self.stop(Phase::EconomicsUnqualified(format!(
+                "{seen} is decode-only"
+            ))),
+            Ok(_) if terms != WITNESSED_MAINNET_TERMS => {
+                self.stop(Phase::TermsDrift(format!("{terms:?}")))
+            }
+            Ok(_) if balance != U256::ZERO => self.stop(Phase::Funded(format!("{balance} wei"))),
+            Ok(v) => {
+                // An armed path stays on its validated deployment (the same
+                // fingerprints); a first probe validates it.
+                if self.executor.is_none() {
+                    self.codehash_generation = generation;
+                    self.validated = Some((v, terms));
+                }
+            }
+        }
+    }
+
+    /// One reconcile step: `wanted` is the component effective SHADOW;
+    /// `session` names this process's fences.
     pub fn tick(
         &mut self,
         wanted: bool,
@@ -127,9 +266,8 @@ impl ExecRuntime {
         if !wanted {
             self.probe = None;
             self.observation = None;
-            self.validated = None;
-            self.executor = None;
-            self.phase = Phase::Off;
+            self.last_probe = None;
+            self.stop(Phase::Off);
             return;
         }
         if let Some(error) = &self.identity_error {
@@ -139,106 +277,62 @@ impl ExecRuntime {
         let Some(sender) = self.sender else {
             return;
         };
+        if self.phase.terminal() {
+            return;
+        }
         let (Some(owner), Some((endpoint, limits))) = (owner, canonical) else {
             self.phase = Phase::WaitingC2;
             return;
         };
-        if self.executor.is_some() {
-            self.phase = Phase::Armed;
-            return;
-        }
-        if self.validated.is_none() {
-            match self.phase {
-                Phase::ProbeFailed(_)
-                | Phase::DeploymentDrift(_)
-                | Phase::TermsDrift(_)
-                | Phase::EconomicsUnqualified(_)
-                | Phase::Funded(_) => return,
-                _ => {}
-            }
-            let Some(rx) = &self.probe else {
-                let (tx, rx) = channel();
-                let endpoint = endpoint.to_string();
-                let limits = *limits;
-                let spawned =
-                    thread::Builder::new()
-                        .name("bsc-exec-probe".into())
-                        .spawn(move || {
-                            let result = probe_flap(
-                                &endpoint,
-                                &limits,
-                                &bsc_mainnet_v5_27_0(),
-                                Address::from(sender),
-                            )
-                            .map_err(|e| e.to_string());
-                            let _ = tx.send(result);
-                        });
-                match spawned {
-                    Ok(_) => {
-                        self.probe = Some(rx);
+        // A probe in flight: its outcome first.
+        if let Some(rx) = &self.probe {
+            match rx.try_recv() {
+                Err(TryRecvError::Empty) => {
+                    if self.executor.is_none() {
                         self.phase = Phase::Probing;
                     }
-                    Err(e) => self.phase = Phase::ProbeFailed(format!("spawn: {e}")),
+                    return;
                 }
-                return;
-            };
-            match rx.try_recv() {
-                Err(TryRecvError::Empty) => return,
                 Err(TryRecvError::Disconnected) => {
                     self.probe = None;
-                    self.phase = Phase::ProbeFailed("probe thread ended".into());
-                    return;
+                    return self.stop(Phase::ProbeFailed("probe thread ended".into()));
                 }
-                Ok(Err(e)) => {
+                Ok(result) => {
                     self.probe = None;
-                    self.phase = Phase::ProbeFailed(e);
-                    return;
-                }
-                Ok(Ok(observation)) => {
-                    self.probe = None;
-                    self.codehash_generation += 1;
-                    let validated = bsc_mainnet_v5_27_0()
-                        .validate(&observation.deployment(), self.codehash_generation);
-                    let terms = observation.terms;
-                    let balance = observation.caller_balance_wei;
-                    self.observation = Some(observation);
-                    match validated {
-                        Err(e) => {
-                            self.phase = Phase::DeploymentDrift(e.to_string());
-                            return;
-                        }
-                        Ok(v) if !v.economics_witnessed() => {
-                            self.phase = Phase::EconomicsUnqualified(format!(
-                                "Portal {} ({}) is decode-only",
-                                self.observation
-                                    .as_ref()
-                                    .map_or("?", |o| o.observed.portal_version.as_str()),
-                                v.deployment().portal_implementation
-                            ));
-                            return;
-                        }
-                        Ok(_) if terms != WITNESSED_MAINNET_TERMS => {
-                            self.phase = Phase::TermsDrift(format!("{terms:?}"));
-                            return;
-                        }
-                        Ok(_) if balance != U256::ZERO => {
-                            self.phase = Phase::Funded(format!("{balance} wei"));
-                            return;
-                        }
-                        Ok(v) => self.validated = Some((v, terms)),
+                    self.observed(result);
+                    if self.phase.terminal() {
+                        return;
                     }
                 }
             }
         }
+        if self.executor.is_some() {
+            self.phase = Phase::Armed;
+            if self
+                .last_probe
+                .is_none_or(|at| at.elapsed() >= self.setup.reprobe)
+            {
+                self.spawn_probe(endpoint, limits, sender);
+            }
+            return;
+        }
+        let Some((deployment, terms)) = self.validated else {
+            self.spawn_probe(endpoint, limits, sender);
+            if !self.phase.terminal() {
+                self.phase = Phase::Probing;
+            }
+            return;
+        };
         let Some(next_nonce) = owner.clean_next_nonce(&sender) else {
             self.phase = Phase::WaitingNonce;
             return;
         };
-        let Some((deployment, terms)) = self.validated else {
-            return;
-        };
-        if matches!(self.phase, Phase::ArmFailed(_)) {
-            return;
+        // A PAPER identity never sends: any consumed nonce means the key
+        // was used elsewhere.
+        if next_nonce != 0 {
+            return self.stop(Phase::IdentityRefused(format!(
+                "the PAPER sender's next nonce is {next_nonce}: the key has sent transactions"
+            )));
         }
         let armed = PaperIdentity::load(
             &self.setup.identity_path,
@@ -247,46 +341,63 @@ impl ExecRuntime {
         )
         .map_err(|e| e.to_string())
         .and_then(|identity| {
+            if identity.address() != sender {
+                return Err("the PAPER identity file changed since start".to_string());
+            }
             PaperExecutor::arm(
                 identity,
                 deployment,
                 terms,
                 self.setup.exec.clone(),
-                next_nonce,
-                &self.fence_dir,
-                session,
+                Arming {
+                    next_nonce,
+                    fence_dir: &self.fence_dir,
+                    session,
+                    arm: self.arms,
+                },
             )
             .map_err(|e| e.to_string())
         });
+        self.arms += 1;
         match armed {
             Ok(executor) => {
                 self.executor = Some(executor);
                 self.phase = Phase::Armed;
             }
-            Err(e) => self.phase = Phase::ArmFailed(e),
+            Err(e) => self.stop(Phase::ArmFailed(e)),
         }
     }
 
-    /// A verified pending C1-scope launch (`raw` signed bytes), observed at
-    /// `ingress_ns`: the production path to the sink, when armed.
+    /// A verified pending C1-scope launch (`raw` signed bytes), received at
+    /// `ingress_ns` on `clock`: the production path to the sink, when
+    /// armed.
     pub fn on_launch(
         &mut self,
         hash: [u8; 32],
         raw: &[u8],
         ingress_ns: u64,
         owner: &StateOwner,
-        now_ns: impl Fn() -> u64,
+        clock: &dyn Clock,
     ) -> Option<PaperBuy> {
         let executor = self.executor.as_mut()?;
-        let target = decode_tx_target(raw).ok()?;
+        let Ok(target) = decode_tx_target(raw) else {
+            executor.refuse_undecodable();
+            return None;
+        };
         executor
             .on_launch(
-                hash,
-                target.to,
-                target.data,
-                ingress_ns,
-                |c, p, g| owner.snapshot(c, p, g),
-                now_ns,
+                PendingLaunch {
+                    hash,
+                    raw,
+                    to: target.to,
+                    input: target.data,
+                    ingress_ns,
+                },
+                &LaunchContext {
+                    snapshot: &|c, p, g| owner.snapshot(c, p, g),
+                    head: owner.head(),
+                },
+                clock,
             )
             .ok()
     }
@@ -322,11 +433,19 @@ impl ExecRuntime {
         }
         if let Some(o) = &self.observation {
             d.set(e::PORTAL_VERSION, o.observed.portal_version.as_str())
-                .set(e::PROBE_BLOCK, o.block_number);
+                .set(e::PROBE_BLOCK, o.block_number)
+                .set(
+                    e::PAPER_BALANCE_WEI,
+                    darkbot_bsc_record::Value::U256(o.caller_balance_wei.to_be_bytes()),
+                );
         }
         let (armed, left) = self.executor.as_ref().map_or((0, 0), PaperExecutor::lanes);
         let counters = self.executor.as_ref().map(|x| x.counters().clone());
         let refused = |stage: &str| counters.as_ref().map_or(0, |c| c.refused(stage));
+        let spent = self
+            .executor
+            .as_ref()
+            .map_or(U256::ZERO, PaperExecutor::spent_wei);
         d.set(e::LANES_ARMED, armed as u64)
             .set(e::LANES_LEFT, left as u64)
             .set(e::LAUNCHES, counters.as_ref().map_or(0, |c| c.launches))
@@ -338,7 +457,18 @@ impl ExecRuntime {
             .set(e::REFUSED_INTENT, refused("INTENT"))
             .set(e::REFUSED_LANES_EXHAUSTED, refused("LANES_EXHAUSTED"))
             .set(e::REFUSED_LANE, refused("LANE"))
-            .set(e::REFUSED_BUILD, refused("BUILD"));
+            .set(e::REFUSED_BUILD, refused("BUILD"))
+            .set(e::REFUSED_DUPLICATE_TOKEN, refused("DUPLICATE_TOKEN"))
+            .set(e::REFUSED_SESSION_CAP, refused("SESSION_CAP"))
+            .set(e::REFUSED_PLAN, refused("PLAN"))
+            .set(e::REFUSED_DEADLINE, refused("DEADLINE"))
+            .set(e::REFUSED_DISPATCH, refused("DISPATCH"))
+            .set(
+                e::SESSION_SPENT_WEI,
+                darkbot_bsc_record::Value::U256(spent.to_be_bytes()),
+            )
+            .set(e::PROBES, self.probes)
+            .set(e::DISARM_ERRORS, self.disarm_errors);
         let latencies = self.executor.as_ref().map(PaperExecutor::latencies);
         d.set(e::LATENCY_SAMPLES, latencies.map_or(0, |l| l.len() as u64));
         if let Some((p50, p99, max)) = latencies.and_then(|l| l.quantiles()) {
@@ -353,12 +483,19 @@ impl ExecRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chain_follower::CanonicalEvent;
+    use crate::paper_exec::FnClock;
     use crate::runtime::state::StateConfig;
+    use crate::venue_probe::{CodeFingerprint, ObservedDeploymentData};
+    use alloy_primitives::{B256, keccak256};
     use darkbot_bsc_record::schema::bsc_runtime::runtime_status::exec as e;
     use darkbot_bsc_trading::chain_state::engine::StateLimits;
-    use std::time::{Duration, Instant};
+    use darkbot_bsc_trading::signer::Signer;
+    use darkbot_bsc_trading::transactions::legacy::LegacyTx;
+    use darkbot_bsc_trading::venues::flap::abi::{LaunchParamsV6, encode_new_token_v6};
+    use std::cell::Cell;
 
-    fn setup(path: PathBuf) -> ExecSetup {
+    fn setup(path: PathBuf, reprobe: Duration) -> ExecSetup {
         ExecSetup {
             identity_path: path,
             refused_accounts: Vec::new(),
@@ -372,12 +509,21 @@ mod tests {
                 max_calldata: 16_384,
                 latency_samples: 16,
                 policy_generation: 1,
+                capability_generation: 1,
+                validity_blocks: 2,
+                start_limit_ns: 1_000_000,
+                max_frame: 65_536,
             },
+            reprobe,
         }
     }
 
+    fn record(x: &ExecRuntime) -> darkbot_bsc_record::Record {
+        darkbot_bsc_record::decode(&e::SCHEMA, &x.draft().encode().unwrap()).unwrap()
+    }
+
     fn state(x: &ExecRuntime) -> (String, Option<String>) {
-        let r = darkbot_bsc_record::decode(&e::SCHEMA, &x.draft().encode().unwrap()).unwrap();
+        let r = record(x);
         (
             r.text(e::STATE).unwrap().to_owned(),
             r.opt_text(e::REASON).unwrap().map(str::to_owned),
@@ -402,28 +548,8 @@ mod tests {
         }
     }
 
-    /// The lifecycle outside the entry path: a missing identity is refused
-    /// visibly; without C2 it waits; a probe that cannot reach the node
-    /// fails visibly and is not retried; switching off resets.
-    #[test]
-    fn the_paper_path_waits_probes_and_fails_closed() {
-        let dir = std::env::temp_dir().join(format!("bsc-exec-rt-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let repo = Path::new("/nonexistent-repo");
-        let missing = ExecRuntime::new(setup(dir.join("none.key")), repo, dir.join("fences"));
-        let mut missing = missing;
-        missing.tick(true, None, None, 1);
-        assert_eq!(state(&missing).0, "IDENTITY_REFUSED");
-        missing.tick(false, None, None, 1);
-        assert_eq!(state(&missing), ("OFF".to_owned(), None));
-
-        let key = dir.join("id/paper.key");
-        PaperIdentity::create(&key, repo).unwrap();
-        let mut x = ExecRuntime::new(setup(key), repo, dir.join("fences"));
-        let sender = x.sender().unwrap();
-        x.tick(true, None, None, 1);
-        assert_eq!(state(&x).0, "WAITING_C2");
-        let owner = StateOwner::fresh(
+    fn owner(dir: &Path, sender: [u8; 20]) -> StateOwner {
+        StateOwner::fresh(
             &StateConfig {
                 limits: StateLimits {
                     max_txs: 64,
@@ -438,30 +564,298 @@ mod tests {
             },
             dir.join("c2.bin"),
         )
-        .unwrap();
-        // A closed local port: the probe fails, once.
-        let lim = limits();
-        x.tick(true, Some(&owner), Some(("https://127.0.0.1:1", &lim)), 1);
-        assert_eq!(state(&x).0, "PROBING");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while state(&x).0 == "PROBING" && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-            x.tick(true, Some(&owner), Some(("https://127.0.0.1:1", &lim)), 1);
+        .unwrap()
+    }
+
+    const HEAD: u64 = 129_900_000;
+
+    /// The live deployment exactly as the constants witness it.
+    fn observation(version: &str, implementation: Address) -> VenueObservation {
+        let d = bsc_mainnet_v5_27_0();
+        let fingerprint = |sha256| CodeFingerprint {
+            sha256,
+            keccak256: B256::ZERO,
+            len: 1,
+        };
+        VenueObservation {
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+            chain_id: d.chain_id,
+            observed: ObservedDeploymentData {
+                portal_version: version.to_string(),
+                portal_code: fingerprint(d.portal_runtime_sha256),
+                portal_implementation: implementation,
+                portal_implementation_code: fingerprint(d.portal_implementation_runtime_sha256),
+                tax_v3_implementation_code: fingerprint(d.tax_v3_implementation_runtime_sha256),
+            },
+            terms: WITNESSED_MAINNET_TERMS,
+            caller_balance_wei: U256::ZERO,
         }
+    }
+
+    fn witnessed(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        Ok(observation(d.portal_version, d.portal_implementation))
+    }
+
+    fn upgraded(
+        _: &str,
+        _: &FollowerLimits,
+        _: &FlapDeployment,
+        _: Address,
+    ) -> Result<VenueObservation, String> {
+        Ok(observation("v5.27.2", Address::repeat_byte(0x6f)))
+    }
+
+    /// The witnessed self-launch, really signed by a third party.
+    fn launch() -> ([u8; 32], Vec<u8>, [u8; 20]) {
+        let mut beneficiary = [0u8; 20];
+        beneficiary[18] = 0xa1;
+        beneficiary[19] = 0x1c;
+        let params = LaunchParamsV6 {
+            name: b"DarkBot G06A Economics",
+            symbol: b"DBG06E",
+            uri: b"ipfs://darkbot-g06a-economics",
+            dex_thresh: 1,
+            salt: B256::from(alloy_primitives::hex!(
+                "09c4b20c7956530d4bf91b3569ed173abfce47d16d412d94dde5e6f4034c6eeb"
+            )),
+            migrator_type: 1,
+            quote_token: Address::ZERO,
+            quote_amt: U256::ZERO,
+            beneficiary: Address::from(beneficiary),
+            permit: &[],
+            extension_id: B256::ZERO,
+            extension_data: &[],
+            dex_id: 0,
+            lp_fee_profile: 0,
+            buy_tax: 100,
+            sell_tax: 100,
+            tax_duration: 31_536_000,
+            anti_farmer_duration: 86_400,
+            mkt_bps: 10_000,
+            deflation_bps: 0,
+            dividend_bps: 0,
+            lp_bps: 0,
+            minimum_share_balance: U256::ZERO,
+            dividend_token: Address::ZERO,
+            commission_receiver: Address::ZERO,
+            token_version: 6,
+        };
+        let mut input = Vec::new();
+        encode_new_token_v6(&params, &mut input);
+        let launcher = Signer::from_secret_bytes(&[0x5a; 32]).unwrap();
+        let (mut scratch, mut raw) = (Vec::new(), Vec::new());
+        launcher
+            .sign_legacy(
+                &LegacyTx {
+                    chain_id: 56,
+                    nonce: 3,
+                    gas_price: 1_000_000_000,
+                    gas_limit: 6_000_000,
+                    to: bsc_mainnet_v5_27_0().portal,
+                    value: U256::ZERO,
+                    input: &input,
+                },
+                &mut scratch,
+                &mut raw,
+            )
+            .unwrap();
+        (keccak256(&raw).0, raw, launcher.address().into_array())
+    }
+
+    /// Ticks until the state is not `PROBING` (the probe thread answers).
+    fn settle(x: &mut ExecRuntime, owner: &StateOwner, endpoint: &str) {
+        let lim = limits();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            x.tick(true, Some(owner), Some((endpoint, &lim)), 7);
+            if state(x).0 != "PROBING" || Instant::now() > deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The lifecycle outside the entry path: a missing identity is refused
+    /// visibly; without C2 it waits; a probe that cannot reach the node
+    /// fails visibly and is not retried; switching off resets.
+    #[test]
+    fn the_paper_path_waits_probes_and_fails_closed() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-rt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let reprobe = Duration::from_secs(60);
+        let mut missing =
+            ExecRuntime::new(setup(dir.join("none.key"), reprobe), repo, dir.join("f"));
+        missing.tick(true, None, None, 1);
+        assert_eq!(state(&missing).0, "IDENTITY_REFUSED");
+        missing.tick(false, None, None, 1);
+        assert_eq!(state(&missing), ("OFF".to_owned(), None));
+
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let mut x = ExecRuntime::new(setup(key, reprobe), repo, dir.join("fences"));
+        let sender = x.sender().unwrap();
+        x.tick(true, None, None, 1);
+        assert_eq!(state(&x).0, "WAITING_C2");
+        let owner = owner(&dir, sender);
+        // A closed local port: the probe fails, once.
+        settle(&mut x, &owner, "https://127.0.0.1:1");
         let (s, reason) = state(&x);
         assert_eq!(s, "PROBE_FAILED");
         assert!(reason.is_some());
+        let lim = limits();
         x.tick(true, Some(&owner), Some(("https://127.0.0.1:1", &lim)), 1);
         assert_eq!(state(&x).0, "PROBE_FAILED", "no automatic retry");
         x.tick(false, Some(&owner), None, 1);
         assert_eq!(state(&x).0, "OFF");
         assert_eq!(
-            darkbot_bsc_record::decode(&e::SCHEMA, &x.draft().encode().unwrap())
-                .unwrap()
-                .text(e::PAPER_SENDER)
-                .unwrap(),
+            record(&x).text(e::PAPER_SENDER).unwrap(),
             format!("0x{}", alloy_primitives::hex::encode(sender))
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Gate review M5/M2/M3: the integrated path. Armed on a C2 nonce fact,
+    /// a real C1-scope launch goes to the sink (status counters, latency);
+    /// a re-probe that finds the Portal upgraded disarms visibly (fence
+    /// gone, nothing armed); OFF and SHADOW again arm a new fence.
+    #[test]
+    fn an_armed_path_takes_a_launch_to_the_sink_and_disarms_on_drift() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-int-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            fences.clone(),
+            witnessed,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "WAITING_NONCE");
+        // C2: a canonical head and the PAPER sender's nonce fact.
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 1);
+
+        let (hash, raw, launcher) = launch();
+        owner.pending(hash, launcher, 3, 0, 10);
+        let now = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                now.set(now.get() + 3);
+                now.get()
+            },
+        };
+        let buy = x.on_launch(hash, &raw, 10, &owner, &clock).unwrap();
+        assert_eq!(buy.launch_hash, hash);
+        // Signed bytes that are no transaction are counted, not lost.
+        assert!(x.on_launch([9; 32], b"no tx", 20, &owner, &clock).is_none());
+        let r = record(&x);
+        assert_eq!(r.u64(e::LAUNCHES).unwrap(), 2);
+        assert_eq!(r.u64(e::HANDOFFS).unwrap(), 1);
+        assert_eq!(r.u64(e::REFUSED_NOT_DECODED).unwrap(), 1);
+        assert_eq!(r.u64(e::LANES_LEFT).unwrap(), 1);
+        assert_eq!(r.u64(e::LATENCY_SAMPLES).unwrap(), 1);
+        assert_eq!(
+            r.u64(e::LATENCY_MAX_NS).unwrap(),
+            buy.times.sink_ns - buy.times.ingress_ns
+        );
+
+        // The Portal is upgraded: the next probe disarms (M3).
+        x.prober = upgraded;
+        x.last_probe = None;
+        settle(&mut x, &owner, "https://probe.invalid");
+        let lim = limits();
+        for _ in 0..200 {
+            x.tick(true, Some(&owner), Some(("https://probe.invalid", &lim)), 7);
+            if state(&x).0 != "ARMED" {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (s, reason) = state(&x);
+        assert_eq!(s, "DEPLOYMENT_DRIFT");
+        assert!(reason.unwrap().contains("v5.27.2"));
+        assert_eq!(record(&x).u64(e::LANES_ARMED).unwrap(), 0);
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
+        assert!(x.on_launch(hash, &raw, 30, &owner, &clock).is_none());
+
+        // OFF, then SHADOW on the witnessed deployment: a new arm (M2).
+        x.prober = witnessed;
+        x.tick(false, Some(&owner), None, 7);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 1);
+        x.tick(false, Some(&owner), None, 7);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Gate review L2: a PAPER identity whose nonce was consumed has sent
+    /// transactions; it is refused, never armed.
+    #[test]
+    fn a_used_identity_is_refused() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-used-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            dir.join("fences"),
+            witnessed,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1,
+            timestamp_ms: 1_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 4,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        let (s, reason) = state(&x);
+        assert_eq!(s, "IDENTITY_REFUSED");
+        assert!(reason.unwrap().contains("next nonce is 4"));
+        assert!(!dir.join("fences").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -29,7 +29,8 @@ use crate::chain_follower::{
 };
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
-use crate::paper_exec::ExecConfig;
+use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
+use darkbot_bsc_geth_ipc::protocol_v2::CLOCK_ID_MONOTONIC;
 use crate::runtime_journal::{
     EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
     later_sighting_payload, orphaned_launch_payload, paper_handoff_payload, pending_launch_payload,
@@ -228,6 +229,7 @@ impl RuntimeConfig {
             }
             Some(path) => Some(ExecSetup {
                 identity_path: ExecSetup::expand_home(path)?,
+                reprobe: ms(take("BSC_EXEC_REPROBE_MS", 1_000, 3_600_000)?),
                 refused_accounts: StateConfig::parse_watched(
                     refused_accounts.ok_or("BSC_EXEC_REFUSED_ACCOUNTS is required")?,
                 )
@@ -242,9 +244,36 @@ impl RuntimeConfig {
                     max_calldata: take("BSC_EXEC_MAX_CALLDATA", 1_024, 1 << 20)? as usize,
                     latency_samples: take("BSC_EXEC_LATENCY_SAMPLES", 1, 1 << 20)? as usize,
                     policy_generation: take("BSC_EXEC_POLICY_GENERATION", 1, u64::from(u32::MAX))?,
+                    capability_generation: take(
+                        "BSC_EXEC_CAPABILITY_GENERATION",
+                        1,
+                        u64::from(u32::MAX),
+                    )?,
+                    validity_blocks: take(
+                        "BSC_EXEC_VALIDITY_BLOCKS",
+                        1,
+                        PAPER_PROFILE.max_block_window(),
+                    )?,
+                    start_limit_ns: take(
+                        "BSC_EXEC_START_LIMIT_NS",
+                        1,
+                        PAPER_PROFILE.max_transport_start_limit_ns(),
+                    )?,
+                    max_frame: take("BSC_EXEC_MAX_FRAME_BYTES", 4_096, 1 << 20)? as usize,
                 },
             }),
         };
+        if let Some(x) = &exec {
+            // Cross-key rules: an armed path must be able to admit a BUY,
+            // and take every launch the ingress counts as one.
+            x.exec.validate()?;
+            if x.exec.max_calldata < max_launch_calldata {
+                return Err(format!(
+                    "BSC_EXEC_MAX_CALLDATA {} is below BSC_RUNTIME_MAX_LAUNCH_CALLDATA {max_launch_calldata}",
+                    x.exec.max_calldata
+                ));
+            }
+        }
         let wss = WssLimits {
             connect_timeout: ms(take("BSC_RUNTIME_CONNECT_TIMEOUT_MS", 100, 60_000)?),
             handshake_timeout: ms(take("BSC_RUNTIME_HANDSHAKE_TIMEOUT_MS", 100, 120_000)?),
@@ -1062,7 +1091,16 @@ pub fn run(
             // production path to the PAPER sink (when armed).
             if let (Some(x), Some(o), Some(Launch::First { hash, .. }), Event::Full { raw, .. }) =
                 (exec.as_mut(), owner.as_ref(), decided, &event)
-                && let Some(buy) = x.on_launch(hash, raw, at, o, || clock.now_ns())
+                && let Some(buy) = x.on_launch(
+                    hash,
+                    raw,
+                    at,
+                    o,
+                    &FnClock {
+                        id: CLOCK_ID_MONOTONIC,
+                        now: || clock.now_ns(),
+                    },
+                )
             {
                 journal.record(
                     RecordKind::Runtime,

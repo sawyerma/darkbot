@@ -8,6 +8,7 @@
 
 use crate::{Record, RecordError, Schema, decode, header};
 
+pub mod bsc_c3_latency;
 pub mod bsc_census;
 pub mod bsc_flap_econ;
 pub mod bsc_flap_freeze;
@@ -34,6 +35,7 @@ pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = 4;
 pub fn all() -> Vec<&'static Schema> {
     g06a::ALL
         .iter()
+        .chain(bsc_c3_latency::ALL)
         .chain(bsc_census::ALL)
         .chain(bsc_flap_econ::ALL)
         .chain(bsc_flap_freeze::ALL)

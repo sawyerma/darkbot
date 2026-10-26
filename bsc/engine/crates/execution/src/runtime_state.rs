@@ -190,6 +190,17 @@ impl StateOwner {
             .snapshot_id(candidate, policy_generation, codehash_generation)
     }
 
+    /// The canonical head as a submission plan sees it: number and
+    /// timestamp in unix seconds.
+    pub fn head(&self) -> Option<darkbot_bsc_trading::submission_policy::plan::ChainHead> {
+        self.state.head_block().map(|(number, _, timestamp_ms)| {
+            darkbot_bsc_trading::submission_policy::plan::ChainHead {
+                number,
+                timestamp: timestamp_ms / 1_000,
+            }
+        })
+    }
+
     /// The next canonical nonce of `sender` when C2 knows it exactly.
     pub fn clean_next_nonce(&self, sender: &[u8; 20]) -> Option<u64> {
         match self.state.sender(Address::from(*sender)) {

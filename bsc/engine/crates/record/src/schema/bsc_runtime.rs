@@ -452,14 +452,15 @@ pub mod runtime_status {
     pub mod exec {
         use super::*;
 
-        /// `NOT_CONFIGURED`, `IDENTITY_REFUSED`, `WAITING_C2`, `PROBING`,
+        /// `OFF`, `IDENTITY_REFUSED`, `WAITING_C2`, `PROBING`,
         /// `PROBE_FAILED`, `DEPLOYMENT_DRIFT`, `TERMS_DRIFT`,
-        /// `WAITING_NONCE`, `ARM_FAILED`, `ARMED` or `EXHAUSTED`.
+        /// `ECONOMICS_UNQUALIFIED`, `FUNDED`, `WAITING_NONCE`, `ARM_FAILED`,
+        /// `ARMED` or `EXHAUSTED`.
         pub const STATE: u16 = 1;
         /// Why the state is not `ARMED`.
         pub const REASON: u16 = 2;
-        /// The PAPER identity's address (never funded, never a production
-        /// account).
+        /// The PAPER identity's address (never a production account; its
+        /// balance is `PAPER_BALANCE_WEI` at the probe block).
         pub const PAPER_SENDER: u16 = 3;
         /// The live Portal version and the block the probe pinned.
         pub const PORTAL_VERSION: u16 = 4;
@@ -484,11 +485,27 @@ pub mod runtime_status {
         pub const LATENCY_P50_NS: u16 = 19;
         pub const LATENCY_P99_NS: u16 = 20;
         pub const LATENCY_MAX_NS: u16 = 21;
+        /// v2 (C3 gate review): the stages of the production submission
+        /// plan, frame and dispatch, the session's shared cap and token
+        /// dedup, the probe's view of the PAPER balance, re-probes.
+        pub const REFUSED_DUPLICATE_TOKEN: u16 = 22;
+        pub const REFUSED_SESSION_CAP: u16 = 23;
+        pub const REFUSED_PLAN: u16 = 24;
+        pub const REFUSED_DEADLINE: u16 = 25;
+        pub const REFUSED_DISPATCH: u16 = 26;
+        /// Exposure dispatched in this session (against the shared cap).
+        pub const SESSION_SPENT_WEI: u16 = 27;
+        /// The PAPER sender's balance at the probe block.
+        pub const PAPER_BALANCE_WEI: u16 = 28;
+        /// Probes started (the first and the re-probes while armed).
+        pub const PROBES: u16 = 29;
+        /// Disarms whose fence could not be removed.
+        pub const DISARM_ERRORS: u16 = 30;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.exec",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -511,6 +528,15 @@ pub mod runtime_status {
                 Field::opt(LATENCY_P50_NS, "latency_p50_ns", U64),
                 Field::opt(LATENCY_P99_NS, "latency_p99_ns", U64),
                 Field::opt(LATENCY_MAX_NS, "latency_max_ns", U64),
+                Field::req(REFUSED_DUPLICATE_TOKEN, "refused_duplicate_token", U64),
+                Field::req(REFUSED_SESSION_CAP, "refused_session_cap", U64),
+                Field::req(REFUSED_PLAN, "refused_plan", U64),
+                Field::req(REFUSED_DEADLINE, "refused_deadline", U64),
+                Field::req(REFUSED_DISPATCH, "refused_dispatch", U64),
+                Field::req(SESSION_SPENT_WEI, "session_spent_wei", U256),
+                Field::opt(PAPER_BALANCE_WEI, "paper_balance_wei", U256),
+                Field::req(PROBES, "probes", U64),
+                Field::req(DISARM_ERRORS, "disarm_errors", U64),
             ],
         };
     }
@@ -543,7 +569,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 7,
+        schema_version: 8,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
