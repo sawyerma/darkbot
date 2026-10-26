@@ -13,10 +13,44 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 4 | C2 State/Nonce/Reorg/Recovery | TECHNISCH FERTIG (SHADOW; operativ LIVE gesperrt bis G0.8 PASS + G0.4) | `f427cfa1`; Phase-Gate PASS (3 Durchgänge, Funde behoben: `2d16ec81`, `f427cfa1`); Basis `c97e767c`, `3be74b41` | C2-Eingaben-Journal/Replay → Phase F/I (Master-Plan-Matrix) | Paket 5 |
 | 5 | C3, D, G0.1-Four-Freeze, E | TECHNISCH FERTIG — EXTERNAL_BLOCKED: verifizierte ABI (Flap v5.27.2, Four; BscScan-Key/Sourcify), C3-Linux-Zielhardware, Live-PAPER bei unbezeugtem Portal v5.27.2 (D Gate PASS `d01ebd44`; C3 Gate PASS `cb9813c6`; E Gate PASS `531ddfcc`, 3 Durchgänge; Freeze v3 `four_freeze_20261026T134532Z`: Tool `c3c6ca00` = tool_sha256 8f6e5986…, Feld git_head 4a961fb5 irrtümlich, seit `d1a6dedd` beim Start gelesen) | `d01ebd44` (D), `cb9813c6` (C3), `531ddfcc` (E) | v5.27.2-ABI, Four-ABI (BscScan-Key); C3-Zielhardware (Linux); L3 Four-Drift-Guard → Phase I | – |
 | 6 | F, G, H | F: TECHNISCH FERTIG — EXTERNAL_BLOCKED: 30-min-Native-geth-Erfassung (CLEAN/MET) und geth-Hook-Latenzen §8 (F-Gate PASS `88cc92b6`, 3 Durchgänge; Live-E2E PASS `baf5f0fa`). G: TECHNISCH FERTIG — EXTERNAL_BLOCKED: Four-Classic/OpenFour-Economics (verifizierte ABI, BscScan-Key), Flap v5.27.2 nicht quellverifiziert (G-Gate PASS `5e862699`, 2 Durchgänge; LOWs `39525e66`, Snapshot `61058800` `9ece58db`). H: TECHNISCH FERTIG (H-Gate PASS `2d4c5503`, 3 Durchgänge; Code `cec8336a`; 60-min-Lauf `live_strategy_1793049942243`, Replay PASS). Wirtschaftlich kein Strategie-PASS: 3/3 PAPER-Positionen Verlust (−0,00389 BNB), keine positive Erwartung | `88cc92b6` (F), `5e862699` (G), `2d4c5503` (H) | Mainnet-geth (Kostenentscheidung) | Paket 7 |
-| 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
+| 7 | I PAPER/SHADOW | TECHNISCH FERTIG — EXTERNAL_BLOCKED: Live-PAPER/J auf bezeugtem Portal (v5.27.2 DEPLOYMENT_DRIFT), `T_send` über synchronisierten Mainnet-geth (Kostenentscheidung), Linux-Zielhardware (I-Gate PASS `3b6275e9`, 4 Durchgänge; LOW `bfc239e6`; Positionierung §17 J `i/strategy_positioning_1793049942243.dbrec`: Eintritt frühestens D+2, Untergrenze) | `3b6275e9`, `bfc239e6` | Live-PAPER-Positionierung (PAPER-Quelle) | Paket 8 |
 | 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
 | 9 | Release-Kandidat | OFFEN | – | – | nach Paket 8 |
 | P | G0.4 Rohdaten (parallel) | OFFEN (Nenner + Zensus `a79afb0e`, Messdefinition final `aba025e3`: vor der Blockzeit, C1-Scope, Abdeckung, Tx-Prüfung; C1-Scope ab `3fa5c869` = Präfilter + strikter Flap-Decoder; ab `b6db0d95` T_ingress/First-Seen = WSS-Frame-Empfang (~100 µs früher); ältere Journale nicht mischen) | `aba025e3` | Kriterien-Bestätigung (Nutzer), 7-Tage-Lauf (Deploy) | Bestätigung, dann 7-Tage-Lauf |
+
+## Operator-Runbook (Paket 8; jeder Befehl am Code geprüft)
+
+Nur READ_ONLY/SHADOW/PAPER. Guard `FROZEN_APPROVED_V5_SHA256="UNARMED"`, `approved=false`, `execution_ready=false`; SIGN/ARM/SEND/LIVE nur nach gesonderter Freigabe.
+
+| Schritt | Befehl | Erwartet |
+|---|---|---|
+| Release-Build | `ops/darkbotctl build` (Frontend-Lint + Build; Gateway, P0-Reporter, BSC Reporter/Readiness/Kandidat/Runtime, je `--release --locked --offline`) | `build ok`; `gateway/target/darkbot-release.json` = Schema-ID + SHA-256 jedes Artefakts |
+| Identität | `python3 ops/release_manifest.py` | `Coordinated release manifest: PASS` |
+| Deploy | `ops/darkbotctl deploy` (verweigert: fremdes Manifest, laufende Readiness, Schemawechsel bei laufender Capture; synchronisiert den BSC-Snapshot) | `~/Library/Application Support/DarkBot/releases/<ts>`, `current` |
+| Start/Stopp | `ops/darkbotctl up [--no-open]`, `down`, `restart-gateway` | Gateway, BSC-Reporter, BSC-Runtime unter launchd; Runtime-Neustart nur nach Crash; Stopp über Stopp-Datei binnen `BSC_RUNTIME_STOP_TIMEOUT_MS` |
+| Health | `ops/darkbotctl status`, `is-healthy`, `status-short` | `gateway: ok … sources=[…]` |
+| Frontend | `ops/darkbotctl open` → `http://127.0.0.1:8787/` | fünf Tabs; BSC per Reporter-Push, kein Polling |
+| Modi | `ops/darkbotctl bsc source request <ID> OFF\|SHADOW\|LIVE <generation> <request_id>`; Quellen `BSC_INGRESS_GETH`, `_PUBLICNODE`, `_DRPC`, `_BLOCKREQ`, `_48CLUB`; Komponenten `BSC_STATE_C2`, `BSC_EXEC`, `BSC_STRATEGY_C` | Quittung mit Generation (CAS); LIVE ⇒ BLOCKED |
+| Readiness | `ops/darkbotctl bsc readiness start\|stop\|status` (read-only; Stopp per SIGTERM, kein SIGKILL) | Verdict `BLOCKED` ohne V5 |
+| Snapshot | `ops/darkbotctl bsc sync` (im Original-Repository) | Snapshot mit Konfiguration, Gas-Evidence, Records |
+
+- **Konfiguration:** `bsc/config/ingress.public.env` (Runtime, C2, C3 `BSC_EXEC_*`, Strategy C `BSC_STRATEGY_C_*`; jede Grenze ein Schlüssel mit Bereich), `bsc/config/readiness.public.env` (read-only RPC). PAPER-Identität: `bsc_runtime paper-identity init|show --config <cfg>` (lokal, ungefundet, außerhalb des Repos, `BSC_EXEC_PAPER_IDENTITY`).
+- **RPC/Provider:** kostenlose öffentliche WSS-Quellen, read-only; Readiness und G0.8 über kostenloses read-only HTTPS (Blast-Archiv für G0.8-Historie); keine kostenpflichtigen Provider. Synchronisierter Mainnet-geth (native C1-Quelle, `T_send`): Kostenentscheidung offen.
+- **Logs/Evidence:** `~/Library/Logs/DarkBot/` (`gateway`, `bsc-runtime`, `bsc-reporter`, `bsc-readiness-<launch>`); Laufzustand `~/.darkbot/run/` (`bsc-runtime/status.dbrec`, `journal/<run>/`, `g04-census.dbrec`, `<prüfung>-<run>.dbrec`, `bsc-sources/`); versioniert `bsc/native/evidence/<phase>/`.
+- **Journal/Zustand** (nach `down`): `bsc_runtime replay-proof|capture-quality|strategy-replay --rundir ~/.darkbot/run --config <snapshot>/bsc/config/ingress.public.env [--run ID]`, `capture-preflight`, `census`; lesen mit `dbrec_show <record>`.
+- **Recovery:** Runtime-Crash ⇒ launchd-Neustart, neuer Run, Follower-Backfill, C2-Checkpoint-Restore; Reorg ⇒ C2-Rollback, Strategie-Kurven unvollständig; `down` + `up`; Quelle per `source request` trennen und wieder anhängen.
+- **Abbruch (fail-closed, gezählt):** C3 nicht armiert bei `DEPLOYMENT_DRIFT`/`TERMS_DRIFT`/`ECONOMICS_UNQUALIFIED`/`FUNDED`; Absichten verweigert mit `NO_SNAPSHOT`, `STALE_HEAD`, `DEADLINE`, `NONCE_GAP`, `NONCE_TAKEN`, `SESSION_CAP`, `NOT_HELD`; Readiness STOP bei Drift.
+- **Wirtschaftliche Grenzen:** G0.7-Budget ≤ 481163500000000 wei; PAPER-Caps `BSC_EXEC_SESSION_CAP_WEI`, `BSC_EXEC_STRATEGY_SESSION_CAP_WEI`; kein LIVE.
+- **G0.7/G0.8 (nur nach gesonderter Freigabe, Reihenfolge des Absatzes unten):**
+  1. `bsc/tools/g06a_final_dry.sh --prepare [--profile A|B]` (schlüsselfrei).
+  2. `BSC_MAINNET_RPC_HTTPS=<read-only RPC> DARKBOT_G06A_SIGN=YES bsc/tools/g06a_final_dry.sh --sign <prepare_dir>`.
+  3. V5-Vorschlag; Readiness `PASS_READ_ONLY`; menschlicher Vergleich mit der V5-Prüfliste.
+  4. Arming: Commit `FROZEN_APPROVED_V5_SHA256=<V5-SHA>`; Grant.
+  5. Ein Versuch: `DARKBOT_G07_MAINNET_SEND=YES g07_mainnet_self_launch_buy` mit `DARKBOT_G07_*`.
+  6. Disarm nach Runner-Ende.
+  7. `g08_mainnet_verify` mit `DARKBOT_G08_G07_EVIDENCE`/`_CHAIN_JOURNAL`/`_EVIDENCE_PATH` und `BSC_MAINNET_RPC_HTTPS`; Archiv-Endpunkt vorher mit `BSC_MAINNET_RPC_HTTPS=<archiv> g08_mainnet_verify --qualify-history` frisch qualifizieren (Exit 0 nur qualifiziert).
+- **V5-Prüfliste:** Kandidat, Token, signierte Launch-/BUY-Hashes, tatsächliche Wallet-Nonces, Gas, Budget, Provider (48Club `noMerge=true`, `positionFirst=true`), Bundle-Semantik (`send_head+2`), Policy-Alter (24 h, Builder 15 s), Authority-Identität (Remote-Attempt-Ref).
+- **Disarm:** Commit `FROZEN_APPROVED_V5_SHA256="UNARMED"` nur lokal vorbereiten; Push erst nach Runner-Ende und mit Nutzergenehmigung.
 
 ## Bindender neuer Umsetzungsstatus — 2026-10-25 (technische Offline-Freigabe, kein Geld)
 
@@ -30,7 +64,7 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 
 **Nächste technische Arbeit:** erst letzte Gate-A/B- und aktuelle gemeinsame Schema-Regression; dann BSC-050 vollständige produktive Callgraph-/Fake-/Legacy-/JSON-/Hardcoding-Inventur, echte Bugs beheben; C1.10 teknischer Freeze und C2 samt Frontend; anschließend C3/D/F/G/H/I nach ihren echten Fachabhängigkeiten. Runbook/Disarm-Patch/V5-Bindungscheckliste ohne echte SIGN-/ARM-/BUY-Ausführung erstellen. Für jeden Abschnitt nur `TECHNISCH FERTIG` nach voller Code-/E2E-/Test-/Release-/Git-Abnahme, sonst `OFFEN` bzw. `TECHNISCH FERTIG — EXTERNAL_BLOCKED` mit konkreter externer Evidence.
 
-**Operator-Runbook (nur Dokumentation, nicht ausgeführt):** Separat autorisiertes Funding → separat autorisiertes lokal kontrolliertes SIGN/VERIFY mit H2-/Policy-Refresh → V5-Vorschlag → echte native `PASS_READ_ONLY`-Readiness → menschlicher Vergleich von Candidate/Token, Launch-/BUY-TX-Hashes, beobachteten Wallet-Nonces, Gas-/Budget ≤481163500000000 wei, `send_head+2`, Flags, Builder-15-s-Frist/24-h-Policy und Remote-Attempt-Ref → separate exakte V5-SHA-Genehmigung/Arming → separater Grant → genau ein wirtschaftlich autorisierter Versuch → Disarm nach Runner-Ende → G0.8 mit frisch qualifiziertem historischem Archiv-State. Jeder Fehler, falscher Hash, unbekannter Nonce, Drift, Fristüberschreitung, Authority-Unklarheit oder fehlender Receipt-Nachweis ⇒ STOP/UNRESOLVED entsprechend dem echten Native-Gate; kein automatischer Send/Retry. Disarm-Commit darf vorher **nur lokal vorbereitet**, nicht ohne spätere Nutzergenehmigung gepusht werden. Ein vollständiges ausführbares Runbook samt echten erwarteten Binärausgaben bleibt vom BSC-Owner im nächsten Offline-Paket zu ergänzen.
+**Operator-Runbook (nur Dokumentation, nicht ausgeführt):** Separat autorisiertes Funding → separat autorisiertes lokal kontrolliertes SIGN/VERIFY mit H2-/Policy-Refresh → V5-Vorschlag → echte native `PASS_READ_ONLY`-Readiness → menschlicher Vergleich von Candidate/Token, Launch-/BUY-TX-Hashes, beobachteten Wallet-Nonces, Gas-/Budget ≤481163500000000 wei, `send_head+2`, Flags, Builder-15-s-Frist/24-h-Policy und Remote-Attempt-Ref → separate exakte V5-SHA-Genehmigung/Arming → separater Grant → genau ein wirtschaftlich autorisierter Versuch → Disarm nach Runner-Ende → G0.8 mit frisch qualifiziertem historischem Archiv-State. Jeder Fehler, falscher Hash, unbekannter Nonce, Drift, Fristüberschreitung, Authority-Unklarheit oder fehlender Receipt-Nachweis ⇒ STOP/UNRESOLVED entsprechend dem echten Native-Gate; kein automatischer Send/Retry. Disarm-Commit darf vorher **nur lokal vorbereitet**, nicht ohne spätere Nutzergenehmigung gepusht werden. Ausführbares Runbook: Abschnitt „Operator-Runbook (Paket 8)“ oben.
 
 ---
 
