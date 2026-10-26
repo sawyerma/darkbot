@@ -58,3 +58,36 @@ fn dec07_an_unapproved_raw_capture_reads_nothing() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// DEC-07: the runtime itself (`p0-longtail`, econ4h) started directly — no `p0ctl run start`,
+/// no record — refuses before any network read: every start needs its approved record.
+#[test]
+fn dec07_a_direct_runtime_start_without_its_record_reads_nothing() {
+    let dir = std::env::temp_dir().join(format!("p0_runtime_gate_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_p0-longtail"))
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("P0_MODE", "econ4h")
+        .env("P0_RPC_URL", format!("http://{addr}"))
+        .env("P0_WS_URL", format!("ws://{addr}"))
+        .env("P0_ECON_OUT_DIR", dir.join("out"))
+        .env("P0_ECON_RUN_ID", "r1")
+        .env("P0_PROJECT_DIR", &dir)
+        .output()
+        .unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("BOOT_NETWORK_AUDIT_MISSING"), "{text}");
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(
+        listener.accept().is_err(),
+        "no connection to the configured endpoints"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

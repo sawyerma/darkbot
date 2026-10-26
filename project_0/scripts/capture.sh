@@ -2,7 +2,7 @@
 # Project_0 capture entry point (structure iteration 21). Read-only observation: LIVE and submission stay disabled.
 #   capture.sh [econ4h] --duration 10m|1h|5h|24h [typed options]   typed C0-E1 measurement via `p0ctl run start`
 #   capture.sh econ4h-launcher --duration D [native options]           econ4h capture, native verify + report (p0ctl only)
-#   capture.sh market                                                 C0-MO unfiltered read-only market observer
+#   capture.sh market                                                 refused (DEC-07): the raw capture starts through its boot flow
 #   capture.sh shadow --duration D [-- OPERATIONAL_ARGS]              bounded Mainnet Shadow via `p0ctl run start --mode shadow`
 #   capture.sh shadow-launcher --duration D [-- OPERATIONAL_ARGS]     Shadow runtime of that run (p0ctl only)
 # scripts/test.sh (PHASENPLAN operator command) runs `capture.sh econ4h`. Every mode works from any working directory.
@@ -307,59 +307,13 @@ absolute_paths
 exec "${CARGO_TARGET_DIR:-$PROJECT_DIR/native/target}/release/p0ctl" --project "$PROJECT_DIR" run start "$@"
 }
 
+# DEC-07 (P0-013): a raw capture reads Mainnet only through its boot flow (mode market): the
+# desktop capture p0-market-capture-reported, started by `darkbotctl p0 boot start` with the
+# admission of its approved network record. This launcher's p0-longtail market mode is never
+# admitted, so it starts nothing.
 market() {
-load_env
-absolute_paths
-# transactions = Helius transactionSubscribe (Developer+ plan), needs only the WebSocket.
-# logs         = standard logsSubscribe (all plans), additionally needs RPC for post-capture enrichment.
-export P0_MARKET_SOURCE="${P0_MARKET_SOURCE:-transactions}"
-case "$P0_MARKET_SOURCE" in
-  transactions|logs) ;;
-  *) echo "invalid P0_MARKET_SOURCE=$P0_MARKET_SOURCE (transactions|logs)" >&2; exit 2 ;;
-esac
-
-# Endpoint selection lives in Rust (MarketConfig): an explicit P0_WS_URL / P0_RPC_URL always wins;
-# otherwise HELIUS_API_KEY derives them (transactions -> Helius Enhanced WSS, logs -> standard WSS + RPC).
-#   Helius Free:                         P0_MARKET_SOURCE=logs
-#   Helius Developer+ (transactionSubscribe): P0_MARKET_SOURCE=transactions (preferred)
-# Provider support for transactionSubscribe is never assumed; the smoke run must show the ACK.
-if [[ -z "${P0_WS_URL:-}" && -z "${HELIUS_API_KEY:-}" ]]; then
-  echo "missing endpoint: set P0_WS_URL or HELIUS_API_KEY" >&2
-  exit 2
-fi
-if [[ "$P0_MARKET_SOURCE" == "logs" && -z "${P0_RPC_URL:-}" && -z "${HELIUS_API_KEY:-}" ]]; then
-  echo "note: no P0_RPC_URL/HELIUS_API_KEY - liquidation enrichment unavailable (capture, summary and report still run)" >&2
-fi
-
-# Market mode never needs a signer: make sure none is passed through by accident.
-unset P0_KEYPAIR_PATH P0_EXPECTED_PUBKEY
-
-export P0_PROGRAM_ID="${P0_PROGRAM_ID:-MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA}"
-export P0_MODE=market
-export P0_MARKET_DURATION_SECS="${P0_MARKET_DURATION_SECS:-14400}"
-export P0_MARKET_COMMITMENT="${P0_MARKET_COMMITMENT:-finalized}"
-export P0_MARKET_RUN_ID="${P0_MARKET_RUN_ID:-market_$(date -u +%Y%m%dT%H%M%SZ)}"
-# Run storage contract: data/market (layout V1) by default, data/runs with P0_RUN_STORE=runs.
-# Standalone C0-MO has no pre-capture manifest, so it always writes layout V1.
-P0_MARKET_OUT_DIR="$(py operations.capture.run_store root market "${P0_MARKET_OUT_DIR:-}")" || exit 2
-export P0_MARKET_OUT_DIR
-export P0_RUNTIME_LOCK="${P0_RUNTIME_LOCK:-$(dirname "$P0_MARKET_OUT_DIR")/.p0-runtime.lock}"
-
-py operations.capture.run_store allocate "$P0_MARKET_OUT_DIR" "$P0_MARKET_RUN_ID" >/dev/null || exit 2
-
-echo "Project_0 Unfiltered Live Market Observer"
-echo "  program=$P0_PROGRAM_ID"
-echo "  source=$P0_MARKET_SOURCE"
-echo "  commitment=$P0_MARKET_COMMITMENT"
-echo "  duration_seconds=$P0_MARKET_DURATION_SECS"
-echo "  endpoints: see Rust banner (hosts redacted)"
-echo "  output=$P0_MARKET_OUT_DIR/$P0_MARKET_RUN_ID"
-
-cd "$REPO_ROOT"
-exec cargo run --release \
-  --manifest-path project_0/native/Cargo.toml \
-  --features "crate_health txv1" \
-  --bin p0-longtail
+echo "BOOT_AUDIT_REQUIRED: capture.sh market starts no raw capture; it starts only through its boot flow (Capture tab, or darkbotctl p0 boot offline --mode market --duration D, network and start approval)" >&2
+exit 2
 }
 
 # Operator entry of a bounded Mainnet Shadow run (P6-MT MT11/MT12): the native control plane validates

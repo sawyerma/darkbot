@@ -156,52 +156,51 @@ fn x1_admission_record_from_the_launcher_environment() {
         (ENV_NETWORK_AUDIT, path.display().to_string()),
         (ENV_NETWORK_AUDIT_TOKEN, token.clone()),
         (ENV_NETWORK_AUDIT_APPROVED_AT, "1001".into()),
+        ("P0_MARKET_SOURCE", "logs".into()),
     ]
     .into();
     let current = || Ok(fixture_identity());
     let binary = || Ok("binary".to_string());
-    let run = |env: &HashMap<&str, String>, launched: bool| {
-        admission_record(&|k| env.get(k).cloned(), launched, &current, &binary)
-    };
-    assert_eq!(run(&HashMap::new(), false), Ok(None));
-    assert_eq!(run(&full, true), Ok(Some(n.clone())));
+    let run =
+        |env: &HashMap<&str, String>| admission_record(&|k| env.get(k).cloned(), &current, &binary);
+    assert_eq!(run(&full), Ok(n.clone()));
+    // DEC-07: no start without its record — a start without the launch marker included.
     assert_eq!(
-        run(&full, false),
-        Ok(Some(n.clone())),
-        "a record is always checked"
-    );
-    assert_eq!(
-        run(&HashMap::new(), true).unwrap_err(),
+        run(&HashMap::new()).unwrap_err(),
         "BOOT_NETWORK_AUDIT_MISSING"
     );
     for drop in [ENV_NETWORK_AUDIT_TOKEN, ENV_NETWORK_AUDIT_APPROVED_AT] {
         let mut env = full.clone();
         env.remove(drop);
-        assert_eq!(run(&env, true).unwrap_err(), "BOOT_NETWORK_AUDIT_MISSING");
+        assert_eq!(run(&env).unwrap_err(), "BOOT_NETWORK_AUDIT_MISSING");
     }
     let mut env = full.clone();
     env.insert(ENV_NETWORK_AUDIT_APPROVED_AT, "soon".into());
-    assert_eq!(run(&env, true).unwrap_err(), "BOOT_NETWORK_AUDIT_MISSING");
+    assert_eq!(run(&env).unwrap_err(), "BOOT_NETWORK_AUDIT_MISSING");
     for bad in [d.join("absent.p0j"), garbage] {
         let mut env = full.clone();
         env.insert(ENV_NETWORK_AUDIT, bad.display().to_string());
-        assert_eq!(
-            run(&env, true).unwrap_err(),
-            "BOOT_NETWORK_EVIDENCE_INVALID"
-        );
+        assert_eq!(run(&env).unwrap_err(), "BOOT_NETWORK_EVIDENCE_INVALID");
     }
     let mut env = full.clone();
     env.insert(ENV_NETWORK_AUDIT_APPROVED_AT, "1060".into());
-    assert_eq!(run(&env, true).unwrap_err(), "BOOT_NETWORK_EXPIRED");
+    assert_eq!(run(&env).unwrap_err(), "BOOT_NETWORK_EXPIRED");
     let mut env = full.clone();
     env.insert("P0_MARKET_SOURCE", "transactions".into());
     assert_eq!(
-        run(&env, true).unwrap_err(),
+        run(&env).unwrap_err(),
+        "BOOT_IDENTITY_DRIFT: capture_source"
+    );
+    // Unset, the capture resolves transactions (its own default): a logs record is drift.
+    let mut env = full.clone();
+    env.remove("P0_MARKET_SOURCE");
+    assert_eq!(
+        run(&env).unwrap_err(),
         "BOOT_IDENTITY_DRIFT: capture_source"
     );
     let failing = || Err::<AuditedIdentity, _>("BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".into());
     assert_eq!(
-        admission_record(&|k| full.get(k).cloned(), true, &failing, &binary).unwrap_err(),
+        admission_record(&|k| full.get(k).cloned(), &failing, &binary).unwrap_err(),
         "BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR"
     );
     std::fs::remove_dir_all(d).unwrap();
@@ -638,14 +637,31 @@ fn dec07_a_raw_capture_is_admitted_only_to_its_market_flow() {
         (ENV_NETWORK_AUDIT_APPROVED_AT, "1001".into()),
         ("P0_MEASUREMENT_DURATION", "1m".into()),
         ("P0_MARKET_DURATION_SECS", "60".into()),
+        ("P0_MARKET_SOURCE", "logs".into()),
     ]
     .into();
     let current = || Ok(fixture_identity());
     let binary = || Ok("binary".to_string());
-    let admit = |env: &HashMap<&str, String>| {
-        market_admission_with(&|k| env.get(k).cloned(), &current, &binary)
+    let admit_at = |env: &HashMap<&str, String>, now: u64| {
+        market_admission_with(&|k| env.get(k).cloned(), &current, &binary, now)
     };
+    let admit = |env: &HashMap<&str, String>| admit_at(env, 1002);
+    // The capture's own clock: inside the record's TTL (1000..1060) and not before its approval.
+    for now in [999, 1000, 1060, 4000] {
+        assert_eq!(admit_at(&full, now), Err("BOOT_NETWORK_EXPIRED"), "{now}");
+    }
+    let mut ahead = full.clone();
+    ahead.insert(ENV_NETWORK_AUDIT_APPROVED_AT, "1003".into());
+    assert_eq!(
+        admit(&ahead),
+        Err("BOOT_NETWORK_EXPIRED"),
+        "approved after now"
+    );
+    // Once: the admission is consumed; a relaunch with the same values is refused.
     assert_eq!(admit(&full), Ok(n.clone()));
+    assert!(path.with_extension("admitted").is_file());
+    assert_eq!(admit(&full), Err(BOOT_ADMISSION_CONSUMED));
+    std::fs::remove_file(path.with_extension("admitted")).unwrap();
     for missing in ["P0_MODE", ENV_NETWORK_AUDIT, "P0_MEASUREMENT_DURATION"] {
         let mut env = full.clone();
         env.remove(missing);
@@ -666,7 +682,12 @@ fn dec07_a_raw_capture_is_admitted_only_to_its_market_flow() {
     assert_eq!(admit(&late), Err("BOOT_NETWORK_EXPIRED"));
     let other = || Ok("other-binary".to_string());
     assert_eq!(
-        market_admission_with(&|k| full.get(k).cloned(), &current, &other),
+        market_admission_with(&|k| full.get(k).cloned(), &current, &other, 1002),
         Err("BOOT_IDENTITY_DRIFT")
     );
+    assert!(
+        !path.with_extension("admitted").exists(),
+        "a refusal consumes nothing"
+    );
+    let _ = std::fs::remove_dir_all(d);
 }

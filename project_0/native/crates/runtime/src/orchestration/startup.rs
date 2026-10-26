@@ -164,9 +164,9 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
     // expired, foreign or drifted record refuses the start (econ4h: after its local manifest, so
     // the refused run stays diagnosable). The owner binds the audited accounts to its own
     // bootstrap state at the first Ready, before admission.
+    // DEC-07: every runtime start needs its record (no unadmitted econ4h/Shadow start).
     let admission = super::boot_audit::admission_record(
         &|k| std::env::var(k).ok(),
-        std::env::var_os("P0_CTL_LAUNCH_RUN_ID").is_some(),
         &|| {
             let project = std::env::var("P0_PROJECT_DIR")
                 .map_err(|_| "BOOT_NETWORK_AUDIT_MISSING: P0_PROJECT_DIR".to_string())?;
@@ -179,6 +179,7 @@ pub fn run_with(after_owner_lock: &mut dyn FnMut()) -> Result<(), Box<dyn std::e
         },
         &super::boot_audit::runtime_binary_identity,
     )
+    .map(Some)
     .map_err(|e| {
         crate::console::line(format!("BOOT admission refused: {e}"));
         super::boot_audit::admission_code(&e)

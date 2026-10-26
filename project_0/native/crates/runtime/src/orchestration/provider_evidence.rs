@@ -113,6 +113,11 @@ pub fn is_id(s: &str) -> bool {
     s.len() == 16 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+/// Whether `id` names exactly these record bytes.
+pub fn names(id: &str, data: &[u8]) -> bool {
+    is_id(id) && sha(data)[..16] == *id
+}
+
 /// A record's bytes within [`RECORD_LIMIT`]; a missing file is `missing`.
 fn read_limited(path: &std::path::Path, missing: &str) -> Result<Vec<u8>, String> {
     use std::io::Read;
@@ -178,7 +183,7 @@ pub fn resolve(project: &std::path::Path, id: &str) -> Result<std::path::PathBuf
         return Err("BOOT_PROVIDER_EVIDENCE_ID_INVALID: a record id is 16 lowercase hex digits (p0ctl boot evidence import FILE.p0j)".into());
     }
     let path = project.join(STORE).join(format!("{id}.p0j"));
-    if sha(&read_limited(&path, "BOOT_PROVIDER_EVIDENCE_UNKNOWN")?)[..16] != *id {
+    if !names(id, &read_limited(&path, "BOOT_PROVIDER_EVIDENCE_UNKNOWN")?) {
         return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
     }
     Ok(path)

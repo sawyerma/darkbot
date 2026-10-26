@@ -663,6 +663,12 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
         Ok(data)
     };
     let data = read_bounded()?;
+    // A boot flow names its record by id: the bytes bound are exactly the ones it names.
+    if let Some(id) = val("--provider-evidence-id") {
+        if !super::provider_evidence::names(&id, &data) {
+            return Err("BOOT_PROVIDER_EVIDENCE_CHANGED".into());
+        }
+    }
     let proof: fe::ProviderEvidence = journal::read_typed_value(Path::new(&proof_path))
         .map_err(|_| "BOOT_PROVIDER_EVIDENCE_FORMAT")?;
     if read_bounded()? != data {

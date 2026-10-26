@@ -79,7 +79,9 @@ type EnrichmentFetcher<'a> =
 
 #[path = "configuration.rs"]
 mod configuration;
-pub use configuration::{market_ws_config, redact_url, EnrichConfig, MarketConfig, MarketSource};
+pub use configuration::{
+    market_ws_config, redact_url, source_name, EnrichConfig, MarketConfig, MarketSource,
+};
 #[path = "time.rs"]
 mod time;
 use time::unix_now_s;

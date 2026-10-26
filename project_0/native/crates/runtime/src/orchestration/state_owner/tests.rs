@@ -1077,6 +1077,8 @@ fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
             let (tx, rx) = bounded::<IngressEvent>("r1", 1024);
             let stop = Shutdown::new();
             let (sd, flags) = (stop.clone(), Some(shared.clone()));
+            // The listener's count before this session exists: its accept is counted after.
+            let before = accepted.load(Ordering::Acquire);
             let thread = std::thread::spawn(move || {
                 ingress::run_ingress(src, tx, sd, IngressHalt::new(), SlotWatch::new(), flags)
             });
@@ -1085,7 +1087,6 @@ fn shadow_session_stop_and_join_is_far_below_the_shutdown_budget() {
             // The session is in its phase: the backoff after its DEGRADED event, the hanging
             // handshake after the listener's accept; with admission either one (its permit was
             // granted and it connected, or its admission ended).
-            let before = accepted.load(Ordering::Acquire);
             let until = std::time::Instant::now() + budget;
             let mut degraded = false;
             let reached = loop {

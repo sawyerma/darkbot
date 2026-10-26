@@ -223,7 +223,7 @@ fn dec07_a_raw_capture_flow_starts_through_its_launcher_with_its_admission() {
     let ok = script(
         "ok-ctl",
         &format!(
-            "printf '%s|%s|%s|%s|%s|%s\\n' \"$*\" \"$P0_MODE\" \"$P0_MEASUREMENT_DURATION\" \"$P0_NETWORK_AUDIT\" \"$P0_NETWORK_AUDIT_TOKEN\" \"$P0_NETWORK_AUDIT_APPROVED_AT\" >> '{}'",
+            "printf '%s|%s|%s|%s|%s|%s\\n' \"$*\" \"$P0_MODE\" \"$P0_MEASUREMENT_DURATION\" \"$P0_NETWORK_AUDIT\" \"$P0_NETWORK_AUDIT_TOKEN\" \"$P0_NETWORK_AUDIT_APPROVED_AT\" >> '{}'; echo 'Capture gestartet pid=1 dauer=600 launch=l1'",
             calls.display()
         ),
     );
@@ -260,10 +260,14 @@ fn dec07_a_raw_capture_flow_starts_through_its_launcher_with_its_admission() {
         fields[5].parse::<u64>().unwrap() > 0,
         "approved now: {call}"
     );
-    assert_eq!(
-        boot_control::status(&d, "m1").unwrap().start.name(),
-        "COMPLETED"
-    );
+    // The step names the capture its launcher started.
+    match boot_control::status(&d, "m1").unwrap().start {
+        boot_control::StepState::Done(o) => assert_eq!(
+            (o.state.as_str(), o.run_id.as_deref()),
+            ("COMPLETED", Some("app-l1"))
+        ),
+        other => panic!("{other:?}"),
+    }
     let refusing = script("no-ctl", "echo 'BOOT_AUDIT_REQUIRED: refused' >&2; exit 1");
     let (code, _) = run(
         &[

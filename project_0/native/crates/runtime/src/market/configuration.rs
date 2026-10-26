@@ -103,6 +103,18 @@ pub const HELIUS_STANDARD_WSS_MAINNET: &str = "wss://mainnet.helius-rpc.com/?api
 pub const HELIUS_RPC_MAINNET: &str = "https://mainnet.helius-rpc.com/?api-key=";
 pub const DEFAULT_OUT_DIR: &str = "project_0/data/market";
 
+/// The capture source `P0_MARKET_SOURCE` names (unset: transactions) — the one resolution the
+/// capture, its boot admission and `p0ctl boot` share (DEC-07).
+pub fn source_name(value: Option<&str>) -> Result<&'static str, String> {
+    match value {
+        None | Some("transactions") => Ok("transactions"),
+        Some("logs") => Ok("logs"),
+        Some(other) => Err(format!(
+            "invalid P0_MARKET_SOURCE={other} (transactions|logs)"
+        )),
+    }
+}
+
 impl MarketConfig {
     /// Pure parser (testable). Requires `P0_PROGRAM_ID` and either `P0_WS_URL` or `HELIUS_API_KEY`
     /// (explicit URLs always win). `P0_RPC_URL` is optional: without it, `logs` enrichment is
@@ -127,14 +139,9 @@ impl MarketConfig {
         let program_s = req("P0_PROGRAM_ID")?;
         let program =
             Pubkey::from_str(&program_s).map_err(|e| format!("invalid P0_PROGRAM_ID: {e}"))?;
-        let source = match opt("P0_MARKET_SOURCE").as_deref() {
-            None | Some("transactions") => MarketSource::Transactions,
-            Some("logs") => MarketSource::Logs,
-            Some(other) => {
-                return Err(format!(
-                    "invalid P0_MARKET_SOURCE={other} (transactions|logs)"
-                ))
-            }
+        let source = match source_name(opt("P0_MARKET_SOURCE").as_deref())? {
+            "logs" => MarketSource::Logs,
+            _ => MarketSource::Transactions,
         };
         let commitment: &'static str = match opt("P0_MARKET_COMMITMENT").as_deref() {
             None | Some("finalized") => "finalized",

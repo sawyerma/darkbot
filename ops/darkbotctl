@@ -463,9 +463,9 @@ _capture_start() {
     [ "$secs" -ge 60 ] && [ "$secs" -le 86400 ] || die "Dauer: until-stopped oder 60..86400 Sekunden"
   fi
   if capture_running; then
-    if capture_stopping; then say "Capture beendet sich gerade (pid $(capture_pid)) – kein neuer Start"
-    else say "Capture läuft bereits (pid $(capture_pid))"; fi
-    return 0
+    # DEC-07: an approved start admits exactly one new capture; it never reports a running one.
+    if capture_stopping; then die "BOOT_CAPTURE_RUNNING: Capture beendet sich gerade (pid $(capture_pid)) – kein neuer Start"
+    else die "BOOT_CAPTURE_RUNNING: Capture läuft bereits (pid $(capture_pid)) – die Startfreigabe startet keine neue"; fi
   fi
   foreign="$(foreign_capture)"
   [ -z "$foreign" ] || die "Capture-Prozess $foreign läuft außerhalb von launchd – kein zweiter Start (Stopp: kill -TERM $foreign)"

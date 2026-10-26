@@ -1006,7 +1006,11 @@ fn load_capture_env() -> Result<(), String> {
 /// DEC-07: the capture source a raw-capture flow audits — the configured one
 /// (`P0_MARKET_SOURCE`, the admission's default logs); another one is refused.
 fn raw_capture_source(asked: Option<String>) -> Result<String, String> {
-    let configured = std::env::var("P0_MARKET_SOURCE").unwrap_or_else(|_| "logs".into());
+    // The capture's own resolution (unset: transactions), never a default of its own.
+    let configured = darkbot_runner::market_observer::source_name(
+        std::env::var("P0_MARKET_SOURCE").ok().as_deref(),
+    )?
+    .to_string();
     match asked {
         Some(asked) if asked != configured => Err(format!(
             "BOOT_CAPTURE_SOURCE_MISMATCH: the raw capture is configured for {configured}"
@@ -1054,7 +1058,13 @@ fn start_raw_capture(
         .output()
         .map_err(|e| format!("BOOT_DESKTOP_CONTROL: {e}"))?;
     if out.status.success() {
-        Ok(None)
+        // The step names the capture it started (`darkbotctl`: "… launch=ID").
+        let text = String::from_utf8_lossy(&out.stdout);
+        let launch = text
+            .split_whitespace()
+            .find_map(|w| w.strip_prefix("launch="))
+            .ok_or("BOOT_RAW_CAPTURE_UNCONFIRMED: the launcher named no started capture")?;
+        Ok(Some(format!("app-{launch}")))
     } else {
         let text = String::from_utf8_lossy(&out.stderr);
         let last = text
@@ -1238,6 +1248,8 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                             need("--genesis-hash")?,
                             "--provider-evidence".into(),
                             evidence_path(project, &need("--provider-evidence")?)?,
+                            "--provider-evidence-id".into(),
+                            need("--provider-evidence")?,
                             "--capture-source".into(),
                             capture_source()?,
                             "--duration".into(),

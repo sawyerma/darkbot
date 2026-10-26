@@ -168,11 +168,10 @@ class Launchers(unittest.TestCase):
     def test_market_and_gap_launchers_resolve_through_the_same_contract(self):
         with tempfile.TemporaryDirectory() as folder:
             tmp=Path(folder);env=self.environment(tmp);out=tmp/'market'
-            p=self.run_script('capture.sh market',{**env,'P0_RUN_STORE':'runs','P0_MARKET_OUT_DIR':str(out)})
-            self.assertEqual(p.returncode,2);self.assertIn('RUN_ROOT_CONFLICT',p.stderr);self.assertFalse(out.exists())
-            (out/'m1').mkdir(parents=True)
-            p=self.run_script('capture.sh market',{**env,'P0_MARKET_OUT_DIR':str(out),'P0_MARKET_RUN_ID':'m1'})
-            self.assertEqual(p.returncode,2);self.assertIn('RUN_ID_COLLISION',p.stderr);self.assertNotIn('Unfiltered Live Market Observer',p.stdout)
+            # DEC-07: the raw capture starts only through its boot flow; this launcher allocates nothing.
+            for extra in ({'P0_RUN_STORE':'runs','P0_MARKET_OUT_DIR':str(out)},{'P0_MARKET_OUT_DIR':str(out),'P0_MARKET_RUN_ID':'m1'}):
+                p=self.run_script('capture.sh market',{**env,**extra})
+                self.assertEqual(p.returncode,2);self.assertIn('BOOT_AUDIT_REQUIRED',p.stderr);self.assertFalse(out.exists())
             p=self.run_script('smoke.sh',{**env,'P0_RUN_STORE':'bogus'})
             self.assertEqual(p.returncode,2);self.assertIn('RUN_STORE_INVALID',p.stderr)
             econ=tmp/'econ';(econ/'g1').mkdir(parents=True);(econ/'g1/keep.json').write_text('{}')

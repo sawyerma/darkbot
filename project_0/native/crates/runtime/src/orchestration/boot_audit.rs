@@ -1686,31 +1686,29 @@ pub const ENV_NETWORK_AUDIT: &str = "P0_NETWORK_AUDIT";
 pub const ENV_NETWORK_AUDIT_TOKEN: &str = "P0_NETWORK_AUDIT_TOKEN";
 pub const ENV_NETWORK_AUDIT_APPROVED_AT: &str = "P0_NETWORK_AUDIT_APPROVED_AT";
 
-/// X1: the network audit a runtime start is bound to. A start by `p0ctl` (`launched` = the
-/// launch marker is set) or with a record path must carry record, token and approval time and
-/// pass [`NetworkAudit::validate_admission`]; anything missing or invalid refuses the start
-/// before any network read. Without both, the legacy local Shadow path is unchanged (`None`).
+/// X1: the network audit a runtime start is bound to. Every start reads Mainnet, so it must
+/// carry record, token and approval time and pass [`NetworkAudit::validate_admission`];
+/// anything missing or invalid refuses the start before any network read (DEC-07: no start
+/// without its record — the former unlaunched path without one is gone).
 pub fn admission_record(
     get: &dyn Fn(&str) -> Option<String>,
-    launched: bool,
     current: &dyn Fn() -> Result<AuditedIdentity, String>,
     binary: &dyn Fn() -> Result<String, String>,
-) -> Result<Option<NetworkAudit>, String> {
-    let path = get(ENV_NETWORK_AUDIT).filter(|v| !v.is_empty());
-    if !launched && path.is_none() {
-        return Ok(None);
-    }
+) -> Result<NetworkAudit, String> {
     let missing = || "BOOT_NETWORK_AUDIT_MISSING".to_string();
-    let path = path.ok_or_else(missing)?;
+    let path = get(ENV_NETWORK_AUDIT)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(missing)?;
     let token = get(ENV_NETWORK_AUDIT_TOKEN).ok_or_else(missing)?;
     let approved_at = get(ENV_NETWORK_AUDIT_APPROVED_AT)
         .and_then(|v| v.parse::<u64>().ok())
         .ok_or_else(missing)?;
     let record: NetworkAudit =
         journal::read_typed_value(Path::new(&path)).map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
-    let source = get("P0_MARKET_SOURCE").unwrap_or_else(|| "logs".into());
-    record.validate_admission(approved_at, &token, &current()?, &binary()?, &source)?;
-    Ok(Some(record))
+    let source = crate::market_observer::source_name(get("P0_MARKET_SOURCE").as_deref())
+        .map_err(|e| format!("BOOT_IDENTITY_DRIFT: capture_source ({e})"))?;
+    record.validate_admission(approved_at, &token, &current()?, &binary()?, source)?;
+    Ok(record)
 }
 
 /// Bind both the control executable and the actual runtime it admits.
@@ -1734,15 +1732,23 @@ pub fn binary_identity_for(mode: &str) -> Result<String, String> {
 pub const MARKET_MODE: &str = "market";
 /// DEC-07: a standalone raw capture without its admitted boot flow.
 pub const BOOT_AUDIT_REQUIRED: &str = "BOOT_AUDIT_REQUIRED";
+/// DEC-07: an approved raw-capture start admits one capture; a second start of it is refused.
+pub const BOOT_ADMISSION_CONSUMED: &str = "BOOT_ADMISSION_CONSUMED";
 
 /// DEC-07: the admission of a standalone raw capture — every one reads Mainnet, so it starts
 /// only admitted to its approved network audit of boot mode `market` (`p0ctl boot start`
 /// through the desktop launcher): record, token and approval time inside the record's TTL,
 /// this code, configuration, safety flags, executables and capture source, and exactly the
-/// audited duration. Anything else ends before any read; without a record BOOT_AUDIT_REQUIRED.
+/// audited duration; the capture's own clock inside the record's TTL (it starts right after its
+/// approval), and once: the admission is consumed. Anything else ends before any read; without
+/// a record BOOT_AUDIT_REQUIRED.
 pub fn market_admission(
     get: &dyn Fn(&str) -> Option<String>,
 ) -> Result<NetworkAudit, &'static str> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "BOOT_CLOCK")?
+        .as_secs();
     market_admission_with(
         get,
         &|| {
@@ -1751,6 +1757,7 @@ pub fn market_admission(
             launched_identity(Path::new(&project), SafetyFlags::from_env(), &[], get)
         },
         &runtime_binary_identity,
+        now,
     )
 }
 
@@ -1759,6 +1766,7 @@ pub(crate) fn market_admission_with(
     get: &dyn Fn(&str) -> Option<String>,
     current: &dyn Fn() -> Result<AuditedIdentity, String>,
     binary: &dyn Fn() -> Result<String, String>,
+    now: u64,
 ) -> Result<NetworkAudit, &'static str> {
     if get("P0_MODE").as_deref() != Some(MARKET_MODE)
         || get(ENV_NETWORK_AUDIT).is_none_or(|v| v.is_empty())
@@ -1771,9 +1779,34 @@ pub(crate) fn market_admission_with(
     if get("P0_MARKET_DURATION_SECS").and_then(|v| v.parse::<u64>().ok()) != Some(seconds) {
         return Err("BOOT_IDENTITY_DRIFT");
     }
-    admission_record(get, true, current, binary)
-        .map_err(|e| admission_code(&e))?
-        .ok_or(BOOT_AUDIT_REQUIRED)
+    let record = admission_record(get, current, binary).map_err(|e| admission_code(&e))?;
+    let approved_at = get(ENV_NETWORK_AUDIT_APPROVED_AT)
+        .and_then(|v| v.parse::<u64>().ok())
+        .ok_or(BOOT_AUDIT_REQUIRED)?;
+    if approved_at > now || !record.within_ttl(now) {
+        return Err("BOOT_NETWORK_EXPIRED");
+    }
+    // Once: the approval is consumed beside its record before any read (a relaunch of the same
+    // job, or its values copied, is refused).
+    let path = std::path::PathBuf::from(get(ENV_NETWORK_AUDIT).ok_or(BOOT_AUDIT_REQUIRED)?);
+    let consumed = path.with_extension("admitted");
+    let mut marker = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&consumed)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(BOOT_ADMISSION_CONSUMED)
+        }
+        Err(_) => return Err("BOOT_NETWORK_EVIDENCE_INVALID"),
+    };
+    use std::io::Write;
+    marker
+        .write_all(format!("pid={} admitted_unix_s={now}\n", std::process::id()).as_bytes())
+        .and_then(|()| marker.sync_all())
+        .map_err(|_| "BOOT_NETWORK_EVIDENCE_INVALID")?;
+    Ok(record)
 }
 
 /// The same identity seen from the runtime (X1): `p0ctl` next to the running executable.

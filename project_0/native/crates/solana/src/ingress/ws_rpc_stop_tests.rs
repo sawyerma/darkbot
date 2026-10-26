@@ -20,6 +20,20 @@ fn r10_run_until(
     cfg: WsRpcConfig,
     stop_when: Option<&dyn Fn() -> bool>,
 ) -> (Result<(), IngressError>, Duration, Vec<IngressEvent>) {
+    match stop_when {
+        None => r10_run_until_events(cfg, None),
+        Some(when) => r10_run_until_events(cfg, Some(&|_: &[IngressEvent]| when())),
+    }
+}
+
+/// A stop condition over the events the source has queued so far.
+type R10Until<'a> = Option<&'a dyn Fn(&[IngressEvent]) -> bool>;
+
+/// As [`r10_run_until`], the condition over the events the source has queued so far.
+fn r10_run_until_events(
+    cfg: WsRpcConfig,
+    stop_when: R10Until<'_>,
+) -> (Result<(), IngressError>, Duration, Vec<IngressEvent>) {
     let (tx, rx) = darkbot_common::channel::bounded("r10", 1024);
     let stop = Shutdown::new();
     if stop_when.is_none() {
@@ -29,14 +43,18 @@ fn r10_run_until(
     src.provider_budget = std::sync::Arc::new(crate::provider::Budget::default());
     let sd = stop.clone();
     let thread = std::thread::spawn(move || src.run(tx, sd, IngressHalt::new(), SlotWatch::new()));
+    let mut events = Vec::new();
     if let Some(when) = stop_when {
         let waiting = std::time::Instant::now();
-        while !when() {
+        while !when(&events) {
             assert!(
                 waiting.elapsed() < Duration::from_secs(30),
                 "stop condition not reached within 30 s"
             );
-            std::thread::sleep(Duration::from_millis(2));
+            match rx.pop_timeout(Duration::from_millis(2)) {
+                Some(e) => events.push(e),
+                None => continue,
+            }
         }
     }
     let requested = std::time::Instant::now();
@@ -50,7 +68,6 @@ fn r10_run_until(
     }
     let ended = requested.elapsed();
     let result = thread.join().expect("ingress thread panicked");
-    let mut events = Vec::new();
     while let Some(e) = rx.try_pop() {
         events.push(e);
     }
@@ -186,7 +203,9 @@ fn requested_stop_is_ok_without_fatal_in_every_session_phase() {
 }
 
 /// R1 rest: a requested stop stays bounded, `Ok` and without `Fatal` when the peer stops reading
-/// (the source's Pong replies to a Ping flood are blocked, its reader keeps reading: V2-14 P3-04)
+/// (the source's Pong replies to a Ping flood are blocked, its reader keeps reading: V2-14 P3-04;
+/// P0-015: proven by an order — the slot sent after the flood reaches the source in the same
+/// session — never by a send latency)
 /// and while a TLS handshake stalls (the peer reads the ClientHello of the
 /// production rustls connector and never answers). Loopback only, never Mainnet. An established
 /// TLS session cannot be built offline (the connector trusts only the webpki roots); no stop path
@@ -200,13 +219,11 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
     // V2-14 P3-04: a peer that acknowledges the subscription, then floods Pings and never reads
     // again. The source's Pong writes are blocked (more Pong bytes, 131 each, than its autotuned
     // send buffer of at most 4 MiB and the peer's 4 KiB receive buffer hold), its reader is not:
-    // every Ping is taken without a stalled send of the peer.
+    // it takes every Ping and then the slot behind them. A reader blocked on its own Pong (the
+    // pre-P3-04 code) ends the session at its Pong timeout and never reaches the slot.
+    // P0-015 (was P0-007): no send-latency threshold decides — a loaded runner's TCP timing is
+    // no verdict.
     const FLOOD_PINGS: usize = 48 * 1024;
-    // P0-007: a send counts as stalled (the client stopped reading) only after 3 s — a loaded CI
-    // runner can delay one send by more than the former 500 ms without any blocked reader, while
-    // a reader blocked on its own Pong (the pre-P3-04 code, up to its 5 s Pong timeout) still
-    // stalls the peer far longer.
-    const FLOOD_STALL: Duration = Duration::from_secs(3);
     let (flooded, done) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let release = Shutdown::new();
     let (addr_tx, addr_rx) = std::sync::mpsc::channel();
@@ -243,15 +260,23 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
             .unwrap();
             let until = tokio::time::Instant::now() + limit;
             let mut sent = 0usize;
-            while sent < FLOOD_PINGS && tokio::time::Instant::now() < until {
+            while sent < FLOOD_PINGS {
                 let ping = ws.send(Message::Ping(vec![0x5A; 125]));
-                match tokio::time::timeout(FLOOD_STALL, ping).await {
+                match tokio::time::timeout_at(until, ping).await {
                     Ok(Ok(())) => sent += 1,
-                    // A stalled send: the client stopped reading.
+                    // The connection ended (or the hang guard): the flood is incomplete.
                     _ => break,
                 }
             }
-            flag.store(sent == FLOOD_PINGS, Ordering::Release);
+            // The slot behind the flood: only a reader that took every Ping reaches it.
+            let slot = json!({"jsonrpc": "2.0", "method": "slotNotification", "params": {
+                "subscription": 7, "result": {"slot": 100, "parent": 99, "root": 98}}});
+            let behind = sent == FLOOD_PINGS
+                && matches!(
+                    tokio::time::timeout_at(until, ws.send(Message::Text(slot.to_string()))).await,
+                    Ok(Ok(()))
+                );
+            flag.store(behind, Ordering::Release);
             finished.store(true, Ordering::Release);
             // Keep the connection open (and unread) until the test is done with it.
             while !hold.is_requested() && tokio::time::Instant::now() < until {
@@ -260,16 +285,25 @@ fn requested_stop_is_bounded_when_the_peer_stops_reading_or_tls_stalls() {
         });
     });
     let addr = addr_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let ready = done.clone();
-    let (r, ended, ev) = r10_run_until(
+    let (ready, sent) = (done.clone(), flooded.clone());
+    // The stop follows the source's own evidence: the slot behind the flood (or the peer's
+    // incomplete flood).
+    let (r, ended, ev) = r10_run_until_events(
         r10_cfg(format!("ws://{addr}")),
-        Some(&move || ready.load(Ordering::Acquire)),
+        Some(&move |ev: &[IngressEvent]| {
+            ev.iter().any(|e| matches!(e, IngressEvent::Slot(_)))
+                || (ready.load(Ordering::Acquire) && !sent.load(Ordering::Acquire))
+        }),
     );
     release.request();
     server.join().unwrap();
     assert!(
         flooded.load(Ordering::Acquire),
-        "the reader kept reading while its Pong writes were blocked"
+        "the peer flooded every Ping and the slot behind them"
+    );
+    assert!(
+        ev.iter().any(|e| matches!(e, IngressEvent::Slot(s) if s.slot == 100)),
+        "the reader kept reading while its Pong writes were blocked: the slot behind the flood"
     );
     assert!(r.is_ok() && r10_fatals(&ev) == 0, "peer stops reading: {r:?}");
     assert!(
