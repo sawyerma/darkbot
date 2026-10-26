@@ -21,8 +21,10 @@
 //! A [`ChainInput::Reorg`] lists the orphaned blocks ascending and is
 //! followed by the new chain's blocks `fork + 1 ..= new_head`. A
 //! [`ChainInput::ReorgTooDeep`] is followed by the block `new_head`. A
-//! [`ChainInput::Gap`] `{from, to}` is followed by the block `to + 1`. The
-//! state expects exactly these; any other block is a [`Conflict`].
+//! [`ChainInput::Gap`] `{from, to}` is followed by the block `to + 1`. A
+//! block that is not the one expected is a counted
+//! [`Conflict::Discontinuity`] (rule 3); the owner never stays stalled on
+//! canonical input.
 //!
 //! It keeps three things apart (master plan §13 C2):
 //!
@@ -36,7 +38,14 @@
 //!   seen pending.
 //! - **Confidence** per sender: `Clean` (its next canonical nonce is known
 //!   exactly), `Unknown` or `Quarantined`, always with a reason. Nothing is
-//!   ever assumed: an unknown nonce is never zero.
+//!   ever assumed: an unknown nonce is never zero. EIP-7702 is active on
+//!   BSC: an authorization in another transaction can raise an account's
+//!   nonce without a transaction of that account. Such a raise shows as a
+//!   skipped nonce at the account's next inclusion and costs it `Clean`
+//!   (rule 3). For a foreign sender `Clean` therefore means "known from the
+//!   last inclusion"; watched senders are assumed to sign no
+//!   authorizations (the signer signs legacy transactions only), so a skip
+//!   of theirs needs a nonce fact.
 //!
 //! Proofs ([`InclusionProof`], [`FinalityProof`], [`OrphanProof`],
 //! [`ReconciliationProof`]) and [`Replaced`] records are produced only for
@@ -52,30 +61,42 @@
 //! 2. **Replacement needs canonical evidence.** Only the inclusion of one
 //!    candidate in an accepted block marks the others of its slot
 //!    `Replaced` with that winner.
-//! 3. **Blocks extend the head.** A block is accepted only if its parent is
-//!    the head and its number the next one (or, while unanchored, if it is
-//!    the block the state expects). Its transaction list must be complete
-//!    (`index` = position), free of repeated hashes, and give every sender
-//!    consecutive nonces. A transaction already included in an accepted
-//!    block, or a nonce already consumed, is a [`Conflict`]; the block is
-//!    refused, nothing is overwritten, and the state reports no snapshot
-//!    until an accepted canonical input follows.
+//! 3. **Blocks extend the head.** A block whose parent is the head and
+//!    whose number is the next one extends the chain. Any other block
+//!    (also, while unanchored, one that is not the expected block) is a
+//!    discontinuity of unknown extent: it is reported as the non-refusing
+//!    [`Conflict::Discontinuity`], the retained chain is dropped as for a
+//!    gap (rule 5, reason `Discontinuity`), and the block becomes the new
+//!    anchor. Every block's transaction list must be complete (`index` =
+//!    position), free of repeated hashes, and give each sender strictly
+//!    increasing nonces; it need not give consecutive ones, because an
+//!    EIP-7702 authorization can raise a nonce inside the block. A skipped
+//!    nonce is a non-refusing [`Conflict::NonceDiscontinuity`] and costs the
+//!    sender `Clean`. A malformed or oversize block, a transaction already
+//!    included in a held canonical block, or a nonce the state knows to be
+//!    consumed (by a held inclusion, a nonce fact, or below the sender's
+//!    known next nonce) is refused: nothing is overwritten and the state
+//!    reports no snapshot until an accepted canonical input follows. The
+//!    follower's next block then re-anchors through the discontinuity rule.
 //! 4. **Reorg.** A [`ChainInput::Reorg`] must name exactly a suffix of the
 //!    retained chain ending at the head. Its transactions return to
 //!    candidates (never dropped), the candidates they had replaced return
 //!    as well, watched senders get one [`OrphanProof`] per consumed nonce,
 //!    and every sender's next nonce falls back to the smallest orphaned
 //!    one. A reorg reaching below the retained window is handled as too
-//!    deep.
-//! 5. **Too deep and gaps.** [`ChainInput::ReorgTooDeep`] and
-//!    [`ChainInput::Gap`] drop the retained chain: listed blocks are
-//!    orphaned as in rule 4, the not yet final transactions of the other
-//!    retained blocks become `Uncertain`, every sender becomes `Unknown`
-//!    (a quarantined one stays quarantined) and the state is unanchored
-//!    until the expected block arrives. Watched senders need a
-//!    [`ChainInput::NonceFact`] to become `Clean` again; foreign senders
-//!    become `Clean` with their next canonical inclusion, which fixes their
-//!    nonce exactly.
+//!    deep. A reorg naming blocks the state does not hold is refused; the
+//!    new chain's next block re-anchors (rule 3).
+//! 5. **Too deep, gaps, discontinuities.** [`ChainInput::ReorgTooDeep`],
+//!    [`ChainInput::Gap`] and a discontinuous block drop the retained
+//!    chain: listed blocks are orphaned as in rule 4, the not yet final
+//!    transactions of the other retained blocks become `Uncertain`, every
+//!    sender becomes `Unknown` (a quarantined one stays quarantined) and
+//!    the state is unanchored until the next block, which anchors it. A gap
+//!    that does not start right after the head is applied all the same and
+//!    reported as the non-refusing [`Conflict::GapMismatch`]. Watched
+//!    senders need a [`ChainInput::NonceFact`] to become `Clean` again;
+//!    foreign senders become `Clean` with their next inclusion that skips
+//!    no nonce.
 //! 6. **Finality.** A retained block becomes final once the head is
 //!    `finality_depth` blocks above it; each watched transaction in it gets
 //!    one [`FinalityProof`]. `finality_depth <= reorg_window`, so a block is
@@ -84,20 +105,28 @@
 //! 7. **Reverted transactions consume their nonce** like successful ones.
 //! 8. **Reconciliation.** A `NonceFact` for a watched sender is checked
 //!    against the canonical effects: its block must be on the retained
-//!    chain, the sender's inclusions after it must continue its nonce
-//!    contiguously, and the resulting next nonce must equal the one the
-//!    effects imply. Only if in addition no transaction of the sender is a
-//!    candidate or uncertain, and every overflowed nonce of the sender was
-//!    consumed by a recorded inclusion, the sender becomes `Clean` and a
-//!    [`ReconciliationProof`] is emitted. Otherwise it stays `Unknown` or
-//!    `Quarantined` with the reason. A fact also proves that an uncertain
-//!    transaction at or below its block whose nonce is not yet consumed
-//!    was orphaned.
+//!    chain (or be the head), the sender's inclusions after it must have
+//!    strictly increasing nonces from the fact's next nonce on, and the
+//!    resulting next nonce must equal the one the effects imply. A fact
+//!    that passes the block check proves every nonce below its next nonce
+//!    consumed at or before its block, and every nonce from it on not yet
+//!    consumed there: a candidate of a consumed nonce becomes `Dropped`, an
+//!    uncertain transaction of a consumed nonce `ConsumedUnattributed`
+//!    (resolved, no proof: only a receipt could attribute it), and an
+//!    uncertain transaction of an unconsumed nonce at or below the fact's
+//!    block was orphaned. The sender becomes `Clean` and a
+//!    [`ReconciliationProof`] is emitted only if, in addition, its
+//!    inclusions after the fact's block skip no nonce, none of its
+//!    transactions is a candidate or uncertain, and every overflowed nonce
+//!    of it is consumed. Otherwise it stays `Unknown` or `Quarantined` with
+//!    the reason. A fact resolution settles once the fact's block leaves
+//!    the window final, and is reverted if that block leaves the chain or
+//!    becomes uncertain first.
 //! 9. **Bounds.** At most `max_txs` transactions and, per slot, at most
 //!    `max_candidates_per_nonce` records besides the canonical one are
 //!    held. When full, only *settled* records are evicted: included in a
-//!    final block that left the reorg window, or replaced by such a
-//!    transaction. Otherwise the record is refused with a counted
+//!    final block that left the reorg window, replaced by such a
+//!    transaction, or resolved by a nonce fact whose block did. Otherwise the record is refused with a counted
 //!    [`Overflow`] and the sender becomes `Unknown`; nothing is lost
 //!    silently. Sender records exist for the watched senders and for
 //!    senders with at least one held transaction.
@@ -254,11 +283,14 @@ pub enum SenderReason {
     Restart,
     /// Canonical blocks were not followed.
     Gap,
+    /// A block did not extend the head (rule 3).
+    Discontinuity,
     /// A reorg reached below the retained chain.
     ReorgTooDeep,
     /// A transaction of the sender was refused by a bound.
     Overflow,
-    /// A canonical inclusion did not continue the known next nonce.
+    /// A canonical inclusion skipped the known next nonce (an EIP-7702
+    /// authorization, or a consumption the state did not see).
     NonceDiscontinuity {
         /// The next nonce the state held.
         expected: u64,
@@ -347,6 +379,31 @@ pub enum TxState {
         /// The consuming transaction.
         winner: B256,
     },
+    /// A nonce fact proved the nonce consumed at or before its block, and
+    /// this candidate was never seen included: it was dropped. Resolved.
+    Dropped {
+        /// Number of the fact's block.
+        fact_block_number: u64,
+        /// Hash of the fact's block.
+        fact_block_hash: B256,
+    },
+    /// Executed in a block of unknown canonicity, and a nonce fact proved
+    /// the nonce consumed at or before its block; whether by this
+    /// transaction is unknown without a receipt. Resolved; no proof.
+    ConsumedUnattributed {
+        /// Number of the uncertain block.
+        block_number: u64,
+        /// Hash of the uncertain block.
+        block_hash: B256,
+        /// Position in that block.
+        index: u32,
+        /// Execution result in that block.
+        status: ExecutionStatus,
+        /// Number of the fact's block.
+        fact_block_number: u64,
+        /// Hash of the fact's block.
+        fact_block_hash: B256,
+    },
 }
 
 /// What the state holds about one transaction.
@@ -396,6 +453,15 @@ pub enum Consumption {
         /// Its block hash.
         block_hash: B256,
     },
+    /// A nonce fact proved it consumed at or before its block; by which
+    /// transaction is unknown (the slot holds `Dropped` or
+    /// `ConsumedUnattributed` records).
+    BeforeFact {
+        /// Number of the fact's block.
+        fact_block_number: u64,
+        /// Hash of the fact's block.
+        fact_block_hash: B256,
+    },
     /// Below the sender's known next nonce, by a transaction the state does
     /// not hold.
     ByUntracked,
@@ -412,6 +478,9 @@ pub struct NonceView {
     pub candidates: Vec<B256>,
     /// Replaced transactions, in the order they were first held.
     pub replaced: Vec<B256>,
+    /// `Dropped` and `ConsumedUnattributed` transactions, in the order they
+    /// were first held.
+    pub unattributed: Vec<B256>,
     /// Consumption of the nonce.
     pub consumption: Consumption,
 }
@@ -429,14 +498,18 @@ pub struct Replaced {
     pub winner: B256,
 }
 
-/// Contradicting or malformed input. Every variant except
-/// [`Conflict::NonceDiscontinuity`] means the input was refused and changed
-/// nothing but counters; a refused canonical input also withholds the
-/// snapshot until an accepted canonical input follows.
+/// Contradicting or malformed input. [`Conflict::Discontinuity`],
+/// [`Conflict::GapMismatch`] and [`Conflict::NonceDiscontinuity`] are
+/// reported for inputs that were applied ([`Conflict::refused`] is false).
+/// Every other variant means the input was refused and changed nothing but
+/// counters; a refused canonical input also withholds the snapshot until an
+/// accepted canonical input follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Conflict {
-    /// The block's parent is not the head, or its number not the next.
-    NotOnHead {
+    /// Applied, not refused: the block's parent is not the head or its
+    /// number not the next (or, unanchored, it is not the expected block).
+    /// The retained chain was dropped and the block is the new anchor.
+    Discontinuity {
         /// Block number.
         number: u64,
         /// Block hash.
@@ -444,17 +517,8 @@ pub enum Conflict {
         /// Its parent hash.
         parent_hash: B256,
     },
-    /// The unanchored state expected another block.
-    AnchorMismatch {
-        /// Expected number.
-        expected_number: u64,
-        /// Block number.
-        number: u64,
-        /// Block hash.
-        hash: B256,
-    },
-    /// Incomplete or repeated transaction list, or non-consecutive nonces of
-    /// a sender within the block.
+    /// Incomplete or repeated transaction list, or equal or decreasing
+    /// nonces of a sender within the block.
     MalformedBlock {
         /// Block number.
         number: u64,
@@ -480,14 +544,15 @@ pub enum Conflict {
         /// The refused block.
         block_hash: B256,
     },
-    /// A nonce already consumed on the canonical chain is consumed again.
+    /// A nonce the state knows to be consumed is consumed again.
     NonceConsumedTwice {
         /// The sender.
         sender: Address,
         /// The nonce.
         nonce: u64,
-        /// Transaction that consumed it.
-        consumed_by: B256,
+        /// The held transaction that consumed it; `None` when a nonce fact
+        /// or the sender's known next nonce proves the consumption.
+        consumed_by: Option<B256>,
         /// The second transaction.
         tx: B256,
     },
@@ -499,15 +564,23 @@ pub enum Conflict {
     /// The reorg does not name a suffix of the retained chain ending at the
     /// head, or the state has no head.
     ReorgMismatch,
-    /// The gap does not start right after the head.
+    /// Applied, not refused: the gap does not start right after the head
+    /// (or at the block an unanchored state expected).
     GapMismatch {
         /// First block of the gap.
         from: u64,
         /// Last block of the gap.
         to: u64,
     },
-    /// Applied, not refused: an accepted block consumed another nonce than
-    /// the sender's known next one.
+    /// `from` is above `to`, or `to` is the largest block number.
+    MalformedGap {
+        /// First block of the gap.
+        from: u64,
+        /// Last block of the gap.
+        to: u64,
+    },
+    /// Applied, not refused: an accepted block skipped the sender's known
+    /// next nonce, across blocks or inside one (EIP-7702).
     NonceDiscontinuity {
         /// The sender.
         sender: Address,
@@ -521,7 +594,10 @@ pub enum Conflict {
 impl Conflict {
     /// Whether the input was refused.
     pub fn refused(&self) -> bool {
-        !matches!(self, Self::NonceDiscontinuity { .. })
+        !matches!(
+            self,
+            Self::Discontinuity { .. } | Self::GapMismatch { .. } | Self::NonceDiscontinuity { .. }
+        )
     }
 }
 
@@ -608,6 +684,8 @@ pub struct StateCounters {
     pub orphaned_txs: u64,
     /// Gaps applied.
     pub gaps: u64,
+    /// Blocks that did not extend the head and re-anchored the state.
+    pub discontinuities: u64,
     /// Transactions that became uncertain.
     pub uncertain_marked: u64,
     /// Blocks that became final.
@@ -622,6 +700,13 @@ pub struct StateCounters {
     pub reconciliations: u64,
     /// Nonce facts that did not reconcile.
     pub reconciliation_refusals: u64,
+    /// Candidates a nonce fact proved dropped.
+    pub dropped: u64,
+    /// Uncertain transactions a nonce fact proved consumed, unattributed.
+    pub consumed_unattributed: u64,
+    /// Fact resolutions reverted because the fact's block left the chain or
+    /// became uncertain.
+    pub fact_resolutions_reverted: u64,
     /// Restart quarantines.
     pub quarantines: u64,
     /// Conflicts, refused or not.
@@ -864,10 +949,10 @@ impl ChainState {
                 bump(&mut self.counters.reorgs_too_deep);
                 self.drop_chain(
                     orphaned,
-                    Expect {
+                    Some(Expect {
                         number: new_head.0,
                         hash: Some(new_head.1),
-                    },
+                    }),
                     SenderReason::ReorgTooDeep,
                     &mut out,
                 );
@@ -929,6 +1014,7 @@ impl ChainState {
     pub fn nonce(&self, sender: Address, nonce: u64) -> NonceView {
         let mut candidates = Vec::new();
         let mut replaced = Vec::new();
+        let mut unattributed = Vec::new();
         let mut consumption = None;
         for hash in self.slot(sender, nonce) {
             let Some(record) = self.txs.get(hash) else {
@@ -963,6 +1049,21 @@ impl ChainState {
                         block_hash,
                     });
                 }
+                TxState::Dropped {
+                    fact_block_number,
+                    fact_block_hash,
+                }
+                | TxState::ConsumedUnattributed {
+                    fact_block_number,
+                    fact_block_hash,
+                    ..
+                } => {
+                    unattributed.push(*hash);
+                    consumption.get_or_insert(Consumption::BeforeFact {
+                        fact_block_number,
+                        fact_block_hash,
+                    });
+                }
             }
         }
         let consumption = consumption.unwrap_or_else(|| match self.sender(sender) {
@@ -973,6 +1074,7 @@ impl ChainState {
         NonceView {
             candidates,
             replaced,
+            unattributed,
             consumption,
         }
     }
@@ -1051,7 +1153,10 @@ impl ChainState {
             match record.state {
                 TxState::Candidate => bump(&mut c.held_candidates),
                 TxState::Uncertain { .. } => bump(&mut c.held_uncertain),
-                TxState::Included { .. } | TxState::Replaced { .. } => {}
+                TxState::Included { .. }
+                | TxState::Replaced { .. }
+                | TxState::Dropped { .. }
+                | TxState::ConsumedUnattributed { .. } => {}
             }
         }
         c.held_senders = len_u64(self.senders.len());
@@ -1175,9 +1280,37 @@ impl ChainState {
     // -----------------------------------------------------------------
 
     fn apply_block(&mut self, block: &CanonicalBlock, out: &mut Applied) {
-        if let Some(conflict) = self.check_block(block) {
+        let linked = match (self.head, self.expect) {
+            (Some((number, hash)), _) => {
+                block.parent_hash == hash && number.checked_add(1) == Some(block.number)
+            }
+            (None, Some(expect)) => {
+                block.number == expect.number && expect.hash.is_none_or(|h| h == block.hash)
+            }
+            (None, None) => true,
+        };
+        // A block that does not extend the head is a discontinuity of
+        // unknown extent (rule 3): it is checked against the state as it
+        // will be once the retained chain is dropped.
+        let dropping = !linked && self.head.is_some();
+        if let Some(conflict) = self.check_block(block, dropping) {
             self.refuse(conflict, out);
             return;
+        }
+        if !linked {
+            out.conflicts.push(Conflict::Discontinuity {
+                number: block.number,
+                hash: block.hash,
+                parent_hash: block.parent_hash,
+            });
+            bump(&mut self.counters.discontinuities);
+            if dropping {
+                self.drop_chain(&[], None, SenderReason::Discontinuity, out);
+            } else {
+                // Unanchored already: nothing is retained to drop.
+                bump(&mut self.counters.effects);
+            }
+            self.expect = None;
         }
         let mut record = BlockRecord {
             number: block.number,
@@ -1209,28 +1342,12 @@ impl ChainState {
     }
 
     /// Every reason to refuse `block`, checked before anything changes.
-    fn check_block(&self, block: &CanonicalBlock) -> Option<Conflict> {
-        match (self.head, self.expect) {
-            (Some((number, hash)), _) => {
-                if block.parent_hash != hash || number.checked_add(1) != Some(block.number) {
-                    return Some(Conflict::NotOnHead {
-                        number: block.number,
-                        hash: block.hash,
-                        parent_hash: block.parent_hash,
-                    });
-                }
-            }
-            (None, Some(expect)) => {
-                if block.number != expect.number || expect.hash.is_some_and(|h| h != block.hash) {
-                    return Some(Conflict::AnchorMismatch {
-                        expected_number: expect.number,
-                        number: block.number,
-                        hash: block.hash,
-                    });
-                }
-            }
-            (None, None) => {}
-        }
+    ///
+    /// With `dropping` the records are judged as they will be once the
+    /// retained chain is dropped (rule 5): an inclusion in a retained block
+    /// that is not final is then uncertain, a fact resolution at such a
+    /// block is reverted, and no sender has a known next nonce.
+    fn check_block(&self, block: &CanonicalBlock, dropping: bool) -> Option<Conflict> {
         if block.txs.len() > self.limits.max_txs {
             return Some(Conflict::OversizeBlock {
                 number: block.number,
@@ -1248,19 +1365,32 @@ impl ChainState {
             if usize::try_from(tx.index).ok() != Some(position) || !hashes.insert(tx.hash) {
                 return malformed;
             }
+            // Strictly increasing, not consecutive: an EIP-7702
+            // authorization can raise the nonce inside the block.
             if let Some(previous) = last_nonce.insert(tx.sender, tx.nonce)
-                && previous.checked_add(1) != Some(tx.nonce)
+                && previous >= tx.nonce
             {
                 return malformed;
             }
         }
+        let mut first_of_sender = BTreeSet::new();
         for tx in &block.txs {
+            let consumed = |consumed_by: Option<B256>| {
+                Some(Conflict::NonceConsumedTwice {
+                    sender: tx.sender,
+                    nonce: tx.nonce,
+                    consumed_by,
+                    tx: tx.hash,
+                })
+            };
             if let Some(record) = self.txs.get(&tx.hash) {
                 if record.sender != tx.sender || record.nonce != tx.nonce {
                     return Some(Conflict::IdentityMismatch { tx: tx.hash });
                 }
                 match record.state {
-                    TxState::Included { block_hash, .. } => {
+                    TxState::Included { block_hash, .. }
+                        if stays_canonical(&record.state, dropping) =>
+                    {
                         return Some(Conflict::DoubleInclusion {
                             tx: tx.hash,
                             included_in: block_hash,
@@ -1270,31 +1400,65 @@ impl ChainState {
                     TxState::Replaced { winner } => {
                         let winner_open = self.txs.get(&winner).is_some_and(|w| {
                             matches!(w.state, TxState::Candidate | TxState::Uncertain { .. })
+                                || (matches!(w.state, TxState::Included { .. })
+                                    && !stays_canonical(&w.state, dropping))
                         });
                         if !winner_open {
-                            return Some(Conflict::NonceConsumedTwice {
-                                sender: tx.sender,
-                                nonce: tx.nonce,
-                                consumed_by: winner,
-                                tx: tx.hash,
-                            });
+                            return consumed(Some(winner));
                         }
                     }
-                    TxState::Candidate | TxState::Uncertain { .. } => {}
+                    _ if self.fact_holds(&record.state, dropping) => return consumed(None),
+                    _ => {}
                 }
             }
-            if let Some((winner, _)) = self.slot_winner((tx.sender, tx.nonce))
-                && winner != tx.hash
-            {
-                return Some(Conflict::NonceConsumedTwice {
-                    sender: tx.sender,
-                    nonce: tx.nonce,
-                    consumed_by: winner,
-                    tx: tx.hash,
-                });
+            for other in self.slot(tx.sender, tx.nonce) {
+                if *other == tx.hash {
+                    continue;
+                }
+                let Some(record) = self.txs.get(other) else {
+                    continue;
+                };
+                if stays_canonical(&record.state, dropping) {
+                    return consumed(Some(*other));
+                }
+                if self.fact_holds(&record.state, dropping) {
+                    return consumed(None);
+                }
+            }
+            // Nonces only rise: a sender's first nonce in the block below its
+            // known next nonce is consumed already.
+            if !dropping && first_of_sender.insert(tx.sender) {
+                let below = self
+                    .senders
+                    .get(&tx.sender)
+                    .and_then(|r| r.implied)
+                    .is_some_and(|next| tx.nonce < next);
+                if below {
+                    return consumed(None);
+                }
             }
         }
         None
+    }
+
+    /// Whether a fact resolution (`Dropped`, `ConsumedUnattributed`) holds,
+    /// with `dropping` also once the retained chain is dropped.
+    fn fact_holds(&self, state: &TxState, dropping: bool) -> bool {
+        match state {
+            TxState::Dropped {
+                fact_block_hash, ..
+            }
+            | TxState::ConsumedUnattributed {
+                fact_block_hash, ..
+            } => {
+                !dropping
+                    || !self
+                        .blocks
+                        .iter()
+                        .any(|b| b.hash == *fact_block_hash && !b.finalized)
+            }
+            _ => false,
+        }
     }
 
     /// Applies one transaction of an accepted block. Returns whether the
@@ -1393,27 +1557,27 @@ impl ChainState {
         recorded
     }
 
-    /// The sender's next nonce after a canonical inclusion of `nonce`. An
-    /// inclusion fixes it exactly; a foreign sender becomes `Clean` by it,
-    /// a watched one only by a nonce fact.
+    /// The sender's next nonce after a canonical inclusion of `nonce`. A
+    /// foreign sender becomes `Clean` by an inclusion that skips no nonce, a
+    /// watched one only by a nonce fact; a skip costs either `Clean`.
     fn note_inclusion(&mut self, sender: Address, nonce: u64, recorded: bool, out: &mut Applied) {
         let Some(record) = self.senders.get_mut(&sender) else {
             return;
         };
-        if let Some(expected) = record.implied
-            && expected != nonce
-        {
+        let skipped = record.implied.filter(|expected| *expected != nonce);
+        if let Some(expected) = skipped {
+            // A nonce below the known next one is refused before (rule 3);
+            // this is a skip: something the state does not hold consumed
+            // the nonces in between.
             out.conflicts.push(Conflict::NonceDiscontinuity {
                 sender,
                 expected,
                 observed: nonce,
             });
-            if record.watched {
-                record.degrade(SenderReason::NonceDiscontinuity {
-                    expected,
-                    observed: nonce,
-                });
-            }
+            record.degrade(SenderReason::NonceDiscontinuity {
+                expected,
+                observed: nonce,
+            });
         }
         if recorded && record.lost_max == Some(nonce) {
             // The largest overflowed nonce was consumed by a held inclusion.
@@ -1422,7 +1586,7 @@ impl ChainState {
         record.implied = nonce.checked_add(1);
         if record.implied.is_none() {
             record.degrade(SenderReason::NonceExhausted);
-        } else if !record.watched && recorded {
+        } else if !record.watched && recorded && skipped.is_none() {
             record.confidence = Confidence::Clean;
         }
     }
@@ -1522,6 +1686,62 @@ impl ChainState {
             }
             self.reopen_losers(tx.sender, tx.nonce, tx.hash);
         }
+        if block.finalized {
+            for hash in self.fact_resolved_at(block.hash) {
+                self.settle(hash);
+            }
+        } else {
+            self.revert_fact_resolutions(block.hash);
+        }
+    }
+
+    /// Records of watched senders resolved by a nonce fact at `fact_block`.
+    fn fact_resolved_at(&self, fact_block: B256) -> Vec<B256> {
+        let mut found = Vec::new();
+        for sender in &self.watched {
+            for (_, hashes) in self.slots.range((*sender, 0)..=(*sender, u64::MAX)) {
+                for hash in hashes {
+                    let at_fact = self.txs.get(hash).is_some_and(|r| {
+                        matches!(
+                            r.state,
+                            TxState::Dropped { fact_block_hash, .. }
+                                | TxState::ConsumedUnattributed { fact_block_hash, .. }
+                                if fact_block_hash == fact_block
+                        )
+                    });
+                    if at_fact {
+                        found.push(*hash);
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// The fact's block left the chain or became uncertain: what it
+    /// resolved is open again.
+    fn revert_fact_resolutions(&mut self, fact_block: B256) {
+        for hash in self.fact_resolved_at(fact_block) {
+            let Some(record) = self.txs.get_mut(&hash) else {
+                continue;
+            };
+            record.state = match record.state {
+                TxState::ConsumedUnattributed {
+                    block_number,
+                    block_hash,
+                    index,
+                    status,
+                    ..
+                } => TxState::Uncertain {
+                    block_number,
+                    block_hash,
+                    index,
+                    status,
+                },
+                _ => TxState::Candidate,
+            };
+            bump(&mut self.counters.fact_resolutions_reverted);
+        }
     }
 
     // -----------------------------------------------------------------
@@ -1556,10 +1776,10 @@ impl ChainState {
                 bump(&mut self.counters.reorgs_beyond_window);
                 self.drop_chain(
                     orphaned,
-                    Expect {
+                    Some(Expect {
                         number: first.0,
                         hash: None,
-                    },
+                    }),
                     SenderReason::ReorgTooDeep,
                     out,
                 );
@@ -1646,15 +1866,17 @@ impl ChainState {
                 .and_modify(|n| *n = (*n).min(tx.nonce))
                 .or_insert(tx.nonce);
         }
+        self.revert_fact_resolutions(block.hash);
     }
 
-    /// The retained chain is dropped (reorg too deep, gap): listed blocks
-    /// are orphaned, the others retire, every sender loses its nonce, and
-    /// the state waits for `expect`.
+    /// The retained chain is dropped (reorg too deep, gap, discontinuity):
+    /// listed blocks are orphaned, the others retire, every sender loses its
+    /// nonce, and the state is unanchored, expecting `expect` (any block
+    /// anchors it; another one is a counted discontinuity).
     fn drop_chain(
         &mut self,
         orphaned: &[(u64, B256)],
-        expect: Expect,
+        expect: Option<Expect>,
         reason: SenderReason,
         out: &mut Applied,
     ) {
@@ -1683,29 +1905,33 @@ impl ChainState {
             record.degrade(reason);
         }
         self.head = None;
-        self.expect = Some(expect);
+        self.expect = expect;
         self.diverged = false;
         bump(&mut self.counters.effects);
     }
 
     fn apply_gap(&mut self, from: u64, to: u64, out: &mut Applied) {
+        let Some(next) = to.checked_add(1).filter(|_| from <= to) else {
+            self.refuse(Conflict::MalformedGap { from, to }, out);
+            return;
+        };
         let starts_right = match (self.head, self.expect) {
             (Some((number, _)), _) => number.checked_add(1) == Some(from),
             (None, Some(expect)) => expect.number == from,
             (None, None) => true,
         };
-        let next = to.checked_add(1);
-        let Some(next) = next.filter(|_| from <= to && starts_right) else {
-            self.refuse(Conflict::GapMismatch { from, to }, out);
-            return;
-        };
+        if !starts_right {
+            // Applied all the same: whatever lies between the head and the
+            // gap was not followed either.
+            out.conflicts.push(Conflict::GapMismatch { from, to });
+        }
         bump(&mut self.counters.gaps);
         self.drop_chain(
             &[],
-            Expect {
+            Some(Expect {
                 number: next,
                 hash: None,
-            },
+            }),
             SenderReason::Gap,
             out,
         );
@@ -1744,6 +1970,7 @@ impl ChainState {
         }
 
         self.resolve_uncertain(sender, next_nonce, block_number, out);
+        self.resolve_below(sender, next_nonce, block_number, block_hash);
 
         let mut after = Vec::new();
         let mut before_max: Option<u64> = None;
@@ -1757,12 +1984,14 @@ impl ChainState {
             }
         }
         let implied_now = self.senders.get(&sender).and_then(|r| r.implied);
-        let contiguous = after
-            .iter()
-            .enumerate()
-            .all(|(i, n)| next_nonce.checked_add(len_u64(i)) == Some(*n));
-        let head_next = next_nonce.checked_add(len_u64(after.len()));
-        let consistent = contiguous
+        let increasing = after.windows(2).all(|pair| matches!(pair, [a, b] if a < b));
+        let starts = after.first().is_none_or(|first| *first >= next_nonce);
+        let head_next = match after.last() {
+            Some(last) => last.checked_add(1),
+            None => Some(next_nonce),
+        };
+        let consistent = increasing
+            && starts
             && before_max.is_none_or(|m| m < next_nonce)
             && head_next.is_some()
             && implied_now.is_none_or(|c| Some(c) == head_next);
@@ -1781,12 +2010,31 @@ impl ChainState {
         };
         record.implied = Some(head_next);
 
+        // A nonce skipped after the fact's block: consistent, but the sender
+        // is reconciled only by a fact at or after the skip.
+        let mut expected = next_nonce;
+        for observed in &after {
+            if *observed != expected {
+                self.refuse_fact(
+                    sender,
+                    SenderReason::NonceDiscontinuity {
+                        expected,
+                        observed: *observed,
+                    },
+                );
+                return;
+            }
+            expected = observed.saturating_add(1);
+        }
+
         if let Some(nonce) = self.min_unresolved_nonce(sender) {
             self.refuse_fact(sender, SenderReason::UnresolvedCandidate { nonce });
             return;
         }
         let lost = self.senders.get(&sender).and_then(|r| r.lost_max);
+        // A lost transaction can no longer run once its nonce is consumed.
         if let Some(lost) = lost
+            && lost >= next_nonce
             && self.slot_winner((sender, lost)).is_none()
         {
             self.refuse_fact(sender, SenderReason::Overflow);
@@ -1837,6 +2085,67 @@ impl ChainState {
                         .push(OrphanProof::new(chain_id, sender, key.1, block_hash));
                     resolved = true;
                 }
+            }
+        }
+        if resolved {
+            bump(&mut self.counters.effects);
+        }
+    }
+
+    /// A fact proves every nonce below `next_nonce` consumed at or before
+    /// its block (master plan §12 "dropped ... outcomes are explicit"). A
+    /// candidate of such a nonce was dropped; an uncertain transaction of
+    /// such a nonce consumed it or lost it, which only a receipt could tell.
+    /// Both are resolved without a proof, settle once the fact's block
+    /// leaves the window final (at once if it is no longer retained), and
+    /// revert if it leaves the chain or becomes uncertain first.
+    fn resolve_below(
+        &mut self,
+        sender: Address,
+        next_nonce: u64,
+        fact_block_number: u64,
+        fact_block_hash: B256,
+    ) {
+        let retained = self.blocks.iter().any(|b| b.hash == fact_block_hash);
+        let hashes: Vec<B256> = self
+            .slots
+            .range((sender, 0)..(sender, next_nonce))
+            .flat_map(|(_, hashes)| hashes.iter().copied())
+            .collect();
+        let mut resolved = false;
+        for hash in hashes {
+            let Some(record) = self.txs.get_mut(&hash) else {
+                continue;
+            };
+            record.state = match record.state {
+                TxState::Candidate => {
+                    bump(&mut self.counters.dropped);
+                    TxState::Dropped {
+                        fact_block_number,
+                        fact_block_hash,
+                    }
+                }
+                TxState::Uncertain {
+                    block_number,
+                    block_hash,
+                    index,
+                    status,
+                } => {
+                    bump(&mut self.counters.consumed_unattributed);
+                    TxState::ConsumedUnattributed {
+                        block_number,
+                        block_hash,
+                        index,
+                        status,
+                        fact_block_number,
+                        fact_block_hash,
+                    }
+                }
+                _ => continue,
+            };
+            resolved = true;
+            if !retained {
+                self.settle(hash);
             }
         }
         if resolved {
@@ -2004,6 +2313,12 @@ impl ChainState {
         out.conflicts.push(conflict);
         self.diverged = true;
     }
+}
+
+/// Whether `state` is a canonical inclusion, with `dropping` also once the
+/// retained chain is dropped (a not yet final one is then uncertain).
+fn stays_canonical(state: &TxState, dropping: bool) -> bool {
+    matches!(state, TxState::Included { finalized, .. } if !dropping || *finalized)
 }
 
 fn bump(counter: &mut u64) {

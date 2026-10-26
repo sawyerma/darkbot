@@ -165,6 +165,14 @@ fn check_invariants(s: &ChainState) {
             assert_eq!((s.txs[h].sender, s.txs[h].nonce), (*sender, *nonce));
         }
     }
+    for record in s.txs.values() {
+        if matches!(
+            record.state,
+            TxState::Dropped { .. } | TxState::ConsumedUnattributed { .. }
+        ) {
+            assert!(s.is_watched(record.sender));
+        }
+    }
     for (sender, record) in &s.senders {
         assert_eq!(record.refs, refs.get(sender).copied().unwrap_or(0));
         assert!(record.watched || record.refs > 0);
@@ -445,32 +453,95 @@ fn consumed_nonce_consumed_again_is_a_conflict() {
         vec![Conflict::NonceConsumedTwice {
             sender: foreign(),
             nonce: 0,
-            consumed_by: t(1),
+            consumed_by: Some(t(1)),
             tx: t(2)
         }]
     );
     assert_eq!(s.tx(&t(2)), None);
 }
 
-/// Order C2: a block whose parent is not the head is refused as a conflict;
-/// the follower must send the reorg first.
+/// Review 4 H1 (rule 3): a block whose parent is not the head, or whose
+/// number is not the next, is a discontinuity of unknown extent. It is
+/// applied like a gap of unknown range (the not yet final transactions
+/// become uncertain, every sender unknown) and re-anchors the state; it is
+/// counted and moves the snapshot cursor. The owner never stays stalled.
 #[test]
-fn block_whose_parent_is_not_the_head_is_refused_as_conflict() {
-    let mut s = reconciled(0);
-    let before = s.clone();
-    let skip = s.apply(&block(BASE + 2, 0, 0, &[(t(1), own(), 0)]));
-    let fork = s.apply(&block(BASE + 1, 1, 5, &[(t(1), own(), 0)]));
-    for out in [&skip, &fork] {
+fn block_not_extending_the_head_is_a_discontinuity_and_re_anchors() {
+    // A skipped height (parent unknown) and a fork at the next height.
+    for (number, parent_fork) in [(BASE + 3, 0u8), (BASE + 1, 5)] {
+        let mut s = reconciled(0);
+        accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)])));
+        let effects = s.counters().effects;
+        let out = s.apply(&block(number, 1, parent_fork, &[(t(2), foreign(), 0)]));
+        assert_eq!(
+            out.conflicts,
+            vec![Conflict::Discontinuity {
+                number,
+                hash: bh(number, 1),
+                parent_hash: bh(number - 1, parent_fork)
+            }]
+        );
+        accepted(&out);
+        assert_eq!(s.high_water(), Some((number, bh(number, 1))));
+        assert_eq!(s.retained(), vec![(number, bh(number, 1))]);
         assert!(matches!(
-            out.conflicts.as_slice(),
-            [Conflict::NotOnHead { .. }]
+            s.tx(&t(1)).unwrap().state,
+            TxState::Uncertain { block_number, .. } if block_number == BASE + 1
         ));
-        assert!(out.inclusions.is_empty());
+        assert_eq!(
+            s.sender(own()),
+            SenderView::Unknown {
+                reason: SenderReason::Discontinuity
+            }
+        );
+        assert_eq!(s.sender(foreign()), SenderView::Clean { next_nonce: 1 });
+        let c = s.counters();
+        assert_eq!(c.discontinuities, 1);
+        assert_eq!(c.refused_inputs, 0);
+        assert!(c.effects >= effects + 2);
+        // Coherent again exactly as after a gap: once the own sender is
+        // reconciled.
+        assert!(!s.coherent());
+        s.apply(&fact(own(), 1, number, 1));
+        assert!(s.coherent());
+        assert_eq!(
+            s.tx(&t(1)).unwrap().state,
+            TxState::ConsumedUnattributed {
+                block_number: BASE + 1,
+                block_hash: bh(BASE + 1, 0),
+                index: 0,
+                status: ExecutionStatus::Succeeded,
+                fact_block_number: number,
+                fact_block_hash: bh(number, 1)
+            }
+        );
+        accepted(&s.apply(&block(number + 1, 1, 1, &[])));
+        check_invariants(&s);
     }
-    assert_eq!(s.txs, before.txs);
+}
+
+/// A discontinuous block still passes its own checks: malformed or
+/// oversize, it is refused and nothing is dropped.
+#[test]
+fn discontinuous_block_still_passes_its_own_checks() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)])));
+    let before = s.clone();
+    let out = s.apply(&block(
+        BASE + 5,
+        1,
+        1,
+        &[(t(2), foreign(), 3), (t(3), foreign(), 3)],
+    ));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::MalformedBlock { .. }]
+    ));
     assert_eq!(s.blocks, before.blocks);
+    assert_eq!(s.txs, before.txs);
     assert_eq!(s.senders, before.senders);
-    assert_eq!(s.counters().refused_inputs, 2);
+    assert_eq!(s.counters().discontinuities, 0);
+    assert!(!s.coherent());
 }
 
 /// A block's transaction list must be complete and consistent; otherwise
@@ -484,13 +555,19 @@ fn malformed_and_oversize_blocks_are_refused() {
         b.txs[1].index = 2;
     }
     let repeated = block(BASE + 1, 0, 0, &[(t(1), own(), 0), (t(1), own(), 0)]);
-    let skipped = block(
+    let equal = block(
         BASE + 1,
         0,
         0,
-        &[(t(1), foreign(), 0), (t(2), foreign(), 2)],
+        &[(t(1), foreign(), 2), (t(2), foreign(), 2)],
     );
-    for input in [gap, repeated, skipped] {
+    let decreasing = block(
+        BASE + 1,
+        0,
+        0,
+        &[(t(1), foreign(), 2), (t(2), foreign(), 1)],
+    );
+    for input in [gap, repeated, equal, decreasing] {
         let out = s.apply(&input);
         assert!(matches!(
             out.conflicts.as_slice(),
@@ -533,8 +610,9 @@ fn identity_mismatch_is_a_conflict_and_changes_nothing() {
 }
 
 /// A canonical inclusion that skips the known next nonce is reported (the
-/// block is chain truth and is applied); a watched sender then needs a
-/// nonce fact, a foreign one is fixed by the inclusion itself.
+/// block is chain truth and is applied; an EIP-7702 authorization can raise
+/// a nonce unseen). The sender loses `Clean`: a watched one needs a nonce
+/// fact, a foreign one regains it with an inclusion that skips nothing.
 #[test]
 fn nonce_discontinuity_is_reported_and_makes_a_watched_sender_unknown() {
     let mut s = reconciled(0);
@@ -559,8 +637,65 @@ fn nonce_discontinuity_is_reported_and_makes_a_watched_sender_unknown() {
 
     s.apply(&block(BASE + 2, 0, 0, &[(t(2), foreign(), 3)]));
     let out = s.apply(&block(BASE + 3, 0, 0, &[(t(3), foreign(), 6)]));
-    assert_eq!(out.conflicts.len(), 1);
-    assert_eq!(s.sender(foreign()), SenderView::Clean { next_nonce: 7 });
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::NonceDiscontinuity {
+            sender: foreign(),
+            expected: 4,
+            observed: 6
+        }]
+    );
+    assert_eq!(
+        s.sender(foreign()),
+        SenderView::Unknown {
+            reason: SenderReason::NonceDiscontinuity {
+                expected: 4,
+                observed: 6
+            }
+        }
+    );
+    accepted(&s.apply(&block(BASE + 4, 0, 0, &[(t(4), foreign(), 7)])));
+    assert_eq!(s.sender(foreign()), SenderView::Clean { next_nonce: 8 });
+}
+
+/// Review 4 B1: nonces only rise, also with EIP-7702. A sender's first
+/// nonce in a block below its known next nonce is consumed already: the
+/// block is refused, against a held inclusion with its consumer, otherwise
+/// without one; the follower's next block re-anchors.
+#[test]
+fn nonce_below_the_known_next_nonce_is_refused() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), foreign(), 4)])));
+    accepted(&s.apply(&block(BASE + 2, 0, 0, &[(t(2), foreign(), 5)])));
+    let out = s.apply(&block(BASE + 3, 0, 0, &[(t(3), foreign(), 4)]));
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::NonceConsumedTwice {
+            sender: foreign(),
+            nonce: 4,
+            consumed_by: Some(t(1)),
+            tx: t(3)
+        }]
+    );
+    let out = s.apply(&block(BASE + 3, 0, 0, &[(t(3), foreign(), 2)]));
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::NonceConsumedTwice {
+            sender: foreign(),
+            nonce: 2,
+            consumed_by: None,
+            tx: t(3)
+        }]
+    );
+    assert_eq!(s.high_water(), Some((BASE + 2, bh(BASE + 2, 0))));
+    assert!(!s.coherent());
+    // The follower continues with the refused block's child.
+    let out = s.apply(&block(BASE + 4, 0, 0, &[]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::Discontinuity { .. }]
+    ));
+    assert_eq!(s.high_water(), Some((BASE + 4, bh(BASE + 4, 0))));
 }
 
 // ---------------------------------------------------------------------
@@ -719,12 +854,8 @@ fn reorg_too_deep_makes_every_sender_and_the_snapshot_unknown_until_reconciled()
     assert_eq!(s.high_water(), None);
     assert_eq!(s.snapshot_id(t(50), 1, 1), None);
 
-    let out = s.apply(&block(BASE + 4, 1, 1, &[]));
-    assert!(matches!(
-        out.conflicts.as_slice(),
-        [Conflict::AnchorMismatch { .. }]
-    ));
-    accepted(&s.apply(&block(BASE + 5, 1, 7, &[])));
+    let out = s.apply(&block(BASE + 5, 1, 7, &[]));
+    assert!(out.conflicts.is_empty());
     assert_eq!(s.snapshot_id(t(50), 1, 1), None);
 
     // t(1) is a candidate again: reconciliation must wait for it.
@@ -749,23 +880,11 @@ fn reorg_too_deep_makes_every_sender_and_the_snapshot_unknown_until_reconciled()
 /// Master plan §12 "Gaps, backfill and dropped/replaced/orphaned outcomes
 /// are explicit"; PHASENPLAN §10 "canonical/orphan/uncertain". A gap makes
 /// the not yet final transactions of the retained chain uncertain and every
-/// sender unknown; a gap must start right after the head.
+/// sender unknown; the block after the gap anchors the state.
 #[test]
 fn gap_makes_every_sender_unknown_and_non_final_txs_uncertain() {
     let mut s = reconciled(0);
     s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)]));
-    let out = s.apply(&ChainInput::Gap {
-        from: BASE + 3,
-        to: BASE + 5,
-    });
-    assert_eq!(
-        out.conflicts,
-        vec![Conflict::GapMismatch {
-            from: BASE + 3,
-            to: BASE + 5
-        }]
-    );
-
     let out = s.apply(&ChainInput::Gap {
         from: BASE + 2,
         to: BASE + 5,
@@ -788,12 +907,80 @@ fn gap_makes_every_sender_unknown_and_non_final_txs_uncertain() {
     );
     assert_eq!(s.high_water(), None);
     assert_eq!(s.counters().held_uncertain, 1);
-    let out = s.apply(&block(BASE + 7, 0, 0, &[]));
+    let out = s.apply(&block(BASE + 6, 0, 3, &[]));
+    assert!(out.conflicts.is_empty());
+    assert_eq!(s.high_water(), Some((BASE + 6, bh(BASE + 6, 0))));
+}
+
+/// Review 4 H1: a gap that does not start right after the head (or at the
+/// block an unanchored state expects) is applied all the same and reported,
+/// not refused; so is a block other than the expected one. Only a malformed
+/// gap is refused.
+#[test]
+fn gap_not_right_after_the_head_is_applied_and_reported() {
+    let mut s = reconciled(0);
+    s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)]));
+    let out = s.apply(&ChainInput::Gap {
+        from: BASE + 3,
+        to: BASE + 5,
+    });
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::GapMismatch {
+            from: BASE + 3,
+            to: BASE + 5
+        }]
+    );
+    accepted(&out);
     assert!(matches!(
-        out.conflicts.as_slice(),
-        [Conflict::AnchorMismatch { .. }]
+        s.tx(&t(1)).unwrap().state,
+        TxState::Uncertain { .. }
     ));
-    accepted(&s.apply(&block(BASE + 6, 0, 3, &[])));
+    assert_eq!(
+        s.sender(own()),
+        SenderView::Unknown {
+            reason: SenderReason::Gap
+        }
+    );
+    assert_eq!(s.high_water(), None);
+
+    let out = s.apply(&ChainInput::Gap {
+        from: BASE + 9,
+        to: BASE + 9,
+    });
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::GapMismatch {
+            from: BASE + 9,
+            to: BASE + 9
+        }]
+    );
+    let out = s.apply(&block(BASE + 12, 0, 0, &[]));
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::Discontinuity {
+            number: BASE + 12,
+            hash: bh(BASE + 12, 0),
+            parent_hash: bh(BASE + 11, 0)
+        }]
+    );
+    assert_eq!(s.high_water(), Some((BASE + 12, bh(BASE + 12, 0))));
+
+    let out = s.apply(&ChainInput::Gap {
+        from: BASE + 20,
+        to: BASE + 19,
+    });
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::MalformedGap {
+            from: BASE + 20,
+            to: BASE + 19
+        }]
+    );
+    assert!(out.conflicts[0].refused());
+    assert_eq!(s.high_water(), Some((BASE + 12, bh(BASE + 12, 0))));
+    let c = s.counters();
+    assert_eq!((c.gaps, c.discontinuities, c.refused_inputs), (2, 1, 1));
 }
 
 /// An uncertain transaction that a canonical block includes again proves
@@ -849,24 +1036,20 @@ fn uncertain_tx_replaced_by_another_canonical_tx() {
 /// that shows its nonce unconsumed proves that block left the chain.
 #[test]
 fn nonce_fact_proves_an_uncertain_tx_was_orphaned() {
-    let mut s = reconciled(0);
-    s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)]));
-    s.apply(&ChainInput::Gap {
-        from: BASE + 2,
-        to: BASE + 3,
-    });
-    s.apply(&block(BASE + 4, 1, 1, &[]));
+    let after_gap = || {
+        let mut s = reconciled(0);
+        s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)]));
+        s.apply(&ChainInput::Gap {
+            from: BASE + 2,
+            to: BASE + 3,
+        });
+        s.apply(&block(BASE + 4, 1, 1, &[]));
+        s
+    };
 
-    // A count of 1 does not say which transaction consumed nonce 0.
-    let out = s.apply(&fact(own(), 1, BASE + 4, 1));
-    assert!(out.orphans.is_empty() && out.reconciliations.is_empty());
-    assert_eq!(
-        s.sender(own()),
-        SenderView::Unknown {
-            reason: SenderReason::UnresolvedCandidate { nonce: 0 }
-        }
-    );
-
+    // A count of 0 at a later block: nonce 0 is not consumed there, so the
+    // uncertain block left the chain.
+    let mut s = after_gap();
     let out = s.apply(&fact(own(), 0, BASE + 4, 1));
     assert_eq!(
         out.orphans,
@@ -874,6 +1057,23 @@ fn nonce_fact_proves_an_uncertain_tx_was_orphaned() {
     );
     assert!(out.reconciliations.is_empty());
     assert_eq!(s.tx(&t(1)).unwrap().state, TxState::Candidate);
+    assert_eq!(
+        s.sender(own()),
+        SenderView::Unknown {
+            reason: SenderReason::UnresolvedCandidate { nonce: 0 }
+        }
+    );
+
+    // A count of 1 does not say which transaction consumed nonce 0: the
+    // transaction is consumed-unattributed, without a proof (review 4 M1).
+    let mut s = after_gap();
+    let out = s.apply(&fact(own(), 1, BASE + 4, 1));
+    assert!(out.orphans.is_empty() && out.inclusions.is_empty());
+    assert_eq!(out.reconciliations.len(), 1);
+    assert!(matches!(
+        s.tx(&t(1)).unwrap().state,
+        TxState::ConsumedUnattributed { .. }
+    ));
 }
 
 // ---------------------------------------------------------------------
@@ -1147,6 +1347,18 @@ fn tx_table_overflow_is_counted_and_makes_the_sender_unknown() {
         }
     );
     check_invariants(&s);
+
+    // Once a fact shows its nonce consumed, it can no longer run.
+    accepted(&s.apply(&ChainInput::Gap {
+        from: BASE + 1,
+        to: BASE + 1,
+    }));
+    accepted(&s.apply(&block(BASE + 2, 0, 0, &[])));
+    let out = s.apply(&fact(own(), 1, BASE + 2, 0));
+    assert_eq!(
+        out.reconciliations,
+        vec![ReconciliationProof::for_tests(CHAIN, own(), 1)]
+    );
 }
 
 /// Bounded state: settled records (final and out of the reorg window) are
@@ -1394,16 +1606,30 @@ fn coherent_follows_the_head_and_refusals() {
     accepted(&s.apply(&block(BASE + 3, 0, 0, &[])));
     assert!(s.coherent());
 
-    let refused = s.apply(&block(BASE + 4, 0, 5, &[]));
+    let refused = s.apply(&block(
+        BASE + 4,
+        0,
+        0,
+        &[(t(1), foreign(), 1), (t(2), foreign(), 1)],
+    ));
     assert!(matches!(
         refused.conflicts.as_slice(),
-        [Conflict::NotOnHead { .. }]
+        [Conflict::MalformedBlock { .. }]
     ));
     assert!(!s.coherent());
     assert_eq!(s.snapshot_id(t(50), 1, 1), None);
     accepted(&s.apply(&block(BASE + 4, 0, 0, &[])));
     assert!(s.coherent());
     assert!(s.snapshot_id(t(50), 1, 1).is_some());
+
+    // A discontinuity: coherent as after a gap, here at once (nothing to
+    // reconcile).
+    let out = s.apply(&block(BASE + 9, 0, 3, &[]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::Discontinuity { .. }]
+    ));
+    assert!(s.coherent());
 
     // A watched sender that is not clean makes the state incoherent.
     let mut w = state();
@@ -1506,6 +1732,7 @@ fn random_journal(seed: u64, steps: usize) -> Vec<ChainInput> {
             pending(t(id), sender, nonce, rng.below(4) as u8, rng.below(1_000))
         } else if roll < 75 {
             let (number, parent) = match (s.high_water(), expected) {
+                (Some((n, _)), _) if rng.below(12) == 0 => (n + 1 + rng.below(2), bh(n, 0xdd)),
                 (Some((n, h)), _) => (n + 1, h),
                 (None, Some((n, _))) => (n, bh(n.saturating_sub(1), 0xee)),
                 (None, None) => (BASE, bh(BASE - 1, 0)),
@@ -1591,6 +1818,13 @@ fn random_journal(seed: u64, steps: usize) -> Vec<ChainInput> {
             assert!(s.is_watched(proof.sender()));
         }
         let refused = out.conflicts.iter().any(Conflict::refused);
+        if out
+            .conflicts
+            .iter()
+            .any(|c| matches!(c, Conflict::Discontinuity { .. }))
+        {
+            chain.clear();
+        }
         match &input {
             ChainInput::Block(b) if !refused => chain.push((b.number, b.hash)),
             ChainInput::Reorg { orphaned, .. } if !refused => {
@@ -1660,6 +1894,7 @@ fn replay_of_the_journal_yields_identical_state_and_outputs() {
         totals.evicted += k.evicted;
         totals.orphaned_txs += k.orphaned_txs;
         totals.refused_inputs += k.refused_inputs;
+        totals.discontinuities += k.discontinuities;
     }
     // The journals exercised every path.
     assert!(totals.blocks > 0, "{totals:?}");
@@ -1672,6 +1907,7 @@ fn replay_of_the_journal_yields_identical_state_and_outputs() {
     assert!(totals.evicted > 0, "{totals:?}");
     assert!(totals.orphaned_txs > 0, "{totals:?}");
     assert!(totals.refused_inputs > 0, "{totals:?}");
+    assert!(totals.discontinuities > 0, "{totals:?}");
 }
 
 /// Exact integers: block numbers and nonces at the top of `u64` never wrap.
@@ -1705,9 +1941,10 @@ fn integer_bounds_never_wrap() {
         timestamp_ms: 0,
         txs: Vec::new(),
     });
+    // No block follows u64::MAX: a discontinuity, never a wrap.
     assert!(matches!(
         s.apply(&next).conflicts.as_slice(),
-        [Conflict::NotOnHead { .. }]
+        [Conflict::Discontinuity { number: 0, .. }]
     ));
     let gap = s.apply(&ChainInput::Gap {
         from: u64::MAX,
@@ -1715,6 +1952,393 @@ fn integer_bounds_never_wrap() {
     });
     assert!(matches!(
         gap.conflicts.as_slice(),
-        [Conflict::GapMismatch { .. }]
+        [Conflict::MalformedGap { .. }]
     ));
+}
+
+// ---------------------------------------------------------------------
+// Phase-gate review 4: the reviewer's demonstrations, inverted
+// ---------------------------------------------------------------------
+
+/// Review 4 B1, port of `r4_valid_7702_block_wedges_the_owner`, inverted.
+/// EIP-7702 is active on BSC: a type-4 authorization raises the authority's
+/// nonce inside a block, so one sender validly shows nonces 5 and then 7.
+/// The block is applied with one counted nonce discontinuity (the sender
+/// loses `Clean`), and the owner keeps following, also after a checkpoint
+/// restart that resumes at that block.
+#[test]
+fn eip7702_nonce_jump_within_a_block_is_applied_and_following_continues() {
+    let relayer = Address::repeat_byte(0x33);
+    let mut s = ChainState::new(CHAIN, limits(), &[]).unwrap();
+    accepted(&s.apply(&block(BASE, 0, 0, &[])));
+    let checkpoint = s.encode_checkpoint();
+    let b1 = block(
+        BASE + 1,
+        0,
+        0,
+        &[
+            (t(1), foreign(), 5),
+            (t(2), relayer, 0),
+            (t(3), foreign(), 7),
+        ],
+    );
+    let out = s.apply(&b1);
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::NonceDiscontinuity {
+            sender: foreign(),
+            expected: 6,
+            observed: 7
+        }]
+    );
+    accepted(&out);
+    assert_eq!(
+        s.sender(foreign()),
+        SenderView::Unknown {
+            reason: SenderReason::NonceDiscontinuity {
+                expected: 6,
+                observed: 7
+            }
+        }
+    );
+    for n in 2..10 {
+        accepted(&s.apply(&block(BASE + n, 0, 0, &[])));
+    }
+    assert!(s.coherent());
+    assert_eq!(s.high_water(), Some((BASE + 9, bh(BASE + 9, 0))));
+
+    let mut r = ChainState::restore(CHAIN, limits(), &[], &checkpoint).unwrap();
+    accepted(&r.apply(&b1));
+    assert_eq!(r.high_water(), Some((BASE + 1, bh(BASE + 1, 0))));
+}
+
+/// Review 4 M1, port of `r4_gap_leaves_own_sender_unreconcilable_forever`,
+/// inverted. After a gap an own transaction can be uncertain while its
+/// block is canonical, or a pending own transaction can be mined inside the
+/// gap. A truthful nonce fact proves its nonce consumed: the transaction is
+/// resolved (without a proof), and the sender reconciles.
+#[test]
+fn gap_then_truthful_nonce_fact_resolves_the_own_sender() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)])));
+    accepted(&s.apply(&ChainInput::Gap {
+        from: BASE + 2,
+        to: BASE + 9,
+    }));
+    accepted(&s.apply(&block(BASE + 10, 0, 0, &[])));
+    let out = s.apply(&fact(own(), 1, BASE + 10, 0));
+    assert_eq!(
+        out.reconciliations,
+        vec![ReconciliationProof::for_tests(CHAIN, own(), 1)]
+    );
+    assert!(out.inclusions.is_empty() && out.orphans.is_empty());
+    assert_eq!(s.sender(own()), SenderView::Clean { next_nonce: 1 });
+    assert!(s.coherent());
+    assert!(!matches!(
+        s.tx(&t(1)).unwrap().state,
+        TxState::Candidate | TxState::Uncertain { .. }
+    ));
+
+    // An own pending transaction mined inside the gap.
+    let mut s = reconciled(0);
+    s.apply(&pending(t(7), own(), 0, 1, 100));
+    accepted(&s.apply(&ChainInput::Gap {
+        from: BASE + 1,
+        to: BASE + 9,
+    }));
+    accepted(&s.apply(&block(BASE + 10, 0, 0, &[])));
+    let out = s.apply(&fact(own(), 1, BASE + 10, 0));
+    assert_eq!(out.reconciliations.len(), 1);
+    assert_ne!(s.tx(&t(7)).unwrap().state, TxState::Candidate);
+    assert_eq!(s.sender(own()), SenderView::Clean { next_nonce: 1 });
+}
+
+/// Review 4 H1, port of `r4_too_deep_then_moved_tip_wedges`, inverted. The
+/// follower reports a reorg too deep with `new_head` H1, but the tip moved
+/// and it delivers another block at that height: the owner re-anchors on it
+/// (a counted, non-refusing discontinuity) and keeps following.
+#[test]
+fn too_deep_then_moved_tip_re_anchors_and_follows() {
+    let mut s = ChainState::new(CHAIN, limits(), &[]).unwrap();
+    for n in 0..3 {
+        accepted(&s.apply(&block(BASE + n, 0, 0, &[])));
+    }
+    let orphaned = s.retained();
+    accepted(&s.apply(&ChainInput::ReorgTooDeep {
+        orphaned,
+        new_head: (BASE + 3, bh(BASE + 3, 1)),
+    }));
+    let out = s.apply(&block(BASE + 3, 2, 2, &[]));
+    accepted(&out);
+    assert_eq!(out.conflicts.len(), 1);
+    assert_eq!(s.high_water(), Some((BASE + 3, bh(BASE + 3, 2))));
+    for n in 4..10 {
+        accepted(&s.apply(&block(BASE + n, 2, 2, &[])));
+    }
+    accepted(&s.apply(&ChainInput::Gap {
+        from: BASE + 10,
+        to: BASE + 12,
+    }));
+    accepted(&s.apply(&block(BASE + 13, 2, 2, &[])));
+    assert!(s.coherent());
+}
+
+// ---------------------------------------------------------------------
+// Phase-gate review 4: the fixed behaviour in detail
+// ---------------------------------------------------------------------
+
+/// Review 4 M1 (master plan §12 "dropped ... outcomes are explicit"): a
+/// nonce fact proves every nonce below its next nonce consumed at or before
+/// its block. Candidates of such nonces become `Dropped`, uncertain
+/// transactions `ConsumedUnattributed`: resolved, counted, visible in the
+/// views, without proofs. A nonce from the fact's on stays open.
+#[test]
+fn nonce_fact_resolves_consumed_nonces_explicitly() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)])));
+    s.apply(&pending(t(2), own(), 1, 1, 10));
+    s.apply(&pending(t(3), own(), 1, 2, 11));
+    s.apply(&pending(t(4), own(), 2, 1, 12));
+    accepted(&s.apply(&ChainInput::Gap {
+        from: BASE + 2,
+        to: BASE + 5,
+    }));
+    accepted(&s.apply(&block(BASE + 6, 1, 1, &[])));
+
+    let out = s.apply(&fact(own(), 2, BASE + 6, 1));
+    assert!(out.orphans.is_empty() && out.inclusions.is_empty());
+    assert!(out.reconciliations.is_empty());
+    let dropped = TxState::Dropped {
+        fact_block_number: BASE + 6,
+        fact_block_hash: bh(BASE + 6, 1),
+    };
+    assert_eq!(s.tx(&t(2)).unwrap().state, dropped);
+    assert_eq!(s.tx(&t(3)).unwrap().state, dropped);
+    assert_eq!(
+        s.tx(&t(1)).unwrap().state,
+        TxState::ConsumedUnattributed {
+            block_number: BASE + 1,
+            block_hash: bh(BASE + 1, 0),
+            index: 0,
+            status: ExecutionStatus::Succeeded,
+            fact_block_number: BASE + 6,
+            fact_block_hash: bh(BASE + 6, 1)
+        }
+    );
+    let before_fact = Consumption::BeforeFact {
+        fact_block_number: BASE + 6,
+        fact_block_hash: bh(BASE + 6, 1),
+    };
+    let view = s.nonce(own(), 1);
+    assert_eq!(view.unattributed, vec![t(2), t(3)]);
+    assert!(view.candidates.is_empty());
+    assert_eq!(view.consumption, before_fact);
+    assert_eq!(s.nonce(own(), 0).unattributed, vec![t(1)]);
+    assert_eq!(s.nonce(own(), 0).consumption, before_fact);
+    assert_eq!(s.tx(&t(4)).unwrap().state, TxState::Candidate);
+    assert_eq!(
+        s.sender(own()),
+        SenderView::Unknown {
+            reason: SenderReason::UnresolvedCandidate { nonce: 2 }
+        }
+    );
+    let c = s.counters();
+    assert_eq!((c.dropped, c.consumed_unattributed), (2, 1));
+
+    // A dropped transaction cannot be included later: the block is refused.
+    let mut refused = s.clone();
+    let out = refused.apply(&block(BASE + 7, 1, 1, &[(t(3), own(), 1)]));
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::NonceConsumedTwice {
+            sender: own(),
+            nonce: 1,
+            consumed_by: None,
+            tx: t(3)
+        }]
+    );
+    // A late sighting changes nothing; a new candidate of a consumed nonce
+    // is stale.
+    s.apply(&pending(t(2), own(), 1, 3, 1));
+    assert_eq!(s.tx(&t(2)).unwrap().state, dropped);
+    s.apply(&pending(t(5), own(), 1, 3, 13));
+    assert_eq!(s.tx(&t(5)), None);
+
+    let out = s.apply(&block(BASE + 7, 1, 1, &[(t(4), own(), 2)]));
+    assert_eq!(out.inclusions, vec![inclusion(2, t(4), bh(BASE + 7, 1))]);
+    let out = s.apply(&fact(own(), 3, BASE + 7, 1));
+    assert_eq!(
+        out.reconciliations,
+        vec![ReconciliationProof::for_tests(CHAIN, own(), 3)]
+    );
+    check_invariants(&s);
+}
+
+/// Review 4 M1: a fact resolution is as strong as the fact's block. It is
+/// reverted when that block is orphaned or becomes uncertain, and settles
+/// (becomes evictable) once that block leaves the window final.
+#[test]
+fn fact_resolutions_follow_the_fact_block() {
+    let dropped_at_103 = || {
+        let mut s = reconciled(0);
+        s.apply(&pending(t(1), own(), 0, 1, 1));
+        accepted(&s.apply(&ChainInput::Gap {
+            from: BASE + 1,
+            to: BASE + 1,
+        }));
+        accepted(&s.apply(&block(BASE + 2, 1, 1, &[])));
+        accepted(&s.apply(&block(BASE + 3, 1, 1, &[])));
+        let out = s.apply(&fact(own(), 1, BASE + 3, 1));
+        assert_eq!(out.reconciliations.len(), 1);
+        assert!(matches!(
+            s.tx(&t(1)).unwrap().state,
+            TxState::Dropped { .. }
+        ));
+        s
+    };
+
+    // The fact's block is orphaned.
+    let mut s = dropped_at_103();
+    accepted(&s.apply(&ChainInput::Reorg {
+        orphaned: vec![(BASE + 3, bh(BASE + 3, 1))],
+        new_head: (BASE + 3, bh(BASE + 3, 2)),
+    }));
+    assert_eq!(s.tx(&t(1)).unwrap().state, TxState::Candidate);
+    assert_eq!(s.counters().fact_resolutions_reverted, 1);
+
+    // The fact's block becomes uncertain (a discontinuity before it is
+    // final).
+    let mut s = dropped_at_103();
+    s.apply(&block(BASE + 9, 1, 7, &[]));
+    assert_eq!(s.tx(&t(1)).unwrap().state, TxState::Candidate);
+
+    // The fact's block leaves the window final: settled, still dropped.
+    let mut s = dropped_at_103();
+    for n in 4..=10 {
+        accepted(&s.apply(&block(BASE + n, 1, 1, &[])));
+    }
+    assert!(matches!(
+        s.tx(&t(1)).unwrap().state,
+        TxState::Dropped { .. }
+    ));
+    assert!(s.txs[&t(1)].settled);
+    check_invariants(&s);
+}
+
+/// Review 4 B1, rule 8: the sender's inclusions after the fact's block may
+/// skip a nonce (EIP-7702). Such a fact is consistent, but reconciles only
+/// once a fact at or after the skip matches.
+#[test]
+fn nonce_skip_after_the_fact_block_reconciles_only_with_a_later_fact() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), own(), 0)])));
+    let out = s.apply(&block(BASE + 2, 0, 0, &[(t(2), own(), 2)]));
+    assert_eq!(
+        out.conflicts,
+        vec![Conflict::NonceDiscontinuity {
+            sender: own(),
+            expected: 1,
+            observed: 2
+        }]
+    );
+    let skipped = SenderView::Unknown {
+        reason: SenderReason::NonceDiscontinuity {
+            expected: 1,
+            observed: 2,
+        },
+    };
+    assert_eq!(s.sender(own()), skipped);
+
+    let out = s.apply(&fact(own(), 0, BASE, 0));
+    assert!(out.reconciliations.is_empty());
+    assert_eq!(s.sender(own()), skipped);
+
+    let out = s.apply(&fact(own(), 2, BASE + 1, 0));
+    assert_eq!(
+        out.reconciliations,
+        vec![ReconciliationProof::for_tests(CHAIN, own(), 3)]
+    );
+    assert_eq!(s.sender(own()), SenderView::Clean { next_nonce: 3 });
+}
+
+/// Review 4 H1: a reorg naming blocks the state does not hold stays
+/// refused; the new chain's next block re-anchors (rule 3).
+#[test]
+fn refused_reorg_is_followed_by_a_re_anchor() {
+    let mut s = ChainState::new(CHAIN, limits(), &[]).unwrap();
+    for n in 0..3 {
+        accepted(&s.apply(&block(BASE + n, 0, 0, &[])));
+    }
+    let out = s.apply(&ChainInput::Reorg {
+        orphaned: vec![(BASE + 2, bh(BASE + 2, 9))],
+        new_head: (BASE + 2, bh(BASE + 2, 1)),
+    });
+    assert_eq!(out.conflicts, vec![Conflict::ReorgMismatch]);
+    assert!(!s.coherent());
+    let out = s.apply(&block(BASE + 2, 1, 0, &[]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::Discontinuity { .. }]
+    ));
+    assert!(s.coherent());
+    accepted(&s.apply(&block(BASE + 3, 1, 1, &[])));
+    assert_eq!(s.high_water(), Some((BASE + 3, bh(BASE + 3, 1))));
+}
+
+/// Review 4 H1: a block refused for a double inclusion is followed by its
+/// child, which re-anchors; the owner recovers with the next nonce fact.
+#[test]
+fn refused_double_inclusion_is_followed_by_a_re_anchor() {
+    let mut s = reconciled(0);
+    accepted(&s.apply(&block(BASE + 1, 0, 0, &[(t(1), foreign(), 0)])));
+    let out = s.apply(&block(BASE + 2, 0, 0, &[(t(1), foreign(), 0)]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::DoubleInclusion { .. }]
+    ));
+    assert!(!s.coherent());
+
+    let out = s.apply(&block(BASE + 3, 0, 0, &[]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::Discontinuity { .. }]
+    ));
+    assert_eq!(s.high_water(), Some((BASE + 3, bh(BASE + 3, 0))));
+    assert!(!s.coherent());
+    s.apply(&fact(own(), 0, BASE + 3, 0));
+    assert!(s.coherent());
+    accepted(&s.apply(&block(BASE + 4, 0, 0, &[])));
+    check_invariants(&s);
+}
+
+/// Review 4 LOW: after a reorg too deep, records that settled below the
+/// window stay included (finality). If such a transaction reappears, that
+/// block is refused and the next block re-anchors: the owner does not
+/// stall.
+#[test]
+fn settled_tx_reappearing_after_a_too_deep_reorg_does_not_stall_the_owner() {
+    let mut s = ChainState::new(CHAIN, limits(), &[]).unwrap();
+    accepted(&s.apply(&block(BASE, 0, 0, &[(t(1), foreign(), 0)])));
+    for n in 1..=7 {
+        accepted(&s.apply(&block(BASE + n, 0, 0, &[])));
+    }
+    assert!(s.txs[&t(1)].settled);
+    let orphaned = s.retained();
+    accepted(&s.apply(&ChainInput::ReorgTooDeep {
+        orphaned,
+        new_head: (BASE + 3, bh(BASE + 3, 1)),
+    }));
+    let out = s.apply(&block(BASE + 3, 1, 1, &[(t(1), foreign(), 0)]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::DoubleInclusion { .. }]
+    ));
+    assert!(!s.coherent());
+    let out = s.apply(&block(BASE + 4, 1, 1, &[]));
+    assert!(matches!(
+        out.conflicts.as_slice(),
+        [Conflict::Discontinuity { .. }]
+    ));
+    assert!(s.coherent());
+    assert_eq!(s.high_water(), Some((BASE + 4, bh(BASE + 4, 1))));
 }

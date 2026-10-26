@@ -351,11 +351,15 @@ impl Follower {
                 }
                 orphaned.reverse();
                 self.facts_due = true;
+                // The new chain is followed from the fork point on: should
+                // its first block fail and a gap follow, the gap starts here.
+                self.next = Some(fork.saturating_add(1));
                 sink(CanonicalEvent::Reorg { orphaned, new_head });
             }
             None => {
                 let orphaned = self.kept.drain(..).collect();
                 self.facts_due = true;
+                self.next = Some(new_head.0);
                 sink(CanonicalEvent::ReorgTooDeep { orphaned, new_head });
                 chain.truncate(1);
             }

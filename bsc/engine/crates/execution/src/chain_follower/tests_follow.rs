@@ -50,6 +50,8 @@ enum Reply {
     ForgedFrom,
     /// Reads the request and never answers (until the client closes).
     Hang,
+    /// Answers `eth_blockNumber` with this head (the phase is unchanged).
+    Head(u64),
 }
 
 struct Script {
@@ -193,6 +195,9 @@ impl State {
                     let mut receipts = self.answer(req);
                     receipts[0]["from"] = json!(hx(&[0x5e; 20]));
                     respond(&mut writer, &ok(receipts), chunk, false);
+                }
+                Some(Reply::Head(n)) => {
+                    respond(&mut writer, &ok(json!(q(n))), None, false);
                 }
                 Some(Reply::RpcError(code)) => {
                     let error = json!({"jsonrpc": "2.0", "id": id,
@@ -1385,5 +1390,98 @@ fn nonce_facts_of_the_watched_senders_at_due_blocks() {
             "nonce aa at 105A = 105",
             "nonce bb at 105A = 105",
         ]
+    );
+}
+
+/// Review 4 H1(a): after an exact reorg the first new-chain block fails
+/// (receipts error) and the head then runs more than `max_catch_up`
+/// ahead. The gap starts at the fork point + 1 (never at the follower's
+/// stale position), so the new chain's block there is reported as not
+/// followed and the C2 owner, fed as the runtime feeds it, keeps
+/// following (before the fix: `gap 103..=109`, 102B silently skipped,
+/// the owner stuck at 101).
+#[test]
+fn a_gap_after_a_failed_reorg_starts_at_the_fork_point() {
+    use crate::runtime::state::{StateConfig, StateOwner};
+    use darkbot_bsc_trading::chain_state::engine::StateLimits;
+
+    let a100 = block("100A", 100, "99", vec![]);
+    let a101 = block("101A", 101, "100A", vec![]);
+    let a102 = block("102A", 102, "101A", vec![]);
+    let mut b = vec![block("102B", 102, "101A", vec![])];
+    for n in 103..=112u64 {
+        b.push(block(&format!("{n}B"), n, &format!("{}B", n - 1), vec![]));
+    }
+    let mut fork_b: Vec<&Synth> = vec![&a100, &a101];
+    fork_b.extend(b.iter());
+    let script = Script {
+        phases: vec![
+            phase(100, &[&a100]),
+            phase(102, &[&a100, &a101, &a102]),
+            phase(103, &fork_b),
+        ],
+        inject: vec![
+            // Occurrence 0 is 102A's receipts, 1 is 102B's in the reorg.
+            (Req::Receipts(102), 1, Reply::RpcError(-32000)),
+            (Req::BlockNumber, 3, Reply::Head(110)),
+            (Req::BlockNumber, 4, Reply::Head(112)),
+        ],
+        chunk: 64,
+    };
+    let limits = limits();
+    let outcome = follow_script(script, limits, &[], Some(Duration::from_millis(1500)));
+    let mut names = BTreeMap::new();
+    for label in ["99", "100A", "101A", "102A"] {
+        names.insert(named(label), label.to_owned());
+    }
+    for n in 102..=112u64 {
+        names.insert(named(&format!("{n}B")), format!("{n}B"));
+    }
+    let lines: Vec<String> = outcome
+        .events
+        .iter()
+        .map(|(e, _)| describe(e, &names))
+        .filter(|l| !l.starts_with("fault"))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "block 100A <- 99 txs 0",
+            "block 101A <- 100A txs 0",
+            "block 102A <- 101A txs 0",
+            "reorg 102A -> 103B",
+            "gap 102..=109",
+            "block 110B <- 109B txs 0",
+            "block 111B <- 110B txs 0",
+            "block 112B <- 111B txs 0",
+        ]
+    );
+    let config = StateConfig {
+        limits: StateLimits {
+            max_txs: 1_024,
+            max_candidates_per_nonce: 4,
+            max_watched_senders: 4,
+            reorg_window: limits.reorg_depth,
+            finality_depth: 2,
+        },
+        watched: Vec::new(),
+        checkpoint_ms: 1_000,
+        nonce_fact_blocks: 1,
+    };
+    let path = std::env::temp_dir().join(format!("bsc-c2-h1a-{}.bin", std::process::id()));
+    let mut owner = StateOwner::fresh(&config, path).unwrap();
+    for (event, _) in &outcome.events {
+        owner.canonical(event);
+    }
+    use darkbot_bsc_record::schema::bsc_runtime::runtime_status::state as e;
+    let r = darkbot_bsc_record::decode(&e::SCHEMA, &owner.draft().encode().unwrap()).unwrap();
+    assert_eq!(
+        (
+            r.opt_u64(e::HEAD).unwrap(),
+            r.bool(e::COHERENT).unwrap(),
+            r.u64(e::REFUSED_INPUTS).unwrap()
+        ),
+        (Some(112), true, 0),
+        "the owner follows the new chain"
     );
 }

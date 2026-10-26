@@ -401,6 +401,9 @@ struct Canonical {
     /// and their launches, reorgs and gaps are outside it.
     window_from_ms: u64,
     first_journaled: bool,
+    /// The window's first block (its `H` record); heights below it are
+    /// never counted as skipped.
+    window_first_block: u64,
     backfill_blocks: u64,
     backfill_launches: u64,
     blocks_skipped: u64,
@@ -422,6 +425,7 @@ impl Canonical {
             head_seen_unix_ms: None,
             window_from_ms,
             first_journaled: false,
+            window_first_block: 0,
             backfill_blocks: 0,
             backfill_launches: 0,
             blocks_skipped: 0,
@@ -464,6 +468,7 @@ impl Canonical {
                         return;
                     }
                     self.first_journaled = true;
+                    self.window_first_block = number;
                     journal.record(
                         RecordKind::Canonical,
                         at,
@@ -521,7 +526,10 @@ impl Canonical {
                 // The new chain below its head is not followed: those heights
                 // are skipped (the orphaned ones are counted as orphaned).
                 self.resyncs += 1;
-                let from = orphaned.first().map_or(new_head.0, |(n, _)| *n);
+                let from = orphaned
+                    .first()
+                    .map_or(new_head.0, |(n, _)| *n)
+                    .max(self.window_first_block);
                 if new_head.0 > from {
                     self.blocks_skipped += new_head.0 - from;
                     journal.record(RecordKind::Reorg, at, &resync_payload(from, new_head.0 - 1));
@@ -856,18 +864,13 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
             if !stopping {
                 generation = store.current()?;
                 if let Some(c) = &config.canonical {
-                    match (c2_wanted(&generation), owner.is_some()) {
-                        (true, false) => {
-                            owner = Some(StateOwner::fresh(&c.state, checkpoint_path.clone())?);
-                        }
-                        (false, true) => {
-                            // Its last window stays the checkpoint for the next start.
-                            if let Some(mut o) = owner.take() {
-                                o.checkpoint(replace);
-                            }
-                        }
-                        _ => {}
-                    }
+                    StateOwner::switch(
+                        &mut owner,
+                        c2_wanted(&generation),
+                        &c.state,
+                        &checkpoint_path,
+                        replace,
+                    )?;
                 }
             }
             for source in SourceId::ALL {
@@ -1454,6 +1457,48 @@ mod tests {
         // No clean end record in this unit test: a killed process's window.
         assert_eq!(w.state, "UNTERMINATED");
         assert_eq!(census.fetch_lag_ms_min, Some(300));
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// A too-deep reorg whose orphaned blocks reach below the window (a
+    /// resume backfill) counts only the window's heights as skipped
+    /// (review 4 LOW: before, 9 was counted although it precedes the window).
+    #[test]
+    fn a_too_deep_reorg_never_counts_heights_before_the_window() {
+        const BLOCK_MS: u64 = 1_792_000_000_000;
+        let base = std::env::temp_dir().join(format!("bsc-runtime-deep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let config = RuntimeConfig::parse(CONFIG).unwrap();
+        let mut c = Canonical::new(config.canonical.as_ref().unwrap(), BLOCK_MS + 10);
+        let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
+        let block = |n: u64| CanonicalEvent::Block {
+            number: n,
+            hash: [n as u8; 32],
+            parent_hash: [n as u8 - 1; 32],
+            timestamp_s: (BLOCK_MS + n) / 1_000,
+            timestamp_ms: BLOCK_MS + n,
+            txs: Vec::new(),
+            observed: Instant::now(),
+            observed_unix_ms: None,
+        };
+        c.event(1, block(9), &mut journal);
+        c.event(2, block(10), &mut journal);
+        c.event(3, block(11), &mut journal);
+        assert_eq!(
+            (c.backfill_blocks, c.blocks, c.window_first_block),
+            (1, 2, 10)
+        );
+        c.event(
+            4,
+            CanonicalEvent::ReorgTooDeep {
+                orphaned: vec![(9, [9; 32]), (10, [10; 32]), (11, [11; 32])],
+                new_head: (14, [0xEE; 32]),
+            },
+            &mut journal,
+        );
+        // Heights 10..=13, not 9..=13.
+        assert_eq!((c.resyncs, c.blocks_skipped), (1, 4));
+        journal.finish().unwrap();
         fs::remove_dir_all(&base).unwrap();
     }
 

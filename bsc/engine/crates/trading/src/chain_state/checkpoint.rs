@@ -37,7 +37,7 @@
 //! Decoding is fail-closed: magic, format version, checksum, chain id,
 //! every count and length against the remaining bytes before anything is
 //! allocated, trailing bytes, each entry decoding to a block, and each block
-//! being accepted.
+//! being accepted as an extension of the one before it.
 
 use alloy_primitives::{Address, keccak256};
 
@@ -90,7 +90,8 @@ pub enum CheckpointError {
         /// Position of the entry.
         position: u64,
     },
-    /// The state refused a block.
+    /// The state refused a block, or the block does not extend the one
+    /// before it.
     BlockRefused {
         /// Position of the entry.
         position: u64,
@@ -213,7 +214,13 @@ impl ChainState {
                 return Err(CheckpointError::NotABlock { position });
             }
             let out = state.apply(&input);
-            if let Some(conflict) = out.conflicts.iter().find(|c| c.refused()) {
+            // Inside a checkpoint every block extends the previous one; a
+            // discontinuity there is corruption, not a follower event.
+            let broken = out
+                .conflicts
+                .iter()
+                .find(|c| c.refused() || matches!(c, Conflict::Discontinuity { .. }));
+            if let Some(conflict) = broken {
                 return Err(CheckpointError::BlockRefused {
                     position,
                     conflict: *conflict,
@@ -539,7 +546,7 @@ mod tests {
             restore(&reseal(&b)),
             Err(CheckpointError::BlockRefused {
                 position: 1,
-                conflict: Conflict::NotOnHead { .. }
+                conflict: Conflict::Discontinuity { .. }
             })
         ));
 
@@ -579,25 +586,38 @@ mod tests {
     }
 
     /// After a restore the follower continues at the checkpoint's head: a
-    /// block extending it is accepted, any other is `NotOnHead`.
+    /// block extending it is accepted; any other is a counted
+    /// discontinuity that re-anchors the state (the owner never stalls).
     #[test]
-    fn restored_state_accepts_only_blocks_extending_the_checkpoint_head() {
+    fn restored_state_follows_the_checkpoint_head_and_re_anchors_otherwise() {
         let s = original();
-        let mut r = restore(&s.encode_checkpoint()).unwrap();
         let ok = ExecutionStatus::Succeeded;
-        let wrong = r.apply(&block(BASE + 9, 0, 7, &[]));
-        assert!(matches!(
-            wrong.conflicts.as_slice(),
-            [Conflict::NotOnHead { .. }]
-        ));
-        let skip = r.apply(&block(BASE + 10, 0, 0, &[]));
-        assert!(matches!(
-            skip.conflicts.as_slice(),
-            [Conflict::NotOnHead { .. }]
-        ));
+        let mut r = restore(&s.encode_checkpoint()).unwrap();
         let out = r.apply(&block(BASE + 9, 0, 0, &[(t(99), own(), 9, ok)]));
         assert!(out.conflicts.is_empty());
         assert_eq!(out.inclusions.len(), 1);
         assert_eq!(r.high_water(), Some((BASE + 9, bh(BASE + 9, 0))));
+
+        for (number, parent_fork) in [(BASE + 9, 7), (BASE + 10, 0)] {
+            let mut r = restore(&s.encode_checkpoint()).unwrap();
+            let out = r.apply(&block(number, 0, parent_fork, &[]));
+            assert_eq!(
+                out.conflicts,
+                vec![Conflict::Discontinuity {
+                    number,
+                    hash: bh(number, 0),
+                    parent_hash: bh(number - 1, parent_fork)
+                }]
+            );
+            assert_eq!(r.high_water(), Some((number, bh(number, 0))));
+            assert_eq!(r.retained(), vec![(number, bh(number, 0))]);
+            assert_eq!(
+                r.sender(own()),
+                SenderView::Quarantined {
+                    reason: SenderReason::Discontinuity
+                }
+            );
+            assert_eq!(r.counters().discontinuities, 1);
+        }
     }
 }

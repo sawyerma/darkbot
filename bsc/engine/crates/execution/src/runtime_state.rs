@@ -85,6 +85,9 @@ pub struct StateOwner {
     checkpoint_writes: u64,
     checkpoint_errors: u64,
     last_conflict: Option<&'static str>,
+    /// The latest refused input's kind (a later non-refusing conflict never
+    /// hides it).
+    last_refused: Option<&'static str>,
 }
 
 impl StateOwner {
@@ -118,6 +121,29 @@ impl StateOwner {
         Ok(owner)
     }
 
+    /// Applies the component's effective mode while running: switched on,
+    /// a fresh owner (the follower is past any checkpoint); switched off,
+    /// the last window is checkpointed for the next start and the owner
+    /// ends.
+    pub fn switch(
+        owner: &mut Option<StateOwner>,
+        wanted: bool,
+        config: &StateConfig,
+        path: &Path,
+        replace: impl Fn(&Path, &[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        match (wanted, owner.is_some()) {
+            (true, false) => *owner = Some(Self::fresh(config, path.to_path_buf())?),
+            (false, true) => {
+                if let Some(mut o) = owner.take() {
+                    o.checkpoint(replace);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Switched on while running: the follower is past any checkpoint, so
     /// the state starts empty (and quarantined, as after a restart).
     pub fn fresh(config: &StateConfig, path: PathBuf) -> Result<Self, String> {
@@ -138,6 +164,7 @@ impl StateOwner {
             checkpoint_writes: 0,
             checkpoint_errors: 0,
             last_conflict: None,
+            last_refused: None,
         }
     }
 
@@ -159,6 +186,9 @@ impl StateOwner {
         let applied = self.state.apply(input);
         if let Some(c) = applied.conflicts.last() {
             self.last_conflict = Some(conflict_kind(c));
+        }
+        if let Some(c) = applied.conflicts.iter().rev().find(|c| c.refused()) {
+            self.last_refused = Some(conflict_kind(c));
         }
     }
 
@@ -298,12 +328,19 @@ impl StateOwner {
             .set(e::RESTORED_BLOCKS, self.restored_blocks)
             .set(e::CHECKPOINT_RESTORE, self.restore)
             .set(e::CHECKPOINT_WRITES, self.checkpoint_writes)
-            .set(e::CHECKPOINT_ERRORS, self.checkpoint_errors);
+            .set(e::CHECKPOINT_ERRORS, self.checkpoint_errors)
+            .set(e::DISCONTINUITIES, c.discontinuities)
+            .set(e::DROPPED, c.dropped)
+            .set(e::CONSUMED_UNATTRIBUTED, c.consumed_unattributed)
+            .set(e::FACT_RESOLUTIONS_REVERTED, c.fact_resolutions_reverted);
         if let Some((n, _)) = self.state.high_water() {
             d.set(e::HEAD, n);
         }
         if let Some(kind) = self.last_conflict {
             d.set(e::LAST_CONFLICT, kind);
+        }
+        if let Some(kind) = self.last_refused {
+            d.set(e::LAST_REFUSED, kind);
         }
         d
     }
@@ -315,8 +352,8 @@ fn ids(blocks: &[(u64, [u8; 32])]) -> Vec<(u64, B256)> {
 
 fn conflict_kind(c: &Conflict) -> &'static str {
     match c {
-        Conflict::NotOnHead { .. } => "NOT_ON_HEAD",
-        Conflict::AnchorMismatch { .. } => "ANCHOR_MISMATCH",
+        Conflict::Discontinuity { .. } => "DISCONTINUITY",
+        Conflict::MalformedGap { .. } => "MALFORMED_GAP",
         Conflict::MalformedBlock { .. } => "MALFORMED_BLOCK",
         Conflict::OversizeBlock { .. } => "OVERSIZE_BLOCK",
         Conflict::DoubleInclusion { .. } => "DOUBLE_INCLUSION",
@@ -457,13 +494,6 @@ mod tests {
         // The own account is quarantined until a nonce fact reconciles it.
         assert!(!r.bool(e::COHERENT).unwrap());
         assert_eq!(r.opt_text(e::LAST_CONFLICT).unwrap(), None);
-        // A block not on the head is refused, never applied.
-        o.canonical(&block(5, 0xC, 0xC, &[]));
-        let r = status(&o);
-        assert_eq!(r.text(e::LAST_CONFLICT).unwrap(), "NOT_ON_HEAD");
-        assert_eq!(r.u64(e::REFUSED_INPUTS).unwrap(), 1);
-        assert_eq!(o.state.high_water(), Some((3, B256::from(id(3, 0xB)))));
-
         o.checkpoint(super::super::replace);
         assert_eq!(status(&o).u64(e::CHECKPOINT_WRITES).unwrap(), 1);
         let back = StateOwner::restore(&cfg, path.clone()).unwrap();
@@ -484,6 +514,41 @@ mod tests {
             back.state.sender(Address::from(W)),
             SenderView::Quarantined { .. }
         ));
+
+        // A block not extending the head is a discontinuity: the chain is
+        // dropped and the block re-anchors (never a permanent stall).
+        o.canonical(&block(5, 0xC, 0xC, &[]));
+        let r = status(&o);
+        assert_eq!(
+            (
+                r.text(e::LAST_CONFLICT).unwrap(),
+                r.u64(e::DISCONTINUITIES).unwrap(),
+                r.u64(e::REFUSED_INPUTS).unwrap(),
+                r.opt_text(e::LAST_REFUSED).unwrap()
+            ),
+            ("DISCONTINUITY", 1, 0, None)
+        );
+        assert_eq!(o.state.high_water(), Some((5, B256::from(id(5, 0xC)))));
+        // A malformed block (one sender, nonce 4 after 5) is refused; its child
+        // re-anchors, and the refusal stays visible as the last refused kind.
+        o.canonical(&block(
+            6,
+            0xC,
+            0xC,
+            &[([0x61; 32], F, 5), ([0x62; 32], F, 4)],
+        ));
+        o.canonical(&block(7, 0xC, 0xC, &[]));
+        let r = status(&o);
+        assert_eq!(
+            (
+                r.text(e::LAST_CONFLICT).unwrap(),
+                r.text(e::LAST_REFUSED).unwrap(),
+                r.u64(e::REFUSED_INPUTS).unwrap(),
+                r.u64(e::DISCONTINUITIES).unwrap()
+            ),
+            ("DISCONTINUITY", "MALFORMED_BLOCK", 1, 2)
+        );
+        assert_eq!(o.state.high_water(), Some((7, B256::from(id(7, 0xC)))));
 
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[20] ^= 1;
@@ -554,6 +619,56 @@ mod tests {
             ),
             (2, 1, 1, 0)
         );
+    }
+
+    /// The lifecycle the runtime drives: OFF→SHADOW starts a fresh owner,
+    /// SHADOW→OFF checkpoints its window and ends it, a second switch-on
+    /// starts fresh again (the follower is past the checkpoint), and the
+    /// next process start restores the window, quarantined.
+    #[test]
+    fn switching_on_and_off_checkpoints_and_the_next_start_restores() {
+        let dir = std::env::temp_dir().join(format!("bsc-c2-switch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c2-checkpoint.bin");
+        let cfg = config(vec![W]);
+        let mut owner: Option<StateOwner> = None;
+        StateOwner::switch(&mut owner, false, &cfg, &path, super::super::replace).unwrap();
+        assert!(
+            owner.is_none() && !path.exists(),
+            "OFF stays off, writes nothing"
+        );
+        StateOwner::switch(&mut owner, true, &cfg, &path, super::super::replace).unwrap();
+        let o = owner.as_mut().unwrap();
+        assert_eq!(o.restore, "NONE");
+        for n in 1..=3 {
+            o.canonical(&block(n, 0xA, 0xA, &[]));
+        }
+        StateOwner::switch(&mut owner, true, &cfg, &path, super::super::replace).unwrap();
+        assert_eq!(
+            owner.as_ref().unwrap().state.high_water().unwrap().0,
+            3,
+            "kept"
+        );
+        StateOwner::switch(&mut owner, false, &cfg, &path, super::super::replace).unwrap();
+        assert!(owner.is_none());
+        StateOwner::switch(&mut owner, true, &cfg, &path, super::super::replace).unwrap();
+        assert_eq!(
+            owner.as_ref().unwrap().state.high_water(),
+            None,
+            "fresh, not restored"
+        );
+        let next = StateOwner::restore(&cfg, path.clone()).unwrap();
+        assert_eq!(next.restore, "RESTORED");
+        assert_eq!(
+            next.resume_window(),
+            vec![(1, id(1, 0xA)), (2, id(2, 0xA)), (3, id(3, 0xA))]
+        );
+        assert!(matches!(
+            next.state.sender(Address::from(W)),
+            SenderView::Quarantined { .. }
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
