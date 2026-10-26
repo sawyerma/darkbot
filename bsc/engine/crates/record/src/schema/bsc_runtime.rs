@@ -273,11 +273,16 @@ pub mod runtime_status {
         /// a derived token that is not the canonical one.
         pub const FOUR_PENDING_UNKNOWN: u16 = 29;
         pub const FOUR_PENDING_MISMATCH: u16 = 30;
+        /// Four.meme launches seen in full before their block whose token the
+        /// decoder derived from the launch bytes (actionable before execution).
+        pub const FOUR_ACTIONABLE: u16 = 31;
+        /// Launch calls included and reverted (no token).
+        pub const REVERTED_LAUNCHES: u16 = 32;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 7,
+            schema_version: 8,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -309,6 +314,8 @@ pub mod runtime_status {
                 Field::req(FOUR_PENDING_DECODED, "four_pending_decoded", U64),
                 Field::req(FOUR_PENDING_UNKNOWN, "four_pending_unknown", U64),
                 Field::req(FOUR_PENDING_MISMATCH, "four_pending_mismatch", U64),
+                Field::req(FOUR_ACTIONABLE, "four_actionable", U64),
+                Field::req(REVERTED_LAUNCHES, "reverted_launches", U64),
             ],
         };
     }
@@ -623,7 +630,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 10,
+        schema_version: 11,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

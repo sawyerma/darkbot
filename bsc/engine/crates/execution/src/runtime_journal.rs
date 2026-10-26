@@ -41,6 +41,9 @@
 //!   the Four.meme decoder's pre-execution verdict, 0 Flap, 1 not a decoded
 //!   launch, 2 no proven derivation, 3 derived = canonical, 4 derived ≠
 //!   canonical; absent in the 136-byte records of older builds).
+//! - `Canonical` `b'V'`: a launch call included and reverted (no token),
+//!   `b'V' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`; an `O`
+//!   of the same block and transaction takes it out again.
 //! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
 //!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
 //! - `Reorg` `b'R'`: a reorg, `b'R' | depth u32 | new head u64 | hash [32]`.
@@ -236,12 +239,25 @@ pub fn pending_launch_payload(l: &LaunchRef) -> Vec<u8> {
 pub const EXIT_PAYLOAD: [u8; 1] = [b'X'];
 
 pub fn orphaned_launch_payload(l: &LaunchRef) -> Vec<u8> {
+    launch_id_payload(b'O', l.venue, l.block_number, &l.block_hash, &l.tx_hash)
+}
+
+/// A launch call included and reverted (`V`), or one of an orphaned block
+/// taken out again (`O`): `tag | venue u8 | block u64 | block_hash [32] |
+/// tx_hash [32]`.
+pub fn launch_id_payload(
+    tag: u8,
+    venue: Venue,
+    block: u64,
+    block_hash: &[u8; 32],
+    tx_hash: &[u8; 32],
+) -> Vec<u8> {
     let mut out = Vec::with_capacity(74);
-    out.push(b'O');
-    out.push(venue_byte(l.venue));
-    out.extend_from_slice(&l.block_number.to_le_bytes());
-    out.extend_from_slice(&l.block_hash);
-    out.extend_from_slice(&l.tx_hash);
+    out.push(tag);
+    out.push(venue_byte(venue));
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(block_hash);
+    out.extend_from_slice(tx_hash);
     out
 }
 

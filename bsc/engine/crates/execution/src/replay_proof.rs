@@ -118,6 +118,12 @@ fn counter_mismatches(canonical: &Record, c: &Census) -> Vec<String> {
             "four_pending_mismatch",
             c.four_mismatch,
         ),
+        (k::FOUR_ACTIONABLE, "four_actionable", c.four_actionable),
+        (
+            k::REVERTED_LAUNCHES,
+            "reverted_launches",
+            c.reverted_flap + c.reverted_classic + c.reverted_openfour,
+        ),
     ]
     .into_iter()
     .filter_map(|(tag, name, replayed)| {

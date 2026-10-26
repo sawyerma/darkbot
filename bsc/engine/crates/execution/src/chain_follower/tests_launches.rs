@@ -66,6 +66,14 @@ const OPENFOUR_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_1298
 const OPENFOUR_RECEIPTS: &str =
     include_str!("../../tests/fixtures/chain/block_129842141.receipts.json");
 
+/// A block with a reverted Flap launch call (the D refreeze's REVERTED
+/// fixture 0x509e3941…, index 102) among five failed receipts,
+/// `eth_getBlockByNumber(n, true)` and `eth_getBlockReceipts(n)` of
+/// bsc-dataseed.bnbchain.org, fetched 2026-10-26.
+const REVERTED_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129891515.full.json");
+const REVERTED_RECEIPTS: &str =
+    include_str!("../../tests/fixtures/chain/block_129891515.receipts.json");
+
 const TRANSFER: [u8; 32] = hex!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
 
 /// The block and its receipts through the follower's own parse and
@@ -567,4 +575,22 @@ fn block_transactions_are_bound_cross_checked_and_verified() {
         Some(RejectReason::UnsupportedType(4))
     );
     assert!(verify_object(&retyped.objects[1]).is_ok());
+}
+
+/// Phase F §10 (gate M4): of a block's failed receipts exactly the launch
+/// calls are reverted launches, by the pending path's own decision; the
+/// other failed transactions are not.
+#[test]
+fn a_reverted_launch_call_is_reported_and_no_other_failed_transaction() {
+    let (_, receipts) = load(REVERTED_BLOCK, REVERTED_RECEIPTS, 129_891_515);
+    assert_eq!(receipts.iter().filter(|r| !r.succeeded).count(), 5);
+    let objects = full(REVERTED_BLOCK, 129_891_515).objects;
+    assert_eq!(
+        super::launches::reverted(&receipts, &objects, 16_384),
+        vec![(
+            Venue::Flap,
+            102,
+            hex!("509e39416c0d556071222741dd65ab0228aa4a2f7089eddedf362d14225bd505")
+        )]
+    );
 }

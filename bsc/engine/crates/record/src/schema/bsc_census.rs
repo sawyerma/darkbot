@@ -167,11 +167,30 @@ pub mod census {
     /// Pending events the ingress queue dropped before the journal, in all
     /// windows (Phase F gate H1: never a clean capture).
     pub const INGRESS_DROPPED: u16 = 50;
+    /// Phase F §10 per venue (gate M3/M4): Four Classic and OpenFour
+    /// launches; actionable before execution (seen in full before the block
+    /// with the token derived from the launch bytes) in all and per family;
+    /// Four launches during a source outage; the lead of Four launches seen
+    /// in full before the block; launch calls included and reverted per
+    /// venue; journaled launch sightings never included by their window's
+    /// end.
+    pub const CLASSIC_LAUNCHES: u16 = 51;
+    pub const OPENFOUR_LAUNCHES: u16 = 52;
+    pub const FOUR_ACTIONABLE: u16 = 53;
+    pub const CLASSIC_ACTIONABLE: u16 = 54;
+    pub const OPENFOUR_ACTIONABLE: u16 = 55;
+    pub const FOUR_OUTAGE_LAUNCHES: u16 = 56;
+    pub const FOUR_LEAD_P50_US: u16 = 57;
+    pub const FOUR_LEAD_MAX_US: u16 = 58;
+    pub const REVERTED_FLAP: u16 = 59;
+    pub const REVERTED_CLASSIC: u16 = 60;
+    pub const REVERTED_OPENFOUR: u16 = 61;
+    pub const LAUNCHES_NOT_INCLUDED: u16 = 62;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
-        schema_version: 7,
+        schema_version: 8,
         fields: &[
             Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
@@ -226,6 +245,18 @@ pub mod census {
             Field::opt(LATER_LAG_P95_US, "later_lag_p95_us", U64),
             Field::opt(LATER_LAG_MAX_US, "later_lag_max_us", U64),
             Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
+            Field::req(CLASSIC_LAUNCHES, "classic_launches", U64),
+            Field::req(OPENFOUR_LAUNCHES, "openfour_launches", U64),
+            Field::req(FOUR_ACTIONABLE, "four_actionable", U64),
+            Field::req(CLASSIC_ACTIONABLE, "classic_actionable", U64),
+            Field::req(OPENFOUR_ACTIONABLE, "openfour_actionable", U64),
+            Field::req(FOUR_OUTAGE_LAUNCHES, "four_outage_launches", U64),
+            Field::opt(FOUR_LEAD_P50_US, "four_lead_p50_us", U64),
+            Field::opt(FOUR_LEAD_MAX_US, "four_lead_max_us", U64),
+            Field::req(REVERTED_FLAP, "reverted_flap", U64),
+            Field::req(REVERTED_CLASSIC, "reverted_classic", U64),
+            Field::req(REVERTED_OPENFOUR, "reverted_openfour", U64),
+            Field::req(LAUNCHES_NOT_INCLUDED, "launches_not_included", U64),
         ],
     };
 }

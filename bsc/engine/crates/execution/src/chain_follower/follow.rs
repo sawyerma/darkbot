@@ -430,6 +430,7 @@ impl Follower {
                 launch.with_transaction(tx.as_ref().map_err(|r| *r), self.max_launch_calldata),
             );
         }
+        let reverted = launches::reverted(&receipts, &objects, self.max_launch_calldata);
         let txs = head
             .txs
             .iter()
@@ -455,6 +456,15 @@ impl Follower {
         });
         for launch in launches {
             sink(CanonicalEvent::Launch(launch));
+        }
+        for (venue, tx_index, tx_hash) in reverted {
+            sink(CanonicalEvent::RevertedLaunch {
+                venue,
+                block_number: header.number,
+                block_hash: header.hash,
+                tx_index,
+                tx_hash,
+            });
         }
         self.kept.push_back((header.number, header.hash));
         while self.kept.len() as u64 > self.reorg_depth.saturating_add(1) {

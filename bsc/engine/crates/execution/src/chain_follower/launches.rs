@@ -203,8 +203,30 @@ impl ReceiptLaunch {
     }
 }
 
+/// The reverted launch calls of one block: failed receipts whose
+/// transaction object verifies and whose signed bytes are a launch to the
+/// production decoders (`ingress::launch_venue`, the pending path's own
+/// decision); an unverifiable failed transaction is not guessed.
+pub(super) fn reverted(
+    receipts: &[Receipt],
+    objects: &[Result<ParsedTx, RejectReason>],
+    max_launch_calldata: usize,
+) -> Vec<(Venue, u64, [u8; 32])> {
+    let four = bsc_mainnet_g01_129842711();
+    receipts
+        .iter()
+        .filter(|r| !r.succeeded)
+        .filter_map(|r| {
+            let object = objects.get(usize::try_from(r.tx_index).ok()?)?;
+            let tx = verify_object(object).ok()?;
+            let venue = crate::ingress::launch_venue(&four, &tx.raw, max_launch_calldata)?;
+            Some((venue, r.tx_index, r.tx_hash))
+        })
+        .collect()
+}
+
 /// The launches of one block whose receipts were verified against `block`,
-/// in receipt and log order. Failed receipts are skipped.
+/// in receipt and log order. Failed receipts are skipped (see [`reverted`]).
 pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<ReceiptLaunch> {
     let mut launches = Vec::new();
     for receipt in receipts.iter().filter(|r| r.succeeded) {

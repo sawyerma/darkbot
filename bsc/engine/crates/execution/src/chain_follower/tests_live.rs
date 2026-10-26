@@ -88,6 +88,7 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
             blocks += 1;
         }
         CanonicalEvent::Launch(launch) => launches.push(launch),
+        CanonicalEvent::RevertedLaunch { .. } => {}
         CanonicalEvent::Reorg { orphaned, new_head } => {
             for (number, hash) in &orphaned {
                 assert_eq!(chain.remove(number), Some(*hash));

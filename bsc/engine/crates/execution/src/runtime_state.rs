@@ -281,7 +281,9 @@ impl StateOwner {
                 block_number: *block_number,
                 block_hash: B256::from(*block_hash),
             },
-            CanonicalEvent::Launch(_) | CanonicalEvent::Fault(_) => return,
+            CanonicalEvent::Launch(_)
+            | CanonicalEvent::RevertedLaunch { .. }
+            | CanonicalEvent::Fault(_) => return,
         };
         self.apply(&input);
     }

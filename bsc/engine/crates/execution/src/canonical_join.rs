@@ -174,6 +174,10 @@ pub struct JoinCounters {
     /// canonical one.
     pub four_pending_unknown: u64,
     pub four_pending_mismatch: u64,
+    /// Four.meme launches seen in full before their block whose token the
+    /// decoder derived from the launch bytes: actionable before execution
+    /// (Phase F §7/§10, the Four counterpart of `c1_scope_full_before`).
+    pub four_actionable: u64,
     pub orphaned_launches: u64,
     pub seen_full_before: u64,
     pub seen_hash_only_before: u64,
@@ -214,6 +218,11 @@ impl JoinCounters {
                 FourToken::Unknown => step(&mut self.four_pending_unknown),
                 FourToken::Mismatch => step(&mut self.four_pending_mismatch),
                 FourToken::NotApplicable | FourToken::NotRecognized => {}
+            }
+            if j.launch.four_token == FourToken::Matched
+                && matches!(j.visibility, Visibility::FullBefore { .. })
+            {
+                step(&mut self.four_actionable);
             }
             return;
         }

@@ -33,8 +33,9 @@ use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
     SourceEvent, canonical_launch_payload, first_sighting_payload, ingress_drop_payload,
-    later_sighting_payload, orphaned_launch_payload, own_binary_sha256, paper_handoff_payload,
-    pending_launch_payload, reorg_payload, resync_payload, source_event_payload, window_payload,
+    later_sighting_payload, launch_id_payload, orphaned_launch_payload, own_binary_sha256,
+    paper_handoff_payload, pending_launch_payload, reorg_payload, resync_payload,
+    source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -518,6 +519,12 @@ struct Canonical {
     window_first_block: u64,
     backfill_blocks: u64,
     backfill_launches: u64,
+    /// Launch calls included and reverted, and the recent ones (a reorg
+    /// within the follower's window takes them out again).
+    reverted_launches: u64,
+    reverted_recent: Vec<(u64, [u8; 32], [u8; 32], crate::canonical_join::Venue)>,
+    /// The deepest reorg the follower reports (`BSC_CANONICAL_REORG_DEPTH`).
+    reorg_window: u64,
     blocks_skipped: u64,
     blocks: u64,
     reorgs: u64,
@@ -540,6 +547,9 @@ impl Canonical {
             window_first_block: 0,
             backfill_blocks: 0,
             backfill_launches: 0,
+            reverted_launches: 0,
+            reverted_recent: Vec::new(),
+            reorg_window: config.limits.reorg_depth,
             blocks_skipped: 0,
             blocks: 0,
             reorgs: 0,
@@ -557,6 +567,18 @@ impl Canonical {
         let hashes: Vec<[u8; 32]> = orphaned.iter().map(|(_, h)| *h).collect();
         for l in self.ledger.orphan(&hashes) {
             journal.record(RecordKind::Canonical, at, &orphaned_launch_payload(&l));
+        }
+        let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.reverted_recent)
+            .into_iter()
+            .partition(|(_, block, _, _)| hashes.contains(block));
+        self.reverted_recent = kept;
+        for (number, block, tx, venue) in gone {
+            self.reverted_launches = self.reverted_launches.saturating_sub(1);
+            journal.record(
+                RecordKind::Canonical,
+                at,
+                &launch_id_payload(b'O', venue, number, &block, &tx),
+            );
         }
     }
 
@@ -592,6 +614,26 @@ impl Canonical {
             // Before the window: not part of the G0.4 counts (the C2 owner
             // has applied them already).
             CanonicalEvent::Launch(_) if !self.first_journaled => self.backfill_launches += 1,
+            CanonicalEvent::RevertedLaunch { .. } if !self.first_journaled => {}
+            CanonicalEvent::RevertedLaunch {
+                venue,
+                block_number,
+                block_hash,
+                tx_hash,
+                ..
+            } => {
+                self.reverted_launches += 1;
+                self.reverted_recent
+                    .push((block_number, block_hash, tx_hash, venue));
+                // Older than any reorg the follower reports: final.
+                let floor = block_number.saturating_sub(self.reorg_window);
+                self.reverted_recent.retain(|(n, ..)| *n >= floor);
+                journal.record(
+                    RecordKind::Canonical,
+                    at,
+                    &launch_id_payload(b'V', venue, block_number, &block_hash, &tx_hash),
+                );
+            }
             CanonicalEvent::Reorg { .. }
             | CanonicalEvent::ReorgTooDeep { .. }
             | CanonicalEvent::Gap { .. }
@@ -702,6 +744,8 @@ impl Canonical {
             .set(e::FOUR_PENDING_DECODED, c.four_pending_decoded)
             .set(e::FOUR_PENDING_UNKNOWN, c.four_pending_unknown)
             .set(e::FOUR_PENDING_MISMATCH, c.four_pending_mismatch)
+            .set(e::FOUR_ACTIONABLE, c.four_actionable)
+            .set(e::REVERTED_LAUNCHES, self.reverted_launches)
             .set(e::ORPHANED_LAUNCHES, c.orphaned_launches)
             .set(e::SEEN_FULL_BEFORE, c.seen_full_before)
             .set(e::SEEN_HASH_ONLY_BEFORE, c.seen_hash_only_before)
@@ -1054,6 +1098,8 @@ pub fn run(
     let mut core = IngressCore::new(config.dedup_hashes, config.max_launch_calldata);
     // The dropped-event totals last journaled, per source (`D` records).
     let mut journaled_drops = [0u64; 5];
+    // The periodic census in flight, if any.
+    let mut census_job: Option<std::thread::JoinHandle<()>> = None;
     // The venue contracts the pending capture's VENUES scope keeps.
     let four_deployment = bsc_mainnet_g01_129842711();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
@@ -1431,9 +1477,27 @@ pub fn run(
                     &window_payload(b'K', n, &h),
                 );
             }
-            // A census failure is visible in the log; observation goes on.
-            if let Err(e) = write_census(config, rundir, Some(journal.path())) {
-                eprintln!("g04 census: {e}");
+            // The census replays every journal: on its own thread, one at a
+            // time, never on this decision loop (Phase F gate M1). A census
+            // failure is visible in the log; observation goes on.
+            if census_job.as_ref().is_none_or(|j| j.is_finished()) {
+                if let Some(done) = census_job.take() {
+                    let _ = done.join();
+                }
+                let (config, rundir, active) = (
+                    config.clone(),
+                    rundir.to_path_buf(),
+                    journal.path().to_path_buf(),
+                );
+                census_job = std::thread::Builder::new()
+                    .name("bsc-census".into())
+                    .spawn(move || {
+                        if let Err(e) = write_census(&config, &rundir, Some(&active)) {
+                            eprintln!("g04 census: {e}");
+                        }
+                    })
+                    .map_err(|e| eprintln!("g04 census thread: {e}"))
+                    .ok();
             }
         }
         if stopping && adapters.is_empty() {
@@ -1445,6 +1509,10 @@ pub fn run(
             journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
             journal.record(RecordKind::Runtime, clock.now_ns(), &EXIT_PAYLOAD);
             journal.finish()?;
+            // The last periodic census ends before the final one.
+            if let Some(done) = census_job.take() {
+                let _ = done.join();
+            }
             if let Err(e) = write_census(config, rundir, None) {
                 eprintln!("g04 census: {e}");
             }

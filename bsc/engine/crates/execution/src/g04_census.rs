@@ -109,6 +109,24 @@ pub struct Census {
     pub later_lag_max_us: Option<u64>,
     /// Pending events the ingress queue dropped before the journals.
     pub ingress_dropped: u64,
+    /// Phase F §10 per venue: Four Classic and OpenFour launches; those
+    /// actionable before execution (seen in full before the block with the
+    /// token derived from the launch bytes); Four launches during a source
+    /// outage and the lead of those seen in full before the block; launch
+    /// calls included and reverted; journaled launch sightings never
+    /// included by their window's end.
+    pub classic_launches: u64,
+    pub openfour_launches: u64,
+    pub four_actionable: u64,
+    pub classic_actionable: u64,
+    pub openfour_actionable: u64,
+    pub four_outage_launches: u64,
+    pub four_lead_p50_us: Option<u64>,
+    pub four_lead_max_us: Option<u64>,
+    pub reverted_flap: u64,
+    pub reverted_classic: u64,
+    pub reverted_openfour: u64,
+    pub launches_not_included: u64,
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
@@ -136,7 +154,7 @@ pub struct Census {
 /// One canonical launch record (`b'C'`); class 0 marks an orphaned one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LaunchRecord {
-    flap: bool,
+    venue: Venue,
     block_hash: [u8; 32],
     pub(crate) tx_hash: [u8; 32],
     external_buys: Option<u32>,
@@ -201,7 +219,7 @@ pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         return None;
     }
     Some(LaunchRecord {
-        flap: venue == Venue::Flap,
+        venue,
         block_hash: hash_at(p, 10)?,
         tx_hash: hash_at(p, 50)?,
         external_buys: if buys_known {
@@ -265,6 +283,10 @@ impl Connectivity {
 struct Replay {
     window: Window,
     launches: Vec<LaunchRecord>,
+    /// Launch calls included and reverted (not taken out by a reorg).
+    reverted: Vec<Venue>,
+    /// Journaled launch sightings never included by the window's end.
+    not_included: u64,
     connectivity: Connectivity,
     /// The lag of every later sighting of a launch behind its first (`L`).
     later_lags_ns: Vec<u64>,
@@ -332,6 +354,10 @@ fn replay(
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
     let mut later_lags_ns: Vec<u64> = Vec::new();
+    // Reverted launch calls (`V`), by block and transaction.
+    let mut reverted: HashMap<([u8; 32], [u8; 32]), Venue> = HashMap::new();
+    // Every journaled launch sighting (`RawSignedTx`), by transaction hash.
+    let mut sighted: HashSet<[u8; 32]> = HashSet::new();
     // `D` records: each source's cumulative dropped-event total.
     let mut dropped: HashMap<u8, u64> = HashMap::new();
     // Launches received (`P`) and resolved (`C`/`O`), by (block, tx).
@@ -393,6 +419,19 @@ fn replay(
                 }
                 None => window.unparsed_records += 1,
             },
+            (RecordKind::RawSignedTx, _) => {
+                if let Some(h) = hash_at(p, 1) {
+                    sighted.insert(h);
+                }
+            }
+            (RecordKind::Canonical, Some(b'V')) if p.len() == 74 => {
+                match (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1])) {
+                    (Some(block), Some(tx), Some(venue)) => {
+                        reverted.insert((block, tx), venue);
+                    }
+                    _ => window.unparsed_records += 1,
+                }
+            }
             (RecordKind::Canonical, Some(b'O')) if p.len() == 74 => {
                 let (Some(block), Some(tx), Some(venue)) =
                     (hash_at(p, 10), hash_at(p, 42), venue_of_byte(p[1]))
@@ -400,12 +439,16 @@ fn replay(
                     window.unparsed_records += 1;
                     continue;
                 };
+                // A reverted launch call of an orphaned block: taken out.
+                if reverted.remove(&(block, tx)).is_some() {
+                    continue;
+                }
                 {
                     resolved.insert((block, tx));
                     launches.retain(|l| !(l.block_hash == block && l.tx_hash == tx));
                     // Counted as orphaned (class 0), joined or not.
                     launches.push(LaunchRecord {
-                        flap: venue == Venue::Flap,
+                        venue,
                         block_hash: block,
                         tx_hash: tx,
                         external_buys: None,
@@ -477,9 +520,29 @@ fn replay(
     }
     window.duration_ms = last_ns / 1_000_000;
     connectivity.sort();
+    // A sighting whose transaction no canonical record names by the end of a
+    // finished window was never included in it (replaced, dropped, or later).
+    let not_included = if state == "INVALID" || state == "RUNNING" {
+        0
+    } else {
+        let included: HashSet<[u8; 32]> = received
+            .iter()
+            .chain(resolved.iter())
+            .chain(reverted.keys())
+            .map(|(_, tx)| *tx)
+            .collect();
+        sighted.difference(&included).count() as u64
+    };
+    let reverted: Vec<Venue> = if state == "INVALID" {
+        Vec::new()
+    } else {
+        reverted.into_values().collect()
+    };
     Ok(Replay {
         window,
         launches,
+        reverted,
+        not_included,
         connectivity,
         later_lags_ns,
     })
@@ -549,6 +612,7 @@ fn census_of(
 ) -> Result<Census, String> {
     let mut out = Census::default();
     let mut leads: Vec<u64> = Vec::new();
+    let mut four_leads: Vec<u64> = Vec::new();
     let mut later: Vec<u64> = Vec::new();
     let mut lags: Vec<i64> = Vec::new();
     let mut firsts: HashMap<usize, u64> = HashMap::new();
@@ -582,8 +646,27 @@ fn census_of(
             }
             out.tx_unverifiable += u64::from(l.tx_unverifiable);
             out.tx_answer_refused += u64::from(l.tx_answer_refused);
-            if !l.flap {
+            if l.venue != Venue::Flap {
                 out.four_launches += 1;
+                *match l.venue {
+                    Venue::OpenFour => &mut out.openfour_launches,
+                    _ => &mut out.classic_launches,
+                } += 1;
+                // Seen in full before the block with the token derived from
+                // the launch bytes: actionable before execution (§7/§10).
+                if l.class == 1 && l.four == Some(FourToken::Matched) {
+                    out.four_actionable += 1;
+                    *match l.venue {
+                        Venue::OpenFour => &mut out.openfour_actionable,
+                        _ => &mut out.classic_actionable,
+                    } += 1;
+                }
+                if l.class == 1 {
+                    four_leads.push(l.delta_us);
+                }
+                if !r.connectivity.any_connected_at(l.seen_ns) {
+                    out.four_outage_launches += 1;
+                }
                 let n = match l.four {
                     Some(FourToken::Matched) => &mut out.four_derived,
                     Some(FourToken::Unknown) => &mut out.four_no_derivation,
@@ -639,9 +722,20 @@ fn census_of(
             }
         }
         later.extend(r.later_lags_ns.iter().map(|ns| ns / 1_000));
+        for v in &r.reverted {
+            *match v {
+                Venue::Flap => &mut out.reverted_flap,
+                Venue::Four => &mut out.reverted_classic,
+                Venue::OpenFour => &mut out.reverted_openfour,
+            } += 1;
+        }
+        out.launches_not_included += r.not_included;
         out.windows.push(r.window);
     }
     later.sort_unstable();
+    four_leads.sort_unstable();
+    out.four_lead_p50_us = percentile(&four_leads, 500);
+    out.four_lead_max_us = four_leads.last().copied();
     out.later_sightings = later.len() as u64;
     out.later_lag_p50_us = percentile(&later, 500);
     out.later_lag_p95_us = percentile(&later, 950);
@@ -707,6 +801,16 @@ impl Census {
             .set(cs::FOUR_CLOCK_UNKNOWN, self.four_clock_unknown)
             .set(cs::LATER_SIGHTINGS, self.later_sightings)
             .set(cs::INGRESS_DROPPED, self.ingress_dropped)
+            .set(cs::CLASSIC_LAUNCHES, self.classic_launches)
+            .set(cs::OPENFOUR_LAUNCHES, self.openfour_launches)
+            .set(cs::FOUR_ACTIONABLE, self.four_actionable)
+            .set(cs::CLASSIC_ACTIONABLE, self.classic_actionable)
+            .set(cs::OPENFOUR_ACTIONABLE, self.openfour_actionable)
+            .set(cs::FOUR_OUTAGE_LAUNCHES, self.four_outage_launches)
+            .set(cs::REVERTED_FLAP, self.reverted_flap)
+            .set(cs::REVERTED_CLASSIC, self.reverted_classic)
+            .set(cs::REVERTED_OPENFOUR, self.reverted_openfour)
+            .set(cs::LAUNCHES_NOT_INCLUDED, self.launches_not_included)
             .set(cs::ORPHANED_LAUNCHES, self.orphaned_launches)
             .set(cs::OUTAGE_LAUNCHES, self.outage_launches)
             .set(cs::FULL_BEFORE, self.full_before)
@@ -723,6 +827,8 @@ impl Census {
             (cs::LATER_LAG_P50_US, self.later_lag_p50_us),
             (cs::LATER_LAG_P95_US, self.later_lag_p95_us),
             (cs::LATER_LAG_MAX_US, self.later_lag_max_us),
+            (cs::FOUR_LEAD_P50_US, self.four_lead_p50_us),
+            (cs::FOUR_LEAD_MAX_US, self.four_lead_max_us),
         ] {
             if let Some(v) = v {
                 d.set(tag, v);
@@ -1494,6 +1600,105 @@ mod tests {
         assert_eq!(c.covered_ms, 2_000);
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::INGRESS_DROPPED).unwrap(), 7);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase F gate M3/M4: Four Classic and OpenFour apart; actionable
+    /// only when seen in full before the block with the derived token;
+    /// reverted launch calls per venue, a reorg taking one out again (not an
+    /// orphaned launch); a journaled launch sighting never included.
+    #[test]
+    fn per_venue_actionability_reverts_and_unincluded_sightings_are_counted() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-venues-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let joined = |venue, tx, four, full_before: bool| {
+            let launch = LaunchRef {
+                four_token: four,
+                ..launch(venue, 10, tx, None, 100)
+            };
+            (
+                RecordKind::Canonical,
+                100,
+                canonical_launch_payload(&Joined {
+                    launch,
+                    visibility: if full_before {
+                        Visibility::FullBefore {
+                            source: SourceId::PublicNode,
+                            lead_us: 7,
+                        }
+                    } else {
+                        Visibility::Missed
+                    },
+                }),
+            )
+        };
+        let id = |tag, venue, tx: u8| {
+            (
+                RecordKind::Canonical,
+                150,
+                crate::runtime_journal::launch_id_payload(tag, venue, 10, &[10; 32], &[tx; 32]),
+            )
+        };
+        let sighting = |tx: u8| {
+            (
+                RecordKind::RawSignedTx,
+                50,
+                crate::runtime_journal::first_sighting_payload(
+                    SourceId::PublicNode,
+                    &[tx; 32],
+                    b"raw",
+                ),
+            )
+        };
+        let records = vec![
+            (
+                RecordKind::Canonical,
+                1,
+                window_payload(b'H', 10, &[10; 32]),
+            ),
+            sighting(1),
+            sighting(9),
+            joined(Venue::Four, 1, FourToken::Matched, true),
+            joined(Venue::OpenFour, 2, FourToken::Matched, true),
+            joined(Venue::OpenFour, 3, FourToken::Unknown, true),
+            joined(Venue::OpenFour, 4, FourToken::Matched, false),
+            id(b'V', Venue::Flap, 7),
+            id(b'V', Venue::Four, 8),
+            id(b'O', Venue::Four, 8),
+            (
+                RecordKind::Canonical,
+                400,
+                window_payload(b'E', 11, &[11; 32]),
+            ),
+            (RecordKind::Runtime, 401, EXIT_PAYLOAD.to_vec()),
+        ];
+        write(&dir, 1_000, &records);
+        let c = census(&dir, 4096, None).unwrap();
+        assert_eq!(
+            (c.classic_launches, c.openfour_launches, c.four_launches),
+            (1, 3, 4)
+        );
+        assert_eq!(
+            (
+                c.four_actionable,
+                c.classic_actionable,
+                c.openfour_actionable
+            ),
+            (2, 1, 1)
+        );
+        assert_eq!(
+            (
+                c.reverted_flap,
+                c.reverted_classic,
+                c.reverted_openfour,
+                c.orphaned_launches
+            ),
+            (1, 0, 0, 0)
+        );
+        assert_eq!(c.launches_not_included, 1);
+        assert_eq!(c.four_lead_max_us, Some(7));
+        let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
+        assert_eq!(record.u64(cs::FOUR_ACTIONABLE).unwrap(), 2);
         fs::remove_dir_all(&dir).unwrap();
     }
 

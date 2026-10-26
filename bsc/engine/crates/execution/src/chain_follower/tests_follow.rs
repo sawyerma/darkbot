@@ -744,6 +744,9 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
                 txs.len()
             )
         }
+        CanonicalEvent::RevertedLaunch {
+            venue, tx_index, ..
+        } => format!("reverted {venue:?} {tx_index}"),
         CanonicalEvent::Launch(l) => format!(
             "launch {:?} {} {} token {:?} creator {:?} buys {:?} first {:?} \
              sender {} nonce {} c1 {}",

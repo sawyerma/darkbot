@@ -238,6 +238,16 @@ pub enum CanonicalEvent {
         txs: Vec<CanonicalTx>,
     },
     Launch(CanonicalLaunch),
+    /// A launch call that was included and reverted (no token): its
+    /// verified signed bytes are a launch of `venue` to the production
+    /// decoders (Phase F contract §10 "reverted").
+    RevertedLaunch {
+        venue: Venue,
+        block_number: u64,
+        block_hash: [u8; 32],
+        tx_index: u64,
+        tx_hash: [u8; 32],
+    },
     /// Earlier reported blocks left the canonical chain: `orphaned` in
     /// ascending order, the fork point is the block below the first. The
     /// new chain's blocks up to `new_head` (the block that revealed the
