@@ -310,6 +310,12 @@ pub struct Counters {
     pub gain_wei: U256,
     pub loss_wei: U256,
     pub unresolved: u64,
+    /// The inputs taken: trades, terms, migrations and the records that
+    /// made every followed curve incomplete.
+    pub trades: u64,
+    pub terms: u64,
+    pub migrations: u64,
+    pub incomplete: u64,
 }
 
 /// The strategy component of one run.
@@ -358,7 +364,11 @@ pub fn status_draft(
     .set(st::UNRESOLVED, c.unresolved)
     .set(st::OBSERVATION_MS, config.observation_ms)
     .set(st::MAX_OPEN, config.max_open as u64)
-    .set(st::INPUT_WEI, Value::U256(config.input_wei.to_be_bytes()));
+    .set(st::INPUT_WEI, Value::U256(config.input_wei.to_be_bytes()))
+    .set(st::TRADES, c.trades)
+    .set(st::TERMS, c.terms)
+    .set(st::MIGRATIONS, c.migrations)
+    .set(st::INCOMPLETE, c.incomplete);
     if let (None, Some(why)) = (strategy, refused) {
         d.set(st::REASON, why);
     }
@@ -389,8 +399,14 @@ impl StrategyRuntime {
         let Some(input) = input_of_record(kind, payload) else {
             return Vec::new();
         };
-        if matches!(input, Input::Launch { .. }) {
-            self.counters.launches += 1;
+        let c = &mut self.counters;
+        match input {
+            Input::Launch { .. } => c.launches += 1,
+            Input::Trade { .. } => c.trades += 1,
+            Input::Term { .. } => c.terms += 1,
+            Input::Migrated { .. } => c.migrations += 1,
+            Input::Incomplete => c.incomplete += 1,
+            Input::Block { .. } => {}
         }
         let outputs: Vec<Vec<u8>> = self
             .engine
@@ -561,6 +577,10 @@ fn add(sum: &mut Counters, c: &Counters) {
         (&mut sum.gains, c.gains),
         (&mut sum.losses, c.losses),
         (&mut sum.unresolved, c.unresolved),
+        (&mut sum.trades, c.trades),
+        (&mut sum.terms, c.terms),
+        (&mut sum.migrations, c.migrations),
+        (&mut sum.incomplete, c.incomplete),
     ] {
         *a = a.saturating_add(b);
     }
@@ -634,7 +654,11 @@ impl Replay {
             .set(sr::LOSSES, c.losses)
             .set(sr::GAIN_WEI, Value::U256(c.gain_wei.to_be_bytes()))
             .set(sr::LOSS_WEI, Value::U256(c.loss_wei.to_be_bytes()))
-            .set(sr::UNRESOLVED, c.unresolved);
+            .set(sr::UNRESOLVED, c.unresolved)
+            .set(sr::TRADES, c.trades)
+            .set(sr::TERMS, c.terms)
+            .set(sr::MIGRATIONS, c.migrations)
+            .set(sr::INCOMPLETE, c.incomplete);
         if let Some(i) = self.first_difference {
             d.set(sr::FIRST_DIFFERENCE, i);
         }
@@ -650,13 +674,17 @@ impl Replay {
     pub fn summary(&self) -> String {
         let c = &self.counters;
         format!(
-            "strategy replay of run {}: {} (records {}, starts {}, outputs journaled {} replayed {}; launches {}, passed {}, rejected {}, data incomplete {}, not tracked {}, slot limit {}, creator sold {}; PAPER entered {}, cancelled {}, exits creator-sell {} target {} stop {} timeout {}; gains {} ({} wei), losses {} ({} wei), unresolved {})\n{}",
+            "strategy replay of run {}: {} (records {}, starts {}, outputs journaled {} replayed {}; inputs: trades {}, terms {}, migrations {}, incomplete {}; launches {}, passed {}, rejected {}, data incomplete {}, not tracked {}, slot limit {}, creator sold {}; PAPER entered {}, cancelled {}, exits creator-sell {} target {} stop {} timeout {}; gains {} ({} wei), losses {} ({} wei), unresolved {})\n{}",
             self.run_id,
             self.verdict(),
             self.records,
             self.starts,
             self.journaled,
             self.replayed,
+            c.trades,
+            c.terms,
+            c.migrations,
+            c.incomplete,
             c.launches,
             c.passed,
             c.rejected,

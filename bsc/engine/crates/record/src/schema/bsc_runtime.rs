@@ -545,11 +545,18 @@ pub mod runtime_status {
         pub const OBSERVATION_MS: u16 = 22;
         pub const MAX_OPEN: u16 = 23;
         pub const INPUT_WEI: u16 = 24;
+        /// v2: the inputs the engine took: trades, terms, migrations and
+        /// the records that made every followed curve incomplete (a refused
+        /// Portal log, a reorg, a resync).
+        pub const TRADES: u16 = 25;
+        pub const TERMS: u16 = 26;
+        pub const MIGRATIONS: u16 = 27;
+        pub const INCOMPLETE: u16 = 28;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.strategy",
             record_type: 0,
-            schema_version: 1,
+            schema_version: 2,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -575,6 +582,10 @@ pub mod runtime_status {
                 Field::req(OBSERVATION_MS, "observation_ms", U64),
                 Field::req(MAX_OPEN, "max_open", U64),
                 Field::req(INPUT_WEI, "input_wei", U256),
+                Field::req(TRADES, "trades", U64),
+                Field::req(TERMS, "terms", U64),
+                Field::req(MIGRATIONS, "migrations", U64),
+                Field::req(INCOMPLETE, "incomplete", U64),
             ],
         };
     }
@@ -703,7 +714,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 12,
+        schema_version: 13,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -777,6 +788,11 @@ pub mod strategy_replay {
     pub const GAIN_WEI: u16 = 28;
     pub const LOSS_WEI: u16 = 29;
     pub const UNRESOLVED: u16 = 30;
+    /// The inputs the replay took (as the status's strategy section).
+    pub const TRADES: u16 = 31;
+    pub const TERMS: u16 = 32;
+    pub const MIGRATIONS: u16 = 33;
+    pub const INCOMPLETE: u16 = 34;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.strategy-replay.v1",
@@ -817,6 +833,10 @@ pub mod strategy_replay {
             Field::req(GAIN_WEI, "gain_wei", U256),
             Field::req(LOSS_WEI, "loss_wei", U256),
             Field::req(UNRESOLVED, "unresolved", U64),
+            Field::req(TRADES, "trades", U64),
+            Field::req(TERMS, "terms", U64),
+            Field::req(MIGRATIONS, "migrations", U64),
+            Field::req(INCOMPLETE, "incomplete", U64),
         ],
     };
 }

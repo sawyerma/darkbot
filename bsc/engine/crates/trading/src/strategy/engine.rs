@@ -328,8 +328,10 @@ impl Engine {
             let features = o.features(&t.book, self.cfg.first_buyer_window);
             let decision = match (evaluate(&self.cfg.rules, &features), t.book.status) {
                 (Verdict::DataIncomplete, _) => Decision::DataIncomplete,
-                (Verdict::Reject(f), _) => Decision::Reject(f),
-                (Verdict::Pass, Err(why)) => Decision::NotTracked(why),
+                // Outside the scope or not exact: its features are no
+                // basis for a filter verdict.
+                (_, Err(why)) => Decision::NotTracked(why),
+                (Verdict::Reject(f), Ok(())) => Decision::Reject(f),
                 (Verdict::Pass, Ok(())) if t.creator_sold.is_some() => Decision::CreatorSold,
                 (Verdict::Pass, Ok(())) if self.slots_taken() >= self.cfg.max_open => {
                     Decision::SlotLimit

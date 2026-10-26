@@ -366,6 +366,34 @@ fn gaps_fail_closed() {
     assert_eq!(c.kinds()[1..], ["entered 106", "unresolved 107 Gap"]);
 }
 
+/// A launch outside the priced scope (another quote token) is NOT_TRACKED
+/// with its reason, never DATA_INCOMPLETE and never a filter verdict.
+#[test]
+fn an_unsupported_launch_is_not_tracked() {
+    use super::book::Untracked;
+    let mut c = Chain::new(config("buy_count:10:"));
+    c.feed(Input::Launch {
+        token: TOKEN,
+        creator: CREATOR,
+        tx_index: 1,
+    });
+    c.feed(Input::Term {
+        token: TOKEN,
+        term: Term::QuoteToken([9; 20]),
+    });
+    for _ in 0..5 {
+        c.next_block();
+    }
+    assert!(matches!(
+        c.out.as_slice(),
+        [Output::Decided {
+            block: 105,
+            decision: Decision::NotTracked(Untracked::Unsupported("quote token")),
+            ..
+        }]
+    ));
+}
+
 /// With one slot the second passing launch of the same window is discarded.
 #[test]
 fn a_busy_slot_discards_for_good() {

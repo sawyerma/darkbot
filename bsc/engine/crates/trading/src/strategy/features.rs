@@ -243,7 +243,10 @@ impl Observation {
             },
             num(ratio(self.dev_tokens, U256::from(TOTAL_SUPPLY), p)),
             num(progress),
-            Value::Flag(self.gap || !book.tracking()),
+            // A coverage gap only: a token the book stopped tracking (a
+            // term outside the scope, a mismatch) is NOT_TRACKED with its
+            // reason, not missing data.
+            Value::Flag(self.gap),
         ]
     }
 }
@@ -344,7 +347,10 @@ mod tests {
         assert!(n(11) > 0 && n(12) > 0);
         assert!(n(13) > 0 && n(14) > 0);
         assert_eq!(f[GAP_FLAG], Value::Flag(false));
-        // A gap in the window is the flag; so is a token no longer tracked.
+        // A gap in the window is the flag; a token no longer tracked is not.
+        let mut untracked = b.clone();
+        untracked.term(Term::QuoteToken([9; 20]));
+        assert_eq!(o.features(&untracked, 5)[GAP_FLAG], Value::Flag(false));
         o.gap = true;
         assert_eq!(o.features(&b, 5)[GAP_FLAG], Value::Flag(true));
     }
