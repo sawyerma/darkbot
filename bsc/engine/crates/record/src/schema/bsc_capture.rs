@@ -163,6 +163,8 @@ pub mod capture_run {
     pub const INGRESS_DROPPED: u16 = 28;
     pub const BUILD_SHA256: u16 = 29;
     pub const BUILD_DIRTY: u16 = 30;
+    /// The pending capture scope (`LAUNCHES`, `VENUES`, `ALL`).
+    pub const CAPTURE_PENDING: u16 = 31;
 
     pub const V3: Schema = Schema {
         name: "darkbot.bsc.capture-run.v1",
@@ -203,6 +205,7 @@ pub mod capture_run {
             Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
             Field::opt(BUILD_SHA256, "build_sha256", B256),
             Field::opt(BUILD_DIRTY, "build_dirty", Bool),
+            Field::opt(CAPTURE_PENDING, "capture_pending", Text),
         ],
     };
 
@@ -293,6 +296,63 @@ pub mod replay_proof {
             Field::req(PENDING_TO_VENUES, "pending_to_venues", U64),
         ],
     };
+
+    /// v3 (Phase F gate H2): the runtime's canonical counters of the run
+    /// equal the replayed census of that run alone; launches seen full
+    /// before their block without a journaled sighting; pending sightings
+    /// journaled as other that the decoders take for a launch; whether the
+    /// replay ran with the run's configuration and build.
+    pub const STATUS_COUNTERS_MATCH: u16 = 25;
+    pub const SIGHTINGS_MISSING: u16 = 26;
+    pub const PENDING_AS_LAUNCH: u16 = 27;
+    pub const CONFIG_MATCH: u16 = 28;
+    pub const BUILD_MATCH: u16 = 29;
+
+    pub const V3: Schema = Schema {
+        name: "darkbot.bsc.replay-proof.v1",
+        record_type: 56,
+        schema_version: 3,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(MANIFEST_SHA256, "manifest_sha256", B256),
+            Field::opt(MANIFEST_STATE, "manifest_state", Text),
+            Field::req(SEGMENTS, "segments", U64),
+            Field::req(RECORDS, "records", U64),
+            Field::opt(LAST_SEQUENCE, "last_sequence", U64),
+            Field::req(MANIFEST_MATCH, "manifest_match", Bool),
+            Field::opt(READ_ERROR, "read_error", Text),
+            Field::req(FLAP_SIGHTINGS, "flap_sightings", U64),
+            Field::req(FOUR_SIGHTINGS, "four_sightings", U64),
+            Field::req(OPENFOUR_SIGHTINGS, "openfour_sightings", U64),
+            Field::req(UNDECODABLE_SIGHTINGS, "undecodable_sightings", U64),
+            Field::req(CENSUS_STATE, "census_state", Text),
+            Field::req(CENSUS_DETERMINISTIC, "census_deterministic", Bool),
+            Field::opt(STATUS_LAUNCHES, "status_launches", U64),
+            Field::opt(STATUS_MATCH, "status_match", Bool),
+            Field::req(VERDICT, "verdict", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::req(PENDING_SIGHTINGS, "pending_sightings", U64),
+            Field::req(PENDING_TO_VENUES, "pending_to_venues", U64),
+            Field::opt(STATUS_COUNTERS_MATCH, "status_counters_match", Bool),
+            Field::req(SIGHTINGS_MISSING, "sightings_missing", U64),
+            Field::req(PENDING_AS_LAUNCH, "pending_as_launch", U64),
+            Field::opt(CONFIG_MATCH, "config_match", Bool),
+            Field::opt(BUILD_MATCH, "build_match", Bool),
+        ],
+    };
+
+    /// A replay proof of either version.
+    pub fn decode_proof(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
+        crate::decode(&V3, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+    }
 }
 
 /// The capacity preflight of a planned scoped capture (master plan §11):
@@ -450,6 +510,7 @@ pub const ALL: &[&Schema] = &[
     &capture_run::V2,
     &capture_run::V3,
     &replay_proof::SCHEMA,
+    &replay_proof::V3,
     &capture_preflight::SCHEMA,
     &ingest_latency::SCHEMA,
 ];

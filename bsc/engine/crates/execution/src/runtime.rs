@@ -33,8 +33,8 @@ use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
     SourceEvent, canonical_launch_payload, first_sighting_payload, ingress_drop_payload,
-    later_sighting_payload, orphaned_launch_payload, paper_handoff_payload, pending_launch_payload,
-    reorg_payload, resync_payload, source_event_payload, window_payload,
+    later_sighting_payload, orphaned_launch_payload, own_binary_sha256, paper_handoff_payload,
+    pending_launch_payload, reorg_payload, resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -834,6 +834,29 @@ fn journal_drops(
     journal.set_ingress_dropped(journaled.iter().sum());
 }
 
+/// The checkout's commit and whether its engine sources differ from it
+/// (`git -C <repo> rev-parse HEAD`, `git status --porcelain -- bsc/engine`);
+/// `None` where there is no checkout (Phase F gate M5: with the binary's own
+/// SHA-256 in the manifest).
+pub fn checkout_identity(repo_root: &Path) -> (Option<String>, Option<bool>) {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let head = git(&["rev-parse", "HEAD"]).filter(|h| h.len() == 40);
+    let dirty = head
+        .as_ref()
+        .and_then(|_| git(&["status", "--porcelain", "--", "bsc/engine"]))
+        .map(|s| !s.is_empty());
+    (head, dirty)
+}
+
 /// The host a run's latencies are of: OS, architecture, logical CPUs.
 pub fn host_label() -> String {
     format!(
@@ -1002,10 +1025,19 @@ pub fn run(
         u64::from(CLOCK_ID_MONOTONIC),
         journal_setup(config),
     )?;
+    let (checkout, dirty) = checkout_identity(repo_root);
     journal.set_identity(RunIdentity {
         host: host_label(),
-        build: format!("darkbot-bsc-execution {}", env!("CARGO_PKG_VERSION")),
+        build: format!(
+            "darkbot-bsc-execution {} checkout {}{}",
+            env!("CARGO_PKG_VERSION"),
+            checkout.as_deref().unwrap_or("unknown"),
+            if dirty == Some(true) { "+dirty" } else { "" }
+        ),
         config_sha256: config.source_sha256,
+        build_sha256: own_binary_sha256(),
+        build_dirty: dirty,
+        capture_pending: config.capture_pending.name(),
     });
     let journal_rel: PathBuf = journal
         .path()

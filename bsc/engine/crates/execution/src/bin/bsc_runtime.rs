@@ -104,6 +104,8 @@ fn run(args: &[String]) -> Result<bool, String> {
                 status.as_deref(),
                 journal_max_payload(&config),
                 config.max_launch_calldata,
+                Some(config.source_sha256),
+                darkbot_bsc_execution::runtime_journal::own_binary_sha256(),
             )?;
             let observed = darkbot_bsc_record::observed_now()?;
             replay_proof::write(

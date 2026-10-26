@@ -1016,7 +1016,7 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
     if let Some((_, proof)) = newest_proof
         && let Some(bytes) = read(&proof)
     {
-        match record::decode(&schema::bsc_capture::replay_proof::SCHEMA, &bytes) {
+        match schema::bsc_capture::replay_proof::decode_proof(&bytes) {
             Ok(r) => monitoring.records.push(native_record(rundir, &proof, &r)),
             Err(_) => warnings.push("REPLAY_PROOF_INVALID".into()),
         }

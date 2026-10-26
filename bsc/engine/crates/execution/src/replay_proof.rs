@@ -1,23 +1,32 @@
 //! The capture→replay identity proof of one finished runtime run (Phase F
 //! contract §9): the run is closed and hashed (its manifest), read again
 //! through the same Rust API (`RunReader`, every frame and sequence
-//! verified, every sealed segment against the manifest), every journaled
-//! first sighting decoded again by the same promoted decoders
-//! (`ingress::launch_venue`), the census replayed twice (it must be the
-//! same), and the runtime's own Flap launch counter (its last status of
-//! this run) compared with the replay's. No Python, no normalization: the
-//! journal's binary frames are the only input.
+//! verified, every sealed segment against the manifest), and what it holds
+//! is held against what the runtime decided while it ran:
+//!
+//! - every journaled launch sighting decodes again as a launch of its venue
+//!   (`ingress::launch_venue`), every other pending sighting does not;
+//! - every launch the follower joined as seen in full before its block has
+//!   its journaled sighting (C1 scope always; every one under VENUES/ALL);
+//! - the runtime's own counters of this run (its last status: the Flap
+//!   launch counter and the canonical join counters) equal the census of
+//!   this run replayed alone, and that census equals the run's window among
+//!   all journals;
+//! - the replay runs with the run's configuration and build (manifest).
+//!
+//! No Python, no normalization: the journal's binary frames are the input.
 
 use crate::canonical_join::Venue;
-use crate::g04_census::{census, manifest_matches};
+use crate::g04_census::{Census, census, census_of_run, launch_record, manifest_matches};
 use crate::ingress::launch_venue;
 use crate::runtime_journal::RUN_MANIFEST;
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_journal::storage::run::RunReader;
 use darkbot_bsc_record::schema::bsc_capture::{capture_run as cr, replay_proof as rp};
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
-use darkbot_bsc_record::{Draft, Value, decode};
+use darkbot_bsc_record::{Draft, Record, Value, decode};
 use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -39,22 +48,97 @@ pub struct Proof {
     /// addressed to a venue contract.
     pub pending: u64,
     pub pending_to_venues: u64,
+    /// Other pending sightings the decoders take for a launch.
+    pub pending_as_launch: u64,
+    /// Launches joined as seen in full before their block without their
+    /// journaled sighting.
+    pub sightings_missing: u64,
     pub census_state: String,
+    /// The run's census alone equals its window among all journals.
     pub census_deterministic: bool,
     pub status_launches: Option<u64>,
     pub status_match: Option<bool>,
+    pub status_counters_match: Option<bool>,
+    pub config_match: Option<bool>,
+    pub build_match: Option<bool>,
     pub verdict: &'static str,
     pub reasons: Vec<String>,
 }
 
-/// Proves the run `<journal_dir>/<run_id>/`; `status` is the bytes of the
-/// runtime's status record, if any (compared only when it is of this run).
+/// The runtime's canonical join counters against the census of the run.
+fn counter_mismatches(canonical: &Record, c: &Census) -> Vec<String> {
+    use rs::canonical as k;
+    [
+        (k::FLAP_LAUNCHES, "flap_launches", c.flap_launches),
+        (k::FOUR_LAUNCHES, "four_launches", c.four_launches),
+        (
+            k::ORPHANED_LAUNCHES,
+            "orphaned_launches",
+            c.orphaned_launches,
+        ),
+        (k::SEEN_FULL_BEFORE, "seen_full_before", c.full_before),
+        (
+            k::SEEN_HASH_ONLY_BEFORE,
+            "seen_hash_only_before",
+            c.hash_only_before,
+        ),
+        (k::SEEN_AFTER, "seen_after", c.after),
+        (k::MISSED, "missed", c.missed),
+        (k::CLOCK_UNKNOWN, "clock_unknown", c.clock_unknown),
+        (
+            k::C1_SCOPE_LAUNCHES,
+            "c1_scope_launches",
+            c.c1_scope_launches,
+        ),
+        (
+            k::C1_SCOPE_FULL_BEFORE,
+            "c1_scope_full_before",
+            c.c1_scope_full_before,
+        ),
+        (k::TX_UNVERIFIABLE, "tx_unverifiable", c.tx_unverifiable),
+        (
+            k::TX_ANSWER_REFUSED,
+            "tx_answer_refused",
+            c.tx_answer_refused,
+        ),
+        (k::EXTERNAL_BUYS, "external_buys", c.external_buys),
+        (k::BUYS_UNKNOWN, "buys_unknown", c.buys_unknown),
+        (
+            k::FOUR_PENDING_DECODED,
+            "four_pending_decoded",
+            c.four_derived,
+        ),
+        (
+            k::FOUR_PENDING_UNKNOWN,
+            "four_pending_unknown",
+            c.four_no_derivation,
+        ),
+        (
+            k::FOUR_PENDING_MISMATCH,
+            "four_pending_mismatch",
+            c.four_mismatch,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(tag, name, replayed)| {
+        let runtime = canonical.u64(tag).ok()?;
+        (runtime != replayed).then(|| format!("runtime {name} {runtime} != replayed {replayed}"))
+    })
+    .collect()
+}
+
+/// Proves the run `<journal_dir>/<run_id>/`. `status` is the bytes of the
+/// runtime's status record, if any (compared only when it is of this run);
+/// `config_sha256` and `own_build` are the replaying configuration's and
+/// binary's hashes, held against the run manifest's.
 pub fn prove(
     journal_dir: &Path,
     run_id: &str,
     status: Option<&[u8]>,
     max_payload: usize,
     max_calldata: usize,
+    config_sha256: Option<[u8; 32]>,
+    own_build: Option<[u8; 32]>,
 ) -> Result<Proof, String> {
     let run = journal_dir.join(run_id);
     if !run.is_dir() {
@@ -69,10 +153,20 @@ pub fn prove(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(format!("{}: {e}", run.join(RUN_MANIFEST).display())),
     };
+    let mut venues_or_all = false;
     match manifest.as_deref().map(cr::decode_run) {
         Some(Ok(m)) => {
             p.manifest_sha256 = m.file_sha256();
             p.manifest_state = m.text(cr::STATE).ok().map(str::to_string);
+            let field = |tag| m.opt_b256(tag).ok().flatten();
+            p.config_match = field(cr::CONFIG_SHA256)
+                .zip(config_sha256)
+                .map(|(a, b)| a == b);
+            p.build_match = field(cr::BUILD_SHA256).zip(own_build).map(|(a, b)| a == b);
+            venues_or_all = matches!(
+                m.opt_text(cr::CAPTURE_PENDING).ok().flatten(),
+                Some("VENUES" | "ALL")
+            );
         }
         Some(Err(e)) => p.reasons.push(format!("run manifest does not decode: {e}")),
         None => p
@@ -80,34 +174,52 @@ pub fn prove(
             .push("no run manifest: the run is not sealed".into()),
     }
     let four = bsc_mainnet_g01_129842711();
+    // Hashes of every journaled first sighting, and the joined launches.
+    let mut sighted: HashSet<[u8; 32]> = HashSet::new();
+    let mut joined: Vec<([u8; 32], u8, bool)> = Vec::new();
     match RunReader::open(&run, max_payload) {
         Ok(mut reader) => {
             loop {
                 match reader.next_record() {
                     Ok(Some(r)) => {
                         p.records += 1;
-                        if r.kind == RecordKind::TxpoolAccepted {
-                            p.pending += 1;
-                            p.pending_to_venues += u64::from(
-                                r.payload
-                                    .get(33..)
-                                    .is_some_and(|raw| crate::ingress::venue_target(&four, raw)),
-                            );
-                            continue;
-                        }
-                        if r.kind != RecordKind::RawSignedTx {
-                            continue;
-                        }
                         // `source u8 | hash [32] | signed bytes`.
-                        match r
+                        let sighting =
+                            matches!(r.kind, RecordKind::TxpoolAccepted | RecordKind::RawSignedTx);
+                        if let Some(h) = r
                             .payload
-                            .get(33..)
-                            .and_then(|raw| launch_venue(&four, raw, max_calldata))
+                            .get(1..33)
+                            .filter(|_| sighting)
+                            .and_then(|h| <[u8; 32]>::try_from(h).ok())
                         {
-                            Some(Venue::Flap) => p.sightings[0] += 1,
-                            Some(Venue::Four) => p.sightings[1] += 1,
-                            Some(Venue::OpenFour) => p.sightings[2] += 1,
-                            None => p.undecodable += 1,
+                            sighted.insert(h);
+                        }
+                        let venue = || {
+                            r.payload
+                                .get(33..)
+                                .and_then(|raw| launch_venue(&four, raw, max_calldata))
+                        };
+                        match r.kind {
+                            RecordKind::TxpoolAccepted => {
+                                p.pending += 1;
+                                p.pending_to_venues +=
+                                    u64::from(r.payload.get(33..).is_some_and(|raw| {
+                                        crate::ingress::venue_target(&four, raw)
+                                    }));
+                                p.pending_as_launch += u64::from(venue().is_some());
+                            }
+                            RecordKind::RawSignedTx => match venue() {
+                                Some(Venue::Flap) => p.sightings[0] += 1,
+                                Some(Venue::Four) => p.sightings[1] += 1,
+                                Some(Venue::OpenFour) => p.sightings[2] += 1,
+                                None => p.undecodable += 1,
+                            },
+                            RecordKind::Canonical if r.payload.first() == Some(&b'C') => {
+                                if let Some(l) = launch_record(&r.payload, r.timestamp_ns) {
+                                    joined.push((l.tx_hash, l.class, l.c1_scope));
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     Ok(None) => break,
@@ -125,17 +237,16 @@ pub fn prove(
         }
         Err(e) => p.read_error = Some(e.to_string()),
     }
-    let (a, b) = (
-        census(journal_dir, max_payload, None)?,
-        census(journal_dir, max_payload, None)?,
-    );
-    p.census_deterministic = a == b;
-    p.census_state = a
-        .windows
+    // Class 1: the first full sighting came before the block time.
+    p.sightings_missing = joined
         .iter()
-        .find(|w| w.journal == run_id)
-        .map_or("ABSENT", |w| w.state)
-        .to_string();
+        .filter(|(tx, class, c1)| *class == 1 && (venues_or_all || *c1) && !sighted.contains(tx))
+        .count() as u64;
+    let alone = census_of_run(journal_dir, run_id, max_payload)?;
+    let all = census(journal_dir, max_payload, None)?;
+    let window = all.windows.iter().find(|w| w.journal == run_id);
+    p.census_deterministic = alone.windows.first() == window;
+    p.census_state = window.map_or("ABSENT", |w| w.state).to_string();
     if let Some(bytes) = status {
         let s = decode(&rs::SCHEMA, bytes).map_err(|e| format!("runtime status: {e}"))?;
         let of_this_run = s
@@ -147,6 +258,14 @@ pub fn prove(
                 .map_err(|e| format!("runtime status: {e}"))?;
             p.status_launches = Some(n);
             p.status_match = Some(n == p.sightings[0]);
+            let mismatches = match s.opt_nested(rs::CANONICAL).ok().flatten() {
+                Some(canonical) => counter_mismatches(&canonical, &alone),
+                // Without a follower nothing may be joined.
+                None if alone.flap_launches + alone.four_launches == 0 => Vec::new(),
+                None => vec!["launches joined without a follower in the status".into()],
+            };
+            p.status_counters_match = Some(mismatches.is_empty());
+            p.reasons.extend(mismatches);
         }
     }
     if manifest.is_some() && !p.manifest_match {
@@ -164,12 +283,25 @@ pub fn prove(
             .push(format!("census window state {}", p.census_state));
     }
     if !p.census_deterministic {
-        p.reasons.push("two replays gave different censuses".into());
+        p.reasons
+            .push("the run's census alone differs from its window among all journals".into());
     }
     if p.undecodable > 0 {
         p.reasons.push(format!(
-            "{} journaled sightings are no launch to the decoders",
+            "{} journaled launch sightings are no launch to the decoders",
             p.undecodable
+        ));
+    }
+    if p.pending_as_launch > 0 {
+        p.reasons.push(format!(
+            "{} pending sightings journaled as other are launches to the decoders",
+            p.pending_as_launch
+        ));
+    }
+    if p.sightings_missing > 0 {
+        p.reasons.push(format!(
+            "{} launches seen in full before their block have no journaled sighting",
+            p.sightings_missing
         ));
     }
     if p.status_match == Some(false) {
@@ -179,14 +311,40 @@ pub fn prove(
             p.sightings[0]
         ));
     }
+    if p.config_match == Some(false) {
+        p.reasons
+            .push("replayed with another configuration than the run's".into());
+    }
+    if p.build_match == Some(false) {
+        p.reasons
+            .push("replayed by another build than the run's".into());
+    }
     p.verdict = if !p.reasons.is_empty() {
         "FAIL"
-    } else if p.status_match.is_none() {
-        p.reasons
-            .push("no runtime status of this run: its launch counter is not compared".into());
-        "PARTIAL"
     } else {
-        "PASS"
+        for (known, what) in [
+            (
+                p.status_match,
+                "no runtime status of this run: its counters are not compared",
+            ),
+            (
+                p.config_match,
+                "the manifest or the replay names no configuration hash",
+            ),
+            (
+                p.build_match,
+                "the manifest or the replay names no build hash",
+            ),
+        ] {
+            if known.is_none() {
+                p.reasons.push(what.into());
+            }
+        }
+        if p.reasons.is_empty() {
+            "PASS"
+        } else {
+            "PARTIAL"
+        }
     };
     Ok(p)
 }
@@ -221,7 +379,7 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 impl Proof {
     pub fn encode(&self, observed_unix_ms: u64) -> Result<Vec<u8>, String> {
-        let mut d = Draft::new(&rp::SCHEMA);
+        let mut d = Draft::new(&rp::V3);
         d.set(rp::RUN_ID, self.run_id.as_str())
             .set(rp::CHAIN_ID, 56u64)
             .set(rp::PROVENANCE_TOOL, "bsc_runtime replay-proof")
@@ -235,12 +393,14 @@ impl Proof {
             .set(rp::UNDECODABLE_SIGHTINGS, self.undecodable)
             .set(rp::PENDING_SIGHTINGS, self.pending)
             .set(rp::PENDING_TO_VENUES, self.pending_to_venues)
+            .set(rp::PENDING_AS_LAUNCH, self.pending_as_launch)
+            .set(rp::SIGHTINGS_MISSING, self.sightings_missing)
             .set(rp::CENSUS_STATE, self.census_state.as_str())
             .set(rp::CENSUS_DETERMINISTIC, self.census_deterministic)
             .set(rp::VERDICT, self.verdict)
             .push(
                 rp::NON_CLAIMS,
-                "LOCAL_REPLAY: identity of this host's capture and its replay; no Phase-F quality verdict",
+                "LOCAL_REPLAY: identity of this host's capture and its replay; the Phase-F quality verdict is the capture-quality record",
             );
         if let Some(h) = self.manifest_sha256 {
             d.set(rp::MANIFEST_SHA256, Value::B256(h));
@@ -257,8 +417,15 @@ impl Proof {
         if let Some(v) = self.status_launches {
             d.set(rp::STATUS_LAUNCHES, v);
         }
-        if let Some(v) = self.status_match {
-            d.set(rp::STATUS_MATCH, v);
+        for (tag, v) in [
+            (rp::STATUS_MATCH, self.status_match),
+            (rp::STATUS_COUNTERS_MATCH, self.status_counters_match),
+            (rp::CONFIG_MATCH, self.config_match),
+            (rp::BUILD_MATCH, self.build_match),
+        ] {
+            if let Some(v) = v {
+                d.set(tag, v);
+            }
         }
         for r in &self.reasons {
             d.push(rp::REASONS, r.as_str());
@@ -351,6 +518,22 @@ mod tests {
         alloy_primitives::hex::decode(row[10]).unwrap()
     }
 
+    /// The configuration and build every test run is written and replayed
+    /// with.
+    const CONFIG: Option<[u8; 32]> = Some([0xC0; 32]);
+    const BUILD: Option<[u8; 32]> = Some([0xB0; 32]);
+
+    fn identity() -> crate::runtime_journal::RunIdentity {
+        crate::runtime_journal::RunIdentity {
+            host: "test".into(),
+            build: "test".into(),
+            config_sha256: CONFIG.unwrap(),
+            build_sha256: BUILD,
+            build_dirty: Some(false),
+            capture_pending: "VENUES",
+        }
+    }
+
     fn status(started: u64, launches: u64) -> Vec<u8> {
         let mut d = Draft::new(&rs::SCHEMA);
         d.set(rs::GENERATION, 1u64)
@@ -378,6 +561,7 @@ mod tests {
             ..JournalSetup::whole(64, MAX + 64)
         };
         let mut j = RuntimeJournal::open(dir, started, 1, setup).unwrap();
+        j.set_identity(identity());
         let mut at = 0;
         let mut put = |j: &mut RuntimeJournal, kind, payload: &[u8]| {
             at += 1;
@@ -416,17 +600,211 @@ mod tests {
         let base = std::env::temp_dir().join(format!("bsc-replay-proof-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         write(&base, 7, 0);
-        let p = prove(&base, "7", Some(&status(7, 2)), MAX + 64, MAX).unwrap();
+        let p = prove(
+            &base,
+            "7",
+            Some(&status(7, 2)),
+            MAX + 64,
+            MAX,
+            CONFIG,
+            BUILD,
+        )
+        .unwrap();
         assert_eq!(p.verdict, "PASS", "{}", p.summary());
         assert_eq!((p.sightings, p.undecodable), ([2, 0, 1], 0));
         assert_eq!((p.pending, p.pending_to_venues), (1, 1));
         assert!(p.segments > 1 && p.manifest_match && p.census_deterministic);
         assert_eq!(p.status_match, Some(true));
-        let r = decode(&rp::SCHEMA, &p.encode(1).unwrap()).unwrap();
+        let r = rp::decode_proof(&p.encode(1).unwrap()).unwrap();
         assert_eq!(r.text(rp::VERDICT).unwrap(), "PASS");
         // The status of another run is not compared: PARTIAL.
-        let other = prove(&base, "7", Some(&status(8, 2)), MAX + 64, MAX).unwrap();
+        let other = prove(
+            &base,
+            "7",
+            Some(&status(8, 2)),
+            MAX + 64,
+            MAX,
+            CONFIG,
+            BUILD,
+        )
+        .unwrap();
         assert_eq!((other.verdict, other.status_launches), ("PARTIAL", None));
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// The runtime's status of run `started` with a canonical block whose
+    /// required counters are zero but `flap_launches`.
+    fn status_with_canonical(started: u64, flap_launches: u64) -> Vec<u8> {
+        use darkbot_bsc_record::Kind;
+        use rs::canonical as k;
+        let mut c = Draft::new(&k::SCHEMA);
+        for f in k::SCHEMA
+            .fields
+            .iter()
+            .filter(|f| f.presence == darkbot_bsc_record::Presence::Required)
+        {
+            match f.kind {
+                Kind::U64 => c.set(f.tag, 0u64),
+                Kind::I64 => c.set(f.tag, 0i64),
+                Kind::Bool => c.set(f.tag, false),
+                Kind::Text => c.set(f.tag, "STOPPED"),
+                other => panic!("canonical field kind {other:?}"),
+            };
+        }
+        c.set(k::FLAP_LAUNCHES, flap_launches);
+        let mut d = Draft::new(&rs::SCHEMA);
+        d.set(rs::GENERATION, 1u64)
+            .set(rs::PROVENANCE_TOOL, "bsc_runtime")
+            .set(rs::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(rs::STARTED_UNIX_MS, started)
+            .set(rs::LAUNCHES, 2u64)
+            .set(rs::JOURNAL_PATH, "j")
+            .set(rs::JOURNAL_RECORDS, 0u64)
+            .set(rs::JOURNAL_LOST, 0u64)
+            .set(rs::MODE, "READ_ONLY")
+            .set(rs::STATUS_INTERVAL_MS, 1000u64)
+            .set(rs::CANONICAL, c.into_nested());
+        d.encode().unwrap()
+    }
+
+    /// Phase F gate H2/M5: the replay holds the runtime's decisions. Each
+    /// of these fails (before: PASS): another configuration or build, a
+    /// launch journaled as other pending, a launch seen in full before its
+    /// block without its sighting, a canonical counter the replay does not
+    /// reproduce.
+    #[test]
+    fn the_replay_holds_the_runtime_decisions() {
+        let base = std::env::temp_dir().join(format!("bsc-replay-proof-h-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let (a, b, c) = (base.join("a"), base.join("b"), base.join("c"));
+        write(&a, 7, 0);
+        let fail = |p: &Proof, why: &str| {
+            assert_eq!(p.verdict, "FAIL", "{}", p.summary());
+            assert!(p.reasons.iter().any(|r| r.contains(why)), "{}", p.summary());
+        };
+        let p = prove(
+            &a,
+            "7",
+            Some(&status(7, 2)),
+            MAX + 64,
+            MAX,
+            Some([1; 32]),
+            BUILD,
+        )
+        .unwrap();
+        fail(&p, "another configuration");
+        let p = prove(
+            &a,
+            "7",
+            Some(&status(7, 2)),
+            MAX + 64,
+            MAX,
+            CONFIG,
+            Some([1; 32]),
+        )
+        .unwrap();
+        fail(&p, "another build");
+        // The canonical counters of the runtime against the replayed census.
+        let p = prove(
+            &a,
+            "7",
+            Some(&status_with_canonical(7, 0)),
+            MAX + 64,
+            MAX,
+            CONFIG,
+            BUILD,
+        )
+        .unwrap();
+        assert_eq!(
+            (p.verdict, p.status_counters_match),
+            ("PASS", Some(true)),
+            "{}",
+            p.summary()
+        );
+        let p = prove(
+            &a,
+            "7",
+            Some(&status_with_canonical(7, 5)),
+            MAX + 64,
+            MAX,
+            CONFIG,
+            BUILD,
+        )
+        .unwrap();
+        fail(&p, "runtime flap_launches 5 != replayed 0");
+        // A Flap launch's signed bytes journaled as other pending.
+        {
+            let setup = JournalSetup::whole(64, MAX + 64);
+            let mut j = RuntimeJournal::open(&b, 7, 1, setup).unwrap();
+            j.set_identity(identity());
+            j.record(
+                RecordKind::Canonical,
+                1,
+                &window_payload(b'H', 10, &[10; 32]),
+            );
+            j.record(
+                RecordKind::TxpoolAccepted,
+                2,
+                &first_sighting_payload(SourceId::Drpc, &[1; 32], &flap_launch()),
+            );
+            j.record(
+                RecordKind::Canonical,
+                3,
+                &window_payload(b'E', 11, &[11; 32]),
+            );
+            j.record(RecordKind::Runtime, 4, &EXIT_PAYLOAD);
+            j.finish().unwrap();
+        }
+        let p = prove(&b, "7", Some(&status(7, 0)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
+        fail(&p, "journaled as other are launches");
+        // A launch joined as seen in full before its block, its sighting not
+        // in the journal.
+        {
+            use crate::canonical_join::{FourToken, Joined, LaunchRef, LaunchTx, Visibility};
+            let launch = LaunchRef {
+                venue: Venue::Flap,
+                block_number: 10,
+                block_hash: [10; 32],
+                tx_index: 0,
+                tx_hash: [0x55; 32],
+                token: Some([4; 20]),
+                external_buys: Some(0),
+                c1_scope: true,
+                four_token: FourToken::NotApplicable,
+                tx: LaunchTx::Verified,
+                block_ms: 1_000,
+                block_seen_ns: 3,
+                block_seen_unix_ms: Some(1_100),
+            };
+            let setup = JournalSetup::whole(64, MAX + 64);
+            let mut j = RuntimeJournal::open(&c, 7, 1, setup).unwrap();
+            j.set_identity(identity());
+            j.record(
+                RecordKind::Canonical,
+                1,
+                &window_payload(b'H', 10, &[10; 32]),
+            );
+            j.record(
+                RecordKind::Canonical,
+                3,
+                &crate::runtime_journal::canonical_launch_payload(&Joined {
+                    launch,
+                    visibility: Visibility::FullBefore {
+                        source: SourceId::Drpc,
+                        lead_us: 9,
+                    },
+                }),
+            );
+            j.record(
+                RecordKind::Canonical,
+                4,
+                &window_payload(b'E', 11, &[11; 32]),
+            );
+            j.record(RecordKind::Runtime, 5, &EXIT_PAYLOAD);
+            j.finish().unwrap();
+        }
+        let p = prove(&c, "7", Some(&status(7, 0)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
+        fail(&p, "have no journaled sighting");
         fs::remove_dir_all(&base).unwrap();
     }
 
@@ -439,14 +817,14 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         let (a, b, c) = (base.join("a"), base.join("b"), base.join("c"));
         write(&a, 7, 0);
-        let p = prove(&a, "7", Some(&status(7, 3)), MAX + 64, MAX).unwrap();
+        let p = prove(&a, "7", Some(&status(7, 3)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
         assert_eq!(p.verdict, "FAIL");
         assert!(p.reasons[0].contains("counter 3 != replayed Flap sightings 2"));
 
         write(&c, 7, 100);
         let seg = |d: &Path| d.join("7").join("segment_000001.dbjnl");
         fs::copy(seg(&c), seg(&a)).unwrap();
-        let p = prove(&a, "7", Some(&status(7, 2)), MAX + 64, MAX).unwrap();
+        let p = prove(&a, "7", Some(&status(7, 2)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
         assert_eq!((p.verdict, p.manifest_match), ("FAIL", false));
         assert_eq!(p.read_error, None);
         assert_eq!(
@@ -459,7 +837,7 @@ mod tests {
 
         write(&b, 7, 0);
         fs::remove_file(b.join("7").join(RUN_MANIFEST)).unwrap();
-        let p = prove(&b, "7", Some(&status(7, 2)), MAX + 64, MAX).unwrap();
+        let p = prove(&b, "7", Some(&status(7, 2)), MAX + 64, MAX, CONFIG, BUILD).unwrap();
         assert_eq!(p.verdict, "FAIL");
         assert!(p.reasons.iter().any(|r| r.contains("not sealed")));
         fs::remove_dir_all(&base).unwrap();

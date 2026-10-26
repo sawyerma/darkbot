@@ -378,8 +378,31 @@ pub struct CaptureRun {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunIdentity {
     pub host: String,
+    /// Crate version and the checkout's commit (`checkout <sha>[+dirty]`).
     pub build: String,
     pub config_sha256: [u8; 32],
+    /// SHA-256 of the running binary itself, if it could be read.
+    pub build_sha256: Option<[u8; 32]>,
+    /// Whether the checkout had uncommitted engine changes, if known.
+    pub build_dirty: Option<bool>,
+    /// The pending capture scope.
+    pub capture_pending: &'static str,
+}
+
+impl CaptureScope {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Launches => "LAUNCHES",
+            Self::Venues => "VENUES",
+            Self::All => "ALL",
+        }
+    }
+}
+
+/// SHA-256 of the running binary (`std::env::current_exe`).
+pub fn own_binary_sha256() -> Option<[u8; 32]> {
+    let exe = std::env::current_exe().ok()?;
+    Some(darkbot_bsc_record::sha256(&fs::read(exe).ok()?))
 }
 
 /// The capture's storage health of this moment (runtime status).
@@ -576,7 +599,14 @@ impl RuntimeJournal {
         if let Some(id) = &self.identity {
             d.set(cr::HOST, id.host.as_str())
                 .set(cr::BUILD, id.build.as_str())
-                .set(cr::CONFIG_SHA256, Value::B256(id.config_sha256));
+                .set(cr::CONFIG_SHA256, Value::B256(id.config_sha256))
+                .set(cr::CAPTURE_PENDING, id.capture_pending);
+            if let Some(h) = id.build_sha256 {
+                d.set(cr::BUILD_SHA256, Value::B256(h));
+            }
+            if let Some(dirty) = id.build_dirty {
+                d.set(cr::BUILD_DIRTY, dirty);
+            }
         }
         if let Some(last) = sealed.iter().rev().find_map(|s| s.manifest.last_sequence) {
             d.set(cr::LAST_SEQUENCE, last);
@@ -704,6 +734,9 @@ mod tests {
             host: "test-host".into(),
             build: "test-build".into(),
             config_sha256: [3; 32],
+            build_sha256: Some([4; 32]),
+            build_dirty: Some(false),
+            capture_pending: "VENUES",
         });
         let h = [5u8; 32];
         assert!(j.record(

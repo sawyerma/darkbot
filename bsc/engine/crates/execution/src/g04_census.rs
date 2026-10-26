@@ -135,15 +135,15 @@ pub struct Census {
 
 /// One canonical launch record (`b'C'`); class 0 marks an orphaned one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct LaunchRecord {
+pub(crate) struct LaunchRecord {
     flap: bool,
     block_hash: [u8; 32],
-    tx_hash: [u8; 32],
+    pub(crate) tx_hash: [u8; 32],
     external_buys: Option<u32>,
-    class: u8,
+    pub(crate) class: u8,
     source: Option<usize>,
     delta_us: u64,
-    c1_scope: bool,
+    pub(crate) c1_scope: bool,
     tx_unverifiable: bool,
     tx_answer_refused: bool,
     fetch_lag_ms: Option<i64>,
@@ -168,7 +168,7 @@ fn flag(byte: u8) -> Option<bool> {
     }
 }
 
-fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
+pub(crate) fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
     if !(p.len() == CANONICAL_LAUNCH_LEN || p.len() == CANONICAL_LAUNCH_LEN_V1) || p[0] != b'C' {
         return None;
     }
@@ -527,6 +527,26 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
         names.push((started, name));
     }
     names.sort();
+    census_of(dir, names, max_payload, active)
+}
+
+/// The census of one journal of `dir` alone (a run directory or a file of
+/// an older build, by its name): what the replay proof compares with the
+/// runtime's own counters of that run.
+pub fn census_of_run(dir: &Path, name: &str, max_payload: usize) -> Result<Census, String> {
+    let started: u64 = name
+        .trim_end_matches(".dbjnl")
+        .parse()
+        .map_err(|_| format!("{name}: not a <started_unix_ms> journal"))?;
+    census_of(dir, vec![(started, name.to_string())], max_payload, None)
+}
+
+fn census_of(
+    dir: &Path,
+    names: Vec<(u64, String)>,
+    max_payload: usize,
+    active: Option<&Path>,
+) -> Result<Census, String> {
     let mut out = Census::default();
     let mut leads: Vec<u64> = Vec::new();
     let mut later: Vec<u64> = Vec::new();
