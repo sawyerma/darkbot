@@ -14,6 +14,7 @@ import { CapturePanel } from "./pages/CapturePanel";
 import { AnalyticsPanel } from "./pages/AnalyticsPanel";
 import { WalletsPanel } from "./pages/WalletsPanel";
 import { NonLandingSection } from "./components/NonLandingSection";
+import { HoldsSection } from "./components/HoldsSection";
 import "./styles/graphite.css";
 import "./styles/status.css";
 
@@ -70,7 +71,7 @@ export default function Project0Page() {
     {tab === "liquidator" ? <LiquidatorPanel fleet={fleet} authorization={authorization} goto={setTab} owner={liquidator.value} ownerStatus={liquidator.topicStatus} finance={liveFinance} system={system.value}/> : null}
     {tab === "capture" ? <CapturePanel capture={capture.value} topicStatus={capture.topicStatus} analytics={analytics.value} analyticsStatus={analytics.topicStatus} owner={liquidator.value} ownerStatus={liquidator.topicStatus}/> : null}
     {tab === "analytics" ? <AnalyticsPanel analytics={analytics.value} topicStatus={analytics.topicStatus} createDraft={fleet.create} goto={setTab}/> : null}
-    {tab === "wallets" ? <><WalletsPanel finance={liveFinance}/><NonLandingSection wallets={wallets.value} topicStatus={wallets.topicStatus}/></> : null}
+    {tab === "wallets" ? <><WalletsPanel finance={liveFinance}/><NonLandingSection wallets={wallets.value} topicStatus={wallets.topicStatus}/><HoldsSection wallets={wallets.value} topicStatus={wallets.topicStatus}/></> : null}
     <footer className="p0-footer">Graphite V0 · Read-only status via gateway · No live submissions or transfers</footer>
   </div></div>;
 }

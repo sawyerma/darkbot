@@ -180,6 +180,37 @@ export function toWalletsView(m: WalletsState): WalletsView {
         reads: m.nonLanding.reads,
       }
       : null,
+    holdB: m.holdB
+      ? {
+        requested: m.holdB.requested,
+        effective: m.holdB.effective,
+        blockReason: m.holdB.blockReason,
+        n: optional(m.holdB.n),
+        evidenceExact: m.holdB.evidenceExact,
+        evidenceUnderestimated: m.holdB.evidenceUnderestimated,
+        evidenceUnqualified: m.holdB.evidenceUnqualified,
+        inventoryReservedUsdMicro: m.holdB.inventoryReservedUsdMicro,
+        capitalInUseUsdMicro: m.holdB.capitalInUseUsdMicro,
+        attempt: m.holdB.attempt
+          ? {
+            mode: m.holdB.attempt.mode,
+            aWallet: amounts(m.holdB.attempt.aWallet),
+            aInventoryUsdMicro: m.holdB.attempt.aInventoryUsdMicro,
+            bClass: m.holdB.attempt.bClass,
+            bReason: m.holdB.attempt.bReason,
+            bKind: m.holdB.attempt.bKind,
+            bInventoryUsdMicro: optional(m.holdB.attempt.bInventoryUsdMicro),
+            flows: m.holdB.attempt.flows.map((f) => ({
+              asset: f.asset,
+              reserve: f.reserve,
+              residualMax: f.residualMax,
+              actual: optional(f.actual),
+              underestimated: f.underestimated,
+            })),
+          }
+          : null,
+      }
+      : null,
   };
 }
 

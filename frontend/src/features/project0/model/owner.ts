@@ -164,6 +164,33 @@ export interface WalletsView {
   heldAttempt: string;
   /** DEC-03: null without a held FE-04 journal (no attempt, nothing to classify). */
   nonLanding: NonLandingView | null;
+  /** DEC-04: null without an owner projection of the B hold mode. */
+  holdB: HoldBView | null;
+}
+
+/** DEC-04 (V7): the B hold mode, its evidence, Safety's reserved inventory and capital, and the
+ * held attempt's A, B and finalized flows. */
+export interface HoldBView {
+  requested: string;
+  effective: string;
+  blockReason: string;
+  /** The user's N (B-8); null while undecided. */
+  n: bigint | null;
+  evidenceExact: bigint;
+  evidenceUnderestimated: bigint;
+  evidenceUnqualified: bigint;
+  inventoryReservedUsdMicro: bigint;
+  capitalInUseUsdMicro: bigint;
+  attempt: {
+    mode: string;
+    aWallet: ReadonlyArray<{ asset: string; units: bigint }>;
+    aInventoryUsdMicro: bigint;
+    bClass: string;
+    bReason: string;
+    bKind: string;
+    bInventoryUsdMicro: bigint | null;
+    flows: ReadonlyArray<{ asset: string; reserve: bigint; residualMax: bigint; actual: bigint | null; underestimated: boolean }>;
+  } | null;
 }
 
 /** DEC-03 (N-2): the non-landing status of the held FE-04 attempt or its latest exit. */

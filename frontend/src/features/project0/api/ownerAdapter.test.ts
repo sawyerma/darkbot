@@ -83,6 +83,17 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
       bytes: 1_234_567n,
       reads: 3n,
     });
+    // DEC-04: the B hold mode and the held attempt's A, B and finalized flows.
+    expect(wallets.holdB).toBeNull();
+    expect(held.holdB).toMatchObject({
+      requested: "ACTIVE", effective: "OBSERVE", n: null, evidenceExact: 1n,
+      inventoryReservedUsdMicro: 1_100n, capitalInUseUsdMicro: 5_000n,
+      attempt: {
+        mode: "OBSERVE", aWallet: [{ asset: "SOL", units: 20n }], aInventoryUsdMicro: 1_100n,
+        bClass: "EXACT", bKind: "PLAIN", bInventoryUsdMicro: 100n,
+        flows: [{ asset: "SOL", reserve: 20n, residualMax: 0n, actual: -21n, underestimated: true }],
+      },
+    });
     expect(unusableByReason([
       { operator: "a", class: "UNUSABLE_RATE_LIMITED" }, { operator: "b", class: "USABLE" },
       { operator: "c", class: "UNUSABLE_PRUNED" }, { operator: "d", class: "UNUSABLE_RATE_LIMITED" },

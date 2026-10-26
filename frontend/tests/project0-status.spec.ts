@@ -126,6 +126,14 @@ test("DEC-03: Wallets shows the N-2 non-landing status beside the frozen panel, 
   }
   await expect(section.getByRole("button")).toHaveCount(0);
   await expect(section.locator("input, select")).toHaveCount(0);
+  // DEC-04: the holds beside it — the mode, the attempt's A and B, the underestimation; no switch.
+  const holds = page.locator(".p0-section", { has: page.getByRole("heading", { name: "Holds · A / B" }) });
+  await expect(page.getByTestId("p0-hold-mode")).toHaveText("ACTIVE / OBSERVE");
+  for (const text of ["B-8: N not decided", "undecided · 1 / 0 / 0", "A inventory 0.001100 USD · B 0.000100 USD (PLAIN)", "reserve 20 · keeps ≤ 0 · finalized -21 · UNDERESTIMATED"]) {
+    await expect(holds).toContainText(text);
+  }
+  await expect(page.getByTestId("p0-hold-underestimated")).toBeVisible();
+  await expect(holds.locator("button, input, select")).toHaveCount(0);
   // The frozen panel keeps its rows.
   await expect(page.getByText("Total capital", { exact: true })).toBeVisible();
 });
@@ -324,6 +332,17 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   const c = fromBinary(CapabilityControlCommandSchema, capability.params);
   expect([c.capability, c.requested]).toEqual(["LIVE", "OFF"]);
   expect(capability.expected?.version).toEqual({ case: "configVersion", value: 1n });
+  // DEC-04: the B hold mode is requested through the same controller; the row shows ACTIVE
+  // requested and OBSERVE effective while N (B-8) is undecided.
+  await expect(page.locator(".p0-line", { hasText: /^HOLD_B/ }).first()).toContainText("OBSERVE (requested ACTIVE) · B-8: N not decided");
+  await page.getByRole("combobox", { name: "B hold mode" }).selectOption("ACTIVE");
+  await page.getByRole("button", { name: "Request hold mode" }).click();
+  await expect.poll(() => sent.length).toBe(2);
+  const hold = sent.at(-1)!;
+  expect(hold.action).toBe("project0.capability.set");
+  const hb = fromBinary(CapabilityControlCommandSchema, hold.params);
+  expect([hb.capability, hb.requested]).toEqual(["HOLD_B", "ACTIVE"]);
+  expect(hold.expected?.version).toEqual({ case: "configVersion", value: 1n });
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();
@@ -349,6 +368,6 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   expect([s.unit, s.mode]).toEqual(["geyser:publicnode", "off"]);
   // CTRL-03: the change states the configuration version the Liquidator projection showed.
   expect(source.expected?.version).toEqual({ case: "configVersion", value: 3n });
-  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
+  expect(sent.map((r) => r.action)).toEqual(["project0.capability.set", "project0.capability.set", "project0.analytics.backtest.start", "project0.source.set"]);
   expect(errors).toEqual([]);
 });

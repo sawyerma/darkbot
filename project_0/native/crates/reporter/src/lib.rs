@@ -1446,12 +1446,21 @@ mod contract_tests {
                 day_attempts: 0,
             },
             // DEC-13: LIVE requested by the operator, still not effective without FE-06.
-            capabilities: vec![OwnerCapability {
-                name: "LIVE",
-                requested: "LIVE",
-                effective: "BLOCKED",
-                block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)",
-            }],
+            capabilities: vec![
+                OwnerCapability {
+                    name: "LIVE",
+                    requested: "LIVE",
+                    effective: "BLOCKED",
+                    block_reason: "FE-06/P8-LT: LIVE is not authorized (B10)",
+                },
+                // DEC-04: ACTIVE requested, OBSERVE effective while N (B-8) is undecided.
+                OwnerCapability {
+                    name: "HOLD_B",
+                    requested: "ACTIVE",
+                    effective: "OBSERVE",
+                    block_reason: "B-8: N not decided (hold_b_min_attempts unset)",
+                },
+            ],
             wallets: OwnerWallets {
                 finance_snapshot_id: "golden-run-3".into(),
                 journal_read: true,

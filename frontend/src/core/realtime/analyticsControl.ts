@@ -99,10 +99,13 @@ export function sourceCommand(unit: string, mode: "off" | "observe" | "active"):
   return { params: toBinary(SourceControlCommandSchema, message(SourceControlCommandSchema, { unit, mode })) };
 }
 
-/** DEC-13: the operands of `p0ctl capability set LIVE OFF|LIVE`; the owner decides what is
- * effective (LIVE stays BLOCKED until a separate FE-06 authorization). */
-export function capabilityCommand(requested: "OFF" | "LIVE"): { params: Uint8Array } {
-  return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability: "LIVE", requested })) };
+/** DEC-13/DEC-04: the operands of `p0ctl capability set LIVE OFF|LIVE` or `… HOLD_B
+ * OFF|OBSERVE|ACTIVE`; the owner decides what is effective (LIVE stays BLOCKED until a separate
+ * FE-06 authorization, HOLD_B ACTIVE needs the user's N and the evidence). */
+export function capabilityCommand(capability: "LIVE", requested: "OFF" | "LIVE"): { params: Uint8Array };
+export function capabilityCommand(capability: "HOLD_B", requested: "OFF" | "OBSERVE" | "ACTIVE"): { params: Uint8Array };
+export function capabilityCommand(capability: string, requested: string): { params: Uint8Array } {
+  return { params: toBinary(CapabilityControlCommandSchema, message(CapabilityControlCommandSchema, { capability, requested })) };
 }
 
 async function csrf(): Promise<string> {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { TopicStatus } from "@/core/realtime";
 import type { LiquidatorView } from "../model/owner";
 import type { SystemView } from "../model/status";
@@ -86,8 +87,39 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
     <LiveRequest owner={owner} live={live}/>
+    <HoldModeRequest owner={owner} live={live}/>
     {params}
   </Section>;
+}
+
+type HoldMode = "OFF" | "OBSERVE" | "ACTIVE";
+
+/**
+ * DEC-04 (N-5): the B hold mode through the same controller (`p0ctl capability set HOLD_B …`,
+ * CAS on the capability configuration version). ACTIVE is only requested here: the owner makes it
+ * effective with the user's N (B-8) and N finalized attempts without an underestimation, else it
+ * stays OBSERVE with the reason shown in the capability row.
+ */
+function HoldModeRequest({ owner, live }: { owner: LiquidatorView; live: boolean }) {
+  const { busy } = useAnalyticsControl();
+  const row = owner.capabilities.find((c) => c.name === "HOLD_B") ?? null;
+  const [mode, setMode] = useState<HoldMode>("OBSERVE");
+  const version = owner.capabilityConfigVersion;
+  const blocked = busy ? "Command in progress" : !live ? "Runtime owner not current"
+    : version == null ? "Capability configuration version unknown (no capability control in this runtime)" : "";
+  if (!row) return null;
+  return <>
+    <div className="p0-formgrid">
+      <label>B hold mode<select value={mode} onChange={(e) => setMode(e.target.value as HoldMode)}>
+        <option value="OFF">Off</option><option value="OBSERVE">Observe</option><option value="ACTIVE">Active (needs N and the evidence)</option></select></label>
+    </div>
+    <div className="p0-actions">
+      <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
+        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand("HOLD_B", mode).params, configVersion: version ?? undefined })}>
+        Request hold mode
+      </button>
+    </div>
+  </>;
 }
 
 /**
@@ -108,7 +140,7 @@ function LiveRequest({ owner, live }: { owner: LiquidatorView; live: boolean }) 
     {d ? <DetailRow title={`Capability decision · #${d.seq}`} value={`${d.applied ? "APPLIED" : "REFUSED"} · ${d.request} · ${d.detail}`}/> : null}
     <div className="p0-actions">
       <button className="p0-secondary" disabled={blocked !== ""} title={blocked || undefined}
-        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand(next).params, configVersion: version ?? undefined })}>
+        onClick={() => void analyticsCommand("project0.capability.set", { params: capabilityCommand("LIVE", next).params, configVersion: version ?? undefined })}>
         {next === "LIVE" ? "Request LIVE (stays BLOCKED until FE-06)" : "Withdraw LIVE request"}
       </button>
     </div>
