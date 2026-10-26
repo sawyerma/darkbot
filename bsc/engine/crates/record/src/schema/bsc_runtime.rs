@@ -36,6 +36,30 @@ pub mod source_modes {
         };
     }
 
+    /// One switchable runtime component of a generation (C2 state, ...):
+    /// requested and effective mode like a source.
+    pub mod component {
+        use super::*;
+
+        /// `BSC_STATE_C2`, ...
+        pub const COMPONENT_ID: u16 = 1;
+        pub const REQUESTED: u16 = 2;
+        pub const EFFECTIVE: u16 = 3;
+        pub const BLOCK_REASON: u16 = 4;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.component-mode",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(COMPONENT_ID, "component_id", Text),
+                Field::req(REQUESTED, "requested", Text),
+                Field::req(EFFECTIVE, "effective", Text),
+                Field::opt(BLOCK_REASON, "block_reason", Text),
+            ],
+        };
+    }
+
     /// Strictly increasing; the CAS every change states.
     pub const GENERATION: u16 = 1;
     pub const SOURCES: u16 = 2;
@@ -43,8 +67,36 @@ pub mod source_modes {
     pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
     /// The request this generation applied (none for the initial one).
     pub const REQUEST_ID: u16 = 5;
+    /// The switchable components; a generation written before a component
+    /// existed has it OFF (the initial state, nothing ever requested).
+    pub const COMPONENTS: u16 = 6;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.source-modes.v1",
+        record_type: 38,
+        schema_version: 2,
+        fields: &[
+            Field::req(GENERATION, "generation", U64),
+            Field::nested(SOURCES, "sources", Presence::Repeated, &entry::SCHEMA),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::nested(
+                COMPONENTS,
+                "components",
+                Presence::Repeated,
+                &component::SCHEMA,
+            ),
+        ],
+    };
+
+    /// Generations written before components existed (read only; their
+    /// components are OFF).
+    pub const SCHEMA_V1: Schema = Schema {
         name: "darkbot.bsc.source-modes.v1",
         record_type: 38,
         schema_version: 1,
@@ -67,6 +119,7 @@ pub mod source_mode_receipt {
     use super::*;
 
     pub const REQUEST_ID: u16 = 1;
+    /// The source or component the request was for.
     pub const SOURCE_ID: u16 = 2;
     pub const REQUESTED: u16 = 3;
     pub const EXPECTED_GENERATION: u16 = 4;
@@ -293,6 +346,7 @@ pub mod runtime_status {
 
 pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA,
+    &source_modes::SCHEMA_V1,
     &source_mode_receipt::SCHEMA,
     &runtime_status::SCHEMA,
 ];

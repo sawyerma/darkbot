@@ -2404,7 +2404,7 @@
     },
     {
       "source_path": "gateway/src/control.rs",
-      "source_sha": "5cb6bd291467637c1d47fc937b291f08b981dbc1ed1b615381db9c42c31ed1a0",
+      "source_sha": "d66a5729017b92ea09a1b10c29dfc766113c7c02ea91aa414942b7b1c4c7ac71",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     }
@@ -3795,6 +3795,18 @@
       "wire": "none",
       "topic": "none",
       "reason": "C1.10 freeze inputs/record (copy in bsc/native/evidence/c1/c1-10-freeze-*); verified by c1_freeze --verify at their darkbot_commit, not a GUI state"
+    },
+    {
+      "schemas": [
+        "darkbot.bsc.source-modes.v1"
+      ],
+      "match": "prefix:components[].",
+      "panel": "monitoring",
+      "section": 6,
+      "status": "IST_CONNECTED",
+      "wire": "NativeRecord · bsc.monitoring.state",
+      "topic": "bsc.monitoring.state",
+      "reason": "switchable runtime components of the same native owner (C2 state): requested/effective, LIVE BLOCKED until G0.8 PASS and evaluated G0.4"
     }
   ]
 }

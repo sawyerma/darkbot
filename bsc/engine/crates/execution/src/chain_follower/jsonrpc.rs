@@ -9,7 +9,7 @@
 use serde_json::{Map, Value};
 
 use super::{Call, Field, RequestError};
-use crate::wss::{BSC_MAINNET_CHAIN_ID, RateLimitSignal, VerifiedTx, verify_tx_map};
+use crate::wss::{ParsedTx, RateLimitSignal, RejectReason, parse_tx_map};
 
 /// The JSON-RPC error codes that mean rate limiting: EIP-1474 "limit
 /// exceeded" and the HTTP status some providers reuse (the codes of the
@@ -34,12 +34,31 @@ pub(super) struct Header {
     pub(super) block_ms: u64,
 }
 
-/// `eth_getBlockByNumber(n, false)`: the header and the block's
-/// transaction hashes in order.
+/// `eth_getBlockByNumber(n, true)`: the header and the block's
+/// transactions in order (the index is the position).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct BlockHead {
     pub(super) header: Header,
-    pub(super) transactions: Vec<[u8; 32]>,
+    pub(super) txs: Vec<BlockTx>,
+}
+
+/// One transaction of a block, as its object states it (bound to the
+/// block's hash, number and its position).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BlockTx {
+    pub(super) hash: [u8; 32],
+    pub(super) from: [u8; 20],
+    pub(super) nonce: u64,
+}
+
+/// A block with each transaction object also converted into the WSS
+/// verifier's typed fields (verified only where needed: the launches).
+#[derive(Debug)]
+pub(super) struct FullBlock {
+    pub(super) head: BlockHead,
+    /// Per transaction, in order: its typed fields, or why the WSS source
+    /// cannot rebuild it.
+    pub(super) objects: Vec<Result<ParsedTx, RejectReason>>,
 }
 
 /// One receipt of `eth_getBlockReceipts`.
@@ -47,6 +66,7 @@ pub(super) struct BlockHead {
 pub(super) struct Receipt {
     pub(super) tx_hash: [u8; 32],
     pub(super) tx_index: u64,
+    pub(super) from: [u8; 20],
     pub(super) block_hash: [u8; 32],
     pub(super) block_number: u64,
     /// `status` is `0x1`.
@@ -63,34 +83,18 @@ pub(super) struct Log {
     pub(super) log_index: u64,
 }
 
-/// Where a launch transaction must be: its receipt's hash, block and
-/// index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TxPlace {
-    pub(super) hash: [u8; 32],
-    pub(super) block_hash: [u8; 32],
-    pub(super) block_number: u64,
-    pub(super) tx_index: u64,
-}
-
 /// The request body of `call` with `id`.
 pub(super) fn request(id: u64, call: Call) -> String {
     match call {
         Call::BlockNumber => {
             format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_blockNumber","params":[]}}"#)
         }
-        Call::Header(n) => format!(
-            r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockByNumber","params":["0x{n:x}",false]}}"#
+        Call::Block(n) => format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockByNumber","params":["0x{n:x}",true]}}"#
         ),
         Call::Receipts(n) => format!(
             r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getBlockReceipts","params":["0x{n:x}"]}}"#
         ),
-        Call::Transaction(hash) => {
-            let hash = alloy_primitives::hex::encode_prefixed(hash);
-            format!(
-                r#"{{"jsonrpc":"2.0","id":{id},"method":"eth_getTransactionByHash","params":["{hash}"]}}"#
-            )
-        }
     }
 }
 
@@ -102,12 +106,14 @@ pub(super) fn parse_block_number(body: &[u8], id: u64) -> Result<u64, RequestErr
     }
 }
 
-/// The answer to `eth_getBlockByNumber(number, false)`; `None` for `null`.
-pub(super) fn parse_header(
+/// The answer to `eth_getBlockByNumber(number, true)`; `None` for `null`.
+/// Every transaction must be a full object bound to this block at its
+/// position.
+pub(super) fn parse_block(
     body: &[u8],
     id: u64,
     number: u64,
-) -> Result<Option<BlockHead>, RequestError> {
+) -> Result<Option<FullBlock>, RequestError> {
     let block = match envelope(body, id)? {
         Value::Null => return Ok(None),
         Value::Object(block) => block,
@@ -129,17 +135,32 @@ pub(super) fn parse_header(
     if header.number != number {
         return Err(RequestError::Shape(Field::Number));
     }
-    let Some(Value::Array(txs)) = block.get("transactions") else {
+    let Some(Value::Array(entries)) = block.get("transactions") else {
         return Err(RequestError::Shape(Field::Transactions));
     };
-    let transactions = txs
-        .iter()
-        .map(|tx| tx.as_str().and_then(data_fixed::<32>))
-        .collect::<Option<Vec<_>>>()
-        .ok_or(RequestError::Shape(Field::Transactions))?;
-    Ok(Some(BlockHead {
-        header,
-        transactions,
+    let mut txs = Vec::with_capacity(entries.len());
+    let mut objects = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        // The hash-only form (`false`) is refused here.
+        let Value::Object(tx) = entry else {
+            return Err(RequestError::Shape(Field::Transactions));
+        };
+        let bound = quantity(tx, "transactionIndex", Field::TxIndex)? == index as u64
+            && fixed::<32>(tx, "blockHash", Field::BlockHash)? == header.hash
+            && quantity(tx, "blockNumber", Field::BlockNumber)? == header.number;
+        if !bound {
+            return Err(RequestError::Shape(Field::TxBinding));
+        }
+        txs.push(BlockTx {
+            hash: fixed(tx, "hash", Field::TxHash)?,
+            from: fixed(tx, "from", Field::From)?,
+            nonce: quantity(tx, "nonce", Field::Nonce)?,
+        });
+        objects.push(parse_tx_map(tx));
+    }
+    Ok(Some(FullBlock {
+        head: BlockHead { header, txs },
+        objects,
     }))
 }
 
@@ -154,42 +175,6 @@ fn mix_hash_ms(mix_hash: [u8; 32]) -> Option<u64> {
     }
     let ms = u64::from(u16::from_be_bytes([low[0], low[1]]));
     (ms < MS_PER_S).then_some(ms)
-}
-
-/// The answer to `eth_getTransactionByHash` for the launch at `place`:
-/// bound to its receipt (hash, block hash and number, index) and verified
-/// by the WSS source's verifier for BSC Mainnet. `None` for `null`.
-pub(super) fn parse_transaction(
-    body: &[u8],
-    id: u64,
-    place: &TxPlace,
-) -> Result<Option<VerifiedTx>, RequestError> {
-    let tx = match envelope(body, id)? {
-        Value::Null => return Ok(None),
-        Value::Object(tx) => tx,
-        _ => return Err(RequestError::Shape(Field::Result)),
-    };
-    // A backend that has not seen the block yet answers the transaction as
-    // pending (`blockHash` null): not there yet, retried like `null`.
-    if tx.get("blockHash") == Some(&Value::Null) {
-        return Ok(None);
-    }
-    let found = TxPlace {
-        hash: fixed(&tx, "hash", Field::TxBinding)?,
-        block_hash: fixed(&tx, "blockHash", Field::TxBinding)?,
-        block_number: quantity(&tx, "blockNumber", Field::TxBinding)?,
-        tx_index: quantity(&tx, "transactionIndex", Field::TxBinding)?,
-    };
-    if found != *place {
-        return Err(RequestError::Shape(Field::TxBinding));
-    }
-    let verified = verify_tx_map(&tx, BSC_MAINNET_CHAIN_ID).map_err(RequestError::Unverifiable)?;
-    // The verifier proved Keccak-256 of the signed bytes is the object's
-    // hash, which is the receipt's.
-    if verified.hash != place.hash {
-        return Err(RequestError::Shape(Field::TxBinding));
-    }
-    Ok(Some(verified))
 }
 
 /// The answer to `eth_getBlockReceipts`; `None` for `null`.
@@ -212,6 +197,7 @@ pub(super) fn parse_receipts(body: &[u8], id: u64) -> Result<Option<Vec<Receipt>
 fn receipt(r: &Map<String, Value>) -> Result<Receipt, RequestError> {
     let tx_hash = fixed(r, "transactionHash", Field::TxHash)?;
     let tx_index = quantity(r, "transactionIndex", Field::TxIndex)?;
+    let from = fixed(r, "from", Field::From)?;
     let block_hash = fixed(r, "blockHash", Field::BlockHash)?;
     let block_number = quantity(r, "blockNumber", Field::BlockNumber)?;
     let succeeded = match quantity(r, "status", Field::Status)? {
@@ -259,6 +245,7 @@ fn receipt(r: &Map<String, Value>) -> Result<Receipt, RequestError> {
     Ok(Receipt {
         tx_hash,
         tx_index,
+        from,
         block_hash,
         block_number,
         succeeded,

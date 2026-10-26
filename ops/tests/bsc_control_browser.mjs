@@ -97,10 +97,10 @@ try{
  const srcLine=id=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+id+'$')})}).first();
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('0'),'native source owner generation 0');
  for(const id of ['BSC_INGRESS_GETH','BSC_INGRESS_PUBLICNODE','BSC_INGRESS_DRPC','BSC_INGRESS_BLOCKREQ','BSC_INGRESS_48CLUB'])assert((await srcLine(id).innerText()).includes('OFF'),id+' OFF');
- const requestSource=async(id,mode,expect)=>{
+ const requestSource=async(id,mode,expect,receipt='bsc-source-receipt')=>{
   await p.getByTestId(`bsc-source-${id}-${mode}`).click();
   await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
-  await until(async()=> (await p.getByTestId('bsc-source-receipt').innerText()).includes(expect),`${id} ${mode} receipt ${expect}`);
+  await until(async()=> (await p.getByTestId(receipt).innerText()).includes(expect),`${id} ${mode} receipt ${expect}`);
  };
  await requestSource('BSC_INGRESS_PUBLICNODE','SHADOW','outcome=APPLIED source=BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW');
  await until(async()=> (await srcLine('BSC_INGRESS_PUBLICNODE').innerText()).includes('SHADOW'),'PUBLICNODE effective SHADOW pushed');
@@ -120,6 +120,13 @@ try{
  const staleR=fromBinary(proto.CommandResponseSchema,new Uint8Array(await staleSource.body()));assert.equal(staleR.phase,proto.CommandPhase.FAILED,'stale request fails');
  assert((await srcLine('BSC_INGRESS_GETH').innerText()).includes('OFF'),'stale request changed nothing');
  for(const bad of ['BSC_INGRESS_GETH:ARMED','BSC_INGRESS_X:SHADOW','BSC_INGRESS_GETH']){const r=await api.post(base+'/api/v1/command',{headers,data:Buffer.from(toBinary(proto.CommandRequestSchema,create(proto.CommandRequestSchema,{project:2,requestId:crypto.randomUUID(),action:'bsc.source.mode.set',resourceId:bad,expected:{version:{case:'configVersion',value:3n}},issuedAtUnixNs:BigInt(Date.now())*1_000_000n})))});assert.equal(fromBinary(proto.CommandResponseSchema,new Uint8Array(await r.body())).status,proto.CommandStatus.REJECTED,bad);}
+ // The C2 state component of the same owner (PHASENPLAN §10): SHADOW applies, LIVE stays BLOCKED.
+ const compLine=()=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:/^BSC_STATE_C2$/})}).first();
+ await requestSource('BSC_STATE_C2','SHADOW','source=BSC_STATE_C2 requested=SHADOW effective=SHADOW','bsc-component-receipt');
+ // The CAS of the next request is the pushed generation 4 (the hint text names SHADOW too).
+ await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('4')&&(await compLine().innerText()).includes('requested SHADOW'),'C2 component SHADOW pushed (generation 4)');
+ await requestSource('BSC_STATE_C2','LIVE','effective=BLOCKED block_reason=C2_OPERATIONAL_NOT_AUTHORIZED','bsc-component-receipt');
+ await until(async()=> {const t=await compLine().innerText();return t.includes('BLOCKED')&&t.includes('requested LIVE')&&t.includes('C2_OPERATIONAL_NOT_AUTHORIZED');},'C2 LIVE stays BLOCKED');
  await p.screenshot({path:`${dir}/bsc-monitoring.png`,fullPage:true});
  // The G0.4 census, replayed by the runtime from its journals: Analytics §2, no verdict.
  await p.getByRole('tab',{name:'Analytics',exact:true}).click();
@@ -186,5 +193,5 @@ try{
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all five tabs (desktop and 390 px without overflow), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

@@ -37,12 +37,15 @@ const BSC_CANDIDATE: &str = "bsc.candidate.select";
 /// BSC source mode request (plan §5a.2, order V2 §5): the native owner applies or
 /// refuses it; a requested LIVE stays BLOCKED there. Never arm, sign or send.
 const BSC_SOURCE: &str = "bsc.source.mode.set";
-const BSC_SOURCE_IDS: [&str; 5] = [
+/// The five signal sources and the switchable runtime components of the
+/// native BSC mode owner (`bsc_runtime source request`).
+const BSC_SOURCE_IDS: [&str; 6] = [
     "BSC_INGRESS_GETH",
     "BSC_INGRESS_PUBLICNODE",
     "BSC_INGRESS_DRPC",
     "BSC_INGRESS_BLOCKREQ",
     "BSC_INGRESS_48CLUB",
+    "BSC_STATE_C2",
 ];
 const BSC_SOURCE_MODES: [&str; 3] = ["OFF", "SHADOW", "LIVE"];
 /// B03/U-9: offline analytics jobs of the Project 0 job controller (`p0ctl job …`).
@@ -2398,6 +2401,15 @@ mod tests {
         assert_eq!(
             source_request(&request("x", "BSC_INGRESS_DRPC:LIVE", config(4))),
             Some(("BSC_INGRESS_DRPC", "LIVE", 4))
+        );
+        // The C2 state component is switched by the same owner and action.
+        assert_eq!(
+            source_request(&request("x", "BSC_STATE_C2:SHADOW", config(4))),
+            Some(("BSC_STATE_C2", "SHADOW", 4))
+        );
+        assert_eq!(
+            source_request(&request("x", "BSC_STATE_C3:SHADOW", config(4))),
+            None
         );
         for (resource, expected) in [
             ("BSC_INGRESS_DRPC", config(4)),

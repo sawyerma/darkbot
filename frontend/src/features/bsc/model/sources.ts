@@ -8,13 +8,17 @@ import type { NativeRecordView } from "./types";
 export const SOURCE_SCHEMA = "darkbot.bsc.source-modes.v1";
 export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
 export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"] as const;
+/** Switchable runtime components of the same native owner (C2 state, ...). */
+export const COMPONENT_IDS = ["BSC_STATE_C2"] as const;
+/** A component the owner's record does not name yet (a generation from before it existed). */
+export const NOT_RECORDED = "NOT_RECORDED";
 export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
 
 export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string }
 /** The canonical chain follower (G0.4 denominator); absent when not configured. */
 export interface CanonicalView { state: string; head: string; headAgeMs: string; chain: string; launches: string; join: string }
 export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView }
-export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; runtime: RuntimeView }
+export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; runtime: RuntimeView }
 
 /** Rewrites a runtime status may miss before it is STALE. */
 export const STALE_AFTER_INTERVALS = 3;
@@ -56,6 +60,7 @@ export function sourceControlView(records: readonly NativeRecordView[], nowMs = 
   const unavailable = (reason: string): SourceControlView => ({
     available: false, reason, generation: 0n, runtime,
     rows: SOURCE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", ...healthOf(id) })),
+    components: COMPONENT_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", health: "", counters: "" })),
   });
   const record = records.find(r => r.schema === SOURCE_SCHEMA);
   if (!record) return unavailable(BACKEND_UNAVAILABLE);
@@ -74,5 +79,13 @@ export function sourceControlView(records: readonly NativeRecordView[], nowMs = 
   }
   const ids = rows.map(r => r.id).sort();
   if (ids.join() !== [...SOURCE_IDS].sort().join()) return unavailable("BACKEND_INVALID");
-  return { available: true, reason: "", generation, runtime, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!) };
+  const found = new Map<string, SourceRow>();
+  for (let i = 0; f.has(`components[${i}].component_id`); i++) {
+    const id = f.get(`components[${i}].component_id`) ?? "";
+    if (!(COMPONENT_IDS as readonly string[]).includes(id) || found.has(id)) return unavailable("BACKEND_INVALID");
+    found.set(id, { id, requested: f.get(`components[${i}].requested`) ?? "UNKNOWN", effective: f.get(`components[${i}].effective`) ?? "UNKNOWN",
+      blockReason: f.get(`components[${i}].block_reason`) ?? "", health: "", counters: "" });
+  }
+  const components = COMPONENT_IDS.map(id => found.get(id) ?? { id, requested: NOT_RECORDED, effective: NOT_RECORDED, blockReason: "", health: "", counters: "" });
+  return { available: true, reason: "", generation, runtime, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!), components };
 }

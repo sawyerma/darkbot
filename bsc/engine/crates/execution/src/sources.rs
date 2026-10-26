@@ -106,6 +106,9 @@ impl Effective {
 }
 
 pub const ECONOMIC_LIVE_NOT_AUTHORIZED: &str = "ECONOMIC_LIVE_NOT_AUTHORIZED";
+/// C2 may only run operationally after a real G0.8 acquisition PASS and the
+/// evaluated G0.4 measurement (PHASENPLAN §10 offline override).
+pub const C2_OPERATIONAL_NOT_AUTHORIZED: &str = "C2_OPERATIONAL_NOT_AUTHORIZED";
 pub const SOURCE_ACCESS_UNQUALIFIED: &str = "SOURCE_ACCESS_UNQUALIFIED";
 
 /// The owner's rule. 48Club's auction feed needs credentials and an
@@ -119,6 +122,86 @@ pub fn effective(source: SourceId, requested: Mode) -> Effective {
     }
 }
 
+/// The switchable runtime components besides the sources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComponentId {
+    /// The C2 canonical/pending state owner (observes in SHADOW).
+    StateC2,
+}
+
+impl ComponentId {
+    pub const ALL: [ComponentId; 1] = [ComponentId::StateC2];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ComponentId::StateC2 => "BSC_STATE_C2",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<ComponentId> {
+        Self::ALL.into_iter().find(|c| c.name() == name)
+    }
+}
+
+/// The owner's rule for a component: SHADOW runs it without any economic
+/// effect; LIVE (operational use of its state) is never effective here.
+pub fn component_effective(component: ComponentId, requested: Mode) -> Effective {
+    match (component, requested) {
+        (_, Mode::Off) => Effective::Off,
+        (_, Mode::Shadow) => Effective::Shadow,
+        (ComponentId::StateC2, Mode::Live) => Effective::Blocked(C2_OPERATIONAL_NOT_AUTHORIZED),
+    }
+}
+
+/// Anything this owner switches: a source or a component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entity {
+    Source(SourceId),
+    Component(ComponentId),
+}
+
+impl Entity {
+    pub fn name(self) -> &'static str {
+        match self {
+            Entity::Source(s) => s.name(),
+            Entity::Component(c) => c.name(),
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Entity> {
+        SourceId::parse(name)
+            .map(Entity::Source)
+            .or_else(|| ComponentId::parse(name).map(Entity::Component))
+    }
+
+    pub fn effective(self, requested: Mode) -> Effective {
+        match self {
+            Entity::Source(s) => effective(s, requested),
+            Entity::Component(c) => component_effective(c, requested),
+        }
+    }
+}
+
+impl From<SourceId> for Entity {
+    fn from(s: SourceId) -> Self {
+        Entity::Source(s)
+    }
+}
+
+impl From<ComponentId> for Entity {
+    fn from(c: ComponentId) -> Self {
+        Entity::Component(c)
+    }
+}
+
+/// One component of a generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComponentMode {
+    pub component: ComponentId,
+    pub requested: Mode,
+    pub effective: Effective,
+}
+
 /// One source of a generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceMode {
@@ -127,11 +210,12 @@ pub struct SourceMode {
     pub effective: Effective,
 }
 
-/// One generation of all five sources.
+/// One generation of all five sources and every component.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Generation {
     pub generation: u64,
     pub sources: [SourceMode; 5],
+    pub components: [ComponentMode; 1],
     pub request_id: Option<String>,
 }
 
@@ -145,7 +229,48 @@ impl Generation {
                 requested: Mode::Off,
                 effective: Effective::Off,
             }),
+            components: ComponentId::ALL.map(|component| ComponentMode {
+                component,
+                requested: Mode::Off,
+                effective: Effective::Off,
+            }),
             request_id: None,
+        }
+    }
+
+    pub fn component(&self, id: ComponentId) -> ComponentMode {
+        self.components[ComponentId::ALL.iter().position(|c| *c == id).unwrap_or(0)]
+    }
+
+    /// The effective mode of any entity.
+    pub fn effective_of(&self, entity: Entity) -> Effective {
+        match entity {
+            Entity::Source(s) => self.source(s).effective,
+            Entity::Component(c) => self.component(c).effective,
+        }
+    }
+
+    fn set(&mut self, entity: Entity, requested: Mode) {
+        match entity {
+            Entity::Source(source) => {
+                let at = SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0);
+                self.sources[at] = SourceMode {
+                    source,
+                    requested,
+                    effective: effective(source, requested),
+                };
+            }
+            Entity::Component(component) => {
+                let at = ComponentId::ALL
+                    .iter()
+                    .position(|c| *c == component)
+                    .unwrap_or(0);
+                self.components[at] = ComponentMode {
+                    component,
+                    requested,
+                    effective: component_effective(component, requested),
+                };
+            }
         }
     }
 
@@ -168,6 +293,17 @@ impl Generation {
             }
             d.push(sm::SOURCES, e.into_nested());
         }
+        for c in &self.components {
+            use sm::component as k;
+            let mut e = Draft::new(&k::SCHEMA);
+            e.set(k::COMPONENT_ID, c.component.name())
+                .set(k::REQUESTED, c.requested.name())
+                .set(k::EFFECTIVE, c.effective.name());
+            if let Some(reason) = c.effective.reason() {
+                e.set(k::BLOCK_REASON, reason);
+            }
+            d.push(sm::COMPONENTS, e.into_nested());
+        }
         if let Some(id) = &self.request_id {
             d.set(sm::REQUEST_ID, id.as_str());
         }
@@ -175,7 +311,7 @@ impl Generation {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, String> {
-        let r = decode(&sm::SCHEMA, bytes).map_err(|e| e.to_string())?;
+        let r = decode_generation(bytes)?;
         let e = |x: darkbot_bsc_record::RecordError| x.0;
         let mut sources = Generation::initial().sources;
         let rows = r.nested_all(sm::SOURCES).map_err(e)?;
@@ -204,19 +340,66 @@ impl Generation {
                 effective: derived,
             };
         }
+        // A generation from before a component existed has it OFF.
+        let mut components = Generation::initial().components;
+        let mut seen: Vec<ComponentId> = Vec::new();
+        let rows = if r.schema().schema_version >= 2 {
+            r.nested_all(sm::COMPONENTS).map_err(e)?
+        } else {
+            Vec::new()
+        };
+        for row in rows {
+            use sm::component as k;
+            let component = ComponentId::parse(row.text(k::COMPONENT_ID).map_err(e)?)
+                .ok_or("unknown component in a generation")?;
+            if seen.contains(&component) {
+                return Err(format!("{} appears twice", component.name()));
+            }
+            seen.push(component);
+            let requested = Mode::parse(row.text(k::REQUESTED).map_err(e)?)
+                .ok_or("unknown requested mode in a generation")?;
+            let derived = component_effective(component, requested);
+            if row.text(k::EFFECTIVE).map_err(e)? != derived.name()
+                || row.opt_text(k::BLOCK_REASON).map_err(e)? != derived.reason()
+            {
+                return Err(format!(
+                    "{}: stored effective mode is not the owner's",
+                    component.name()
+                ));
+            }
+            let at = ComponentId::ALL
+                .iter()
+                .position(|c| *c == component)
+                .unwrap_or(0);
+            components[at] = ComponentMode {
+                component,
+                requested,
+                effective: derived,
+            };
+        }
         Ok(Generation {
             generation: r.u64(sm::GENERATION).map_err(e)?,
             sources,
+            components,
             request_id: r.opt_text(sm::REQUEST_ID).map_err(e)?.map(str::to_string),
         })
     }
+}
+
+/// A generation record of the current schema, or one written before
+/// components existed (schema version 1).
+fn decode_generation(bytes: &[u8]) -> Result<Record, String> {
+    decode(&sm::SCHEMA, bytes)
+        .or_else(|current| decode(&sm::SCHEMA_V1, bytes).map_err(|_| current))
+        .map_err(|e| e.to_string())
 }
 
 /// The outcome of one request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     pub request_id: String,
-    pub source: SourceId,
+    /// The source or component requested.
+    pub entity: Entity,
     pub requested: Mode,
     pub expected_generation: u64,
     /// `APPLIED` or `REJECTED_STALE`.
@@ -235,7 +418,7 @@ impl Receipt {
         format!(
             "outcome={} source={} requested={} effective={}{} generation={} request_id={}",
             self.outcome,
-            self.source.name(),
+            self.entity.name(),
             self.requested.name(),
             self.effective.name(),
             self.effective
@@ -250,7 +433,7 @@ impl Receipt {
     fn encode(&self, observed_unix_ms: u64) -> Result<Vec<u8>, String> {
         let mut d = Draft::new(&rc::SCHEMA);
         d.set(rc::REQUEST_ID, self.request_id.as_str())
-            .set(rc::SOURCE_ID, self.source.name())
+            .set(rc::SOURCE_ID, self.entity.name())
             .set(rc::REQUESTED, self.requested.name())
             .set(rc::EXPECTED_GENERATION, self.expected_generation)
             .set(rc::OUTCOME, self.outcome)
@@ -266,7 +449,7 @@ impl Receipt {
     fn decode(bytes: &[u8]) -> Result<Self, String> {
         let r = decode(&rc::SCHEMA, bytes).map_err(|e| e.to_string())?;
         let e = |x: darkbot_bsc_record::RecordError| x.0;
-        let source = SourceId::parse(r.text(rc::SOURCE_ID).map_err(e)?).ok_or("unknown source")?;
+        let entity = Entity::parse(r.text(rc::SOURCE_ID).map_err(e)?).ok_or("unknown source")?;
         let requested = Mode::parse(r.text(rc::REQUESTED).map_err(e)?).ok_or("unknown mode")?;
         let outcome = match r.text(rc::OUTCOME).map_err(e)? {
             "APPLIED" => "APPLIED",
@@ -275,12 +458,12 @@ impl Receipt {
         };
         Ok(Receipt {
             request_id: r.text(rc::REQUEST_ID).map_err(e)?.to_string(),
-            source,
+            entity,
             requested,
             expected_generation: r.u64(rc::EXPECTED_GENERATION).map_err(e)?,
             outcome,
             generation: r.u64(rc::GENERATION).map_err(e)?,
-            effective: effective(source, requested),
+            effective: entity.effective(requested),
         })
     }
 }
@@ -387,11 +570,12 @@ impl Store {
     pub fn request(
         &self,
         request_id: &str,
-        source: SourceId,
+        entity: impl Into<Entity>,
         requested: Mode,
         expected_generation: u64,
         now_ms: u64,
     ) -> Result<Receipt, String> {
+        let entity: Entity = entity.into();
         if !safe_id(request_id) {
             return Err("the request ID is not a safe identifier".into());
         }
@@ -400,7 +584,7 @@ impl Store {
             .join("receipts")
             .join(format!("{request_id}.dbrec"));
         let same = |r: &Receipt| {
-            r.source == source
+            r.entity == entity
                 && r.requested == requested
                 && r.expected_generation == expected_generation
         };
@@ -419,12 +603,12 @@ impl Store {
         let current = self.current()?;
         let mut receipt = Receipt {
             request_id: request_id.into(),
-            source,
+            entity,
             requested,
             expected_generation,
             outcome: "REJECTED_STALE",
             generation: current.generation,
-            effective: current.source(source).effective,
+            effective: current.effective_of(entity),
         };
         if current.request_id.as_deref() == Some(request_id) {
             // Crash recovery: the generation names this request, the receipt was lost.
@@ -436,12 +620,7 @@ impl Store {
                 .checked_add(1)
                 .ok_or("generation exhausted")?;
             next.request_id = Some(request_id.into());
-            let at = SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0);
-            next.sources[at] = SourceMode {
-                source,
-                requested,
-                effective: effective(source, requested),
-            };
+            next.set(entity, requested);
             match write_new(
                 &self.generation_path(next.generation),
                 &next.encode(now_ms)?,
@@ -449,13 +628,13 @@ impl Store {
                 Ok(()) => {
                     receipt.outcome = "APPLIED";
                     receipt.generation = next.generation;
-                    receipt.effective = next.source(source).effective;
+                    receipt.effective = next.effective_of(entity);
                 }
                 // Another writer took this generation first: stale.
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => {
                     let now = self.current()?;
                     receipt.generation = now.generation;
-                    receipt.effective = now.source(source).effective;
+                    receipt.effective = now.effective_of(entity);
                 }
                 Err(e) => return Err(format!("generation not written: {e}")),
             }
@@ -527,7 +706,7 @@ pub fn current_record(dir: &Path) -> Result<Option<(PathBuf, Record)>, String> {
     if Generation::decode(&bytes)?.generation != n {
         return Err(format!("generation file {n} holds another generation"));
     }
-    let record = decode(&sm::SCHEMA, &bytes).map_err(|e| e.to_string())?;
+    let record = decode_generation(&bytes)?;
     Ok(Some((path, record)))
 }
 
@@ -540,6 +719,78 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let s = Store::open(&dir, 8).unwrap();
         (dir, s)
+    }
+
+    /// PHASENPLAN §10 / V2 §5: the C2 state component runs in SHADOW, and a
+    /// requested LIVE is recorded but never effective.
+    #[test]
+    fn the_c2_component_is_switchable_and_never_operationally_live() {
+        let (dir, s) = store("c2");
+        let c2 = ComponentId::StateC2;
+        assert_eq!(Entity::parse("BSC_STATE_C2"), Some(Entity::Component(c2)));
+        assert_eq!(component_effective(c2, Mode::Off), Effective::Off);
+        assert_eq!(component_effective(c2, Mode::Shadow), Effective::Shadow);
+        let r = s.request("c2-1", c2, Mode::Shadow, 0, 1).unwrap();
+        assert!(r.applied());
+        assert_eq!(
+            s.current().unwrap().component(c2).effective,
+            Effective::Shadow
+        );
+        let r = s.request("c2-2", c2, Mode::Live, 1, 2).unwrap();
+        assert!(r.applied());
+        assert_eq!(
+            r.effective,
+            Effective::Blocked(C2_OPERATIONAL_NOT_AUTHORIZED)
+        );
+        assert!(
+            r.line()
+                .contains("source=BSC_STATE_C2 requested=LIVE effective=BLOCKED")
+        );
+        // The sources are untouched by a component request.
+        assert!(
+            s.current()
+                .unwrap()
+                .sources
+                .iter()
+                .all(|m| m.requested == Mode::Off)
+        );
+        // A stale component request changes nothing.
+        let stale = s.request("c2-3", c2, Mode::Off, 1, 3).unwrap();
+        assert_eq!(stale.outcome, "REJECTED_STALE");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A generation written before components existed (schema version 1)
+    /// still reads, with every component OFF.
+    #[test]
+    fn a_generation_from_before_components_reads_with_them_off() {
+        let (dir, s) = store("v1");
+        let mut d = Draft::new(&sm::SCHEMA_V1);
+        d.set(sm::GENERATION, 0u64)
+            .set(sm::PROVENANCE_TOOL, "bsc_runtime")
+            .set(sm::PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+        for source in SourceId::ALL {
+            let mut e = Draft::new(&sm::entry::SCHEMA);
+            e.set(sm::entry::SOURCE_ID, source.name())
+                .set(sm::entry::REQUESTED, "OFF")
+                .set(sm::entry::EFFECTIVE, "OFF");
+            d.push(sm::SOURCES, e.into_nested());
+        }
+        fs::write(
+            dir.join("generations").join(format!("{:020}.dbrec", 0)),
+            d.encode().unwrap(),
+        )
+        .unwrap();
+        let g = s.current().unwrap();
+        assert_eq!(g.component(ComponentId::StateC2).effective, Effective::Off);
+        assert!(current_record(&dir).unwrap().is_some());
+        // The next request writes the current schema with the component.
+        s.request("after-v1", ComponentId::StateC2, Mode::Shadow, 0, 2)
+            .unwrap();
+        let (_, r) = current_record(&dir).unwrap().unwrap();
+        assert_eq!(r.schema().schema_version, sm::SCHEMA.schema_version);
+        assert_eq!(r.nested_all(sm::COMPONENTS).unwrap().len(), 1);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// V2 §5: no request makes a source economically live; 48Club is

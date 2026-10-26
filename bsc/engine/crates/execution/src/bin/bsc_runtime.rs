@@ -5,7 +5,7 @@
 //! bsc_runtime run --sources <dir> --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime source init --state <dir>
 //! bsc_runtime source show --state <dir>
-//! bsc_runtime source request <SOURCE_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
+//! bsc_runtime source request <SOURCE_OR_COMPONENT_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! ```
 //!
@@ -19,7 +19,7 @@
 //! authorization exists). Exit 0 when applied, 2 when refused or stale.
 
 use darkbot_bsc_execution::runtime::{RuntimeConfig, run as run_runtime, stop_file, write_census};
-use darkbot_bsc_execution::sources::{Mode, SourceId, Store};
+use darkbot_bsc_execution::sources::{Entity, Mode, Store};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::process::ExitCode;
@@ -67,13 +67,22 @@ fn run(args: &[String]) -> Result<bool, String> {
             let store = Store::open(flag(rest, "--state")?, KEEP_GENERATIONS)?;
             let g = store.current()?;
             println!("generation={}", g.generation);
-            for s in g.sources {
+            let rows = g
+                .sources
+                .iter()
+                .map(|s| (s.source.name(), s.requested, s.effective))
+                .chain(
+                    g.components
+                        .iter()
+                        .map(|c| (c.component.name(), c.requested, c.effective)),
+                );
+            for (name, requested, effective) in rows {
                 println!(
                     "{} requested={} effective={}{}",
-                    s.source.name(),
-                    s.requested.name(),
-                    s.effective.name(),
-                    s.effective
+                    name,
+                    requested.name(),
+                    effective.name(),
+                    effective
                         .reason()
                         .map(|r| format!(" block_reason={r}"))
                         .unwrap_or_default()
@@ -82,7 +91,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             Ok(true)
         }
         [area, cmd, source, mode, rest @ ..] if area == "source" && cmd == "request" => {
-            let source = SourceId::parse(source).ok_or("unknown source ID")?;
+            let source = Entity::parse(source).ok_or("unknown source or component ID")?;
             let mode = Mode::parse(mode).ok_or("the mode is OFF, SHADOW or LIVE")?;
             let expected = flag(rest, "--expect-generation")?
                 .parse::<u64>()

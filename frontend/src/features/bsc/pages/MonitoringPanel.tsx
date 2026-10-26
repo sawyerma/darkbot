@@ -51,6 +51,9 @@ export function MonitoringPanel() {
       <EvidenceRows evidence={m?.evidence} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={6} records={records}>
+      {sources.components.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
+        hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · C2 canonical/pending state owner; SHADOW observes only, LIVE stays BLOCKED until G0.8 PASS and evaluated G0.4`} />)}
+      <SourceActions view={sources} rows={sources.components} testId="bsc-component" />
       <Line label="Canonical follower" value={<ValueState state={sources.runtime.canonical?.state ?? "NOT_CONFIGURED"} />}
         hint={sources.runtime.canonical ? `head ${sources.runtime.canonical.head} · age ${sources.runtime.canonical.headAgeMs} ms · ${sources.runtime.canonical.chain}` : "No canonical endpoint in the runtime configuration: no G0.4 denominator"} />
       {sources.runtime.canonical && <Line label="Canonical launches (G0.4 denominator)" value={sources.runtime.canonical.launches} hint="Orphaned launches are taken out; Four token fields only where the event layout is proven" />}

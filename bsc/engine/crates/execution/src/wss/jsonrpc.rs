@@ -108,14 +108,24 @@ pub(super) fn parse_tx_json(bytes: &[u8]) -> Result<WireTx, RejectReason> {
     }
 }
 
-/// Verifies one transaction object the caller already parsed (the
-/// canonical follower's `eth_getTransactionByHash` answer): the same
-/// conversion and checks as every full notification.
-pub(crate) fn verify_tx_map(
-    tx: &Map<String, Value>,
+/// A transaction object converted into typed fields, not yet verified
+/// (the canonical follower's full block transactions).
+#[derive(Debug)]
+pub(crate) struct ParsedTx(WireTx);
+
+/// Converts one transaction object the caller already parsed from JSON
+/// into typed fields, the same conversion as every full notification;
+/// [`verify_parsed`] checks it.
+pub(crate) fn parse_tx_map(tx: &Map<String, Value>) -> Result<ParsedTx, RejectReason> {
+    parse_tx(tx).map(ParsedTx)
+}
+
+/// The checks of every full notification on a [`ParsedTx`].
+pub(crate) fn verify_parsed(
+    tx: &ParsedTx,
     expected_chain_id: u64,
 ) -> Result<VerifiedTx, RejectReason> {
-    super::verify::verify(&parse_tx(tx)?, expected_chain_id)
+    super::verify::verify(&tx.0, expected_chain_id)
 }
 
 /// Converts a transaction object into typed fields. Only the fields the

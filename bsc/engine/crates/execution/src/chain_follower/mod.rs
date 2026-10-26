@@ -10,13 +10,17 @@
 //! `chunked`; every response is bounded in size and time.
 //!
 //! Protocol: `eth_blockNumber` every [`FollowerLimits::poll`]; for every new
-//! block, in order, `eth_getBlockByNumber(n, false)` and
-//! `eth_getBlockReceipts(n)`. JSON exists only at that wire (`jsonrpc`):
-//! every field is checked for its exact shape (canonical lowercase hex
-//! quantities, fixed-width data) and converted at once into typed values.
-//! The receipts must be exactly the block's transactions, in order, bound to
-//! the block's hash and number, with strictly increasing log indices;
-//! otherwise nothing of the block is used and the block is fetched again.
+//! block, in order, `eth_getBlockByNumber(n, true)` (full transaction
+//! objects) and `eth_getBlockReceipts(n)`. JSON exists only at that wire
+//! (`jsonrpc`): every field is checked for its exact shape (canonical
+//! lowercase hex quantities, fixed-width data) and converted at once into
+//! typed values. Every transaction object must be bound to the block's
+//! hash and number at its position. The receipts must be exactly the
+//! block's transactions, in order (hash and sender equal), bound to the
+//! block's hash and number, with log indices contiguous from 0; otherwise
+//! nothing of the block is used and the block is fetched again. Each
+//! reported block carries all its transactions ([`CanonicalTx`]: hash,
+//! index, sender, nonce, receipt status).
 //!
 //! Canonicity: the follower keeps the last [`FollowerLimits::reorg_depth`]
 //! blocks plus their parent (the deepest fork point it can still prove). A
@@ -27,15 +31,19 @@
 //! names every kept block as orphaned and following resumes at the new
 //! head. Heights that are never followed are always reported
 //! ([`CanonicalEvent::Gap`], [`CanonicalEvent::ReorgTooDeep`]); nothing is
-//! skipped silently. Following starts at the head first reported.
+//! skipped silently. Following starts at the head first reported, or after
+//! a block the caller had applied before (`resume_after`): that block is the
+//! kept window until the next one proves it is still canonical.
 //!
 //! Launches: exactly the venues of [`launches::LAUNCH_EVENTS`], each by
 //! contract address and event topic, in successful receipts only. Each
-//! launch's transaction is fetched (`eth_getTransactionByHash`), bound to
-//! its receipt and verified by the WSS source's verifier for chain 56 (the
-//! signed bytes rebuilt, hash and signer checked); its sender, nonce and C1
-//! scope come from those verified bytes. A block is reported only with all
-//! of its launches verified.
+//! launch's transaction object from the block itself is verified by the
+//! WSS source's verifier for chain 56 (the signed bytes rebuilt, hash and
+//! signer checked); its sender, nonce and C1 scope come from those verified
+//! bytes. A refusal for a property of the transaction
+//! ([`is_unrebuildable`]) is carried by the launch at once; any other is
+//! retried with the whole block up to [`FollowerLimits::tx_attempts`] times,
+//! then carried.
 //!
 //! Time: a block's `timestamp_ms` is bsc-geth's `Header.MilliTimestamp()`
 //! (v1.7.8, `core/types/block.go`): `timestamp * 1000` plus the 256-bit
@@ -179,6 +187,18 @@ pub enum FollowerConfigError {
     Tls,
 }
 
+/// One transaction of a canonical block: the block object's hash, sender
+/// and nonce (the sender equal to its receipt's `from`), and its receipt's
+/// status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanonicalTx {
+    pub hash: [u8; 32],
+    pub index: u64,
+    pub sender: [u8; 20],
+    pub nonce: u64,
+    pub succeeded: bool,
+}
+
 /// What the follower reports, in chain order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalEvent {
@@ -196,6 +216,8 @@ pub enum CanonicalEvent {
         /// The wall clock (Unix ms) read next to `observed`; `None` when
         /// the system clock could not be read.
         observed_unix_ms: Option<u64>,
+        /// Every transaction of the block, in order.
+        txs: Vec<CanonicalTx>,
     },
     Launch(CanonicalLaunch),
     /// Earlier reported blocks left the canonical chain: `orphaned` in
@@ -266,7 +288,7 @@ pub enum FollowerFault {
     /// backend, or the block left the chain in between).
     Unavailable(Call),
     /// The receipts are not exactly the block's transactions (count, order,
-    /// hashes, block hash or number, log order).
+    /// hashes, senders, block hash or number, log order).
     ReceiptsMismatch(u64),
     /// During a reorg walk the parent link of the new chain broke at this
     /// height: the chain moved again; the step is retried.
@@ -277,10 +299,10 @@ pub enum FollowerFault {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Call {
     BlockNumber,
-    Header(u64),
+    /// `eth_getBlockByNumber(n, true)`; also the call of a launch
+    /// transaction refused by the verifier (its object came with it).
+    Block(u64),
     Receipts(u64),
-    /// The transaction of a launch, by hash.
-    Transaction([u8; 32]),
 }
 
 /// Why one request failed.
@@ -299,7 +321,8 @@ pub enum RequestError {
     Rpc(i64),
     /// A field of the answer has the wrong shape.
     Shape(Field),
-    /// The transaction object failed the WSS verifier.
+    /// A launch transaction object of the block failed the WSS verifier
+    /// (a refusal that may be the provider's; retried).
     Unverifiable(RejectReason),
 }
 
@@ -339,9 +362,14 @@ pub enum Field {
     Timestamp,
     /// Not 32 bytes, or a millisecond value of 1000 or more.
     MixHash,
+    /// Not an array of full transaction objects.
     Transactions,
     TxHash,
     TxIndex,
+    /// A transaction's or receipt's `from`.
+    From,
+    /// A transaction's `nonce`.
+    Nonce,
     BlockHash,
     BlockNumber,
     Status,
@@ -353,7 +381,8 @@ pub enum Field {
     LogRemoved,
     /// A log's block or transaction fields differ from its receipt's.
     LogBinding,
-    /// A transaction's hash, block or index differ from its receipt's.
+    /// A transaction object's block hash, number or index differ from its
+    /// block and position.
     TxBinding,
 }
 
@@ -361,10 +390,19 @@ pub enum Field {
 /// the caller supplies it, no endpoint is compiled in) until `stop` is
 /// set. Every event goes to `sink` on the calling thread.
 ///
+/// `resume_after` is the last block (number, hash) the caller had applied
+/// before, or `None` to start at the head. With `Some((n, h))` the follower
+/// follows `n + 1, n + 2, ...` while the head is at most `max_catch_up`
+/// ahead of `n` (otherwise [`CanonicalEvent::Gap`] from `n + 1` and the
+/// head is followed); if block `n + 1` does not have the parent `h`, block
+/// `n` left the chain: [`CanonicalEvent::ReorgTooDeep`] with `(n, h)`
+/// orphaned comes first, then the new chain from `n + 1`.
+///
 /// Returns `Err` only for a configuration refused before any connect.
 pub fn run_follower(
     endpoint: &str,
     limits: &FollowerLimits,
+    resume_after: Option<(u64, [u8; 32])>,
     stop: &AtomicBool,
     sink: &mut dyn FnMut(CanonicalEvent),
 ) -> Result<(), FollowerConfigError> {
@@ -380,7 +418,13 @@ pub fn run_follower(
     let bounds = connect_bounds(limits);
     let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
     let client = http::Client::new(connect, authority, path, limits);
-    follow::run(&mut follow::Rpc::new(client), limits, stop, sink);
+    follow::run(
+        &mut follow::Rpc::new(client),
+        limits,
+        resume_after,
+        stop,
+        sink,
+    );
     Ok(())
 }
 

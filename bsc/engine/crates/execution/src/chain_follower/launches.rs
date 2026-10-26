@@ -24,9 +24,9 @@
 use alloy_primitives::hex;
 
 use super::CanonicalLaunch;
-use super::jsonrpc::{BlockHead, Log, Receipt, TxPlace};
+use super::jsonrpc::{BlockHead, Log, Receipt};
 use crate::ingress::is_flap_launch;
-use crate::wss::{RejectReason, VerifiedTx};
+use crate::wss::{BSC_MAINNET_CHAIN_ID, ParsedTx, RejectReason, VerifiedTx, verify_parsed};
 
 /// The venue of a launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,17 +119,18 @@ pub(super) struct ReceiptLaunch {
     pub(super) first_external_buy_index: Option<u64>,
 }
 
-impl ReceiptLaunch {
-    /// Where the launch transaction must be.
-    pub(super) fn place(&self) -> TxPlace {
-        TxPlace {
-            hash: self.tx_hash,
-            block_hash: self.block_hash,
-            block_number: self.block_number,
-            tx_index: self.tx_index,
-        }
+/// The WSS verifier's result for one transaction object of a block (for
+/// BSC Mainnet), or why the object could not be converted.
+pub(super) fn verify_object(
+    object: &Result<ParsedTx, RejectReason>,
+) -> Result<VerifiedTx, RejectReason> {
+    match object {
+        Ok(parsed) => verify_parsed(parsed, BSC_MAINNET_CHAIN_ID),
+        Err(reason) => Err(*reason),
     }
+}
 
+impl ReceiptLaunch {
     /// The launch with the facts of its verified transaction: sender,
     /// nonce, and the C1 scope decision of the pending path
     /// (`ingress::is_flap_launch` of the signed bytes); or, for a

@@ -45,6 +45,7 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     let mut faults = Vec::new();
     // Wall clock when first held minus the block's millisecond timestamp.
     let mut lags_ms: Vec<i64> = Vec::new();
+    let mut tx_counts: Vec<usize> = Vec::new();
     let started = Instant::now();
     let mut sink = |event: CanonicalEvent| match event {
         CanonicalEvent::Block {
@@ -55,8 +56,11 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
             timestamp_ms,
             observed,
             observed_unix_ms,
+            txs,
         } => {
             assert!(observed >= started);
+            assert!(txs.iter().enumerate().all(|(i, tx)| tx.index == i as u64));
+            tx_counts.push(txs.len());
             assert_eq!(timestamp_ms / 1000, timestamp_s);
             let held = observed_unix_ms.expect("the wall clock is readable");
             lags_ms.push(i64::try_from(held).unwrap() - i64::try_from(timestamp_ms).unwrap());
@@ -97,6 +101,7 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     run_follower(
         "https://bsc-dataseed.bnbchain.org",
         &limits,
+        None,
         &stop,
         &mut sink,
     )
@@ -113,6 +118,29 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         lags_ms.get(lags_ms.len() / 2),
         lags_ms.last()
     );
+    tx_counts.sort_unstable();
+    println!(
+        "txs per block over {} blocks: min={:?} p50={:?} max={:?}",
+        tx_counts.len(),
+        tx_counts.first(),
+        tx_counts.get(tx_counts.len() / 2),
+        tx_counts.last()
+    );
+    let recent: Vec<u64> = chain.keys().rev().take(20).copied().collect();
+    let (mut block_bytes, mut receipt_bytes) = response_sizes(&limits, &recent);
+    for (name, sizes) in [
+        ("eth_getBlockByNumber(n, true)", &mut block_bytes),
+        ("eth_getBlockReceipts(n)", &mut receipt_bytes),
+    ] {
+        sizes.sort_unstable();
+        println!(
+            "{name} body bytes over {} blocks: min={:?} p50={:?} max={:?}",
+            sizes.len(),
+            sizes.first(),
+            sizes.get(sizes.len() / 2),
+            sizes.last()
+        );
+    }
     println!(
         "live {:?}: blocks={blocks} linked={linked} first={first:?} last={last_block:?} \
          reorgs={reorgs:?} gaps={gaps:?} faults={} {faults:?} launches={}",
@@ -140,4 +168,29 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         "parent links checked"
     );
     assert!(returned - stop_at < limits.read_tick * 2 + limits.connect_timeout);
+}
+
+/// The body sizes of `eth_getBlockByNumber(n, true)` and
+/// `eth_getBlockReceipts(n)` for `numbers`, fetched again through the
+/// follower's own client (failed requests are left out).
+fn response_sizes(limits: &FollowerLimits, numbers: &[u64]) -> (Vec<usize>, Vec<usize>) {
+    let target = Endpoint::parse("wss://bsc-dataseed.bnbchain.org").unwrap();
+    let tls = tls_config().unwrap();
+    let (authority, path) = authority_and_path(target.url());
+    let bounds = connect_bounds(limits);
+    let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
+    let mut client = http::Client::new(connect, authority, path, limits);
+    let stop = AtomicBool::new(false);
+    let (mut blocks, mut receipts) = (Vec::new(), Vec::new());
+    for (id, number) in (1u64..).zip(numbers) {
+        let block = jsonrpc::request(id, Call::Block(*number));
+        if let Ok(body) = client.post(block.as_bytes(), &stop) {
+            blocks.push(body.len());
+        }
+        let receipt = jsonrpc::request(id, Call::Receipts(*number));
+        if let Ok(body) = client.post(receipt.as_bytes(), &stop) {
+            receipts.push(body.len());
+        }
+    }
+    (blocks, receipts)
 }

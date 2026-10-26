@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKEND_UNAVAILABLE, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, runtimeView, sourceControlView } from "./sources";
+import { BACKEND_UNAVAILABLE, NOT_RECORDED, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, runtimeView, sourceControlView } from "./sources";
 import type { NativeRecordView } from "./types";
 
 const record = (generation: string, rows: [string, string, string, string?][]): NativeRecordView => ({
@@ -15,6 +15,29 @@ const record = (generation: string, rows: [string, string, string, string?][]): 
 
 const all = (over: Record<string, [string, string, string?]> = {}) =>
   SOURCE_IDS.map(id => [id, ...(over[id] ?? ["OFF", "OFF"])] as [string, string, string, string?]);
+
+const withComponents = (base: NativeRecordView, rows: [string, string, string, string?][]): NativeRecordView => ({
+  ...base, fields: [...base.fields, ...rows.flatMap(([id, requested, effective, reason], i) => [
+    { name: `components[${i}].component_id`, value: id, kind: 7, unit: "" },
+    { name: `components[${i}].requested`, value: requested, kind: 7, unit: "" },
+    { name: `components[${i}].effective`, value: effective, kind: 7, unit: "" },
+    ...(reason ? [{ name: `components[${i}].block_reason`, value: reason, kind: 7, unit: "" }] : []),
+  ])],
+});
+
+describe("BSC component control (C2 state)", () => {
+  it("shows the owner's component modes; LIVE stays BLOCKED with its reason", () => {
+    const v = sourceControlView([withComponents(record("4", all()), [["BSC_STATE_C2", "LIVE", "BLOCKED", "C2_OPERATIONAL_NOT_AUTHORIZED"]])]);
+    expect(v.components).toEqual([{ id: "BSC_STATE_C2", requested: "LIVE", effective: "BLOCKED", blockReason: "C2_OPERATIONAL_NOT_AUTHORIZED", health: "", counters: "" }]);
+  });
+  it("a generation from before components is NOT_RECORDED, never assumed", () => {
+    expect(sourceControlView([record("1", all())]).components[0]).toMatchObject({ requested: NOT_RECORDED, effective: NOT_RECORDED });
+  });
+  it("an unknown or repeated component makes the record invalid", () => {
+    expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_X", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
+    expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_C2", "OFF", "OFF"], ["BSC_STATE_C2", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
+  });
+});
 
 describe("BSC source control", () => {
   it("without the native owner's record nothing can be requested", () => {

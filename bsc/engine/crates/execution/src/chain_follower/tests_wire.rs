@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::http::{Bounds, Response, round_trip};
 use super::jsonrpc::{
-    data_fixed, parse_block_number, parse_header, parse_receipts, quantity_u64, request,
+    BlockHead, data_fixed, parse_block, parse_block_number, parse_receipts, quantity_u64, request,
 };
 use super::*;
 
@@ -191,19 +191,12 @@ fn request_bodies_are_fixed_templates() {
         r#"{"jsonrpc":"2.0","id":7,"method":"eth_blockNumber","params":[]}"#
     );
     assert_eq!(
-        request(8, Call::Header(129_781_248)),
-        r#"{"jsonrpc":"2.0","id":8,"method":"eth_getBlockByNumber","params":["0x7bc4e00",false]}"#
+        request(8, Call::Block(129_781_248)),
+        r#"{"jsonrpc":"2.0","id":8,"method":"eth_getBlockByNumber","params":["0x7bc4e00",true]}"#
     );
     assert_eq!(
         request(9, Call::Receipts(0)),
         r#"{"jsonrpc":"2.0","id":9,"method":"eth_getBlockReceipts","params":["0x0"]}"#
-    );
-    let mut hash = [0u8; 32];
-    hash[0] = 0xab;
-    hash[31] = 0x01;
-    assert_eq!(
-        request(10, Call::Transaction(hash)),
-        r#"{"jsonrpc":"2.0","id":10,"method":"eth_getTransactionByHash","params":["0xab00000000000000000000000000000000000000000000000000000000000001"]}"#
     );
 }
 
@@ -279,16 +272,32 @@ const HASH_B: &str = "0x22222222222222222222222222222222222222222222222222222222
 /// A `mixHash` of 200 (ms).
 const MIX_200: &str = "0x00000000000000000000000000000000000000000000000000000000000000c8";
 
+const SENDER: &str = "0x3333333333333333333333333333333333333333";
+
 fn header_body(number: &str, transactions: &str) -> String {
     format!(
         r#"{{"jsonrpc":"2.0","id":1,"result":{{"number":"{number}","hash":"{HASH_A}","parentHash":"{HASH_B}","timestamp":"0x6ade7af4","mixHash":"{MIX_200}","transactions":{transactions}}}}}"#
     )
 }
 
+/// One full transaction object of block 5 (`HASH_A`) at index 0; not a
+/// signed transaction (its WSS conversion is refused, which only matters
+/// for a launch).
+fn tx_json() -> String {
+    format!(
+        r#"{{"hash":"{HASH_B}","from":"{SENDER}","nonce":"0x7","transactionIndex":"0x0","blockHash":"{HASH_A}","blockNumber":"0x5"}}"#
+    )
+}
+
+/// The typed block of a body (its WSS conversions left out).
+fn head(body: &str, number: u64) -> Result<Option<BlockHead>, RequestError> {
+    parse_block(body.as_bytes(), 1, number).map(|b| b.map(|b| b.head))
+}
+
 #[test]
-fn header_shapes() {
-    let good = parse_header(
-        header_body("0x5", &format!(r#"["{HASH_B}"]"#)).as_bytes(),
+fn block_shapes() {
+    let good = parse_block(
+        header_body("0x5", &format!("[{}]", tx_json())).as_bytes(),
         1,
         5,
     )
@@ -296,30 +305,69 @@ fn header_shapes() {
     .unwrap();
     assert_eq!(
         (
-            good.header.number,
-            good.header.timestamp_s,
-            good.header.block_ms,
-            good.transactions.len()
+            good.head.header.number,
+            good.head.header.timestamp_s,
+            good.head.header.block_ms,
         ),
-        (5, 0x6ade_7af4, 0x6ade_7af4 * 1000 + 200, 1)
+        (5, 0x6ade_7af4, 0x6ade_7af4 * 1000 + 200)
     );
+    let tx = good.head.txs[0];
     assert_eq!(
-        parse_header(br#"{"jsonrpc":"2.0","id":1,"result":null}"#, 1, 5),
+        (tx.hash, tx.from, tx.nonce),
+        (data_fixed(HASH_B).unwrap(), data_fixed(SENDER).unwrap(), 7)
+    );
+    assert!(matches!(
+        good.objects[..],
+        [Err(crate::wss::RejectReason::Missing(_))]
+    ));
+    assert_eq!(
+        head(r#"{"jsonrpc":"2.0","id":1,"result":null}"#, 5),
         Ok(None)
     );
     assert_eq!(
-        parse_header(header_body("0x6", "[]").as_bytes(), 1, 5),
+        head(&header_body("0x6", "[]"), 5),
         Err(RequestError::Shape(Field::Number))
     );
-    // Full transaction objects are not the `false` form.
+    // The hash-only form (`false`) is refused.
     assert_eq!(
-        parse_header(header_body("0x5", r#"[{"hash":"0x00"}]"#).as_bytes(), 1, 5),
+        head(&header_body("0x5", &format!(r#"["{HASH_B}"]"#)), 5),
         Err(RequestError::Shape(Field::Transactions))
     );
-    let short_hash = header_body("0x5", "[]").replace(HASH_A, "0x11");
     assert_eq!(
-        parse_header(short_hash.as_bytes(), 1, 5),
+        head(&header_body("0x5", "[]").replace(HASH_A, "0x11"), 5),
         Err(RequestError::Shape(Field::Hash))
+    );
+    // Each object is bound to the block and its position, and strict.
+    let cases = [
+        (
+            r#""transactionIndex":"0x0""#,
+            r#""transactionIndex":"0x1""#,
+            Field::TxBinding,
+        ),
+        (
+            r#""blockNumber":"0x5""#,
+            r#""blockNumber":"0x6""#,
+            Field::TxBinding,
+        ),
+        (r#""from":"0x33"#, r#""from":"0x3"#, Field::From),
+        (r#""nonce":"0x7""#, r#""nonce":"0x07""#, Field::Nonce),
+        (r#""hash":"0x22"#, r#""hash":"0x2"#, Field::TxHash),
+    ];
+    for (from, to, field) in cases {
+        let tx = tx_json().replacen(from, to, 1);
+        assert_eq!(
+            head(&header_body("0x5", &format!("[{tx}]")), 5),
+            Err(RequestError::Shape(field)),
+            "{tx}"
+        );
+    }
+    let other_block = tx_json().replace(
+        &format!(r#""blockHash":"{HASH_A}""#),
+        &format!(r#""blockHash":"{HASH_B}""#),
+    );
+    assert_eq!(
+        head(&header_body("0x5", &format!("[{other_block}]")), 5),
+        Err(RequestError::Shape(Field::TxBinding))
     );
 }
 
@@ -329,8 +377,7 @@ fn header_shapes() {
 fn mix_hash_milliseconds() {
     let with_mix = |mix: &str| header_body("0x5", "[]").replace(MIX_200, mix);
     let ms = |mix: &str| {
-        parse_header(with_mix(mix).as_bytes(), 1, 5)
-            .map(|b| b.unwrap().header.block_ms - 0x6ade_7af4 * 1000)
+        head(&with_mix(mix), 5).map(|b| b.unwrap().header.block_ms - 0x6ade_7af4 * 1000)
     };
     let word = |tail: &str| format!("0x{tail:0>64}");
     assert_eq!(ms(&word("0")), Ok(0));
@@ -346,20 +393,17 @@ fn mix_hash_milliseconds() {
         assert_eq!(ms(&bad), Err(RequestError::Shape(Field::MixHash)), "{bad}");
     }
     let missing = header_body("0x5", "[]").replace(&format!(r#""mixHash":"{MIX_200}","#), "");
-    assert_eq!(
-        parse_header(missing.as_bytes(), 1, 5),
-        Err(RequestError::Shape(Field::MixHash))
-    );
+    assert_eq!(head(&missing, 5), Err(RequestError::Shape(Field::MixHash)));
     let overflow = with_mix(&word("1")).replace("0x6ade7af4", "0xffffffffffffffff");
     assert_eq!(
-        parse_header(overflow.as_bytes(), 1, 5),
+        head(&overflow, 5),
         Err(RequestError::Shape(Field::Timestamp))
     );
 }
 
 fn receipt_body(log: &str) -> String {
     format!(
-        r#"{{"jsonrpc":"2.0","id":1,"result":[{{"transactionHash":"{HASH_B}","transactionIndex":"0x0","blockHash":"{HASH_A}","blockNumber":"0x5","status":"0x1","logs":[{log}]}}]}}"#
+        r#"{{"jsonrpc":"2.0","id":1,"result":[{{"transactionHash":"{HASH_B}","transactionIndex":"0x0","from":"{SENDER}","blockHash":"{HASH_A}","blockNumber":"0x5","status":"0x1","logs":[{log}]}}]}}"#
     )
 }
 
@@ -398,6 +442,18 @@ fn receipt_and_log_shapes() {
     assert_eq!(
         parse_receipts(odd.as_bytes(), 1),
         Err(RequestError::Shape(Field::Status))
+    );
+    let no_sender = receipt_body("").replace(&format!(r#""from":"{SENDER}","#), "");
+    assert_eq!(
+        parse_receipts(no_sender.as_bytes(), 1),
+        Err(RequestError::Shape(Field::From))
+    );
+    assert_eq!(
+        parse_receipts(receipt_body("").as_bytes(), 1)
+            .unwrap()
+            .unwrap()[0]
+            .from,
+        data_fixed::<20>(SENDER).unwrap()
     );
 }
 
@@ -461,13 +517,13 @@ fn limits_and_endpoint_are_refused_before_any_connect() {
     ];
     for (url, expected) in refused {
         assert_eq!(
-            run_follower(url, &limits(), &stop, &mut sink),
+            run_follower(url, &limits(), None, &stop, &mut sink),
             Err(expected),
             "{url}"
         );
     }
     assert_eq!(
-        run_follower("https://node.example", &zero_poll, &stop, &mut sink),
+        run_follower("https://node.example", &zero_poll, None, &stop, &mut sink),
         Err(FollowerConfigError::Limits(LimitsError::ZeroDuration(
             "poll"
         )))

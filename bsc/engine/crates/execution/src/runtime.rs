@@ -296,6 +296,7 @@ struct Follower {
 /// send blocks: the follower falls behind rather than losing an event.
 fn spawn_follower(
     config: CanonicalConfig,
+    resume_after: Option<(u64, [u8; 32])>,
     tx: SyncSender<(u64, CanonicalEvent)>,
     clock: Clock,
 ) -> Result<Follower, String> {
@@ -312,7 +313,13 @@ fn spawn_follower(
                 // Err only once the runtime dropped the receiver at stop.
                 let _ = tx.send((at, event));
             };
-            if let Err(e) = run_follower(&config.endpoint, &config.limits, &flag, &mut sink) {
+            if let Err(e) = run_follower(
+                &config.endpoint,
+                &config.limits,
+                resume_after,
+                &flag,
+                &mut sink,
+            ) {
                 eprintln!("canonical follower refused its configuration: {e:?}");
             }
         })
@@ -702,7 +709,8 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
     let canonical_rx = Some(canonical_rx);
     let mut canonical = config.canonical.as_ref().map(Canonical::new);
     let mut follower = match &config.canonical {
-        Some(c) => Some(spawn_follower(c.clone(), canonical_tx, clock)?),
+        // No persisted canonical window yet (C2 checkpoint): start at the head.
+        Some(c) => Some(spawn_follower(c.clone(), None, canonical_tx, clock)?),
         None => {
             drop(canonical_tx);
             None
@@ -1034,6 +1042,7 @@ mod tests {
             parent_hash: [n - 1; 32],
             timestamp_s: block_ms(n) / 1_000,
             timestamp_ms: block_ms(n),
+            txs: Vec::new(),
             observed: clock.0,
             // The follower held the header 300 ms after the block time.
             observed_unix_ms: Some(block_ms(n) + 300),

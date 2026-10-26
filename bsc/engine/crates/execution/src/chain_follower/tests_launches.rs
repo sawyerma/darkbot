@@ -26,9 +26,12 @@
 //!   the token's `Transfer` from the Portal to that buyer. Each launch
 //!   transaction carries the creator's own `TokenBought`, which is not
 //!   counted (re-checked below);
-//! - transactions (`tx_<block>_<index>.json`): the answers to
-//!   `eth_getTransactionByHash` for each launch, fetched on 2026-10-26.
-//!   Sender and nonce are the object's `from`/`nonce`; the C1 scope is true
+//! - transactions: the block fixtures (`block_<n>.full.json`) are the
+//!   answers to `eth_getBlockByNumber(n, true)`, fetched on 2026-10-26; the
+//!   launch objects in them were compared equal to the separately fetched
+//!   `eth_getTransactionByHash` answers, and every object's hash and `from`
+//!   to its receipt's. Sender and nonce are the object's `from`/`nonce`;
+//!   the C1 scope is true
 //!   only for block 129774331 index 1, whose `to` is the Portal and whose
 //!   input starts with `newTokenV6` (`0x8cb5772c`); the others call a
 //!   router (0xa853...3f6b), a launcher (0x8994...6666) or TokenManager2
@@ -38,62 +41,62 @@ use alloy_primitives::{hex, keccak256};
 use serde_json::Value;
 
 use super::follow::receipts_match;
-use super::jsonrpc::{BlockHead, Receipt, parse_header, parse_receipts, parse_transaction};
-use super::launches::{FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, ReceiptLaunch, detect};
+use super::jsonrpc::{BlockHead, FullBlock, Receipt, parse_block, parse_receipts};
+use super::launches::{
+    FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, ReceiptLaunch, detect, verify_object,
+};
 use super::{CanonicalLaunch, Field, RequestError, Venue};
 use crate::wss::RejectReason;
 
-const FLAP_A_HEADER: &str = include_str!("../../tests/fixtures/chain/block_129774331.header.json");
+const FLAP_A_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129774331.full.json");
 const FLAP_A_RECEIPTS: &str =
     include_str!("../../tests/fixtures/chain/block_129774331.receipts.json");
-const FLAP_B_HEADER: &str = include_str!("../../tests/fixtures/chain/block_129781248.header.json");
+const FLAP_B_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129781248.full.json");
 const FLAP_B_RECEIPTS: &str =
     include_str!("../../tests/fixtures/chain/block_129781248.receipts.json");
-const FOUR_HEADER: &str = include_str!("../../tests/fixtures/chain/block_129781119.header.json");
+const FOUR_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129781119.full.json");
 const FOUR_RECEIPTS: &str =
     include_str!("../../tests/fixtures/chain/block_129781119.receipts.json");
-
-const TX_A1: &str = include_str!("../../tests/fixtures/chain/tx_129774331_1.json");
-const TX_A26: &str = include_str!("../../tests/fixtures/chain/tx_129774331_26.json");
-const TX_B32: &str = include_str!("../../tests/fixtures/chain/tx_129781248_32.json");
-const TX_FOUR: &str = include_str!("../../tests/fixtures/chain/tx_129781119_32.json");
 
 const TRANSFER: [u8; 32] = hex!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
 
 /// The block and its receipts through the follower's own parse and
 /// receipt check.
-fn load(header: &str, receipts: &str, number: u64) -> (BlockHead, Vec<Receipt>) {
-    let block = parse_header(header.as_bytes(), 1, number).unwrap().unwrap();
+fn load(block: &str, receipts: &str, number: u64) -> (BlockHead, Vec<Receipt>) {
+    let block = full(block, number).head;
     let receipts = parse_receipts(receipts.as_bytes(), 1).unwrap().unwrap();
     assert!(receipts_match(&block, &receipts));
     (block, receipts)
 }
 
-/// Each launch completed from its transaction fixture (in order), through
-/// the follower's own bound and verified parse.
-fn complete(launches: Vec<ReceiptLaunch>, txs: &[&str]) -> Vec<CanonicalLaunch> {
-    assert_eq!(launches.len(), txs.len());
+fn full(block: &str, number: u64) -> FullBlock {
+    parse_block(block.as_bytes(), 1, number).unwrap().unwrap()
+}
+
+/// Each launch completed from its block's own transaction object, through
+/// the follower's own conversion and the WSS verifier.
+fn complete(block: &str, number: u64, launches: Vec<ReceiptLaunch>) -> Vec<CanonicalLaunch> {
+    let objects = full(block, number).objects;
     launches
         .into_iter()
-        .zip(txs)
-        .map(|(launch, tx)| {
-            let verified = parse_transaction(tx.as_bytes(), 1, &launch.place())
-                .unwrap()
-                .unwrap();
+        .map(|launch| {
+            let index = usize::try_from(launch.tx_index).unwrap();
+            let verified = verify_object(&objects[index]).unwrap();
             launch.with_transaction(Ok(&verified))
         })
         .collect()
 }
 
-/// The raw transaction object, read independently of `jsonrpc`.
-fn raw_tx(tx: &str) -> Value {
-    let all: Value = serde_json::from_str(tx).unwrap();
-    all["result"].clone()
+/// The raw transaction object at `index` of a block, read independently
+/// of `jsonrpc`.
+fn raw_tx(block: &str, index: u64) -> Value {
+    let all: Value = serde_json::from_str(block).unwrap();
+    all["result"]["transactions"][usize::try_from(index).unwrap()].clone()
 }
 
 /// Independent checks of the transaction facts against the raw object.
-fn check_tx(tx: &str, launch: &CanonicalLaunch) {
-    let raw = raw_tx(tx);
+fn check_tx(block: &str, launch: &CanonicalLaunch) {
+    let raw = raw_tx(block, launch.tx_index);
     assert_eq!(Some(address_of(&raw["from"])), launch.sender);
     assert_eq!(
         Some(u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap()),
@@ -189,11 +192,11 @@ fn venue_topics_are_the_keccak_of_their_signatures() {
 
 #[test]
 fn flap_block_with_two_launches_and_one_external_buy() {
-    let (block, receipts) = load(FLAP_A_HEADER, FLAP_A_RECEIPTS, 129_774_331);
+    let (block, receipts) = load(FLAP_A_BLOCK, FLAP_A_RECEIPTS, 129_774_331);
     let hash = hex!("b46720d61774811f42474df7f45d98e2967509025fe10a5f67c9eb9f381e12ab");
     assert_eq!(block.header.hash, hash);
     assert_eq!(receipts.len(), 54);
-    let launches = complete(detect(&block, &receipts), &[TX_A1, TX_A26]);
+    let launches = complete(FLAP_A_BLOCK, 129_774_331, detect(&block, &receipts));
     let expected = vec![
         CanonicalLaunch {
             venue: Venue::Flap,
@@ -227,9 +230,9 @@ fn flap_block_with_two_launches_and_one_external_buy() {
         },
     ];
     assert_eq!(launches, expected);
-    for (launch, tx) in launches.iter().zip([TX_A1, TX_A26]) {
+    for launch in &launches {
         check_launch_receipt(FLAP_A_RECEIPTS, launch);
-        check_tx(tx, launch);
+        check_tx(FLAP_A_BLOCK, launch);
     }
     // Direct Portal call: the creator is the sender.
     let first = raw_receipt(FLAP_A_RECEIPTS, 1);
@@ -255,10 +258,10 @@ fn flap_block_with_two_launches_and_one_external_buy() {
 
 #[test]
 fn flap_block_with_one_launch_and_no_external_buy() {
-    let (block, receipts) = load(FLAP_B_HEADER, FLAP_B_RECEIPTS, 129_781_248);
+    let (block, receipts) = load(FLAP_B_BLOCK, FLAP_B_RECEIPTS, 129_781_248);
     let hash = hex!("f6690df0d75f2c36e6a9822bca1ff8fed6aba47eb176bda1ad801cffd5ff4d51");
     assert_eq!(block.header.hash, hash);
-    let launches = complete(detect(&block, &receipts), &[TX_B32]);
+    let launches = complete(FLAP_B_BLOCK, 129_781_248, detect(&block, &receipts));
     let expected = CanonicalLaunch {
         venue: Venue::Flap,
         block_number: 129_781_248,
@@ -276,7 +279,7 @@ fn flap_block_with_one_launch_and_no_external_buy() {
     };
     assert_eq!(launches, vec![expected.clone()]);
     check_launch_receipt(FLAP_B_RECEIPTS, &expected);
-    check_tx(TX_B32, &expected);
+    check_tx(FLAP_B_BLOCK, &expected);
     // Via a launcher contract: the creator is the called contract.
     let raw = raw_receipt(FLAP_B_RECEIPTS, 32);
     assert_eq!(address_of(&raw["to"]), expected.creator.unwrap());
@@ -284,10 +287,10 @@ fn flap_block_with_one_launch_and_no_external_buy() {
 
 #[test]
 fn four_block_launch_has_token_and_creator_but_no_buy_count() {
-    let (block, receipts) = load(FOUR_HEADER, FOUR_RECEIPTS, 129_781_119);
+    let (block, receipts) = load(FOUR_BLOCK, FOUR_RECEIPTS, 129_781_119);
     let hash = hex!("51d04ca917cbec94c520b6f68fea4e3093f3ee933d57bf35f13a895ff94dfbae");
     assert_eq!(block.header.hash, hash);
-    let launches = complete(detect(&block, &receipts), &[TX_FOUR]);
+    let launches = complete(FOUR_BLOCK, 129_781_119, detect(&block, &receipts));
     let expected = CanonicalLaunch {
         venue: Venue::Four,
         block_number: 129_781_119,
@@ -305,9 +308,9 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
     };
     assert_eq!(launches, vec![expected.clone()]);
     check_launch_receipt(FOUR_RECEIPTS, &expected);
-    check_tx(TX_FOUR, &expected);
+    check_tx(FOUR_BLOCK, &expected);
     assert!(
-        raw_tx(TX_FOUR)["input"]
+        raw_tx(FOUR_BLOCK, 32)["input"]
             .as_str()
             .unwrap()
             .starts_with("0x519ebb10")
@@ -333,7 +336,7 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
 
 #[test]
 fn failed_receipts_and_other_contracts_are_not_launches() {
-    let (block, receipts) = load(FLAP_B_HEADER, FLAP_B_RECEIPTS, 129_781_248);
+    let (block, receipts) = load(FLAP_B_BLOCK, FLAP_B_RECEIPTS, 129_781_248);
     let mut failed = receipts.clone();
     failed[32].succeeded = false;
     assert!(detect(&block, &failed).is_empty());
@@ -348,7 +351,7 @@ fn failed_receipts_and_other_contracts_are_not_launches() {
 
 #[test]
 fn malformed_words_are_unknown_never_guessed() {
-    let (block, receipts) = load(FLAP_A_HEADER, FLAP_A_RECEIPTS, 129_774_331);
+    let (block, receipts) = load(FLAP_A_BLOCK, FLAP_A_RECEIPTS, 129_774_331);
     let buy_topic = LAUNCH_EVENTS[0].buy.unwrap().topic0;
     // A later buy event of the Portal with a wrong length: the count of
     // the first launch is unknown, not 0 or 1.
@@ -392,15 +395,15 @@ fn malformed_words_are_unknown_never_guessed() {
 /// every fixture header (read independently of `jsonrpc`).
 #[test]
 fn block_ms_of_the_fixture_headers() {
-    let (block, _) = load(FLAP_A_HEADER, FLAP_A_RECEIPTS, 129_774_331);
+    let (block, _) = load(FLAP_A_BLOCK, FLAP_A_RECEIPTS, 129_774_331);
     assert_eq!(block.header.timestamp_s, 1_792_962_219);
     assert_eq!(block.header.block_ms, 1_792_962_219_200);
     for (header, number) in [
-        (FLAP_A_HEADER, 129_774_331),
-        (FLAP_B_HEADER, 129_781_248),
-        (FOUR_HEADER, 129_781_119),
+        (FLAP_A_BLOCK, 129_774_331),
+        (FLAP_B_BLOCK, 129_781_248),
+        (FOUR_BLOCK, 129_781_119),
     ] {
-        let parsed = parse_header(header.as_bytes(), 1, number).unwrap().unwrap();
+        let parsed = full(header, number).head;
         let raw: Value = serde_json::from_str(header).unwrap();
         let node_ms =
             u64::from_str_radix(&raw["result"]["milliTimestamp"].as_str().unwrap()[2..], 16)
@@ -409,43 +412,60 @@ fn block_ms_of_the_fixture_headers() {
     }
 }
 
-/// The transaction answer must be the receipt's transaction, mined in that
-/// block at that index, and pass the WSS verifier.
+/// The launch transaction comes from the block's own objects: each bound
+/// to the block and its position, its `from` cross-checked with the
+/// receipt, its signed bytes verified by the WSS verifier.
 #[test]
-fn launch_transactions_are_bound_and_verified() {
-    let (block, receipts) = load(FLAP_A_HEADER, FLAP_A_RECEIPTS, 129_774_331);
-    let launch = detect(&block, &receipts).remove(0);
-    let place = launch.place();
-    let with = |edit: &dyn Fn(&mut Value)| {
-        let mut answer: Value = serde_json::from_str(TX_A1).unwrap();
-        edit(&mut answer["result"]);
-        parse_transaction(answer.to_string().as_bytes(), 1, &place)
+fn block_transactions_are_bound_cross_checked_and_verified() {
+    let (block, receipts) = load(FLAP_A_BLOCK, FLAP_A_RECEIPTS, 129_774_331);
+    // Every object's hash and sender are its receipt's (receipts_match).
+    assert_eq!(block.txs.len(), 54);
+    assert_eq!(
+        (block.txs[1].from, block.txs[1].nonce),
+        (hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"), 13)
+    );
+    let tampered = |index: usize, edit: &dyn Fn(&mut Value)| {
+        let mut answer: Value = serde_json::from_str(FLAP_A_BLOCK).unwrap();
+        edit(&mut answer["result"]["transactions"][index]);
+        answer.to_string()
     };
-    assert!(with(&|_| {}).unwrap().is_some());
+    let parse = |body: &str| parse_block(body.as_bytes(), 1, 129_774_331);
+    // Not at its position, or of another block: refused.
     assert_eq!(
-        parse_transaction(br#"{"jsonrpc":"2.0","id":1,"result":null}"#, 1, &place),
-        Ok(None)
-    );
-    // Another index or block: not this launch.
-    let mut elsewhere = place;
-    elsewhere.tx_index = 2;
-    assert_eq!(
-        parse_transaction(TX_A1.as_bytes(), 1, &elsewhere),
-        Err(RequestError::Shape(Field::TxBinding))
+        parse(&tampered(1, &|tx| tx["transactionIndex"] = Value::from("0x2"))).err(),
+        Some(RequestError::Shape(Field::TxBinding))
     );
     assert_eq!(
-        with(&|tx| tx["blockNumber"] = Value::from("0x7bc32fc")),
-        Err(RequestError::Shape(Field::TxBinding))
+        parse(&tampered(1, &|tx| tx["blockNumber"] = Value::from("0x7bc32fc"))).err(),
+        Some(RequestError::Shape(Field::TxBinding))
     );
-    // A lagging backend answering it as pending: not there yet (retried).
-    assert_eq!(with(&|tx| tx["blockHash"] = Value::Null), Ok(None));
-    // A changed signed field breaks the hash; a changed sender the signer.
+    // A changed signed field breaks the hash.
+    let renonced = parse(&tampered(1, &|tx| tx["nonce"] = Value::from("0xe")))
+        .unwrap()
+        .unwrap();
+    assert!(receipts_match(&renonced.head, &receipts));
     assert_eq!(
-        with(&|tx| tx["nonce"] = Value::from("0xe")),
-        Err(RequestError::Unverifiable(RejectReason::HashMismatch))
+        verify_object(&renonced.objects[1]).err(),
+        Some(RejectReason::HashMismatch)
     );
+    // A changed sender breaks the receipt cross-check and the signer.
+    let resent = parse(&tampered(1, &|tx| {
+        tx["from"] = Value::from("0x1111111111111111111111111111111111111111");
+    }))
+    .unwrap()
+    .unwrap();
+    assert!(!receipts_match(&resent.head, &receipts));
     assert_eq!(
-        with(&|tx| tx["from"] = Value::from("0x1111111111111111111111111111111111111111")),
-        Err(RequestError::Unverifiable(RejectReason::SignerMismatch))
+        verify_object(&resent.objects[1]).err(),
+        Some(RejectReason::SignerMismatch)
     );
+    // A type the verifier does not rebuild is known at conversion.
+    let retyped = parse(&tampered(26, &|tx| tx["type"] = Value::from("0x4")))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        verify_object(&retyped.objects[26]).err(),
+        Some(RejectReason::UnsupportedType(4))
+    );
+    assert!(verify_object(&retyped.objects[1]).is_ok());
 }

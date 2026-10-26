@@ -16,14 +16,12 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-/// The `result` of `eth_getBlockByNumber(n, false)` and of
+/// The `result` of `eth_getBlockByNumber(n, true)` and of
 /// `eth_getBlockReceipts(n)` for one block.
 #[derive(Clone)]
 struct Served {
-    header: Value,
+    block: Value,
     receipts: Value,
-    /// The `eth_getTransactionByHash` results of its launch transactions.
-    txs: Vec<Value>,
 }
 
 /// The canonical chain as the server reports it during one phase.
@@ -35,9 +33,8 @@ struct Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Req {
     BlockNumber,
-    Header(u64),
+    Block(u64),
     Receipts(u64),
-    Transaction([u8; 32]),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,8 +45,8 @@ enum Reply {
     /// Valid HTTP framing, invalid JSON.
     Malformed,
     RpcError(i64),
-    /// A `null` result.
-    Null,
+    /// The receipts with the first one's `from` replaced.
+    ForgedFrom,
     /// Reads the request and never answers (until the client closes).
     Hang,
 }
@@ -120,11 +117,11 @@ impl State {
                 }
                 json!(format!("0x{:x}", self.current().head))
             }
-            Req::Header(n) => self
+            Req::Block(n) => self
                 .current()
                 .blocks
                 .get(&n)
-                .map_or(Value::Null, |b| b.header.clone()),
+                .map_or(Value::Null, |b| b.block.clone()),
             Req::Receipts(n) => {
                 let receipts = self
                     .current()
@@ -136,14 +133,6 @@ impl State {
                 }
                 receipts
             }
-            Req::Transaction(hash) => self
-                .current()
-                .blocks
-                .values()
-                .flat_map(|b| &b.txs)
-                .find(|tx| tx["hash"] == hx(&hash))
-                .cloned()
-                .unwrap_or(Value::Null),
         }
     }
 
@@ -158,13 +147,10 @@ impl State {
             let req = match request["method"].as_str().unwrap() {
                 "eth_blockNumber" => Req::BlockNumber,
                 "eth_getBlockByNumber" => {
-                    assert_eq!(request["params"][1], false);
-                    Req::Header(number(&request["params"][0]))
+                    assert_eq!(request["params"][1], true);
+                    Req::Block(number(&request["params"][0]))
                 }
                 "eth_getBlockReceipts" => Req::Receipts(number(&request["params"][0])),
-                "eth_getTransactionByHash" => Req::Transaction(
-                    hex::decode_to_array(request["params"][0].as_str().unwrap()).unwrap(),
-                ),
                 other => panic!("unexpected method {other}"),
             };
             let chunk = matches!(req, Req::Receipts(_)).then_some(self.script.chunk);
@@ -185,7 +171,11 @@ impl State {
                     let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
                     let _ = writer.write_all(&[head.as_bytes(), body].concat());
                 }
-                Some(Reply::Null) => respond(&mut writer, &ok(Value::Null), None, false),
+                Some(Reply::ForgedFrom) => {
+                    let mut receipts = self.answer(req);
+                    receipts[0]["from"] = json!(hx(&[0x5e; 20]));
+                    respond(&mut writer, &ok(receipts), chunk, false);
+                }
                 Some(Reply::RpcError(code)) => {
                     let error = json!({"jsonrpc": "2.0", "id": id,
                         "error": {"code": code, "message": "scripted"}});
@@ -396,7 +386,12 @@ struct Outcome {
 
 /// Runs the production follower loop against `script` until the script or
 /// `stop_after` sets `stop`.
-fn follow_script(script: Script, limits: FollowerLimits, stop_after: Option<Duration>) -> Outcome {
+fn follow_script(
+    script: Script,
+    limits: FollowerLimits,
+    resume_after: Option<(u64, [u8; 32])>,
+    stop_after: Option<Duration>,
+) -> Outcome {
     let stop = Arc::new(AtomicBool::new(false));
     let server = serve(script, Arc::clone(&stop));
     let stopper = stop_after.map(|after| {
@@ -416,7 +411,13 @@ fn follow_script(script: Script, limits: FollowerLimits, stop_after: Option<Dura
     );
     let mut events = Vec::new();
     let mut sink = |event: CanonicalEvent| events.push((event, Instant::now()));
-    run(&mut Rpc::new(client), &limits, &stop, &mut sink);
+    run(
+        &mut Rpc::new(client),
+        &limits,
+        resume_after,
+        &stop,
+        &mut sink,
+    );
     let returned = Instant::now();
     server.done.store(true, Ordering::Release);
     let state = server.handle.join().unwrap();
@@ -521,10 +522,9 @@ fn four_launch(creator: [u8; 20], token: [u8; 20]) -> SynthLog {
 struct Tx {
     ok: bool,
     logs: Vec<SynthLog>,
-    /// A real signed transaction (a fixture's `eth_getTransactionByHash`
-    /// answer) this synthetic one stands for: its hash, and its object
-    /// rebound to the synthetic block.
-    real: Option<&'static str>,
+    /// A real signed transaction object (from a fixture block) this
+    /// synthetic one stands for, rebound to the synthetic block.
+    real: Option<Value>,
 }
 
 fn tx(logs: Vec<SynthLog>) -> Tx {
@@ -535,7 +535,7 @@ fn tx(logs: Vec<SynthLog>) -> Tx {
     }
 }
 
-fn signed(real: &'static str, logs: Vec<SynthLog>) -> Tx {
+fn signed(real: Value, logs: Vec<SynthLog>) -> Tx {
     Tx {
         ok: true,
         logs,
@@ -543,19 +543,43 @@ fn signed(real: &'static str, logs: Vec<SynthLog>) -> Tx {
     }
 }
 
-/// The `result` of a stored `eth_getTransactionByHash` answer.
-fn tx_object(answer: &str) -> Value {
+const FLAP_A_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129774331.full.json");
+const FLAP_A_RECEIPTS: &str =
+    include_str!("../../tests/fixtures/chain/block_129774331.receipts.json");
+const FOUR_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129781119.full.json");
+
+/// The `result` of a stored answer.
+fn result(answer: &str) -> Value {
     let answer: Value = serde_json::from_str(answer).unwrap();
     answer["result"].clone()
 }
 
-fn tx_hash(answer: &str) -> [u8; 32] {
-    hex::decode_to_array(tx_object(answer)["hash"].as_str().unwrap()).unwrap()
+/// Transaction `index` of a fixture block, as the node sent it.
+fn fixture_tx(block: &str, index: usize) -> Value {
+    result(block)["transactions"][index].clone()
 }
 
-const TX_DIRECT: &str = include_str!("../../tests/fixtures/chain/tx_129774331_1.json");
-const TX_ROUTER: &str = include_str!("../../tests/fixtures/chain/tx_129774331_26.json");
-const TX_FOUR: &str = include_str!("../../tests/fixtures/chain/tx_129781119_32.json");
+/// The real direct Portal `newTokenV6` launch (block 129774331, index 1).
+fn tx_direct() -> Value {
+    fixture_tx(FLAP_A_BLOCK, 1)
+}
+
+/// The real launch through a router (block 129774331, index 26).
+fn tx_router() -> Value {
+    fixture_tx(FLAP_A_BLOCK, 26)
+}
+
+/// The real Four.meme `createToken` (block 129781119, index 32).
+fn tx_four() -> Value {
+    fixture_tx(FOUR_BLOCK, 32)
+}
+
+fn hash_of(tx: &Value) -> [u8; 32] {
+    hex::decode_to_array(tx["hash"].as_str().unwrap()).unwrap()
+}
+
+/// The sender of every synthetic (unsigned) transaction.
+const SYNTH_SENDER: [u8; 20] = [0xaa; 20];
 
 struct Synth {
     number: u64,
@@ -567,14 +591,27 @@ struct Synth {
 /// of `parent`, with `number % 1000` milliseconds in its `mixHash`.
 fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
     let hash = named(label);
-    let hashes: Vec<[u8; 32]> = txs
+    // Real objects rebound to this block; synthetic ones with the fields
+    // the follower reads (their WSS conversion is refused, which only
+    // matters for a launch).
+    let objects: Vec<Value> = txs
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            t.real
-                .map_or_else(|| named(&format!("{label}/tx{i}")), tx_hash)
+            let mut object = t.real.clone().unwrap_or_else(|| {
+                json!({
+                    "hash": hx(&named(&format!("{label}/tx{i}"))),
+                    "from": hx(&SYNTH_SENDER),
+                    "nonce": q(i as u64),
+                })
+            });
+            object["blockHash"] = json!(hx(&hash));
+            object["blockNumber"] = json!(q(number));
+            object["transactionIndex"] = json!(q(i as u64));
+            object
         })
         .collect();
+    let hashes: Vec<[u8; 32]> = objects.iter().map(hash_of).collect();
     let header = json!({
         "number": q(number),
         "hash": hx(&hash),
@@ -582,18 +619,8 @@ fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
         "timestamp": q(1_760_000_000 + number),
         "mixHash": format!("0x{:064x}", number % 1000),
         "miner": hx(&[0u8; 20]),
-        "transactions": hashes.iter().map(|h| hx(h)).collect::<Vec<_>>(),
+        "transactions": objects,
     });
-    let mut signed_txs = Vec::new();
-    for (i, t) in txs.iter().enumerate() {
-        if let Some(real) = t.real {
-            let mut object = tx_object(real);
-            object["blockHash"] = json!(hx(&hash));
-            object["blockNumber"] = json!(q(number));
-            object["transactionIndex"] = json!(q(i as u64));
-            signed_txs.push(object);
-        }
-    }
     let mut log_index = 0u64;
     let mut receipts = Vec::new();
     for (i, t) in txs.iter().enumerate() {
@@ -615,6 +642,7 @@ fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
         receipts.push(json!({
             "transactionHash": hx(&hashes[i]),
             "transactionIndex": q(i as u64),
+            "from": header["transactions"][i]["from"],
             "blockHash": hx(&hash),
             "blockNumber": q(number),
             "status": if t.ok { "0x1" } else { "0x0" },
@@ -625,9 +653,8 @@ fn block(label: &str, number: u64, parent: &str, txs: Vec<Tx>) -> Synth {
     Synth {
         number,
         served: Served {
-            header,
+            block: header,
             receipts: Value::Array(receipts),
-            txs: signed_txs,
         },
     }
 }
@@ -664,6 +691,7 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
             timestamp_s,
             timestamp_ms,
             observed_unix_ms,
+            txs,
             ..
         } => {
             if names.contains_key(hash) {
@@ -671,7 +699,15 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
                 assert_eq!(*timestamp_ms, timestamp_s * 1000 + number % 1000);
             }
             assert!(observed_unix_ms.is_some());
-            format!("block {} <- {}", name(hash), name(parent_hash))
+            for (i, tx) in txs.iter().enumerate() {
+                assert_eq!(tx.index, i as u64);
+            }
+            format!(
+                "block {} <- {} txs {}",
+                name(hash),
+                name(parent_hash),
+                txs.len()
+            )
         }
         CanonicalEvent::Launch(l) => format!(
             "launch {:?} {} {} token {:?} creator {:?} buys {:?} first {:?} \
@@ -694,9 +730,6 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
             format!("too deep {} -> {}", list(orphaned), list(&[*new_head]))
         }
         CanonicalEvent::Gap { from, to } => format!("gap {from}..={to}"),
-        CanonicalEvent::Fault(FollowerFault::Unavailable(Call::Transaction(h))) => {
-            format!("fault unavailable {}", name(h))
-        }
         CanonicalEvent::Fault(fault) => format!("fault {fault:?}"),
     }
 }
@@ -720,7 +753,10 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         vec![
             // The launch with the creator's own buy (not external), standing
             // for a real direct Portal `newTokenV6` call.
-            signed(TX_DIRECT, vec![flap_launch(DEV, T1), flap_buy(T1, DEV, 7)]),
+            signed(
+                tx_direct(),
+                vec![flap_launch(DEV, T1), flap_buy(T1, DEV, 7)],
+            ),
             tx(vec![flap_buy(T1, BUYER, 7)]),
             Tx {
                 ok: false,
@@ -738,7 +774,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         "102C",
         102,
         "101C",
-        vec![signed(TX_FOUR, vec![four_launch(DEV, T2)])],
+        vec![signed(tx_four(), vec![four_launch(DEV, T2)])],
     );
     let c103 = block("103C", 103, "102C", vec![]);
     let c104 = block("104C", 104, "103C", vec![]);
@@ -748,7 +784,7 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         let txs = if n == 106 {
             // A later buy event of the token that is malformed.
             vec![
-                signed(TX_ROUTER, vec![flap_launch(DEV, T3)]),
+                signed(tx_router(), vec![flap_launch(DEV, T3)]),
                 tx(vec![flap_buy(T3, BUYER, 6)]),
             ]
         } else {
@@ -775,10 +811,10 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         inject: vec![
             (Req::Receipts(101), 0, Reply::Close),
             (Req::BlockNumber, 3, Reply::Http429),
-            (Req::Transaction(tx_hash(TX_FOUR)), 0, Reply::Null),
-            (Req::Header(105), 0, Reply::Malformed),
+            (Req::Receipts(102), 2, Reply::ForgedFrom),
+            (Req::Block(105), 0, Reply::Malformed),
             (Req::Receipts(113), 0, Reply::RpcError(-32000)),
-            (Req::Header(114), 0, Reply::RpcError(-32005)),
+            (Req::Block(114), 0, Reply::RpcError(-32005)),
         ],
         chunk: 37,
     };
@@ -793,50 +829,81 @@ fn follows_reorgs_gaps_and_faults_in_exact_order() {
         names.insert(named(&label), label.clone());
         names.insert(named(&format!("{label}/tx0")), format!("{label}/tx0"));
     }
-    names.insert(tx_hash(TX_DIRECT), "tx:direct".to_owned());
-    names.insert(tx_hash(TX_ROUTER), "tx:router".to_owned());
-    names.insert(tx_hash(TX_FOUR), "tx:four".to_owned());
+    names.insert(hash_of(&tx_direct()), "tx:direct".to_owned());
+    names.insert(hash_of(&tx_router()), "tx:router".to_owned());
+    names.insert(hash_of(&tx_four()), "tx:four".to_owned());
 
     let limits = limits();
-    let outcome = follow_script(script, limits, None);
+    let outcome = follow_script(script, limits, None, None);
     let lines: Vec<String> = outcome
         .events
         .iter()
         .map(|(e, _)| describe(e, &names))
         .collect();
     let expected = [
-        "block 100A <- 99",
-        "block 101A <- 100A",
+        "block 100A <- 99 txs 1",
+        "block 101A <- 100A txs 4",
         "launch Flap 101A tx:direct token Some(113) creator Some(222) buys Some(2) first Some(1) \
          sender 15 nonce 13 c1 true",
-        "block 102A <- 101A",
+        "block 102A <- 101A txs 0",
         "reorg 102A -> 103B",
-        "block 102B <- 101A",
-        "block 103B <- 102B",
+        "block 102B <- 101A txs 1",
+        "block 103B <- 102B txs 0",
         "fault Request { call: BlockNumber, error: RateLimited(Http429) }",
         "reorg 101A,102B,103B -> 104C",
-        "block 101C <- 100A",
-        // The Four launch's transaction is not served yet: 102C waits.
-        "fault unavailable tx:four",
-        "block 102C <- 101C",
+        "block 101C <- 100A txs 0",
+        // A receipt whose sender is not its transaction's: 102C waits.
+        "fault ReceiptsMismatch(102)",
+        "block 102C <- 101C txs 1",
         "launch Four 102C tx:four token Some(114) creator Some(222) buys None first None \
          sender 119 nonce 262 c1 false",
-        "block 103C <- 102C",
-        "block 104C <- 103C",
-        "fault Request { call: Header(105), error: MalformedJson }",
-        "block 105C <- 104C",
+        "block 103C <- 102C txs 0",
+        "block 104C <- 103C txs 0",
+        "fault Request { call: Block(105), error: MalformedJson }",
+        "block 105C <- 104C txs 0",
         "too deep 102C,103C,104C,105C -> 106D",
-        "block 106D <- 105D",
+        "block 106D <- 105D txs 2",
         "launch Flap 106D tx:router token Some(115) creator Some(222) buys None first None \
          sender 203 nonce 1592 c1 false",
         "gap 107..=111",
-        "block 112D <- 111D",
+        "block 112D <- 111D txs 0",
         "fault Request { call: Receipts(113), error: Rpc(-32000) }",
-        "block 113D <- 112D",
-        "fault Request { call: Header(114), error: RateLimited(RpcError(-32005)) }",
-        "block 114D <- 113D",
+        "block 113D <- 112D txs 0",
+        "fault Request { call: Block(114), error: RateLimited(RpcError(-32005)) }",
+        "block 114D <- 113D txs 0",
     ];
     assert_eq!(lines, expected);
+    // Every transaction of a block: sender, nonce and receipt status.
+    let a101 = outcome
+        .events
+        .iter()
+        .find_map(|(e, _)| match e {
+            CanonicalEvent::Block { hash, txs, .. } if *hash == named("101A") => Some(txs.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let synthetic = |i: u64, succeeded| CanonicalTx {
+        hash: named(&format!("101A/tx{i}")),
+        index: i,
+        sender: SYNTH_SENDER,
+        nonce: i,
+        succeeded,
+    };
+    assert_eq!(
+        a101,
+        vec![
+            CanonicalTx {
+                hash: hash_of(&tx_direct()),
+                index: 0,
+                sender: hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"),
+                nonce: 13,
+                succeeded: true,
+            },
+            synthetic(1, true),
+            synthetic(2, false),
+            synthetic(3, true),
+        ]
+    );
 
     // Every block was observed before it was reported; 113D keeps the time
     // its header was first held, before the failed receipts.
@@ -888,7 +955,7 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
         chunk: 64,
     };
     let limits = limits();
-    let outcome = follow_script(script, limits, Some(Duration::from_millis(300)));
+    let outcome = follow_script(script, limits, None, Some(Duration::from_millis(300)));
     assert_eq!(outcome.events.len(), 1, "only block 100A, no fault");
     let after = outcome.returned - outcome.stop_set_at.unwrap();
     assert!(after < bound(&limits), "hanging request: {after:?}");
@@ -903,7 +970,7 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
         poll: Duration::from_secs(60),
         ..limits
     };
-    let outcome = follow_script(script, long_poll, Some(Duration::from_millis(300)));
+    let outcome = follow_script(script, long_poll, None, Some(Duration::from_millis(300)));
     assert_eq!(outcome.events.len(), 1);
     let after = outcome.returned - outcome.stop_set_at.unwrap();
     assert!(after < bound(&long_poll), "poll wait: {after:?}");
@@ -918,7 +985,7 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
         request_timeout: Duration::from_millis(150),
         ..limits
     };
-    let outcome = follow_script(script, short_deadline, None);
+    let outcome = follow_script(script, short_deadline, None, None);
     let names = BTreeMap::from([
         (named("100A"), "100A".to_owned()),
         (named("99"), "99".to_owned()),
@@ -931,36 +998,42 @@ fn stop_ends_a_hanging_request_and_the_poll_wait_within_a_bound() {
     assert_eq!(
         lines,
         [
-            "block 100A <- 99",
+            "block 100A <- 99 txs 0",
             "fault Request { call: BlockNumber, error: Transport(Timeout) }",
         ]
     );
 }
 
+/// Block 129774331 as the node sent it, with `edit` applied to its
+/// transaction objects.
+fn real_block(edit: &dyn Fn(&mut Vec<Value>)) -> Served {
+    let mut block = result(FLAP_A_BLOCK);
+    if let Value::Array(txs) = &mut block["transactions"] {
+        edit(txs);
+    }
+    Served {
+        block,
+        receipts: result(FLAP_A_RECEIPTS),
+    }
+}
+
+fn only(served: Served) -> Phase {
+    Phase {
+        head: 129_774_331,
+        blocks: BTreeMap::from([(129_774_331, served)]),
+    }
+}
+
 #[test]
 fn a_real_launch_block_through_the_whole_path() {
-    let header: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/chain/block_129774331.header.json"
-    ))
-    .unwrap();
-    let receipts: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/chain/block_129774331.receipts.json"
-    ))
-    .unwrap();
-    let served = Served {
-        header: header["result"].clone(),
-        receipts: receipts["result"].clone(),
-        txs: vec![tx_object(TX_DIRECT), tx_object(TX_ROUTER)],
-    };
+    let header = result(FLAP_A_BLOCK);
+    let receipts = result(FLAP_A_RECEIPTS);
     let script = Script {
-        phases: vec![Phase {
-            head: 129_774_331,
-            blocks: BTreeMap::from([(129_774_331, served)]),
-        }],
+        phases: vec![only(real_block(&|_| {}))],
         inject: vec![],
         chunk: 4096,
     };
-    let outcome = follow_script(script, limits(), None);
+    let outcome = follow_script(script, limits(), None, None);
     let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Block {
@@ -970,6 +1043,7 @@ fn a_real_launch_block_through_the_whole_path() {
             timestamp_s,
             timestamp_ms,
             observed_unix_ms,
+            txs,
             ..
         },
         CanonicalEvent::Launch(first),
@@ -979,24 +1053,26 @@ fn a_real_launch_block_through_the_whole_path() {
         panic!("{events:?}");
     };
     assert_eq!(*number, 129_774_331);
+    // Every transaction against the raw objects and receipts.
+    assert_eq!(txs.len(), 54);
+    for (i, tx) in txs.iter().enumerate() {
+        let raw = &header["transactions"][i];
+        assert_eq!(hx(&tx.hash), raw["hash"].as_str().unwrap());
+        assert_eq!(hx(&tx.sender), raw["from"].as_str().unwrap());
+        assert_eq!(q(tx.nonce), raw["nonce"].as_str().unwrap());
+        assert_eq!(tx.succeeded, receipts[i]["status"] == "0x1");
+        assert_eq!(tx.index, i as u64);
+    }
+    assert!(txs.iter().any(|tx| !tx.succeeded));
     assert_eq!(
         *hash,
         hex!("b46720d61774811f42474df7f45d98e2967509025fe10a5f67c9eb9f381e12ab")
     );
-    assert_eq!(
-        hx(parent_hash),
-        header["result"]["parentHash"].as_str().unwrap()
-    );
-    assert_eq!(
-        q(*timestamp_s),
-        header["result"]["timestamp"].as_str().unwrap()
-    );
+    assert_eq!(hx(parent_hash), header["parentHash"].as_str().unwrap());
+    assert_eq!(q(*timestamp_s), header["timestamp"].as_str().unwrap());
     // 0x6ade6eab s * 1000 + mixHash 0xc8 ms; the node's `milliTimestamp`.
     assert_eq!(*timestamp_ms, 1_792_962_219_200);
-    assert_eq!(
-        q(*timestamp_ms),
-        header["result"]["milliTimestamp"].as_str().unwrap()
-    );
+    assert_eq!(q(*timestamp_ms), header["milliTimestamp"].as_str().unwrap());
     // Held now, long after the block was made.
     assert!(observed_unix_ms.unwrap() > *timestamp_ms);
     assert_eq!(
@@ -1040,30 +1116,13 @@ fn a_real_launch_block_through_the_whole_path() {
 /// carries the reason, and nothing is skipped.
 #[test]
 fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
-    let header: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/chain/block_129774331.header.json"
-    ))
-    .unwrap();
-    let receipts: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/chain/block_129774331.receipts.json"
-    ))
-    .unwrap();
-    let mut refused = tx_object(TX_ROUTER);
-    refused["type"] = Value::from("0x4");
-    let served = Served {
-        header: header["result"].clone(),
-        receipts: receipts["result"].clone(),
-        txs: vec![tx_object(TX_DIRECT), refused],
-    };
+    let served = real_block(&|txs| txs[26]["type"] = Value::from("0x4"));
     let script = Script {
-        phases: vec![Phase {
-            head: 129_774_331,
-            blocks: BTreeMap::from([(129_774_331, served)]),
-        }],
+        phases: vec![only(served)],
         inject: vec![],
         chunk: 4096,
     };
-    let outcome = follow_script(script, limits(), None);
+    let outcome = follow_script(script, limits(), None, None);
     let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Block { number, .. },
@@ -1092,37 +1151,17 @@ fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
 /// never silently passes as verified.
 #[test]
 fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
-    let header: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/chain/block_129774331.header.json"
-    ))
-    .unwrap();
-    let receipts: Value = serde_json::from_str(include_str!(
-        "../../tests/fixtures/chain/block_129774331.receipts.json"
-    ))
-    .unwrap();
-    let mut broken = tx_object(TX_ROUTER);
-    broken["nonce"] = Value::from("0x1");
     // The same block in two phases: a phase ends with its head's receipts,
     // so the second one serves the retry.
-    let phase = || Phase {
-        head: 129_774_331,
-        blocks: BTreeMap::from([(
-            129_774_331,
-            Served {
-                header: header["result"].clone(),
-                receipts: receipts["result"].clone(),
-                txs: vec![tx_object(TX_DIRECT), broken.clone()],
-            },
-        )]),
-    };
+    let served = real_block(&|txs| txs[26]["nonce"] = Value::from("0x1"));
     let script = Script {
-        phases: vec![phase(), phase()],
+        phases: vec![only(served.clone()), only(served)],
         inject: vec![],
         chunk: 4096,
     };
     let limits = limits();
     assert_eq!(limits.tx_attempts, 2);
-    let outcome = follow_script(script, limits, None);
+    let outcome = follow_script(script, limits, None, None);
     let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
     let [
         CanonicalEvent::Fault(FollowerFault::Request {
@@ -1144,4 +1183,65 @@ fn a_provider_side_refusal_is_retried_then_carried_with_its_reason() {
     );
     assert!(!is_unrebuildable(RejectReason::HashMismatch));
     assert!(is_unrebuildable(RejectReason::UnsupportedType(4)));
+}
+
+/// C2 restart: the follower resumes after the block the caller applied
+/// last. It backfills in order when that block is still canonical, reports
+/// it orphaned when it left the chain, and reports the exact gap when the
+/// head is more than `max_catch_up` (5) ahead.
+#[test]
+fn resume_after_the_last_applied_block() {
+    let chain: Vec<Synth> = (100..=110u64)
+        .map(|n| {
+            let parent = if n == 100 {
+                "99".to_owned()
+            } else {
+                format!("{}A", n - 1)
+            };
+            block(&format!("{n}A"), n, &parent, vec![])
+        })
+        .collect();
+    let mut names = BTreeMap::new();
+    for label in (100..=110)
+        .map(|n| format!("{n}A"))
+        .chain(["99".to_owned(), "100X".to_owned()])
+    {
+        names.insert(named(&label), label);
+    }
+    let lines = |head: u64, resume: (u64, [u8; 32])| -> Vec<String> {
+        let blocks: Vec<&Synth> = chain.iter().filter(|b| b.number <= head).collect();
+        let script = Script {
+            phases: vec![phase(head, &blocks)],
+            inject: vec![],
+            chunk: 64,
+        };
+        follow_script(script, limits(), Some(resume), None)
+            .events
+            .iter()
+            .map(|(e, _)| describe(e, &names))
+            .collect()
+    };
+    // Still canonical: 101..=103 in order, no gap.
+    assert_eq!(
+        lines(103, (100, named("100A"))),
+        [
+            "block 101A <- 100A txs 0",
+            "block 102A <- 101A txs 0",
+            "block 103A <- 102A txs 0",
+        ]
+    );
+    // Left the chain while the process was down: reported before 101.
+    assert_eq!(
+        lines(102, (100, named("100X"))),
+        [
+            "too deep 100X -> 101A",
+            "block 101A <- 100A txs 0",
+            "block 102A <- 101A txs 0",
+        ]
+    );
+    // Too far behind: the skipped heights, exactly, then the head.
+    assert_eq!(
+        lines(110, (100, named("100A"))),
+        ["gap 101..=109", "block 110A <- 109A txs 0"]
+    );
 }

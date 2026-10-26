@@ -8,12 +8,13 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::http::Client;
-use super::jsonrpc::{self, BlockHead, Header, Receipt, TxPlace};
+use super::jsonrpc::{self, BlockHead, FullBlock, Receipt};
 use super::launches;
 use super::{
-    Call, CanonicalEvent, FollowerFault, FollowerLimits, RequestError, is_unrebuildable, stopped,
+    Call, CanonicalEvent, CanonicalTx, FollowerFault, FollowerLimits, RequestError,
+    is_unrebuildable, stopped,
 };
-use crate::wss::{DisconnectReason, VerifiedTx};
+use crate::wss::DisconnectReason;
 
 /// The typed JSON-RPC calls over one HTTP client.
 pub(super) struct Rpc<S, C> {
@@ -47,10 +48,10 @@ where
             .map_err(|error| FollowerFault::Request { call, error })
     }
 
-    fn header(&mut self, number: u64, stop: &AtomicBool) -> Result<BlockHead, FollowerFault> {
-        let call = Call::Header(number);
+    fn block(&mut self, number: u64, stop: &AtomicBool) -> Result<FullBlock, FollowerFault> {
+        let call = Call::Block(number);
         let (answer, id) = self.post(call, stop)?;
-        jsonrpc::parse_header(&answer, id, number)
+        jsonrpc::parse_block(&answer, id, number)
             .map_err(|error| FollowerFault::Request { call, error })?
             .ok_or(FollowerFault::Unavailable(call))
     }
@@ -59,18 +60,6 @@ where
         let call = Call::Receipts(number);
         let (answer, id) = self.post(call, stop)?;
         jsonrpc::parse_receipts(&answer, id)
-            .map_err(|error| FollowerFault::Request { call, error })?
-            .ok_or(FollowerFault::Unavailable(call))
-    }
-
-    fn transaction(
-        &mut self,
-        place: &TxPlace,
-        stop: &AtomicBool,
-    ) -> Result<VerifiedTx, FollowerFault> {
-        let call = Call::Transaction(place.hash);
-        let (answer, id) = self.post(call, stop)?;
-        jsonrpc::parse_transaction(&answer, id, place)
             .map_err(|error| FollowerFault::Request { call, error })?
             .ok_or(FollowerFault::Unavailable(call))
     }
@@ -102,13 +91,14 @@ impl FirstHeld {
 pub(super) fn run<S, C>(
     rpc: &mut Rpc<S, C>,
     limits: &FollowerLimits,
+    resume_after: Option<(u64, [u8; 32])>,
     stop: &AtomicBool,
     sink: &mut dyn FnMut(CanonicalEvent),
 ) where
     S: Read + Write,
     C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
 {
-    let mut follower = Follower::new(limits);
+    let mut follower = Follower::new(limits, resume_after);
     let mut next_wait = limits.backoff_initial;
     while !stopped(stop) {
         let wait = match follower.step(rpc, stop, sink) {
@@ -163,9 +153,10 @@ fn wait_unless_stopped(wait: Duration, tick: Duration, stop: &AtomicBool) -> boo
 pub(super) struct Follower {
     reorg_depth: u64,
     max_catch_up: u64,
-    /// The last followed blocks, contiguous and ascending: at most
-    /// `reorg_depth + 1` (the deepest provable fork point included).
-    kept: VecDeque<Header>,
+    /// The last followed blocks (number, hash), contiguous and ascending:
+    /// at most `reorg_depth + 1` (the deepest provable fork point
+    /// included).
+    kept: VecDeque<(u64, [u8; 32])>,
     /// The lowest height not yet followed; `None` before the first block.
     next: Option<u64>,
     /// When a header (number, hash) was first held, for blocks not yet
@@ -178,12 +169,14 @@ pub(super) struct Follower {
 }
 
 impl Follower {
-    pub(super) fn new(limits: &FollowerLimits) -> Self {
+    /// `resume_after`: the block the caller applied last, kept as the
+    /// window until its successor proves it canonical (or orphans it).
+    pub(super) fn new(limits: &FollowerLimits, resume_after: Option<(u64, [u8; 32])>) -> Self {
         Self {
             reorg_depth: limits.reorg_depth,
             max_catch_up: limits.max_catch_up,
-            kept: VecDeque::new(),
-            next: None,
+            kept: resume_after.into_iter().collect(),
+            next: resume_after.map(|(number, _)| number.saturating_add(1)),
             seen: VecDeque::new(),
             tx_attempts: limits.tx_attempts,
             refusals: Vec::new(),
@@ -202,7 +195,7 @@ impl Follower {
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
         let head = rpc.block_number(stop)?;
-        let Some(last) = self.kept.back().map(|h| h.number) else {
+        let Some(last) = self.kept.back().map(|(number, _)| *number) else {
             return self.restart(rpc, head, stop, sink);
         };
         if head <= last {
@@ -247,7 +240,7 @@ impl Follower {
                 self.next = Some(head);
             }
         }
-        let (block, observed) = self.fetch_header(rpc, head, stop)?;
+        let (block, observed) = self.fetch_block(rpc, head, stop)?;
         self.accept(rpc, block, observed, stop, sink)
     }
 
@@ -263,11 +256,11 @@ impl Follower {
         S: Read + Write,
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
-        let (block, observed) = self.fetch_header(rpc, number, stop)?;
+        let (block, observed) = self.fetch_block(rpc, number, stop)?;
         let extends = self
             .kept
             .back()
-            .is_none_or(|head| head.hash == block.header.parent_hash);
+            .is_none_or(|(_, hash)| *hash == block.head.header.parent_hash);
         if extends {
             self.accept(rpc, block, observed, stop, sink)
         } else {
@@ -282,7 +275,7 @@ impl Follower {
     fn reorg<S, C>(
         &mut self,
         rpc: &mut Rpc<S, C>,
-        tip: BlockHead,
+        tip: FullBlock,
         tip_observed: FirstHeld,
         stop: &AtomicBool,
         sink: &mut dyn FnMut(CanonicalEvent),
@@ -291,38 +284,40 @@ impl Follower {
         S: Read + Write,
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
-        let new_head = (tip.header.number, tip.header.hash);
+        let new_head = (tip.head.header.number, tip.head.header.hash);
         // The new chain from the tip downwards. Bounded: each round goes
         // one height down and ends below the kept window.
         let mut chain = vec![(tip, tip_observed)];
         let fork = loop {
-            let Some(child) = chain.last().map(|(block, _)| block.header) else {
+            let Some(child) = chain.last().map(|(block, _)| block.head.header) else {
                 break None;
             };
-            let Some(kept) = child.number.checked_sub(1).and_then(|h| self.kept_at(h)) else {
+            let Some((kept_number, kept_hash)) =
+                child.number.checked_sub(1).and_then(|h| self.kept_at(h))
+            else {
                 break None;
             };
-            if kept.hash == child.parent_hash {
-                break Some(kept.number);
+            if kept_hash == child.parent_hash {
+                break Some(kept_number);
             }
-            let (parent, observed) = self.fetch_header(rpc, kept.number, stop)?;
-            if parent.header.hash != child.parent_hash {
-                return Err(FollowerFault::ChainMoved(kept.number));
+            let (parent, observed) = self.fetch_block(rpc, kept_number, stop)?;
+            if parent.head.header.hash != child.parent_hash {
+                return Err(FollowerFault::ChainMoved(kept_number));
             }
             chain.push((parent, observed));
         };
         match fork {
             Some(fork) => {
                 let mut orphaned = Vec::new();
-                while let Some(head) = self.kept.back().filter(|h| h.number > fork) {
-                    orphaned.push((head.number, head.hash));
+                while let Some(head) = self.kept.back().filter(|(number, _)| *number > fork) {
+                    orphaned.push(*head);
                     self.kept.pop_back();
                 }
                 orphaned.reverse();
                 sink(CanonicalEvent::Reorg { orphaned, new_head });
             }
             None => {
-                let orphaned = self.kept.drain(..).map(|h| (h.number, h.hash)).collect();
+                let orphaned = self.kept.drain(..).collect();
                 sink(CanonicalEvent::ReorgTooDeep { orphaned, new_head });
                 chain.truncate(1);
             }
@@ -333,14 +328,14 @@ impl Follower {
         Ok(())
     }
 
-    /// Fetches the receipts of `block`, verifies them against it, fetches
-    /// and verifies the transaction of every launch, then reports the block
-    /// and its launches and keeps its header. Nothing is reported unless
-    /// all of it succeeded.
+    /// Fetches the receipts of `block`, verifies them against it and the
+    /// launch transactions from the block's own objects, then reports the
+    /// block (with all its transactions) and its launches and keeps it.
+    /// Nothing is reported unless all of it succeeded.
     fn accept<S, C>(
         &mut self,
         rpc: &mut Rpc<S, C>,
-        block: BlockHead,
+        block: FullBlock,
         observed: FirstHeld,
         stop: &AtomicBool,
         sink: &mut dyn FnMut(CanonicalEvent),
@@ -349,47 +344,59 @@ impl Follower {
         S: Read + Write,
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
-        let header = block.header;
+        let FullBlock { head, objects } = block;
+        let header = head.header;
         let receipts = rpc.receipts(header.number, stop)?;
-        if !receipts_match(&block, &receipts) {
+        if !receipts_match(&head, &receipts) {
             return Err(FollowerFault::ReceiptsMismatch(header.number));
         }
         let mut launches = Vec::new();
-        for launch in launches::detect(&block, &receipts) {
-            // A refusal of the verifier is a fact of this transaction (it
-            // would never verify): the launch carries it. Only a missing or
-            // unreachable answer is retried.
-            let tx = match rpc.transaction(&launch.place(), stop) {
+        for launch in launches::detect(&head, &receipts) {
+            let object = usize::try_from(launch.tx_index)
+                .ok()
+                .and_then(|index| objects.get(index))
+                .ok_or(FollowerFault::ReceiptsMismatch(header.number))?;
+            let tx = match launches::verify_object(object) {
                 Ok(tx) => Ok(tx),
-                Err(FollowerFault::Request {
-                    error: RequestError::Unverifiable(reason),
-                    call,
-                }) => {
-                    // A provider-side refusal is fetched again (the block is
-                    // retried) up to `tx_attempts` times, then accepted with it.
-                    let hash = launch.place().hash;
-                    let tried = match self.refusals.iter_mut().find(|(h, _)| *h == hash) {
+                Err(reason) => {
+                    // A refusal for a property of the transaction is final
+                    // at once; one that may be the provider's is fetched
+                    // again with the block up to `tx_attempts` times, then
+                    // carried by the launch.
+                    let tried = match self.refusals.iter_mut().find(|(h, _)| *h == launch.tx_hash) {
                         Some((_, n)) => {
                             *n += 1;
                             *n
                         }
                         None => {
-                            self.refusals.push((hash, 1));
+                            self.refusals.push((launch.tx_hash, 1));
                             1
                         }
                     };
                     if !is_unrebuildable(reason) && tried < self.tx_attempts {
                         return Err(FollowerFault::Request {
+                            call: Call::Block(header.number),
                             error: RequestError::Unverifiable(reason),
-                            call,
                         });
                     }
                     Err(reason)
                 }
-                Err(fault) => return Err(fault),
             };
             launches.push(launch.with_transaction(tx.as_ref().map_err(|r| *r)));
         }
+        let txs = head
+            .txs
+            .iter()
+            .zip(&receipts)
+            .enumerate()
+            .map(|(index, (tx, receipt))| CanonicalTx {
+                hash: tx.hash,
+                index: index as u64,
+                sender: tx.from,
+                nonce: tx.nonce,
+                succeeded: receipt.succeeded,
+            })
+            .collect();
         sink(CanonicalEvent::Block {
             number: header.number,
             hash: header.hash,
@@ -398,11 +405,12 @@ impl Follower {
             timestamp_ms: header.block_ms,
             observed: observed.at,
             observed_unix_ms: observed.unix_ms,
+            txs,
         });
         for launch in launches {
             sink(CanonicalEvent::Launch(launch));
         }
-        self.kept.push_back(header);
+        self.kept.push_back((header.number, header.hash));
         while self.kept.len() as u64 > self.reorg_depth.saturating_add(1) {
             self.kept.pop_front();
         }
@@ -412,20 +420,20 @@ impl Follower {
         Ok(())
     }
 
-    /// The header of block `number` and when this follower first held it.
-    fn fetch_header<S, C>(
+    /// The block `number` and when this follower first held its header.
+    fn fetch_block<S, C>(
         &mut self,
         rpc: &mut Rpc<S, C>,
         number: u64,
         stop: &AtomicBool,
-    ) -> Result<(BlockHead, FirstHeld), FollowerFault>
+    ) -> Result<(FullBlock, FirstHeld), FollowerFault>
     where
         S: Read + Write,
         C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
     {
-        let block = rpc.header(number, stop)?;
+        let block = rpc.block(number, stop)?;
         let now = FirstHeld::now();
-        let id = (block.header.number, block.header.hash);
+        let id = (block.head.header.number, block.head.header.hash);
         let observed = match self.seen.iter().find(|(n, h, _)| (*n, *h) == id) {
             Some((_, _, first)) => *first,
             None => {
@@ -439,24 +447,25 @@ impl Follower {
         Ok((block, observed))
     }
 
-    fn kept_at(&self, number: u64) -> Option<Header> {
-        let front = self.kept.front()?.number;
+    fn kept_at(&self, number: u64) -> Option<(u64, [u8; 32])> {
+        let front = self.kept.front()?.0;
         let index = usize::try_from(number.checked_sub(front)?).ok()?;
         self.kept.get(index).copied()
     }
 }
 
 /// The receipts are exactly the block's transactions: same count, in
-/// order, each bound to the block's hash and number, with the block's log
-/// indices contiguous from 0.
+/// order, each with its transaction's hash and sender, bound to the block's
+/// hash and number, with the block's log indices contiguous from 0.
 pub(super) fn receipts_match(block: &BlockHead, receipts: &[Receipt]) -> bool {
-    if receipts.len() != block.transactions.len() {
+    if receipts.len() != block.txs.len() {
         return false;
     }
     let mut next_log = 0u64;
-    for (index, (receipt, tx)) in receipts.iter().zip(&block.transactions).enumerate() {
+    for (index, (receipt, tx)) in receipts.iter().zip(&block.txs).enumerate() {
         let bound = receipt.tx_index == index as u64
-            && receipt.tx_hash == *tx
+            && receipt.tx_hash == tx.hash
+            && receipt.from == tx.from
             && receipt.block_hash == block.header.hash
             && receipt.block_number == block.header.number;
         if !bound {
