@@ -79,6 +79,9 @@ pub mod chain_follower;
 /// The PAPER identity and sink: the end of the PAPER path (no transport).
 #[cfg(feature = "runtime")]
 pub mod paper;
+/// The C3 production path in PAPER mode, ending at the PAPER sink.
+#[cfg(feature = "runtime")]
+pub mod paper_exec;
 
 // The unit tests of the release path share the fixtures of the
 // integration tests, which name this crate by its name.

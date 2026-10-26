@@ -32,13 +32,13 @@
 
 use alloy_primitives::{Address, B256, U256};
 
-use super::abi::{AbiError, decode_swap_exact_input_native};
+use super::abi::{AbiError, decode_swap_exact_input_native, encode_swap_exact_input_native};
 use super::deployment::ValidatedDeployment;
 use crate::chain_state::SnapshotId;
 use crate::economics::flap::AdmittedBuy;
 use crate::economics::policy::BuyPolicy;
-use crate::signer::{SignerError, recover_legacy_sender};
-use crate::transactions::legacy::{LegacyDecodeError, decode_signed, tx_hash};
+use crate::signer::{Signer, SignerError, recover_legacy_sender};
+use crate::transactions::legacy::{LegacyDecodeError, LegacyTx, decode_signed, tx_hash};
 
 /// Reason an expectation cannot be formed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,6 +179,65 @@ impl ExpectedBuy {
     }
 }
 
+/// Reason a BUY could not be built and signed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildError {
+    /// The signer is not the expectation's sender (the tokens would go to
+    /// another recipient).
+    WrongSigner,
+    /// The expectation cannot be encoded (a zero amount).
+    Calldata(AbiError),
+    Sign(SignerError),
+}
+
+impl core::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::WrongSigner => f.write_str("buy build: signer is not the expected sender"),
+            Self::Calldata(e) => write!(f, "buy build: {e}"),
+            Self::Sign(e) => write!(f, "buy build: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for BuildError {}
+
+impl ExpectedBuy {
+    /// The one production construction of a BUY: the native-input
+    /// `swapExactInput` call to the Portal exactly as expected, signed by
+    /// `signer` (which must be the expected sender) into `out`. Returns the
+    /// transaction hash. The calldata is a fixed-size array; `scratch` and
+    /// `out` are cleared and reused (no allocation once they have capacity).
+    /// PAPER, replay and LIVE build here; [`verify_final_buy`] checks the
+    /// result at the send boundary.
+    pub fn sign(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        if signer.address() != self.sender {
+            return Err(BuildError::WrongSigner);
+        }
+        let calldata =
+            encode_swap_exact_input_native(self.token, self.input_amount, self.min_output_amount)
+                .map_err(BuildError::Calldata)?;
+        let tx = LegacyTx {
+            chain_id: self.chain_id,
+            nonce: self.nonce,
+            gas_price: self.gas_price,
+            gas_limit: self.gas_limit,
+            to: self.portal,
+            value: self.input_amount,
+            input: &calldata,
+        };
+        signer
+            .sign_legacy(&tx, scratch, out)
+            .map_err(BuildError::Sign)
+    }
+}
+
 /// Reason signed bytes are not the intended BUY.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingError {
@@ -288,9 +347,6 @@ mod tests {
         QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, WITNESSED_MAINNET_TERMS,
         admit_native_buy,
     };
-    use crate::signer::Signer;
-    use crate::transactions::legacy::LegacyTx;
-    use crate::venues::flap::abi::encode_swap_exact_input_native;
     use crate::venues::flap::deployment::testkit::validated_mainnet;
     use crate::venues::flap::profile::classify_launch;
     use crate::venues::flap::profile::testkit::{
@@ -349,26 +405,12 @@ mod tests {
         Address::from_slice(&keccak256(preimage).as_slice()[12..])
     }
 
-    /// Signs exactly the transaction that `expected` describes.
+    /// Signs exactly the transaction that `expected` describes, with the
+    /// production builder.
     fn sign(signer: &Signer, expected: &ExpectedBuy) -> (Vec<u8>, B256) {
-        let calldata = encode_swap_exact_input_native(
-            expected.token,
-            expected.input_amount,
-            expected.min_output_amount,
-        )
-        .unwrap();
-        let tx = LegacyTx {
-            chain_id: expected.chain_id,
-            nonce: expected.nonce,
-            gas_price: expected.gas_price,
-            gas_limit: expected.gas_limit,
-            to: expected.portal,
-            value: expected.input_amount,
-            input: &calldata,
-        };
         let mut scratch = Vec::new();
         let mut raw = Vec::new();
-        let hash = signer.sign_legacy(&tx, &mut scratch, &mut raw).unwrap();
+        let hash = expected.sign(signer, &mut scratch, &mut raw).unwrap();
         (raw, hash)
     }
 
@@ -387,6 +429,30 @@ mod tests {
             ExpectedBuy::from_admitted(&deployment, &admitted, &current, signer.address(), nonce)
                 .unwrap();
         (expected, admitted.calldata().unwrap())
+    }
+
+    /// C3: the production builder signs exactly the admitted expectation
+    /// (its calldata is the admission's), the result passes the send
+    /// boundary, and another signer is refused before any signature.
+    #[test]
+    fn the_production_builder_signs_exactly_the_admitted_buy() {
+        let signer = Signer::from_secret_bytes(&[0x51; 32]).unwrap();
+        let (expected, calldata) = admitted_expectation(&signer, 3);
+        let mut scratch = Vec::new();
+        let mut raw = Vec::new();
+        let hash = expected.sign(&signer, &mut scratch, &mut raw).unwrap();
+        assert_eq!(
+            verify_final_buy(&raw, &expected, &expected.snapshot(), &mut scratch),
+            Ok(hash)
+        );
+        let signed = decode_signed(&raw).unwrap();
+        assert_eq!(signed.tx.input, calldata.as_slice());
+        let other = Signer::from_secret_bytes(&[0x52; 32]).unwrap();
+        assert_eq!(
+            expected.sign(&other, &mut scratch, &mut raw),
+            Err(BuildError::WrongSigner)
+        );
+        assert!(raw.is_empty(), "no bytes of a refused build");
     }
 
     /// Port of Gate-0 `parallel_final_envelopes_bind_ticket_token_and_implicit_recipient`
