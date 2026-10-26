@@ -187,7 +187,78 @@ pub mod replay_proof {
     };
 }
 
-pub const ALL: &[&Schema] = &[&capture_run::SCHEMA, &replay_proof::SCHEMA];
+/// The capacity preflight of a planned scoped capture (master plan §11):
+/// the measured inputs (rates of the newest sealed run, the writer
+/// throughput just measured on the capture volume, its free bytes) and
+/// the verdict. A run that is not qualified is not started.
+pub mod capture_preflight {
+    use super::*;
+
+    pub const DURATION_S: u16 = 1;
+    pub const CHAIN_ID: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    /// The sealed run the rates come from (absent: none, unmeasured).
+    pub const RATES_RUN_ID: u16 = 5;
+    pub const AVERAGE_BYTES_PER_S: u16 = 6;
+    /// The densest segment's rate, held for `burst_s`.
+    pub const PEAK_BYTES_PER_S: u16 = 7;
+    pub const BURST_S: u16 = 8;
+    pub const OVERHEAD_PPM: u16 = 9;
+    /// Bytes written, synced and sealed by the probe, and their rate.
+    pub const PROBE_BYTES: u16 = 10;
+    pub const WRITER_BYTES_PER_S: u16 = 11;
+    pub const FREE_DISK_BYTES: u16 = 12;
+    pub const DISK_RESERVE_BYTES: u16 = 13;
+    pub const MEMORY_BUDGET_BYTES: u16 = 14;
+    /// `QUALIFIED` or `BLOCKED`.
+    pub const VERDICT: u16 = 15;
+    pub const EXPECTED_BYTES: u16 = 16;
+    pub const BURST_BACKLOG_BYTES: u16 = 17;
+    /// `UNMEASURED`, `WRITER_THROUGHPUT`, `MEMORY` or `DISK`.
+    pub const BLOCKING_RESOURCE: u16 = 18;
+    /// The longest duration that would be qualified.
+    pub const ACHIEVABLE_S: u16 = 19;
+    pub const NON_CLAIMS: u16 = 20;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.capture-preflight.v1",
+        record_type: 57,
+        schema_version: 1,
+        fields: &[
+            Field::req(DURATION_S, "duration_s", U64),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::opt(RATES_RUN_ID, "rates_run_id", Text),
+            Field::req(AVERAGE_BYTES_PER_S, "average_bytes_per_s", U64),
+            Field::req(PEAK_BYTES_PER_S, "peak_bytes_per_s", U64),
+            Field::req(BURST_S, "burst_s", U64),
+            Field::req(OVERHEAD_PPM, "overhead_ppm", U64),
+            Field::req(PROBE_BYTES, "probe_bytes", U64),
+            Field::req(WRITER_BYTES_PER_S, "writer_bytes_per_s", U64),
+            Field::req(FREE_DISK_BYTES, "free_disk_bytes", U64),
+            Field::req(DISK_RESERVE_BYTES, "disk_reserve_bytes", U64),
+            Field::req(MEMORY_BUDGET_BYTES, "memory_budget_bytes", U64),
+            Field::req(VERDICT, "verdict", Text),
+            Field::opt(EXPECTED_BYTES, "expected_bytes", U64),
+            Field::opt(BURST_BACKLOG_BYTES, "burst_backlog_bytes", U64),
+            Field::opt(BLOCKING_RESOURCE, "blocking_resource", Text),
+            Field::opt(ACHIEVABLE_S, "achievable_s", U64),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+        ],
+    };
+}
+
+pub const ALL: &[&Schema] = &[
+    &capture_run::SCHEMA,
+    &replay_proof::SCHEMA,
+    &capture_preflight::SCHEMA,
+];
 
 #[cfg(test)]
 mod tests {

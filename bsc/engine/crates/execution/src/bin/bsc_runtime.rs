@@ -8,7 +8,13 @@
 //! bsc_runtime source request <SOURCE_OR_COMPONENT_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
+//! bsc_runtime capture-preflight --rundir <dir> --config <ingress.public.env>
 //! ```
+//!
+//! `capture-preflight` measures this host for a scoped capture of
+//! `BSC_RUNTIME_CAPTURE_DURATION_S` (master plan §11) into
+//! `bsc-runtime/capture-preflight.dbrec` and prints it; exit 0 only when
+//! QUALIFIED.
 //!
 //! `replay-proof` proves the capture→replay identity of one finished run
 //! (the newest without `--run`; Phase F contract §9) into
@@ -24,11 +30,12 @@
 //! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
 //! authorization exists). Exit 0 when applied, 2 when refused or stale.
 
-use darkbot_bsc_execution::replay_proof;
 use darkbot_bsc_execution::runtime::{
-    RuntimeConfig, journal_max_payload, run as run_runtime, stop_file, write_census,
+    RuntimeConfig, journal_max_payload, preflight_setup, run as run_runtime, stop_file,
+    write_census,
 };
 use darkbot_bsc_execution::sources::{Entity, Mode, Store};
+use darkbot_bsc_execution::{capture_preflight, replay_proof};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use std::process::ExitCode;
@@ -105,6 +112,19 @@ fn run(args: &[String]) -> Result<bool, String> {
             )?;
             println!("{}", proof.summary());
             Ok(proof.verdict == "PASS")
+        }
+        [cmd, rest @ ..] if cmd == "capture-preflight" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let dir = std::path::Path::new(flag(rest, "--rundir")?).join("bsc-runtime");
+            let report = capture_preflight::check(&dir.join("journal"), preflight_setup(&config))?;
+            replay_proof::write(
+                &dir.join("capture-preflight.dbrec"),
+                &report.encode(darkbot_bsc_record::observed_now()?)?,
+            )?;
+            println!("{}", report.summary());
+            Ok(report.qualified())
         }
         [area, cmd, rest @ ..] if area == "paper-identity" && (cmd == "init" || cmd == "show") => {
             // The C3 PAPER identity: a local key outside the repository,

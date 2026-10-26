@@ -93,5 +93,17 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
         .unwrap();
     assert!(proof.status.success(), "{proof:?}");
     assert!(String::from_utf8_lossy(&proof.stdout).contains(": PASS"));
+    // The capacity preflight measures from sealed runs only: this run's
+    // records span no time, so a capture stays UNMEASURED and is refused.
+    let pre = Command::new(bin)
+        .args(["capture-preflight", "--rundir"])
+        .arg(&base)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    assert_eq!(pre.status.code(), Some(2), "{pre:?}");
+    assert!(String::from_utf8_lossy(&pre.stdout).contains("BLOCKED by UNMEASURED"));
+    assert!(base.join("bsc-runtime/capture-preflight.dbrec").exists());
     fs::remove_dir_all(&base).unwrap();
 }

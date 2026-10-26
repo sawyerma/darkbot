@@ -73,6 +73,9 @@ pub mod runtime_journal;
 
 #[cfg(feature = "runtime")]
 pub mod replay_proof;
+/// The capacity preflight of a planned scoped capture.
+#[cfg(feature = "runtime")]
+pub mod capture_preflight;
 /// The read-only runtime process: sources, ingress, journal, status.
 #[cfg(feature = "runtime")]
 pub mod runtime;

@@ -82,6 +82,11 @@ pub struct RuntimeConfig {
     pub journal_segment_ms: u64,
     pub journal_sync_records: u64,
     pub journal_sync_ms: u64,
+    /// The capacity preflight of a scoped capture: its planned duration,
+    /// the writer probe's bytes and the disk reserve.
+    pub capture_duration_s: u64,
+    pub preflight_probe_bytes: u64,
+    pub disk_reserve_bytes: u64,
     pub status_ms: u64,
     /// Every bound of the WSS adapters, validated by `WssLimits::validate`.
     pub wss: WssLimits,
@@ -309,6 +314,9 @@ impl RuntimeConfig {
             journal_segment_ms: take("BSC_RUNTIME_JOURNAL_SEGMENT_MS", 1_000, 86_400_000)?,
             journal_sync_records: take("BSC_RUNTIME_JOURNAL_SYNC_RECORDS", 1, 1 << 20)?,
             journal_sync_ms: take("BSC_RUNTIME_JOURNAL_SYNC_MS", 1, 60_000)?,
+            capture_duration_s: take("BSC_RUNTIME_CAPTURE_DURATION_S", 60, 604_800)?,
+            preflight_probe_bytes: take("BSC_RUNTIME_PREFLIGHT_PROBE_BYTES", 1 << 20, 1 << 32)?,
+            disk_reserve_bytes: take("BSC_RUNTIME_DISK_RESERVE_BYTES", 0, 1 << 40)?,
             status_ms: take("BSC_RUNTIME_STATUS_MS", 100, 60_000)?,
             wss,
             canonical,
@@ -789,6 +797,16 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
 /// The payload bound of the runtime journal; the census reads with the same.
 pub fn journal_max_payload(config: &RuntimeConfig) -> usize {
     config.wss.max_message_bytes + 64
+}
+
+/// The bounds of a capacity preflight of the runtime's capture.
+pub fn preflight_setup(config: &RuntimeConfig) -> crate::capture_preflight::PreflightSetup {
+    crate::capture_preflight::PreflightSetup {
+        duration_s: config.capture_duration_s,
+        probe_bytes: config.preflight_probe_bytes,
+        disk_reserve_bytes: config.disk_reserve_bytes,
+        memory_budget_bytes: config.journal_budget_bytes as u64,
+    }
 }
 
 /// The bounds of the runtime's segmented capture.
