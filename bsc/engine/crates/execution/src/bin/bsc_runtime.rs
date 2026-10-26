@@ -52,7 +52,8 @@ fn run(args: &[String]) -> Result<bool, String> {
             let config_path = flag(rest, "--config")?;
             let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
             let config = RuntimeConfig::parse(&text)?;
-            let census = write_census(&config, std::path::Path::new(flag(rest, "--rundir")?))?;
+            // Offline replay: a journal a runtime still writes reads UNTERMINATED here.
+            let census = write_census(&config, std::path::Path::new(flag(rest, "--rundir")?), None)?;
             print!("{}", census.summary());
             Ok(true)
         }

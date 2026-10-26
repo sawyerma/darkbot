@@ -121,15 +121,16 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
     );
     for launch in &launches {
         println!(
-            "  {:?} block {} tx {} token {:?} buys {:?} sender {} nonce {} c1 {}",
+            "  {:?} block {} tx {} token {:?} buys {:?} sender {:?} nonce {:?} c1 {} unverifiable {:?}",
             launch.venue,
             launch.block_number,
             launch.tx_index,
             launch.token.map(alloy_primitives::hex::encode),
             launch.external_buys_after,
-            alloy_primitives::hex::encode(launch.sender),
+            launch.sender.map(alloy_primitives::hex::encode),
             launch.nonce,
-            launch.c1_scope
+            launch.c1_scope,
+            launch.unverifiable
         );
     }
     assert!(blocks >= 10, "followed only {blocks} blocks");

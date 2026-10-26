@@ -6,10 +6,12 @@
 //! verified frame and says `TAIL_INCOMPLETE`; one without the clean end
 //! record (`X`) says `UNTERMINATED` (killed or crashed) and its covered
 //! window ends at its last checkpoint; a corrupt frame makes the whole
-//! journal `INVALID` and nothing of it counts. Lost records (gap spans),
-//! skipped canonical blocks (gap/resync ranges) and launches received but
-//! never joined (`P` without `C`/`O`) are counted per window, never filled
-//! in.
+//! journal `INVALID` and nothing of it counts. The journal the running
+//! runtime still writes is `RUNNING`: its launches not joined yet are
+//! `pending_join`, not lost. Lost records (gap spans), skipped canonical
+//! blocks (gap/resync ranges, and the heights between two process windows),
+//! launches received but never joined (`P` without `C`/`O`) and canonical
+//! records that do not parse are counted, never filled in.
 //!
 //! "Before the block" is the join's: the runtime's wall-clock estimate of
 //! the first sighting against the header's millisecond block time. The
@@ -47,6 +49,10 @@ pub struct Window {
     pub lost_records: u64,
     pub blocks_skipped: u64,
     pub unjoined: u64,
+    /// The running journal's launches still inside their join delay.
+    pub pending_join: u64,
+    /// Canonical/reorg records that do not parse (an older layout, damage).
+    pub unparsed_records: u64,
     pub state: &'static str,
 }
 
@@ -64,6 +70,7 @@ pub struct Census {
     pub after: u64,
     pub missed: u64,
     pub clock_unknown: u64,
+    pub tx_unverifiable: u64,
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
@@ -77,6 +84,9 @@ pub struct Census {
     pub buys_unknown: u64,
     pub unjoined: u64,
     pub blocks_skipped: u64,
+    /// Canonical heights between two process windows (not followed by any).
+    pub blocks_between_windows: u64,
+    pub unparsed_records: u64,
     pub fetch_lag_ms_min: Option<i64>,
     pub fetch_lag_ms_p50: Option<i64>,
     pub fetch_lag_ms_max: Option<i64>,
@@ -96,6 +106,7 @@ struct LaunchRecord {
     source: Option<usize>,
     delta_us: u64,
     c1_scope: bool,
+    tx_unverifiable: bool,
     fetch_lag_ms: Option<i64>,
     seen_ns: u64,
 }
@@ -131,6 +142,10 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         _ => return None,
     };
     let lag_known = flag(p[127])?;
+    let tx = p[126];
+    if tx > 2 {
+        return None;
+    }
     Some(LaunchRecord {
         flap: p[1] == 1,
         block_hash: hash_at(p, 10)?,
@@ -143,7 +158,8 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
         class,
         source,
         delta_us: u64_at(p, 110)?,
-        c1_scope: flag(p[126])?,
+        c1_scope: tx == 1,
+        tx_unverifiable: tx == 2,
         fetch_lag_ms: if lag_known {
             Some(i64::from_le_bytes(p.get(128..136)?.try_into().ok()?))
         } else {
@@ -196,7 +212,13 @@ struct Replay {
     connectivity: Connectivity,
 }
 
-fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result<Replay, String> {
+fn replay(
+    path: &Path,
+    name: String,
+    started: u64,
+    max_payload: usize,
+    active: bool,
+) -> Result<Replay, String> {
     let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = JournalReader::new(std::io::BufReader::new(file), max_payload)
         .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -217,6 +239,7 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
         let record = match reader.next_record() {
             Ok(Some(r)) => r,
             Ok(None) if exited => break "COMPLETE",
+            Ok(None) | Err(JournalError::Truncated) if active => break "RUNNING",
             Ok(None) => break "UNTERMINATED",
             Err(JournalError::Truncated) => break "TAIL_INCOMPLETE",
             Err(_) => break "INVALID",
@@ -238,12 +261,13 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
                     received.insert((block, tx));
                 }
             }
-            (RecordKind::Canonical, Some(b'C')) => {
-                if let Some(l) = launch_record(p, record.timestamp_ns) {
+            (RecordKind::Canonical, Some(b'C')) => match launch_record(p, record.timestamp_ns) {
+                Some(l) => {
                     resolved.insert((l.block_hash, l.tx_hash));
                     launches.push(l);
                 }
-            }
+                None => window.unparsed_records += 1,
+            },
             (RecordKind::Canonical, Some(b'O')) if p.len() == 74 => {
                 if let (Some(block), Some(tx)) = (hash_at(p, 10), hash_at(p, 42)) {
                     resolved.insert((block, tx));
@@ -258,6 +282,7 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
                         source: None,
                         delta_us: 0,
                         c1_scope: false,
+                        tx_unverifiable: false,
                         fetch_lag_ms: None,
                         seen_ns: record.timestamp_ns,
                     });
@@ -271,7 +296,7 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
                     _ => checkpoint = number,
                 }
             }
-            (RecordKind::Reorg, Some(b'R')) => window.reorgs += 1,
+            (RecordKind::Reorg, Some(b'R')) if p.len() == 45 => window.reorgs += 1,
             (RecordKind::Reorg, Some(b'G')) if p.len() == 17 => {
                 window.resyncs += 1;
                 if let (Some(from), Some(to)) = (u64_at(p, 1), u64_at(p, 9))
@@ -280,6 +305,7 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
                     window.blocks_skipped = window.blocks_skipped.saturating_add(to - from + 1);
                 }
             }
+            (RecordKind::Canonical | RecordKind::Reorg, _) => window.unparsed_records += 1,
             _ => {}
         }
     };
@@ -291,7 +317,12 @@ fn replay(path: &Path, name: String, started: u64, max_payload: usize) -> Result
         connectivity = Connectivity::default();
     } else {
         window.last_block = window.last_block.or(checkpoint);
-        window.unjoined = received.difference(&resolved).count() as u64;
+        let open = received.difference(&resolved).count() as u64;
+        if state == "RUNNING" {
+            window.pending_join = open;
+        } else {
+            window.unjoined = open;
+        }
     }
     window.duration_ms = last_ns / 1_000_000;
     connectivity.sort();
@@ -312,8 +343,9 @@ fn percentile<T: Copy>(sorted: &[T], q_per_mille: u64) -> Option<T> {
     sorted.get(usize::try_from(rank - 1).ok()?).copied()
 }
 
-/// Replays every `*.dbjnl` of `dir` (name `<started_unix_ms>.dbjnl`).
-pub fn census(dir: &Path, max_payload: usize) -> Result<Census, String> {
+/// Replays every `*.dbjnl` of `dir` (name `<started_unix_ms>.dbjnl`);
+/// `active` names the journal the running runtime still writes.
+pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<Census, String> {
     let mut names: Vec<(u64, String)> = Vec::new();
     for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -332,10 +364,23 @@ pub fn census(dir: &Path, max_payload: usize) -> Result<Census, String> {
     let mut lags: Vec<i64> = Vec::new();
     let mut firsts: HashMap<usize, u64> = HashMap::new();
     for (started, name) in names {
-        let r = replay(&dir.join(&name), name, started, max_payload)?;
+        let path = dir.join(&name);
+        let is_active = active.is_some_and(|a| a == path.as_path());
+        let r = replay(&path, name, started, max_payload, is_active)?;
         out.covered_ms = out.covered_ms.saturating_add(r.window.duration_ms);
         out.unjoined = out.unjoined.saturating_add(r.window.unjoined);
         out.blocks_skipped = out.blocks_skipped.saturating_add(r.window.blocks_skipped);
+        out.unparsed_records = out
+            .unparsed_records
+            .saturating_add(r.window.unparsed_records);
+        // Heights no process followed: after the previous window's last block.
+        if let (Some(prev), Some(first)) = (
+            out.windows.iter().rev().find_map(|w| w.last_block),
+            r.window.first_block,
+        ) && first > prev.saturating_add(1)
+        {
+            out.blocks_between_windows += first - prev - 1;
+        }
         for l in &r.launches {
             if l.class == 0 {
                 out.orphaned_launches += 1;
@@ -348,6 +393,9 @@ pub fn census(dir: &Path, max_payload: usize) -> Result<Census, String> {
             out.flap_launches += 1;
             if l.c1_scope {
                 out.c1_scope_launches += 1;
+            }
+            if l.tx_unverifiable {
+                out.tx_unverifiable += 1;
             }
             if let Some(lag) = l.fetch_lag_ms {
                 lags.push(lag);
@@ -413,7 +461,9 @@ impl Census {
                 .set(e::LOST_RECORDS, w.lost_records)
                 .set(e::STATE, w.state)
                 .set(e::BLOCKS_SKIPPED, w.blocks_skipped)
-                .set(e::UNJOINED, w.unjoined);
+                .set(e::UNJOINED, w.unjoined)
+                .set(e::PENDING_JOIN, w.pending_join)
+                .set(e::UNPARSED_RECORDS, w.unparsed_records);
             if let Some(b) = w.first_block {
                 row.set(e::FIRST_BLOCK, b);
             }
@@ -468,7 +518,10 @@ impl Census {
                 d.set(tag, v);
             }
         }
-        d.set(cs::CLOCK_SUSPECT, self.clock_suspect);
+        d.set(cs::CLOCK_SUSPECT, self.clock_suspect)
+            .set(cs::TX_UNVERIFIABLE, self.tx_unverifiable)
+            .set(cs::BLOCKS_BETWEEN_WINDOWS, self.blocks_between_windows)
+            .set(cs::UNPARSED_RECORDS, self.unparsed_records);
         d.encode().map_err(|e| e.to_string())
     }
 
@@ -477,7 +530,7 @@ impl Census {
         let opt = |v: Option<u64>| v.map_or("n/a".to_string(), |v| v.to_string());
         let opti = |v: Option<i64>| v.map_or("n/a".to_string(), |v| v.to_string());
         let mut s = format!(
-            "covered_ms={} windows={} flap_launches={} c1_scope={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={}\n\
+            "covered_ms={} windows={} flap_launches={} c1_scope={} tx_unverifiable={} four_launches={} orphaned={} outage={} unjoined={} blocks_skipped={} between_windows={} unparsed={}\n\
              before the block time: full={} (c1_scope {}) hash_only={} after={} missed={} clock_unknown={}\n\
              lead_us p50={} p95={} p99={} max={} n={}\n\
              fetch_lag_ms min={} p50={} max={} clock_suspect={}\n\
@@ -486,11 +539,14 @@ impl Census {
             self.windows.len(),
             self.flap_launches,
             self.c1_scope_launches,
+            self.tx_unverifiable,
             self.four_launches,
             self.orphaned_launches,
             self.outage_launches,
             self.unjoined,
             self.blocks_skipped,
+            self.blocks_between_windows,
+            self.unparsed_records,
             self.full_before,
             self.c1_scope_full_before,
             self.hash_only_before,
@@ -552,6 +608,8 @@ mod tests {
             token: None,
             external_buys: buys,
             c1_scope: tx != 3,
+            // Unverifiable launches: covered by the runtime test's census.
+            tx_unverifiable: false,
             block_ms: BLOCK_MS,
             block_seen_ns: seen,
             block_seen_unix_ms: Some(BLOCK_MS + u64::from(tx) * 100),
@@ -678,7 +736,7 @@ mod tests {
         fs::write(&bad, &bytes).unwrap();
         fs::write(dir.join("notes.txt"), b"ignored").unwrap();
 
-        let c = census(&dir, 4096).unwrap();
+        let c = census(&dir, 4096, None).unwrap();
         let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
         assert_eq!(
             states,
@@ -742,6 +800,66 @@ mod tests {
     }
 
     #[test]
+    fn running_unparsed_and_between_window_coverage_are_explicit() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-running-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        // A finished window ending at its checkpoint 15, with one record of
+        // the older 118-byte `C` layout of 25.10. (it cannot be read).
+        let mut old = vec![b'C', 1];
+        old.resize(118, 0);
+        write(
+            &dir,
+            1,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 10, &[10; 32]),
+                ),
+                (RecordKind::Canonical, 2, old),
+                (
+                    RecordKind::Canonical,
+                    3,
+                    window_payload(b'K', 15, &[15; 32]),
+                ),
+                (RecordKind::Runtime, 4, EXIT_PAYLOAD.to_vec()),
+            ],
+        );
+        // The journal a runtime still writes: from 40, one launch inside its
+        // join delay.
+        let l = launch(Venue::Flap, 40, 1, Some(0), 1);
+        let running = write(
+            &dir,
+            2,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 40, &[40; 32]),
+                ),
+                (RecordKind::Canonical, 2, pending_launch_payload(&l)),
+            ],
+        );
+        let c = census(&dir, 4096, Some(&running)).unwrap();
+        let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
+        assert_eq!(states, ["COMPLETE", "RUNNING"]);
+        assert_eq!(
+            (c.windows[0].last_block, c.windows[0].unparsed_records),
+            (Some(15), 1)
+        );
+        assert_eq!((c.windows[1].pending_join, c.windows[1].unjoined), (1, 0));
+        assert_eq!(
+            (c.unjoined, c.unparsed_records, c.blocks_between_windows),
+            (0, 1, 24)
+        );
+        // Offline (no active journal) the same window reads as killed.
+        let offline = census(&dir, 4096, None).unwrap();
+        assert_eq!(offline.windows[1].state, "UNTERMINATED");
+        assert_eq!(offline.unjoined, 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn a_negative_fetch_lag_marks_the_local_clock_suspect() {
         let dir = std::env::temp_dir().join(format!("bsc-g04-skew-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -752,7 +870,7 @@ mod tests {
             visibility: Visibility::Missed,
         });
         write(&dir, 1, &[(RecordKind::Canonical, 1, payload)]);
-        let c = census(&dir, 4096).unwrap();
+        let c = census(&dir, 4096, None).unwrap();
         assert_eq!((c.fetch_lag_ms_min, c.clock_suspect), (Some(-40), true));
         fs::remove_dir_all(&dir).unwrap();
     }

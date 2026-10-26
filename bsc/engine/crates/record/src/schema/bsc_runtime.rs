@@ -199,11 +199,13 @@ pub mod runtime_status {
         /// The head's fetch lag: local wall ms at the header fetch minus the
         /// block's ms (negative: local clock behind).
         pub const HEAD_FETCH_LAG_MS: u16 = 23;
+        /// Flap launches whose transaction the verifier refuses.
+        pub const TX_UNVERIFIABLE: u16 = 24;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 2,
+            schema_version: 3,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -228,6 +230,7 @@ pub mod runtime_status {
                 Field::req(BLOCKS_SKIPPED, "blocks_skipped", U64),
                 Field::req(WAITING, "waiting", U64),
                 Field::opt(HEAD_FETCH_LAG_MS, "head_fetch_lag_ms", I64),
+                Field::req(TX_UNVERIFIABLE, "tx_unverifiable", U64),
             ],
         };
     }
@@ -256,7 +259,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 2,
+        schema_version: 3,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

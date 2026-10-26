@@ -80,7 +80,7 @@ fn complete(launches: Vec<ReceiptLaunch>, txs: &[&str]) -> Vec<CanonicalLaunch> 
             let verified = parse_transaction(tx.as_bytes(), 1, &launch.place())
                 .unwrap()
                 .unwrap();
-            launch.with_transaction(&verified)
+            launch.with_transaction(Ok(&verified))
         })
         .collect()
 }
@@ -94,9 +94,9 @@ fn raw_tx(tx: &str) -> Value {
 /// Independent checks of the transaction facts against the raw object.
 fn check_tx(tx: &str, launch: &CanonicalLaunch) {
     let raw = raw_tx(tx);
-    assert_eq!(address_of(&raw["from"]), launch.sender);
+    assert_eq!(Some(address_of(&raw["from"])), launch.sender);
     assert_eq!(
-        u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap(),
+        Some(u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap()),
         launch.nonce
     );
     let direct_v6 = address_of(&raw["to"]) == FLAP_PORTAL
@@ -205,9 +205,10 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             creator: Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464")),
             external_buys_after: Some(1),
             first_external_buy_index: Some(2),
-            sender: hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"),
-            nonce: 13,
+            sender: Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464")),
+            nonce: Some(13),
             c1_scope: true,
+            unverifiable: None,
         },
         CanonicalLaunch {
             venue: Venue::Flap,
@@ -219,9 +220,10 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             creator: Some(hex!("d3f3fe1f286d13f95f4be5c1bfea5e1a9e6335ea")),
             external_buys_after: Some(0),
             first_external_buy_index: None,
-            sender: hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34"),
-            nonce: 1592,
+            sender: Some(hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34")),
+            nonce: Some(1592),
             c1_scope: false,
+            unverifiable: None,
         },
     ];
     assert_eq!(launches, expected);
@@ -267,9 +269,10 @@ fn flap_block_with_one_launch_and_no_external_buy() {
         creator: Some(hex!("8994ef9463667ee3bb7268758167c7e9468d6666")),
         external_buys_after: Some(0),
         first_external_buy_index: None,
-        sender: hex!("1b4ebe73585b94578dc055c6ac7e89333fdadcf7"),
-        nonce: 4297,
+        sender: Some(hex!("1b4ebe73585b94578dc055c6ac7e89333fdadcf7")),
+        nonce: Some(4297),
         c1_scope: false,
+        unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
     check_launch_receipt(FLAP_B_RECEIPTS, &expected);
@@ -295,9 +298,10 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         creator: Some(hex!("774352301321637bc2cad74e67d4089f36e15962")),
         external_buys_after: None,
         first_external_buy_index: None,
-        sender: hex!("774352301321637bc2cad74e67d4089f36e15962"),
-        nonce: 262,
+        sender: Some(hex!("774352301321637bc2cad74e67d4089f36e15962")),
+        nonce: Some(262),
         c1_scope: false,
+        unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
     check_launch_receipt(FOUR_RECEIPTS, &expected);

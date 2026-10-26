@@ -118,6 +118,9 @@ pub struct LaunchRef {
     /// The launch transaction is a direct call of the C1 scope (Portal
     /// `newTokenV6`): what the pending path can act on.
     pub c1_scope: bool,
+    /// The node's transaction object could not be verified (an unsupported
+    /// type, pre-EIP-155, a mismatch): counted, not actionable.
+    pub tx_unverifiable: bool,
     /// The block's time (header milliseconds, validator wall clock).
     pub block_ms: u64,
     /// When the follower first held the block's header: monotonic ns of the
@@ -154,6 +157,8 @@ pub struct JoinCounters {
     pub seen_after: u64,
     pub missed: u64,
     pub clock_unknown: u64,
+    /// Flap launches whose transaction the verifier refuses.
+    pub tx_unverifiable: u64,
     /// Flap launches of the C1 scope, and those seen full before the block.
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
@@ -183,6 +188,9 @@ impl JoinCounters {
             Visibility::After { .. } => step(&mut self.seen_after),
             Visibility::Missed => step(&mut self.missed),
             Visibility::ClockUnknown { .. } => step(&mut self.clock_unknown),
+        }
+        if j.launch.tx_unverifiable {
+            step(&mut self.tx_unverifiable);
         }
         if j.launch.c1_scope {
             step(&mut self.c1_scope_launches);
@@ -325,6 +333,7 @@ mod tests {
             token: None,
             external_buys: buys,
             c1_scope: tx % 2 == 1,
+            tx_unverifiable: false,
             block_ms: BLOCK_MS,
             block_seen_ns: seen,
             block_seen_unix_ms: Some(BLOCK_MS + 300),

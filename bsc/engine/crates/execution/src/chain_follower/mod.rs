@@ -224,12 +224,18 @@ pub struct CanonicalLaunch {
     pub external_buys_after: Option<u32>,
     /// The transaction index of the first of those buys.
     pub first_external_buy_index: Option<u64>,
-    /// The verified signer of the launch transaction.
-    pub sender: [u8; 20],
-    pub nonce: u64,
+    /// The verified signer and nonce of the launch transaction; `None` when
+    /// it is unverifiable.
+    pub sender: Option<[u8; 20]>,
+    pub nonce: Option<u64>,
     /// The launch transaction is in the C1 scope (`ingress::is_flap_launch`
-    /// of its verified signed bytes: a direct Portal `newTokenV6` call).
+    /// of its verified signed bytes: a direct Portal `newTokenV6` call);
+    /// false when unverifiable (the pending path rejects it the same way).
     pub c1_scope: bool,
+    /// Why the node's transaction object could not be rebuilt and verified
+    /// (an unsupported type, pre-EIP-155, a hash or signer mismatch): a
+    /// per-launch result, journaled and counted, never a retried fault.
+    pub unverifiable: Option<RejectReason>,
 }
 
 /// Why a step of the follower failed.

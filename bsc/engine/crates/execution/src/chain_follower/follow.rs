@@ -348,8 +348,18 @@ impl Follower {
         }
         let mut launches = Vec::new();
         for launch in launches::detect(&block, &receipts) {
-            let tx = rpc.transaction(&launch.place(), stop)?;
-            launches.push(launch.with_transaction(&tx));
+            // A refusal of the verifier is a fact of this transaction (it
+            // would never verify): the launch carries it. Only a missing or
+            // unreachable answer is retried.
+            let tx = match rpc.transaction(&launch.place(), stop) {
+                Ok(tx) => Ok(tx),
+                Err(FollowerFault::Request {
+                    error: RequestError::Unverifiable(reason),
+                    ..
+                }) => Err(reason),
+                Err(fault) => return Err(fault),
+            };
+            launches.push(launch.with_transaction(tx.as_ref().map_err(|r| *r)));
         }
         sink(CanonicalEvent::Block {
             number: header.number,

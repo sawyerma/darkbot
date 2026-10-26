@@ -18,11 +18,12 @@
 //! - `Canonical` `b'C'`: a canonical launch joined with the sightings,
 //!   `b'C' | venue u8 | block u64 | block_hash [32] | tx_index u64 | tx_hash
 //!   [32] | token? u8 [20] | buys? u8 | external_buys u32 | class u8 | source
-//!   u8 | delta_us u64 | block_ms u64 | c1_scope u8 | fetch_lag? u8 i64` (integers
+//!   u8 | delta_us u64 | block_ms u64 | tx u8 | fetch_lag? u8 i64` (integers
 //!   LE; venue 1 Flap, 2 Four; class per
 //!   [`Visibility::code`](crate::canonical_join::Visibility::code); source 0xFF
 //!   and delta 0 for a miss; delta = lead or lag against the block time;
-//!   fetch_lag = local wall ms at the header fetch minus block_ms).
+//!   fetch_lag = local wall ms at the header fetch minus block_ms; tx 0 verified
+//!   outside the C1 scope, 1 verified in the C1 scope, 2 unverifiable).
 //! - `Canonical` `b'O'`: a launch of an orphaned block taken out again,
 //!   `b'O' | venue u8 | block u64 | block_hash [32] | tx_hash [32]`.
 //! - `Reorg` `b'R'`: a reorg, `b'R' | depth u32 | new head u64 | hash [32]`.
@@ -112,7 +113,11 @@ pub fn canonical_launch_payload(j: &Joined) -> Vec<u8> {
     out.push(source);
     out.extend_from_slice(&delta.to_le_bytes());
     out.extend_from_slice(&l.block_ms.to_le_bytes());
-    out.push(u8::from(l.c1_scope));
+    out.push(if l.tx_unverifiable {
+        2
+    } else {
+        u8::from(l.c1_scope)
+    });
     let lag = l.fetch_lag_ms();
     out.push(u8::from(lag.is_some()));
     out.extend_from_slice(&lag.unwrap_or(0).to_le_bytes());
@@ -343,6 +348,7 @@ mod tests {
             token: Some([4; 20]),
             external_buys: Some(5),
             c1_scope: true,
+            tx_unverifiable: false,
             block_ms: 1_000,
             block_seen_ns: 0,
             block_seen_unix_ms: Some(990),

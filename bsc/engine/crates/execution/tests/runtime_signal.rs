@@ -70,6 +70,7 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
     let c = census(
         &base.join("bsc-runtime/journal"),
         journal_max_payload(&config),
+        None,
     )
     .unwrap();
     assert_eq!(c.windows.len(), 1);

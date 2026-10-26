@@ -403,6 +403,7 @@ impl Canonical {
                     token: l.token,
                     external_buys: l.external_buys_after,
                     c1_scope: l.c1_scope,
+                    tx_unverifiable: l.unverifiable.is_some(),
                     block_ms: match self.head_block_ms {
                         Some(ms) if same => ms,
                         // Never reached: the follower reports a block before its launches.
@@ -489,6 +490,7 @@ impl Canonical {
             .set(e::EXTERNAL_BUYS, c.external_buys)
             .set(e::BUYS_UNKNOWN, c.buys_unknown)
             .set(e::CLOCK_UNKNOWN, c.clock_unknown)
+            .set(e::TX_UNVERIFIABLE, c.tx_unverifiable)
             .set(e::C1_SCOPE_LAUNCHES, c.c1_scope_launches)
             .set(e::C1_SCOPE_FULL_BEFORE, c.c1_scope_full_before)
             .set(e::BLOCKS_SKIPPED, self.blocks_skipped)
@@ -577,10 +579,15 @@ pub fn journal_max_payload(config: &RuntimeConfig) -> usize {
     config.wss.max_message_bytes + 64
 }
 
-/// Replays the journals of `rundir` into `bsc-runtime/g04-census.dbrec`.
-pub fn write_census(config: &RuntimeConfig, rundir: &Path) -> Result<Census, String> {
+/// Replays the journals of `rundir` into `bsc-runtime/g04-census.dbrec`;
+/// `active` is the journal the calling runtime still writes (`RUNNING`).
+pub fn write_census(
+    config: &RuntimeConfig,
+    rundir: &Path,
+    active: Option<&Path>,
+) -> Result<Census, String> {
     let dir = rundir.join("bsc-runtime");
-    let census = census(&dir.join("journal"), journal_max_payload(config))?;
+    let census = census(&dir.join("journal"), journal_max_payload(config), active)?;
     replace(
         &dir.join("g04-census.dbrec"),
         &census.encode(observed_now()?)?,
@@ -918,7 +925,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
                 );
             }
             // A census failure is visible in the log; observation goes on.
-            if let Err(e) = write_census(config, rundir) {
+            if let Err(e) = write_census(config, rundir, Some(journal.path())) {
                 eprintln!("g04 census: {e}");
             }
         }
@@ -926,7 +933,7 @@ pub fn run(config: &RuntimeConfig, sources_dir: &Path, rundir: &Path) -> Result<
             drop(tx);
             journal.record(RecordKind::Runtime, clock.now_ns(), &EXIT_PAYLOAD);
             journal.finish()?;
-            if let Err(e) = write_census(config, rundir) {
+            if let Err(e) = write_census(config, rundir, None) {
                 eprintln!("g04 census: {e}");
             }
             return Ok(());
@@ -1036,9 +1043,10 @@ mod tests {
                 creator: None,
                 external_buys_after: buys,
                 first_external_buy_index: None,
-                sender: [tx; 20],
-                nonce: u64::from(tx),
+                sender: Some([tx; 20]),
+                nonce: Some(u64::from(tx)),
                 c1_scope,
+                unverifiable: None,
             })
         };
         // Launch 1: a hash 50 ms before its block time; launch 2: a full
@@ -1063,10 +1071,19 @@ mod tests {
         );
         c.event(10, block(10), &mut journal);
         c.event(10, launch(10, 1, Some(2), true), &mut journal);
+        // A launch whose transaction the verifier refuses (e.g. a type it
+        // does not rebuild): a counted per-launch fact, never a stall.
+        let CanonicalEvent::Launch(mut refused) = launch(10, 4, Some(0), false) else {
+            unreachable!()
+        };
+        refused.sender = None;
+        refused.nonce = None;
+        refused.unverifiable = Some(crate::wss::RejectReason::UnsupportedType(4));
+        c.event(10, CanonicalEvent::Launch(refused), &mut journal);
         c.event(20, block(11), &mut journal);
         c.event(20, launch(11, 2, None, false), &mut journal);
         c.event(20, launch(11, 3, Some(0), true), &mut journal);
-        assert_eq!(c.ledger.waiting(), 3);
+        assert_eq!(c.ledger.waiting(), 4);
         c.event(
             25,
             CanonicalEvent::Fault(FollowerFault::Request {
@@ -1092,9 +1109,10 @@ mod tests {
                 k.missed,
                 k.external_buys,
                 k.buys_unknown,
-                k.c1_scope_launches
+                k.c1_scope_launches,
+                k.tx_unverifiable
             ),
-            (3, 1, 1, 1, 2, 1, 2)
+            (4, 1, 1, 2, 2, 1, 2, 1)
         );
         c.event(
             40,
@@ -1111,9 +1129,10 @@ mod tests {
                 k.flap_launches,
                 k.missed,
                 k.orphaned_launches,
-                k.c1_scope_launches
+                k.c1_scope_launches,
+                k.tx_unverifiable
             ),
-            (1, 0, 2, 1)
+            (2, 1, 2, 1, 1)
         );
         assert_eq!(
             (
@@ -1143,13 +1162,14 @@ mod tests {
         let r = darkbot_bsc_record::decode(&rs::SCHEMA, &status).unwrap();
         assert_eq!(r.u64(rs::STATUS_INTERVAL_MS).unwrap(), config.status_ms);
         let n = r.nested(rs::CANONICAL).unwrap();
-        assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 1);
+        assert_eq!(n.u64(rs::canonical::FLAP_LAUNCHES).unwrap(), 2);
+        assert_eq!(n.u64(rs::canonical::TX_UNVERIFIABLE).unwrap(), 1);
         assert_eq!(n.u64(rs::canonical::HEAD).unwrap(), 12);
         assert_eq!(n.u64(rs::canonical::BLOCKS_SKIPPED).unwrap(), 87);
         assert_eq!(n.u64(rs::canonical::C1_SCOPE_LAUNCHES).unwrap(), 1);
         assert_eq!(n.i64(rs::canonical::HEAD_FETCH_LAG_MS).unwrap(), 300);
         journal.finish().unwrap();
-        let census = census(&base, journal_max_payload(&config)).unwrap();
+        let census = census(&base, journal_max_payload(&config), None).unwrap();
         assert_eq!(
             (
                 census.flap_launches,
@@ -1157,9 +1177,10 @@ mod tests {
                 census.orphaned_launches,
                 census.c1_scope_launches,
                 census.unjoined,
-                census.blocks_skipped
+                census.blocks_skipped,
+                census.tx_unverifiable
             ),
-            (1, 1, 2, 1, 0, 87)
+            (2, 1, 2, 1, 0, 87, 1)
         );
         let w = &census.windows[0];
         assert_eq!((w.first_block, w.reorgs, w.resyncs), (Some(10), 1, 1));

@@ -28,19 +28,24 @@ pub mod census {
         pub const RESYNCS: u16 = 7;
         /// Records the bounded queue lost (gap spans): the window is incomplete.
         pub const LOST_RECORDS: u16 = 8;
-        /// `COMPLETE` (clean end record), `UNTERMINATED` (killed: no end
-        /// record), `TAIL_INCOMPLETE` (still written or cut: the verified
-        /// frames count) or `INVALID` (a corrupt frame: nothing counts).
+        /// `COMPLETE` (clean end record), `RUNNING` (the journal the running
+        /// runtime still writes), `UNTERMINATED` (killed: no end record),
+        /// `TAIL_INCOMPLETE` (cut: the verified frames count) or `INVALID`
+        /// (a corrupt frame: nothing counts).
         pub const STATE: u16 = 9;
         /// Canonical blocks not followed (gaps, resyncs).
         pub const BLOCKS_SKIPPED: u16 = 10;
         /// Launches received but never joined (lost at a crash).
         pub const UNJOINED: u16 = 11;
+        /// A RUNNING window's launches still inside their join delay.
+        pub const PENDING_JOIN: u16 = 12;
+        /// Canonical/reorg records that do not parse (older layout, damage).
+        pub const UNPARSED_RECORDS: u16 = 13;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.g04-census.window",
             record_type: 0,
-            schema_version: 2,
+            schema_version: 3,
             fields: &[
                 Field::req(JOURNAL, "journal", Text),
                 Field::req(STARTED_UNIX_MS, "started_unix_ms", U64),
@@ -53,6 +58,8 @@ pub mod census {
                 Field::req(STATE, "state", Text),
                 Field::req(BLOCKS_SKIPPED, "blocks_skipped", U64),
                 Field::req(UNJOINED, "unjoined", U64),
+                Field::req(PENDING_JOIN, "pending_join", U64),
+                Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
             ],
         };
     }
@@ -121,11 +128,18 @@ pub mod census {
     pub const FETCH_LAG_MS_MAX: u16 = 30;
     /// A negative fetch lag: the local clock is behind the block time.
     pub const CLOCK_SUSPECT: u16 = 31;
+    /// Flap launches whose transaction the verifier refuses (an unsupported
+    /// type, pre-EIP-155, a mismatch): counted, not actionable.
+    pub const TX_UNVERIFIABLE: u16 = 32;
+    /// Canonical heights no process window followed (between two windows).
+    pub const BLOCKS_BETWEEN_WINDOWS: u16 = 33;
+    /// Canonical/reorg records that do not parse, in all windows.
+    pub const UNPARSED_RECORDS: u16 = 34;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
-        schema_version: 2,
+        schema_version: 3,
         fields: &[
             Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
@@ -161,6 +175,9 @@ pub mod census {
             Field::opt(FETCH_LAG_MS_P50, "fetch_lag_ms_p50", I64),
             Field::opt(FETCH_LAG_MS_MAX, "fetch_lag_ms_max", I64),
             Field::req(CLOCK_SUSPECT, "clock_suspect", Bool),
+            Field::req(TX_UNVERIFIABLE, "tx_unverifiable", U64),
+            Field::req(BLOCKS_BETWEEN_WINDOWS, "blocks_between_windows", U64),
+            Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
         ],
     };
 }

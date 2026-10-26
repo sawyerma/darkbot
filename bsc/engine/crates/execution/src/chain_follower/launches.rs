@@ -26,7 +26,7 @@ use alloy_primitives::hex;
 use super::CanonicalLaunch;
 use super::jsonrpc::{BlockHead, Log, Receipt, TxPlace};
 use crate::ingress::is_flap_launch;
-use crate::wss::VerifiedTx;
+use crate::wss::{RejectReason, VerifiedTx};
 
 /// The venue of a launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,8 +132,9 @@ impl ReceiptLaunch {
 
     /// The launch with the facts of its verified transaction: sender,
     /// nonce, and the C1 scope decision of the pending path
-    /// (`ingress::is_flap_launch` of the signed bytes).
-    pub(super) fn with_transaction(self, tx: &VerifiedTx) -> CanonicalLaunch {
+    /// (`ingress::is_flap_launch` of the signed bytes); or, for a
+    /// transaction the verifier refuses, that reason.
+    pub(super) fn with_transaction(self, tx: Result<&VerifiedTx, RejectReason>) -> CanonicalLaunch {
         CanonicalLaunch {
             venue: self.venue,
             block_number: self.block_number,
@@ -144,9 +145,10 @@ impl ReceiptLaunch {
             creator: self.creator,
             external_buys_after: self.external_buys_after,
             first_external_buy_index: self.first_external_buy_index,
-            sender: tx.from,
-            nonce: tx.nonce,
-            c1_scope: is_flap_launch(&tx.raw),
+            sender: tx.ok().map(|t| t.from),
+            nonce: tx.ok().map(|t| t.nonce),
+            c1_scope: tx.is_ok_and(|t| is_flap_launch(&t.raw)),
+            unverifiable: tx.err(),
         }
     }
 }

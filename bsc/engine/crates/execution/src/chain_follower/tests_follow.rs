@@ -682,8 +682,8 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
             l.creator.map(|c| c[0]),
             l.external_buys_after,
             l.first_external_buy_index,
-            l.sender[0],
-            l.nonce,
+            l.sender.map_or("?".to_string(), |a| a[0].to_string()),
+            l.nonce.map_or("?".to_string(), |n| n.to_string()),
             l.c1_scope
         ),
         CanonicalEvent::Reorg { orphaned, new_head } => {
@@ -1000,13 +1000,17 @@ fn a_real_launch_block_through_the_whole_path() {
     assert!(observed_unix_ms.unwrap() > *timestamp_ms);
     assert_eq!(
         (first.sender, first.nonce, first.c1_scope),
-        (hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"), 13, true)
+        (
+            Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464")),
+            Some(13),
+            true
+        )
     );
     assert_eq!(
         (second.sender, second.nonce, second.c1_scope),
         (
-            hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34"),
-            1592,
+            Some(hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34")),
+            Some(1592),
             false
         )
     );
@@ -1026,5 +1030,57 @@ fn a_real_launch_block_through_the_whole_path() {
     assert_eq!(
         second.token,
         Some(hex!("e5499b52f4f70ab9efd09880342a53f520dc7777"))
+    );
+}
+
+/// Review Paket 3 (second pass), HIGH: a launch transaction the verifier
+/// refuses for good (here re-typed to EIP-7702 type 4) is a fact of that
+/// launch, never a retried fault: the block is emitted at once, the launch
+/// carries the reason, and nothing is skipped.
+#[test]
+fn an_unverifiable_launch_transaction_never_stalls_the_follower() {
+    let header: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/chain/block_129774331.header.json"
+    ))
+    .unwrap();
+    let receipts: Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/chain/block_129774331.receipts.json"
+    ))
+    .unwrap();
+    let mut refused = tx_object(TX_ROUTER);
+    refused["type"] = Value::from("0x4");
+    let served = Served {
+        header: header["result"].clone(),
+        receipts: receipts["result"].clone(),
+        txs: vec![tx_object(TX_DIRECT), refused],
+    };
+    let script = Script {
+        phases: vec![Phase {
+            head: 129_774_331,
+            blocks: BTreeMap::from([(129_774_331, served)]),
+        }],
+        inject: vec![],
+        chunk: 4096,
+    };
+    let outcome = follow_script(script, limits(), None);
+    let events: Vec<CanonicalEvent> = outcome.events.into_iter().map(|(e, _)| e).collect();
+    let [
+        CanonicalEvent::Block { number, .. },
+        CanonicalEvent::Launch(first),
+        CanonicalEvent::Launch(second),
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(*number, 129_774_331);
+    assert_eq!((first.c1_scope, first.unverifiable), (true, None));
+    assert_eq!(
+        (
+            second.sender,
+            second.nonce,
+            second.c1_scope,
+            second.unverifiable
+        ),
+        (None, None, false, Some(RejectReason::UnsupportedType(4)))
     );
 }
