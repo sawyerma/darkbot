@@ -211,9 +211,8 @@ pub struct Recovery {
     pub discontinuity: Option<(u32, u64, u64)>,
 }
 
-/// Validates the segments of `dir` in index order: every frame, checksum
-/// and sequence, and the continuity across segments.
-pub fn recover(dir: &Path, max_payload: usize) -> Result<Recovery, JournalError> {
+/// The segments of a run directory in index order: `(index, path, sealed)`.
+pub(crate) fn list_segments(dir: &Path) -> Result<Vec<(u32, PathBuf, bool)>, JournalError> {
     let mut found: Vec<(u32, PathBuf, bool)> = Vec::new();
     for entry in fs::read_dir(dir).map_err(JournalError::Io)? {
         let path = entry.map_err(JournalError::Io)?.path();
@@ -236,6 +235,13 @@ pub fn recover(dir: &Path, max_payload: usize) -> Result<Recovery, JournalError>
         found.push((index, path, sealed));
     }
     found.sort_by_key(|(index, _, _)| *index);
+    Ok(found)
+}
+
+/// Validates the segments of `dir` in index order: every frame, checksum
+/// and sequence, and the continuity across segments.
+pub fn recover(dir: &Path, max_payload: usize) -> Result<Recovery, JournalError> {
+    let found = list_segments(dir)?;
     let mut segments = Vec::with_capacity(found.len());
     let mut complete = true;
     let mut discontinuity = None;

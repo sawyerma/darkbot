@@ -1,8 +1,14 @@
 //! The BSC runtime's binary journal (`DBJNL001`, V2 framing of
-//! `darkbot-bsc-journal`): the runtime thread enqueues without waiting into a
-//! bounded recorder; a writer thread appends to `<dir>/<started_ms>.dbjnl`
-//! (create-new, 0600). A full queue loses the record visibly (counted, and the
-//! sequence gap is proven on replay), never silently.
+//! `darkbot-bsc-journal`; Phase F storage): the runtime thread enqueues
+//! without waiting into a recorder bounded by records and by bytes (the
+//! capture `MemoryBudget`); the one `JournalWorker` appends to the run
+//! directory `<dir>/<started_ms>/` as sealed segments (create-new, 0600),
+//! syncs by the configured policy and, at the end, the run manifest
+//! `capture-run.dbrec` (`darkbot.bsc.capture-run.v1`) names every segment
+//! with its sequence range and exact SHA-256. A full queue or budget loses
+//! the record visibly (counted, and the sequence gap is proven on replay),
+//! never silently. Journals of older builds (`<dir>/<started_ms>.dbjnl`,
+//! one file) stay readable by the census.
 //!
 //! What it holds (binary payloads, no JSON):
 //! - `RawSignedTx`: the first verified full sighting of a Flap launch,
@@ -43,13 +49,19 @@
 
 use crate::canonical_join::{Joined, LaunchRef, LaunchTx, Venue};
 use crate::sources::SourceId;
-use darkbot_bsc_journal::{JournalError, JournalManifest, JournalWriter, RecordKind, Recorder};
+use darkbot_bsc_journal::storage::metrics::StorageMetrics;
+use darkbot_bsc_journal::storage::segments::{SealedSegment, SegmentPolicy, SegmentWriter};
+use darkbot_bsc_journal::storage::writer::{self, SyncPolicy, WorkerEnd};
+use darkbot_bsc_journal::{JournalError, MemoryBudget, RECORD_OVERHEAD, RecordKind, Recorder};
+use darkbot_bsc_record::schema::bsc_capture::capture_run as cr;
+use darkbot_bsc_record::{Draft, Value};
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::thread::{self, JoinHandle};
+use std::sync::mpsc;
+use std::thread::JoinHandle;
 
 /// A source transition recorded in the journal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,82 +223,134 @@ pub fn window_payload(tag: u8, number: u64, hash: &[u8; 32]) -> Vec<u8> {
     out
 }
 
+/// The run manifest's file name inside a run directory.
+pub const RUN_MANIFEST: &str = "capture-run.dbrec";
+
+/// The bounds of the runtime's segmented capture (`BSC_RUNTIME_JOURNAL_*`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JournalSetup {
+    /// Records the recorder queues at most…
+    pub queue: usize,
+    /// …and the bytes they may hold together (payload plus overhead).
+    pub budget_bytes: usize,
+    pub max_payload: usize,
+    pub segment: SegmentPolicy,
+    pub sync: SyncPolicy,
+}
+
+impl JournalSetup {
+    /// One unrotated segment, a budget that holds a full queue of the
+    /// largest records, synced at the end only: the bounds of a bounded
+    /// harness or test capture (the runtime takes its keys,
+    /// `runtime::journal_setup`).
+    pub fn whole(queue: usize, max_payload: usize) -> Self {
+        JournalSetup {
+            queue,
+            budget_bytes: max_payload
+                .saturating_add(RECORD_OVERHEAD)
+                .saturating_mul(queue.max(1)),
+            max_payload,
+            segment: SegmentPolicy {
+                max_segment_bytes: u64::MAX,
+                max_segment_ns: u64::MAX,
+            },
+            sync: SyncPolicy {
+                every_records: u64::MAX,
+                every: std::time::Duration::MAX,
+            },
+        }
+    }
+
+    /// The largest record must fit the budget, or every such record would
+    /// be lost.
+    pub fn validate(&self) -> Result<(), String> {
+        let largest = self.max_payload.saturating_add(RECORD_OVERHEAD);
+        if self.budget_bytes < largest {
+            return Err(format!(
+                "BSC_RUNTIME_JOURNAL_BUDGET_BYTES {} is below the largest record ({largest} bytes)",
+                self.budget_bytes
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// What a finished capture wrote.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureRun {
+    pub dir: PathBuf,
+    pub segments: usize,
+    /// Frames written; records lost: the gap spans among them plus the
+    /// oversize records refused (which take no sequence).
+    pub records: u64,
+    pub lost_records: u64,
+    pub complete: bool,
+}
+
 pub struct RuntimeJournal {
-    path: PathBuf,
+    dir: PathBuf,
+    started_ms: u64,
+    clock_id: u64,
+    setup: JournalSetup,
     recorder: Option<Recorder>,
-    writer: Option<JoinHandle<Result<JournalManifest, String>>>,
-    appended: Arc<AtomicU64>,
-    failed: Arc<AtomicBool>,
+    worker: Option<JoinHandle<Result<WorkerEnd, JournalError>>>,
+    sealed: mpsc::Receiver<SealedSegment>,
+    metrics: Arc<StorageMetrics>,
+    budget: Arc<MemoryBudget>,
     lost: u64,
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
 impl RuntimeJournal {
-    /// Creates `<dir>/<started_ms>.dbjnl` (dir 0700) and its writer.
+    /// Creates the run directory `<dir>/<started_ms>/` (parents 0700; the
+    /// run itself create-new) and its writer. `clock_id` names the clock
+    /// of every record timestamp.
     pub fn open(
         dir: &Path,
         started_ms: u64,
-        capacity: usize,
-        max_payload: usize,
+        clock_id: u64,
+        setup: JournalSetup,
     ) -> Result<Self, String> {
-        match fs::DirBuilder::new()
+        setup.validate()?;
+        fs::DirBuilder::new()
             .mode(0o700)
             .recursive(true)
             .create(dir)
-        {
-            Ok(()) => {}
-            Err(e) => return Err(format!("{}: {e}", dir.display())),
-        }
-        let path = dir.join(format!("{started_ms}.dbjnl"));
-        // Read too: the commit hashes the exact bytes written.
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| format!("create-new {}: {e}", path.display()))?;
-        let (recorder, mut drain) = Recorder::bounded_spanned(capacity, max_payload)
-            .map_err(|e| format!("journal recorder: {e}"))?;
-        let appended = Arc::new(AtomicU64::new(0));
-        let failed = Arc::new(AtomicBool::new(false));
-        let (w_appended, w_failed) = (Arc::clone(&appended), Arc::clone(&failed));
-        let writer = thread::Builder::new()
-            .name("bsc-runtime-journal".into())
-            .spawn(move || {
-                let mut journal = JournalWriter::new_v2(file);
-                loop {
-                    match drain.recv_spanned() {
-                        Ok(record) => {
-                            if let Err(e) = journal.append(&record) {
-                                w_failed.store(true, Ordering::Release);
-                                return Err(format!("journal append failed: {e}"));
-                            }
-                            w_appended.fetch_add(1, Ordering::Release);
-                        }
-                        Err(JournalError::QueueDisconnected) => break,
-                        Err(e) => {
-                            w_failed.store(true, Ordering::Release);
-                            return Err(format!("journal drain failed: {e}"));
-                        }
-                    }
-                }
-                journal
-                    .commit_file()
-                    .map_err(|e| format!("journal commit failed: {e}"))
-            })
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+        let run = dir.join(started_ms.to_string());
+        let segments = SegmentWriter::create(&run, setup.segment)
+            .map_err(|e| format!("create-new {}: {e}", run.display()))?;
+        let budget =
+            MemoryBudget::new(setup.budget_bytes).map_err(|e| format!("journal budget: {e}"))?;
+        let (recorder, drain) =
+            Recorder::bounded_spanned_budgeted(setup.queue, setup.max_payload, Arc::clone(&budget))
+                .map_err(|e| format!("journal recorder: {e}"))?;
+        let metrics = Arc::new(StorageMetrics::default());
+        let (tx, sealed) = mpsc::channel();
+        let worker = writer::spawn(drain, segments, setup.sync, Arc::clone(&metrics), Some(tx))
             .map_err(|e| format!("spawn journal writer: {e}"))?;
         Ok(RuntimeJournal {
-            path,
+            dir: run,
+            started_ms,
+            clock_id,
+            setup,
             recorder: Some(recorder),
-            writer: Some(writer),
-            appended,
-            failed,
+            worker: Some(worker),
+            sealed,
+            metrics,
+            budget,
             lost: 0,
         })
     }
 
+    /// The run directory.
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.dir
     }
 
     /// Enqueues without waiting; `false` when the record was lost (counted).
@@ -302,7 +366,7 @@ impl RuntimeJournal {
     }
 
     pub fn appended(&self) -> u64 {
-        self.appended.load(Ordering::Acquire)
+        self.metrics.view().records
     }
 
     pub fn lost(&self) -> u64 {
@@ -310,18 +374,130 @@ impl RuntimeJournal {
     }
 
     pub fn healthy(&self) -> bool {
-        !self.failed.load(Ordering::Acquire)
+        !self.metrics.view().failed
     }
 
-    /// Closes the queue, lets the writer append what is queued and commit.
-    pub fn finish(mut self) -> Result<JournalManifest, String> {
+    /// Closes the queue, lets the worker append what is queued and seal
+    /// the last segment, then writes the run manifest (also after a write
+    /// failure, as `INCOMPLETE`). A write failure is returned after that.
+    pub fn finish(mut self) -> Result<CaptureRun, String> {
+        // Refusals outside the sequence (oversize): the others are gap spans.
+        let oversize = self
+            .recorder
+            .as_ref()
+            .map_or(0, |r| r.stats().rejected_oversize);
         drop(self.recorder.take());
-        self.writer
+        let end = self
+            .worker
             .take()
             .ok_or("journal writer already joined")?
             .join()
-            .map_err(|_| "journal writer panicked".to_string())?
+            .map_err(|_| "journal writer panicked".to_string())?;
+        let sealed: Vec<SealedSegment> = self.sealed.try_iter().collect();
+        let view = self.metrics.view();
+        let records: u64 = sealed.iter().map(|s| s.manifest.records).sum();
+        let lost_records: u64 = sealed.iter().map(|s| s.manifest.lost_records).sum();
+        let mut reasons = Vec::new();
+        if let Err(e) = &end {
+            reasons.push(format!("journal write failed: {e}"));
+        }
+        if lost_records > 0 {
+            reasons.push(format!("{lost_records} records lost (gap spans)"));
+        }
+        if oversize > 0 {
+            reasons.push(format!("{oversize} oversize records refused"));
+        }
+        let complete = reasons.is_empty();
+        let mut d = Draft::new(&cr::SCHEMA);
+        d.set(cr::RUN_ID, self.started_ms.to_string())
+            .set(cr::CHAIN_ID, 56u64)
+            .set(cr::PROVENANCE_TOOL, "bsc_runtime")
+            .set(cr::PROVENANCE_OBSERVED_UNIX_MS, now_ms())
+            .set(cr::STARTED_UNIX_MS, self.started_ms)
+            .set(cr::ENDED_UNIX_MS, now_ms())
+            .set(cr::CLOCK_ID, self.clock_id)
+            .set(cr::BUDGET_BYTES, self.setup.budget_bytes as u64)
+            .set(cr::QUEUE_RECORDS, self.setup.queue as u64)
+            .set(cr::SEGMENT_BYTES, self.setup.segment.max_segment_bytes)
+            .set(cr::SEGMENT_NS, self.setup.segment.max_segment_ns)
+            .set(cr::SYNC_RECORDS, self.setup.sync.every_records)
+            .set(
+                cr::SYNC_MS,
+                u64::try_from(self.setup.sync.every.as_millis()).unwrap_or(u64::MAX),
+            )
+            .set(cr::RECORDS, records)
+            .set(cr::LOST_RECORDS, lost_records.saturating_add(oversize))
+            .set(cr::PEAK_BYTES, self.budget.peak() as u64)
+            .set(cr::BUDGET_REFUSED, self.budget.refused())
+            .set(cr::WRITE_ERRORS, view.write_errors)
+            .set(cr::STATE, if complete { "COMPLETE" } else { "INCOMPLETE" })
+            .push(
+                cr::NON_CLAIMS,
+                "LOCAL_CAPTURE: a runtime journal of this host; no Phase-F quality verdict",
+            );
+        if let Some(last) = sealed.iter().rev().find_map(|s| s.manifest.last_sequence) {
+            d.set(cr::LAST_SEQUENCE, last);
+        }
+        for reason in &reasons {
+            d.push(cr::REASONS, reason.as_str());
+        }
+        for s in &sealed {
+            let mut seg = Draft::new(&cr::segment::SCHEMA);
+            let file = s
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            seg.set(cr::segment::INDEX, u64::from(s.index))
+                .set(cr::segment::FILE, file)
+                .set(cr::segment::RECORDS, s.manifest.records)
+                .set(cr::segment::LOST_RECORDS, s.manifest.lost_records)
+                .set(cr::segment::BYTES, s.manifest.bytes)
+                .set(cr::segment::SHA256, Value::B256(s.manifest.sha256));
+            if let Some(v) = s.manifest.first_sequence {
+                seg.set(cr::segment::FIRST_SEQUENCE, v);
+            }
+            if let Some(v) = s.manifest.last_sequence {
+                seg.set(cr::segment::LAST_SEQUENCE, v);
+            }
+            if let Some(v) = s.first_timestamp_ns {
+                seg.set(cr::segment::FIRST_TIMESTAMP_NS, v);
+            }
+            if let Some(v) = s.last_timestamp_ns {
+                seg.set(cr::segment::LAST_TIMESTAMP_NS, v);
+            }
+            d.push(cr::SEGMENTS, seg.into_nested());
+        }
+        let bytes = d.encode().map_err(|e| format!("run manifest: {e}"))?;
+        write_durable(&self.dir.join(RUN_MANIFEST), &bytes)?;
+        end.map_err(|e| format!("journal write failed: {e}"))?;
+        Ok(CaptureRun {
+            dir: self.dir.clone(),
+            segments: sealed.len(),
+            records,
+            lost_records: lost_records.saturating_add(oversize),
+            complete,
+        })
     }
+}
+
+/// Create-new 0600, written, synced, then the directory synced.
+fn write_durable(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| format!("create-new {}: {e}", path.display()))?;
+    f.write_all(bytes)
+        .and_then(|()| f.sync_all())
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if let Some(parent) = path.parent() {
+        fs::File::open(parent)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -338,13 +514,14 @@ mod tests {
     }
 
     use super::*;
-    use darkbot_bsc_journal::JournalReader;
+    use darkbot_bsc_journal::storage::run::RunReader;
+    use darkbot_bsc_record::decode;
 
     #[test]
     fn sightings_and_transitions_replay_in_order_with_their_payloads() {
         let dir = std::env::temp_dir().join(format!("bsc-runtime-journal-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let mut j = RuntimeJournal::open(&dir, 7, 64, 4096).unwrap();
+        let mut j = RuntimeJournal::open(&dir, 7, 1, JournalSetup::whole(64, 4096)).unwrap();
         let h = [5u8; 32];
         assert!(j.record(
             RecordKind::Runtime,
@@ -362,9 +539,10 @@ mod tests {
             &later_sighting_payload(SourceId::PublicNode, &h, 40)
         ));
         let path = j.path().to_path_buf();
-        let manifest = j.finish().unwrap();
-        assert_eq!(manifest.logical_records, 3);
-        let mut reader = JournalReader::new(fs::File::open(&path).unwrap(), 4096).unwrap();
+        assert_eq!(path, dir.join("7"));
+        let run = j.finish().unwrap();
+        assert_eq!((run.segments, run.records, run.complete), (1, 3, true));
+        let mut reader = RunReader::open(&path, 4096).unwrap();
         let mut got = Vec::new();
         while let Some(r) = reader.next_record().unwrap() {
             got.push((r.kind, r.timestamp_ns, r.payload.to_vec()));
@@ -377,8 +555,17 @@ mod tests {
         later.extend_from_slice(&h);
         later.extend_from_slice(&40u64.to_le_bytes());
         assert_eq!(got[2], (RecordKind::Runtime, 3, later));
+        // The run manifest names the sealed segment by its exact hash.
+        let m = decode(&cr::SCHEMA, &fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(m.text(cr::STATE).unwrap(), "COMPLETE");
+        let segments = m.nested_all(cr::SEGMENTS).unwrap();
+        assert_eq!(
+            segments[0].b256(cr::segment::SHA256).unwrap(),
+            reader.segments()[0].sha256
+        );
+        assert_eq!(m.u64(cr::RECORDS).unwrap(), 3);
         // create-new: the same start time never overwrites a journal.
-        assert!(RuntimeJournal::open(&dir, 7, 64, 4096).is_err());
+        assert!(RuntimeJournal::open(&dir, 7, 1, JournalSetup::whole(64, 4096)).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -444,16 +631,41 @@ mod tests {
         assert_eq!(window_payload(b'K', 1, &[0; 32])[0], b'K');
     }
 
+    /// A budget below the largest record would lose every such record:
+    /// refused before anything is created.
+    #[test]
+    fn a_budget_below_the_largest_record_is_refused() {
+        let dir =
+            std::env::temp_dir().join(format!("bsc-runtime-journal-b-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let setup = JournalSetup {
+            budget_bytes: 64 + RECORD_OVERHEAD - 1,
+            ..JournalSetup::whole(4, 64)
+        };
+        assert!(RuntimeJournal::open(&dir, 1, 1, setup).is_err());
+        assert!(!dir.exists());
+    }
+
     #[test]
     fn a_full_queue_loses_visibly_never_silently() {
         let dir =
             std::env::temp_dir().join(format!("bsc-runtime-journal-full-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let mut j = RuntimeJournal::open(&dir, 1, 1, 64).unwrap();
+        let mut j = RuntimeJournal::open(&dir, 1, 1, JournalSetup::whole(1, 64)).unwrap();
         // Oversize payloads are refused by the bounded recorder: counted.
         assert!(!j.record(RecordKind::Runtime, 1, &[0u8; 65]));
         assert_eq!(j.lost(), 1);
-        j.finish().unwrap();
+        let path = j.path().to_path_buf();
+        let run = j.finish().unwrap();
+        assert!(!run.complete);
+        // The run manifest says why the capture is not complete.
+        let m = decode(&cr::SCHEMA, &fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(m.text(cr::STATE).unwrap(), "INCOMPLETE");
+        assert_eq!(m.u64(cr::LOST_RECORDS).unwrap(), 1);
+        assert_eq!(
+            m.texts(cr::REASONS).unwrap(),
+            ["1 oversize records refused"]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 }

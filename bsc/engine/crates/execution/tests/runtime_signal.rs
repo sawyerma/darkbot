@@ -20,7 +20,13 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
     let text: String = CONFIG
         .replace("STATUS_MS=1000", "STATUS_MS=100")
         .lines()
-        .filter(|l| !l.starts_with("BSC_CANONICAL_"))
+        // No canonical follower, so neither the C2 owner nor the C3 path
+        // that need it.
+        .filter(|l| {
+            !["BSC_CANONICAL_", "BSC_STATE_", "BSC_EXEC_"]
+                .iter()
+                .any(|p| l.starts_with(p))
+        })
         .map(|l| format!("{l}\n"))
         .collect();
     let config_path = base.join("ingress.env");

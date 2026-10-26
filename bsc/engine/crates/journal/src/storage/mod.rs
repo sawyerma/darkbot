@@ -6,5 +6,6 @@
 pub mod budget;
 pub mod metrics;
 pub mod preflight;
+pub mod run;
 pub mod segments;
 pub mod writer;

@@ -30,6 +30,23 @@ impl<R: Read> JournalReader<R> {
         })
     }
 
+    /// A reader of the next segment of a run: its first record must follow
+    /// `last_sequence` (the previous segment's last), as within one file.
+    pub fn continuing(inner: R, max_payload: usize, last_sequence: Option<u64>) -> Result<Self, JournalError> {
+        let mut reader = Self::new(inner, max_payload)?;
+        reader.last_sequence = last_sequence;
+        Ok(reader)
+    }
+
+    /// The last logical sequence read so far.
+    pub fn last_sequence(&self) -> Option<u64> {
+        self.last_sequence
+    }
+
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, JournalError> {
         if self.failed { return Err(JournalError::Poisoned); }
         let result = self.read_frame();

@@ -24,7 +24,7 @@ use darkbot_bsc_execution::paper::PaperIdentity;
 use darkbot_bsc_execution::paper_exec::{
     Arming, ExecConfig, FnClock, LaunchContext, PaperExecutor, PendingLaunch, Refusal,
 };
-use darkbot_bsc_execution::runtime_journal::RuntimeJournal;
+use darkbot_bsc_execution::runtime_journal::{JournalSetup, RuntimeJournal};
 use darkbot_bsc_geth_ipc::RecordKind;
 use darkbot_bsc_geth_ipc::hot0::{Hot0Config, Hot0Decision, Hot0Poller};
 use darkbot_bsc_geth_ipc::ingress::{SOURCE_ETH_BROADCAST, decode_tx_target, ingress_aux};
@@ -321,7 +321,13 @@ fn c3_paper_path_latency() {
     });
 
     // The runtime journal takes each handoff record (recorder load).
-    let mut journal = RuntimeJournal::open(&dir.join("journal"), 1, launches + 8, 4096).unwrap();
+    let mut journal = RuntimeJournal::open(
+        &dir.join("journal"),
+        1,
+        1,
+        JournalSetup::whole(launches + 8, 4096),
+    )
+    .unwrap();
 
     // FastLane arena: one bound peer lane, the chain lane.
     let path = arena_path_v2(&dir, GENERATION);

@@ -6,7 +6,12 @@
 //! verified frame and says `TAIL_INCOMPLETE`; one without the clean end
 //! record (`X`) says `UNTERMINATED` (killed or crashed) and its covered
 //! window ends at its last checkpoint; a corrupt frame makes the whole
-//! journal `INVALID` and nothing of it counts. The journal the running
+//! journal `INVALID` and nothing of it counts. A journal is one file of an
+//! older build (`<started_ms>.dbjnl`) or one segmented run directory
+//! (`<started_ms>/`, read across its segments as one sequence); a run with
+//! a clean end but no run manifest says `UNSEALED`, and one whose sealed
+//! segments differ from its manifest (count, names, records, sequence
+//! range, SHA-256) is `INVALID`. The journal the running
 //! runtime still writes is `RUNNING`: its launches not joined yet are
 //! `pending_join`, not lost. Lost records (gap spans), skipped canonical
 //! blocks (gap/resync ranges, and the heights between two process windows),
@@ -26,11 +31,13 @@
 //! versioned criteria (order V2 §8).
 
 use crate::canonical_join::Venue;
-use crate::runtime_journal::{CANONICAL_LAUNCH_LEN, venue_of_byte};
+use crate::runtime_journal::{CANONICAL_LAUNCH_LEN, RUN_MANIFEST, venue_of_byte};
 use crate::sources::SourceId;
-use darkbot_bsc_journal::{JournalError, JournalReader, RecordKind};
-use darkbot_bsc_record::Draft;
+use darkbot_bsc_journal::storage::run::{RunReader, SegmentRead};
+use darkbot_bsc_journal::{CaptureRecord, JournalError, JournalReader, RecordKind};
+use darkbot_bsc_record::schema::bsc_capture::capture_run as cr;
 use darkbot_bsc_record::schema::bsc_census::census as cs;
+use darkbot_bsc_record::{Draft, decode};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -220,6 +227,39 @@ struct Replay {
     connectivity: Connectivity,
 }
 
+/// One journal: a single file of an older build or a segmented run.
+enum Reader {
+    File(JournalReader<std::io::BufReader<fs::File>>),
+    Run(Box<RunReader>),
+}
+
+impl Reader {
+    fn next_record(&mut self) -> Result<Option<CaptureRecord>, JournalError> {
+        match self {
+            Reader::File(r) => r.next_record(),
+            Reader::Run(r) => r.next_record(),
+        }
+    }
+}
+
+/// Whether the run manifest names exactly the sealed segments read.
+fn manifest_matches(bytes: &[u8], read: &[SegmentRead]) -> bool {
+    let Ok(segments) = decode(&cr::SCHEMA, bytes).and_then(|m| m.nested_all(cr::SEGMENTS)) else {
+        return false;
+    };
+    let sealed: Vec<&SegmentRead> = read.iter().filter(|r| r.sealed).collect();
+    segments.len() == sealed.len()
+        && segments.iter().zip(sealed).all(|(m, r)| {
+            let file = r.path.file_name().and_then(|n| n.to_str());
+            m.u64(cr::segment::INDEX).ok() == Some(u64::from(r.index))
+                && m.text(cr::segment::FILE).ok() == file
+                && m.u64(cr::segment::RECORDS).ok() == Some(r.records)
+                && m.opt_u64(cr::segment::FIRST_SEQUENCE).ok() == Some(r.first_sequence)
+                && m.opt_u64(cr::segment::LAST_SEQUENCE).ok() == Some(r.last_sequence)
+                && m.b256(cr::segment::SHA256).ok() == Some(r.sha256)
+        })
+}
+
 fn replay(
     path: &Path,
     name: String,
@@ -227,9 +267,20 @@ fn replay(
     max_payload: usize,
     active: bool,
 ) -> Result<Replay, String> {
-    let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut reader = JournalReader::new(std::io::BufReader::new(file), max_payload)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut reader = if path.is_dir() {
+        // A missing or reordered segment is a corrupt run: nothing counts.
+        match RunReader::open(path, max_payload) {
+            Ok(r) => Some(Reader::Run(Box::new(r))),
+            Err(JournalError::FileMismatch) => None,
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        }
+    } else {
+        let file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Some(Reader::File(
+            JournalReader::new(std::io::BufReader::new(file), max_payload)
+                .map_err(|e| format!("{}: {e}", path.display()))?,
+        ))
+    };
     let mut window = Window {
         journal: name,
         started_unix_ms: started,
@@ -243,7 +294,10 @@ fn replay(
     let mut exited = false;
     let mut checkpoint = None;
     let mut last_ns = 0u64;
-    let state = loop {
+    let mut state = loop {
+        let Some(reader) = reader.as_mut() else {
+            break "INVALID";
+        };
         let record = match reader.next_record() {
             Ok(Some(r)) => r,
             Ok(None) if exited => break "COMPLETE",
@@ -328,6 +382,20 @@ fn replay(
             _ => {}
         }
     };
+    if let Some(Reader::Run(run)) = &reader
+        && !active
+    {
+        match fs::read(path.join(RUN_MANIFEST)) {
+            Ok(bytes) if !manifest_matches(&bytes, run.segments()) => state = "INVALID",
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if state == "COMPLETE" {
+                    state = "UNSEALED";
+                }
+            }
+            Err(e) => return Err(format!("{}: {e}", path.join(RUN_MANIFEST).display())),
+        }
+    }
     window.state = state;
     if state == "INVALID" {
         window.first_block = None;
@@ -362,13 +430,25 @@ fn percentile<T: Copy>(sorted: &[T], q_per_mille: u64) -> Option<T> {
     sorted.get(usize::try_from(rank - 1).ok()?).copied()
 }
 
-/// Replays every `*.dbjnl` of `dir` (name `<started_unix_ms>.dbjnl`);
-/// `active` names the journal the running runtime still writes.
+/// Replays every journal of `dir`: `<started_unix_ms>.dbjnl` files and
+/// `<started_unix_ms>/` run directories; `active` names the journal the
+/// running runtime still writes.
 pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<Census, String> {
     let mut names: Vec<(u64, String)> = Vec::new();
     for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        let is_run = entry
+            .file_type()
+            .map_err(|e| format!("{}: {e}", entry.path().display()))?
+            .is_dir();
+        if is_run {
+            let started: u64 = name
+                .parse()
+                .map_err(|_| format!("{name}: not a <started_unix_ms> run directory"))?;
+            names.push((started, name));
+            continue;
+        }
         let Some(stem) = name.strip_suffix(".dbjnl") else {
             continue;
         };
@@ -640,12 +720,51 @@ mod tests {
         }
     }
 
+    /// A journal of an older build: one `<started>.dbjnl` file (the
+    /// layout the census keeps reading).
     fn write(
         dir: &Path,
         started: u64,
         records: &[(RecordKind, u64, Vec<u8>)],
     ) -> std::path::PathBuf {
-        let mut j = RuntimeJournal::open(dir, started, 64, 4096).unwrap();
+        fs::create_dir_all(dir).unwrap();
+        let path = dir.join(format!("{started}.dbjnl"));
+        let mut w = darkbot_bsc_journal::JournalWriter::new_v2(
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap(),
+        );
+        for (sequence, (kind, at, payload)) in records.iter().enumerate() {
+            w.append(&CaptureRecord {
+                sequence: sequence as u64,
+                kind: *kind,
+                timestamp_ns: *at,
+                payload: payload.clone().into_boxed_slice(),
+            })
+            .unwrap();
+        }
+        w.commit_file().unwrap();
+        path
+    }
+
+    /// A segmented run of the production writer.
+    fn write_run(
+        dir: &Path,
+        started: u64,
+        records: &[(RecordKind, u64, Vec<u8>)],
+        segment_bytes: u64,
+    ) -> std::path::PathBuf {
+        let setup = crate::runtime_journal::JournalSetup {
+            segment: darkbot_bsc_journal::storage::segments::SegmentPolicy {
+                max_segment_bytes: segment_bytes,
+                max_segment_ns: u64::MAX,
+            },
+            ..crate::runtime_journal::JournalSetup::whole(64, 4096)
+        };
+        let mut j = RuntimeJournal::open(dir, started, 1, setup).unwrap();
         for (kind, at, payload) in records {
             assert!(j.record(*kind, *at, payload));
         }
@@ -979,6 +1098,92 @@ mod tests {
         assert_eq!(offline.windows[1].state, "UNTERMINATED");
         assert_eq!(offline.unjoined, 1);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase F: a segmented run is read across its segments as one journal
+    /// and checked against its manifest. Without a manifest a clean run is
+    /// `UNSEALED`; a sealed segment replaced by another valid one (frames
+    /// and sequence intact) differs from the manifest and makes the run
+    /// `INVALID`; a crash's torn open last segment is `TAIL_INCOMPLETE`, as
+    /// for one file.
+    #[test]
+    fn segmented_runs_are_read_across_segments_and_sealed_by_their_manifest() {
+        let base = std::env::temp_dir().join(format!("bsc-g04-runs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let (dir, donor) = (base.join("journal"), base.join("donor"));
+        let records = |shift: u64| {
+            let mut r = vec![(
+                RecordKind::Canonical,
+                1 + shift,
+                window_payload(b'H', 10, &[10; 32]),
+            )];
+            for i in 0..20u64 {
+                r.push((
+                    RecordKind::Canonical,
+                    2 + i + shift,
+                    window_payload(b'K', 10 + i, &[10 + i as u8; 32]),
+                ));
+            }
+            r.push((
+                RecordKind::Canonical,
+                30 + shift,
+                window_payload(b'E', 30, &[30; 32]),
+            ));
+            r.push((RecordKind::Runtime, 31 + shift, EXIT_PAYLOAD.to_vec()));
+            r
+        };
+        let complete = write_run(&dir, 1_000, &records(0), 200);
+        let segments = |run: &Path| {
+            let mut s: Vec<_> = fs::read_dir(run)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| p.extension().is_some_and(|e| e == "dbjnl"))
+                .collect();
+            s.sort();
+            s
+        };
+        assert!(segments(&complete).len() >= 4);
+        let unsealed = write_run(&dir, 2_000, &records(0), 200);
+        fs::remove_file(unsealed.join(RUN_MANIFEST)).unwrap();
+        let changed = write_run(&dir, 3_000, &records(0), 200);
+        let other = write_run(&donor, 3_000, &records(1), 200);
+        fs::copy(&segments(&other)[1], &segments(&changed)[1]).unwrap();
+        let crashed = write_run(&dir, 4_000, &records(0)[..10], 200);
+        fs::remove_file(crashed.join(RUN_MANIFEST)).unwrap();
+        let last = segments(&crashed).pop().unwrap();
+        let open = last.with_extension("dbjnl.open");
+        fs::rename(&last, &open).unwrap();
+        let len = fs::metadata(&open).unwrap().len();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&open)
+            .unwrap()
+            .set_len(len - 3)
+            .unwrap();
+
+        let c = census(&dir, 4096, None).unwrap();
+        let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
+        assert_eq!(
+            states,
+            ["COMPLETE", "UNSEALED", "INVALID", "TAIL_INCOMPLETE"]
+        );
+        assert_eq!(
+            (c.windows[0].first_block, c.windows[0].last_block),
+            (Some(10), Some(30))
+        );
+        assert_eq!(c.windows[0].journal, "1000");
+        // Nothing of the changed run counts.
+        assert_eq!(
+            (c.windows[2].first_block, c.windows[2].last_block),
+            (None, None)
+        );
+        // The crashed run counts up to its last verified frame (checkpoint).
+        assert_eq!(c.windows[3].first_block, Some(10));
+        // Unchanged, the donor run reads COMPLETE: the segment copy alone
+        // made the other INVALID.
+        let d = census(&donor, 4096, None).unwrap();
+        assert_eq!(d.windows[0].state, "COMPLETE");
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

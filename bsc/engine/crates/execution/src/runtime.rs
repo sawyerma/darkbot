@@ -31,15 +31,17 @@ use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, health};
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
-    EXIT_PAYLOAD, RuntimeJournal, SourceEvent, canonical_launch_payload, first_sighting_payload,
-    later_sighting_payload, orphaned_launch_payload, paper_handoff_payload, pending_launch_payload,
-    reorg_payload, resync_payload, source_event_payload, window_payload,
+    EXIT_PAYLOAD, JournalSetup, RuntimeJournal, SourceEvent, canonical_launch_payload,
+    first_sighting_payload, later_sighting_payload, orphaned_launch_payload, paper_handoff_payload,
+    pending_launch_payload, reorg_payload, resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
 use crate::wss::{DisconnectReason, WssEvent, WssLimits, WssSource, run_source};
 use darkbot_bsc_geth_ipc::protocol_v2::CLOCK_ID_MONOTONIC;
 use darkbot_bsc_journal::RecordKind;
+use darkbot_bsc_journal::storage::segments::SegmentPolicy;
+use darkbot_bsc_journal::storage::writer::SyncPolicy;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{Draft, observed_now};
 use darkbot_bsc_trading::chain_state::engine::StateLimits;
@@ -72,6 +74,13 @@ pub struct RuntimeConfig {
     /// A connected source silent this long is DEGRADED.
     pub quiet_ms: u64,
     pub journal_queue: usize,
+    /// The capture's byte budget, segment rotation and sync policy
+    /// (`BSC_RUNTIME_JOURNAL_*`; Phase F storage).
+    pub journal_budget_bytes: usize,
+    pub journal_segment_bytes: u64,
+    pub journal_segment_ms: u64,
+    pub journal_sync_records: u64,
+    pub journal_sync_ms: u64,
     pub status_ms: u64,
     /// Every bound of the WSS adapters, validated by `WssLimits::validate`.
     pub wss: WssLimits,
@@ -293,6 +302,12 @@ impl RuntimeConfig {
             dedup_hashes: take("BSC_RUNTIME_DEDUP_HASHES", 1024, 1 << 24)? as usize,
             quiet_ms: take("BSC_RUNTIME_QUIET_MS", 1000, 600_000)?,
             journal_queue: take("BSC_RUNTIME_JOURNAL_QUEUE", 16, 1 << 20)? as usize,
+            journal_budget_bytes: take("BSC_RUNTIME_JOURNAL_BUDGET_BYTES", 1 << 20, 1 << 32)?
+                as usize,
+            journal_segment_bytes: take("BSC_RUNTIME_JOURNAL_SEGMENT_BYTES", 1 << 20, 1 << 32)?,
+            journal_segment_ms: take("BSC_RUNTIME_JOURNAL_SEGMENT_MS", 1_000, 86_400_000)?,
+            journal_sync_records: take("BSC_RUNTIME_JOURNAL_SYNC_RECORDS", 1, 1 << 20)?,
+            journal_sync_ms: take("BSC_RUNTIME_JOURNAL_SYNC_MS", 1, 60_000)?,
             status_ms: take("BSC_RUNTIME_STATUS_MS", 100, 60_000)?,
             wss,
             canonical,
@@ -308,6 +323,7 @@ impl RuntimeConfig {
             .wss
             .validate()
             .map_err(|e| format!("WSS bounds: {e:?}"))?;
+        journal_setup(&config).validate()?;
         let needed = config.stop_bound_ms();
         if config.stop_timeout_ms < needed {
             return Err(format!(
@@ -774,6 +790,23 @@ pub fn journal_max_payload(config: &RuntimeConfig) -> usize {
     config.wss.max_message_bytes + 64
 }
 
+/// The bounds of the runtime's segmented capture.
+pub fn journal_setup(config: &RuntimeConfig) -> JournalSetup {
+    JournalSetup {
+        queue: config.journal_queue,
+        budget_bytes: config.journal_budget_bytes,
+        max_payload: journal_max_payload(config),
+        segment: SegmentPolicy {
+            max_segment_bytes: config.journal_segment_bytes,
+            max_segment_ns: config.journal_segment_ms.saturating_mul(1_000_000),
+        },
+        sync: SyncPolicy {
+            every_records: config.journal_sync_records,
+            every: Duration::from_millis(config.journal_sync_ms),
+        },
+    }
+}
+
 /// Replays the journals of `rundir` into `bsc-runtime/g04-census.dbrec`;
 /// `active` is the journal the calling runtime still writes (`RUNNING`).
 pub fn write_census(
@@ -881,8 +914,8 @@ pub fn run(
     let mut journal = RuntimeJournal::open(
         &dir.join("journal"),
         started_ms,
-        config.journal_queue,
-        journal_max_payload(config),
+        u64::from(CLOCK_ID_MONOTONIC),
+        journal_setup(config),
     )?;
     let journal_rel: PathBuf = journal
         .path()
@@ -1434,7 +1467,13 @@ mod tests {
         let block_ms = |n: u8| BLOCK_MS + u64::from(n) * 450;
         // The process started at block 10's time.
         let mut c = Canonical::new(&cc, block_ms(10));
-        let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
         let mut core = IngressCore::new(64, config.max_launch_calldata);
         let clock = Clock(Instant::now());
         let block = |n: u8| CanonicalEvent::Block {
@@ -1656,7 +1695,13 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         let config = RuntimeConfig::parse(CONFIG).unwrap();
         let mut c = Canonical::new(config.canonical.as_ref().unwrap(), BLOCK_MS + 10);
-        let mut journal = RuntimeJournal::open(&base, 1, 64, journal_max_payload(&config)).unwrap();
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
         let block = |n: u64| CanonicalEvent::Block {
             number: n,
             hash: [n as u8; 32],

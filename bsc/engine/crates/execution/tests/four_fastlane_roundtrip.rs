@@ -10,7 +10,9 @@
 
 use alloy_primitives::{Address, hex, keccak256};
 use darkbot_bsc_execution::ingress::four_launch_token;
-use darkbot_bsc_execution::runtime_journal::{RuntimeJournal, first_sighting_payload};
+use darkbot_bsc_execution::runtime_journal::{
+    JournalSetup, RuntimeJournal, first_sighting_payload,
+};
 use darkbot_bsc_execution::sources::SourceId;
 use darkbot_bsc_geth_ipc::RecordKind;
 use darkbot_bsc_geth_ipc::hot0::{Hot0Config, Hot0Decision, Hot0Poller};
@@ -19,7 +21,8 @@ use darkbot_bsc_geth_ipc::protocol_v2::{
     ArenaV2, BorrowedRecordV2, CLOCK_ID_MONOTONIC, DirectionV2, LaneClassV2, LaneConfigV2,
     ProducerV2, RecordV2, arena_path_v2,
 };
-use darkbot_bsc_journal::{JournalReader, RecordKind as JournalKind};
+use darkbot_bsc_journal::RecordKind as JournalKind;
+use darkbot_bsc_journal::storage::run::RunReader;
 use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
 use darkbot_bsc_trading::venues::fourmeme::recognize::recognize;
 use std::fs;
@@ -164,7 +167,8 @@ fn fastlane_and_journal_bytes_decode_like_the_original() {
     // back by the journal reader (as the census replays them).
     let max = fixtures.iter().map(|f| f.raw.len()).max().unwrap() + 64;
     let journal_dir = dir.join("journal");
-    let mut journal = RuntimeJournal::open(&journal_dir, 1, 32, max).unwrap();
+    let mut journal =
+        RuntimeJournal::open(&journal_dir, 1, 1, JournalSetup::whole(32, max)).unwrap();
     for (i, f) in fixtures.iter().enumerate() {
         assert!(journal.record(
             JournalKind::RawSignedTx,
@@ -174,8 +178,7 @@ fn fastlane_and_journal_bytes_decode_like_the_original() {
     }
     let path = journal.path().to_path_buf();
     journal.finish().unwrap();
-    let file = fs::File::open(&path).unwrap();
-    let mut reader = JournalReader::new(std::io::BufReader::new(file), max).unwrap();
+    let mut reader = RunReader::open(&path, max).unwrap();
     let mut replayed = Vec::new();
     while let Some(record) = reader.next_record().unwrap() {
         if record.kind == JournalKind::RawSignedTx {
