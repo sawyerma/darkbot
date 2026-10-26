@@ -10,8 +10,8 @@ Sitzungsstart: `git fetch` + Fast-Forward, V2 und diese Tabelle lesen, HEAD prü
 | 1 | Gate A/B: BSC-005 T5, G0.8 UNRESOLVED-Rundweg, Schema-/Readiness-Regression | TECHNISCH FERTIG — EXTERNAL_BLOCKED: SIGN/V5/Grant/echter G0.7/G0.8 (Nutzerfreigabe) | `746fdf29`, `f91274bb`, `e9f88965`; Reviewer 25.10.: kein HIGH/CRITICAL, alle MEDIUM/LOW behoben | Readiness real: `BLOCKED` (kein V5 ohne SIGN) | – |
 | 2 | BSC-050 Vollinventur + Fixes | TECHNISCH FERTIG (Inventur + Gate-0/Gateway-Fixes); C1-Funde → Paket 3 | `0a10f0d5` (BSC-051/053), `e9f88965` (Uhr-Fixes) | Fehlerliste §8 | Paket 3 |
 | 3 | C0/C1 inkl. C1.9/C1.9b/C1.10-Freeze | TECHNISCH FERTIG — EXTERNAL_BLOCKED: synchronisierter Mainnet-geth (BSC-023 Mainnet-Messung, BSC-025 Peers; ≈3 TB NVMe, 475 GB frei → Kostenentscheidung) | `aba025e3`; Phase-Gate PASS (Review 4 Durchgänge, alle Funde behoben: `402393a6`, `995a2a27`, `da860a66`, `aba025e3`); C1.10 FROZEN `818525b1` (`e6177bba`) | – | Paket 4 |
-| 4 | C2 State/Nonce/Reorg/Recovery | OFFEN | – | – | C2-Kern (Tx-Identität, Sender+Nonce, kanonisch/orphan/unsicher, Recovery) |
-| 5 | C3, D, G0.1-Four-Freeze, E | OFFEN | – | – | nach Paket 4 |
+| 4 | C2 State/Nonce/Reorg/Recovery | TECHNISCH FERTIG (SHADOW; operativ LIVE gesperrt bis G0.8 PASS + G0.4) | `f427cfa1`; Phase-Gate PASS (3 Durchgänge, Funde behoben: `2d16ec81`, `f427cfa1`); Basis `c97e767c`, `3be74b41` | C2-Eingaben-Journal/Replay → Phase F/I (Master-Plan-Matrix) | Paket 5 |
+| 5 | C3, D, G0.1-Four-Freeze, E | OFFEN (G0.1 Four PARTIAL `925968a7`: 9/10 PROVEN je Familie, verifizierte ABI UNKNOWN) | – | verifizierte Four-ABI (BscScan-Key = Nutzerentscheidung) | D: Flap-v5.26-Refreeze → Decoder; dann C3 |
 | 6 | F, G, H | OFFEN | – | – | nach Paket 5 |
 | 7 | I PAPER/SHADOW | OFFEN | – | – | nach Paket 6 |
 | 8 | Gesamtbetriebsabnahme + Runbook | OFFEN | – | – | nach Paket 7 |
