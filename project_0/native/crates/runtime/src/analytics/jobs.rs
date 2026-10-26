@@ -192,7 +192,7 @@ fn io(e: impl std::fmt::Display) -> String {
     format!("JOB_STORE_IO: {e}")
 }
 
-fn open_lock(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_lock(path: &Path) -> std::io::Result<File> {
     OpenOptions::new()
         .read(true)
         .write(true)
@@ -202,7 +202,7 @@ fn open_lock(path: &Path) -> std::io::Result<File> {
 }
 
 /// flock without blocking: `Ok(false)` when another holder has it.
-fn flock_nb(file: &File, op: libc::c_int) -> std::io::Result<bool> {
+pub(crate) fn flock_nb(file: &File, op: libc::c_int) -> std::io::Result<bool> {
     // SAFETY: flock on an owned, open file descriptor.
     if unsafe { libc::flock(file.as_raw_fd(), op | libc::LOCK_NB) } == 0 {
         return Ok(true);
@@ -218,7 +218,7 @@ fn flock_nb(file: &File, op: libc::c_int) -> std::io::Result<bool> {
 /// Whether a process holds the exclusive lock of `path` (a missing file: nobody). A probe takes
 /// the shared lock for an instant only; a worker takes its job lock blocking, so a probe never
 /// makes it fail.
-fn held(path: &Path) -> Result<bool, String> {
+pub(crate) fn held(path: &Path) -> Result<bool, String> {
     match File::open(path) {
         Ok(f) => flock_nb(&f, libc::LOCK_SH).map(|free| !free).map_err(io),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -237,7 +237,7 @@ fn probe_guard(project: &Path) -> Result<File, String> {
 }
 
 /// Whether process `pid` exists (EPERM: it exists under another user).
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -255,7 +255,7 @@ fn write_spawn(dir: &Path, pid: u32) -> Result<(), String> {
 }
 
 /// The pid and start time a worker wrote into its lock (`pid=… started_unix_ms=…`).
-fn worker_record(path: &Path) -> (u32, Option<u64>) {
+pub(crate) fn worker_record(path: &Path) -> (u32, Option<u64>) {
     let mut text = String::new();
     if let Ok(mut f) = File::open(path) {
         let _ = f.read_to_string(&mut text);

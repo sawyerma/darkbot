@@ -123,6 +123,12 @@ pub mod kind {
     /// Measured FREE_ONLY provider evidence read by the network boot audit, imported offline
     /// from the measured JSON (`p0-journal import-provider-evidence`).
     pub const PROVIDER_EVIDENCE: u16 = 711;
+    /// DEC-07: a boot flow's offline step (`orchestration::boot_control::BootFlow`), a sealed
+    /// single-value journal `data/boot/<flow_id>/flow.p0j`.
+    pub const BOOT_FLOW: u16 = 712;
+    /// DEC-07: the outcome of a boot flow's network or start step, a sealed single-value journal
+    /// `data/boot/<flow_id>/<step>.outcome.p0j`.
+    pub const BOOT_STEP: u16 = 713;
     pub const FE01_CONFIG: u16 = 700;
     pub const FE01_READ: u16 = 701;
     pub const FE01_RESULT: u16 = 702;
@@ -206,6 +212,8 @@ pub mod kind {
         MT0_SNAPSHOT,
         BOOT_NETWORK,
         PROVIDER_EVIDENCE,
+        BOOT_FLOW,
+        BOOT_STEP,
         FE01_CONFIG,
         FE01_READ,
         FE01_RESULT,
@@ -247,6 +255,8 @@ pub mod source {
     pub const BACKTEST: u32 = 14;
     /// DEC-13 operator capability control (`p0ctl capability set`).
     pub const CAPABILITY_CONTROL: u32 = 15;
+    /// DEC-07 boot controller (`p0ctl boot …`).
+    pub const BOOT_CONTROL: u32 = 16;
 }
 /// M6: the static code of a journal integrity failure (FRAME_CRC, MANIFEST_MISMATCH, …),
 /// carried as the typed source of its `io::Error`; callers classify by type (`code_of`), never

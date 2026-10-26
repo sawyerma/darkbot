@@ -839,6 +839,12 @@ macro_rules! typed_kinds {
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }
+            k::BOOT_FLOW => {
+                $f::<crate::orchestration::boot_control::BootFlow>($kind, $schema, $bytes)
+            }
+            k::BOOT_STEP => {
+                $f::<crate::orchestration::boot_control::BootStepOutcome>($kind, $schema, $bytes)
+            }
             k::FE01_FREEZE => $f::<Fe01Freeze>($kind, $schema, $bytes),
             k::FE01_SMOKE => $f::<Fe01Smoke>($kind, $schema, $bytes),
             k::FE01_CONFIG => $f::<Fe01Config>($kind, $schema, $bytes),

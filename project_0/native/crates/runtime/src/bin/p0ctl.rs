@@ -27,6 +27,7 @@
 //! p0ctl [--project DIR] post-capture --run RUN_ID --chain-verify off|strict [--provider-evidence FILE] [--verify-* N] [--report-* …]
 //! p0ctl [--project DIR] source set wss|geyser:PROVIDER off|observe|active
 //! p0ctl [--project DIR] capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | capability status
+//! p0ctl [--project DIR] boot offline|network|start|cancel|status … (DEC-07: the boot controller)
 //! p0ctl [--project DIR] source status
 //! p0ctl [--project DIR] approval show FILE [--journal-dir DIR]
 //! p0ctl [--project DIR] fe04 accounting --journal-dir DIR --wallet PUBKEY
@@ -945,6 +946,241 @@ fn source_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
+const BOOT_USAGE: &str = "usage: p0ctl boot offline [--flow ID] [--mode econ4h|shadow] [-- OPERATIONAL_ARGS...]
+  | p0ctl boot network --flow ID --approve OFFLINE_TOKEN --genesis-hash HASH --provider-evidence FILE.p0j [--capture-source logs|transactions]
+  | p0ctl boot start --flow ID --approve NETWORK_TOKEN --duration D [--capture-source logs|transactions] [--chain-verify off|strict]
+  | p0ctl boot cancel --flow ID | p0ctl boot status [--flow ID]";
+
+/// DEC-07 (N7): the boot controller (`orchestration::boot_control`), the terminal's and the
+/// Capture tab's one path: `offline` audits locally and records a new flow with its mode,
+/// operational arguments and TTL; `network` (the operator's approval of the offline token) and
+/// `start` (the approval of the network token) each start that flow's step once in a detached
+/// worker (`boot run`, internal), which runs the network audit, respectively `run start`, with
+/// exactly the flow's mode and operational arguments; `cancel` stops a running step.
+fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::boot_control as bc;
+    let options = args.split(|a| a == "--").next().unwrap_or(&[]);
+    let operational = args.split(|a| a == "--").nth(1).unwrap_or(&[]);
+    let need = |flag: &str| -> Result<String, String> {
+        given(options, flag)?.ok_or_else(|| format!("{flag} required\n{BOOT_USAGE}"))
+    };
+    let capture_source = || -> Result<String, String> {
+        match given(options, "--capture-source")?.as_deref() {
+            None | Some("logs") => Ok("logs".into()),
+            Some("transactions") => Ok("transactions".into()),
+            Some(other) => Err(format!("CAPTURE_SOURCE_INVALID: {other}")),
+        }
+    };
+    let worker = || std::env::current_exe().map_err(|e| format!("BOOT_WORKER: {e}"));
+    match options.first().map(String::as_str) {
+        Some("offline") => {
+            let flow_id = match given(options, "--flow")? {
+                Some(id) => id,
+                None => jobs::new_id()?,
+            };
+            let mode = RunMode::of(&options[1..])?;
+            let resolved = darkbot_solana::runtime_config::Resolved::for_mode(
+                mode.name(),
+                operational,
+                &|k| std::env::var(k).ok(),
+            )?;
+            // DEC-07: the TTL and its source, as the status projection names it.
+            let ttl_source = resolved
+                .sources
+                .get("boot_token_ttl_seconds")
+                .cloned()
+                .unwrap_or_else(|| "builtin_default".into());
+            resolved.activate()?;
+            let ttl_seconds = darkbot_solana::runtime_config::active()
+                .limits
+                .boot_token_ttl_seconds;
+            let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
+            print!("{}", audit.terminal());
+            let blocked = audit.verdict == AuditVerdict::Blocked;
+            let token = audit.readiness_token[..16].to_string();
+            bc::create(
+                project,
+                &bc::BootFlow {
+                    flow_id: flow_id.clone(),
+                    mode: mode.name().into(),
+                    operational: operational.to_vec(),
+                    offline: audit,
+                    ttl_seconds,
+                    ttl_source: ttl_source.clone(),
+                    created_unix_ms: darkbot_runner::status_tap::unix_ms_now(),
+                },
+            )?;
+            if blocked {
+                println!("[p0ctl] boot flow {flow_id}: offline BLOCKED; nothing to approve");
+            } else {
+                println!("[p0ctl] boot flow {flow_id}: TTL {ttl_seconds} s [source {ttl_source}]; approve the network audit: p0ctl boot network --flow {flow_id} --approve {token} --genesis-hash HASH --provider-evidence FILE.p0j");
+            }
+            Ok(!blocked)
+        }
+        Some(step @ ("network" | "start")) => {
+            let flow_id = need("--flow")?;
+            let token = need("--approve")?;
+            let source = capture_source()?;
+            let mut worker_args = vec!["--approve".to_string(), token.clone()];
+            worker_args.extend(["--capture-source".to_string(), source]);
+            let step = if step == "network" {
+                worker_args.extend([
+                    "--genesis-hash".to_string(),
+                    need("--genesis-hash")?,
+                    "--provider-evidence".to_string(),
+                    need("--provider-evidence")?,
+                ]);
+                bc::NETWORK
+            } else {
+                let duration = need("--duration")?;
+                darkbot_solana::runtime_config::duration_seconds(&duration)
+                    .map_err(|e| format!("--duration {duration}: {e}"))?;
+                let verify = given(options, "--chain-verify")?.unwrap_or_else(|| "off".into());
+                if !matches!(verify.as_str(), "off" | "strict") {
+                    return Err(format!("CHAIN_VERIFY_{verify}_BLOCKED: off|strict"));
+                }
+                worker_args.extend([
+                    "--duration".to_string(),
+                    duration,
+                    "--chain-verify".to_string(),
+                    verify,
+                ]);
+                bc::START
+            };
+            bc::begin(project, &flow_id, step, &token, &worker()?, &worker_args)?;
+            println!("[p0ctl] boot flow {flow_id}: {step} approved and started; its end: p0ctl boot status --flow {flow_id}");
+            Ok(true)
+        }
+        Some("run") => {
+            control::install_stop_handler()?;
+            let (flow_id, step) = (need("--flow")?, need("--step")?);
+            let token = need("--approve")?;
+            let source = capture_source()?;
+            let outcome = bc::run_step(
+                project,
+                &flow_id,
+                &step,
+                control::stop_requested,
+                |flow, dir| {
+                    let record = dir.join(bc::NETWORK_RECORD).display().to_string();
+                    let mut call: Vec<String> = Vec::new();
+                    if step == bc::NETWORK {
+                        call.extend([
+                            "--network-approved".into(),
+                            token.clone(),
+                            "--genesis-hash".into(),
+                            need("--genesis-hash")?,
+                            "--provider-evidence".into(),
+                            need("--provider-evidence")?,
+                            "--capture-source".into(),
+                            source.clone(),
+                            "--output".into(),
+                            record,
+                            "--".into(),
+                        ]);
+                        call.extend(flow.operational.iter().cloned());
+                        #[cfg(feature = "crate_health")]
+                        {
+                            return match darkbot_runner::orchestration::boot_network::execute(
+                                project, &flow.mode, &call,
+                            )? {
+                                true => Ok(None),
+                                false => Err("BOOT_NETWORK_BLOCKED".into()),
+                            };
+                        }
+                        #[cfg(not(feature = "crate_health"))]
+                        {
+                            let _ = call;
+                            return Err("BOOT_NETWORK_REQUIRES_CRATE_HEALTH".into());
+                        }
+                    }
+                    let mode = RunMode::of(&["--mode".to_string(), flow.mode.clone()])?;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|_| "BOOT_CLOCK")?
+                        .as_secs();
+                    let run_id = format!(
+                        "{}_{}",
+                        mode.prefix(),
+                        darkbot_runner::market_observer::utc_compact(now)
+                    );
+                    // The worker is single-threaded here: the run id `run start` launches with.
+                    std::env::set_var(mode.run_id_env(), &run_id);
+                    call.extend([
+                        "--mode".into(),
+                        flow.mode.clone(),
+                        "--duration".into(),
+                        need("--duration")?,
+                        "--network-audit".into(),
+                        record,
+                        "--mainnet-approved".into(),
+                        token.clone(),
+                    ]);
+                    if mode == RunMode::Econ4h {
+                        call.extend([
+                            "--capture-source".into(),
+                            source.clone(),
+                            "--chain-verify".into(),
+                            need("--chain-verify")?,
+                        ]);
+                    }
+                    call.push("--".into());
+                    call.extend(flow.operational.iter().cloned());
+                    match run_start(project, &call)? {
+                        true => Ok(Some(run_id)),
+                        false => Err(format!("RUN_ENDED_UNSUCCESSFUL: {run_id}")),
+                    }
+                },
+            )?;
+            println!(
+                "[p0ctl] boot flow {flow_id} {step} {} {}",
+                outcome.state, outcome.code
+            );
+            Ok(outcome.state == bc::COMPLETED)
+        }
+        Some("cancel") => {
+            let pid = bc::cancel(project, &need("--flow")?)?;
+            println!("[p0ctl] boot step stop requested (worker pid {pid})");
+            Ok(true)
+        }
+        Some("status") => {
+            let flows = match given(options, "--flow")? {
+                Some(id) => vec![bc::status(project, &id)?],
+                None => bc::list(project)?,
+            };
+            if flows.is_empty() {
+                println!("no boot flows");
+            }
+            for f in &flows {
+                let v = bc::BootView::of(f);
+                println!(
+                    "flow {} mode={} ttl={}s[{}] offline={} token={} network={}{} start={}{}",
+                    v.flow_id,
+                    v.mode,
+                    v.ttl_seconds,
+                    v.ttl_source,
+                    v.offline_verdict,
+                    v.offline_token,
+                    v.network.state,
+                    v.network_token
+                        .map(|t| format!(
+                            " token={t} expires_unix_s={}",
+                            v.expires_unix_s.unwrap_or(0)
+                        ))
+                        .unwrap_or_default(),
+                    v.start.state,
+                    v.start
+                        .run_id
+                        .map(|r| format!(" run={r}"))
+                        .unwrap_or_default(),
+                );
+            }
+            Ok(true)
+        }
+        _ => Err(BOOT_USAGE.into()),
+    }
+}
+
 const CAPABILITY_USAGE: &str =
     "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE [--expect-version N] | p0ctl capability status";
 
@@ -1438,13 +1674,14 @@ fn main() -> ExitCode {
             (Some("post-capture"), _) => post_capture_cmd(&project, &rest),
             (Some("source"), _) => source_cmd(&project, &rest),
             (Some("capability"), _) => capability_cmd(&project, &rest),
+            (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("backtest"), _) => foreground_job(&project, "backtest", &rest),
             (Some("optimize"), _) => foreground_job(&project, "optimize", &rest),
             (Some("job"), _) => job_cmd(&project, &rest),
             (Some("profiles"), _) => profiles_cmd(&project, &rest),
             (Some("approval"), _) => approval_cmd(&project, &rest),
             (Some("fe04"), _) => fe04_cmd(&rest),
-            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|backtest|optimize|job|profiles|approval|fe04 …".into()),
+            _ => Err("usage: p0ctl [--project DIR] doctor|preflight|run preflight|run start|run status|run stop|runs list|verify|report|qualify|post-capture|source|capability|boot|backtest|optimize|job|profiles|approval|fe04 …".into()),
         }
     });
     match result {
