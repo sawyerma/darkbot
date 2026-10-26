@@ -11,12 +11,14 @@
 //!   signed swap terms (ExactIn input, floor, quote), Token-2022 transfer fees (a fee-bearing or
 //!   unmodelled mint has no fee model: unqualified) and the flash repayment (FLASH_FUNDED is
 //!   blocked) — what the wallet must hold before the attempt (`reserve`) and keeps at most after it
-//!   (`residual_max`), the residual inventory valued conservatively. What B cannot derive is
-//!   UNQUALIFIED, and A applies, visibly.
+//!   (`residual_max`; a swap's liability inflow has no bound in units, its value is bounded by the
+//!   swapped input at the high price less the repay at the low price), the residual inventory
+//!   valued conservatively. What B cannot derive is UNQUALIFIED, and A applies, visibly.
 //! * **Modes** (`HOLD_B`): OFF computes nothing; OBSERVE (the default) records A, B and the
-//!   finalized flows per attempt; ACTIVE holds B's inventory value for a plan of a qualified kind —
-//!   effective only with the user's N (B-8, `hold_b_min_attempts`, no default) and N landed,
-//!   finalized attempts of that kind without an underestimation. Otherwise OBSERVE, with the reason.
+//!   finalized flows per attempt; ACTIVE holds B's inventory value for a plan of a qualified class
+//!   (funding class and integration) — effective only on a recorded request with the user's N
+//!   (B-8, `hold_b_min_attempts`, no default) and N successful finalized attempts of that class
+//!   without any underestimation. Otherwise OBSERVE, with the reason; never promoted unrequested.
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::BTreeMap;
@@ -29,8 +31,10 @@ pub const HOLD_B_VALUES: [&str; 3] = ["OFF", "OBSERVE", "ACTIVE"];
 pub const B8_UNDECIDED: &str = "B-8: N not decided (hold_b_min_attempts unset)";
 /// ACTIVE is not effective: B underestimated a finalized attempt.
 pub const B_UNDERESTIMATED: &str = "B underestimated a finalized attempt";
-/// ACTIVE is not effective: fewer than N landed attempts with an exact B.
+/// ACTIVE is not effective: fewer than N successful attempts with an exact B.
 pub const B_EVIDENCE_SHORT: &str = "fewer than N finalized attempts with an exact B";
+/// ACTIVE is not effective: the owner's decision on the request was not recorded.
+pub const B_DECISION_UNRECORDED: &str = "the ACTIVE decision was not recorded";
 
 /// The B hold mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,18 +76,19 @@ pub struct HoldFacts {
     pub repay_all: bool,
     /// A's inventory hold: the conservative value of the whole seizure.
     pub seized_hold_value: u64,
-    /// The repay amount at the high-biased liability price (`None`: unknown).
-    pub repay_high_value: Option<u64>,
+    /// The repay amount at the low-biased liability price (`None`: unknown).
+    pub repay_low_value: Option<u64>,
     /// JIT: the mint the buy spends.
     pub funding_mint: Option<Pubkey>,
 }
 
 /// One asset's flow in the signed plan, base units: what the wallet must hold before the attempt
-/// (spent before an in-plan inflow covers it) and what it keeps at most after it.
+/// (spent before an in-plan inflow covers it) and what it keeps at most after it (`None`: no bound
+/// in units — a swap's output — the value is bounded in B's inventory hold).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetFlow {
     pub reserve: u64,
-    pub residual_max: u64,
+    pub residual_max: Option<u64>,
 }
 
 /// B: the exact flows of one signed plan.
@@ -105,12 +110,13 @@ pub enum BHold {
 }
 
 /// What an attempt's journal keeps of its holds: the mode it was admitted in, A's inventory hold
-/// (A's wallet reservation is the intent's holds) and B.
+/// (A's wallet reservation is the intent's holds), B, and the inventory hold Safety reserved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HoldEvidence {
     pub mode: HoldMode,
     pub a_inventory_usd_micro: u64,
     pub b: BHold,
+    pub reserved_inventory_usd_micro: u64,
 }
 
 /// B's computation from a signed plan (the builder's crates: integration conversion, swap
@@ -147,6 +153,9 @@ mod compute {
     fn ceil_share(value: u64, part: u64, whole: u64) -> Option<u64> {
         if part == 0 {
             return Some(0);
+        }
+        if whole == 0 {
+            return None;
         }
         let n = u128::from(value).checked_mul(u128::from(part))?;
         u64::try_from(n.div_ceil(u128::from(whole))).ok()
@@ -252,6 +261,10 @@ mod compute {
         if f.asset_mint == f.liab_mint {
             return Err("B_SAME_MINT_UNMODELLED".into());
         }
+        // A's unknown-price sentinel is no value B could share.
+        if f.seized_hold_value == u64::MAX {
+            return Err("B_SEIZURE_PRICE_UNKNOWN".into());
+        }
         let sol = i.sol_debit.ok_or("B_SOL_DEBIT_UNKNOWN")?;
         let exec = i.exec.map_err(|e| format!("B_INTEGRATION:{e}"))?;
         // Mint/amount parity: the signed withdraw (the converted instruction amount of an
@@ -276,49 +289,59 @@ mod compute {
             "SOL".into(),
             AssetFlow {
                 reserve: sol,
-                residual_max: 0,
+                residual_max: Some(0),
             },
         );
-        // (collateral the swap spends, liability the plan credits at least / at the quote)
-        let (swapped, liability_min, liability_quoted) = match p.input.funding {
+        // (collateral the swap spends, the liability's floor, the value the swap or buy spends
+        // at the high price: what its output can be worth at most; `None`: no swap)
+        let (swapped, liability_min, input_value) = match p.input.funding {
             FundingClass::ZeroPrefundSameTx => {
+                if !p.prerequisite_txs.is_empty() {
+                    return Err("B_ZERO_PREFUND_PREREQUISITES".into());
+                }
                 let t = swap_of(&p.instructions, i.taker, &f.asset_mint, &f.liab_mint)?;
                 if t.in_amount > credited {
                     return Err("B_SWAP_INPUT_EXCEEDS_CREDIT".into());
                 }
-                (t.in_amount, t.minimum_out, t.quoted_out)
+                let value = ceil_share(f.seized_hold_value, t.in_amount, credited)
+                    .ok_or("B_VALUE_OVERFLOW")?;
+                (t.in_amount, t.minimum_out, Some(value))
             }
             FundingClass::NoSwapInventory | FundingClass::PreheldInventory => {
                 if !p.prerequisite_txs.is_empty() || swaps(&p.instructions) {
                     return Err("B_INVENTORY_PLAN_SWAPS".into());
                 }
-                (0, 0, 0)
+                (0, 0, None)
             }
             FundingClass::JitShortfall => {
                 let funding = f.funding_mint.ok_or("B_JIT_FUNDING_UNKNOWN")?;
                 let [buy] = p.prerequisite_txs.as_slice() else {
                     return Err(format!("B_JIT_SHAPE:{}", p.prerequisite_txs.len()));
                 };
+                if swaps(&p.instructions) {
+                    return Err("B_JIT_RECEIVERSHIP_SWAPS".into());
+                }
                 let t = swap_of(buy, i.taker, &funding, &f.liab_mint)?;
                 flows.insert(
                     funding.to_string(),
                     AssetFlow {
                         reserve: t.in_amount,
-                        residual_max: 0,
+                        residual_max: Some(0),
                     },
                 );
-                (0, t.minimum_out, t.quoted_out)
+                // The buy spends the plan's capital: the funding at its conservative cost.
+                (0, t.minimum_out, Some(p.input.required_capital_usd_micro))
             }
             FundingClass::FlashFunded => return Err("B_FLASH_FUNDED_BLOCKED".into()),
         };
-        // The liability: the repay debits it, the swap or buy credits at least its floor, at most
-        // (expected) its quote.
-        let surplus = liability_quoted.saturating_sub(f.repay_amount);
+        // The liability: the repay debits it, a swap or buy credits at least its floor; what it
+        // credits beyond the repay has no bound in units — its value at most the input's high
+        // value less the repay's low value.
         flows.insert(
             f.liab_mint.to_string(),
             AssetFlow {
                 reserve: f.repay_amount.saturating_sub(liability_min),
-                residual_max: surplus,
+                residual_max: if input_value.is_some() { None } else { Some(0) },
             },
         );
         // The collateral: credited by the withdrawal, spent by the swap.
@@ -327,18 +350,18 @@ mod compute {
             f.asset_mint.to_string(),
             AssetFlow {
                 reserve: 0,
-                residual_max: residual,
+                residual_max: Some(residual),
             },
         );
-        // Its residual is its share of the seizure's conservative value; the liability surplus is
-        // valued at the high-biased liability price.
+        // Its residual is its share of the seizure's conservative value.
         let collateral_value =
             ceil_share(f.seized_hold_value, residual, credited).ok_or("B_VALUE_OVERFLOW")?;
-        let surplus_value = if surplus == 0 {
-            0
-        } else {
-            let high = f.repay_high_value.ok_or("B_LIABILITY_PRICE_UNKNOWN")?;
-            ceil_share(high, surplus, f.repay_amount).ok_or("B_VALUE_OVERFLOW")?
+        let surplus_value = match input_value {
+            None => 0,
+            Some(input) => {
+                let low = f.repay_low_value.ok_or("B_LIABILITY_PRICE_UNKNOWN")?;
+                input.saturating_sub(low)
+            }
         };
         Ok(PlanFlows {
             flows,
@@ -359,7 +382,7 @@ pub use compute::{b_hold, hold_b_of, BInputs};
 pub struct FlowCheck {
     pub asset: String,
     pub reserve: u64,
-    pub residual_max: u64,
+    pub residual_max: Option<u64>,
     pub actual: i128,
     pub underestimated: bool,
 }
@@ -374,14 +397,19 @@ pub fn compare(
     assets
         .into_iter()
         .map(|asset| {
-            let p = predicted.get(asset).copied().unwrap_or_default();
+            // An asset the prediction does not name: nothing held, nothing kept.
+            let p = predicted.get(asset).copied().unwrap_or(AssetFlow {
+                reserve: 0,
+                residual_max: Some(0),
+            });
             let d = actual.get(asset).copied().unwrap_or(0);
             FlowCheck {
                 asset: asset.clone(),
                 reserve: p.reserve,
                 residual_max: p.residual_max,
                 actual: d,
-                underestimated: d < -i128::from(p.reserve) || d > i128::from(p.residual_max),
+                underestimated: d < -i128::from(p.reserve)
+                    || p.residual_max.is_some_and(|m| d > i128::from(m)),
             }
         })
         .collect()
@@ -397,15 +425,21 @@ pub fn a_flows(holds: &BTreeMap<String, u64>) -> BTreeMap<String, AssetFlow> {
                 asset.clone(),
                 AssetFlow {
                     reserve: *units,
-                    residual_max: 0,
+                    residual_max: Some(0),
                 },
             )
         })
         .collect()
 }
 
-/// The B evidence of the landed, finalized attempts per kind: exact predictions without and
-/// with an underestimation, and the attempts without an exact B.
+/// The class B's evidence is kept by: the attempt's funding class and the withdrawal's kind.
+pub fn class_of(funding_class: &str, kind: &str) -> String {
+    format!("{funding_class}/{kind}")
+}
+
+/// The B evidence of the landed, finalized attempts per class (`class_of`): exact predictions
+/// of successful attempts, underestimations (of any landed attempt) and attempts without an
+/// exact B. A failed attempt within its prediction exercised no swap or repay flow: no evidence.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BEvidence {
     pub exact: u64,
@@ -414,27 +448,43 @@ pub struct BEvidence {
     pub per_kind: BTreeMap<String, (u64, u64)>,
 }
 
+/// One landed, finalized attempt as evidence: its funding class, whether it succeeded, its
+/// finalized wallet deltas and the conservative mark of the inventory it left.
+pub struct Finalized<'a> {
+    pub funding_class: &'a str,
+    pub success: bool,
+    pub deltas: &'a BTreeMap<String, i128>,
+    pub inventory_usd_micro: i128,
+}
+
 impl BEvidence {
-    /// One landed, finalized attempt with its holds and finalized wallet deltas.
-    pub fn add(&mut self, hold: &HoldEvidence, deltas: &BTreeMap<String, i128>) {
+    /// One landed, finalized attempt with its holds: B underestimated it when a flow left its
+    /// prediction or the inventory it left is worth more than B's inventory hold.
+    pub fn add(&mut self, hold: &HoldEvidence, done: &Finalized<'_>) {
         match &hold.b {
             BHold::Unqualified(_) => self.unqualified += 1,
             BHold::Exact(f) => {
-                let under = compare(&f.flows, deltas).iter().any(|c| c.underestimated);
-                let kind = self.per_kind.entry(f.kind.clone()).or_default();
+                let under = compare(&f.flows, done.deltas)
+                    .iter()
+                    .any(|c| c.underestimated)
+                    || done.inventory_usd_micro > i128::from(f.inventory_usd_micro);
+                let class = self
+                    .per_kind
+                    .entry(class_of(done.funding_class, &f.kind))
+                    .or_default();
                 if under {
                     self.underestimated += 1;
-                    kind.1 += 1;
-                } else {
+                    class.1 += 1;
+                } else if done.success {
                     self.exact += 1;
-                    kind.0 += 1;
+                    class.0 += 1;
                 }
             }
         }
     }
-    /// A kind is qualified with N exact attempts and no underestimation.
-    pub fn kind_qualified(&self, kind: &str, n: u64) -> bool {
-        self.underestimated == 0 && self.per_kind.get(kind).is_some_and(|(ok, _)| *ok >= n)
+    /// A class is qualified with N exact attempts and no underestimation at all.
+    pub fn kind_qualified(&self, class: &str, n: u64) -> bool {
+        self.underestimated == 0 && self.per_kind.get(class).is_some_and(|(ok, _)| *ok >= n)
     }
 }
 
@@ -472,23 +522,26 @@ impl HoldGate {
             per_kind: BTreeMap::new(),
         },
     };
-    /// The inventory hold of a plan with A's value `a` and B `b` (`inventory_hold`).
-    pub fn inventory_hold(&self, a: u64, b: Option<&BHold>) -> u64 {
-        inventory_hold(a, b, self.mode, self.n, &self.evidence)
+    /// The inventory hold of a plan of `funding_class` with A's value `a` and B `b`.
+    pub fn inventory_hold(&self, a: u64, b: Option<&BHold>, funding_class: &str) -> u64 {
+        inventory_hold(a, b, funding_class, self.mode, self.n, &self.evidence)
     }
 }
 
-/// The inventory hold Safety checks: B's for an exact plan of a qualified kind in an effective
-/// ACTIVE, A's otherwise.
+/// The inventory hold Safety checks: B's for an exact plan of a qualified class (its funding
+/// class and kind) in an effective ACTIVE, A's otherwise.
 pub fn inventory_hold(
     a: u64,
     b: Option<&BHold>,
+    funding_class: &str,
     mode: HoldMode,
     n: Option<u64>,
     e: &BEvidence,
 ) -> u64 {
     match (mode, b, n) {
-        (HoldMode::Active, Some(BHold::Exact(f)), Some(n)) if e.kind_qualified(&f.kind, n) => {
+        (HoldMode::Active, Some(BHold::Exact(f)), Some(n))
+            if e.kind_qualified(&class_of(funding_class, &f.kind), n) =>
+        {
             f.inventory_usd_micro
         }
         _ => a,
@@ -499,7 +552,7 @@ pub fn inventory_hold(
 mod tests {
     use super::*;
 
-    fn flows(entries: &[(&str, u64, u64)]) -> BTreeMap<String, AssetFlow> {
+    fn flows(entries: &[(&str, u64, Option<u64>)]) -> BTreeMap<String, AssetFlow> {
         entries
             .iter()
             .map(|(a, reserve, residual_max)| {
@@ -522,15 +575,34 @@ mod tests {
                 inventory_usd_micro: 100,
                 kind: kind.into(),
             }),
+            reserved_inventory_usd_micro: 1_100,
         }
     }
+    fn done<'a>(
+        funding_class: &'a str,
+        success: bool,
+        deltas: &'a BTreeMap<String, i128>,
+        inventory: i128,
+    ) -> Finalized<'a> {
+        Finalized {
+            funding_class,
+            success,
+            deltas,
+            inventory_usd_micro: inventory,
+        }
+    }
+    const ZP: &str = "ZERO_PREFUND_SAME_TX";
 
     /// DEC-04 (§5): a finalized attempt against a prediction — a debit within the reserve and an
-    /// inflow within the residual hold; anything beyond, or a flow of an unpredicted asset, is an
-    /// underestimation.
+    /// inflow within the residual hold (an unbounded residual: any inflow); anything beyond, or a
+    /// flow of an unpredicted asset, is an underestimation.
     #[test]
     fn dec04_finalized_flows_against_the_prediction() {
-        let predicted = flows(&[("SOL", 10, 0), ("MINT", 0, 100)]);
+        let predicted = flows(&[
+            ("SOL", 10, Some(0)),
+            ("MINT", 0, Some(100)),
+            ("LIAB", 5, None),
+        ]);
         let actual = |d: &[(&str, i128)]| d.iter().map(|(a, v)| (a.to_string(), *v)).collect();
         let under = |d: &[(&str, i128)]| {
             compare(&predicted, &actual(d))
@@ -539,24 +611,73 @@ mod tests {
                 .map(|c| c.asset)
                 .collect::<Vec<_>>()
         };
-        assert!(under(&[("SOL", -10), ("MINT", 100)]).is_empty());
-        assert!(under(&[("SOL", -3)]).is_empty());
-        assert_eq!(under(&[("SOL", -11), ("MINT", 101)]), ["MINT", "SOL"]);
+        assert!(under(&[("SOL", -10), ("MINT", 100), ("LIAB", 1_000_000)]).is_empty());
+        assert!(under(&[("SOL", -3), ("LIAB", -5)]).is_empty());
+        assert_eq!(
+            under(&[("SOL", -11), ("MINT", 101), ("LIAB", -6)]),
+            ["LIAB", "MINT", "SOL"]
+        );
         assert_eq!(under(&[("OTHER", 1)]), ["OTHER"]);
         // A predicts the wallet reservation and keeps nothing in the wallet.
         assert_eq!(
             a_flows(&[("SOL".to_string(), 10)].into()),
-            flows(&[("SOL", 10, 0)])
+            flows(&[("SOL", 10, Some(0))])
         );
     }
 
-    /// DEC-04 (§6): the gate — ACTIVE is effective only with N decided, N exact landed attempts
-    /// and no underestimation at all; the inventory hold is B's only then and only for a kind
-    /// with N exact attempts; otherwise A.
+    /// DEC-04 (§6, review H1/M1/M4): evidence — only a successful attempt within its prediction
+    /// is exact; a failed one within it is no evidence; an underestimation counts from any
+    /// landed attempt, also an inventory left worth more than B's hold; the evidence is kept per
+    /// funding class and kind.
+    #[test]
+    fn dec04_evidence_counts_successful_exact_attempts_per_class() {
+        let plain = exact("PLAIN", flows(&[("SOL", 10, Some(0))]));
+        let ok: BTreeMap<String, i128> = [("SOL".to_string(), -10)].into();
+        let over: BTreeMap<String, i128> = [("SOL".to_string(), -11)].into();
+        let mut e = BEvidence::default();
+        e.add(&plain, &done(ZP, false, &ok, 0));
+        assert_eq!(
+            (e.exact, e.underestimated),
+            (0, 0),
+            "a lost race is no evidence"
+        );
+        e.add(&plain, &done(ZP, true, &ok, 100));
+        e.add(&plain, &done("NO_SWAP_INVENTORY", true, &ok, 0));
+        assert_eq!(e.per_kind[&class_of(ZP, "PLAIN")], (1, 0));
+        assert_eq!(e.per_kind[&class_of("NO_SWAP_INVENTORY", "PLAIN")], (1, 0));
+        assert!(e.kind_qualified(&class_of(ZP, "PLAIN"), 1));
+        assert!(!e.kind_qualified(&class_of(ZP, "PLAIN"), 2));
+        let mut worth = e.clone();
+        worth.add(&plain, &done(ZP, true, &ok, 101));
+        assert_eq!(
+            worth.underestimated, 1,
+            "an inventory worth more than B's hold"
+        );
+        let mut failed = e.clone();
+        failed.add(&plain, &done(ZP, false, &over, 0));
+        assert_eq!(
+            failed.underestimated, 1,
+            "a failed attempt can still be underestimated"
+        );
+        assert!(!failed.kind_qualified(&class_of("NO_SWAP_INVENTORY", "PLAIN"), 1));
+        let mut unq = e.clone();
+        unq.add(
+            &HoldEvidence {
+                b: BHold::Unqualified("B_SWAP_PROGRAM_UNMODELLED".into()),
+                ..plain.clone()
+            },
+            &done(ZP, true, &ok, 0),
+        );
+        assert_eq!((unq.exact, unq.unqualified), (2, 1));
+    }
+
+    /// DEC-04 (§6): the gate — ACTIVE is effective only with N decided, N exact attempts and no
+    /// underestimation at all; the inventory hold is B's only then and only for a funding class
+    /// and kind with N exact attempts of its own; otherwise A.
     #[test]
     fn dec04_active_is_gated_by_n_and_the_evidence() {
         let mut e = BEvidence::default();
-        let plain = exact("PLAIN", flows(&[("SOL", 10, 0)]));
+        let plain = exact("PLAIN", flows(&[("SOL", 10, Some(0))]));
         let ok: BTreeMap<String, i128> = [("SOL".to_string(), -10)].into();
         assert_eq!(
             effective(HoldMode::Active, None, &e),
@@ -566,8 +687,8 @@ mod tests {
             effective(HoldMode::Active, Some(2), &e),
             (HoldMode::Observe, B_EVIDENCE_SHORT)
         );
-        e.add(&plain, &ok);
-        e.add(&plain, &ok);
+        e.add(&plain, &done(ZP, true, &ok, 0));
+        e.add(&plain, &done(ZP, true, &ok, 0));
         assert_eq!(
             effective(HoldMode::Active, Some(2), &e),
             (HoldMode::Active, "")
@@ -576,51 +697,34 @@ mod tests {
             assert_eq!(effective(m, None, &e), (m, ""));
         }
         let b = plain.b.clone();
+        let hold =
+            |b: Option<&BHold>, class: &str, mode, n| inventory_hold(1_100, b, class, mode, n, &e);
+        assert_eq!(hold(Some(&b), ZP, HoldMode::Active, Some(2)), 100);
+        assert_eq!(hold(Some(&b), ZP, HoldMode::Observe, Some(2)), 1_100);
+        assert_eq!(hold(Some(&b), ZP, HoldMode::Active, None), 1_100);
+        assert_eq!(hold(None, ZP, HoldMode::Active, Some(2)), 1_100);
+        // Another funding class or kind without its own evidence stays A.
         assert_eq!(
-            inventory_hold(1_100, Some(&b), HoldMode::Active, Some(2), &e),
-            100
-        );
-        assert_eq!(
-            inventory_hold(1_100, Some(&b), HoldMode::Observe, Some(2), &e),
+            hold(Some(&b), "NO_SWAP_INVENTORY", HoldMode::Active, Some(2)),
             1_100
         );
-        assert_eq!(
-            inventory_hold(1_100, Some(&b), HoldMode::Active, None, &e),
-            1_100
-        );
-        assert_eq!(
-            inventory_hold(1_100, None, HoldMode::Active, Some(2), &e),
-            1_100
-        );
-        // Another kind without its own evidence stays A.
-        let drift = exact("DRIFT", flows(&[("SOL", 10, 0)])).b;
-        assert_eq!(
-            inventory_hold(1_100, Some(&drift), HoldMode::Active, Some(2), &e),
-            1_100
-        );
+        let drift = exact("DRIFT", flows(&[("SOL", 10, Some(0))])).b;
+        assert_eq!(hold(Some(&drift), ZP, HoldMode::Active, Some(2)), 1_100);
         let unq = BHold::Unqualified("B_SWAP_PROGRAM_UNMODELLED".into());
-        assert_eq!(
-            inventory_hold(1_100, Some(&unq), HoldMode::Active, Some(2), &e),
-            1_100
+        assert_eq!(hold(Some(&unq), ZP, HoldMode::Active, Some(2)), 1_100);
+        // One underestimation blocks ACTIVE and every class.
+        let mut under = e.clone();
+        under.add(
+            &plain,
+            &done(ZP, true, &[("SOL".to_string(), -11)].into(), 0),
         );
-        // One underestimation blocks ACTIVE and every kind.
-        e.add(&plain, &[("SOL".to_string(), -11)].into());
         assert_eq!(
-            effective(HoldMode::Active, Some(2), &e),
+            effective(HoldMode::Active, Some(2), &under),
             (HoldMode::Observe, B_UNDERESTIMATED)
         );
         assert_eq!(
-            inventory_hold(1_100, Some(&b), HoldMode::Active, Some(2), &e),
+            inventory_hold(1_100, Some(&b), ZP, HoldMode::Active, Some(2), &under),
             1_100
         );
-        e.add(
-            &HoldEvidence {
-                b: unq,
-                ..plain.clone()
-            },
-            &ok,
-        );
-        assert_eq!((e.exact, e.underestimated, e.unqualified), (2, 1, 1));
-        assert_eq!(e.per_kind["PLAIN"], (2, 1));
     }
 }

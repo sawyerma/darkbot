@@ -90,8 +90,13 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
       inventoryReservedUsdMicro: 1_100n, capitalInUseUsdMicro: 5_000n,
       attempt: {
         mode: "OBSERVE", aWallet: [{ asset: "SOL", units: 20n }], aInventoryUsdMicro: 1_100n,
-        bClass: "EXACT", bKind: "PLAIN", bInventoryUsdMicro: 100n,
-        flows: [{ asset: "SOL", reserve: 20n, residualMax: 0n, actual: -21n, underestimated: true }],
+        reservedInventoryUsdMicro: 1_100n, bClass: "EXACT", bKind: "PLAIN", bInventoryUsdMicro: 100n,
+        flows: [
+          { asset: "LIAB", reserve: 0n, residualMax: null, actual: 150n, underestimated: false },
+          { asset: "SOL", reserve: 20n, residualMax: 0n, actual: -21n, underestimated: true },
+        ],
+        aFlows: [{ asset: "SOL", reserve: 20n, residualMax: 0n, actual: -21n, underestimated: true }],
+        settled: true, actualInventoryUsdMicro: 90n,
       },
     });
     expect(unusableByReason([

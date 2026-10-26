@@ -1570,7 +1570,7 @@ impl crate::execution::pipeline::ReceivershipBuilder for AdmissionBuilder {
                 "SOL".to_string(),
                 AssetFlow {
                     reserve: sol_debit.unwrap_or(0),
-                    residual_max: 0,
+                    residual_max: Some(0),
                 },
             )]
             .into(),
@@ -1836,7 +1836,10 @@ fn dec04_live_admission_keeps_the_holds_and_active_reserves_b() {
     );
     assert_eq!(reserved, 0, "OBSERVE reserves A");
     let mut evidence = BEvidence::default();
-    evidence.per_kind.insert("PLAIN".into(), (1, 0));
+    evidence.per_kind.insert(
+        crate::execution::hold_b::class_of("ZERO_PREFUND_SAME_TX", "PLAIN"),
+        (1, 0),
+    );
     evidence.exact = 1;
     let active = HoldGate {
         mode: HoldMode::Active,
@@ -1844,8 +1847,30 @@ fn dec04_live_admission_keeps_the_holds_and_active_reserves_b() {
         evidence,
     };
     let (hold, reserved) = run(&active);
-    assert_eq!(hold.unwrap().mode, HoldMode::Active);
+    let hold = hold.unwrap();
+    assert_eq!(hold.mode, HoldMode::Active);
     assert_eq!(reserved, 7, "an effective ACTIVE reserves B");
+    assert_eq!(
+        hold.reserved_inventory_usd_micro, 7,
+        "the journal keeps what was reserved"
+    );
+    // A refused admission releases exactly what was reserved (B's value), nothing stays held.
+    let dir = std::env::temp_dir().join(format!("p0-dec04-refused-{}", Pubkey::new_unique()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (a, mut s) = (adapter(), safety());
+    let mut fe04 = admission(&dir, &payer, target, "ZERO_PREFUND_SAME_TX");
+    fe04.approval.max_total_sol_debit_lamports = 0;
+    let r = evaluate_in(
+        crate::execution::pipeline::Mode::Live,
+        (&a, &mut s, Some(&mut fe04)),
+        &payer,
+        target,
+        u64::MAX,
+        &active,
+    );
+    assert_eq!(r.decision, Decision::Unavailable, "{:?}", r.reason);
+    assert_eq!((s.inventory_reserved(), s.capital_in_use()), (0, 0));
+    let _ = std::fs::remove_dir_all(dir);
     let off = HoldGate {
         mode: HoldMode::Off,
         ..HoldGate::OBSERVE

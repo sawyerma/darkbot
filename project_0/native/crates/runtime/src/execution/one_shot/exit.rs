@@ -1347,6 +1347,15 @@ pub(crate) mod tests {
         let mut attempt = p.clone();
         attempt.non_landing = release(Verdict::CAloneQualified);
         assert!(!super::legal(&p, Transition::ExitObserve, &attempt));
+        // DEC-04: no exit transition changes the attempt's holds.
+        let mut held = p.clone();
+        held.hold = Some(crate::execution::hold_b::HoldEvidence {
+            mode: crate::execution::hold_b::HoldMode::Observe,
+            a_inventory_usd_micro: 1,
+            b: crate::execution::hold_b::BHold::Unqualified("B".into()),
+            reserved_inventory_usd_micro: 1,
+        });
+        assert!(!super::legal(&p, Transition::ExitObserve, &held));
         let sig = &ei.signatures[0];
         let mut seen = observation(sig, true, -5_000, &[]);
         seen.unknown_reasons = vec!["ARCHIVE_429".into()];

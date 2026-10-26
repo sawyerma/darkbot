@@ -416,8 +416,18 @@ message HoldAttempt {
   string b_kind = 6;
   // B's inventory hold, USD micro; unset when unqualified.
   optional uint64 b_inventory_usd_micro = 7;
-  // B per asset against the finalized delta.
+  // B per asset against the finalized delta: every asset of B or of the deltas.
   repeated HoldFlow flows = 8;
+  // The inventory hold Safety reserved for the attempt, USD micro (A's unless an effective ACTIVE
+  // qualified B).
+  uint64 reserved_inventory_usd_micro = 9;
+  // A per asset against the finalized delta: every asset of A's wallet reservation or of the
+  // deltas (A keeps nothing in the wallet; it holds the seizure in the inventory limit).
+  repeated HoldFlow a_flows = 10;
+  // The attempt is settled: the finalized deltas and inventory mark are its own.
+  bool settled = 11;
+  // The finalized open-inventory mark, USD micro; unset until settled (or beyond int64).
+  optional sint64 actual_inventory_usd_micro = 12;
 }
 
 // DEC-04: one asset of B: what the wallet holds before the attempt and keeps at most after it,
@@ -433,6 +443,9 @@ message HoldFlow {
   optional sint64 actual = 4;
   // The delta is a debit beyond the reserve or an inflow beyond the residual.
   bool underestimated = 5;
+  // No bound in units (a swap's output; its value is bounded in B's inventory hold);
+  // residual_max is then 0.
+  bool residual_unbounded = 6;
 }
 
 // DEC-03 (N-2): the non-landing status of one FE-04 subject — exactly one result class, the

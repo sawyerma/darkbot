@@ -1337,9 +1337,11 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             self.builder
                 .hold_b(&plan, plan.sol_debit_lamports(fee_lamports))
         });
-        let inventory_hold = self
-            .hold
-            .inventory_hold(plan.inventory_hold_usd_micro, hold_b.as_ref());
+        let inventory_hold = self.hold.inventory_hold(
+            plan.inventory_hold_usd_micro,
+            hold_b.as_ref(),
+            plan.input.funding.as_str(),
+        );
         // B1/B15: capital and the worst-case inventory are reserved before the durable admission.
         if let Err(d) = self.safety.check(
             now_unix_s,
@@ -1384,6 +1386,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                     mode: self.hold.mode,
                     a_inventory_usd_micro: plan.inventory_hold_usd_micro,
                     b,
+                    reserved_inventory_usd_micro: inventory_hold,
                 }),
             },
             self.submitter,

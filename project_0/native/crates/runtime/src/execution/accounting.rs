@@ -103,13 +103,21 @@ impl Ledger {
     }
 
     /// DEC-04: the B evidence of the landed, settled attempts — each B against its finalized
-    /// wallet deltas.
+    /// wallet deltas and the inventory it left (only a successful one counts as exact).
     pub fn b_evidence(&self) -> crate::execution::hold_b::BEvidence {
         let mut e = crate::execution::hold_b::BEvidence::default();
         for a in &self.attempts {
             if let (Some(hold), Some(s)) = (&a.hold, &a.settlement) {
                 if s.landed {
-                    e.add(hold, &s.wallet_deltas);
+                    e.add(
+                        hold,
+                        &crate::execution::hold_b::Finalized {
+                            funding_class: &a.funding_class,
+                            success: s.landed_success,
+                            deltas: &s.wallet_deltas,
+                            inventory_usd_micro: s.unrealized_inventory_usd_micro,
+                        },
+                    );
                 }
             }
         }
@@ -350,6 +358,42 @@ mod tests {
             open_positions: BTreeMap::new(),
             hold: None,
         }
+    }
+
+    /// DEC-04 (review H1): only landed attempts are evidence, a failed one within B is none; an
+    /// underestimation counts from any landed attempt.
+    #[test]
+    fn dec04_b_evidence_counts_landed_attempts_only() {
+        use crate::execution::hold_b::{AssetFlow, BHold, HoldEvidence, HoldMode, PlanFlows};
+        let hold = HoldEvidence {
+            mode: HoldMode::Observe,
+            a_inventory_usd_micro: 1_100,
+            b: BHold::Exact(PlanFlows {
+                flows: [(
+                    "SOL".to_string(),
+                    AssetFlow {
+                        reserve: 5_000,
+                        residual_max: Some(0),
+                    },
+                )]
+                .into(),
+                inventory_usd_micro: 0,
+                kind: "PLAIN".into(),
+            }),
+            reserved_inventory_usd_micro: 1_100,
+        };
+        let with = |landed: bool, success: bool, sol: i128| {
+            let mut a = settled(&[("SOL", sol)], 0);
+            a.hold = Some(hold.clone());
+            let s = a.settlement.as_mut().unwrap();
+            (s.landed, s.landed_success) = (landed, success);
+            a
+        };
+        let ledger = |attempts| Ledger { attempts };
+        let e = ledger(vec![with(false, false, 0), with(true, false, -5_000)]).b_evidence();
+        assert_eq!((e.exact, e.underestimated), (0, 0));
+        let e = ledger(vec![with(true, true, -5_000), with(true, false, -6_000)]).b_evidence();
+        assert_eq!((e.exact, e.underestimated), (1, 1));
     }
 
     /// F-07: an unvalued open position makes the open inventory's total mark Unknown, never 0;

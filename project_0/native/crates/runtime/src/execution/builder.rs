@@ -104,7 +104,7 @@ pub mod p0 {
             repay_amount: sz.repay_amount,
             repay_all: sz.repay_all,
             seized_hold_value: sz.seized_hold_value,
-            repay_high_value: sz.repay_high_value,
+            repay_low_value: sz.repay_low_value,
             funding_mint,
         }
     }
@@ -135,9 +135,6 @@ pub mod p0 {
         /// FE-02: the same `repay_amount` at the low-biased liability price (rounded down);
         /// `None` = price unknown. Values a ZERO_PREFUND swap surplus conservatively.
         pub repay_low_value: Option<u64>,
-        /// DEC-04: the same `repay_amount` at the high-biased liability price (rounded up);
-        /// `None` = price unknown. Values B's liability surplus as an inventory hold.
-        pub repay_high_value: Option<u64>,
         pub liability_needed_value: u64, // USD-Micro
         pub liability_inventory_value: u64,
         pub funding_bank: Option<Pubkey>,
@@ -288,14 +285,6 @@ pub mod p0 {
                     repay_value: sz.repay_transfer_value_micro,
                     repay_low_value: sizer
                         .native_amount_conservative_value_usd_micro(
-                            &sz.liab_bank,
-                            sz.repay_amount,
-                            now_unix_s as i64,
-                            slot,
-                        )
-                        .ok(),
-                    repay_high_value: sizer
-                        .native_amount_conservative_cost_usd_micro(
                             &sz.liab_bank,
                             sz.repay_amount,
                             now_unix_s as i64,
@@ -2024,7 +2013,6 @@ pub mod p0 {
                 seized_hold_value: 0,
                 repay_value,
                 repay_low_value: Some(repay_value),
-                repay_high_value: Some(repay_value),
                 liability_needed_value: repay_value,
                 liability_inventory_value: 0,
                 funding_bank: None,
@@ -2346,7 +2334,6 @@ pub mod p0 {
                         seized_hold_value: 1_100,
                         repay_value: 500,
                         repay_low_value: Some(500),
-                        repay_high_value: Some(500),
                         liability_needed_value: 500,
                         liability_inventory_value: 10_000,
                         funding_bank: None,
@@ -3181,25 +3168,26 @@ pub mod p0 {
                 panic!("{:?}", b(&zp));
             };
             // The whole withdrawal is swapped; the swap credits ≥ 597 for the 500 repaid, its
-            // quote leaves 100 at the high liability price (500 per 500).
+            // surplus has no bound in units — its value is the swapped input at the high price
+            // (1 100) less the repay at the low price (500).
             assert_eq!(
                 x.flows,
                 [
-                    ("SOL".to_string(), flow(7, 0)),
-                    (asset.clone(), flow(0, 0)),
-                    (liab.clone(), flow(0, 100)),
+                    ("SOL".to_string(), flow(7, Some(0))),
+                    (asset.clone(), flow(0, Some(0))),
+                    (liab.clone(), flow(0, None)),
                 ]
                 .into()
             );
-            assert_eq!((x.inventory_usd_micro, x.kind.as_str()), (100, "PLAIN"));
+            assert_eq!((x.inventory_usd_micro, x.kind.as_str()), (600, "PLAIN"));
             // A keeps the whole seizure in the inventory limit.
             assert_eq!(zp.inventory_hold_usd_micro, 1_100);
             let inv = of(FundingClass::NoSwapInventory);
             let BHold::Exact(y) = b(&inv) else {
                 panic!("{:?}", b(&inv));
             };
-            assert_eq!(y.flows[&liab], flow(500, 0));
-            assert_eq!(y.flows[&asset], flow(0, 1_000));
+            assert_eq!(y.flows[&liab], flow(500, Some(0)));
+            assert_eq!(y.flows[&asset], flow(0, Some(1_000)));
             assert_eq!(y.inventory_usd_micro, 1_100);
             let unqualified = |p: &ReceivershipPlan| match b(p) {
                 BHold::Unqualified(r) => r,
@@ -3302,8 +3290,10 @@ pub mod p0 {
                 let BHold::Exact(x) = with(zp, Ok(Some(exec))) else {
                     panic!("{kind:?}");
                 };
-                assert_eq!(x.flows[&asset].residual_max, 200, "{kind:?}");
-                assert_eq!((x.inventory_usd_micro, x.kind.as_str()), (284, code));
+                // 200 stay (184 of the seizure's 1 100); the swapped 1 000 are worth ≤ 917,
+                // less the 500 repaid at the low price: 417.
+                assert_eq!(x.flows[&asset].residual_max, Some(200), "{kind:?}");
+                assert_eq!((x.inventory_usd_micro, x.kind.as_str()), (601, code));
                 let other = IntegrationExecutionAmount {
                     instruction_amount: 999,
                     ..exec
@@ -3340,8 +3330,9 @@ pub mod p0 {
                 reserve,
                 residual_max,
             };
-            assert_eq!(x.flows[&funding.to_string()], flow(300, 0));
-            assert_eq!(x.flows[&f.banks[1].1.to_string()], flow(301, 0));
+            assert_eq!(x.flows[&funding.to_string()], flow(300, Some(0)));
+            assert_eq!(x.flows[&f.banks[1].1.to_string()], flow(301, None));
+            // The whole seizure stays; the buy spends its 500 capital for the 500 repaid.
             assert_eq!(x.inventory_usd_micro, 1_100);
         }
 

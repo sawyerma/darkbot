@@ -398,19 +398,28 @@ pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
                 b_reason: a.b_reason.clone(),
                 b_kind: a.b_kind.clone(),
                 b_inventory_usd_micro: a.b_inventory_usd_micro,
-                flows: a
-                    .flows
-                    .iter()
-                    .map(|f| HoldFlow {
-                        asset: f.asset.clone(),
-                        reserve: f.reserve,
-                        residual_max: f.residual_max,
-                        actual: f.actual.and_then(|d| i64::try_from(d).ok()),
-                        underestimated: f.underestimated,
-                    })
-                    .collect(),
+                flows: a.flows.iter().map(hold_flow).collect(),
+                reserved_inventory_usd_micro: a.reserved_inventory_usd_micro,
+                a_flows: a.a_flows.iter().map(hold_flow).collect(),
+                settled: a.settled,
+                actual_inventory_usd_micro: a
+                    .actual_inventory_usd_micro
+                    .and_then(|v| i64::try_from(v).ok()),
             }),
         }),
+    }
+}
+
+/// DEC-04: one asset of a prediction against the finalized delta (an unbounded residual is 0
+/// with its flag; a delta beyond int64 stays unset).
+fn hold_flow(f: &darkbot_runner::status_tap::OwnerHoldFlow) -> HoldFlow {
+    HoldFlow {
+        asset: f.asset.clone(),
+        reserve: f.reserve,
+        residual_max: f.residual_max.unwrap_or(0),
+        actual: f.actual.and_then(|d| i64::try_from(d).ok()),
+        underestimated: f.underestimated,
+        residual_unbounded: f.residual_max.is_none(),
     }
 }
 
@@ -1731,13 +1740,32 @@ mod contract_tests {
                 b_reason: String::new(),
                 b_kind: "PLAIN".into(),
                 b_inventory_usd_micro: Some(100),
-                flows: vec![darkbot_runner::status_tap::OwnerHoldFlow {
+                flows: vec![
+                    darkbot_runner::status_tap::OwnerHoldFlow {
+                        asset: "LIAB".into(),
+                        reserve: 0,
+                        residual_max: None,
+                        actual: Some(150),
+                        underestimated: false,
+                    },
+                    darkbot_runner::status_tap::OwnerHoldFlow {
+                        asset: "SOL".into(),
+                        reserve: 20,
+                        residual_max: Some(0),
+                        actual: Some(-21),
+                        underestimated: true,
+                    },
+                ],
+                reserved_inventory_usd_micro: 1_100,
+                a_flows: vec![darkbot_runner::status_tap::OwnerHoldFlow {
                     asset: "SOL".into(),
                     reserve: 20,
-                    residual_max: 0,
+                    residual_max: Some(0),
                     actual: Some(-21),
                     underestimated: true,
                 }],
+                settled: true,
+                actual_inventory_usd_micro: Some(90),
             }),
         });
         check_golden(

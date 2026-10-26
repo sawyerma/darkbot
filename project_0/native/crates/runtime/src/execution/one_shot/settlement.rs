@@ -314,13 +314,12 @@ pub(super) fn non_landing_class(
 }
 
 /// DEC-04: an attempt's holds — its approval, the admission's evidence (`None`: OFF or before
-/// DEC-04), A's wallet reservation (the intent's holds) and, once settled, the finalized wallet
-/// deltas.
+/// DEC-04), A's wallet reservation (the intent's holds) and, once settled, its settlement.
 pub struct AttemptHolds<'a> {
     pub approval_id: &'a str,
     pub hold: Option<&'a crate::execution::hold_b::HoldEvidence>,
     pub a_wallet: &'a BTreeMap<String, u64>,
-    pub settled_deltas: Option<&'a BTreeMap<String, i128>>,
+    pub settled: Option<&'a Settlement>,
 }
 
 /// DEC-03 (N-2 §6): the non-landing status of the journal's latest subject — its last exit,
@@ -464,8 +463,8 @@ impl Journal {
             approval_id: &s.approval.approval_id,
             hold: s.hold.as_ref(),
             a_wallet: &s.intent.holds,
-            settled_deltas: match &s.phase {
-                Phase::Settled(done) => Some(&done.wallet_deltas),
+            settled: match &s.phase {
+                Phase::Settled(done) => Some(done),
                 _ => None,
             },
         })

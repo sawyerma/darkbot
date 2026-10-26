@@ -185,12 +185,26 @@ export interface HoldBView {
     mode: string;
     aWallet: ReadonlyArray<{ asset: string; units: bigint }>;
     aInventoryUsdMicro: bigint;
+    reservedInventoryUsdMicro: bigint;
     bClass: string;
     bReason: string;
     bKind: string;
     bInventoryUsdMicro: bigint | null;
-    flows: ReadonlyArray<{ asset: string; reserve: bigint; residualMax: bigint; actual: bigint | null; underestimated: boolean }>;
+    flows: ReadonlyArray<HoldFlowView>;
+    aFlows: ReadonlyArray<HoldFlowView>;
+    settled: boolean;
+    actualInventoryUsdMicro: bigint | null;
   } | null;
+}
+
+/** DEC-04: one asset of a prediction against the finalized delta (`residualMax` null: no bound in
+ * units; `actual` null until settled or beyond int64). */
+export interface HoldFlowView {
+  asset: string;
+  reserve: bigint;
+  residualMax: bigint | null;
+  actual: bigint | null;
+  underestimated: boolean;
 }
 
 /** DEC-03 (N-2): the non-landing status of the held FE-04 attempt or its latest exit. */

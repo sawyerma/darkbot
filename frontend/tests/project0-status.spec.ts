@@ -129,7 +129,7 @@ test("DEC-03: Wallets shows the N-2 non-landing status beside the frozen panel, 
   // DEC-04: the holds beside it — the mode, the attempt's A and B, the underestimation; no switch.
   const holds = page.locator(".p0-section", { has: page.getByRole("heading", { name: "Holds · A / B" }) });
   await expect(page.getByTestId("p0-hold-mode")).toHaveText("ACTIVE / OBSERVE");
-  for (const text of ["B-8: N not decided", "undecided · 1 / 0 / 0", "A inventory 0.001100 USD · B 0.000100 USD (PLAIN)", "reserve 20 · keeps ≤ 0 · finalized -21 · UNDERESTIMATED"]) {
+  for (const text of ["B-8: N not decided", "undecided · 1 / 0 / 0", "(PLAIN) · reserved", "reserve 20 · keeps ≤ 0 · finalized -21 · UNDERESTIMATED", "keeps ≤ unbounded (value-bounded) · finalized 150", "Finalized inventory mark"]) {
     await expect(holds).toContainText(text);
   }
   await expect(page.getByTestId("p0-hold-underestimated")).toBeVisible();

@@ -2354,7 +2354,11 @@ finalized flows.
 | b_reason | [string](#string) |  | Why B is unqualified (A applies); empty when exact. |
 | b_kind | [string](#string) |  | PLAIN | KAMINO | DRIFT | JUPLEND; empty when unqualified. |
 | b_inventory_usd_micro | [uint64](#uint64) | optional | B&#39;s inventory hold, USD micro; unset when unqualified. |
-| flows | [HoldFlow](#darkbot-project0-v1-HoldFlow) | repeated | B per asset against the finalized delta. |
+| flows | [HoldFlow](#darkbot-project0-v1-HoldFlow) | repeated | B per asset against the finalized delta: every asset of B or of the deltas. |
+| reserved_inventory_usd_micro | [uint64](#uint64) |  | The inventory hold Safety reserved for the attempt, USD micro (A&#39;s unless an effective ACTIVE qualified B). |
+| a_flows | [HoldFlow](#darkbot-project0-v1-HoldFlow) | repeated | A per asset against the finalized delta: every asset of A&#39;s wallet reservation or of the deltas (A keeps nothing in the wallet; it holds the seizure in the inventory limit). |
+| settled | [bool](#bool) |  | The attempt is settled: the finalized deltas and inventory mark are its own. |
+| actual_inventory_usd_micro | [sint64](#sint64) | optional | The finalized open-inventory mark, USD micro; unset until settled (or beyond int64). |
 
 
 
@@ -2401,6 +2405,7 @@ the finalized delta and whether B underestimated it.
 | residual_max | [uint64](#uint64) |  | Base units kept at most after it. |
 | actual | [sint64](#sint64) | optional | The finalized wallet delta; unset until settled (or beyond int64). |
 | underestimated | [bool](#bool) |  | The delta is a debit beyond the reserve or an inflow beyond the residual. |
+| residual_unbounded | [bool](#bool) |  | No bound in units (a swap&#39;s output; its value is bounded in B&#39;s inventory hold); residual_max is then 0. |
 
 
 

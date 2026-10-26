@@ -151,6 +151,17 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
   };
 }
 
+/** DEC-04: one HoldFlow; an unbounded residual is null. */
+function holdFlow(f: { asset: string; reserve: bigint; residualMax: bigint; actual?: bigint; underestimated: boolean; residualUnbounded: boolean }) {
+  return {
+    asset: f.asset,
+    reserve: f.reserve,
+    residualMax: f.residualUnbounded ? null : f.residualMax,
+    actual: optional(f.actual),
+    underestimated: f.underestimated,
+  };
+}
+
 export function toWalletsView(m: WalletsState): WalletsView {
   const amounts = (xs: WalletsState["holds"]) => xs.map((a) => ({ asset: a.asset, units: a.units }));
   return {
@@ -200,13 +211,11 @@ export function toWalletsView(m: WalletsState): WalletsView {
             bReason: m.holdB.attempt.bReason,
             bKind: m.holdB.attempt.bKind,
             bInventoryUsdMicro: optional(m.holdB.attempt.bInventoryUsdMicro),
-            flows: m.holdB.attempt.flows.map((f) => ({
-              asset: f.asset,
-              reserve: f.reserve,
-              residualMax: f.residualMax,
-              actual: optional(f.actual),
-              underestimated: f.underestimated,
-            })),
+            reservedInventoryUsdMicro: m.holdB.attempt.reservedInventoryUsdMicro,
+            flows: m.holdB.attempt.flows.map(holdFlow),
+            aFlows: m.holdB.attempt.aFlows.map(holdFlow),
+            settled: m.holdB.attempt.settled,
+            actualInventoryUsdMicro: optional(m.holdB.attempt.actualInventoryUsdMicro),
           }
           : null,
       }

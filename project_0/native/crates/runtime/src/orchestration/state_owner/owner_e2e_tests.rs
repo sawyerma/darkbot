@@ -2417,13 +2417,14 @@ fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
                 "SOL".to_string(),
                 AssetFlow {
                     reserve: 20,
-                    residual_max: 0,
+                    residual_max: Some(0),
                 },
             )]
             .into(),
             inventory_usd_micro: 0,
             kind: "PLAIN".into(),
         }),
+        reserved_inventory_usd_micro: 1_100,
     };
     let (mut f, intent, _) = fe04_fixture_held("dec04_owner", "unknown", Some(hold.clone()));
     install_sol_price(&mut f);
@@ -2448,9 +2449,45 @@ fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
         f.owner.sources.capabilities.hold_b_block,
         crate::execution::hold_b::B8_UNDECIDED
     );
+    // N decided later: a refresh never promotes on its own (only a recorded request does).
     f.owner.hold_gate.n = Some(1);
+    assert!(f.owner.lifecycle());
+    assert_eq!(f.owner.hold_gate.mode, HoldMode::Observe);
     f.owner
         .apply_capability_control(2, Ok(request("ACTIVE", 2)));
+    assert_eq!(f.owner.hold_gate.mode, HoldMode::Active);
+    // The projection: the settled attempt's A and B rows, the reserved value, its inventory mark.
+    let h = f.owner.owner_snapshot(0).wallets.hold_b.unwrap();
+    let a = h.attempt.unwrap();
+    assert!(a.settled);
+    assert_eq!(
+        (a.reserved_inventory_usd_micro, a.actual_inventory_usd_micro),
+        (1_100, Some(0))
+    );
+    assert_eq!(
+        (
+            a.flows[0].asset.as_str(),
+            a.flows[0].actual,
+            a.a_flows[0].actual
+        ),
+        ("SOL", Some(-20), Some(-20))
+    );
+    // An underestimation in the evidence takes ACTIVE back at the next refresh.
+    f.owner.hold_gate.evidence.underestimated = 1;
+    f.owner.refresh_hold_gate(false);
+    assert_eq!(
+        (
+            f.owner.hold_gate.mode,
+            f.owner.sources.capabilities.hold_b_block
+        ),
+        (
+            HoldMode::Observe,
+            crate::execution::hold_b::B_UNDERESTIMATED
+        )
+    );
+    f.owner.hold_gate.evidence.underestimated = 0;
+    f.owner
+        .apply_capability_control(3, Ok(request("ACTIVE", 3)));
     assert_eq!(f.owner.hold_gate.mode, HoldMode::Active);
     let row = f
         .owner

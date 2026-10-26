@@ -1646,13 +1646,14 @@ mod tests {
                     "SOL".to_string(),
                     crate::execution::hold_b::AssetFlow {
                         reserve: 5_000,
-                        residual_max: 0,
+                        residual_max: Some(0),
                     },
                 )]
                 .into(),
                 inventory_usd_micro: 100,
                 kind: "PLAIN".into(),
             }),
+            reserved_inventory_usd_micro: 1_100,
         });
         let version = Version {
             transition: Transition::ExitNotLanded,
@@ -1668,8 +1669,8 @@ mod tests {
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
             (
-                2246,
-                "CEg9YPuop7vqjGvgQvzPHtkUKUoYVR5nyQQxyipF3UvC".to_string()
+                2255,
+                "CWE1yXko1Hdpj78WU9rPSahgUq236ba4YqZw47LR4qAz".to_string()
             ),
             "FE04_TRANSITION schema-7 layout changed"
         );
@@ -2714,6 +2715,7 @@ mod tests {
             mode: HoldMode::Observe,
             a_inventory_usd_micro: 1_100,
             b: BHold::Unqualified("B_SWAP_PROGRAM_UNMODELLED".into()),
+            reserved_inventory_usd_micro: 1_100,
         });
         let mut reserve = reserved(&a, &i);
         reserve.hold = hold.clone();

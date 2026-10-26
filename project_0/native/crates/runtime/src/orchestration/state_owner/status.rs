@@ -311,75 +311,6 @@ impl ShadowOwner {
         }
     }
 
-    /// DEC-04: the B hold mode with its evidence, Safety's reserved inventory and capital, and
-    /// the held attempt's A, B and finalized flows.
-    fn hold_b_projection(&self) -> crate::status_tap::OwnerHoldB {
-        use crate::execution::hold_b::{compare, BHold};
-        use crate::status_tap::{OwnerHoldAttempt, OwnerHoldFlow};
-        let e = &self.hold_gate.evidence;
-        let attempt = self
-            .fe04_held
-            .as_ref()
-            .and_then(|j| j.attempt_holds())
-            .and_then(|held| {
-                let hold = held.hold?;
-                let (b_class, b_reason, b_kind, b_inventory, flows) = match &hold.b {
-                    BHold::Exact(f) => {
-                        let checks = held
-                            .settled_deltas
-                            .map(|d| compare(&f.flows, d))
-                            .unwrap_or_default();
-                        let flows = f
-                            .flows
-                            .iter()
-                            .map(|(asset, flow)| {
-                                let check = checks.iter().find(|c| &c.asset == asset);
-                                OwnerHoldFlow {
-                                    asset: asset.clone(),
-                                    reserve: flow.reserve,
-                                    residual_max: flow.residual_max,
-                                    actual: check.map(|c| c.actual),
-                                    underestimated: check.is_some_and(|c| c.underestimated),
-                                }
-                            })
-                            .collect();
-                        (
-                            "EXACT",
-                            String::new(),
-                            f.kind.clone(),
-                            Some(f.inventory_usd_micro),
-                            flows,
-                        )
-                    }
-                    BHold::Unqualified(reason) => {
-                        ("UNQUALIFIED", reason.clone(), String::new(), None, vec![])
-                    }
-                };
-                Some(OwnerHoldAttempt {
-                    mode: hold.mode.code(),
-                    a_wallet: held.a_wallet.iter().map(|(a, u)| (a.clone(), *u)).collect(),
-                    a_inventory_usd_micro: hold.a_inventory_usd_micro,
-                    b_class,
-                    b_reason,
-                    b_kind,
-                    b_inventory_usd_micro: b_inventory,
-                    flows,
-                })
-            });
-        crate::status_tap::OwnerHoldB {
-            requested: self.sources.capabilities.hold_b_requested.code(),
-            effective: self.hold_gate.mode.code(),
-            block_reason: self.sources.capabilities.hold_b_block,
-            n: self.hold_gate.n,
-            evidence_exact: e.exact,
-            evidence_underestimated: e.underestimated,
-            evidence_unqualified: e.unqualified,
-            inventory_reserved_usd_micro: self.safety.inventory_reserved(),
-            capital_in_use_usd_micro: self.safety.capital_in_use(),
-            attempt,
-        }
-    }
-
     /// DEC-03: the Wallets non-landing status from the held journal and this run's latest read
     /// of the same subject; without a read in this run, a released subject shows its persisted
     /// release (its usable B operators, C negative).
@@ -426,6 +357,88 @@ impl ShadowOwner {
                 0
             },
         })
+    }
+
+    /// DEC-04: the B hold mode with its evidence, Safety's reserved inventory and capital, and
+    /// the held attempt's A, B and finalized flows (every asset of a prediction or of the deltas).
+    fn hold_b_projection(&self) -> crate::status_tap::OwnerHoldB {
+        use crate::execution::hold_b::{a_flows, compare, AssetFlow, BHold};
+        use crate::status_tap::{OwnerHoldAttempt, OwnerHoldFlow};
+        let rows = |predicted: &std::collections::BTreeMap<String, AssetFlow>,
+                    deltas: Option<&std::collections::BTreeMap<String, i128>>|
+         -> Vec<OwnerHoldFlow> {
+            match deltas {
+                Some(d) => compare(predicted, d)
+                    .into_iter()
+                    .map(|c| OwnerHoldFlow {
+                        asset: c.asset,
+                        reserve: c.reserve,
+                        residual_max: c.residual_max,
+                        actual: Some(c.actual),
+                        underestimated: c.underestimated,
+                    })
+                    .collect(),
+                None => predicted
+                    .iter()
+                    .map(|(asset, f)| OwnerHoldFlow {
+                        asset: asset.clone(),
+                        reserve: f.reserve,
+                        residual_max: f.residual_max,
+                        actual: None,
+                        underestimated: false,
+                    })
+                    .collect(),
+            }
+        };
+        let e = &self.hold_gate.evidence;
+        let attempt = self
+            .fe04_held
+            .as_ref()
+            .and_then(|j| j.attempt_holds())
+            .and_then(|held| {
+                let hold = held.hold?;
+                let deltas = held.settled.map(|s| &s.wallet_deltas);
+                let (b_class, b_reason, b_kind, b_inventory, flows) = match &hold.b {
+                    BHold::Exact(f) => (
+                        "EXACT",
+                        String::new(),
+                        f.kind.clone(),
+                        Some(f.inventory_usd_micro),
+                        rows(&f.flows, deltas),
+                    ),
+                    BHold::Unqualified(reason) => {
+                        ("UNQUALIFIED", reason.clone(), String::new(), None, vec![])
+                    }
+                };
+                Some(OwnerHoldAttempt {
+                    mode: hold.mode.code(),
+                    a_wallet: held.a_wallet.iter().map(|(a, u)| (a.clone(), *u)).collect(),
+                    a_inventory_usd_micro: hold.a_inventory_usd_micro,
+                    reserved_inventory_usd_micro: hold.reserved_inventory_usd_micro,
+                    b_class,
+                    b_reason,
+                    b_kind,
+                    b_inventory_usd_micro: b_inventory,
+                    flows,
+                    a_flows: rows(&a_flows(held.a_wallet), deltas),
+                    settled: held.settled.is_some(),
+                    actual_inventory_usd_micro: held
+                        .settled
+                        .map(|s| s.unrealized_inventory_usd_micro),
+                })
+            });
+        crate::status_tap::OwnerHoldB {
+            requested: self.sources.capabilities.hold_b_requested.code(),
+            effective: self.hold_gate.mode.code(),
+            block_reason: self.sources.capabilities.hold_b_block,
+            n: self.hold_gate.n,
+            evidence_exact: e.exact,
+            evidence_underestimated: e.underestimated,
+            evidence_unqualified: e.unqualified,
+            inventory_reserved_usd_micro: self.safety.inventory_reserved(),
+            capital_in_use_usd_micro: self.safety.capital_in_use(),
+            attempt,
+        }
     }
 
     /// DEC-10: the configured approval at this instant (expiry moves with the clock); without an

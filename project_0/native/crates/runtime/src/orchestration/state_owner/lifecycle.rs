@@ -31,7 +31,7 @@ impl ShadowOwner {
                 self.fe04_refreshed = std::time::Instant::now();
             }
         }
-        self.refresh_hold_gate();
+        self.refresh_hold_gate(false);
         #[cfg(feature = "crate_health")]
         self.rebalance_observe();
         #[cfg(feature = "crate_health")]

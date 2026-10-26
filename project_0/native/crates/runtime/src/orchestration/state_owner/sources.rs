@@ -327,16 +327,29 @@ impl ShadowOwner {
     }
 
     /// DEC-04: the effective B hold mode of the requested one (`hold_b::effective`: ACTIVE only
-    /// with the user's N and the evidence), and why it is not the requested one.
-    pub(super) fn refresh_hold_gate(&mut self) {
+    /// with the user's N and the evidence), and why it is not the requested one. Only a request
+    /// decides (`promote`, its decision recorded); a refresh keeps the decision or takes ACTIVE
+    /// back when the evidence no longer carries it — never promotes on its own.
+    pub(super) fn refresh_hold_gate(&mut self, promote: bool) {
+        use crate::execution::hold_b::HoldMode;
         let requested = self.sources.capabilities.hold_b_requested;
         let (mode, block) = crate::execution::hold_b::effective(
             requested,
             self.hold_gate.n,
             &self.hold_gate.evidence,
         );
-        self.hold_gate.mode = mode;
-        self.sources.capabilities.hold_b_block = block;
+        if promote || mode != HoldMode::Active || self.hold_gate.mode == HoldMode::Active {
+            if !promote && self.hold_gate.mode == HoldMode::Active && mode != HoldMode::Active {
+                owner_log!(
+                    self,
+                    "capability_control: HOLD_B ACTIVE taken back: {block}; holds are A's"
+                );
+            }
+            if promote || self.hold_gate.mode != mode {
+                self.hold_gate.mode = mode;
+                self.sources.capabilities.hold_b_block = block;
+            }
+        }
     }
 
     /// DEC-13: one capability request: a valid one becomes the requested value; the effective
@@ -375,7 +388,7 @@ impl ShadowOwner {
             c.refused = c.refused.saturating_add(1);
         }
         let (requested, effective, block_reason) = if hold_b {
-            self.refresh_hold_gate();
+            self.refresh_hold_gate(true);
             let c = &self.sources.capabilities;
             (
                 c.hold_b_requested.code(),
@@ -424,6 +437,12 @@ impl ShadowOwner {
                 self,
                 "capability_control: decision seq={seq} not recorded: {e}"
             );
+            // DEC-04: an ACTIVE decision stands only recorded.
+            if hold_b && self.hold_gate.mode == crate::execution::hold_b::HoldMode::Active {
+                self.hold_gate.mode = crate::execution::hold_b::HoldMode::Observe;
+                self.sources.capabilities.hold_b_block =
+                    crate::execution::hold_b::B_DECISION_UNRECORDED;
+            }
         }
     }
 
