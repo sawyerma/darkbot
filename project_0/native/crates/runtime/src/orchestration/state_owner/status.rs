@@ -209,7 +209,8 @@ impl ShadowOwner {
             } else {
                 cap("V1_MESSAGES", "OFF", "UNSUPPORTED", "built without txv1")
             },
-            // A JIT plan is a bundle (buy + liquidation): only a bundle path simulates it.
+            // A JIT plan is a bundle (buy + liquidation): only a bundle path builds and quotes it
+            // (DEC-11); none is simulated without a qualified bundle simulator.
             cap(
                 "JIT_EXACT_IN",
                 on(jit),
@@ -220,9 +221,11 @@ impl ShadowOwner {
                 },
                 match (jit, bundles) {
                     (false, _) => "",
-                    (true, true) => "Shadow: JIT bundles are simulated, never sent",
+                    (true, true) => {
+                        "JIT bundles are built and fee-quoted; no qualified bundle simulator (B02/B05), none is simulated or sent"
+                    }
                     (true, false) => {
-                        "JIT plans are bundles; no qualified Jito bundle simulator (B02/B05/F-20), every JIT plan is refused before simulation"
+                        "JIT plans are bundles; the bundle path (JITO_BUNDLE) is OFF, every JIT plan is refused before simulation"
                     }
                 },
             ),

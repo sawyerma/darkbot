@@ -961,7 +961,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &[],
         slot_watch: &slots,
@@ -1120,7 +1120,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &[],
         slot_watch: &slots,
@@ -1319,7 +1319,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
                 max_opportunity_age_ns: u64::MAX,
                 execution_deadline_ns: u64::MAX,
             },
-            tip_account: None,
+            bundle_tip: None,
             global_allowed: std::slice::from_ref(&test_table().program),
             prereq_allowed: &[],
             slot_watch: &slots,
@@ -1429,7 +1429,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &[],
         slot_watch: &slots,
@@ -1669,7 +1669,7 @@ fn evaluate_in(
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &[],
         slot_watch: &slots,
@@ -2320,7 +2320,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &[],
         slot_watch: &slots,
@@ -2444,7 +2444,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
                 max_opportunity_age_ns: u64::MAX,
                 execution_deadline_ns: u64::MAX,
             },
-            tip_account: None,
+            bundle_tip: None,
             global_allowed: std::slice::from_ref(&test_table().program),
             prereq_allowed: &[],
             slot_watch: &slots,
@@ -2603,7 +2603,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
                 max_opportunity_age_ns: u64::MAX,
                 execution_deadline_ns: u64::MAX,
             },
-            tip_account: None,
+            bundle_tip: None,
             global_allowed: std::slice::from_ref(&test_table().program),
             prereq_allowed: &[],
             slot_watch: &slots,
@@ -3401,7 +3401,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &[],
         slot_watch: &slots,
@@ -3691,7 +3691,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
         blockhash_max_age_ns,
         p7_passed: false,
         freshness,
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: std::slice::from_ref(&test_table().program),
         prereq_allowed: &prereq_program,
         slot_watch: &slots,
@@ -4899,4 +4899,344 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
     assert!(fe04.journal.active_hold().is_none(), "nothing reserved");
     assert_eq!(safety.capital_in_use(), 0);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-11: `AdmissionBuilder`'s plan as a JIT bundle — one prerequisite swap TX before the
+/// receivership TX, and the funding (`.0`, 50 base units) its buy spends held and an asset of
+/// the plan (as the builder's JIT plan).
+struct BundleBuilder(Pubkey);
+impl crate::execution::pipeline::ReceivershipBuilder for BundleBuilder {
+    fn native_cost_usd_micro(&self, n: u64) -> Option<u64> {
+        Some(n)
+    }
+    fn instruction_table(&self) -> &darkbot_project0::planner::InstructionTable {
+        test_table()
+    }
+    fn plans(
+        &self,
+        a: &Pubkey,
+        n: u64,
+        s: u64,
+        d: std::time::Instant,
+    ) -> Result<
+        Vec<crate::execution::pipeline::ReceivershipPlan>,
+        crate::execution::pipeline::PlanError,
+    > {
+        let mut plans = AdmissionBuilder.plans(a, n, s, d)?;
+        for p in &mut plans {
+            p.prerequisite_txs = vec![vec![solana_sdk::instruction::Instruction {
+                program_id: Pubkey::new_from_array([8; 32]),
+                accounts: vec![],
+                data: vec![1],
+            }]];
+            p.inventory_holds = vec![(self.0, 50)];
+            p.assets = vec![self.0];
+        }
+        Ok(plans)
+    }
+    fn hold_b(
+        &self,
+        plan: &crate::execution::pipeline::ReceivershipPlan,
+        sol_debit: Option<u64>,
+    ) -> crate::execution::hold_b::BHold {
+        AdmissionBuilder.hold_b(plan, sol_debit)
+    }
+}
+
+/// DEC-11: the shape of the owner's submitter — single TXs on RPC, a bundle path — whose
+/// bundle simulation passes: the stand-in for a qualified bundle simulator (production holds
+/// none). Every message costs 200 lamports; the bundle handoff is recorded.
+struct QualifiedBundleSim {
+    bundles: Arc<AtomicU64>,
+    sims: Arc<AtomicU64>,
+}
+impl SubmissionAdapter for QualifiedBundleSim {
+    fn path(&self) -> SubmissionPath {
+        SubmissionPath::Rpc
+    }
+    fn supports_bundle(&self) -> bool {
+        true
+    }
+    fn fee_for_message(
+        &self,
+        tx: &VersionedTransaction,
+        _: std::time::Instant,
+    ) -> Result<MessageFeeQuote, darkbot_solana::submit::FeeQuoteError> {
+        Ok(MessageFeeQuote {
+            message_hash: tx.message.hash(),
+            context_slot: 1,
+            lamports: 200,
+        })
+    }
+    fn simulate(&self, _: &VersionedTransaction, _: std::time::Instant) -> SimResult {
+        panic!("a bundle is never simulated as a single TX")
+    }
+    fn simulate_bundle(&self, txs: &[VersionedTransaction], _: std::time::Instant) -> SimResult {
+        assert!(txs.iter().all(|t| t.verify_and_hash_message().is_ok()));
+        self.sims.fetch_add(1, Ordering::Relaxed);
+        SimResult::Ok {
+            units_consumed: Some(300),
+            context_slot: Some(10),
+        }
+    }
+    fn submit(
+        &self,
+        _: &VersionedTransaction,
+        _: u64,
+        _: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
+        panic!("a bundle is never submitted as a single TX")
+    }
+    fn submit_bundle(
+        &self,
+        txs: &[VersionedTransaction],
+        t: u64,
+        deadline: std::time::Instant,
+    ) -> Result<SubmitAck, SubmitError> {
+        if std::time::Instant::now() >= deadline {
+            return Err(SubmitError::Deadline { sent: false });
+        }
+        self.bundles.fetch_add(1, Ordering::Relaxed);
+        let signatures: Vec<_> = txs.iter().map(|t| t.signatures[0]).collect();
+        Ok(SubmitAck {
+            path: SubmissionPath::JitoBundle,
+            signature: signatures[0],
+            signatures,
+            submission_id: Some("bundle-1".into()),
+            t_handoff_ns: t,
+            serialized_len: txs
+                .iter()
+                .map(|t| darkbot_solana::submit::serialize_tx(t).unwrap().len())
+                .sum(),
+        })
+    }
+}
+
+/// DEC-11: one LIVE evaluation of `target` as a JIT bundle through the production pipeline,
+/// with the configured `tip`, the bundle path's failure costs and the prerequisite program
+/// allowlisted.
+fn bundle_evaluate<S: SubmissionAdapter>(
+    adapter: &S,
+    safety: &mut darkbot_project0::safety::Safety,
+    fe04: &mut crate::execution::one_shot::admission::Fe04Admission,
+    (payer, target, mint): (&solana_sdk::signature::Keypair, Pubkey, Pubkey),
+    tip: crate::execution::bundle_path::BundleTip,
+) -> OpportunityRecord {
+    use crate::execution::pipeline::{Mode, Pipeline};
+    use darkbot_project0::{execution::Freshness, planner::Allowlist};
+    use darkbot_solana::{
+        state::blockhash::{BlockhashCache, CachedBlockhash},
+        tx::{Resources, TxLimits},
+    };
+    let clock = Clock::new();
+    let bh = BlockhashCache::new();
+    bh.set(CachedBlockhash {
+        hash: solana_sdk::hash::Hash::new_unique(),
+        last_valid_block_height: 100,
+        refreshed_ns: clock.now_ns(),
+    });
+    let allow = Allowlist::default();
+    let failed = FailedCostMatrix {
+        jito_bundle_not_landed: Some(0),
+        jito_bundle_failed: Some(0),
+        ..Default::default()
+    };
+    let slots = darkbot_solana::ingress::SlotWatch::new();
+    slots.observe(10);
+    let prereq_program = [Pubkey::new_from_array([8; 32])];
+    let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
+    let mut p = Pipeline {
+        mode: Mode::Live,
+        clock: &clock,
+        health: &TestHealth,
+        builder: &BundleBuilder(mint),
+        submitter: adapter,
+        safety,
+        blockhash: &bh,
+        payer,
+        allowlist: &allow,
+        failed_costs: &failed,
+        limits: TxLimits::default(),
+        resources: Resources {
+            compute_unit_limit: 100_000,
+            priority_micro_lamports_per_cu: 0,
+            loaded_accounts_data_size: None,
+        },
+        min_profit: 0,
+        blockhash_max_age_ns: u64::MAX,
+        p7_passed: false,
+        freshness: Freshness {
+            max_opportunity_age_ns: u64::MAX,
+            execution_deadline_ns: u64::MAX,
+        },
+        bundle_tip: Some(tip),
+        global_allowed: std::slice::from_ref(&test_table().program),
+        prereq_allowed: &prereq_program,
+        slot_watch: &slots,
+        network: &mut network,
+        simulation_failure: None,
+        blockhash_park: crate::execution::pipeline::BlockhashPark::Off,
+        fe04: Some(fe04),
+        hold: &crate::execution::hold_b::HoldGate::OBSERVE,
+    };
+    p.evaluate(target, "test", clock.now_ns(), 100, 10, true)
+}
+
+/// DEC-11 (B02/B05/F-20): the bundle fee model, its holds, the admission and the simulation
+/// boundary. A JIT plan on the bundle path pays the configured tip in its own TX and is priced
+/// as a bundle: every transaction's exact message fee (prerequisite, receivership, tip) summed,
+/// plus the tip. Through the owner's production submitter (bundle path configured, no
+/// qualified bundle simulator) the bundle is fee-quoted on RPC and never simulated: no Jito
+/// endpoint is called, nothing is reserved. With a qualified simulation (a test stand-in) the
+/// FE-04 admission binds all three signatures, the summed fee, the tip and the SOL and funding
+/// holds, and hands the bundle off once (before: refused `FE04_BUNDLE_FEES_UNQUOTED`).
+#[test]
+fn dec11_bundle_fee_model_holds_admission_and_simulation_boundary() {
+    use crate::execution::bundle_path::{
+        BundleConfig, BundleTip, OwnerSubmitter, BUNDLE_SIMULATOR_UNQUALIFIED,
+    };
+    use crate::execution::observe_only::ObserveOnly;
+    use crate::execution::one_shot::non_landing::loopback::{endpoint, Reply};
+    use darkbot_project0::safety::{Allow, Limits, Safety};
+    let target = Pubkey::new_unique();
+    let payer = solana_sdk::signature::Keypair::new();
+    let mint = Pubkey::new_unique();
+    let tip = BundleTip {
+        account: Pubkey::new_unique(),
+        lamports: 1_000,
+    };
+    let open_safety = || {
+        let mut allow = Allow::default();
+        allow.execution_classes.insert("longtail");
+        allow.assets.insert(mint);
+        Safety::new(
+            Limits {
+                max_total_capital: u64::MAX,
+                max_outstanding_inventory: u64::MAX,
+                max_concurrent_positions: u32::MAX,
+                max_exposure_per_attempt: u64::MAX,
+                max_daily_loss: u64::MAX,
+                max_failed_attempts_per_day: u32::MAX,
+                max_tip: u64::MAX,
+                max_slippage_bps: u64::MAX,
+                max_outstanding_attempts: u32::MAX,
+            },
+            allow,
+            true,
+        )
+    };
+    let journal = |name: &str| {
+        let d = std::env::temp_dir().join(format!("p0-dec11-{name}-{}", Pubkey::new_unique()));
+        std::fs::create_dir_all(&d).unwrap();
+        let mut fe04 = admission(&d, &payer, target, "ZERO_PREFUND_SAME_TX");
+        fe04.approval.max_tip_lamports = tip.lamports;
+        fe04.balances.insert(mint.to_string(), 1_000);
+        fe04
+    };
+
+    // The production submitter: RPC fee quotes from a loopback, the Jito endpoints counted.
+    let (rpc_url, rpc_calls) = endpoint(Arc::new(|method, _| match method {
+        "getFeeForMessage" => Reply::Result(serde_json::json!({
+            "context": {"slot": 10}, "value": 5_000
+        })),
+        _ => Reply::Error,
+    }));
+    let (jito_url, jito_calls) = endpoint(Arc::new(|_, _| Reply::Error));
+    let mut config = darkbot_solana::runtime_config::RuntimeConfig::default();
+    (config.limits.rpc_rps, config.limits.rpc_burst) = (1_000, 1_000);
+    let budget = Arc::new(darkbot_solana::provider::Budget::configured(&config));
+    let mut owner = OwnerSubmitter::new(
+        darkbot_solana::submit::rpc::RpcSubmitter::with_budget(rpc_url, true, budget).unwrap(),
+    );
+    let bundle_path = BundleConfig {
+        block_engine_url: jito_url.clone(),
+        bundle_sim_rpc_url: Some(jito_url),
+        tip,
+    };
+    owner
+        .set_bundle_path(Some(&bundle_path), Duration::from_secs(1))
+        .unwrap();
+    let production = ObserveOnly::new(owner);
+    let mut safety = open_safety();
+    let mut fe04 = journal("unqualified");
+    let r = bundle_evaluate(
+        &production,
+        &mut safety,
+        &mut fe04,
+        (&payer, target, mint),
+        tip,
+    );
+    let costs = &r.candidate_costs[0];
+    assert_eq!(costs.path, "JitoBundle");
+    assert_eq!(
+        (costs.transaction_fee_usd_micro, costs.jito_tip_usd_micro),
+        (Some(15_000), Some(1_000)),
+        "three messages of 5 000 lamports, plus the tip"
+    );
+    let quotes = rpc_calls.lock().unwrap().clone();
+    assert_eq!(quotes, vec!["getFeeForMessage"; 3], "one quote per message");
+    assert_eq!(r.path.as_deref(), Some(SubmissionPath::JitoBundle.as_str()));
+    assert!(
+        r.reason_text()
+            .unwrap()
+            .contains(BUNDLE_SIMULATOR_UNQUALIFIED),
+        "{:?}",
+        r.reason_text()
+    );
+    assert!(jito_calls.lock().unwrap().is_empty(), "no Jito call");
+    assert!(fe04.journal.active_hold().is_none(), "nothing is reserved");
+    assert_eq!(safety.capital_in_use(), 0);
+
+    // A qualified bundle simulation: the admission binds and holds the whole bundle.
+    let qualified = QualifiedBundleSim {
+        bundles: Arc::new(AtomicU64::new(0)),
+        sims: Arc::new(AtomicU64::new(0)),
+    };
+    let mut safety = open_safety();
+    let mut fe04 = journal("qualified");
+    let r = bundle_evaluate(
+        &qualified,
+        &mut safety,
+        &mut fe04,
+        (&payer, target, mint),
+        tip,
+    );
+    assert_eq!(r.decision, Decision::Submitted, "{:?}", r.reason_text());
+    assert_eq!(
+        (
+            qualified.sims.load(Ordering::Relaxed),
+            qualified.bundles.load(Ordering::Relaxed)
+        ),
+        (1, 1),
+        "simulated once (reused at the handoff), handed off once"
+    );
+    let intent = fe04.journal.intent().unwrap();
+    assert_eq!(
+        intent.signatures.len(),
+        3,
+        "prerequisite, receivership and tip TX"
+    );
+    assert_eq!(r.all_signatures, intent.signatures);
+    assert_eq!(
+        (intent.transaction_fee_lamports, intent.tip_lamports),
+        (600, 1_000),
+        "three messages of 200 lamports; the tip"
+    );
+    let hold = fe04.journal.active_hold().unwrap();
+    assert_eq!(
+        hold.holds["SOL"], 1_605,
+        "fees 600 + tip 1 000 + flat fee 5 + record rent 0"
+    );
+    assert_eq!(
+        hold.holds[&mint.to_string()],
+        50,
+        "the funding the buy spends"
+    );
+    assert_eq!(
+        r.submitted_tip
+            .as_ref()
+            .map(|t| (t.signature.as_str(), t.lamports)),
+        Some((intent.signatures[2].as_str(), 1_000))
+    );
+    assert_eq!(safety.capital_in_use(), 1_000, "reserved until settled");
 }

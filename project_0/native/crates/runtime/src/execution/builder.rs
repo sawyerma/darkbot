@@ -1683,7 +1683,15 @@ pub mod p0 {
                                 tip: self.jito_tip_lamports,
                                 // FE-02: the buy's enforced slippage binds the approval limits.
                                 slippage_bps: enforced_slippage(&buy, sz.slippage_bps),
-                                assets: vec![asset_mint, liab_mint],
+                                // DEC-11: the funding the buy spends is an asset of the plan
+                                // too (Safety's asset allowlist, FE-04's expected wallet deltas).
+                                assets: {
+                                    let mut assets = vec![asset_mint, liab_mint];
+                                    if !assets.contains(&funding_mint) {
+                                        assets.push(funding_mint);
+                                    }
+                                    assets
+                                },
                                 tx_version: BuildVersion::V0,
                                 lookup_tables: crate::execution::lookup_tables::merge(
                                     &protocol_luts,
@@ -2562,6 +2570,10 @@ pub mod p0 {
                 vec![(liab_mint, 200), (funding_mint, buy_in)]
             );
             assert_eq!(jit.slippage_bps, 100, "the buy's enforced slippage");
+            assert!(
+                jit.assets.contains(&funding_mint),
+                "DEC-11: the funding the buy spends is an asset of the plan"
+            );
             // Capital = the buy's spend at the funding inventory's own value per unit (10_000
             // value / 10_000 units); the shortfall it buys is worth 300.
             assert_eq!(jit.input.required_capital_usd_micro, buy_in);

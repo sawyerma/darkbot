@@ -2,11 +2,11 @@
 //! JITO_BUNDLE capability the bundle path through a constructed `JitoAdapter`.
 //!
 //! Message fees and single simulations are always the RPC path's (getFeeForMessage per
-//! transaction: the bundle fee model is each transaction's fee plus the tip). A bundle is
-//! simulated only by a qualified bundle simulator — a provider qualification this build does not
-//! hold (FE-06/P8) — so the bundle simulation stays unavailable, no Jito endpoint is called and
-//! FE-04 refuses bundles (`bundle_simulated = false`). Every submission is refused by
-//! `ObserveOnly` regardless.
+//! transaction: the bundle fee model is each transaction's fee plus the configured tip, priced
+//! by the pipeline). A bundle is simulated only by a qualified bundle simulator — a provider
+//! qualification this build does not hold (FE-06/P8) — so the bundle simulation stays
+//! unavailable, no Jito endpoint is called and FE-04 refuses bundles (`bundle_simulated =
+//! false`). Every submission is refused by `ObserveOnly` regardless.
 use darkbot_solana::submit::{
     jito::JitoAdapter, rpc::RpcSubmitter, FeeQuoteError, MessageFeeQuote, SimResult,
     SubmissionAdapter, SubmissionPath, SubmitAck, SubmitError,
@@ -19,26 +19,38 @@ pub const JITO_BUNDLE: &str = "JITO_BUNDLE";
 /// The values JITO_BUNDLE may be requested with (OFF at every start).
 pub const JITO_BUNDLE_VALUES: [&str; 3] = ["OFF", "OBSERVE", "ACTIVE"];
 /// The bundle path is not configured.
-pub const JITO_UNCONFIGURED: &str = "P0_JITO_BLOCK_ENGINE_URL or P0_JITO_TIP_ACCOUNT unset";
+pub const JITO_UNCONFIGURED: &str =
+    "P0_JITO_BLOCK_ENGINE_URL, P0_JITO_TIP_ACCOUNT or P0_JITO_TIP_LAMPORTS unset";
 /// Bundles are not admitted: no qualified bundle simulator.
 pub const BUNDLE_SIMULATOR_UNQUALIFIED: &str =
     "bundle simulator not qualified (B02/B05: no provider qualification)";
 
-/// The configured bundle path: the block engine, the bundle simulator and the tip account.
+/// The tip a bundle pays in its own tip transaction: the configured account and amount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BundleTip {
+    pub account: Pubkey,
+    pub lamports: u64,
+}
+
+/// The configured bundle path: the block engine, the bundle simulator and the tip.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BundleConfig {
     pub block_engine_url: String,
     pub bundle_sim_rpc_url: Option<String>,
-    pub tip_account: Pubkey,
+    pub tip: BundleTip,
 }
 
 impl BundleConfig {
-    /// From the runtime configuration: both the block engine and the tip account, else none.
+    /// From the runtime configuration: the block engine, the tip account and the tip amount,
+    /// else none.
     pub fn of(c: &darkbot_solana::runtime_config::RuntimeConfig) -> Option<Self> {
         Some(Self {
             block_engine_url: c.jito_block_engine_url.clone()?,
             bundle_sim_rpc_url: c.bundle_sim_rpc_url.clone(),
-            tip_account: c.jito_tip_account.as_deref()?.parse().ok()?,
+            tip: BundleTip {
+                account: c.jito_tip_account.as_deref()?.parse().ok()?,
+                lamports: c.jito_tip_lamports?,
+            },
         })
     }
 }
@@ -170,7 +182,15 @@ mod tests {
         assert_eq!(BundleConfig::of(&c), None, "no tip account");
         let tip = Pubkey::new_unique();
         c.jito_tip_account = Some(tip.to_string());
-        assert_eq!(BundleConfig::of(&c).map(|b| b.tip_account), Some(tip));
+        assert_eq!(BundleConfig::of(&c), None, "no tip amount");
+        c.jito_tip_lamports = Some(1_000);
+        assert_eq!(
+            BundleConfig::of(&c).map(|b| b.tip),
+            Some(BundleTip {
+                account: tip,
+                lamports: 1_000
+            })
+        );
     }
 
     /// DEC-11 (loopback): OFF builds no Jito adapter; the bundle path holds one and simulates
@@ -185,7 +205,10 @@ mod tests {
         let config = BundleConfig {
             block_engine_url: url.clone(),
             bundle_sim_rpc_url: Some(url),
-            tip_account: Pubkey::new_unique(),
+            tip: BundleTip {
+                account: Pubkey::new_unique(),
+                lamports: 1_000,
+            },
         };
         let timeout = std::time::Duration::from_secs(1);
         s.set_bundle_path(Some(&config), timeout).unwrap();

@@ -374,7 +374,7 @@ fn owner_projection_carries_real_engine_safety_and_unknown_finance() {
     };
     assert_eq!(cap("LIVE"), ("OFF", "BLOCKED"));
     assert_eq!(cap("SUBMISSION"), ("OFF", "NOT_AUTHORIZED"));
-    assert_eq!(cap("JITO_BUNDLE"), ("OFF", "BLOCKED"));
+    assert_eq!(cap("JITO_BUNDLE"), ("OFF", "OFF"));
     assert_eq!(cap("JIT_EXACT_IN"), ("OFF", "OFF"));
     // A JIT plan is a bundle (buy + liquidation): without a bundle path the owner rejects every
     // one before simulation, so a configured JIT bank is BLOCKED, never a fake OBSERVE.
@@ -2444,7 +2444,10 @@ fn dec11_owner_builds_the_bundle_path_through_the_capability() {
     f.owner.bundle_config = Some(crate::execution::bundle_path::BundleConfig {
         block_engine_url: "https://jito.invalid".into(),
         bundle_sim_rpc_url: None,
-        tip_account: Pubkey::new_unique(),
+        tip: crate::execution::bundle_path::BundleTip {
+            account: Pubkey::new_unique(),
+            lamports: 1_000,
+        },
     });
     f.owner
         .apply_capability_control(2, Ok(request("OBSERVE", 2)));

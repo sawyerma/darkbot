@@ -360,7 +360,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
             max_opportunity_age_ns: u64::MAX,
             execution_deadline_ns: u64::MAX,
         },
-        tip_account: None,
+        bundle_tip: None,
         global_allowed: &allowed,
         prereq_allowed: &[],
         slot_watch: &slots,

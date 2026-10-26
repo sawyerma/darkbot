@@ -413,6 +413,36 @@ impl NetworkBudget {
     }
 }
 
+/// D2: one evaluation's fee quotes, keyed by the message hash of the built bytes.
+type FeeQuotes = Vec<(
+    solana_sdk::hash::Hash,
+    Result<submit::MessageFeeQuote, submit::FeeQuoteError>,
+)>;
+
+/// DEC-11: a bundle's transactions besides the receivership TX, built once per evaluation —
+/// the prerequisite TXs (signed at the boundary) and the signed tip TX.
+struct BundleParts {
+    prerequisites: Vec<darkbot_solana::tx::BuiltTx>,
+    tip_tx: solana_sdk::transaction::VersionedTransaction,
+}
+
+/// DEC-11: a bundle plan's other transactions (or the typed rejection of building them, kept for
+/// the boundary) and the sum of its transactions' exact message fees (`None`: unknown).
+struct BundleQuote {
+    parts: Result<BundleParts, (LossReason, Rejection)>,
+    fee_lamports: Option<u64>,
+}
+
+/// A plan the evaluation may select: its built receivership TX, evaluation, cost record and, for
+/// a bundle, its quote.
+type Selected = (
+    ReceivershipPlan,
+    darkbot_solana::tx::BuiltTx,
+    Evaluation,
+    crate::analytics::record::CandidateCostRecord,
+    Option<BundleQuote>,
+);
+
 pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> {
     pub mode: Mode,
     pub clock: &'a Clock,
@@ -430,8 +460,9 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub blockhash_max_age_ns: u64,
     pub p7_passed: bool,
     pub freshness: Freshness,
-    /// [FIX-4] Tip-Account (aus `JitoAdapter::tip_accounts()`, rotierend) — nur für Bundle-Pfad.
-    pub tip_account: Option<Pubkey>,
+    /// [FIX-4]/DEC-11: the tip of a bundle (the configured account and amount), only while the
+    /// bundle path is effective.
+    pub bundle_tip: Option<crate::execution::bundle_path::BundleTip>,
     /// [FIX-22] Globale P0-Top-Level-Allowlist (protocol::receivership_allowed_programs).
     /// C8: borrowed from the owner (immutable during the evaluation), never copied per candidate.
     pub global_allowed: &'a [Pubkey],
@@ -695,18 +726,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             return rec.with_timeline(&tl);
         };
 
-        let mut best_actionable: Option<(
-            ReceivershipPlan,
-            darkbot_solana::tx::BuiltTx,
-            Evaluation,
-            crate::analytics::record::CandidateCostRecord,
-        )> = None;
-        let mut best_probe: Option<(
-            ReceivershipPlan,
-            darkbot_solana::tx::BuiltTx,
-            Evaluation,
-            crate::analytics::record::CandidateCostRecord,
-        )> = None;
+        let mut best_actionable: Option<Selected> = None;
+        let mut best_probe: Option<Selected> = None;
         let mut threshold_hits: u32 = 0;
         // V9: plans the economics would act on that only the LIVE Safety preview refused.
         let mut safety_hits: u32 = 0;
@@ -718,14 +739,20 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // D2: fee quotes of this evaluation (one blockhash, one slot) keyed by the message hash
         // of the built bytes: funding classes with byte-identical transactions (NoSwap and
         // Preheld inventory) share one quote; nothing is reused across evaluations.
-        let mut fee_quotes: Vec<(
-            solana_sdk::hash::Hash,
-            Result<submit::MessageFeeQuote, submit::FeeQuoteError>,
-        )> = Vec::new();
+        let mut fee_quotes: FeeQuotes = Vec::new();
         // V2-14 P1-04: plans with identical instructions, version and lookup tables (NoSwap and
         // Preheld inventory) share one compiled and signed transaction of this evaluation.
         let mut built_txs: Vec<(TxPlan, darkbot_solana::tx::BuiltTx)> = Vec::new();
         for mut plan in plans {
+            // DEC-11: on an effective bundle path a plan with prerequisite TXs is a bundle — it
+            // pays the configured tip in its own TX and is priced on the bundle path.
+            let bundled = !plan.prerequisite_txs.is_empty() && self.submitter.supports_bundle();
+            if bundled {
+                if let Some(tip) = self.bundle_tip {
+                    plan.tip = tip.lamports;
+                }
+                plan.input.path = Path::JitoBundle;
+            }
             // E2: the gate decides on the steps of the actually built instructions (receivership
             // TX and every prerequisite TX), immediately before they are signed.
             let table = self.builder.instruction_table();
@@ -879,67 +906,43 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 && plan.prerequisite_txs.is_empty()
                 && plan.tip == 0
             {
-                if Instant::now() >= deadline {
-                    rec.loss = Some(LossReason::RpcDeadline);
-                    rec.reason = Some(Rejection::RpcDeadlineBeforeFeeQuote);
-                    return rec.with_timeline(&tl);
-                }
-                let message_hash = built.tx.message.hash();
-                let cached = fee_quotes
-                    .iter()
-                    .find(|(h, _)| *h == message_hash)
-                    .map(|(_, q)| q.clone());
-                let fee = match cached {
-                    Some(quote) => quote,
-                    None => {
-                        let fee_started = Instant::now();
-                        let quote = self.submitter.fee_for_message(&built.tx, deadline);
-                        // [MT0] H6: would a local fee model have matched the RPC fee?
-                        // (measurement only, once per RPC quote)
-                        if let Ok(q) = &quote {
-                            match local_fee_estimate_lamports(&built.tx) {
-                                Some(local) if local == q.lamports => darkbot_common::mt0::MT0
-                                    .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
-                                Some(_) => darkbot_common::mt0::MT0
-                                    .add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
-                                None => darkbot_common::mt0::MT0
-                                    .add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
-                            }
-                        }
-                        record_timing(
-                            &FEE_CALLS,
-                            &FEE_NS_TOTAL,
-                            &FEE_NS_MAX,
-                            fee_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
-                        );
-                        fee_quotes.push((message_hash, quote.clone()));
-                        quote
-                    }
-                };
-                // N2: a deadline or a refused call ends the evaluation with its own cause; an
-                // unavailable quote or a transport failure leaves the fee UNKNOWN (never 0).
-                match fee {
-                    Err(submit::FeeQuoteError::Deadline) => {
-                        rec.loss = Some(LossReason::RpcDeadline);
-                        rec.reason = Some(Rejection::RpcDeadlineInFeeQuote);
+                match self.quote_message(&built.tx, deadline, &mut fee_quotes) {
+                    Ok(quote) => quote,
+                    Err((loss, reason)) => {
+                        rec.loss = Some(loss);
+                        rec.reason = Some(reason);
                         return rec.with_timeline(&tl);
                     }
-                    Err(submit::FeeQuoteError::BudgetRejected(code)) => {
-                        rec.loss = Some(LossReason::RpcBudget);
-                        rec.reason = Some(Rejection::RpcBudgetFeeQuote(code));
-                        return rec.with_timeline(&tl);
-                    }
-                    Err(_) => None,
-                    // V2-14 P1-02: compared with the hash computed above, typed (an unreadable
-                    // quote hash is no match); the quote's persisted text form stays (layout).
-                    Ok(q) => Some(q).filter(|q| q.message_hash == message_hash),
                 }
             } else {
                 None
             };
-            plan.input.transaction_fee_usd_micro = fee_quote
-                .as_ref()
-                .and_then(|q| self.builder.native_cost_usd_micro(q.lamports));
+            // DEC-11: the bundle fee model — every transaction's exact message fee, summed, plus
+            // the tip; an unknown part leaves the bundle's cost unknown (never 0).
+            let bundle = if bundled {
+                match self.bundle_quote(&plan, &built, bh.hash, deadline, &mut fee_quotes) {
+                    Ok(quote) => Some(quote),
+                    Err((loss, reason)) => {
+                        rec.loss = Some(loss);
+                        rec.reason = Some(reason);
+                        return rec.with_timeline(&tl);
+                    }
+                }
+            } else {
+                None
+            };
+            let fee_lamports = match &bundle {
+                Some(b) => b.fee_lamports,
+                None => fee_quote.as_ref().map(|q| q.lamports),
+            };
+            plan.input.transaction_fee_usd_micro =
+                fee_lamports.and_then(|l| self.builder.native_cost_usd_micro(l));
+            if bundled {
+                match self.builder.native_cost_usd_micro(plan.tip) {
+                    Some(tip) => plan.input.jito_tip_usd_micro = tip,
+                    None => plan.input.transaction_fee_usd_micro = None,
+                }
+            }
             let candidate_failed = if fee_quote.is_some() {
                 economics::rpc_message_failure_costs(plan.input.transaction_fee_usd_micro)
             } else {
@@ -960,7 +963,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 safety_hits += 1;
             }
             // [MT0] avoidable remote work, classified only from decisions already made above.
-            if fee_quote.is_some() && matches!(eval, Evaluation::Known { .. }) && !actionable {
+            if fee_lamports.is_some() && matches!(eval, Evaluation::Known { .. }) && !actionable {
                 darkbot_common::mt0::MT0
                     .add(darkbot_common::mt0::Counter::FeeRpcForKnownNonActionable, 1);
             }
@@ -1026,11 +1029,13 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
 
             if actionable {
-                let replace = best_actionable.as_ref().is_none_or(|(_, _, current, _)| {
-                    economics::compare_evaluations(eval, *current).is_gt()
-                });
+                let replace = best_actionable
+                    .as_ref()
+                    .is_none_or(|(_, _, current, _, _)| {
+                        economics::compare_evaluations(eval, *current).is_gt()
+                    });
                 if replace {
-                    best_actionable = Some((plan, built, eval, cost_record));
+                    best_actionable = Some((plan, built, eval, cost_record, bundle));
                 }
             } else {
                 let candidate_key = (
@@ -1040,7 +1045,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 );
                 let replace = best_probe
                     .as_ref()
-                    .is_none_or(|(cur_plan, cur_built, _, _)| {
+                    .is_none_or(|(cur_plan, cur_built, _, _, _)| {
                         candidate_key
                             < (
                                 cur_built.serialized_len,
@@ -1049,7 +1054,7 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                             )
                     });
                 if replace {
-                    best_probe = Some((plan, built, eval, cost_record));
+                    best_probe = Some((plan, built, eval, cost_record, bundle));
                 }
             }
         }
@@ -1057,7 +1062,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         if best_actionable.is_some() {
             rec.t_profitable_unix_s = None;
         }
-        let Some((plan, mut built, eval, selected_costs)) = best_actionable.or(best_probe) else {
+        let Some((plan, mut built, eval, selected_costs, bundle)) = best_actionable.or(best_probe)
+        else {
             // V9: a plan the economics would have acted on was refused by Safety: its own cause.
             if safety_hits > 0 {
                 rec.decision = Decision::DeniedBySafety;
@@ -1129,33 +1135,26 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
         // [FIX-15] Bundle-Kandidaten werden als Bundle simuliert, Einzel-TX als Einzel-TX — nie gemischt.
         // [FIX-4] Bundle = [prerequisite TXs…, receivership TX, tip TX]; Tip nie in der Receivership-TX.
         let mut bundle_txs: Vec<solana_sdk::transaction::VersionedTransaction> = Vec::new();
+        // DEC-11: the bundle's fee is the sum quoted for exactly these transactions.
+        let bundle_fee_lamports = bundle.as_ref().and_then(|b| b.fee_lamports);
         if use_bundle {
-            let Some(tip_account) = self.tip_account else {
-                rec.loss = Some(LossReason::Submission);
-                rec.reason = Some(Rejection::BundleWithoutTip);
-                return rec.with_timeline(&tl);
+            // The parts quoted with the plan (or, for a plan priced as a single TX, built now).
+            let parts = match bundle {
+                Some(quoted) => quoted.parts,
+                None => self.bundle_parts(&plan, bh.hash),
             };
-            for pre in &plan.prerequisite_txs {
-                let pre_plan = TxPlan {
-                    version: BuildVersion::V0,
-                    payer: tx::payer_of(self.payer),
-                    instructions: pre.clone(),
-                    lookup_tables: plan.lookup_tables.clone(),
-                    resources: self.resources,
-                };
-                let mut b = match tx::build(&pre_plan, bh.hash, &self.limits) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        rec.loss = Some(LossReason::Build);
-                        rec.reason = Some(Rejection::PrerequisiteBuild(e));
-                        return rec.with_timeline(&tl);
-                    }
-                };
-                if let Err(code) = tx::message_matches_plan(&b.tx.message, &pre_plan) {
-                    rec.loss = Some(LossReason::Build);
-                    rec.reason = Some(Rejection::PrerequisiteMessage(code));
+            let BundleParts {
+                prerequisites,
+                tip_tx,
+            } = match parts {
+                Ok(parts) => parts,
+                Err((loss, reason)) => {
+                    rec.loss = Some(loss);
+                    rec.reason = Some(reason);
                     return rec.with_timeline(&tl);
                 }
+            };
+            for mut b in prerequisites {
                 if let Err(e) = tx::sign(&mut b, &[self.payer]) {
                     rec.loss = Some(LossReason::Build);
                     rec.reason = Some(Rejection::PrerequisiteSign(e));
@@ -1164,31 +1163,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
                 bundle_txs.push(b.tx);
             }
             bundle_txs.push(built.tx.clone());
-            match submit::build_tip_tx(self.payer, &tip_account, plan.tip, bh.hash) {
-                Ok(t) => {
-                    // E2: the tip transaction is checked against its plan like every other one.
-                    if let Err(code) =
-                        submit::tip_matches(&t, &tx::payer_of(self.payer), &tip_account, plan.tip)
-                    {
-                        rec.loss = Some(LossReason::Build);
-                        rec.reason = Some(Rejection::TipMismatch(code));
-                        return rec.with_timeline(&tl);
-                    }
-                    rec.submitted_tip =
-                        t.signatures
-                            .first()
-                            .map(|s| crate::execution::pending::SubmittedTip {
-                                signature: s.to_string(),
-                                lamports: plan.tip,
-                            });
-                    bundle_txs.push(t);
-                }
-                Err(e) => {
-                    rec.loss = Some(LossReason::Build);
-                    rec.reason = Some(Rejection::TipBuild(e));
-                    return rec.with_timeline(&tl);
-                }
-            }
+            rec.submitted_tip =
+                tip_tx
+                    .signatures
+                    .first()
+                    .map(|s| crate::execution::pending::SubmittedTip {
+                        signature: s.to_string(),
+                        lamports: plan.tip,
+                    });
+            bundle_txs.push(tip_tx);
         }
         if use_bundle {
             tl.mark(Stage::Sign, self.clock.now_ns());
@@ -1312,11 +1295,15 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             rec.reason = Some(Rejection::LiveSendRequiresFe04 { bundle: use_bundle });
             return rec.with_timeline(&tl);
         };
-        let fee_lamports = rec
-            .selected_costs
-            .as_ref()
-            .and_then(|c| c.message_fee_quote.as_ref())
-            .map(|q| q.lamports);
+        // DEC-11: a bundle's fee is the sum of its transactions' quotes, a single TX's its quote.
+        let fee_lamports = if use_bundle {
+            bundle_fee_lamports
+        } else {
+            rec.selected_costs
+                .as_ref()
+                .and_then(|c| c.message_fee_quote.as_ref())
+                .map(|q| q.lamports)
+        };
         let max_loss_usd_micro = plan
             .sol_debit_lamports(fee_lamports)
             .and_then(|l| self.builder.native_cost_usd_micro(l))
@@ -1431,6 +1418,139 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             }
         }
         rec.with_timeline(&tl)
+    }
+
+    /// N2/D2: the network fee of one exact message, quoted once per evaluation (`fee_quotes`,
+    /// keyed by the message hash) and bound to that hash. `Ok(None)`: unknown — an unavailable
+    /// quote, a transport failure or another hash, never 0; `Err`: the evaluation ends with its
+    /// own cause (the deadline or a refused call).
+    fn quote_message(
+        &self,
+        tx: &solana_sdk::transaction::VersionedTransaction,
+        deadline: Instant,
+        fee_quotes: &mut FeeQuotes,
+    ) -> Result<Option<submit::MessageFeeQuote>, (LossReason, Rejection)> {
+        if Instant::now() >= deadline {
+            return Err((
+                LossReason::RpcDeadline,
+                Rejection::RpcDeadlineBeforeFeeQuote,
+            ));
+        }
+        let message_hash = tx.message.hash();
+        let cached = fee_quotes
+            .iter()
+            .find(|(h, _)| *h == message_hash)
+            .map(|(_, q)| q.clone());
+        let fee = match cached {
+            Some(quote) => quote,
+            None => {
+                let fee_started = Instant::now();
+                let quote = self.submitter.fee_for_message(tx, deadline);
+                // [MT0] H6: would a local fee model have matched the RPC fee?
+                // (measurement only, once per RPC quote)
+                if let Ok(q) = &quote {
+                    match local_fee_estimate_lamports(tx) {
+                        Some(local) if local == q.lamports => darkbot_common::mt0::MT0
+                            .add(darkbot_common::mt0::Counter::FeeParityMatch, 1),
+                        Some(_) => darkbot_common::mt0::MT0
+                            .add(darkbot_common::mt0::Counter::FeeParityMismatch, 1),
+                        None => darkbot_common::mt0::MT0
+                            .add(darkbot_common::mt0::Counter::FeeParityUnsupported, 1),
+                    }
+                }
+                record_timing(
+                    &FEE_CALLS,
+                    &FEE_NS_TOTAL,
+                    &FEE_NS_MAX,
+                    fee_started.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+                );
+                fee_quotes.push((message_hash, quote.clone()));
+                quote
+            }
+        };
+        match fee {
+            Err(submit::FeeQuoteError::Deadline) => {
+                Err((LossReason::RpcDeadline, Rejection::RpcDeadlineInFeeQuote))
+            }
+            Err(submit::FeeQuoteError::BudgetRejected(code)) => {
+                Err((LossReason::RpcBudget, Rejection::RpcBudgetFeeQuote(code)))
+            }
+            Err(_) => Ok(None),
+            // V2-14 P1-02: compared with the hash computed above, typed (an unreadable quote
+            // hash is no match); the quote's persisted text form stays (layout).
+            Ok(q) => Ok(Some(q).filter(|q| q.message_hash == message_hash)),
+        }
+    }
+
+    /// DEC-11: the bundle fee model of `plan` — its other transactions from the evaluated
+    /// blockhash and the sum of every transaction's exact message fee (prerequisite TXs, the
+    /// receivership TX `built`, the tip TX; the tip itself is the plan's). Parts that cannot be
+    /// built are kept for the boundary (their typed rejection) with the fee unknown.
+    fn bundle_quote(
+        &self,
+        plan: &ReceivershipPlan,
+        built: &darkbot_solana::tx::BuiltTx,
+        blockhash: solana_sdk::hash::Hash,
+        deadline: Instant,
+        fee_quotes: &mut FeeQuotes,
+    ) -> Result<BundleQuote, (LossReason, Rejection)> {
+        let parts = self.bundle_parts(plan, blockhash);
+        let mut fee_lamports = None;
+        if let Ok(p) = &parts {
+            let mut sum = Some(0u64);
+            let txs = p.prerequisites.iter().map(|b| &b.tx);
+            for tx in txs.chain([&built.tx, &p.tip_tx]) {
+                match self.quote_message(tx, deadline, fee_quotes)? {
+                    Some(q) => sum = sum.and_then(|s| s.checked_add(q.lamports)),
+                    None => {
+                        sum = None;
+                        break;
+                    }
+                }
+            }
+            fee_lamports = sum;
+        }
+        Ok(BundleQuote {
+            parts,
+            fee_lamports,
+        })
+    }
+
+    /// [FIX-4]/DEC-11: a bundle's transactions besides the receivership TX, from `blockhash` —
+    /// every prerequisite TX built and checked against its plan (signed at the boundary) and the
+    /// signed tip TX to the configured tip account, checked against its plan (E2). The tip is
+    /// never in the receivership TX.
+    fn bundle_parts(
+        &self,
+        plan: &ReceivershipPlan,
+        blockhash: solana_sdk::hash::Hash,
+    ) -> Result<BundleParts, (LossReason, Rejection)> {
+        let Some(tip) = self.bundle_tip else {
+            return Err((LossReason::Submission, Rejection::BundleWithoutTip));
+        };
+        let mut prerequisites = Vec::with_capacity(plan.prerequisite_txs.len());
+        for pre in &plan.prerequisite_txs {
+            let pre_plan = TxPlan {
+                version: BuildVersion::V0,
+                payer: tx::payer_of(self.payer),
+                instructions: pre.clone(),
+                lookup_tables: plan.lookup_tables.clone(),
+                resources: self.resources,
+            };
+            let b = tx::build(&pre_plan, blockhash, &self.limits)
+                .map_err(|e| (LossReason::Build, Rejection::PrerequisiteBuild(e)))?;
+            tx::message_matches_plan(&b.tx.message, &pre_plan)
+                .map_err(|code| (LossReason::Build, Rejection::PrerequisiteMessage(code)))?;
+            prerequisites.push(b);
+        }
+        let tip_tx = submit::build_tip_tx(self.payer, &tip.account, plan.tip, blockhash)
+            .map_err(|e| (LossReason::Build, Rejection::TipBuild(e)))?;
+        submit::tip_matches(&tip_tx, &tx::payer_of(self.payer), &tip.account, plan.tip)
+            .map_err(|code| (LossReason::Build, Rejection::TipMismatch(code)))?;
+        Ok(BundleParts {
+            prerequisites,
+            tip_tx,
+        })
     }
 }
 

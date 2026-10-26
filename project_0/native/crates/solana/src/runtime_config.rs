@@ -440,6 +440,10 @@ pub struct RuntimeConfig {
     pub bundle_sim_rpc_url: Option<String>,
     /// DEC-11: the tip account of the bundle's tip transaction (`P0_JITO_TIP_ACCOUNT`, base58).
     pub jito_tip_account: Option<String>,
+    /// DEC-11: the tip a bundle pays (`P0_JITO_TIP_LAMPORTS`, at most `max_tip`). The tip is
+    /// measured, not decided by the code (PHASENPLAN §1.8): no default, unset keeps the bundle
+    /// path OFF.
+    pub jito_tip_lamports: Option<u64>,
 }
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -453,6 +457,7 @@ impl Default for RuntimeConfig {
             jito_block_engine_url: None,
             bundle_sim_rpc_url: None,
             jito_tip_account: None,
+            jito_tip_lamports: None,
             fallback: false,
             adaptive: true,
             duration: "4h".into(),
@@ -763,6 +768,13 @@ impl RuntimeConfig {
             tip.parse::<solana_sdk::pubkey::Pubkey>()
                 .map_err(|_| "jito_tip_account invalid".to_string())?;
         }
+        match self.jito_tip_lamports {
+            Some(0) => return Err("jito_tip_lamports must be at least 1".into()),
+            Some(tip) if tip > self.limits.max_tip => {
+                return Err("jito_tip_lamports exceeds max_tip (P0_MAX_TIP)".into())
+            }
+            _ => {}
+        }
         if !["off", "index", "strict", "crosscheck"].contains(&self.verification.as_str()) {
             return Err("invalid verification mode".into());
         }
@@ -885,6 +897,7 @@ struct ConfigFile {
     jito_block_engine_url: Option<String>,
     bundle_sim_rpc_url: Option<String>,
     jito_tip_account: Option<String>,
+    jito_tip_lamports: Option<u64>,
     fallback: Option<bool>,
     adaptive: Option<bool>,
     duration: Option<String>,
@@ -940,6 +953,9 @@ impl ConfigFile {
                 "jito_block_engine_url" => f.jito_block_engine_url = Some(value),
                 "bundle_sim_rpc_url" => f.bundle_sim_rpc_url = Some(value),
                 "jito_tip_account" => f.jito_tip_account = Some(value),
+                "jito_tip_lamports" => {
+                    f.jito_tip_lamports = Some(number("jito_tip_lamports", &value)?)
+                }
                 "fe_targets" => f.fe_targets = Some(list(&value)),
                 field if Limits::default().get(field).is_some() => {
                     f.limits
@@ -1118,6 +1134,14 @@ impl Resolved {
                 sources.insert(field.into(), "environment".into());
             }
         }
+        if let Some(raw) = env("P0_JITO_TIP_LAMPORTS") {
+            c.jito_tip_lamports = Some(
+                raw.trim()
+                    .parse()
+                    .map_err(|_| "invalid P0_JITO_TIP_LAMPORTS: expected lamports".to_string())?,
+            );
+            sources.insert("jito_tip_lamports".into(), "environment".into());
+        }
         if let Some(url) = env("P0_WS_URL") {
             c.wss_endpoints = vec![url];
             sources.insert("wss_endpoints".into(), "environment".into());
@@ -1186,6 +1210,10 @@ impl Resolved {
                 sources.insert(field.into(), "config_file".into());
             }
         }
+        if let Some(n) = file.jito_tip_lamports {
+            c.jito_tip_lamports = Some(n);
+            sources.insert("jito_tip_lamports".into(), "config_file".into());
+        }
         if let Some(v) = file.wss_endpoints.filter(|v| !v.is_empty()) {
             c.wss_endpoints = v;
             sources.insert("wss_endpoints".into(), "config_file".into());
@@ -1237,6 +1265,10 @@ impl Resolved {
                     }
                     "jito_block_engine_url" | "bundle_sim_rpc_url" | "jito_tip_account" => {
                         *c.bundle_field(&k) = Some(val.clone())
+                    }
+                    "jito_tip_lamports" => {
+                        c.jito_tip_lamports =
+                            Some(val.parse().map_err(|_| "configuration type mismatch")?)
                     }
                     "wss_endpoints" => c.wss_endpoints = list(&val),
                     "fe_targets" => c.fe_targets = list(&val),
@@ -1302,7 +1334,7 @@ impl Resolved {
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--jito-block-engine-url URL --bundle-sim-rpc-url URL --jito-tip-account PUBKEY (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (priority order; declared FREE_ONLY)\n--non-landing-sources OPERATOR=URL[,OPERATOR=URL] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--jito-block-engine-url URL --bundle-sim-rpc-url URL --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1377,6 +1409,13 @@ impl Resolved {
                 src("jito_tip_account")
             ),
             None => "jito-tip-account = unset\n".to_string(),
+        };
+        s += &match self.config.jito_tip_lamports {
+            Some(tip) => format!(
+                "jito-tip-lamports = {tip} [source {}]\n",
+                src("jito_tip_lamports")
+            ),
+            None => "jito-tip-lamports = unset (bundle path OFF)\n".to_string(),
         };
         for (name, value) in [
             ("fallback", e.fallback.to_string()),
@@ -1630,6 +1669,32 @@ mod tests {
             assert!(parse(&bad).is_err(), "{bad:?}");
         }
         assert!(parse(&["--jito-tip-account", &tip]).is_ok());
+        // The tip has no default and stays within the Safety tip limit.
+        assert!(unset
+            .text()
+            .contains("jito-tip-lamports = unset (bundle path OFF)"));
+        assert_eq!(unset.config.jito_tip_lamports, None);
+        for bad in [
+            &["--jito-tip-lamports", "0"][..],
+            &["--jito-tip-lamports", "x"],
+        ] {
+            assert!(parse(bad).is_err(), "{bad:?}");
+        }
+        assert!(
+            parse(&["--jito-tip-lamports", "1"]).is_err(),
+            "above the default max_tip 0"
+        );
+        let r = parse(&["--max-tip", "5000", "--jito-tip-lamports", "5000"]).unwrap();
+        assert_eq!(r.config.jito_tip_lamports, Some(5000));
+        assert!(r.text().contains("jito-tip-lamports = 5000 [source cli]"));
+        let env_tip = |k: &str| match k {
+            "P0_RPC_URL" => Some("https://rpc.invalid/".to_string()),
+            "P0_MAX_TIP" => Some("9000".to_string()),
+            "P0_JITO_TIP_LAMPORTS" => Some("9000".to_string()),
+            _ => None,
+        };
+        let r = Resolved::parse(&[], &env_tip).unwrap();
+        assert_eq!(r.sources["jito_tip_lamports"], "environment");
     }
     /// DEC-04 (B-8): N has no default (undecided keeps B in OBSERVE), comes from environment,
     /// file or CLI, is at least 1 and is printed with its source.

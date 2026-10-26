@@ -54,7 +54,8 @@ pub struct Candidate<'a> {
     pub txs: Vec<VersionedTransaction>,
     pub path: SubmissionPath,
     pub payer: Pubkey,
-    /// The exact message's network fee (fee quote); `None` is unknown.
+    /// The network fee of the payload: the exact message's quote, a bundle's the sum of every
+    /// transaction's quote (DEC-11); `None` is unknown.
     pub fee_lamports: Option<u64>,
     pub net_usd_micro: i128,
     /// Worst-case loss of the attempt (USD micro); `None` is unknown.
@@ -91,9 +92,9 @@ impl Fe04Admission {
     pub fn admit(&mut self, c: Candidate<'_>, adapter: &dyn SubmissionAdapter) -> Admission {
         let refuse = |s: &str| Admission::Refused(s.into());
         let a = &self.approval;
-        if !c.plan.prerequisite_txs.is_empty() {
-            return refuse("FE04_BUNDLE_FEES_UNQUOTED");
-        }
+        // DEC-11: a bundle is admitted like a single TX — its summed fee, the tip and every
+        // transaction's signature are bound into the intent and its SOL/inventory holds; it is
+        // reserved only with a bundle simulation of exactly these bytes (`bundle_simulated`).
         if c.plan.input.funding.as_str() != a.funding_class {
             return refuse("FE04_FUNDING_CLASS_MISMATCH");
         }

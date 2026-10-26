@@ -115,14 +115,10 @@ impl SignedPayload {
         deadline: std::time::Instant,
         binding: SimulationBinding,
     ) -> Result<(SimResult, Option<SimulatedPayload<'_>>), String> {
+        // DEC-11: a bundle needs an adapter with a bundle path (the owner's submitter keeps its
+        // single TXs on RPC), a single TX the adapter's own path.
         let compatible = match self.path {
-            SubmissionPath::JitoBundle => {
-                adapter.supports_bundle()
-                    && matches!(
-                        adapter.path(),
-                        SubmissionPath::JitoSingle | SubmissionPath::JitoBundle
-                    )
-            }
+            SubmissionPath::JitoBundle => adapter.supports_bundle(),
             path => adapter.path() == path,
         };
         if !compatible {
