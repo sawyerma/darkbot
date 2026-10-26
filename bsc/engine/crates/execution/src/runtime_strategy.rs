@@ -1087,6 +1087,29 @@ mod tests {
         std::fs::remove_dir_all(&base).unwrap();
     }
 
+    /// The runtime reads only gas evidence the economics snapshot binds:
+    /// the configured files load; any other file or none is refused.
+    #[test]
+    fn only_frozen_gas_evidence_is_read() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let with = |files: &[&str]| crate::runtime::StrategyConfig {
+            engine: config(),
+            gas_evidence: files.iter().map(|f| f.to_string()).collect(),
+        };
+        let text = std::fs::read_to_string(root.join("bsc/config/ingress.public.env")).unwrap();
+        let configured = crate::runtime::RuntimeConfig::parse(&text)
+            .unwrap()
+            .strategy;
+        assert!(configured.gas(&root).is_ok());
+        for bad in [
+            &["bsc/config/ingress.public.env"][..],
+            &["bsc/engine/crates/trading/fixtures/bsc/../bsc/flap_gas_20261026.txt"][..],
+            &[][..],
+        ] {
+            assert!(with(bad).gas(&root).is_err(), "{bad:?}");
+        }
+    }
+
     #[test]
     fn the_creator_policy_is_exact() {
         assert_eq!(

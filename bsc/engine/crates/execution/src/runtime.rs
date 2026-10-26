@@ -76,13 +76,24 @@ pub struct StrategyConfig {
 }
 
 impl StrategyConfig {
-    /// The gas evidence of the configured files under `repo_root`.
+    /// The gas evidence of the configured files under `repo_root`; each
+    /// must be a file the economics snapshot binds (frozen evidence, never
+    /// another file), and at least one is named.
     pub fn gas(
         &self,
         repo_root: &Path,
     ) -> Result<darkbot_bsc_trading::economics::network::GasEvidence, String> {
+        use darkbot_bsc_trading::economics::snapshot::BOUND_FILES;
+        if self.gas_evidence.is_empty() {
+            return Err("BSC_STRATEGY_C_GAS_EVIDENCE names no file".into());
+        }
         let mut text = String::new();
         for p in &self.gas_evidence {
+            if !BOUND_FILES.contains(&p.as_str()) {
+                return Err(format!(
+                    "{p}: not a file the economics snapshot binds (BSC_STRATEGY_C_GAS_EVIDENCE)"
+                ));
+            }
             let path = repo_root.join(p);
             text.push_str(
                 &std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
