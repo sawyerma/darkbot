@@ -17,6 +17,7 @@ pub mod chain_state;
 pub mod economics;
 pub mod intent;
 pub mod signer;
+pub mod strategy;
 pub mod submission_policy;
 pub mod transactions;
 pub mod venues;
