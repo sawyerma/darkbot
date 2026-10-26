@@ -116,6 +116,24 @@ export interface LiquidatorView {
   /** CTRL-03: the source configuration version decided up to — the CAS a source change states;
    * null without source control. */
   sourceConfigVersion: bigint | null;
+  /** DEC-10: the configured FE-04 approval, secret-free (never a LIVE authorization). */
+  approval: ApprovalView | null;
+}
+
+/** DEC-10: status of the FE-04 approval file the runtime is configured with. */
+export interface ApprovalView {
+  /** NONE | VALID | EXPIRED | CONSUMED | BLOCKED | INVALID | BINDING_MISMATCH. */
+  state: string;
+  reason: string;
+  kind: string;
+  approvalId: string;
+  fundingClass: string;
+  expiresUnixS: bigint;
+  maxCapitalUsdMicro: bigint;
+  maxLossUsdMicro: bigint;
+  minNetUsdMicro: bigint;
+  maxSlippageBps: bigint;
+  allowedTargets: bigint;
 }
 
 export interface WalletsView {

@@ -1013,7 +1013,7 @@ mod tests {
             phase_journal: "capture/measurement_phases.jsonl".into(),
             compatibility: "c".into(),
         };
-        for revision in [4u16, 7, 10] {
+        for revision in [4u16, 7, 10, 11] {
             let schema = revision + 1;
             let old = encode_with_limits_revision(&manifest, &effective, revision);
             let read: RunManifest = decode(kind::RUN_MANIFEST, schema, &old).unwrap();

@@ -127,6 +127,15 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
       ? { seq: m.lastSourceDecision.seq, request: m.lastSourceDecision.request, applied: m.lastSourceDecision.applied, detail: m.lastSourceDecision.detail }
       : null,
     sourceConfigVersion: m.sourceConfigVersion ?? null,
+    approval: m.approval
+      ? {
+          state: m.approval.state, reason: m.approval.reason, kind: m.approval.kind, approvalId: m.approval.approvalId,
+          fundingClass: m.approval.fundingClass, expiresUnixS: m.approval.expiresUnixS,
+          maxCapitalUsdMicro: m.approval.maxCapitalUsdMicro, maxLossUsdMicro: m.approval.maxLossUsdMicro,
+          minNetUsdMicro: m.approval.minNetUsdMicro, maxSlippageBps: m.approval.maxSlippageBps,
+          allowedTargets: m.approval.allowedTargets,
+        }
+      : null,
     sourceStats: m.sourceStats
       ? { observed: m.sourceStats.observed, rejected: m.sourceStats.rejected, applied: m.sourceStats.applied, refused: m.sourceStats.refused }
       : null,

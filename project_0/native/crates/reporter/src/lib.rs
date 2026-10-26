@@ -16,11 +16,11 @@ use proto::control::{
 };
 use proto::project0::{
     AssetAmount, Capability, CapturePhase as WirePhase, CaptureState, Counter, DataSource,
-    EffectiveRecord, FinanceSummary, LiquidatorState, LossCount, MarketAssessment, MarketCounters,
-    OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety,
-    OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget, ReasonCount, RebalanceBlocked,
-    RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision, SourceStats,
-    StateCounters, SystemStatus, TransportStatus, WalletsState, WriterLane,
+    EffectiveRecord, Fe04Approval, FinanceSummary, LiquidatorState, LossCount, MarketAssessment,
+    MarketCounters, OperationalConfig, OperationalParameter, OwnerEngine, OwnerPipeline, OwnerRun,
+    OwnerSafety, OwnerTrigger, PhaseStatus, ProgramPin, ProviderBudget, ReasonCount,
+    RebalanceBlocked, RebalancePlan, RebalanceTrade, ReceiverTotal, RunInfo, SourceDecision,
+    SourceStats, StateCounters, SystemStatus, TransportStatus, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -306,6 +306,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             refused: o.source_stats.refused,
         }),
         source_config_version: o.source_config_version,
+        approval: Some(fe04_approval(&o.approval)),
     }
 }
 
@@ -341,6 +342,25 @@ pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
         holds: amounts(&w.holds),
         policy_reserves: amounts(&w.policy_reserves),
         held_attempt: w.held_attempt.into(),
+    }
+}
+
+/// DEC-10: the secret-free approval status.
+fn fe04_approval(
+    a: &darkbot_runner::execution::one_shot::approval_file::ApprovalStatus,
+) -> Fe04Approval {
+    Fe04Approval {
+        state: a.state.into(),
+        reason: a.reason.clone(),
+        kind: a.kind.into(),
+        approval_id: a.approval_id.clone(),
+        funding_class: a.funding_class.clone(),
+        expires_unix_s: a.expires_unix_s,
+        max_capital_usd_micro: a.max_capital_usd_micro,
+        max_loss_usd_micro: a.max_loss_usd_micro,
+        min_net_usd_micro: a.min_net_usd_micro,
+        max_slippage_bps: a.max_slippage_bps,
+        allowed_targets: a.allowed_targets,
     }
 }
 
@@ -1428,6 +1448,19 @@ mod contract_tests {
                 refused: 1,
             },
             source_config_version: Some(3),
+            approval: darkbot_runner::execution::one_shot::approval_file::ApprovalStatus {
+                state: "BINDING_MISMATCH",
+                reason: "code_sha".into(),
+                kind: "attempt",
+                approval_id: "pilot-1".into(),
+                funding_class: "ZERO_PREFUND_SAME_TX".into(),
+                expires_unix_s: 4_000_000_000,
+                max_capital_usd_micro: 10_000_000,
+                max_loss_usd_micro: 1_000_000,
+                min_net_usd_micro: 100,
+                max_slippage_bps: 50,
+                allowed_targets: 1,
+            },
         }
     }
 

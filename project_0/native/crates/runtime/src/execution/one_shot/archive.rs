@@ -18,7 +18,7 @@ fn wallet_archive(directory: &Path, wallet: &str) -> PathBuf {
 }
 
 /// An approval id names its archived journal: `[A-Za-z0-9_-]{1,64}`.
-fn approval_id_valid(id: &str) -> bool {
+pub(super) fn approval_id_valid(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id

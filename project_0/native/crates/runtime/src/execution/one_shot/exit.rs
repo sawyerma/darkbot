@@ -246,7 +246,7 @@ impl ExitApproval {
     }
 }
 
-fn well_formed(a: &ExitApproval) -> bool {
+pub(super) fn well_formed(a: &ExitApproval) -> bool {
     !(a.schema != 1
         || !a.authorized
         || a.approval_id.is_empty()

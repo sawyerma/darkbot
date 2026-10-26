@@ -45,14 +45,16 @@
 //! the runtime refuses an unmigrated one (F8). All are offline: no network, no signer, no LIVE.
 //!
 //! `approval show` (FE-04) reads one versioned one-shot approval profile — an attempt
-//! (`Approval`) or an exit (`ExitApproval`), strict JSON authored by the operator — checks it
+//! (`Approval`) or an exit (`ExitApproval`), the native `key = value` text authored by the
+//! operator (DEC-10: `approval_file`; a JSON approval is refused, the `historical` build shows it
+//! as never authorizing) — checks it
 //! alone (schema, authorization, ids, keys, bounds, expiry) and prints what it binds: wallet,
 //! program/deployment or mint/route, every maximum and the file's SHA-256, and whether its
 //! `code_sha` is this project's clean HEAD and its `binary_sha256` these binaries. It exits 0
-//! only when the profile is valid and both bindings MATCH. With `--journal-dir` an attempt
-//! approval is shown against the wallet's FE-04 history: whether the approval is already spent
-//! (archived), an unfinished active attempt, the cumulative realized net and the verdict — and it
-//! exits 0 only if a new attempt could start. It changes nothing, reads no network and does not
+//! only when the status is VALID: valid, within the lifetime bound, both bindings MATCH and single
+//! use checked with `--journal-dir` (the wallet's FE-04 history: an attempt approval unused and no
+//! other attempt active, an exit approval unused with the open position of its attempt; the
+//! history, cumulative realized net and verdict are shown). It changes nothing, reads no network and does not
 //! enable LIVE (FE-06 stays a separate explicit approval).
 //!
 //! `source set` (S1-02) records a typed source-control request and rings the running runtime;
@@ -1048,9 +1050,6 @@ fn profiles_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     Ok(true)
 }
 
-/// An approval profile is a small operator file; anything larger is not one.
-const APPROVAL_MAX_BYTES: u64 = 64 * 1024;
-
 /// FE-04 `fe04 accounting|archive`: see the module documentation.
 fn fe04_cmd(args: &[String]) -> Result<bool, String> {
     const USAGE: &str =
@@ -1101,9 +1100,14 @@ fn fe04_cmd(args: &[String]) -> Result<bool, String> {
     }
 }
 
-/// FE-04 `approval show FILE`: see the module documentation.
+/// FE-04 `approval show FILE`: see the module documentation. DEC-10: the one status evaluation
+/// of the runtime (`approval_file::status`); this tool checks code, binary, expiry, lifetime and
+/// single use (with `--journal-dir`) — the runtime also binds wallet, program, the observed
+/// ProgramData and the Safety ceilings.
 fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
-    use darkbot_runner::execution::one_shot::{exit::ExitApproval, Approval};
+    use darkbot_runner::execution::one_shot::approval_file::{
+        self, ApprovalBinding, ApprovalFile, Bind, Usage,
+    };
     const USAGE: &str = "usage: p0ctl approval show FILE [--journal-dir DIR]";
     let (show, file, journal_dir) = match args {
         [show, file] => (show, file, None),
@@ -1113,27 +1117,32 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     if show != "show" {
         return Err(USAGE.into());
     }
-    let path = Path::new(file);
-    if std::fs::metadata(path)
-        .map_err(|_| "APPROVAL_UNREADABLE")?
-        .len()
-        > APPROVAL_MAX_BYTES
-    {
-        return Err("APPROVAL_UNREADABLE: larger than 64 KiB".into());
-    }
-    let bytes = std::fs::read(path).map_err(|_| "APPROVAL_UNREADABLE")?;
+    let bytes = approval_file::read_bytes(Path::new(file))?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| "WALL_CLOCK_UNAVAILABLE")?
         .as_secs();
-    let attempt = serde_json::from_slice::<Approval>(&bytes);
-    let exit = serde_json::from_slice::<ExitApproval>(&bytes);
+    // DEC-10: the native text; a historical JSON approval is shown only by the historical build
+    // and never authorizes (it is never adopted into a native approval).
+    let historical = approval_file::is_json(&bytes);
+    #[cfg(feature = "historical")]
+    let parsed = if historical {
+        approval_file::read_historical_json(&bytes)?
+    } else {
+        approval_file::parse(&bytes)?
+    };
+    #[cfg(not(feature = "historical"))]
+    let parsed = approval_file::parse(&bytes)?;
     let mut lines: Vec<(String, String)> = Vec::new();
     let mut put = |k: &str, v: String| lines.push((k.to_string(), v));
-    // FE-04: without `--journal-dir` the history is not checked (and not claimed).
-    let mut history_ok = true;
-    let (check, code_sha, binary_sha) = match (attempt, exit) {
-        (Ok(a), Err(_)) => {
+    if historical {
+        put(
+            "format",
+            "HISTORICAL_JSON (never authorizes, DEC-10)".into(),
+        );
+    }
+    let (wallet, code_sha, binary_sha) = match &parsed {
+        ApprovalFile::Attempt(a) => {
             put("approval", "attempt".into());
             put("approval_id", a.approval_id.clone());
             put("wallet", a.wallet.clone());
@@ -1160,12 +1169,13 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             put("max_slippage_bps", a.max_slippage_bps.to_string());
             put("max_state_age_ms", a.max_state_age_ms.to_string());
             put("expires_unix_s", a.expires_unix_s.to_string());
-            if let Some(dir) = journal_dir {
-                history_ok = attempt_history(dir, &a, &mut put);
-            }
-            (a.check(now), a.code_sha, a.binary_sha256)
+            (
+                a.wallet.clone(),
+                a.code_sha.clone(),
+                a.binary_sha256.clone(),
+            )
         }
-        (Err(_), Ok(e)) => {
+        ApprovalFile::Exit(e) => {
             put("approval", "exit".into());
             put("approval_id", e.approval_id.clone());
             put("attempt_approval_id", e.attempt_approval_id.clone());
@@ -1177,12 +1187,27 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             put("max_slippage_bps", e.max_slippage_bps.to_string());
             put("max_state_age_ms", e.max_state_age_ms.to_string());
             put("expires_unix_s", e.expires_unix_s.to_string());
-            (e.check(now), e.code_sha, e.binary_sha256)
-        }
-        _ => {
-            return Err(
-                "APPROVAL_UNREADABLE: neither an attempt nor an exit approval (schema 1)".into(),
+            (
+                e.wallet.clone(),
+                e.code_sha.clone(),
+                e.binary_sha256.clone(),
             )
+        }
+    };
+    // FE-04/DEC-10: single use is checked only against the wallet's journals.
+    let usage = match journal_dir {
+        None => Usage::Unchecked("SINGLE_USE_NOT_CHECKED: --journal-dir DIR".into()),
+        Some(dir) => {
+            if let ApprovalFile::Attempt(a) = &parsed {
+                attempt_history(dir, a, &mut put);
+            }
+            match darkbot_runner::execution::accounting::Ledger::load(dir, &wallet) {
+                Ok(ledger) => approval_file::usage(&parsed, &ledger),
+                Err(e) => {
+                    put("history", format!("UNREADABLE ({e})"));
+                    Usage::Refused("INVALID", "FE04_JOURNAL_UNREADABLE".into())
+                }
+            }
         }
     };
     let head = boot_audit::clean_source_head(project);
@@ -1208,40 +1233,72 @@ fn approval_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             .map(|b| format!("{b:02x}"))
             .collect(),
     );
+    let lifetime =
+        darkbot_solana::runtime_config::Resolved::parse(&[], &|k| std::env::var(k).ok())?
+            .config
+            .limits
+            .fe04_approval_max_lifetime_seconds;
+    let status = approval_file::status(
+        Some(&Ok(parsed)),
+        &ApprovalBinding {
+            wallet: Bind::NotChecked,
+            program: Bind::NotChecked,
+            program_data_hash: Bind::NotChecked,
+            code_sha: Bind::of(head),
+            binary_sha256: Bind::of(binary),
+            ceilings: None,
+            max_lifetime_seconds: lifetime,
+        },
+        now,
+        &usage,
+    );
+    let valid = status.state == "VALID" && !historical;
+    put(
+        "status",
+        if status.reason.is_empty() {
+            status.state.to_string()
+        } else {
+            format!("{} ({})", status.state, status.reason)
+        },
+    );
     put(
         "valid",
-        match &check {
-            Ok(()) => "yes".into(),
-            Err(code) => format!("no ({code})"),
+        if valid {
+            "yes".into()
+        } else if historical {
+            "no (HISTORICAL_JSON_NEVER_AUTHORIZES)".into()
+        } else {
+            format!(
+                "no ({})",
+                if status.reason.is_empty() {
+                    status.state
+                } else {
+                    &status.reason
+                }
+            )
         },
     );
     put("live", "LOCKED (FE-06: separate explicit approval)".into());
     for (k, v) in &lines {
         println!("{k}: {v}");
     }
-    Ok(check.is_ok()
-        && history_ok
-        && head.as_deref() == Some(&code_sha)
-        && binary.as_deref() == Some(&binary_sha))
+    Ok(valid)
 }
 
-/// FE-04: an attempt approval against the wallet's journal history; `true` only if a new attempt
-/// could start (approval not spent, no unfinished active attempt, history readable).
+/// FE-04: an attempt approval against the wallet's journal history (display only; the single-use
+/// decision is `approval_file::usage` on the same ledger): whether its attempt was archived, the
+/// unfinished active attempt, the cumulative realized net and the verdict.
 fn attempt_history(
     dir: &Path,
     a: &darkbot_runner::execution::one_shot::Approval,
     put: &mut dyn FnMut(&str, String),
-) -> bool {
+) {
     use darkbot_runner::execution::accounting::{Ledger, Verdict};
-    let consumed =
+    let archived =
         darkbot_runner::execution::one_shot::archive::is_consumed(dir, &a.wallet, &a.approval_id);
-    put("approval_consumed", consumed.to_string());
-    let ledger = match Ledger::load(dir, &a.wallet) {
-        Ok(l) => l,
-        Err(e) => {
-            put("history", format!("UNREADABLE ({e})"));
-            return false;
-        }
+    put("approval_archived", archived.to_string());
+    let Ok(ledger) = Ledger::load(dir, &a.wallet) else {
+        return;
     };
     let active = ledger.attempts.iter().find(|r| !r.archived);
     put(
@@ -1267,7 +1324,6 @@ fn attempt_history(
             v => v.name().into(),
         },
     );
-    !consumed && active.is_none()
 }
 
 fn main() -> ExitCode {

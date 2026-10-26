@@ -18,6 +18,11 @@ impl ShadowOwner {
                 #[cfg(feature = "crate_health")]
                 if crate::status_tap::installed().is_some() {
                     self.ledger_view = Some(status_view::LedgerView::load(dir, &wallet));
+                    // DEC-10: the approval may be replaced or spent between refreshes; its
+                    // status is published only through the tap.
+                    if let Some(source) = self.fe04_approval.as_mut() {
+                        source.refresh(Some(dir), &wallet);
+                    }
                 }
                 self.fe04_refreshed = std::time::Instant::now();
             }

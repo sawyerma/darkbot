@@ -285,6 +285,11 @@ test("owner and analytics topics reach their tabs; job and source commands take 
   await expect(page.getByText("Program pin · BLOCKED", { exact: true })).toBeVisible();
   await expect(page.getByText(/NOT_REFERENCE · upgrade latched .* qualified mrgn-0\.1\.11-rc1/)).toBeVisible();
   await expect(page.getByText(/^runner idle · \d+ running · \d+ queued/)).toBeVisible();
+  // DEC-10: the Liquidator tab shows the FE-04 approval status the engine projected (no secrets).
+  await tab(page, "Liquidator");
+  await expect(page.locator(".p0-line", { hasText: "FE-04 approval" }))
+    .toContainText("BINDING_MISMATCH (code_sha) · attempt pilot-1 · ZERO_PREFUND_SAME_TX");
+  await expect(page.locator(".p0-line", { hasText: "FE-04 approval" })).toContainText("LIVE not authorized (FE-06)");
   // Analytics (B03/U-9): a backtest is one typed command to the native job controller.
   await tab(page, "Analytics");
   await page.getByRole("tablist", { name: "Analysis mode" }).getByRole("tab", { name: "Backtest", exact: true }).click();

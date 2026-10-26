@@ -42,6 +42,9 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.sources.map((s) => [s.unit, s.mode, s.canonical])).toEqual([["geyser:publicnode", "observe", false], ["wss", "active", true]]);
     expect(liquidator.lastSourceDecision).toEqual({ seq: 3n, request: "geyser:publicnode active", applied: false, detail: "SOURCE_ACTIVE_REQUIRES_QUALIFICATION" });
     expect(liquidator.sourceConfigVersion).toBe(3n);
+    // DEC-10: the approval status as the engine projected it (golden: bound to another commit).
+    expect(liquidator.approval).toMatchObject({ state: "BINDING_MISMATCH", reason: "code_sha", kind: "attempt",
+      approvalId: "pilot-1", maxCapitalUsdMicro: 10_000_000n, allowedTargets: 1n });
   });
 
   it("keeps unknown finance unknown and one snapshot id across the wallet topics", () => {

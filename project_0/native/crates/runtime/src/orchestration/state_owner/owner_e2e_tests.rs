@@ -114,6 +114,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         fe04_journal: None,
         fe04_refreshed: std::time::Instant::now(),
         fe04_held: None,
+        fe04_approval: None,
         fe04_settle_due: None,
         fe04_unbooked: None,
         inventory_targets: Default::default(),
@@ -3664,4 +3665,95 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
     f.owner.rebalance_observe();
     assert!(jobs.try_pop().is_none());
     cleanup(f);
+}
+
+/// DEC-10 (N-5): the Liquidator projection carries the status of the configured FE-04 approval
+/// (native text, bound to this owner's wallet, program, ProgramData and ceilings): none, refused
+/// without an FE-04 journal, valid, spent once an attempt used it, JSON refused — never a LIVE
+/// authorization.
+#[test]
+fn dec10_projection_shows_the_configured_approval_status() {
+    use crate::execution::one_shot::approval_file::{
+        ApprovalBinding, Bind, Ceilings, Usage, ATTEMPT_SCHEMA,
+    };
+    let mut f = fixture("dec10");
+    assert_eq!(f.owner.owner_snapshot(1).approval.state, "NONE");
+    let wallet = f.owner.liquidator.to_string();
+    let file = f.dir.join("approval.conf");
+    let hash = solana_sdk::hash::Hash::new_unique().to_string();
+    let expires = darkbot_common::timing::wall_now().unwrap().as_secs() + 3_600;
+    std::fs::write(
+        &file,
+        format!(
+            "schema = {ATTEMPT_SCHEMA}\nauthorized = true\napproval_id = pilot-1\ncode_sha = {}\nbinary_sha256 = {}\nwallet = {wallet}\nprogram = {}\nprogram_data_hash = {hash}\nfunding_class = NO_SWAP_INVENTORY\nallowed_targets = {}\nexpires_unix_s = {expires}\nmax_state_age_ms = 500\nmax_capital_usd_micro = 10000000\nmax_total_sol_debit_lamports = 50000\nmax_tip_lamports = 0\nmax_rent_lamports = 3000000\nmax_loss_usd_micro = 1000000\nmin_net_usd_micro = 100\nmax_slippage_bps = 50\n",
+            "a".repeat(40),
+            "b".repeat(64),
+            f.owner.program,
+            solana_sdk::pubkey::Pubkey::new_unique()
+        ),
+    )
+    .unwrap();
+    let journal = f.dir.join("fe04");
+    std::fs::create_dir_all(&journal).unwrap();
+    let mut source = ApprovalSource {
+        path: file.clone(),
+        binding: ApprovalBinding {
+            wallet: Bind::Known(wallet.clone()),
+            program: Bind::Known(f.owner.program.to_string()),
+            program_data_hash: Bind::Known(hash),
+            code_sha: Bind::Known("a".repeat(40)),
+            binary_sha256: Bind::Known("b".repeat(64)),
+            ceilings: Some(Ceilings {
+                max_state_age_ms: 2_000,
+                max_slippage_bps: 50,
+                max_tip_lamports: 0,
+                max_capital_usd_micro: 10_000_000,
+                max_loss_usd_micro: 1_000_000,
+            }),
+            max_lifetime_seconds: 86_400,
+        },
+        read: Err("APPROVAL_NOT_READ".into()),
+        usage: Usage::Unchecked("APPROVAL_NOT_READ".into()),
+    };
+    // Without an FE-04 journal the single use cannot be checked: never VALID.
+    source.refresh(None, &wallet);
+    f.owner.fe04_approval = Some(source);
+    let s = f.owner.owner_snapshot(1).approval;
+    assert_eq!(
+        (s.state, s.reason.as_str()),
+        ("INVALID", "FE04_JOURNAL_NOT_CONFIGURED")
+    );
+    let refresh = |f: &mut Fixture| {
+        f.owner
+            .fe04_approval
+            .as_mut()
+            .unwrap()
+            .refresh(Some(&journal), &wallet)
+    };
+    refresh(&mut f);
+    let s = f.owner.owner_snapshot(1).approval;
+    assert_eq!(
+        (s.state, s.kind, s.approval_id.as_str()),
+        ("VALID", "attempt", "pilot-1"),
+        "{s:?}"
+    );
+    // An unreadable archive never proves the approval unspent.
+    let spent = journal.join("attempts").join(&wallet);
+    std::fs::create_dir_all(&spent).unwrap();
+    std::fs::write(spent.join("pilot-1.p0j"), b"not a journal").unwrap();
+    refresh(&mut f);
+    let s = f.owner.owner_snapshot(1).approval;
+    assert_eq!(
+        (s.state, s.reason.as_str()),
+        ("INVALID", "FE04_JOURNAL_UNREADABLE")
+    );
+    std::fs::remove_dir_all(journal.join("attempts")).unwrap();
+    // A JSON approval file is refused, never adopted.
+    std::fs::write(&file, b"{\"schema\":1}").unwrap();
+    refresh(&mut f);
+    let s = f.owner.owner_snapshot(1).approval;
+    assert!(
+        s.state == "INVALID" && s.reason.starts_with("APPROVAL_JSON_REFUSED"),
+        "{s:?}"
+    );
 }

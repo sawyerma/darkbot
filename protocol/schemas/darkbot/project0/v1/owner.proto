@@ -29,6 +29,8 @@ message LiquidatorState {
   // CTRL-03: the source configuration version the owner has decided up to — the
   // ExpectedVersion.config_version a source change states; unset without source control.
   optional uint64 source_config_version = 11;
+  // DEC-10: the configured FE-04 approval, secret-free; it never authorizes LIVE (FE-06).
+  Fe04Approval approval = 12;
 }
 
 // One controlled data source (the owner's arbiter: at most one canonical unit).
@@ -337,6 +339,34 @@ message WalletsState {
   repeated AssetAmount policy_reserves = 13;
   // State of the attempt held by this run: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED.
   string held_attempt = 14;
+}
+
+// DEC-10: secret-free status of the FE-04 approval file (native key = value) the runtime is
+// configured with, bound to its wallet, program, observed ProgramData, clean HEAD, binaries and
+// Safety ceilings, single use checked against its FE-04 journals.
+message Fe04Approval {
+  // NONE | VALID | EXPIRED | CONSUMED | BLOCKED | INVALID | BINDING_MISMATCH.
+  string state = 1;
+  // Refusal code or the mismatching bindings; empty when VALID or NONE.
+  string reason = 2;
+  // attempt | exit; empty without an approval.
+  string kind = 3;
+  // Approval id (spent once).
+  string approval_id = 4;
+  // Funding class of an attempt approval.
+  string funding_class = 5;
+  // Expiry, Unix seconds.
+  uint64 expires_unix_s = 6;
+  // Attempt approval: capital bound, USD-micro.
+  uint64 max_capital_usd_micro = 7;
+  // Attempt approval: loss bound, USD-micro.
+  uint64 max_loss_usd_micro = 8;
+  // Attempt approval: minimum conservative net, USD-micro.
+  uint64 min_net_usd_micro = 9;
+  // Slippage bound (both kinds).
+  uint64 max_slippage_bps = 10;
+  // Number of allowed targets of an attempt approval.
+  uint64 allowed_targets = 11;
 }
 
 // One amount of one asset.

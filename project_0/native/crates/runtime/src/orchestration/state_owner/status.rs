@@ -59,6 +59,7 @@ impl ShadowOwner {
             safety: self.safety_status(),
             capabilities: self.capabilities(),
             wallets: self.wallets_status(),
+            approval: self.approval_status(),
             finance: self.finance_status(),
             rebalance: self.rebalance.projection(self.st.highest_slot()),
             sources: self.sources_status(),
@@ -291,6 +292,22 @@ impl ShadowOwner {
                 .and_then(|j| j.step_state())
                 .map_or("NONE", |s| s.name()),
         }
+    }
+
+    /// DEC-10: the configured approval at this instant (expiry moves with the clock); without an
+    /// FE-04 journal its single use is unchecked: never VALID then.
+    fn approval_status(&self) -> crate::execution::one_shot::approval_file::ApprovalStatus {
+        use crate::execution::one_shot::approval_file::{self, Usage};
+        let Some(source) = &self.fe04_approval else {
+            return approval_file::status(None, &Default::default(), 0, &Usage::Free);
+        };
+        let now_unix_s = (self.clock.unix_ns(self.clock.now_ns()) / 1_000_000_000) as u64;
+        approval_file::status(
+            Some(&source.read),
+            &source.binding,
+            now_unix_s,
+            &source.usage,
+        )
     }
 
     /// The id both wallet topics carry for one publication.

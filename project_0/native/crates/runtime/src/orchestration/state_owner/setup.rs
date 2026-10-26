@@ -977,6 +977,13 @@ pub(super) fn prepare(
         optional_set,
         prereq_allowed,
         reservations,
+        fe04_approval: approval_source(
+            &liquidator,
+            &program,
+            &program_data_baseline_hash.to_string(),
+            &operational,
+            fe04_journal.as_deref(),
+        ),
         fe04_journal,
         fe04_refreshed: std::time::Instant::now(),
         fe04_held,
@@ -1460,4 +1467,44 @@ mod blockhash_tests {
             .expect("refresh loop ignored shutdown after the refresh in flight");
         assert_eq!(calls.load(SeqCst), 1);
     }
+}
+
+/// DEC-10: the FE-04 approval configured with `P0_FE04_APPROVAL` (native `key = value` file),
+/// read once now and at every FE-04 refresh; `None` without one. It binds this wallet, program,
+/// the observed ProgramData, the clean HEAD, these binaries and the operational Safety ceilings.
+fn approval_source(
+    liquidator: &Pubkey,
+    program: &Pubkey,
+    program_data_hash: &str,
+    operational: &darkbot_solana::runtime_config::Limits,
+    journal: Option<&std::path::Path>,
+) -> Option<ApprovalSource> {
+    use crate::execution::one_shot::approval_file::{ApprovalBinding, Bind, Ceilings, Usage};
+    use crate::orchestration::boot_audit;
+    let path = config::require("P0_FE04_APPROVAL").ok()?;
+    let project = std::env::var("P0_PROJECT_DIR").ok();
+    let mut source = ApprovalSource {
+        path: path.into(),
+        binding: ApprovalBinding {
+            wallet: Bind::Known(liquidator.to_string()),
+            program: Bind::Known(program.to_string()),
+            program_data_hash: Bind::Known(program_data_hash.to_string()),
+            code_sha: Bind::of(
+                project.and_then(|p| boot_audit::clean_source_head(std::path::Path::new(&p))),
+            ),
+            binary_sha256: Bind::of(boot_audit::runtime_binary_identity().ok()),
+            ceilings: Some(Ceilings {
+                max_state_age_ms: operational.max_opportunity_age_ns / 1_000_000,
+                max_slippage_bps: operational.max_slippage_bps,
+                max_tip_lamports: operational.max_tip,
+                max_capital_usd_micro: operational.max_total_capital,
+                max_loss_usd_micro: operational.max_daily_loss,
+            }),
+            max_lifetime_seconds: operational.fe04_approval_max_lifetime_seconds,
+        },
+        read: Err("APPROVAL_NOT_READ".into()),
+        usage: Usage::Unchecked("APPROVAL_NOT_READ".into()),
+    };
+    source.refresh(journal, &liquidator.to_string());
+    Some(source)
 }

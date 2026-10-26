@@ -7,6 +7,7 @@ text; `fe04 archive` refuses without a finished attempt and never creates a jour
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -43,22 +44,23 @@ class Fe04Cli(unittest.TestCase):
             self.assertEqual(list(Path(d).iterdir()), [])
 
     def test_approval_show_reports_the_wallet_history_and_a_spent_approval(self):
-        import json
+        # DEC-10: the native key = value approval text.
         approval = {
-            'schema': 1, 'authorized': True, 'approval_id': 'pilot-1', 'code_sha': 'a' * 40,
-            'binary_sha256': 'b' * 64, 'wallet': WALLET, 'program': WALLET,
-            'program_data_hash': 'c' * 64, 'funding_class': 'NO_SWAP_INVENTORY',
-            'allowed_targets': [WALLET], 'expires_unix_s': 4_000_000_000,
+            'schema': 'Project0/FE04Approval/1', 'authorized': 'true', 'approval_id': 'pilot-1',
+            'code_sha': 'a' * 40, 'binary_sha256': 'b' * 64, 'wallet': WALLET, 'program': WALLET,
+            'program_data_hash': '1' * 32, 'funding_class': 'NO_SWAP_INVENTORY',
+            'allowed_targets': WALLET, 'expires_unix_s': int(time.time()) + 3600,
             'max_state_age_ms': 500, 'max_capital_usd_micro': 1, 'max_total_sol_debit_lamports': 1,
             'max_tip_lamports': 0, 'max_rent_lamports': 0, 'max_loss_usd_micro': 1,
             'min_net_usd_micro': 1, 'max_slippage_bps': 1,
         }
         with tempfile.TemporaryDirectory() as d:
-            f = Path(d) / 'approval.json'
-            f.write_text(json.dumps(approval))
+            f = Path(d) / 'approval.conf'
+            f.write_text(''.join(f'{k} = {v}\n' for k, v in approval.items()))
             journals = Path(d) / 'fe04'
             p = run('approval', 'show', str(f), '--journal-dir', str(journals))
-            self.assertIn('approval_consumed: false', p.stdout, p.stderr)
+            self.assertIn('approval_archived: false', p.stdout, p.stderr)
+            self.assertIn('status: BINDING_MISMATCH (code_sha,binary_sha256)', p.stdout)
             self.assertIn('active_attempt: none', p.stdout)
             self.assertIn('history_verdict: NO_TRADE', p.stdout)
             self.assertEqual(p.returncode, 2, 'test approval binds no real code/binary')
@@ -66,7 +68,9 @@ class Fe04Cli(unittest.TestCase):
             spent.mkdir(parents=True)
             (spent / 'pilot-1.p0j').write_bytes(b'archived')
             p = run('approval', 'show', str(f), '--journal-dir', str(journals))
-            self.assertIn('approval_consumed: true', p.stdout)
+            self.assertIn('approval_archived: true', p.stdout)
+            # A damaged archive never proves the approval unspent.
+            self.assertIn('status: INVALID (FE04_JOURNAL_UNREADABLE)', p.stdout)
             self.assertEqual(p.returncode, 2)
 
     def test_missing_arguments_print_the_usage(self):

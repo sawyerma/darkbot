@@ -202,6 +202,8 @@ parameters! {
     recovery_root_catchup_seconds = defaults::RECOVERY_ROOT_CATCHUP_SECS, "s", "P0_RECOVERY_ROOT_CATCHUP_SECS";
     recovery_root_stall_seconds = defaults::RECOVERY_ROOT_STALL_SECS, "s", "P0_RECOVERY_ROOT_STALL_SECS";
     recovery_root_hard_max_seconds = defaults::RECOVERY_ROOT_HARD_MAX_SECS, "s", "P0_RECOVERY_ROOT_HARD_MAX_SECS";
+    // DEC-10: how far ahead an FE-04 approval may expire (revision 12).
+    fe04_approval_max_lifetime_seconds = 86400, "s", "P0_FE04_APPROVAL_MAX_LIFETIME_SECS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -215,8 +217,9 @@ parameters! {
 /// `analytics_runs_listed`, `analytics_jobs_listed` (B03/U-9 analytics job projection); 10:
 /// `rebalance_observe_ms`, `rebalance_budget_usd_micro`, `rebalance_quote_rounds` (B01); 11: the
 /// state owner's parameters `max_total_capital` … `recovery_root_hard_max_seconds` and the typed
-/// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]).
-pub const LIMITS_REVISION: u16 = 11;
+/// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]); 12:
+/// `fe04_approval_max_lifetime_seconds` (DEC-10).
+pub const LIMITS_REVISION: u16 = 12;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -237,6 +240,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("fe04_approval_max_lifetime_seconds") => 12,
         f if position(f) >= position("max_total_capital") => 11,
         f if position(f) >= position("rebalance_observe_ms") => 10,
         f if position(f) >= position("analytics_status_ms") => 9,
@@ -445,6 +449,11 @@ impl Default for RuntimeConfig {
             source_geyser_provider: crate::ingress::sources::PUBLICNODE_ID.into(),
         }
     }
+}
+/// The native `key = value` text of operator files (operational config, profiles, the FE-04
+/// approval of DEC-10): unique keys (`-` read as `_`), `#` comment lines, no JSON.
+pub fn key_values(text: &str) -> Result<Vec<(String, String)>, String> {
+    parse_lines(text)
 }
 /// `key = value` lines: the native operational config and profile text format (JFI-01/02: a
 /// config file is not a JSON interface). `#` starts a comment line; keys are CLI names
@@ -1500,9 +1509,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                11,
-                140,
-                "8g2vgkxH6T8CGg5viZRoP3SvbC3c9eLLGcXxwfF3G4RD".to_string()
+                12,
+                141,
+                "5g2uUNCnr1jdNs7x6Snrt1SybJJekaRfAzvZUqAjjkf6".to_string()
             )
         );
     }

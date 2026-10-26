@@ -1,6 +1,7 @@
 //! FE-04 durable single-wallet hold at the existing submission boundary.
 //! No signer, provider, state/price engine or automatic LIVE activation.
 pub mod admission;
+pub mod approval_file;
 pub mod archive;
 pub mod exit;
 #[cfg(feature = "crate_health")]

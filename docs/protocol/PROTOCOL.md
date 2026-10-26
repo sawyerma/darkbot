@@ -127,6 +127,7 @@
     - [AssetAmount](#darkbot-project0-v1-AssetAmount)
     - [Capability](#darkbot-project0-v1-Capability)
     - [DataSource](#darkbot-project0-v1-DataSource)
+    - [Fe04Approval](#darkbot-project0-v1-Fe04Approval)
     - [FinanceSummary](#darkbot-project0-v1-FinanceSummary)
     - [LiquidatorState](#darkbot-project0-v1-LiquidatorState)
     - [LossCount](#darkbot-project0-v1-LossCount)
@@ -2262,6 +2263,33 @@ One controlled data source (the owner&#39;s arbiter: at most one canonical unit)
 
 
 
+<a name="darkbot-project0-v1-Fe04Approval"></a>
+
+### Fe04Approval
+DEC-10: secret-free status of the FE-04 approval file (native key = value) the runtime is
+configured with, bound to its wallet, program, observed ProgramData, clean HEAD, binaries and
+Safety ceilings, single use checked against its FE-04 journals.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| state | [string](#string) |  | NONE | VALID | EXPIRED | CONSUMED | BLOCKED | INVALID | BINDING_MISMATCH. |
+| reason | [string](#string) |  | Refusal code or the mismatching bindings; empty when VALID or NONE. |
+| kind | [string](#string) |  | attempt | exit; empty without an approval. |
+| approval_id | [string](#string) |  | Approval id (spent once). |
+| funding_class | [string](#string) |  | Funding class of an attempt approval. |
+| expires_unix_s | [uint64](#uint64) |  | Expiry, Unix seconds. |
+| max_capital_usd_micro | [uint64](#uint64) |  | Attempt approval: capital bound, USD-micro. |
+| max_loss_usd_micro | [uint64](#uint64) |  | Attempt approval: loss bound, USD-micro. |
+| min_net_usd_micro | [uint64](#uint64) |  | Attempt approval: minimum conservative net, USD-micro. |
+| max_slippage_bps | [uint64](#uint64) |  | Slippage bound (both kinds). |
+| allowed_targets | [uint64](#uint64) |  | Number of allowed targets of an attempt approval. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-FinanceSummary"></a>
 
 ### FinanceSummary
@@ -2307,6 +2335,7 @@ Values are what the owner holds; an unknown value stays unset, never 0.
 | last_source_decision | [SourceDecision](#darkbot-project0-v1-SourceDecision) |  | The owner&#39;s last source-control decision; unset before the first one. |
 | source_stats | [SourceStats](#darkbot-project0-v1-SourceStats) |  | Source counters of this run. |
 | source_config_version | [uint64](#uint64) | optional | CTRL-03: the source configuration version the owner has decided up to — the ExpectedVersion.config_version a source change states; unset without source control. |
+| approval | [Fe04Approval](#darkbot-project0-v1-Fe04Approval) |  | DEC-10: the configured FE-04 approval, secret-free; it never authorizes LIVE (FE-06). |
 
 
 

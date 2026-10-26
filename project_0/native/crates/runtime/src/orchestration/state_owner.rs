@@ -95,6 +95,33 @@ mod metrics;
 mod status_view;
 use metrics::OwnerMetrics;
 
+/// DEC-10: the FE-04 approval file whose secret-free status the Wallets tab shows, bound to this
+/// wallet, program, clean HEAD and these binaries; re-read at every FE-04 refresh.
+pub(super) struct ApprovalSource {
+    path: std::path::PathBuf,
+    binding: crate::execution::one_shot::approval_file::ApprovalBinding,
+    read: Result<crate::execution::one_shot::approval_file::ApprovalFile, String>,
+    /// Single use against the wallet's FE-04 journals (archived and active attempts, exits).
+    usage: crate::execution::one_shot::approval_file::Usage,
+}
+impl ApprovalSource {
+    fn refresh(&mut self, journal: Option<&std::path::Path>, wallet: &str) {
+        use crate::execution::one_shot::approval_file::{self, Usage};
+        self.read = approval_file::read(&self.path);
+        self.usage = match (&self.read, journal) {
+            (_, None) => Usage::Unchecked("FE04_JOURNAL_NOT_CONFIGURED".into()),
+            (Err(_), _) => Usage::Unchecked("APPROVAL_UNREADABLE".into()),
+            (Ok(file), Some(dir)) => {
+                match crate::execution::accounting::Ledger::load(dir, wallet) {
+                    Ok(ledger) => approval_file::usage(file, &ledger),
+                    // A journal that cannot be read never proves an approval unspent.
+                    Err(_) => Usage::Refused("INVALID", "FE04_JOURNAL_UNREADABLE".into()),
+                }
+            }
+        };
+    }
+}
+
 pub(super) struct ShadowOwner {
     metrics: OwnerMetrics,
     mode: String,
@@ -137,6 +164,8 @@ pub(super) struct ShadowOwner {
     /// FE-04/C3: the wallet journal of an existing attempt, held for the run (one runtime per
     /// project): the reservation book follows it and its UNKNOWN attempt is settled here.
     fe04_held: Option<crate::execution::one_shot::Journal>,
+    /// DEC-10: the configured FE-04 approval (`P0_FE04_APPROVAL`), re-read with the journal.
+    fe04_approval: Option<ApprovalSource>,
     /// When the next settlement step is due (`None`: a read in flight, or nothing to settle).
     fe04_settle_due: Option<std::time::Instant>,
     /// What Safety has still to book for that attempt (`None`: nothing, or booked).

@@ -24,6 +24,7 @@ const OWNER_PARAMETERS = [
   "threshold_bootstrap_batch", "candidate_recheck_slots", "candidate_error_recheck_slots", "candidate_repeat_soft_cap",
   "rpc_candidates_per_drain", "candidate_network_deadline_ms", "mt0_interval_seconds",
   "recovery_root_catchup_seconds", "recovery_root_stall_seconds", "recovery_root_hard_max_seconds",
+  "fe04_approval_max_lifetime_seconds",
 ] as const;
 
 /** The owner's typed settings (DEC-05). */
@@ -74,6 +75,11 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
         value={`${t.amountIn} → ≥ ${t.minimumOut} · cost ${usdMicroDisplay(t.costUsdMicro.toString())} · planned, never traded`}/>)}
       {owner.rebalance.blocked.map((b) => <DetailRow key={`b${b.asset}`} title={`Rebalance · ${b.asset.slice(0, 8)}`} value={b.reason}/>)}
     </> : null}
+    {owner.approval ? <DetailRow title="FE-04 approval"
+      value={owner.approval.state === "NONE" ? "none configured · LIVE not authorized (FE-06)"
+        : `${owner.approval.state}${owner.approval.reason ? ` (${owner.approval.reason})` : ""} · ${owner.approval.kind} ${owner.approval.approvalId}`
+          + `${owner.approval.kind === "attempt" ? ` · ${owner.approval.fundingClass} · capital ≤ ${usdMicroDisplay(owner.approval.maxCapitalUsdMicro.toString())} · loss ≤ ${usdMicroDisplay(owner.approval.maxLossUsdMicro.toString())} · ${owner.approval.allowedTargets} targets` : ""}`
+          + ` · slippage ≤ ${owner.approval.maxSlippageBps} bps · expires ${new Date(Number(owner.approval.expiresUnixS) * 1000).toISOString()} · LIVE not authorized (FE-06)`}/> : null}
     {owner.capabilities.map((c) => <DetailRow key={c.name} title={c.name}
       value={`${c.effective}${c.requested !== c.effective ? ` (requested ${c.requested})` : ""}${c.blockReason ? ` · ${c.blockReason}` : ""}`}/>)}
     {params}
