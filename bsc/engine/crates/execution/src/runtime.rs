@@ -571,6 +571,7 @@ impl Canonical {
                     token: l.token,
                     external_buys: l.external_buys_after,
                     c1_scope: l.c1_scope,
+                    four_token: l.four_token,
                     tx: match l.unverifiable {
                         None => LaunchTx::Verified,
                         Some(r) if is_unrebuildable(r) => LaunchTx::Unrebuildable,
@@ -662,6 +663,8 @@ impl Canonical {
             .set(e::FLAP_LAUNCHES, c.flap_launches)
             .set(e::FOUR_LAUNCHES, c.four_launches)
             .set(e::FOUR_PENDING_DECODED, c.four_pending_decoded)
+            .set(e::FOUR_PENDING_UNKNOWN, c.four_pending_unknown)
+            .set(e::FOUR_PENDING_MISMATCH, c.four_pending_mismatch)
             .set(e::ORPHANED_LAUNCHES, c.orphaned_launches)
             .set(e::SEEN_FULL_BEFORE, c.seen_full_before)
             .set(e::SEEN_HASH_ONLY_BEFORE, c.seen_hash_only_before)
@@ -1459,6 +1462,7 @@ mod tests {
                 sender: Some([tx; 20]),
                 nonce: Some(u64::from(tx)),
                 c1_scope,
+                four_token: crate::chain_follower::FourToken::NotApplicable,
                 unverifiable: None,
             })
         };

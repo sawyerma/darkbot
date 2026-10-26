@@ -78,7 +78,7 @@ mod tests_live;
 #[cfg(test)]
 mod tests_wire;
 
-pub use launches::Venue;
+pub use launches::{FourToken, Venue};
 
 /// Every bound of the follower. The caller fills all of them; there are no
 /// compiled-in operating values. [`FollowerLimits::validate`] states the
@@ -299,6 +299,8 @@ pub struct CanonicalLaunch {
     /// of its verified signed bytes: a direct Portal `newTokenV6` call);
     /// false when unverifiable (the pending path rejects it the same way).
     pub c1_scope: bool,
+    /// Four.meme: the pending decoder's token against the canonical one.
+    pub four_token: FourToken,
     /// Why the node's transaction object could not be rebuilt and verified
     /// (an unsupported type, pre-EIP-155, a hash or signer mismatch): a
     /// per-launch result, journaled and counted, never a retried fault.

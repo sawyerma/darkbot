@@ -394,6 +394,7 @@ mod tests {
             token: Some([4; 20]),
             external_buys: Some(5),
             c1_scope: true,
+            four_token: crate::canonical_join::FourToken::NotApplicable,
             tx: LaunchTx::Verified,
             block_ms: 1_000,
             block_seen_ns: 0,

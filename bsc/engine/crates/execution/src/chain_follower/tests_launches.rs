@@ -46,7 +46,7 @@ use super::launches::{
     FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, OPENFOUR_CORE, ReceiptLaunch, detect,
     verify_object,
 };
-use super::{CanonicalLaunch, Field, RequestError, Venue};
+use super::{CanonicalLaunch, Field, FourToken, RequestError, Venue};
 use crate::wss::RejectReason;
 
 const FLAP_A_BLOCK: &str = include_str!("../../tests/fixtures/chain/block_129774331.full.json");
@@ -243,6 +243,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             sender: Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464")),
             nonce: Some(13),
             c1_scope: true,
+            four_token: FourToken::NotApplicable,
             unverifiable: None,
         },
         CanonicalLaunch {
@@ -258,6 +259,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             sender: Some(hex!("cbb8be2e4ef71b77f58b98334491e9bbd9888e34")),
             nonce: Some(1592),
             c1_scope: false,
+            four_token: FourToken::NotApplicable,
             unverifiable: None,
         },
     ];
@@ -307,6 +309,7 @@ fn flap_block_with_one_launch_and_no_external_buy() {
         sender: Some(hex!("1b4ebe73585b94578dc055c6ac7e89333fdadcf7")),
         nonce: Some(4297),
         c1_scope: false,
+        four_token: FourToken::NotApplicable,
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -340,6 +343,7 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         // deployer and template, salt from the calldata) is this token: a
         // launch outside the freeze's fixtures confirms the derivation.
         c1_scope: true,
+        four_token: FourToken::Matched,
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -393,6 +397,7 @@ fn openfour_block_launch_has_token_creator_and_a_derived_pending_token() {
         sender: Some(hex!("a26cc5fd86def0050de3ef43dd4796dae89ca25c")),
         nonce: Some(u64::from_str_radix(&raw["nonce"].as_str().unwrap()[2..], 16).unwrap()),
         c1_scope: true,
+        four_token: FourToken::Matched,
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -410,6 +415,19 @@ fn openfour_block_launch_has_token_creator_and_a_derived_pending_token() {
         .unwrap();
     assert_eq!(topic_address(&log["topics"][2]), expected.creator.unwrap());
     assert_eq!(topic_address(&log["topics"][3]), expected.token.unwrap());
+}
+
+/// Phase E review M1: a canonical token other than the derived one is a
+/// counted mismatch, never the C1-like scope.
+#[test]
+fn a_four_launch_whose_derived_token_differs_is_a_mismatch() {
+    let (block, receipts) = load(OPENFOUR_BLOCK, OPENFOUR_RECEIPTS, 129_842_141);
+    let objects = full(OPENFOUR_BLOCK, 129_842_141).objects;
+    let mut launch = detect(&block, &receipts).remove(0);
+    launch.token = Some([0x77; 20]);
+    let verified = verify_object(&objects[74]).unwrap();
+    let l = launch.with_transaction(Ok(&verified), 16_384);
+    assert_eq!((l.four_token, l.c1_scope), (FourToken::Mismatch, false));
 }
 
 #[test]

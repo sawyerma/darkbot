@@ -47,6 +47,24 @@ pub enum Venue {
     OpenFour,
 }
 
+/// What the production Four decoder makes of a Four.meme launch's verified
+/// signed bytes before execution (Phase E); `NotApplicable` for Flap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FourToken {
+    NotApplicable,
+    /// Not a decoded launch call (another contract, a router, refused or
+    /// unverifiable bytes).
+    NotRecognized,
+    /// A decoded launch without a proven derivation (an OpenFour preset
+    /// outside the frozen table).
+    Unknown,
+    /// The token derived before execution is the canonical one.
+    Matched,
+    /// A derived token that is not the canonical one (another mode or
+    /// template than the frozen ones).
+    Mismatch,
+}
+
 /// The event of a venue that announces a new token.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LaunchEvent {
@@ -142,6 +160,23 @@ impl ReceiptLaunch {
         tx: Result<&VerifiedTx, RejectReason>,
         max_launch_calldata: usize,
     ) -> CanonicalLaunch {
+        let four_token = match (self.venue, tx) {
+            (Venue::Flap, _) => FourToken::NotApplicable,
+            (_, Err(_)) => FourToken::NotRecognized,
+            (_, Ok(t)) => {
+                match four_launch_token(&bsc_mainnet_g01_129842711(), &t.raw, max_launch_calldata) {
+                    None => FourToken::NotRecognized,
+                    Some(PendingToken::Unknown) => FourToken::Unknown,
+                    Some(PendingToken::Derived(token) | PendingToken::Unconfirmed(token)) => {
+                        if Some(token.into_array()) == self.token {
+                            FourToken::Matched
+                        } else {
+                            FourToken::Mismatch
+                        }
+                    }
+                }
+            }
+        };
         CanonicalLaunch {
             venue: self.venue,
             block_number: self.block_number,
@@ -154,14 +189,11 @@ impl ReceiptLaunch {
             first_external_buy_index: self.first_external_buy_index,
             sender: tx.ok().map(|t| t.from),
             nonce: tx.ok().map(|t| t.nonce),
-            c1_scope: tx.is_ok_and(|t| match self.venue {
-                Venue::Flap => is_flap_launch(&t.raw, max_launch_calldata),
-                Venue::Four | Venue::OpenFour => matches!(
-                    four_launch_token(&bsc_mainnet_g01_129842711(), &t.raw, max_launch_calldata),
-                    Some(PendingToken::Derived(token) | PendingToken::Unconfirmed(token))
-                        if Some(token.into_array()) == self.token
-                ),
-            }),
+            c1_scope: match self.venue {
+                Venue::Flap => tx.is_ok_and(|t| is_flap_launch(&t.raw, max_launch_calldata)),
+                Venue::Four | Venue::OpenFour => four_token == FourToken::Matched,
+            },
+            four_token,
             unverifiable: tx.err(),
         }
     }

@@ -22,7 +22,7 @@
 //! (they stay visible as `orphaned`); the window that can still be orphaned
 //! is the follower's reorg depth.
 
-pub use crate::chain_follower::Venue;
+pub use crate::chain_follower::{FourToken, Venue};
 use crate::ingress::{FirstSeen, Sighting};
 use crate::sources::SourceId;
 use std::collections::VecDeque;
@@ -131,6 +131,8 @@ pub struct LaunchRef {
     /// The launch transaction is a direct call of the C1 scope (Portal
     /// `newTokenV6`): what the pending path can act on.
     pub c1_scope: bool,
+    /// Four.meme: the pending decoder's token against the canonical one.
+    pub four_token: FourToken,
     /// What the launch transaction is (verified, or why not).
     pub tx: LaunchTx,
     /// The block's time (header milliseconds, validator wall clock).
@@ -167,6 +169,11 @@ pub struct JoinCounters {
     /// the canonical token derived before execution (Phase E).
     pub four_launches: u64,
     pub four_pending_decoded: u64,
+    /// Four.meme launches decoded pending without a proven derivation (an
+    /// unfrozen OpenFour preset), and with a derived token that is not the
+    /// canonical one.
+    pub four_pending_unknown: u64,
+    pub four_pending_mismatch: u64,
     pub orphaned_launches: u64,
     pub seen_full_before: u64,
     pub seen_hash_only_before: u64,
@@ -202,8 +209,11 @@ impl JoinCounters {
         }
         if j.launch.venue != Venue::Flap {
             step(&mut self.four_launches);
-            if j.launch.c1_scope {
-                step(&mut self.four_pending_decoded);
+            match j.launch.four_token {
+                FourToken::Matched => step(&mut self.four_pending_decoded),
+                FourToken::Unknown => step(&mut self.four_pending_unknown),
+                FourToken::Mismatch => step(&mut self.four_pending_mismatch),
+                FourToken::NotApplicable | FourToken::NotRecognized => {}
             }
             return;
         }
@@ -356,6 +366,11 @@ mod tests {
             token: None,
             external_buys: buys,
             c1_scope: tx % 2 == 1,
+            four_token: match (venue, tx % 2 == 1) {
+                (Venue::Flap, _) => FourToken::NotApplicable,
+                (_, true) => FourToken::Matched,
+                (_, false) => FourToken::Unknown,
+            },
             tx: LaunchTx::Verified,
             block_ms: BLOCK_MS,
             block_seen_ns: seen,

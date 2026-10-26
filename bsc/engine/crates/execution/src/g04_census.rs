@@ -627,6 +627,11 @@ mod tests {
             token: None,
             external_buys: buys,
             c1_scope: tx != 3,
+            four_token: if venue == Venue::Flap {
+                crate::canonical_join::FourToken::NotApplicable
+            } else {
+                crate::canonical_join::FourToken::NotRecognized
+            },
             // Unverifiable launches: covered by the runtime test's census.
             tx: crate::canonical_join::LaunchTx::Verified,
             block_ms: BLOCK_MS,

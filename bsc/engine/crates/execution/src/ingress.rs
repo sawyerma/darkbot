@@ -457,6 +457,44 @@ mod tests {
         assert!(!is_flap_launch(&legacy(PORTAL, LAUNCH), launch.len() - 1));
     }
 
+    /// Phase E review M1: an OpenFour launch of a preset outside the frozen
+    /// table decodes, but its token is UNKNOWN before execution.
+    #[test]
+    fn an_unfrozen_openfour_preset_has_no_pending_token() {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+        let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
+        let row: Vec<&str> = calls
+            .lines()
+            .find(|l| l.starts_with("OPENFOUR LAUNCH"))
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        let mut raw = alloy_primitives::hex::decode(row[10]).unwrap();
+        let d = bsc_mainnet_g01_129842711();
+        assert!(matches!(
+            four_launch_token(&d, &raw, MAX_CALLDATA),
+            Some(four::PendingToken::Derived(_))
+        ));
+        // The presetId word (createArgs head word 1) of the signed bytes,
+        // changed: the bytes are no longer signed, the decode is the same.
+        let input = alloy_primitives::hex::decode(row[9]).unwrap();
+        let at = raw
+            .windows(input.len())
+            .position(|w| w == input.as_slice())
+            .unwrap()
+            + 4
+            + 64
+            + 32
+            + 32
+            + 32
+            + 31;
+        raw[at] ^= 1;
+        assert_eq!(
+            four_launch_token(&d, &raw, MAX_CALLDATA),
+            Some(four::PendingToken::Unknown)
+        );
+    }
+
     /// Plan §5a.3: the first verified full sighting wins, even when another
     /// source had the hash earlier; later full sightings are lags, duplicates
     /// never create a second launch.

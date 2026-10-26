@@ -268,11 +268,16 @@ pub mod runtime_status {
         /// recognizes as a launch with the canonical token derived before
         /// execution (Phase E).
         pub const FOUR_PENDING_DECODED: u16 = 28;
+        /// v7 (Phase E review M1): Four.meme launches decoded pending
+        /// without a proven derivation (unfrozen OpenFour preset), and with
+        /// a derived token that is not the canonical one.
+        pub const FOUR_PENDING_UNKNOWN: u16 = 29;
+        pub const FOUR_PENDING_MISMATCH: u16 = 30;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.canonical",
             record_type: 0,
-            schema_version: 6,
+            schema_version: 7,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(HEAD, "head", U64),
@@ -302,6 +307,8 @@ pub mod runtime_status {
                 Field::req(BACKFILL_BLOCKS, "backfill_blocks", U64),
                 Field::req(BACKFILL_LAUNCHES, "backfill_launches", U64),
                 Field::req(FOUR_PENDING_DECODED, "four_pending_decoded", U64),
+                Field::req(FOUR_PENDING_UNKNOWN, "four_pending_unknown", U64),
+                Field::req(FOUR_PENDING_MISMATCH, "four_pending_mismatch", U64),
             ],
         };
     }
@@ -569,7 +576,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 8,
+        schema_version: 9,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
