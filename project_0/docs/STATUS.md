@@ -76,6 +76,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`96baf387`** (2026-10-26) | DEC-05: eine typisierte Konfigurationsautorität — jede Betriebsart über ihr Profil (econ4h ohne Argumente `performance`), 28 Owner-Parameter in der Registry, wertgleich; Status-Hinweg Liquidator/Health | OFFLINE_VERIFIED · Gate 981/979/453/453, CI `40252813830`/`40252813869` grün (BUGS §22.5) |
 | `8bd462e` | Runtime refactor: four crates; orchestration/execution/market/analytics domains | Local tests reported; no economic GO |
 | `bb26313` | Initial typed owner writer and binary journal WIP | Intermediate version; superseded by `4a27a1c` |
 | **`4a27a1c`** | Production binary journal integration, FE-04 transition journaling, capture/MT0/econ/census/FE-01 journal/replay, reader/export tooling | **PERSIST PARTIAL**, not Mainnet-qualified; Rust 415/417 PASS with 2 ignored each, Python 107 PASS, verifier 29 PASS per recorded local evidence. |

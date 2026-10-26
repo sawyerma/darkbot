@@ -30,5 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1
+        # P0-008: authenticated release lookup (an anonymous one hit the API rate limit).
+        with:
+          github_token: ${{ github.token }}
       - run: buf lint
         working-directory: protocol

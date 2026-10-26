@@ -14,6 +14,9 @@ jobs:
         with:
           fetch-depth: 0
       - uses: bufbuild/buf-setup-action@v1
+        # P0-008: authenticated release lookup (an anonymous one hit the API rate limit).
+        with:
+          github_token: ${{ github.token }}
       # P0-003: the compatibility base is the event's real predecessor, never origin/main (on a push
       # that is the checked commit itself): push = event.before, pull request = the target branch's
       # base SHA, workflow_dispatch = the checked commit's parent. check.sh refuses a missing,

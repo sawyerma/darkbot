@@ -1363,7 +1363,7 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | `Q7` | REVIEW_REQUIRED | BERICHT | Index-/Provider-Struktur; kein falscher Index belegt | bugs_b.md:1739 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1739) |
 | `Q8` | REVIEW_REQUIRED | BERICHT | Owner-/Setup-Struktur, keine bestätigte Runtime-Auswirkung | bugs_b.md:1749 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1749) |
 | `Q9` | WIDERLEGT | BERICHT | redundantes `cfg` → P0-002 (LOW) | bugs_b.md:1759 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1759) |
-| `Q10` | REVIEW_REQUIRED | BERICHT | Konfigurations-Divergenz nicht bewiesen; L4/DEC-05 abgleichen | bugs_b.md:1769 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1769) |
+| `Q10` | ERLEDIGT_LOKAL | BERICHT | DEC-05: Slippage einmal (Registry), `P0_RPC_URL` einmal gelesen, Token-IDs aus `protocol` | bugs_b.md:1769 | 96baf387 · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1769) |
 | `Q11` | REVIEW_REQUIRED | BERICHT | SDK-API-/Compile-Frage vor Umsetzung klären, E2 separat | bugs_b.md:1779 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1779) |
 | `Q12` | REVIEW_REQUIRED | BERICHT | Economics-Testabdeckung prüfen | bugs_b.md:1789 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1789) |
 | `Q13` | REVIEW_REQUIRED | BERICHT | Dokumentations-/SHA-Provenienz B6/C10/R13 | bugs_b.md:1799 | bugs_b §C · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/bugs_b.md#L1799) |
@@ -1432,7 +1432,7 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | `FS-D08` | ERLEDIGT_LOKAL | BERICHT | `market/time.rs:40-45` → 0; Aufrufer `capture.rs:209…749`, `market_gap.rs:245`, `MarketConfig::from_lookup`… | fehlstellen_v1.md:119 | 77f00f04, 4035dd80 · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L119) |
 | `FS-D09` | ERLEDIGT_LOKAL | BERICHT | `accounting.rs:293-299`: fehlender `held`/`reserve` ⇒ 0 ⇒ Spendable nicht reduziert; `withdrawable` ohne produktiven… | fehlstellen_v1.md:120 | b7f4b296, a817a94f · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L120) |
 | `FS-D10` | WIDERLEGT | BERICHT | Gegenbeleg im Quellbericht; nicht als Defekt reaktivieren. | fehlstellen_v1.md:121 | Quellbericht, kein neuer Test · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L121) |
-| `FS-D11` | OFFEN | BERICHT | DEC-05: 24 Owner-Parameter und vollständige wertgleiche Profil-Auflösung noch nicht migriert. | fehlstellen_v1.md:122 | cfc7c121, 8f9886ca · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L122) |
+| `FS-D11` | ERLEDIGT_LOKAL | BERICHT | DEC-05: Owner-Parameter in der Registry (Rev. 11), jede Betriebsart über ihr Profil, wertgleich; CI grün. | fehlstellen_v1.md:122 | cfc7c121, 8f9886ca, 96baf387 · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L122) |
 | `FS-E01` | GEGENBELEG | BERICHT | Test-Fixture hinter Feature | fehlstellen_v1.md:128 | fehlstellen_v1 §6 · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L128) |
 | `FS-E02` | GEGENBELEG | BERICHT | Mocks ausschließlich testgebunden | fehlstellen_v1.md:128 | fehlstellen_v1 §6 · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L128) |
 | `FS-E03` | GEGENBELEG | BERICHT | Historischer Schema-1-Encoder testgebunden | fehlstellen_v1.md:128 | fehlstellen_v1 §6 · [Quelle](https://github.com/sawyerma/darkbot/blob/1b43ab30d0381dec4ae910f7563e5b1fde10495e/project_0/docs/fehlstellen_v1.md#L128) |
@@ -1494,6 +1494,7 @@ Nach bestätigtem Abschluss: `- [x]`, ursprüngliche Problembeschreibung durchst
 | `P0-005` | REVIEW_REQUIRED | Restticket aus C7 | Grenztest Fatal bei voller Writer-Queue | §23 | Ursprung C7 `89a715e` |
 | `P0-006` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `3d18f401`, `ee9a307a` · `gateway` Läufe `40243757542`, `40244250738` grün |
 | `P0-007` | ERLEDIGT_LOKAL | Commit + CI | — | §23 | `8eba756e` · Lauf `40244512659` grün (`test_all`) |
+| `P0-008` | ERLEDIGT_LOKAL | Commit | — | §23 | `buf-setup-action` mit `github_token` (CI-Nachweis im nächsten Register-Commit) |
 
 ### 22.2 `bugs_b.md`: Z1–Z19 und Q1–Q14 — Zusammenführungen
 
@@ -1515,7 +1516,7 @@ Zusammenfassungen aus Auditblöcken §2–7 und Korrekturfortschritt §11.4; zus
 | 02 | V2-15/P7-03 | OFFEN: genau eine beweisgebundene Simulation bzw. sichere Neusimulation |
 | 03 | V2-15/P7-02, C12 | OFFEN: N-2 drei Quellenklassen, B/C-Veto, fünf Wallet-Ergebnisklassen, Settlement |
 | 04 | Z7/V7, B15/C11, Q1 | OFFEN: A-Wallet-Hold vs. Inventory-Limit, typisierte B/Ist-Flüsse, OBSERVE/Gate |
-| 05 | FS-D11, FS-D01…FS-D06, FS-B11/FS-E10 | OFFEN: alle 24 Parameter, Wertparität, explizite Profil- und Herkunftsauflösung |
+| 05 | FS-D11, FS-D01…FS-D06, FS-B11/FS-E10 | **OFFLINE_VERIFIED** `96baf387` (Gate PASS, CI `40252813830`/`40252813869` grün): 28 Owner-Parameter, Wertparität, Profil je Betriebsart mit Herkunft, Status-Hinweg Liquidator/Health; FS-B11/FS-E10 (CAS für Hot-Changes) mit DEC-06/07 |
 | 06 | FS-C08, V2-03/V2-13 | OFFEN: OFF/OBSERVE/ACTIVE, CAS, Fallback, qualifizierte Gegenprobe |
 | 07 | N7 (ursprüngliche BUGS-ID), FS-A06 | OFFEN: integrierte zwei Freigaben, TTL 10–120 s und native Receipts |
 | 08 | FS-A04/FS-A08/FS-F-02, C0-E1 | OFFEN: INDEX/CROSSCHECK/STRICT vollständig nativ und historisches Paritätsgate |
@@ -1531,17 +1532,17 @@ Die N-5-Reiter-/Commandzuordnung gilt exakt wie in `ENTSCHEIDUNGEN.md` §7: kein
 
 ### 22.6 Prüfbilanz je Git-SHA, CI und Archivregel
 
-**Zählung** (reproduzierbar: `python3 project_0/scripts/bugs_register.py`; erzeugt beim Erstellen dieses Commits auf Basis `8eba756e`):
+**Zählung** (reproduzierbar: `python3 project_0/scripts/bugs_register.py`; Stand nach DEC-05 `96baf387`):
 
 | Gruppe | IDs | ERLEDIGT_LOKAL | OFFEN | TEILWEISE | BLOCKED_EXTERNAL | BLOCKED_MESSUNG | REVIEW_REQUIRED | WIDERLEGT | DUPLIKAT | GEGENBELEG |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Ursprüngliche Tickets | 148 | 119 | 2 | 12 | 0 | 8 | 6 | 1 | 0 | 0 |
-| `bugs_b.md` Z/Q | 33 | 14 | 0 | 4 | 0 | 0 | 11 | 2 | 2 | 0 |
-| `fehlstellen_v1.md` FS | 85 | 65 | 8 | 1 | 2 | 1 | 1 | 1 | 0 | 6 |
+| `bugs_b.md` Z/Q | 33 | 15 | 0 | 4 | 0 | 0 | 10 | 2 | 2 | 0 |
+| `fehlstellen_v1.md` FS | 85 | 66 | 7 | 1 | 2 | 1 | 1 | 1 | 0 | 6 |
 | `bug_v2.md` V2 | 15 | 11 | 2 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
-| neue P0 | 7 | 3 | 3 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
+| neue P0 | 8 | 4 | 3 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |
 
-**CI-Nachweis (N-6, exakt geprüfte SHAs):** Commit B `935c3239`: Lauf `40242745414` (`Project 0 status contract`) — fünf `project0-gate`-Matrizen und `contract-and-ui` grün (Protokollbasis `0addbeee` = `event.before`, P0-003), `native` rot (CI-N1); Lauf `40242745481` (`gateway`) — `protocol` grün, `rust` rot (fmt, P0-006). Commit B2 `3d18f401`: Lauf `40243757365` — alles grün außer `native` (Linux-Testwettlauf `ws_integration`, Job `121320900336`); `gateway` `40243757542` grün. Commit B3 `ee9a307a`: Lauf `40244250752` alle sieben Jobs grün; `gateway` `40244250738` grün. Commit B4 `8eba756e`: Lauf `40244512659` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). Commit C `7ed4e192`: Lauf `40246730628` (`Project 0 status contract`) alle sieben Jobs grün, einschließlich ID-Test im Python-Schritt von `project0-gate (release bash_n python)` (Job `121329753529`). Ältere Läufe ab 23.10. waren in `native` durchgehend rot (CI-N1); lokale `gate.sh`-PASS-Angaben jener Zeit sind keine CI-Freigabe (STATUS.md, Korrektur 26.10.).
+**CI-Nachweis (N-6, exakt geprüfte SHAs):** Commit B `935c3239`: Lauf `40242745414` (`Project 0 status contract`) — fünf `project0-gate`-Matrizen und `contract-and-ui` grün (Protokollbasis `0addbeee` = `event.before`, P0-003), `native` rot (CI-N1); Lauf `40242745481` (`gateway`) — `protocol` grün, `rust` rot (fmt, P0-006). Commit B2 `3d18f401`: Lauf `40243757365` — alles grün außer `native` (Linux-Testwettlauf `ws_integration`, Job `121320900336`); `gateway` `40243757542` grün. Commit B3 `ee9a307a`: Lauf `40244250752` alle sieben Jobs grün; `gateway` `40244250738` grün. Commit B4 `8eba756e`: Lauf `40244512659` alle sieben Jobs grün (`gateway` laut Pfadtabelle nicht pflichtig). Commit C `7ed4e192`: Lauf `40246730628` (`Project 0 status contract`) alle sieben Jobs grün, einschließlich ID-Test im Python-Schritt von `project0-gate (release bash_n python)` (Job `121329753529`). Commit D `b3cce8ee`: Lauf `40247971583` alle sieben Jobs grün. DEC-05 `96baf387`: Lauf `40252813830` alle sieben Jobs grün; `gateway` `40252813869` Versuch 1 `protocol` rot (Infrastruktur: `buf-setup-action` API-Ratenlimit ohne Token, P0-008), Versuch 2 auf demselben SHA `protocol` und `rust` grün. Ältere Läufe ab 23.10. waren in `native` durchgehend rot (CI-N1); lokale `gate.sh`-PASS-Angaben jener Zeit sind keine CI-Freigabe (STATUS.md, Korrektur 26.10.).
 
 **N-4/Z-1 CI-Gate:** Für reine `project_0/docs/**`-Änderungen lösen `Project 0 status contract` und `gateway` gemäß der festgelegten Pfad→Job-Matrix **keine automatische CI aus**. Daher hier **kein behauptetes `OFFLINE_VERIFIED`/Test-PASS**. Bei späteren Code-/Proto-/Gateway-/Frontend-Änderungen sämtliche pfadpflichtigen Jobs aus `ENTSCHEIDUNGEN.md` §7 prüfen; rote Pflichtjobs sperren `OFFLINE_VERIFIED`, enge BSC-Ausnahme nur mit separater dokumentierter Baseline und Ursache. Dokumentabschluss ist keine operative Freigabe.
 
@@ -1575,6 +1576,11 @@ Die N-5-Reiter-/Commandzuordnung gilt exakt wie in `ENTSCHEIDUNGEN.md` §7: kein
 - **Status: ERLEDIGT_LOKAL** (Fix Commit B2; CI-Nachweis auf exaktem SHA in Commit C). **Gate:** N-4 Pflichtjob `gateway`/`rust` für `protocol/**`, `gateway/**`.
 - **Befund:** `.github/workflows/gateway.yml` nutzt `dtolnay/rust-toolchain@stable` (am 25.10. Rust 1.99.1), lokal ist 1.93.1. (1) Clippy `-D warnings`: `AtomicUsize::fetch_update` ist auf 1.99 deprecated (`gateway/src/ws.rs`), rot u. a. auf `865867af` (Lauf `40194134086`, Job `121171229418`), `5353cdcb`, `add191f1`; (2) `clippy::result_large_err` in `gateway/tests/ws_integration.rs` (`try_connect`); (3) auf Commit B (`935c3239`, Lauf `40242745481`, Job `121317868326`) `cargo fmt --check`: vier unformatierte Stellen in `gateway/src/control.rs` aus `0a10f0d5` (mit 1.93 und 1.99 identisch).
 - **Fix:** `reserve_slot` als expliziter Compare-Exchange-Loop (Test `client_slots_never_exceed_the_limit`: 16×100 parallele Reservierungen, genau Limit gewinnt, Freigabe wiederverwendbar), geboxter Handshake-Fehler im Testhelper, `cargo fmt`. Lokal mit dem offiziellen Rust-1.99.1-Toolchain (Hash-geprüft, nur Scratch) **und** 1.93.1: fmt, Clippy `-D warnings`, `cargo test --all-features` 49/0, Release-Build grün.
+
+### P0-008 — CI-Infrastruktur: `buf-setup-action` ohne Token am API-Ratenlimit
+- **Status: ERLEDIGT_LOKAL** (Workflow-Fix; CI-Nachweis folgt). **Gate:** N-6 (rote Jobs zählen nicht).
+- **Befund:** `gateway` Lauf `40252813869` Versuch 1, Job `121348177871`: `bufbuild/buf-setup-action@v1` ohne `github_token` → „API rate limit exceeded“; kein Code-Fehler (Versuch 2 auf demselben SHA grün).
+- **Fix:** beide Workflows übergeben `github_token: ${{ github.token }}`.
 
 ### P0-007 — Flaky Linux-CI: P3-04-Floodtest verlangte < 500 ms je Ping-Send
 - **Status: ERLEDIGT_LOKAL** (Fix Commit B4; CI-Nachweis auf exaktem SHA in Commit C). **Gate:** N-4 (Flaky Tests gesondert erfassen), `project0-gate (test_all)`.
