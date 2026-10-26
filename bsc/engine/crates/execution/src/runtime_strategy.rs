@@ -368,23 +368,37 @@ pub struct Counters {
     /// Phase I: decisions for the PAPER path that found no armed C3
     /// executor (`BSC_EXEC` not ARMED): counted, never executed.
     pub paper_unarmed: u64,
+    /// Phase I gate L4: decisions whose token had no exact curve (or no
+    /// position) when the block was complete: counted, never executed.
+    pub paper_unpriced: u64,
 }
 
 /// A Strategy C decision for the PAPER path (Phase I): a PASS is a BUY of
 /// the configured input on the token's exact curve, an exit trigger the
-/// SELL of the position's tokens on its shadow curve.
+/// SELL of the position's tokens on its shadow curve; both on the state
+/// of the block once all its events were applied (gate M2), `decided_ns`
+/// the decision record's time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StrategyAction {
     Buy {
         token: [u8; 20],
         curve: StrategyCurve,
         input_wei: U256,
+        decided_ns: u64,
     },
     Exit {
         token: [u8; 20],
         tokens: U256,
         curve: StrategyCurve,
+        decided_ns: u64,
     },
+}
+
+/// A decision waiting for its block to be complete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pending {
+    Buy([u8; 20], u64),
+    Exit([u8; 20], u64),
 }
 
 /// A Strategy C PAPER transaction at the sink (Phase I), a `Runtime`
@@ -423,7 +437,7 @@ pub struct StrategyRuntime {
     input_wei: U256,
     /// Decisions for the PAPER path since the last `take_actions`
     /// (collected on the runtime path only, not in a replay).
-    actions: Vec<StrategyAction>,
+    pending: Vec<Pending>,
 }
 
 /// The status section of a strategy that runs, or of one refused (no
@@ -475,7 +489,8 @@ pub fn status_draft(
         st::OPEN,
         strategy.map_or(0, |s| s.engine.open_positions() as u64),
     )
-    .set(st::PAPER_UNARMED, c.paper_unarmed);
+    .set(st::PAPER_UNARMED, c.paper_unarmed)
+    .set(st::PAPER_UNPRICED, c.paper_unpriced);
     if let (None, Some(why)) = (strategy, refused) {
         d.set(st::REASON, why);
     }
@@ -488,44 +503,54 @@ impl StrategyRuntime {
             input_wei: config.input_wei,
             engine: Engine::new(config, gas),
             counters: Counters::default(),
-            actions: Vec::new(),
+            pending: Vec::new(),
         }
     }
 
-    /// The decisions for the PAPER path since the last call (Phase I).
+    /// The decisions for the PAPER path since the last call (Phase I), on
+    /// the engine's state now: called once the block's events are all
+    /// applied, so the curve is the block's complete one (gate M2). A
+    /// decision without an exact curve or position now is counted
+    /// (`paper_unpriced`, gate L4), never executed.
     pub fn take_actions(&mut self) -> Vec<StrategyAction> {
-        std::mem::take(&mut self.actions)
+        let pending = std::mem::take(&mut self.pending);
+        let mut out = Vec::with_capacity(pending.len());
+        for p in pending {
+            let action = match p {
+                Pending::Buy(token, decided_ns) => {
+                    self.curve(&token).map(|curve| StrategyAction::Buy {
+                        token,
+                        curve,
+                        input_wei: self.input_wei,
+                        decided_ns,
+                    })
+                }
+                Pending::Exit(token, decided_ns) => self
+                    .curve(&token)
+                    .zip(self.engine.position_tokens(&token))
+                    .map(|(curve, tokens)| StrategyAction::Exit {
+                        token,
+                        tokens,
+                        curve,
+                        decided_ns,
+                    }),
+            };
+            match action {
+                Some(a) => out.push(a),
+                None => self.counters.paper_unpriced += 1,
+            }
+        }
+        out
     }
 
-    /// The PAPER action of one output, on the engine's state right after
-    /// the record that produced it.
-    fn action_of(&self, o: &Output) -> Option<StrategyAction> {
-        let curve = |token: &[u8; 20]| {
-            self.engine
-                .curve_of(token)
-                .map(|(terms, reserve, circulating)| StrategyCurve {
-                    terms,
-                    reserve,
-                    circulating,
-                })
-        };
-        match o {
-            Output::Decided {
-                token,
-                decision: Decision::Pass,
-                ..
-            } => Some(StrategyAction::Buy {
-                token: *token,
-                curve: curve(token)?,
-                input_wei: self.input_wei,
-            }),
-            Output::ExitTriggered { token, .. } => Some(StrategyAction::Exit {
-                token: *token,
-                tokens: self.engine.position_tokens(token)?,
-                curve: curve(token)?,
-            }),
-            _ => None,
-        }
+    fn curve(&self, token: &[u8; 20]) -> Option<StrategyCurve> {
+        self.engine
+            .curve_of(token)
+            .map(|(terms, reserve, circulating)| StrategyCurve {
+                terms,
+                reserve,
+                circulating,
+            })
     }
 
     pub fn followed(&self) -> usize {
@@ -562,9 +587,19 @@ impl StrategyRuntime {
             })
             .collect();
         if journal.is_some() {
-            let actions: Vec<StrategyAction> =
-                typed.iter().filter_map(|o| self.action_of(o)).collect();
-            self.actions.extend(actions);
+            for o in &typed {
+                match o {
+                    Output::Decided {
+                        token,
+                        decision: Decision::Pass,
+                        ..
+                    } => self.pending.push(Pending::Buy(*token, at)),
+                    Output::ExitTriggered { token, .. } => {
+                        self.pending.push(Pending::Exit(*token, at))
+                    }
+                    _ => {}
+                }
+            }
         }
         if let Some(j) = journal {
             for p in &outputs {
@@ -1099,6 +1134,80 @@ mod tests {
         ] {
             assert_eq!(input_of_record(kind, &p), None);
         }
+    }
+
+    /// Phase I gate M2: the PASS is decided when its block's record
+    /// arrives, its PAPER action taken once the block is complete: a trade
+    /// of that block is in the action's curve.
+    #[test]
+    fn the_action_takes_the_complete_blocks_curve() {
+        use crate::runtime_journal::JournalSetup;
+        let base = std::env::temp_dir().join(format!("bsc-strategy-m2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let mut j = RuntimeJournal::open(&base, 7, 1, JournalSetup::whole(64, 16_384)).unwrap();
+        let mut s = runtime();
+        let mut records = launch_records(100);
+        records.extend((101..=105).map(block));
+        for (k, p) in &records {
+            s.record(*k, p, 1, Some(&mut j));
+        }
+        assert_eq!(s.counters.passed, 1);
+        // A buy in the decision block 105, after its record.
+        let (terms, reserve, circulating) = s.engine.curve_of(&TOKEN).unwrap();
+        let eth = U256::from(100_000_000_000_000_000u64);
+        let q = quote_native_buy(
+            &darkbot_bsc_trading::economics::flap::native_curve20::NativeBuyInputs {
+                token: terms,
+                reserve_before: reserve,
+                circulating_before: circulating,
+                input_amount: eth,
+                protocol_fee_bps:
+                    darkbot_bsc_trading::economics::flap::native_curve20::WITNESSED_MAINNET_TERMS
+                        .protocol_buy_fee_bps,
+                tax_on_bonding_curve_enabled: true,
+                caller_fee_exempt: false,
+                holding_cap: darkbot_bsc_trading::economics::flap::native_curve20::HoldingCap::None,
+            },
+        )
+        .unwrap();
+        let trade = CanonicalTrade {
+            block_number: 105,
+            block_hash: HASH,
+            tx_index: 3,
+            tx_hash: [8; 32],
+            log_index: 0,
+            origin: [0x55; 20],
+            sell: false,
+            token: TOKEN,
+            trader: [0x55; 20],
+            amount: be(q.output_amount),
+            eth: be(eth),
+            fee: be(q.protocol_fee),
+            post_price: [0; 32],
+        };
+        s.record(
+            RecordKind::Canonical,
+            &flap_trade_payload(&trade),
+            2,
+            Some(&mut j),
+        );
+        let actions = s.take_actions();
+        let [
+            StrategyAction::Buy {
+                curve, decided_ns, ..
+            },
+        ] = actions.as_slice()
+        else {
+            panic!("{actions:?}")
+        };
+        assert_eq!(
+            (curve.reserve, curve.circulating),
+            (q.reserve_after, q.supply_after)
+        );
+        assert_ne!(curve.reserve, reserve);
+        assert_eq!(*decided_ns, 1);
+        j.finish().unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     /// A launch fed from its journaled records: PASS after the window, the

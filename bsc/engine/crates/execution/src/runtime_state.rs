@@ -298,6 +298,7 @@ impl StateOwner {
             | CanonicalEvent::FlapTerm(_)
             | CanonicalEvent::FlapMigrated { .. }
             | CanonicalEvent::FlapTradeUndecodable { .. }
+            | CanonicalEvent::BlockComplete { .. }
             | CanonicalEvent::Fault(_) => return,
         };
         self.apply(&input);

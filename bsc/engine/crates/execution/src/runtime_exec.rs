@@ -429,15 +429,18 @@ impl ExecRuntime {
     }
 
     /// Phase I: one Strategy C decision on the PAPER path, when armed:
-    /// the intents that reached the sink (none when refused, counted by the
-    /// executor). `None` when the executor is not armed.
+    /// the intents that reached the sink (an exit's approval even when its
+    /// SELL was refused) and the refusal, counted by the executor. `None`
+    /// when the executor is not armed.
     pub fn on_strategy(
         &mut self,
         action: &crate::runtime_strategy::StrategyAction,
         owner: &StateOwner,
         clock: &dyn Clock,
-        at: u64,
-    ) -> Option<Vec<crate::paper_exec::PaperIntent>> {
+    ) -> Option<(
+        Vec<crate::paper_exec::PaperIntent>,
+        Option<crate::paper_exec::Refusal>,
+    )> {
         use crate::paper_exec::CanonicalContext;
         use crate::runtime_strategy::StrategyAction;
         let executor = self.executor.as_mut()?;
@@ -450,18 +453,17 @@ impl ExecRuntime {
                 token,
                 curve,
                 input_wei,
-            } => executor
-                .on_strategy_buy(token, curve, input_wei, &c2, clock, at)
-                .map(|i| vec![i])
-                .unwrap_or_default(),
+                decided_ns,
+            } => match executor.on_strategy_buy(token, curve, input_wei, &c2, clock, decided_ns) {
+                Ok(i) => (vec![i], None),
+                Err(r) => (Vec::new(), Some(r)),
+            },
             StrategyAction::Exit {
                 token,
                 tokens,
                 curve,
-            } => executor
-                .on_strategy_exit(token, tokens, curve, &c2, clock, at)
-                .map(|[a, b]| vec![a, b])
-                .unwrap_or_default(),
+                decided_ns,
+            } => executor.on_strategy_exit(token, tokens, curve, &c2, clock, decided_ns),
         })
     }
 
@@ -546,10 +548,10 @@ impl ExecRuntime {
             .executor
             .as_ref()
             .map(|x| x.strategy_counters().clone());
-        let (_, lanes_left, sells_left, strategy_spent) = self
+        let (_, lanes_left, next_nonce, strategy_spent, nonce_gap) = self
             .executor
             .as_ref()
-            .map_or((0, 0, 0, U256::ZERO), PaperExecutor::strategy_lanes);
+            .map_or((0, 0, 0, U256::ZERO, false), PaperExecutor::strategy_lanes);
         d.set(
             e::STRATEGY_INTENTS,
             strategy.as_ref().map_or(0, |c| c.launches),
@@ -565,7 +567,8 @@ impl ExecRuntime {
                 .map_or(0, |c| c.refusals.iter().map(|(_, n)| n).sum::<u64>()),
         )
         .set(e::STRATEGY_LANES_LEFT, lanes_left as u64)
-        .set(e::STRATEGY_SELL_LANES_LEFT, sells_left as u64)
+        .set(e::STRATEGY_NEXT_NONCE, next_nonce)
+        .set(e::STRATEGY_NONCE_GAP, nonce_gap)
         .set(
             e::STRATEGY_SPENT_WEI,
             darkbot_bsc_record::Value::U256(strategy_spent.to_be_bytes()),
@@ -617,7 +620,7 @@ mod tests {
                 validity_blocks: 2,
                 start_limit_ns: 1_000_000,
                 max_frame: 65_536,
-                strategy_lanes: 2,
+                strategy_lanes: 8,
                 strategy_session_cap_wei: 100_000_000_000_000_000,
                 approve_gas_limit: 100_000,
                 sell_gas_limit: 1_500_000,
@@ -888,13 +891,23 @@ mod tests {
             reserve: q.reserve_after,
             circulating: q.supply_after,
         };
+        // Gate H1: the decision record is 5 s older than its processing
+        // (the clock starts there); the deadline runs from the processing.
+        now.set(5_000_000_000);
         let buy = StrategyAction::Buy {
             token: [0xAB; 20],
             curve,
             input_wei: U256::from(10_000_000_000_000_000u64),
+            decided_ns: 0,
+        };
+        let exit = StrategyAction::Exit {
+            token: [0xAB; 20],
+            tokens: U256::from(1_000_000u64) * U256::from(10u64).pow(U256::from(18u8)),
+            curve,
+            decided_ns: 0,
         };
         // Not armed: nothing is executed.
-        assert!(x.on_strategy(&buy, &owner, &clock, 10).is_none());
+        assert!(x.on_strategy(&buy, &owner, &clock).is_none());
         settle(&mut x, &owner, "https://probe.invalid");
         owner.canonical(&CanonicalEvent::Block {
             number: HEAD,
@@ -914,25 +927,30 @@ mod tests {
         });
         settle(&mut x, &owner, "https://probe.invalid");
         assert_eq!(state(&x).0, "ARMED");
-        let intents = x.on_strategy(&buy, &owner, &clock, 20).unwrap();
-        assert_eq!(intents.len(), 1);
+        // Gate M1: no exit without a held BUY.
+        let (none, refused) = x.on_strategy(&exit, &owner, &clock).unwrap();
+        assert_eq!(
+            (none.len(), refused),
+            (0, Some(crate::paper_exec::Refusal::NotHeld))
+        );
+        let (intents, refused) = x.on_strategy(&buy, &owner, &clock).unwrap();
+        assert_eq!((intents.len(), refused), (1, None));
         assert_eq!(intents[0].kind, IntentKind::Buy);
-        let exit = StrategyAction::Exit {
-            token: [0xAB; 20],
-            tokens: U256::from(1_000_000u64) * U256::from(10u64).pow(U256::from(18u8)),
-            curve,
-        };
-        let intents = x.on_strategy(&exit, &owner, &clock, 30).unwrap();
+        assert_eq!(intents[0].times.ingress_ns, 0);
+        let (intents, refused) = x.on_strategy(&exit, &owner, &clock).unwrap();
+        assert_eq!(refused, None);
         assert_eq!(
             intents.iter().map(|i| i.kind).collect::<Vec<_>>(),
             [IntentKind::Approve, IntentKind::Sell]
         );
         // A second exit of the token is refused and counted, not executed.
-        assert!(x.on_strategy(&exit, &owner, &clock, 40).unwrap().is_empty());
+        assert!(x.on_strategy(&exit, &owner, &clock).unwrap().0.is_empty());
         let r = record(&x);
-        assert_eq!(r.u64(e::STRATEGY_INTENTS).unwrap(), 3);
+        assert_eq!(r.u64(e::STRATEGY_INTENTS).unwrap(), 4);
         assert_eq!(r.u64(e::STRATEGY_HANDOFFS).unwrap(), 3);
-        assert_eq!(r.u64(e::STRATEGY_REFUSED).unwrap(), 1);
+        assert_eq!(r.u64(e::STRATEGY_REFUSED).unwrap(), 2);
+        // BUY 0, approval 1, SELL 2: the next strategy nonce is 3.
+        assert_eq!(r.u64(e::STRATEGY_NEXT_NONCE).unwrap(), 3);
         // C3's own launch path is untouched.
         assert_eq!(r.u64(e::LAUNCHES).unwrap(), 0);
         x.shutdown();
@@ -1088,6 +1106,253 @@ mod tests {
         assert_eq!(s, "IDENTITY_REFUSED");
         assert!(reason.unwrap().contains("next nonce is 4"));
         assert!(!dir.join("fences").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Phase I gate H1/M2, at runtime level: a Flap launch whose canonical
+    /// events (launch, terms, the creator's purchase, the blocks past the
+    /// observation window) run through the runtime's own
+    /// `apply_canonical`, every record dated at time 0 (seconds before its
+    /// processing): at the decision block's `BlockComplete` the PASS goes
+    /// through the armed executor to the sink and is journaled as `J`
+    /// (before: the transport deadline ran from the record and refused it).
+    /// The 1 ms transport start limit holds in an optimized build only
+    /// (`cargo test --release ... -- --include-ignored`).
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        ignore = "the 1 ms transport start limit needs a release build"
+    )]
+    fn a_runtime_pass_reaches_the_sink_and_the_journal() {
+        use crate::chain_follower::{
+            CanonicalLaunch, CanonicalTerm, CanonicalTrade, FlapTerm, FourToken, Venue,
+        };
+        use crate::runtime::{
+            Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload,
+        };
+        use crate::runtime_journal::{JournalSetup, RuntimeJournal};
+        use crate::runtime_strategy::StrategyRuntime;
+        use darkbot_bsc_journal::RecordKind;
+        use darkbot_bsc_journal::storage::run::RunReader;
+        use darkbot_bsc_trading::economics::flap::native_curve20::{
+            HoldingCap, NativeBuyInputs, PricedToken, curve20, profile_terms, quote_native_buy,
+        };
+        use darkbot_bsc_trading::economics::network::{
+            Action, GasEvidence, PathClass, Venue as GasVenue,
+        };
+        let dir =
+            std::env::temp_dir().join(format!("bsc-exec-runtime-pass-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            dir.join("fences"),
+            witnessed,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        settle(&mut x, &owner, "https://probe.invalid");
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "ARMED");
+
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        const T: u64 = 1_793_000_000_450;
+        let mut c = Canonical::new(config.canonical.as_ref().unwrap(), T);
+        let mut cfg = config.strategy.engine.clone();
+        cfg.rules = Vec::new();
+        let mut gas = GasEvidence::default();
+        for (action, used) in [
+            (Action::Buy, 723_604),
+            (Action::Approve, 49_255),
+            (Action::Sell, 768_101),
+        ] {
+            gas.add(
+                PathClass {
+                    venue: GasVenue::Flap,
+                    action,
+                },
+                used,
+            )
+            .unwrap();
+        }
+        c.strategy = Some(StrategyRuntime::new(cfg, gas));
+        let mut journal = RuntimeJournal::open(
+            &dir.join("journal"),
+            7,
+            1,
+            JournalSetup::whole(256, journal_max_payload(&config)),
+        )
+        .unwrap();
+        // The runtime's clock started 600 ms ago: every record dated 0 is
+        // older than a whole ingress pass when it is processed.
+        let clock = Clock(
+            Instant::now()
+                .checked_sub(Duration::from_millis(600))
+                .unwrap(),
+        );
+        let (mut owner, mut exec) = (Some(owner), Some(x));
+        let mut apply = |c: &mut Canonical, journal: &mut RuntimeJournal, event| {
+            // Every record is dated at 0, before the processing.
+            apply_canonical(c, &mut owner, &mut exec, journal, clock, 0, event)
+        };
+        let token = [0xAB; 20];
+        let creator = [0xCC; 20];
+        let hash = |i: u64| [(i % 250) as u8 + 1; 32];
+        let block = |i: u64| CanonicalEvent::Block {
+            number: HEAD + i,
+            hash: hash(i),
+            parent_hash: if i == 1 { [0xb1; 32] } else { hash(i - 1) },
+            timestamp_s: (T + (i - 1) * 450) / 1_000,
+            timestamp_ms: T + (i - 1) * 450,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        };
+        let complete = |i: u64| CanonicalEvent::BlockComplete {
+            number: HEAD + i,
+            hash: hash(i),
+        };
+        apply(&mut c, &mut journal, block(1));
+        apply(
+            &mut c,
+            &mut journal,
+            CanonicalEvent::Launch(CanonicalLaunch {
+                venue: Venue::Flap,
+                block_number: HEAD + 1,
+                block_hash: hash(1),
+                tx_index: 1,
+                tx_hash: [0x11; 32],
+                token: Some(token),
+                creator: Some(creator),
+                external_buys_after: Some(0),
+                first_external_buy_index: None,
+                sender: Some(creator),
+                nonce: Some(0),
+                c1_scope: true,
+                venue_target: true,
+                four_token: FourToken::NotApplicable,
+                unverifiable: None,
+            }),
+        );
+        let c20 = curve20();
+        let word = |v: U256| v.to_be_bytes::<32>();
+        for (i, term) in [
+            FlapTerm::Version(6),
+            FlapTerm::QuoteToken([0; 20]),
+            FlapTerm::Curve {
+                r: word(c20.r),
+                h: word(c20.h),
+                k: word(c20.k),
+            },
+            FlapTerm::DexThreshold(word(
+                U256::from(8u64) * U256::from(10u64).pow(U256::from(26u64)),
+            )),
+            FlapTerm::Tax {
+                buy: word(U256::from(100u8)),
+                sell: word(U256::from(100u8)),
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            apply(
+                &mut c,
+                &mut journal,
+                CanonicalEvent::FlapTerm(CanonicalTerm {
+                    block_number: HEAD + 1,
+                    block_hash: hash(1),
+                    tx_index: 1,
+                    log_index: i as u64,
+                    token,
+                    term,
+                }),
+            );
+        }
+        let eth = U256::from(5_000_000_000_000_000u64);
+        let q = quote_native_buy(&NativeBuyInputs {
+            token: PricedToken::new(&profile_terms(100, 100)).unwrap(),
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: eth,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap();
+        apply(
+            &mut c,
+            &mut journal,
+            CanonicalEvent::FlapTrade(CanonicalTrade {
+                block_number: HEAD + 1,
+                block_hash: hash(1),
+                tx_index: 1,
+                tx_hash: [0x11; 32],
+                log_index: 9,
+                origin: creator,
+                sell: false,
+                token,
+                trader: creator,
+                amount: word(q.output_amount),
+                eth: word(eth),
+                fee: word(q.protocol_fee),
+                post_price: [0; 32],
+            }),
+        );
+        apply(&mut c, &mut journal, complete(1));
+        // 450 ms blocks: the 3 s window closes at the 8th block.
+        for i in 2..=9 {
+            apply(&mut c, &mut journal, block(i));
+            apply(&mut c, &mut journal, complete(i));
+        }
+        let strategy = c.strategy.as_ref().unwrap();
+        assert_eq!(
+            (strategy.counters.passed, strategy.counters.paper_unarmed),
+            (1, 0)
+        );
+        let x = exec.as_ref().unwrap();
+        let r = record(x);
+        assert_eq!(r.u64(e::STRATEGY_INTENTS).unwrap(), 1);
+        assert_eq!(
+            r.u64(e::STRATEGY_HANDOFFS).unwrap(),
+            1,
+            "{:?}",
+            r.get(e::STRATEGY_REFUSALS)
+        );
+        journal.finish().unwrap();
+        let mut reader =
+            RunReader::open(&dir.join("journal").join("7"), journal_max_payload(&config)).unwrap();
+        let mut intents = 0;
+        while let Some(rec) = reader.next_record().unwrap() {
+            if rec.kind == RecordKind::Runtime
+                && crate::runtime_strategy::paper_intent_kind(&rec.payload)
+                    == Some(crate::paper_exec::IntentKind::Buy)
+            {
+                intents += 1;
+            }
+        }
+        assert_eq!(intents, 1);
+        exec.unwrap().shutdown();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

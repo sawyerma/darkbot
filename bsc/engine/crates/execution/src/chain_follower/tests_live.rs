@@ -123,7 +123,8 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         CanonicalEvent::FlapTrade(_)
         | CanonicalEvent::FlapTerm(_)
         | CanonicalEvent::FlapMigrated { .. }
-        | CanonicalEvent::FlapTradeUndecodable { .. } => {}
+        | CanonicalEvent::FlapTradeUndecodable { .. }
+        | CanonicalEvent::BlockComplete { .. } => {}
         CanonicalEvent::Fault(fault) => faults.push(fault),
     };
     run_follower(

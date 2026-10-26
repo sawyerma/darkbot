@@ -177,7 +177,8 @@ fn strategy_paper_path_latency() {
             validity_blocks: 2,
             start_limit_ns: 1_000_000,
             max_frame: 65_536,
-            strategy_lanes: 2 * entries,
+            // BUY, approval, SELL: three nonces of the sequence each.
+            strategy_lanes: 3 * entries,
             strategy_session_cap_wei: u128::MAX / 4,
             approve_gas_limit: 100_000,
             sell_gas_limit: 1_500_000,
@@ -285,9 +286,9 @@ fn strategy_paper_path_latency() {
         );
         let buy_ns = buy.times.sink_ns - decided;
         let triggered = now();
-        let [approve, sell] = exec
-            .on_strategy_exit(token, tokens, curve, &c2, &clock, triggered)
-            .unwrap();
+        let (exit, refused) = exec.on_strategy_exit(token, tokens, curve, &c2, &clock, triggered);
+        assert_eq!(refused, None);
+        let [approve, sell]: [_; 2] = exit.try_into().unwrap();
         for x in [&approve, &sell] {
             journal.record(
                 JournalKind::Runtime,

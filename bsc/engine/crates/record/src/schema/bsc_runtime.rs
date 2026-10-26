@@ -557,11 +557,14 @@ pub mod runtime_status {
         /// v4 (Phase I): decisions for the PAPER path without an armed C3
         /// executor (counted, never executed).
         pub const PAPER_UNARMED: u16 = 30;
+        /// v5 (Phase I gate L4): decisions without an exact curve or
+        /// position when their block was complete (never executed).
+        pub const PAPER_UNPRICED: u16 = 31;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.strategy",
             record_type: 0,
-            schema_version: 4,
+            schema_version: 5,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -593,6 +596,7 @@ pub mod runtime_status {
                 Field::req(INCOMPLETE, "incomplete", U64),
                 Field::req(OPEN, "open", U64),
                 Field::req(PAPER_UNARMED, "paper_unarmed", U64),
+                Field::req(PAPER_UNPRICED, "paper_unpriced", U64),
             ],
         };
     }
@@ -657,15 +661,21 @@ pub mod runtime_status {
         pub const STRATEGY_HANDOFFS: u16 = 32;
         pub const STRATEGY_REFUSED: u16 = 33;
         pub const STRATEGY_LANES_LEFT: u16 = 34;
-        pub const STRATEGY_SELL_LANES_LEFT: u16 = 35;
+        /// Open exposure plus the gas spent (v4: an exit releases its
+        /// position's input).
         pub const STRATEGY_SPENT_WEI: u16 = 36;
         /// The refusals by stage, `STAGE=n` each.
         pub const STRATEGY_REFUSALS: u16 = 37;
+        /// v4 (Phase I gate M3): the strategy's next nonce in the PAPER
+        /// sender's sequence, and whether a nonce hole stopped its intents
+        /// (field 35, the v3 SELL lanes, is retired).
+        pub const STRATEGY_NEXT_NONCE: u16 = 38;
+        pub const STRATEGY_NONCE_GAP: u16 = 39;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.exec",
             record_type: 0,
-            schema_version: 3,
+            schema_version: 4,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -701,9 +711,10 @@ pub mod runtime_status {
                 Field::req(STRATEGY_HANDOFFS, "strategy_handoffs", U64),
                 Field::req(STRATEGY_REFUSED, "strategy_refused", U64),
                 Field::req(STRATEGY_LANES_LEFT, "strategy_lanes_left", U64),
-                Field::req(STRATEGY_SELL_LANES_LEFT, "strategy_sell_lanes_left", U64),
                 Field::req(STRATEGY_SPENT_WEI, "strategy_spent_wei", U256),
                 Field::rep(STRATEGY_REFUSALS, "strategy_refusals", Text),
+                Field::req(STRATEGY_NEXT_NONCE, "strategy_next_nonce", U64),
+                Field::req(STRATEGY_NONCE_GAP, "strategy_nonce_gap", Bool),
             ],
         };
     }
@@ -740,7 +751,7 @@ pub mod runtime_status {
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
         record_type: 40,
-        schema_version: 15,
+        schema_version: 16,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

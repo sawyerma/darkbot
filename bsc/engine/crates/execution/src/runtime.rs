@@ -163,6 +163,9 @@ pub struct RuntimeConfig {
     /// The longest a pass waits for events before it reconciles sources,
     /// joins launches and checks the stop file.
     pub reconcile_ms: u64,
+    /// The longest a queued canonical event waits for the ingress pass
+    /// (`BSC_RUNTIME_CANONICAL_SLICE_MS`, at most the pass).
+    pub canonical_slice_ms: u64,
     /// How long the operator waits for a requested stop before it kills the
     /// process; at least the derived worst-case stop path.
     pub stop_timeout_ms: u64,
@@ -418,6 +421,7 @@ impl RuntimeConfig {
             canonical,
             census_ms: take("BSC_RUNTIME_CENSUS_MS", 1_000, 86_400_000)?,
             reconcile_ms: take("BSC_RUNTIME_RECONCILE_MS", 10, 60_000)?,
+            canonical_slice_ms: take("BSC_RUNTIME_CANONICAL_SLICE_MS", 1, 60_000)?,
             // Below the launchd ExitTimeOut (330 s) of the runtime job in
             // ops/bsc-control.sh, so a SIGTERM stop is never cut by SIGKILL.
             stop_timeout_ms: take("BSC_RUNTIME_STOP_TIMEOUT_MS", 1_000, 300_000)?,
@@ -479,6 +483,23 @@ impl RuntimeConfig {
             .validate()
             .map_err(|e| format!("WSS bounds: {e:?}"))?;
         journal_setup(&config).validate()?;
+        if config.canonical_slice_ms > config.reconcile_ms {
+            return Err(format!(
+                "BSC_RUNTIME_CANONICAL_SLICE_MS {} is above BSC_RUNTIME_RECONCILE_MS {}",
+                config.canonical_slice_ms, config.reconcile_ms
+            ));
+        }
+        // Phase I gate L2: the strategy prices the network cost at the gas
+        // price its PAPER intents are signed with.
+        if let Some(x) = &config.exec
+            && alloy_primitives::U256::from(x.exec.gas_price_wei)
+                != config.strategy.engine.gas_price_wei
+        {
+            return Err(format!(
+                "BSC_STRATEGY_C_GAS_PRICE_WEI {} differs from BSC_EXEC_GAS_PRICE_WEI {}",
+                config.strategy.engine.gas_price_wei, x.exec.gas_price_wei
+            ));
+        }
         let needed = config.stop_bound_ms();
         if config.stop_timeout_ms < needed {
             return Err(format!(
@@ -549,7 +570,6 @@ fn strategy_to_paper(
     owner: &Option<StateOwner>,
     clock: Clock,
     journal: &mut RuntimeJournal,
-    at: u64,
 ) {
     let Some(s) = c.strategy.as_mut() else {
         return;
@@ -563,12 +583,14 @@ fn strategy_to_paper(
                     id: CLOCK_ID_MONOTONIC,
                     now: || clock.now_ns(),
                 },
-                at,
             ),
             _ => None,
         };
         match handed {
-            Some(intents) => {
+            // Every transaction at the sink is journaled, an exit's
+            // approval also when its SELL was refused (refusals are the
+            // executor's counters).
+            Some((intents, _refused)) => {
                 for i in &intents {
                     journal.record(
                         RecordKind::Runtime,
@@ -579,6 +601,47 @@ fn strategy_to_paper(
             }
             None => s.counters.paper_unarmed += 1,
         }
+    }
+}
+
+/// One canonical event: the C2 owner first, then the follower's records
+/// (and the strategy fed from them); once the block's events are all
+/// applied (`BlockComplete`), the strategy's decisions go to the PAPER
+/// path on that complete state (Phase I gate M2).
+fn apply_canonical(
+    c: &mut Canonical,
+    owner: &mut Option<StateOwner>,
+    exec: &mut Option<ExecRuntime>,
+    journal: &mut RuntimeJournal,
+    clock: Clock,
+    at: u64,
+    event: CanonicalEvent,
+) {
+    let complete = matches!(event, CanonicalEvent::BlockComplete { .. });
+    if let Some(o) = owner.as_mut() {
+        o.canonical(&event);
+    }
+    c.event(at, event, journal);
+    if complete {
+        strategy_to_paper(c, exec, owner, clock, journal);
+    }
+}
+
+/// Every queued canonical event, now (Phase I gate H1: also between the
+/// ingress events of a pass, every `BSC_RUNTIME_CANONICAL_SLICE_MS`).
+fn drain_canonical(
+    canonical: &mut Option<Canonical>,
+    crx: Option<&std::sync::mpsc::Receiver<(u64, CanonicalEvent)>>,
+    owner: &mut Option<StateOwner>,
+    exec: &mut Option<ExecRuntime>,
+    journal: &mut RuntimeJournal,
+    clock: Clock,
+) {
+    let (Some(c), Some(crx)) = (canonical.as_mut(), crx) else {
+        return;
+    };
+    while let Ok((at, event)) = crx.try_recv() {
+        apply_canonical(c, owner, exec, journal, clock, at, event);
     }
 }
 
@@ -987,6 +1050,8 @@ impl Canonical {
             }
             // The C2 owner's reconciliation input; no G0.4 count.
             CanonicalEvent::NonceFact { .. } => {}
+            // Phase I: the runtime acts on the complete block (strategy).
+            CanonicalEvent::BlockComplete { .. } => {}
             CanonicalEvent::Fault(fault) => {
                 self.rpc_errors += 1;
                 let limited = matches!(
@@ -1462,6 +1527,7 @@ pub fn run(
     let mut next_status = Instant::now();
     let mut next_reconcile = Instant::now();
     let reconcile_every = Duration::from_millis(config.reconcile_ms);
+    let canonical_slice = Duration::from_millis(config.canonical_slice_ms);
     let status_every = Duration::from_millis(config.status_ms);
     let index = |s: SourceId| SourceId::ALL.iter().position(|x| *x == s).unwrap_or(0);
     let mut stop_journaled = false;
@@ -1603,10 +1669,22 @@ pub fn run(
         // Events, bounded per pass so status and stop stay timely.
         let deadline = Instant::now() + reconcile_every;
         while Instant::now() < deadline {
-            let wait = deadline.saturating_duration_since(Instant::now());
+            // The canonical events do not wait for the pass (Phase I gate
+            // H1): drained before every ingress event and every slice.
+            drain_canonical(
+                &mut canonical,
+                canonical_rx.as_ref(),
+                &mut owner,
+                &mut exec,
+                &mut journal,
+                clock,
+            );
+            let wait = deadline
+                .saturating_duration_since(Instant::now())
+                .min(canonical_slice);
             let (source, at, event) = match rx.recv_timeout(wait) {
                 Ok(e) => e,
-                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,
             };
             let observation = match &event {
@@ -1721,13 +1799,15 @@ pub fn run(
                 f.stop.store(true, Ordering::Release);
                 loop {
                     match crx.recv_timeout(reconcile_every) {
-                        Ok((at, event)) => {
-                            if let Some(o) = owner.as_mut() {
-                                o.canonical(&event);
-                            }
-                            c.event(at, event, &mut journal);
-                            strategy_to_paper(c, &mut exec, &owner, clock, &mut journal, at);
-                        }
+                        Ok((at, event)) => apply_canonical(
+                            c,
+                            &mut owner,
+                            &mut exec,
+                            &mut journal,
+                            clock,
+                            at,
+                            event,
+                        ),
                         Err(RecvTimeoutError::Timeout) if !f.handle.is_finished() => {}
                         Err(_) => break,
                     }
@@ -1735,11 +1815,7 @@ pub fn run(
                 let _ = f.handle.join();
             }
             while let Ok((at, event)) = crx.try_recv() {
-                if let Some(o) = owner.as_mut() {
-                    o.canonical(&event);
-                }
-                c.event(at, event, &mut journal);
-                strategy_to_paper(c, &mut exec, &owner, clock, &mut journal, at);
+                apply_canonical(c, &mut owner, &mut exec, &mut journal, clock, at, event);
             }
             let now = if stopping { u64::MAX } else { clock.now_ns() };
             c.join(now, &core, &mut journal);

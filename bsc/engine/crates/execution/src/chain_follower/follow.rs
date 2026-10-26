@@ -470,6 +470,10 @@ impl Follower {
         for event in flap {
             sink(event);
         }
+        sink(CanonicalEvent::BlockComplete {
+            number: header.number,
+            hash: header.hash,
+        });
         self.kept.push_back((header.number, header.hash));
         while self.kept.len() as u64 > self.reorg_depth.saturating_add(1) {
             self.kept.pop_front();

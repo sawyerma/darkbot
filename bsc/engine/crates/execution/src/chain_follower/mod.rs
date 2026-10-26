@@ -304,6 +304,10 @@ pub enum CanonicalEvent {
     },
     /// A step failed; the follower waits its backoff and tries again.
     Fault(FollowerFault),
+    /// Phase I: every event of the block just reported (its launches,
+    /// reverted launches and Portal events) has been sent; a consumer that
+    /// acts on the block's complete state acts now.
+    BlockComplete { number: u64, hash: [u8; 32] },
 }
 
 /// One term the Portal set for a token.

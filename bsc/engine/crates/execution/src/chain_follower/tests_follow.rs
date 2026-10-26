@@ -403,6 +403,8 @@ fn connector(
 struct Outcome {
     /// Every event with the time the sink received it.
     events: Vec<(CanonicalEvent, Instant)>,
+    /// Each `BlockComplete`: its block and how many events preceded it.
+    completes: Vec<(u64, usize)>,
     returned: Instant,
     stop_set_at: Option<Instant>,
     connections: usize,
@@ -444,7 +446,13 @@ fn follow_watching(
         &limits,
     );
     let mut events = Vec::new();
-    let mut sink = |event: CanonicalEvent| events.push((event, Instant::now()));
+    let mut completes = Vec::new();
+    // `BlockComplete` closes every reported block: kept apart, so the
+    // tests read the block's events (one asserts the marker itself).
+    let mut sink = |event: CanonicalEvent| match event {
+        CanonicalEvent::BlockComplete { number, .. } => completes.push((number, events.len())),
+        other => events.push((other, Instant::now())),
+    };
     run(
         &mut Rpc::new(client),
         &limits,
@@ -459,6 +467,7 @@ fn follow_watching(
     let stopper_at = stopper.map(|s| s.join().unwrap());
     Outcome {
         events,
+        completes,
         returned,
         stop_set_at: state.stop_set_at.or(stopper_at),
         connections: state.connections,
@@ -786,6 +795,7 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
             format!("term {} {} {:?}", t.block_number, t.log_index, t.term)
         }
         CanonicalEvent::FlapMigrated { block_number, .. } => format!("migrated {block_number}"),
+        CanonicalEvent::BlockComplete { hash, .. } => format!("complete {}", name(hash)),
         CanonicalEvent::Fault(fault) => format!("fault {fault:?}"),
     }
 }
@@ -1098,6 +1108,9 @@ fn a_real_launch_block_through_the_whole_path() {
         chunk: 4096,
     };
     let outcome = follow_script(script, limits(), &[], None);
+    // Phase I gate M2: the block is complete after all its events (its
+    // launches, reverted launches and Portal events).
+    assert_eq!(outcome.completes, [(129774331, outcome.events.len())]);
     // Phase H: the block's trades follow its launches; checked apart.
     let (trades, events): (Vec<CanonicalEvent>, Vec<CanonicalEvent>) =
         outcome.events.into_iter().map(|(e, _)| e).partition(|e| {
