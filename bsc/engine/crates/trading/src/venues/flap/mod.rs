@@ -1,5 +1,9 @@
-//! Flap protocol, supported scope: `newTokenV6` launches of token version 6
-//! (`TOKEN_TAXED_V3`) and the direct native-input `swapExactInput` BUY.
+//! Flap protocol, the full production decoder (Phase D) of the verified
+//! Portal v5.27.0: pending recognition of every launch and trade call of
+//! the verified ABI ([`recognize`]; `newTokenV6` and `swapExactInput`
+//! decoded, the others explicitly unsupported) and canonical decode of the
+//! Portal's events ([`events`]: launch, BUY, SELL, migration, mode and
+//! configuration). Trading admission stays the `TOKEN_TAXED_V3` profile.
 //!
 //! This is the single implementation of the Flap ABI, the token-address
 //! derivation, the deployment binding, the launch classification and the
@@ -10,6 +14,8 @@
 //!
 //! - [`abi`] decodes facts. It accepts every canonical call, including
 //!   launches of modes that are not supported, so capture keeps them.
+//! - [`recognize`] and [`events`] are the one decoder of capture, replay,
+//!   PAPER and LIVE (the runtime ingress and the canonical follower).
 //! - [`deployment`] holds the witnessed deployment constants and validates
 //!   the live deployment against them.
 //! - [`profile`] is the fail-closed trading admission: a launch is
@@ -24,4 +30,9 @@ pub mod abi;
 pub mod address;
 pub mod binding;
 pub mod deployment;
+pub mod events;
 pub mod profile;
+pub mod recognize;
+
+#[cfg(test)]
+mod decoder_tests;

@@ -369,7 +369,8 @@ fn malformed_words_are_unknown_never_guessed() {
         ),
         (None, None)
     );
-    // A token word with a non-zero pad: token, and so the buys, unknown.
+    // A token word with a non-zero pad: the event is malformed for the
+    // Flap decoder (Phase D), so token, creator and the buys are unknown.
     let launch_topic = LAUNCH_EVENTS[0].topic0;
     let mut dirty = receipts;
     for log in &mut dirty[1].logs {
@@ -380,13 +381,15 @@ fn malformed_words_are_unknown_never_guessed() {
     let launches = detect(&block, &dirty);
     assert_eq!(launches.len(), 2);
     assert_eq!(
-        (launches[0].token, launches[0].external_buys_after),
-        (None, None)
+        (
+            launches[0].token,
+            launches[0].creator,
+            launches[0].external_buys_after
+        ),
+        (None, None, None)
     );
-    assert_eq!(
-        launches[0].creator,
-        Some(hex!("0fd35ec5ecbb70db9f163764c42a23f4bfbfb464"))
-    );
+    // The other launch of the block is untouched.
+    assert!(launches[1].token.is_some() && launches[1].creator.is_some());
 }
 
 /// `timestamp_ms` of block 129774331: `timestamp` 0x6ade6eab = 1792962219 s,

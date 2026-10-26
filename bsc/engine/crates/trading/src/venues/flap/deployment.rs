@@ -215,6 +215,28 @@ pub fn bsc_mainnet_v5_24_0() -> FlapDeployment {
     }
 }
 
+/// BSC mainnet (chain 56), Portal v5.27.0: the current deployment.
+///
+/// Witness: the G0.1 Flap refreeze at block 129849511
+/// (`bsc/native/evidence/g01/flap_freeze_20261026T062813Z/flap.dbrec`). The
+/// implementation is Sourcify-verified ("Portal", solc 0.8.26); the proxy,
+/// the tax-token V3 implementation and its clone init code are unchanged
+/// since v5.24.0, the implementation, its fingerprint and the version are
+/// new.
+pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
+    let v5_24 = bsc_mainnet_v5_24_0();
+    FlapDeployment {
+        portal_version: "v5.27.0",
+        portal_implementation: Address::new(alloy_primitives::hex!(
+            "6a0e41d0f4195dc0efa36e6d28a18475932830de"
+        )),
+        portal_implementation_runtime_sha256: alloy_primitives::hex!(
+            "4a439209fca0a6168a15cf58d19c19975205b6af13e0fb81846f7d78528e8f74"
+        ),
+        ..v5_24
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod testkit {
     //! Validated mainnet deployment for tests of dependent modules.
@@ -290,6 +312,56 @@ mod tests {
             deployment.tax_v3_implementation_runtime_sha256.as_slice(),
             unhex("34000dd228055664fda2debd21b5fe5288b750ca3ce8fb4e6933e5c529586ef5").as_slice()
         );
+    }
+
+    /// The current deployment against the G0.1 Flap refreeze (block
+    /// 129849511): new implementation, fingerprint and version; the rest,
+    /// including the token init code hash, unchanged.
+    #[test]
+    fn current_constants_match_the_flap_refreeze() {
+        let current = bsc_mainnet_v5_27_0();
+        let previous = bsc_mainnet_v5_24_0();
+        assert_eq!(current.portal_version, "v5.27.0");
+        assert_eq!(
+            current.portal_implementation,
+            address("6a0e41d0f4195dc0efa36e6d28a18475932830de")
+        );
+        assert_eq!(
+            current.portal_implementation_runtime_sha256.as_slice(),
+            unhex("4a439209fca0a6168a15cf58d19c19975205b6af13e0fb81846f7d78528e8f74").as_slice()
+        );
+        assert_eq!(
+            (
+                current.chain_id,
+                current.portal,
+                current.portal_runtime_sha256,
+                current.tax_v3_implementation,
+                current.tax_v3_implementation_runtime_sha256,
+            ),
+            (
+                previous.chain_id,
+                previous.portal,
+                previous.portal_runtime_sha256,
+                previous.tax_v3_implementation,
+                previous.tax_v3_implementation_runtime_sha256,
+            )
+        );
+        assert_eq!(
+            current.tax_v3_init_code_hash,
+            word("2f7f413fcc6c3812c665c15bd4a012e663f567d626112a81d401066fd5a771b4")
+        );
+        // A live v5.24.0 observation no longer validates against it.
+        assert_eq!(
+            current.validate(&matching_observation(), 1),
+            Err(DeploymentError::PortalVersion)
+        );
+        let observed = ObservedDeployment {
+            portal_version: "v5.27.0",
+            portal_implementation: current.portal_implementation,
+            portal_implementation_runtime_sha256: current.portal_implementation_runtime_sha256,
+            ..matching_observation()
+        };
+        assert!(current.validate(&observed, 1).is_ok());
     }
 
     #[test]

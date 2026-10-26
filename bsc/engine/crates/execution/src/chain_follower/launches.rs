@@ -21,7 +21,8 @@
 //!
 //! Every topic is recomputed from its signature in the tests.
 
-use alloy_primitives::hex;
+use alloy_primitives::{Address, hex};
+use darkbot_bsc_trading::venues::flap::events::{PortalEvent, PortalLog, decode_portal_log};
 
 use super::CanonicalLaunch;
 use super::jsonrpc::{BlockHead, Log, Receipt};
@@ -166,14 +167,25 @@ pub(super) fn detect(block: &BlockHead, receipts: &[Receipt]) -> Vec<ReceiptLaun
             else {
                 continue;
             };
-            let words =
-                (log.topics.len() == 1 && log.data.len() >= event.head_words * WORD).then(|| {
-                    (
-                        address_word(&log.data, event.token_word),
-                        address_word(&log.data, event.creator_word),
-                    )
-                });
-            let (token, creator) = words.unwrap_or((None, None));
+            let (token, creator) = match event.venue {
+                // Phase D: the one Flap decoder (strict canonical layout).
+                Venue::Flap => match flap_log(log) {
+                    PortalLog::Event(PortalEvent::TokenCreated { token, creator, .. }) => {
+                        (Some(token.into_array()), Some(creator.into_array()))
+                    }
+                    _ => (None, None),
+                },
+                Venue::Four => {
+                    if log.topics.len() == 1 && log.data.len() >= event.head_words * WORD {
+                        (
+                            address_word(&log.data, event.token_word),
+                            address_word(&log.data, event.creator_word),
+                        )
+                    } else {
+                        (None, None)
+                    }
+                }
+            };
             let (external_buys_after, first_external_buy_index) = match (event.buy, token) {
                 (Some(buy), Some(token)) => {
                     match buys_after(receipts, receipt.tx_index, event.contract, &buy, token) {
@@ -220,16 +232,35 @@ fn buys_after(
             .iter()
             .filter(|l| is_event(l, contract, buy.topic0))
         {
-            if log.topics.len() != 1 || log.data.len() != buy.words * WORD {
-                return None;
-            }
-            if address_word(&log.data, buy.token_word)? == token {
+            let bought = if contract == FLAP_PORTAL {
+                // Phase D: the one Flap decoder; a malformed buy voids the count.
+                match flap_log(log) {
+                    PortalLog::Event(PortalEvent::TokenBought(trade)) => trade.token.into_array(),
+                    _ => return None,
+                }
+            } else {
+                if log.topics.len() != 1 || log.data.len() != buy.words * WORD {
+                    return None;
+                }
+                address_word(&log.data, buy.token_word)?
+            };
+            if bought == token {
                 count = count.checked_add(1)?;
                 first.get_or_insert(receipt.tx_index);
             }
         }
     }
     Some((count, first))
+}
+
+/// One log through the production Flap decoder (`trading::venues::flap`).
+fn flap_log(log: &Log) -> PortalLog<'_> {
+    decode_portal_log(
+        Address::from(FLAP_PORTAL),
+        Address::from(log.address),
+        &log.topics,
+        &log.data,
+    )
 }
 
 fn is_event(log: &Log, contract: [u8; 20], topic0: [u8; 32]) -> bool {

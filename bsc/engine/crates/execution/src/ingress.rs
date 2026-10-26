@@ -11,7 +11,9 @@
 //! Times are the caller's monotonic readings; this module reads no clock.
 
 use crate::sources::SourceId;
+use alloy_primitives::Address;
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
+use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
 use std::collections::{HashMap, VecDeque};
 
 /// What one source delivered.
@@ -115,9 +117,24 @@ fn index(source: SourceId) -> usize {
     SourceId::ALL.iter().position(|s| *s == source).unwrap_or(0)
 }
 
-/// Whether canonical signed bytes are a Flap launch of the C1 scope.
+/// Whether canonical signed bytes are a Flap launch of the C1 scope: the
+/// frozen HOT0 prefilter (Portal, `newTokenV6`) and then the production
+/// Flap decoder's verified decode (Phase D). Calldata the decoder refuses
+/// is no launch.
 pub fn is_flap_launch(raw: &[u8]) -> bool {
-    decode_tx_target(raw).is_ok_and(|t| C14_FLAP_SCOPE.matches(&t))
+    let Ok(target) = decode_tx_target(raw) else {
+        return false;
+    };
+    if !C14_FLAP_SCOPE.matches(&target) {
+        return false;
+    }
+    // The prefilter's one address is the Portal; the signed bytes bound
+    // the calldata.
+    let portal = Address::from(C14_FLAP_SCOPE.addresses[0]);
+    matches!(
+        recognize(portal, target.to.map(Address::from), target.data, raw.len()),
+        Recognized::LaunchV6(_)
+    )
 }
 
 impl IngressCore {
@@ -334,19 +351,38 @@ pub fn health(
 mod tests {
     use super::*;
 
-    /// A canonical signed legacy transaction to the Flap portal with the
-    /// launch selector (`newTokenV6`), and one to another address.
+    /// A pending `newTokenV6` launch of the G0.4 coverage capture (real,
+    /// canonical calldata).
+    const LAUNCH_CALLDATA: &str =
+        include_str!("../../trading/fixtures/flap/launch_v6_native_split_tax_pending.hex");
+
+    fn launch_calldata() -> Vec<u8> {
+        alloy_primitives::hex::decode(LAUNCH_CALLDATA.trim()).unwrap()
+    }
+
+    /// A canonical signed legacy transaction to `to`: the real launch
+    /// calldata for the launch selector (`newTokenV6`), else the selector
+    /// and one zero word.
     fn legacy(to: [u8; 20], selector: [u8; 4]) -> Vec<u8> {
+        let data = if selector == LAUNCH {
+            launch_calldata()
+        } else {
+            let mut data = selector.to_vec();
+            data.extend_from_slice(&[0u8; 32]);
+            data
+        };
+        signed(to, &data)
+    }
+
+    fn signed(to: [u8; 20], data: &[u8]) -> Vec<u8> {
         use darkbot_bsc_tx_encoding::rlp::{encode_bytes, encode_list, encode_u64};
-        let mut data = selector.to_vec();
-        data.extend_from_slice(&[0u8; 32]);
         encode_list(&[
             encode_u64(1),
             encode_u64(1_000_000_000),
             encode_u64(21_000),
             encode_bytes(&to),
             encode_u64(0),
-            encode_bytes(&data),
+            encode_bytes(data),
             encode_u64(147),
             encode_bytes(&[1u8; 32]),
             encode_bytes(&[2u8; 32]),
@@ -365,6 +401,14 @@ mod tests {
         assert!(!is_flap_launch(&legacy([7; 20], LAUNCH)));
         assert!(!is_flap_launch(&legacy(PORTAL, [1, 2, 3, 4])));
         assert!(!is_flap_launch(b"not a transaction"));
+        // Phase D: the launch selector alone is no launch; the production
+        // decoder must accept the calldata (before: counted as a launch).
+        let mut short = LAUNCH.to_vec();
+        short.extend_from_slice(&[0u8; 32]);
+        assert!(!is_flap_launch(&signed(PORTAL, &short)));
+        let mut truncated = launch_calldata();
+        truncated.truncate(truncated.len() - 32);
+        assert!(!is_flap_launch(&signed(PORTAL, &truncated)));
     }
 
     /// Plan §5a.3: the first verified full sighting wins, even when another
