@@ -76,6 +76,7 @@ Canonical facts: [PHASENPLAN.md](PHASENPLAN.md), [MEASUREMENT_LEDGER.md](MEASURE
 
 | Code / evidence | Scope | Qualification |
 |---|---|---|
+| **`c6b3b2e7`** (2026-10-26) | DEC-04: A verbindlich, B aus dem signierten Plan, HOLD_B mit Nachweis-Gate (N = B-8), Journal-Schema 7, `HoldFlows`-Record, Wallets-/Liquidator-Anzeige (mit `30d5b823`, `e6cbd319`, `65603ed7`) | OFFLINE_VERIFIED · CI `40327233793` grün; ACTIVE wartet auf B-8 (BUGS §22.5) |
 | **`386c3b39`** (2026-10-26) | DEC-03: Non-Landing nach N-2 (B je Betreiber, lückenlose C-Kette, fünf Klassen, Klasse im Journal, Record/Alarm, Wallets-Abschnitt) | OFFLINE_VERIFIED · CI `40288382331`/`40288382152` grün; echte Provider-Gates NOT_RUN (BUGS §22.5) |
 | **`777748e4`** (2026-10-26) | DEC-13a: LIVE-Anforderung über den Controller; requested/effective, effective BLOCKED bis FE-06 | TEILWEISE · CI `40278646493`/`40278646443` grün; DEC-13b offen (BUGS §22.5) |
 | **`ac3fec1f`** (2026-10-26) | DEC-02: FE-04-Handoff verwendet die gebundene Simulation wieder (oder simuliert neu/lehnt ab) | TEILWEISE · CI `40274176837` grün; Status/produktiv mit DEC-13b (BUGS §22.5) |
