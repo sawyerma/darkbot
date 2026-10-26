@@ -51,7 +51,9 @@ fn check(id: &str, name: &str, result: Result<String, &str>, slot: u64) -> BootC
 pub struct Spec {
     pub genesis: String,
     pub transactions: bool,
+    /// DEC-07: the registry's `boot_token_ttl_seconds` and its source.
     pub ttl_seconds: u64,
+    pub ttl_source: String,
 }
 impl Spec {
     pub fn validate(&self) -> Result<(), String> {
@@ -60,7 +62,10 @@ impl Spec {
         if self.genesis != protocol::GENESIS_HASH_MAINNET {
             return Err("BOOT_GENESIS_PIN_MISMATCH".into());
         }
-        if self.ttl_seconds == 0 || self.ttl_seconds > 60 {
+        use darkbot_solana::runtime_config::defaults::{
+            BOOT_TOKEN_TTL_MAX_SECONDS, BOOT_TOKEN_TTL_MIN_SECONDS,
+        };
+        if !(BOOT_TOKEN_TTL_MIN_SECONDS..=BOOT_TOKEN_TTL_MAX_SECONDS).contains(&self.ttl_seconds) {
             return Err("BOOT_TOKEN_TTL".into());
         }
         Ok(())
@@ -561,6 +566,8 @@ fn run(
         .into(),
         accounts,
         state_hash,
+        ttl_seconds: spec.ttl_seconds,
+        ttl_source: spec.ttl_source.clone(),
     };
     result.audit.readiness_token.clear();
     result.audit.readiness_token = hash(&bincode::serialize(&result).map_err(|_| "BOOT_TOKEN")?);
@@ -579,6 +586,12 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
     let resolved = darkbot_solana::runtime_config::Resolved::for_mode(mode, operational, &|k| {
         std::env::var(k).ok()
     })?;
+    // DEC-07: the TTL's source, as the status projection names it.
+    let ttl_source = resolved
+        .sources
+        .get("boot_token_ttl_seconds")
+        .cloned()
+        .unwrap_or_else(|| "builtin_default".into());
     resolved.activate()?;
     let c = darkbot_solana::runtime_config::active();
     let offline = boot_audit::offline(&boot_audit::OfflineInputs::for_project(project))?;
@@ -596,7 +609,8 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
             Some("transactions") => true,
             _ => return Err("BOOT_CAPTURE_SOURCE".into()),
         },
-        ttl_seconds: 60,
+        ttl_seconds: c.limits.boot_token_ttl_seconds,
+        ttl_source,
     };
     spec.validate()?;
     // X2: the typed PROVIDER_EVIDENCE record of the explicit offline import
@@ -740,6 +754,7 @@ mod tests {
             genesis: protocol::GENESIS_HASH_MAINNET.into(),
             transactions: false,
             ttl_seconds: 60,
+            ttl_source: "builtin_default".into(),
         }
     }
     /// BOOT-12: the operator's `--genesis-hash` and the checked-in pin are two independent
@@ -1110,6 +1125,47 @@ mod tests {
         assert!(missing.err().unwrap().starts_with("FE_ACCOUNT_MISSING"));
         assert_eq!(genesis.unwrap_err(), "BOOT_GENESIS_UNKNOWN");
     }
+    /// DEC-07: the registry's TTL is the record's — 10 s and 120 s are issued, 9 s and 121 s are
+    /// refused before any read. The TTL counts from the oldest network read (`observed_at`, taken
+    /// before the first read), however long the reads take, never from the token's issue.
+    #[test]
+    fn dec07_the_record_carries_the_registry_ttl_from_its_oldest_read() {
+        let (mut c, all) = fe::tests::fixture();
+        c.rpc_endpoints = vec!["https://rpc.invalid".into()];
+        c.wss_endpoints = vec!["wss://wss.invalid".into()];
+        let io = || Fixture {
+            genesis: spec().genesis,
+            all: all.clone(),
+            reads: 0,
+            wss: true,
+            wrong_slot: false,
+        };
+        for ttl in [10, 120] {
+            let s = Spec {
+                ttl_seconds: ttl,
+                ttl_source: "cli".into(),
+                ..spec()
+            };
+            let mut reads = io();
+            let out = run(audit(), &c, &s, &mut reads, 1000, "p".into(), "b".into()).unwrap();
+            assert!(reads.reads > 1, "the reads follow the TTL's start");
+            assert_eq!(
+                (out.observed_at, out.expires_at, out.ttl_seconds),
+                (1000, 1000 + ttl, ttl)
+            );
+            assert_eq!(out.ttl_source, "cli");
+        }
+        for ttl in [9, 121] {
+            let s = Spec {
+                ttl_seconds: ttl,
+                ..spec()
+            };
+            let mut reads = io();
+            let refused = run(audit(), &c, &s, &mut reads, 1000, "p".into(), "b".into());
+            assert_eq!(refused.unwrap_err(), "BOOT_TOKEN_TTL");
+            assert_eq!(reads.reads, 0, "refused before any read");
+        }
+    }
     #[test]
     fn cluster_pin_and_slot_contradictions_block_without_followup_reads() {
         let s = spec();
@@ -1227,6 +1283,8 @@ mod tests {
             capture_source: "logs".into(),
             accounts: Vec::<AccountProof>::new(),
             state_hash: "state".into(),
+            ttl_seconds: 60,
+            ttl_source: "builtin_default".into(),
         };
         n.audit.readiness_token.clear();
         n.audit.readiness_token = hash(&bincode::serialize(&n).unwrap());

@@ -1421,11 +1421,72 @@ pub struct NetworkAudit {
     pub capture_source: String,
     pub accounts: Vec<AccountProof>,
     pub state_hash: String,
+    /// DEC-07: the TTL this record was issued with (`expires_at − observed_at`, from its oldest
+    /// network read) and the source of that value (`boot_token_ttl_seconds`); covered by the
+    /// readiness token, so no later configuration extends it.
+    pub ttl_seconds: u64,
+    pub ttl_source: String,
 }
 impl payload::Payload for NetworkAudit {
     const KIND: u16 = journal::kind::BOOT_NETWORK;
+    /// DEC-07: 3 — the TTL and its source. Schema 2 stays readable (a fixed 60 s TTL); its token
+    /// covers that earlier layout, so such a record never admits a start.
+    const SCHEMA: u16 = payload::TYPED + 1;
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
+        (schema == payload::TYPED)
+            .then(|| payload::decode_wire::<NetworkAuditV2>(bytes).map(NetworkAudit::from))
+    }
+}
+/// The record before DEC-07 (schema 2): no TTL field.
+#[derive(Deserialize)]
+struct NetworkAuditV2 {
+    audit: BootAudit,
+    observed_at: u64,
+    expires_at: u64,
+    slot: u64,
+    genesis: String,
+    rpc_binding: String,
+    wss_binding: String,
+    binary_sha256: String,
+    provider_proof_sha256: String,
+    capture_source: String,
+    accounts: Vec<AccountProof>,
+    state_hash: String,
+}
+/// The source of a TTL read from a record written before DEC-07.
+pub const TTL_SOURCE_PRE_DEC07: &str = "pre_dec07";
+impl From<NetworkAuditV2> for NetworkAudit {
+    fn from(v: NetworkAuditV2) -> Self {
+        Self {
+            ttl_seconds: v.expires_at.saturating_sub(v.observed_at),
+            ttl_source: TTL_SOURCE_PRE_DEC07.into(),
+            audit: v.audit,
+            observed_at: v.observed_at,
+            expires_at: v.expires_at,
+            slot: v.slot,
+            genesis: v.genesis,
+            rpc_binding: v.rpc_binding,
+            wss_binding: v.wss_binding,
+            binary_sha256: v.binary_sha256,
+            provider_proof_sha256: v.provider_proof_sha256,
+            capture_source: v.capture_source,
+            accounts: v.accounts,
+            state_hash: v.state_hash,
+        }
+    }
 }
 impl NetworkAudit {
+    /// DEC-07: `at` lies within the record's own TTL — the one it was issued with, within the
+    /// user's 10..=120 s, counted from its oldest network read (`observed_at`).
+    fn within_ttl(&self, at: u64) -> bool {
+        use darkbot_solana::runtime_config::defaults::{
+            BOOT_TOKEN_TTL_MAX_SECONDS, BOOT_TOKEN_TTL_MIN_SECONDS,
+        };
+        (BOOT_TOKEN_TTL_MIN_SECONDS..=BOOT_TOKEN_TTL_MAX_SECONDS).contains(&self.ttl_seconds)
+            && self.observed_at.checked_add(self.ttl_seconds) == Some(self.expires_at)
+            && (self.observed_at..self.expires_at).contains(&at)
+    }
+
     pub fn validate_start(
         &self,
         current: &AuditedIdentity,
@@ -1434,10 +1495,7 @@ impl NetworkAudit {
         source: &str,
     ) -> Result<(), String> {
         self.verify_record()?;
-        if now < self.observed_at
-            || now >= self.expires_at
-            || self.expires_at.saturating_sub(self.observed_at) > 60
-        {
+        if !self.within_ttl(now) {
             return Err("BOOT_NETWORK_EXPIRED".into());
         }
         if current != &self.audit.identity
@@ -1501,10 +1559,7 @@ impl NetworkAudit {
         if approved_token.len() != 16 || !self.audit.readiness_token.starts_with(approved_token) {
             return Err("BOOT_NETWORK_TOKEN".into());
         }
-        if approved_at < self.observed_at
-            || approved_at >= self.expires_at
-            || self.expires_at.saturating_sub(self.observed_at) > 60
-        {
+        if !self.within_ttl(approved_at) {
             return Err("BOOT_NETWORK_EXPIRED".into());
         }
         let (a, b) = (&self.audit.identity, current);
@@ -1731,6 +1786,8 @@ pub(crate) fn network_record_fixture(accounts: Vec<AccountProof>) -> NetworkAudi
         capture_source: "logs".into(),
         accounts,
         state_hash: "state".into(),
+        ttl_seconds: 60,
+        ttl_source: "builtin_default".into(),
     };
     n.reseal();
     n

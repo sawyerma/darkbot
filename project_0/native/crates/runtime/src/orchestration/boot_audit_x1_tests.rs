@@ -533,3 +533,85 @@ fn x1_start_config_is_identical_in_p0ctl_and_the_launched_runtime() {
     );
     std::fs::remove_dir_all(d).unwrap();
 }
+
+/// DEC-07: a record admits a start only within the TTL it was issued with — 10, 60 and 120 s
+/// from its oldest network read (its last second inside, its end outside); 9 and 121 s are never
+/// issued (a re-sealed record claiming them is refused), nor a TTL that differs from its own
+/// expiry. A later configuration never extends a record: its TTL is under its token.
+#[test]
+fn dec07_admission_holds_the_record_ttl_of_10_to_120_seconds() {
+    let id = fixture_identity();
+    let with_ttl = |ttl: u64| {
+        let mut n = network_record_fixture(vec![]);
+        n.ttl_seconds = ttl;
+        n.expires_at = n.observed_at + ttl;
+        n.reseal();
+        n
+    };
+    for ttl in [10, 60, 120] {
+        let n = with_ttl(ttl);
+        let last = n.observed_at + ttl - 1;
+        assert_eq!(admit(&n, n.observed_at, &id), Ok(()), "{ttl}");
+        assert_eq!(admit(&n, last, &id), Ok(()), "{ttl}");
+        assert_eq!(
+            admit(&n, last + 1, &id).unwrap_err(),
+            "BOOT_NETWORK_EXPIRED",
+            "{ttl}"
+        );
+        assert!(n.validate_start(&id, "binary", last, "logs").is_ok());
+        assert_eq!(
+            n.validate_start(&id, "binary", last + 1, "logs")
+                .unwrap_err(),
+            "BOOT_NETWORK_EXPIRED"
+        );
+    }
+    for ttl in [9, 121] {
+        let n = with_ttl(ttl);
+        let inside = n.observed_at + 1;
+        assert_eq!(
+            admit(&n, inside, &id).unwrap_err(),
+            "BOOT_NETWORK_EXPIRED",
+            "{ttl}"
+        );
+    }
+    let mut stretched = with_ttl(60);
+    stretched.expires_at += 60;
+    stretched.reseal();
+    assert_eq!(
+        admit(&stretched, stretched.observed_at + 90, &id).unwrap_err(),
+        "BOOT_NETWORK_EXPIRED"
+    );
+    // The old token after a configuration change: a 60 s record stays expired after 60 s
+    // whatever the registry says now; rewriting its TTL breaks its token.
+    let n = with_ttl(60);
+    let mut longer = n.clone();
+    (longer.ttl_seconds, longer.expires_at) = (120, n.observed_at + 120);
+    assert_eq!(
+        admit(&longer, n.observed_at + 90, &id).unwrap_err(),
+        "BOOT_NETWORK_TOKEN"
+    );
+    assert_eq!(
+        admit(&n, n.observed_at + 90, &id).unwrap_err(),
+        "BOOT_NETWORK_EXPIRED"
+    );
+}
+
+/// DEC-07: a record of the layout before the TTL field (schema 2) stays readable with its fixed
+/// 60 s and the source `pre_dec07`; its token covers that layout, so it never admits a start.
+#[test]
+fn dec07_an_earlier_network_record_is_readable_and_never_admits() {
+    use crate::analytics::payload::{self, Payload};
+    let n = network_record_fixture(vec![]);
+    let mut earlier = payload::encode_wire(&n).unwrap();
+    earlier.truncate(earlier.len() - 16 - n.ttl_source.len());
+    let read: NetworkAudit = payload::decode(NetworkAudit::KIND, payload::TYPED, &earlier).unwrap();
+    assert_eq!(
+        (read.ttl_seconds, read.ttl_source.as_str()),
+        (60, TTL_SOURCE_PRE_DEC07)
+    );
+    assert_eq!(read.state_hash, n.state_hash);
+    assert_eq!(
+        admit(&read, n.observed_at + 1, &fixture_identity()).unwrap_err(),
+        "BOOT_NETWORK_TOKEN"
+    );
+}

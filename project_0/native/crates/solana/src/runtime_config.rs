@@ -8,6 +8,11 @@ use std::{collections::BTreeMap, path::Path, sync::OnceLock};
 /// literal).
 pub mod defaults {
     pub const INGRESS_QUEUE: u64 = 65_536;
+    /// DEC-07 (ENTSCHEIDUNGEN §7): the validity of a network boot audit, counted from its oldest
+    /// network read — default and the user's bounds.
+    pub const BOOT_TOKEN_TTL_SECONDS: u64 = 60;
+    pub const BOOT_TOKEN_TTL_MIN_SECONDS: u64 = 10;
+    pub const BOOT_TOKEN_TTL_MAX_SECONDS: u64 = 120;
     /// D11: the owner's recovery waits for the finalized-root catch-up before Snapshot B (the
     /// 2026-10-10 smoke exceeded 30 s; the wait never skips reconciliation), the real root stall
     /// and the absolute phase cap — the one default of every launcher (`P0_RECOVERY_ROOT_*`).
@@ -204,6 +209,8 @@ parameters! {
     recovery_root_hard_max_seconds = defaults::RECOVERY_ROOT_HARD_MAX_SECS, "s", "P0_RECOVERY_ROOT_HARD_MAX_SECS";
     // DEC-10: how far ahead an FE-04 approval may expire (revision 12).
     fe04_approval_max_lifetime_seconds = 86400, "s", "P0_FE04_APPROVAL_MAX_LIFETIME_SECS";
+    // DEC-07: the network boot audit's TTL from its oldest network read (revision 13).
+    boot_token_ttl_seconds = defaults::BOOT_TOKEN_TTL_SECONDS, "s", "P0_BOOT_TOKEN_TTL_SECONDS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -218,8 +225,8 @@ parameters! {
 /// `rebalance_observe_ms`, `rebalance_budget_usd_micro`, `rebalance_quote_rounds` (B01); 11: the
 /// state owner's parameters `max_total_capital` … `recovery_root_hard_max_seconds` and the typed
 /// owner settings appended to [`EffectiveConfig`] (DEC-05, [`OWNER_SETTINGS_REVISION`]); 12:
-/// `fe04_approval_max_lifetime_seconds` (DEC-10).
-pub const LIMITS_REVISION: u16 = 12;
+/// `fe04_approval_max_lifetime_seconds` (DEC-10); 13: `boot_token_ttl_seconds` (DEC-07).
+pub const LIMITS_REVISION: u16 = 13;
 
 /// The first revision whose [`EffectiveConfig`] ends with the typed owner settings
 /// (`threshold_trigger` … `source_geyser_provider`); an earlier record has none.
@@ -240,6 +247,7 @@ fn introduced(field: &str) -> u16 {
         "fee_rps" | "send_rps" => 5,
         "sweep_batch_max_events" | "sweep_batch_max_age_ns" | "ingress_burst_before_detect" => 6,
         "rpc_pool_idle_ms" | "rpc_tcp_keepalive_ms" => 7,
+        f if position(f) >= position("boot_token_ttl_seconds") => 13,
         f if position(f) >= position("fe04_approval_max_lifetime_seconds") => 12,
         f if position(f) >= position("max_total_capital") => 11,
         f if position(f) >= position("rebalance_observe_ms") => 10,
@@ -322,6 +330,7 @@ impl Parameter {
             | "integration_probe_limit_per_kind" => 0,
             "recovery_root_catchup_seconds" | "recovery_root_hard_max_seconds" => 30,
             "recovery_root_stall_seconds" => 5,
+            "boot_token_ttl_seconds" => defaults::BOOT_TOKEN_TTL_MIN_SECONDS,
             _ => 1,
         }
     }
@@ -349,6 +358,7 @@ impl Parameter {
             "recovery_root_catchup_seconds" => 300,
             "recovery_root_stall_seconds" => 180,
             "recovery_root_hard_max_seconds" => 900,
+            "boot_token_ttl_seconds" => defaults::BOOT_TOKEN_TTL_MAX_SECONDS,
             _ => u64::from(u32::MAX),
         }
     }
@@ -1696,6 +1706,34 @@ mod tests {
         let r = Resolved::parse(&[], &env_tip).unwrap();
         assert_eq!(r.sources["jito_tip_lamports"], "environment");
     }
+    /// DEC-07: the boot audit TTL is a typed registry value — default 60 s, settable only within
+    /// 10..=120 s (9 and 121 are refused), from environment, file or CLI, printed with its source.
+    #[test]
+    fn dec07_boot_token_ttl_is_10_to_120_seconds_default_60() {
+        let r = parse(&[]).unwrap();
+        assert_eq!(r.config.limits.boot_token_ttl_seconds, 60);
+        for ok in ["10", "60", "120"] {
+            let r = parse(&["--boot-token-ttl-seconds", ok]).unwrap();
+            assert_eq!(
+                r.config.limits.boot_token_ttl_seconds.to_string(),
+                ok,
+                "{ok}"
+            );
+            assert_eq!(r.sources["boot_token_ttl_seconds"], "cli");
+        }
+        for bad in ["9", "121", "0"] {
+            assert!(parse(&["--boot-token-ttl-seconds", bad]).is_err(), "{bad}");
+        }
+        let env = |k: &str| (k == "P0_BOOT_TOKEN_TTL_SECONDS").then(|| "90".to_string());
+        let r = Resolved::parse(&[], &env).unwrap();
+        assert_eq!(
+            (
+                r.config.limits.boot_token_ttl_seconds,
+                r.sources["boot_token_ttl_seconds"].as_str()
+            ),
+            (90, "environment")
+        );
+    }
     /// DEC-04 (B-8): N has no default (undecided keeps B in OBSERVE), comes from environment,
     /// file or CLI, is at least 1 and is printed with its source.
     #[test]
@@ -1888,9 +1926,9 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                12,
-                141,
-                "5g2uUNCnr1jdNs7x6Snrt1SybJJekaRfAzvZUqAjjkf6".to_string()
+                13,
+                142,
+                "8PksZayVUJ39c24LMUmoesz1kNDhy4BwZ6g2Beav4PFu".to_string()
             )
         );
     }
