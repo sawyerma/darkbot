@@ -3220,6 +3220,13 @@ pub mod p0 {
             let mut p = zp.clone();
             p.hold_facts = None;
             assert_eq!(unqualified(&p), "B_HOLD_FACTS_MISSING");
+            // A's unknown-price sentinel is no value; a ZERO_PREFUND plan has no prerequisites.
+            let mut p = zp.clone();
+            p.hold_facts.as_mut().unwrap().seized_hold_value = u64::MAX;
+            assert_eq!(unqualified(&p), "B_SEIZURE_PRICE_UNKNOWN");
+            let mut p = zp.clone();
+            p.prerequisite_txs = vec![vec![]];
+            assert_eq!(unqualified(&p), "B_ZERO_PREFUND_PREREQUISITES");
             assert_eq!(
                 hold_b_of(&src, &f.program, &f.liquidator, &zp, None),
                 BHold::Unqualified("B_SOL_DEBIT_UNKNOWN".into())
