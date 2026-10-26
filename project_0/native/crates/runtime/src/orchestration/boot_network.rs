@@ -609,8 +609,6 @@ fn run(
     result.audit.readiness_token = hash(&bincode::serialize(&result).map_err(|_| "BOOT_TOKEN")?);
     Ok(result)
 }
-/// Read permission and FREE_ONLY proof are checked before constructing clients or opening WSS.
-/// `mode`: the operating mode `run start` will launch (DEC-05: its profile).
 /// X2: the typed PROVIDER_EVIDENCE record at `path` and its bytes (bounded, read twice: a
 /// record changed while it is read is refused). A boot flow names its record by id (DEC-07):
 /// the bytes are exactly the ones the id names.
@@ -640,6 +638,8 @@ fn read_evidence(path: &Path, id: Option<&str>) -> Result<(Vec<u8>, fe::Provider
     Ok((data, proof))
 }
 
+/// Read permission and FREE_ONLY proof are checked before constructing clients or opening WSS.
+/// `mode`: the operating mode `run start` will launch (DEC-05: its profile).
 pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, String> {
     let val = |k: &str| {
         args.iter()
@@ -1227,9 +1227,7 @@ mod tests {
             "BOOT_CAPTURE_SOURCE"
         );
     }
-    /// DEC-07: the registry's TTL is the record's — 10 s and 120 s are issued, 9 s and 121 s are
-    /// refused before any read. The TTL counts from the oldest network read (`observed_at`, taken
-    /// before the first read), however long the reads take, never from the token's issue.
+    /// DEC-07: the network audit binds exactly the bytes its evidence record id names.
     #[test]
     fn dec07_the_audit_binds_the_bytes_its_evidence_id_names() {
         let d = std::env::temp_dir().join(format!("p0_boot_evidence_{}", std::process::id()));
@@ -1254,6 +1252,9 @@ mod tests {
         assert!(read_evidence(&record, None).is_ok());
         let _ = std::fs::remove_dir_all(&d);
     }
+    /// DEC-07: the registry's TTL is the record's — 10 s and 120 s are issued, 9 s and 121 s are
+    /// refused before any read. The TTL counts from the oldest network read (`observed_at`, taken
+    /// before the first read), however long the reads take, never from the token's issue.
     #[test]
     fn dec07_the_record_carries_the_registry_ttl_from_its_oldest_read() {
         let (mut c, all) = fe::tests::fixture();
