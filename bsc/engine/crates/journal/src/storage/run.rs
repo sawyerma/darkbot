@@ -89,10 +89,26 @@ impl RunReader {
     pub fn next_record(&mut self) -> Result<Option<CaptureRecord>, JournalError> {
         loop {
             if self.current.is_none() {
-                let Some((index, path, sealed)) = self.pending.next() else {
+                let Some((index, mut path, mut sealed)) = self.pending.next() else {
                     return Ok(None);
                 };
-                let file = File::open(&path).map_err(JournalError::Io)?;
+                let file = match File::open(&path) {
+                    Ok(f) => f,
+                    // Sealed (renamed) by the writer since the listing: the
+                    // same segment under its sealed name (Phase F gate L2).
+                    Err(e) if e.kind() == io::ErrorKind::NotFound && !sealed => {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .and_then(|n| n.strip_suffix(".open"))
+                            .ok_or(JournalError::Io(e))?
+                            .to_string();
+                        path.set_file_name(name);
+                        sealed = true;
+                        File::open(&path).map_err(JournalError::Io)?
+                    }
+                    Err(e) => return Err(JournalError::Io(e)),
+                };
                 let hashing = Hashing {
                     inner: file,
                     hasher: Sha256::new(),
@@ -215,6 +231,36 @@ mod tests {
             assert_eq!(read.last_sequence, seal.manifest.last_sequence);
         }
         assert_eq!(r.last_sequence(), Some(11));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Phase F gate L2: a segment listed open and sealed by the writer
+    /// before it is read is read under its sealed name.
+    #[test]
+    fn a_segment_sealed_after_the_listing_is_still_read() {
+        let d = dir("race");
+        let mut w = SegmentWriter::create(
+            &d,
+            SegmentPolicy {
+                max_segment_bytes: u64::MAX,
+                max_segment_ns: u64::MAX,
+            },
+        )
+        .unwrap();
+        for i in 0..3 {
+            w.append(&record(i)).unwrap();
+        }
+        w.sync().unwrap();
+        // Listed while open…
+        let mut r = RunReader::open(&d, 1024).unwrap();
+        // …sealed before the first read.
+        w.finish().unwrap();
+        let mut n = 0;
+        while r.next_record().unwrap().is_some() {
+            n += 1;
+        }
+        assert_eq!(n, 3);
+        assert!(r.segments()[0].sealed);
         fs::remove_dir_all(&d).unwrap();
     }
 

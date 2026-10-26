@@ -156,9 +156,61 @@ pub mod capture_run {
         ],
     };
 
+    /// v3 (Phase F gate H1/M5): pending events the sources delivered that
+    /// the bounded ingress queue dropped before the journal (a loss like a
+    /// gap span), and the build's own SHA-256 and whether its source tree
+    /// was dirty (`BUILD` names the git commit).
+    pub const INGRESS_DROPPED: u16 = 28;
+    pub const BUILD_SHA256: u16 = 29;
+    pub const BUILD_DIRTY: u16 = 30;
+
+    pub const V3: Schema = Schema {
+        name: "darkbot.bsc.capture-run.v1",
+        record_type: 55,
+        schema_version: 3,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(STARTED_UNIX_MS, "started_unix_ms", U64),
+            Field::opt(ENDED_UNIX_MS, "ended_unix_ms", U64),
+            Field::req(CLOCK_ID, "clock_id", U64),
+            Field::opt(GIT_HEAD, "git_head", Text),
+            Field::req(BUDGET_BYTES, "budget_bytes", U64),
+            Field::req(QUEUE_RECORDS, "queue_records", U64),
+            Field::req(SEGMENT_BYTES, "segment_bytes", U64),
+            Field::req(SEGMENT_NS, "segment_ns", U64),
+            Field::req(SYNC_RECORDS, "sync_records", U64),
+            Field::req(SYNC_MS, "sync_ms", U64),
+            Field::nested(SEGMENTS, "segments", Presence::Repeated, &segment::SCHEMA),
+            Field::req(RECORDS, "records", U64),
+            Field::req(LOST_RECORDS, "lost_records", U64),
+            Field::opt(LAST_SEQUENCE, "last_sequence", U64),
+            Field::req(PEAK_BYTES, "peak_bytes", U64),
+            Field::req(BUDGET_REFUSED, "budget_refused", U64),
+            Field::req(WRITE_ERRORS, "write_errors", U64),
+            Field::req(STATE, "state", Text),
+            Field::rep(REASONS, "reasons", Text),
+            Field::rep(NON_CLAIMS, "non_claims", Text),
+            Field::opt(HOST, "host", Text),
+            Field::opt(BUILD, "build", Text),
+            Field::opt(CONFIG_SHA256, "config_sha256", B256),
+            Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
+            Field::opt(BUILD_SHA256, "build_sha256", B256),
+            Field::opt(BUILD_DIRTY, "build_dirty", Bool),
+        ],
+    };
+
     /// A run manifest of either version (v1 of the first segmented builds).
     pub fn decode_run(bytes: &[u8]) -> Result<crate::Record, crate::RecordError> {
-        crate::decode(&V2, bytes).or_else(|_| crate::decode(&SCHEMA, bytes))
+        crate::decode(&V3, bytes)
+            .or_else(|_| crate::decode(&V2, bytes))
+            .or_else(|_| crate::decode(&SCHEMA, bytes))
     }
 }
 
@@ -396,6 +448,7 @@ pub mod ingest_latency {
 pub const ALL: &[&Schema] = &[
     &capture_run::SCHEMA,
     &capture_run::V2,
+    &capture_run::V3,
     &replay_proof::SCHEMA,
     &capture_preflight::SCHEMA,
     &ingest_latency::SCHEMA,

@@ -50,6 +50,9 @@
 //!   of this process and periodic checkpoints of the head,
 //!   `b'H'|b'E'|b'K' | number u64 | hash [32]`: the covered window, also
 //!   after a crash (last `K`).
+//! - `Runtime` `b'D'`: pending events of a source the bounded ingress queue
+//!   dropped before this journal, `b'D' | source u8 | total u64` (the
+//!   source's cumulative count, written when it grows and at the end).
 //! - `Runtime` `b'X'`: the clean end of this process (journal committed
 //!   after it); its absence marks a killed or crashed process.
 //!
@@ -119,6 +122,15 @@ pub fn paper_handoff_payload(buy: &crate::paper_exec::PaperBuy) -> Vec<u8> {
         out.extend_from_slice(&ns.to_le_bytes());
     }
     out.extend_from_slice(&buy.raw);
+    out
+}
+
+/// The cumulative count of a source's events the ingress queue dropped.
+pub fn ingress_drop_payload(source: SourceId, total: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(10);
+    out.push(b'D');
+    out.push(source_byte(source));
+    out.extend_from_slice(&total.to_le_bytes());
     out
 }
 
@@ -392,6 +404,8 @@ pub struct RuntimeJournal {
     budget: Arc<MemoryBudget>,
     lost: u64,
     identity: Option<RunIdentity>,
+    /// Events the ingress queue dropped before this journal (all sources).
+    ingress_dropped: u64,
 }
 
 fn now_ms() -> u64 {
@@ -440,12 +454,19 @@ impl RuntimeJournal {
             budget,
             lost: 0,
             identity: None,
+            ingress_dropped: 0,
         })
     }
 
     /// Names the host, build and configuration in the run manifest.
     pub fn set_identity(&mut self, identity: RunIdentity) {
         self.identity = Some(identity);
+    }
+
+    /// The events the ingress queue dropped before this journal so far (all
+    /// sources): the manifest's loss count besides the gap spans.
+    pub fn set_ingress_dropped(&mut self, total: u64) {
+        self.ingress_dropped = total;
     }
 
     /// The run directory.
@@ -517,8 +538,14 @@ impl RuntimeJournal {
         if oversize > 0 {
             reasons.push(format!("{oversize} oversize records refused"));
         }
+        if self.ingress_dropped > 0 {
+            reasons.push(format!(
+                "{} source events dropped by the ingress queue before the journal",
+                self.ingress_dropped
+            ));
+        }
         let complete = reasons.is_empty();
-        let mut d = Draft::new(&cr::V2);
+        let mut d = Draft::new(&cr::V3);
         d.set(cr::RUN_ID, self.started_ms.to_string())
             .set(cr::CHAIN_ID, 56u64)
             .set(cr::PROVENANCE_TOOL, "bsc_runtime")
@@ -540,6 +567,7 @@ impl RuntimeJournal {
             .set(cr::PEAK_BYTES, self.budget.peak() as u64)
             .set(cr::BUDGET_REFUSED, self.budget.refused())
             .set(cr::WRITE_ERRORS, view.write_errors)
+            .set(cr::INGRESS_DROPPED, self.ingress_dropped)
             .set(cr::STATE, if complete { "COMPLETE" } else { "INCOMPLETE" })
             .push(
                 cr::NON_CLAIMS,
@@ -793,6 +821,37 @@ mod tests {
         assert_eq!(reorg_payload(2, 9, &[3; 32])[..5], [b'R', 2, 0, 0, 0]);
         assert_eq!(resync_payload(1, 2).len(), 17);
         assert_eq!(window_payload(b'K', 1, &[0; 32])[0], b'K');
+    }
+
+    /// Phase F gate H1: events the ingress queue dropped before the journal
+    /// make the run INCOMPLETE and are named in its manifest.
+    #[test]
+    fn ingress_drops_make_the_run_incomplete() {
+        let dir =
+            std::env::temp_dir().join(format!("bsc-runtime-journal-d-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut j = RuntimeJournal::open(&dir, 1, 1, JournalSetup::whole(8, 64)).unwrap();
+        assert!(j.record(
+            RecordKind::Runtime,
+            1,
+            &ingress_drop_payload(SourceId::Drpc, 3)
+        ));
+        j.set_ingress_dropped(3);
+        let path = j.path().to_path_buf();
+        assert!(!j.finish().unwrap().complete);
+        let m = cr::decode_run(&fs::read(path.join(RUN_MANIFEST)).unwrap()).unwrap();
+        assert_eq!(
+            (
+                m.text(cr::STATE).unwrap(),
+                m.u64(cr::INGRESS_DROPPED).unwrap()
+            ),
+            ("INCOMPLETE", 3)
+        );
+        assert_eq!(
+            m.texts(cr::REASONS).unwrap(),
+            ["3 source events dropped by the ingress queue before the journal"]
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A budget below the largest record would lose every such record:

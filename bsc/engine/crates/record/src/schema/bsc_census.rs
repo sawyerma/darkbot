@@ -41,11 +41,14 @@ pub mod census {
         pub const PENDING_JOIN: u16 = 12;
         /// Canonical/reorg records that do not parse (older layout, damage).
         pub const UNPARSED_RECORDS: u16 = 13;
+        /// Pending events the ingress queue dropped before the journal
+        /// (`D` records: the sources' cumulative totals).
+        pub const INGRESS_DROPPED: u16 = 14;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.g04-census.window",
             record_type: 0,
-            schema_version: 3,
+            schema_version: 4,
             fields: &[
                 Field::req(JOURNAL, "journal", Text),
                 Field::req(STARTED_UNIX_MS, "started_unix_ms", U64),
@@ -60,6 +63,7 @@ pub mod census {
                 Field::req(UNJOINED, "unjoined", U64),
                 Field::req(PENDING_JOIN, "pending_join", U64),
                 Field::req(UNPARSED_RECORDS, "unparsed_records", U64),
+                Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
             ],
         };
     }
@@ -160,11 +164,14 @@ pub mod census {
     pub const LATER_LAG_P50_US: u16 = 47;
     pub const LATER_LAG_P95_US: u16 = 48;
     pub const LATER_LAG_MAX_US: u16 = 49;
+    /// Pending events the ingress queue dropped before the journal, in all
+    /// windows (Phase F gate H1: never a clean capture).
+    pub const INGRESS_DROPPED: u16 = 50;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.g04-census.v1",
         record_type: 41,
-        schema_version: 6,
+        schema_version: 7,
         fields: &[
             Field::nested(WINDOWS, "windows", Presence::Repeated, &window::SCHEMA),
             Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
@@ -218,6 +225,7 @@ pub mod census {
             Field::opt(LATER_LAG_P50_US, "later_lag_p50_us", U64),
             Field::opt(LATER_LAG_P95_US, "later_lag_p95_us", U64),
             Field::opt(LATER_LAG_MAX_US, "later_lag_max_us", U64),
+            Field::req(INGRESS_DROPPED, "ingress_dropped", U64),
         ],
     };
 }

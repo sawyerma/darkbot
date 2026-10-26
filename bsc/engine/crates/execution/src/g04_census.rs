@@ -38,9 +38,9 @@ use crate::runtime_journal::{
 use crate::sources::SourceId;
 use darkbot_bsc_journal::storage::run::{RunReader, SegmentRead};
 use darkbot_bsc_journal::{CaptureRecord, JournalError, JournalReader, RecordKind};
+use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_capture::capture_run as cr;
 use darkbot_bsc_record::schema::bsc_census::census as cs;
-use darkbot_bsc_record::Draft;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -64,6 +64,8 @@ pub struct Window {
     pub pending_join: u64,
     /// Canonical/reorg records that do not parse (an older layout, damage).
     pub unparsed_records: u64,
+    /// Pending events the ingress queue dropped before this journal.
+    pub ingress_dropped: u64,
     pub state: &'static str,
 }
 
@@ -105,6 +107,8 @@ pub struct Census {
     pub later_lag_p50_us: Option<u64>,
     pub later_lag_p95_us: Option<u64>,
     pub later_lag_max_us: Option<u64>,
+    /// Pending events the ingress queue dropped before the journals.
+    pub ingress_dropped: u64,
     pub c1_scope_launches: u64,
     pub c1_scope_full_before: u64,
     /// Nearest-rank percentiles of the lead (µs) over `full_before`.
@@ -328,6 +332,8 @@ fn replay(
     let mut launches: Vec<LaunchRecord> = Vec::new();
     let mut connectivity = Connectivity::default();
     let mut later_lags_ns: Vec<u64> = Vec::new();
+    // `D` records: each source's cumulative dropped-event total.
+    let mut dropped: HashMap<u8, u64> = HashMap::new();
     // Launches received (`P`) and resolved (`C`/`O`), by (block, tx).
     let mut received: HashSet<([u8; 32], [u8; 32])> = HashSet::new();
     let mut resolved: HashSet<([u8; 32], [u8; 32])> = HashSet::new();
@@ -358,6 +364,13 @@ fn replay(
                 connectivity.event(usize::from(p[1]), p[2], record.timestamp_ns);
             }
             (RecordKind::Runtime, Some(b'X')) if p.len() == 1 => exited = true,
+            (RecordKind::Runtime, Some(b'D')) if p.len() == 10 => match u64_at(p, 2) {
+                Some(total) => {
+                    let e = dropped.entry(p[1]).or_default();
+                    *e = (*e).max(total);
+                }
+                None => window.unparsed_records += 1,
+            },
             // `L | source u8 | hash [32] | lag_ns u64`: the spread across sources.
             (RecordKind::Runtime, Some(b'L')) if p.len() == 42 => {
                 if let Some(lag) = u64_at(p, 34) {
@@ -425,6 +438,8 @@ fn replay(
                     window.blocks_skipped = window.blocks_skipped.saturating_add(to - from + 1);
                 }
             }
+            // A known runtime tag of another length: damaged, counted (L6).
+            (RecordKind::Runtime, Some(b'S' | b'L' | b'D' | b'X')) => window.unparsed_records += 1,
             (RecordKind::Canonical | RecordKind::Reorg, _) => window.unparsed_records += 1,
             _ => {}
         }
@@ -451,6 +466,7 @@ fn replay(
         connectivity = Connectivity::default();
         later_lags_ns.clear();
     } else {
+        window.ingress_dropped = dropped.values().fold(0u64, |a, b| a.saturating_add(*b));
         window.last_block = window.last_block.or(checkpoint);
         let open = received.difference(&resolved).count() as u64;
         if state == "RUNNING" {
@@ -487,6 +503,10 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
     for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        // Hidden entries are no journal (Phase F gate M2).
+        if name.starts_with('.') {
+            continue;
+        }
         let is_run = entry
             .file_type()
             .map_err(|e| format!("{}: {e}", entry.path().display()))?
@@ -516,12 +536,17 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
         let path = dir.join(&name);
         let is_active = active.is_some_and(|a| a == path.as_path());
         let r = replay(&path, name, started, max_payload, is_active)?;
-        out.covered_ms = out.covered_ms.saturating_add(r.window.duration_ms);
-        out.unjoined = out.unjoined.saturating_add(r.window.unjoined);
-        out.blocks_skipped = out.blocks_skipped.saturating_add(r.window.blocks_skipped);
-        out.unparsed_records = out
-            .unparsed_records
-            .saturating_add(r.window.unparsed_records);
+        // Nothing of an INVALID window counts (Phase F gate L3): its frames
+        // are not trusted.
+        if r.window.state != "INVALID" {
+            out.covered_ms = out.covered_ms.saturating_add(r.window.duration_ms);
+            out.unjoined = out.unjoined.saturating_add(r.window.unjoined);
+            out.blocks_skipped = out.blocks_skipped.saturating_add(r.window.blocks_skipped);
+            out.unparsed_records = out
+                .unparsed_records
+                .saturating_add(r.window.unparsed_records);
+            out.ingress_dropped = out.ingress_dropped.saturating_add(r.window.ingress_dropped);
+        }
         // Heights no process followed: after the previous window's last block.
         if let (Some(prev), Some(first)) = (
             out.windows.iter().rev().find_map(|w| w.last_block),
@@ -635,7 +660,8 @@ impl Census {
                 .set(e::BLOCKS_SKIPPED, w.blocks_skipped)
                 .set(e::UNJOINED, w.unjoined)
                 .set(e::PENDING_JOIN, w.pending_join)
-                .set(e::UNPARSED_RECORDS, w.unparsed_records);
+                .set(e::UNPARSED_RECORDS, w.unparsed_records)
+                .set(e::INGRESS_DROPPED, w.ingress_dropped);
             if let Some(b) = w.first_block {
                 row.set(e::FIRST_BLOCK, b);
             }
@@ -660,6 +686,7 @@ impl Census {
             .set(cs::FOUR_MISSED, self.four_missed)
             .set(cs::FOUR_CLOCK_UNKNOWN, self.four_clock_unknown)
             .set(cs::LATER_SIGHTINGS, self.later_sightings)
+            .set(cs::INGRESS_DROPPED, self.ingress_dropped)
             .set(cs::ORPHANED_LAUNCHES, self.orphaned_launches)
             .set(cs::OUTAGE_LAUNCHES, self.outage_launches)
             .set(cs::FULL_BEFORE, self.full_before)
@@ -1379,6 +1406,75 @@ mod tests {
         let d = census(&donor, 4096, None).unwrap();
         assert_eq!(d.windows[0].state, "COMPLETE");
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Phase F gate H1/L3/L6/M2: ingress drops (`D`, cumulative per
+    /// source) reach the window and the census; a malformed runtime record
+    /// is unparsed, never silently skipped; nothing of an INVALID window
+    /// counts (covered time included); a hidden probe directory is no run.
+    #[test]
+    fn ingress_drops_and_damaged_records_are_counted_and_invalid_time_is_not() {
+        let dir = std::env::temp_dir().join(format!("bsc-g04-drops-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let d = |source, total| {
+            (
+                RecordKind::Runtime,
+                5,
+                crate::runtime_journal::ingress_drop_payload(source, total),
+            )
+        };
+        write(
+            &dir,
+            1_000,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 10, &[10; 32]),
+                ),
+                d(SourceId::PublicNode, 3),
+                d(SourceId::PublicNode, 5),
+                d(SourceId::Drpc, 2),
+                (RecordKind::Runtime, 6, vec![b'S', 1]),
+                (
+                    RecordKind::Canonical,
+                    2_000_000_000,
+                    window_payload(b'E', 11, &[11; 32]),
+                ),
+                (RecordKind::Runtime, 2_000_000_001, EXIT_PAYLOAD.to_vec()),
+            ],
+        );
+        // A corrupt window of 9 s: none of its time counts.
+        let bad = write(
+            &dir,
+            2_000,
+            &[
+                (
+                    RecordKind::Canonical,
+                    1,
+                    window_payload(b'H', 20, &[20; 32]),
+                ),
+                (
+                    RecordKind::Canonical,
+                    9_000_000_000,
+                    window_payload(b'K', 21, &[21; 32]),
+                ),
+            ],
+        );
+        let mut bytes = fs::read(&bad).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        fs::write(&bad, &bytes).unwrap();
+        fs::create_dir_all(dir.join(".capture-preflight-1-1")).unwrap();
+        let c = census(&dir, 4096, None).unwrap();
+        let states: Vec<_> = c.windows.iter().map(|w| w.state).collect();
+        assert_eq!(states, ["COMPLETE", "INVALID"]);
+        assert_eq!((c.windows[0].ingress_dropped, c.ingress_dropped), (7, 7));
+        assert_eq!((c.windows[0].unparsed_records, c.unparsed_records), (1, 1));
+        assert_eq!(c.covered_ms, 2_000);
+        let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
+        assert_eq!(record.u64(cs::INGRESS_DROPPED).unwrap(), 7);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

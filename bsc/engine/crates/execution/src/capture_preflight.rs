@@ -20,8 +20,8 @@ use crate::runtime_journal::RUN_MANIFEST;
 use darkbot_bsc_journal::storage::preflight::{CapacityInputs, Preflight, Resource, preflight};
 use darkbot_bsc_journal::storage::segments::{SegmentPolicy, SegmentWriter};
 use darkbot_bsc_journal::{CaptureRecord, RecordKind};
-use darkbot_bsc_record::schema::bsc_capture::{capture_preflight as cp, capture_run as cr};
 use darkbot_bsc_record::Draft;
+use darkbot_bsc_record::schema::bsc_capture::{capture_preflight as cp, capture_run as cr};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -131,7 +131,7 @@ pub fn writer_throughput(
     let header = darkbot_bsc_journal::HEADER_LEN;
     let payload = record_bytes.saturating_sub(header).max(1);
     let dir = volume_dir.join(format!(
-        ".capture-preflight-{}-{}",
+        "{PROBE_PREFIX}{}-{}",
         std::process::id(),
         darkbot_bsc_record::observed_now()?
     ));
@@ -169,6 +169,22 @@ pub fn writer_throughput(
     let result = run();
     let _ = fs::remove_dir_all(&dir);
     result
+}
+
+/// The prefix of a writer probe's directory.
+const PROBE_PREFIX: &str = ".capture-preflight-";
+
+/// Removes probe directories a killed preflight left in `volume_dir`.
+fn remove_stale_probes(volume_dir: &Path) -> Result<(), String> {
+    let Ok(entries) = fs::read_dir(volume_dir) else {
+        return Ok(());
+    };
+    for e in entries.flatten() {
+        if e.file_name().to_string_lossy().starts_with(PROBE_PREFIX) {
+            fs::remove_dir_all(e.path()).map_err(|err| format!("{}: {err}", e.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Free bytes of the volume holding `path` (POSIX `df -Pk`).
@@ -223,10 +239,15 @@ pub fn check(journal_dir: &Path, setup: PreflightSetup) -> Result<Report, String
     let rates = rates(journal_dir)?;
     // Without a sealed run nothing is measured; the probe would have no
     // record size either.
+    // The probe writes next to the journal directory, never inside it (the
+    // census reads every run there); a probe a killed preflight left
+    // behind is removed first (Phase F gate M2).
+    let volume = journal_dir.parent().unwrap_or(journal_dir);
+    remove_stale_probes(volume)?;
     let (writer, probe) = match &rates {
         Some(r) => (
             writer_throughput(
-                journal_dir,
+                volume,
                 setup.probe_bytes,
                 usize::try_from(r.average_record_bytes).unwrap_or(usize::MAX),
             )?,
@@ -382,8 +403,11 @@ mod tests {
 
     #[test]
     fn rates_come_from_the_newest_sealed_run_and_qualify_a_fitting_run() {
-        let dir = std::env::temp_dir().join(format!("bsc-preflight-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let base = std::env::temp_dir().join(format!("bsc-preflight-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let dir = base.join("journal");
+        // A probe a killed preflight left behind goes first.
+        fs::create_dir_all(base.join(".capture-preflight-1-1")).unwrap();
         // Nothing sealed yet: unmeasured, blocked.
         let r = check(&dir, setup(1_800, 0)).unwrap();
         assert_eq!(
@@ -416,13 +440,16 @@ mod tests {
         let record = decode(&cp::SCHEMA, &r.encode(1).unwrap()).unwrap();
         assert_eq!(record.text(cp::VERDICT).unwrap(), "QUALIFIED");
         assert_eq!(record.text(cp::RATES_RUN_ID).unwrap(), "5");
-        // The probe leaves nothing behind.
-        assert!(fs::read_dir(&dir).unwrap().all(|e| {
-            !e.unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".capture")
-        }));
+        // The probe leaves nothing behind, in the journal directory or next
+        // to it, and the stale one is gone.
+        for d in [&dir, &base] {
+            assert!(fs::read_dir(d).unwrap().all(|e| {
+                !e.unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".capture")
+            }));
+        }
         // A reserve above the free disk blocks on DISK with no duration.
         let r = check(&dir, setup(1_800, u64::MAX)).unwrap();
         assert_eq!(
@@ -432,6 +459,6 @@ mod tests {
                 achievable_s: 0
             }
         );
-        fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&base).unwrap();
     }
 }

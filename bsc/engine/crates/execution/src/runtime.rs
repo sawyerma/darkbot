@@ -32,9 +32,9 @@ use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats, heal
 use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
-    SourceEvent, canonical_launch_payload, first_sighting_payload, later_sighting_payload,
-    orphaned_launch_payload, paper_handoff_payload, pending_launch_payload, reorg_payload,
-    resync_payload, source_event_payload, window_payload,
+    SourceEvent, canonical_launch_payload, first_sighting_payload, ingress_drop_payload,
+    later_sighting_payload, orphaned_launch_payload, paper_handoff_payload, pending_launch_payload,
+    reorg_payload, resync_payload, source_event_payload, window_payload,
 };
 use crate::sources::{ComponentId, Effective, Generation, SourceId, Store};
 use crate::wss::endpoint::Endpoint;
@@ -811,6 +811,29 @@ pub fn journal_max_payload(config: &RuntimeConfig) -> usize {
     config.wss.max_message_bytes + 64
 }
 
+/// Journals each source's dropped-event total that grew since the last
+/// `D` record and tells the journal the sum (Phase F gate H1: a loss before
+/// the journal is a loss of the capture).
+fn journal_drops(
+    journal: &mut RuntimeJournal,
+    dropped: &[Arc<AtomicU64>],
+    journaled: &mut [u64; 5],
+    at: u64,
+) {
+    for (i, d) in dropped.iter().enumerate().take(journaled.len()) {
+        let total = d.load(Ordering::Relaxed);
+        if total > journaled[i] {
+            journal.record(
+                RecordKind::Runtime,
+                at,
+                &ingress_drop_payload(SourceId::ALL[i], total),
+            );
+            journaled[i] = total;
+        }
+    }
+    journal.set_ingress_dropped(journaled.iter().sum());
+}
+
 /// The host a run's latencies are of: OS, architecture, logical CPUs.
 pub fn host_label() -> String {
     format!(
@@ -997,6 +1020,8 @@ pub fn run(
         .map(|_| Arc::new(AtomicU64::new(0)))
         .collect();
     let mut core = IngressCore::new(config.dedup_hashes, config.max_launch_calldata);
+    // The dropped-event totals last journaled, per source (`D` records).
+    let mut journaled_drops = [0u64; 5];
     // The venue contracts the pending capture's VENUES scope keeps.
     let four_deployment = bsc_mainnet_g01_129842711();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
@@ -1310,6 +1335,7 @@ pub fn run(
         }
         if Instant::now() >= next_status || stopping {
             next_status = Instant::now() + status_every;
+            journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
             let now = clock.now_ns();
             let stats: Vec<_> = SourceId::ALL
                 .iter()
@@ -1384,6 +1410,7 @@ pub fn run(
             if let Some(x) = exec.as_mut() {
                 x.shutdown();
             }
+            journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
             journal.record(RecordKind::Runtime, clock.now_ns(), &EXIT_PAYLOAD);
             journal.finish()?;
             if let Err(e) = write_census(config, rundir, None) {
