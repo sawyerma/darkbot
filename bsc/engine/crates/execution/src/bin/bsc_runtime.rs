@@ -7,7 +7,13 @@
 //! bsc_runtime source show --state <dir>
 //! bsc_runtime source request <SOURCE_OR_COMPONENT_ID> <OFF|SHADOW|LIVE> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime census --rundir <dir> --config <ingress.public.env>
+//! bsc_runtime replay-proof --rundir <dir> --config <ingress.public.env> [--run <started_unix_ms>]
 //! ```
+//!
+//! `replay-proof` proves the capture→replay identity of one finished run
+//! (the newest without `--run`; Phase F contract §9) into
+//! `bsc-runtime/replay-proof-<run>.dbrec` and prints it; exit 0 only on
+//! PASS.
 //!
 //! `census` replays every runtime journal of the run directory into the
 //! G0.4 census record (`bsc-runtime/g04-census.dbrec`) and prints its text
@@ -18,7 +24,10 @@
 //! receipt. A requested LIVE is recorded and stays BLOCKED (no economic
 //! authorization exists). Exit 0 when applied, 2 when refused or stale.
 
-use darkbot_bsc_execution::runtime::{RuntimeConfig, run as run_runtime, stop_file, write_census};
+use darkbot_bsc_execution::replay_proof;
+use darkbot_bsc_execution::runtime::{
+    RuntimeConfig, journal_max_payload, run as run_runtime, stop_file, write_census,
+};
 use darkbot_bsc_execution::sources::{Entity, Mode, Store};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
@@ -70,6 +79,32 @@ fn run(args: &[String]) -> Result<bool, String> {
             let census = write_census(&config, std::path::Path::new(flag(rest, "--rundir")?), None)?;
             print!("{}", census.summary());
             Ok(true)
+        }
+        [cmd, rest @ ..] if cmd == "replay-proof" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let dir = std::path::Path::new(flag(rest, "--rundir")?).join("bsc-runtime");
+            let journal = dir.join("journal");
+            let run = match rest.iter().any(|a| a == "--run") {
+                true => flag(rest, "--run")?.to_string(),
+                false => replay_proof::latest_run(&journal)?,
+            };
+            let status = std::fs::read(dir.join("status.dbrec")).ok();
+            let proof = replay_proof::prove(
+                &journal,
+                &run,
+                status.as_deref(),
+                journal_max_payload(&config),
+                config.max_launch_calldata,
+            )?;
+            let observed = darkbot_bsc_record::observed_now()?;
+            replay_proof::write(
+                &dir.join(format!("replay-proof-{run}.dbrec")),
+                &proof.encode(observed)?,
+            )?;
+            println!("{}", proof.summary());
+            Ok(proof.verdict == "PASS")
         }
         [area, cmd, rest @ ..] if area == "paper-identity" && (cmd == "init" || cmd == "show") => {
             // The C3 PAPER identity: a local key outside the repository,

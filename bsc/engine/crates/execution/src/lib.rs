@@ -70,6 +70,9 @@ pub mod g04_census;
 /// The runtime's bounded binary journal.
 #[cfg(feature = "runtime")]
 pub mod runtime_journal;
+
+#[cfg(feature = "runtime")]
+pub mod replay_proof;
 /// The read-only runtime process: sources, ingress, journal, status.
 #[cfg(feature = "runtime")]
 pub mod runtime;

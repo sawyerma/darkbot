@@ -445,6 +445,8 @@ pub mod four_freeze {
         pub const LINKED_TO_BLOCK: u16 = 4;
         pub const HEADERS: u16 = 5;
         pub const PARENT_LINKED: u16 = 6;
+        /// The main scan's candidate blocks it fetched (v3: the window's
+        /// candidates are `window_bloom_candidates`).
         pub const BLOOM_CANDIDATE_BLOCKS: u16 = 7;
         pub const RECEIPT_BLOCKS_FETCHED: u16 = 8;
         pub const RECEIPT_BLOCK_BUDGET: u16 = 9;

@@ -161,6 +161,13 @@ fn launch_record(p: &[u8], seen_ns: u64) -> Option<LaunchRecord> {
     };
     // Every venue the writer knows (Phase E: OpenFour is byte 3).
     let venue = venue_of_byte(p[1])?;
+    // A Flap launch has no Four verdict and a Four launch always has one:
+    // anything else is an inconsistent record (Phase E review pass 3).
+    if let Some(t) = four
+        && (venue == Venue::Flap) != (t == FourToken::NotApplicable)
+    {
+        return None;
+    }
     let buys_known = flag(p[103])?;
     let class = p[108];
     if !(1..=5).contains(&class) {
@@ -260,7 +267,7 @@ impl Reader {
 }
 
 /// Whether the run manifest names exactly the sealed segments read.
-fn manifest_matches(bytes: &[u8], read: &[SegmentRead]) -> bool {
+pub(crate) fn manifest_matches(bytes: &[u8], read: &[SegmentRead]) -> bool {
     let Ok(segments) = decode(&cr::SCHEMA, bytes).and_then(|m| m.nested_all(cr::SEGMENTS)) else {
         return false;
     };
@@ -511,6 +518,7 @@ pub fn census(dir: &Path, max_payload: usize, active: Option<&Path>) -> Result<C
                     Some(FourToken::Matched) => &mut out.four_derived,
                     Some(FourToken::Unknown) => &mut out.four_no_derivation,
                     Some(FourToken::Mismatch) => &mut out.four_mismatch,
+                    // `NotApplicable` on a Four record is refused by `launch_record`.
                     Some(FourToken::NotRecognized | FourToken::NotApplicable) => {
                         &mut out.four_not_recognized
                     }
@@ -871,6 +879,10 @@ mod tests {
         old.pop();
         let mut bad = c(with(Venue::Four, 6, FourToken::Matched));
         *bad.last_mut().unwrap() = 9;
+        // Venue and verdict disagree: a Flap record with a Four verdict, a
+        // Four record without one.
+        let flap_with = c(with(Venue::Flap, 7, FourToken::Matched));
+        let four_without = c(with(Venue::Four, 8, FourToken::NotApplicable));
         let mut records = vec![(
             RecordKind::Canonical,
             1,
@@ -883,6 +895,8 @@ mod tests {
             c(with(Venue::Four, 4, FourToken::NotRecognized)),
             old,
             bad,
+            flap_with,
+            four_without,
         ] {
             records.push((RecordKind::Canonical, 100, p));
         }
@@ -904,7 +918,7 @@ mod tests {
                 c.four_verdict_unrecorded,
                 c.unparsed_records
             ),
-            (5, 1, 1, 1, 1, 1, 1)
+            (5, 1, 1, 1, 1, 1, 3)
         );
         let record = darkbot_bsc_record::decode(&cs::SCHEMA, &c.encode(1).unwrap()).unwrap();
         assert_eq!(record.u64(cs::FOUR_DERIVED).unwrap(), 1);

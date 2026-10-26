@@ -82,5 +82,16 @@ fn sigterm_is_a_clean_stop_with_a_committed_journal() {
     assert_eq!(c.windows.len(), 1);
     assert_eq!(c.windows[0].state, "COMPLETE");
     assert!(base.join("bsc-runtime/g04-census.dbrec").exists());
+    // Phase F §9: the run replays to the same counts as the process
+    // reported (its last status), sealed by its manifest.
+    let proof = Command::new(bin)
+        .args(["replay-proof", "--rundir"])
+        .arg(&base)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .unwrap();
+    assert!(proof.status.success(), "{proof:?}");
+    assert!(String::from_utf8_lossy(&proof.stdout).contains(": PASS"));
     fs::remove_dir_all(&base).unwrap();
 }
